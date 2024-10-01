@@ -40,7 +40,7 @@ function get_mac_deployment_target {
 # Build host hermes compiler for internal bytecode
 function build_host_hermesc {
   cmake -S . -B build_host_hermesc
-  cmake --build ./build_host_hermesc --target hermesc
+  cmake --build ./build_host_hermesc --target hermesc shermes
 }
 
 # Utility function to configure an Apple framework
@@ -71,7 +71,7 @@ function configure_apple_framework {
     -DHERMES_BUILD_APPLE_FRAMEWORK:BOOLEAN=true \
     -DHERMES_BUILD_APPLE_DSYM:BOOLEAN=true \
     -DHERMES_ENABLE_TOOLS:BOOLEAN="$build_cli_tools" \
-    -DIMPORT_HERMESC:PATH="$PWD/build_host_hermesc/ImportHermesc.cmake" \
+    -DIMPORT_HOST_COMPILERS:PATH="$PWD/build_host_hermesc/ImportHostCompilers.cmake" \
     -DCMAKE_INSTALL_PREFIX:PATH=../destroot \
     -DCMAKE_BUILD_TYPE="$BUILD_TYPE"
 }
@@ -81,7 +81,7 @@ function build_apple_framework {
   echo "Building framework for $1 with architectures: $2"
 
   build_host_hermesc
-  [ ! -f "$PWD/build_host_hermesc/ImportHermesc.cmake" ] &&
+  [ ! -f "$PWD/build_host_hermesc/ImportHostCompilers.cmake" ] &&
   echo "Host hermesc is required to build apple frameworks!"
 
   configure_apple_framework "$1" "$2" "$3"
