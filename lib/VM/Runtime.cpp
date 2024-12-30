@@ -1210,8 +1210,15 @@ Handle<JSObject> Runtime::runInternalJavaScript() {
       /*sourceURL*/ "InternalBytecode.js",
       makeNullHandle<Environment>());
   // It is a fatal error for the internal bytecode to throw an exception.
-  assert(
-      res != ExecutionStatus::EXCEPTION && "Internal bytecode threw exception");
+  if (LLVM_UNLIKELY(res == ExecutionStatus::EXCEPTION)) {
+    // Make sure stdout catches up to stderr.
+    llvh::outs().flush();
+    llvh::errs() << "Internal bytecode threw exception\n";
+    auto exc = makeHandle(getThrownValue());
+    clearThrownValue();
+    printException(llvh::errs(), exc);
+    hermes_fatal("Internal bytecode threw exception");
+  }
   assert(
       res->isObject() &&
       "Completion value of internal bytecode must be an object");
