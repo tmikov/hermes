@@ -13,8 +13,13 @@
 #include "libhermesvm-config.h"
 
 #include <assert.h>
-#include <setjmp.h>
 #include <stdint.h>
+
+#ifdef __wasi__
+typedef int jmp_buf[1];
+#else
+#include <setjmp.h>
+#endif
 
 #ifdef __cplusplus
 extern "C" {

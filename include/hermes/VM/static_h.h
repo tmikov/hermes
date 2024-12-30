@@ -14,9 +14,9 @@
 #include "hermes/VM/sh_runtime.h"
 
 #include <math.h>
-#include <setjmp.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdlib.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -330,7 +330,20 @@ SHERMES_EXPORT SHLegacyValue _sh_ljs_create_this(
     SHLegacyValue *newTarget,
     SHPropertyCacheEntry *propCacheEntry);
 
-#ifndef _WINDOWS
+#ifdef __wasi__
+#warning "JS exceptions are currenly broken with WASI"
+
+static inline int _noop_setjmp(jmp_buf) {
+  return 0;
+}
+static inline void _noop_longjmp(jmp_buf, int) {
+  // We can't just ignore the exception. At least do something.
+  abort();
+}
+#define _sh_setjmp _noop_setjmp
+#define _sh_longjmp _noop_longjmp
+
+#elif !defined(_WINDOWS)
 // Use _setjmp and _longjmp outside Windows, to avoid saving and restoring the
 // signal mask, which is costly and may interfere with signal mask manipulation
 // by non-Hermes code.
