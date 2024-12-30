@@ -11,7 +11,7 @@ target_link_libraries(shermes_console PRIVATE hermesvm)
 add_library(shermes_console_a STATIC ConsoleBindings.cpp)
 # Add hermesvm as a dependency so headers are available, even though we aren't
 # actually linking anything here.
-target_link_libraries(shermes_console_a PRIVATE hermesvm_a)
+target_link_libraries(shermes_console_a PRIVATE hermesvmlean_a)
 
 set(SHERMES_CC "cc" CACHE STRING "C compiler to invoke")
 set(SHERMES_CC_SYSCFLAGS "" CACHE STRING "C compiler system flags")
