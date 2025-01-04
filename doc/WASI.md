@@ -319,6 +319,54 @@ hello world
 
 ### Shell script
 
+```
+#!/bin/bash
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
+set -e  # Exit immediately if a command exits with a non-zero status
+set -u  # Treat unset variables as an error and exit immediately
+
+# Extract the filename without path and extension
+file_name=$(basename "$1")   # Remove path
+file_name="${file_name%.*}"      # Remove extension
+
+rm -rf out
+
+mkdir out
+
+out="$PWD/out"
+
+rm -rf ${file_name}.c ${file_name}.o ${file_name}.wasm ${file_name}.hbc ${file_name}
+
+./build-host/bin/hermes ${file_name}.js --emit-binary -out "${out}/${file_name}.hbc"
+
+./build-host/bin/shermes -v -Os -g -static-link -Xenable-tdz -emit-c "${file_name}.js" -o "${out}/${file_name}.c"
+
+./build-host/bin/shermes -v -Os -g -Xenable-tdz ${file_name}.js -o "${out}/${file_name}" 
+
+../wasi-sdk/bin/wasm32-wasi-clang "${out}/${file_name}.c" -c \
+  -O3 \
+  -DNDEBUG \
+  -fno-strict-aliasing -fno-strict-overflow \
+  -I./build-wasm/lib/config \
+  -I../hermes/include \
+  -mllvm -wasm-enable-sjlj \
+  -o "${out}/${file_name}.o"
+
+../wasi-sdk/bin/clang++ -O3 "${out}/${file_name}.o" ./build-wasm/tools/sh-demo/CMakeFiles/sh-demo.dir/cxa.cpp.obj -o "${out}/${file_name}.wasm" \
+  -L./build-wasm/lib \
+  -L./build-wasm/jsi \
+  -L./build-wasm/tools/shermes \
+  -lshermes_console_a -lhermesvmlean_a -ljsi -lwasi-emulated-mman
+
+../wasi-sdk/bin/strip "${out}/${file_name}.wasm"
+
+ls -lh "${out}"
+```
+
 `./wasm-standalone-test.sh hello.js`
 
 ```
