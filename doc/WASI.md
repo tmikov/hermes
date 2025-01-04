@@ -374,16 +374,10 @@ In file included from /media/user/123/hermes-builds/out/hello.c:2:
 ../hermes/include/hermes/VM/static_h.h:334:2: warning: "JS exceptions are currenly broken with WASI" [-W#warnings]
   334 | #warning "JS exceptions are currenly broken with WASI"
       |  ^
-../hermes/include/hermes/VM/static_h.h:336:39: warning: omitting the parameter name in a function definition is a C23 extension [-Wc23-extensions]
-  336 | static inline int _noop_setjmp(jmp_buf) {
-      |                                       ^
-../hermes/include/hermes/VM/static_h.h:339:41: warning: omitting the parameter name in a function definition is a C23 extension [-Wc23-extensions]
-  339 | static inline void _noop_longjmp(jmp_buf, int) {
-      |                                         ^
-../hermes/include/hermes/VM/static_h.h:339:46: warning: omitting the parameter name in a function definition is a C23 extension [-Wc23-extensions]
-  339 | static inline void _noop_longjmp(jmp_buf, int) {
-      |                                              ^
-4 warnings generated.
+../hermes/include/hermes/VM/static_h.h:334:2: warning: "JS exceptions are currenly broken with WASI" [-W#warnings]
+  334 | #warning "JS exceptions are currenly broken with WASI"
+      |  ^
+1 warning generated.
 total 1.6M
 -rwxrwxr-x 1 user user  29K Jan  4 14:23 hello
 -rw-rw-r-- 1 user user  12K Jan  4 14:23 hello.c
