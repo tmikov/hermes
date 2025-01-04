@@ -367,8 +367,6 @@ rm -rf ${file_name}.c ${file_name}.o ${file_name}.wasm ${file_name}.hbc ${file_n
 ls -lh "${out}"
 ```
 
-`./wasm-standalone-test.sh hello.js`
-
 ```
 ./wasm-standalone-test.sh hello.js
 /usr/bin/cc /tmp/hello.js-c2d6b3.c -Os -I/media/user/123/hermes-builds/build-host/lib/config -I/media/user/123/hermes/include -DNDEBUG -g -fno-strict-aliasing -fno-strict-overflow -L/media/user/123/hermes-builds/build-host/lib -L/media/user/123/hermes-builds/build-host/jsi -L/media/user/123/hermes-builds/build-host/tools/shermes -lshermes_console -Wl,-rpath /media/user/123/hermes-builds/build-host/lib -Wl,-rpath /media/user/123/hermes-builds/build-host/jsi -Wl,-rpath /media/user/123/hermes-builds/build-host/tools/shermes -lm -lhermesvm -o /media/user/123/hermes-builds/out/hello
