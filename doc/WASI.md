@@ -275,50 +275,6 @@ cat hello.js
 var x = "hello"; print(`${x} world`);
 ```
 
-I copied `cxa.cpp` from `hermes/tools/sh-demo` to the `hermes-builds` directory from this
-```
-/*
- * Copyright (c) Meta Platforms, Inc. and affiliates.
- *
- * This source code is licensed under the MIT license found in the
- * LICENSE file in the root directory of this source tree.
- */
-
-#include "llvh/Support/ErrorHandling.h"
-
-extern "C" void __cxa_throw(void* thrown_exception,
-    std::type_info* tinfo,
-    void (*dest)(void*)) {
-  llvh::report_fatal_error("C++ exceptions not supported on Wasi");
-}
-
-extern "C" void* __cxa_allocate_exception(size_t) {
-  llvh::report_fatal_error("C++ exceptions not supported on Wasi");
-}
-
-```
-
-to this 
-
-```
-/*
- * Copyright (c) Meta Platforms, Inc. and affiliates.
- *
- * This source code is licensed under the MIT license found in the
- * LICENSE file in the root directory of this source tree.
- */
-
-//#include "llvh/Support/ErrorHandling.h"
-
-extern "C" void __cxa_throw() {
-  //llvh::report_fatal_error("C++ exceptions not supported on Wasi");
-}
-
-extern "C" void* __cxa_allocate_exception() {
-  //llvh::report_fatal_error("C++ exceptions not supported on Wasi");
-}
-```
-
 ### Emit C
 
 ```
@@ -328,22 +284,24 @@ build-host/bin/shermes -Xenable-tdz -emit-c hello.js
 
 ```
 ../wasi-sdk/bin/wasm32-wasi-clang hello.c -c \
--O3 \
--DNDEBUG \
--fno-strict-aliasing -fno-strict-overflow \
--I./build-wasm/lib/config \
--I../hermes/include \
--mllvm -wasm-enable-sjlj 
+  -O3 \
+  -DNDEBUG \
+  -fno-strict-aliasing -fno-strict-overflow \
+  -I./build-wasm/lib/config \
+  -I../hermes/include \
+  -mllvm -wasm-enable-sjlj \
+  -o hello
 ```
 
 ### Compile to `.wasm` file WASI-SDK's `clang++`
 
 ```
-../wasi-sdk/bin/clang++ -O3 fopen.o cxa.cpp -o fopen.wasm \
--L./build-wasm/lib \
--L./build-wasm/jsi \
--L./build-wasm/tools/shermes \
--lshermes_console_a -lhermesvmlean_a -ljsi -lwasi-emulated-mman 
+../wasi-sdk/bin/clang++ -O3 hello.o ./build-wasm/tools/sh-demo/CMakeFiles/sh-demo.dir/cxa.cpp.obj \
+  -o hello.wasm \
+  -L./build-wasm/lib \
+  -L./build-wasm/jsi \
+  -L./build-wasm/tools/shermes \
+  -lshermes_console_a -lhermesvmlean_a -ljsi -lwasi-emulated-mman
 ```
 
 ### Test
@@ -365,7 +323,7 @@ hello world
 
 ```
 ./wasm-standalone-test.sh hello.js
-/usr/bin/cc /tmp/hello.js-3d471f.c -Os -I/media/user/123/hermes-builds/build-host/lib/config -I/media/user/123/hermes/include -DNDEBUG -g -fno-strict-aliasing -fno-strict-overflow -L/media/user/123/hermes-builds/build-host/lib -L/media/user/123/hermes-builds/build-host/jsi -L/media/user/123/hermes-builds/build-host/tools/shermes -lshermes_console -Wl,-rpath /media/user/123/hermes-builds/build-host/lib -Wl,-rpath /media/user/123/hermes-builds/build-host/jsi -Wl,-rpath /media/user/123/hermes-builds/build-host/tools/shermes -lm -lhermesvm -o /media/user/123/hermes-builds/out/hello
+/usr/bin/cc /tmp/hello.js-c2d6b3.c -Os -I/media/user/123/hermes-builds/build-host/lib/config -I/media/user/123/hermes/include -DNDEBUG -g -fno-strict-aliasing -fno-strict-overflow -L/media/user/123/hermes-builds/build-host/lib -L/media/user/123/hermes-builds/build-host/jsi -L/media/user/123/hermes-builds/build-host/tools/shermes -lshermes_console -Wl,-rpath /media/user/123/hermes-builds/build-host/lib -Wl,-rpath /media/user/123/hermes-builds/build-host/jsi -Wl,-rpath /media/user/123/hermes-builds/build-host/tools/shermes -lm -lhermesvm -o /media/user/123/hermes-builds/out/hello
 In file included from /media/user/123/hermes-builds/out/hello.c:2:
 ../hermes/include/hermes/VM/static_h.h:334:2: warning: "JS exceptions are currenly broken with WASI" [-W#warnings]
   334 | #warning "JS exceptions are currenly broken with WASI"
@@ -380,21 +338,11 @@ In file included from /media/user/123/hermes-builds/out/hello.c:2:
   339 | static inline void _noop_longjmp(jmp_buf, int) {
       |                                              ^
 4 warnings generated.
-./cxa.cpp:19:1: warning: non-void function does not return a value [-Wreturn-type]
-   19 | }
-      | ^
-1 warning generated.
-wasm-ld: warning: function signature mismatch: __cxa_throw
->>> defined as (i32, i32, i32) -> void in ./build-wasm/lib/libhermesvmlean_a.a(hermes.cpp.obj)
->>> defined as () -> void in /tmp/cxa-1b393a.o
-
-wasm-ld: warning: function signature mismatch: __cxa_allocate_exception
->>> defined as (i32) -> i32 in ./build-wasm/lib/libhermesvmlean_a.a(hermes.cpp.obj)
->>> defined as () -> i32 in /tmp/cxa-1b393a.o
 total 1.6M
--rwxrwxr-x 1 user user  29K Jan  4 12:38 hello
--rw-rw-r-- 1 user user  12K Jan  4 12:38 hello.c
--rw-rw-r-- 1 user user  700 Jan  4 12:38 hello.hbc
--rw-rw-r-- 1 user user 4.3K Jan  4 12:38 hello.o
--rwxrwxr-x 1 user user 1.5M Jan  4 12:38 hello.wasm
+-rwxrwxr-x 1 user user  29K Jan  4 14:23 hello
+-rw-rw-r-- 1 user user  12K Jan  4 14:23 hello.c
+-rw-rw-r-- 1 user user  700 Jan  4 14:23 hello.hbc
+-rw-rw-r-- 1 user user 4.3K Jan  4 14:23 hello.o
+-rwxrwxr-x 1 user user 1.5M Jan  4 14:23 hello.wasm
+
 ```
