@@ -371,7 +371,7 @@ ls -lh "${out}"
 ./wasm-standalone-test.sh hello.js
 /usr/bin/cc /tmp/hello.js-c2d6b3.c -Os -I/media/user/123/hermes-builds/build-host/lib/config -I/media/user/123/hermes/include -DNDEBUG -g -fno-strict-aliasing -fno-strict-overflow -L/media/user/123/hermes-builds/build-host/lib -L/media/user/123/hermes-builds/build-host/jsi -L/media/user/123/hermes-builds/build-host/tools/shermes -lshermes_console -Wl,-rpath /media/user/123/hermes-builds/build-host/lib -Wl,-rpath /media/user/123/hermes-builds/build-host/jsi -Wl,-rpath /media/user/123/hermes-builds/build-host/tools/shermes -lm -lhermesvm -o /media/user/123/hermes-builds/out/hello
 In file included from /media/user/123/hermes-builds/out/hello.c:2:
-../hermes/include/hermes/VM/static_h.h:334:2: warning: "JS exceptions are currenly broken with WASI" [-W#warnings]
+../hermes/include/hermes./wasm-standalone-test.sh hello.js/VM/static_h.h:334:2: warning: "JS exceptions are currenly broken with WASI" [-W#warnings]
   334 | #warning "JS exceptions are currenly broken with WASI"
       |  ^
 ../hermes/include/hermes/VM/static_h.h:334:2: warning: "JS exceptions are currenly broken with WASI" [-W#warnings]
@@ -384,5 +384,94 @@ total 1.6M
 -rw-rw-r-- 1 user user  700 Jan  4 14:23 hello.hbc
 -rw-rw-r-- 1 user user 4.3K Jan  4 14:23 hello.o
 -rwxrwxr-x 1 user user 1.5M Jan  4 14:23 hello.wasm
+
+```
+
+## Compiling with `-typed`, additionally generating `.wat` and `.js` to run WASI with `node`, `deno`, `bun`
+
+```
+#!/bin/bash
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+#
+# This source code is licensed under the MIT license found in the
+# LICENSE file in the root directory of this source tree.
+
+set -e  # Exit immediately if a command exits with a non-zero status
+set -u  # Treat unset variables as an error and exit immediately
+
+# Extract the filename without path and extension
+file_name=$(basename "$1")   # Remove path
+file_name_with_ext="${file_name}"
+file_name="${file_name%.*}"      # Remove extension
+
+rm -rf out
+
+mkdir out
+
+out="$PWD/out"
+
+./build-host/bin/shermes -v -Os -g -fauto-detect-static-builtins -typed \
+-Xenable-tdz -emit-c "${file_name_with_ext}" \
+-o "${out}/${file_name}.c"
+
+./build-host/bin/shermes -v -Os -g -Xenable-tdz -typed \
+-fauto-detect-static-builtins -fstd-globals "${file_name_with_ext}" \
+-o "${out}/${file_name}" 
+
+../wasi-sdk/bin/wasm32-wasi-clang "${out}/${file_name}.c" -c \
+  -O3 \
+  -DNDEBUG \
+  -fno-strict-aliasing -fno-strict-overflow \
+  -I./build-wasm/lib/config \
+  -I../hermes/include \
+  -mllvm -wasm-enable-sjlj \
+  -Wno-c23-extensions \
+  -o "${out}/${file_name}.o"
+
+../wasi-sdk/bin/clang++ -O3 "${out}/${file_name}.o" ./build-wasm/tools/sh-demo/CMakeFiles/sh-demo.dir/cxa.cpp.obj -o "${out}/${file_name}.wasm" \
+  -L./build-wasm/lib \
+  -L./build-wasm/jsi \
+  -L./build-wasm/tools/shermes \
+  -lshermes_console_a -lhermesvmlean_a -ljsi -lwasi-emulated-mman -lsetjmp
+
+../wasi-sdk/bin/strip "${out}/${file_name}.wasm"
+
+../wabt/bin/wasm2wat "${out}/${file_name}.wasm" -o "${out}/${file_name}.wat"
+
+cp "${file_name_with_ext}" "out/${file_name_with_ext}"
+
+cp "$PWD/wasi.js" "out/wasi.js"
+
+cat << EOF > "out/${file_name}.js"
+import WASI from "./wasi.js"; 
+import { readFile }  from "node:fs/promises";
+const bin = await readFile("./out/${file_name}.wasm");
+const mod = await WebAssembly.compile(bin);
+const wasi = new WASI();
+const instance = await WebAssembly.instantiate(mod, {
+  wasi_snapshot_preview1: wasi.exports,
+});
+wasi.memory = instance.exports.memory;
+instance.exports._start();
+EOF
+
+ls -lh "${out}"
+```
+
+```
+./wasm-standalone-test.sh fopen.ts
+../hermes/include/hermes/VM/static_h.h:334:2: warning: "JS exceptions are currenly broken with WASI" [-W#warnings]
+  334 | #warning "JS exceptions are currenly broken with WASI"
+      |  ^
+1 warning generated.
+total 17M
+-rwxrwxr-x 1 user user  69K Jan 11 21:24 fopen
+-rw-rw-r-- 1 user user  44K Jan 11 21:24 fopen.c
+-rw-rw-r-- 1 user user  358 Jan 11 21:24 fopen.js
+-rw-rw-r-- 1 user user  12K Jan 11 21:24 fopen.o
+-rw-rw-r-- 1 user user 2.9K Jan 11 21:24 fopen.ts
+-rwxrwxr-x 1 user user 1.5M Jan 11 21:24 fopen.wasm
+-rw-rw-r-- 1 user user  15M Jan 11 21:24 fopen.wat
+-rw-rw-r-- 1 user user  38K Jan 11 21:24 wasi.js
 
 ```
