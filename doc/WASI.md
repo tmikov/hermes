@@ -387,7 +387,7 @@ total 1.6M
 
 ```
 
-## Compiling with `-typed`, additionally generating `.wat` and `.js` to run WASI with `node`, `deno`, `bun`
+## Compiling with `-typed` to native executable and WASM, additionally generating `.wat` and `.js` to run WASI with `node`, `deno`, `bun`
 
 ```
 #!/bin/bash
