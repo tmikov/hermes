@@ -316,6 +316,31 @@ wasmer hello.wasm
 hello world
 ```
 
+### Missing library
+
+For example
+```
+/usr/bin/ld: cannot find -lshermes_console: No such file or directory
+```
+
+From with the build directory
+
+```
+ninja libraryname
+```
+
+I.e.,
+
+
+```
+ninja shermes_console
+```
+
+
+```
+ninja shermes_console_a
+```
+
 
 ### Shell script
 
