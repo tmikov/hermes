@@ -235,11 +235,13 @@ class JSTypedArray final : public JSTypedArrayBase {
     return begin(runtime) + length_;
   }
 
+  /// Monomorphic access to the \p i'th element of the buffer. This is
+  /// implemented for each TypedArray subclass.
   /// Retrieve the \p i'th element of the buffer.
   /// \pre
   ///   This cannot be called on a detached TypedArray.
   ///   i must be less than the length of the TypedArray.
-  T &at(Runtime &runtime, size_type i) {
+  T &monoAt(Runtime &runtime, size_type i) {
     assert(attached(runtime) && "at() requires a JSArrayBuffer");
     assert(i < getLength() && "That index is out of bounds of this TypedArray");
     return begin(runtime)[i];
