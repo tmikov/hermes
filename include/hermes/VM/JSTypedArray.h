@@ -92,6 +92,10 @@ class JSTypedArrayBase : public JSObject {
     return data(runtime) + getByteLength();
   }
 
+  /// Polymorphic access to the data in the TypedArray.
+  inline static HermesValue
+  polyReadMayAlloc(JSTypedArrayBase *self, Runtime &runtime, size_type index);
+
   /// \return Whether this JSTypedArrayBase is attached to some buffer.
   bool attached(Runtime &runtime) const {
     return buffer_ && buffer_.getNonNull(runtime)->attached();
@@ -206,6 +210,66 @@ class JSTypedArrayBase : public JSObject {
       const GCCell *cell,
       Metadata::Builder &mb);
 };
+
+#ifdef NDEBUG
+LLVM_ATTRIBUTE_ALWAYS_INLINE
+#endif
+inline HermesValue JSTypedArrayBase::polyReadMayAlloc(
+    JSTypedArrayBase *self,
+    Runtime &runtime,
+    size_type index) {
+  assert(self->attached(runtime) && "at() requires a JSArrayBuffer");
+  assert(
+      index < self->getLength() &&
+      "That index is out of bounds of this TypedArray");
+
+  uint8_t *dataPtr = self->data(runtime);
+  switch (self->getKind()) {
+    case CellKind::Int8ArrayKind:
+      return HermesValue::encodeTrustedNumberValue(
+          reinterpret_cast<int8_t *>(dataPtr)[index]);
+    case CellKind::Uint8ArrayKind:
+      return HermesValue::encodeTrustedNumberValue(
+          reinterpret_cast<uint8_t *>(dataPtr)[index]);
+    case CellKind::Uint8ClampedArrayKind:
+      return HermesValue::encodeTrustedNumberValue(
+          reinterpret_cast<uint8_t *>(dataPtr)[index]);
+    case CellKind::Int16ArrayKind:
+      return HermesValue::encodeTrustedNumberValue(
+          reinterpret_cast<int16_t *>(dataPtr)[index]);
+    case CellKind::Uint16ArrayKind:
+      return HermesValue::encodeTrustedNumberValue(
+          reinterpret_cast<uint16_t *>(dataPtr)[index]);
+    case CellKind::Int32ArrayKind:
+      return HermesValue::encodeTrustedNumberValue(
+          reinterpret_cast<int32_t *>(dataPtr)[index]);
+    case CellKind::Uint32ArrayKind:
+      return HermesValue::encodeTrustedNumberValue(
+          reinterpret_cast<uint32_t *>(dataPtr)[index]);
+    case CellKind::Float32ArrayKind:
+      return HermesValue::encodeUntrustedNumberValue(
+          reinterpret_cast<float *>(dataPtr)[index]);
+    case CellKind::Float64ArrayKind:
+      return HermesValue::encodeUntrustedNumberValue(
+          reinterpret_cast<double *>(dataPtr)[index]);
+    case CellKind::BigInt64ArrayKind: {
+      auto cr = BigIntPrimitive::fromSigned(
+          runtime, reinterpret_cast<int64_t *>(dataPtr)[index]);
+      if (LLVM_UNLIKELY(cr.getStatus() == ExecutionStatus::EXCEPTION))
+        hermes_fatal("Failed to encode BigInt in polyReadMayAlloc");
+      return *cr;
+    }
+    case CellKind::BigUint64ArrayKind: {
+      auto cr = BigIntPrimitive::fromUnsigned(
+          runtime, reinterpret_cast<uint64_t *>(dataPtr)[index]);
+      if (LLVM_UNLIKELY(cr.getStatus() == ExecutionStatus::EXCEPTION))
+        hermes_fatal("Failed to encode BigInt in polyReadMayAlloc");
+      return *cr;
+    }
+    default:
+      llvm_unreachable("Unknown TypedArray kind");
+  }
+}
 
 /// JSTypedArray is a collection with array semantics (random access indexing),
 /// but stores a typed value with a known size, and has a static total size.
