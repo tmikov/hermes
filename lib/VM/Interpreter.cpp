@@ -58,6 +58,25 @@ HERMES_SLOW_STATISTIC(
     NumGetByIdDict,
     "NumGetByIdDict: Number of property 'read by id' of dictionaries");
 
+HERMES_SLOW_STATISTIC(NumGetByIndex, "NumGetByIndex: Number of GetByIndex");
+
+HERMES_SLOW_STATISTIC(NumGetByVal, "NumGetByVal: Number of GetByVal");
+HERMES_SLOW_STATISTIC(
+    NumGetByValObj,
+    "NumGetByValObj: Number of GetByVal _,Obj,_");
+HERMES_SLOW_STATISTIC(
+    NumGetByValObjInd,
+    "NumGetByValObjInd: Number of GetByVal _,Obj,Index");
+HERMES_SLOW_STATISTIC(
+    NumGetByValObjIndArr,
+    "NumGetByValObjIndArr: Number of GetByVal _,JSArray,Index");
+HERMES_SLOW_STATISTIC(
+    NumGetByValObjIndArrOK,
+    "NumGetByValObjIndArrOK: Number of GetByVal _,JSArray,[Index] != Empty");
+HERMES_SLOW_STATISTIC(
+    NumGetByValObjIndTA,
+    "NumGetByValObjIndTA: Number of GetByVal _,JSTypedArray,Index");
+
 HERMES_SLOW_STATISTIC(
     NumPutById,
     "NumPutById: Number of property 'write by id' accesses");
@@ -364,6 +383,7 @@ static inline const Inst *nextInstCall(const Inst *ip) {
       ((sizeof(inst::name##Inst) - minSize) \
        << (((uint8_t)OpCode::name - firstCall) * W))
 #include "hermes/BCGen/HBC/BytecodeList.def"
+
       ;
 #undef DEFINE_RET_TARGET
 
@@ -2032,7 +2052,70 @@ tailCall:
       DISPATCH;
     }
 
-      CASE_OUTOFLINE(GetByVal);
+      CASE(GetByVal) {
+        ++NumGetByVal;
+        if constexpr (HERMES_SLOW_STATISTIC_ENABLED) {
+          if (O2REG(GetByVal).isObject())
+            ++NumGetByValObj;
+        }
+        (void)NumGetByValObj;
+
+        // An efficient check whether the value is both a number and a uint32.
+        static_assert(
+            HERMESVALUE_VERSION == 2,
+            "HermesValue must use NaN-encoding for non-numbers");
+        uint32_t index;
+        if (sh_tryfast_f64_to_u32(O3REG(GetByVal).f64, index) &&
+            LLVM_LIKELY(O2REG(GetByVal).isObject())) {
+          ++NumGetByValObjInd;
+          auto *obj = vmcast<JSObject>(O2REG(GetByVal));
+
+          // Check for array with fast index properties and a valid index.
+          if (obj->getKind() == CellKind::JSArrayKind) {
+            if (obj->hasFastIndexProperties() && index != 0xFFFFFFFFu) {
+              ++NumGetByValObjIndArr;
+              auto *jsArray = vmcast<JSArray>(obj);
+              SmallHermesValue shv = jsArray->at(runtime, index);
+              if (!shv.isEmpty()) {
+                ++NumGetByValObjIndArrOK;
+                O1REG(GetByVal) = shv.unboxToHV(runtime);
+                ip = NEXTINST(GetByVal);
+                DISPATCH;
+              }
+            }
+          } else if (vmisa<JSTypedArrayBase>(obj)) {
+            ++NumGetByValObjIndTA;
+            auto *taJSTypedArray = vmcast<JSTypedArrayBase>(obj);
+
+            O1REG(GetByVal) = LLVM_LIKELY(
+                                  index < taJSTypedArray->getLength() &&
+                                  taJSTypedArray->attached(runtime))
+                ? JSTypedArrayBase::polyReadMayAlloc(
+                      taJSTypedArray, runtime, index)
+                : HermesValue::encodeUndefinedValue();
+            ip = NEXTINST(GetByVal);
+            DISPATCH;
+          } else if (obj->hasFastIndexProperties()) {
+            // Fall-back fast path for other objects with fast index properties
+            auto ourValue = createPseudoHandle(JSObject::getOwnIndexed(
+                createPseudoHandle(obj), runtime, index));
+            if (LLVM_LIKELY(!ourValue->isEmpty())) {
+              O1REG(GetByVal) = ourValue.getHermesValue();
+              ip = NEXTINST(GetByVal);
+              DISPATCH;
+            }
+          }
+        }
+
+        CAPTURE_IP_ASSIGN(
+            ExecutionStatus res, caseGetByVal(runtime, frameRegs, ip));
+        if (LLVM_UNLIKELY(res == ExecutionStatus::EXCEPTION))
+          goto exception;
+        gcScope.flushToSmallCount(KEEP_HANDLES);
+        ip = NEXTINST(GetByVal);
+        DISPATCH;
+      }
+
       CASE_OUTOFLINE(GetByValWithReceiver);
 
       CASE(DefineOwnById) {
@@ -2094,15 +2177,39 @@ tailCall:
       }
 
       CASE(GetByIndex) {
+        ++NumGetByIndex;
         if (LLVM_LIKELY(O2REG(GetByIndex).isObject())) {
           auto *obj = vmcast<JSObject>(O2REG(GetByIndex));
-          if (LLVM_LIKELY(obj->hasFastIndexProperties())) {
+          uint32_t index = ip->iGetByIndex.op3;
+
+          if (obj->getKind() == CellKind::JSArrayKind) {
+            if (LLVM_LIKELY(obj->hasFastIndexProperties())) {
+              auto *jsArray = vmcast<JSArray>(obj);
+              SmallHermesValue shv = jsArray->at(runtime, index);
+              if (LLVM_LIKELY(!shv.isEmpty())) {
+                O1REG(GetByIndex) = shv.unboxToHV(runtime);
+                ip = NEXTINST(GetByIndex);
+                DISPATCH;
+              }
+            }
+          } else if (vmisa<JSTypedArrayBase>(obj)) {
+            auto *jsTypedArray = vmcast<JSTypedArrayBase>(obj);
+
+            O1REG(GetByIndex) = LLVM_LIKELY(
+                                    index < jsTypedArray->getLength() &&
+                                    jsTypedArray->attached(runtime))
+                ? JSTypedArrayBase::polyReadMayAlloc(
+                      jsTypedArray, runtime, index)
+                : HermesValue::encodeUndefinedValue();
+            ip = NEXTINST(GetByIndex);
+            DISPATCH;
+          }
+          // Fall-back fast path for other objects with fast index properties
+          else if (obj->hasFastIndexProperties()) {
             CAPTURE_IP_ASSIGN(
                 auto ourValue,
                 createPseudoHandle(JSObject::getOwnIndexed(
-                    PseudoHandle<JSObject>::create(obj),
-                    runtime,
-                    ip->iGetByIndex.op3)));
+                    PseudoHandle<JSObject>::create(obj), runtime, index)));
             if (LLVM_LIKELY(!ourValue->isEmpty())) {
               gcScope.flushToSmallCount(KEEP_HANDLES);
               O1REG(GetByIndex) = ourValue.get();
