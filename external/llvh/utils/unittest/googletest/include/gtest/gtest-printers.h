@@ -95,6 +95,7 @@
 #ifndef GTEST_INCLUDE_GTEST_GTEST_PRINTERS_H_
 #define GTEST_INCLUDE_GTEST_GTEST_PRINTERS_H_
 
+#include <iomanip>
 #include <ostream>  // NOLINT
 #include <sstream>
 #include <string>
@@ -837,6 +838,41 @@ class UniversalTersePrinter<wchar_t*> {
  public:
   static void Print(wchar_t* str, ::std::ostream* os) {
     UniversalTersePrinter<const wchar_t*>::Print(str, os);
+  }
+};
+
+// Specialization for char16_t* to fix MSVC deleted operator<< error.
+// MSVC explicitly deletes operator<< for char16_t* in <ostream>.
+template <>
+class UniversalTersePrinter<const char16_t*> {
+ public:
+  static void Print(const char16_t* str, ::std::ostream* os) {
+    if (str == NULL) {
+      *os << "NULL";
+    } else {
+      *os << "u\"";
+      for (const char16_t* p = str; *p; ++p) {
+        char16_t c = *p;
+        if (c >= 0x20 && c < 0x7F) {
+          *os << static_cast<char>(c);
+        } else {
+          // Print as \uXXXX
+          *os << "\\u"
+              << std::hex << std::setfill('0') << std::setw(4)
+              << static_cast<unsigned>(c)
+              << std::dec;
+        }
+      }
+      *os << "\"";
+    }
+  }
+};
+
+template <>
+class UniversalTersePrinter<char16_t*> {
+ public:
+  static void Print(char16_t* str, ::std::ostream* os) {
+    UniversalTersePrinter<const char16_t*>::Print(str, os);
   }
 };
 
