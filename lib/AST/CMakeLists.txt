@@ -10,6 +10,7 @@ add_hermes_library(hermesAST
     ESTree.cpp
     ESTreeJSONDumper.cpp
     CommonJS.cpp
+    JSXTransform.cpp
     TS2Flow.cpp
     TransformAST.cpp
     Context.cpp

@@ -7,12 +7,20 @@
 
 #include "hermes/AST/TransformAST.h"
 #include "hermes/AST/AsyncGenerator.h"
+#include "hermes/AST/JSXTransform.h"
 
 namespace hermes {
 
-ESTree::Node *transformASTForCompilation(Context &context, ESTree::Node *root) {
+ESTree::Node *transformASTForCompilation(
+    Context &context,
+    ESTree::Node *root,
+    llvh::StringRef sourceFilename) {
   if (context.getEnableAsyncGenerators()) {
     root = transformAsyncGenerators(context, root);
+  }
+  if (context.getEnableJSXTransform()) {
+    root = transformJSX(
+        context, root, context.getJSXTransformConfig(), sourceFilename);
   }
   return root;
 }

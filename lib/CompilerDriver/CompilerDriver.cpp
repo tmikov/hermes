@@ -493,6 +493,40 @@ static opt<bool> CommonJS(
 #if HERMES_PARSE_JSX
 static opt<bool>
     JSX("parse-jsx", desc("Parse JSX"), init(false), cat(CompilerCategory));
+
+static opt<bool> TransformJSX(
+    "transform-jsx",
+    desc("Transform JSX to function calls (implies -parse-jsx)"),
+    init(false),
+    cat(CompilerCategory));
+
+enum class JSXRuntimeOpt { JSX, CreateElement };
+static opt<JSXRuntimeOpt> JSXRuntimeMode(
+    "jsx-runtime",
+    desc("JSX runtime mode"),
+    init(JSXRuntimeOpt::JSX),
+    values(
+        clEnumValN(
+            JSXRuntimeOpt::JSX,
+            "jsx",
+            "Use jsx/jsxs from configurable global (React 17+ style)"),
+        clEnumValN(
+            JSXRuntimeOpt::CreateElement,
+            "createElement",
+            "Use React.createElement (legacy style)")),
+    cat(CompilerCategory));
+
+static opt<bool> JSXDev(
+    "jsx-dev",
+    desc("Enable development mode for JSX (adds source location info)"),
+    init(false),
+    cat(CompilerCategory));
+
+static opt<std::string> JSXGlobal(
+    "jsx-global",
+    desc("Global object for JSX functions (default: JSX for jsx, React for createElement)"),
+    init(""),
+    cat(CompilerCategory));
 #endif
 
 #if HERMES_PARSE_FLOW
@@ -1204,8 +1238,27 @@ std::shared_ptr<Context> createContext(
   }
 
 #if HERMES_PARSE_JSX
-  if (cl::JSX) {
+  if (cl::JSX || cl::TransformJSX) {
     context->setParseJSX(true);
+  }
+  if (cl::TransformJSX) {
+    context->setEnableJSXTransform(true);
+
+    JSXTransformConfig config;
+    config.runtime = (cl::JSXRuntimeMode == cl::JSXRuntimeOpt::JSX)
+        ? JSXRuntime::JSX
+        : JSXRuntime::CreateElement;
+    config.development = cl::JSXDev;
+
+    if (!cl::JSXGlobal.empty()) {
+      if (config.runtime == JSXRuntime::JSX) {
+        config.jsxGlobal = cl::JSXGlobal;
+      } else {
+        config.createElementGlobal = cl::JSXGlobal;
+      }
+    }
+
+    context->setJSXTransformConfig(config);
   }
 #endif
 

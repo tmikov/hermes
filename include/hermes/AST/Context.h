@@ -10,6 +10,7 @@
 
 #include "hermes/ADT/StringSetVector.h"
 #include "hermes/AST/Config.h"
+#include "hermes/AST/JSXTransform.h"
 #include "hermes/Parser/PreParser.h"
 #include "hermes/Regex/RegexSerialization.h"
 #include "hermes/Support/Allocator.h"
@@ -269,6 +270,12 @@ class Context {
   /// Whether to enable support for async generators
   bool enableAsyncGenerators_{false};
 
+  /// Whether to enable JSX transformation.
+  bool enableJSXTransform_{false};
+
+  /// JSX transformation configuration.
+  JSXTransformConfig jsxTransformConfig_{};
+
   /// Whether to enable support for ES6 block scoping.
   /// TODO: This is intended to provide a temporary way to configure block
   ///       scoping until we have debugger support for it.
@@ -477,6 +484,22 @@ class Context {
 
   bool getEnableAsyncGenerators() const {
     return enableAsyncGenerators_;
+  }
+
+  void setEnableJSXTransform(bool enable) {
+    enableJSXTransform_ = enable;
+  }
+
+  bool getEnableJSXTransform() const {
+    return enableJSXTransform_;
+  }
+
+  void setJSXTransformConfig(const JSXTransformConfig &config) {
+    jsxTransformConfig_ = config;
+  }
+
+  const JSXTransformConfig &getJSXTransformConfig() const {
+    return jsxTransformConfig_;
   }
 
   void setEnableES6BlockScoping(bool enableES6BlockScoping) {

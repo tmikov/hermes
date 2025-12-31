@@ -10,6 +10,8 @@
 #include "hermes/AST/Context.h"
 #include "hermes/AST/ESTree.h"
 
+#include "llvh/ADT/StringRef.h"
+
 namespace hermes {
 
 /// General purpose AST transformation which will be applied before running
@@ -17,9 +19,15 @@ namespace hermes {
 /// Allows adding functionality/transforms in a general way directly to the AST
 /// in a way that works for lazy compilation, debugger eval, etc.
 ///
+/// \param context The AST context.
+/// \param root The root AST node to transform.
+/// \param sourceFilename The source file name (used for JSX dev mode).
 /// \return the transformed node, which should be used for the remainder of
 ///   compilation. On failure, report an error and return nullptr.
 ///   The returned Node must be the same kind as the original \p root.
-ESTree::Node *transformASTForCompilation(Context &context, ESTree::Node *root);
+ESTree::Node *transformASTForCompilation(
+    Context &context,
+    ESTree::Node *root,
+    llvh::StringRef sourceFilename = "");
 
 } // namespace hermes
