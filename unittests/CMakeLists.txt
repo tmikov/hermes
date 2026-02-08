@@ -37,3 +37,8 @@ add_subdirectory(PlatformUnicode)
 add_subdirectory(API)
 add_subdirectory(ADT)
 add_subdirectory(Optimizer)
+
+if(HERMES_ENABLE_WASM)
+  add_subdirectory(WasmFrontend)
+  add_subdirectory(WasmIRGen)
+endif()

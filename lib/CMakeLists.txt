@@ -75,6 +75,11 @@ add_subdirectory(Platform)
 add_subdirectory(InternalJavaScript)
 add_subdirectory(Sema)
 
+if(HERMES_ENABLE_WASM)
+  add_subdirectory(WasmFrontend)
+  add_subdirectory(WasmIRGen)
+endif()
+
 # Define combined libraries from all components. Components are defined as object
 # libraries. It is tricky.
 #

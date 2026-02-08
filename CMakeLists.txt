@@ -267,6 +267,9 @@ set(ANDROID_LINUX_PERF_PATH ""
 set(HERMES_MSVC_MP ON CACHE STRING
   "Enable /MP in MSVC for parallel builds")
 
+set(HERMES_ENABLE_WASM OFF CACHE BOOL
+  "Enable WebAssembly support")
+
 set(HERMES_ENABLE_INTL OFF CACHE BOOL
   "Enable JS Intl support (WIP)")
 
