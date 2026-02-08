@@ -753,30 +753,6 @@ endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Fetch and configure wabt for WebAssembly support.
-# This must be before add_subdirectory(lib) because lib/WasmFrontend links
-# against the wabt library.
-if(HERMES_ENABLE_WASM)
-  include(FetchContent)
-  FetchContent_Declare(
-    wabt
-    GIT_REPOSITORY https://github.com/WebAssembly/wabt.git
-    GIT_TAG 1.0.39
-    GIT_SHALLOW TRUE
-  )
-  # Configure wabt build options.
-  set(BUILD_TESTS OFF CACHE BOOL "Build wabt tests" FORCE)
-  set(BUILD_LIBWASM OFF CACHE BOOL "Build wabt libwasm" FORCE)
-  set(USE_INTERNAL_SHA256 ON CACHE BOOL "Use internal SHA256" FORCE)
-  # Populate wabt and add it with EXCLUDE_FROM_ALL so its targets are only
-  # built when actually needed by Hermes targets.
-  FetchContent_GetProperties(wabt)
-  if(NOT wabt_POPULATED)
-    FetchContent_Populate(wabt)
-    add_subdirectory(${wabt_SOURCE_DIR} ${wabt_BINARY_DIR} EXCLUDE_FROM_ALL)
-  endif()
-endif()
-
 add_subdirectory(external)
 add_subdirectory(utils/hermes-lit)
 add_subdirectory(lib)
