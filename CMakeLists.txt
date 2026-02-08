@@ -285,6 +285,9 @@ set(ANDROID_LINUX_PERF_PATH ""
 set(HERMES_MSVC_MP ON CACHE STRING
   "Enable /MP in MSVC for parallel builds")
 
+set(HERMES_ENABLE_WASM OFF CACHE BOOL
+  "Enable WebAssembly support")
+
 set(HERMES_ENABLE_INTL OFF CACHE BOOL
   "Enable JS Intl support (WIP)")
 
@@ -542,6 +545,10 @@ if(HERMESVM_PLATFORM_LOGGING)
 endif()
 if (NOT (ANDROID_LINUX_PERF_PATH STREQUAL ""))
   add_definitions(-DANDROID_LINUX_PERF_PATH="${ANDROID_LINUX_PERF_PATH}")
+endif()
+
+if (HERMES_ENABLE_WASM)
+  add_definitions(-DHERMES_ENABLE_WASM)
 endif()
 
 if (HERMES_ENABLE_INTL)
@@ -852,6 +859,10 @@ if(HERMES_ENABLE_TEST_SUITE)
     endif()
   endif()
 
+  if (HERMES_ENABLE_WASM)
+    list(APPEND HERMES_TEST_DEPS wat2wasm wast2json)
+  endif()
+
   set(coverage_directory "")
   if (HERMES_ENABLE_CODE_COVERAGE)
     set(coverage_directory ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_CFG_INTDIR}/coverage)
@@ -890,6 +901,9 @@ if(HERMES_ENABLE_TEST_SUITE)
     qemu_run_prefix=${QEMU_RUN_PREFIX}
     napi_enabled=${HERMES_ENABLE_NAPI}
     python=${Python_EXECUTABLE}
+    wasm_enabled=${HERMES_ENABLE_WASM}
+    wat2wasm=${CMAKE_BINARY_DIR}/external/wabt/wabt/wat2wasm
+    wast2json=${CMAKE_BINARY_DIR}/external/wabt/wabt/wast2json
     )
 
   if(HERMES_ENABLE_NAPI)

@@ -80,6 +80,11 @@ add_subdirectory(InternalJavaScript)
 add_subdirectory(TypedLib)
 add_subdirectory(Sema)
 
+if(HERMES_ENABLE_WASM)
+  add_subdirectory(WasmFrontend)
+  add_subdirectory(WasmIRGen)
+endif()
+
 # Define combined libraries from all components. Components are defined as object
 # libraries. It is tricky.
 #
@@ -124,6 +129,13 @@ target_link_libraries(hermescompiler PUBLIC
   hermesTypedLib_obj
   zip_obj
   )
+if(HERMES_ENABLE_WASM)
+  target_link_libraries(hermescompiler PUBLIC
+    hermesWasmFrontend_obj
+    hermesWasmIRGen_obj
+    wabt
+    )
+endif()
 
 set(HERMESVM_PUBLIC_INCLUDE_DIRS
   ${PROJECT_SOURCE_DIR}/public
@@ -301,6 +313,14 @@ if(HERMES_ENABLE_INTL)
   set(INTL_OBJ_LIBS hermesPlatformIntl_obj hermesBCP47Parser_obj)
   target_link_libraries(hermesvm_a PUBLIC ${INTL_OBJ_LIBS})
   target_link_libraries(hermesvmlean_a PUBLIC ${INTL_OBJ_LIBS})
+endif()
+
+if(HERMES_ENABLE_WASM)
+  target_link_libraries(hermesvm_a PUBLIC
+    hermesWasmFrontend_obj
+    hermesWasmIRGen_obj
+    wabt
+    )
 endif()
 
 # Construct the HermesVM model string
