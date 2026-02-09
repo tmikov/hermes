@@ -13,4 +13,6 @@ add_hermes_unittest(WasmIRGenTest
 
 target_link_libraries(WasmIRGenTest
   hermesWasmIRGen
+  hermesWasmFrontend
+  wabt
   )
