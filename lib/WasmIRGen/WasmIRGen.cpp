@@ -33,10 +33,10 @@ void WasmIRGen::createFunctions() {
   // Create a VariableScope for the top-level function (no parent).
   topLevelVS_ = builder_.createVariableScope(nullptr);
 
-  // Create all Wasm functions.
+  // Create all Wasm functions and a Variable in the top-level scope for each.
   uint32_t totalFuncs = moduleInfo_.totalFunctionCount();
   irFunctions_.resize(totalFuncs, nullptr);
-  irFunctionScopes_.resize(totalFuncs, nullptr);
+  closureVars_.resize(totalFuncs, nullptr);
 
   for (uint32_t i = 0; i < totalFuncs; ++i) {
     const WasmFuncType &funcType = moduleInfo_.getFunctionType(i);
@@ -56,8 +56,12 @@ void WasmIRGen::createFunctions() {
         Function::DefinitionKind::ES5Function,
         true /* strictMode */);
 
-    // Create a VariableScope for this function (parent = top-level scope).
-    irFunctionScopes_[i] = builder_.createVariableScope(topLevelVS_);
+    // Create a variable in the top-level scope to hold the pre-created closure.
+    closureVars_[i] = builder_.createVariable(
+        topLevelVS_,
+        ("closure_" + llvh::Twine(i)),
+        Type::createAnyType(),
+        /* hidden */ true);
 
     // Add a "this" parameter (required by Hermes calling convention).
     builder_.createJSThisParam(func);
@@ -80,7 +84,7 @@ void WasmIRGen::createFunctions() {
   }
 
   // Populate the top-level function body.
-  // It calls the Wasm start function (if present) and returns undefined.
+  // Create all closures once and store them in the top-level scope.
   auto *tlEntry = builder_.createBasicBlock(topLevel);
   builder_.setInsertionBlock(tlEntry);
 
@@ -88,12 +92,19 @@ void WasmIRGen::createFunctions() {
   auto *tlScope = builder_.createCreateScopeInst(
       topLevelVS_, builder_.getEmptySentinel());
 
-  // Call the start function if specified.
+  // Pre-create closures for all Wasm functions and store in the environment.
+  for (uint32_t i = 0; i < totalFuncs; ++i) {
+    auto *closure = builder_.createCreateFunctionInst(
+        tlScope, irFunctions_[i]);
+    builder_.createStoreFrameInst(tlScope, closure, closureVars_[i]);
+  }
+
+  // Call the start function if specified (load its pre-created closure).
   if (moduleInfo_.startFunction.has_value()) {
     uint32_t startIdx = *moduleInfo_.startFunction;
     if (startIdx < irFunctions_.size()) {
-      auto *closure = builder_.createCreateFunctionInst(
-          tlScope, irFunctions_[startIdx]);
+      auto *closure = builder_.createLoadFrameInst(
+          tlScope, closureVars_[startIdx]);
       builder_.createCallInst(
           closure,
           /* newTarget */ builder_.getLiteralUndefined(),
@@ -132,18 +143,10 @@ void WasmIRGen::beginFunction(
   }
   builder_.setInsertionBlock(&entryBB);
 
-  // Get the parent (top-level) scope. All Wasm functions are flat children
-  // of the top-level scope, so GetParentScopeInst resolves to topLevelVS_.
-  auto *parentScope = builder_.createGetParentScopeInst(
+  // Get the parent (top-level) scope. Used to load pre-created closures
+  // from the environment at call sites.
+  parentScopeInst_ = builder_.createGetParentScopeInst(
       topLevelVS_, currentFunc_->getParentScopeParam());
-
-  // Create a scope for this function.
-  currentScope_ = builder_.createCreateScopeInst(
-      irFunctionScopes_[funcIndex], parentScope);
-
-  // Store the parent scope for use in CreateFunctionInst (to create closures
-  // for calls to other Wasm functions, which are also children of topLevelVS_).
-  parentScopeInst_ = parentScope;
 
   // Create AllocStackInst for each parameter.
   uint32_t numParams = funcType.params.size();
@@ -244,7 +247,6 @@ void WasmIRGen::endFunction() {
   }
 
   currentFunc_ = nullptr;
-  currentScope_ = nullptr;
   parentScopeInst_ = nullptr;
   valueStack_.clear();
   locals_.clear();
@@ -1035,12 +1037,9 @@ void WasmIRGen::onCall(uint32_t funcIndex) {
     args[i - 1] = pop();
   }
 
-  // Create a closure for the callee and emit CallInst.
-  // Use the parent (top-level) scope since all Wasm functions are flat
-  // children of the top-level scope.
-  Function *callee = irFunctions_[funcIndex];
-  auto *closure = builder_.createCreateFunctionInst(
-      parentScopeInst_, callee);
+  // Load the pre-created closure from the top-level environment.
+  auto *closure = builder_.createLoadFrameInst(
+      parentScopeInst_, closureVars_[funcIndex]);
   auto *call = builder_.createCallInst(
       closure,
       /* newTarget */ builder_.getLiteralUndefined(),

@@ -24,14 +24,14 @@
 
 ;; --- Test 1: Constants and locals ---
 ;; CHECK-LABEL: function wasm_func_0(): any
-;; CHECK:   %2 = AllocStackInst (:any) $local_0
-;; CHECK:   StoreStackInst 0: number, %2
-;; CHECK:   StoreStackInst 42: number, %2
-;; CHECK:   %5 = LoadStackInst (:any) %2
+;; CHECK:   %1 = AllocStackInst (:any) $local_0
+;; CHECK:   StoreStackInst 0: number, %1
+;; CHECK:   StoreStackInst 42: number, %1
+;; CHECK:   %4 = LoadStackInst (:any) %1
 ;; CHECK:   BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK:   %7 = PhiInst (:any) %5: any, %BB0
-;; CHECK:   ReturnInst %7
+;; CHECK:   %6 = PhiInst (:any) %4: any, %BB0
+;; CHECK:   ReturnInst %6
 ;; CHECK:   function_end
 (func $constants_and_locals (result i32) (local i32)
   i32.const 42
@@ -197,7 +197,7 @@
 
 ;; --- Test 11: Function call ---
 ;; CHECK-LABEL: function wasm_func_10(): any
-;; CHECK:   CreateFunctionInst (:object) {{.*}} %wasm_func_0(): functionCode
+;; CHECK:   LoadFrameInst (:any) {{.*}}[%VS0.closure_0]: any
 ;; CHECK:   CallInst (:any)
 ;; CHECK:   BranchInst %BB1
 ;; CHECK:   function_end

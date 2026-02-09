@@ -262,8 +262,9 @@ class WasmIRGen {
   /// Includes both imported and defined functions.
   std::vector<Function *> irFunctions_;
 
-  /// One VariableScope per Wasm function, indexed by Wasm function index.
-  std::vector<VariableScope *> irFunctionScopes_;
+  /// One Variable per Wasm function in the top-level scope, holding the
+  /// pre-created closure. Indexed by Wasm function index.
+  std::vector<Variable *> closureVars_;
 
   /// The VariableScope for the top-level function.
   VariableScope *topLevelVS_ = nullptr;
@@ -282,11 +283,8 @@ class WasmIRGen {
   /// AllocStackInst for each Wasm local (params + declared locals).
   std::vector<AllocStackInst *> locals_;
 
-  /// The CreateScopeInst for the current function.
-  CreateScopeInst *currentScope_ = nullptr;
-
-  /// The parent (top-level) scope instruction. Used to create closures for
-  /// calls to other Wasm functions (which are all children of topLevelVS_).
+  /// The parent (top-level) scope instruction, used to load pre-created
+  /// closures from the environment at call sites.
   GetParentScopeInst *parentScopeInst_ = nullptr;
 
   /// Whether we are in unreachable code (after an unconditional br, return,

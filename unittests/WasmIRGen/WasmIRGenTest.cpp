@@ -1792,18 +1792,19 @@ TEST(WasmIRGenTest, CallSimple) {
   irgen.onEnd();
   irgen.endFunction();
 
-  // Verify function 1 has a CallInst targeting function 0 via a closure.
+  // Verify function 1 has a CallInst loading function 0's closure.
   auto *caller = irgen.getIRFunctions()[1];
-  auto *callee = irgen.getIRFunctions()[0];
   bool foundCall = false;
   for (auto &bb : caller->getBasicBlockList()) {
     for (auto &inst : bb) {
       if (auto *call = llvh::dyn_cast<CallInst>(&inst)) {
-        // The callee is a CreateFunctionInst closure wrapping the target.
-        auto *cfi =
-            llvh::dyn_cast<CreateFunctionInst>(call->getCallee());
-        ASSERT_NE(cfi, nullptr);
-        EXPECT_EQ(cfi->getFunctionCode(), callee);
+        // The callee is a LoadFrameInst loading the pre-created closure.
+        auto *lfi =
+            llvh::dyn_cast<LoadFrameInst>(call->getCallee());
+        ASSERT_NE(lfi, nullptr);
+        // The variable name should be "closure_0" for function 0.
+        EXPECT_EQ(
+            lfi->getLoadVariable()->getName().str(), "closure_0");
         foundCall = true;
       }
     }
@@ -1843,17 +1844,18 @@ TEST(WasmIRGenTest, CallWithArgs) {
   irgen.onEnd();
   irgen.endFunction();
 
-  // Verify function 1 has a CallInst with 2 arguments via a closure.
+  // Verify function 1 has a CallInst with 2 arguments.
   auto *caller = irgen.getIRFunctions()[1];
-  auto *callee = irgen.getIRFunctions()[0];
   bool foundCall = false;
   for (auto &bb : caller->getBasicBlockList()) {
     for (auto &inst : bb) {
       if (auto *call = llvh::dyn_cast<CallInst>(&inst)) {
-        auto *cfi =
-            llvh::dyn_cast<CreateFunctionInst>(call->getCallee());
-        ASSERT_NE(cfi, nullptr);
-        EXPECT_EQ(cfi->getFunctionCode(), callee);
+        // The callee is a LoadFrameInst loading the pre-created closure.
+        auto *lfi =
+            llvh::dyn_cast<LoadFrameInst>(call->getCallee());
+        ASSERT_NE(lfi, nullptr);
+        EXPECT_EQ(
+            lfi->getLoadVariable()->getName().str(), "closure_0");
         // getNumArguments() includes "this" as argument 0, so for
         // 2 Wasm args: this + 2 = 3 total arguments.
         EXPECT_EQ(call->getNumArguments(), 3u);

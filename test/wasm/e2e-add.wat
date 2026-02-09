@@ -22,7 +22,7 @@
 ;; CHECK-LABEL: function global(): any
 ;; CHECK:   CreateScopeInst
 ;; CHECK:   CreateFunctionInst
-;; CHECK:   CallInst
+;; CHECK:   StoreFrameInst
 ;; CHECK:   ReturnInst
 
 ;; CHECK-LABEL: function wasm_func_0(p0: any, p1: any): any
@@ -30,7 +30,7 @@
 ;; CHECK:   AsInt32Inst
 
 ;; CHECK-LABEL: function wasm_func_1(): any
-;; CHECK:   CreateFunctionInst
+;; CHECK:   LoadFrameInst
 ;; CHECK:   CallInst
 
 (module

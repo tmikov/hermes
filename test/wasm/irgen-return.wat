@@ -17,8 +17,8 @@
 ;; CHECK-NEXT: %BB0:
 ;; CHECK:              ReturnInst 42: number
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %3 = PhiInst (:notype)
-;; CHECK-NEXT:        ReturnInst %3: notype
+;; CHECK-NEXT:   %2 = PhiInst (:notype)
+;; CHECK-NEXT:        ReturnInst %2: notype
 ;; CHECK-NEXT: function_end
 
 ;; Test 2: Implicit return (fallthrough) with i32 result.
@@ -26,8 +26,8 @@
 ;; CHECK-NEXT: %BB0:
 ;; CHECK:              BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %3 = PhiInst (:number) 42: number, %BB0
-;; CHECK-NEXT:        ReturnInst %3: number
+;; CHECK-NEXT:   %2 = PhiInst (:number) 42: number, %BB0
+;; CHECK-NEXT:        ReturnInst %2: number
 ;; CHECK-NEXT: function_end
 
 ;; Test 3: Void function with drop.

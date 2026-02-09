@@ -39,10 +39,10 @@
 
 ;; CHECK-LABEL: function wasm_func_0(p0: any): any
 ;; is_even calls is_odd (wasm_func_1)
-;; CHECK: CreateFunctionInst (:object) {{.*}} %wasm_func_1(): functionCode
-;; CHECK: CallInst (:any) %{{[0-9]+}}: object, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined,
+;; CHECK: LoadFrameInst (:any) {{.*}}[%VS0.closure_1]: any
+;; CHECK: CallInst (:any) %{{[0-9]+}}: any, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined,
 
 ;; CHECK-LABEL: function wasm_func_1(p0: any): any
 ;; is_odd calls is_even (wasm_func_0)
-;; CHECK: CreateFunctionInst (:object) {{.*}} %wasm_func_0(): functionCode
-;; CHECK: CallInst (:any) %{{[0-9]+}}: object, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined,
+;; CHECK: LoadFrameInst (:any) {{.*}}[%VS0.closure_0]: any
+;; CHECK: CallInst (:any) %{{[0-9]+}}: any, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined,

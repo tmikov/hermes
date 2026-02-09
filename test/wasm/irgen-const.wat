@@ -14,8 +14,8 @@
 ;; CHECK-NEXT: %BB0:
 ;; CHECK:              BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %3 = PhiInst (:number) 42: number, %BB0
-;; CHECK-NEXT:        ReturnInst %3: number
+;; CHECK-NEXT:   %2 = PhiInst (:number) 42: number, %BB0
+;; CHECK-NEXT:        ReturnInst %2: number
 ;; CHECK-NEXT: function_end
 
 (module

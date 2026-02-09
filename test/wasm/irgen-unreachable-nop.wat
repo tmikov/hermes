@@ -36,8 +36,8 @@
 ;; CHECK-NEXT: %BB0:
 ;; CHECK:              BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %3 = PhiInst (:number) 99: number, %BB0
-;; CHECK-NEXT:        ReturnInst %3: number
+;; CHECK-NEXT:   %2 = PhiInst (:number) 99: number, %BB0
+;; CHECK-NEXT:        ReturnInst %2: number
 ;; CHECK-NEXT: function_end
 
 ;; Test 4: unreachable after pushing a value — dead code after unreachable.
@@ -48,8 +48,8 @@
 ;; CHECK:        CallBuiltinInst {{.*}}[HermesBuiltin.wasmTrap]
 ;; CHECK-NEXT:   UnreachableInst
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %4 = PhiInst (:notype)
-;; CHECK-NEXT:        ReturnInst %4: notype
+;; CHECK-NEXT:   %3 = PhiInst (:notype)
+;; CHECK-NEXT:        ReturnInst %3: notype
 ;; CHECK-NEXT: function_end
 
 (module

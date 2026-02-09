@@ -47,8 +47,8 @@
 
 ;; CHECK-LABEL: function wasm_func_1(): any
 ;; CHECK:   %BB0:
-;; CHECK:     CreateFunctionInst (:object) {{.*}} %wasm_func_0(): functionCode
-;; CHECK:     %{{[0-9]+}} = CallInst (:any) %{{[0-9]+}}: object, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined
+;; CHECK:     LoadFrameInst (:any) {{.*}}[%VS0.closure_0]: any
+;; CHECK:     %{{[0-9]+}} = CallInst (:any) %{{[0-9]+}}: any, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined
 ;; CHECK:     {{.*}}BranchInst %BB1
 
 ;; CHECK-LABEL: function wasm_func_2(p0: any, p1: any): any
@@ -56,8 +56,8 @@
 
 ;; CHECK-LABEL: function wasm_func_3(): any
 ;; CHECK:   %BB0:
-;; CHECK:     CreateFunctionInst (:object) {{.*}} %wasm_func_2(): functionCode
-;; CHECK:     %{{[0-9]+}} = CallInst (:any) %{{[0-9]+}}: object, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, 10: number, 20: number
+;; CHECK:     LoadFrameInst (:any) {{.*}}[%VS0.closure_2]: any
+;; CHECK:     %{{[0-9]+}} = CallInst (:any) %{{[0-9]+}}: any, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, 10: number, 20: number
 ;; CHECK:     {{.*}}BranchInst %BB1
 
 ;; CHECK-LABEL: function wasm_func_4(): any
@@ -66,6 +66,6 @@
 
 ;; CHECK-LABEL: function wasm_func_5(): any
 ;; CHECK:   %BB0:
-;; CHECK:     CreateFunctionInst (:object) {{.*}} %wasm_func_4(): functionCode
-;; CHECK:     %{{[0-9]+}} = CallInst (:any) %{{[0-9]+}}: object, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined
+;; CHECK:     LoadFrameInst (:any) {{.*}}[%VS0.closure_4]: any
+;; CHECK:     %{{[0-9]+}} = CallInst (:any) %{{[0-9]+}}: any, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined
 ;; CHECK:     {{.*}}BranchInst %BB1

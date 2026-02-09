@@ -12,14 +12,14 @@
 
 ;; CHECK-LABEL: function wasm_func_0(p0: any): any
 ;; CHECK-NEXT: %BB0:
-;; CHECK:        %2 = AllocStackInst (:any) $local_0: any
-;; CHECK-NEXT:   %3 = LoadParamInst (:any) %p0: any
-;; CHECK-NEXT:        StoreStackInst %3: any, %2: any
-;; CHECK-NEXT:   %5 = LoadStackInst (:any) %2: any
+;; CHECK:        %1 = AllocStackInst (:any) $local_0: any
+;; CHECK-NEXT:   %2 = LoadParamInst (:any) %p0: any
+;; CHECK-NEXT:        StoreStackInst %2: any, %1: any
+;; CHECK-NEXT:   %4 = LoadStackInst (:any) %1: any
 ;; CHECK-NEXT:        BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %7 = PhiInst (:any) %5: any, %BB0
-;; CHECK-NEXT:        ReturnInst %7: any
+;; CHECK-NEXT:   %6 = PhiInst (:any) %4: any, %BB0
+;; CHECK-NEXT:        ReturnInst %6: any
 ;; CHECK-NEXT: function_end
 
 (module

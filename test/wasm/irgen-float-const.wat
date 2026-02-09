@@ -14,16 +14,16 @@
 ;; CHECK-NEXT: %BB0:
 ;; CHECK:              BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %3 = PhiInst (:number) 3.140000{{.*}}: number, %BB0
-;; CHECK-NEXT:        ReturnInst %3: number
+;; CHECK-NEXT:   %2 = PhiInst (:number) 3.140000{{.*}}: number, %BB0
+;; CHECK-NEXT:        ReturnInst %2: number
 ;; CHECK-NEXT: function_end
 
 ;; CHECK-LABEL: function wasm_func_1(): any
 ;; CHECK-NEXT: %BB0:
 ;; CHECK:              BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %3 = PhiInst (:number) 2.718281{{.*}}: number, %BB0
-;; CHECK-NEXT:        ReturnInst %3: number
+;; CHECK-NEXT:   %2 = PhiInst (:number) 2.718281{{.*}}: number, %BB0
+;; CHECK-NEXT:        ReturnInst %2: number
 ;; CHECK-NEXT: function_end
 
 (module

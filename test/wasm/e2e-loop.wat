@@ -25,7 +25,7 @@
 ;; CHECK:   BinaryAddInst
 
 ;; CHECK-LABEL: function wasm_func_1(): any
-;; CHECK:   CreateFunctionInst
+;; CHECK:   LoadFrameInst
 ;; CHECK:   CallInst
 
 (module

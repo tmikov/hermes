@@ -58,12 +58,12 @@
 ;; CHECK: %BB0:
 ;; CHECK:              BranchInst %BB2
 ;; CHECK: %BB1:
-;; CHECK-NEXT:   %3 = PhiInst (:number) %6: number, %BB3
-;; CHECK-NEXT:        ReturnInst %3: number
+;; CHECK-NEXT:   %2 = PhiInst (:number) %5: number, %BB3
+;; CHECK-NEXT:        ReturnInst %2: number
 ;; CHECK: %BB2:
 ;; CHECK-NEXT:        BranchInst %BB3
 ;; CHECK: %BB3:
-;; CHECK-NEXT:   %6 = PhiInst (:number) 99: number, %BB2
+;; CHECK-NEXT:   %5 = PhiInst (:number) 99: number, %BB2
 ;; CHECK-NEXT:        BranchInst %BB1
 ;; CHECK:   function_end
 
@@ -74,10 +74,10 @@
 ;; CHECK: %BB0:
 ;; CHECK:              BranchInst %BB3
 ;; CHECK: %BB1:
-;; CHECK-NEXT:   %3 = PhiInst (:number) %5: number, %BB2
-;; CHECK-NEXT:        ReturnInst %3: number
+;; CHECK-NEXT:   %2 = PhiInst (:number) %4: number, %BB2
+;; CHECK-NEXT:        ReturnInst %2: number
 ;; CHECK: %BB2:
-;; CHECK-NEXT:   %5 = PhiInst (:number) 77: number, %BB3
+;; CHECK-NEXT:   %4 = PhiInst (:number) 77: number, %BB3
 ;; CHECK-NEXT:        BranchInst %BB1
 ;; CHECK: %BB3:
 ;; CHECK-NEXT:        BranchInst %BB2
