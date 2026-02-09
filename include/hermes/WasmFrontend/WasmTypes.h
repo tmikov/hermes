@@ -9,6 +9,7 @@
 #define HERMES_WASMFRONTEND_WASMTYPES_H
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace hermes {
@@ -55,6 +56,73 @@ struct WasmMemoryType {
 struct WasmGlobalType {
   WasmValType type = WasmValType::I32;
   bool mutable_ = false;
+};
+
+/// External kind for imports and exports.
+enum class WasmExternalKind : uint8_t {
+  Function = 0,
+  Table = 1,
+  Memory = 2,
+  Global = 3,
+};
+
+/// A Wasm import entry.
+struct WasmImport {
+  std::string moduleName;
+  std::string fieldName;
+  WasmExternalKind kind = WasmExternalKind::Function;
+  /// Index into types[] for function imports.
+  uint32_t typeIndex = 0;
+  /// For table imports.
+  WasmTableType tableType;
+  /// For memory imports.
+  WasmMemoryType memoryType;
+  /// For global imports.
+  WasmGlobalType globalType;
+};
+
+/// A Wasm export entry.
+struct WasmExport {
+  std::string name;
+  WasmExternalKind kind = WasmExternalKind::Function;
+  /// Index into the respective index space.
+  uint32_t index = 0;
+};
+
+/// A Wasm function declaration (body is translated directly to IR during
+/// parsing, so it is not stored here).
+struct WasmFunction {
+  /// Index into types[].
+  uint32_t typeIndex = 0;
+};
+
+/// A Wasm global variable.
+struct WasmGlobal {
+  WasmGlobalType type;
+
+  /// Kind of the constant init expression.
+  enum class InitKind : uint8_t {
+    I32Const,
+    I64Const,
+    F32Const,
+    F64Const,
+    GlobalGet,
+    RefNull,
+    RefFunc,
+  };
+  InitKind initKind = InitKind::I32Const;
+
+  /// Value of the constant init expression.
+  union InitValue {
+    int32_t i32Val;
+    int64_t i64Val;
+    float f32Val;
+    double f64Val;
+    uint32_t globalIndex;
+    uint32_t funcIndex;
+
+    InitValue() : i32Val(0) {}
+  } initValue;
 };
 
 } // namespace wasm
