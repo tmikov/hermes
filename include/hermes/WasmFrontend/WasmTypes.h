@@ -125,6 +125,46 @@ struct WasmGlobal {
   } initValue;
 };
 
+/// A Wasm element segment (populates a table).
+struct WasmElemSegment {
+  enum class Mode : uint8_t { Active, Passive, Declarative };
+  Mode mode = Mode::Active;
+  /// Table index for active segments.
+  uint32_t tableIndex = 0;
+  /// Kind of the offset init expression (for active segments).
+  WasmGlobal::InitKind offsetKind = WasmGlobal::InitKind::I32Const;
+  /// i32.const value for the offset (common case).
+  int32_t offsetValue = 0;
+  /// Global index for global.get offset expression.
+  uint32_t offsetGlobalIdx = 0;
+  /// Element values (function indices).
+  std::vector<uint32_t> funcIndices;
+};
+
+/// A Wasm data segment (initializes linear memory).
+struct WasmDataSegment {
+  enum class Mode : uint8_t { Active, Passive };
+  Mode mode = Mode::Active;
+  /// Memory index for active segments (always 0 in MVP).
+  uint32_t memoryIndex = 0;
+  /// Kind of the offset init expression (for active segments).
+  WasmGlobal::InitKind offsetKind = WasmGlobal::InitKind::I32Const;
+  /// i32.const value for the offset.
+  int32_t offsetValue = 0;
+  /// Global index for global.get offset expression.
+  uint32_t offsetGlobalIdx = 0;
+  /// Raw data bytes.
+  std::vector<uint8_t> data;
+};
+
+/// Parsed name section (custom section "name").
+struct WasmNameSection {
+  std::string moduleName;
+  /// Function names indexed by function index.
+  std::vector<std::string> functionNames;
+  // Local names omitted for now.
+};
+
 } // namespace wasm
 } // namespace hermes
 

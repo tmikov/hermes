@@ -301,4 +301,130 @@ TEST(WasmTypesTest, GlobalDefaults) {
   EXPECT_EQ(g.initValue.i32Val, 0);
 }
 
+TEST(WasmTypesTest, ElemSegmentActiveDefaults) {
+  WasmElemSegment seg;
+  EXPECT_EQ(seg.mode, WasmElemSegment::Mode::Active);
+  EXPECT_EQ(seg.tableIndex, 0u);
+  EXPECT_EQ(seg.offsetKind, WasmGlobal::InitKind::I32Const);
+  EXPECT_EQ(seg.offsetValue, 0);
+  EXPECT_EQ(seg.offsetGlobalIdx, 0u);
+  EXPECT_TRUE(seg.funcIndices.empty());
+}
+
+TEST(WasmTypesTest, ElemSegmentActive) {
+  WasmElemSegment seg;
+  seg.mode = WasmElemSegment::Mode::Active;
+  seg.tableIndex = 0;
+  seg.offsetKind = WasmGlobal::InitKind::I32Const;
+  seg.offsetValue = 10;
+  seg.funcIndices = {0, 1, 2, 3};
+
+  EXPECT_EQ(seg.mode, WasmElemSegment::Mode::Active);
+  EXPECT_EQ(seg.offsetValue, 10);
+  EXPECT_EQ(seg.funcIndices.size(), 4u);
+  EXPECT_EQ(seg.funcIndices[0], 0u);
+  EXPECT_EQ(seg.funcIndices[3], 3u);
+}
+
+TEST(WasmTypesTest, ElemSegmentGlobalGetOffset) {
+  WasmElemSegment seg;
+  seg.mode = WasmElemSegment::Mode::Active;
+  seg.offsetKind = WasmGlobal::InitKind::GlobalGet;
+  seg.offsetGlobalIdx = 2;
+  seg.funcIndices = {5};
+
+  EXPECT_EQ(seg.offsetKind, WasmGlobal::InitKind::GlobalGet);
+  EXPECT_EQ(seg.offsetGlobalIdx, 2u);
+  EXPECT_EQ(seg.funcIndices.size(), 1u);
+}
+
+TEST(WasmTypesTest, ElemSegmentPassive) {
+  WasmElemSegment seg;
+  seg.mode = WasmElemSegment::Mode::Passive;
+  seg.funcIndices = {7, 8};
+
+  EXPECT_EQ(seg.mode, WasmElemSegment::Mode::Passive);
+  EXPECT_EQ(seg.funcIndices.size(), 2u);
+}
+
+TEST(WasmTypesTest, ElemSegmentDeclarative) {
+  WasmElemSegment seg;
+  seg.mode = WasmElemSegment::Mode::Declarative;
+
+  EXPECT_EQ(seg.mode, WasmElemSegment::Mode::Declarative);
+}
+
+TEST(WasmTypesTest, DataSegmentActiveDefaults) {
+  WasmDataSegment seg;
+  EXPECT_EQ(seg.mode, WasmDataSegment::Mode::Active);
+  EXPECT_EQ(seg.memoryIndex, 0u);
+  EXPECT_EQ(seg.offsetKind, WasmGlobal::InitKind::I32Const);
+  EXPECT_EQ(seg.offsetValue, 0);
+  EXPECT_EQ(seg.offsetGlobalIdx, 0u);
+  EXPECT_TRUE(seg.data.empty());
+}
+
+TEST(WasmTypesTest, DataSegmentActive) {
+  WasmDataSegment seg;
+  seg.mode = WasmDataSegment::Mode::Active;
+  seg.memoryIndex = 0;
+  seg.offsetKind = WasmGlobal::InitKind::I32Const;
+  seg.offsetValue = 1024;
+  seg.data = {0x48, 0x65, 0x6C, 0x6C, 0x6F}; // "Hello"
+
+  EXPECT_EQ(seg.mode, WasmDataSegment::Mode::Active);
+  EXPECT_EQ(seg.memoryIndex, 0u);
+  EXPECT_EQ(seg.offsetValue, 1024);
+  EXPECT_EQ(seg.data.size(), 5u);
+  EXPECT_EQ(seg.data[0], 0x48);
+  EXPECT_EQ(seg.data[4], 0x6F);
+}
+
+TEST(WasmTypesTest, DataSegmentGlobalGetOffset) {
+  WasmDataSegment seg;
+  seg.mode = WasmDataSegment::Mode::Active;
+  seg.offsetKind = WasmGlobal::InitKind::GlobalGet;
+  seg.offsetGlobalIdx = 1;
+  seg.data = {0xFF};
+
+  EXPECT_EQ(seg.offsetKind, WasmGlobal::InitKind::GlobalGet);
+  EXPECT_EQ(seg.offsetGlobalIdx, 1u);
+}
+
+TEST(WasmTypesTest, DataSegmentPassive) {
+  WasmDataSegment seg;
+  seg.mode = WasmDataSegment::Mode::Passive;
+  seg.data = {0x00, 0x01, 0x02};
+
+  EXPECT_EQ(seg.mode, WasmDataSegment::Mode::Passive);
+  EXPECT_EQ(seg.data.size(), 3u);
+}
+
+TEST(WasmTypesTest, NameSectionDefaults) {
+  WasmNameSection ns;
+  EXPECT_TRUE(ns.moduleName.empty());
+  EXPECT_TRUE(ns.functionNames.empty());
+}
+
+TEST(WasmTypesTest, NameSection) {
+  WasmNameSection ns;
+  ns.moduleName = "test_module";
+  ns.functionNames = {"add", "sub", "mul"};
+
+  EXPECT_EQ(ns.moduleName, "test_module");
+  EXPECT_EQ(ns.functionNames.size(), 3u);
+  EXPECT_EQ(ns.functionNames[0], "add");
+  EXPECT_EQ(ns.functionNames[1], "sub");
+  EXPECT_EQ(ns.functionNames[2], "mul");
+}
+
+TEST(WasmTypesTest, NameSectionEmptyModuleName) {
+  WasmNameSection ns;
+  ns.functionNames = {"f0", "", "f2"};
+
+  EXPECT_TRUE(ns.moduleName.empty());
+  EXPECT_EQ(ns.functionNames.size(), 3u);
+  EXPECT_EQ(ns.functionNames[1], "");
+}
+
 } // namespace
