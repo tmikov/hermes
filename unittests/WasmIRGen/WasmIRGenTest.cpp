@@ -615,4 +615,85 @@ TEST(WasmIRGenTest, I32Eqz) {
   EXPECT_TRUE(foundBitOr);
 }
 
+// --- Return and drop tests (D.5) ---
+
+TEST(WasmIRGenTest, ExplicitReturn) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(WasmFuncType{{}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  // i32.const 42; return
+  irgen.onI32Const(42);
+  irgen.onReturn();
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+  // Should have 2 basic blocks: the entry block and the dead block after
+  // return.
+  EXPECT_EQ(func->getBasicBlockList().size(), 2u);
+
+  // Entry block should end with ReturnInst returning 42.
+  auto &bb = func->getBasicBlockList().front();
+  ASSERT_TRUE(llvh::isa<ReturnInst>(&bb.back()));
+  auto *ret = llvh::cast<ReturnInst>(&bb.back());
+  auto *lit = llvh::dyn_cast<LiteralNumber>(ret->getOperand(0));
+  ASSERT_NE(lit, nullptr);
+  EXPECT_EQ(lit->getValue(), 42.0);
+}
+
+TEST(WasmIRGenTest, ExplicitReturnVoid) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  // Void function: () -> ()
+  moduleInfo.types.push_back(WasmFuncType{{}, {}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  // return (no value)
+  irgen.onReturn();
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+  // Entry block should end with ReturnInst returning undefined.
+  auto &bb = func->getBasicBlockList().front();
+  ASSERT_TRUE(llvh::isa<ReturnInst>(&bb.back()));
+  auto *ret = llvh::cast<ReturnInst>(&bb.back());
+  EXPECT_TRUE(llvh::isa<LiteralUndefined>(ret->getOperand(0)));
+}
+
+TEST(WasmIRGenTest, Drop) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  // Void function: () -> ()
+  moduleInfo.types.push_back(WasmFuncType{{}, {}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  // i32.const 42; drop
+  irgen.onI32Const(42);
+  irgen.onDrop();
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+  // Should return undefined (void function, value was dropped).
+  auto &bb = func->getBasicBlockList().front();
+  ASSERT_TRUE(llvh::isa<ReturnInst>(&bb.back()));
+  auto *ret = llvh::cast<ReturnInst>(&bb.back());
+  EXPECT_TRUE(llvh::isa<LiteralUndefined>(ret->getOperand(0)));
+}
+
 } // namespace

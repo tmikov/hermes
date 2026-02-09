@@ -187,6 +187,29 @@ void WasmIRGen::onLocalTee(uint32_t localIndex) {
   push(val);
 }
 
+// --- Return and drop (D.5) ---
+
+void WasmIRGen::onReturn() {
+  const WasmFuncType &funcType =
+      moduleInfo_.getFunctionType(currentFuncIndex_);
+
+  if (!funcType.results.empty()) {
+    Value *result = pop();
+    builder_.createReturnInst(result);
+  } else {
+    builder_.createReturnInst(builder_.getLiteralUndefined());
+  }
+
+  // After an unconditional return, create a new unreachable basic block
+  // for any dead code that follows.
+  auto *deadBlock = builder_.createBasicBlock(currentFunc_);
+  builder_.setInsertionBlock(deadBlock);
+}
+
+void WasmIRGen::onDrop() {
+  pop();
+}
+
 // --- i32 arithmetic (D.3) ---
 
 void WasmIRGen::onI32Add() {

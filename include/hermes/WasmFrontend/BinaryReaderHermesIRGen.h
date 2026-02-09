@@ -188,6 +188,8 @@ class BinaryReaderHermesIRGen : public wabt::BinaryReaderNop {
   wabt::Result OnBinaryExpr(wabt::Opcode opcode) override;
   wabt::Result OnCompareExpr(wabt::Opcode opcode) override;
   wabt::Result OnConvertExpr(wabt::Opcode opcode) override;
+  wabt::Result OnReturnExpr() override;
+  wabt::Result OnDropExpr() override;
 
  private:
   /// Convert a wabt Type to our WasmValType.

@@ -814,5 +814,21 @@ wabt::Result BinaryReaderHermesIRGen::OnConvertExpr(wabt::Opcode opcode) {
   return wabt::Result::Ok;
 }
 
+// --- Return and drop instruction callbacks ---
+
+wabt::Result BinaryReaderHermesIRGen::OnReturnExpr() {
+  if (inFunctionBody_ && irgen_) {
+    irgen_->onReturn();
+  }
+  return wabt::Result::Ok;
+}
+
+wabt::Result BinaryReaderHermesIRGen::OnDropExpr() {
+  if (inFunctionBody_ && irgen_) {
+    irgen_->onDrop();
+  }
+  return wabt::Result::Ok;
+}
+
 } // namespace wasm
 } // namespace hermes

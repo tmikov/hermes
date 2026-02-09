@@ -78,6 +78,13 @@ class WasmIRGen {
   void onI32ShrS();
   void onI32ShrU();
 
+  // --- Return and drop (D.5) ---
+
+  /// Explicit return from the current function.
+  void onReturn();
+  /// Pop and discard the top value from the stack.
+  void onDrop();
+
   // --- i32 comparisons (D.4) ---
 
   void onI32Eq();
