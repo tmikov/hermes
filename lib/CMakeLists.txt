@@ -276,6 +276,14 @@ if(HERMES_ENABLE_INTL)
   target_link_libraries(hermesvmlean_a PUBLIC ${INTL_OBJ_LIBS})
 endif()
 
+if(HERMES_ENABLE_WASM)
+  target_link_libraries(hermesvm_a PUBLIC
+    hermesWasmFrontend_obj
+    hermesWasmIRGen_obj
+    wabt
+    )
+endif()
+
 # Construct the HermesVM model string
 set(HERMESVM_MODEL "")
 
