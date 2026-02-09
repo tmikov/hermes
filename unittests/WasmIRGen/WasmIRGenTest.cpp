@@ -332,4 +332,154 @@ TEST(WasmIRGenTest, VoidFunctionReturn) {
   EXPECT_TRUE(llvh::isa<LiteralUndefined>(ret->getOperand(0)));
 }
 
+// --- i32 arithmetic tests (D.3) ---
+
+TEST(WasmIRGenTest, I32Add) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::I32, WasmValType::I32}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+  irgen.onLocalGet(0);
+  irgen.onLocalGet(1);
+  irgen.onI32Add();
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+  auto &bb = func->getBasicBlockList().front();
+
+  // Find BinaryAddInst and AsInt32Inst.
+  bool foundAdd = false;
+  bool foundAsInt32 = false;
+  for (auto &inst : bb) {
+    if (inst.getKind() == ValueKind::BinaryAddInstKind)
+      foundAdd = true;
+    if (llvh::isa<AsInt32Inst>(&inst))
+      foundAsInt32 = true;
+  }
+  EXPECT_TRUE(foundAdd);
+  EXPECT_TRUE(foundAsInt32);
+}
+
+TEST(WasmIRGenTest, I32Mul) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::I32, WasmValType::I32}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+  irgen.onLocalGet(0);
+  irgen.onLocalGet(1);
+  irgen.onI32Mul();
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+  auto &bb = func->getBasicBlockList().front();
+
+  // Find CallBuiltinInst (Math.imul).
+  bool foundCallBuiltin = false;
+  for (auto &inst : bb) {
+    if (llvh::isa<CallBuiltinInst>(&inst))
+      foundCallBuiltin = true;
+  }
+  EXPECT_TRUE(foundCallBuiltin);
+}
+
+TEST(WasmIRGenTest, I32BitwiseOps) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::I32, WasmValType::I32}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  // Test i32.and
+  irgen.onLocalGet(0);
+  irgen.onLocalGet(1);
+  irgen.onI32And();
+
+  // Test i32.or
+  irgen.onLocalGet(0);
+  irgen.onI32Or();
+
+  // Test i32.xor
+  irgen.onLocalGet(0);
+  irgen.onI32Xor();
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+  auto &bb = func->getBasicBlockList().front();
+
+  bool foundAnd = false;
+  bool foundOr = false;
+  bool foundXor = false;
+  for (auto &inst : bb) {
+    if (inst.getKind() == ValueKind::BinaryAndInstKind)
+      foundAnd = true;
+    if (inst.getKind() == ValueKind::BinaryOrInstKind)
+      foundOr = true;
+    if (inst.getKind() == ValueKind::BinaryXorInstKind)
+      foundXor = true;
+  }
+  EXPECT_TRUE(foundAnd);
+  EXPECT_TRUE(foundOr);
+  EXPECT_TRUE(foundXor);
+}
+
+TEST(WasmIRGenTest, I32ShiftOps) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::I32, WasmValType::I32}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  // Test i32.shl
+  irgen.onLocalGet(0);
+  irgen.onLocalGet(1);
+  irgen.onI32Shl();
+
+  // Test i32.shr_s
+  irgen.onLocalGet(0);
+  irgen.onI32ShrS();
+
+  // Test i32.shr_u
+  irgen.onLocalGet(0);
+  irgen.onI32ShrU();
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+  auto &bb = func->getBasicBlockList().front();
+
+  bool foundShl = false;
+  bool foundShrS = false;
+  bool foundShrU = false;
+  for (auto &inst : bb) {
+    if (inst.getKind() == ValueKind::BinaryLeftShiftInstKind)
+      foundShl = true;
+    if (inst.getKind() == ValueKind::BinaryRightShiftInstKind)
+      foundShrS = true;
+    if (inst.getKind() == ValueKind::BinaryUnsignedRightShiftInstKind)
+      foundShrU = true;
+  }
+  EXPECT_TRUE(foundShl);
+  EXPECT_TRUE(foundShrS);
+  EXPECT_TRUE(foundShrU);
+}
+
 } // namespace

@@ -66,6 +66,18 @@ class WasmIRGen {
   /// Store the top of the value stack into a local variable without popping.
   void onLocalTee(uint32_t localIndex);
 
+  // --- i32 arithmetic (D.3) ---
+
+  void onI32Add();
+  void onI32Sub();
+  void onI32Mul();
+  void onI32And();
+  void onI32Or();
+  void onI32Xor();
+  void onI32Shl();
+  void onI32ShrS();
+  void onI32ShrU();
+
   /// \return the array of IR Functions created by createFunctions(), indexed
   ///   by Wasm function index.
   llvh::ArrayRef<Function *> getIRFunctions() const {

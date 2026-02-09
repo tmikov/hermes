@@ -711,5 +711,46 @@ wabt::Result BinaryReaderHermesIRGen::OnLocalTeeExpr(
   return wabt::Result::Ok;
 }
 
+// --- Binary (two-operand) instruction callback ---
+
+wabt::Result BinaryReaderHermesIRGen::OnBinaryExpr(wabt::Opcode opcode) {
+  if (!inFunctionBody_ || !irgen_)
+    return wabt::Result::Ok;
+
+  switch (static_cast<wabt::Opcode::Enum>(opcode)) {
+    case wabt::Opcode::I32Add:
+      irgen_->onI32Add();
+      break;
+    case wabt::Opcode::I32Sub:
+      irgen_->onI32Sub();
+      break;
+    case wabt::Opcode::I32Mul:
+      irgen_->onI32Mul();
+      break;
+    case wabt::Opcode::I32And:
+      irgen_->onI32And();
+      break;
+    case wabt::Opcode::I32Or:
+      irgen_->onI32Or();
+      break;
+    case wabt::Opcode::I32Xor:
+      irgen_->onI32Xor();
+      break;
+    case wabt::Opcode::I32Shl:
+      irgen_->onI32Shl();
+      break;
+    case wabt::Opcode::I32ShrS:
+      irgen_->onI32ShrS();
+      break;
+    case wabt::Opcode::I32ShrU:
+      irgen_->onI32ShrU();
+      break;
+    default:
+      // Unimplemented binary opcode — silently ignore for now.
+      break;
+  }
+  return wabt::Result::Ok;
+}
+
 } // namespace wasm
 } // namespace hermes

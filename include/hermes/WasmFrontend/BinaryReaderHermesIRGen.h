@@ -185,6 +185,7 @@ class BinaryReaderHermesIRGen : public wabt::BinaryReaderNop {
   wabt::Result OnLocalGetExpr(wabt::Index localIndex) override;
   wabt::Result OnLocalSetExpr(wabt::Index localIndex) override;
   wabt::Result OnLocalTeeExpr(wabt::Index localIndex) override;
+  wabt::Result OnBinaryExpr(wabt::Opcode opcode) override;
 
  private:
   /// Convert a wabt Type to our WasmValType.

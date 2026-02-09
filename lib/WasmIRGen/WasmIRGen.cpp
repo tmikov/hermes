@@ -7,6 +7,7 @@
 
 #include "hermes/WasmIRGen/WasmIRGen.h"
 
+#include "hermes/FrontEndDefs/Builtins.h"
 #include "hermes/IR/IR.h"
 #include "hermes/IR/IRBuilder.h"
 #include "hermes/IR/Instrs.h"
@@ -184,6 +185,76 @@ void WasmIRGen::onLocalTee(uint32_t localIndex) {
   Value *val = pop();
   builder_.createStoreStackInst(val, locals_[localIndex]);
   push(val);
+}
+
+// --- i32 arithmetic (D.3) ---
+
+void WasmIRGen::onI32Add() {
+  Value *rhs = pop();
+  Value *lhs = pop();
+  auto *add = builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryAddInstKind);
+  push(builder_.createAsInt32Inst(add));
+}
+
+void WasmIRGen::onI32Sub() {
+  Value *rhs = pop();
+  Value *lhs = pop();
+  auto *sub = builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinarySubtractInstKind);
+  push(builder_.createAsInt32Inst(sub));
+}
+
+void WasmIRGen::onI32Mul() {
+  // Use Math.imul for correctness: double multiplication loses precision
+  // for large int32 products (e.g., 65536 * 65536 overflows 53-bit mantissa).
+  Value *rhs = pop();
+  Value *lhs = pop();
+  auto *imul = builder_.createCallBuiltinInst(
+      BuiltinMethod::Math_imul, {lhs, rhs});
+  push(imul);
+}
+
+void WasmIRGen::onI32And() {
+  Value *rhs = pop();
+  Value *lhs = pop();
+  push(builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryAndInstKind));
+}
+
+void WasmIRGen::onI32Or() {
+  Value *rhs = pop();
+  Value *lhs = pop();
+  push(builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryOrInstKind));
+}
+
+void WasmIRGen::onI32Xor() {
+  Value *rhs = pop();
+  Value *lhs = pop();
+  push(builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryXorInstKind));
+}
+
+void WasmIRGen::onI32Shl() {
+  Value *rhs = pop();
+  Value *lhs = pop();
+  push(builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryLeftShiftInstKind));
+}
+
+void WasmIRGen::onI32ShrS() {
+  Value *rhs = pop();
+  Value *lhs = pop();
+  push(builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryRightShiftInstKind));
+}
+
+void WasmIRGen::onI32ShrU() {
+  Value *rhs = pop();
+  Value *lhs = pop();
+  push(builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryUnsignedRightShiftInstKind));
 }
 
 Value *WasmIRGen::pop() {
