@@ -844,24 +844,24 @@ wabt::Result BinaryReaderHermesIRGen::OnBinaryExpr(wabt::Opcode opcode) {
     case wabt::Opcode::F32Copysign:
       irgen_->warnUnsupported("f32.copysign", 2, 1);
       break;
-    // --- f64 binary ops (deferred to Part E) ---
+    // --- f64 binary ops (E.1) ---
     case wabt::Opcode::F64Add:
-      irgen_->warnUnsupported("f64.add", 2, 1);
+      irgen_->onF64Add();
       break;
     case wabt::Opcode::F64Sub:
-      irgen_->warnUnsupported("f64.sub", 2, 1);
+      irgen_->onF64Sub();
       break;
     case wabt::Opcode::F64Mul:
-      irgen_->warnUnsupported("f64.mul", 2, 1);
+      irgen_->onF64Mul();
       break;
     case wabt::Opcode::F64Div:
-      irgen_->warnUnsupported("f64.div", 2, 1);
+      irgen_->onF64Div();
       break;
     case wabt::Opcode::F64Min:
-      irgen_->warnUnsupported("f64.min", 2, 1);
+      irgen_->onF64Min();
       break;
     case wabt::Opcode::F64Max:
-      irgen_->warnUnsupported("f64.max", 2, 1);
+      irgen_->onF64Max();
       break;
     case wabt::Opcode::F64Copysign:
       irgen_->warnUnsupported("f64.copysign", 2, 1);
@@ -961,24 +961,24 @@ wabt::Result BinaryReaderHermesIRGen::OnCompareExpr(wabt::Opcode opcode) {
     case wabt::Opcode::F32Ge:
       irgen_->warnUnsupported("f32.ge", 2, 1);
       break;
-    // --- f64 compare ops (deferred to Part E) ---
+    // --- f64 compare ops (E.1) ---
     case wabt::Opcode::F64Eq:
-      irgen_->warnUnsupported("f64.eq", 2, 1);
+      irgen_->onF64Eq();
       break;
     case wabt::Opcode::F64Ne:
-      irgen_->warnUnsupported("f64.ne", 2, 1);
+      irgen_->onF64Ne();
       break;
     case wabt::Opcode::F64Lt:
-      irgen_->warnUnsupported("f64.lt", 2, 1);
+      irgen_->onF64Lt();
       break;
     case wabt::Opcode::F64Gt:
-      irgen_->warnUnsupported("f64.gt", 2, 1);
+      irgen_->onF64Gt();
       break;
     case wabt::Opcode::F64Le:
-      irgen_->warnUnsupported("f64.le", 2, 1);
+      irgen_->onF64Le();
       break;
     case wabt::Opcode::F64Ge:
-      irgen_->warnUnsupported("f64.ge", 2, 1);
+      irgen_->onF64Ge();
       break;
     default:
       // Non-MVP compare opcode (SIMD, etc.) — warn.
@@ -1069,7 +1069,7 @@ wabt::Result BinaryReaderHermesIRGen::OnConvertExpr(wabt::Opcode opcode) {
       irgen_->warnUnsupported("f32.demote_f64", 1, 1);
       break;
     case wabt::Opcode::F64PromoteF32:
-      irgen_->warnUnsupported("f64.promote_f32", 1, 1);
+      irgen_->onF64PromoteF32();
       break;
     // --- Reinterpret/bitcast (deferred to Part F) ---
     case wabt::Opcode::I32ReinterpretF32:
@@ -1388,27 +1388,27 @@ wabt::Result BinaryReaderHermesIRGen::OnUnaryExpr(wabt::Opcode opcode) {
     case wabt::Opcode::F32Sqrt:
       irgen_->warnUnsupported("f32.sqrt", 1, 1);
       break;
-    // --- f64 unary ops (deferred to Part E) ---
+    // --- f64 unary ops (E.1) ---
     case wabt::Opcode::F64Abs:
-      irgen_->warnUnsupported("f64.abs", 1, 1);
+      irgen_->onF64Abs();
       break;
     case wabt::Opcode::F64Neg:
-      irgen_->warnUnsupported("f64.neg", 1, 1);
+      irgen_->onF64Neg();
       break;
     case wabt::Opcode::F64Ceil:
-      irgen_->warnUnsupported("f64.ceil", 1, 1);
+      irgen_->onF64Ceil();
       break;
     case wabt::Opcode::F64Floor:
-      irgen_->warnUnsupported("f64.floor", 1, 1);
+      irgen_->onF64Floor();
       break;
     case wabt::Opcode::F64Trunc:
-      irgen_->warnUnsupported("f64.trunc", 1, 1);
+      irgen_->onF64Trunc();
       break;
     case wabt::Opcode::F64Nearest:
-      irgen_->warnUnsupported("f64.nearest", 1, 1);
+      irgen_->onF64Nearest();
       break;
     case wabt::Opcode::F64Sqrt:
-      irgen_->warnUnsupported("f64.sqrt", 1, 1);
+      irgen_->onF64Sqrt();
       break;
     // --- Sign-extension operators ---
     case wabt::Opcode::I32Extend8S:

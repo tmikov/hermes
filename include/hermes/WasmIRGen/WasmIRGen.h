@@ -140,6 +140,35 @@ class WasmIRGen {
   /// No-op instruction (nothing is emitted).
   void onNop();
 
+  // --- f64 arithmetic (E.1) ---
+
+  void onF64Add();
+  void onF64Sub();
+  void onF64Mul();
+  void onF64Div();
+  void onF64Neg();
+  void onF64Abs();
+  void onF64Sqrt();
+  void onF64Ceil();
+  void onF64Floor();
+  void onF64Trunc();
+  void onF64Nearest();
+  void onF64Min();
+  void onF64Max();
+
+  // --- f64 comparisons (E.1) ---
+
+  void onF64Eq();
+  void onF64Ne();
+  void onF64Lt();
+  void onF64Gt();
+  void onF64Le();
+  void onF64Ge();
+
+  // --- f64/f32 conversions (E.1) ---
+
+  void onF64PromoteF32();
+
   // --- Unsupported opcode handling (D.13) ---
 
   /// Emit a warning for an unsupported opcode. Pops \p numInputs values
