@@ -2983,4 +2983,151 @@ TEST(WasmIRGenTest, F32ReinterpretI32) {
   EXPECT_TRUE(foundCallBuiltin);
 }
 
+TEST(WasmIRGenTest, CreateFunctionsExportsObject) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // Type 0: (i32, i32) -> (i32)
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::I32, WasmValType::I32}, {WasmValType::I32}});
+  // Type 1: () -> ()
+  moduleInfo.types.push_back(WasmFuncType{{}, {}});
+
+  // Two defined functions.
+  moduleInfo.functions.push_back(WasmFunction{0}); // func 0: exported
+  moduleInfo.functions.push_back(WasmFunction{1}); // func 1: internal
+
+  // Export only function 0 as "add".
+  WasmExport exp;
+  exp.name = "add";
+  exp.kind = WasmExternalKind::Function;
+  exp.index = 0;
+  moduleInfo.exports.push_back(exp);
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  // The top-level function should contain:
+  //   AllocObjectLiteralInst (exports object)
+  //   LoadFrameInst (load closure for exported func)
+  //   StorePropertyStrictInst (store closure on exports object)
+  //   ReturnInst (return the exports object, not undefined)
+  auto *topLevel = tm.mod.getTopLevelFunction();
+  ASSERT_NE(topLevel, nullptr);
+  ASSERT_EQ(topLevel->getBasicBlockList().size(), 1u);
+
+  auto &bb = topLevel->getBasicBlockList().front();
+
+  AllocObjectLiteralInst *allocObj = nullptr;
+  StorePropertyStrictInst *storeProp = nullptr;
+  ReturnInst *ret = nullptr;
+  unsigned loadFrameCount = 0;
+
+  for (auto &inst : bb) {
+    if (auto *a = llvh::dyn_cast<AllocObjectLiteralInst>(&inst))
+      allocObj = a;
+    if (auto *s = llvh::dyn_cast<StorePropertyStrictInst>(&inst))
+      storeProp = s;
+    if (llvh::isa<LoadFrameInst>(&inst))
+      ++loadFrameCount;
+    if (auto *r = llvh::dyn_cast<ReturnInst>(&inst))
+      ret = r;
+  }
+
+  // AllocObjectLiteralInst should exist.
+  ASSERT_NE(allocObj, nullptr);
+
+  // StorePropertyStrictInst should exist (one for the one export).
+  ASSERT_NE(storeProp, nullptr);
+  // The store target should be the alloc'd object.
+  EXPECT_EQ(storeProp->getObject(), allocObj);
+  // The property name should be "add".
+  auto *propLit = llvh::dyn_cast<LiteralString>(storeProp->getProperty());
+  ASSERT_NE(propLit, nullptr);
+  EXPECT_EQ(propLit->getValue().str(), "add");
+
+  // There should be a LoadFrameInst for the exported closure
+  // (in addition to the StoreFrameInst/CreateFunctionInst for all funcs).
+  EXPECT_GE(loadFrameCount, 1u);
+
+  // ReturnInst should return the exports object, not undefined.
+  ASSERT_NE(ret, nullptr);
+  EXPECT_EQ(ret->getOperand(0), allocObj);
+}
+
+TEST(WasmIRGenTest, CreateFunctionsNoExports) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // One function, no exports.
+  moduleInfo.types.push_back(WasmFuncType{{}, {}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  // Even with no exports, the top-level function should return an
+  // (empty) exports object, not undefined.
+  auto *topLevel = tm.mod.getTopLevelFunction();
+  auto &bb = topLevel->getBasicBlockList().front();
+
+  AllocObjectLiteralInst *allocObj = nullptr;
+  ReturnInst *ret = nullptr;
+  unsigned storePropCount = 0;
+
+  for (auto &inst : bb) {
+    if (auto *a = llvh::dyn_cast<AllocObjectLiteralInst>(&inst))
+      allocObj = a;
+    if (llvh::isa<StorePropertyStrictInst>(&inst))
+      ++storePropCount;
+    if (auto *r = llvh::dyn_cast<ReturnInst>(&inst))
+      ret = r;
+  }
+
+  ASSERT_NE(allocObj, nullptr);
+  // No exports means no StorePropertyStrictInst.
+  EXPECT_EQ(storePropCount, 0u);
+  // ReturnInst returns the empty object.
+  ASSERT_NE(ret, nullptr);
+  EXPECT_EQ(ret->getOperand(0), allocObj);
+}
+
+TEST(WasmIRGenTest, CreateFunctionsSkipsNonFunctionExports) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // One function type and one function.
+  moduleInfo.types.push_back(WasmFuncType{{}, {}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  // Export the function.
+  WasmExport funcExp;
+  funcExp.name = "myFunc";
+  funcExp.kind = WasmExternalKind::Function;
+  funcExp.index = 0;
+  moduleInfo.exports.push_back(funcExp);
+
+  // Also add a memory export (should be skipped).
+  WasmExport memExp;
+  memExp.name = "memory";
+  memExp.kind = WasmExternalKind::Memory;
+  memExp.index = 0;
+  moduleInfo.exports.push_back(memExp);
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  auto *topLevel = tm.mod.getTopLevelFunction();
+  auto &bb = topLevel->getBasicBlockList().front();
+
+  unsigned storePropCount = 0;
+  for (auto &inst : bb) {
+    if (llvh::isa<StorePropertyStrictInst>(&inst))
+      ++storePropCount;
+  }
+
+  // Only the function export should produce a StorePropertyStrictInst.
+  EXPECT_EQ(storePropCount, 1u);
+}
+
 } // namespace

@@ -113,7 +113,23 @@ void WasmIRGen::createFunctions() {
     }
   }
 
-  builder_.createReturnInst(builder_.getLiteralUndefined());
+  // Build the exports object: a plain JS object mapping export names to
+  // their pre-created closures. Only function exports are handled; other
+  // export kinds (memory, table, global) are silently skipped for now.
+  auto *exportsObj = builder_.createAllocObjectLiteralInst({});
+  for (const auto &exp : moduleInfo_.exports) {
+    if (exp.kind != WasmExternalKind::Function)
+      continue;
+    assert(
+        exp.index < closureVars_.size() &&
+        "export function index out of range");
+    auto *closure = builder_.createLoadFrameInst(
+        tlScope, closureVars_[exp.index]);
+    builder_.createStorePropertyStrictInst(
+        closure, exportsObj, builder_.getLiteralString(exp.name));
+  }
+
+  builder_.createReturnInst(exportsObj);
 }
 
 void WasmIRGen::beginFunction(
