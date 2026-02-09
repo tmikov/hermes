@@ -5,6 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include "hermes/WasmFrontend/WasmModuleInfo.h"
 #include "hermes/WasmFrontend/WasmTypes.h"
 
 #include "gtest/gtest.h"
@@ -425,6 +426,247 @@ TEST(WasmTypesTest, NameSectionEmptyModuleName) {
   EXPECT_TRUE(ns.moduleName.empty());
   EXPECT_EQ(ns.functionNames.size(), 3u);
   EXPECT_EQ(ns.functionNames[1], "");
+}
+
+// --- WasmModuleInfo tests ---
+
+/// Helper to build a WasmModuleInfo with 2 imported functions and 3 defined
+/// functions, plus some imports of other kinds.
+static WasmModuleInfo buildTestModuleInfo() {
+  WasmModuleInfo mod;
+
+  // Type section: 3 distinct signatures.
+  // Type 0: (i32, i32) -> i32
+  WasmFuncType ft0;
+  ft0.params = {WasmValType::I32, WasmValType::I32};
+  ft0.results = {WasmValType::I32};
+  mod.types.push_back(std::move(ft0));
+  // Type 1: () -> void
+  WasmFuncType ft1;
+  mod.types.push_back(std::move(ft1));
+  // Type 2: (f64) -> f64
+  WasmFuncType ft2;
+  ft2.params = {WasmValType::F64};
+  ft2.results = {WasmValType::F64};
+  mod.types.push_back(std::move(ft2));
+
+  // Imports: 2 functions, 1 table, 1 memory, 1 global (5 total imports).
+  {
+    WasmImport imp;
+    imp.moduleName = "env";
+    imp.fieldName = "add";
+    imp.kind = WasmExternalKind::Function;
+    imp.typeIndex = 0; // (i32, i32) -> i32
+    mod.imports.push_back(std::move(imp));
+  }
+  {
+    WasmImport imp;
+    imp.moduleName = "env";
+    imp.fieldName = "table";
+    imp.kind = WasmExternalKind::Table;
+    imp.tableType.elemType = WasmValType::FuncRef;
+    imp.tableType.limits.initial = 10;
+    mod.imports.push_back(std::move(imp));
+  }
+  {
+    WasmImport imp;
+    imp.moduleName = "env";
+    imp.fieldName = "nop";
+    imp.kind = WasmExternalKind::Function;
+    imp.typeIndex = 1; // () -> void
+    mod.imports.push_back(std::move(imp));
+  }
+  {
+    WasmImport imp;
+    imp.moduleName = "env";
+    imp.fieldName = "mem";
+    imp.kind = WasmExternalKind::Memory;
+    imp.memoryType.limits.initial = 1;
+    mod.imports.push_back(std::move(imp));
+  }
+  {
+    WasmImport imp;
+    imp.moduleName = "env";
+    imp.fieldName = "g";
+    imp.kind = WasmExternalKind::Global;
+    imp.globalType.type = WasmValType::I32;
+    imp.globalType.mutable_ = false;
+    mod.imports.push_back(std::move(imp));
+  }
+
+  // Defined functions: 3 functions.
+  mod.functions.push_back(WasmFunction{0}); // type 0: (i32, i32) -> i32
+  mod.functions.push_back(WasmFunction{2}); // type 2: (f64) -> f64
+  mod.functions.push_back(WasmFunction{1}); // type 1: () -> void
+
+  // Defined tables: 1.
+  WasmTableType tt;
+  tt.elemType = WasmValType::FuncRef;
+  tt.limits.initial = 5;
+  mod.tables.push_back(std::move(tt));
+
+  // Defined memories: 1.
+  WasmMemoryType mt;
+  mt.limits.initial = 2;
+  mod.memories.push_back(std::move(mt));
+
+  // Defined globals: 2.
+  WasmGlobal g0;
+  g0.type.type = WasmValType::I32;
+  g0.initKind = WasmGlobal::InitKind::I32Const;
+  g0.initValue.i32Val = 100;
+  mod.globals.push_back(std::move(g0));
+  WasmGlobal g1;
+  g1.type.type = WasmValType::F64;
+  g1.initKind = WasmGlobal::InitKind::F64Const;
+  g1.initValue.f64Val = 3.14;
+  mod.globals.push_back(std::move(g1));
+
+  return mod;
+}
+
+TEST(WasmModuleInfoTest, DefaultEmpty) {
+  WasmModuleInfo mod;
+  EXPECT_EQ(mod.totalFunctionCount(), 0u);
+  EXPECT_EQ(mod.importedFunctionCount(), 0u);
+  EXPECT_EQ(mod.totalGlobalCount(), 0u);
+  EXPECT_EQ(mod.importedGlobalCount(), 0u);
+  EXPECT_EQ(mod.totalTableCount(), 0u);
+  EXPECT_EQ(mod.importedTableCount(), 0u);
+  EXPECT_EQ(mod.totalMemoryCount(), 0u);
+  EXPECT_EQ(mod.importedMemoryCount(), 0u);
+  EXPECT_FALSE(mod.startFunction.has_value());
+}
+
+TEST(WasmModuleInfoTest, FunctionCounts) {
+  auto mod = buildTestModuleInfo();
+  EXPECT_EQ(mod.importedFunctionCount(), 2u);
+  EXPECT_EQ(mod.totalFunctionCount(), 5u);
+}
+
+TEST(WasmModuleInfoTest, GetFunctionTypeImported) {
+  auto mod = buildTestModuleInfo();
+  // Func index 0 is the first imported function (type 0: (i32, i32) -> i32).
+  const auto &ft0 = mod.getFunctionType(0);
+  EXPECT_EQ(ft0.params.size(), 2u);
+  EXPECT_EQ(ft0.params[0], WasmValType::I32);
+  EXPECT_EQ(ft0.params[1], WasmValType::I32);
+  EXPECT_EQ(ft0.results.size(), 1u);
+  EXPECT_EQ(ft0.results[0], WasmValType::I32);
+
+  // Func index 1 is the second imported function (type 1: () -> void).
+  const auto &ft1 = mod.getFunctionType(1);
+  EXPECT_TRUE(ft1.params.empty());
+  EXPECT_TRUE(ft1.results.empty());
+}
+
+TEST(WasmModuleInfoTest, GetFunctionTypeDefined) {
+  auto mod = buildTestModuleInfo();
+  // Func index 2 is the first defined function (type 0: (i32, i32) -> i32).
+  const auto &ft2 = mod.getFunctionType(2);
+  EXPECT_EQ(ft2.params.size(), 2u);
+  EXPECT_EQ(ft2.results.size(), 1u);
+  EXPECT_EQ(ft2.results[0], WasmValType::I32);
+
+  // Func index 3 is the second defined function (type 2: (f64) -> f64).
+  const auto &ft3 = mod.getFunctionType(3);
+  EXPECT_EQ(ft3.params.size(), 1u);
+  EXPECT_EQ(ft3.params[0], WasmValType::F64);
+  EXPECT_EQ(ft3.results.size(), 1u);
+  EXPECT_EQ(ft3.results[0], WasmValType::F64);
+
+  // Func index 4 is the third defined function (type 1: () -> void).
+  const auto &ft4 = mod.getFunctionType(4);
+  EXPECT_TRUE(ft4.params.empty());
+  EXPECT_TRUE(ft4.results.empty());
+}
+
+TEST(WasmModuleInfoTest, GlobalCounts) {
+  auto mod = buildTestModuleInfo();
+  // 1 imported global + 2 defined globals = 3 total.
+  EXPECT_EQ(mod.importedGlobalCount(), 1u);
+  EXPECT_EQ(mod.totalGlobalCount(), 3u);
+}
+
+TEST(WasmModuleInfoTest, TableCounts) {
+  auto mod = buildTestModuleInfo();
+  // 1 imported table + 1 defined table = 2 total.
+  EXPECT_EQ(mod.importedTableCount(), 1u);
+  EXPECT_EQ(mod.totalTableCount(), 2u);
+}
+
+TEST(WasmModuleInfoTest, MemoryCounts) {
+  auto mod = buildTestModuleInfo();
+  // 1 imported memory + 1 defined memory = 2 total.
+  EXPECT_EQ(mod.importedMemoryCount(), 1u);
+  EXPECT_EQ(mod.totalMemoryCount(), 2u);
+}
+
+TEST(WasmModuleInfoTest, StartFunction) {
+  WasmModuleInfo mod;
+  EXPECT_FALSE(mod.startFunction.has_value());
+
+  mod.startFunction = 3;
+  EXPECT_TRUE(mod.startFunction.has_value());
+  EXPECT_EQ(*mod.startFunction, 3u);
+}
+
+TEST(WasmModuleInfoTest, NoImportsCounts) {
+  // Module with only defined items, no imports.
+  WasmModuleInfo mod;
+  WasmFuncType ft;
+  ft.params = {WasmValType::I32};
+  ft.results = {WasmValType::I32};
+  mod.types.push_back(std::move(ft));
+  mod.functions.push_back(WasmFunction{0});
+  mod.functions.push_back(WasmFunction{0});
+
+  WasmTableType tt;
+  tt.elemType = WasmValType::FuncRef;
+  tt.limits.initial = 1;
+  mod.tables.push_back(std::move(tt));
+
+  WasmMemoryType mt;
+  mt.limits.initial = 1;
+  mod.memories.push_back(std::move(mt));
+
+  WasmGlobal g;
+  g.type.type = WasmValType::I32;
+  mod.globals.push_back(std::move(g));
+
+  EXPECT_EQ(mod.importedFunctionCount(), 0u);
+  EXPECT_EQ(mod.totalFunctionCount(), 2u);
+  EXPECT_EQ(mod.importedTableCount(), 0u);
+  EXPECT_EQ(mod.totalTableCount(), 1u);
+  EXPECT_EQ(mod.importedMemoryCount(), 0u);
+  EXPECT_EQ(mod.totalMemoryCount(), 1u);
+  EXPECT_EQ(mod.importedGlobalCount(), 0u);
+  EXPECT_EQ(mod.totalGlobalCount(), 1u);
+
+  // getFunctionType for defined-only functions.
+  const auto &ft0 = mod.getFunctionType(0);
+  EXPECT_EQ(ft0.params.size(), 1u);
+  EXPECT_EQ(ft0.params[0], WasmValType::I32);
+}
+
+TEST(WasmModuleInfoTest, OnlyImportsCounts) {
+  // Module with only imports, no defined items.
+  WasmModuleInfo mod;
+  WasmFuncType ft;
+  ft.results = {WasmValType::I32};
+  mod.types.push_back(std::move(ft));
+
+  WasmImport imp;
+  imp.kind = WasmExternalKind::Function;
+  imp.typeIndex = 0;
+  mod.imports.push_back(std::move(imp));
+
+  EXPECT_EQ(mod.importedFunctionCount(), 1u);
+  EXPECT_EQ(mod.totalFunctionCount(), 1u);
+
+  const auto &ft0 = mod.getFunctionType(0);
+  EXPECT_EQ(ft0.results.size(), 1u);
+  EXPECT_EQ(ft0.results[0], WasmValType::I32);
 }
 
 } // namespace
