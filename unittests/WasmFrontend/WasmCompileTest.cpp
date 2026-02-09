@@ -6,8 +6,12 @@
  */
 
 #include "hermes/WasmFrontend/BinaryReaderHermesIRGen.h"
+#include "hermes/WasmFrontend/WasmCompile.h"
 #include "hermes/WasmFrontend/WasmModuleInfo.h"
 #include "hermes/WasmFrontend/WasmTypes.h"
+
+#include "hermes/AST/Context.h"
+#include "hermes/IR/IR.h"
 
 #include "wabt/binary-reader.h"
 #include "wabt/feature.h"
@@ -1211,6 +1215,38 @@ TEST(BinaryReaderTest, MultipleExports) {
   EXPECT_EQ(moduleInfo.exports[0].kind, WasmExternalKind::Function);
   EXPECT_EQ(moduleInfo.exports[1].name, "m");
   EXPECT_EQ(moduleInfo.exports[1].kind, WasmExternalKind::Memory);
+}
+
+// --- compileWasmModule tests ---
+
+TEST(CompileWasmTest, ValidModule) {
+  auto binary = buildMinimalWasm();
+  auto context = std::make_shared<hermes::Context>();
+  hermes::Module M(context);
+  std::string errorMsg;
+  EXPECT_TRUE(
+      hermes::compileWasmModule(binary.data(), binary.size(), M, errorMsg));
+  EXPECT_TRUE(errorMsg.empty());
+}
+
+TEST(CompileWasmTest, InvalidModule) {
+  // Invalid magic bytes.
+  std::vector<uint8_t> binary = {
+      0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00};
+  auto context = std::make_shared<hermes::Context>();
+  hermes::Module M(context);
+  std::string errorMsg;
+  EXPECT_FALSE(
+      hermes::compileWasmModule(binary.data(), binary.size(), M, errorMsg));
+  EXPECT_FALSE(errorMsg.empty());
+}
+
+TEST(CompileWasmTest, EmptyBuffer) {
+  auto context = std::make_shared<hermes::Context>();
+  hermes::Module M(context);
+  std::string errorMsg;
+  EXPECT_FALSE(hermes::compileWasmModule(nullptr, 0, M, errorMsg));
+  EXPECT_FALSE(errorMsg.empty());
 }
 
 } // namespace
