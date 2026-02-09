@@ -822,24 +822,24 @@ wabt::Result BinaryReaderHermesIRGen::OnBinaryExpr(wabt::Opcode opcode) {
     case wabt::Opcode::I64Rotr:
       irgen_->warnUnsupported("i64.rotr", 2, 1);
       break;
-    // --- f32 binary ops (deferred to Part E) ---
+    // --- f32 binary ops (E.2) ---
     case wabt::Opcode::F32Add:
-      irgen_->warnUnsupported("f32.add", 2, 1);
+      irgen_->onF32Add();
       break;
     case wabt::Opcode::F32Sub:
-      irgen_->warnUnsupported("f32.sub", 2, 1);
+      irgen_->onF32Sub();
       break;
     case wabt::Opcode::F32Mul:
-      irgen_->warnUnsupported("f32.mul", 2, 1);
+      irgen_->onF32Mul();
       break;
     case wabt::Opcode::F32Div:
-      irgen_->warnUnsupported("f32.div", 2, 1);
+      irgen_->onF32Div();
       break;
     case wabt::Opcode::F32Min:
-      irgen_->warnUnsupported("f32.min", 2, 1);
+      irgen_->onF32Min();
       break;
     case wabt::Opcode::F32Max:
-      irgen_->warnUnsupported("f32.max", 2, 1);
+      irgen_->onF32Max();
       break;
     case wabt::Opcode::F32Copysign:
       irgen_->warnUnsupported("f32.copysign", 2, 1);
@@ -942,24 +942,24 @@ wabt::Result BinaryReaderHermesIRGen::OnCompareExpr(wabt::Opcode opcode) {
     case wabt::Opcode::I64GeU:
       irgen_->warnUnsupported("i64.ge_u", 2, 1);
       break;
-    // --- f32 compare ops (deferred to Part E) ---
+    // --- f32 compare ops (E.3) ---
     case wabt::Opcode::F32Eq:
-      irgen_->warnUnsupported("f32.eq", 2, 1);
+      irgen_->onF32Eq();
       break;
     case wabt::Opcode::F32Ne:
-      irgen_->warnUnsupported("f32.ne", 2, 1);
+      irgen_->onF32Ne();
       break;
     case wabt::Opcode::F32Lt:
-      irgen_->warnUnsupported("f32.lt", 2, 1);
+      irgen_->onF32Lt();
       break;
     case wabt::Opcode::F32Gt:
-      irgen_->warnUnsupported("f32.gt", 2, 1);
+      irgen_->onF32Gt();
       break;
     case wabt::Opcode::F32Le:
-      irgen_->warnUnsupported("f32.le", 2, 1);
+      irgen_->onF32Le();
       break;
     case wabt::Opcode::F32Ge:
-      irgen_->warnUnsupported("f32.ge", 2, 1);
+      irgen_->onF32Ge();
       break;
     // --- f64 compare ops (E.1) ---
     case wabt::Opcode::F64Eq:
@@ -1064,9 +1064,9 @@ wabt::Result BinaryReaderHermesIRGen::OnConvertExpr(wabt::Opcode opcode) {
     case wabt::Opcode::F64ConvertI64U:
       irgen_->warnUnsupported("f64.convert_i64_u", 1, 1);
       break;
-    // --- Float-to-float conversions (deferred to Part E) ---
+    // --- Float-to-float conversions (E.1, E.2) ---
     case wabt::Opcode::F32DemoteF64:
-      irgen_->warnUnsupported("f32.demote_f64", 1, 1);
+      irgen_->onF32DemoteF64();
       break;
     case wabt::Opcode::F64PromoteF32:
       irgen_->onF64PromoteF32();
@@ -1366,27 +1366,27 @@ wabt::Result BinaryReaderHermesIRGen::OnUnaryExpr(wabt::Opcode opcode) {
     case wabt::Opcode::I64Popcnt:
       irgen_->warnUnsupported("i64.popcnt", 1, 1);
       break;
-    // --- f32 unary ops (deferred to Part E) ---
+    // --- f32 unary ops (E.2) ---
     case wabt::Opcode::F32Abs:
-      irgen_->warnUnsupported("f32.abs", 1, 1);
+      irgen_->onF32Abs();
       break;
     case wabt::Opcode::F32Neg:
-      irgen_->warnUnsupported("f32.neg", 1, 1);
+      irgen_->onF32Neg();
       break;
     case wabt::Opcode::F32Ceil:
-      irgen_->warnUnsupported("f32.ceil", 1, 1);
+      irgen_->onF32Ceil();
       break;
     case wabt::Opcode::F32Floor:
-      irgen_->warnUnsupported("f32.floor", 1, 1);
+      irgen_->onF32Floor();
       break;
     case wabt::Opcode::F32Trunc:
-      irgen_->warnUnsupported("f32.trunc", 1, 1);
+      irgen_->onF32Trunc();
       break;
     case wabt::Opcode::F32Nearest:
-      irgen_->warnUnsupported("f32.nearest", 1, 1);
+      irgen_->onF32Nearest();
       break;
     case wabt::Opcode::F32Sqrt:
-      irgen_->warnUnsupported("f32.sqrt", 1, 1);
+      irgen_->onF32Sqrt();
       break;
     // --- f64 unary ops (E.1) ---
     case wabt::Opcode::F64Abs:

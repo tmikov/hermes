@@ -1099,12 +1099,160 @@ void WasmIRGen::onF64Ge() {
       cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
 }
 
-// --- f64/f32 conversions (E.1) ---
+// --- f32 arithmetic (E.2) ---
+// In Phase 1, f32 operations use f64 precision — we don't have Math.fround
+// as a CallBuiltin. Constants are correctly rounded to f32 via onF32Const.
+// This means intermediate results may accumulate f64 precision, but the
+// overall correctness is acceptable for Phase 1. True f32 rounding will be
+// added when Math.fround becomes a Hermes builtin or via Part F helpers.
+
+void WasmIRGen::onF32Add() {
+  Value *rhs = pop();
+  Value *lhs = pop();
+  push(builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryAddInstKind));
+}
+
+void WasmIRGen::onF32Sub() {
+  Value *rhs = pop();
+  Value *lhs = pop();
+  push(builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinarySubtractInstKind));
+}
+
+void WasmIRGen::onF32Mul() {
+  Value *rhs = pop();
+  Value *lhs = pop();
+  push(builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryMultiplyInstKind));
+}
+
+void WasmIRGen::onF32Div() {
+  Value *rhs = pop();
+  Value *lhs = pop();
+  push(builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryDivideInstKind));
+}
+
+void WasmIRGen::onF32Neg() {
+  Value *val = pop();
+  push(builder_.createUnaryOperatorInst(
+      val, ValueKind::UnaryMinusInstKind));
+}
+
+void WasmIRGen::onF32Abs() {
+  Value *val = pop();
+  push(builder_.createCallBuiltinInst(BuiltinMethod::Math_abs, {val}));
+}
+
+void WasmIRGen::onF32Sqrt() {
+  Value *val = pop();
+  push(builder_.createCallBuiltinInst(BuiltinMethod::Math_sqrt, {val}));
+}
+
+void WasmIRGen::onF32Ceil() {
+  Value *val = pop();
+  push(builder_.createCallBuiltinInst(BuiltinMethod::Math_ceil, {val}));
+}
+
+void WasmIRGen::onF32Floor() {
+  Value *val = pop();
+  push(builder_.createCallBuiltinInst(BuiltinMethod::Math_floor, {val}));
+}
+
+void WasmIRGen::onF32Trunc() {
+  Value *val = pop();
+  push(builder_.createCallBuiltinInst(BuiltinMethod::Math_trunc, {val}));
+}
+
+void WasmIRGen::onF32Nearest() {
+  // Same approximation as f64.nearest: Math.round instead of round-ties-even.
+  Value *val = pop();
+  push(builder_.createCallBuiltinInst(BuiltinMethod::Math_round, {val}));
+}
+
+void WasmIRGen::onF32Min() {
+  Value *rhs = pop();
+  Value *lhs = pop();
+  push(builder_.createCallBuiltinInst(BuiltinMethod::Math_min, {lhs, rhs}));
+}
+
+void WasmIRGen::onF32Max() {
+  Value *rhs = pop();
+  Value *lhs = pop();
+  push(builder_.createCallBuiltinInst(BuiltinMethod::Math_max, {lhs, rhs}));
+}
+
+// --- f32 comparisons (E.3) ---
+// Same pattern as f64 comparisons. Since values are doubles in Phase 1,
+// comparisons work correctly including NaN handling (IEEE 754).
+
+void WasmIRGen::onF32Eq() {
+  Value *rhs = pop();
+  Value *lhs = pop();
+  auto *cmp = builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryStrictlyEqualInstKind);
+  push(builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+}
+
+void WasmIRGen::onF32Ne() {
+  Value *rhs = pop();
+  Value *lhs = pop();
+  auto *cmp = builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryStrictlyNotEqualInstKind);
+  push(builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+}
+
+void WasmIRGen::onF32Lt() {
+  Value *rhs = pop();
+  Value *lhs = pop();
+  auto *cmp = builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryLessThanInstKind);
+  push(builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+}
+
+void WasmIRGen::onF32Gt() {
+  Value *rhs = pop();
+  Value *lhs = pop();
+  auto *cmp = builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryGreaterThanInstKind);
+  push(builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+}
+
+void WasmIRGen::onF32Le() {
+  Value *rhs = pop();
+  Value *lhs = pop();
+  auto *cmp = builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryLessThanOrEqualInstKind);
+  push(builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+}
+
+void WasmIRGen::onF32Ge() {
+  Value *rhs = pop();
+  Value *lhs = pop();
+  auto *cmp = builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryGreaterThanOrEqualInstKind);
+  push(builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+}
+
+// --- f64/f32 conversions (E.1, E.2) ---
 
 void WasmIRGen::onF64PromoteF32() {
   // f32 is already represented as double in our Phase 1 implementation,
   // so promotion is a no-op (the value is already f64).
   // Just leave the value on the stack.
+}
+
+void WasmIRGen::onF32DemoteF64() {
+  // In Phase 1, demote is a no-op because we don't have Math.fround as a
+  // CallBuiltin. The value stays at f64 precision. This is a known Phase 1
+  // limitation — true f32 rounding will be added in a later phase.
 }
 
 // --- unreachable and nop (D.11) ---

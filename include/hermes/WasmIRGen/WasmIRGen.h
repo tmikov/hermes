@@ -165,9 +165,37 @@ class WasmIRGen {
   void onF64Le();
   void onF64Ge();
 
-  // --- f64/f32 conversions (E.1) ---
+  // --- f32 arithmetic (E.2) ---
+  // In Phase 1, f32 operations use f64 precision (no per-op rounding).
+  // Constants are correctly rounded via float cast in onF32Const.
+
+  void onF32Add();
+  void onF32Sub();
+  void onF32Mul();
+  void onF32Div();
+  void onF32Neg();
+  void onF32Abs();
+  void onF32Sqrt();
+  void onF32Ceil();
+  void onF32Floor();
+  void onF32Trunc();
+  void onF32Nearest();
+  void onF32Min();
+  void onF32Max();
+
+  // --- f32 comparisons (E.3) ---
+
+  void onF32Eq();
+  void onF32Ne();
+  void onF32Lt();
+  void onF32Gt();
+  void onF32Le();
+  void onF32Ge();
+
+  // --- f64/f32 conversions (E.1, E.2) ---
 
   void onF64PromoteF32();
+  void onF32DemoteF64();
 
   // --- Unsupported opcode handling (D.13) ---
 

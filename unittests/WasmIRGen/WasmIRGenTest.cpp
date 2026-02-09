@@ -2068,4 +2068,294 @@ TEST(WasmIRGenTest, F64PromoteF32) {
   }
 }
 
+// --- f32 arithmetic tests (E.2) ---
+
+TEST(WasmIRGenTest, F32AddSubMulDiv) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::F32, WasmValType::F32}, {WasmValType::F32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  // f32.add
+  irgen.onLocalGet(0);
+  irgen.onLocalGet(1);
+  irgen.onF32Add();
+  irgen.onDrop();
+
+  // f32.sub
+  irgen.onLocalGet(0);
+  irgen.onLocalGet(1);
+  irgen.onF32Sub();
+  irgen.onDrop();
+
+  // f32.mul
+  irgen.onLocalGet(0);
+  irgen.onLocalGet(1);
+  irgen.onF32Mul();
+  irgen.onDrop();
+
+  // f32.div
+  irgen.onLocalGet(0);
+  irgen.onLocalGet(1);
+  irgen.onF32Div();
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+  auto &bb = func->getBasicBlockList().front();
+
+  bool foundAdd = false, foundSub = false;
+  bool foundMul = false, foundDiv = false;
+  for (auto &inst : bb) {
+    if (inst.getKind() == ValueKind::BinaryAddInstKind)
+      foundAdd = true;
+    if (inst.getKind() == ValueKind::BinarySubtractInstKind)
+      foundSub = true;
+    if (inst.getKind() == ValueKind::BinaryMultiplyInstKind)
+      foundMul = true;
+    if (inst.getKind() == ValueKind::BinaryDivideInstKind)
+      foundDiv = true;
+  }
+  EXPECT_TRUE(foundAdd);
+  EXPECT_TRUE(foundSub);
+  EXPECT_TRUE(foundMul);
+  EXPECT_TRUE(foundDiv);
+}
+
+TEST(WasmIRGenTest, F32NegAbsSqrt) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::F32}, {WasmValType::F32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  // f32.neg
+  irgen.onLocalGet(0);
+  irgen.onF32Neg();
+  irgen.onDrop();
+
+  // f32.abs
+  irgen.onLocalGet(0);
+  irgen.onF32Abs();
+  irgen.onDrop();
+
+  // f32.sqrt
+  irgen.onLocalGet(0);
+  irgen.onF32Sqrt();
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+  auto &bb = func->getBasicBlockList().front();
+
+  bool foundNeg = false;
+  unsigned builtinCount = 0;
+  for (auto &inst : bb) {
+    if (inst.getKind() == ValueKind::UnaryMinusInstKind)
+      foundNeg = true;
+    if (llvh::isa<CallBuiltinInst>(&inst))
+      ++builtinCount;
+  }
+  EXPECT_TRUE(foundNeg);
+  // abs + sqrt = 2 CallBuiltinInst
+  EXPECT_EQ(builtinCount, 2u);
+}
+
+TEST(WasmIRGenTest, F32RoundingOps) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::F32}, {WasmValType::F32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  // ceil, floor, trunc, nearest — 4 CallBuiltinInst
+  irgen.onLocalGet(0);
+  irgen.onF32Ceil();
+  irgen.onDrop();
+
+  irgen.onLocalGet(0);
+  irgen.onF32Floor();
+  irgen.onDrop();
+
+  irgen.onLocalGet(0);
+  irgen.onF32Trunc();
+  irgen.onDrop();
+
+  irgen.onLocalGet(0);
+  irgen.onF32Nearest();
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+  auto &bb = func->getBasicBlockList().front();
+
+  unsigned builtinCount = 0;
+  for (auto &inst : bb) {
+    if (llvh::isa<CallBuiltinInst>(&inst))
+      ++builtinCount;
+  }
+  EXPECT_EQ(builtinCount, 4u);
+}
+
+TEST(WasmIRGenTest, F32MinMax) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::F32, WasmValType::F32}, {WasmValType::F32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  // f32.min
+  irgen.onLocalGet(0);
+  irgen.onLocalGet(1);
+  irgen.onF32Min();
+  irgen.onDrop();
+
+  // f32.max
+  irgen.onLocalGet(0);
+  irgen.onLocalGet(1);
+  irgen.onF32Max();
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+  auto &bb = func->getBasicBlockList().front();
+
+  unsigned builtinCount = 0;
+  for (auto &inst : bb) {
+    if (llvh::isa<CallBuiltinInst>(&inst))
+      ++builtinCount;
+  }
+  // min + max = 2 CallBuiltinInst
+  EXPECT_EQ(builtinCount, 2u);
+}
+
+// --- f32 comparison tests (E.3) ---
+
+TEST(WasmIRGenTest, F32Comparisons) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::F32, WasmValType::F32}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  // f32.eq → BinaryStrictlyEqual + BinaryOr
+  irgen.onLocalGet(0);
+  irgen.onLocalGet(1);
+  irgen.onF32Eq();
+  irgen.onDrop();
+
+  // f32.ne → BinaryStrictlyNotEqual + BinaryOr
+  irgen.onLocalGet(0);
+  irgen.onLocalGet(1);
+  irgen.onF32Ne();
+  irgen.onDrop();
+
+  // f32.lt → BinaryLessThan + BinaryOr
+  irgen.onLocalGet(0);
+  irgen.onLocalGet(1);
+  irgen.onF32Lt();
+  irgen.onDrop();
+
+  // f32.gt → BinaryGreaterThan + BinaryOr
+  irgen.onLocalGet(0);
+  irgen.onLocalGet(1);
+  irgen.onF32Gt();
+  irgen.onDrop();
+
+  // f32.le → BinaryLessThanOrEqual + BinaryOr
+  irgen.onLocalGet(0);
+  irgen.onLocalGet(1);
+  irgen.onF32Le();
+  irgen.onDrop();
+
+  // f32.ge → BinaryGreaterThanOrEqual + BinaryOr
+  irgen.onLocalGet(0);
+  irgen.onLocalGet(1);
+  irgen.onF32Ge();
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+  auto &bb = func->getBasicBlockList().front();
+
+  bool foundStrictEq = false, foundStrictNe = false;
+  bool foundLt = false, foundGt = false;
+  bool foundLe = false, foundGe = false;
+  unsigned orCount = 0;
+  for (auto &inst : bb) {
+    if (inst.getKind() == ValueKind::BinaryStrictlyEqualInstKind)
+      foundStrictEq = true;
+    if (inst.getKind() == ValueKind::BinaryStrictlyNotEqualInstKind)
+      foundStrictNe = true;
+    if (inst.getKind() == ValueKind::BinaryLessThanInstKind)
+      foundLt = true;
+    if (inst.getKind() == ValueKind::BinaryGreaterThanInstKind)
+      foundGt = true;
+    if (inst.getKind() == ValueKind::BinaryLessThanOrEqualInstKind)
+      foundLe = true;
+    if (inst.getKind() == ValueKind::BinaryGreaterThanOrEqualInstKind)
+      foundGe = true;
+    if (inst.getKind() == ValueKind::BinaryOrInstKind)
+      ++orCount;
+  }
+  EXPECT_TRUE(foundStrictEq);
+  EXPECT_TRUE(foundStrictNe);
+  EXPECT_TRUE(foundLt);
+  EXPECT_TRUE(foundGt);
+  EXPECT_TRUE(foundLe);
+  EXPECT_TRUE(foundGe);
+  // 6 comparisons, each with BinaryOr → 6 BinaryOrInsts
+  EXPECT_EQ(orCount, 6u);
+}
+
+TEST(WasmIRGenTest, F32DemoteF64) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  // f64 → f32 demotion
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::F64}, {WasmValType::F32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  // f32.demote_f64 is a no-op in Phase 1 (no rounding)
+  irgen.onLocalGet(0);
+  irgen.onF32DemoteF64();
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+  auto &bb = func->getBasicBlockList().front();
+
+  // There should be NO arithmetic, conversion, or builtin instruction.
+  for (auto &inst : bb) {
+    EXPECT_FALSE(llvh::isa<CallBuiltinInst>(&inst));
+    EXPECT_FALSE(llvh::isa<BinaryOperatorInst>(&inst));
+    EXPECT_FALSE(llvh::isa<UnaryOperatorInst>(&inst));
+  }
+}
+
 } // namespace
