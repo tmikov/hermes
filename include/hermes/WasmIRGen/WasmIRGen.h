@@ -122,6 +122,11 @@ class WasmIRGen {
       uint32_t numTargets,
       uint32_t defaultDepth);
 
+  // --- Parametric instructions (D.10) ---
+
+  /// select: pop condition, val2, val1; push (cond ? val1 : val2).
+  void onSelect();
+
   /// \return the array of IR Functions created by createFunctions(), indexed
   ///   by Wasm function index.
   llvh::ArrayRef<Function *> getIRFunctions() const {

@@ -811,6 +811,40 @@ void WasmIRGen::onBrTable(
   builder_.setInsertionBlock(deadBlock);
 }
 
+// --- Parametric instructions (D.10) ---
+
+void WasmIRGen::onSelect() {
+  if (unreachable_)
+    return;
+
+  Value *cond = pop();
+  Value *val2 = pop(); // value if cond == 0 (false)
+  Value *val1 = pop(); // value if cond != 0 (true)
+
+  // Create true/false/merge blocks for the conditional.
+  auto *trueBlock = builder_.createBasicBlock(currentFunc_);
+  auto *falseBlock = builder_.createBasicBlock(currentFunc_);
+  auto *mergeBlock = builder_.createBasicBlock(currentFunc_);
+
+  builder_.createCondBranchInst(cond, trueBlock, falseBlock);
+
+  // True block: just branch to merge.
+  builder_.setInsertionBlock(trueBlock);
+  builder_.createBranchInst(mergeBlock);
+
+  // False block: just branch to merge.
+  builder_.setInsertionBlock(falseBlock);
+  builder_.createBranchInst(mergeBlock);
+
+  // Merge block: phi merges val1 (from true) and val2 (from false).
+  builder_.setInsertionBlock(mergeBlock);
+  auto *phi = builder_.createPhiInst();
+  phi->addEntry(val1, trueBlock);
+  phi->addEntry(val2, falseBlock);
+
+  push(phi);
+}
+
 // --- Helper methods ---
 
 Value *WasmIRGen::pop() {

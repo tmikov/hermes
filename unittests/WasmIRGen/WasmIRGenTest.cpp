@@ -1427,4 +1427,102 @@ TEST(WasmIRGenTest, BrTableSameDepthMerge) {
   EXPECT_EQ(case0.second, case1.second);
 }
 
+// --- Select tests (D.10) ---
+
+TEST(WasmIRGenTest, SelectTrueCondition) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  // Function: () -> (i32)
+  moduleInfo.types.push_back(WasmFuncType{{}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  // (select (i32.const 42) (i32.const 99) (i32.const 1))
+  // Stack order: val1=42, val2=99, cond=1 → result should be 42.
+  irgen.onI32Const(42);
+  irgen.onI32Const(99);
+  irgen.onI32Const(1);
+  irgen.onSelect();
+
+  irgen.onEnd(); // function end
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+
+  // Should have a CondBranchInst from the select.
+  bool foundCondBranch = false;
+  for (auto &bb : func->getBasicBlockList()) {
+    for (auto &inst : bb) {
+      if (llvh::isa<CondBranchInst>(&inst))
+        foundCondBranch = true;
+    }
+  }
+  EXPECT_TRUE(foundCondBranch);
+
+  // Should have a PhiInst with entries for 42 and 99.
+  bool foundPhi42 = false;
+  bool foundPhi99 = false;
+  for (auto &bb : func->getBasicBlockList()) {
+    for (auto &inst : bb) {
+      if (auto *phi = llvh::dyn_cast<PhiInst>(&inst)) {
+        for (unsigned i = 0; i < phi->getNumEntries(); ++i) {
+          auto pair = phi->getEntry(i);
+          if (auto *lit = llvh::dyn_cast<LiteralNumber>(pair.first)) {
+            if (lit->getValue() == 42.0)
+              foundPhi42 = true;
+            if (lit->getValue() == 99.0)
+              foundPhi99 = true;
+          }
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(foundPhi42);
+  EXPECT_TRUE(foundPhi99);
+}
+
+TEST(WasmIRGenTest, SelectWithParams) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  // Function: (i32, i32, i32) -> (i32)
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::I32, WasmValType::I32, WasmValType::I32},
+      {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  // (select (local.get 0) (local.get 1) (local.get 2))
+  irgen.onLocalGet(0);
+  irgen.onLocalGet(1);
+  irgen.onLocalGet(2);
+  irgen.onSelect();
+
+  irgen.onEnd(); // function end
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+
+  // Should have a CondBranchInst and a PhiInst.
+  bool foundCondBranch = false;
+  bool foundPhi = false;
+  for (auto &bb : func->getBasicBlockList()) {
+    for (auto &inst : bb) {
+      if (llvh::isa<CondBranchInst>(&inst))
+        foundCondBranch = true;
+      if (llvh::isa<PhiInst>(&inst))
+        foundPhi = true;
+    }
+  }
+  EXPECT_TRUE(foundCondBranch);
+  EXPECT_TRUE(foundPhi);
+}
+
 } // namespace

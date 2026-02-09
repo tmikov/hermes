@@ -920,5 +920,16 @@ wabt::Result BinaryReaderHermesIRGen::OnBrTableExpr(
   return wabt::Result::Ok;
 }
 
+// --- Select instruction callback ---
+
+wabt::Result BinaryReaderHermesIRGen::OnSelectExpr(
+    wabt::Index resultCount,
+    wabt::Type *resultTypes) {
+  if (inFunctionBody_ && irgen_) {
+    irgen_->onSelect();
+  }
+  return wabt::Result::Ok;
+}
+
 } // namespace wasm
 } // namespace hermes
