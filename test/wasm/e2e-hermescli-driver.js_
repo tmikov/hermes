@@ -1,0 +1,17 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-hermescli.wat.
+// Loads a compiled .hbc Wasm module via hermescli and calls its exports.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+
+print("exports type:", typeof exports);
+print("add(3, 4) =", exports.add(3, 4));
+print("sub(10, 3) =", exports.sub(10, 3));
+print("mul(6, 7) =", exports.mul(6, 7));
