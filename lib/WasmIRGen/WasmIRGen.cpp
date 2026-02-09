@@ -499,12 +499,89 @@ void WasmIRGen::onLoop(const std::vector<WasmValType> &resultTypes) {
   controlStack_.push_back(std::move(entry));
 }
 
+void WasmIRGen::onIf(const std::vector<WasmValType> &resultTypes) {
+  if (unreachable_) {
+    // Push a dummy If entry so onEnd/onElse can pop it.
+    ControlEntry entry;
+    entry.kind = ControlEntry::If;
+    entry.contBlock = nullptr;
+    entry.elseBlock = nullptr;
+    entry.resultTypes = resultTypes;
+    entry.stackHeight = valueStack_.size();
+    entry.outerUnreachable = true;
+    controlStack_.push_back(std::move(entry));
+    return;
+  }
+
+  // Pop the condition.
+  Value *cond = pop();
+
+  // Create thenBlock, elseBlock, mergeBlock.
+  auto *thenBlock = builder_.createBasicBlock(currentFunc_);
+  auto *elseBlock = builder_.createBasicBlock(currentFunc_);
+  auto *mergeBlock = builder_.createBasicBlock(currentFunc_);
+
+  // Emit CondBranchInst: non-zero → thenBlock, zero → elseBlock.
+  builder_.createCondBranchInst(cond, thenBlock, elseBlock);
+
+  ControlEntry entry;
+  entry.kind = ControlEntry::If;
+  entry.contBlock = mergeBlock; // br target and end continuation
+  entry.elseBlock = elseBlock;
+  entry.resultTypes = resultTypes;
+  entry.stackHeight = valueStack_.size();
+  entry.outerUnreachable = unreachable_;
+
+  // Create phi nodes in the merge block for results.
+  if (!resultTypes.empty()) {
+    auto *savedBlock = builder_.getInsertionBlock();
+    builder_.setInsertionBlock(mergeBlock);
+    for (size_t i = 0; i < resultTypes.size(); ++i) {
+      entry.resultPhis.push_back(builder_.createPhiInst());
+    }
+    builder_.setInsertionBlock(savedBlock);
+  }
+
+  controlStack_.push_back(std::move(entry));
+
+  // Set insertion point to the thenBlock.
+  builder_.setInsertionBlock(thenBlock);
+}
+
+void WasmIRGen::onElse() {
+  assert(!controlStack_.empty() && "control stack underflow");
+  ControlEntry &entry = controlStack_.back();
+  assert(entry.kind == ControlEntry::If && "onElse without matching if");
+
+  if (!entry.outerUnreachable) {
+    bool fallsThrough = !unreachable_ && !isCurrentBlockTerminated();
+
+    if (fallsThrough) {
+      // The then-block falls through to mergeBlock.
+      addBranchPhiOperands(entry);
+      builder_.createBranchInst(entry.contBlock);
+    }
+
+    // Set insertion point to the elseBlock.
+    builder_.setInsertionBlock(entry.elseBlock);
+  }
+
+  // Restore the value stack to the entry height (discard then-block values).
+  valueStack_.resize(entry.stackHeight);
+
+  // Reset unreachable for the else arm.
+  unreachable_ = entry.outerUnreachable;
+
+  // Mark that we've consumed the else block (so onEnd knows).
+  entry.elseBlock = nullptr;
+}
+
 void WasmIRGen::onEnd() {
   assert(!controlStack_.empty() && "control stack underflow");
   ControlEntry entry = std::move(controlStack_.back());
   controlStack_.pop_back();
 
-  if (entry.kind == ControlEntry::Block) {
+  if (entry.kind == ControlEntry::Block || entry.kind == ControlEntry::If) {
     bool fallsThrough = !unreachable_ && !isCurrentBlockTerminated();
 
     if (fallsThrough) {
@@ -513,12 +590,28 @@ void WasmIRGen::onEnd() {
       builder_.createBranchInst(entry.contBlock);
     }
 
+    // For If without else: the else block branches directly to merge.
+    if (entry.kind == ControlEntry::If && entry.elseBlock != nullptr &&
+        !entry.outerUnreachable) {
+      auto *savedBlock = builder_.getInsertionBlock();
+      builder_.setInsertionBlock(entry.elseBlock);
+      builder_.createBranchInst(entry.contBlock);
+      builder_.setInsertionBlock(savedBlock);
+    }
+
     // Set insertion point to the continuation block.
     builder_.setInsertionBlock(entry.contBlock);
 
-    // The continuation block is reachable if we fell through or if any
-    // branch (br/br_if) targeted this block.
-    unreachable_ = !fallsThrough && !entry.branchTargeted;
+    // The continuation block is reachable if we fell through, if any
+    // branch (br/br_if) targeted this block, or if there was an if
+    // without else (the else path always reaches merge).
+    bool ifWithoutElse =
+        entry.kind == ControlEntry::If && entry.elseBlock != nullptr;
+    unreachable_ = !fallsThrough && !entry.branchTargeted && !ifWithoutElse;
+
+    // Restore unreachable if the outer context was unreachable.
+    if (entry.outerUnreachable)
+      unreachable_ = true;
 
     // Push phi results onto the value stack.
     for (auto *phi : entry.resultPhis) {
@@ -569,7 +662,6 @@ void WasmIRGen::onEnd() {
       push(phi);
     }
   }
-  // If kind will be handled in D.8.
 }
 
 void WasmIRGen::onBr(uint32_t depth) {
@@ -654,7 +746,8 @@ WasmIRGen::ControlEntry &WasmIRGen::getControlEntry(uint32_t depth) {
 }
 
 void WasmIRGen::addBranchPhiOperands(ControlEntry &entry) {
-  if (entry.kind == ControlEntry::Block && !entry.resultPhis.empty()) {
+  if ((entry.kind == ControlEntry::Block || entry.kind == ControlEntry::If) &&
+      !entry.resultPhis.empty()) {
     auto *currentBlock = builder_.getInsertionBlock();
     size_t numResults = entry.resultPhis.size();
     size_t available = valueStack_.size();

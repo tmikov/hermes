@@ -99,12 +99,17 @@ class WasmIRGen {
   void onI32GeU();
   void onI32Eqz();
 
-  // --- Control flow (D.6, D.7) ---
+  // --- Control flow (D.6, D.7, D.8) ---
 
   /// Enter a block with the given result types.
   void onBlock(const std::vector<WasmValType> &resultTypes);
   /// Enter a loop with the given result types.
   void onLoop(const std::vector<WasmValType> &resultTypes);
+  /// Enter an if construct with the given result types.
+  /// Pops the condition from the value stack.
+  void onIf(const std::vector<WasmValType> &resultTypes);
+  /// Switch to the else branch of the current if construct.
+  void onElse();
   /// End the current block/loop/if.
   void onEnd();
   /// Unconditional branch to the control entry at \p depth.

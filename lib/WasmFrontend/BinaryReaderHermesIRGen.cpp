@@ -862,6 +862,29 @@ wabt::Result BinaryReaderHermesIRGen::OnLoopExpr(wabt::Type sigType) {
   return wabt::Result::Ok;
 }
 
+wabt::Result BinaryReaderHermesIRGen::OnIfExpr(wabt::Type sigType) {
+  if (!inFunctionBody_ || !irgen_)
+    return wabt::Result::Ok;
+
+  // Convert if signature type to result types vector.
+  // In Wasm MVP, if types are either void or a single value type.
+  std::vector<WasmValType> resultTypes;
+  if (static_cast<wabt::Type::Enum>(sigType) != wabt::Type::Void) {
+    resultTypes.push_back(convertType(sigType));
+  }
+
+  irgen_->onIf(resultTypes);
+  return wabt::Result::Ok;
+}
+
+wabt::Result BinaryReaderHermesIRGen::OnElseExpr() {
+  if (!inFunctionBody_ || !irgen_)
+    return wabt::Result::Ok;
+
+  irgen_->onElse();
+  return wabt::Result::Ok;
+}
+
 wabt::Result BinaryReaderHermesIRGen::OnEndExpr() {
   if (!inFunctionBody_ || !irgen_)
     return wabt::Result::Ok;

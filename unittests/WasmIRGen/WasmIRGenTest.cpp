@@ -1046,4 +1046,235 @@ TEST(WasmIRGenTest, LoopWithResult) {
   EXPECT_TRUE(foundPhi42);
 }
 
+// --- If/else tests (D.8) ---
+
+TEST(WasmIRGenTest, IfElseWithResult) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  // Function: (i32) -> (i32)
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::I32}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  // (if (result i32) (local.get 0)
+  //   (then (i32.const 42))
+  //   (else (i32.const 99)))
+  irgen.onLocalGet(0);
+  irgen.onIf({WasmValType::I32});
+  irgen.onI32Const(42);
+  irgen.onElse();
+  irgen.onI32Const(99);
+  irgen.onEnd(); // end if
+
+  irgen.onEnd(); // function end
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+
+  // Should have a CondBranchInst for the if condition.
+  bool foundCondBranch = false;
+  for (auto &bb : func->getBasicBlockList()) {
+    for (auto &inst : bb) {
+      if (llvh::isa<CondBranchInst>(&inst))
+        foundCondBranch = true;
+    }
+  }
+  EXPECT_TRUE(foundCondBranch);
+
+  // Should have a PhiInst in the merge block with entries for 42 and 99.
+  bool foundPhi42 = false;
+  bool foundPhi99 = false;
+  for (auto &bb : func->getBasicBlockList()) {
+    for (auto &inst : bb) {
+      if (auto *phi = llvh::dyn_cast<PhiInst>(&inst)) {
+        for (unsigned i = 0; i < phi->getNumEntries(); ++i) {
+          auto pair = phi->getEntry(i);
+          if (auto *lit = llvh::dyn_cast<LiteralNumber>(pair.first)) {
+            if (lit->getValue() == 42.0)
+              foundPhi42 = true;
+            if (lit->getValue() == 99.0)
+              foundPhi99 = true;
+          }
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(foundPhi42);
+  EXPECT_TRUE(foundPhi99);
+}
+
+TEST(WasmIRGenTest, IfWithoutElseVoid) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  // Void function: (i32) -> ()
+  moduleInfo.types.push_back(WasmFuncType{{WasmValType::I32}, {}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {WasmValType::I32});
+
+  // (if (local.get 0)
+  //   (then (i32.const 1) (local.set 1)))
+  irgen.onLocalGet(0);
+  irgen.onIf({});
+  irgen.onI32Const(1);
+  irgen.onLocalSet(1);
+  irgen.onEnd(); // end if (no else)
+
+  irgen.onEnd(); // function end
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+
+  // Should have a CondBranchInst for the if condition.
+  bool foundCondBranch = false;
+  for (auto &bb : func->getBasicBlockList()) {
+    for (auto &inst : bb) {
+      if (llvh::isa<CondBranchInst>(&inst))
+        foundCondBranch = true;
+    }
+  }
+  EXPECT_TRUE(foundCondBranch);
+
+  // Should return undefined (void function).
+  auto *ret = findReturnInst(func);
+  ASSERT_NE(ret, nullptr);
+  EXPECT_TRUE(llvh::isa<LiteralUndefined>(ret->getOperand(0)));
+}
+
+TEST(WasmIRGenTest, NestedIfElse) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  // Function: (i32, i32) -> (i32)
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::I32, WasmValType::I32}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  // (if (result i32) (local.get 0)
+  //   (then
+  //     (if (result i32) (local.get 1)
+  //       (then (i32.const 1))
+  //       (else (i32.const 2))))
+  //   (else (i32.const 3)))
+  irgen.onLocalGet(0);
+  irgen.onIf({WasmValType::I32}); // outer if
+  irgen.onLocalGet(1);
+  irgen.onIf({WasmValType::I32}); // inner if
+  irgen.onI32Const(1);
+  irgen.onElse(); // inner else
+  irgen.onI32Const(2);
+  irgen.onEnd(); // end inner if
+  irgen.onElse(); // outer else
+  irgen.onI32Const(3);
+  irgen.onEnd(); // end outer if
+
+  irgen.onEnd(); // function end
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+
+  // Count CondBranchInsts — should have 2 (outer if + inner if).
+  unsigned condBranchCount = 0;
+  for (auto &bb : func->getBasicBlockList()) {
+    for (auto &inst : bb) {
+      if (llvh::isa<CondBranchInst>(&inst))
+        ++condBranchCount;
+    }
+  }
+  EXPECT_EQ(condBranchCount, 2u);
+
+  // Should have PhiInsts with values 1, 2, and 3.
+  bool found1 = false, found2 = false, found3 = false;
+  for (auto &bb : func->getBasicBlockList()) {
+    for (auto &inst : bb) {
+      if (auto *phi = llvh::dyn_cast<PhiInst>(&inst)) {
+        for (unsigned i = 0; i < phi->getNumEntries(); ++i) {
+          auto pair = phi->getEntry(i);
+          if (auto *lit = llvh::dyn_cast<LiteralNumber>(pair.first)) {
+            if (lit->getValue() == 1.0)
+              found1 = true;
+            if (lit->getValue() == 2.0)
+              found2 = true;
+            if (lit->getValue() == 3.0)
+              found3 = true;
+          }
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(found1);
+  EXPECT_TRUE(found2);
+  EXPECT_TRUE(found3);
+}
+
+TEST(WasmIRGenTest, IfWithBr) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  // Function: (i32) -> (i32)
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::I32}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  // (block (result i32)
+  //   (if (local.get 0)
+  //     (then (i32.const 42) (br 1))
+  //   )
+  //   (i32.const 99))
+  irgen.onBlock({WasmValType::I32}); // outer block
+  irgen.onLocalGet(0);
+  irgen.onIf({}); // void if
+  irgen.onI32Const(42);
+  irgen.onBr(1); // br to outer block
+  irgen.onEnd(); // end if
+  irgen.onI32Const(99); // fallthrough path
+  irgen.onEnd(); // end block
+
+  irgen.onEnd(); // function end
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+
+  // Should have both a CondBranchInst (for if) and PhiInst values.
+  bool foundCondBranch = false;
+  bool foundPhi42 = false;
+  bool foundPhi99 = false;
+  for (auto &bb : func->getBasicBlockList()) {
+    for (auto &inst : bb) {
+      if (llvh::isa<CondBranchInst>(&inst))
+        foundCondBranch = true;
+      if (auto *phi = llvh::dyn_cast<PhiInst>(&inst)) {
+        for (unsigned i = 0; i < phi->getNumEntries(); ++i) {
+          auto pair = phi->getEntry(i);
+          if (auto *lit = llvh::dyn_cast<LiteralNumber>(pair.first)) {
+            if (lit->getValue() == 42.0)
+              foundPhi42 = true;
+            if (lit->getValue() == 99.0)
+              foundPhi99 = true;
+          }
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(foundCondBranch);
+  EXPECT_TRUE(foundPhi42);
+  EXPECT_TRUE(foundPhi99);
+}
+
 } // namespace
