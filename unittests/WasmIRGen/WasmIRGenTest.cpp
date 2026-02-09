@@ -482,4 +482,137 @@ TEST(WasmIRGenTest, I32ShiftOps) {
   EXPECT_TRUE(foundShrU);
 }
 
+// --- i32 comparison tests (D.4) ---
+
+TEST(WasmIRGenTest, I32EqNe) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::I32, WasmValType::I32}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+  irgen.onLocalGet(0);
+  irgen.onLocalGet(1);
+  irgen.onI32Eq();
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+  auto &bb = func->getBasicBlockList().front();
+
+  // Should have BinaryStrictlyEqualInst followed by BinaryOrInst.
+  bool foundStrictlyEqual = false;
+  bool foundBitOr = false;
+  for (auto &inst : bb) {
+    if (inst.getKind() == ValueKind::BinaryStrictlyEqualInstKind)
+      foundStrictlyEqual = true;
+    if (inst.getKind() == ValueKind::BinaryOrInstKind)
+      foundBitOr = true;
+  }
+  EXPECT_TRUE(foundStrictlyEqual);
+  EXPECT_TRUE(foundBitOr);
+}
+
+TEST(WasmIRGenTest, I32SignedComparisons) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::I32, WasmValType::I32}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+  irgen.onLocalGet(0);
+  irgen.onLocalGet(1);
+  irgen.onI32LtS();
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+  auto &bb = func->getBasicBlockList().front();
+
+  // Should have AsInt32Inst (x2), BinaryLessThanInst, BinaryOrInst.
+  unsigned asInt32Count = 0;
+  bool foundLessThan = false;
+  bool foundBitOr = false;
+  for (auto &inst : bb) {
+    if (llvh::isa<AsInt32Inst>(&inst))
+      ++asInt32Count;
+    if (inst.getKind() == ValueKind::BinaryLessThanInstKind)
+      foundLessThan = true;
+    if (inst.getKind() == ValueKind::BinaryOrInstKind)
+      foundBitOr = true;
+  }
+  EXPECT_EQ(asInt32Count, 2u);
+  EXPECT_TRUE(foundLessThan);
+  EXPECT_TRUE(foundBitOr);
+}
+
+TEST(WasmIRGenTest, I32UnsignedComparisons) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::I32, WasmValType::I32}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+  irgen.onLocalGet(0);
+  irgen.onLocalGet(1);
+  irgen.onI32LtU();
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+  auto &bb = func->getBasicBlockList().front();
+
+  // Should have AsUint32Inst (x2), BinaryLessThanInst, BinaryOrInst.
+  unsigned asUint32Count = 0;
+  bool foundLessThan = false;
+  bool foundBitOr = false;
+  for (auto &inst : bb) {
+    if (llvh::isa<AsUint32Inst>(&inst))
+      ++asUint32Count;
+    if (inst.getKind() == ValueKind::BinaryLessThanInstKind)
+      foundLessThan = true;
+    if (inst.getKind() == ValueKind::BinaryOrInstKind)
+      foundBitOr = true;
+  }
+  EXPECT_EQ(asUint32Count, 2u);
+  EXPECT_TRUE(foundLessThan);
+  EXPECT_TRUE(foundBitOr);
+}
+
+TEST(WasmIRGenTest, I32Eqz) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::I32}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+  irgen.onLocalGet(0);
+  irgen.onI32Eqz();
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+  auto &bb = func->getBasicBlockList().front();
+
+  // Should have BinaryStrictlyEqualInst(val, 0) and BinaryOrInst.
+  bool foundStrictlyEqual = false;
+  bool foundBitOr = false;
+  for (auto &inst : bb) {
+    if (inst.getKind() == ValueKind::BinaryStrictlyEqualInstKind)
+      foundStrictlyEqual = true;
+    if (inst.getKind() == ValueKind::BinaryOrInstKind)
+      foundBitOr = true;
+  }
+  EXPECT_TRUE(foundStrictlyEqual);
+  EXPECT_TRUE(foundBitOr);
+}
+
 } // namespace

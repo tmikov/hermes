@@ -257,6 +257,128 @@ void WasmIRGen::onI32ShrU() {
       lhs, rhs, ValueKind::BinaryUnsignedRightShiftInstKind));
 }
 
+// --- i32 comparisons (D.4) ---
+
+void WasmIRGen::onI32Eq() {
+  Value *rhs = pop();
+  Value *lhs = pop();
+  auto *cmp = builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryStrictlyEqualInstKind);
+  // Convert boolean to i32 (true→1, false→0) via BitOr with 0.
+  push(builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+}
+
+void WasmIRGen::onI32Ne() {
+  Value *rhs = pop();
+  Value *lhs = pop();
+  auto *cmp = builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryStrictlyNotEqualInstKind);
+  push(builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+}
+
+void WasmIRGen::onI32LtS() {
+  Value *rhs = pop();
+  Value *lhs = pop();
+  // Signed: cast both operands to int32 before comparing.
+  auto *lhsI32 = builder_.createAsInt32Inst(lhs);
+  auto *rhsI32 = builder_.createAsInt32Inst(rhs);
+  auto *cmp = builder_.createBinaryOperatorInst(
+      lhsI32, rhsI32, ValueKind::BinaryLessThanInstKind);
+  push(builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+}
+
+void WasmIRGen::onI32GtS() {
+  Value *rhs = pop();
+  Value *lhs = pop();
+  auto *lhsI32 = builder_.createAsInt32Inst(lhs);
+  auto *rhsI32 = builder_.createAsInt32Inst(rhs);
+  auto *cmp = builder_.createBinaryOperatorInst(
+      lhsI32, rhsI32, ValueKind::BinaryGreaterThanInstKind);
+  push(builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+}
+
+void WasmIRGen::onI32LeS() {
+  Value *rhs = pop();
+  Value *lhs = pop();
+  auto *lhsI32 = builder_.createAsInt32Inst(lhs);
+  auto *rhsI32 = builder_.createAsInt32Inst(rhs);
+  auto *cmp = builder_.createBinaryOperatorInst(
+      lhsI32, rhsI32, ValueKind::BinaryLessThanOrEqualInstKind);
+  push(builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+}
+
+void WasmIRGen::onI32GeS() {
+  Value *rhs = pop();
+  Value *lhs = pop();
+  auto *lhsI32 = builder_.createAsInt32Inst(lhs);
+  auto *rhsI32 = builder_.createAsInt32Inst(rhs);
+  auto *cmp = builder_.createBinaryOperatorInst(
+      lhsI32, rhsI32, ValueKind::BinaryGreaterThanOrEqualInstKind);
+  push(builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+}
+
+void WasmIRGen::onI32LtU() {
+  Value *rhs = pop();
+  Value *lhs = pop();
+  // Unsigned: cast both operands to uint32 before comparing.
+  auto *lhsU32 = builder_.createAsUint32Inst(lhs);
+  auto *rhsU32 = builder_.createAsUint32Inst(rhs);
+  auto *cmp = builder_.createBinaryOperatorInst(
+      lhsU32, rhsU32, ValueKind::BinaryLessThanInstKind);
+  push(builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+}
+
+void WasmIRGen::onI32GtU() {
+  Value *rhs = pop();
+  Value *lhs = pop();
+  auto *lhsU32 = builder_.createAsUint32Inst(lhs);
+  auto *rhsU32 = builder_.createAsUint32Inst(rhs);
+  auto *cmp = builder_.createBinaryOperatorInst(
+      lhsU32, rhsU32, ValueKind::BinaryGreaterThanInstKind);
+  push(builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+}
+
+void WasmIRGen::onI32LeU() {
+  Value *rhs = pop();
+  Value *lhs = pop();
+  auto *lhsU32 = builder_.createAsUint32Inst(lhs);
+  auto *rhsU32 = builder_.createAsUint32Inst(rhs);
+  auto *cmp = builder_.createBinaryOperatorInst(
+      lhsU32, rhsU32, ValueKind::BinaryLessThanOrEqualInstKind);
+  push(builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+}
+
+void WasmIRGen::onI32GeU() {
+  Value *rhs = pop();
+  Value *lhs = pop();
+  auto *lhsU32 = builder_.createAsUint32Inst(lhs);
+  auto *rhsU32 = builder_.createAsUint32Inst(rhs);
+  auto *cmp = builder_.createBinaryOperatorInst(
+      lhsU32, rhsU32, ValueKind::BinaryGreaterThanOrEqualInstKind);
+  push(builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+}
+
+void WasmIRGen::onI32Eqz() {
+  Value *val = pop();
+  // eqz(x) == (x === 0) → boolean → i32.
+  auto *cmp = builder_.createBinaryOperatorInst(
+      val,
+      builder_.getLiteralNumber(0),
+      ValueKind::BinaryStrictlyEqualInstKind);
+  push(builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+}
+
 Value *WasmIRGen::pop() {
   assert(!valueStack_.empty() && "value stack underflow");
   Value *v = valueStack_.back();

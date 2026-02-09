@@ -78,6 +78,20 @@ class WasmIRGen {
   void onI32ShrS();
   void onI32ShrU();
 
+  // --- i32 comparisons (D.4) ---
+
+  void onI32Eq();
+  void onI32Ne();
+  void onI32LtS();
+  void onI32GtS();
+  void onI32LeS();
+  void onI32GeS();
+  void onI32LtU();
+  void onI32GtU();
+  void onI32LeU();
+  void onI32GeU();
+  void onI32Eqz();
+
   /// \return the array of IR Functions created by createFunctions(), indexed
   ///   by Wasm function index.
   llvh::ArrayRef<Function *> getIRFunctions() const {

@@ -752,5 +752,67 @@ wabt::Result BinaryReaderHermesIRGen::OnBinaryExpr(wabt::Opcode opcode) {
   return wabt::Result::Ok;
 }
 
+// --- Compare (two-operand comparison) instruction callback ---
+
+wabt::Result BinaryReaderHermesIRGen::OnCompareExpr(wabt::Opcode opcode) {
+  if (!inFunctionBody_ || !irgen_)
+    return wabt::Result::Ok;
+
+  switch (static_cast<wabt::Opcode::Enum>(opcode)) {
+    case wabt::Opcode::I32Eq:
+      irgen_->onI32Eq();
+      break;
+    case wabt::Opcode::I32Ne:
+      irgen_->onI32Ne();
+      break;
+    case wabt::Opcode::I32LtS:
+      irgen_->onI32LtS();
+      break;
+    case wabt::Opcode::I32GtS:
+      irgen_->onI32GtS();
+      break;
+    case wabt::Opcode::I32LeS:
+      irgen_->onI32LeS();
+      break;
+    case wabt::Opcode::I32GeS:
+      irgen_->onI32GeS();
+      break;
+    case wabt::Opcode::I32LtU:
+      irgen_->onI32LtU();
+      break;
+    case wabt::Opcode::I32GtU:
+      irgen_->onI32GtU();
+      break;
+    case wabt::Opcode::I32LeU:
+      irgen_->onI32LeU();
+      break;
+    case wabt::Opcode::I32GeU:
+      irgen_->onI32GeU();
+      break;
+    default:
+      // Unimplemented compare opcode — silently ignore for now.
+      break;
+  }
+  return wabt::Result::Ok;
+}
+
+// --- Convert instruction callback ---
+// wabt dispatches i32.eqz via OnConvertExpr (not OnUnaryExpr).
+
+wabt::Result BinaryReaderHermesIRGen::OnConvertExpr(wabt::Opcode opcode) {
+  if (!inFunctionBody_ || !irgen_)
+    return wabt::Result::Ok;
+
+  switch (static_cast<wabt::Opcode::Enum>(opcode)) {
+    case wabt::Opcode::I32Eqz:
+      irgen_->onI32Eqz();
+      break;
+    default:
+      // Unimplemented convert opcode — silently ignore for now.
+      break;
+  }
+  return wabt::Result::Ok;
+}
+
 } // namespace wasm
 } // namespace hermes
