@@ -771,10 +771,10 @@ wabt::Result BinaryReaderHermesIRGen::OnBinaryExpr(wabt::Opcode opcode) {
       irgen_->onI32RemU();
       break;
     case wabt::Opcode::I32Rotl:
-      irgen_->warnUnsupported("i32.rotl", 2, 1);
+      irgen_->onI32Rotl();
       break;
     case wabt::Opcode::I32Rotr:
-      irgen_->warnUnsupported("i32.rotr", 2, 1);
+      irgen_->onI32Rotr();
       break;
     // --- i64 binary ops (deferred to Part G) ---
     case wabt::Opcode::I64Add:
@@ -1346,15 +1346,15 @@ wabt::Result BinaryReaderHermesIRGen::OnUnaryExpr(wabt::Opcode opcode) {
     return wabt::Result::Ok;
 
   switch (static_cast<wabt::Opcode::Enum>(opcode)) {
-    // --- i32 unary ops (deferred to Part F) ---
+    // --- i32 unary ops (F.3) ---
     case wabt::Opcode::I32Clz:
-      irgen_->warnUnsupported("i32.clz", 1, 1);
+      irgen_->onI32Clz();
       break;
     case wabt::Opcode::I32Ctz:
-      irgen_->warnUnsupported("i32.ctz", 1, 1);
+      irgen_->onI32Ctz();
       break;
     case wabt::Opcode::I32Popcnt:
-      irgen_->warnUnsupported("i32.popcnt", 1, 1);
+      irgen_->onI32Popcnt();
       break;
     // --- i64 unary ops (deferred to Part G) ---
     case wabt::Opcode::I64Clz:
@@ -1410,12 +1410,12 @@ wabt::Result BinaryReaderHermesIRGen::OnUnaryExpr(wabt::Opcode opcode) {
     case wabt::Opcode::F64Sqrt:
       irgen_->onF64Sqrt();
       break;
-    // --- Sign-extension operators ---
+    // --- Sign-extension operators (F.3) ---
     case wabt::Opcode::I32Extend8S:
-      irgen_->warnUnsupported("i32.extend8_s", 1, 1);
+      irgen_->onI32Extend8S();
       break;
     case wabt::Opcode::I32Extend16S:
-      irgen_->warnUnsupported("i32.extend16_s", 1, 1);
+      irgen_->onI32Extend16S();
       break;
     case wabt::Opcode::I64Extend8S:
       irgen_->warnUnsupported("i64.extend8_s", 1, 1);

@@ -11,25 +11,25 @@
 ;; RUN: %wat2wasm %s -o %t.wasm
 ;; RUN: %hermesc --wasm --dump-ir -O0 %t.wasm 2>&1 | %FileCheck %s
 
-;; CHECK: warning: unsupported Wasm opcode: i32.rotl
-;; CHECK: warning: unsupported Wasm opcode: i32.clz
+;; CHECK: warning: unsupported Wasm opcode: i64.rotl
+;; CHECK: warning: unsupported Wasm opcode: i64.clz
 ;; CHECK: warning: unsupported Wasm opcode: global.get
 ;; CHECK: warning: unsupported Wasm opcode: global.set
 
 (module
   (global $g (mut i32) (i32.const 0))
 
-  ;; Exercise unsupported binary op.
-  (func $rotl_test (param i32 i32) (result i32)
+  ;; Exercise unsupported binary op (i64 is still deferred).
+  (func $rotl_test (param i64 i64) (result i64)
     local.get 0
     local.get 1
-    i32.rotl
+    i64.rotl
   )
 
-  ;; Exercise unsupported unary op.
-  (func $clz_test (param i32) (result i32)
+  ;; Exercise unsupported unary op (i64 is still deferred).
+  (func $clz_test (param i64) (result i64)
     local.get 0
-    i32.clz
+    i64.clz
   )
 
   ;; Exercise global.get and global.set in function body.

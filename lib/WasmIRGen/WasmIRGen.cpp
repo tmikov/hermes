@@ -421,6 +421,71 @@ void WasmIRGen::onI32RemU() {
   push(helpers_.emitI32RemU(lhs, rhs));
 }
 
+// --- i32 bit manipulation (F.3) ---
+
+void WasmIRGen::onI32Clz() {
+  if (unreachable_)
+    return;
+  Value *a = pop();
+  push(helpers_.emitI32Clz(a));
+}
+
+void WasmIRGen::onI32Ctz() {
+  if (unreachable_)
+    return;
+  Value *a = pop();
+  push(helpers_.emitI32Ctz(a));
+}
+
+void WasmIRGen::onI32Popcnt() {
+  if (unreachable_)
+    return;
+  Value *a = pop();
+  push(helpers_.emitI32Popcnt(a));
+}
+
+void WasmIRGen::onI32Rotl() {
+  if (unreachable_)
+    return;
+  Value *rhs = pop();
+  Value *lhs = pop();
+  push(helpers_.emitI32Rotl(lhs, rhs));
+}
+
+void WasmIRGen::onI32Rotr() {
+  if (unreachable_)
+    return;
+  Value *rhs = pop();
+  Value *lhs = pop();
+  push(helpers_.emitI32Rotr(lhs, rhs));
+}
+
+void WasmIRGen::onI32Extend8S() {
+  if (unreachable_)
+    return;
+  Value *a = pop();
+  // Sign-extend from 8 bits: (a << 24) >> 24
+  auto *shifted = builder_.createBinaryOperatorInst(
+      a, builder_.getLiteralNumber(24), ValueKind::BinaryLeftShiftInstKind);
+  push(builder_.createBinaryOperatorInst(
+      shifted,
+      builder_.getLiteralNumber(24),
+      ValueKind::BinaryRightShiftInstKind));
+}
+
+void WasmIRGen::onI32Extend16S() {
+  if (unreachable_)
+    return;
+  Value *a = pop();
+  // Sign-extend from 16 bits: (a << 16) >> 16
+  auto *shifted = builder_.createBinaryOperatorInst(
+      a, builder_.getLiteralNumber(16), ValueKind::BinaryLeftShiftInstKind);
+  push(builder_.createBinaryOperatorInst(
+      shifted,
+      builder_.getLiteralNumber(16),
+      ValueKind::BinaryRightShiftInstKind));
+}
+
 // --- i32 comparisons (D.4) ---
 
 void WasmIRGen::onI32Eq() {

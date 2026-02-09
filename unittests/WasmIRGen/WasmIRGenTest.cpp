@@ -2564,4 +2564,245 @@ TEST(WasmIRGenTest, WasmHelpersEmitTrap) {
   EXPECT_EQ(trapCallCount, 1);
 }
 
+// --- F.3: i32 bit manipulation ---
+
+TEST(WasmIRGenTest, I32Clz) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::I32}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  std::vector<WasmValType> locals;
+  irgen.beginFunction(0, locals);
+  irgen.onLocalGet(0);
+  irgen.onI32Clz();
+  irgen.endFunction();
+
+  auto &blocks = irgen.getIRFunctions()[0]->getBasicBlockList();
+  bool foundCallBuiltin = false;
+  for (auto &bb : blocks) {
+    for (auto &inst : bb) {
+      if (auto *cbi = llvh::dyn_cast<CallBuiltinInst>(&inst)) {
+        if (cbi->getBuiltinIndex() ==
+            BuiltinMethod::HermesBuiltin_wasmI32Clz) {
+          foundCallBuiltin = true;
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(foundCallBuiltin);
+}
+
+TEST(WasmIRGenTest, I32Ctz) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::I32}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  std::vector<WasmValType> locals;
+  irgen.beginFunction(0, locals);
+  irgen.onLocalGet(0);
+  irgen.onI32Ctz();
+  irgen.endFunction();
+
+  auto &blocks = irgen.getIRFunctions()[0]->getBasicBlockList();
+  bool foundCallBuiltin = false;
+  for (auto &bb : blocks) {
+    for (auto &inst : bb) {
+      if (auto *cbi = llvh::dyn_cast<CallBuiltinInst>(&inst)) {
+        if (cbi->getBuiltinIndex() ==
+            BuiltinMethod::HermesBuiltin_wasmI32Ctz) {
+          foundCallBuiltin = true;
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(foundCallBuiltin);
+}
+
+TEST(WasmIRGenTest, I32Popcnt) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::I32}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  std::vector<WasmValType> locals;
+  irgen.beginFunction(0, locals);
+  irgen.onLocalGet(0);
+  irgen.onI32Popcnt();
+  irgen.endFunction();
+
+  auto &blocks = irgen.getIRFunctions()[0]->getBasicBlockList();
+  bool foundCallBuiltin = false;
+  for (auto &bb : blocks) {
+    for (auto &inst : bb) {
+      if (auto *cbi = llvh::dyn_cast<CallBuiltinInst>(&inst)) {
+        if (cbi->getBuiltinIndex() ==
+            BuiltinMethod::HermesBuiltin_wasmI32Popcnt) {
+          foundCallBuiltin = true;
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(foundCallBuiltin);
+}
+
+TEST(WasmIRGenTest, I32RotlRotr) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::I32, WasmValType::I32}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  // Test rotl
+  {
+    std::vector<WasmValType> locals;
+    irgen.beginFunction(0, locals);
+    irgen.onLocalGet(0);
+    irgen.onLocalGet(1);
+    irgen.onI32Rotl();
+    irgen.endFunction();
+
+    auto &blocks = irgen.getIRFunctions()[0]->getBasicBlockList();
+    bool foundRotl = false;
+    for (auto &bb : blocks) {
+      for (auto &inst : bb) {
+        if (auto *cbi = llvh::dyn_cast<CallBuiltinInst>(&inst)) {
+          if (cbi->getBuiltinIndex() ==
+              BuiltinMethod::HermesBuiltin_wasmI32Rotl) {
+            foundRotl = true;
+          }
+        }
+      }
+    }
+    EXPECT_TRUE(foundRotl);
+  }
+
+  // Test rotr
+  {
+    std::vector<WasmValType> locals;
+    irgen.beginFunction(1, locals);
+    irgen.onLocalGet(0);
+    irgen.onLocalGet(1);
+    irgen.onI32Rotr();
+    irgen.endFunction();
+
+    auto &blocks = irgen.getIRFunctions()[1]->getBasicBlockList();
+    bool foundRotr = false;
+    for (auto &bb : blocks) {
+      for (auto &inst : bb) {
+        if (auto *cbi = llvh::dyn_cast<CallBuiltinInst>(&inst)) {
+          if (cbi->getBuiltinIndex() ==
+              BuiltinMethod::HermesBuiltin_wasmI32Rotr) {
+            foundRotr = true;
+          }
+        }
+      }
+    }
+    EXPECT_TRUE(foundRotr);
+  }
+}
+
+TEST(WasmIRGenTest, I32Extend8S) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::I32}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  std::vector<WasmValType> locals;
+  irgen.beginFunction(0, locals);
+  irgen.onLocalGet(0);
+  irgen.onI32Extend8S();
+  irgen.endFunction();
+
+  // Expect: (a << 24) >> 24
+  // Find BinaryLeftShiftInst with operand 24, followed by
+  // BinaryRightShiftInst with operand 24.
+  auto &blocks = irgen.getIRFunctions()[0]->getBasicBlockList();
+  bool foundLeftShift = false;
+  bool foundRightShift = false;
+  for (auto &bb : blocks) {
+    for (auto &inst : bb) {
+      if (auto *bop = llvh::dyn_cast<BinaryOperatorInst>(&inst)) {
+        if (bop->getKind() == ValueKind::BinaryLeftShiftInstKind) {
+          if (auto *lit = llvh::dyn_cast<LiteralNumber>(bop->getRightHandSide())) {
+            if (lit->getValue() == 24)
+              foundLeftShift = true;
+          }
+        }
+        if (bop->getKind() == ValueKind::BinaryRightShiftInstKind) {
+          if (auto *lit = llvh::dyn_cast<LiteralNumber>(bop->getRightHandSide())) {
+            if (lit->getValue() == 24)
+              foundRightShift = true;
+          }
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(foundLeftShift);
+  EXPECT_TRUE(foundRightShift);
+}
+
+TEST(WasmIRGenTest, I32Extend16S) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::I32}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  std::vector<WasmValType> locals;
+  irgen.beginFunction(0, locals);
+  irgen.onLocalGet(0);
+  irgen.onI32Extend16S();
+  irgen.endFunction();
+
+  // Expect: (a << 16) >> 16
+  auto &blocks = irgen.getIRFunctions()[0]->getBasicBlockList();
+  bool foundLeftShift = false;
+  bool foundRightShift = false;
+  for (auto &bb : blocks) {
+    for (auto &inst : bb) {
+      if (auto *bop = llvh::dyn_cast<BinaryOperatorInst>(&inst)) {
+        if (bop->getKind() == ValueKind::BinaryLeftShiftInstKind) {
+          if (auto *lit = llvh::dyn_cast<LiteralNumber>(bop->getRightHandSide())) {
+            if (lit->getValue() == 16)
+              foundLeftShift = true;
+          }
+        }
+        if (bop->getKind() == ValueKind::BinaryRightShiftInstKind) {
+          if (auto *lit = llvh::dyn_cast<LiteralNumber>(bop->getRightHandSide())) {
+            if (lit->getValue() == 16)
+              foundRightShift = true;
+          }
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(foundLeftShift);
+  EXPECT_TRUE(foundRightShift);
+}
+
 } // namespace

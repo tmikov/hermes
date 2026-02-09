@@ -46,6 +46,21 @@ class WasmHelpers {
   /// Emit i32 unsigned remainder with trapping on division by zero.
   Instruction *emitI32RemU(Value *a, Value *b);
 
+  /// Emit i32 count leading zeros.
+  Instruction *emitI32Clz(Value *a);
+
+  /// Emit i32 count trailing zeros.
+  Instruction *emitI32Ctz(Value *a);
+
+  /// Emit i32 population count (number of set bits).
+  Instruction *emitI32Popcnt(Value *a);
+
+  /// Emit i32 rotate left.
+  Instruction *emitI32Rotl(Value *a, Value *b);
+
+  /// Emit i32 rotate right.
+  Instruction *emitI32Rotr(Value *a, Value *b);
+
  private:
   IRBuilder &builder_;
 };

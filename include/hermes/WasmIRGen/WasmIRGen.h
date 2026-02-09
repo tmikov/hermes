@@ -87,6 +87,16 @@ class WasmIRGen {
   void onI32RemS();
   void onI32RemU();
 
+  // --- i32 bit manipulation (F.3) ---
+
+  void onI32Clz();
+  void onI32Ctz();
+  void onI32Popcnt();
+  void onI32Rotl();
+  void onI32Rotr();
+  void onI32Extend8S();
+  void onI32Extend16S();
+
   // --- Return and drop (D.5) ---
 
   /// Explicit return from the current function.

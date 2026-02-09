@@ -266,6 +266,60 @@ CallResult<HermesValue> wasmI32RemU(void *, Runtime &runtime) {
   return HermesValue::encodeTrustedNumberValue(a % b);
 }
 
+/// Wasm i32.clz: count leading zeros.
+CallResult<HermesValue> wasmI32Clz(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  uint32_t a =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(0).getNumber()));
+  // __builtin_clz is undefined for 0, so handle it explicitly.
+  uint32_t result = a == 0 ? 32 : __builtin_clz(a);
+  return HermesValue::encodeTrustedNumberValue(result);
+}
+
+/// Wasm i32.ctz: count trailing zeros.
+CallResult<HermesValue> wasmI32Ctz(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  uint32_t a =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(0).getNumber()));
+  // __builtin_ctz is undefined for 0, so handle it explicitly.
+  uint32_t result = a == 0 ? 32 : __builtin_ctz(a);
+  return HermesValue::encodeTrustedNumberValue(result);
+}
+
+/// Wasm i32.popcnt: population count (number of set bits).
+CallResult<HermesValue> wasmI32Popcnt(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  uint32_t a =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(0).getNumber()));
+  return HermesValue::encodeTrustedNumberValue(__builtin_popcount(a));
+}
+
+/// Wasm i32.rotl: rotate left.
+CallResult<HermesValue> wasmI32Rotl(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  uint32_t a =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(0).getNumber()));
+  uint32_t b =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(1).getNumber()));
+  uint32_t shift = b & 31;
+  // Guard against UB: shifting uint32_t by 32 is undefined.
+  uint32_t result = shift == 0 ? a : (a << shift) | (a >> (32 - shift));
+  return HermesValue::encodeTrustedNumberValue(result);
+}
+
+/// Wasm i32.rotr: rotate right.
+CallResult<HermesValue> wasmI32Rotr(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  uint32_t a =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(0).getNumber()));
+  uint32_t b =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(1).getNumber()));
+  uint32_t shift = b & 31;
+  // Guard against UB: shifting uint32_t by 32 is undefined.
+  uint32_t result = shift == 0 ? a : (a >> shift) | (a << (32 - shift));
+  return HermesValue::encodeTrustedNumberValue(result);
+}
+
 namespace {
 
 CallResult<HermesValue> copyDataPropertiesSlowPath_RJS(
@@ -1086,6 +1140,16 @@ void createHermesBuiltins(Runtime &runtime) {
       B::HermesBuiltin_wasmI32RemS, P::wasmI32RemS, wasmI32RemS, 2);
   defineInternMethod(
       B::HermesBuiltin_wasmI32RemU, P::wasmI32RemU, wasmI32RemU, 2);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI32Clz, P::wasmI32Clz, wasmI32Clz, 1);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI32Ctz, P::wasmI32Ctz, wasmI32Ctz, 1);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI32Popcnt, P::wasmI32Popcnt, wasmI32Popcnt, 1);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI32Rotl, P::wasmI32Rotl, wasmI32Rotl, 2);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI32Rotr, P::wasmI32Rotr, wasmI32Rotr, 2);
 }
 
 } // namespace vm
