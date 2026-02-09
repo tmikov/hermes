@@ -2805,4 +2805,180 @@ TEST(WasmIRGenTest, I32Extend16S) {
   EXPECT_TRUE(foundRightShift);
 }
 
+// --- F.4: Type conversion tests ---
+
+TEST(WasmIRGenTest, I32TruncF64S) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(
+      WasmFuncType{{WasmValType::F64}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+  irgen.onLocalGet(0);
+  irgen.onI32TruncF64S();
+  irgen.endFunction();
+
+  // Should produce a CallBuiltinInst for wasmI32TruncF64S.
+  auto &blocks = irgen.getIRFunctions()[0]->getBasicBlockList();
+  bool foundCallBuiltin = false;
+  for (auto &bb : blocks) {
+    for (auto &inst : bb) {
+      if (auto *cb = llvh::dyn_cast<CallBuiltinInst>(&inst)) {
+        if (cb->getBuiltinIndex() ==
+            BuiltinMethod::HermesBuiltin_wasmI32TruncF64S) {
+          foundCallBuiltin = true;
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(foundCallBuiltin);
+}
+
+TEST(WasmIRGenTest, I32TruncSatF64U) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(
+      WasmFuncType{{WasmValType::F64}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+  irgen.onLocalGet(0);
+  irgen.onI32TruncSatF64U();
+  irgen.endFunction();
+
+  // Should produce a CallBuiltinInst for wasmI32TruncSatF64U.
+  auto &blocks = irgen.getIRFunctions()[0]->getBasicBlockList();
+  bool foundCallBuiltin = false;
+  for (auto &bb : blocks) {
+    for (auto &inst : bb) {
+      if (auto *cb = llvh::dyn_cast<CallBuiltinInst>(&inst)) {
+        if (cb->getBuiltinIndex() ==
+            BuiltinMethod::HermesBuiltin_wasmI32TruncSatF64U) {
+          foundCallBuiltin = true;
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(foundCallBuiltin);
+}
+
+TEST(WasmIRGenTest, F64ConvertI32S) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(
+      WasmFuncType{{WasmValType::I32}, {WasmValType::F64}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+  irgen.onLocalGet(0);
+  irgen.onF64ConvertI32S();
+  irgen.endFunction();
+
+  // Should produce an AsInt32Inst.
+  auto &blocks = irgen.getIRFunctions()[0]->getBasicBlockList();
+  bool foundAsInt32 = false;
+  for (auto &bb : blocks) {
+    for (auto &inst : bb) {
+      if (llvh::isa<AsInt32Inst>(&inst)) {
+        foundAsInt32 = true;
+      }
+    }
+  }
+  EXPECT_TRUE(foundAsInt32);
+}
+
+TEST(WasmIRGenTest, F64ConvertI32U) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(
+      WasmFuncType{{WasmValType::I32}, {WasmValType::F64}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+  irgen.onLocalGet(0);
+  irgen.onF64ConvertI32U();
+  irgen.endFunction();
+
+  // Should produce an AsUint32Inst.
+  auto &blocks = irgen.getIRFunctions()[0]->getBasicBlockList();
+  bool foundAsUint32 = false;
+  for (auto &bb : blocks) {
+    for (auto &inst : bb) {
+      if (llvh::isa<AsUint32Inst>(&inst)) {
+        foundAsUint32 = true;
+      }
+    }
+  }
+  EXPECT_TRUE(foundAsUint32);
+}
+
+TEST(WasmIRGenTest, I32ReinterpretF32) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(
+      WasmFuncType{{WasmValType::F32}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+  irgen.onLocalGet(0);
+  irgen.onI32ReinterpretF32();
+  irgen.endFunction();
+
+  // Should produce a CallBuiltinInst for wasmI32ReinterpretF32.
+  auto &blocks = irgen.getIRFunctions()[0]->getBasicBlockList();
+  bool foundCallBuiltin = false;
+  for (auto &bb : blocks) {
+    for (auto &inst : bb) {
+      if (auto *cb = llvh::dyn_cast<CallBuiltinInst>(&inst)) {
+        if (cb->getBuiltinIndex() ==
+            BuiltinMethod::HermesBuiltin_wasmI32ReinterpretF32) {
+          foundCallBuiltin = true;
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(foundCallBuiltin);
+}
+
+TEST(WasmIRGenTest, F32ReinterpretI32) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(
+      WasmFuncType{{WasmValType::I32}, {WasmValType::F32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+  irgen.onLocalGet(0);
+  irgen.onF32ReinterpretI32();
+  irgen.endFunction();
+
+  // Should produce a CallBuiltinInst for wasmF32ReinterpretI32.
+  auto &blocks = irgen.getIRFunctions()[0]->getBasicBlockList();
+  bool foundCallBuiltin = false;
+  for (auto &bb : blocks) {
+    for (auto &inst : bb) {
+      if (auto *cb = llvh::dyn_cast<CallBuiltinInst>(&inst)) {
+        if (cb->getBuiltinIndex() ==
+            BuiltinMethod::HermesBuiltin_wasmF32ReinterpretI32) {
+          foundCallBuiltin = true;
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(foundCallBuiltin);
+}
+
 } // namespace

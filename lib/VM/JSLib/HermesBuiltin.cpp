@@ -21,6 +21,8 @@
 
 #include "hermes/Support/Conversions.h"
 
+#include <cmath>
+#include <cstring>
 #include <random>
 
 namespace hermes {
@@ -318,6 +320,93 @@ CallResult<HermesValue> wasmI32Rotr(void *, Runtime &runtime) {
   // Guard against UB: shifting uint32_t by 32 is undefined.
   uint32_t result = shift == 0 ? a : (a >> shift) | (a << (32 - shift));
   return HermesValue::encodeTrustedNumberValue(result);
+}
+
+/// Wasm i32.trunc_f64_s (also used for i32.trunc_f32_s):
+/// Truncate double to signed i32, trapping on NaN or out-of-range.
+CallResult<HermesValue> wasmI32TruncF64S(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  double a = args.getArg(0).getNumber();
+  if (LLVM_UNLIKELY(std::isnan(a)))
+    return runtime.raiseError("invalid conversion to integer");
+  // Truncate toward zero.
+  double t = std::trunc(a);
+  // Signed i32 range: [-2147483648.0, 2147483647.0].
+  if (LLVM_UNLIKELY(t < -2147483648.0 || t > 2147483647.0))
+    return runtime.raiseError("integer overflow");
+  return HermesValue::encodeTrustedNumberValue(static_cast<int32_t>(t));
+}
+
+/// Wasm i32.trunc_f64_u (also used for i32.trunc_f32_u):
+/// Truncate double to unsigned i32, trapping on NaN or out-of-range.
+CallResult<HermesValue> wasmI32TruncF64U(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  double a = args.getArg(0).getNumber();
+  if (LLVM_UNLIKELY(std::isnan(a)))
+    return runtime.raiseError("invalid conversion to integer");
+  // Truncate toward zero.
+  double t = std::trunc(a);
+  // Unsigned i32 range: [0.0, 4294967295.0].
+  if (LLVM_UNLIKELY(t < 0.0 || t > 4294967295.0))
+    return runtime.raiseError("integer overflow");
+  return HermesValue::encodeTrustedNumberValue(
+      static_cast<double>(static_cast<uint32_t>(t)));
+}
+
+/// Wasm i32.trunc_sat_f64_s (also used for i32.trunc_sat_f32_s):
+/// Saturating truncation to signed i32. NaN -> 0.
+CallResult<HermesValue> wasmI32TruncSatF64S(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  double a = args.getArg(0).getNumber();
+  if (LLVM_UNLIKELY(std::isnan(a)))
+    return HermesValue::encodeTrustedNumberValue(0);
+  double t = std::trunc(a);
+  if (t < -2147483648.0)
+    return HermesValue::encodeTrustedNumberValue(
+        static_cast<double>(INT32_MIN));
+  if (t > 2147483647.0)
+    return HermesValue::encodeTrustedNumberValue(
+        static_cast<double>(INT32_MAX));
+  return HermesValue::encodeTrustedNumberValue(static_cast<int32_t>(t));
+}
+
+/// Wasm i32.trunc_sat_f64_u (also used for i32.trunc_sat_f32_u):
+/// Saturating truncation to unsigned i32. NaN -> 0.
+CallResult<HermesValue> wasmI32TruncSatF64U(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  double a = args.getArg(0).getNumber();
+  if (LLVM_UNLIKELY(std::isnan(a)))
+    return HermesValue::encodeTrustedNumberValue(0);
+  double t = std::trunc(a);
+  if (t < 0.0)
+    return HermesValue::encodeTrustedNumberValue(0);
+  if (t > 4294967295.0)
+    return HermesValue::encodeTrustedNumberValue(
+        static_cast<double>(UINT32_MAX));
+  return HermesValue::encodeTrustedNumberValue(
+      static_cast<double>(static_cast<uint32_t>(t)));
+}
+
+/// Wasm i32.reinterpret_f32: bitcast f32 to i32.
+/// The input is a double representing an f32 value. We narrow to float,
+/// then reinterpret the bits as int32.
+CallResult<HermesValue> wasmI32ReinterpretF32(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  float f = static_cast<float>(args.getArg(0).getNumber());
+  int32_t bits;
+  memcpy(&bits, &f, sizeof(bits));
+  return HermesValue::encodeTrustedNumberValue(bits);
+}
+
+/// Wasm f32.reinterpret_i32: bitcast i32 to f32.
+/// The input is a double representing an i32 value. We truncate to int32,
+/// reinterpret as float, then promote back to double.
+CallResult<HermesValue> wasmF32ReinterpretI32(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  int32_t bits = truncateToInt32(args.getArg(0).getNumber());
+  float f;
+  memcpy(&f, &bits, sizeof(f));
+  return HermesValue::encodeTrustedNumberValue(static_cast<double>(f));
 }
 
 namespace {
@@ -1150,6 +1239,36 @@ void createHermesBuiltins(Runtime &runtime) {
       B::HermesBuiltin_wasmI32Rotl, P::wasmI32Rotl, wasmI32Rotl, 2);
   defineInternMethod(
       B::HermesBuiltin_wasmI32Rotr, P::wasmI32Rotr, wasmI32Rotr, 2);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI32TruncF64S,
+      P::wasmI32TruncF64S,
+      wasmI32TruncF64S,
+      1);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI32TruncF64U,
+      P::wasmI32TruncF64U,
+      wasmI32TruncF64U,
+      1);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI32TruncSatF64S,
+      P::wasmI32TruncSatF64S,
+      wasmI32TruncSatF64S,
+      1);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI32TruncSatF64U,
+      P::wasmI32TruncSatF64U,
+      wasmI32TruncSatF64U,
+      1);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI32ReinterpretF32,
+      P::wasmI32ReinterpretF32,
+      wasmI32ReinterpretF32,
+      1);
+  defineInternMethod(
+      B::HermesBuiltin_wasmF32ReinterpretI32,
+      P::wasmF32ReinterpretI32,
+      wasmF32ReinterpretI32,
+      1);
 }
 
 } // namespace vm

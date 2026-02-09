@@ -1354,6 +1354,117 @@ void WasmIRGen::onF32DemoteF64() {
   // limitation — true f32 rounding will be added in a later phase.
 }
 
+// --- Type conversions (F.4) ---
+
+void WasmIRGen::onI32TruncF32S() {
+  if (unreachable_)
+    return;
+  Value *a = pop();
+  // In Phase 1, f32 values are doubles — reuse the f64 trapping truncation.
+  push(helpers_.emitI32TruncF64S(a));
+}
+
+void WasmIRGen::onI32TruncF64S() {
+  if (unreachable_)
+    return;
+  Value *a = pop();
+  push(helpers_.emitI32TruncF64S(a));
+}
+
+void WasmIRGen::onI32TruncF32U() {
+  if (unreachable_)
+    return;
+  Value *a = pop();
+  push(helpers_.emitI32TruncF64U(a));
+}
+
+void WasmIRGen::onI32TruncF64U() {
+  if (unreachable_)
+    return;
+  Value *a = pop();
+  push(helpers_.emitI32TruncF64U(a));
+}
+
+void WasmIRGen::onI32TruncSatF32S() {
+  if (unreachable_)
+    return;
+  Value *a = pop();
+  push(helpers_.emitI32TruncSatF64S(a));
+}
+
+void WasmIRGen::onI32TruncSatF64S() {
+  if (unreachable_)
+    return;
+  Value *a = pop();
+  push(helpers_.emitI32TruncSatF64S(a));
+}
+
+void WasmIRGen::onI32TruncSatF32U() {
+  if (unreachable_)
+    return;
+  Value *a = pop();
+  push(helpers_.emitI32TruncSatF64U(a));
+}
+
+void WasmIRGen::onI32TruncSatF64U() {
+  if (unreachable_)
+    return;
+  Value *a = pop();
+  push(helpers_.emitI32TruncSatF64U(a));
+}
+
+void WasmIRGen::onF32ConvertI32S() {
+  if (unreachable_)
+    return;
+  // Convert signed i32 to f32.
+  // In Phase 1, we simply reinterpret via AsInt32Inst (which ensures the
+  // value is treated as signed). The result is a double that exactly
+  // represents the int32 value. No Math.fround rounding in Phase 1.
+  Value *a = pop();
+  push(builder_.createAsInt32Inst(a));
+}
+
+void WasmIRGen::onF32ConvertI32U() {
+  if (unreachable_)
+    return;
+  // Convert unsigned i32 to f32.
+  // AsUint32Inst ensures the value is treated as unsigned.
+  // No Math.fround rounding in Phase 1.
+  Value *a = pop();
+  push(builder_.createAsUint32Inst(a));
+}
+
+void WasmIRGen::onF64ConvertI32S() {
+  if (unreachable_)
+    return;
+  // Convert signed i32 to f64. Double can exactly represent all i32 values.
+  Value *a = pop();
+  push(builder_.createAsInt32Inst(a));
+}
+
+void WasmIRGen::onF64ConvertI32U() {
+  if (unreachable_)
+    return;
+  // Convert unsigned i32 to f64. Double can exactly represent all uint32
+  // values.
+  Value *a = pop();
+  push(builder_.createAsUint32Inst(a));
+}
+
+void WasmIRGen::onI32ReinterpretF32() {
+  if (unreachable_)
+    return;
+  Value *a = pop();
+  push(helpers_.emitI32ReinterpretF32(a));
+}
+
+void WasmIRGen::onF32ReinterpretI32() {
+  if (unreachable_)
+    return;
+  Value *a = pop();
+  push(helpers_.emitF32ReinterpretI32(a));
+}
+
 // --- unreachable and nop (D.11) ---
 
 void WasmIRGen::onUnreachable() {

@@ -1014,18 +1014,18 @@ wabt::Result BinaryReaderHermesIRGen::OnConvertExpr(wabt::Opcode opcode) {
     case wabt::Opcode::I64ExtendI32U:
       irgen_->warnUnsupported("i64.extend_i32_u", 1, 1);
       break;
-    // --- Float-to-int truncations (deferred to Part F) ---
+    // --- Float-to-int truncations (F.4) ---
     case wabt::Opcode::I32TruncF32S:
-      irgen_->warnUnsupported("i32.trunc_f32_s", 1, 1);
+      irgen_->onI32TruncF32S();
       break;
     case wabt::Opcode::I32TruncF32U:
-      irgen_->warnUnsupported("i32.trunc_f32_u", 1, 1);
+      irgen_->onI32TruncF32U();
       break;
     case wabt::Opcode::I32TruncF64S:
-      irgen_->warnUnsupported("i32.trunc_f64_s", 1, 1);
+      irgen_->onI32TruncF64S();
       break;
     case wabt::Opcode::I32TruncF64U:
-      irgen_->warnUnsupported("i32.trunc_f64_u", 1, 1);
+      irgen_->onI32TruncF64U();
       break;
     case wabt::Opcode::I64TruncF32S:
       irgen_->warnUnsupported("i64.trunc_f32_s", 1, 1);
@@ -1039,12 +1039,12 @@ wabt::Result BinaryReaderHermesIRGen::OnConvertExpr(wabt::Opcode opcode) {
     case wabt::Opcode::I64TruncF64U:
       irgen_->warnUnsupported("i64.trunc_f64_u", 1, 1);
       break;
-    // --- Int-to-float conversions (deferred to Part F) ---
+    // --- Int-to-float conversions (F.4) ---
     case wabt::Opcode::F32ConvertI32S:
-      irgen_->warnUnsupported("f32.convert_i32_s", 1, 1);
+      irgen_->onF32ConvertI32S();
       break;
     case wabt::Opcode::F32ConvertI32U:
-      irgen_->warnUnsupported("f32.convert_i32_u", 1, 1);
+      irgen_->onF32ConvertI32U();
       break;
     case wabt::Opcode::F32ConvertI64S:
       irgen_->warnUnsupported("f32.convert_i64_s", 1, 1);
@@ -1053,10 +1053,10 @@ wabt::Result BinaryReaderHermesIRGen::OnConvertExpr(wabt::Opcode opcode) {
       irgen_->warnUnsupported("f32.convert_i64_u", 1, 1);
       break;
     case wabt::Opcode::F64ConvertI32S:
-      irgen_->warnUnsupported("f64.convert_i32_s", 1, 1);
+      irgen_->onF64ConvertI32S();
       break;
     case wabt::Opcode::F64ConvertI32U:
-      irgen_->warnUnsupported("f64.convert_i32_u", 1, 1);
+      irgen_->onF64ConvertI32U();
       break;
     case wabt::Opcode::F64ConvertI64S:
       irgen_->warnUnsupported("f64.convert_i64_s", 1, 1);
@@ -1071,31 +1071,31 @@ wabt::Result BinaryReaderHermesIRGen::OnConvertExpr(wabt::Opcode opcode) {
     case wabt::Opcode::F64PromoteF32:
       irgen_->onF64PromoteF32();
       break;
-    // --- Reinterpret/bitcast (deferred to Part F) ---
+    // --- Reinterpret/bitcast (F.4) ---
     case wabt::Opcode::I32ReinterpretF32:
-      irgen_->warnUnsupported("i32.reinterpret_f32", 1, 1);
+      irgen_->onI32ReinterpretF32();
       break;
     case wabt::Opcode::I64ReinterpretF64:
       irgen_->warnUnsupported("i64.reinterpret_f64", 1, 1);
       break;
     case wabt::Opcode::F32ReinterpretI32:
-      irgen_->warnUnsupported("f32.reinterpret_i32", 1, 1);
+      irgen_->onF32ReinterpretI32();
       break;
     case wabt::Opcode::F64ReinterpretI64:
       irgen_->warnUnsupported("f64.reinterpret_i64", 1, 1);
       break;
-    // --- Saturating truncations (post-MVP but commonly used) ---
+    // --- Saturating truncations (F.4) ---
     case wabt::Opcode::I32TruncSatF32S:
-      irgen_->warnUnsupported("i32.trunc_sat_f32_s", 1, 1);
+      irgen_->onI32TruncSatF32S();
       break;
     case wabt::Opcode::I32TruncSatF32U:
-      irgen_->warnUnsupported("i32.trunc_sat_f32_u", 1, 1);
+      irgen_->onI32TruncSatF32U();
       break;
     case wabt::Opcode::I32TruncSatF64S:
-      irgen_->warnUnsupported("i32.trunc_sat_f64_s", 1, 1);
+      irgen_->onI32TruncSatF64S();
       break;
     case wabt::Opcode::I32TruncSatF64U:
-      irgen_->warnUnsupported("i32.trunc_sat_f64_u", 1, 1);
+      irgen_->onI32TruncSatF64U();
       break;
     case wabt::Opcode::I64TruncSatF32S:
       irgen_->warnUnsupported("i64.trunc_sat_f32_s", 1, 1);

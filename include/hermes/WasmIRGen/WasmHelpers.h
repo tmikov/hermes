@@ -61,6 +61,28 @@ class WasmHelpers {
   /// Emit i32 rotate right.
   Instruction *emitI32Rotr(Value *a, Value *b);
 
+  /// Emit i32.trunc_f64_s (also used for i32.trunc_f32_s):
+  /// trapping truncation from float/double to signed i32.
+  Instruction *emitI32TruncF64S(Value *a);
+
+  /// Emit i32.trunc_f64_u (also used for i32.trunc_f32_u):
+  /// trapping truncation from float/double to unsigned i32.
+  Instruction *emitI32TruncF64U(Value *a);
+
+  /// Emit i32.trunc_sat_f64_s (also used for i32.trunc_sat_f32_s):
+  /// saturating truncation from float/double to signed i32.
+  Instruction *emitI32TruncSatF64S(Value *a);
+
+  /// Emit i32.trunc_sat_f64_u (also used for i32.trunc_sat_f32_u):
+  /// saturating truncation from float/double to unsigned i32.
+  Instruction *emitI32TruncSatF64U(Value *a);
+
+  /// Emit i32.reinterpret_f32: bitcast f32 to i32.
+  Instruction *emitI32ReinterpretF32(Value *a);
+
+  /// Emit f32.reinterpret_i32: bitcast i32 to f32.
+  Instruction *emitF32ReinterpretI32(Value *a);
+
  private:
   IRBuilder &builder_;
 };

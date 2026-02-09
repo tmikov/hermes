@@ -215,6 +215,29 @@ class WasmIRGen {
   void onF64PromoteF32();
   void onF32DemoteF64();
 
+  // --- Type conversions (F.4) ---
+
+  /// Trapping truncation: float/double to signed i32.
+  void onI32TruncF32S();
+  void onI32TruncF64S();
+  /// Trapping truncation: float/double to unsigned i32.
+  void onI32TruncF32U();
+  void onI32TruncF64U();
+  /// Saturating truncation: float/double to signed i32.
+  void onI32TruncSatF32S();
+  void onI32TruncSatF64S();
+  /// Saturating truncation: float/double to unsigned i32.
+  void onI32TruncSatF32U();
+  void onI32TruncSatF64U();
+  /// Int-to-float conversion.
+  void onF32ConvertI32S();
+  void onF32ConvertI32U();
+  void onF64ConvertI32S();
+  void onF64ConvertI32U();
+  /// Reinterpret (bitcast).
+  void onI32ReinterpretF32();
+  void onF32ReinterpretI32();
+
   // --- Unsupported opcode handling (D.13) ---
 
   /// Emit a warning for an unsupported opcode. Pops \p numInputs values

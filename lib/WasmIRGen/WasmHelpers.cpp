@@ -60,5 +60,35 @@ Instruction *WasmHelpers::emitI32Rotr(Value *a, Value *b) {
       BuiltinMethod::HermesBuiltin_wasmI32Rotr, {a, b});
 }
 
+Instruction *WasmHelpers::emitI32TruncF64S(Value *a) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI32TruncF64S, {a});
+}
+
+Instruction *WasmHelpers::emitI32TruncF64U(Value *a) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI32TruncF64U, {a});
+}
+
+Instruction *WasmHelpers::emitI32TruncSatF64S(Value *a) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI32TruncSatF64S, {a});
+}
+
+Instruction *WasmHelpers::emitI32TruncSatF64U(Value *a) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI32TruncSatF64U, {a});
+}
+
+Instruction *WasmHelpers::emitI32ReinterpretF32(Value *a) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI32ReinterpretF32, {a});
+}
+
+Instruction *WasmHelpers::emitF32ReinterpretI32(Value *a) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmF32ReinterpretI32, {a});
+}
+
 } // namespace wasm
 } // namespace hermes
