@@ -99,10 +99,12 @@ class WasmIRGen {
   void onI32GeU();
   void onI32Eqz();
 
-  // --- Control flow (D.6) ---
+  // --- Control flow (D.6, D.7) ---
 
   /// Enter a block with the given result types.
   void onBlock(const std::vector<WasmValType> &resultTypes);
+  /// Enter a loop with the given result types.
+  void onLoop(const std::vector<WasmValType> &resultTypes);
   /// End the current block/loop/if.
   void onEnd();
   /// Unconditional branch to the control entry at \p depth.
@@ -147,15 +149,21 @@ class WasmIRGen {
   struct ControlEntry {
     enum Kind { Block, Loop, If };
     Kind kind;
-    /// Continuation after end (for Block/If), or loop header (for Loop).
+    /// For Block/If: continuation after end (also the br target).
+    /// For Loop: the loop header block (the br target).
     BasicBlock *contBlock;
+    /// For Loop: the block after the loop's end (where fallthrough goes).
+    /// For Block/If: nullptr (contBlock serves both purposes).
+    BasicBlock *endBlock = nullptr;
     /// Only for If: the else block.
-    BasicBlock *elseBlock;
+    BasicBlock *elseBlock = nullptr;
     /// Block signature result types.
     std::vector<WasmValType> resultTypes;
     /// Value stack height at entry.
     size_t stackHeight;
     /// Phi nodes for results at the continuation block.
+    /// For Block/If: phis in contBlock for results from br/fallthrough.
+    /// For Loop: phis in endBlock for results from fallthrough.
     std::vector<PhiInst *> resultPhis;
     /// Whether the code was unreachable when this entry was pushed.
     bool outerUnreachable = false;

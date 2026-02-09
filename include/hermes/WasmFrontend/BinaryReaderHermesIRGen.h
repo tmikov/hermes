@@ -191,6 +191,7 @@ class BinaryReaderHermesIRGen : public wabt::BinaryReaderNop {
   wabt::Result OnReturnExpr() override;
   wabt::Result OnDropExpr() override;
   wabt::Result OnBlockExpr(wabt::Type sigType) override;
+  wabt::Result OnLoopExpr(wabt::Type sigType) override;
   wabt::Result OnEndExpr() override;
   wabt::Result OnBrExpr(wabt::Index depth) override;
   wabt::Result OnBrIfExpr(wabt::Index depth) override;

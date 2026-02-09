@@ -437,7 +437,7 @@ void WasmIRGen::onI32Eqz() {
       cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
 }
 
-// --- Control flow (D.6) ---
+// --- Control flow (D.6, D.7) ---
 
 void WasmIRGen::onBlock(const std::vector<WasmValType> &resultTypes) {
   // Create a continuation basic block (target of br 0 = after end).
@@ -446,7 +446,6 @@ void WasmIRGen::onBlock(const std::vector<WasmValType> &resultTypes) {
   ControlEntry entry;
   entry.kind = ControlEntry::Block;
   entry.contBlock = contBlock;
-  entry.elseBlock = nullptr;
   entry.resultTypes = resultTypes;
   entry.stackHeight = valueStack_.size();
   entry.outerUnreachable = unreachable_;
@@ -462,11 +461,42 @@ void WasmIRGen::onBlock(const std::vector<WasmValType> &resultTypes) {
   }
 
   controlStack_.push_back(std::move(entry));
-  // The code inside the block starts as reachable (even if outer is
-  // unreachable, the block entry is a new reachability scope).
-  // Actually, if the outer code was unreachable, the block itself is
-  // unreachable too. But we still process it to keep the control stack
-  // balanced.
+}
+
+void WasmIRGen::onLoop(const std::vector<WasmValType> &resultTypes) {
+  // Create the loop header block. br targeting this loop jumps here.
+  auto *headerBlock = builder_.createBasicBlock(currentFunc_);
+
+  // Create the end block (after the loop's end, where fallthrough goes).
+  auto *endBlock = builder_.createBasicBlock(currentFunc_);
+
+  ControlEntry entry;
+  entry.kind = ControlEntry::Loop;
+  entry.contBlock = headerBlock; // br targets the loop header
+  entry.endBlock = endBlock; // fallthrough after end goes here
+  entry.resultTypes = resultTypes;
+  entry.stackHeight = valueStack_.size();
+  entry.outerUnreachable = unreachable_;
+
+  // Result phis go in the end block (for fallthrough values).
+  if (!resultTypes.empty()) {
+    auto *savedBlock = builder_.getInsertionBlock();
+    builder_.setInsertionBlock(endBlock);
+    for (size_t i = 0; i < resultTypes.size(); ++i) {
+      entry.resultPhis.push_back(builder_.createPhiInst());
+    }
+    builder_.setInsertionBlock(savedBlock);
+  }
+
+  // Branch from the current block to the loop header.
+  if (!unreachable_ && !isCurrentBlockTerminated()) {
+    builder_.createBranchInst(headerBlock);
+  }
+
+  // Set insertion point to the loop header.
+  builder_.setInsertionBlock(headerBlock);
+
+  controlStack_.push_back(std::move(entry));
 }
 
 void WasmIRGen::onEnd() {
@@ -494,8 +524,52 @@ void WasmIRGen::onEnd() {
     for (auto *phi : entry.resultPhis) {
       push(phi);
     }
+  } else if (entry.kind == ControlEntry::Loop) {
+    bool fallsThrough = !unreachable_ && !isCurrentBlockTerminated();
+
+    if (fallsThrough) {
+      // Add phi operands to the end block from the fallthrough path.
+      // We handle this directly here rather than via addBranchPhiOperands,
+      // because addBranchPhiOperands skips Loop entries (since br to a
+      // loop targets the header, not the end block).
+      if (!entry.resultPhis.empty()) {
+        auto *currentBlock = builder_.getInsertionBlock();
+        size_t numResults = entry.resultPhis.size();
+        size_t available = valueStack_.size();
+        if (available >= numResults) {
+          for (size_t i = 0; i < numResults; ++i) {
+            Value *val = valueStack_[available - numResults + i];
+            entry.resultPhis[i]->addEntry(val, currentBlock);
+          }
+          valueStack_.resize(available - numResults);
+        } else {
+          // Stack underflow — use undefined as placeholder.
+          for (size_t i = 0; i < numResults; ++i) {
+            Value *val = (i >= numResults - available)
+                ? valueStack_[i - (numResults - available)]
+                : builder_.getLiteralUndefined();
+            entry.resultPhis[i]->addEntry(val, currentBlock);
+          }
+          valueStack_.clear();
+        }
+      }
+      builder_.createBranchInst(entry.endBlock);
+    }
+
+    // Set insertion point to the end block (after the loop).
+    builder_.setInsertionBlock(entry.endBlock);
+
+    // The end block is reachable if we fell through.
+    // Note: branchTargeted only tracks br to the loop header; it does NOT
+    // make the end block reachable. Only fallthrough makes it reachable.
+    unreachable_ = !fallsThrough;
+
+    // Push phi results onto the value stack.
+    for (auto *phi : entry.resultPhis) {
+      push(phi);
+    }
   }
-  // Loop and If kinds will be handled in D.7 and D.8.
+  // If kind will be handled in D.8.
 }
 
 void WasmIRGen::onBr(uint32_t depth) {

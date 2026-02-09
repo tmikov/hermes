@@ -847,6 +847,21 @@ wabt::Result BinaryReaderHermesIRGen::OnBlockExpr(wabt::Type sigType) {
   return wabt::Result::Ok;
 }
 
+wabt::Result BinaryReaderHermesIRGen::OnLoopExpr(wabt::Type sigType) {
+  if (!inFunctionBody_ || !irgen_)
+    return wabt::Result::Ok;
+
+  // Convert loop signature type to result types vector.
+  // In Wasm MVP, loop types are either void or a single value type.
+  std::vector<WasmValType> resultTypes;
+  if (static_cast<wabt::Type::Enum>(sigType) != wabt::Type::Void) {
+    resultTypes.push_back(convertType(sigType));
+  }
+
+  irgen_->onLoop(resultTypes);
+  return wabt::Result::Ok;
+}
+
 wabt::Result BinaryReaderHermesIRGen::OnEndExpr() {
   if (!inFunctionBody_ || !irgen_)
     return wabt::Result::Ok;
