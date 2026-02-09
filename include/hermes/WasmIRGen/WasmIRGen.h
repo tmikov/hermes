@@ -50,6 +50,14 @@ class WasmIRGen {
   /// End translating a Wasm function body.
   void endFunction();
 
+  // --- i64 value stack helpers (G.1) ---
+
+  /// Push an i64 value as two stack slots: lo32 first, then hi32.
+  void pushI64(Value *lo, Value *hi);
+  /// Pop an i64 value from the stack (hi32 first, then lo32).
+  /// \return {lo, hi}.
+  std::pair<Value *, Value *> popI64();
+
   // --- Instruction callbacks (added incrementally in subsequent steps) ---
 
   /// Push an i32 constant onto the value stack.
@@ -283,7 +291,12 @@ class WasmIRGen {
   uint32_t currentFuncIndex_ = 0;
 
   /// Abstract value stack: stack of Value* (Hermes IR SSA values).
+  /// For i64 values, two consecutive slots are used: [lo32, hi32].
   std::vector<Value *> valueStack_;
+
+  /// Parallel to valueStack_: true if the slot is the hi32 part of an i64.
+  /// Used by drop and select to determine if a value occupies 2 slots.
+  std::vector<bool> valueStackIsI64Hi_;
 
   /// AllocStackInst for each Wasm local (params + declared locals).
   std::vector<AllocStackInst *> locals_;
@@ -330,6 +343,9 @@ class WasmIRGen {
   Value *pop();
   /// Push a value onto the value stack.
   void push(Value *v);
+
+  /// Check if the top of the value stack is the hi32 part of an i64.
+  bool isTopI64() const;
 
   /// Get the ControlEntry at the given branch depth.
   ControlEntry &getControlEntry(uint32_t depth);

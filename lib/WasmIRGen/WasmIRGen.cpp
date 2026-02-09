@@ -143,6 +143,7 @@ void WasmIRGen::beginFunction(
   assert(currentFunc_ && "IR function not created");
 
   valueStack_.clear();
+  valueStackIsI64Hi_.clear();
   locals_.clear();
   controlStack_.clear();
   unreachable_ = false;
@@ -265,6 +266,7 @@ void WasmIRGen::endFunction() {
   currentFunc_ = nullptr;
   parentScopeInst_ = nullptr;
   valueStack_.clear();
+  valueStackIsI64Hi_.clear();
   locals_.clear();
   controlStack_.clear();
 }
@@ -276,9 +278,11 @@ void WasmIRGen::onI32Const(int32_t value) {
 void WasmIRGen::onI64Const(int64_t value) {
   // Split i64 into lo32 and hi32 (Phase 1 representation).
   auto lo = static_cast<int32_t>(value & 0xFFFFFFFF);
-  auto hi = static_cast<int32_t>((static_cast<uint64_t>(value) >> 32) & 0xFFFFFFFF);
-  push(builder_.getLiteralNumber(static_cast<double>(lo)));
-  push(builder_.getLiteralNumber(static_cast<double>(hi)));
+  auto hi = static_cast<int32_t>(
+      (static_cast<uint64_t>(value) >> 32) & 0xFFFFFFFF);
+  pushI64(
+      builder_.getLiteralNumber(static_cast<double>(lo)),
+      builder_.getLiteralNumber(static_cast<double>(hi)));
 }
 
 void WasmIRGen::onF32Const(float value) {
@@ -332,7 +336,11 @@ void WasmIRGen::onReturn() {
 }
 
 void WasmIRGen::onDrop() {
-  pop();
+  if (isTopI64()) {
+    popI64();
+  } else {
+    pop();
+  }
 }
 
 // --- i32 arithmetic (D.3) ---
@@ -757,6 +765,7 @@ void WasmIRGen::onElse() {
 
   // Restore the value stack to the entry height (discard then-block values).
   valueStack_.resize(entry.stackHeight);
+  valueStackIsI64Hi_.resize(entry.stackHeight);
 
   // Reset unreachable for the else arm.
   unreachable_ = entry.outerUnreachable;
@@ -824,6 +833,7 @@ void WasmIRGen::onEnd() {
             entry.resultPhis[i]->addEntry(val, currentBlock);
           }
           valueStack_.resize(available - numResults);
+          valueStackIsI64Hi_.resize(available - numResults);
         } else {
           // Stack underflow — use undefined as placeholder.
           for (size_t i = 0; i < numResults; ++i) {
@@ -833,6 +843,7 @@ void WasmIRGen::onEnd() {
             entry.resultPhis[i]->addEntry(val, currentBlock);
           }
           valueStack_.clear();
+          valueStackIsI64Hi_.clear();
         }
       }
       builder_.createBranchInst(entry.endBlock);
@@ -1552,11 +1563,37 @@ Value *WasmIRGen::pop() {
   assert(!valueStack_.empty() && "value stack underflow");
   Value *v = valueStack_.back();
   valueStack_.pop_back();
+  valueStackIsI64Hi_.pop_back();
   return v;
 }
 
 void WasmIRGen::push(Value *v) {
   valueStack_.push_back(v);
+  valueStackIsI64Hi_.push_back(false);
+}
+
+void WasmIRGen::pushI64(Value *lo, Value *hi) {
+  valueStack_.push_back(lo);
+  valueStackIsI64Hi_.push_back(false); // lo32 is not the hi part
+  valueStack_.push_back(hi);
+  valueStackIsI64Hi_.push_back(true); // hi32 is marked
+}
+
+std::pair<Value *, Value *> WasmIRGen::popI64() {
+  assert(valueStack_.size() >= 2 && "value stack underflow for i64 pop");
+  assert(valueStackIsI64Hi_.back() && "expected i64 hi32 on top of stack");
+  Value *hi = valueStack_.back();
+  valueStack_.pop_back();
+  valueStackIsI64Hi_.pop_back();
+  assert(!valueStackIsI64Hi_.back() && "expected i64 lo32 below hi32");
+  Value *lo = valueStack_.back();
+  valueStack_.pop_back();
+  valueStackIsI64Hi_.pop_back();
+  return {lo, hi};
+}
+
+bool WasmIRGen::isTopI64() const {
+  return !valueStackIsI64Hi_.empty() && valueStackIsI64Hi_.back();
 }
 
 WasmIRGen::ControlEntry &WasmIRGen::getControlEntry(uint32_t depth) {
@@ -1578,6 +1615,7 @@ void WasmIRGen::addBranchPhiOperands(ControlEntry &entry) {
         entry.resultPhis[i]->addEntry(val, currentBlock);
       }
       valueStack_.resize(available - numResults);
+      valueStackIsI64Hi_.resize(available - numResults);
     } else {
       // Stack underflow (e.g., due to unimplemented instructions).
       // Use undefined as placeholder for missing values.
@@ -1588,6 +1626,7 @@ void WasmIRGen::addBranchPhiOperands(ControlEntry &entry) {
         entry.resultPhis[i]->addEntry(val, currentBlock);
       }
       valueStack_.clear();
+      valueStackIsI64Hi_.clear();
     }
   }
   // For Loop entries, br targets the loop header. Loop phis are for

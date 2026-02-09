@@ -3196,4 +3196,153 @@ TEST(WasmIRGenTest, F32Copysign) {
   EXPECT_TRUE(foundCallBuiltin);
 }
 
+// --- i64 representation (G.1) ---
+
+TEST(WasmIRGenTest, I64ConstPushesTwo) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // Type: () -> (i32) — returns i32 so we can verify stack height via return
+  moduleInfo.types.push_back(WasmFuncType{{}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  irgen.beginFunction(0, {});
+
+  // Push an i64 constant — should occupy 2 stack slots.
+  irgen.onI64Const(0x0000000100000002LL);
+
+  // Drop should consume both halves (lo + hi).
+  irgen.onDrop();
+
+  // Push a regular i32 for the return.
+  irgen.onI32Const(42);
+
+  irgen.endFunction();
+
+  // Verify the function compiled without assertion failures.
+  // The key test is that onDrop properly consumed both i64 halves.
+  auto *func = irgen.getIRFunctions()[0];
+  ASSERT_NE(func, nullptr);
+}
+
+TEST(WasmIRGenTest, I64PopI64ReturnsCorrectPair) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // Type: () -> (i32) — returns lo32 of the i64
+  moduleInfo.types.push_back(WasmFuncType{{}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  irgen.beginFunction(0, {});
+
+  // Push an i64 constant: value = 0x00000003_00000007
+  // lo32 = 7, hi32 = 3
+  irgen.onI64Const(0x0000000300000007LL);
+
+  // Use popI64 to get lo and hi.
+  auto [lo, hi] = irgen.popI64();
+
+  // Both should be LiteralNumber values.
+  auto *loNum = llvh::dyn_cast<LiteralNumber>(lo);
+  auto *hiNum = llvh::dyn_cast<LiteralNumber>(hi);
+  ASSERT_NE(loNum, nullptr);
+  ASSERT_NE(hiNum, nullptr);
+  EXPECT_EQ(loNum->getValue(), 7.0);
+  EXPECT_EQ(hiNum->getValue(), 3.0);
+
+  // Push an i32 for return.
+  irgen.onI32Const(0);
+  irgen.endFunction();
+}
+
+TEST(WasmIRGenTest, I64DropConsumesTwo) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // Type: () -> (i32)
+  moduleInfo.types.push_back(WasmFuncType{{}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  irgen.beginFunction(0, {});
+
+  // Push i32 first, then i64 on top.
+  irgen.onI32Const(10);
+  irgen.onI64Const(0x100000002LL);
+
+  // Drop should consume the i64 (2 slots), leaving the i32.
+  irgen.onDrop();
+
+  // The remaining i32 on the stack is our return value.
+  irgen.endFunction();
+
+  // Verify that the function compiled without issues.
+  auto *func = irgen.getIRFunctions()[0];
+  ASSERT_NE(func, nullptr);
+}
+
+TEST(WasmIRGenTest, I64DropDoesNotConsumeSingleValue) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // Type: () -> ()
+  moduleInfo.types.push_back(WasmFuncType{{}, {}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  irgen.beginFunction(0, {});
+
+  // Push a regular i32 value.
+  irgen.onI32Const(42);
+
+  // Drop should consume only 1 slot (not 2) because it's not i64.
+  irgen.onDrop();
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+  ASSERT_NE(func, nullptr);
+}
+
+TEST(WasmIRGenTest, I64PushI64ThenI32Interleaved) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // Type: () -> (i32)
+  moduleInfo.types.push_back(WasmFuncType{{}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  irgen.beginFunction(0, {});
+
+  // Push i64 (2 slots), then i32 (1 slot).
+  irgen.onI64Const(100);
+  irgen.onI32Const(42);
+
+  // Drop the i32 (1 slot).
+  irgen.onDrop();
+
+  // Drop the i64 (2 slots).
+  irgen.onDrop();
+
+  // Push return value.
+  irgen.onI32Const(0);
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+  ASSERT_NE(func, nullptr);
+}
+
 } // namespace
