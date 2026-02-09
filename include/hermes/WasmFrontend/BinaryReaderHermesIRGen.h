@@ -13,19 +13,30 @@
 #include "wabt/binary-reader-nop.h"
 
 #include <string>
+#include <vector>
 
 namespace hermes {
 namespace wasm {
+
+class WasmIRGen;
 
 /// A wabt BinaryReaderDelegate that populates a WasmModuleInfo with
 /// module-level data (types, imports, functions, tables, memories, globals,
 /// exports, start function, element segments, data segments, and names).
 ///
-/// Function body callbacks are left as no-ops for now — they will be wired
-/// to WasmIRGen in a later step.
+/// When a WasmIRGen is attached via setIRGen(), function body callbacks
+/// are dispatched to it for IR generation. Otherwise they are no-ops.
 class BinaryReaderHermesIRGen : public wabt::BinaryReaderNop {
  public:
   explicit BinaryReaderHermesIRGen(WasmModuleInfo &moduleInfo);
+
+  /// Attach a WasmIRGen instance for function body translation.
+  /// Must be called after module-level parsing is complete (i.e., after
+  /// a first pass that populates WasmModuleInfo) or before a single-pass
+  /// parse that handles both module-level and function body data.
+  void setIRGen(WasmIRGen *irgen) {
+    irgen_ = irgen;
+  }
 
   /// \return a reference to the populated module info.
   WasmModuleInfo &getModuleInfo() {
@@ -150,7 +161,20 @@ class BinaryReaderHermesIRGen : public wabt::BinaryReaderNop {
       wabt::Index functionIndex,
       std::string_view functionName) override;
 
-  // --- Init expression callbacks (shared by globals, elems, data) ---
+  // --- Code section / Function body callbacks ---
+  wabt::Result BeginCodeSection(wabt::Offset size) override;
+  wabt::Result BeginFunctionBody(
+      wabt::Index index,
+      wabt::Offset size) override;
+  wabt::Result OnLocalDeclCount(wabt::Index count) override;
+  wabt::Result OnLocalDecl(
+      wabt::Index declIndex,
+      wabt::Index count,
+      wabt::Type type) override;
+  wabt::Result EndLocalDecls() override;
+  wabt::Result EndFunctionBody(wabt::Index index) override;
+
+  // --- Instruction callbacks (function body + init expressions) ---
   wabt::Result OnI32ConstExpr(uint32_t value) override;
   wabt::Result OnI64ConstExpr(uint64_t value) override;
   wabt::Result OnF32ConstExpr(uint32_t valueBits) override;
@@ -158,6 +182,9 @@ class BinaryReaderHermesIRGen : public wabt::BinaryReaderNop {
   wabt::Result OnGlobalGetExpr(wabt::Index globalIndex) override;
   wabt::Result OnRefNullExpr(wabt::Type type) override;
   wabt::Result OnRefFuncExpr(wabt::Index funcIndex) override;
+  wabt::Result OnLocalGetExpr(wabt::Index localIndex) override;
+  wabt::Result OnLocalSetExpr(wabt::Index localIndex) override;
+  wabt::Result OnLocalTeeExpr(wabt::Index localIndex) override;
 
  private:
   /// Convert a wabt Type to our WasmValType.
@@ -168,6 +195,20 @@ class BinaryReaderHermesIRGen : public wabt::BinaryReaderNop {
   static WasmExternalKind convertExternalKind(wabt::ExternalKind kind);
 
   WasmModuleInfo &moduleInfo_;
+
+  /// Optional WasmIRGen for function body translation.
+  WasmIRGen *irgen_ = nullptr;
+
+  /// Whether we are currently inside a function body.
+  bool inFunctionBody_ = false;
+
+  /// The Wasm function index of the current function body being parsed.
+  /// This is the index in the Wasm function index space (imports + defined).
+  uint32_t currentBodyFuncIndex_ = 0;
+
+  /// Local types accumulated during OnLocalDecl callbacks for the current
+  /// function body.
+  std::vector<WasmValType> currentLocalTypes_;
 
   /// Tracks which init expression context we are in.
   enum class InitExprContext {

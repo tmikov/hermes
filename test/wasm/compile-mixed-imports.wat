@@ -8,21 +8,28 @@
 
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm
-;; RUN: %hermesc -emit-binary --wasm %t.wasm 2>&1 | %FileCheck %s
+;; RUN: %hermesc --wasm --dump-ir %t.wasm | %FileCheck %s
 
-;; CHECK: Wasm module parsed successfully.
-;; CHECK: Types: 4
-;; CHECK: Imports: 4
-;; CHECK: Functions: 5 (2 imported, 3 defined)
-;; CHECK: Tables: 1
-;; CHECK: Memories: 1
-;; CHECK: Globals: 1 (1 imported, 0 defined)
-;; CHECK: Exports: 2
-;; CHECK: Start function: 2
-;; CHECK: Element segments: 0
-;; CHECK: Data segments: 0
-;; CHECK: Export: run (func 3)
-;; CHECK: Export: helper (func 4)
+;; Imported function placeholders.
+;; CHECK-LABEL: function wasm_func_0(p0: any): any
+;; CHECK:   ReturnInst undefined
+;; CHECK:   function_end
+
+;; CHECK-LABEL: function wasm_func_1(p0: any): any
+;; CHECK:   ReturnInst undefined
+;; CHECK:   function_end
+
+;; Defined functions.
+;; CHECK-LABEL: function wasm_func_2(): any
+;; CHECK:   function_end
+
+;; CHECK-LABEL: function wasm_func_3(): any
+;; CHECK:   function_end
+
+;; CHECK-LABEL: function wasm_func_4(p0: any): any
+;; CHECK:   AllocStackInst {{.*}} $local_0
+;; CHECK:   LoadParamInst
+;; CHECK:   function_end
 
 (module
   ;; Import a function from "env".

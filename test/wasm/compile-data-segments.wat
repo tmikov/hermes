@@ -3,24 +3,16 @@
 ;; This source code is licensed under the MIT license found in the
 ;; LICENSE file in the root directory of this source tree.
 
-;; Test module with memory and active data segments.
+;; Test module with memory and data segments compiles to IR.
 
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm
-;; RUN: %hermesc -emit-binary --wasm %t.wasm 2>&1 | %FileCheck %s
+;; RUN: %hermesc --wasm --dump-ir %t.wasm | %FileCheck %s
 
-;; CHECK: Wasm module parsed successfully.
-;; CHECK: Types: 1
-;; CHECK: Imports: 0
-;; CHECK: Functions: 1 (0 imported, 1 defined)
-;; CHECK: Tables: 0
-;; CHECK: Memories: 1
-;; CHECK: Globals: 0 (0 imported, 0 defined)
-;; CHECK: Exports: 2
-;; CHECK: Element segments: 0
-;; CHECK: Data segments: 2
-;; CHECK: Export: memory (memory 0)
-;; CHECK: Export: load (func 0)
+;; CHECK-LABEL: function wasm_func_0(p0: any): any
+;; CHECK:   AllocStackInst {{.*}} $local_0
+;; CHECK:   LoadParamInst
+;; CHECK:   function_end
 
 (module
   (memory (export "memory") 1)

@@ -3,21 +3,26 @@
 ;; This source code is licensed under the MIT license found in the
 ;; LICENSE file in the root directory of this source tree.
 
+;; Test Wasm module with imports compiles to IR.
+
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm
-;; RUN: %hermesc -emit-binary --wasm %t.wasm 2>&1 | %FileCheck %s
+;; RUN: %hermesc --wasm --dump-ir %t.wasm | %FileCheck %s
 
-;; CHECK: Wasm module parsed successfully.
-;; CHECK: Types: 3
-;; CHECK: Imports: 2
-;; CHECK: Functions: 3 (1 imported, 2 defined)
-;; CHECK: Tables: 0
-;; CHECK: Memories: 1
-;; CHECK: Globals: 1 (1 imported, 0 defined)
-;; CHECK: Exports: 1
-;; CHECK: Element segments: 0
-;; CHECK: Data segments: 0
-;; CHECK: Export: main (func 1)
+;; Imported function placeholder.
+;; CHECK-LABEL: function wasm_func_0(p0: any): any
+;; CHECK:   ReturnInst undefined
+;; CHECK:   function_end
+
+;; First defined function.
+;; CHECK-LABEL: function wasm_func_1(): any
+;; CHECK:   function_end
+
+;; Second defined function.
+;; CHECK-LABEL: function wasm_func_2(p0: any): any
+;; CHECK:   AllocStackInst {{.*}} $local_0
+;; CHECK:   LoadParamInst
+;; CHECK:   function_end
 
 (module
   (import "env" "log" (func $log (param i32)))

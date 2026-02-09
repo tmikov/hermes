@@ -7,6 +7,8 @@
 
 #include "hermes/WasmFrontend/BinaryReaderHermesIRGen.h"
 
+#include "hermes/WasmIRGen/WasmIRGen.h"
+
 #include <cassert>
 #include <cstring>
 
@@ -426,11 +428,81 @@ wabt::Result BinaryReaderHermesIRGen::OnFunctionName(
   return wabt::Result::Ok;
 }
 
+// --- Code section / Function body callbacks ---
+
+wabt::Result BinaryReaderHermesIRGen::BeginCodeSection(wabt::Offset size) {
+  // By the time the code section is reached, all module-level sections
+  // (type, import, function, table, memory, global, export, start, elem)
+  // have been parsed. Create the IR functions now.
+  if (irgen_)
+    irgen_->createFunctions();
+  return wabt::Result::Ok;
+}
+
+wabt::Result BinaryReaderHermesIRGen::BeginFunctionBody(
+    wabt::Index index,
+    wabt::Offset size) {
+  if (!irgen_)
+    return wabt::Result::Ok;
+
+  // wabt passes the full Wasm function index (num_func_imports + i),
+  // not the code-section-relative index.
+  currentBodyFuncIndex_ = index;
+  currentLocalTypes_.clear();
+  inFunctionBody_ = true;
+  return wabt::Result::Ok;
+}
+
+wabt::Result BinaryReaderHermesIRGen::OnLocalDeclCount(wabt::Index count) {
+  return wabt::Result::Ok;
+}
+
+wabt::Result BinaryReaderHermesIRGen::OnLocalDecl(
+    wabt::Index declIndex,
+    wabt::Index count,
+    wabt::Type type) {
+  if (!irgen_)
+    return wabt::Result::Ok;
+
+  WasmValType vt = convertType(type);
+  for (wabt::Index i = 0; i < count; ++i) {
+    currentLocalTypes_.push_back(vt);
+  }
+  return wabt::Result::Ok;
+}
+
+wabt::Result BinaryReaderHermesIRGen::EndLocalDecls() {
+  if (!irgen_)
+    return wabt::Result::Ok;
+
+  // All local declarations have been accumulated. Now begin the function
+  // in WasmIRGen, which creates AllocStackInsts for params and locals.
+  irgen_->beginFunction(currentBodyFuncIndex_, currentLocalTypes_);
+  return wabt::Result::Ok;
+}
+
+wabt::Result BinaryReaderHermesIRGen::EndFunctionBody(wabt::Index index) {
+  if (!irgen_) {
+    inFunctionBody_ = false;
+    return wabt::Result::Ok;
+  }
+
+  irgen_->endFunction();
+  inFunctionBody_ = false;
+  return wabt::Result::Ok;
+}
+
 // --- Init expression callbacks ---
 // These are called in the context of globals, element segments, and data
 // segments. We use initExprContext_ to route the values to the right place.
 
 wabt::Result BinaryReaderHermesIRGen::OnI32ConstExpr(uint32_t value) {
+  // In a function body, dispatch to WasmIRGen.
+  if (inFunctionBody_ && irgen_) {
+    irgen_->onI32Const(static_cast<int32_t>(value));
+    return wabt::Result::Ok;
+  }
+
   switch (initExprContext_) {
     case InitExprContext::Global: {
       assert(
@@ -467,6 +539,11 @@ wabt::Result BinaryReaderHermesIRGen::OnI32ConstExpr(uint32_t value) {
 }
 
 wabt::Result BinaryReaderHermesIRGen::OnI64ConstExpr(uint64_t value) {
+  if (inFunctionBody_ && irgen_) {
+    irgen_->onI64Const(static_cast<int64_t>(value));
+    return wabt::Result::Ok;
+  }
+
   if (initExprContext_ == InitExprContext::Global) {
     assert(
         currentInitExprIndex_ < moduleInfo_.globals.size() &&
@@ -479,6 +556,13 @@ wabt::Result BinaryReaderHermesIRGen::OnI64ConstExpr(uint64_t value) {
 }
 
 wabt::Result BinaryReaderHermesIRGen::OnF32ConstExpr(uint32_t valueBits) {
+  if (inFunctionBody_ && irgen_) {
+    float f;
+    memcpy(&f, &valueBits, sizeof(f));
+    irgen_->onF32Const(f);
+    return wabt::Result::Ok;
+  }
+
   if (initExprContext_ == InitExprContext::Global) {
     assert(
         currentInitExprIndex_ < moduleInfo_.globals.size() &&
@@ -493,6 +577,13 @@ wabt::Result BinaryReaderHermesIRGen::OnF32ConstExpr(uint32_t valueBits) {
 }
 
 wabt::Result BinaryReaderHermesIRGen::OnF64ConstExpr(uint64_t valueBits) {
+  if (inFunctionBody_ && irgen_) {
+    double d;
+    memcpy(&d, &valueBits, sizeof(d));
+    irgen_->onF64Const(d);
+    return wabt::Result::Ok;
+  }
+
   if (initExprContext_ == InitExprContext::Global) {
     assert(
         currentInitExprIndex_ < moduleInfo_.globals.size() &&
@@ -508,6 +599,10 @@ wabt::Result BinaryReaderHermesIRGen::OnF64ConstExpr(uint64_t valueBits) {
 
 wabt::Result BinaryReaderHermesIRGen::OnGlobalGetExpr(
     wabt::Index globalIndex) {
+  // In a function body, global.get is handled by a later step (K.1).
+  if (inFunctionBody_)
+    return wabt::Result::Ok;
+
   switch (initExprContext_) {
     case InitExprContext::Global: {
       assert(
@@ -544,6 +639,10 @@ wabt::Result BinaryReaderHermesIRGen::OnGlobalGetExpr(
 }
 
 wabt::Result BinaryReaderHermesIRGen::OnRefNullExpr(wabt::Type type) {
+  // In a function body, ref.null is handled by a later step.
+  if (inFunctionBody_)
+    return wabt::Result::Ok;
+
   if (initExprContext_ == InitExprContext::Global) {
     assert(
         currentInitExprIndex_ < moduleInfo_.globals.size() &&
@@ -555,6 +654,10 @@ wabt::Result BinaryReaderHermesIRGen::OnRefNullExpr(wabt::Type type) {
 }
 
 wabt::Result BinaryReaderHermesIRGen::OnRefFuncExpr(wabt::Index funcIndex) {
+  // In a function body, ref.func is handled by a later step.
+  if (inFunctionBody_)
+    return wabt::Result::Ok;
+
   switch (initExprContext_) {
     case InitExprContext::Global: {
       assert(
@@ -578,6 +681,32 @@ wabt::Result BinaryReaderHermesIRGen::OnRefFuncExpr(wabt::Index funcIndex) {
     case InitExprContext::None:
     case InitExprContext::DataSegment:
       break;
+  }
+  return wabt::Result::Ok;
+}
+
+// --- Local variable instruction callbacks ---
+
+wabt::Result BinaryReaderHermesIRGen::OnLocalGetExpr(
+    wabt::Index localIndex) {
+  if (inFunctionBody_ && irgen_) {
+    irgen_->onLocalGet(localIndex);
+  }
+  return wabt::Result::Ok;
+}
+
+wabt::Result BinaryReaderHermesIRGen::OnLocalSetExpr(
+    wabt::Index localIndex) {
+  if (inFunctionBody_ && irgen_) {
+    irgen_->onLocalSet(localIndex);
+  }
+  return wabt::Result::Ok;
+}
+
+wabt::Result BinaryReaderHermesIRGen::OnLocalTeeExpr(
+    wabt::Index localIndex) {
+  if (inFunctionBody_ && irgen_) {
+    irgen_->onLocalTee(localIndex);
   }
   return wabt::Result::Ok;
 }

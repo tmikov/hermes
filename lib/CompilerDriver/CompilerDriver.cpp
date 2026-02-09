@@ -2271,13 +2271,18 @@ CompileResult processWasmFile(std::unique_ptr<llvh::MemoryBuffer> fileBuf) {
   size_t size = fileBuf->getBufferSize();
 
   // Create a Module for the Wasm compiler to populate.
-  // For now we just call the stub, which returns an error.
   auto context = std::make_shared<Context>();
   Module M(context);
   std::string errorMsg;
   if (!compileWasmModule(data, size, M, errorMsg)) {
     llvh::errs() << "Error: " << errorMsg << '\n';
     return ParsingFailed;
+  }
+
+  // Support --dump-ir for Wasm modules.
+  if (cl::DumpTarget == DumpIR) {
+    M.dump();
+    return Success;
   }
 
   return Success;

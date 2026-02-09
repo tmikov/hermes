@@ -3,23 +3,23 @@
 ;; This source code is licensed under the MIT license found in the
 ;; LICENSE file in the root directory of this source tree.
 
-;; Test module with a table and element segments.
+;; Test module with a table and element segments compiles to IR.
 
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm
-;; RUN: %hermesc -emit-binary --wasm %t.wasm 2>&1 | %FileCheck %s
+;; RUN: %hermesc --wasm --dump-ir %t.wasm | %FileCheck %s
 
-;; CHECK: Wasm module parsed successfully.
-;; CHECK: Types: 2
-;; CHECK: Imports: 0
-;; CHECK: Functions: 3 (0 imported, 3 defined)
-;; CHECK: Tables: 1
-;; CHECK: Memories: 0
-;; CHECK: Globals: 0 (0 imported, 0 defined)
-;; CHECK: Exports: 1
-;; CHECK: Element segments: 1
-;; CHECK: Data segments: 0
-;; CHECK: Export: call_indirect (func 2)
+;; CHECK-LABEL: function wasm_func_0(): any
+;; CHECK:   ReturnInst 10
+;; CHECK:   function_end
+
+;; CHECK-LABEL: function wasm_func_1(): any
+;; CHECK:   ReturnInst 20
+;; CHECK:   function_end
+
+;; CHECK-LABEL: function wasm_func_2(p0: any): any
+;; CHECK:   AllocStackInst {{.*}} $local_0
+;; CHECK:   function_end
 
 (module
   ;; A function table with minimum size 3.
