@@ -80,6 +80,14 @@ bool compileWasmModule(
                  << exp.index << ")\n";
   }
 
+  // List function names from the name section.
+  for (uint32_t i = 0; i < moduleInfo.names.functionNames.size(); ++i) {
+    if (!moduleInfo.names.functionNames[i].empty()) {
+      llvh::outs() << "  Function " << i << " name: "
+                   << moduleInfo.names.functionNames[i] << "\n";
+    }
+  }
+
   // TODO: Drive WasmIRGen and BCGen here in future steps.
   return true;
 }
