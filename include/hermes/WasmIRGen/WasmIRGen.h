@@ -139,6 +139,15 @@ class WasmIRGen {
   /// No-op instruction (nothing is emitted).
   void onNop();
 
+  // --- Unsupported opcode handling (D.13) ---
+
+  /// Emit a warning for an unsupported opcode. Pops \p numInputs values
+  /// from the stack and pushes \p numOutputs placeholder values.
+  void warnUnsupported(
+      const char *opcodeName,
+      uint32_t numInputs,
+      uint32_t numOutputs);
+
   /// \return the array of IR Functions created by createFunctions(), indexed
   ///   by Wasm function index.
   llvh::ArrayRef<Function *> getIRFunctions() const {

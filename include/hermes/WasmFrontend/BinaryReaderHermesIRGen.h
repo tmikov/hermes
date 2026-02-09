@@ -205,8 +205,25 @@ class BinaryReaderHermesIRGen : public wabt::BinaryReaderNop {
       wabt::Index resultCount,
       wabt::Type *resultTypes) override;
   wabt::Result OnCallExpr(wabt::Index funcIndex) override;
+  wabt::Result OnCallIndirectExpr(
+      wabt::Index sigIndex,
+      wabt::Index tableIndex) override;
   wabt::Result OnUnreachableExpr() override;
   wabt::Result OnNopExpr() override;
+  wabt::Result OnGlobalSetExpr(wabt::Index globalIndex) override;
+  wabt::Result OnLoadExpr(
+      wabt::Opcode opcode,
+      wabt::Index memidx,
+      wabt::Address alignmentLog2,
+      wabt::Address offset) override;
+  wabt::Result OnStoreExpr(
+      wabt::Opcode opcode,
+      wabt::Index memidx,
+      wabt::Address alignmentLog2,
+      wabt::Address offset) override;
+  wabt::Result OnMemorySizeExpr(wabt::Index memidx) override;
+  wabt::Result OnMemoryGrowExpr(wabt::Index memidx) override;
+  wabt::Result OnUnaryExpr(wabt::Opcode opcode) override;
 
  private:
   /// Convert a wabt Type to our WasmValType.

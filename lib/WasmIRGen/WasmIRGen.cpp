@@ -16,6 +16,7 @@
 #include "llvh/ADT/DenseMap.h"
 #include "llvh/ADT/SmallVector.h"
 #include "llvh/ADT/Twine.h"
+#include "llvh/Support/raw_ostream.h"
 
 namespace hermes {
 namespace wasm {
@@ -898,6 +899,29 @@ void WasmIRGen::onUnreachable() {
 
 void WasmIRGen::onNop() {
   // nop does nothing.
+}
+
+// --- Unsupported opcode handling (D.13) ---
+
+void WasmIRGen::warnUnsupported(
+    const char *opcodeName,
+    uint32_t numInputs,
+    uint32_t numOutputs) {
+  if (unreachable_)
+    return;
+
+  llvh::errs() << "warning: unsupported Wasm opcode: " << opcodeName << "\n";
+
+  // Pop the expected number of inputs.
+  for (uint32_t i = 0; i < numInputs; ++i) {
+    if (!valueStack_.empty())
+      pop();
+  }
+
+  // Push placeholder undefined values for outputs.
+  for (uint32_t i = 0; i < numOutputs; ++i) {
+    push(builder_.getLiteralUndefined());
+  }
 }
 
 // --- Helper methods ---

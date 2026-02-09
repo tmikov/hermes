@@ -27,7 +27,7 @@
 ;; CHECK:   AllocStackInst {{.*}} $local_0
 ;; CHECK:   BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK:   PhiInst (:any) %{{[0-9]+}}: any, %BB0
+;; CHECK:   PhiInst (:undefined) undefined: undefined, %BB0
 ;; CHECK:   ReturnInst
 ;; CHECK:   function_end
 
