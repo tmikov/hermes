@@ -506,6 +506,10 @@ if (NOT (ANDROID_LINUX_PERF_PATH STREQUAL ""))
   add_definitions(-DANDROID_LINUX_PERF_PATH="${ANDROID_LINUX_PERF_PATH}")
 endif()
 
+if (HERMES_ENABLE_WASM)
+  add_definitions(-DHERMES_ENABLE_WASM)
+endif()
+
 if (HERMES_ENABLE_INTL)
   add_definitions(-DHERMES_ENABLE_INTL)
 endif()

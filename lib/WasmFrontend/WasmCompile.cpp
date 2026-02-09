@@ -5,6 +5,17 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-// Placeholder — implementation added in step C.2.
-// Verify wabt integration by including the binary reader header.
-#include "wabt/binary-reader.h"
+#include "hermes/WasmFrontend/WasmCompile.h"
+
+namespace hermes {
+
+bool compileWasmModule(
+    const uint8_t *buffer,
+    size_t size,
+    Module &M,
+    std::string &errorMsg) {
+  errorMsg = "Wasm compilation not yet implemented";
+  return false;
+}
+
+} // namespace hermes

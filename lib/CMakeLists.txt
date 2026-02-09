@@ -123,6 +123,13 @@ target_link_libraries(hermescompiler PUBLIC
   hermesSupport_obj
   zip_obj
   )
+if(HERMES_ENABLE_WASM)
+  target_link_libraries(hermescompiler PUBLIC
+    hermesWasmFrontend_obj
+    hermesWasmIRGen_obj
+    wabt
+    )
+endif()
 
 add_library(hermesvm_a STATIC)
 target_link_libraries(hermesvm_a PUBLIC

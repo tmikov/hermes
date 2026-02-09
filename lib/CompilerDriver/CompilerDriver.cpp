@@ -57,6 +57,10 @@
 
 #include "zip/src/zip.h"
 
+#ifdef HERMES_ENABLE_WASM
+#include "hermes/WasmFrontend/WasmCompile.h"
+#endif
+
 #include <sstream>
 
 #define DEBUG_TYPE "hermes"
@@ -304,6 +308,12 @@ static opt<bool> unused_HermesParser(
 static opt<bool> BytecodeMode(
     "b",
     desc("Treat the input as executable bytecode"));
+
+#ifdef HERMES_ENABLE_WASM
+static opt<bool> WasmMode(
+    "wasm",
+    desc("Treat the input as a WebAssembly binary module"));
+#endif
 
 static opt<bool> NonStrictMode(
     "non-strict",
@@ -943,6 +953,14 @@ void setFlagDefaults() {
     cl::BytecodeMode = true;
   }
 
+#ifdef HERMES_ENABLE_WASM
+  // Auto-detect .wasm extension.
+  if (!cl::WasmMode && cl::InputFilenames.size() == 1 &&
+      llvh::sys::path::extension(cl::InputFilenames[0]) == ".wasm") {
+    cl::WasmMode = true;
+  }
+#endif
+
   if (cl::LazyCompilation && cl::OptimizationLevel > cl::OptLevel::Og) {
     cl::OptimizationLevel = cl::OptLevel::Og;
   }
@@ -964,6 +982,13 @@ bool validateFlags() {
       errored = true;
     }
   };
+
+#ifdef HERMES_ENABLE_WASM
+  // Wasm mode is mutually exclusive with bytecode mode and most other flags.
+  if (cl::WasmMode && cl::BytecodeMode) {
+    err("Error! Cannot use both -wasm and -b");
+  }
+#endif
 
   // Validate strict vs non strict mode.
   if (cl::NonStrictMode && cl::StrictMode) {
@@ -2239,6 +2264,26 @@ void printHermesVersion(
   }
 }
 
+#ifdef HERMES_ENABLE_WASM
+/// Process a Wasm binary file: read it and invoke the Wasm compilation pipeline.
+CompileResult processWasmFile(std::unique_ptr<llvh::MemoryBuffer> fileBuf) {
+  auto *data = reinterpret_cast<const uint8_t *>(fileBuf->getBufferStart());
+  size_t size = fileBuf->getBufferSize();
+
+  // Create a Module for the Wasm compiler to populate.
+  // For now we just call the stub, which returns an error.
+  auto context = std::make_shared<Context>();
+  Module M(context);
+  std::string errorMsg;
+  if (!compileWasmModule(data, size, M, errorMsg)) {
+    llvh::errs() << "Error: " << errorMsg << '\n';
+    return ParsingFailed;
+  }
+
+  return Success;
+}
+#endif
+
 } // namespace
 
 namespace hermes {
@@ -2335,7 +2380,18 @@ CompileResult compileFromCommandLineOptions() {
         fileBufs.size() == 1 && fileBufs[0].size() == 1 &&
         "validateFlags() should enforce exactly one bytecode input file");
     return processBytecodeFile(std::move(fileBufs[0][0].file));
-  } else {
+  }
+
+#ifdef HERMES_ENABLE_WASM
+  if (cl::WasmMode) {
+    assert(
+        fileBufs.size() == 1 && fileBufs[0].size() == 1 &&
+        "validateFlags() should enforce exactly one wasm input file");
+    return processWasmFile(std::move(fileBufs[0][0].file));
+  }
+#endif
+
+  {
     std::shared_ptr<Context> context =
         createContext(std::move(resolutionTable), std::move(segments));
     return processSourceFiles(context, std::move(fileBufs));
