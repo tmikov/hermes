@@ -157,6 +157,10 @@ PRIVATE_BUILTIN(functionPrototypeCall)
 // Wasm helper builtins. Called by Wasm-generated IR for operations that have
 // no direct JS/asm.js equivalent.
 PRIVATE_BUILTIN(wasmTrap)
+PRIVATE_BUILTIN(wasmI32DivS)
+PRIVATE_BUILTIN(wasmI32DivU)
+PRIVATE_BUILTIN(wasmI32RemS)
+PRIVATE_BUILTIN(wasmI32RemU)
 
 JS_BUILTIN(spawnAsync)
 MARK_FIRST_JS_BUILTIN(spawnAsync)

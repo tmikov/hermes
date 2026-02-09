@@ -757,18 +757,18 @@ wabt::Result BinaryReaderHermesIRGen::OnBinaryExpr(wabt::Opcode opcode) {
     case wabt::Opcode::I32ShrU:
       irgen_->onI32ShrU();
       break;
-    // --- i32 binary ops not yet implemented ---
+    // --- i32 trapping division/remainder (F.2) ---
     case wabt::Opcode::I32DivS:
-      irgen_->warnUnsupported("i32.div_s", 2, 1);
+      irgen_->onI32DivS();
       break;
     case wabt::Opcode::I32DivU:
-      irgen_->warnUnsupported("i32.div_u", 2, 1);
+      irgen_->onI32DivU();
       break;
     case wabt::Opcode::I32RemS:
-      irgen_->warnUnsupported("i32.rem_s", 2, 1);
+      irgen_->onI32RemS();
       break;
     case wabt::Opcode::I32RemU:
-      irgen_->warnUnsupported("i32.rem_u", 2, 1);
+      irgen_->onI32RemU();
       break;
     case wabt::Opcode::I32Rotl:
       irgen_->warnUnsupported("i32.rotl", 2, 1);

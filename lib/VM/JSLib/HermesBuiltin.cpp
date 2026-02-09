@@ -19,6 +19,8 @@
 #include "hermes/VM/StackFrame-inline.h"
 #include "hermes/VM/StringView.h"
 
+#include "hermes/Support/Conversions.h"
+
 #include <random>
 
 namespace hermes {
@@ -211,6 +213,57 @@ CallResult<HermesValue> hermesBuiltinThrowReferenceError(
 /// Takes no meaningful arguments — the trap message is fixed.
 CallResult<HermesValue> wasmTrap(void *, Runtime &runtime) {
   return runtime.raiseError("unreachable executed");
+}
+
+/// Wasm i32.div_s: signed division with trapping.
+/// Traps on division by zero or INT32_MIN / -1 (overflow).
+CallResult<HermesValue> wasmI32DivS(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  int32_t a = truncateToInt32(args.getArg(0).getNumber());
+  int32_t b = truncateToInt32(args.getArg(1).getNumber());
+  if (LLVM_UNLIKELY(b == 0))
+    return runtime.raiseError("integer divide by zero");
+  if (LLVM_UNLIKELY(a == INT32_MIN && b == -1))
+    return runtime.raiseError("integer overflow");
+  return HermesValue::encodeTrustedNumberValue(a / b);
+}
+
+/// Wasm i32.div_u: unsigned division with trapping.
+/// Traps on division by zero.
+CallResult<HermesValue> wasmI32DivU(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  uint32_t a = static_cast<uint32_t>(truncateToInt32(args.getArg(0).getNumber()));
+  uint32_t b = static_cast<uint32_t>(truncateToInt32(args.getArg(1).getNumber()));
+  if (LLVM_UNLIKELY(b == 0))
+    return runtime.raiseError("integer divide by zero");
+  return HermesValue::encodeTrustedNumberValue(a / b);
+}
+
+/// Wasm i32.rem_s: signed remainder with trapping.
+/// Traps on division by zero. INT32_MIN % -1 = 0 (not a trap).
+CallResult<HermesValue> wasmI32RemS(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  int32_t a = truncateToInt32(args.getArg(0).getNumber());
+  int32_t b = truncateToInt32(args.getArg(1).getNumber());
+  if (LLVM_UNLIKELY(b == 0))
+    return runtime.raiseError("integer divide by zero");
+  // Special case: INT32_MIN % -1 = 0.
+  // Must handle explicitly because on x86 the idiv instruction traps on
+  // INT32_MIN / -1 (which is computed together with the remainder).
+  if (LLVM_UNLIKELY(a == INT32_MIN && b == -1))
+    return HermesValue::encodeTrustedNumberValue(0);
+  return HermesValue::encodeTrustedNumberValue(a % b);
+}
+
+/// Wasm i32.rem_u: unsigned remainder with trapping.
+/// Traps on division by zero.
+CallResult<HermesValue> wasmI32RemU(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  uint32_t a = static_cast<uint32_t>(truncateToInt32(args.getArg(0).getNumber()));
+  uint32_t b = static_cast<uint32_t>(truncateToInt32(args.getArg(1).getNumber()));
+  if (LLVM_UNLIKELY(b == 0))
+    return runtime.raiseError("integer divide by zero");
+  return HermesValue::encodeTrustedNumberValue(a % b);
 }
 
 namespace {
@@ -1025,6 +1078,14 @@ void createHermesBuiltins(Runtime &runtime) {
 
   // Wasm helper builtins.
   defineInternMethod(B::HermesBuiltin_wasmTrap, P::wasmTrap, wasmTrap, 0);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI32DivS, P::wasmI32DivS, wasmI32DivS, 2);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI32DivU, P::wasmI32DivU, wasmI32DivU, 2);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI32RemS, P::wasmI32RemS, wasmI32RemS, 2);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI32RemU, P::wasmI32RemU, wasmI32RemU, 2);
 }
 
 } // namespace vm

@@ -15,5 +15,25 @@ Instruction *WasmHelpers::emitTrap() {
       BuiltinMethod::HermesBuiltin_wasmTrap, {});
 }
 
+Instruction *WasmHelpers::emitI32DivS(Value *a, Value *b) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI32DivS, {a, b});
+}
+
+Instruction *WasmHelpers::emitI32DivU(Value *a, Value *b) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI32DivU, {a, b});
+}
+
+Instruction *WasmHelpers::emitI32RemS(Value *a, Value *b) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI32RemS, {a, b});
+}
+
+Instruction *WasmHelpers::emitI32RemU(Value *a, Value *b) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI32RemU, {a, b});
+}
+
 } // namespace wasm
 } // namespace hermes

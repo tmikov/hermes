@@ -480,6 +480,137 @@ TEST(WasmIRGenTest, I32ShiftOps) {
   EXPECT_TRUE(foundShrU);
 }
 
+// --- i32 trapping division tests (F.2) ---
+
+TEST(WasmIRGenTest, I32DivS) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::I32, WasmValType::I32}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  std::vector<WasmValType> locals;
+  irgen.beginFunction(0, locals);
+  irgen.onLocalGet(0);
+  irgen.onLocalGet(1);
+  irgen.onI32DivS();
+  irgen.endFunction();
+
+  // Find the CallBuiltinInst in the entry block.
+  auto &blocks = irgen.getIRFunctions()[0]->getBasicBlockList();
+  bool foundCallBuiltin = false;
+  for (auto &bb : blocks) {
+    for (auto &inst : bb) {
+      if (auto *cbi = llvh::dyn_cast<CallBuiltinInst>(&inst)) {
+        if (cbi->getBuiltinIndex() ==
+            BuiltinMethod::HermesBuiltin_wasmI32DivS) {
+          foundCallBuiltin = true;
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(foundCallBuiltin);
+}
+
+TEST(WasmIRGenTest, I32DivU) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::I32, WasmValType::I32}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  std::vector<WasmValType> locals;
+  irgen.beginFunction(0, locals);
+  irgen.onLocalGet(0);
+  irgen.onLocalGet(1);
+  irgen.onI32DivU();
+  irgen.endFunction();
+
+  auto &blocks = irgen.getIRFunctions()[0]->getBasicBlockList();
+  bool foundCallBuiltin = false;
+  for (auto &bb : blocks) {
+    for (auto &inst : bb) {
+      if (auto *cbi = llvh::dyn_cast<CallBuiltinInst>(&inst)) {
+        if (cbi->getBuiltinIndex() ==
+            BuiltinMethod::HermesBuiltin_wasmI32DivU) {
+          foundCallBuiltin = true;
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(foundCallBuiltin);
+}
+
+TEST(WasmIRGenTest, I32RemS) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::I32, WasmValType::I32}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  std::vector<WasmValType> locals;
+  irgen.beginFunction(0, locals);
+  irgen.onLocalGet(0);
+  irgen.onLocalGet(1);
+  irgen.onI32RemS();
+  irgen.endFunction();
+
+  auto &blocks = irgen.getIRFunctions()[0]->getBasicBlockList();
+  bool foundCallBuiltin = false;
+  for (auto &bb : blocks) {
+    for (auto &inst : bb) {
+      if (auto *cbi = llvh::dyn_cast<CallBuiltinInst>(&inst)) {
+        if (cbi->getBuiltinIndex() ==
+            BuiltinMethod::HermesBuiltin_wasmI32RemS) {
+          foundCallBuiltin = true;
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(foundCallBuiltin);
+}
+
+TEST(WasmIRGenTest, I32RemU) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::I32, WasmValType::I32}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  std::vector<WasmValType> locals;
+  irgen.beginFunction(0, locals);
+  irgen.onLocalGet(0);
+  irgen.onLocalGet(1);
+  irgen.onI32RemU();
+  irgen.endFunction();
+
+  auto &blocks = irgen.getIRFunctions()[0]->getBasicBlockList();
+  bool foundCallBuiltin = false;
+  for (auto &bb : blocks) {
+    for (auto &inst : bb) {
+      if (auto *cbi = llvh::dyn_cast<CallBuiltinInst>(&inst)) {
+        if (cbi->getBuiltinIndex() ==
+            BuiltinMethod::HermesBuiltin_wasmI32RemU) {
+          foundCallBuiltin = true;
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(foundCallBuiltin);
+}
+
 // --- i32 comparison tests (D.4) ---
 
 TEST(WasmIRGenTest, I32EqNe) {

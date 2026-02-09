@@ -11,7 +11,7 @@
 ;; RUN: %wat2wasm %s -o %t.wasm
 ;; RUN: %hermesc --wasm --dump-ir -O0 %t.wasm 2>&1 | %FileCheck %s
 
-;; CHECK: warning: unsupported Wasm opcode: i32.div_s
+;; CHECK: warning: unsupported Wasm opcode: i32.rotl
 ;; CHECK: warning: unsupported Wasm opcode: i32.clz
 ;; CHECK: warning: unsupported Wasm opcode: global.get
 ;; CHECK: warning: unsupported Wasm opcode: global.set
@@ -20,10 +20,10 @@
   (global $g (mut i32) (i32.const 0))
 
   ;; Exercise unsupported binary op.
-  (func $div_test (param i32 i32) (result i32)
+  (func $rotl_test (param i32 i32) (result i32)
     local.get 0
     local.get 1
-    i32.div_s
+    i32.rotl
   )
 
   ;; Exercise unsupported unary op.

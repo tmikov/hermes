@@ -80,6 +80,13 @@ class WasmIRGen {
   void onI32ShrS();
   void onI32ShrU();
 
+  // --- i32 trapping division (F.2) ---
+
+  void onI32DivS();
+  void onI32DivU();
+  void onI32RemS();
+  void onI32RemU();
+
   // --- Return and drop (D.5) ---
 
   /// Explicit return from the current function.

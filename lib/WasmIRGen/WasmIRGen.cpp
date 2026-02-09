@@ -387,6 +387,40 @@ void WasmIRGen::onI32ShrU() {
       lhs, rhs, ValueKind::BinaryUnsignedRightShiftInstKind));
 }
 
+// --- i32 trapping division (F.2) ---
+
+void WasmIRGen::onI32DivS() {
+  if (unreachable_)
+    return;
+  Value *rhs = pop();
+  Value *lhs = pop();
+  push(helpers_.emitI32DivS(lhs, rhs));
+}
+
+void WasmIRGen::onI32DivU() {
+  if (unreachable_)
+    return;
+  Value *rhs = pop();
+  Value *lhs = pop();
+  push(helpers_.emitI32DivU(lhs, rhs));
+}
+
+void WasmIRGen::onI32RemS() {
+  if (unreachable_)
+    return;
+  Value *rhs = pop();
+  Value *lhs = pop();
+  push(helpers_.emitI32RemS(lhs, rhs));
+}
+
+void WasmIRGen::onI32RemU() {
+  if (unreachable_)
+    return;
+  Value *rhs = pop();
+  Value *lhs = pop();
+  push(helpers_.emitI32RemU(lhs, rhs));
+}
+
 // --- i32 comparisons (D.4) ---
 
 void WasmIRGen::onI32Eq() {

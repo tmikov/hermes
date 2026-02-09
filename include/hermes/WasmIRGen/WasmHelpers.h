@@ -33,6 +33,19 @@ class WasmHelpers {
   /// instruction.
   Instruction *emitTrap();
 
+  /// Emit i32 signed division with trapping on division by zero or overflow.
+  /// \return the CallBuiltinInst for the result.
+  Instruction *emitI32DivS(Value *a, Value *b);
+
+  /// Emit i32 unsigned division with trapping on division by zero.
+  Instruction *emitI32DivU(Value *a, Value *b);
+
+  /// Emit i32 signed remainder with trapping on division by zero.
+  Instruction *emitI32RemS(Value *a, Value *b);
+
+  /// Emit i32 unsigned remainder with trapping on division by zero.
+  Instruction *emitI32RemU(Value *a, Value *b);
+
  private:
   IRBuilder &builder_;
 };
