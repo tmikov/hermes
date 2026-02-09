@@ -8,14 +8,14 @@
 
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm
-;; RUN: %hermesc --wasm --dump-ir %t.wasm | %FileCheck %s
+;; RUN: %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s
 
 ;; CHECK-LABEL: function wasm_func_0(): any
 ;; CHECK-NEXT: %BB0:
-;; CHECK-NEXT:        BranchInst %BB1
+;; CHECK:              BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %1 = PhiInst (:number) 42: number, %BB0
-;; CHECK-NEXT:        ReturnInst %1: number
+;; CHECK-NEXT:   %3 = PhiInst (:number) 42: number, %BB0
+;; CHECK-NEXT:        ReturnInst %3: number
 ;; CHECK-NEXT: function_end
 
 (module

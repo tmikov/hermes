@@ -30,7 +30,8 @@ class WasmIRGen {
  public:
   WasmIRGen(Module &M, WasmModuleInfo &moduleInfo);
 
-  /// Create Hermes IR Functions for all Wasm functions (imported + defined).
+  /// Create Hermes IR Functions for all Wasm functions (imported + defined),
+  /// plus a top-level wrapper function that serves as the module entry point.
   /// Called once after module-level parsing is complete, before any function
   /// bodies are translated.
   void createFunctions();
@@ -162,6 +163,12 @@ class WasmIRGen {
   /// Includes both imported and defined functions.
   std::vector<Function *> irFunctions_;
 
+  /// One VariableScope per Wasm function, indexed by Wasm function index.
+  std::vector<VariableScope *> irFunctionScopes_;
+
+  /// The VariableScope for the top-level function.
+  VariableScope *topLevelVS_ = nullptr;
+
   // --- Per-function state (valid between beginFunction/endFunction) ---
 
   /// The current Hermes IR function being built.
@@ -175,6 +182,13 @@ class WasmIRGen {
 
   /// AllocStackInst for each Wasm local (params + declared locals).
   std::vector<AllocStackInst *> locals_;
+
+  /// The CreateScopeInst for the current function.
+  CreateScopeInst *currentScope_ = nullptr;
+
+  /// The parent (top-level) scope instruction. Used to create closures for
+  /// calls to other Wasm functions (which are all children of topLevelVS_).
+  GetParentScopeInst *parentScopeInst_ = nullptr;
 
   /// Whether we are in unreachable code (after an unconditional br, return,
   /// or unreachable). In unreachable mode, instructions are no-ops until

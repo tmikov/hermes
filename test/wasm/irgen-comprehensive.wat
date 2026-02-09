@@ -20,18 +20,18 @@
 
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm
-;; RUN: %hermesc --wasm --dump-ir %t.wasm 2>&1 | %FileCheck %s
+;; RUN: %hermesc --wasm --dump-ir -O0 %t.wasm 2>&1 | %FileCheck %s
 
 ;; --- Test 1: Constants and locals ---
 ;; CHECK-LABEL: function wasm_func_0(): any
-;; CHECK:   %0 = AllocStackInst (:any) $local_0
-;; CHECK:   StoreStackInst 0: number, %0
-;; CHECK:   StoreStackInst 42: number, %0
-;; CHECK:   %3 = LoadStackInst (:any) %0
+;; CHECK:   %2 = AllocStackInst (:any) $local_0
+;; CHECK:   StoreStackInst 0: number, %2
+;; CHECK:   StoreStackInst 42: number, %2
+;; CHECK:   %5 = LoadStackInst (:any) %2
 ;; CHECK:   BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK:   %5 = PhiInst (:any) %3: any, %BB0
-;; CHECK:   ReturnInst %5
+;; CHECK:   %7 = PhiInst (:any) %5: any, %BB0
+;; CHECK:   ReturnInst %7
 ;; CHECK:   function_end
 (func $constants_and_locals (result i32) (local i32)
   i32.const 42
@@ -197,7 +197,8 @@
 
 ;; --- Test 11: Function call ---
 ;; CHECK-LABEL: function wasm_func_10(): any
-;; CHECK:   CallInst (:any) %wasm_func_0(): functionCode
+;; CHECK:   CreateFunctionInst (:object) {{.*}} %wasm_func_0(): functionCode
+;; CHECK:   CallInst (:any)
 ;; CHECK:   BranchInst %BB1
 ;; CHECK:   function_end
 (func $call_test (result i32)
@@ -208,7 +209,7 @@
 ;; CHECK-LABEL: function wasm_func_11(): any
 ;; CHECK: %BB0:
 ;; CHECK:   ReturnInst 42: number
-;; CHECK: %BB2:
+;; CHECK: %BB1:
 ;; CHECK:   function_end
 (func $return_nop (result i32)
   nop
@@ -220,7 +221,7 @@
 ;; CHECK-LABEL: function wasm_func_12(): any
 ;; CHECK: %BB0:
 ;; CHECK:   UnreachableInst
-;; CHECK: %BB2:
+;; CHECK: %BB1:
 ;; CHECK:   function_end
 (func $unreachable_test
   unreachable

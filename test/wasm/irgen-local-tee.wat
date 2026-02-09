@@ -8,19 +8,19 @@
 
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm
-;; RUN: %hermesc --wasm --dump-ir %t.wasm | %FileCheck %s
+;; RUN: %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s
 
 ;; CHECK-LABEL: function wasm_func_0(p0: any): any
 ;; CHECK-NEXT: %BB0:
-;; CHECK-NEXT:   %0 = AllocStackInst (:any) $local_0: any
-;; CHECK-NEXT:   %1 = LoadParamInst (:any) %p0: any
-;; CHECK-NEXT:        StoreStackInst %1: any, %0: any
-;; CHECK-NEXT:   %3 = LoadStackInst (:any) %0: any
-;; CHECK-NEXT:        StoreStackInst %3: any, %0: any
+;; CHECK:        %2 = AllocStackInst (:any) $local_0: any
+;; CHECK-NEXT:   %3 = LoadParamInst (:any) %p0: any
+;; CHECK-NEXT:        StoreStackInst %3: any, %2: any
+;; CHECK-NEXT:   %5 = LoadStackInst (:any) %2: any
+;; CHECK-NEXT:        StoreStackInst %5: any, %2: any
 ;; CHECK-NEXT:        BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %6 = PhiInst (:any) %3: any, %BB0
-;; CHECK-NEXT:        ReturnInst %6: any
+;; CHECK-NEXT:   %8 = PhiInst (:any) %5: any, %BB0
+;; CHECK-NEXT:        ReturnInst %8: any
 ;; CHECK-NEXT: function_end
 
 (module

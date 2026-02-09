@@ -7,7 +7,7 @@
 
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm
-;; RUN: %hermesc --wasm --dump-ir %t.wasm | %FileCheck %s
+;; RUN: %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s
 
 ;; Test 1: select with constant true condition → 42
 ;; BB0=entry, BB1=exit, BB2=trueBlock, BB3=falseBlock, BB4=mergeBlock

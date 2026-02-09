@@ -7,14 +7,14 @@
 
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm
-;; RUN: %hermesc --wasm --dump-ir %t.wasm | %FileCheck %s
+;; RUN: %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s
 
 ;; Test 1: Simple loop that falls through immediately (no br).
 ;; Entry branches to loop header, header falls through to end block,
 ;; end block branches to function exit.
 ;; CHECK-LABEL: function wasm_func_0(): any
 ;; CHECK: %BB0:
-;; CHECK-NEXT:        BranchInst %BB2
+;; CHECK:              BranchInst %BB2
 ;; CHECK: %BB1:
 ;; CHECK-NEXT:        ReturnInst undefined: undefined
 ;; CHECK: %BB2:
@@ -28,7 +28,7 @@
 ;; the dead block after br are unreachable.
 ;; CHECK-LABEL: function wasm_func_1(): any
 ;; CHECK: %BB0:
-;; CHECK-NEXT:        BranchInst %BB2
+;; CHECK:              BranchInst %BB2
 ;; CHECK: %BB1:
 ;; CHECK-NEXT:        ReturnInst undefined: undefined
 ;; CHECK: %BB2:
@@ -56,14 +56,14 @@
 ;; feeds the function exit phi.
 ;; CHECK-LABEL: function wasm_func_3(): any
 ;; CHECK: %BB0:
-;; CHECK-NEXT:        BranchInst %BB2
+;; CHECK:              BranchInst %BB2
 ;; CHECK: %BB1:
-;; CHECK-NEXT:   %1 = PhiInst (:number) %4: number, %BB3
-;; CHECK-NEXT:        ReturnInst %1: number
+;; CHECK-NEXT:   %3 = PhiInst (:number) %6: number, %BB3
+;; CHECK-NEXT:        ReturnInst %3: number
 ;; CHECK: %BB2:
 ;; CHECK-NEXT:        BranchInst %BB3
 ;; CHECK: %BB3:
-;; CHECK-NEXT:   %4 = PhiInst (:number) 99: number, %BB2
+;; CHECK-NEXT:   %6 = PhiInst (:number) 99: number, %BB2
 ;; CHECK-NEXT:        BranchInst %BB1
 ;; CHECK:   function_end
 
@@ -72,12 +72,12 @@
 ;; "i32.const 0" are unreachable dead code.
 ;; CHECK-LABEL: function wasm_func_4(): any
 ;; CHECK: %BB0:
-;; CHECK-NEXT:        BranchInst %BB3
+;; CHECK:              BranchInst %BB3
 ;; CHECK: %BB1:
-;; CHECK-NEXT:   %1 = PhiInst (:number) %3: number, %BB2
-;; CHECK-NEXT:        ReturnInst %1: number
+;; CHECK-NEXT:   %3 = PhiInst (:number) %5: number, %BB2
+;; CHECK-NEXT:        ReturnInst %3: number
 ;; CHECK: %BB2:
-;; CHECK-NEXT:   %3 = PhiInst (:number) 77: number, %BB3
+;; CHECK-NEXT:   %5 = PhiInst (:number) 77: number, %BB3
 ;; CHECK-NEXT:        BranchInst %BB1
 ;; CHECK: %BB3:
 ;; CHECK-NEXT:        BranchInst %BB2

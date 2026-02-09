@@ -25,8 +25,18 @@ WasmIRGen::WasmIRGen(Module &M, WasmModuleInfo &moduleInfo)
     : moduleInfo_(moduleInfo), builder_(&M) {}
 
 void WasmIRGen::createFunctions() {
+  // Create the top-level function first (must be before other functions).
+  auto *topLevel = builder_.createTopLevelFunction(
+      "global", true /* strictMode */);
+  topLevel->setExpectedParamCountIncludingThis(1); // just "this"
+
+  // Create a VariableScope for the top-level function (no parent).
+  topLevelVS_ = builder_.createVariableScope(nullptr);
+
+  // Create all Wasm functions.
   uint32_t totalFuncs = moduleInfo_.totalFunctionCount();
   irFunctions_.resize(totalFuncs, nullptr);
+  irFunctionScopes_.resize(totalFuncs, nullptr);
 
   for (uint32_t i = 0; i < totalFuncs; ++i) {
     const WasmFuncType &funcType = moduleInfo_.getFunctionType(i);
@@ -46,6 +56,9 @@ void WasmIRGen::createFunctions() {
         Function::DefinitionKind::ES5Function,
         true /* strictMode */);
 
+    // Create a VariableScope for this function (parent = top-level scope).
+    irFunctionScopes_[i] = builder_.createVariableScope(topLevelVS_);
+
     // Add a "this" parameter (required by Hermes calling convention).
     builder_.createJSThisParam(func);
 
@@ -55,6 +68,9 @@ void WasmIRGen::createFunctions() {
           func, ("p" + llvh::Twine(p)).str());
     }
 
+    // Set the expected param count (including "this").
+    func->setExpectedParamCountIncludingThis(funcType.params.size() + 1);
+
     // Create a single entry basic block with ReturnInst(undefined).
     auto *entry = builder_.createBasicBlock(func);
     builder_.setInsertionBlock(entry);
@@ -62,6 +78,31 @@ void WasmIRGen::createFunctions() {
 
     irFunctions_[i] = func;
   }
+
+  // Populate the top-level function body.
+  // It calls the Wasm start function (if present) and returns undefined.
+  auto *tlEntry = builder_.createBasicBlock(topLevel);
+  builder_.setInsertionBlock(tlEntry);
+
+  // Create a scope for the top-level function.
+  auto *tlScope = builder_.createCreateScopeInst(
+      topLevelVS_, builder_.getEmptySentinel());
+
+  // Call the start function if specified.
+  if (moduleInfo_.startFunction.has_value()) {
+    uint32_t startIdx = *moduleInfo_.startFunction;
+    if (startIdx < irFunctions_.size()) {
+      auto *closure = builder_.createCreateFunctionInst(
+          tlScope, irFunctions_[startIdx]);
+      builder_.createCallInst(
+          closure,
+          /* newTarget */ builder_.getLiteralUndefined(),
+          /* thisValue */ builder_.getLiteralUndefined(),
+          {});
+    }
+  }
+
+  builder_.createReturnInst(builder_.getLiteralUndefined());
 }
 
 void WasmIRGen::beginFunction(
@@ -90,6 +131,19 @@ void WasmIRGen::beginFunction(
     entryBB.back().eraseFromParent();
   }
   builder_.setInsertionBlock(&entryBB);
+
+  // Get the parent (top-level) scope. All Wasm functions are flat children
+  // of the top-level scope, so GetParentScopeInst resolves to topLevelVS_.
+  auto *parentScope = builder_.createGetParentScopeInst(
+      topLevelVS_, currentFunc_->getParentScopeParam());
+
+  // Create a scope for this function.
+  currentScope_ = builder_.createCreateScopeInst(
+      irFunctionScopes_[funcIndex], parentScope);
+
+  // Store the parent scope for use in CreateFunctionInst (to create closures
+  // for calls to other Wasm functions, which are also children of topLevelVS_).
+  parentScopeInst_ = parentScope;
 
   // Create AllocStackInst for each parameter.
   uint32_t numParams = funcType.params.size();
@@ -176,7 +230,22 @@ void WasmIRGen::endFunction() {
     }
   }
 
+  // Remove dead blocks that were created after unconditional branches/returns
+  // but never received instructions. The BCGen verifier requires every block
+  // to be reachable and have a terminator.
+  llvh::SmallVector<BasicBlock *, 4> deadBlocks;
+  for (auto &BB : currentFunc_->getBasicBlockList()) {
+    if (BB.empty() || !llvh::isa<TerminatorInst>(&BB.back())) {
+      deadBlocks.push_back(&BB);
+    }
+  }
+  for (auto *BB : deadBlocks) {
+    BB->eraseFromParent();
+  }
+
   currentFunc_ = nullptr;
+  currentScope_ = nullptr;
+  parentScopeInst_ = nullptr;
   valueStack_.clear();
   locals_.clear();
   controlStack_.clear();
@@ -867,10 +936,14 @@ void WasmIRGen::onCall(uint32_t funcIndex) {
     args[i - 1] = pop();
   }
 
-  // Emit CallInst to the target function.
+  // Create a closure for the callee and emit CallInst.
+  // Use the parent (top-level) scope since all Wasm functions are flat
+  // children of the top-level scope.
   Function *callee = irFunctions_[funcIndex];
+  auto *closure = builder_.createCreateFunctionInst(
+      parentScopeInst_, callee);
   auto *call = builder_.createCallInst(
-      callee,
+      closure,
       /* newTarget */ builder_.getLiteralUndefined(),
       /* thisValue */ builder_.getLiteralUndefined(),
       args);

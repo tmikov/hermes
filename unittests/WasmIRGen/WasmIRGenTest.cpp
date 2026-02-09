@@ -21,15 +21,13 @@ using namespace hermes::wasm;
 
 namespace {
 
-/// Helper to create a Module with a top-level function.
+/// Helper to create a Module.
+/// Note: WasmIRGen::createFunctions() creates the top-level function.
 struct TestModule {
   std::shared_ptr<Context> ctx;
   Module mod;
 
-  TestModule() : ctx(std::make_shared<Context>()), mod(ctx) {
-    IRBuilder builder(&mod);
-    builder.createTopLevelFunction("global", true);
-  }
+  TestModule() : ctx(std::make_shared<Context>()), mod(ctx) {}
 };
 
 // --- createFunctions tests ---
@@ -634,8 +632,8 @@ TEST(WasmIRGenTest, ExplicitReturn) {
   irgen.endFunction();
 
   auto *func = irgen.getIRFunctions()[0];
-  // Should have 3 basic blocks: entry, dead block after return, exit block.
-  EXPECT_EQ(func->getBasicBlockList().size(), 3u);
+  // Should have 2 basic blocks: entry and exit block (dead block removed).
+  EXPECT_EQ(func->getBasicBlockList().size(), 2u);
 
   // Entry block should end with ReturnInst returning 42.
   auto &bb = func->getBasicBlockList().front();
@@ -1663,14 +1661,18 @@ TEST(WasmIRGenTest, CallSimple) {
   irgen.onEnd();
   irgen.endFunction();
 
-  // Verify function 1 has a CallInst targeting function 0.
+  // Verify function 1 has a CallInst targeting function 0 via a closure.
   auto *caller = irgen.getIRFunctions()[1];
   auto *callee = irgen.getIRFunctions()[0];
   bool foundCall = false;
   for (auto &bb : caller->getBasicBlockList()) {
     for (auto &inst : bb) {
       if (auto *call = llvh::dyn_cast<CallInst>(&inst)) {
-        EXPECT_EQ(call->getCallee(), callee);
+        // The callee is a CreateFunctionInst closure wrapping the target.
+        auto *cfi =
+            llvh::dyn_cast<CreateFunctionInst>(call->getCallee());
+        ASSERT_NE(cfi, nullptr);
+        EXPECT_EQ(cfi->getFunctionCode(), callee);
         foundCall = true;
       }
     }
@@ -1710,14 +1712,17 @@ TEST(WasmIRGenTest, CallWithArgs) {
   irgen.onEnd();
   irgen.endFunction();
 
-  // Verify function 1 has a CallInst with 2 arguments.
+  // Verify function 1 has a CallInst with 2 arguments via a closure.
   auto *caller = irgen.getIRFunctions()[1];
   auto *callee = irgen.getIRFunctions()[0];
   bool foundCall = false;
   for (auto &bb : caller->getBasicBlockList()) {
     for (auto &inst : bb) {
       if (auto *call = llvh::dyn_cast<CallInst>(&inst)) {
-        EXPECT_EQ(call->getCallee(), callee);
+        auto *cfi =
+            llvh::dyn_cast<CreateFunctionInst>(call->getCallee());
+        ASSERT_NE(cfi, nullptr);
+        EXPECT_EQ(cfi->getFunctionCode(), callee);
         // getNumArguments() includes "this" as argument 0, so for
         // 2 Wasm args: this + 2 = 3 total arguments.
         EXPECT_EQ(call->getNumArguments(), 3u);

@@ -1,4 +1,4 @@
-;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm --dump-ir %t.wasm | %FileCheck %s
+;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s
 ;; REQUIRES: wasm
 
 ;; Test br_table with 4 cases returning different values.

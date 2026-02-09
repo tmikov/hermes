@@ -7,7 +7,7 @@
 
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm
-;; RUN: %hermesc --wasm --dump-ir %t.wasm | %FileCheck %s
+;; RUN: %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s
 
 ;; CHECK-LABEL: function wasm_func_0(p0: any, p1: any): any
 ;; CHECK:   AllocStackInst {{.*}} $local_0

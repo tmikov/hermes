@@ -9,7 +9,7 @@
 
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm
-;; RUN: %hermesc --wasm --dump-ir %t.wasm 2>&1 | %FileCheck %s
+;; RUN: %hermesc --wasm --dump-ir -O0 %t.wasm 2>&1 | %FileCheck %s
 
 ;; CHECK: warning: unsupported Wasm opcode: i32.div_s
 ;; CHECK: warning: unsupported Wasm opcode: i32.clz

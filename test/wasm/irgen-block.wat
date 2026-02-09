@@ -7,18 +7,18 @@
 
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm
-;; RUN: %hermesc --wasm --dump-ir %t.wasm | %FileCheck %s
+;; RUN: %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s
 
 ;; Test 1: block (result i32) with br 0 → sends 42 to block's phi → function
 ;; exit phi → return.
 ;; CHECK-LABEL: function wasm_func_0(): any
 ;; CHECK: %BB0:
-;; CHECK-NEXT:        BranchInst %BB2
+;; CHECK:              BranchInst %BB2
 ;; CHECK: %BB1:
-;; CHECK-NEXT:   %1 = PhiInst (:number) %3: number, %BB2
-;; CHECK-NEXT:        ReturnInst %1: number
+;; CHECK-NEXT:   %3 = PhiInst (:number) %5: number, %BB2
+;; CHECK-NEXT:        ReturnInst %3: number
 ;; CHECK: %BB2:
-;; CHECK-NEXT:   %3 = PhiInst (:number) 42: number, %BB0
+;; CHECK-NEXT:   %5 = PhiInst (:number) 42: number, %BB0
 ;; CHECK-NEXT:        BranchInst %BB1
 ;; CHECK:   function_end
 
@@ -26,7 +26,7 @@
 ;; continuation, then falls through to function exit.
 ;; CHECK-LABEL: function wasm_func_1(): any
 ;; CHECK: %BB0:
-;; CHECK-NEXT:        CondBranchInst 1: number, %BB2, %BB3
+;; CHECK:              CondBranchInst 1: number, %BB2, %BB3
 ;; CHECK: %BB1:
 ;; CHECK-NEXT:        ReturnInst undefined: undefined
 ;; CHECK: %BB2:
@@ -39,10 +39,10 @@
 ;; i32.const 99 which becomes the return value.
 ;; CHECK-LABEL: function wasm_func_2(): any
 ;; CHECK: %BB0:
-;; CHECK-NEXT:        CondBranchInst 0: number, %BB2, %BB3
+;; CHECK:              CondBranchInst 0: number, %BB2, %BB3
 ;; CHECK: %BB1:
-;; CHECK-NEXT:   %1 = PhiInst (:number) 99: number, %BB2
-;; CHECK-NEXT:        ReturnInst %1: number
+;; CHECK-NEXT:   %3 = PhiInst (:number) 99: number, %BB2
+;; CHECK-NEXT:        ReturnInst %3: number
 ;; CHECK: %BB2:
 ;; CHECK-NEXT:        BranchInst %BB1
 ;; CHECK: %BB3:
@@ -53,12 +53,12 @@
 ;; The inner block's continuation (i32.const 0) is unreachable dead code.
 ;; CHECK-LABEL: function wasm_func_3(): any
 ;; CHECK: %BB0:
-;; CHECK-NEXT:        BranchInst %BB2
+;; CHECK:              BranchInst %BB2
 ;; CHECK: %BB1:
-;; CHECK-NEXT:   %1 = PhiInst (:number) %3: number, %BB2
-;; CHECK-NEXT:        ReturnInst %1: number
+;; CHECK-NEXT:   %3 = PhiInst (:number) %5: number, %BB2
+;; CHECK-NEXT:        ReturnInst %3: number
 ;; CHECK: %BB2:
-;; CHECK-NEXT:   %3 = PhiInst (:number) 55: number, %BB0
+;; CHECK-NEXT:   %5 = PhiInst (:number) 55: number, %BB0
 ;; CHECK-NEXT:        BranchInst %BB1
 ;; CHECK:   function_end
 

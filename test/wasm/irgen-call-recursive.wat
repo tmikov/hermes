@@ -3,7 +3,7 @@
 ;; This source code is licensed under the MIT license found in the
 ;; LICENSE file in the root directory of this source tree.
 
-;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm --dump-ir %t.wasm | %FileCheck %s
+;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s
 ;; REQUIRES: wasm
 
 ;; Test: Recursive factorial function.
@@ -27,6 +27,7 @@
 
 ;; CHECK-LABEL: function wasm_func_0(p0: any): any
 ;; Verify there is a recursive CallInst targeting wasm_func_0.
-;; CHECK: CallInst (:any) %wasm_func_0(): functionCode, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined,
+;; CHECK: CreateFunctionInst (:object) {{.*}} %wasm_func_0(): functionCode
+;; CHECK: CallInst (:any) %{{[0-9]+}}: object, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined,
 ;; Verify multiplication via Math.imul (n * factorial(n-1)).
 ;; CHECK: CallBuiltinInst (:any) [Math.imul]

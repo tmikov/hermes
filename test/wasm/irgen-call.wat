@@ -3,7 +3,7 @@
 ;; This source code is licensed under the MIT license found in the
 ;; LICENSE file in the root directory of this source tree.
 
-;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm --dump-ir %t.wasm | %FileCheck %s
+;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s
 ;; REQUIRES: wasm
 
 ;; Test 1: Function A calls function B which returns a constant.
@@ -47,7 +47,8 @@
 
 ;; CHECK-LABEL: function wasm_func_1(): any
 ;; CHECK:   %BB0:
-;; CHECK:     %{{[0-9]+}} = CallInst (:any) %wasm_func_0(): functionCode, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined
+;; CHECK:     CreateFunctionInst (:object) {{.*}} %wasm_func_0(): functionCode
+;; CHECK:     %{{[0-9]+}} = CallInst (:any) %{{[0-9]+}}: object, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined
 ;; CHECK:     {{.*}}BranchInst %BB1
 
 ;; CHECK-LABEL: function wasm_func_2(p0: any, p1: any): any
@@ -55,7 +56,8 @@
 
 ;; CHECK-LABEL: function wasm_func_3(): any
 ;; CHECK:   %BB0:
-;; CHECK:     %{{[0-9]+}} = CallInst (:any) %wasm_func_2(): functionCode, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, 10: number, 20: number
+;; CHECK:     CreateFunctionInst (:object) {{.*}} %wasm_func_2(): functionCode
+;; CHECK:     %{{[0-9]+}} = CallInst (:any) %{{[0-9]+}}: object, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, 10: number, 20: number
 ;; CHECK:     {{.*}}BranchInst %BB1
 
 ;; CHECK-LABEL: function wasm_func_4(): any
@@ -64,5 +66,6 @@
 
 ;; CHECK-LABEL: function wasm_func_5(): any
 ;; CHECK:   %BB0:
-;; CHECK:     %{{[0-9]+}} = CallInst (:any) %wasm_func_4(): functionCode, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined
+;; CHECK:     CreateFunctionInst (:object) {{.*}} %wasm_func_4(): functionCode
+;; CHECK:     %{{[0-9]+}} = CallInst (:any) %{{[0-9]+}}: object, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined
 ;; CHECK:     {{.*}}BranchInst %BB1
