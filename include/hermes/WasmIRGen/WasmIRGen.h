@@ -10,6 +10,7 @@
 
 #include "hermes/IR/IRBuilder.h"
 #include "hermes/WasmFrontend/WasmModuleInfo.h"
+#include "hermes/WasmIRGen/WasmHelpers.h"
 
 namespace hermes {
 
@@ -215,6 +216,7 @@ class WasmIRGen {
  private:
   WasmModuleInfo &moduleInfo_;
   IRBuilder builder_;
+  WasmHelpers helpers_;
 
   /// One IR Function per Wasm function, indexed by Wasm function index.
   /// Includes both imported and defined functions.

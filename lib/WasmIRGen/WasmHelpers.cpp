@@ -5,4 +5,15 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-// Placeholder — implementation added in step F.1.
+#include "hermes/WasmIRGen/WasmHelpers.h"
+
+namespace hermes {
+namespace wasm {
+
+Instruction *WasmHelpers::emitTrap() {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmTrap, {});
+}
+
+} // namespace wasm
+} // namespace hermes

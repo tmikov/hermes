@@ -22,7 +22,7 @@ namespace hermes {
 namespace wasm {
 
 WasmIRGen::WasmIRGen(Module &M, WasmModuleInfo &moduleInfo)
-    : moduleInfo_(moduleInfo), builder_(&M) {}
+    : moduleInfo_(moduleInfo), builder_(&M), helpers_(builder_) {}
 
 void WasmIRGen::createFunctions() {
   // Create the top-level function first (must be before other functions).
@@ -1261,6 +1261,11 @@ void WasmIRGen::onUnreachable() {
   if (unreachable_)
     return;
 
+  // Emit a call to the wasmTrap helper, which throws a runtime error.
+  helpers_.emitTrap();
+
+  // UnreachableInst serves as the block terminator for IR verification.
+  // The trap call above always throws, so this is never reached at runtime.
   builder_.createUnreachableInst();
 
   // After unreachable, code is dead.

@@ -11,13 +11,14 @@
 ;; RUN: %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s
 
 ;; Test 1: unreachable in a void function.
-;; unreachable emits UnreachableInst, then a dead block follows.
+;; unreachable calls wasmTrap helper then emits UnreachableInst.
 ;; The exit block (BB1) is unreachable with a dead ReturnInst.
 ;; CHECK-LABEL: function wasm_func_0(): any
 ;; CHECK-NEXT: %BB0:
-;; CHECK:              UnreachableInst
+;; CHECK:        CallBuiltinInst {{.*}}[HermesBuiltin.wasmTrap]
+;; CHECK-NEXT:   UnreachableInst
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:        ReturnInst undefined: undefined
+;; CHECK-NEXT:   ReturnInst undefined: undefined
 ;; CHECK-NEXT: function_end
 
 ;; Test 2: nop in a void function (should produce no extra instructions).
@@ -44,10 +45,11 @@
 ;; the control flow. Code after unreachable is dead.
 ;; CHECK-LABEL: function wasm_func_3(): any
 ;; CHECK-NEXT: %BB0:
-;; CHECK:              UnreachableInst
+;; CHECK:        CallBuiltinInst {{.*}}[HermesBuiltin.wasmTrap]
+;; CHECK-NEXT:   UnreachableInst
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %3 = PhiInst (:notype)
-;; CHECK-NEXT:        ReturnInst %3: notype
+;; CHECK-NEXT:   %4 = PhiInst (:notype)
+;; CHECK-NEXT:        ReturnInst %4: notype
 ;; CHECK-NEXT: function_end
 
 (module

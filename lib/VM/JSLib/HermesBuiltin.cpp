@@ -206,6 +206,13 @@ CallResult<HermesValue> hermesBuiltinThrowReferenceError(
   return runtime.raiseReferenceError(args.getArgHandle(0));
 }
 
+/// Wasm trap: throws a RuntimeError (currently a generic Error).
+/// Called by Wasm-generated IR for the `unreachable` instruction.
+/// Takes no meaningful arguments — the trap message is fixed.
+CallResult<HermesValue> wasmTrap(void *, Runtime &runtime) {
+  return runtime.raiseError("unreachable executed");
+}
+
 namespace {
 
 CallResult<HermesValue> copyDataPropertiesSlowPath_RJS(
@@ -1015,6 +1022,9 @@ void createHermesBuiltins(Runtime &runtime) {
   // Define the 'requireFast' function, which takes a number argument.
   defineInternMethod(
       B::HermesBuiltin_requireFast, P::requireFast, requireFast, 1);
+
+  // Wasm helper builtins.
+  defineInternMethod(B::HermesBuiltin_wasmTrap, P::wasmTrap, wasmTrap, 0);
 }
 
 } // namespace vm

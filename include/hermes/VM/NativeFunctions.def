@@ -405,6 +405,8 @@ NATIVE_FUNCTION(weakSetPrototypeHas)
 NATIVE_FUNCTION(weakRefConstructor)
 NATIVE_FUNCTION(weakRefPrototypeDeref)
 
+NATIVE_FUNCTION(wasmTrap)
+
 #define ALL_ERROR_TYPE(name) NATIVE_FUNCTION(name##Constructor)
 #include "hermes/VM/NativeErrorTypes.def"
 #undef ALL_ERROR_TYPE

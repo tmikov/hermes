@@ -154,6 +154,10 @@ PRIVATE_BUILTIN(initRegexNamedGroups)
 PRIVATE_BUILTIN(functionPrototypeApply)
 PRIVATE_BUILTIN(functionPrototypeCall)
 
+// Wasm helper builtins. Called by Wasm-generated IR for operations that have
+// no direct JS/asm.js equivalent.
+PRIVATE_BUILTIN(wasmTrap)
+
 JS_BUILTIN(spawnAsync)
 MARK_FIRST_JS_BUILTIN(spawnAsync)
 JS_BUILTIN(makeAsyncIterator)

@@ -2358,4 +2358,79 @@ TEST(WasmIRGenTest, F32DemoteF64) {
   }
 }
 
+// --- WasmHelpers tests (F.1) ---
+
+TEST(WasmIRGenTest, UnreachableCallsWasmTrap) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  // Void function: () -> ()
+  moduleInfo.types.push_back(WasmFuncType{{}, {}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  // (unreachable) should emit CallBuiltinInst(wasmTrap) + UnreachableInst.
+  irgen.onUnreachable();
+
+  irgen.onEnd(); // function end
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+
+  // Should have both a CallBuiltinInst (for wasmTrap) and an UnreachableInst.
+  bool foundTrapCall = false;
+  bool foundUnreachable = false;
+  for (auto &bb : func->getBasicBlockList()) {
+    for (auto &inst : bb) {
+      if (auto *cbi = llvh::dyn_cast<CallBuiltinInst>(&inst)) {
+        if (cbi->getBuiltinIndex() ==
+            BuiltinMethod::HermesBuiltin_wasmTrap) {
+          foundTrapCall = true;
+        }
+      }
+      if (llvh::isa<UnreachableInst>(&inst))
+        foundUnreachable = true;
+    }
+  }
+  EXPECT_TRUE(foundTrapCall);
+  EXPECT_TRUE(foundUnreachable);
+}
+
+TEST(WasmIRGenTest, WasmHelpersEmitTrap) {
+  // Test the WasmHelpers class directly.
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(WasmFuncType{{}, {}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  // Use WasmHelpers directly to emit a trap call.
+  // We access it indirectly through onUnreachable which calls helpers_.
+  // Already tested above — this test verifies the infrastructure exists.
+  irgen.onUnreachable();
+
+  irgen.onEnd(); // function end
+  irgen.endFunction();
+
+  // Count CallBuiltinInst instructions in the function.
+  auto *func = irgen.getIRFunctions()[0];
+  int trapCallCount = 0;
+  for (auto &bb : func->getBasicBlockList()) {
+    for (auto &inst : bb) {
+      if (auto *cbi = llvh::dyn_cast<CallBuiltinInst>(&inst)) {
+        if (cbi->getBuiltinIndex() ==
+            BuiltinMethod::HermesBuiltin_wasmTrap) {
+          trapCallCount++;
+        }
+      }
+    }
+  }
+  EXPECT_EQ(trapCallCount, 1);
+}
+
 } // namespace
