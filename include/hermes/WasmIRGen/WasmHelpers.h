@@ -83,6 +83,12 @@ class WasmHelpers {
   /// Emit f32.reinterpret_i32: bitcast i32 to f32.
   Instruction *emitF32ReinterpretI32(Value *a);
 
+  /// Emit f64.copysign(a, b): copy the sign bit of b onto the magnitude of a.
+  Instruction *emitF64Copysign(Value *a, Value *b);
+
+  /// Emit f32.copysign(a, b): copy the sign bit of b onto the magnitude of a.
+  Instruction *emitF32Copysign(Value *a, Value *b);
+
  private:
   IRBuilder &builder_;
 };

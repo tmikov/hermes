@@ -90,5 +90,15 @@ Instruction *WasmHelpers::emitF32ReinterpretI32(Value *a) {
       BuiltinMethod::HermesBuiltin_wasmF32ReinterpretI32, {a});
 }
 
+Instruction *WasmHelpers::emitF64Copysign(Value *a, Value *b) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmF64Copysign, {a, b});
+}
+
+Instruction *WasmHelpers::emitF32Copysign(Value *a, Value *b) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmF32Copysign, {a, b});
+}
+
 } // namespace wasm
 } // namespace hermes

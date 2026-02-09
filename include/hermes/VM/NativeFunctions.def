@@ -421,6 +421,8 @@ NATIVE_FUNCTION(wasmI32TruncSatF64S)
 NATIVE_FUNCTION(wasmI32TruncSatF64U)
 NATIVE_FUNCTION(wasmI32ReinterpretF32)
 NATIVE_FUNCTION(wasmF32ReinterpretI32)
+NATIVE_FUNCTION(wasmF64Copysign)
+NATIVE_FUNCTION(wasmF32Copysign)
 
 #define ALL_ERROR_TYPE(name) NATIVE_FUNCTION(name##Constructor)
 #include "hermes/VM/NativeErrorTypes.def"

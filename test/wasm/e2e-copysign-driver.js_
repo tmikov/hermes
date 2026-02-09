@@ -1,0 +1,18 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-copysign.wat.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+
+print("f64.copysign(1, -1) =", exports.f64_copysign(1, -1));
+print("f64.copysign(-1, 1) =", exports.f64_copysign(-1, 1));
+print("f64.copysign(5.5, -3) =", exports.f64_copysign(5.5, -3));
+print("f32.copysign(1, -1) =", exports.f32_copysign(1, -1));
+print("f32.copysign(-1, 1) =", exports.f32_copysign(-1, 1));
+print("f32.copysign(5.5, -3) =", exports.f32_copysign(5.5, -3));

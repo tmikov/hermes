@@ -210,6 +210,11 @@ class WasmIRGen {
   void onF32Le();
   void onF32Ge();
 
+  // --- f64/f32 copysign (F.5) ---
+
+  void onF64Copysign();
+  void onF32Copysign();
+
   // --- f64/f32 conversions (E.1, E.2) ---
 
   void onF64PromoteF32();

@@ -1355,6 +1355,24 @@ void WasmIRGen::onF32Ge() {
       cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
 }
 
+// --- f64/f32 copysign (F.5) ---
+
+void WasmIRGen::onF64Copysign() {
+  if (unreachable_)
+    return;
+  Value *b = pop();
+  Value *a = pop();
+  push(helpers_.emitF64Copysign(a, b));
+}
+
+void WasmIRGen::onF32Copysign() {
+  if (unreachable_)
+    return;
+  Value *b = pop();
+  Value *a = pop();
+  push(helpers_.emitF32Copysign(a, b));
+}
+
 // --- f64/f32 conversions (E.1, E.2) ---
 
 void WasmIRGen::onF64PromoteF32() {

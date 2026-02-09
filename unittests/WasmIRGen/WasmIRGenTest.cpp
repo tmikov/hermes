@@ -3130,4 +3130,70 @@ TEST(WasmIRGenTest, CreateFunctionsSkipsNonFunctionExports) {
   EXPECT_EQ(storePropCount, 1u);
 }
 
+TEST(WasmIRGenTest, F64Copysign) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(
+      WasmFuncType{{WasmValType::F64, WasmValType::F64}, {WasmValType::F64}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+  irgen.onLocalGet(0);
+  irgen.onLocalGet(1);
+  irgen.onF64Copysign();
+  irgen.endFunction();
+
+  // Should produce a CallBuiltinInst for wasmF64Copysign.
+  auto &blocks = irgen.getIRFunctions()[0]->getBasicBlockList();
+  bool foundCallBuiltin = false;
+  for (auto &bb : blocks) {
+    for (auto &inst : bb) {
+      if (auto *cb = llvh::dyn_cast<CallBuiltinInst>(&inst)) {
+        if (cb->getBuiltinIndex() ==
+            BuiltinMethod::HermesBuiltin_wasmF64Copysign) {
+          foundCallBuiltin = true;
+          // Two Wasm args + 1 (this) = 3.
+          EXPECT_EQ(cb->getNumArguments(), 3u);
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(foundCallBuiltin);
+}
+
+TEST(WasmIRGenTest, F32Copysign) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  moduleInfo.types.push_back(
+      WasmFuncType{{WasmValType::F32, WasmValType::F32}, {WasmValType::F32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+  irgen.onLocalGet(0);
+  irgen.onLocalGet(1);
+  irgen.onF32Copysign();
+  irgen.endFunction();
+
+  // Should produce a CallBuiltinInst for wasmF32Copysign.
+  auto &blocks = irgen.getIRFunctions()[0]->getBasicBlockList();
+  bool foundCallBuiltin = false;
+  for (auto &bb : blocks) {
+    for (auto &inst : bb) {
+      if (auto *cb = llvh::dyn_cast<CallBuiltinInst>(&inst)) {
+        if (cb->getBuiltinIndex() ==
+            BuiltinMethod::HermesBuiltin_wasmF32Copysign) {
+          foundCallBuiltin = true;
+          // Two Wasm args + 1 (this) = 3.
+          EXPECT_EQ(cb->getNumArguments(), 3u);
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(foundCallBuiltin);
+}
+
 } // namespace

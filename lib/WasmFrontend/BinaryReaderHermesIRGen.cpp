@@ -842,7 +842,7 @@ wabt::Result BinaryReaderHermesIRGen::OnBinaryExpr(wabt::Opcode opcode) {
       irgen_->onF32Max();
       break;
     case wabt::Opcode::F32Copysign:
-      irgen_->warnUnsupported("f32.copysign", 2, 1);
+      irgen_->onF32Copysign();
       break;
     // --- f64 binary ops (E.1) ---
     case wabt::Opcode::F64Add:
@@ -864,7 +864,7 @@ wabt::Result BinaryReaderHermesIRGen::OnBinaryExpr(wabt::Opcode opcode) {
       irgen_->onF64Max();
       break;
     case wabt::Opcode::F64Copysign:
-      irgen_->warnUnsupported("f64.copysign", 2, 1);
+      irgen_->onF64Copysign();
       break;
     default:
       // Non-MVP binary opcode (SIMD, etc.) — warn.

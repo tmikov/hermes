@@ -409,6 +409,25 @@ CallResult<HermesValue> wasmF32ReinterpretI32(void *, Runtime &runtime) {
   return HermesValue::encodeTrustedNumberValue(static_cast<double>(f));
 }
 
+/// Wasm f64.copysign(a, b): copy the sign bit of b onto the magnitude of a.
+CallResult<HermesValue> wasmF64Copysign(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  double a = args.getArg(0).getNumber();
+  double b = args.getArg(1).getNumber();
+  return HermesValue::encodeTrustedNumberValue(std::copysign(a, b));
+}
+
+/// Wasm f32.copysign(a, b): copy the sign bit of b onto the magnitude of a.
+/// In Phase 1, all values are doubles. We narrow to float for the copysign
+/// operation, then promote back to double.
+CallResult<HermesValue> wasmF32Copysign(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  float a = static_cast<float>(args.getArg(0).getNumber());
+  float b = static_cast<float>(args.getArg(1).getNumber());
+  return HermesValue::encodeTrustedNumberValue(
+      static_cast<double>(std::copysign(a, b)));
+}
+
 namespace {
 
 CallResult<HermesValue> copyDataPropertiesSlowPath_RJS(
@@ -1269,6 +1288,16 @@ void createHermesBuiltins(Runtime &runtime) {
       P::wasmF32ReinterpretI32,
       wasmF32ReinterpretI32,
       1);
+  defineInternMethod(
+      B::HermesBuiltin_wasmF64Copysign,
+      P::wasmF64Copysign,
+      wasmF64Copysign,
+      2);
+  defineInternMethod(
+      B::HermesBuiltin_wasmF32Copysign,
+      P::wasmF32Copysign,
+      wasmF32Copysign,
+      2);
 }
 
 } // namespace vm
