@@ -9,31 +9,13 @@
 ;; REQUIRES: wasm
 
 ;; Test 1: Two-step compilation and execution.
-;; RUN: %wat2wasm %s -o %t.wasm
-;; RUN: %hermesc --wasm -emit-binary -out %t.hbc %t.wasm
-;; RUN: %hermes %t.hbc
+;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes %t.hbc
 
 ;; Test 2: Direct execution.
 ;; RUN: %hermes --wasm %t.wasm
 
 ;; Test 3: Verify IR structure.
 ;; RUN: %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s
-
-;; CHECK-LABEL: function wasm_func_0(p0: any, p1: any): any
-;; CHECK:   BinaryAddInst
-
-;; CHECK-LABEL: function wasm_func_1(p0: any, p1: any): any
-;; CHECK:   BinaryLessThanInst
-;; CHECK:   BinaryOrInst
-
-;; CHECK-LABEL: function wasm_func_2(p0: any): any
-;; CHECK:   UnaryMinusInst
-
-;; CHECK-LABEL: function wasm_func_3(p0: any): any
-;; CHECK:   CallBuiltinInst {{.*}}[Math.abs]
-
-;; CHECK-LABEL: function wasm_func_4(p0: any, p1: any): any
-;; CHECK:   CallBuiltinInst {{.*}}[Math.min]
 
 (module
   ;; Simple f32 addition
@@ -86,3 +68,19 @@
 
   (start $start)
 )
+
+;; CHECK-LABEL: function wasm_func_0(p0: any, p1: any): any
+;; CHECK:   BinaryAddInst
+
+;; CHECK-LABEL: function wasm_func_1(p0: any, p1: any): any
+;; CHECK:   BinaryLessThanInst
+;; CHECK-NEXT:   BinaryOrInst
+
+;; CHECK-LABEL: function wasm_func_2(p0: any): any
+;; CHECK:   UnaryMinusInst
+
+;; CHECK-LABEL: function wasm_func_3(p0: any): any
+;; CHECK:   CallBuiltinInst {{.*}}[Math.abs]
+
+;; CHECK-LABEL: function wasm_func_4(p0: any, p1: any): any
+;; CHECK:   CallBuiltinInst {{.*}}[Math.min]

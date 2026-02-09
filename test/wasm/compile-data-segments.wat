@@ -4,15 +4,11 @@
 ;; LICENSE file in the root directory of this source tree.
 
 ;; Test module with memory and data segments compiles to IR.
+;; The i32.load8_u opcode is not yet supported, so the function body
+;; falls through to a default undefined return.
 
 ;; REQUIRES: wasm
-;; RUN: %wat2wasm %s -o %t.wasm
-;; RUN: %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s
-
-;; CHECK-LABEL: function wasm_func_0(p0: any): any
-;; CHECK:   AllocStackInst {{.*}} $local_0
-;; CHECK:   LoadParamInst
-;; CHECK:   function_end
+;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s
 
 (module
   (memory (export "memory") 1)
@@ -28,4 +24,14 @@
     local.get 0
     i32.load8_u
   )
+;; CHECK-LABEL: function wasm_func_0(p0: any): any
+;; CHECK: %BB0:
+;; CHECK:   %[[L0:.*]] = AllocStackInst (:any) $local_0: any
+;; CHECK-NEXT: %[[P0:.*]] = LoadParamInst (:any) %p0: any
+;; CHECK-NEXT:              StoreStackInst %[[P0]]: any, %[[L0]]: any
+;; CHECK:                   BranchInst %BB1
+;; CHECK: %BB1:
+;; CHECK-NEXT: %{{.*}} = PhiInst (:undefined) undefined: undefined, %BB0
+;; CHECK-NEXT:           ReturnInst
+;; CHECK-NEXT: function_end
 )

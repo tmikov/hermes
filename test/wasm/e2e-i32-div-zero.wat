@@ -6,11 +6,7 @@
 ;; Test that i32.div_s traps on division by zero (F.2).
 
 ;; REQUIRES: wasm
-;; RUN: %wat2wasm %s -o %t.wasm
-;; RUN: %hermesc --wasm -emit-binary -out %t.hbc %t.wasm
-;; RUN: ! %hermes %t.hbc 2>&1 | %FileCheck %s
-
-;; CHECK: Error: integer divide by zero
+;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && ! %hermes %t.hbc 2>&1 | %FileCheck %s
 
 (module
   (func $start
@@ -18,3 +14,5 @@
     drop)
   (start $start)
 )
+
+;; CHECK: Error: integer divide by zero

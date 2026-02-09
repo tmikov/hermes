@@ -9,9 +9,7 @@
 ;; REQUIRES: wasm
 
 ;; Test 1: Two-step compilation.
-;; RUN: %wat2wasm %s -o %t.wasm
-;; RUN: %hermesc --wasm -emit-binary -out %t.hbc %t.wasm
-;; RUN: %hermes %t.hbc
+;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes %t.hbc
 
 ;; Test 2: Direct execution.
 ;; RUN: %hermes --wasm %t.wasm

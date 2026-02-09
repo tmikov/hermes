@@ -7,18 +7,12 @@
 ;; Compiles to .hbc and runs, verifying correct results.
 
 ;; REQUIRES: wasm
-;; RUN: %wat2wasm %s -o %t.wasm
-;; RUN: %hermesc --wasm -emit-binary -out %t.hbc %t.wasm
-;; RUN: %hermes %t.hbc
 
-;; Also verify IR is well-formed.
+;; Test 1: Two-step compilation and execution.
+;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes %t.hbc
+
+;; Test 2: Verify IR is well-formed.
 ;; RUN: %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s
-
-;; CHECK-LABEL: function global(): any
-;; CHECK:   CreateScopeInst
-;; CHECK:   CreateFunctionInst
-;; CHECK:   CallInst
-;; CHECK:   ReturnInst
 
 (module
   ;; f64 add: 1.5 + 2.5 = 4.0
@@ -109,3 +103,9 @@
   )
   (start 8)
 )
+
+;; CHECK-LABEL: function global(): any
+;; CHECK:   CreateScopeInst
+;; CHECK:   CreateFunctionInst
+;; CHECK:   CallInst
+;; CHECK:   ReturnInst

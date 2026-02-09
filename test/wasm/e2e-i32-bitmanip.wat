@@ -8,23 +8,12 @@
 ;; errors. Correctness is verified by the irgen lit tests and unit tests.
 
 ;; REQUIRES: wasm
-;; RUN: %wat2wasm %s -o %t.wasm
-;; RUN: %hermesc --wasm -emit-binary -out %t.hbc %t.wasm
-;; RUN: %hermes %t.hbc
 
-;; Also verify IR is well-formed.
+;; Test 1: Two-step compilation and execution.
+;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes %t.hbc
+
+;; Test 2: Verify IR is well-formed.
 ;; RUN: %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s
-
-;; CHECK-LABEL: function wasm_func_0(): any
-;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32Clz]
-;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32Ctz]
-;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32Popcnt]
-;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32Rotl]
-;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32Rotr]
-;; CHECK:   BinaryLeftShiftInst
-;; CHECK:   BinaryRightShiftInst
-;; CHECK:   BinaryLeftShiftInst
-;; CHECK:   BinaryRightShiftInst
 
 (module
   (func $test_all
@@ -68,3 +57,14 @@
 
   (start $test_all)
 )
+
+;; CHECK-LABEL: function wasm_func_0(): any
+;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32Clz]
+;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32Ctz]
+;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32Popcnt]
+;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32Rotl]
+;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32Rotr]
+;; CHECK:   BinaryLeftShiftInst
+;; CHECK-NEXT:   BinaryRightShiftInst
+;; CHECK:   BinaryLeftShiftInst
+;; CHECK-NEXT:   BinaryRightShiftInst

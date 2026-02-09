@@ -11,36 +11,6 @@
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s
 
-;; The global function creates closures, builds the exports object, and
-;; returns it. Exports are "add" (func 0) and "sub" (func 2).
-;; CHECK-LABEL: function global(): any
-;; CHECK:   CreateScopeInst
-;; CHECK:   CreateFunctionInst
-;; CHECK:   StoreFrameInst
-;; CHECK:   CreateFunctionInst
-;; CHECK:   StoreFrameInst
-;; CHECK:   CreateFunctionInst
-;; CHECK:   StoreFrameInst
-;; CHECK:   AllocObjectLiteralInst
-;; CHECK:   LoadFrameInst
-;; CHECK:   StorePropertyStrictInst {{.*}}, {{.*}}, "add"
-;; CHECK:   LoadFrameInst
-;; CHECK:   StorePropertyStrictInst {{.*}}, {{.*}}, "sub"
-;; CHECK:   ReturnInst
-
-;; The exported "add" function.
-;; CHECK-LABEL: function {{.*}}(p0: any, p1: any): any
-;; CHECK:   BinaryAddInst
-;; CHECK:   AsInt32Inst
-
-;; The internal helper (not exported).
-;; CHECK-LABEL: function {{.*}}(p0: any): any
-
-;; The exported "sub" function.
-;; CHECK-LABEL: function {{.*}}(p0: any, p1: any): any
-;; CHECK:   BinarySubtractInst
-;; CHECK:   AsInt32Inst
-
 (module
   (func $add (export "add") (param i32 i32) (result i32)
     local.get 0
@@ -57,3 +27,33 @@
     i32.sub
   )
 )
+
+;; The global function creates closures, builds the exports object, and
+;; returns it. Exports are "add" (func 0) and "sub" (func 2).
+;; CHECK-LABEL: function global(): any
+;; CHECK:   CreateScopeInst
+;; CHECK-NEXT:   CreateFunctionInst
+;; CHECK-NEXT:   StoreFrameInst
+;; CHECK:   CreateFunctionInst
+;; CHECK-NEXT:   StoreFrameInst
+;; CHECK:   CreateFunctionInst
+;; CHECK-NEXT:   StoreFrameInst
+;; CHECK:   AllocObjectLiteralInst
+;; CHECK-NEXT:   LoadFrameInst
+;; CHECK-NEXT:   StorePropertyStrictInst {{.*}}, {{.*}}, "add"
+;; CHECK-NEXT:   LoadFrameInst
+;; CHECK-NEXT:   StorePropertyStrictInst {{.*}}, {{.*}}, "sub"
+;; CHECK-NEXT:   ReturnInst
+
+;; The exported "add" function.
+;; CHECK-LABEL: function {{.*}}(p0: any, p1: any): any
+;; CHECK:   BinaryAddInst
+;; CHECK-NEXT:   AsInt32Inst
+
+;; The internal helper (not exported).
+;; CHECK-LABEL: function {{.*}}(p0: any): any
+
+;; The exported "sub" function.
+;; CHECK-LABEL: function {{.*}}(p0: any, p1: any): any
+;; CHECK:   BinarySubtractInst
+;; CHECK-NEXT:   AsInt32Inst

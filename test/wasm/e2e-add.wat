@@ -9,29 +9,13 @@
 ;; REQUIRES: wasm
 
 ;; Test 1: Two-step compilation (hermesc -emit-binary, then hermes).
-;; RUN: %wat2wasm %s -o %t.wasm
-;; RUN: %hermesc --wasm -emit-binary -out %t.hbc %t.wasm
-;; RUN: %hermes %t.hbc
+;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes %t.hbc
 
 ;; Test 2: Direct execution.
 ;; RUN: %hermes --wasm %t.wasm
 
 ;; Test 3: Verify IR is well-formed (optimizer doesn't crash).
 ;; RUN: %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s
-
-;; CHECK-LABEL: function global(): any
-;; CHECK:   CreateScopeInst
-;; CHECK:   CreateFunctionInst
-;; CHECK:   StoreFrameInst
-;; CHECK:   ReturnInst
-
-;; CHECK-LABEL: function wasm_func_0(p0: any, p1: any): any
-;; CHECK:   BinaryAddInst
-;; CHECK:   AsInt32Inst
-
-;; CHECK-LABEL: function wasm_func_1(): any
-;; CHECK:   LoadFrameInst
-;; CHECK:   CallInst
 
 (module
   (func $add (param i32 i32) (result i32)
@@ -48,3 +32,17 @@
   )
   (start 1)
 )
+
+;; CHECK-LABEL: function global(): any
+;; CHECK:   CreateScopeInst
+;; CHECK-NEXT:   CreateFunctionInst
+;; CHECK-NEXT:   StoreFrameInst
+;; CHECK:   ReturnInst
+
+;; CHECK-LABEL: function wasm_func_0(p0: any, p1: any): any
+;; CHECK:   BinaryAddInst
+;; CHECK-NEXT:   AsInt32Inst
+
+;; CHECK-LABEL: function wasm_func_1(): any
+;; CHECK:   LoadFrameInst
+;; CHECK:   CallInst

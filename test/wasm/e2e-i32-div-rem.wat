@@ -7,21 +7,12 @@
 ;; Tests normal operation (no trap) and that the module compiles and runs.
 
 ;; REQUIRES: wasm
-;; RUN: %wat2wasm %s -o %t.wasm
-;; RUN: %hermesc --wasm -emit-binary -out %t.hbc %t.wasm
-;; RUN: %hermes %t.hbc
 
-;; Verify IR uses CallBuiltinInst for div/rem operations.
+;; Test 1: Two-step compilation and execution.
+;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes %t.hbc
+
+;; Test 2: Verify IR uses CallBuiltinInst for div/rem operations.
 ;; RUN: %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s
-
-;; CHECK-LABEL: function wasm_func_0(p0: any, p1: any): any
-;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32DivS]
-;; CHECK-LABEL: function wasm_func_1(p0: any, p1: any): any
-;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32DivU]
-;; CHECK-LABEL: function wasm_func_2(p0: any, p1: any): any
-;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32RemS]
-;; CHECK-LABEL: function wasm_func_3(p0: any, p1: any): any
-;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32RemU]
 
 (module
   (func $div_s (param i32 i32) (result i32)
@@ -76,3 +67,12 @@
   )
   (start $start)
 )
+
+;; CHECK-LABEL: function wasm_func_0(p0: any, p1: any): any
+;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32DivS]
+;; CHECK-LABEL: function wasm_func_1(p0: any, p1: any): any
+;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32DivU]
+;; CHECK-LABEL: function wasm_func_2(p0: any, p1: any): any
+;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32RemS]
+;; CHECK-LABEL: function wasm_func_3(p0: any, p1: any): any
+;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32RemU]

@@ -7,29 +7,7 @@
 ;; from different modules, and a start function.
 
 ;; REQUIRES: wasm
-;; RUN: %wat2wasm %s -o %t.wasm
-;; RUN: %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s
-
-;; Imported function placeholders.
-;; CHECK-LABEL: function wasm_func_0(p0: any): any
-;; CHECK:   ReturnInst undefined
-;; CHECK:   function_end
-
-;; CHECK-LABEL: function wasm_func_1(p0: any): any
-;; CHECK:   ReturnInst undefined
-;; CHECK:   function_end
-
-;; Defined functions.
-;; CHECK-LABEL: function wasm_func_2(): any
-;; CHECK:   function_end
-
-;; CHECK-LABEL: function wasm_func_3(): any
-;; CHECK:   function_end
-
-;; CHECK-LABEL: function wasm_func_4(p0: any): any
-;; CHECK:   AllocStackInst {{.*}} $local_0
-;; CHECK:   LoadParamInst
-;; CHECK:   function_end
+;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s
 
 (module
   ;; Import a function from "env".
@@ -53,13 +31,57 @@
     call $log
   )
   (start $init)
+;; Imported function placeholder for $log.
+;; CHECK-LABEL: function wasm_func_0(p0: any): any
+;; CHECK: %BB0:
+;; CHECK-NEXT: ReturnInst undefined: undefined
+;; CHECK-NEXT: function_end
+
+;; Imported function placeholder for $square.
+;; CHECK-LABEL: function wasm_func_1(p0: any): any
+;; CHECK: %BB0:
+;; CHECK-NEXT: ReturnInst undefined: undefined
+;; CHECK-NEXT: function_end
+
+;; $init: calls $log(0).
+;; CHECK-LABEL: function wasm_func_2(): any
+;; CHECK: %BB0:
+;; CHECK:   %[[LOG:.*]] = LoadFrameInst (:any) %{{.*}}: environment, [%VS0.closure_0]: any
+;; CHECK-NEXT: %{{.*}} = CallInst (:any) %[[LOG]]: any, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, 0: number
+;; CHECK-NEXT:           BranchInst %BB1
+;; CHECK: %BB1:
+;; CHECK-NEXT: ReturnInst undefined: undefined
+;; CHECK-NEXT: function_end
 
   ;; Exported functions.
   (func (export "run") (result i32)
     global.get $max_size
   )
+;; "run": global.get is unsupported, falls through to undefined.
+;; CHECK-LABEL: function wasm_func_3(): any
+;; CHECK: %BB0:
+;; CHECK:   BranchInst %BB1
+;; CHECK: %BB1:
+;; CHECK-NEXT: %{{.*}} = PhiInst (:undefined) undefined: undefined, %BB0
+;; CHECK-NEXT:           ReturnInst
+;; CHECK-NEXT: function_end
+
   (func (export "helper") (param i32) (result i32)
     local.get 0
     call $square
   )
+;; "helper": loads param, calls imported $square, returns result.
+;; CHECK-LABEL: function wasm_func_4(p0: any): any
+;; CHECK: %BB0:
+;; CHECK:   %[[L0:.*]] = AllocStackInst (:any) $local_0: any
+;; CHECK-NEXT: %[[P0:.*]] = LoadParamInst (:any) %p0: any
+;; CHECK-NEXT:              StoreStackInst %[[P0]]: any, %[[L0]]: any
+;; CHECK:   %[[V:.*]] = LoadStackInst (:any) %[[L0]]: any
+;; CHECK-NEXT: %[[SQ:.*]] = LoadFrameInst (:any) %{{.*}}: environment, [%VS0.closure_1]: any
+;; CHECK-NEXT: %[[RES:.*]] = CallInst (:any) %[[SQ]]: any, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %[[V]]: any
+;; CHECK-NEXT:               BranchInst %BB1
+;; CHECK: %BB1:
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[RES]]: any, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: function_end
 )

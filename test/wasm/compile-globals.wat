@@ -4,13 +4,11 @@
 ;; LICENSE file in the root directory of this source tree.
 
 ;; Test module with globals compiles to IR without errors.
+;; The global.get opcode is not yet supported, so the function body
+;; falls through to a default undefined return.
 
 ;; REQUIRES: wasm
-;; RUN: %wat2wasm %s -o %t.wasm
-;; RUN: %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s
-
-;; CHECK-LABEL: function wasm_func_0(): any
-;; CHECK:   function_end
+;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s
 
 (module
   ;; Immutable i32 global with i32.const init.
@@ -26,4 +24,11 @@
   (func (export "get_g_mut") (result i32)
     global.get 1
   )
+;; CHECK-LABEL: function wasm_func_0(): any
+;; CHECK: %BB0:
+;; CHECK:   BranchInst %BB1
+;; CHECK: %BB1:
+;; CHECK-NEXT: %{{.*}} = PhiInst (:undefined) undefined: undefined, %BB0
+;; CHECK-NEXT:           ReturnInst
+;; CHECK-NEXT: function_end
 )

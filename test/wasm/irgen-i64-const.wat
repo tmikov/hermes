@@ -7,20 +7,19 @@
 ;; Phase 1 represents i64 as two values on the stack (lo, hi).
 
 ;; REQUIRES: wasm
-;; RUN: %wat2wasm %s -o %t.wasm
-;; RUN: %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s
+;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s
 
-;; i64.const 0x0000000100000002 = 4294967298
-;; Split: lo32 = 2, hi32 = 1
-;; The function has result type i64, endFunction() returns top of stack = hi=1.
+(module
+  ;; i64.const 0x0000000100000002 = 4294967298
+  ;; Split: lo32 = 2, hi32 = 1
+  ;; The function has result type i64, endFunction() returns top of stack = hi=1.
+  (func (result i64)
+    i64.const 4294967298))
+
 ;; CHECK-LABEL: function wasm_func_0(): any
 ;; CHECK-NEXT: %BB0:
 ;; CHECK:              BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %2 = PhiInst (:number) 1: number, %BB0
-;; CHECK-NEXT:        ReturnInst %2: number
+;; CHECK-NEXT:   %[[PHI:.*]] = PhiInst (:number) 1: number, %BB0
+;; CHECK-NEXT:                 ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
-
-(module
-  (func (result i64)
-    i64.const 4294967298))
