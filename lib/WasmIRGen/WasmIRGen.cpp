@@ -845,6 +845,26 @@ void WasmIRGen::onSelect() {
   push(phi);
 }
 
+// --- unreachable and nop (D.11) ---
+
+void WasmIRGen::onUnreachable() {
+  if (unreachable_)
+    return;
+
+  builder_.createUnreachableInst();
+
+  // After unreachable, code is dead.
+  unreachable_ = true;
+
+  // Create a new dead basic block for any dead code that follows.
+  auto *deadBlock = builder_.createBasicBlock(currentFunc_);
+  builder_.setInsertionBlock(deadBlock);
+}
+
+void WasmIRGen::onNop() {
+  // nop does nothing.
+}
+
 // --- Helper methods ---
 
 Value *WasmIRGen::pop() {

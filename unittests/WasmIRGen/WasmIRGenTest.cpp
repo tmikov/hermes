@@ -1525,4 +1525,113 @@ TEST(WasmIRGenTest, SelectWithParams) {
   EXPECT_TRUE(foundPhi);
 }
 
+// --- unreachable and nop tests (D.11) ---
+
+TEST(WasmIRGenTest, UnreachableBasic) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  // Void function: () -> ()
+  moduleInfo.types.push_back(WasmFuncType{{}, {}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  // (unreachable)
+  irgen.onUnreachable();
+
+  irgen.onEnd(); // function end
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+
+  // Should have an UnreachableInst in the entry block.
+  bool foundUnreachable = false;
+  for (auto &bb : func->getBasicBlockList()) {
+    for (auto &inst : bb) {
+      if (llvh::isa<UnreachableInst>(&inst))
+        foundUnreachable = true;
+    }
+  }
+  EXPECT_TRUE(foundUnreachable);
+}
+
+TEST(WasmIRGenTest, UnreachableDeadCode) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  // Function: () -> (i32)
+  moduleInfo.types.push_back(WasmFuncType{{}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  // (unreachable) (i32.const 99) — the const should be dead code.
+  irgen.onUnreachable();
+  irgen.onI32Const(99); // should be a no-op (unreachable)
+
+  irgen.onEnd(); // function end
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+
+  // Should have an UnreachableInst.
+  bool foundUnreachable = false;
+  for (auto &bb : func->getBasicBlockList()) {
+    for (auto &inst : bb) {
+      if (llvh::isa<UnreachableInst>(&inst))
+        foundUnreachable = true;
+    }
+  }
+  EXPECT_TRUE(foundUnreachable);
+
+  // The constant 99 should NOT appear in the IR since it's dead code.
+  // The LiteralNumber 99 may exist in the module's literal pool, but
+  // it should not be used by any instruction.
+  bool found99InInst = false;
+  for (auto &bb : func->getBasicBlockList()) {
+    for (auto &inst : bb) {
+      for (unsigned i = 0; i < inst.getNumOperands(); ++i) {
+        if (auto *lit = llvh::dyn_cast<LiteralNumber>(inst.getOperand(i))) {
+          if (lit->getValue() == 99.0)
+            found99InInst = true;
+        }
+      }
+    }
+  }
+  EXPECT_FALSE(found99InInst);
+}
+
+TEST(WasmIRGenTest, NopDoesNothing) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  // Void function: () -> ()
+  moduleInfo.types.push_back(WasmFuncType{{}, {}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  // (nop)
+  irgen.onNop();
+
+  irgen.onEnd(); // function end
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+
+  // nop should not add any instructions beyond the standard control flow.
+  // The function should have just: entry block with BranchInst to exit block,
+  // exit block with ReturnInst.
+  auto *ret = findReturnInst(func);
+  ASSERT_NE(ret, nullptr);
+  EXPECT_TRUE(llvh::isa<LiteralUndefined>(ret->getOperand(0)));
+}
+
 } // namespace

@@ -204,6 +204,8 @@ class BinaryReaderHermesIRGen : public wabt::BinaryReaderNop {
   wabt::Result OnSelectExpr(
       wabt::Index resultCount,
       wabt::Type *resultTypes) override;
+  wabt::Result OnUnreachableExpr() override;
+  wabt::Result OnNopExpr() override;
 
  private:
   /// Convert a wabt Type to our WasmValType.

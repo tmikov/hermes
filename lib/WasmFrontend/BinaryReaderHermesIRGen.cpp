@@ -931,5 +931,21 @@ wabt::Result BinaryReaderHermesIRGen::OnSelectExpr(
   return wabt::Result::Ok;
 }
 
+// --- Unreachable and nop instruction callbacks ---
+
+wabt::Result BinaryReaderHermesIRGen::OnUnreachableExpr() {
+  if (inFunctionBody_ && irgen_) {
+    irgen_->onUnreachable();
+  }
+  return wabt::Result::Ok;
+}
+
+wabt::Result BinaryReaderHermesIRGen::OnNopExpr() {
+  if (inFunctionBody_ && irgen_) {
+    irgen_->onNop();
+  }
+  return wabt::Result::Ok;
+}
+
 } // namespace wasm
 } // namespace hermes
