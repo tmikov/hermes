@@ -127,6 +127,11 @@ class WasmIRGen {
   /// select: pop condition, val2, val1; push (cond ? val1 : val2).
   void onSelect();
 
+  // --- Function calls (D.12) ---
+
+  /// Call the function at \p funcIndex with arguments from the value stack.
+  void onCall(uint32_t funcIndex);
+
   // --- unreachable and nop (D.11) ---
 
   /// Emit an UnreachableInst (Wasm trap).

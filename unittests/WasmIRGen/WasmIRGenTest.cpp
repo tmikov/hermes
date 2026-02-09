@@ -1634,4 +1634,179 @@ TEST(WasmIRGenTest, NopDoesNothing) {
   EXPECT_TRUE(llvh::isa<LiteralUndefined>(ret->getOperand(0)));
 }
 
+// --- Function call tests (D.12) ---
+
+TEST(WasmIRGenTest, CallSimple) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // Type 0: () -> (i32) — callee returns a constant
+  moduleInfo.types.push_back(WasmFuncType{{}, {WasmValType::I32}});
+  // Type 1: () -> (i32) — caller
+  moduleInfo.types.push_back(WasmFuncType{{}, {WasmValType::I32}});
+
+  moduleInfo.functions.push_back(WasmFunction{0}); // func 0
+  moduleInfo.functions.push_back(WasmFunction{1}); // func 1
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  // Define function 0: return 42
+  irgen.beginFunction(0, {});
+  irgen.onI32Const(42);
+  irgen.onEnd();
+  irgen.endFunction();
+
+  // Define function 1: call func 0, return its result
+  irgen.beginFunction(1, {});
+  irgen.onCall(0);
+  irgen.onEnd();
+  irgen.endFunction();
+
+  // Verify function 1 has a CallInst targeting function 0.
+  auto *caller = irgen.getIRFunctions()[1];
+  auto *callee = irgen.getIRFunctions()[0];
+  bool foundCall = false;
+  for (auto &bb : caller->getBasicBlockList()) {
+    for (auto &inst : bb) {
+      if (auto *call = llvh::dyn_cast<CallInst>(&inst)) {
+        EXPECT_EQ(call->getCallee(), callee);
+        foundCall = true;
+      }
+    }
+  }
+  EXPECT_TRUE(foundCall);
+}
+
+TEST(WasmIRGenTest, CallWithArgs) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // Type 0: (i32, i32) -> (i32) — add function
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::I32, WasmValType::I32}, {WasmValType::I32}});
+  // Type 1: () -> (i32) — caller
+  moduleInfo.types.push_back(WasmFuncType{{}, {WasmValType::I32}});
+
+  moduleInfo.functions.push_back(WasmFunction{0}); // func 0
+  moduleInfo.functions.push_back(WasmFunction{1}); // func 1
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  // Define function 0: return param0 + param1
+  irgen.beginFunction(0, {});
+  irgen.onLocalGet(0);
+  irgen.onLocalGet(1);
+  irgen.onI32Add();
+  irgen.onEnd();
+  irgen.endFunction();
+
+  // Define function 1: call func 0 with (10, 20)
+  irgen.beginFunction(1, {});
+  irgen.onI32Const(10);
+  irgen.onI32Const(20);
+  irgen.onCall(0);
+  irgen.onEnd();
+  irgen.endFunction();
+
+  // Verify function 1 has a CallInst with 2 arguments.
+  auto *caller = irgen.getIRFunctions()[1];
+  auto *callee = irgen.getIRFunctions()[0];
+  bool foundCall = false;
+  for (auto &bb : caller->getBasicBlockList()) {
+    for (auto &inst : bb) {
+      if (auto *call = llvh::dyn_cast<CallInst>(&inst)) {
+        EXPECT_EQ(call->getCallee(), callee);
+        // getNumArguments() includes "this" as argument 0, so for
+        // 2 Wasm args: this + 2 = 3 total arguments.
+        EXPECT_EQ(call->getNumArguments(), 3u);
+        foundCall = true;
+      }
+    }
+  }
+  EXPECT_TRUE(foundCall);
+}
+
+TEST(WasmIRGenTest, CallVoidFunction) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // Type 0: () -> () — void function
+  moduleInfo.types.push_back(WasmFuncType{{}, {}});
+
+  moduleInfo.functions.push_back(WasmFunction{0}); // func 0
+  moduleInfo.functions.push_back(WasmFunction{0}); // func 1 (same type)
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  // Define function 0: nop
+  irgen.beginFunction(0, {});
+  irgen.onNop();
+  irgen.onEnd();
+  irgen.endFunction();
+
+  // Define function 1: call void func 0
+  irgen.beginFunction(1, {});
+  irgen.onCall(0);
+  irgen.onEnd();
+  irgen.endFunction();
+
+  // Verify CallInst exists and function 1 returns undefined.
+  auto *caller = irgen.getIRFunctions()[1];
+  bool foundCall = false;
+  for (auto &bb : caller->getBasicBlockList()) {
+    for (auto &inst : bb) {
+      if (llvh::isa<CallInst>(&inst))
+        foundCall = true;
+    }
+  }
+  EXPECT_TRUE(foundCall);
+
+  auto *ret = findReturnInst(caller);
+  ASSERT_NE(ret, nullptr);
+  EXPECT_TRUE(llvh::isa<LiteralUndefined>(ret->getOperand(0)));
+}
+
+TEST(WasmIRGenTest, CallInUnreachable) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // Type 0: () -> (i32)
+  moduleInfo.types.push_back(WasmFuncType{{}, {WasmValType::I32}});
+
+  moduleInfo.functions.push_back(WasmFunction{0}); // func 0
+  moduleInfo.functions.push_back(WasmFunction{0}); // func 1
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  // Define function 0: return 1
+  irgen.beginFunction(0, {});
+  irgen.onI32Const(1);
+  irgen.onEnd();
+  irgen.endFunction();
+
+  // Define function 1: return, then call (dead code)
+  irgen.beginFunction(1, {});
+  irgen.onI32Const(99);
+  irgen.onReturn();
+  // This call should be a no-op because we're in unreachable code.
+  irgen.onCall(0);
+  irgen.onEnd();
+  irgen.endFunction();
+
+  // Verify no CallInst in function 1 — the call was in unreachable code.
+  auto *caller = irgen.getIRFunctions()[1];
+  bool foundCall = false;
+  for (auto &bb : caller->getBasicBlockList()) {
+    for (auto &inst : bb) {
+      if (llvh::isa<CallInst>(&inst))
+        foundCall = true;
+    }
+  }
+  EXPECT_FALSE(foundCall);
+}
+
 } // namespace

@@ -204,6 +204,7 @@ class BinaryReaderHermesIRGen : public wabt::BinaryReaderNop {
   wabt::Result OnSelectExpr(
       wabt::Index resultCount,
       wabt::Type *resultTypes) override;
+  wabt::Result OnCallExpr(wabt::Index funcIndex) override;
   wabt::Result OnUnreachableExpr() override;
   wabt::Result OnNopExpr() override;
 

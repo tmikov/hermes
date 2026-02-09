@@ -931,6 +931,15 @@ wabt::Result BinaryReaderHermesIRGen::OnSelectExpr(
   return wabt::Result::Ok;
 }
 
+// --- Call instruction callback ---
+
+wabt::Result BinaryReaderHermesIRGen::OnCallExpr(wabt::Index funcIndex) {
+  if (inFunctionBody_ && irgen_) {
+    irgen_->onCall(funcIndex);
+  }
+  return wabt::Result::Ok;
+}
+
 // --- Unreachable and nop instruction callbacks ---
 
 wabt::Result BinaryReaderHermesIRGen::OnUnreachableExpr() {

@@ -845,6 +845,41 @@ void WasmIRGen::onSelect() {
   push(phi);
 }
 
+// --- Function calls (D.12) ---
+
+void WasmIRGen::onCall(uint32_t funcIndex) {
+  if (unreachable_)
+    return;
+
+  assert(
+      funcIndex < irFunctions_.size() &&
+      "call funcIndex out of range");
+
+  // Look up the called function's type signature.
+  const WasmFuncType &funcType = moduleInfo_.getFunctionType(funcIndex);
+
+  // Pop arguments from the value stack in reverse order.
+  // Wasm pushes args left-to-right, so the last arg is on top.
+  uint32_t numArgs = funcType.params.size();
+  llvh::SmallVector<Value *, 8> args(numArgs, nullptr);
+  for (uint32_t i = numArgs; i > 0; --i) {
+    args[i - 1] = pop();
+  }
+
+  // Emit CallInst to the target function.
+  Function *callee = irFunctions_[funcIndex];
+  auto *call = builder_.createCallInst(
+      callee,
+      /* newTarget */ builder_.getLiteralUndefined(),
+      /* thisValue */ builder_.getLiteralUndefined(),
+      args);
+
+  // Push the return value if the function has a result type.
+  if (!funcType.results.empty()) {
+    push(call);
+  }
+}
+
 // --- unreachable and nop (D.11) ---
 
 void WasmIRGen::onUnreachable() {
