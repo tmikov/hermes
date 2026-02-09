@@ -17,7 +17,10 @@
 ;; CHECK-NEXT:        StoreStackInst %1: any, %0: any
 ;; CHECK-NEXT:   %3 = LoadStackInst (:any) %0: any
 ;; CHECK-NEXT:        StoreStackInst %3: any, %0: any
-;; CHECK-NEXT:        ReturnInst %3: any
+;; CHECK-NEXT:        BranchInst %BB1
+;; CHECK-NEXT: %BB1:
+;; CHECK-NEXT:   %6 = PhiInst (:any) %3: any, %BB0
+;; CHECK-NEXT:        ReturnInst %6: any
 ;; CHECK-NEXT: function_end
 
 (module

@@ -15,7 +15,10 @@
 ;; The function has result type i64, endFunction() returns top of stack = hi=1.
 ;; CHECK-LABEL: function wasm_func_0(): any
 ;; CHECK-NEXT: %BB0:
-;; CHECK-NEXT:        ReturnInst 1: number
+;; CHECK-NEXT:        BranchInst %BB1
+;; CHECK-NEXT: %BB1:
+;; CHECK-NEXT:   %1 = PhiInst (:number) 1: number, %BB0
+;; CHECK-NEXT:        ReturnInst %1: number
 ;; CHECK-NEXT: function_end
 
 (module

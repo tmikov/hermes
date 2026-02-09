@@ -195,12 +195,13 @@ TEST(WasmIRGenTest, BeginEndFunctionNoLocals) {
   irgen.onI32Const(42);
   irgen.endFunction();
 
-  // The function should have its entry block with instructions.
+  // The function should have blocks: entry + exit (from implicit func block).
   auto *func = irgen.getIRFunctions()[0];
-  auto &bb = func->getBasicBlockList().front();
-  EXPECT_FALSE(bb.empty());
-  // Should end with ReturnInst.
-  EXPECT_TRUE(llvh::isa<ReturnInst>(&bb.back()));
+  EXPECT_GE(func->getBasicBlockList().size(), 2u);
+  // The exit block (last block) should end with ReturnInst.
+  auto &exitBB = func->getBasicBlockList().back();
+  EXPECT_FALSE(exitBB.empty());
+  EXPECT_TRUE(llvh::isa<ReturnInst>(&exitBB.back()));
 }
 
 TEST(WasmIRGenTest, BeginFunctionWithLocals) {
@@ -300,14 +301,13 @@ TEST(WasmIRGenTest, LocalTee) {
   irgen.endFunction();
 
   // The function should return 42 (the tee'd value).
+  // The return is in the exit block (last block).
   auto *func = irgen.getIRFunctions()[0];
-  auto &bb = func->getBasicBlockList().front();
-  ASSERT_TRUE(llvh::isa<ReturnInst>(&bb.back()));
-  auto *ret = llvh::cast<ReturnInst>(&bb.back());
-  // The return value should be a LiteralNumber(42).
-  auto *lit = llvh::dyn_cast<LiteralNumber>(ret->getOperand(0));
-  ASSERT_NE(lit, nullptr);
-  EXPECT_EQ(lit->getValue(), 42.0);
+  auto &exitBB = func->getBasicBlockList().back();
+  ASSERT_TRUE(llvh::isa<ReturnInst>(&exitBB.back()));
+  auto *ret = llvh::cast<ReturnInst>(&exitBB.back());
+  // The return operand should be a PhiInst (from the implicit function block).
+  EXPECT_TRUE(llvh::isa<PhiInst>(ret->getOperand(0)));
 }
 
 TEST(WasmIRGenTest, VoidFunctionReturn) {
@@ -324,11 +324,11 @@ TEST(WasmIRGenTest, VoidFunctionReturn) {
   irgen.beginFunction(0, {});
   irgen.endFunction();
 
-  // Should return undefined.
+  // Should return undefined. The return is in the exit block.
   auto *func = irgen.getIRFunctions()[0];
-  auto &bb = func->getBasicBlockList().front();
-  ASSERT_TRUE(llvh::isa<ReturnInst>(&bb.back()));
-  auto *ret = llvh::cast<ReturnInst>(&bb.back());
+  auto &exitBB = func->getBasicBlockList().back();
+  ASSERT_TRUE(llvh::isa<ReturnInst>(&exitBB.back()));
+  auto *ret = llvh::cast<ReturnInst>(&exitBB.back());
   EXPECT_TRUE(llvh::isa<LiteralUndefined>(ret->getOperand(0)));
 }
 
@@ -634,9 +634,8 @@ TEST(WasmIRGenTest, ExplicitReturn) {
   irgen.endFunction();
 
   auto *func = irgen.getIRFunctions()[0];
-  // Should have 2 basic blocks: the entry block and the dead block after
-  // return.
-  EXPECT_EQ(func->getBasicBlockList().size(), 2u);
+  // Should have 3 basic blocks: entry, dead block after return, exit block.
+  EXPECT_EQ(func->getBasicBlockList().size(), 3u);
 
   // Entry block should end with ReturnInst returning 42.
   auto &bb = func->getBasicBlockList().front();
@@ -690,10 +689,212 @@ TEST(WasmIRGenTest, Drop) {
 
   auto *func = irgen.getIRFunctions()[0];
   // Should return undefined (void function, value was dropped).
-  auto &bb = func->getBasicBlockList().front();
-  ASSERT_TRUE(llvh::isa<ReturnInst>(&bb.back()));
-  auto *ret = llvh::cast<ReturnInst>(&bb.back());
+  // The return is in the exit block (last block).
+  auto &exitBB = func->getBasicBlockList().back();
+  ASSERT_TRUE(llvh::isa<ReturnInst>(&exitBB.back()));
+  auto *ret = llvh::cast<ReturnInst>(&exitBB.back());
   EXPECT_TRUE(llvh::isa<LiteralUndefined>(ret->getOperand(0)));
+}
+
+// --- Block/br/br_if tests (D.6) ---
+
+/// Helper: find the first ReturnInst in a function.
+static ReturnInst *findReturnInst(Function *func) {
+  for (auto &bb : func->getBasicBlockList()) {
+    for (auto &inst : bb) {
+      if (auto *ret = llvh::dyn_cast<ReturnInst>(&inst))
+        return ret;
+    }
+  }
+  return nullptr;
+}
+
+TEST(WasmIRGenTest, BlockWithResult) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  // Function: () -> (i32)
+  moduleInfo.types.push_back(WasmFuncType{{}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  // (block (result i32) (i32.const 42) (end))
+  irgen.onBlock({WasmValType::I32});
+  irgen.onI32Const(42);
+  irgen.onEnd(); // end of block
+  // At this point, the block result (42) should be on the value stack.
+  irgen.onEnd(); // end of function
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+  // Find the ReturnInst.
+  auto *ret = findReturnInst(func);
+  ASSERT_NE(ret, nullptr);
+
+  // There should be a PhiInst feeding the return (from the function exit).
+  EXPECT_TRUE(llvh::isa<PhiInst>(ret->getOperand(0)));
+}
+
+TEST(WasmIRGenTest, BlockBrWithResult) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  // Function: () -> (i32)
+  moduleInfo.types.push_back(WasmFuncType{{}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  // (block (result i32) (i32.const 42) (br 0) (end))
+  irgen.onBlock({WasmValType::I32});
+  irgen.onI32Const(42);
+  irgen.onBr(0);
+  irgen.onEnd();
+
+  irgen.onEnd(); // function end
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+
+  // Entry block should have a BranchInst (from the br 0).
+  auto &entryBB = func->getBasicBlockList().front();
+  EXPECT_TRUE(llvh::isa<BranchInst>(&entryBB.back()));
+
+  // There should be a PhiInst in the block's continuation block
+  // that receives 42 from the br.
+  bool foundPhi = false;
+  for (auto &bb : func->getBasicBlockList()) {
+    for (auto &inst : bb) {
+      if (auto *phi = llvh::dyn_cast<PhiInst>(&inst)) {
+        if (phi->getNumEntries() > 0) {
+          auto pair = phi->getEntry(0);
+          if (auto *lit = llvh::dyn_cast<LiteralNumber>(pair.first)) {
+            if (lit->getValue() == 42.0)
+              foundPhi = true;
+          }
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(foundPhi);
+}
+
+TEST(WasmIRGenTest, BlockVoid) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  // Void function: () -> ()
+  moduleInfo.types.push_back(WasmFuncType{{}, {}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  // (block (nop) (end))
+  irgen.onBlock({});
+  // No operations inside the block.
+  irgen.onEnd();
+
+  irgen.onEnd(); // function end
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+  // Should have multiple basic blocks (entry, block cont, exit).
+  EXPECT_GE(func->getBasicBlockList().size(), 3u);
+
+  // Should return undefined.
+  auto *ret = findReturnInst(func);
+  ASSERT_NE(ret, nullptr);
+  EXPECT_TRUE(llvh::isa<LiteralUndefined>(ret->getOperand(0)));
+}
+
+TEST(WasmIRGenTest, BrIfTaken) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  // Void function: () -> ()
+  moduleInfo.types.push_back(WasmFuncType{{}, {}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  // (block (i32.const 1) (br_if 0) (end))
+  irgen.onBlock({});
+  irgen.onI32Const(1);
+  irgen.onBrIf(0);
+  irgen.onEnd();
+
+  irgen.onEnd(); // function end
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+  // Should have a CondBranchInst somewhere.
+  bool foundCondBranch = false;
+  for (auto &bb : func->getBasicBlockList()) {
+    for (auto &inst : bb) {
+      if (llvh::isa<CondBranchInst>(&inst))
+        foundCondBranch = true;
+    }
+  }
+  EXPECT_TRUE(foundCondBranch);
+}
+
+TEST(WasmIRGenTest, NestedBlocksBr) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  // Function: () -> (i32)
+  moduleInfo.types.push_back(WasmFuncType{{}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  // (block (result i32)
+  //   (block
+  //     (i32.const 55)
+  //     (br 1)
+  //   )
+  //   (i32.const 0)
+  // )
+  irgen.onBlock({WasmValType::I32}); // outer block
+  irgen.onBlock({});                  // inner block
+  irgen.onI32Const(55);
+  irgen.onBr(1); // br to outer block (depth 1)
+  irgen.onEnd(); // end inner block
+  irgen.onI32Const(0); // unreachable code
+  irgen.onEnd(); // end outer block
+
+  irgen.onEnd(); // function end
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+
+  // The function should have a PhiInst receiving 55 from the br 1.
+  bool foundPhi55 = false;
+  for (auto &bb : func->getBasicBlockList()) {
+    for (auto &inst : bb) {
+      if (auto *phi = llvh::dyn_cast<PhiInst>(&inst)) {
+        if (phi->getNumEntries() > 0) {
+          auto pair = phi->getEntry(0);
+          if (auto *lit = llvh::dyn_cast<LiteralNumber>(pair.first)) {
+            if (lit->getValue() == 55.0)
+              foundPhi55 = true;
+          }
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(foundPhi55);
 }
 
 } // namespace

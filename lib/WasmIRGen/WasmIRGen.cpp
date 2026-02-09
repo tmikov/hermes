@@ -74,6 +74,7 @@ void WasmIRGen::beginFunction(
   valueStack_.clear();
   locals_.clear();
   controlStack_.clear();
+  unreachable_ = false;
 
   const WasmFuncType &funcType = moduleInfo_.getFunctionType(funcIndex);
 
@@ -128,19 +129,48 @@ void WasmIRGen::beginFunction(
     }
     builder_.createStoreStackInst(zeroVal, alloc);
   }
+
+  // Push an implicit function-level control entry. The function body acts
+  // as an implicit block — wabt calls OnEndExpr for the function body's
+  // final "end", which pops this entry via onEnd().
+  auto *exitBlock = builder_.createBasicBlock(currentFunc_);
+
+  ControlEntry funcEntry;
+  funcEntry.kind = ControlEntry::Block;
+  funcEntry.contBlock = exitBlock;
+  funcEntry.elseBlock = nullptr;
+  funcEntry.resultTypes = funcType.results;
+  funcEntry.stackHeight = 0;
+
+  if (!funcType.results.empty()) {
+    auto *savedBlock = builder_.getInsertionBlock();
+    builder_.setInsertionBlock(exitBlock);
+    for (size_t i = 0; i < funcType.results.size(); ++i) {
+      funcEntry.resultPhis.push_back(builder_.createPhiInst());
+    }
+    builder_.setInsertionBlock(savedBlock);
+  }
+
+  controlStack_.push_back(std::move(funcEntry));
 }
 
 void WasmIRGen::endFunction() {
-  const WasmFuncType &funcType =
-      moduleInfo_.getFunctionType(currentFuncIndex_);
+  // If the control stack still has the implicit function-level entry (e.g.,
+  // in unit tests that skip onEnd), pop remaining entries.
+  while (!controlStack_.empty()) {
+    onEnd();
+  }
 
-  // If the function has a result type and there's a value on the stack,
-  // return it. Otherwise return undefined.
-  if (!funcType.results.empty() && !valueStack_.empty()) {
-    Value *result = pop();
-    builder_.createReturnInst(result);
-  } else {
-    builder_.createReturnInst(builder_.getLiteralUndefined());
+  // Emit a return if the current block is not terminated.
+  if (!isCurrentBlockTerminated()) {
+    const WasmFuncType &funcType =
+        moduleInfo_.getFunctionType(currentFuncIndex_);
+    if (!funcType.results.empty() && !valueStack_.empty()) {
+      Value *result = pop();
+      builder_.createReturnInst(result);
+    } else {
+      builder_.createReturnInst(builder_.getLiteralUndefined());
+    }
   }
 
   currentFunc_ = nullptr;
@@ -190,6 +220,9 @@ void WasmIRGen::onLocalTee(uint32_t localIndex) {
 // --- Return and drop (D.5) ---
 
 void WasmIRGen::onReturn() {
+  if (unreachable_)
+    return;
+
   const WasmFuncType &funcType =
       moduleInfo_.getFunctionType(currentFuncIndex_);
 
@@ -200,8 +233,10 @@ void WasmIRGen::onReturn() {
     builder_.createReturnInst(builder_.getLiteralUndefined());
   }
 
-  // After an unconditional return, create a new unreachable basic block
-  // for any dead code that follows.
+  // After an unconditional return, code is unreachable.
+  unreachable_ = true;
+
+  // Create a new dead basic block for any dead code that follows.
   auto *deadBlock = builder_.createBasicBlock(currentFunc_);
   builder_.setInsertionBlock(deadBlock);
 }
@@ -402,6 +437,132 @@ void WasmIRGen::onI32Eqz() {
       cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
 }
 
+// --- Control flow (D.6) ---
+
+void WasmIRGen::onBlock(const std::vector<WasmValType> &resultTypes) {
+  // Create a continuation basic block (target of br 0 = after end).
+  auto *contBlock = builder_.createBasicBlock(currentFunc_);
+
+  ControlEntry entry;
+  entry.kind = ControlEntry::Block;
+  entry.contBlock = contBlock;
+  entry.elseBlock = nullptr;
+  entry.resultTypes = resultTypes;
+  entry.stackHeight = valueStack_.size();
+  entry.outerUnreachable = unreachable_;
+
+  // If the block has result types, create phi nodes in the continuation block.
+  if (!resultTypes.empty()) {
+    auto *savedBlock = builder_.getInsertionBlock();
+    builder_.setInsertionBlock(contBlock);
+    for (size_t i = 0; i < resultTypes.size(); ++i) {
+      entry.resultPhis.push_back(builder_.createPhiInst());
+    }
+    builder_.setInsertionBlock(savedBlock);
+  }
+
+  controlStack_.push_back(std::move(entry));
+  // The code inside the block starts as reachable (even if outer is
+  // unreachable, the block entry is a new reachability scope).
+  // Actually, if the outer code was unreachable, the block itself is
+  // unreachable too. But we still process it to keep the control stack
+  // balanced.
+}
+
+void WasmIRGen::onEnd() {
+  assert(!controlStack_.empty() && "control stack underflow");
+  ControlEntry entry = std::move(controlStack_.back());
+  controlStack_.pop_back();
+
+  if (entry.kind == ControlEntry::Block) {
+    bool fallsThrough = !unreachable_ && !isCurrentBlockTerminated();
+
+    if (fallsThrough) {
+      // Add phi operands from the fallthrough path.
+      addBranchPhiOperands(entry);
+      builder_.createBranchInst(entry.contBlock);
+    }
+
+    // Set insertion point to the continuation block.
+    builder_.setInsertionBlock(entry.contBlock);
+
+    // The continuation block is reachable if we fell through or if any
+    // branch (br/br_if) targeted this block.
+    unreachable_ = !fallsThrough && !entry.branchTargeted;
+
+    // Push phi results onto the value stack.
+    for (auto *phi : entry.resultPhis) {
+      push(phi);
+    }
+  }
+  // Loop and If kinds will be handled in D.7 and D.8.
+}
+
+void WasmIRGen::onBr(uint32_t depth) {
+  if (unreachable_)
+    return;
+
+  ControlEntry &entry = getControlEntry(depth);
+  entry.branchTargeted = true;
+
+  // Add phi operands for the branch target.
+  addBranchPhiOperands(entry);
+
+  // Branch to the target.
+  builder_.createBranchInst(entry.contBlock);
+
+  // After an unconditional branch, code is unreachable.
+  unreachable_ = true;
+
+  // Create a new dead basic block for any dead code that follows.
+  auto *deadBlock = builder_.createBasicBlock(currentFunc_);
+  builder_.setInsertionBlock(deadBlock);
+}
+
+void WasmIRGen::onBrIf(uint32_t depth) {
+  if (unreachable_)
+    return;
+
+  ControlEntry &entry = getControlEntry(depth);
+  entry.branchTargeted = true;
+
+  // Pop the condition.
+  Value *cond = pop();
+
+  // Create a fallthrough block for when the condition is false.
+  auto *fallthroughBlock = builder_.createBasicBlock(currentFunc_);
+
+  // If the block has results, we need to add phi operands from the
+  // branch-taken path. The values for the phi must be read before the
+  // branch, but we don't pop them (they stay on the stack for the
+  // fallthrough path).
+  if (!entry.resultPhis.empty() && entry.kind == ControlEntry::Block) {
+    // For br_if targeting a block, the top N values are the results.
+    // We peek at them (don't pop) and add them as phi operands.
+    size_t numResults = entry.resultPhis.size();
+    size_t available = valueStack_.size();
+    auto *currentBlock = builder_.getInsertionBlock();
+    for (size_t i = 0; i < numResults; ++i) {
+      // Peek at the result values (don't pop for br_if).
+      Value *val;
+      if (available >= numResults) {
+        val = valueStack_[available - numResults + i];
+      } else {
+        val = builder_.getLiteralUndefined();
+      }
+      entry.resultPhis[i]->addEntry(val, currentBlock);
+    }
+  }
+
+  // Emit conditional branch: non-zero condition branches to target.
+  builder_.createCondBranchInst(cond, entry.contBlock, fallthroughBlock);
+
+  // Continue generating code in the fallthrough block.
+  builder_.setInsertionBlock(fallthroughBlock);
+}
+
+// --- Helper methods ---
+
 Value *WasmIRGen::pop() {
   assert(!valueStack_.empty() && "value stack underflow");
   Value *v = valueStack_.back();
@@ -411,6 +572,47 @@ Value *WasmIRGen::pop() {
 
 void WasmIRGen::push(Value *v) {
   valueStack_.push_back(v);
+}
+
+WasmIRGen::ControlEntry &WasmIRGen::getControlEntry(uint32_t depth) {
+  assert(depth < controlStack_.size() && "branch depth out of range");
+  return controlStack_[controlStack_.size() - 1 - depth];
+}
+
+void WasmIRGen::addBranchPhiOperands(ControlEntry &entry) {
+  if (entry.kind == ControlEntry::Block && !entry.resultPhis.empty()) {
+    auto *currentBlock = builder_.getInsertionBlock();
+    size_t numResults = entry.resultPhis.size();
+    size_t available = valueStack_.size();
+
+    if (available >= numResults) {
+      // Normal case: pop N result values from the stack.
+      for (size_t i = 0; i < numResults; ++i) {
+        Value *val = valueStack_[available - numResults + i];
+        entry.resultPhis[i]->addEntry(val, currentBlock);
+      }
+      valueStack_.resize(available - numResults);
+    } else {
+      // Stack underflow (e.g., due to unimplemented instructions).
+      // Use undefined as placeholder for missing values.
+      for (size_t i = 0; i < numResults; ++i) {
+        Value *val = (i >= numResults - available)
+            ? valueStack_[i - (numResults - available)]
+            : builder_.getLiteralUndefined();
+        entry.resultPhis[i]->addEntry(val, currentBlock);
+      }
+      valueStack_.clear();
+    }
+  }
+  // For Loop entries, br targets the loop header. Loop phis are for
+  // loop parameters which will be handled in D.7.
+}
+
+bool WasmIRGen::isCurrentBlockTerminated() {
+  auto *bb = builder_.getInsertionBlock();
+  if (!bb || bb->empty())
+    return false;
+  return llvh::isa<TerminatorInst>(&bb->back());
 }
 
 } // namespace wasm

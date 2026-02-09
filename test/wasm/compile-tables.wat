@@ -10,15 +10,25 @@
 ;; RUN: %hermesc --wasm --dump-ir %t.wasm | %FileCheck %s
 
 ;; CHECK-LABEL: function wasm_func_0(): any
-;; CHECK:   ReturnInst 10
+;; CHECK:   BranchInst %BB1
+;; CHECK: %BB1:
+;; CHECK:   PhiInst (:number) 10: number, %BB0
+;; CHECK:   ReturnInst
 ;; CHECK:   function_end
 
 ;; CHECK-LABEL: function wasm_func_1(): any
-;; CHECK:   ReturnInst 20
+;; CHECK:   BranchInst %BB1
+;; CHECK: %BB1:
+;; CHECK:   PhiInst (:number) 20: number, %BB0
+;; CHECK:   ReturnInst
 ;; CHECK:   function_end
 
 ;; CHECK-LABEL: function wasm_func_2(p0: any): any
 ;; CHECK:   AllocStackInst {{.*}} $local_0
+;; CHECK:   BranchInst %BB1
+;; CHECK: %BB1:
+;; CHECK:   PhiInst (:any) %{{[0-9]+}}: any, %BB0
+;; CHECK:   ReturnInst
 ;; CHECK:   function_end
 
 (module

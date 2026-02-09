@@ -11,22 +11,31 @@
 ;; RUN: %hermesc --wasm --dump-ir %t.wasm | %FileCheck %s
 
 ;; Test 1: Explicit return with i32 result.
+;; The explicit return jumps directly to ReturnInst; the exit block (BB1)
+;; is unreachable with an empty PhiInst.
 ;; CHECK-LABEL: function wasm_func_0(): any
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:        ReturnInst 42: number
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:        ReturnInst undefined: undefined
+;; CHECK-NEXT:   %1 = PhiInst (:notype)
+;; CHECK-NEXT:        ReturnInst %1: notype
+;; CHECK-NEXT: %BB2:
 ;; CHECK-NEXT: function_end
 
 ;; Test 2: Implicit return (fallthrough) with i32 result.
 ;; CHECK-LABEL: function wasm_func_1(): any
 ;; CHECK-NEXT: %BB0:
-;; CHECK-NEXT:        ReturnInst 42: number
+;; CHECK-NEXT:        BranchInst %BB1
+;; CHECK-NEXT: %BB1:
+;; CHECK-NEXT:   %1 = PhiInst (:number) 42: number, %BB0
+;; CHECK-NEXT:        ReturnInst %1: number
 ;; CHECK-NEXT: function_end
 
 ;; Test 3: Void function with drop.
 ;; CHECK-LABEL: function wasm_func_2(): any
 ;; CHECK-NEXT: %BB0:
+;; CHECK-NEXT:        BranchInst %BB1
+;; CHECK-NEXT: %BB1:
 ;; CHECK-NEXT:        ReturnInst undefined: undefined
 ;; CHECK-NEXT: function_end
 

@@ -830,5 +830,46 @@ wabt::Result BinaryReaderHermesIRGen::OnDropExpr() {
   return wabt::Result::Ok;
 }
 
+// --- Block/end/br/br_if instruction callbacks ---
+
+wabt::Result BinaryReaderHermesIRGen::OnBlockExpr(wabt::Type sigType) {
+  if (!inFunctionBody_ || !irgen_)
+    return wabt::Result::Ok;
+
+  // Convert block signature type to result types vector.
+  // In Wasm MVP, block types are either void or a single value type.
+  std::vector<WasmValType> resultTypes;
+  if (static_cast<wabt::Type::Enum>(sigType) != wabt::Type::Void) {
+    resultTypes.push_back(convertType(sigType));
+  }
+
+  irgen_->onBlock(resultTypes);
+  return wabt::Result::Ok;
+}
+
+wabt::Result BinaryReaderHermesIRGen::OnEndExpr() {
+  if (!inFunctionBody_ || !irgen_)
+    return wabt::Result::Ok;
+
+  irgen_->onEnd();
+  return wabt::Result::Ok;
+}
+
+wabt::Result BinaryReaderHermesIRGen::OnBrExpr(wabt::Index depth) {
+  if (!inFunctionBody_ || !irgen_)
+    return wabt::Result::Ok;
+
+  irgen_->onBr(depth);
+  return wabt::Result::Ok;
+}
+
+wabt::Result BinaryReaderHermesIRGen::OnBrIfExpr(wabt::Index depth) {
+  if (!inFunctionBody_ || !irgen_)
+    return wabt::Result::Ok;
+
+  irgen_->onBrIf(depth);
+  return wabt::Result::Ok;
+}
+
 } // namespace wasm
 } // namespace hermes

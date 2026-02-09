@@ -12,12 +12,18 @@
 
 ;; CHECK-LABEL: function wasm_func_0(): any
 ;; CHECK-NEXT: %BB0:
-;; CHECK-NEXT:        ReturnInst 3.140000{{.*}}: number
+;; CHECK-NEXT:        BranchInst %BB1
+;; CHECK-NEXT: %BB1:
+;; CHECK-NEXT:   %1 = PhiInst (:number) 3.140000{{.*}}: number, %BB0
+;; CHECK-NEXT:        ReturnInst %1: number
 ;; CHECK-NEXT: function_end
 
 ;; CHECK-LABEL: function wasm_func_1(): any
 ;; CHECK-NEXT: %BB0:
-;; CHECK-NEXT:        ReturnInst 2.718281{{.*}}: number
+;; CHECK-NEXT:        BranchInst %BB1
+;; CHECK-NEXT: %BB1:
+;; CHECK-NEXT:   %1 = PhiInst (:number) 2.718281{{.*}}: number, %BB0
+;; CHECK-NEXT:        ReturnInst %1: number
 ;; CHECK-NEXT: function_end
 
 (module

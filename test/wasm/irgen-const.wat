@@ -12,7 +12,10 @@
 
 ;; CHECK-LABEL: function wasm_func_0(): any
 ;; CHECK-NEXT: %BB0:
-;; CHECK-NEXT:        ReturnInst 42: number
+;; CHECK-NEXT:        BranchInst %BB1
+;; CHECK-NEXT: %BB1:
+;; CHECK-NEXT:   %1 = PhiInst (:number) 42: number, %BB0
+;; CHECK-NEXT:        ReturnInst %1: number
 ;; CHECK-NEXT: function_end
 
 (module

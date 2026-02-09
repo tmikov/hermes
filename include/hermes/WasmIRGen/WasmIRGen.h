@@ -99,6 +99,17 @@ class WasmIRGen {
   void onI32GeU();
   void onI32Eqz();
 
+  // --- Control flow (D.6) ---
+
+  /// Enter a block with the given result types.
+  void onBlock(const std::vector<WasmValType> &resultTypes);
+  /// End the current block/loop/if.
+  void onEnd();
+  /// Unconditional branch to the control entry at \p depth.
+  void onBr(uint32_t depth);
+  /// Conditional branch: pop condition, branch if non-zero.
+  void onBrIf(uint32_t depth);
+
   /// \return the array of IR Functions created by createFunctions(), indexed
   ///   by Wasm function index.
   llvh::ArrayRef<Function *> getIRFunctions() const {
@@ -127,6 +138,11 @@ class WasmIRGen {
   /// AllocStackInst for each Wasm local (params + declared locals).
   std::vector<AllocStackInst *> locals_;
 
+  /// Whether we are in unreachable code (after an unconditional br, return,
+  /// or unreachable). In unreachable mode, instructions are no-ops until
+  /// the next end/else that restores reachability.
+  bool unreachable_ = false;
+
   /// Control flow stack (for block/loop/if).
   struct ControlEntry {
     enum Kind { Block, Loop, If };
@@ -141,6 +157,10 @@ class WasmIRGen {
     size_t stackHeight;
     /// Phi nodes for results at the continuation block.
     std::vector<PhiInst *> resultPhis;
+    /// Whether the code was unreachable when this entry was pushed.
+    bool outerUnreachable = false;
+    /// Whether any branch (br/br_if) has targeted this entry's contBlock.
+    bool branchTargeted = false;
   };
   std::vector<ControlEntry> controlStack_;
 
@@ -150,6 +170,19 @@ class WasmIRGen {
   Value *pop();
   /// Push a value onto the value stack.
   void push(Value *v);
+
+  /// Get the ControlEntry at the given branch depth.
+  ControlEntry &getControlEntry(uint32_t depth);
+
+  /// Add phi operands for branching to the given control entry from the
+  /// current block. For Block/If entries, pops result values and adds them
+  /// as phi incoming edges. For Loop entries, no phi operands are added
+  /// (loop phis are for loop parameters, handled separately).
+  void addBranchPhiOperands(ControlEntry &entry);
+
+  /// Check if the current insertion block is terminated (ends with a
+  /// terminator instruction).
+  bool isCurrentBlockTerminated();
 };
 
 } // namespace wasm
