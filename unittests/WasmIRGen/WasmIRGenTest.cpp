@@ -1277,4 +1277,154 @@ TEST(WasmIRGenTest, IfWithBr) {
   EXPECT_TRUE(foundPhi99);
 }
 
+// --- br_table tests (D.9) ---
+
+TEST(WasmIRGenTest, BrTableBasic) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  // Function: (i32) -> ()
+  moduleInfo.types.push_back(WasmFuncType{{WasmValType::I32}, {}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  // (block $b0
+  //   (block $b1
+  //     (block $b2
+  //       (local.get 0)
+  //       (br_table $b0 $b1 $b2)  ;; 0->$b0, 1->$b1, default->$b2
+  //     )))
+  irgen.onBlock({}); // $b0 (depth 2 from innermost)
+  irgen.onBlock({}); // $b1 (depth 1)
+  irgen.onBlock({}); // $b2 (depth 0)
+  irgen.onLocalGet(0);
+  uint32_t depths[] = {2, 1};
+  irgen.onBrTable(depths, 2, 0);
+  irgen.onEnd(); // end $b2
+  irgen.onEnd(); // end $b1
+  irgen.onEnd(); // end $b0
+
+  irgen.onEnd(); // function end
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+
+  // Should have a SwitchInst somewhere.
+  bool foundSwitch = false;
+  for (auto &bb : func->getBasicBlockList()) {
+    for (auto &inst : bb) {
+      if (llvh::isa<SwitchInst>(&inst))
+        foundSwitch = true;
+    }
+  }
+  EXPECT_TRUE(foundSwitch);
+}
+
+TEST(WasmIRGenTest, BrTableWithResult) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  // Function: (i32) -> (i32)
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::I32}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  // (block (result i32)
+  //   (i32.const 10)
+  //   (local.get 0)
+  //   (br_table 0 0)   ;; case 0 and default both go to the block end
+  // )
+  irgen.onBlock({WasmValType::I32});
+  irgen.onI32Const(10);
+  irgen.onLocalGet(0);
+  uint32_t depths[] = {0};
+  irgen.onBrTable(depths, 1, 0);
+  irgen.onEnd(); // end block
+
+  irgen.onEnd(); // function end
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+
+  // Should have a SwitchInst and a PhiInst with value 10.
+  bool foundSwitch = false;
+  bool foundPhi10 = false;
+  for (auto &bb : func->getBasicBlockList()) {
+    for (auto &inst : bb) {
+      if (llvh::isa<SwitchInst>(&inst))
+        foundSwitch = true;
+      if (auto *phi = llvh::dyn_cast<PhiInst>(&inst)) {
+        for (unsigned i = 0; i < phi->getNumEntries(); ++i) {
+          auto pair = phi->getEntry(i);
+          if (auto *lit = llvh::dyn_cast<LiteralNumber>(pair.first)) {
+            if (lit->getValue() == 10.0)
+              foundPhi10 = true;
+          }
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(foundSwitch);
+  EXPECT_TRUE(foundPhi10);
+}
+
+TEST(WasmIRGenTest, BrTableSameDepthMerge) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+  // Function: (i32) -> ()
+  moduleInfo.types.push_back(WasmFuncType{{WasmValType::I32}, {}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  // (block $b0
+  //   (block $b1
+  //     (local.get 0)
+  //     (br_table $b0 $b0 $b1)  ;; 0->$b0, 1->$b0, default->$b1
+  //   ))
+  irgen.onBlock({}); // $b0 (depth 1)
+  irgen.onBlock({}); // $b1 (depth 0)
+  irgen.onLocalGet(0);
+  uint32_t depths[] = {1, 1};
+  irgen.onBrTable(depths, 2, 0);
+  irgen.onEnd(); // end $b1
+  irgen.onEnd(); // end $b0
+
+  irgen.onEnd(); // function end
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+
+  // Should have a SwitchInst. Cases 0 and 1 should share the same
+  // trampoline block (same depth).
+  bool foundSwitch = false;
+  const SwitchInst *switchInst = nullptr;
+  for (auto &bb : func->getBasicBlockList()) {
+    for (auto &inst : bb) {
+      if (auto *si = llvh::dyn_cast<SwitchInst>(&inst)) {
+        foundSwitch = true;
+        switchInst = si;
+      }
+    }
+  }
+  ASSERT_TRUE(foundSwitch);
+  ASSERT_NE(switchInst, nullptr);
+
+  // Two cases should share the same target block.
+  ASSERT_EQ(switchInst->getNumCasePair(), 2u);
+  auto case0 = switchInst->getCasePair(0);
+  auto case1 = switchInst->getCasePair(1);
+  EXPECT_EQ(case0.second, case1.second);
+}
+
 } // namespace

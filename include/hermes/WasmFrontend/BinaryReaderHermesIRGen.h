@@ -197,6 +197,10 @@ class BinaryReaderHermesIRGen : public wabt::BinaryReaderNop {
   wabt::Result OnEndExpr() override;
   wabt::Result OnBrExpr(wabt::Index depth) override;
   wabt::Result OnBrIfExpr(wabt::Index depth) override;
+  wabt::Result OnBrTableExpr(
+      wabt::Index numTargets,
+      wabt::Index *targetDepths,
+      wabt::Index defaultTargetDepth) override;
 
  private:
   /// Convert a wabt Type to our WasmValType.

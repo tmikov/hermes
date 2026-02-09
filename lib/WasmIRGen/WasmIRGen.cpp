@@ -13,6 +13,8 @@
 #include "hermes/IR/Instrs.h"
 #include "hermes/WasmFrontend/WasmModuleInfo.h"
 
+#include "llvh/ADT/DenseMap.h"
+#include "llvh/ADT/SmallVector.h"
 #include "llvh/ADT/Twine.h"
 
 namespace hermes {
@@ -725,6 +727,88 @@ void WasmIRGen::onBrIf(uint32_t depth) {
 
   // Continue generating code in the fallthrough block.
   builder_.setInsertionBlock(fallthroughBlock);
+}
+
+void WasmIRGen::onBrTable(
+    const uint32_t *depths,
+    uint32_t numTargets,
+    uint32_t defaultDepth) {
+  if (unreachable_)
+    return;
+
+  // Pop the index value.
+  Value *index = pop();
+
+  // For each target (including the default), we need to create a trampoline
+  // block that adds phi operands to the target's continuation block and then
+  // branches there. We use a SwitchInst to dispatch to these trampolines.
+
+  // Collect all unique depths and create trampoline blocks.
+  // Multiple case values may share the same depth. We can reuse the same
+  // trampoline block for cases with the same depth.
+  llvh::DenseMap<uint32_t, BasicBlock *> depthToTrampoline;
+
+  auto getOrCreateTrampoline = [&](uint32_t depth) -> BasicBlock * {
+    auto it = depthToTrampoline.find(depth);
+    if (it != depthToTrampoline.end())
+      return it->second;
+    auto *trampoline = builder_.createBasicBlock(currentFunc_);
+    depthToTrampoline[depth] = trampoline;
+    return trampoline;
+  };
+
+  // Create trampoline blocks for all targets.
+  llvh::SmallVector<Literal *, 8> caseValues;
+  llvh::SmallVector<BasicBlock *, 8> caseBlocks;
+  for (uint32_t i = 0; i < numTargets; ++i) {
+    caseValues.push_back(builder_.getLiteralNumber(static_cast<double>(i)));
+    caseBlocks.push_back(getOrCreateTrampoline(depths[i]));
+  }
+
+  BasicBlock *defaultTrampoline = getOrCreateTrampoline(defaultDepth);
+
+  // Emit the SwitchInst.
+  builder_.createSwitchInst(index, defaultTrampoline, caseValues, caseBlocks);
+
+  // Now populate each trampoline block with phi operands and branch.
+  for (auto &pair : depthToTrampoline) {
+    uint32_t depth = pair.first;
+    BasicBlock *trampoline = pair.second;
+
+    ControlEntry &entry = getControlEntry(depth);
+    entry.branchTargeted = true;
+
+    builder_.setInsertionBlock(trampoline);
+
+    // Add phi operands. For Block/If entries, peek at the value stack and
+    // add values as phi incoming edges (the values were on the stack before
+    // the index was popped, so they're still there). For Loop entries,
+    // no phi operands (br to loop targets the header).
+    if ((entry.kind == ControlEntry::Block ||
+         entry.kind == ControlEntry::If) &&
+        !entry.resultPhis.empty()) {
+      size_t numResults = entry.resultPhis.size();
+      size_t available = valueStack_.size();
+      for (size_t i = 0; i < numResults; ++i) {
+        Value *val;
+        if (available >= numResults) {
+          val = valueStack_[available - numResults + i];
+        } else {
+          val = builder_.getLiteralUndefined();
+        }
+        entry.resultPhis[i]->addEntry(val, trampoline);
+      }
+    }
+
+    builder_.createBranchInst(entry.contBlock);
+  }
+
+  // After br_table, code is unreachable.
+  unreachable_ = true;
+
+  // Create a new dead basic block for any dead code that follows.
+  auto *deadBlock = builder_.createBasicBlock(currentFunc_);
+  builder_.setInsertionBlock(deadBlock);
 }
 
 // --- Helper methods ---

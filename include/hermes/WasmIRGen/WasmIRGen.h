@@ -116,6 +116,11 @@ class WasmIRGen {
   void onBr(uint32_t depth);
   /// Conditional branch: pop condition, branch if non-zero.
   void onBrIf(uint32_t depth);
+  /// Table branch (switch): pop index, branch to labels[index] or default.
+  void onBrTable(
+      const uint32_t *depths,
+      uint32_t numTargets,
+      uint32_t defaultDepth);
 
   /// \return the array of IR Functions created by createFunctions(), indexed
   ///   by Wasm function index.

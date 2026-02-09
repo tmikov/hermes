@@ -909,5 +909,16 @@ wabt::Result BinaryReaderHermesIRGen::OnBrIfExpr(wabt::Index depth) {
   return wabt::Result::Ok;
 }
 
+wabt::Result BinaryReaderHermesIRGen::OnBrTableExpr(
+    wabt::Index numTargets,
+    wabt::Index *targetDepths,
+    wabt::Index defaultTargetDepth) {
+  if (!inFunctionBody_ || !irgen_)
+    return wabt::Result::Ok;
+
+  irgen_->onBrTable(targetDepths, numTargets, defaultTargetDepth);
+  return wabt::Result::Ok;
+}
+
 } // namespace wasm
 } // namespace hermes
