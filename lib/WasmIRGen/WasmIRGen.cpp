@@ -366,6 +366,103 @@ void WasmIRGen::finalizeModule() {
     }
   }
 
+  // Initialize the element segments array (for table.init/elem.drop).
+  // Each element is a JS Array of interleaved [func, typeIdx, func, typeIdx, ...]
+  // or null for segments that have been dropped.
+  if (elemSegVar_) {
+    uint32_t numElemSegs = moduleInfo_.elements.size();
+    auto *elemsArr = emitNew(
+        builder_.createTryLoadGlobalPropertyInst("Array"),
+        {builder_.getLiteralNumber(static_cast<double>(numElemSegs))});
+    builder_.createStoreFrameInst(tlScope, elemsArr, elemSegVar_);
+
+    for (uint32_t si = 0; si < numElemSegs; ++si) {
+      const auto &seg = moduleInfo_.elements[si];
+
+      // Declarative segments are immediately dropped.
+      if (seg.mode == WasmElemSegment::Mode::Declarative) {
+        builder_.createStorePropertyStrictInst(
+            builder_.getLiteralNull(),
+            elemsArr,
+            builder_.getLiteralNumber(static_cast<double>(si)));
+        continue;
+      }
+
+      if (seg.funcIndices.empty()) {
+        // Empty segment: store null (same as dropped).
+        builder_.createStorePropertyStrictInst(
+            builder_.getLiteralNull(),
+            elemsArr,
+            builder_.getLiteralNumber(static_cast<double>(si)));
+        continue;
+      }
+
+      // Create an interleaved array: [func0, typeIdx0, func1, typeIdx1, ...]
+      uint32_t numEntries = seg.funcIndices.size();
+      auto *segArr = emitNew(
+          builder_.createTryLoadGlobalPropertyInst("Array"),
+          {builder_.getLiteralNumber(
+              static_cast<double>(numEntries * 2))});
+
+      for (uint32_t i = 0; i < numEntries; ++i) {
+        uint32_t funcIdx = seg.funcIndices[i];
+
+        // Store the closure.
+        if (funcIdx < closureVars_.size()) {
+          auto *closure = builder_.createLoadFrameInst(
+              tlScope, closureVars_[funcIdx]);
+          builder_.createStorePropertyStrictInst(
+              closure,
+              segArr,
+              builder_.getLiteralNumber(static_cast<double>(i * 2)));
+        } else {
+          builder_.createStorePropertyStrictInst(
+              builder_.getLiteralNull(),
+              segArr,
+              builder_.getLiteralNumber(static_cast<double>(i * 2)));
+        }
+
+        // Store the type index.
+        uint32_t typeIdx = 0;
+        if (funcIdx < moduleInfo_.importedFunctionCount()) {
+          uint32_t importFuncIdx = 0;
+          for (const auto &imp : moduleInfo_.imports) {
+            if (imp.kind != WasmExternalKind::Function)
+              continue;
+            if (importFuncIdx == funcIdx) {
+              typeIdx = imp.typeIndex;
+              break;
+            }
+            ++importFuncIdx;
+          }
+        } else {
+          typeIdx = moduleInfo_
+                        .functions[funcIdx -
+                                   moduleInfo_.importedFunctionCount()]
+                        .typeIndex;
+        }
+        builder_.createStorePropertyStrictInst(
+            builder_.getLiteralNumber(static_cast<double>(typeIdx)),
+            segArr,
+            builder_.getLiteralNumber(static_cast<double>(i * 2 + 1)));
+      }
+
+      builder_.createStorePropertyStrictInst(
+          segArr,
+          elemsArr,
+          builder_.getLiteralNumber(static_cast<double>(si)));
+
+      // Active segments are dropped after their contents have been applied
+      // (applied in createTables during createFunctions).
+      if (seg.mode == WasmElemSegment::Mode::Active) {
+        builder_.createStorePropertyStrictInst(
+            builder_.getLiteralNull(),
+            elemsArr,
+            builder_.getLiteralNumber(static_cast<double>(si)));
+      }
+    }
+  }
+
   // Call the start function if specified (load its pre-created closure).
   if (moduleInfo_.startFunction.has_value()) {
     uint32_t startIdx = *moduleInfo_.startFunction;
@@ -3193,6 +3290,17 @@ Variable *WasmIRGen::getOrCreateDataSegVar() {
   return dataSegVar_;
 }
 
+Variable *WasmIRGen::getOrCreateElemSegVar() {
+  if (!elemSegVar_) {
+    elemSegVar_ = builder_.createVariable(
+        topLevelVS_,
+        "elem_segments",
+        Type::createAnyType(),
+        /* hidden */ true);
+  }
+  return elemSegVar_;
+}
+
 uint8_t WasmIRGen::getNaturalAlignLog2(llvh::StringRef op) {
   // 64-bit: natural alignment = 8 bytes (log2 = 3).
   if (op == "i64.load" || op == "i64.store" || op == "f64.load" ||
@@ -4182,6 +4290,72 @@ void WasmIRGen::onTableGrow(uint32_t tableIndex) {
   pop(); // delta
   pop(); // fill value
   push(builder_.getLiteralNumber(-1));
+}
+
+// --- Bulk table operations (N.2) ---
+
+void WasmIRGen::onTableFill(uint32_t tableIndex) {
+  if (unreachable_)
+    return;
+
+  // Stack: [idx, val, count] (top = count).
+  Value *count = pop();
+  Value *val = pop();
+  Value *idx = pop();
+
+  auto *funcsArr = loadTableFuncs(tableIndex);
+  helpers_.emitTableFill(funcsArr, idx, val, count);
+}
+
+void WasmIRGen::onTableCopy(
+    uint32_t dstTableIndex,
+    uint32_t srcTableIndex) {
+  if (unreachable_)
+    return;
+
+  // Stack: [dst, src, count] (top = count).
+  Value *count = pop();
+  Value *src = pop();
+  Value *dst = pop();
+
+  auto *dstFuncs = loadTableFuncs(dstTableIndex);
+  auto *srcFuncs = loadTableFuncs(srcTableIndex);
+  auto *dstTypes = loadTableTypes(dstTableIndex);
+  auto *srcTypes = loadTableTypes(srcTableIndex);
+  helpers_.emitTableCopy(
+      dstFuncs, srcFuncs, dstTypes, srcTypes, dst, src, count);
+}
+
+void WasmIRGen::onTableInit(
+    uint32_t segmentIndex,
+    uint32_t tableIndex) {
+  if (unreachable_)
+    return;
+
+  // Stack: [dst, src, count] (top = count).
+  Value *count = pop();
+  Value *src = pop();
+  Value *dst = pop();
+
+  auto *funcsArr = loadTableFuncs(tableIndex);
+  auto *typesArr = loadTableTypes(tableIndex);
+  auto *elemSegs = builder_.createLoadFrameInst(
+      parentScopeInst_, getOrCreateElemSegVar());
+  auto *segIdx =
+      builder_.getLiteralNumber(static_cast<double>(segmentIndex));
+  helpers_.emitTableInit(
+      funcsArr, typesArr, elemSegs, segIdx, dst, src, count);
+}
+
+void WasmIRGen::onElemDrop(uint32_t segmentIndex) {
+  if (unreachable_)
+    return;
+
+  auto *elemSegs = builder_.createLoadFrameInst(
+      parentScopeInst_, getOrCreateElemSegVar());
+  auto *segIdx =
+      builder_.getLiteralNumber(static_cast<double>(segmentIndex));
+  helpers_.emitElemDrop(elemSegs, segIdx);
 }
 
 // --- Globals (K.1) ---

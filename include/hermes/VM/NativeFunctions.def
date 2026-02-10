@@ -469,6 +469,10 @@ NATIVE_FUNCTION(wasmMemoryFill)
 NATIVE_FUNCTION(wasmMemoryCopy)
 NATIVE_FUNCTION(wasmMemoryInit)
 NATIVE_FUNCTION(wasmDataDrop)
+NATIVE_FUNCTION(wasmTableFill)
+NATIVE_FUNCTION(wasmTableCopy)
+NATIVE_FUNCTION(wasmTableInit)
+NATIVE_FUNCTION(wasmElemDrop)
 
 #define ALL_ERROR_TYPE(name) NATIVE_FUNCTION(name##Constructor)
 #include "hermes/VM/NativeErrorTypes.def"

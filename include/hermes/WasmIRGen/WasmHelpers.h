@@ -223,6 +223,43 @@ class WasmHelpers {
   /// \p dataSegs is the data segments array.
   Instruction *emitDataDrop(Value *dataSegs, Value *segIdx);
 
+  // --- Bulk table helpers (N.2) ---
+
+  /// Emit table.fill: fills \p count entries at \p idx with \p val.
+  /// \p funcsArr is the table's functions JS Array.
+  Instruction *emitTableFill(
+      Value *funcsArr,
+      Value *idx,
+      Value *val,
+      Value *count);
+
+  /// Emit table.copy: copies \p count entries from src to dst table.
+  /// Both funcs and types arrays are copied.
+  Instruction *emitTableCopy(
+      Value *dstFuncs,
+      Value *srcFuncs,
+      Value *dstTypes,
+      Value *srcTypes,
+      Value *dst,
+      Value *src,
+      Value *count);
+
+  /// Emit table.init: copies \p count entries from element segment to table.
+  /// \p funcsArr and \p typesArr are the table's arrays.
+  /// \p elemSegs is the element segments array, \p segIdx is the segment index.
+  Instruction *emitTableInit(
+      Value *funcsArr,
+      Value *typesArr,
+      Value *elemSegs,
+      Value *segIdx,
+      Value *dst,
+      Value *src,
+      Value *count);
+
+  /// Emit elem.drop: marks element segment \p segIdx as dropped.
+  /// \p elemSegs is the element segments array.
+  Instruction *emitElemDrop(Value *elemSegs, Value *segIdx);
+
  private:
   IRBuilder &builder_;
 };

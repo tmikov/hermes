@@ -249,6 +249,18 @@ PRIVATE_BUILTIN(wasmMemoryInit)
 // wasmDataDrop(dataSegs, segIdx): mark a data segment as dropped.
 PRIVATE_BUILTIN(wasmDataDrop)
 
+// Bulk table operations (N.2).
+// wasmTableFill(funcsArr, idx, val, count): fill table entries with val.
+PRIVATE_BUILTIN(wasmTableFill)
+// wasmTableCopy(dstFuncs, srcFuncs, dstTypes, srcTypes, dst, src, count):
+// copy entries between tables (both funcs and type-index arrays).
+PRIVATE_BUILTIN(wasmTableCopy)
+// wasmTableInit(funcsArr, typesArr, elemSegs, segIdx, dst, src, count):
+// copy from element segment into a table.
+PRIVATE_BUILTIN(wasmTableInit)
+// wasmElemDrop(elemSegs, segIdx): mark an element segment as dropped.
+PRIVATE_BUILTIN(wasmElemDrop)
+
 JS_BUILTIN(spawnAsync)
 MARK_FIRST_JS_BUILTIN(spawnAsync)
 JS_BUILTIN(makeAsyncIterator)

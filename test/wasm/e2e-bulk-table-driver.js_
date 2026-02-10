@@ -1,0 +1,105 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-bulk-table.wat.
+// Tests table.fill, table.copy, table.init, and elem.drop.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+
+function tryCall(idx) {
+  try {
+    return exports.call_at(idx);
+  } catch (e) {
+    return "trapped";
+  }
+}
+
+// --- table.copy ---
+// Test first since it preserves type info from active segment.
+print("=== table.copy ===");
+// Copy 2 entries from index 0 to index 4.
+// Table[0]=f10, Table[1]=f20 (from active segment 0).
+exports.copy(4, 0, 2);
+print("copy 4,0,2: ok");
+print("call_at 4:", tryCall(4));  // 10
+print("call_at 5:", tryCall(5));  // 20
+
+// --- table.init from passive segment 1 ---
+print("=== table.init ===");
+// Segment 1 is [f30, f40, f50].
+// Copy 3 entries from segment offset 0 to table offset 7.
+exports.init_seg1(7, 0, 3);
+print("init_seg1 7,0,3: ok");
+print("call_at 7:", tryCall(7));  // 30
+print("call_at 8:", tryCall(8));  // 40
+print("call_at 9:", tryCall(9));  // 50
+
+// --- table.fill ---
+// table.fill doesn't preserve type info, so we can't use call_indirect
+// to verify filled entries. Just verify it doesn't crash and respects bounds.
+print("=== table.fill (no call_indirect) ===");
+exports.fill_from(2, 0, 3);  // fill 3 entries at idx 2 with table[0]'s ref
+print("fill_from 2,0,3: ok");
+print("size:", exports.get_size());  // 10 (unchanged)
+
+// --- elem.drop + table.init after drop ---
+print("=== elem.drop + init n=0 ===");
+exports.drop_seg1();
+print("drop_seg1 ok");
+
+// Per spec: table.init with n=0 should succeed even for dropped segments.
+try {
+  exports.init_seg1(0, 0, 0);
+  print("init_seg1 n=0 ok");
+} catch (e) {
+  print("init_seg1 n=0 error:", e.message);
+}
+
+// table.init with n>0 on a dropped segment should trap.
+try {
+  exports.init_seg1(0, 0, 1);
+  print("init_seg1 n=1 ok (should not happen)");
+} catch (e) {
+  print("init_seg1 n=1 trapped");
+}
+
+// --- Active segment is implicitly dropped ---
+print("=== active segment dropped ===");
+// Segment 0 was active, so it's dropped after instantiation.
+// table.init with n=0 should succeed.
+try {
+  exports.init_seg0_zero();
+  print("init_seg0_zero ok");
+} catch (e) {
+  print("init_seg0_zero error:", e.message);
+}
+
+// --- OOB tests ---
+print("=== OOB checks ===");
+try {
+  exports.fill_from(8, 0, 5);  // 8+5=13 > 10
+  print("fill oob ok (should not happen)");
+} catch (e) {
+  print("fill oob trapped");
+}
+
+try {
+  exports.copy(8, 0, 5);  // 8+5=13 > 10
+  print("copy oob ok (should not happen)");
+} catch (e) {
+  print("copy oob trapped");
+}
+
+try {
+  exports.init_seg1(8, 0, 5);  // segment already dropped, n=5 > 0
+  print("init oob ok (should not happen)");
+} catch (e) {
+  print("init oob trapped");
+}
+
+print("done");

@@ -1135,6 +1135,207 @@ CallResult<HermesValue> wasmDataDrop(void *, Runtime &runtime) {
   return HermesValue::encodeUndefinedValue();
 }
 
+/// Wasm table.fill: fill \p count entries at \p idx with \p val.
+/// Args: (funcsArr, idx, val, count).
+/// Traps on out-of-bounds.
+CallResult<HermesValue> wasmTableFill(void *, Runtime &runtime) {
+  struct : public Locals {
+    PinnedValue<JSArray> funcsArr;
+    PinnedValue<> val;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  lv.funcsArr = vmcast<JSArray>(args.getArg(0));
+  uint32_t idx =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(1).getNumber()));
+  lv.val = args.getArg(2);
+  uint32_t count =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(3).getNumber()));
+
+  uint32_t tableLen = JSArray::getLength(*lv.funcsArr, runtime);
+  // Bounds check: idx + count must not exceed table size.
+  if (LLVM_UNLIKELY(static_cast<uint64_t>(idx) + count > tableLen)) {
+    return runtime.raiseError(
+        "table.fill: out of bounds table access");
+  }
+
+  // Perform the fill.
+  for (uint32_t i = 0; i < count; ++i) {
+    (void)JSArray::setElementAt(lv.funcsArr, runtime, idx + i, lv.val);
+  }
+
+  return HermesValue::encodeUndefinedValue();
+}
+
+/// Wasm table.copy: copy \p count entries from src table to dst table.
+/// Args: (dstFuncs, srcFuncs, dstTypes, srcTypes, dst, src, count).
+/// Traps on out-of-bounds. Handles overlapping regions correctly.
+CallResult<HermesValue> wasmTableCopy(void *, Runtime &runtime) {
+  struct : public Locals {
+    PinnedValue<JSArray> dstFuncs;
+    PinnedValue<JSArray> srcFuncs;
+    PinnedValue<JSArray> dstTypes;
+    PinnedValue<JSArray> srcTypes;
+    PinnedValue<> tmpVal;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  lv.dstFuncs = vmcast<JSArray>(args.getArg(0));
+  lv.srcFuncs = vmcast<JSArray>(args.getArg(1));
+  lv.dstTypes = vmcast<JSArray>(args.getArg(2));
+  lv.srcTypes = vmcast<JSArray>(args.getArg(3));
+  uint32_t dst =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(4).getNumber()));
+  uint32_t src =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(5).getNumber()));
+  uint32_t count =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(6).getNumber()));
+
+  uint32_t dstLen = JSArray::getLength(*lv.dstFuncs, runtime);
+  uint32_t srcLen = JSArray::getLength(*lv.srcFuncs, runtime);
+
+  // Bounds check both regions.
+  if (LLVM_UNLIKELY(
+          static_cast<uint64_t>(dst) + count > dstLen ||
+          static_cast<uint64_t>(src) + count > srcLen)) {
+    return runtime.raiseError(
+        "table.copy: out of bounds table access");
+  }
+
+  if (count == 0)
+    return HermesValue::encodeUndefinedValue();
+
+  // Handle overlapping copy correctly (like memmove).
+  // If dst <= src or different tables, copy forward; otherwise copy backward.
+  bool sameTable = lv.dstFuncs.getHermesValue().getRaw() ==
+      lv.srcFuncs.getHermesValue().getRaw();
+  if (!sameTable || dst <= src) {
+    for (uint32_t i = 0; i < count; ++i) {
+      auto funcVal = lv.srcFuncs->at(runtime, src + i);
+      lv.tmpVal = funcVal.isEmpty() ? HermesValue::encodeEmptyValue()
+                                    : funcVal.unboxToHV(runtime);
+      (void)JSArray::setElementAt(lv.dstFuncs, runtime, dst + i, lv.tmpVal);
+
+      auto typeVal = lv.srcTypes->at(runtime, src + i);
+      lv.tmpVal = typeVal.isEmpty() ? HermesValue::encodeEmptyValue()
+                                    : typeVal.unboxToHV(runtime);
+      (void)JSArray::setElementAt(lv.dstTypes, runtime, dst + i, lv.tmpVal);
+    }
+  } else {
+    // Copy backward for overlapping same-table copy where dst > src.
+    for (uint32_t i = count; i > 0; --i) {
+      auto funcVal = lv.srcFuncs->at(runtime, src + i - 1);
+      lv.tmpVal = funcVal.isEmpty() ? HermesValue::encodeEmptyValue()
+                                    : funcVal.unboxToHV(runtime);
+      (void)JSArray::setElementAt(
+          lv.dstFuncs, runtime, dst + i - 1, lv.tmpVal);
+
+      auto typeVal = lv.srcTypes->at(runtime, src + i - 1);
+      lv.tmpVal = typeVal.isEmpty() ? HermesValue::encodeEmptyValue()
+                                    : typeVal.unboxToHV(runtime);
+      (void)JSArray::setElementAt(
+          lv.dstTypes, runtime, dst + i - 1, lv.tmpVal);
+    }
+  }
+
+  return HermesValue::encodeUndefinedValue();
+}
+
+/// Wasm table.init: copy entries from element segment into a table.
+/// Args: (funcsArr, typesArr, elemSegs, segIdx, dst, src, count).
+/// elemSegs is a JSArray where each element is either a JSArray of
+/// interleaved [func0, typeIdx0, func1, typeIdx1, ...] or null (dropped).
+/// Traps on out-of-bounds or if the segment has been dropped (with n>0).
+CallResult<HermesValue> wasmTableInit(void *, Runtime &runtime) {
+  struct : public Locals {
+    PinnedValue<JSArray> funcsArr;
+    PinnedValue<JSArray> typesArr;
+    PinnedValue<JSArray> elemSegs;
+    PinnedValue<> tmpVal;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  lv.funcsArr = vmcast<JSArray>(args.getArg(0));
+  lv.typesArr = vmcast<JSArray>(args.getArg(1));
+  lv.elemSegs = vmcast<JSArray>(args.getArg(2));
+  uint32_t segIdx =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(3).getNumber()));
+  uint32_t dst =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(4).getNumber()));
+  uint32_t src =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(5).getNumber()));
+  uint32_t count =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(6).getNumber()));
+
+  // Look up the element segment.
+  auto segVal = lv.elemSegs->at(runtime, segIdx);
+  bool dropped = segVal.isEmpty() || segVal.unboxToHV(runtime).isNull();
+
+  // Segment length = number of entries (pairs / 2).
+  uint32_t segLen = 0;
+  JSArray *segArr = nullptr;
+  if (!dropped) {
+    segArr =
+        vmcast<JSArray>(segVal.unboxToHV(runtime).getObject(runtime));
+    // Each element has 2 slots (func, typeIdx), so entries = length / 2.
+    segLen = JSArray::getLength(segArr, runtime) / 2;
+  }
+
+  // Bounds check against element segment.
+  if (LLVM_UNLIKELY(static_cast<uint64_t>(src) + count > segLen)) {
+    return runtime.raiseError(
+        "table.init: out of bounds element segment access");
+  }
+
+  // Bounds check against table.
+  uint32_t tableLen = JSArray::getLength(*lv.funcsArr, runtime);
+  if (LLVM_UNLIKELY(static_cast<uint64_t>(dst) + count > tableLen)) {
+    return runtime.raiseError(
+        "table.init: out of bounds table access");
+  }
+
+  // Copy entries from segment to table.
+  for (uint32_t i = 0; i < count; ++i) {
+    // Read func and typeIdx from interleaved segment array.
+    auto funcVal = segArr->at(runtime, (src + i) * 2);
+    lv.tmpVal = funcVal.isEmpty() ? HermesValue::encodeEmptyValue()
+                                  : funcVal.unboxToHV(runtime);
+    (void)JSArray::setElementAt(lv.funcsArr, runtime, dst + i, lv.tmpVal);
+
+    auto typeVal = segArr->at(runtime, (src + i) * 2 + 1);
+    lv.tmpVal = typeVal.isEmpty() ? HermesValue::encodeEmptyValue()
+                                  : typeVal.unboxToHV(runtime);
+    (void)JSArray::setElementAt(lv.typesArr, runtime, dst + i, lv.tmpVal);
+  }
+
+  return HermesValue::encodeUndefinedValue();
+}
+
+/// Wasm elem.drop: mark an element segment as dropped.
+/// Args: (elemSegs, segIdx).
+/// Sets the segment entry in the element segments array to null.
+CallResult<HermesValue> wasmElemDrop(void *, Runtime &runtime) {
+  struct : public Locals {
+    PinnedValue<JSArray> elemSegs;
+    PinnedValue<> nullVal;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  lv.elemSegs = vmcast<JSArray>(args.getArg(0));
+  uint32_t segIdx =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(1).getNumber()));
+
+  // Set the segment to null to mark it as dropped.
+  lv.nullVal = HermesValue::encodeNullValue();
+  (void)JSArray::setElementAt(lv.elemSegs, runtime, segIdx, lv.nullVal);
+
+  return HermesValue::encodeUndefinedValue();
+}
+
 namespace {
 
 CallResult<HermesValue> copyDataPropertiesSlowPath_RJS(
@@ -2173,6 +2374,28 @@ void createHermesBuiltins(Runtime &runtime) {
       B::HermesBuiltin_wasmDataDrop,
       P::wasmDataDrop,
       wasmDataDrop,
+      2);
+
+  // Bulk table helpers (N.2).
+  defineInternMethod(
+      B::HermesBuiltin_wasmTableFill,
+      P::wasmTableFill,
+      wasmTableFill,
+      4);
+  defineInternMethod(
+      B::HermesBuiltin_wasmTableCopy,
+      P::wasmTableCopy,
+      wasmTableCopy,
+      7);
+  defineInternMethod(
+      B::HermesBuiltin_wasmTableInit,
+      P::wasmTableInit,
+      wasmTableInit,
+      7);
+  defineInternMethod(
+      B::HermesBuiltin_wasmElemDrop,
+      P::wasmElemDrop,
+      wasmElemDrop,
       2);
 }
 

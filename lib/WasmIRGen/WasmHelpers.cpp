@@ -392,5 +392,46 @@ Instruction *WasmHelpers::emitDataDrop(Value *dataSegs, Value *segIdx) {
       BuiltinMethod::HermesBuiltin_wasmDataDrop, {dataSegs, segIdx});
 }
 
+Instruction *WasmHelpers::emitTableFill(
+    Value *funcsArr,
+    Value *idx,
+    Value *val,
+    Value *count) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmTableFill,
+      {funcsArr, idx, val, count});
+}
+
+Instruction *WasmHelpers::emitTableCopy(
+    Value *dstFuncs,
+    Value *srcFuncs,
+    Value *dstTypes,
+    Value *srcTypes,
+    Value *dst,
+    Value *src,
+    Value *count) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmTableCopy,
+      {dstFuncs, srcFuncs, dstTypes, srcTypes, dst, src, count});
+}
+
+Instruction *WasmHelpers::emitTableInit(
+    Value *funcsArr,
+    Value *typesArr,
+    Value *elemSegs,
+    Value *segIdx,
+    Value *dst,
+    Value *src,
+    Value *count) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmTableInit,
+      {funcsArr, typesArr, elemSegs, segIdx, dst, src, count});
+}
+
+Instruction *WasmHelpers::emitElemDrop(Value *elemSegs, Value *segIdx) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmElemDrop, {elemSegs, segIdx});
+}
+
 } // namespace wasm
 } // namespace hermes

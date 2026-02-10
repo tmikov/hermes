@@ -1529,6 +1529,46 @@ wabt::Result BinaryReaderHermesIRGen::OnDataDropExpr(
   return wabt::Result::Ok;
 }
 
+// --- Bulk table operation callbacks ---
+
+wabt::Result BinaryReaderHermesIRGen::OnTableFillExpr(
+    wabt::Index table_index) {
+  if (!inFunctionBody_ || !irgen_)
+    return wabt::Result::Ok;
+  irgen_->onTableFill(static_cast<uint32_t>(table_index));
+  return wabt::Result::Ok;
+}
+
+wabt::Result BinaryReaderHermesIRGen::OnTableCopyExpr(
+    wabt::Index dst_index,
+    wabt::Index src_index) {
+  if (!inFunctionBody_ || !irgen_)
+    return wabt::Result::Ok;
+  irgen_->onTableCopy(
+      static_cast<uint32_t>(dst_index),
+      static_cast<uint32_t>(src_index));
+  return wabt::Result::Ok;
+}
+
+wabt::Result BinaryReaderHermesIRGen::OnTableInitExpr(
+    wabt::Index segment_index,
+    wabt::Index table_index) {
+  if (!inFunctionBody_ || !irgen_)
+    return wabt::Result::Ok;
+  irgen_->onTableInit(
+      static_cast<uint32_t>(segment_index),
+      static_cast<uint32_t>(table_index));
+  return wabt::Result::Ok;
+}
+
+wabt::Result BinaryReaderHermesIRGen::OnElemDropExpr(
+    wabt::Index segment_index) {
+  if (!inFunctionBody_ || !irgen_)
+    return wabt::Result::Ok;
+  irgen_->onElemDrop(static_cast<uint32_t>(segment_index));
+  return wabt::Result::Ok;
+}
+
 // --- Exception handling instruction callbacks ---
 
 wabt::Result BinaryReaderHermesIRGen::OnTryExpr(wabt::Type sigType) {

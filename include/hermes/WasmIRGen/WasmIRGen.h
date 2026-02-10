@@ -423,6 +423,17 @@ class WasmIRGen {
   /// Pushes old size on success, or -1 on failure.
   void onTableGrow(uint32_t tableIndex);
 
+  // --- Bulk table operations (N.2) ---
+
+  /// table.fill: pop count, val, idx; fill table entries with val.
+  void onTableFill(uint32_t tableIndex);
+  /// table.copy: pop count, src, dst; copy entries between tables.
+  void onTableCopy(uint32_t dstTableIndex, uint32_t srcTableIndex);
+  /// table.init: pop count, src, dst; copy from element segment to table.
+  void onTableInit(uint32_t segmentIndex, uint32_t tableIndex);
+  /// elem.drop: mark element segment as no longer needed.
+  void onElemDrop(uint32_t segmentIndex);
+
   // --- Unsupported opcode handling (D.13) ---
 
   /// Emit a warning for an unsupported opcode. Pops \p numInputs values
@@ -496,6 +507,11 @@ class WasmIRGen {
   /// Each element is either a Uint8Array (segment bytes) or null (dropped).
   /// Only populated if the module has data segments.
   Variable *dataSegVar_ = nullptr;
+
+  /// Variable holding a JS Array of element segments in the top-level scope.
+  /// Each element is either a JS Array of interleaved [func, typeIdx, ...]
+  /// or null (dropped). Only populated if the module has element segments.
+  Variable *elemSegVar_ = nullptr;
 
   /// The VariableScope for the top-level function.
   VariableScope *topLevelVS_ = nullptr;
@@ -640,6 +656,10 @@ class WasmIRGen {
   /// Get or lazily create the data segments Variable in topLevelVS_.
   /// Called from onMemoryInit/onDataDrop during function body compilation.
   Variable *getOrCreateDataSegVar();
+
+  /// Get or lazily create the element segments Variable in topLevelVS_.
+  /// Called from onTableInit/onElemDrop during function body compilation.
+  Variable *getOrCreateElemSegVar();
 
   /// Emit `new Constructor(args)` and return the constructed object.
   Value *emitNew(Value *constructor, llvh::ArrayRef<Value *> args);
