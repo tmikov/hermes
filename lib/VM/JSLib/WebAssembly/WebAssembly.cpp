@@ -19,10 +19,13 @@
 #include "hermes/VM/JSError.h"
 #include "hermes/VM/JSTypedArray.h"
 #include "hermes/VM/JSWebAssemblyInstance.h"
+#include "hermes/VM/JSWebAssemblyMemory.h"
 #include "hermes/VM/JSWebAssemblyModule.h"
 #include "hermes/VM/Runtime.h"
 #include "hermes/VM/RuntimeModule.h"
 #include "hermes/WasmFrontend/WasmModuleData.h"
+
+#include <cmath>
 
 namespace hermes {
 
@@ -694,6 +697,218 @@ wasmInstanceConstructor(void *context, Runtime &runtime) {
 }
 
 //===----------------------------------------------------------------------===//
+// WebAssembly.Memory
+//===----------------------------------------------------------------------===//
+
+/// new WebAssembly.Memory({initial: N, maximum: M}) — create a linear memory.
+static CallResult<HermesValue>
+wasmMemoryConstructor(void *context, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  if (!args.isConstructorCall()) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Memory() must be called with 'new'");
+  }
+
+  // The first argument must be an object with an "initial" property.
+  auto optionsHandle = args.getArgHandle(0);
+  if (!optionsHandle->isObject()) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Memory(): argument must be a memory descriptor object");
+  }
+
+  struct : public Locals {
+    PinnedValue<JSObject> options;
+    PinnedValue<> initialVal;
+    PinnedValue<> maximumVal;
+    PinnedValue<JSWebAssemblyMemory> mem;
+    PinnedValue<JSArrayBuffer> buf;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  lv.options.castAndSetHermesValue<JSObject>(optionsHandle.getHermesValue());
+
+  // Read "initial" property (required).
+  auto initialRes = JSObject::getNamed_RJS(
+      lv.options,
+      runtime,
+      Predefined::getSymbolID(Predefined::initial));
+  if (LLVM_UNLIKELY(initialRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  lv.initialVal = std::move(*initialRes);
+
+  if (lv.initialVal->isUndefined()) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Memory(): 'initial' is required");
+  }
+
+  auto initialRes2 = toNumber_RJS(runtime, lv.initialVal);
+  if (LLVM_UNLIKELY(initialRes2 == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  double initialDbl = initialRes2->getDouble();
+  if (initialDbl < 0 || initialDbl > 65536 ||
+      initialDbl != std::floor(initialDbl)) {
+    return runtime.raiseRangeError(
+        "WebAssembly.Memory(): 'initial' must be a non-negative integer "
+        "<= 65536");
+  }
+  uint32_t initialPages = static_cast<uint32_t>(initialDbl);
+
+  // Read "maximum" property (optional).
+  uint32_t maxPages = 65536; // Default: no explicit maximum (Wasm max).
+  auto maximumRes = JSObject::getNamed_RJS(
+      lv.options,
+      runtime,
+      Predefined::getSymbolID(Predefined::maximum));
+  if (LLVM_UNLIKELY(maximumRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  lv.maximumVal = std::move(*maximumRes);
+
+  if (!lv.maximumVal->isUndefined()) {
+    auto maximumRes2 = toNumber_RJS(runtime, lv.maximumVal);
+    if (LLVM_UNLIKELY(maximumRes2 == ExecutionStatus::EXCEPTION)) {
+      return ExecutionStatus::EXCEPTION;
+    }
+    double maxDbl = maximumRes2->getDouble();
+    if (maxDbl < 0 || maxDbl > 65536 || maxDbl != std::floor(maxDbl)) {
+      return runtime.raiseRangeError(
+          "WebAssembly.Memory(): 'maximum' must be a non-negative integer "
+          "<= 65536");
+    }
+    maxPages = static_cast<uint32_t>(maxDbl);
+    if (initialPages > maxPages) {
+      return runtime.raiseRangeError(
+          "WebAssembly.Memory(): 'initial' must not exceed 'maximum'");
+    }
+  }
+
+  // Create the Memory object.
+  Handle<JSObject> memPrototype{runtime.wasmMemoryPrototype};
+  lv.mem = JSWebAssemblyMemory::create(runtime, memPrototype);
+  lv.mem->setMaxPages(maxPages);
+
+  // Create the backing ArrayBuffer.
+  uint32_t byteLength = initialPages * 65536;
+  lv.buf = JSArrayBuffer::create(
+      runtime, Handle<JSObject>::vmcast(&runtime.arrayBufferPrototype));
+
+  if (LLVM_UNLIKELY(
+          JSArrayBuffer::createDataBlock(runtime, lv.buf, byteLength) ==
+          ExecutionStatus::EXCEPTION)) {
+    return runtime.raiseRangeError(
+        "WebAssembly.Memory(): could not allocate memory");
+  }
+
+  lv.mem->setBuffer(runtime, *lv.buf);
+
+  return lv.mem.getHermesValue();
+}
+
+/// WebAssembly.Memory.prototype.buffer getter — returns the ArrayBuffer.
+static CallResult<HermesValue>
+wasmMemoryBufferGetter(void *context, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  auto *mem = dyn_vmcast<JSWebAssemblyMemory>(args.getThisArg());
+  if (!mem) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Memory.prototype.buffer: 'this' is not a "
+        "WebAssembly.Memory");
+  }
+
+  JSArrayBuffer *buf = mem->getBuffer(runtime);
+  if (!buf) {
+    return HermesValue::encodeUndefinedValue();
+  }
+
+  return HermesValue::encodeObjectValue(buf);
+}
+
+/// WebAssembly.Memory.prototype.grow(delta) — grow the memory.
+static CallResult<HermesValue>
+wasmMemoryGrowMethod(void *context, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  auto *mem = dyn_vmcast<JSWebAssemblyMemory>(args.getThisArg());
+  if (!mem) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Memory.prototype.grow: 'this' is not a "
+        "WebAssembly.Memory");
+  }
+
+  struct : public Locals {
+    PinnedValue<> deltaVal;
+    PinnedValue<JSArrayBuffer> oldBuf;
+    PinnedValue<JSArrayBuffer> newBuf;
+    PinnedValue<JSWebAssemblyMemory> memHandle;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  lv.memHandle = mem;
+
+  // Convert delta argument to number.
+  lv.deltaVal = args.getArg(0);
+  auto deltaRes = toNumber_RJS(runtime, lv.deltaVal);
+  if (LLVM_UNLIKELY(deltaRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  double deltaDbl = deltaRes->getDouble();
+  if (deltaDbl < 0 || deltaDbl > 65536 ||
+      deltaDbl != std::floor(deltaDbl)) {
+    return runtime.raiseRangeError(
+        "WebAssembly.Memory.prototype.grow: invalid delta");
+  }
+  uint32_t delta = static_cast<uint32_t>(deltaDbl);
+
+  // Get old buffer info.
+  JSArrayBuffer *oldBufPtr = lv.memHandle->getBuffer(runtime);
+  if (!oldBufPtr) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Memory.prototype.grow: memory has no buffer");
+  }
+  lv.oldBuf = oldBufPtr;
+
+  uint32_t oldSize = static_cast<uint32_t>(lv.oldBuf->size());
+  uint32_t oldPages = oldSize / 65536;
+
+  // Check growth limits.
+  uint32_t maxPages = lv.memHandle->getMaxPages();
+  uint64_t newPages64 = static_cast<uint64_t>(oldPages) + delta;
+  if (newPages64 > maxPages || newPages64 > 65536) {
+    return runtime.raiseRangeError(
+        "WebAssembly.Memory.prototype.grow: would exceed maximum");
+  }
+  uint32_t newPages = static_cast<uint32_t>(newPages64);
+  uint32_t newSize = newPages * 65536;
+
+  // Create a new ArrayBuffer with the larger size.
+  lv.newBuf = JSArrayBuffer::create(
+      runtime, Handle<JSObject>::vmcast(&runtime.arrayBufferPrototype));
+
+  if (LLVM_UNLIKELY(
+          JSArrayBuffer::createDataBlock(runtime, lv.newBuf, newSize, true) ==
+          ExecutionStatus::EXCEPTION)) {
+    return runtime.raiseRangeError(
+        "WebAssembly.Memory.prototype.grow: allocation failed");
+  }
+
+  // Copy old data to the new buffer.
+  if (oldSize > 0) {
+    JSArrayBuffer::copyDataBlockBytes(
+        runtime, *lv.newBuf, 0, *lv.oldBuf, 0, oldSize);
+  }
+
+  // Update the Memory object's buffer reference.
+  lv.memHandle->setBuffer(runtime, *lv.newBuf);
+
+  // Return the old page count.
+  return HermesValue::encodeTrustedNumberValue(oldPages);
+}
+
+//===----------------------------------------------------------------------===//
 // createWebAssemblyObject
 //===----------------------------------------------------------------------===//
 
@@ -702,6 +917,7 @@ void createWebAssemblyObject(Runtime &runtime, MutableHandle<JSObject> result) {
     PinnedValue<JSObject> wasmObj;
     PinnedValue<NativeConstructor> moduleCons;
     PinnedValue<NativeConstructor> instanceCons;
+    PinnedValue<NativeConstructor> memoryCons;
   } lv;
   LocalsRAII lraii(runtime, &lv);
 
@@ -892,6 +1108,75 @@ void createWebAssemblyObject(Runtime &runtime, MutableHandle<JSObject> result) {
       Predefined::getSymbolID(Predefined::Instance),
       dpf,
       runtime.wasmInstanceConstructor);
+  (void)res;
+  assert(res != ExecutionStatus::EXCEPTION && *res);
+
+  // --- WebAssembly.Memory constructor ---
+  Handle<JSObject> memoryPrototype{runtime.wasmMemoryPrototype};
+
+  // Set @@toStringTag on the Memory prototype.
+  {
+    auto tagDpf = DefinePropertyFlags::getDefaultNewPropertyFlags();
+    tagDpf.writable = 0;
+    tagDpf.enumerable = 0;
+
+    defineProperty(
+        runtime,
+        memoryPrototype,
+        Predefined::getSymbolID(Predefined::SymbolToStringTag),
+        runtime.getPredefinedStringHandle(Predefined::Memory),
+        tagDpf);
+  }
+
+  // Define "buffer" as a getter on the prototype.
+  defineAccessor(
+      runtime,
+      memoryPrototype,
+      Predefined::getSymbolID(Predefined::buffer),
+      nullptr,
+      wasmMemoryBufferGetter,
+      nullptr,
+      false,
+      true);
+
+  // Define "grow" as a method on the prototype.
+  defineMethod(
+      runtime,
+      memoryPrototype,
+      Predefined::getSymbolID(Predefined::grow),
+      nullptr,
+      wasmMemoryGrowMethod,
+      1);
+
+  lv.memoryCons = NativeConstructor::create(
+      runtime,
+      Handle<JSObject>::vmcast(&runtime.functionPrototype),
+      nullptr,
+      wasmMemoryConstructor,
+      1);
+
+  st = Callable::defineNameLengthAndPrototype(
+      lv.memoryCons,
+      runtime,
+      Predefined::getSymbolID(Predefined::Memory),
+      1,
+      memoryPrototype,
+      Callable::WritablePrototype::No);
+  (void)st;
+  assert(
+      st != ExecutionStatus::EXCEPTION &&
+      "defineNameLengthAndPrototype failed");
+
+  runtime.wasmMemoryConstructor.castAndSetHermesValue<NativeConstructor>(
+      lv.memoryCons.getHermesValue());
+
+  // Register Memory constructor as a property of WebAssembly.
+  res = JSObject::defineOwnProperty(
+      lv.wasmObj,
+      runtime,
+      Predefined::getSymbolID(Predefined::Memory),
+      dpf,
+      runtime.wasmMemoryConstructor);
   (void)res;
   assert(res != ExecutionStatus::EXCEPTION && *res);
 
