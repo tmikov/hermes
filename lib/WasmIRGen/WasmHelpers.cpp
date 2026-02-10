@@ -336,5 +336,24 @@ Instruction *WasmHelpers::emitCallIndirect(
       {funcsArr, typesArr, index, expectedTypeIdx});
 }
 
+Instruction *WasmHelpers::emitCreateException(
+    Value *tagIndex,
+    llvh::ArrayRef<Value *> payloadValues) {
+  // Build the args: [tagIndex, v0, v1, ...]
+  llvh::SmallVector<Value *, 8> args;
+  args.push_back(tagIndex);
+  for (Value *v : payloadValues)
+    args.push_back(v);
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmCreateException, args);
+}
+
+Instruction *WasmHelpers::emitMatchException(
+    Value *caught,
+    Value *tagIndex) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmMatchException, {caught, tagIndex});
+}
+
 } // namespace wasm
 } // namespace hermes

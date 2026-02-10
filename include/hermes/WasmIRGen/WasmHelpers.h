@@ -187,6 +187,19 @@ class WasmHelpers {
       Value *index,
       Value *expectedTypeIdx);
 
+  // --- Exception handling helpers (L.1) ---
+
+  /// Emit wasmCreateException(tagIndex, v0, v1, ...): creates a Wasm exception
+  /// object (JSArray) with the given tag index and payload values.
+  Instruction *emitCreateException(
+      Value *tagIndex,
+      llvh::ArrayRef<Value *> payloadValues);
+
+  /// Emit wasmMatchException(caught, tagIndex): if the caught value is a Wasm
+  /// exception with matching tag, returns the exception array; otherwise
+  /// returns undefined.
+  Instruction *emitMatchException(Value *caught, Value *tagIndex);
+
  private:
   IRBuilder &builder_;
 };

@@ -230,6 +230,14 @@ PRIVATE_BUILTIN(wasmMemoryGrow)
 // failure.
 PRIVATE_BUILTIN(wasmCallIndirect)
 
+// Exception handling (L.1).
+// wasmCreateException(tagIndex, v0, v1, ...): creates a Wasm exception object
+// with the given tag index and payload values.
+PRIVATE_BUILTIN(wasmCreateException)
+// wasmMatchException(caught, tagIndex): if caught is a Wasm exception with
+// matching tag, returns the payload values array; otherwise returns undefined.
+PRIVATE_BUILTIN(wasmMatchException)
+
 JS_BUILTIN(spawnAsync)
 MARK_FIRST_JS_BUILTIN(spawnAsync)
 JS_BUILTIN(makeAsyncIterator)

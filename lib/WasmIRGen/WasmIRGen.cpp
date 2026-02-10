@@ -8,6 +8,7 @@
 #include "hermes/WasmIRGen/WasmIRGen.h"
 
 #include "hermes/FrontEndDefs/Builtins.h"
+#include "hermes/IR/Analysis.h"
 #include "hermes/IR/IR.h"
 #include "hermes/IR/IRBuilder.h"
 #include "hermes/IR/Instrs.h"
@@ -673,6 +674,9 @@ void WasmIRGen::endFunction() {
     BB->eraseFromParent();
   }
 
+  // Fix up catch targets on ThrowInst instructions inside try blocks.
+  fixupCatchTargets(currentFunc_);
+
   currentFunc_ = nullptr;
   parentScopeInst_ = nullptr;
   valueStack_.clear();
@@ -1205,7 +1209,58 @@ void WasmIRGen::onEnd() {
   ControlEntry entry = std::move(controlStack_.back());
   controlStack_.pop_back();
 
-  if (entry.kind == ControlEntry::Block || entry.kind == ControlEntry::If) {
+  if (entry.kind == ControlEntry::Try) {
+    bool fallsThrough = !unreachable_ && !isCurrentBlockTerminated();
+
+    if (entry.outerUnreachable) {
+      // Try was pushed in unreachable context — just restore state.
+      unreachable_ = true;
+    } else if (!entry.inCatch) {
+      // Try with no catch clauses (shouldn't happen in valid Wasm, but
+      // handle gracefully). End the try body.
+      if (fallsThrough) {
+        addBranchPhiOperands(entry);
+        builder_.createTryEndInst(entry.catchBlock, entry.contBlock);
+      }
+      // The catch block needs at least a CatchInst + rethrow.
+      auto *savedBlock = builder_.getInsertionBlock();
+      builder_.setInsertionBlock(entry.catchBlock);
+      auto *caught = builder_.createCatchInst();
+      builder_.createThrowInst(caught);
+      builder_.setInsertionBlock(savedBlock);
+
+      builder_.setInsertionBlock(entry.contBlock);
+      unreachable_ =
+          !fallsThrough && !entry.branchTargeted;
+    } else {
+      // Try with catch clauses. End the current handler.
+      if (fallsThrough) {
+        addBranchPhiOperands(entry);
+        builder_.createBranchInst(entry.contBlock);
+      }
+
+      // If there's no catch_all, the nextCatchBlock re-throws.
+      if (!entry.hasCatchAll && entry.nextCatchBlock) {
+        auto *savedBlock = builder_.getInsertionBlock();
+        builder_.setInsertionBlock(entry.nextCatchBlock);
+        builder_.createThrowInst(entry.caughtValue);
+        builder_.setInsertionBlock(savedBlock);
+      }
+
+      builder_.setInsertionBlock(entry.contBlock);
+      // contBlock is reachable if any handler fell through, or if br targeted
+      // it, or if the catch_all handler reached it.
+      unreachable_ = !fallsThrough && !entry.branchTargeted;
+    }
+
+    if (entry.outerUnreachable)
+      unreachable_ = true;
+
+    // Restore value stack and push result phis.
+    valueStack_.resize(entry.stackHeight);
+    valueStackIsI64Hi_.resize(entry.stackHeight);
+    pushResultPhis(entry);
+  } else if (entry.kind == ControlEntry::Block || entry.kind == ControlEntry::If) {
     bool fallsThrough = !unreachable_ && !isCurrentBlockTerminated();
 
     if (fallsThrough) {
@@ -2521,6 +2576,287 @@ void WasmIRGen::onNop() {
   // nop does nothing.
 }
 
+// --- Exception handling (L.1) ---
+
+void WasmIRGen::onTry(const std::vector<WasmValType> &resultTypes) {
+  if (unreachable_) {
+    // Push a dummy Try entry so onEnd/onCatch can pop it.
+    ControlEntry entry;
+    entry.kind = ControlEntry::Try;
+    entry.contBlock = nullptr;
+    entry.catchBlock = nullptr;
+    entry.resultTypes = resultTypes;
+    entry.stackHeight = valueStack_.size();
+    entry.outerUnreachable = true;
+    controlStack_.push_back(std::move(entry));
+    return;
+  }
+
+  // Create the continuation block (target of br 0, where execution resumes
+  // after the try/catch construct).
+  auto *contBlock = builder_.createBasicBlock(currentFunc_);
+  // Create the catch dispatch block (target of TryStartInst for exceptions).
+  auto *catchBlock = builder_.createBasicBlock(currentFunc_);
+  // Create the try body block.
+  auto *tryBodyBlock = builder_.createBasicBlock(currentFunc_);
+
+  // Emit TryStartInst: branches to tryBodyBlock, exceptions go to catchBlock.
+  builder_.createTryStartInst(tryBodyBlock, catchBlock);
+
+  ControlEntry entry;
+  entry.kind = ControlEntry::Try;
+  entry.contBlock = contBlock; // br target and end continuation
+  entry.catchBlock = catchBlock;
+  entry.resultTypes = resultTypes;
+  entry.stackHeight = valueStack_.size();
+  entry.outerUnreachable = unreachable_;
+
+  // Create phi nodes in the continuation block for results.
+  if (!resultTypes.empty()) {
+    entry.resultPhis = createResultPhis(contBlock, resultTypes);
+  }
+
+  controlStack_.push_back(std::move(entry));
+
+  // Set insertion point to the try body block.
+  builder_.setInsertionBlock(tryBodyBlock);
+}
+
+void WasmIRGen::onCatch(uint32_t tagIndex) {
+  assert(!controlStack_.empty() && "control stack underflow");
+  ControlEntry &entry = controlStack_.back();
+  assert(entry.kind == ControlEntry::Try && "onCatch without matching try");
+
+  if (entry.outerUnreachable) {
+    // Reset unreachable for the catch handler.
+    unreachable_ = true;
+    return;
+  }
+
+  if (!entry.inCatch) {
+    // First catch clause — transition from try body to catch handling.
+    bool fallsThrough = !unreachable_ && !isCurrentBlockTerminated();
+
+    if (fallsThrough) {
+      // End the try body: TryEndInst exits the protected region.
+      builder_.createTryEndInst(entry.catchBlock, entry.contBlock);
+    }
+
+    // Switch to the catch dispatch block.
+    builder_.setInsertionBlock(entry.catchBlock);
+
+    // CatchInst recovers the thrown exception value.
+    entry.caughtValue = builder_.createCatchInst();
+
+    entry.inCatch = true;
+  } else {
+    // Subsequent catch clause — end the current handler.
+    bool fallsThrough = !unreachable_ && !isCurrentBlockTerminated();
+    if (fallsThrough) {
+      addBranchPhiOperands(entry);
+      builder_.createBranchInst(entry.contBlock);
+      entry.branchTargeted = true;
+    }
+
+    // Continue from the nextCatchBlock (where the previous tag check branches
+    // on mismatch).
+    builder_.setInsertionBlock(entry.nextCatchBlock);
+  }
+
+  // Check if the caught exception matches this tag.
+  auto *tagLit = builder_.getLiteralNumber(static_cast<double>(tagIndex));
+  auto *matchResult = helpers_.emitMatchException(entry.caughtValue, tagLit);
+
+  // Compare: matchResult !== undefined → match.
+  auto *undef = builder_.getLiteralUndefined();
+  auto *cmp = builder_.createBinaryOperatorInst(
+      matchResult,
+      undef,
+      ValueKind::BinaryStrictlyNotEqualInstKind);
+
+  auto *handlerBlock = builder_.createBasicBlock(currentFunc_);
+  entry.nextCatchBlock = builder_.createBasicBlock(currentFunc_);
+
+  builder_.createCondBranchInst(cmp, handlerBlock, entry.nextCatchBlock);
+
+  // Set insertion to the handler block.
+  builder_.setInsertionBlock(handlerBlock);
+
+  // Restore value stack to the try entry height.
+  valueStack_.resize(entry.stackHeight);
+  valueStackIsI64Hi_.resize(entry.stackHeight);
+  unreachable_ = false;
+
+  // Extract payload values from the exception array and push to stack.
+  // The array layout is: [tagIndex, v0, v1, ...]
+  // where i64 values occupy two consecutive slots (lo, hi).
+  // Payload values start at array index 1.
+  const WasmFuncType &tagType = moduleInfo_.getTagType(tagIndex);
+  uint32_t arrIdx = 1; // Start after tagIndex at position 0.
+  for (size_t i = 0; i < tagType.params.size(); ++i) {
+    auto *idx = builder_.getLiteralNumber(static_cast<double>(arrIdx));
+    auto *val = builder_.createLoadPropertyInst(matchResult, idx);
+    if (tagType.params[i] == WasmValType::I64) {
+      // i64 payload: lo32 at arrIdx, hi32 at arrIdx+1.
+      auto *hiIdx =
+          builder_.getLiteralNumber(static_cast<double>(arrIdx + 1));
+      auto *hiVal = builder_.createLoadPropertyInst(matchResult, hiIdx);
+      pushI64(val, hiVal);
+      arrIdx += 2;
+    } else {
+      push(val);
+      arrIdx += 1;
+    }
+  }
+}
+
+void WasmIRGen::onCatchAll() {
+  assert(!controlStack_.empty() && "control stack underflow");
+  ControlEntry &entry = controlStack_.back();
+  assert(entry.kind == ControlEntry::Try && "onCatchAll without matching try");
+
+  if (entry.outerUnreachable) {
+    unreachable_ = true;
+    return;
+  }
+
+  if (!entry.inCatch) {
+    // First handler is catch_all (no prior catch clauses).
+    bool fallsThrough = !unreachable_ && !isCurrentBlockTerminated();
+
+    if (fallsThrough) {
+      builder_.createTryEndInst(entry.catchBlock, entry.contBlock);
+    }
+
+    builder_.setInsertionBlock(entry.catchBlock);
+    entry.caughtValue = builder_.createCatchInst();
+    entry.inCatch = true;
+  } else {
+    // catch_all after some catch clauses — end the current handler.
+    bool fallsThrough = !unreachable_ && !isCurrentBlockTerminated();
+    if (fallsThrough) {
+      addBranchPhiOperands(entry);
+      builder_.createBranchInst(entry.contBlock);
+      entry.branchTargeted = true;
+    }
+
+    builder_.setInsertionBlock(entry.nextCatchBlock);
+  }
+
+  entry.hasCatchAll = true;
+  entry.nextCatchBlock = nullptr;
+
+  // Restore value stack to the try entry height.
+  valueStack_.resize(entry.stackHeight);
+  valueStackIsI64Hi_.resize(entry.stackHeight);
+  unreachable_ = false;
+
+  // catch_all has no payload — nothing pushed to the stack.
+  // Phase 1: catches everything including traps (known spec deviation).
+}
+
+void WasmIRGen::onThrow(uint32_t tagIndex) {
+  if (unreachable_)
+    return;
+
+  // Get the tag's payload types.
+  const WasmFuncType &tagType = moduleInfo_.getTagType(tagIndex);
+
+  // Pop payload values from the stack (in reverse order, top = last param).
+  // Pop values in reverse and arrange them in forward order.
+  // Note: the exception array stores them in forward order starting at index 1.
+  llvh::SmallVector<Value *, 8> stackValues;
+  for (size_t i = tagType.params.size(); i > 0; --i) {
+    size_t idx = i - 1;
+    if (tagType.params[idx] == WasmValType::I64) {
+      auto [lo, hi] = popI64();
+      stackValues.push_back(hi);
+      stackValues.push_back(lo);
+    } else {
+      stackValues.push_back(pop());
+    }
+  }
+  // stackValues is in reverse order, so reverse it.
+  std::reverse(stackValues.begin(), stackValues.end());
+
+  // Create the exception object via the builtin.
+  auto *tagLit = builder_.getLiteralNumber(static_cast<double>(tagIndex));
+  auto *exceptionObj = helpers_.emitCreateException(tagLit, stackValues);
+
+  // Throw it.
+  builder_.createThrowInst(exceptionObj);
+
+  // After throw, code is unreachable.
+  unreachable_ = true;
+
+  // Create a dead block for any subsequent dead code.
+  auto *deadBlock = builder_.createBasicBlock(currentFunc_);
+  builder_.setInsertionBlock(deadBlock);
+}
+
+void WasmIRGen::onRethrow(uint32_t depth) {
+  if (unreachable_)
+    return;
+
+  // Find the catch block at the given depth. In Wasm exception handling,
+  // rethrow targets the catch block, not the try's continuation.
+  // The depth is relative to the current control stack.
+  ControlEntry &entry = getControlEntry(depth);
+  assert(
+      entry.kind == ControlEntry::Try && entry.inCatch &&
+      "rethrow must target a catch block");
+
+  // Re-throw the caught exception.
+  builder_.createThrowInst(entry.caughtValue);
+
+  // After rethrow, code is unreachable.
+  unreachable_ = true;
+
+  auto *deadBlock = builder_.createBasicBlock(currentFunc_);
+  builder_.setInsertionBlock(deadBlock);
+}
+
+void WasmIRGen::onDelegate(uint32_t depth) {
+  assert(!controlStack_.empty() && "control stack underflow");
+  ControlEntry entry = std::move(controlStack_.back());
+  controlStack_.pop_back();
+  assert(entry.kind == ControlEntry::Try && "onDelegate without matching try");
+
+  if (entry.outerUnreachable) {
+    unreachable_ = true;
+    return;
+  }
+
+  bool fallsThrough = !unreachable_ && !isCurrentBlockTerminated();
+
+  // End the try body. delegate pops the try entry.
+  // If the delegate targets an enclosing try, exceptions are forwarded there.
+  // For simplicity in Phase 1, we end the try body normally and let the
+  // catch block re-throw (which the outer try will catch).
+  if (fallsThrough) {
+    addBranchPhiOperands(entry);
+    builder_.createTryEndInst(entry.catchBlock, entry.contBlock);
+  }
+
+  // The catch block re-throws unconditionally (delegate just forwards).
+  auto *savedBlock = builder_.getInsertionBlock();
+  builder_.setInsertionBlock(entry.catchBlock);
+  auto *caught = builder_.createCatchInst();
+  builder_.createThrowInst(caught);
+  builder_.setInsertionBlock(savedBlock);
+
+  // Continue after the try.
+  builder_.setInsertionBlock(entry.contBlock);
+  unreachable_ = !fallsThrough && !entry.branchTargeted;
+  if (entry.outerUnreachable)
+    unreachable_ = true;
+
+  // Restore value stack and push result phis.
+  valueStack_.resize(entry.stackHeight);
+  valueStackIsI64Hi_.resize(entry.stackHeight);
+  pushResultPhis(entry);
+}
+
 // --- Unsupported opcode handling (D.13) ---
 
 void WasmIRGen::warnUnsupported(
@@ -2614,7 +2950,8 @@ std::vector<PhiInst *> WasmIRGen::createResultPhis(
 }
 
 void WasmIRGen::addBranchPhiOperands(ControlEntry &entry) {
-  if ((entry.kind == ControlEntry::Block || entry.kind == ControlEntry::If) &&
+  if ((entry.kind == ControlEntry::Block || entry.kind == ControlEntry::If ||
+       entry.kind == ControlEntry::Try) &&
       !entry.resultPhis.empty()) {
     auto *currentBlock = builder_.getInsertionBlock();
     size_t numPhis = entry.resultPhis.size();
@@ -2646,7 +2983,8 @@ void WasmIRGen::addBranchPhiOperands(ControlEntry &entry) {
 }
 
 void WasmIRGen::peekBranchPhiOperands(ControlEntry &entry) {
-  if ((entry.kind == ControlEntry::Block || entry.kind == ControlEntry::If) &&
+  if ((entry.kind == ControlEntry::Block || entry.kind == ControlEntry::If ||
+       entry.kind == ControlEntry::Try) &&
       !entry.resultPhis.empty()) {
     size_t numPhis = entry.resultPhis.size();
     size_t available = valueStack_.size();

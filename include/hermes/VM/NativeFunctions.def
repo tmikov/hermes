@@ -463,6 +463,8 @@ NATIVE_FUNCTION(wasmI64ReinterpretF64)
 NATIVE_FUNCTION(wasmF64ReinterpretI64)
 NATIVE_FUNCTION(wasmMemoryGrow)
 NATIVE_FUNCTION(wasmCallIndirect)
+NATIVE_FUNCTION(wasmCreateException)
+NATIVE_FUNCTION(wasmMatchException)
 
 #define ALL_ERROR_TYPE(name) NATIVE_FUNCTION(name##Constructor)
 #include "hermes/VM/NativeErrorTypes.def"

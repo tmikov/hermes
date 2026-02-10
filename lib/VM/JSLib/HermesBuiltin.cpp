@@ -932,6 +932,64 @@ CallResult<HermesValue> wasmCallIndirect(void *, Runtime &runtime) {
   return funcVal.unboxToHV(runtime);
 }
 
+/// Wasm exception handling: create an exception object.
+/// wasmCreateException(tagIndex, v0, v1, ...):
+/// Creates a JSArray [tagIndex, v0, v1, ...] representing a Wasm exception.
+/// The tag index at position 0 identifies the exception tag.
+/// Payload values follow at positions 1..N.
+CallResult<HermesValue> wasmCreateException(void *, Runtime &runtime) {
+  struct : public Locals {
+    PinnedValue<JSArray> arr;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  // Total elements = 1 (tagIndex) + payload values.
+  uint32_t totalElems = args.getArgCount();
+
+  auto arrRes = JSArray::create(runtime, totalElems, totalElems);
+  if (LLVM_UNLIKELY(arrRes == ExecutionStatus::EXCEPTION))
+    return ExecutionStatus::EXCEPTION;
+  lv.arr = std::move(*arrRes);
+
+  // Store tagIndex at position 0, payload values at positions 1..N.
+  for (uint32_t i = 0; i < totalElems; ++i) {
+    JSArray::setElementAt(lv.arr, runtime, i, args.getArgHandle(i));
+  }
+
+  return lv.arr.getHermesValue();
+}
+
+/// Wasm exception handling: check if a caught value matches a tag.
+/// wasmMatchException(caught, tagIndex):
+/// If caught is a JSArray and caught[0] === tagIndex, returns the array.
+/// Otherwise returns undefined.
+CallResult<HermesValue> wasmMatchException(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  HermesValue caught = args.getArg(0);
+  double expectedTag = args.getArg(1).getNumber();
+
+  // Check if caught is a JSArray.
+  if (!caught.isObject())
+    return HermesValue::encodeUndefinedValue();
+  auto *obj = vmcast_or_null<JSArray>(caught.getObject(runtime));
+  if (!obj)
+    return HermesValue::encodeUndefinedValue();
+
+  // Check if element 0 matches the expected tag index.
+  auto tagVal = obj->at(runtime, 0);
+  if (tagVal.isEmpty())
+    return HermesValue::encodeUndefinedValue();
+  HermesValue tagHV = tagVal.unboxToHV(runtime);
+  if (!tagHV.isNumber())
+    return HermesValue::encodeUndefinedValue();
+  if (tagHV.getNumber() != expectedTag)
+    return HermesValue::encodeUndefinedValue();
+
+  // Match! Return the array.
+  return caught;
+}
+
 namespace {
 
 CallResult<HermesValue> copyDataPropertiesSlowPath_RJS(
@@ -1937,6 +1995,18 @@ void createHermesBuiltins(Runtime &runtime) {
       P::wasmCallIndirect,
       wasmCallIndirect,
       4);
+
+  // Exception handling helpers (L.1).
+  defineInternMethod(
+      B::HermesBuiltin_wasmCreateException,
+      P::wasmCreateException,
+      wasmCreateException,
+      1);
+  defineInternMethod(
+      B::HermesBuiltin_wasmMatchException,
+      P::wasmMatchException,
+      wasmMatchException,
+      2);
 }
 
 } // namespace vm

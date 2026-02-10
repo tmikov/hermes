@@ -30,6 +30,8 @@ struct WasmModuleInfo {
   std::vector<WasmMemoryType> memories;
   /// Global section: defined (non-imported) globals.
   std::vector<WasmGlobal> globals;
+  /// Tag section: defined (non-imported) exception tags.
+  std::vector<WasmTag> tags;
   /// Export section.
   std::vector<WasmExport> exports;
   /// Start function index (if present).
@@ -62,6 +64,14 @@ struct WasmModuleInfo {
   uint32_t totalMemoryCount() const;
   /// \return number of imported memories.
   uint32_t importedMemoryCount() const;
+
+  /// \return total number of tags (imported + defined).
+  uint32_t totalTagCount() const;
+  /// \return number of imported tags.
+  uint32_t importedTagCount() const;
+  /// \return the function type (signature) of the tag at the given index
+  ///   (handles imported + defined tags).
+  const WasmFuncType &getTagType(uint32_t tagIndex) const;
 };
 
 } // namespace wasm

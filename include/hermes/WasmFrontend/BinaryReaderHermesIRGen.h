@@ -81,6 +81,12 @@ class BinaryReaderHermesIRGen : public wabt::BinaryReaderNop {
       wabt::Index globalIndex,
       wabt::Type type,
       bool mutable_) override;
+  wabt::Result OnImportTag(
+      wabt::Index importIndex,
+      std::string_view moduleName,
+      std::string_view fieldName,
+      wabt::Index tagIndex,
+      wabt::Index sigIndex) override;
 
   // --- Function section ---
   wabt::Result OnFunctionCount(wabt::Index count) override;
@@ -109,6 +115,10 @@ class BinaryReaderHermesIRGen : public wabt::BinaryReaderNop {
   wabt::Result BeginGlobalInitExpr(wabt::Index index) override;
   wabt::Result EndGlobalInitExpr(wabt::Index index) override;
   wabt::Result EndGlobal(wabt::Index index) override;
+
+  // --- Tag section ---
+  wabt::Result OnTagCount(wabt::Index count) override;
+  wabt::Result OnTagType(wabt::Index index, wabt::Index sigIndex) override;
 
   // --- Export section ---
   wabt::Result OnExportCount(wabt::Index count) override;
@@ -228,6 +238,14 @@ class BinaryReaderHermesIRGen : public wabt::BinaryReaderNop {
   wabt::Result OnTableSetExpr(wabt::Index tableIndex) override;
   wabt::Result OnTableSizeExpr(wabt::Index tableIndex) override;
   wabt::Result OnTableGrowExpr(wabt::Index tableIndex) override;
+
+  // --- Exception handling ---
+  wabt::Result OnTryExpr(wabt::Type sigType) override;
+  wabt::Result OnCatchExpr(wabt::Index tagIndex) override;
+  wabt::Result OnCatchAllExpr() override;
+  wabt::Result OnThrowExpr(wabt::Index tagIndex) override;
+  wabt::Result OnRethrowExpr(wabt::Index depth) override;
+  wabt::Result OnDelegateExpr(wabt::Index depth) override;
 
  private:
   /// Convert a wabt Type to our WasmValType.

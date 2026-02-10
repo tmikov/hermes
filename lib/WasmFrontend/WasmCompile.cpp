@@ -31,6 +31,7 @@ bool compileWasmModule(
 
   wabt::ReadBinaryOptions options;
   options.read_debug_names = true;
+  options.features.enable_exceptions();
   wabt::Result result =
       wabt::ReadBinary(buffer, size, &reader, options);
   if (!wabt::Succeeded(result)) {

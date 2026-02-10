@@ -85,5 +85,36 @@ uint32_t WasmModuleInfo::importedMemoryCount() const {
   return countImportsByKind(imports, WasmExternalKind::Memory);
 }
 
+uint32_t WasmModuleInfo::totalTagCount() const {
+  return importedTagCount() + static_cast<uint32_t>(tags.size());
+}
+
+uint32_t WasmModuleInfo::importedTagCount() const {
+  return countImportsByKind(imports, WasmExternalKind::Tag);
+}
+
+const WasmFuncType &WasmModuleInfo::getTagType(uint32_t tagIndex) const {
+  uint32_t numImported = importedTagCount();
+  if (tagIndex < numImported) {
+    // Find the N-th tag import.
+    uint32_t count = 0;
+    for (const auto &imp : imports) {
+      if (imp.kind == WasmExternalKind::Tag) {
+        if (count == tagIndex) {
+          assert(imp.tagTypeIndex < types.size() && "type index out of range");
+          return types[imp.tagTypeIndex];
+        }
+        ++count;
+      }
+    }
+    assert(false && "tagIndex out of range for imported tags");
+  }
+  uint32_t definedIdx = tagIndex - numImported;
+  assert(definedIdx < tags.size() && "tagIndex out of range");
+  assert(
+      tags[definedIdx].typeIndex < types.size() && "type index out of range");
+  return types[tags[definedIdx].typeIndex];
+}
+
 } // namespace wasm
 } // namespace hermes

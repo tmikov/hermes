@@ -1,0 +1,23 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-try-catch.wat.
+// Provides the print import and runs the Wasm module's exported test functions.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+
+globalThis.__wasm_imports__ = {
+  env: {
+    print: function(x) {
+      print(x);
+    },
+  },
+};
+
+var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+
+exports._main();

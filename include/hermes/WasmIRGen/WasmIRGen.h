@@ -375,6 +375,21 @@ class WasmIRGen {
   /// global.set: pop a value and store it into the global at \p globalIndex.
   void onGlobalSet(uint32_t globalIndex);
 
+  // --- Exception handling (L.1) ---
+
+  /// Enter a try block with the given result types.
+  void onTry(const std::vector<WasmValType> &resultTypes);
+  /// Handle a catch clause for the given tag index.
+  void onCatch(uint32_t tagIndex);
+  /// Handle a catch_all clause.
+  void onCatchAll();
+  /// Throw an exception with the given tag index.
+  void onThrow(uint32_t tagIndex);
+  /// Re-throw the caught exception from the catch at the given depth.
+  void onRethrow(uint32_t depth);
+  /// Delegate exceptions to an outer handler at the given depth.
+  void onDelegate(uint32_t depth);
+
   // --- Table operations (J.1) ---
 
   /// table.get: pop index, push the function reference at that index.
@@ -499,15 +514,15 @@ class WasmIRGen {
   /// the next end/else that restores reachability.
   bool unreachable_ = false;
 
-  /// Control flow stack (for block/loop/if).
+  /// Control flow stack (for block/loop/if/try).
   struct ControlEntry {
-    enum Kind { Block, Loop, If };
+    enum Kind { Block, Loop, If, Try };
     Kind kind;
-    /// For Block/If: continuation after end (also the br target).
+    /// For Block/If/Try: continuation after end (also the br target).
     /// For Loop: the loop header block (the br target).
     BasicBlock *contBlock;
     /// For Loop: the block after the loop's end (where fallthrough goes).
-    /// For Block/If: nullptr (contBlock serves both purposes).
+    /// For Block/If/Try: nullptr (contBlock serves both purposes).
     BasicBlock *endBlock = nullptr;
     /// Only for If: the else block.
     BasicBlock *elseBlock = nullptr;
@@ -516,13 +531,28 @@ class WasmIRGen {
     /// Value stack height at entry.
     size_t stackHeight;
     /// Phi nodes for results at the continuation block.
-    /// For Block/If: phis in contBlock for results from br/fallthrough.
+    /// For Block/If/Try: phis in contBlock for results from br/fallthrough.
     /// For Loop: phis in endBlock for results from fallthrough.
     std::vector<PhiInst *> resultPhis;
     /// Whether the code was unreachable when this entry was pushed.
     bool outerUnreachable = false;
     /// Whether any branch (br/br_if) has targeted this entry's contBlock.
     bool branchTargeted = false;
+
+    // --- Try-specific fields ---
+
+    /// The catch dispatch block (target of TryStartInst).
+    BasicBlock *catchBlock = nullptr;
+    /// The CatchInst result (the caught exception value).
+    /// Set when the first catch/catch_all is encountered.
+    Value *caughtValue = nullptr;
+    /// The block where the next catch clause's tag check begins.
+    /// Updated each time a new catch/catch_all is handled.
+    BasicBlock *nextCatchBlock = nullptr;
+    /// Whether we have transitioned from the try body to catch handling.
+    bool inCatch = false;
+    /// Whether a catch_all clause was encountered.
+    bool hasCatchAll = false;
   };
   std::vector<ControlEntry> controlStack_;
 

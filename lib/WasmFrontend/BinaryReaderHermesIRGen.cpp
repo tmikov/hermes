@@ -70,6 +70,8 @@ WasmExternalKind BinaryReaderHermesIRGen::convertExternalKind(
       return WasmExternalKind::Memory;
     case wabt::ExternalKind::Global:
       return WasmExternalKind::Global;
+    case wabt::ExternalKind::Tag:
+      return WasmExternalKind::Tag;
     default:
       assert(false && "unsupported external kind");
       return WasmExternalKind::Function;
@@ -174,6 +176,21 @@ wabt::Result BinaryReaderHermesIRGen::OnImportGlobal(
   return wabt::Result::Ok;
 }
 
+wabt::Result BinaryReaderHermesIRGen::OnImportTag(
+    wabt::Index importIndex,
+    std::string_view moduleName,
+    std::string_view fieldName,
+    wabt::Index tagIndex,
+    wabt::Index sigIndex) {
+  WasmImport imp;
+  imp.moduleName = std::string(moduleName);
+  imp.fieldName = std::string(fieldName);
+  imp.kind = WasmExternalKind::Tag;
+  imp.tagTypeIndex = sigIndex;
+  moduleInfo_.imports.push_back(std::move(imp));
+  return wabt::Result::Ok;
+}
+
 // --- Function section ---
 
 wabt::Result BinaryReaderHermesIRGen::OnFunctionCount(wabt::Index count) {
@@ -255,6 +272,22 @@ wabt::Result BinaryReaderHermesIRGen::EndGlobalInitExpr(wabt::Index index) {
 }
 
 wabt::Result BinaryReaderHermesIRGen::EndGlobal(wabt::Index index) {
+  return wabt::Result::Ok;
+}
+
+// --- Tag section ---
+
+wabt::Result BinaryReaderHermesIRGen::OnTagCount(wabt::Index count) {
+  moduleInfo_.tags.reserve(count);
+  return wabt::Result::Ok;
+}
+
+wabt::Result BinaryReaderHermesIRGen::OnTagType(
+    wabt::Index index,
+    wabt::Index sigIndex) {
+  WasmTag tag;
+  tag.typeIndex = sigIndex;
+  moduleInfo_.tags.push_back(std::move(tag));
   return wabt::Result::Ok;
 }
 
@@ -1455,6 +1488,57 @@ wabt::Result BinaryReaderHermesIRGen::OnTableGrowExpr(
   if (!inFunctionBody_ || !irgen_)
     return wabt::Result::Ok;
   irgen_->onTableGrow(static_cast<uint32_t>(tableIndex));
+  return wabt::Result::Ok;
+}
+
+// --- Exception handling instruction callbacks ---
+
+wabt::Result BinaryReaderHermesIRGen::OnTryExpr(wabt::Type sigType) {
+  if (!inFunctionBody_ || !irgen_)
+    return wabt::Result::Ok;
+
+  // Convert try signature type to result types vector.
+  std::vector<WasmValType> resultTypes;
+  if (static_cast<wabt::Type::Enum>(sigType) != wabt::Type::Void) {
+    resultTypes.push_back(convertType(sigType));
+  }
+
+  irgen_->onTry(resultTypes);
+  return wabt::Result::Ok;
+}
+
+wabt::Result BinaryReaderHermesIRGen::OnCatchExpr(wabt::Index tagIndex) {
+  if (!inFunctionBody_ || !irgen_)
+    return wabt::Result::Ok;
+  irgen_->onCatch(static_cast<uint32_t>(tagIndex));
+  return wabt::Result::Ok;
+}
+
+wabt::Result BinaryReaderHermesIRGen::OnCatchAllExpr() {
+  if (!inFunctionBody_ || !irgen_)
+    return wabt::Result::Ok;
+  irgen_->onCatchAll();
+  return wabt::Result::Ok;
+}
+
+wabt::Result BinaryReaderHermesIRGen::OnThrowExpr(wabt::Index tagIndex) {
+  if (!inFunctionBody_ || !irgen_)
+    return wabt::Result::Ok;
+  irgen_->onThrow(static_cast<uint32_t>(tagIndex));
+  return wabt::Result::Ok;
+}
+
+wabt::Result BinaryReaderHermesIRGen::OnRethrowExpr(wabt::Index depth) {
+  if (!inFunctionBody_ || !irgen_)
+    return wabt::Result::Ok;
+  irgen_->onRethrow(static_cast<uint32_t>(depth));
+  return wabt::Result::Ok;
+}
+
+wabt::Result BinaryReaderHermesIRGen::OnDelegateExpr(wabt::Index depth) {
+  if (!inFunctionBody_ || !irgen_)
+    return wabt::Result::Ok;
+  irgen_->onDelegate(static_cast<uint32_t>(depth));
   return wabt::Result::Ok;
 }
 

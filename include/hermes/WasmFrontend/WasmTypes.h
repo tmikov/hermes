@@ -58,12 +58,19 @@ struct WasmGlobalType {
   bool mutable_ = false;
 };
 
+/// A Wasm exception tag.
+struct WasmTag {
+  /// Index into the module's types[] vector for the tag's signature.
+  uint32_t typeIndex = 0;
+};
+
 /// External kind for imports and exports.
 enum class WasmExternalKind : uint8_t {
   Function = 0,
   Table = 1,
   Memory = 2,
   Global = 3,
+  Tag = 4,
 };
 
 /// A Wasm import entry.
@@ -79,6 +86,8 @@ struct WasmImport {
   WasmMemoryType memoryType;
   /// For global imports.
   WasmGlobalType globalType;
+  /// For tag imports: index into types[].
+  uint32_t tagTypeIndex = 0;
 };
 
 /// A Wasm export entry.
