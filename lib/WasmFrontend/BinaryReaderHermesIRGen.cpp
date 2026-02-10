@@ -1169,18 +1169,35 @@ wabt::Result BinaryReaderHermesIRGen::OnDropExpr() {
 
 // --- Block/end/br/br_if instruction callbacks ---
 
+/// Convert a block/loop/if/try signature type to a vector of result types.
+/// Handles both simple value types (void, i32, f64, etc.) and type index
+/// references (for multi-value blocks).
+std::vector<WasmValType> BinaryReaderHermesIRGen::convertBlockSigType(
+    wabt::Type sigType) {
+  std::vector<WasmValType> resultTypes;
+  if (static_cast<wabt::Type::Enum>(sigType) == wabt::Type::Void) {
+    // No results.
+    return resultTypes;
+  }
+  if (sigType.IsIndex()) {
+    // Multi-value block: look up the type index in the module's type section.
+    auto idx = sigType.GetIndex();
+    if (idx < moduleInfo_.types.size()) {
+      return moduleInfo_.types[idx].results;
+    }
+    // Invalid type index — return empty (treated as void).
+    return resultTypes;
+  }
+  // Simple value type.
+  resultTypes.push_back(convertType(sigType));
+  return resultTypes;
+}
+
 wabt::Result BinaryReaderHermesIRGen::OnBlockExpr(wabt::Type sigType) {
   if (!inFunctionBody_ || !irgen_)
     return wabt::Result::Ok;
 
-  // Convert block signature type to result types vector.
-  // In Wasm MVP, block types are either void or a single value type.
-  std::vector<WasmValType> resultTypes;
-  if (static_cast<wabt::Type::Enum>(sigType) != wabt::Type::Void) {
-    resultTypes.push_back(convertType(sigType));
-  }
-
-  irgen_->onBlock(resultTypes);
+  irgen_->onBlock(convertBlockSigType(sigType));
   return wabt::Result::Ok;
 }
 
@@ -1188,14 +1205,7 @@ wabt::Result BinaryReaderHermesIRGen::OnLoopExpr(wabt::Type sigType) {
   if (!inFunctionBody_ || !irgen_)
     return wabt::Result::Ok;
 
-  // Convert loop signature type to result types vector.
-  // In Wasm MVP, loop types are either void or a single value type.
-  std::vector<WasmValType> resultTypes;
-  if (static_cast<wabt::Type::Enum>(sigType) != wabt::Type::Void) {
-    resultTypes.push_back(convertType(sigType));
-  }
-
-  irgen_->onLoop(resultTypes);
+  irgen_->onLoop(convertBlockSigType(sigType));
   return wabt::Result::Ok;
 }
 
@@ -1203,14 +1213,7 @@ wabt::Result BinaryReaderHermesIRGen::OnIfExpr(wabt::Type sigType) {
   if (!inFunctionBody_ || !irgen_)
     return wabt::Result::Ok;
 
-  // Convert if signature type to result types vector.
-  // In Wasm MVP, if types are either void or a single value type.
-  std::vector<WasmValType> resultTypes;
-  if (static_cast<wabt::Type::Enum>(sigType) != wabt::Type::Void) {
-    resultTypes.push_back(convertType(sigType));
-  }
-
-  irgen_->onIf(resultTypes);
+  irgen_->onIf(convertBlockSigType(sigType));
   return wabt::Result::Ok;
 }
 
@@ -1575,13 +1578,7 @@ wabt::Result BinaryReaderHermesIRGen::OnTryExpr(wabt::Type sigType) {
   if (!inFunctionBody_ || !irgen_)
     return wabt::Result::Ok;
 
-  // Convert try signature type to result types vector.
-  std::vector<WasmValType> resultTypes;
-  if (static_cast<wabt::Type::Enum>(sigType) != wabt::Type::Void) {
-    resultTypes.push_back(convertType(sigType));
-  }
-
-  irgen_->onTry(resultTypes);
+  irgen_->onTry(convertBlockSigType(sigType));
   return wabt::Result::Ok;
 }
 

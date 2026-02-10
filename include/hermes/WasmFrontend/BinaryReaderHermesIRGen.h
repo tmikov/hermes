@@ -273,6 +273,9 @@ class BinaryReaderHermesIRGen : public wabt::BinaryReaderNop {
  private:
   /// Convert a wabt Type to our WasmValType.
   static WasmValType convertType(wabt::Type type);
+  /// Convert a block/loop/if/try signature type to result types.
+  /// Handles both simple types and type index references (multi-value).
+  std::vector<WasmValType> convertBlockSigType(wabt::Type sigType);
   /// Convert a wabt Limits to our WasmLimits.
   static WasmLimits convertLimits(const wabt::Limits *limits);
   /// Convert a wabt ExternalKind to our WasmExternalKind.

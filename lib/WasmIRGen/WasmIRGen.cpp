@@ -1626,8 +1626,13 @@ void WasmIRGen::onBrTable(
 
   BasicBlock *defaultTrampoline = getOrCreateTrampoline(defaultDepth);
 
-  // Emit the SwitchInst.
-  builder_.createSwitchInst(index, defaultTrampoline, caseValues, caseBlocks);
+  if (numTargets == 0) {
+    // No case targets — just branch to the default trampoline.
+    builder_.createBranchInst(defaultTrampoline);
+  } else {
+    // Emit the SwitchInst.
+    builder_.createSwitchInst(index, defaultTrampoline, caseValues, caseBlocks);
+  }
 
   // Now populate each trampoline block with phi operands and branch.
   for (auto &pair : depthToTrampoline) {
