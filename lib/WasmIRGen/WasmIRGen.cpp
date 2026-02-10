@@ -66,14 +66,25 @@ void WasmIRGen::createFunctions() {
     // Add a "this" parameter (required by Hermes calling convention).
     builder_.createJSThisParam(func);
 
-    // Add one JSDynamicParam per Wasm parameter.
+    // Add JSDynamicParams per Wasm parameter. i64 params need two slots
+    // (lo32, hi32) for the split representation.
+    uint32_t jsParamCount = 0;
     for (uint32_t p = 0; p < funcType.params.size(); ++p) {
-      builder_.createJSDynamicParam(
-          func, ("p" + llvh::Twine(p)).str());
+      if (funcType.params[p] == WasmValType::I64) {
+        builder_.createJSDynamicParam(
+            func, ("p" + llvh::Twine(p) + "_lo").str());
+        builder_.createJSDynamicParam(
+            func, ("p" + llvh::Twine(p) + "_hi").str());
+        jsParamCount += 2;
+      } else {
+        builder_.createJSDynamicParam(
+            func, ("p" + llvh::Twine(p)).str());
+        jsParamCount += 1;
+      }
     }
 
     // Set the expected param count (including "this").
-    func->setExpectedParamCountIncludingThis(funcType.params.size() + 1);
+    func->setExpectedParamCountIncludingThis(jsParamCount + 1);
 
     // Create a single entry basic block with ReturnInst(undefined).
     auto *entry = builder_.createBasicBlock(func);
@@ -145,6 +156,8 @@ void WasmIRGen::beginFunction(
   valueStack_.clear();
   valueStackIsI64Hi_.clear();
   locals_.clear();
+  localSlotIndex_.clear();
+  localTypes_.clear();
   controlStack_.clear();
   unreachable_ = false;
 
@@ -165,46 +178,90 @@ void WasmIRGen::beginFunction(
   parentScopeInst_ = builder_.createGetParentScopeInst(
       topLevelVS_, currentFunc_->getParentScopeParam());
 
-  // Create AllocStackInst for each parameter.
+  // Build local type map (params + declared locals).
   uint32_t numParams = funcType.params.size();
   for (uint32_t i = 0; i < numParams; ++i) {
-    auto *alloc = builder_.createAllocStackInst(
-        ("local_" + llvh::Twine(i)).str(),
-        Type::createAnyType());
-    locals_.push_back(alloc);
+    localTypes_.push_back(funcType.params[i]);
+  }
+  for (uint32_t i = 0; i < localTypes.size(); ++i) {
+    localTypes_.push_back(localTypes[i]);
+  }
 
-    // Initialize from function parameter. JSDynamicParams are indexed
-    // starting after "this" (index 0), so param i is at index i+1.
-    auto *param = currentFunc_->getJSDynamicParam(i + 1);
-    auto *loadParam = builder_.createLoadParamInst(param);
-    builder_.createStoreStackInst(loadParam, alloc);
+  // Create AllocStackInst for each parameter. i64 params use 2 slots.
+  // JSDynamicParam index tracks the expanding JS param list.
+  uint32_t jsParamIdx = 1; // 0 = "this"
+  for (uint32_t i = 0; i < numParams; ++i) {
+    localSlotIndex_.push_back(locals_.size());
+    if (funcType.params[i] == WasmValType::I64) {
+      // i64 param: allocate lo and hi stack slots.
+      auto *allocLo = builder_.createAllocStackInst(
+          ("local_" + llvh::Twine(i) + "_lo").str(),
+          Type::createAnyType());
+      auto *allocHi = builder_.createAllocStackInst(
+          ("local_" + llvh::Twine(i) + "_hi").str(),
+          Type::createAnyType());
+      locals_.push_back(allocLo);
+      locals_.push_back(allocHi);
+
+      auto *paramLo = currentFunc_->getJSDynamicParam(jsParamIdx);
+      auto *paramHi = currentFunc_->getJSDynamicParam(jsParamIdx + 1);
+      builder_.createStoreStackInst(
+          builder_.createLoadParamInst(paramLo), allocLo);
+      builder_.createStoreStackInst(
+          builder_.createLoadParamInst(paramHi), allocHi);
+      jsParamIdx += 2;
+    } else {
+      auto *alloc = builder_.createAllocStackInst(
+          ("local_" + llvh::Twine(i)).str(),
+          Type::createAnyType());
+      locals_.push_back(alloc);
+
+      auto *param = currentFunc_->getJSDynamicParam(jsParamIdx);
+      builder_.createStoreStackInst(
+          builder_.createLoadParamInst(param), alloc);
+      jsParamIdx += 1;
+    }
   }
 
   // Create AllocStackInst for each declared local, initialized to zero.
   for (uint32_t i = 0; i < localTypes.size(); ++i) {
-    auto *alloc = builder_.createAllocStackInst(
-        ("local_" + llvh::Twine(numParams + i)).str(),
-        Type::createAnyType());
-    locals_.push_back(alloc);
+    localSlotIndex_.push_back(locals_.size());
+    if (localTypes[i] == WasmValType::I64) {
+      // i64 local: allocate lo and hi stack slots, both initialized to 0.
+      auto *allocLo = builder_.createAllocStackInst(
+          ("local_" + llvh::Twine(numParams + i) + "_lo").str(),
+          Type::createAnyType());
+      auto *allocHi = builder_.createAllocStackInst(
+          ("local_" + llvh::Twine(numParams + i) + "_hi").str(),
+          Type::createAnyType());
+      locals_.push_back(allocLo);
+      locals_.push_back(allocHi);
+      builder_.createStoreStackInst(builder_.getLiteralNumber(0), allocLo);
+      builder_.createStoreStackInst(builder_.getLiteralNumber(0), allocHi);
+    } else {
+      auto *alloc = builder_.createAllocStackInst(
+          ("local_" + llvh::Twine(numParams + i)).str(),
+          Type::createAnyType());
+      locals_.push_back(alloc);
 
-    // Initialize locals to their zero value.
-    Value *zeroVal;
-    switch (localTypes[i]) {
-      case WasmValType::I32:
-      case WasmValType::I64:
-      case WasmValType::F32:
-      case WasmValType::F64:
-        zeroVal = builder_.getLiteralNumber(0);
-        break;
-      case WasmValType::FuncRef:
-      case WasmValType::ExternRef:
-        zeroVal = builder_.getLiteralNull();
-        break;
-      default:
-        zeroVal = builder_.getLiteralNumber(0);
-        break;
+      // Initialize locals to their zero value.
+      Value *zeroVal;
+      switch (localTypes[i]) {
+        case WasmValType::I32:
+        case WasmValType::F32:
+        case WasmValType::F64:
+          zeroVal = builder_.getLiteralNumber(0);
+          break;
+        case WasmValType::FuncRef:
+        case WasmValType::ExternRef:
+          zeroVal = builder_.getLiteralNull();
+          break;
+        default:
+          zeroVal = builder_.getLiteralNumber(0);
+          break;
+      }
+      builder_.createStoreStackInst(zeroVal, alloc);
     }
-    builder_.createStoreStackInst(zeroVal, alloc);
   }
 
   // Push an implicit function-level control entry. The function body acts
@@ -224,6 +281,10 @@ void WasmIRGen::beginFunction(
     builder_.setInsertionBlock(exitBlock);
     for (size_t i = 0; i < funcType.results.size(); ++i) {
       funcEntry.resultPhis.push_back(builder_.createPhiInst());
+      // i64 results need a second phi for the hi32 part.
+      if (funcType.results[i] == WasmValType::I64) {
+        funcEntry.resultPhis.push_back(builder_.createPhiInst());
+      }
     }
     builder_.setInsertionBlock(savedBlock);
   }
@@ -243,8 +304,14 @@ void WasmIRGen::endFunction() {
     const WasmFuncType &funcType =
         moduleInfo_.getFunctionType(currentFuncIndex_);
     if (!funcType.results.empty() && !valueStack_.empty()) {
-      Value *result = pop();
-      builder_.createReturnInst(result);
+      if (funcType.results[0] == WasmValType::I64 && isTopI64()) {
+        auto [lo, hi] = popI64();
+        helpers_.emitI64HiStash(hi);
+        builder_.createReturnInst(lo);
+      } else {
+        Value *result = pop();
+        builder_.createReturnInst(result);
+      }
     } else {
       builder_.createReturnInst(builder_.getLiteralUndefined());
     }
@@ -268,6 +335,8 @@ void WasmIRGen::endFunction() {
   valueStack_.clear();
   valueStackIsI64Hi_.clear();
   locals_.clear();
+  localSlotIndex_.clear();
+  localTypes_.clear();
   controlStack_.clear();
 }
 
@@ -294,21 +363,43 @@ void WasmIRGen::onF64Const(double value) {
 }
 
 void WasmIRGen::onLocalGet(uint32_t localIndex) {
-  assert(localIndex < locals_.size() && "localIndex out of range");
-  push(builder_.createLoadStackInst(locals_[localIndex]));
+  assert(localIndex < localSlotIndex_.size() && "localIndex out of range");
+  uint32_t slot = localSlotIndex_[localIndex];
+  if (localTypes_[localIndex] == WasmValType::I64) {
+    auto *lo = builder_.createLoadStackInst(locals_[slot]);
+    auto *hi = builder_.createLoadStackInst(locals_[slot + 1]);
+    pushI64(lo, hi);
+  } else {
+    push(builder_.createLoadStackInst(locals_[slot]));
+  }
 }
 
 void WasmIRGen::onLocalSet(uint32_t localIndex) {
-  assert(localIndex < locals_.size() && "localIndex out of range");
-  Value *val = pop();
-  builder_.createStoreStackInst(val, locals_[localIndex]);
+  assert(localIndex < localSlotIndex_.size() && "localIndex out of range");
+  uint32_t slot = localSlotIndex_[localIndex];
+  if (localTypes_[localIndex] == WasmValType::I64) {
+    auto [lo, hi] = popI64();
+    builder_.createStoreStackInst(lo, locals_[slot]);
+    builder_.createStoreStackInst(hi, locals_[slot + 1]);
+  } else {
+    Value *val = pop();
+    builder_.createStoreStackInst(val, locals_[slot]);
+  }
 }
 
 void WasmIRGen::onLocalTee(uint32_t localIndex) {
-  assert(localIndex < locals_.size() && "localIndex out of range");
-  Value *val = pop();
-  builder_.createStoreStackInst(val, locals_[localIndex]);
-  push(val);
+  assert(localIndex < localSlotIndex_.size() && "localIndex out of range");
+  uint32_t slot = localSlotIndex_[localIndex];
+  if (localTypes_[localIndex] == WasmValType::I64) {
+    auto [lo, hi] = popI64();
+    builder_.createStoreStackInst(lo, locals_[slot]);
+    builder_.createStoreStackInst(hi, locals_[slot + 1]);
+    pushI64(lo, hi);
+  } else {
+    Value *val = pop();
+    builder_.createStoreStackInst(val, locals_[slot]);
+    push(val);
+  }
 }
 
 // --- Return and drop (D.5) ---
@@ -321,8 +412,14 @@ void WasmIRGen::onReturn() {
       moduleInfo_.getFunctionType(currentFuncIndex_);
 
   if (!funcType.results.empty()) {
-    Value *result = pop();
-    builder_.createReturnInst(result);
+    if (funcType.results[0] == WasmValType::I64) {
+      auto [lo, hi] = popI64();
+      helpers_.emitI64HiStash(hi);
+      builder_.createReturnInst(lo);
+    } else {
+      Value *result = pop();
+      builder_.createReturnInst(result);
+    }
   } else {
     builder_.createReturnInst(builder_.getLiteralUndefined());
   }
@@ -647,14 +744,9 @@ void WasmIRGen::onBlock(const std::vector<WasmValType> &resultTypes) {
   entry.stackHeight = valueStack_.size();
   entry.outerUnreachable = unreachable_;
 
-  // If the block has result types, create phi nodes in the continuation block.
+  // Create phi nodes in the continuation block (i64 results get 2 phis).
   if (!resultTypes.empty()) {
-    auto *savedBlock = builder_.getInsertionBlock();
-    builder_.setInsertionBlock(contBlock);
-    for (size_t i = 0; i < resultTypes.size(); ++i) {
-      entry.resultPhis.push_back(builder_.createPhiInst());
-    }
-    builder_.setInsertionBlock(savedBlock);
+    entry.resultPhis = createResultPhis(contBlock, resultTypes);
   }
 
   controlStack_.push_back(std::move(entry));
@@ -676,13 +768,9 @@ void WasmIRGen::onLoop(const std::vector<WasmValType> &resultTypes) {
   entry.outerUnreachable = unreachable_;
 
   // Result phis go in the end block (for fallthrough values).
+  // i64 results get 2 phis each.
   if (!resultTypes.empty()) {
-    auto *savedBlock = builder_.getInsertionBlock();
-    builder_.setInsertionBlock(endBlock);
-    for (size_t i = 0; i < resultTypes.size(); ++i) {
-      entry.resultPhis.push_back(builder_.createPhiInst());
-    }
-    builder_.setInsertionBlock(savedBlock);
+    entry.resultPhis = createResultPhis(endBlock, resultTypes);
   }
 
   // Branch from the current block to the loop header.
@@ -729,14 +817,9 @@ void WasmIRGen::onIf(const std::vector<WasmValType> &resultTypes) {
   entry.stackHeight = valueStack_.size();
   entry.outerUnreachable = unreachable_;
 
-  // Create phi nodes in the merge block for results.
+  // Create phi nodes in the merge block for results (i64 results get 2 phis).
   if (!resultTypes.empty()) {
-    auto *savedBlock = builder_.getInsertionBlock();
-    builder_.setInsertionBlock(mergeBlock);
-    for (size_t i = 0; i < resultTypes.size(); ++i) {
-      entry.resultPhis.push_back(builder_.createPhiInst());
-    }
-    builder_.setInsertionBlock(savedBlock);
+    entry.resultPhis = createResultPhis(mergeBlock, resultTypes);
   }
 
   controlStack_.push_back(std::move(entry));
@@ -811,10 +894,8 @@ void WasmIRGen::onEnd() {
     if (entry.outerUnreachable)
       unreachable_ = true;
 
-    // Push phi results onto the value stack.
-    for (auto *phi : entry.resultPhis) {
-      push(phi);
-    }
+    // Push phi results onto the value stack (i64 results push 2 values).
+    pushResultPhis(entry);
   } else if (entry.kind == ControlEntry::Loop) {
     bool fallsThrough = !unreachable_ && !isCurrentBlockTerminated();
 
@@ -825,20 +906,20 @@ void WasmIRGen::onEnd() {
       // loop targets the header, not the end block).
       if (!entry.resultPhis.empty()) {
         auto *currentBlock = builder_.getInsertionBlock();
-        size_t numResults = entry.resultPhis.size();
+        size_t numPhis = entry.resultPhis.size();
         size_t available = valueStack_.size();
-        if (available >= numResults) {
-          for (size_t i = 0; i < numResults; ++i) {
-            Value *val = valueStack_[available - numResults + i];
+        if (available >= numPhis) {
+          for (size_t i = 0; i < numPhis; ++i) {
+            Value *val = valueStack_[available - numPhis + i];
             entry.resultPhis[i]->addEntry(val, currentBlock);
           }
-          valueStack_.resize(available - numResults);
-          valueStackIsI64Hi_.resize(available - numResults);
+          valueStack_.resize(available - numPhis);
+          valueStackIsI64Hi_.resize(available - numPhis);
         } else {
           // Stack underflow — use undefined as placeholder.
-          for (size_t i = 0; i < numResults; ++i) {
-            Value *val = (i >= numResults - available)
-                ? valueStack_[i - (numResults - available)]
+          for (size_t i = 0; i < numPhis; ++i) {
+            Value *val = (i >= numPhis - available)
+                ? valueStack_[i - (numPhis - available)]
                 : builder_.getLiteralUndefined();
             entry.resultPhis[i]->addEntry(val, currentBlock);
           }
@@ -857,10 +938,8 @@ void WasmIRGen::onEnd() {
     // make the end block reachable. Only fallthrough makes it reachable.
     unreachable_ = !fallsThrough;
 
-    // Push phi results onto the value stack.
-    for (auto *phi : entry.resultPhis) {
-      push(phi);
-    }
+    // Push phi results onto the value stack (i64 results push 2 values).
+    pushResultPhis(entry);
   }
 }
 
@@ -898,27 +977,9 @@ void WasmIRGen::onBrIf(uint32_t depth) {
   // Create a fallthrough block for when the condition is false.
   auto *fallthroughBlock = builder_.createBasicBlock(currentFunc_);
 
-  // If the block has results, we need to add phi operands from the
-  // branch-taken path. The values for the phi must be read before the
-  // branch, but we don't pop them (they stay on the stack for the
-  // fallthrough path).
-  if (!entry.resultPhis.empty() && entry.kind == ControlEntry::Block) {
-    // For br_if targeting a block, the top N values are the results.
-    // We peek at them (don't pop) and add them as phi operands.
-    size_t numResults = entry.resultPhis.size();
-    size_t available = valueStack_.size();
-    auto *currentBlock = builder_.getInsertionBlock();
-    for (size_t i = 0; i < numResults; ++i) {
-      // Peek at the result values (don't pop for br_if).
-      Value *val;
-      if (available >= numResults) {
-        val = valueStack_[available - numResults + i];
-      } else {
-        val = builder_.getLiteralUndefined();
-      }
-      entry.resultPhis[i]->addEntry(val, currentBlock);
-    }
-  }
+  // If the block has results, peek at the value stack (don't pop) and add
+  // phi operands from the branch-taken path. Values stay for fallthrough.
+  peekBranchPhiOperands(entry);
 
   // Emit conditional branch: non-zero condition branches to target.
   builder_.createCondBranchInst(cond, entry.contBlock, fallthroughBlock);
@@ -985,12 +1046,12 @@ void WasmIRGen::onBrTable(
     if ((entry.kind == ControlEntry::Block ||
          entry.kind == ControlEntry::If) &&
         !entry.resultPhis.empty()) {
-      size_t numResults = entry.resultPhis.size();
+      size_t numPhis = entry.resultPhis.size();
       size_t available = valueStack_.size();
-      for (size_t i = 0; i < numResults; ++i) {
+      for (size_t i = 0; i < numPhis; ++i) {
         Value *val;
-        if (available >= numResults) {
-          val = valueStack_[available - numResults + i];
+        if (available >= numPhis) {
+          val = valueStack_[available - numPhis + i];
         } else {
           val = builder_.getLiteralUndefined();
         }
@@ -1016,31 +1077,58 @@ void WasmIRGen::onSelect() {
     return;
 
   Value *cond = pop();
-  Value *val2 = pop(); // value if cond == 0 (false)
-  Value *val1 = pop(); // value if cond != 0 (true)
 
-  // Create true/false/merge blocks for the conditional.
-  auto *trueBlock = builder_.createBasicBlock(currentFunc_);
-  auto *falseBlock = builder_.createBasicBlock(currentFunc_);
-  auto *mergeBlock = builder_.createBasicBlock(currentFunc_);
+  // Check if the values are i64 (val2 is on top, then val1 below).
+  bool isI64 = isTopI64();
 
-  builder_.createCondBranchInst(cond, trueBlock, falseBlock);
+  if (isI64) {
+    auto [lo2, hi2] = popI64(); // value if cond == 0 (false)
+    auto [lo1, hi1] = popI64(); // value if cond != 0 (true)
 
-  // True block: just branch to merge.
-  builder_.setInsertionBlock(trueBlock);
-  builder_.createBranchInst(mergeBlock);
+    auto *trueBlock = builder_.createBasicBlock(currentFunc_);
+    auto *falseBlock = builder_.createBasicBlock(currentFunc_);
+    auto *mergeBlock = builder_.createBasicBlock(currentFunc_);
 
-  // False block: just branch to merge.
-  builder_.setInsertionBlock(falseBlock);
-  builder_.createBranchInst(mergeBlock);
+    builder_.createCondBranchInst(cond, trueBlock, falseBlock);
 
-  // Merge block: phi merges val1 (from true) and val2 (from false).
-  builder_.setInsertionBlock(mergeBlock);
-  auto *phi = builder_.createPhiInst();
-  phi->addEntry(val1, trueBlock);
-  phi->addEntry(val2, falseBlock);
+    builder_.setInsertionBlock(trueBlock);
+    builder_.createBranchInst(mergeBlock);
 
-  push(phi);
+    builder_.setInsertionBlock(falseBlock);
+    builder_.createBranchInst(mergeBlock);
+
+    builder_.setInsertionBlock(mergeBlock);
+    auto *phiLo = builder_.createPhiInst();
+    phiLo->addEntry(lo1, trueBlock);
+    phiLo->addEntry(lo2, falseBlock);
+    auto *phiHi = builder_.createPhiInst();
+    phiHi->addEntry(hi1, trueBlock);
+    phiHi->addEntry(hi2, falseBlock);
+
+    pushI64(phiLo, phiHi);
+  } else {
+    Value *val2 = pop(); // value if cond == 0 (false)
+    Value *val1 = pop(); // value if cond != 0 (true)
+
+    auto *trueBlock = builder_.createBasicBlock(currentFunc_);
+    auto *falseBlock = builder_.createBasicBlock(currentFunc_);
+    auto *mergeBlock = builder_.createBasicBlock(currentFunc_);
+
+    builder_.createCondBranchInst(cond, trueBlock, falseBlock);
+
+    builder_.setInsertionBlock(trueBlock);
+    builder_.createBranchInst(mergeBlock);
+
+    builder_.setInsertionBlock(falseBlock);
+    builder_.createBranchInst(mergeBlock);
+
+    builder_.setInsertionBlock(mergeBlock);
+    auto *phi = builder_.createPhiInst();
+    phi->addEntry(val1, trueBlock);
+    phi->addEntry(val2, falseBlock);
+
+    push(phi);
+  }
 }
 
 // --- Function calls (D.12) ---
@@ -1058,10 +1146,27 @@ void WasmIRGen::onCall(uint32_t funcIndex) {
 
   // Pop arguments from the value stack in reverse order.
   // Wasm pushes args left-to-right, so the last arg is on top.
-  uint32_t numArgs = funcType.params.size();
-  llvh::SmallVector<Value *, 8> args(numArgs, nullptr);
-  for (uint32_t i = numArgs; i > 0; --i) {
-    args[i - 1] = pop();
+  // i64 params occupy 2 stack slots (lo, hi) and become 2 JS args.
+  // First, collect the Wasm-level values in reverse order.
+  llvh::SmallVector<Value *, 8> args;
+  // Temporary storage for popped values in reverse Wasm param order.
+  llvh::SmallVector<std::pair<Value *, Value *>, 8> wasmArgs(
+      funcType.params.size());
+  for (uint32_t i = funcType.params.size(); i > 0; --i) {
+    if (funcType.params[i - 1] == WasmValType::I64) {
+      wasmArgs[i - 1] = popI64();
+    } else {
+      wasmArgs[i - 1] = {pop(), nullptr};
+    }
+  }
+  // Build the JS arg list in forward order.
+  for (uint32_t i = 0; i < funcType.params.size(); ++i) {
+    if (funcType.params[i] == WasmValType::I64) {
+      args.push_back(wasmArgs[i].first); // lo
+      args.push_back(wasmArgs[i].second); // hi
+    } else {
+      args.push_back(wasmArgs[i].first);
+    }
   }
 
   // Load the pre-created closure from the top-level environment.
@@ -1075,7 +1180,13 @@ void WasmIRGen::onCall(uint32_t funcIndex) {
 
   // Push the return value if the function has a result type.
   if (!funcType.results.empty()) {
-    push(call);
+    if (funcType.results[0] == WasmValType::I64) {
+      // i64 result: lo32 is the call return value, hi32 is in the stash.
+      auto *hi = helpers_.emitI64HiResult();
+      pushI64(call, hi);
+    } else {
+      push(call);
+    }
   }
 }
 
@@ -2069,27 +2180,52 @@ WasmIRGen::ControlEntry &WasmIRGen::getControlEntry(uint32_t depth) {
   return controlStack_[controlStack_.size() - 1 - depth];
 }
 
+size_t WasmIRGen::numPhisForResultTypes(
+    const std::vector<WasmValType> &resultTypes) {
+  size_t count = 0;
+  for (auto t : resultTypes) {
+    count += (t == WasmValType::I64) ? 2 : 1;
+  }
+  return count;
+}
+
+std::vector<PhiInst *> WasmIRGen::createResultPhis(
+    BasicBlock *block,
+    const std::vector<WasmValType> &resultTypes) {
+  std::vector<PhiInst *> phis;
+  auto *savedBlock = builder_.getInsertionBlock();
+  builder_.setInsertionBlock(block);
+  for (auto t : resultTypes) {
+    phis.push_back(builder_.createPhiInst());
+    if (t == WasmValType::I64) {
+      phis.push_back(builder_.createPhiInst());
+    }
+  }
+  builder_.setInsertionBlock(savedBlock);
+  return phis;
+}
+
 void WasmIRGen::addBranchPhiOperands(ControlEntry &entry) {
   if ((entry.kind == ControlEntry::Block || entry.kind == ControlEntry::If) &&
       !entry.resultPhis.empty()) {
     auto *currentBlock = builder_.getInsertionBlock();
-    size_t numResults = entry.resultPhis.size();
+    size_t numPhis = entry.resultPhis.size();
+    // The number of stack slots consumed equals the number of phis
+    // (i64 results have 2 phis and 2 stack slots).
     size_t available = valueStack_.size();
 
-    if (available >= numResults) {
-      // Normal case: pop N result values from the stack.
-      for (size_t i = 0; i < numResults; ++i) {
-        Value *val = valueStack_[available - numResults + i];
+    if (available >= numPhis) {
+      for (size_t i = 0; i < numPhis; ++i) {
+        Value *val = valueStack_[available - numPhis + i];
         entry.resultPhis[i]->addEntry(val, currentBlock);
       }
-      valueStack_.resize(available - numResults);
-      valueStackIsI64Hi_.resize(available - numResults);
+      valueStack_.resize(available - numPhis);
+      valueStackIsI64Hi_.resize(available - numPhis);
     } else {
-      // Stack underflow (e.g., due to unimplemented instructions).
-      // Use undefined as placeholder for missing values.
-      for (size_t i = 0; i < numResults; ++i) {
-        Value *val = (i >= numResults - available)
-            ? valueStack_[i - (numResults - available)]
+      // Stack underflow — use undefined as placeholder.
+      for (size_t i = 0; i < numPhis; ++i) {
+        Value *val = (i >= numPhis - available)
+            ? valueStack_[i - (numPhis - available)]
             : builder_.getLiteralUndefined();
         entry.resultPhis[i]->addEntry(val, currentBlock);
       }
@@ -2099,6 +2235,39 @@ void WasmIRGen::addBranchPhiOperands(ControlEntry &entry) {
   }
   // For Loop entries, br targets the loop header. Loop phis are for
   // loop parameters which will be handled in D.7.
+}
+
+void WasmIRGen::peekBranchPhiOperands(ControlEntry &entry) {
+  if ((entry.kind == ControlEntry::Block || entry.kind == ControlEntry::If) &&
+      !entry.resultPhis.empty()) {
+    size_t numPhis = entry.resultPhis.size();
+    size_t available = valueStack_.size();
+    auto *currentBlock = builder_.getInsertionBlock();
+    for (size_t i = 0; i < numPhis; ++i) {
+      Value *val;
+      if (available >= numPhis) {
+        val = valueStack_[available - numPhis + i];
+      } else {
+        val = builder_.getLiteralUndefined();
+      }
+      entry.resultPhis[i]->addEntry(val, currentBlock);
+    }
+  }
+}
+
+void WasmIRGen::pushResultPhis(const ControlEntry &entry) {
+  size_t phiIdx = 0;
+  for (auto t : entry.resultTypes) {
+    if (t == WasmValType::I64) {
+      assert(phiIdx + 1 < entry.resultPhis.size());
+      pushI64(entry.resultPhis[phiIdx], entry.resultPhis[phiIdx + 1]);
+      phiIdx += 2;
+    } else {
+      assert(phiIdx < entry.resultPhis.size());
+      push(entry.resultPhis[phiIdx]);
+      phiIdx += 1;
+    }
+  }
 }
 
 bool WasmIRGen::isCurrentBlockTerminated() {

@@ -5,6 +5,7 @@
 
 ;; Test IR generation: i64 constant split into lo32/hi32 pair.
 ;; Phase 1 represents i64 as two values on the stack (lo, hi).
+;; i64 function results use the hi-stash pattern: stash hi, return lo.
 
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s
@@ -12,7 +13,6 @@
 (module
   ;; i64.const 0x0000000100000002 = 4294967298
   ;; Split: lo32 = 2, hi32 = 1
-  ;; The function has result type i64, endFunction() returns top of stack = hi=1.
   (func (result i64)
     i64.const 4294967298))
 
@@ -20,6 +20,8 @@
 ;; CHECK-NEXT: %BB0:
 ;; CHECK:              BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %[[PHI:.*]] = PhiInst (:number) 1: number, %BB0
-;; CHECK-NEXT:                 ReturnInst %[[PHI]]: number
+;; CHECK-NEXT:   %[[LO:.*]] = PhiInst (:number) 2: number, %BB0
+;; CHECK-NEXT:   %[[HI:.*]] = PhiInst (:number) 1: number, %BB0
+;; CHECK-NEXT:   %{{.*}} = CallBuiltinInst {{.*}}[HermesBuiltin.wasmI64HiStash]
+;; CHECK:                    ReturnInst %[[LO]]: number
 ;; CHECK-NEXT: function_end

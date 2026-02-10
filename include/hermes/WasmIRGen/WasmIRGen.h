@@ -381,8 +381,20 @@ class WasmIRGen {
   /// Used by drop and select to determine if a value occupies 2 slots.
   std::vector<bool> valueStackIsI64Hi_;
 
-  /// AllocStackInst for each Wasm local (params + declared locals).
+  /// AllocStackInst for each Wasm local slot. For non-i64 locals, there is
+  /// one slot per local. For i64 locals, there are two consecutive slots
+  /// (lo32, hi32). Use localSlotIndex_ to find the starting slot for a
+  /// given Wasm local index.
   std::vector<AllocStackInst *> locals_;
+
+  /// Maps Wasm local index → starting index in locals_.
+  /// For non-i64 locals, locals_[localSlotIndex_[i]] is the single slot.
+  /// For i64 locals, locals_[localSlotIndex_[i]] is the lo32 slot and
+  /// locals_[localSlotIndex_[i]+1] is the hi32 slot.
+  std::vector<uint32_t> localSlotIndex_;
+
+  /// Wasm type of each Wasm local (params then declared locals).
+  std::vector<WasmValType> localTypes_;
 
   /// The parent (top-level) scope instruction, used to load pre-created
   /// closures from the environment at call sites.
@@ -433,11 +445,31 @@ class WasmIRGen {
   /// Get the ControlEntry at the given branch depth.
   ControlEntry &getControlEntry(uint32_t depth);
 
+  /// Compute the number of phi nodes needed for the given result types.
+  /// Each i64 result type contributes 2 phis (lo, hi); others contribute 1.
+  static size_t numPhisForResultTypes(
+      const std::vector<WasmValType> &resultTypes);
+
+  /// Create phi nodes in \p block for the given result types.
+  /// Returns the created phis (i64 types produce 2 phis each).
+  std::vector<PhiInst *> createResultPhis(
+      BasicBlock *block,
+      const std::vector<WasmValType> &resultTypes);
+
   /// Add phi operands for branching to the given control entry from the
   /// current block. For Block/If entries, pops result values and adds them
   /// as phi incoming edges. For Loop entries, no phi operands are added
   /// (loop phis are for loop parameters, handled separately).
   void addBranchPhiOperands(ControlEntry &entry);
+
+  /// Peek at (don't pop) the result values on the value stack for the given
+  /// control entry and add them as phi incoming edges from the current block.
+  /// Used by br_if and br_table where values must remain on the stack.
+  void peekBranchPhiOperands(ControlEntry &entry);
+
+  /// Push the result phis from a control entry onto the value stack.
+  /// i64 results push as i64 pairs (lo phi, hi phi).
+  void pushResultPhis(const ControlEntry &entry);
 
   /// Check if the current insertion block is terminated (ends with a
   /// terminator instruction).

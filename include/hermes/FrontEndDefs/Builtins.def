@@ -174,8 +174,9 @@ PRIVATE_BUILTIN(wasmI32ReinterpretF32)
 PRIVATE_BUILTIN(wasmF32ReinterpretI32)
 PRIVATE_BUILTIN(wasmF64Copysign)
 PRIVATE_BUILTIN(wasmF32Copysign)
-// i64 arithmetic helpers (G.3). Return lo32 as function result; hi32 is
-// stashed and retrieved via wasmI64HiResult.
+// i64 hi32 stash/retrieve helpers. Used for i64 function returns and i64
+// arithmetic helpers that return split lo/hi results.
+PRIVATE_BUILTIN(wasmI64HiStash)
 PRIVATE_BUILTIN(wasmI64HiResult)
 PRIVATE_BUILTIN(wasmI64Add)
 PRIVATE_BUILTIN(wasmI64Sub)

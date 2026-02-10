@@ -100,7 +100,12 @@ Instruction *WasmHelpers::emitF32Copysign(Value *a, Value *b) {
       BuiltinMethod::HermesBuiltin_wasmF32Copysign, {a, b});
 }
 
-// --- i64 helpers (G.3) ---
+// --- i64 helpers (G.3, G.5) ---
+
+Instruction *WasmHelpers::emitI64HiStash(Value *hi) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64HiStash, {hi});
+}
 
 Instruction *WasmHelpers::emitI64HiResult() {
   return builder_.createCallBuiltinInst(

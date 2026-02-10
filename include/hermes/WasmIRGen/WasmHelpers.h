@@ -92,6 +92,9 @@ class WasmHelpers {
   // --- i64 helpers (G.3) ---
   // Binary ops return lo32; hi32 is stashed and retrieved via emitI64HiResult.
 
+  /// Stash the hi32 part of an i64 value (for i64 function returns).
+  Instruction *emitI64HiStash(Value *hi);
+
   /// Retrieve the hi32 part of the most recent i64 helper result.
   Instruction *emitI64HiResult();
 

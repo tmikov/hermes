@@ -463,6 +463,14 @@ static HermesValue splitU64Result(uint64_t val) {
   return HermesValue::encodeTrustedNumberValue(static_cast<double>(lo));
 }
 
+/// Store the hi32 part of an i64 value into the stash. Used when a Wasm
+/// function returns an i64 — the callee stashes hi32 before returning lo32.
+CallResult<HermesValue> wasmI64HiStash(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  wasmI64HiStash_ = args.getArg(0).getNumber();
+  return HermesValue::encodeTrustedNumberValue(0);
+}
+
 /// Retrieve the hi32 part of the most recent i64 result.
 CallResult<HermesValue> wasmI64HiResult(void *, Runtime &) {
   return HermesValue::encodeTrustedNumberValue(wasmI64HiStash_);
@@ -1701,7 +1709,12 @@ void createHermesBuiltins(Runtime &runtime) {
       P::wasmF32Copysign,
       wasmF32Copysign,
       2);
-  // i64 helpers (G.3).
+  // i64 helpers (G.3, G.5).
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64HiStash,
+      P::wasmI64HiStash,
+      wasmI64HiStash,
+      1);
   defineInternMethod(
       B::HermesBuiltin_wasmI64HiResult,
       P::wasmI64HiResult,
