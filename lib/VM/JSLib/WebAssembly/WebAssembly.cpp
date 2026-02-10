@@ -18,8 +18,10 @@
 #include "hermes/VM/JSArrayBuffer.h"
 #include "hermes/VM/JSError.h"
 #include "hermes/VM/JSTypedArray.h"
+#include "hermes/VM/JSWebAssemblyException.h"
 #include "hermes/VM/JSWebAssemblyGlobal.h"
 #include "hermes/VM/JSWebAssemblyInstance.h"
+#include "hermes/VM/JSWebAssemblyTag.h"
 #include "hermes/VM/JSWebAssemblyMemory.h"
 #include "hermes/VM/JSWebAssemblyModule.h"
 #include "hermes/VM/JSWebAssemblyTable.h"
@@ -1684,6 +1686,326 @@ wasmGlobalValueOfMethod(void *context, Runtime &runtime) {
 }
 
 //===----------------------------------------------------------------------===//
+// WebAssembly.Tag
+//===----------------------------------------------------------------------===//
+
+/// Parse a Wasm value type string ("i32", "i64", "f32", "f64") into a
+/// JSWebAssemblyTag::ValType. Returns true on success.
+static bool parseValTypeString(
+    Runtime &runtime,
+    StringPrimitive *str,
+    JSWebAssemblyTag::ValType &result) {
+  auto matchStr = [&](const char *s, size_t len) -> bool {
+    auto res = StringPrimitive::create(runtime, ASCIIRef(s, len));
+    if (LLVM_UNLIKELY(res == ExecutionStatus::EXCEPTION))
+      return false;
+    return str->equals(vmcast<StringPrimitive>(*res));
+  };
+
+  if (matchStr("i32", 3)) {
+    result = JSWebAssemblyTag::ValType::I32;
+    return true;
+  }
+  if (matchStr("i64", 3)) {
+    result = JSWebAssemblyTag::ValType::I64;
+    return true;
+  }
+  if (matchStr("f32", 3)) {
+    result = JSWebAssemblyTag::ValType::F32;
+    return true;
+  }
+  if (matchStr("f64", 3)) {
+    result = JSWebAssemblyTag::ValType::F64;
+    return true;
+  }
+  return false;
+}
+
+/// WebAssembly.Tag constructor.
+/// new WebAssembly.Tag({parameters: ['i32', 'f64']})
+static CallResult<HermesValue>
+wasmTagConstructor(void *context, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  if (!args.isConstructorCall()) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Tag() must be called with 'new'");
+  }
+
+  auto descriptorHandle = args.getArgHandle(0);
+  if (!descriptorHandle->isObject()) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Tag(): argument must be a tag type object");
+  }
+
+  struct : public Locals {
+    PinnedValue<JSObject> descriptor;
+    PinnedValue<> paramsVal;
+    PinnedValue<JSObject> paramsObj;
+    PinnedValue<> lenVal;
+    PinnedValue<> elemVal;
+    PinnedValue<JSWebAssemblyTag> tag;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  lv.descriptor.castAndSetHermesValue<JSObject>(
+      descriptorHandle.getHermesValue());
+
+  // Read "parameters" property (required).
+  auto paramsRes = JSObject::getNamed_RJS(
+      lv.descriptor,
+      runtime,
+      Predefined::getSymbolID(Predefined::parameters));
+  if (LLVM_UNLIKELY(paramsRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  lv.paramsVal = std::move(*paramsRes);
+
+  if (!lv.paramsVal->isObject()) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Tag(): 'parameters' must be an iterable");
+  }
+  lv.paramsObj.castAndSetHermesValue<JSObject>(lv.paramsVal.getHermesValue());
+
+  // Get the length of the parameters array.
+  auto lenRes = JSObject::getNamed_RJS(
+      lv.paramsObj,
+      runtime,
+      Predefined::getSymbolID(Predefined::length));
+  if (LLVM_UNLIKELY(lenRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  lv.lenVal = std::move(*lenRes);
+
+  if (!lv.lenVal->isNumber()) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Tag(): 'parameters' must be an array-like object");
+  }
+
+  uint32_t paramCount = static_cast<uint32_t>(lv.lenVal->getNumber());
+  std::vector<JSWebAssemblyTag::ValType> paramTypes;
+  paramTypes.reserve(paramCount);
+
+  for (uint32_t i = 0; i < paramCount; ++i) {
+    GCScopeMarkerRAII marker{runtime};
+    auto elemRes = JSObject::getComputed_RJS(
+        lv.paramsObj,
+        runtime,
+        runtime.makeHandle(
+            HermesValue::encodeTrustedNumberValue(static_cast<double>(i))));
+    if (LLVM_UNLIKELY(elemRes == ExecutionStatus::EXCEPTION)) {
+      return ExecutionStatus::EXCEPTION;
+    }
+    lv.elemVal = std::move(*elemRes);
+
+    if (!lv.elemVal->isString()) {
+      return runtime.raiseTypeError(
+          "WebAssembly.Tag(): parameter type must be a string");
+    }
+
+    JSWebAssemblyTag::ValType vt;
+    if (!parseValTypeString(runtime, lv.elemVal->getString(), vt)) {
+      return runtime.raiseTypeError(
+          "WebAssembly.Tag(): parameter type must be "
+          "'i32', 'i64', 'f32', or 'f64'");
+    }
+    paramTypes.push_back(vt);
+  }
+
+  // Create the Tag object.
+  Handle<JSObject> tagPrototype{runtime.wasmTagPrototype};
+  lv.tag = JSWebAssemblyTag::create(runtime, tagPrototype);
+  lv.tag->setParameters(std::move(paramTypes));
+
+  return lv.tag.getHermesValue();
+}
+
+//===----------------------------------------------------------------------===//
+// WebAssembly.Exception
+//===----------------------------------------------------------------------===//
+
+/// WebAssembly.Exception constructor.
+/// new WebAssembly.Exception(tag, [v0, v1, ...])
+static CallResult<HermesValue>
+wasmExceptionConstructor(void *context, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  if (!args.isConstructorCall()) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Exception() must be called with 'new'");
+  }
+
+  // First arg must be a WebAssembly.Tag.
+  auto *tag = dyn_vmcast<JSWebAssemblyTag>(args.getArg(0));
+  if (!tag) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Exception(): first argument must be a WebAssembly.Tag");
+  }
+
+  struct : public Locals {
+    PinnedValue<JSWebAssemblyTag> tagHandle;
+    PinnedValue<JSObject> payloadObj;
+    PinnedValue<> lenVal;
+    PinnedValue<> elemVal;
+    PinnedValue<JSArray> arr;
+    PinnedValue<> numVal;
+    PinnedValue<JSWebAssemblyException> exc;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  lv.tagHandle = tag;
+
+  const auto &paramTypes = lv.tagHandle->getParameters();
+  uint32_t paramCount = paramTypes.size();
+
+  // Second arg must be an iterable/array-like with matching length.
+  auto payloadHandle = args.getArgHandle(1);
+  if (!payloadHandle->isObject()) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Exception(): second argument must be an array-like");
+  }
+  lv.payloadObj.castAndSetHermesValue<JSObject>(
+      payloadHandle.getHermesValue());
+
+  // Create the payload array.
+  auto arrRes = JSArray::create(runtime, paramCount, paramCount);
+  if (LLVM_UNLIKELY(arrRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  lv.arr = std::move(*arrRes);
+
+  // Copy and coerce payload values according to the tag's parameter types.
+  for (uint32_t i = 0; i < paramCount; ++i) {
+    GCScopeMarkerRAII marker{runtime};
+    auto elemRes = JSObject::getComputed_RJS(
+        lv.payloadObj,
+        runtime,
+        runtime.makeHandle(
+            HermesValue::encodeTrustedNumberValue(static_cast<double>(i))));
+    if (LLVM_UNLIKELY(elemRes == ExecutionStatus::EXCEPTION)) {
+      return ExecutionStatus::EXCEPTION;
+    }
+    lv.elemVal = std::move(*elemRes);
+
+    // Coerce to number.
+    lv.numVal = lv.elemVal.getHermesValue();
+    auto numRes = toNumber_RJS(runtime, lv.numVal);
+    if (LLVM_UNLIKELY(numRes == ExecutionStatus::EXCEPTION)) {
+      return ExecutionStatus::EXCEPTION;
+    }
+    double val = numRes->getDouble();
+
+    // Truncate based on type.
+    switch (paramTypes[i]) {
+      case JSWebAssemblyTag::ValType::I32:
+        val = static_cast<double>(
+            static_cast<int32_t>(static_cast<int64_t>(val)));
+        break;
+      case JSWebAssemblyTag::ValType::F32:
+        val = static_cast<double>(static_cast<float>(val));
+        break;
+      case JSWebAssemblyTag::ValType::I64:
+      case JSWebAssemblyTag::ValType::F64:
+        // Keep full double precision.
+        break;
+    }
+
+    lv.numVal = HermesValue::encodeTrustedNumberValue(val);
+    (void)JSArray::setElementAt(lv.arr, runtime, i, lv.numVal);
+  }
+
+  // Create the Exception object.
+  Handle<JSObject> excPrototype{runtime.wasmExceptionPrototype};
+  lv.exc = JSWebAssemblyException::create(runtime, excPrototype);
+  lv.exc->setTag(runtime, *lv.tagHandle);
+  lv.exc->setPayload(runtime, *lv.arr);
+
+  return lv.exc.getHermesValue();
+}
+
+/// WebAssembly.Exception.prototype.is(tag)
+/// Returns true if this exception's tag identity-matches the given tag.
+static CallResult<HermesValue>
+wasmExceptionIsMethod(void *context, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  auto *exc = dyn_vmcast<JSWebAssemblyException>(args.getThisArg());
+  if (!exc) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Exception.prototype.is: 'this' is not a "
+        "WebAssembly.Exception");
+  }
+
+  auto *tag = dyn_vmcast<JSWebAssemblyTag>(args.getArg(0));
+  if (!tag) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Exception.prototype.is: argument must be a "
+        "WebAssembly.Tag");
+  }
+
+  // Identity check: the exception's tag must be the same object.
+  bool matches = (exc->getTag(runtime) == tag);
+  return HermesValue::encodeBoolValue(matches);
+}
+
+/// WebAssembly.Exception.prototype.getArg(tag, index)
+/// Returns the payload value at the given index if the tag matches.
+static CallResult<HermesValue>
+wasmExceptionGetArgMethod(void *context, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  auto *exc = dyn_vmcast<JSWebAssemblyException>(args.getThisArg());
+  if (!exc) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Exception.prototype.getArg: 'this' is not a "
+        "WebAssembly.Exception");
+  }
+
+  auto *tag = dyn_vmcast<JSWebAssemblyTag>(args.getArg(0));
+  if (!tag) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Exception.prototype.getArg: first argument must be a "
+        "WebAssembly.Tag");
+  }
+
+  // Tag must identity-match.
+  if (exc->getTag(runtime) != tag) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Exception.prototype.getArg: tag does not match");
+  }
+
+  struct : public Locals {
+    PinnedValue<> indexVal;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  lv.indexVal = args.getArg(1);
+  auto indexRes = toNumber_RJS(runtime, lv.indexVal);
+  if (LLVM_UNLIKELY(indexRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  double indexD = indexRes->getDouble();
+  uint32_t index = static_cast<uint32_t>(indexD);
+
+  if (static_cast<double>(index) != indexD ||
+      index >= tag->getParameters().size()) {
+    return runtime.raiseRangeError("WebAssembly.Exception.prototype.getArg: "
+                                   "index out of range");
+  }
+
+  auto *payload = exc->getPayload(runtime);
+  if (!payload) {
+    return HermesValue::encodeUndefinedValue();
+  }
+
+  auto val = payload->at(runtime, index);
+  if (val.isEmpty()) {
+    return HermesValue::encodeUndefinedValue();
+  }
+  return val.unboxToHV(runtime);
+}
+
+//===----------------------------------------------------------------------===//
 // createWebAssemblyObject
 //===----------------------------------------------------------------------===//
 
@@ -1695,6 +2017,8 @@ void createWebAssemblyObject(Runtime &runtime, MutableHandle<JSObject> result) {
     PinnedValue<NativeConstructor> memoryCons;
     PinnedValue<NativeConstructor> tableCons;
     PinnedValue<NativeConstructor> globalCons;
+    PinnedValue<NativeConstructor> tagCons;
+    PinnedValue<NativeConstructor> exceptionCons;
   } lv;
   LocalsRAII lraii(runtime, &lv);
 
@@ -2126,6 +2450,122 @@ void createWebAssemblyObject(Runtime &runtime, MutableHandle<JSObject> result) {
       Predefined::getSymbolID(Predefined::Global),
       dpf,
       runtime.wasmGlobalConstructor);
+  (void)res;
+  assert(res != ExecutionStatus::EXCEPTION && *res);
+
+  // --- WebAssembly.Tag constructor ---
+  Handle<JSObject> tagPrototype{runtime.wasmTagPrototype};
+
+  // Set @@toStringTag on the Tag prototype.
+  {
+    auto tagDpf = DefinePropertyFlags::getDefaultNewPropertyFlags();
+    tagDpf.writable = 0;
+    tagDpf.enumerable = 0;
+
+    defineProperty(
+        runtime,
+        tagPrototype,
+        Predefined::getSymbolID(Predefined::SymbolToStringTag),
+        runtime.getPredefinedStringHandle(Predefined::Tag),
+        tagDpf);
+  }
+
+  lv.tagCons = NativeConstructor::create(
+      runtime,
+      Handle<JSObject>::vmcast(&runtime.functionPrototype),
+      nullptr,
+      wasmTagConstructor,
+      1);
+
+  st = Callable::defineNameLengthAndPrototype(
+      lv.tagCons,
+      runtime,
+      Predefined::getSymbolID(Predefined::Tag),
+      1,
+      tagPrototype,
+      Callable::WritablePrototype::No);
+  (void)st;
+  assert(
+      st != ExecutionStatus::EXCEPTION &&
+      "defineNameLengthAndPrototype failed");
+
+  runtime.wasmTagConstructor.castAndSetHermesValue<NativeConstructor>(
+      lv.tagCons.getHermesValue());
+
+  // Register Tag constructor as a property of WebAssembly.
+  res = JSObject::defineOwnProperty(
+      lv.wasmObj,
+      runtime,
+      Predefined::getSymbolID(Predefined::Tag),
+      dpf,
+      runtime.wasmTagConstructor);
+  (void)res;
+  assert(res != ExecutionStatus::EXCEPTION && *res);
+
+  // --- WebAssembly.Exception constructor ---
+  Handle<JSObject> exceptionPrototype{runtime.wasmExceptionPrototype};
+
+  // Set @@toStringTag on the Exception prototype.
+  {
+    auto tagDpf = DefinePropertyFlags::getDefaultNewPropertyFlags();
+    tagDpf.writable = 0;
+    tagDpf.enumerable = 0;
+
+    defineProperty(
+        runtime,
+        exceptionPrototype,
+        Predefined::getSymbolID(Predefined::SymbolToStringTag),
+        runtime.getPredefinedStringHandle(Predefined::Exception),
+        tagDpf);
+  }
+
+  // Define "is" method on Exception prototype.
+  defineMethod(
+      runtime,
+      exceptionPrototype,
+      Predefined::getSymbolID(Predefined::is),
+      nullptr,
+      wasmExceptionIsMethod,
+      1);
+
+  // Define "getArg" method on Exception prototype.
+  defineMethod(
+      runtime,
+      exceptionPrototype,
+      Predefined::getSymbolID(Predefined::getArg),
+      nullptr,
+      wasmExceptionGetArgMethod,
+      2);
+
+  lv.exceptionCons = NativeConstructor::create(
+      runtime,
+      Handle<JSObject>::vmcast(&runtime.functionPrototype),
+      nullptr,
+      wasmExceptionConstructor,
+      2);
+
+  st = Callable::defineNameLengthAndPrototype(
+      lv.exceptionCons,
+      runtime,
+      Predefined::getSymbolID(Predefined::Exception),
+      2,
+      exceptionPrototype,
+      Callable::WritablePrototype::No);
+  (void)st;
+  assert(
+      st != ExecutionStatus::EXCEPTION &&
+      "defineNameLengthAndPrototype failed");
+
+  runtime.wasmExceptionConstructor.castAndSetHermesValue<NativeConstructor>(
+      lv.exceptionCons.getHermesValue());
+
+  // Register Exception constructor as a property of WebAssembly.
+  res = JSObject::defineOwnProperty(
+      lv.wasmObj,
+      runtime,
+      Predefined::getSymbolID(Predefined::Exception),
+      dpf,
+      runtime.wasmExceptionConstructor);
   (void)res;
   assert(res != ExecutionStatus::EXCEPTION && *res);
 

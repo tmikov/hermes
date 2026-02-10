@@ -43,6 +43,8 @@ set(source_files
   JSTypedArray.cpp
   JSWeakMapImpl.cpp
   JSWebAssemblyGlobal.cpp
+  JSWebAssemblyTag.cpp
+  JSWebAssemblyException.cpp
   JSWebAssemblyInstance.cpp
   JSWebAssemblyMemory.cpp
   JSWebAssemblyModule.cpp
