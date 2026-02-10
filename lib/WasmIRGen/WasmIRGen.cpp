@@ -1482,6 +1482,71 @@ void WasmIRGen::onCall(uint32_t funcIndex) {
   }
 }
 
+void WasmIRGen::onCallIndirect(uint32_t sigIndex, uint32_t tableIndex) {
+  if (unreachable_)
+    return;
+
+  assert(
+      sigIndex < moduleInfo_.types.size() &&
+      "call_indirect sigIndex out of range");
+  assert(
+      tableIndex < tableFuncVars_.size() &&
+      "call_indirect tableIndex out of range");
+
+  const WasmFuncType &funcType = moduleInfo_.types[sigIndex];
+
+  // Pop the table element index (always i32, on top of the args).
+  auto *tableIdx = pop();
+
+  // Pop arguments from the value stack in reverse order (same as onCall).
+  llvh::SmallVector<Value *, 8> args;
+  llvh::SmallVector<std::pair<Value *, Value *>, 8> wasmArgs(
+      funcType.params.size());
+  for (uint32_t i = funcType.params.size(); i > 0; --i) {
+    if (funcType.params[i - 1] == WasmValType::I64) {
+      wasmArgs[i - 1] = popI64();
+    } else {
+      wasmArgs[i - 1] = {pop(), nullptr};
+    }
+  }
+  // Build the JS arg list in forward order.
+  for (uint32_t i = 0; i < funcType.params.size(); ++i) {
+    if (funcType.params[i] == WasmValType::I64) {
+      args.push_back(wasmArgs[i].first); // lo
+      args.push_back(wasmArgs[i].second); // hi
+    } else {
+      args.push_back(wasmArgs[i].first);
+    }
+  }
+
+  // Load table arrays from the top-level scope.
+  auto *funcsArr = loadTableFuncs(tableIndex);
+  auto *typesArr = loadTableTypes(tableIndex);
+
+  // Call the builtin helper to validate and get the closure.
+  // Takes (funcsArr, typesArr, index, expectedTypeIdx).
+  auto *sigIdxLit = builder_.getLiteralNumber(sigIndex);
+  auto *closure =
+      helpers_.emitCallIndirect(funcsArr, typesArr, tableIdx, sigIdxLit);
+
+  // Call the validated closure with the popped arguments.
+  auto *call = builder_.createCallInst(
+      closure,
+      /* newTarget */ builder_.getLiteralUndefined(),
+      /* thisValue */ builder_.getLiteralUndefined(),
+      args);
+
+  // Push the return value if the function has a result type.
+  if (!funcType.results.empty()) {
+    if (funcType.results[0] == WasmValType::I64) {
+      auto *hi = helpers_.emitI64HiResult();
+      pushI64(call, hi);
+    } else {
+      push(call);
+    }
+  }
+}
+
 // --- i64 arithmetic (G.3) ---
 // i64 values are represented as two i32 values on the stack [lo, hi].
 // Binary operations pop two i64 pairs and push one i64 pair.

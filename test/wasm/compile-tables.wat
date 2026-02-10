@@ -5,8 +5,7 @@
 
 ;; Test module with a table and element segments compiles to IR.
 ;; The two table functions return constant i32 values via phi.
-;; The call_indirect opcode is not yet supported, so call_indirect's
-;; function body falls through to a default undefined return.
+;; call_indirect emits wasmCallIndirect validation + CallInst.
 
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s
@@ -37,7 +36,7 @@
   ;; Active element segment that initializes table[0..1] with $f0 and $f1.
   (elem (i32.const 0) $f0 $f1)
 
-  ;; A function that calls indirectly (unsupported, falls through).
+  ;; A function that calls indirectly via call_indirect.
   (func (export "call_indirect") (param i32) (result i32)
     local.get 0
     call_indirect (result i32)
@@ -47,9 +46,14 @@
 ;; CHECK:   %[[L0:.*]] = AllocStackInst (:any) $local_0: any
 ;; CHECK-NEXT: %[[P0:.*]] = LoadParamInst (:any) %p0: any
 ;; CHECK-NEXT:              StoreStackInst %[[P0]]: any, %[[L0]]: any
-;; CHECK:                   BranchInst %BB1
+;; CHECK:   %[[IDX:.*]] = LoadStackInst (:any) %[[L0]]: any
+;; CHECK-NEXT: %[[FUNCS:.*]] = LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_funcs]: any
+;; CHECK-NEXT: %[[TYPES:.*]] = LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_types]: any
+;; CHECK-NEXT: %[[CLOSURE:.*]] = CallBuiltinInst (:any) [HermesBuiltin.wasmCallIndirect]
+;; CHECK-NEXT: %[[RES:.*]] = CallInst (:any) %[[CLOSURE]]: any
+;; CHECK-NEXT:               BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %{{.*}} = PhiInst (:undefined) undefined: undefined, %BB0
+;; CHECK-NEXT: %{{.*}} = PhiInst (:any) %[[RES]]: any, %BB0
 ;; CHECK-NEXT:           ReturnInst
 ;; CHECK-NEXT: function_end
 )

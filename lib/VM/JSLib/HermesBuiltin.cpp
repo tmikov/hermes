@@ -892,6 +892,46 @@ CallResult<HermesValue> wasmMemoryGrow(void *, Runtime &runtime) {
   return lv.newBuf.getHermesValue();
 }
 
+/// Wasm call_indirect helper (J.2).
+/// Takes (funcsArr, typesArr, index, expectedTypeIdx).
+/// Validates bounds, null/uninitialized entry, and type index.
+/// Returns the closure on success, traps on failure.
+CallResult<HermesValue> wasmCallIndirect(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  auto *funcsArr = vmcast<JSArray>(args.getArg(0));
+  auto *typesArr = vmcast<JSArray>(args.getArg(1));
+  int32_t index = truncateToInt32(args.getArg(2).getNumber());
+  int32_t expectedTypeIdx = truncateToInt32(args.getArg(3).getNumber());
+
+  // Bounds check.
+  uint32_t tableLen = JSArray::getLength(funcsArr, runtime);
+  if (LLVM_UNLIKELY(
+          index < 0 || static_cast<uint32_t>(index) >= tableLen)) {
+    return runtime.raiseError(
+        "call_indirect: undefined element");
+  }
+
+  // Null/uninitialized check: at() returns empty for unset entries.
+  auto funcVal = funcsArr->at(runtime, static_cast<uint32_t>(index));
+  if (LLVM_UNLIKELY(funcVal.isEmpty())) {
+    return runtime.raiseError(
+        "call_indirect: uninitialized element");
+  }
+
+  // Type check.
+  auto typeVal = typesArr->at(runtime, static_cast<uint32_t>(index));
+  int32_t actualTypeIdx = typeVal.isEmpty()
+      ? -1
+      : truncateToInt32(typeVal.unboxToHV(runtime).getNumber());
+  if (LLVM_UNLIKELY(actualTypeIdx != expectedTypeIdx)) {
+    return runtime.raiseError(
+        "call_indirect: type mismatch");
+  }
+
+  return funcVal.unboxToHV(runtime);
+}
+
 namespace {
 
 CallResult<HermesValue> copyDataPropertiesSlowPath_RJS(
@@ -1890,6 +1930,13 @@ void createHermesBuiltins(Runtime &runtime) {
       P::wasmMemoryGrow,
       wasmMemoryGrow,
       3);
+
+  // Table helpers (J.2).
+  defineInternMethod(
+      B::HermesBuiltin_wasmCallIndirect,
+      P::wasmCallIndirect,
+      wasmCallIndirect,
+      4);
 }
 
 } // namespace vm

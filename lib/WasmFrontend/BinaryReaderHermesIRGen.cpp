@@ -1326,15 +1326,8 @@ wabt::Result BinaryReaderHermesIRGen::OnCallIndirectExpr(
   if (!inFunctionBody_ || !irgen_)
     return wabt::Result::Ok;
 
-  // call_indirect pops N args + 1 index value. The number of args depends
-  // on the type signature. The result depends on the signature too.
-  // Deferred to Part J.
   assert(sigIndex < moduleInfo_.types.size() && "sigIndex out of range");
-  const WasmFuncType &funcType = moduleInfo_.types[sigIndex];
-  uint32_t numInputs =
-      static_cast<uint32_t>(funcType.params.size()) + 1; // +1 for table index
-  uint32_t numOutputs = static_cast<uint32_t>(funcType.results.size());
-  irgen_->warnUnsupported("call_indirect", numInputs, numOutputs);
+  irgen_->onCallIndirect(sigIndex, tableIndex);
   return wabt::Result::Ok;
 }
 

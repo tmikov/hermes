@@ -176,6 +176,17 @@ class WasmHelpers {
   /// Returns new ArrayBuffer on success, or -1 on failure.
   Instruction *emitMemoryGrow(Value *heapu8, Value *delta, Value *maxPages);
 
+  // --- Table helpers (J.2) ---
+
+  /// Emit call_indirect validation: takes (funcsArr, typesArr, index,
+  /// expectedTypeIdx). Returns the validated closure on success, traps on
+  /// failure (out of bounds, null entry, or type mismatch).
+  Instruction *emitCallIndirect(
+      Value *funcsArr,
+      Value *typesArr,
+      Value *index,
+      Value *expectedTypeIdx);
+
  private:
   IRBuilder &builder_;
 };

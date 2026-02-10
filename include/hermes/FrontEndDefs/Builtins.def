@@ -225,6 +225,11 @@ PRIVATE_BUILTIN(wasmF64ReinterpretI64)
 // Returns new ArrayBuffer on success, or -1 on failure.
 PRIVATE_BUILTIN(wasmMemoryGrow)
 
+// call_indirect helper (J.2). Takes (funcsArr, typesArr, index, expectedTypeIdx).
+// Validates bounds, null, and type. Returns the closure on success, traps on
+// failure.
+PRIVATE_BUILTIN(wasmCallIndirect)
+
 JS_BUILTIN(spawnAsync)
 MARK_FIRST_JS_BUILTIN(spawnAsync)
 JS_BUILTIN(makeAsyncIterator)

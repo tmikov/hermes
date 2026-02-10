@@ -154,10 +154,15 @@ class WasmIRGen {
   /// select: pop condition, val2, val1; push (cond ? val1 : val2).
   void onSelect();
 
-  // --- Function calls (D.12) ---
+  // --- Function calls (D.12, J.2) ---
 
   /// Call the function at \p funcIndex with arguments from the value stack.
   void onCall(uint32_t funcIndex);
+
+  /// Indirect call through a table.
+  /// \p sigIndex is the expected type signature index.
+  /// \p tableIndex is the table to call from.
+  void onCallIndirect(uint32_t sigIndex, uint32_t tableIndex);
 
   // --- unreachable and nop (D.11) ---
 

@@ -326,5 +326,15 @@ Instruction *WasmHelpers::emitMemoryGrow(
       BuiltinMethod::HermesBuiltin_wasmMemoryGrow, {heapu8, delta, maxPages});
 }
 
+Instruction *WasmHelpers::emitCallIndirect(
+    Value *funcsArr,
+    Value *typesArr,
+    Value *index,
+    Value *expectedTypeIdx) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmCallIndirect,
+      {funcsArr, typesArr, index, expectedTypeIdx});
+}
+
 } // namespace wasm
 } // namespace hermes
