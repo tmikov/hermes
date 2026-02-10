@@ -2358,6 +2358,100 @@ Value *WasmIRGen::loadMemView(MemView view) {
   return builder_.createLoadFrameInst(parentScopeInst_, memViewVars_[view]);
 }
 
+uint8_t WasmIRGen::getNaturalAlignLog2(llvh::StringRef op) {
+  // 64-bit: natural alignment = 8 bytes (log2 = 3).
+  if (op == "i64.load" || op == "i64.store" || op == "f64.load" ||
+      op == "f64.store")
+    return 3;
+  // 32-bit: natural alignment = 4 bytes (log2 = 2).
+  // Includes i32, f32 full loads/stores and i64 narrow 32-bit variants.
+  if (op == "i32.load" || op == "i32.store" || op == "f32.load" ||
+      op == "f32.store" || op == "i64.load32_s" || op == "i64.load32_u" ||
+      op == "i64.store32")
+    return 2;
+  // 16-bit: natural alignment = 2 bytes (log2 = 1).
+  if (op.endswith("16_s") || op.endswith("16_u") || op.endswith("store16"))
+    return 1;
+  // Byte loads/stores: natural alignment = 1 byte (log2 = 0).
+  // These are always naturally aligned, so unaligned path is never taken.
+  return 0;
+}
+
+Value *WasmIRGen::emitUnalignedLoad(Value *addr, uint32_t numBytes) {
+  // Load individual bytes from HEAPU8 and assemble them via shifts and OR.
+  auto *view = loadMemView(HEAPU8);
+
+  // Load byte 0.
+  auto *b0 = builder_.createLoadPropertyInst(view, addr);
+
+  // OOB check on the first byte.
+  auto *isUndef = builder_.createBinaryOperatorInst(
+      b0,
+      builder_.getLiteralUndefined(),
+      ValueKind::BinaryStrictlyEqualInstKind);
+  auto *trapBlock = builder_.createBasicBlock(currentFunc_);
+  auto *okBlock = builder_.createBasicBlock(currentFunc_);
+  builder_.createCondBranchInst(isUndef, trapBlock, okBlock);
+
+  builder_.setInsertionBlock(trapBlock);
+  helpers_.emitTrap();
+  builder_.createUnreachableInst();
+
+  builder_.setInsertionBlock(okBlock);
+
+  if (numBytes == 1)
+    return b0;
+
+  // Assemble multi-byte value: result = b0 | (b1 << 8) | (b2 << 16) | ...
+  Value *result = b0;
+  for (uint32_t i = 1; i < numBytes; ++i) {
+    auto *addrI = builder_.createBinaryOperatorInst(
+        addr,
+        builder_.getLiteralNumber(static_cast<double>(i)),
+        ValueKind::BinaryAddInstKind);
+    auto *bi = builder_.createLoadPropertyInst(view, addrI);
+    auto *shifted = builder_.createBinaryOperatorInst(
+        bi,
+        builder_.getLiteralNumber(static_cast<double>(i * 8)),
+        ValueKind::BinaryLeftShiftInstKind);
+    result = builder_.createBinaryOperatorInst(
+        result, shifted, ValueKind::BinaryOrInstKind);
+  }
+  return result;
+}
+
+void WasmIRGen::emitUnalignedStore(
+    Value *addr,
+    Value *value,
+    uint32_t numBytes) {
+  // Decompose value into bytes and store each byte to HEAPU8.
+  auto *view = loadMemView(HEAPU8);
+
+  // Store byte 0: value & 0xFF.
+  auto *b0 = builder_.createBinaryOperatorInst(
+      value,
+      builder_.getLiteralNumber(0xFF),
+      ValueKind::BinaryAndInstKind);
+  builder_.createStorePropertyStrictInst(b0, view, addr);
+
+  for (uint32_t i = 1; i < numBytes; ++i) {
+    auto *addrI = builder_.createBinaryOperatorInst(
+        addr,
+        builder_.getLiteralNumber(static_cast<double>(i)),
+        ValueKind::BinaryAddInstKind);
+    // Shift right by i*8, then mask to get byte i.
+    auto *shifted = builder_.createBinaryOperatorInst(
+        value,
+        builder_.getLiteralNumber(static_cast<double>(i * 8)),
+        ValueKind::BinaryUnsignedRightShiftInstKind);
+    auto *bi = builder_.createBinaryOperatorInst(
+        shifted,
+        builder_.getLiteralNumber(0xFF),
+        ValueKind::BinaryAndInstKind);
+    builder_.createStorePropertyStrictInst(bi, view, addrI);
+  }
+}
+
 void WasmIRGen::onLoad(
     const char *opcodeName,
     uint32_t alignLog2,
@@ -2382,9 +2476,23 @@ void WasmIRGen::onLoad(
   // Determine which view to use and the element shift based on the opcode.
   llvh::StringRef op(opcodeName);
 
+  // Check if we need the unaligned (byte-assembly) path.
+  uint8_t naturalAlign = getNaturalAlignLog2(op);
+
   // i64 loads: handled specially (split into lo/hi).
   if (op == "i64.load") {
-    // Load two consecutive i32 values from HEAPU32.
+    if (alignLog2 < naturalAlign) {
+      // Unaligned: byte-assemble lo32 and hi32 separately.
+      auto *lo = emitUnalignedLoad(addr, 4);
+      auto *addrHi = builder_.createBinaryOperatorInst(
+          addr,
+          builder_.getLiteralNumber(4),
+          ValueKind::BinaryAddInstKind);
+      auto *hi = emitUnalignedLoad(addrHi, 4);
+      pushI64(lo, hi);
+      return;
+    }
+    // Aligned path: load two consecutive i32 values from HEAPU32.
     auto *view = loadMemView(HEAPU32);
     auto *idx = builder_.createBinaryOperatorInst(
         addr,
@@ -2452,6 +2560,38 @@ void WasmIRGen::onLoad(
 
   if (op == "i64.load16_s" || op == "i64.load16_u") {
     bool isSigned = (op == "i64.load16_s");
+
+    if (alignLog2 < naturalAlign) {
+      // Unaligned: byte-assemble 2 bytes from HEAPU8.
+      auto *raw = emitUnalignedLoad(addr, 2);
+      Value *loI32;
+      if (isSigned) {
+        // Sign-extend from 16 bits: (raw << 16) >> 16.
+        auto *shifted = builder_.createBinaryOperatorInst(
+            raw,
+            builder_.getLiteralNumber(16),
+            ValueKind::BinaryLeftShiftInstKind);
+        loI32 = builder_.createBinaryOperatorInst(
+            shifted,
+            builder_.getLiteralNumber(16),
+            ValueKind::BinaryRightShiftInstKind);
+      } else {
+        loI32 = raw;
+      }
+      Value *hi;
+      if (isSigned) {
+        hi = builder_.createBinaryOperatorInst(
+            loI32,
+            builder_.getLiteralNumber(31),
+            ValueKind::BinaryRightShiftInstKind);
+      } else {
+        hi = builder_.getLiteralNumber(0);
+      }
+      pushI64(loI32, hi);
+      return;
+    }
+
+    // Aligned path.
     auto *view = loadMemView(isSigned ? HEAP16 : HEAPU16);
     auto *idx = builder_.createBinaryOperatorInst(
         addr,
@@ -2487,6 +2627,25 @@ void WasmIRGen::onLoad(
 
   if (op == "i64.load32_s" || op == "i64.load32_u") {
     bool isSigned = (op == "i64.load32_s");
+
+    if (alignLog2 < naturalAlign) {
+      // Unaligned: byte-assemble 4 bytes from HEAPU8.
+      auto *lo = emitUnalignedLoad(addr, 4);
+      Value *hi;
+      if (isSigned) {
+        auto *loI32 = builder_.createAsInt32Inst(lo);
+        hi = builder_.createBinaryOperatorInst(
+            loI32,
+            builder_.getLiteralNumber(31),
+            ValueKind::BinaryRightShiftInstKind);
+      } else {
+        hi = builder_.getLiteralNumber(0);
+      }
+      pushI64(lo, hi);
+      return;
+    }
+
+    // Aligned path.
     auto *view = loadMemView(isSigned ? HEAP32 : HEAPU32);
     auto *idx = builder_.createBinaryOperatorInst(
         addr,
@@ -2533,36 +2692,81 @@ void WasmIRGen::onLoad(
   // Non-i64 loads.
   MemView view;
   uint8_t shift = 0; // log2(element_size)
+  uint32_t numBytes = 0;
 
   if (op == "i32.load") {
     view = HEAP32;
     shift = 2;
+    numBytes = 4;
   } else if (op == "i32.load8_s") {
     // Int8Array returns signed values natively.
     view = HEAP8;
     shift = 0;
+    numBytes = 1;
   } else if (op == "i32.load8_u") {
     view = HEAPU8;
     shift = 0;
+    numBytes = 1;
   } else if (op == "i32.load16_s") {
     // Int16Array returns signed values natively.
     view = HEAP16;
     shift = 1;
+    numBytes = 2;
   } else if (op == "i32.load16_u") {
     view = HEAPU16;
     shift = 1;
+    numBytes = 2;
   } else if (op == "f32.load") {
     view = HEAPF32;
     shift = 2;
+    numBytes = 4;
   } else if (op == "f64.load") {
     view = HEAPF64;
     shift = 3;
+    numBytes = 8;
   } else {
     // Unknown load opcode.
     llvh::errs() << "WARNING: unsupported load opcode: " << op << "\n";
     push(builder_.getLiteralUndefined());
     return;
   }
+
+  // Unaligned path: byte-assemble from HEAPU8.
+  if (alignLog2 < naturalAlign) {
+    if (op == "f64.load") {
+      // f64: load two 4-byte halves and reinterpret as f64.
+      // JS bitwise ops are 32-bit, so we can't assemble 8 bytes at once.
+      auto *lo = emitUnalignedLoad(addr, 4);
+      auto *addrHi = builder_.createBinaryOperatorInst(
+          addr,
+          builder_.getLiteralNumber(4),
+          ValueKind::BinaryAddInstKind);
+      auto *hi = emitUnalignedLoad(addrHi, 4);
+      push(helpers_.emitF64ReinterpretI64(lo, hi));
+    } else if (op == "f32.load") {
+      // f32: load 4 bytes and reinterpret as f32.
+      auto *raw = emitUnalignedLoad(addr, 4);
+      push(helpers_.emitF32ReinterpretI32(raw));
+    } else if (op == "i32.load16_s") {
+      // The 2-byte assembly produces an unsigned 16-bit value.
+      // Sign-extend via (val << 16) >> 16.
+      auto *raw = emitUnalignedLoad(addr, 2);
+      auto *shifted = builder_.createBinaryOperatorInst(
+          raw,
+          builder_.getLiteralNumber(16),
+          ValueKind::BinaryLeftShiftInstKind);
+      push(builder_.createBinaryOperatorInst(
+          shifted,
+          builder_.getLiteralNumber(16),
+          ValueKind::BinaryRightShiftInstKind));
+    } else {
+      auto *raw = emitUnalignedLoad(addr, numBytes);
+      push(raw);
+    }
+    return;
+  }
+
+  // Aligned path: use typed array view.
 
   // Compute typed array index.
   Value *idx;
@@ -2604,6 +2808,7 @@ void WasmIRGen::onStore(
     return;
 
   llvh::StringRef op(opcodeName);
+  uint8_t naturalAlign = getNaturalAlignLog2(op);
 
   // i64 stores: pop i64 pair (lo, hi) then base address.
   if (op == "i64.store") {
@@ -2618,6 +2823,19 @@ void WasmIRGen::onStore(
     } else {
       addr = base;
     }
+
+    if (alignLog2 < naturalAlign) {
+      // Unaligned: byte-store lo32 and hi32 separately.
+      emitUnalignedStore(addr, lo, 4);
+      auto *addrHi = builder_.createBinaryOperatorInst(
+          addr,
+          builder_.getLiteralNumber(4),
+          ValueKind::BinaryAddInstKind);
+      emitUnalignedStore(addrHi, hi, 4);
+      return;
+    }
+
+    // Aligned path.
     auto *view = loadMemView(HEAPU32);
     auto *idx = builder_.createBinaryOperatorInst(
         addr,
@@ -2645,6 +2863,7 @@ void WasmIRGen::onStore(
     } else {
       addr = base;
     }
+    // Byte stores are always naturally aligned (natural align = 0).
     auto *view = loadMemView(HEAPU8);
     builder_.createStorePropertyStrictInst(lo, view, addr);
     return;
@@ -2663,6 +2882,14 @@ void WasmIRGen::onStore(
     } else {
       addr = base;
     }
+
+    if (alignLog2 < naturalAlign) {
+      // Unaligned: byte-store the lo 2 bytes.
+      emitUnalignedStore(addr, lo, 2);
+      return;
+    }
+
+    // Aligned path.
     auto *view = loadMemView(HEAPU16);
     auto *idx = builder_.createBinaryOperatorInst(
         addr,
@@ -2685,6 +2912,14 @@ void WasmIRGen::onStore(
     } else {
       addr = base;
     }
+
+    if (alignLog2 < naturalAlign) {
+      // Unaligned: byte-store 4 bytes.
+      emitUnalignedStore(addr, lo, 4);
+      return;
+    }
+
+    // Aligned path.
     auto *view = loadMemView(HEAPU32);
     auto *idx = builder_.createBinaryOperatorInst(
         addr,
@@ -2710,27 +2945,56 @@ void WasmIRGen::onStore(
 
   MemView view;
   uint8_t shift = 0;
+  uint32_t numBytes = 0;
 
   if (op == "i32.store") {
     view = HEAP32;
     shift = 2;
+    numBytes = 4;
   } else if (op == "i32.store8") {
     view = HEAPU8;
     shift = 0;
+    numBytes = 1;
   } else if (op == "i32.store16") {
     view = HEAPU16;
     shift = 1;
+    numBytes = 2;
   } else if (op == "f32.store") {
     view = HEAPF32;
     shift = 2;
+    numBytes = 4;
   } else if (op == "f64.store") {
     view = HEAPF64;
     shift = 3;
+    numBytes = 8;
   } else {
     llvh::errs() << "WARNING: unsupported store opcode: " << op << "\n";
     return;
   }
 
+  // Unaligned path: byte-store to HEAPU8.
+  if (alignLog2 < naturalAlign) {
+    if (op == "f64.store") {
+      // Reinterpret f64 → i64 (split lo/hi), then byte-store each half.
+      auto *reinterp = helpers_.emitI64ReinterpretF64(value);
+      auto *hi = helpers_.emitI64HiResult();
+      emitUnalignedStore(addr, reinterp, 4);
+      auto *addrHi = builder_.createBinaryOperatorInst(
+          addr,
+          builder_.getLiteralNumber(4),
+          ValueKind::BinaryAddInstKind);
+      emitUnalignedStore(addrHi, hi, 4);
+    } else if (op == "f32.store") {
+      // Reinterpret f32 → i32, then byte-store.
+      auto *raw = helpers_.emitI32ReinterpretF32(value);
+      emitUnalignedStore(addr, raw, 4);
+    } else {
+      emitUnalignedStore(addr, value, numBytes);
+    }
+    return;
+  }
+
+  // Aligned path: use typed array view.
   Value *idx;
   if (shift > 0) {
     idx = builder_.createBinaryOperatorInst(

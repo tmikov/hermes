@@ -532,6 +532,22 @@ class WasmIRGen {
   /// function. Called from createFunctions() if the module has memory.
   /// \p tlScope is the CreateScopeInst for the top-level scope.
   void createMemoryViews(Instruction *tlScope);
+
+  /// Emit a byte-by-byte load from HEAPU8 for unaligned access.
+  /// \p addr is the effective byte address.
+  /// \p numBytes is the number of bytes to load (1, 2, 4, or 8).
+  /// \return the assembled value as a single IR Value.
+  Value *emitUnalignedLoad(Value *addr, uint32_t numBytes);
+
+  /// Emit a byte-by-byte store to HEAPU8 for unaligned access.
+  /// \p addr is the effective byte address.
+  /// \p value is the value to store.
+  /// \p numBytes is the number of bytes to store (1, 2, 4, or 8).
+  void emitUnalignedStore(Value *addr, Value *value, uint32_t numBytes);
+
+  /// Get the natural alignment (log2) for a given load/store opcode.
+  /// Returns 0 for byte ops, 1 for 16-bit, 2 for 32-bit, 3 for 64-bit.
+  static uint8_t getNaturalAlignLog2(llvh::StringRef opcodeName);
 };
 
 } // namespace wasm
