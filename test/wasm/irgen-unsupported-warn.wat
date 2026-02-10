@@ -11,12 +11,15 @@
 ;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm --dump-ir -O0 %t.wasm 2>&1 | %FileCheck %s
 
 (module
-  (global $g (mut i32) (i32.const 0))
+  (table 1 funcref)
+  (elem declare func $ref_test)
 
-  ;; Exercise global.get and global.set in function body.
-  (func $global_test
-    global.get $g
-    global.set $g))
+  ;; Exercise ref.null and ref.func in function body.
+  (func $ref_test
+    ref.null func
+    drop
+    ref.func $ref_test
+    drop))
 
-;; CHECK: warning: unsupported Wasm opcode: global.get
-;; CHECK: warning: unsupported Wasm opcode: global.set
+;; CHECK: warning: unsupported Wasm opcode: ref.null
+;; CHECK: warning: unsupported Wasm opcode: ref.func

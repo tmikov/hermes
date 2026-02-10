@@ -15,8 +15,7 @@
   (import "env" "g" (global i32))
   (memory 1)
 
-  ;; First defined function (index 1); global.get is unsupported so
-  ;; falls through to undefined return.
+  ;; First defined function (index 1); global.get loads the imported global.
   (func (export "main") (result i32)
     global.get 0
   )
@@ -29,12 +28,14 @@
 ;; CHECK:   ReturnInst undefined: undefined
 ;; CHECK-NEXT: function_end
 
-;; First defined function.
+;; First defined function — loads global_0 from parent scope.
 ;; CHECK-LABEL: function wasm_func_1(): any
 ;; CHECK: %BB0:
+;; CHECK:   %[[P:.*]] = GetParentScopeInst
+;; CHECK:   %[[G:.*]] = LoadFrameInst (:any) %[[P]]{{.*}}, [%VS0.global_0]: any
 ;; CHECK:   BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %{{.*}} = PhiInst (:undefined) undefined: undefined, %BB0
+;; CHECK-NEXT: %{{.*}} = PhiInst (:any) %[[G]]: any, %BB0
 ;; CHECK-NEXT:           ReturnInst
 ;; CHECK-NEXT: function_end
 

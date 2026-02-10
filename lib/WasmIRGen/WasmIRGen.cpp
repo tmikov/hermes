@@ -76,6 +76,52 @@ void WasmIRGen::createFunctions() {
     }
   }
 
+  // Create Variables for Wasm globals in the top-level scope.
+  // Each global gets one Variable (or two for i64: lo32, hi32).
+  uint32_t numGlobals = moduleInfo_.totalGlobalCount();
+  uint32_t numImportedGlobals = moduleInfo_.importedGlobalCount();
+  if (numGlobals > 0) {
+    globalSlotIndex_.resize(numGlobals);
+    uint32_t slotIdx = 0;
+    for (uint32_t i = 0; i < numGlobals; ++i) {
+      globalSlotIndex_[i] = slotIdx;
+      // Get the global's type.
+      WasmValType gType;
+      if (i < numImportedGlobals) {
+        // Imported global: find the i-th global import.
+        uint32_t importGlobalIdx = 0;
+        for (const auto &imp : moduleInfo_.imports) {
+          if (imp.kind != WasmExternalKind::Global)
+            continue;
+          if (importGlobalIdx == i) {
+            gType = imp.globalType.type;
+            break;
+          }
+          ++importGlobalIdx;
+        }
+      } else {
+        // Defined global.
+        gType = moduleInfo_.globals[i - numImportedGlobals].type.type;
+      }
+
+      globalVars_.push_back(builder_.createVariable(
+          topLevelVS_,
+          ("global_" + llvh::Twine(i)),
+          Type::createAnyType(),
+          /* hidden */ true));
+      ++slotIdx;
+
+      if (gType == WasmValType::I64) {
+        globalVars_.push_back(builder_.createVariable(
+            topLevelVS_,
+            ("global_" + llvh::Twine(i) + "_hi"),
+            Type::createAnyType(),
+            /* hidden */ true));
+        ++slotIdx;
+      }
+    }
+  }
+
   // Create Variables for imported JS functions in the top-level scope.
   // These hold the JS callables looked up from the imports object.
   uint32_t numImportedFuncs = moduleInfo_.importedFunctionCount();
@@ -197,6 +243,11 @@ void WasmIRGen::createFunctions() {
   // Create and initialize tables, and apply element segments.
   if (numTables > 0) {
     createTables(tlScope);
+  }
+
+  // Initialize Wasm globals (both imported and defined).
+  if (numGlobals > 0) {
+    initializeGlobals(tlScope);
   }
 
   // Create import trampoline bodies for all imported functions.
@@ -3621,6 +3672,212 @@ void WasmIRGen::onTableGrow(uint32_t tableIndex) {
   pop(); // delta
   pop(); // fill value
   push(builder_.getLiteralNumber(-1));
+}
+
+// --- Globals (K.1) ---
+
+void WasmIRGen::initializeGlobals(Instruction *tlScope) {
+  uint32_t numImportedGlobals = moduleInfo_.importedGlobalCount();
+
+  // Initialize imported globals from the imports object.
+  // Imported globals are read from __wasm_imports__[module][field].value
+  // (for WebAssembly.Global objects) or directly as numbers.
+  // Phase 1: treat imported globals as their numeric initial value (0).
+  // This will be properly implemented when M.7 (WebAssembly.Global) exists.
+  for (uint32_t i = 0; i < numImportedGlobals; ++i) {
+    uint32_t slotIdx = globalSlotIndex_[i];
+
+    // Find the i-th global import to determine its type.
+    WasmValType gType = WasmValType::I32;
+    uint32_t importGlobalIdx = 0;
+    for (const auto &imp : moduleInfo_.imports) {
+      if (imp.kind != WasmExternalKind::Global)
+        continue;
+      if (importGlobalIdx == i) {
+        gType = imp.globalType.type;
+        break;
+      }
+      ++importGlobalIdx;
+    }
+
+    // Phase 1: initialize imported globals to 0.
+    builder_.createStoreFrameInst(
+        tlScope,
+        builder_.getLiteralNumber(0),
+        globalVars_[slotIdx]);
+    if (gType == WasmValType::I64) {
+      builder_.createStoreFrameInst(
+          tlScope,
+          builder_.getLiteralNumber(0),
+          globalVars_[slotIdx + 1]);
+    }
+  }
+
+  // Initialize defined globals from their init expressions.
+  for (uint32_t di = 0; di < moduleInfo_.globals.size(); ++di) {
+    uint32_t globalIdx = numImportedGlobals + di;
+    uint32_t slotIdx = globalSlotIndex_[globalIdx];
+    const WasmGlobal &g = moduleInfo_.globals[di];
+
+    switch (g.initKind) {
+      case WasmGlobal::InitKind::I32Const:
+        builder_.createStoreFrameInst(
+            tlScope,
+            builder_.getLiteralNumber(
+                static_cast<double>(g.initValue.i32Val)),
+            globalVars_[slotIdx]);
+        break;
+
+      case WasmGlobal::InitKind::I64Const: {
+        // Split i64 into lo32 and hi32.
+        int64_t val = g.initValue.i64Val;
+        int32_t lo = static_cast<int32_t>(val & 0xFFFFFFFF);
+        int32_t hi = static_cast<int32_t>(
+            static_cast<uint64_t>(val) >> 32);
+        builder_.createStoreFrameInst(
+            tlScope,
+            builder_.getLiteralNumber(static_cast<double>(lo)),
+            globalVars_[slotIdx]);
+        builder_.createStoreFrameInst(
+            tlScope,
+            builder_.getLiteralNumber(static_cast<double>(hi)),
+            globalVars_[slotIdx + 1]);
+        break;
+      }
+
+      case WasmGlobal::InitKind::F32Const:
+        builder_.createStoreFrameInst(
+            tlScope,
+            builder_.getLiteralNumber(
+                static_cast<double>(g.initValue.f32Val)),
+            globalVars_[slotIdx]);
+        break;
+
+      case WasmGlobal::InitKind::F64Const:
+        builder_.createStoreFrameInst(
+            tlScope,
+            builder_.getLiteralNumber(g.initValue.f64Val),
+            globalVars_[slotIdx]);
+        break;
+
+      case WasmGlobal::InitKind::GlobalGet: {
+        // Initialize from another global's current value.
+        uint32_t srcIdx = g.initValue.globalIndex;
+        assert(srcIdx < globalIdx && "forward global reference in init expr");
+        uint32_t srcSlotIdx = globalSlotIndex_[srcIdx];
+        auto *val = builder_.createLoadFrameInst(
+            tlScope, globalVars_[srcSlotIdx]);
+        builder_.createStoreFrameInst(
+            tlScope, val, globalVars_[slotIdx]);
+
+        // If the target is i64, also copy the hi32 slot.
+        if (g.type.type == WasmValType::I64) {
+          auto *hiVal = builder_.createLoadFrameInst(
+              tlScope, globalVars_[srcSlotIdx + 1]);
+          builder_.createStoreFrameInst(
+              tlScope, hiVal, globalVars_[slotIdx + 1]);
+        }
+        break;
+      }
+
+      case WasmGlobal::InitKind::RefNull:
+        builder_.createStoreFrameInst(
+            tlScope,
+            builder_.getLiteralNull(),
+            globalVars_[slotIdx]);
+        break;
+
+      case WasmGlobal::InitKind::RefFunc:
+        // Store the closure for the referenced function.
+        if (g.initValue.funcIndex < closureVars_.size()) {
+          auto *closure = builder_.createLoadFrameInst(
+              tlScope, closureVars_[g.initValue.funcIndex]);
+          builder_.createStoreFrameInst(
+              tlScope, closure, globalVars_[slotIdx]);
+        } else {
+          builder_.createStoreFrameInst(
+              tlScope,
+              builder_.getLiteralNull(),
+              globalVars_[slotIdx]);
+        }
+        break;
+    }
+  }
+}
+
+void WasmIRGen::onGlobalGet(uint32_t globalIndex) {
+  if (unreachable_)
+    return;
+
+  assert(globalIndex < globalSlotIndex_.size() && "global index out of range");
+  uint32_t slotIdx = globalSlotIndex_[globalIndex];
+
+  // Determine the global's type.
+  uint32_t numImportedGlobals = moduleInfo_.importedGlobalCount();
+  WasmValType gType = WasmValType::I32;
+  if (globalIndex < numImportedGlobals) {
+    uint32_t importGlobalIdx = 0;
+    for (const auto &imp : moduleInfo_.imports) {
+      if (imp.kind != WasmExternalKind::Global)
+        continue;
+      if (importGlobalIdx == globalIndex) {
+        gType = imp.globalType.type;
+        break;
+      }
+      ++importGlobalIdx;
+    }
+  } else {
+    gType = moduleInfo_.globals[globalIndex - numImportedGlobals].type.type;
+  }
+
+  auto *val = builder_.createLoadFrameInst(
+      parentScopeInst_, globalVars_[slotIdx]);
+
+  if (gType == WasmValType::I64) {
+    auto *hiVal = builder_.createLoadFrameInst(
+        parentScopeInst_, globalVars_[slotIdx + 1]);
+    pushI64(val, hiVal);
+  } else {
+    push(val);
+  }
+}
+
+void WasmIRGen::onGlobalSet(uint32_t globalIndex) {
+  if (unreachable_)
+    return;
+
+  assert(globalIndex < globalSlotIndex_.size() && "global index out of range");
+  uint32_t slotIdx = globalSlotIndex_[globalIndex];
+
+  // Determine the global's type.
+  uint32_t numImportedGlobals = moduleInfo_.importedGlobalCount();
+  WasmValType gType = WasmValType::I32;
+  if (globalIndex < numImportedGlobals) {
+    uint32_t importGlobalIdx = 0;
+    for (const auto &imp : moduleInfo_.imports) {
+      if (imp.kind != WasmExternalKind::Global)
+        continue;
+      if (importGlobalIdx == globalIndex) {
+        gType = imp.globalType.type;
+        break;
+      }
+      ++importGlobalIdx;
+    }
+  } else {
+    gType = moduleInfo_.globals[globalIndex - numImportedGlobals].type.type;
+  }
+
+  if (gType == WasmValType::I64) {
+    auto [lo, hi] = popI64();
+    builder_.createStoreFrameInst(
+        parentScopeInst_, lo, globalVars_[slotIdx]);
+    builder_.createStoreFrameInst(
+        parentScopeInst_, hi, globalVars_[slotIdx + 1]);
+  } else {
+    Value *val = pop();
+    builder_.createStoreFrameInst(
+        parentScopeInst_, val, globalVars_[slotIdx]);
+  }
 }
 
 } // namespace wasm

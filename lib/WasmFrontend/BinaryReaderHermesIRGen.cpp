@@ -599,9 +599,8 @@ wabt::Result BinaryReaderHermesIRGen::OnF64ConstExpr(uint64_t valueBits) {
 
 wabt::Result BinaryReaderHermesIRGen::OnGlobalGetExpr(
     wabt::Index globalIndex) {
-  // In a function body, global.get is handled by a later step (K.1).
   if (inFunctionBody_ && irgen_) {
-    irgen_->warnUnsupported("global.get", 0, 1);
+    irgen_->onGlobalGet(globalIndex);
     return wabt::Result::Ok;
   }
   if (inFunctionBody_)
@@ -1263,9 +1262,8 @@ wabt::Result BinaryReaderHermesIRGen::OnNopExpr() {
 
 wabt::Result BinaryReaderHermesIRGen::OnGlobalSetExpr(
     wabt::Index globalIndex) {
-  // In a function body, global.set is handled by a later step (K.1).
   if (inFunctionBody_ && irgen_) {
-    irgen_->warnUnsupported("global.set", 1, 0);
+    irgen_->onGlobalSet(globalIndex);
   }
   return wabt::Result::Ok;
 }

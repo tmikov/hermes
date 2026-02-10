@@ -4,8 +4,7 @@
 ;; LICENSE file in the root directory of this source tree.
 
 ;; Test module with globals compiles to IR without errors.
-;; The global.get opcode is not yet supported, so the function body
-;; falls through to a default undefined return.
+;; global.get loads from the top-level scope variable.
 
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s
@@ -26,9 +25,11 @@
   )
 ;; CHECK-LABEL: function wasm_func_0(): any
 ;; CHECK: %BB0:
+;; CHECK:   %[[PARENT:.*]] = GetParentScopeInst
+;; CHECK:   %[[VAL:.*]] = LoadFrameInst (:any) %[[PARENT]]{{.*}}, [%VS0.global_1]: any
 ;; CHECK:   BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %{{.*}} = PhiInst (:undefined) undefined: undefined, %BB0
+;; CHECK-NEXT: %{{.*}} = PhiInst (:any) %[[VAL]]: any, %BB0
 ;; CHECK-NEXT:           ReturnInst
 ;; CHECK-NEXT: function_end
 )

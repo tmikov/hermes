@@ -64,12 +64,14 @@
   (func (export "run") (result i32)
     global.get $max_size
   )
-;; "run": global.get is unsupported, falls through to undefined.
+;; "run": global.get loads the imported global.
 ;; CHECK-LABEL: function wasm_func_3(): any
 ;; CHECK: %BB0:
+;; CHECK:   %[[P:.*]] = GetParentScopeInst
+;; CHECK:   %[[G:.*]] = LoadFrameInst (:any) %[[P]]{{.*}}, [%VS0.global_0]: any
 ;; CHECK:   BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %{{.*}} = PhiInst (:undefined) undefined: undefined, %BB0
+;; CHECK-NEXT: %{{.*}} = PhiInst (:any) %[[G]]: any, %BB0
 ;; CHECK-NEXT:           ReturnInst
 ;; CHECK-NEXT: function_end
 

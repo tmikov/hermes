@@ -4073,4 +4073,211 @@ TEST(WasmIRGenTest, ImportTrampolineWithDefinedFunction) {
   }
 }
 
+// --- Globals (K.1) ---
+
+TEST(WasmIRGenTest, GlobalGetI32) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // One function type: () -> (i32)
+  moduleInfo.types.push_back(WasmFuncType{{}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  // One immutable i32 global initialized to 42.
+  WasmGlobal g;
+  g.type.type = WasmValType::I32;
+  g.type.mutable_ = false;
+  g.initKind = WasmGlobal::InitKind::I32Const;
+  g.initValue.i32Val = 42;
+  moduleInfo.globals.push_back(g);
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  // Translate function body: global.get 0; (implicit return)
+  irgen.beginFunction(0, {});
+  irgen.onGlobalGet(0);
+  irgen.endFunction();
+
+  // Verify the function has a LoadFrameInst for the global.
+  auto funcs = irgen.getIRFunctions();
+  ASSERT_EQ(funcs.size(), 1u);
+  auto &entryBB = funcs[0]->getBasicBlockList().front();
+  bool foundLoadFrame = false;
+  for (auto &I : entryBB) {
+    if (llvh::isa<LoadFrameInst>(&I)) {
+      foundLoadFrame = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(foundLoadFrame);
+}
+
+TEST(WasmIRGenTest, GlobalSetI32) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // One function type: (i32) -> ()
+  moduleInfo.types.push_back(
+      WasmFuncType{{WasmValType::I32}, {}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  // One mutable i32 global initialized to 0.
+  WasmGlobal g;
+  g.type.type = WasmValType::I32;
+  g.type.mutable_ = true;
+  g.initKind = WasmGlobal::InitKind::I32Const;
+  g.initValue.i32Val = 0;
+  moduleInfo.globals.push_back(g);
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  // Translate function body: local.get 0; global.set 0; (implicit return)
+  irgen.beginFunction(0, {});
+  irgen.onLocalGet(0);
+  irgen.onGlobalSet(0);
+  irgen.endFunction();
+
+  // Verify the function has a StoreFrameInst for the global.
+  auto funcs = irgen.getIRFunctions();
+  ASSERT_EQ(funcs.size(), 1u);
+  auto &entryBB = funcs[0]->getBasicBlockList().front();
+  bool foundStoreFrame = false;
+  for (auto &I : entryBB) {
+    if (llvh::isa<StoreFrameInst>(&I)) {
+      foundStoreFrame = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(foundStoreFrame);
+}
+
+TEST(WasmIRGenTest, GlobalGetSetF64) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // One function type: () -> (f64)
+  moduleInfo.types.push_back(WasmFuncType{{}, {WasmValType::F64}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  // One mutable f64 global initialized to 3.14.
+  WasmGlobal g;
+  g.type.type = WasmValType::F64;
+  g.type.mutable_ = true;
+  g.initKind = WasmGlobal::InitKind::F64Const;
+  g.initValue.f64Val = 3.14;
+  moduleInfo.globals.push_back(g);
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  // Translate function body: f64.const 6.28; global.set 0; global.get 0;
+  irgen.beginFunction(0, {});
+  irgen.onF64Const(6.28);
+  irgen.onGlobalSet(0);
+  irgen.onGlobalGet(0);
+  irgen.endFunction();
+
+  auto funcs = irgen.getIRFunctions();
+  ASSERT_EQ(funcs.size(), 1u);
+
+  // Verify there's both a StoreFrameInst and a LoadFrameInst.
+  auto &entryBB = funcs[0]->getBasicBlockList().front();
+  bool foundStore = false, foundLoad = false;
+  for (auto &I : entryBB) {
+    if (llvh::isa<StoreFrameInst>(&I))
+      foundStore = true;
+    if (llvh::isa<LoadFrameInst>(&I))
+      foundLoad = true;
+  }
+  EXPECT_TRUE(foundStore);
+  EXPECT_TRUE(foundLoad);
+}
+
+TEST(WasmIRGenTest, GlobalInitFromOther) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // One function type: () -> (i32)
+  moduleInfo.types.push_back(WasmFuncType{{}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  // Global 0: immutable i32 = 42.
+  WasmGlobal g0;
+  g0.type.type = WasmValType::I32;
+  g0.type.mutable_ = false;
+  g0.initKind = WasmGlobal::InitKind::I32Const;
+  g0.initValue.i32Val = 42;
+  moduleInfo.globals.push_back(g0);
+
+  // Global 1: mutable i32 initialized from global 0.
+  WasmGlobal g1;
+  g1.type.type = WasmValType::I32;
+  g1.type.mutable_ = true;
+  g1.initKind = WasmGlobal::InitKind::GlobalGet;
+  g1.initValue.globalIndex = 0;
+  moduleInfo.globals.push_back(g1);
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  // Read global 1 (should have been initialized from global 0).
+  irgen.beginFunction(0, {});
+  irgen.onGlobalGet(1);
+  irgen.endFunction();
+
+  auto funcs = irgen.getIRFunctions();
+  ASSERT_EQ(funcs.size(), 1u);
+
+  // The function body should have a LoadFrameInst for global_1.
+  auto &entryBB = funcs[0]->getBasicBlockList().front();
+  bool foundLoad = false;
+  for (auto &I : entryBB) {
+    if (llvh::isa<LoadFrameInst>(&I)) {
+      foundLoad = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(foundLoad);
+}
+
+TEST(WasmIRGenTest, GlobalGetI64Split) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // One function type: () -> (i64) — returns split lo/hi.
+  moduleInfo.types.push_back(WasmFuncType{{}, {WasmValType::I64}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  // One i64 global.
+  WasmGlobal g;
+  g.type.type = WasmValType::I64;
+  g.type.mutable_ = true;
+  g.initKind = WasmGlobal::InitKind::I64Const;
+  g.initValue.i64Val = 0x100000002LL; // lo=2, hi=1
+  moduleInfo.globals.push_back(g);
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  // Translate: global.get 0; drop (pops i64 pair);
+  irgen.beginFunction(0, {});
+  irgen.onGlobalGet(0);
+  irgen.onDrop();
+  irgen.endFunction();
+
+  auto funcs = irgen.getIRFunctions();
+  ASSERT_EQ(funcs.size(), 1u);
+
+  // Should have two LoadFrameInst: one for lo32, one for hi32.
+  auto &entryBB = funcs[0]->getBasicBlockList().front();
+  int loadCount = 0;
+  for (auto &I : entryBB) {
+    if (llvh::isa<LoadFrameInst>(&I))
+      ++loadCount;
+  }
+  EXPECT_EQ(loadCount, 2);
+}
+
 } // namespace

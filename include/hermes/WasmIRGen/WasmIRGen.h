@@ -368,6 +368,13 @@ class WasmIRGen {
   /// Pushes old page count on success, or -1 on failure.
   void onMemoryGrow();
 
+  // --- Globals (K.1) ---
+
+  /// global.get: push the value of the global at \p globalIndex.
+  void onGlobalGet(uint32_t globalIndex);
+  /// global.set: pop a value and store it into the global at \p globalIndex.
+  void onGlobalSet(uint32_t globalIndex);
+
   // --- Table operations (J.1) ---
 
   /// table.get: pop index, push the function reference at that index.
@@ -436,6 +443,18 @@ class WasmIRGen {
   /// Indexed by Wasm table index.
   std::vector<Variable *> tableFuncVars_;
   std::vector<Variable *> tableTypeVars_;
+
+  /// Per-global Variables in the top-level scope.
+  /// For non-i64 globals: one Variable per global.
+  /// For i64 globals: two consecutive Variables (lo32, hi32).
+  /// Use globalSlotIndex_ to map global index → first slot.
+  std::vector<Variable *> globalVars_;
+
+  /// Maps Wasm global index → starting index in globalVars_.
+  /// For non-i64 globals, globalVars_[globalSlotIndex_[i]] is the single slot.
+  /// For i64 globals, globalVars_[globalSlotIndex_[i]] is lo32 and
+  /// globalVars_[globalSlotIndex_[i]+1] is hi32.
+  std::vector<uint32_t> globalSlotIndex_;
 
   /// The VariableScope for the top-level function.
   VariableScope *topLevelVS_ = nullptr;
@@ -567,6 +586,12 @@ class WasmIRGen {
   /// initializes them to null/-1, and applies active element segments.
   /// \p tlScope is the CreateScopeInst for the top-level scope.
   void createTables(Instruction *tlScope);
+
+  /// Initialize Wasm globals in the top-level function.
+  /// Evaluates init expressions and stores initial values.
+  /// Imported globals are read from the imports object.
+  /// \p tlScope is the CreateScopeInst for the top-level scope.
+  void initializeGlobals(Instruction *tlScope);
 
   /// Load the table functions array from the top-level scope.
   Value *loadTableFuncs(uint32_t tableIndex);
