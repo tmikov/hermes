@@ -136,6 +136,8 @@ RUNTIME_HV_FIELD(wasmMemoryConstructor, NativeConstructor)
 RUNTIME_HV_FIELD(wasmMemoryPrototype, JSObject)
 RUNTIME_HV_FIELD(wasmTableConstructor, NativeConstructor)
 RUNTIME_HV_FIELD(wasmTablePrototype, JSObject)
+RUNTIME_HV_FIELD(wasmGlobalConstructor, NativeConstructor)
+RUNTIME_HV_FIELD(wasmGlobalPrototype, JSObject)
 #endif
 
 #undef RUNTIME_HV_FIELD

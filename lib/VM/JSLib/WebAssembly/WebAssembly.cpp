@@ -18,6 +18,7 @@
 #include "hermes/VM/JSArrayBuffer.h"
 #include "hermes/VM/JSError.h"
 #include "hermes/VM/JSTypedArray.h"
+#include "hermes/VM/JSWebAssemblyGlobal.h"
 #include "hermes/VM/JSWebAssemblyInstance.h"
 #include "hermes/VM/JSWebAssemblyMemory.h"
 #include "hermes/VM/JSWebAssemblyModule.h"
@@ -1269,6 +1270,183 @@ wasmTableGrowMethod(void *context, Runtime &runtime) {
 }
 
 //===----------------------------------------------------------------------===//
+// WebAssembly.Global
+//===----------------------------------------------------------------------===//
+
+/// WebAssembly.Global constructor.
+static CallResult<HermesValue>
+wasmGlobalConstructor(void *context, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  if (!args.isConstructorCall()) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Global() must be called with 'new'");
+  }
+
+  auto descriptorHandle = args.getArgHandle(0);
+  if (!descriptorHandle->isObject()) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Global(): argument must be a global descriptor object");
+  }
+
+  struct : public Locals {
+    PinnedValue<JSObject> descriptor;
+    PinnedValue<> valueTypeVal;
+    PinnedValue<> mutableVal;
+    PinnedValue<> initVal;
+    PinnedValue<JSWebAssemblyGlobal> glob;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  lv.descriptor.castAndSetHermesValue<JSObject>(
+      descriptorHandle.getHermesValue());
+
+  // Read "value" property (required) — the type string.
+  auto valueTypeRes = JSObject::getNamed_RJS(
+      lv.descriptor,
+      runtime,
+      Predefined::getSymbolID(Predefined::value));
+  if (LLVM_UNLIKELY(valueTypeRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  lv.valueTypeVal = std::move(*valueTypeRes);
+
+  if (!lv.valueTypeVal->isString()) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Global(): 'value' must be a string");
+  }
+
+  // Parse the value type string by comparing against known type names.
+  auto *typeStr = lv.valueTypeVal->getString();
+  JSWebAssemblyGlobal::ValType valType;
+
+  // Helper to create a comparison string and check equality.
+  auto matchStr = [&](const char *s, size_t len) -> bool {
+    auto res = StringPrimitive::create(runtime, ASCIIRef(s, len));
+    if (LLVM_UNLIKELY(res == ExecutionStatus::EXCEPTION))
+      return false;
+    return typeStr->equals(vmcast<StringPrimitive>(*res));
+  };
+
+  if (matchStr("i32", 3)) {
+    valType = JSWebAssemblyGlobal::ValType::I32;
+  } else if (matchStr("i64", 3)) {
+    valType = JSWebAssemblyGlobal::ValType::I64;
+  } else if (matchStr("f32", 3)) {
+    valType = JSWebAssemblyGlobal::ValType::F32;
+  } else if (matchStr("f64", 3)) {
+    valType = JSWebAssemblyGlobal::ValType::F64;
+  } else {
+    return runtime.raiseTypeError(
+        "WebAssembly.Global(): 'value' must be "
+        "'i32', 'i64', 'f32', or 'f64'");
+  }
+
+  // Read "mutable" property (optional, defaults to false).
+  auto mutableRes = JSObject::getNamed_RJS(
+      lv.descriptor,
+      runtime,
+      Predefined::getSymbolID(Predefined::mutable_));
+  if (LLVM_UNLIKELY(mutableRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  lv.mutableVal = std::move(*mutableRes);
+  bool isMutable = toBoolean(lv.mutableVal.getHermesValue());
+
+  // Read initial value (second argument, optional, defaults to 0).
+  double initValue = 0.0;
+  if (args.getArgCount() >= 2) {
+    lv.initVal = args.getArg(1);
+    auto initRes = toNumber_RJS(runtime, lv.initVal);
+    if (LLVM_UNLIKELY(initRes == ExecutionStatus::EXCEPTION)) {
+      return ExecutionStatus::EXCEPTION;
+    }
+    initValue = initRes->getDouble();
+
+    // For integer types, truncate to the appropriate range.
+    if (valType == JSWebAssemblyGlobal::ValType::I32) {
+      initValue = static_cast<double>(
+          static_cast<int32_t>(static_cast<int64_t>(initValue)));
+    } else if (valType == JSWebAssemblyGlobal::ValType::F32) {
+      initValue = static_cast<double>(static_cast<float>(initValue));
+    }
+    // i64 and f64 keep the full double value.
+  }
+
+  // Create the Global object.
+  Handle<JSObject> globalPrototype{runtime.wasmGlobalPrototype};
+  lv.glob = JSWebAssemblyGlobal::create(runtime, globalPrototype);
+  lv.glob->setValType(valType);
+  lv.glob->setMutable(isMutable);
+  lv.glob->setValue(initValue);
+
+  return lv.glob.getHermesValue();
+}
+
+/// WebAssembly.Global.prototype.value getter.
+static CallResult<HermesValue>
+wasmGlobalValueGetter(void *context, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  auto *glob = dyn_vmcast<JSWebAssemblyGlobal>(args.getThisArg());
+  if (!glob) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Global.prototype.value: 'this' is not a "
+        "WebAssembly.Global");
+  }
+
+  return HermesValue::encodeTrustedNumberValue(glob->getValue());
+}
+
+/// WebAssembly.Global.prototype.value setter.
+static CallResult<HermesValue>
+wasmGlobalValueSetter(void *context, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  auto *glob = dyn_vmcast<JSWebAssemblyGlobal>(args.getThisArg());
+  if (!glob) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Global.prototype.value: 'this' is not a "
+        "WebAssembly.Global");
+  }
+
+  if (!glob->isMutable()) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Global.prototype.value: cannot set an immutable global");
+  }
+
+  struct : public Locals {
+    PinnedValue<> newVal;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  lv.newVal = args.getArg(0);
+  auto numRes = toNumber_RJS(runtime, lv.newVal);
+  if (LLVM_UNLIKELY(numRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  double val = numRes->getDouble();
+
+  // Truncate for integer/float types.
+  auto valType = glob->getValType();
+  if (valType == JSWebAssemblyGlobal::ValType::I32) {
+    val = static_cast<double>(
+        static_cast<int32_t>(static_cast<int64_t>(val)));
+  } else if (valType == JSWebAssemblyGlobal::ValType::F32) {
+    val = static_cast<double>(static_cast<float>(val));
+  }
+
+  glob->setValue(val);
+  return HermesValue::encodeUndefinedValue();
+}
+
+/// WebAssembly.Global.prototype.valueOf() — same as value getter.
+static CallResult<HermesValue>
+wasmGlobalValueOfMethod(void *context, Runtime &runtime) {
+  return wasmGlobalValueGetter(context, runtime);
+}
+
+//===----------------------------------------------------------------------===//
 // createWebAssemblyObject
 //===----------------------------------------------------------------------===//
 
@@ -1279,6 +1457,7 @@ void createWebAssemblyObject(Runtime &runtime, MutableHandle<JSObject> result) {
     PinnedValue<NativeConstructor> instanceCons;
     PinnedValue<NativeConstructor> memoryCons;
     PinnedValue<NativeConstructor> tableCons;
+    PinnedValue<NativeConstructor> globalCons;
   } lv;
   LocalsRAII lraii(runtime, &lv);
 
@@ -1625,6 +1804,75 @@ void createWebAssemblyObject(Runtime &runtime, MutableHandle<JSObject> result) {
       Predefined::getSymbolID(Predefined::Table),
       dpf,
       runtime.wasmTableConstructor);
+  (void)res;
+  assert(res != ExecutionStatus::EXCEPTION && *res);
+
+  // --- WebAssembly.Global constructor ---
+  Handle<JSObject> globalPrototype{runtime.wasmGlobalPrototype};
+
+  // Set @@toStringTag on the Global prototype.
+  {
+    auto tagDpf = DefinePropertyFlags::getDefaultNewPropertyFlags();
+    tagDpf.writable = 0;
+    tagDpf.enumerable = 0;
+
+    defineProperty(
+        runtime,
+        globalPrototype,
+        Predefined::getSymbolID(Predefined::SymbolToStringTag),
+        runtime.getPredefinedStringHandle(Predefined::Global),
+        tagDpf);
+  }
+
+  // Define "value" as a getter/setter on the prototype.
+  defineAccessor(
+      runtime,
+      globalPrototype,
+      Predefined::getSymbolID(Predefined::value),
+      nullptr,
+      wasmGlobalValueGetter,
+      wasmGlobalValueSetter,
+      false,
+      true);
+
+  // Define "valueOf" as a method on the prototype.
+  defineMethod(
+      runtime,
+      globalPrototype,
+      Predefined::getSymbolID(Predefined::valueOf),
+      nullptr,
+      wasmGlobalValueOfMethod,
+      0);
+
+  lv.globalCons = NativeConstructor::create(
+      runtime,
+      Handle<JSObject>::vmcast(&runtime.functionPrototype),
+      nullptr,
+      wasmGlobalConstructor,
+      1);
+
+  st = Callable::defineNameLengthAndPrototype(
+      lv.globalCons,
+      runtime,
+      Predefined::getSymbolID(Predefined::Global),
+      1,
+      globalPrototype,
+      Callable::WritablePrototype::No);
+  (void)st;
+  assert(
+      st != ExecutionStatus::EXCEPTION &&
+      "defineNameLengthAndPrototype failed");
+
+  runtime.wasmGlobalConstructor.castAndSetHermesValue<NativeConstructor>(
+      lv.globalCons.getHermesValue());
+
+  // Register Global constructor as a property of WebAssembly.
+  res = JSObject::defineOwnProperty(
+      lv.wasmObj,
+      runtime,
+      Predefined::getSymbolID(Predefined::Global),
+      dpf,
+      runtime.wasmGlobalConstructor);
   (void)res;
   assert(res != ExecutionStatus::EXCEPTION && *res);
 
