@@ -88,6 +88,7 @@ CELL_CLASS(JSProxy, "Proxy")
 CELL_CLASS(JSBigInt, "BigInt")
 CELL_CLASS(FastArray, "FastArray")
 CELL_CLASS(JSWebAssemblyModule, "WebAssemblyModule")
+CELL_CLASS(JSWebAssemblyInstance, "WebAssemblyInstance")
 
 // The ordering of Callables is set up carefully. We want to be able to
 // express overlapping regions: all Native functions, and functions

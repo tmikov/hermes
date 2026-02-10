@@ -7,6 +7,10 @@
 
 #include "hermes/WasmFrontend/WasmCompile.h"
 
+#include "hermes/BCGen/HBC/BCProviderFromSrc.h"
+#include "hermes/BCGen/HBC/HBC.h"
+#include "hermes/IR/IR.h"
+#include "hermes/Optimizer/PassManager/Pipeline.h"
 #include "hermes/WasmFrontend/BinaryReaderHermesIRGen.h"
 #include "hermes/WasmFrontend/WasmModuleInfo.h"
 #include "hermes/WasmIRGen/WasmIRGen.h"
@@ -64,12 +68,14 @@ std::unique_ptr<WasmModuleData> compileWasmToModuleData(
     const uint8_t *buffer,
     size_t size,
     std::string &errorMsg) {
-  // Parse the Wasm binary to extract module info.
-  // Function bodies are not compiled here — the BinaryReaderHermesIRGen
-  // without an IRGen attached will parse module-level sections only.
+  // Full compilation: parse → IR → optimize → bytecode.
+  auto context = std::make_shared<Context>();
+  auto M = std::make_shared<Module>(context);
+
   wasm::WasmModuleInfo moduleInfo;
+  wasm::WasmIRGen irgen(*M, moduleInfo);
   wasm::BinaryReaderHermesIRGen reader(moduleInfo);
-  // Don't call reader.setIRGen() — no IR generation needed.
+  reader.setIRGen(&irgen);
 
   wabt::ReadBinaryOptions options;
   options.read_debug_names = true;
@@ -80,7 +86,27 @@ std::unique_ptr<WasmModuleData> compileWasmToModuleData(
     return nullptr;
   }
 
+  // Run the optimization pipeline.
+  runFullOptimizationPasses(*M);
+
+  // Generate bytecode.
+  BytecodeGenerationOptions genOptions{OutputFormatKind::Execute};
+  genOptions.optimizationEnabled = true;
+  genOptions.staticBuiltinsEnabled = context->getStaticBuiltinOptimization();
+
+  auto BM = hbc::generateBytecodeModule(
+      M.get(), M->getTopLevelFunction(), genOptions);
+  if (!BM) {
+    errorMsg = "bytecode generation failed";
+    return nullptr;
+  }
+
+  auto provider = hbc::BCProviderFromSrc::createFromBytecodeModule(
+      std::move(BM),
+      hbc::BCProviderFromSrc::CompilationData{genOptions, M, nullptr});
+
   auto data = std::make_unique<WasmModuleData>();
+  data->bytecodeProvider = std::move(provider);
 
   // Populate export descriptors.
   for (const auto &exp : moduleInfo.exports) {

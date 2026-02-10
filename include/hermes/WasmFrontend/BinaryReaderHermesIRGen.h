@@ -239,6 +239,9 @@ class BinaryReaderHermesIRGen : public wabt::BinaryReaderNop {
   wabt::Result OnTableSizeExpr(wabt::Index tableIndex) override;
   wabt::Result OnTableGrowExpr(wabt::Index tableIndex) override;
 
+  // --- Module end ---
+  wabt::Result EndModule() override;
+
   // --- Exception handling ---
   wabt::Result OnTryExpr(wabt::Type sigType) override;
   wabt::Result OnCatchExpr(wabt::Index tagIndex) override;
@@ -259,6 +262,9 @@ class BinaryReaderHermesIRGen : public wabt::BinaryReaderNop {
 
   /// Optional WasmIRGen for function body translation.
   WasmIRGen *irgen_ = nullptr;
+
+  /// Whether createFunctions() has been called on the IRGen.
+  bool functionsCreated_ = false;
 
   /// Whether we are currently inside a function body.
   bool inFunctionBody_ = false;

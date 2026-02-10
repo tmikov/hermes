@@ -198,12 +198,13 @@ void WasmIRGen::createFunctions() {
 
   // Populate the top-level function body.
   // Create all closures once and store them in the top-level scope.
-  auto *tlEntry = builder_.createBasicBlock(topLevel);
-  builder_.setInsertionBlock(tlEntry);
+  tlEntry_ = builder_.createBasicBlock(topLevel);
+  builder_.setInsertionBlock(tlEntry_);
 
   // Create a scope for the top-level function.
-  auto *tlScope = builder_.createCreateScopeInst(
+  tlScope_ = builder_.createCreateScopeInst(
       topLevelVS_, builder_.getEmptySentinel());
+  auto *tlScope = tlScope_;
 
   // Resolve imported functions from the imports object.
   // The imports object is read from the global `__wasm_imports__` property.
@@ -259,7 +260,58 @@ void WasmIRGen::createFunctions() {
   }
 
   // Switch back to the top-level entry block after creating trampolines.
-  builder_.setInsertionBlock(tlEntry);
+  // finalizeModule() will continue from here.
+  builder_.setInsertionBlock(tlEntry_);
+}
+
+void WasmIRGen::finalizeModule() {
+  auto *tlScope = tlScope_;
+  bool hasMemory = moduleInfo_.totalMemoryCount() > 0;
+
+  // Ensure insertion is at the top-level entry block.
+  builder_.setInsertionBlock(tlEntry_);
+
+  // Apply active data segments: copy bytes into linear memory.
+  if (hasMemory) {
+    for (const auto &seg : moduleInfo_.dataSegments) {
+      if (seg.mode != WasmDataSegment::Mode::Active)
+        continue;
+      if (seg.data.empty())
+        continue;
+
+      // Compute offset.
+      Value *offset = nullptr;
+      if (seg.offsetKind == WasmGlobal::InitKind::I32Const) {
+        offset = builder_.getLiteralNumber(
+            static_cast<double>(seg.offsetValue));
+      } else {
+        llvh::errs()
+            << "warning: unsupported data segment offset expression\n";
+        continue;
+      }
+
+      // Load HEAPU8 view for byte-level writes.
+      auto *heapu8 = builder_.createLoadFrameInst(
+          tlScope, memViewVars_[static_cast<uint8_t>(MemView::HEAPU8)]);
+
+      // Store each byte of the data segment.
+      for (uint32_t i = 0; i < seg.data.size(); ++i) {
+        Value *idx;
+        if (i == 0) {
+          idx = offset;
+        } else {
+          idx = builder_.createBinaryOperatorInst(
+              offset,
+              builder_.getLiteralNumber(static_cast<double>(i)),
+              ValueKind::BinaryAddInstKind);
+        }
+        builder_.createStorePropertyStrictInst(
+            builder_.getLiteralNumber(static_cast<double>(seg.data[i])),
+            heapu8,
+            idx);
+      }
+    }
+  }
 
   // Call the start function if specified (load its pre-created closure).
   if (moduleInfo_.startFunction.has_value()) {
@@ -301,7 +353,7 @@ void WasmIRGen::createFunctions() {
 
   // Switch back to the top-level entry block to emit closures and the
   // exports object.
-  builder_.setInsertionBlock(tlEntry);
+  builder_.setInsertionBlock(tlEntry_);
 
   auto *exportsObj = builder_.createAllocObjectLiteralInst({});
   for (const auto &w : wrappers) {

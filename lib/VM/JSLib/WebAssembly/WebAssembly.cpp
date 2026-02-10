@@ -18,8 +18,10 @@
 #include "hermes/VM/JSArrayBuffer.h"
 #include "hermes/VM/JSError.h"
 #include "hermes/VM/JSTypedArray.h"
+#include "hermes/VM/JSWebAssemblyInstance.h"
 #include "hermes/VM/JSWebAssemblyModule.h"
 #include "hermes/VM/Runtime.h"
+#include "hermes/VM/RuntimeModule.h"
 #include "hermes/WasmFrontend/WasmModuleData.h"
 
 namespace hermes {
@@ -511,6 +513,187 @@ wasmModuleImports(void *context, Runtime &runtime) {
 }
 
 //===----------------------------------------------------------------------===//
+// WebAssembly.Instance
+//===----------------------------------------------------------------------===//
+
+/// Raise a WebAssembly.LinkError with the given message.
+static ExecutionStatus
+raiseLinkError(Runtime &runtime, const char *msg) {
+  struct : public Locals {
+    PinnedValue<> msgStr;
+    PinnedValue<JSError> err;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  auto strRes = StringPrimitive::create(runtime, ASCIIRef(msg, strlen(msg)));
+  if (LLVM_UNLIKELY(strRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  lv.msgStr = std::move(*strRes);
+
+  lv.err = JSError::create(
+      runtime, Handle<JSObject>{runtime.wasmLinkErrorPrototype});
+
+  if (LLVM_UNLIKELY(
+          JSError::setMessage(lv.err, runtime, lv.msgStr) ==
+          ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+
+  JSError::recordStackTrace(lv.err, runtime, true);
+
+  return runtime.setThrownValue(lv.err.getHermesValue());
+}
+
+/// new WebAssembly.Instance(module, importObject) — instantiate a compiled
+/// Wasm module with the given import object.
+static CallResult<HermesValue>
+wasmInstanceConstructor(void *context, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  if (!args.isConstructorCall()) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Instance() must be called with 'new'");
+  }
+
+  // First argument must be a WebAssembly.Module.
+  auto *mod = dyn_vmcast<JSWebAssemblyModule>(args.getArg(0));
+  if (!mod) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Instance(): first argument must be a "
+        "WebAssembly.Module");
+  }
+
+  auto *moduleData = mod->getModuleData();
+  if (!moduleData) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Instance(): module has no compiled data");
+  }
+
+  if (!moduleData->bytecodeProvider) {
+    raiseLinkError(runtime, "module was not fully compiled");
+    return ExecutionStatus::EXCEPTION;
+  }
+
+  struct : public Locals {
+    PinnedValue<JSWebAssemblyInstance> inst;
+    PinnedValue<JSObject> exportsObj;
+    PinnedValue<> importObj;
+    PinnedValue<> result;
+    PinnedValue<> oldImports;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  // Validate imports: if the module has imports, the second argument must
+  // be an object providing them.
+  bool hasImports = !moduleData->importDescs.empty();
+  lv.importObj = args.getArg(1);
+
+  if (hasImports && !lv.importObj->isObject()) {
+    raiseLinkError(
+        runtime,
+        "WebAssembly.Instance(): module has imports but no import "
+        "object provided");
+    return ExecutionStatus::EXCEPTION;
+  }
+
+  // Set globalThis.__wasm_imports__ to the import object so the compiled
+  // Wasm top-level function can resolve imports from it.
+  auto wasmImportsSymbol =
+      Predefined::getSymbolID(Predefined::__wasm_imports__);
+
+  // Save the previous value (if any) to restore it later.
+  auto prevRes = JSObject::getNamed_RJS(
+      runtime.getGlobal(), runtime, wasmImportsSymbol);
+  if (LLVM_UNLIKELY(prevRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  lv.oldImports = std::move(*prevRes);
+
+  if (hasImports) {
+    auto putRes = JSObject::putNamed_RJS(
+        runtime.getGlobal(),
+        runtime,
+        wasmImportsSymbol,
+        lv.importObj);
+    if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION)) {
+      return ExecutionStatus::EXCEPTION;
+    }
+  }
+
+  // Run the compiled bytecode. The top-level function initializes memory,
+  // tables, globals, element segments, data segments, runs the start
+  // function (if any), and returns the exports object.
+  // Make a copy of the shared_ptr since runBytecode takes by rvalue ref.
+  auto bcProvider = moduleData->bytecodeProvider;
+  auto runRes = runtime.runBytecode(
+      std::move(bcProvider),
+      RuntimeModuleFlags{},
+      "wasm-module",
+      Runtime::makeNullHandle<Environment>());
+
+  // Restore the old __wasm_imports__ value regardless of success/failure.
+  {
+    auto restoreRes = JSObject::putNamed_RJS(
+        runtime.getGlobal(),
+        runtime,
+        wasmImportsSymbol,
+        lv.oldImports);
+    (void)restoreRes;
+  }
+
+  if (LLVM_UNLIKELY(runRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+
+  lv.result = std::move(*runRes);
+
+  // The result should be the exports object returned by the top-level
+  // function. Freeze it per the WebAssembly spec.
+  if (!lv.result->isObject()) {
+    raiseLinkError(
+        runtime, "WebAssembly instantiation failed: unexpected result");
+    return ExecutionStatus::EXCEPTION;
+  }
+
+  lv.exportsObj.castAndSetHermesValue<JSObject>(lv.result.getHermesValue());
+
+  // Freeze the exports object.
+  if (LLVM_UNLIKELY(
+          JSObject::freeze(lv.exportsObj, runtime) ==
+          ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+
+  // Create the Instance object.
+  Handle<JSObject> instancePrototype{runtime.wasmInstancePrototype};
+  lv.inst = JSWebAssemblyInstance::create(runtime, instancePrototype);
+
+  // Define the "exports" property as non-writable, non-configurable,
+  // enumerable (per the WebAssembly spec).
+  DefinePropertyFlags exportsDpf{};
+  exportsDpf.setWritable = 1;
+  exportsDpf.writable = 0;
+  exportsDpf.setConfigurable = 1;
+  exportsDpf.configurable = 0;
+  exportsDpf.setEnumerable = 1;
+  exportsDpf.enumerable = 1;
+  exportsDpf.setValue = 1;
+
+  auto defRes = JSObject::defineOwnProperty(
+      lv.inst,
+      runtime,
+      Predefined::getSymbolID(Predefined::exports),
+      exportsDpf,
+      lv.exportsObj);
+  if (LLVM_UNLIKELY(defRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+
+  return lv.inst.getHermesValue();
+}
+
+//===----------------------------------------------------------------------===//
 // createWebAssemblyObject
 //===----------------------------------------------------------------------===//
 
@@ -518,6 +701,7 @@ void createWebAssemblyObject(Runtime &runtime, MutableHandle<JSObject> result) {
   struct : public Locals {
     PinnedValue<JSObject> wasmObj;
     PinnedValue<NativeConstructor> moduleCons;
+    PinnedValue<NativeConstructor> instanceCons;
   } lv;
   LocalsRAII lraii(runtime, &lv);
 
@@ -659,6 +843,55 @@ void createWebAssemblyObject(Runtime &runtime, MutableHandle<JSObject> result) {
       Predefined::getSymbolID(Predefined::Module),
       dpf,
       runtime.wasmModuleConstructor);
+  (void)res;
+  assert(res != ExecutionStatus::EXCEPTION && *res);
+
+  // --- WebAssembly.Instance constructor ---
+  Handle<JSObject> instancePrototype{runtime.wasmInstancePrototype};
+
+  // Set @@toStringTag on the Instance prototype.
+  {
+    auto tagDpf = DefinePropertyFlags::getDefaultNewPropertyFlags();
+    tagDpf.writable = 0;
+    tagDpf.enumerable = 0;
+
+    defineProperty(
+        runtime,
+        instancePrototype,
+        Predefined::getSymbolID(Predefined::SymbolToStringTag),
+        runtime.getPredefinedStringHandle(Predefined::Instance),
+        tagDpf);
+  }
+
+  lv.instanceCons = NativeConstructor::create(
+      runtime,
+      Handle<JSObject>::vmcast(&runtime.functionPrototype),
+      nullptr,
+      wasmInstanceConstructor,
+      1);
+
+  st = Callable::defineNameLengthAndPrototype(
+      lv.instanceCons,
+      runtime,
+      Predefined::getSymbolID(Predefined::Instance),
+      1,
+      instancePrototype,
+      Callable::WritablePrototype::No);
+  (void)st;
+  assert(
+      st != ExecutionStatus::EXCEPTION &&
+      "defineNameLengthAndPrototype failed");
+
+  runtime.wasmInstanceConstructor.castAndSetHermesValue<NativeConstructor>(
+      lv.instanceCons.getHermesValue());
+
+  // Register Instance constructor as a property of WebAssembly.
+  res = JSObject::defineOwnProperty(
+      lv.wasmObj,
+      runtime,
+      Predefined::getSymbolID(Predefined::Instance),
+      dpf,
+      runtime.wasmInstanceConstructor);
   (void)res;
   assert(res != ExecutionStatus::EXCEPTION && *res);
 

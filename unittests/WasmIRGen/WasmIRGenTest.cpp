@@ -3006,6 +3006,7 @@ TEST(WasmIRGenTest, CreateFunctionsExportsObject) {
 
   WasmIRGen irgen(tm.mod, moduleInfo);
   irgen.createFunctions();
+  irgen.finalizeModule();
 
   // The top-level function should contain:
   //   AllocObjectLiteralInst (exports object)
@@ -3068,6 +3069,7 @@ TEST(WasmIRGenTest, CreateFunctionsNoExports) {
 
   WasmIRGen irgen(tm.mod, moduleInfo);
   irgen.createFunctions();
+  irgen.finalizeModule();
 
   // Even with no exports, the top-level function should return an
   // (empty) exports object, not undefined.
@@ -3119,6 +3121,7 @@ TEST(WasmIRGenTest, CreateFunctionsSkipsNonFunctionExports) {
 
   WasmIRGen irgen(tm.mod, moduleInfo);
   irgen.createFunctions();
+  irgen.finalizeModule();
 
   auto *topLevel = tm.mod.getTopLevelFunction();
   auto &bb = topLevel->getBasicBlockList().front();

@@ -14,13 +14,14 @@
 
 namespace hermes {
 
+namespace hbc {
+class BCProviderBase;
+} // namespace hbc
+
 /// Data stored inside a JSWebAssemblyModule, holding module metadata
 /// needed by the JS API. This is a standalone struct with no VM
 /// dependencies so it can be populated by the WasmFrontend library and
 /// consumed by the VM.
-///
-/// Subclasses may add additional data (e.g., compiled bytecode for
-/// instantiation).
 struct WasmModuleData {
   /// Export descriptor for WebAssembly.Module.exports().
   struct ExportDesc {
@@ -43,6 +44,9 @@ struct WasmModuleData {
   std::vector<ExportDesc> exportDescs;
   /// Import descriptors populated during compilation.
   std::vector<ImportDesc> importDescs;
+  /// Compiled bytecode provider, set during full compilation.
+  /// Null when only metadata was parsed (e.g., Module.exports/imports).
+  std::shared_ptr<hbc::BCProviderBase> bytecodeProvider;
 };
 
 } // namespace hermes

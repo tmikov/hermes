@@ -42,6 +42,7 @@ set(source_files
   JSNativeFunctions.cpp
   JSTypedArray.cpp
   JSWeakMapImpl.cpp
+  JSWebAssemblyInstance.cpp
   JSWebAssemblyModule.cpp
   JSWeakRef.cpp
   LimitedStorageProvider.cpp

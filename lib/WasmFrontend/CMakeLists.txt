@@ -10,6 +10,9 @@ add_hermes_library(hermesWasmFrontend
     LINK_OBJLIBS
     hermesWasmIRGen
     hermesFrontend
+    hermesOptimizer
+    hermesHBCBackend
+    hermesBackend
     hermesSupport
     LINK_LIBS
     wabt

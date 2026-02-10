@@ -467,8 +467,10 @@ wabt::Result BinaryReaderHermesIRGen::BeginCodeSection(wabt::Offset size) {
   // By the time the code section is reached, all module-level sections
   // (type, import, function, table, memory, global, export, start, elem)
   // have been parsed. Create the IR functions now.
-  if (irgen_)
+  if (irgen_ && !functionsCreated_) {
     irgen_->createFunctions();
+    functionsCreated_ = true;
+  }
   return wabt::Result::Ok;
 }
 
@@ -1539,6 +1541,25 @@ wabt::Result BinaryReaderHermesIRGen::OnDelegateExpr(wabt::Index depth) {
   if (!inFunctionBody_ || !irgen_)
     return wabt::Result::Ok;
   irgen_->onDelegate(static_cast<uint32_t>(depth));
+  return wabt::Result::Ok;
+}
+
+// --- Module end ---
+
+wabt::Result BinaryReaderHermesIRGen::EndModule() {
+  // If the module had no code section (e.g., a minimal module with only
+  // a header), ensure createFunctions() is still called so the IR module
+  // gets a top-level function.
+  if (irgen_ && !functionsCreated_) {
+    irgen_->createFunctions();
+    functionsCreated_ = true;
+  }
+  // Finalize the module: apply data segments, call start function, build
+  // exports object, and emit the return instruction. This must happen after
+  // all sections (including the data section) have been parsed.
+  if (irgen_) {
+    irgen_->finalizeModule();
+  }
   return wabt::Result::Ok;
 }
 

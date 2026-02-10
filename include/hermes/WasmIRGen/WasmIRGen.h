@@ -37,6 +37,13 @@ class WasmIRGen {
   /// bodies are translated.
   void createFunctions();
 
+  /// Finalize the top-level function after all sections have been parsed.
+  /// Applies active data segments, calls the start function, builds the
+  /// exports object, and emits the return instruction.
+  /// Must be called after createFunctions() and after all function bodies
+  /// and data sections have been processed.
+  void finalizeModule();
+
   // --- Per-function translation (called by BinaryReaderHermesIRGen) ---
 
   /// Begin translating a Wasm function body.
@@ -473,6 +480,14 @@ class WasmIRGen {
 
   /// The VariableScope for the top-level function.
   VariableScope *topLevelVS_ = nullptr;
+
+  /// The entry BasicBlock of the top-level function.
+  /// Saved by createFunctions() for use by finalizeModule().
+  BasicBlock *tlEntry_ = nullptr;
+
+  /// The CreateScopeInst for the top-level function.
+  /// Saved by createFunctions() for use by finalizeModule().
+  BaseScopeInst *tlScope_ = nullptr;
 
   // --- Per-function state (valid between beginFunction/endFunction) ---
 
