@@ -121,4 +121,13 @@ RUNTIME_HV_FIELD(intlNumberFormatPrototype, JSObject)
 
 RUNTIME_HV_FIELD(promiseRejectionTrackingHook_, HermesValue)
 
+#ifdef HERMES_ENABLE_WASM
+RUNTIME_HV_FIELD(wasmCompileErrorConstructor, NativeConstructor)
+RUNTIME_HV_FIELD(wasmCompileErrorPrototype, JSObject)
+RUNTIME_HV_FIELD(wasmLinkErrorConstructor, NativeConstructor)
+RUNTIME_HV_FIELD(wasmLinkErrorPrototype, JSObject)
+RUNTIME_HV_FIELD(wasmRuntimeErrorConstructor, NativeConstructor)
+RUNTIME_HV_FIELD(wasmRuntimeErrorPrototype, JSObject)
+#endif
+
 #undef RUNTIME_HV_FIELD

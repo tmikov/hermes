@@ -362,6 +362,16 @@ void initGlobalObject(Runtime &runtime, const JSLibFlags &jsLibFlags) {
 #define AGGREGATE_ERROR_TYPE(name) NATIVE_ERROR_TYPE(name)
 #include "hermes/VM/NativeErrorTypes.def"
 
+// "Forward declaration" of WebAssembly error prototypes.
+#ifdef HERMES_ENABLE_WASM
+  runtime.wasmCompileErrorPrototype =
+      JSObject::create(runtime, runtime.ErrorPrototype);
+  runtime.wasmLinkErrorPrototype =
+      JSObject::create(runtime, runtime.ErrorPrototype);
+  runtime.wasmRuntimeErrorPrototype =
+      JSObject::create(runtime, runtime.ErrorPrototype);
+#endif
+
   // "Forward declaration" of the internal CallSite prototype. Its properties
   // will be populated later.
   runtime.callSitePrototype =
@@ -812,6 +822,18 @@ void initGlobalObject(Runtime &runtime, const JSLibFlags &jsLibFlags) {
             normalDPF,
             lv.value));
   }
+#endif
+
+#ifdef HERMES_ENABLE_WASM
+  // Define the global WebAssembly namespace object.
+  createWebAssemblyObject(runtime, lv.tempHandle);
+  runtime.ignoreAllocationFailure(
+      JSObject::defineOwnProperty(
+          runtime.getGlobal(),
+          runtime,
+          Predefined::getSymbolID(Predefined::WebAssembly),
+          normalDPF,
+          lv.tempHandle));
 #endif
 }
 
