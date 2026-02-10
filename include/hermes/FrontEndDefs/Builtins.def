@@ -238,6 +238,17 @@ PRIVATE_BUILTIN(wasmCreateException)
 // matching tag, returns the payload values array; otherwise returns undefined.
 PRIVATE_BUILTIN(wasmMatchException)
 
+// Bulk memory operations (N.1).
+// wasmMemoryFill(heapu8, dest, value, size): fill memory with a byte value.
+PRIVATE_BUILTIN(wasmMemoryFill)
+// wasmMemoryCopy(heapu8, dest, src, size): copy within linear memory.
+PRIVATE_BUILTIN(wasmMemoryCopy)
+// wasmMemoryInit(heapu8, dataSegs, segIdx, dest, src, size): copy from data
+// segment into linear memory.
+PRIVATE_BUILTIN(wasmMemoryInit)
+// wasmDataDrop(dataSegs, segIdx): mark a data segment as dropped.
+PRIVATE_BUILTIN(wasmDataDrop)
+
 JS_BUILTIN(spawnAsync)
 MARK_FIRST_JS_BUILTIN(spawnAsync)
 JS_BUILTIN(makeAsyncIterator)

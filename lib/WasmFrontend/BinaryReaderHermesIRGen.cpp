@@ -1493,6 +1493,42 @@ wabt::Result BinaryReaderHermesIRGen::OnTableGrowExpr(
   return wabt::Result::Ok;
 }
 
+// --- Bulk memory operation callbacks ---
+
+wabt::Result BinaryReaderHermesIRGen::OnMemoryFillExpr(
+    wabt::Index memidx) {
+  if (!inFunctionBody_ || !irgen_)
+    return wabt::Result::Ok;
+  irgen_->onMemoryFill();
+  return wabt::Result::Ok;
+}
+
+wabt::Result BinaryReaderHermesIRGen::OnMemoryCopyExpr(
+    wabt::Index destmemidx,
+    wabt::Index srcmemidx) {
+  if (!inFunctionBody_ || !irgen_)
+    return wabt::Result::Ok;
+  irgen_->onMemoryCopy();
+  return wabt::Result::Ok;
+}
+
+wabt::Result BinaryReaderHermesIRGen::OnMemoryInitExpr(
+    wabt::Index segment_index,
+    wabt::Index memidx) {
+  if (!inFunctionBody_ || !irgen_)
+    return wabt::Result::Ok;
+  irgen_->onMemoryInit(static_cast<uint32_t>(segment_index));
+  return wabt::Result::Ok;
+}
+
+wabt::Result BinaryReaderHermesIRGen::OnDataDropExpr(
+    wabt::Index segment_index) {
+  if (!inFunctionBody_ || !irgen_)
+    return wabt::Result::Ok;
+  irgen_->onDataDrop(static_cast<uint32_t>(segment_index));
+  return wabt::Result::Ok;
+}
+
 // --- Exception handling instruction callbacks ---
 
 wabt::Result BinaryReaderHermesIRGen::OnTryExpr(wabt::Type sigType) {

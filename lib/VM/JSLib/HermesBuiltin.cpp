@@ -990,6 +990,151 @@ CallResult<HermesValue> wasmMatchException(void *, Runtime &runtime) {
   return caught;
 }
 
+/// Wasm memory.fill: fill \p size bytes at \p dest with \p value.
+/// Args: (heapu8, dest, value, size).
+/// Traps on out-of-bounds.
+CallResult<HermesValue> wasmMemoryFill(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  auto *heapu8 = vmcast<JSTypedArrayBase>(args.getArg(0));
+  uint32_t dest =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(1).getNumber()));
+  uint32_t value =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(2).getNumber()));
+  uint32_t size =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(3).getNumber()));
+
+  uint32_t memSize = static_cast<uint32_t>(heapu8->getLength());
+  // Bounds check: dest + size must not exceed memory size.
+  // Use uint64_t to avoid overflow.
+  if (LLVM_UNLIKELY(
+          static_cast<uint64_t>(dest) + size > memSize)) {
+    return runtime.raiseError(
+        "memory.fill: out of bounds memory access");
+  }
+
+  // Perform the fill.
+  if (size > 0) {
+    JSArrayBuffer *buf = heapu8->getBuffer(runtime);
+    uint8_t *data = buf->getDataBlock(runtime);
+    std::memset(data + dest, static_cast<uint8_t>(value), size);
+  }
+
+  return HermesValue::encodeUndefinedValue();
+}
+
+/// Wasm memory.copy: copy \p size bytes from \p src to \p dest.
+/// Args: (heapu8, dest, src, size).
+/// Traps on out-of-bounds. Handles overlapping regions correctly.
+CallResult<HermesValue> wasmMemoryCopy(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  auto *heapu8 = vmcast<JSTypedArrayBase>(args.getArg(0));
+  uint32_t dest =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(1).getNumber()));
+  uint32_t src =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(2).getNumber()));
+  uint32_t size =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(3).getNumber()));
+
+  uint32_t memSize = static_cast<uint32_t>(heapu8->getLength());
+  // Bounds check both regions.
+  if (LLVM_UNLIKELY(
+          static_cast<uint64_t>(src) + size > memSize ||
+          static_cast<uint64_t>(dest) + size > memSize)) {
+    return runtime.raiseError(
+        "memory.copy: out of bounds memory access");
+  }
+
+  // Perform the copy (memmove handles overlapping regions).
+  if (size > 0) {
+    JSArrayBuffer *buf = heapu8->getBuffer(runtime);
+    uint8_t *data = buf->getDataBlock(runtime);
+    std::memmove(data + dest, data + src, size);
+  }
+
+  return HermesValue::encodeUndefinedValue();
+}
+
+/// Wasm memory.init: copy bytes from a data segment into linear memory.
+/// Args: (heapu8, dataSegs, segIdx, dest, src, size).
+/// dataSegs is a JSArray where each element is either a JSTypedArrayBase
+/// (Uint8Array of segment data) or null/empty (segment has been dropped).
+/// Traps on out-of-bounds or if the segment has been dropped (with n>0).
+CallResult<HermesValue> wasmMemoryInit(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  auto *heapu8 = vmcast<JSTypedArrayBase>(args.getArg(0));
+  auto *dataSegs = vmcast<JSArray>(args.getArg(1));
+  uint32_t segIdx =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(2).getNumber()));
+  uint32_t dest =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(3).getNumber()));
+  uint32_t src =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(4).getNumber()));
+  uint32_t size =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(5).getNumber()));
+
+  // Look up the data segment.
+  auto segVal = dataSegs->at(runtime, segIdx);
+  bool dropped = segVal.isEmpty() ||
+      segVal.unboxToHV(runtime).isNull();
+
+  // If size is 0, check bounds but don't fail on dropped segments.
+  // Per spec: memory.init with n=0 succeeds even for dropped segments,
+  // as long as s <= segLen and d <= memLen.
+  uint32_t segLen = 0;
+  JSTypedArrayBase *segArr = nullptr;
+  if (!dropped) {
+    segArr = vmcast<JSTypedArrayBase>(
+        segVal.unboxToHV(runtime).getObject(runtime));
+    segLen = static_cast<uint32_t>(segArr->getLength());
+  }
+
+  // Bounds check against data segment.
+  if (LLVM_UNLIKELY(static_cast<uint64_t>(src) + size > segLen)) {
+    return runtime.raiseError(
+        "memory.init: out of bounds data segment access");
+  }
+
+  // Bounds check against linear memory.
+  uint32_t memSize = static_cast<uint32_t>(heapu8->getLength());
+  if (LLVM_UNLIKELY(static_cast<uint64_t>(dest) + size > memSize)) {
+    return runtime.raiseError(
+        "memory.init: out of bounds memory access");
+  }
+
+  // Perform the copy.
+  if (size > 0) {
+    JSArrayBuffer *memBuf = heapu8->getBuffer(runtime);
+    uint8_t *memData = memBuf->getDataBlock(runtime);
+    JSArrayBuffer *segBuf = segArr->getBuffer(runtime);
+    uint8_t *segData = segBuf->getDataBlock(runtime);
+    std::memcpy(memData + dest, segData + src, size);
+  }
+
+  return HermesValue::encodeUndefinedValue();
+}
+
+/// Wasm data.drop: mark a data segment as dropped.
+/// Args: (dataSegs, segIdx).
+/// Sets the segment entry in the data segments array to null.
+CallResult<HermesValue> wasmDataDrop(void *, Runtime &runtime) {
+  struct : public Locals {
+    PinnedValue<JSArray> dataSegs;
+    PinnedValue<> nullVal;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  lv.dataSegs = vmcast<JSArray>(args.getArg(0));
+  uint32_t segIdx =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(1).getNumber()));
+
+  // Set the segment to null to mark it as dropped.
+  lv.nullVal = HermesValue::encodeNullValue();
+  (void)JSArray::setElementAt(lv.dataSegs, runtime, segIdx, lv.nullVal);
+
+  return HermesValue::encodeUndefinedValue();
+}
+
 namespace {
 
 CallResult<HermesValue> copyDataPropertiesSlowPath_RJS(
@@ -2006,6 +2151,28 @@ void createHermesBuiltins(Runtime &runtime) {
       B::HermesBuiltin_wasmMatchException,
       P::wasmMatchException,
       wasmMatchException,
+      2);
+
+  // Bulk memory helpers (N.1).
+  defineInternMethod(
+      B::HermesBuiltin_wasmMemoryFill,
+      P::wasmMemoryFill,
+      wasmMemoryFill,
+      4);
+  defineInternMethod(
+      B::HermesBuiltin_wasmMemoryCopy,
+      P::wasmMemoryCopy,
+      wasmMemoryCopy,
+      4);
+  defineInternMethod(
+      B::HermesBuiltin_wasmMemoryInit,
+      P::wasmMemoryInit,
+      wasmMemoryInit,
+      6);
+  defineInternMethod(
+      B::HermesBuiltin_wasmDataDrop,
+      P::wasmDataDrop,
+      wasmDataDrop,
       2);
 }
 

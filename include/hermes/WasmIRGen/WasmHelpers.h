@@ -200,6 +200,29 @@ class WasmHelpers {
   /// returns undefined.
   Instruction *emitMatchException(Value *caught, Value *tagIndex);
 
+  // --- Bulk memory helpers (N.1) ---
+
+  /// Emit memory.fill: fills \p size bytes at \p dest with \p value.
+  /// \p heapu8 is the Uint8Array view of linear memory.
+  Instruction *emitMemoryFill(Value *heapu8, Value *dest, Value *val,
+                              Value *size);
+
+  /// Emit memory.copy: copies \p size bytes from \p src to \p dest.
+  /// \p heapu8 is the Uint8Array view of linear memory.
+  Instruction *emitMemoryCopy(Value *heapu8, Value *dest, Value *src,
+                              Value *size);
+
+  /// Emit memory.init: copies \p size bytes from data segment at offset \p src
+  /// to \p dest in linear memory.
+  /// \p heapu8 is the Uint8Array view. \p dataSegs is the data segments array.
+  /// \p segIdx is a LiteralNumber for the segment index.
+  Instruction *emitMemoryInit(Value *heapu8, Value *dataSegs, Value *segIdx,
+                              Value *dest, Value *src, Value *size);
+
+  /// Emit data.drop: marks data segment \p segIdx as dropped.
+  /// \p dataSegs is the data segments array.
+  Instruction *emitDataDrop(Value *dataSegs, Value *segIdx);
+
  private:
   IRBuilder &builder_;
 };

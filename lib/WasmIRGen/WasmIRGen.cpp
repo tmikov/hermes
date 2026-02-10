@@ -271,9 +271,52 @@ void WasmIRGen::finalizeModule() {
   // Ensure insertion is at the top-level entry block.
   builder_.setInsertionBlock(tlEntry_);
 
+  // Initialize the data segments array (for memory.init/data.drop).
+  // Each element is a Uint8Array containing the segment's data bytes,
+  // or null for segments that have been dropped.
+  if (dataSegVar_) {
+    uint32_t numSegs = moduleInfo_.dataSegments.size();
+    auto *Uint8ArrayCtor =
+        builder_.createTryLoadGlobalPropertyInst("Uint8Array");
+    auto *segsArr = emitNew(
+        builder_.createTryLoadGlobalPropertyInst("Array"),
+        {builder_.getLiteralNumber(static_cast<double>(numSegs))});
+    builder_.createStoreFrameInst(tlScope, segsArr, dataSegVar_);
+
+    for (uint32_t si = 0; si < numSegs; ++si) {
+      const auto &seg = moduleInfo_.dataSegments[si];
+      if (seg.data.empty()) {
+        // Empty segment: store null (same as dropped).
+        builder_.createStorePropertyStrictInst(
+            builder_.getLiteralNull(),
+            segsArr,
+            builder_.getLiteralNumber(static_cast<double>(si)));
+        continue;
+      }
+
+      // Create a Uint8Array and fill it with segment data.
+      auto *segArr = emitNew(
+          Uint8ArrayCtor,
+          {builder_.getLiteralNumber(
+              static_cast<double>(seg.data.size()))});
+      for (uint32_t bi = 0; bi < seg.data.size(); ++bi) {
+        builder_.createStorePropertyStrictInst(
+            builder_.getLiteralNumber(
+                static_cast<double>(seg.data[bi])),
+            segArr,
+            builder_.getLiteralNumber(static_cast<double>(bi)));
+      }
+      builder_.createStorePropertyStrictInst(
+          segArr,
+          segsArr,
+          builder_.getLiteralNumber(static_cast<double>(si)));
+    }
+  }
+
   // Apply active data segments: copy bytes into linear memory.
   if (hasMemory) {
-    for (const auto &seg : moduleInfo_.dataSegments) {
+    for (uint32_t si = 0; si < moduleInfo_.dataSegments.size(); ++si) {
+      const auto &seg = moduleInfo_.dataSegments[si];
       if (seg.mode != WasmDataSegment::Mode::Active)
         continue;
       if (seg.data.empty())
@@ -309,6 +352,16 @@ void WasmIRGen::finalizeModule() {
             builder_.getLiteralNumber(static_cast<double>(seg.data[i])),
             heapu8,
             idx);
+      }
+
+      // After applying an active data segment, mark it as dropped.
+      if (dataSegVar_) {
+        auto *dataSegsArr = builder_.createLoadFrameInst(
+            tlScope, dataSegVar_);
+        builder_.createStorePropertyStrictInst(
+            builder_.getLiteralNull(),
+            dataSegsArr,
+            builder_.getLiteralNumber(static_cast<double>(si)));
       }
     }
   }
@@ -3129,6 +3182,17 @@ Value *WasmIRGen::loadMemView(MemView view) {
   return builder_.createLoadFrameInst(parentScopeInst_, memViewVars_[view]);
 }
 
+Variable *WasmIRGen::getOrCreateDataSegVar() {
+  if (!dataSegVar_) {
+    dataSegVar_ = builder_.createVariable(
+        topLevelVS_,
+        "data_segments",
+        Type::createAnyType(),
+        /* hidden */ true);
+  }
+  return dataSegVar_;
+}
+
 uint8_t WasmIRGen::getNaturalAlignLog2(llvh::StringRef op) {
   // 64-bit: natural alignment = 8 bytes (log2 = 3).
   if (op == "i64.load" || op == "i64.store" || op == "f64.load" ||
@@ -3887,6 +3951,62 @@ void WasmIRGen::onMemoryGrow() {
   phi->addEntry(oldPages, successBlock);
 
   push(phi);
+}
+
+// --- Bulk memory operations (N.1) ---
+
+void WasmIRGen::onMemoryFill() {
+  if (unreachable_)
+    return;
+
+  // Stack: [dest, val, size] (top = size).
+  Value *size = pop();
+  Value *val = pop();
+  Value *dest = pop();
+
+  auto *heapu8 = loadMemView(HEAPU8);
+  helpers_.emitMemoryFill(heapu8, dest, val, size);
+}
+
+void WasmIRGen::onMemoryCopy() {
+  if (unreachable_)
+    return;
+
+  // Stack: [dest, src, size] (top = size).
+  Value *size = pop();
+  Value *src = pop();
+  Value *dest = pop();
+
+  auto *heapu8 = loadMemView(HEAPU8);
+  helpers_.emitMemoryCopy(heapu8, dest, src, size);
+}
+
+void WasmIRGen::onMemoryInit(uint32_t segmentIndex) {
+  if (unreachable_)
+    return;
+
+  // Stack: [dest, src, size] (top = size).
+  Value *size = pop();
+  Value *src = pop();
+  Value *dest = pop();
+
+  auto *heapu8 = loadMemView(HEAPU8);
+  auto *dataSegs = builder_.createLoadFrameInst(
+      parentScopeInst_, getOrCreateDataSegVar());
+  auto *segIdx = builder_.getLiteralNumber(
+      static_cast<double>(segmentIndex));
+  helpers_.emitMemoryInit(heapu8, dataSegs, segIdx, dest, src, size);
+}
+
+void WasmIRGen::onDataDrop(uint32_t segmentIndex) {
+  if (unreachable_)
+    return;
+
+  auto *dataSegs = builder_.createLoadFrameInst(
+      parentScopeInst_, getOrCreateDataSegVar());
+  auto *segIdx = builder_.getLiteralNumber(
+      static_cast<double>(segmentIndex));
+  helpers_.emitDataDrop(dataSegs, segIdx);
 }
 
 // --- Table operations (J.1) ---

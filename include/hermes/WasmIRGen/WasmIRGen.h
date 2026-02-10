@@ -397,6 +397,20 @@ class WasmIRGen {
   /// Delegate exceptions to an outer handler at the given depth.
   void onDelegate(uint32_t depth);
 
+  // --- Bulk memory operations (N.1) ---
+
+  /// memory.fill: pop size, value, dest; fill dest..dest+size with value.
+  void onMemoryFill();
+
+  /// memory.copy: pop size, src, dest; copy src..src+size to dest.
+  void onMemoryCopy();
+
+  /// memory.init: pop size, offset, dest; copy data segment to memory.
+  void onMemoryInit(uint32_t segmentIndex);
+
+  /// data.drop: mark data segment as no longer needed.
+  void onDataDrop(uint32_t segmentIndex);
+
   // --- Table operations (J.1) ---
 
   /// table.get: pop index, push the function reference at that index.
@@ -477,6 +491,11 @@ class WasmIRGen {
   /// For i64 globals, globalVars_[globalSlotIndex_[i]] is lo32 and
   /// globalVars_[globalSlotIndex_[i]+1] is hi32.
   std::vector<uint32_t> globalSlotIndex_;
+
+  /// Variable holding a JS Array of data segments in the top-level scope.
+  /// Each element is either a Uint8Array (segment bytes) or null (dropped).
+  /// Only populated if the module has data segments.
+  Variable *dataSegVar_ = nullptr;
 
   /// The VariableScope for the top-level function.
   VariableScope *topLevelVS_ = nullptr;
@@ -617,6 +636,10 @@ class WasmIRGen {
   /// Load a memory view variable from the top-level scope.
   /// \return the LoadFrameInst for the view.
   Value *loadMemView(MemView view);
+
+  /// Get or lazily create the data segments Variable in topLevelVS_.
+  /// Called from onMemoryInit/onDataDrop during function body compilation.
+  Variable *getOrCreateDataSegVar();
 
   /// Emit `new Constructor(args)` and return the constructed object.
   Value *emitNew(Value *constructor, llvh::ArrayRef<Value *> args);

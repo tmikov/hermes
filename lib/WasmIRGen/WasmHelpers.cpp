@@ -355,5 +355,42 @@ Instruction *WasmHelpers::emitMatchException(
       BuiltinMethod::HermesBuiltin_wasmMatchException, {caught, tagIndex});
 }
 
+Instruction *WasmHelpers::emitMemoryFill(
+    Value *heapu8,
+    Value *dest,
+    Value *val,
+    Value *size) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmMemoryFill,
+      {heapu8, dest, val, size});
+}
+
+Instruction *WasmHelpers::emitMemoryCopy(
+    Value *heapu8,
+    Value *dest,
+    Value *src,
+    Value *size) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmMemoryCopy,
+      {heapu8, dest, src, size});
+}
+
+Instruction *WasmHelpers::emitMemoryInit(
+    Value *heapu8,
+    Value *dataSegs,
+    Value *segIdx,
+    Value *dest,
+    Value *src,
+    Value *size) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmMemoryInit,
+      {heapu8, dataSegs, segIdx, dest, src, size});
+}
+
+Instruction *WasmHelpers::emitDataDrop(Value *dataSegs, Value *segIdx) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmDataDrop, {dataSegs, segIdx});
+}
+
 } // namespace wasm
 } // namespace hermes

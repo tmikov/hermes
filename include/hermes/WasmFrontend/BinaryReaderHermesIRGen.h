@@ -239,6 +239,16 @@ class BinaryReaderHermesIRGen : public wabt::BinaryReaderNop {
   wabt::Result OnTableSizeExpr(wabt::Index tableIndex) override;
   wabt::Result OnTableGrowExpr(wabt::Index tableIndex) override;
 
+  // --- Bulk memory operations ---
+  wabt::Result OnMemoryFillExpr(wabt::Index memidx) override;
+  wabt::Result OnMemoryCopyExpr(
+      wabt::Index destmemidx,
+      wabt::Index srcmemidx) override;
+  wabt::Result OnMemoryInitExpr(
+      wabt::Index segment_index,
+      wabt::Index memidx) override;
+  wabt::Result OnDataDropExpr(wabt::Index segment_index) override;
+
   // --- Module end ---
   wabt::Result EndModule() override;
 
