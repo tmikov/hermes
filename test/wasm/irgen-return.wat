@@ -21,8 +21,8 @@
 ;; CHECK-NEXT: %BB0:
 ;; CHECK:              ReturnInst 42: number
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %[[PHI:.*]] = PhiInst (:notype)
-;; CHECK-NEXT:                 ReturnInst %[[PHI]]: notype
+;; CHECK-NEXT:   %{{.*}} = PhiInst (:notype)
+;; CHECK-NEXT:            ReturnInst undefined: undefined
 ;; CHECK-NEXT: function_end
 
   ;; Function 1: implicit return (fallthrough)

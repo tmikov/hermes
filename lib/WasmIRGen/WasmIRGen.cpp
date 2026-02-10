@@ -847,6 +847,9 @@ void WasmIRGen::endFunction() {
 
   // Emit a return if the current block is not terminated.
   if (!isCurrentBlockTerminated()) {
+    // Clear unreachable for the final return emission — we need to access
+    // the value stack directly to get the function result phi.
+    unreachable_ = false;
     const WasmFuncType &funcType =
         moduleInfo_.getFunctionType(currentFuncIndex_);
     if (!funcType.results.empty() && !valueStack_.empty()) {
@@ -864,8 +867,9 @@ void WasmIRGen::endFunction() {
   }
 
   // Remove dead blocks that were created after unconditional branches/returns
-  // but never received instructions. The BCGen verifier requires every block
-  // to be reachable and have a terminator.
+  // but never received instructions. These blocks have no terminator (they're
+  // unreachable dead code). We need to erase them since BCGen requires all
+  // blocks to have terminators and be reachable.
   llvh::SmallVector<BasicBlock *, 4> deadBlocks;
   for (auto &BB : currentFunc_->getBasicBlockList()) {
     if (BB.empty() || !llvh::isa<TerminatorInst>(&BB.back())) {
@@ -890,10 +894,14 @@ void WasmIRGen::endFunction() {
 }
 
 void WasmIRGen::onI32Const(int32_t value) {
+  if (unreachable_)
+    return;
   push(builder_.getLiteralNumber(static_cast<double>(value)));
 }
 
 void WasmIRGen::onI64Const(int64_t value) {
+  if (unreachable_)
+    return;
   // Split i64 into lo32 and hi32 (Phase 1 representation).
   auto lo = static_cast<int32_t>(value & 0xFFFFFFFF);
   auto hi = static_cast<int32_t>(
@@ -904,14 +912,20 @@ void WasmIRGen::onI64Const(int64_t value) {
 }
 
 void WasmIRGen::onF32Const(float value) {
+  if (unreachable_)
+    return;
   push(builder_.getLiteralNumber(static_cast<double>(value)));
 }
 
 void WasmIRGen::onF64Const(double value) {
+  if (unreachable_)
+    return;
   push(builder_.getLiteralNumber(value));
 }
 
 void WasmIRGen::onLocalGet(uint32_t localIndex) {
+  if (unreachable_)
+    return;
   assert(localIndex < localSlotIndex_.size() && "localIndex out of range");
   uint32_t slot = localSlotIndex_[localIndex];
   if (localTypes_[localIndex] == WasmValType::I64) {
@@ -924,6 +938,8 @@ void WasmIRGen::onLocalGet(uint32_t localIndex) {
 }
 
 void WasmIRGen::onLocalSet(uint32_t localIndex) {
+  if (unreachable_)
+    return;
   assert(localIndex < localSlotIndex_.size() && "localIndex out of range");
   uint32_t slot = localSlotIndex_[localIndex];
   if (localTypes_[localIndex] == WasmValType::I64) {
@@ -937,6 +953,8 @@ void WasmIRGen::onLocalSet(uint32_t localIndex) {
 }
 
 void WasmIRGen::onLocalTee(uint32_t localIndex) {
+  if (unreachable_)
+    return;
   assert(localIndex < localSlotIndex_.size() && "localIndex out of range");
   uint32_t slot = localSlotIndex_[localIndex];
   if (localTypes_[localIndex] == WasmValType::I64) {
@@ -982,6 +1000,8 @@ void WasmIRGen::onReturn() {
 }
 
 void WasmIRGen::onDrop() {
+  if (unreachable_)
+    return;
   if (isTopI64()) {
     popI64();
   } else {
@@ -1283,6 +1303,18 @@ void WasmIRGen::onI32Eqz() {
 // --- Control flow (D.6, D.7) ---
 
 void WasmIRGen::onBlock(const std::vector<WasmValType> &resultTypes) {
+  if (unreachable_) {
+    // In unreachable code, push a lightweight entry so onEnd can pop it.
+    ControlEntry entry;
+    entry.kind = ControlEntry::Block;
+    entry.contBlock = nullptr;
+    entry.resultTypes = resultTypes;
+    entry.stackHeight = valueStack_.size();
+    entry.outerUnreachable = true;
+    controlStack_.push_back(std::move(entry));
+    return;
+  }
+
   // Create a continuation basic block (target of br 0 = after end).
   auto *contBlock = builder_.createBasicBlock(currentFunc_);
 
@@ -1291,7 +1323,7 @@ void WasmIRGen::onBlock(const std::vector<WasmValType> &resultTypes) {
   entry.contBlock = contBlock;
   entry.resultTypes = resultTypes;
   entry.stackHeight = valueStack_.size();
-  entry.outerUnreachable = unreachable_;
+  entry.outerUnreachable = false;
 
   // Create phi nodes in the continuation block (i64 results get 2 phis).
   if (!resultTypes.empty()) {
@@ -1302,6 +1334,19 @@ void WasmIRGen::onBlock(const std::vector<WasmValType> &resultTypes) {
 }
 
 void WasmIRGen::onLoop(const std::vector<WasmValType> &resultTypes) {
+  if (unreachable_) {
+    // In unreachable code, push a lightweight entry so onEnd can pop it.
+    ControlEntry entry;
+    entry.kind = ControlEntry::Loop;
+    entry.contBlock = nullptr;
+    entry.endBlock = nullptr;
+    entry.resultTypes = resultTypes;
+    entry.stackHeight = valueStack_.size();
+    entry.outerUnreachable = true;
+    controlStack_.push_back(std::move(entry));
+    return;
+  }
+
   // Create the loop header block. br targeting this loop jumps here.
   auto *headerBlock = builder_.createBasicBlock(currentFunc_);
 
@@ -1314,7 +1359,7 @@ void WasmIRGen::onLoop(const std::vector<WasmValType> &resultTypes) {
   entry.endBlock = endBlock; // fallthrough after end goes here
   entry.resultTypes = resultTypes;
   entry.stackHeight = valueStack_.size();
-  entry.outerUnreachable = unreachable_;
+  entry.outerUnreachable = false;
 
   // Result phis go in the end block (for fallthrough values).
   // i64 results get 2 phis each.
@@ -1323,7 +1368,7 @@ void WasmIRGen::onLoop(const std::vector<WasmValType> &resultTypes) {
   }
 
   // Branch from the current block to the loop header.
-  if (!unreachable_ && !isCurrentBlockTerminated()) {
+  if (!isCurrentBlockTerminated()) {
     builder_.createBranchInst(headerBlock);
   }
 
@@ -1389,6 +1434,9 @@ void WasmIRGen::onElse() {
       // The then-block falls through to mergeBlock.
       addBranchPhiOperands(entry);
       builder_.createBranchInst(entry.contBlock);
+      // Mark that the merge block has been targeted (from the then arm),
+      // so onEnd knows the merge block is reachable.
+      entry.branchTargeted = true;
     }
 
     // Set insertion point to the elseBlock.
@@ -1412,12 +1460,26 @@ void WasmIRGen::onEnd() {
   controlStack_.pop_back();
 
   if (entry.kind == ControlEntry::Try) {
+    if (entry.outerUnreachable) {
+      // Try was pushed in unreachable context — no real IR generated.
+      valueStack_.resize(entry.stackHeight);
+      valueStackIsI64Hi_.resize(entry.stackHeight);
+      for (auto t : entry.resultTypes) {
+        if (t == WasmValType::I64) {
+          push(builder_.getLiteralUndefined());
+          push(builder_.getLiteralUndefined());
+          valueStackIsI64Hi_.back() = true;
+        } else {
+          push(builder_.getLiteralUndefined());
+        }
+      }
+      unreachable_ = true;
+      return;
+    }
+
     bool fallsThrough = !unreachable_ && !isCurrentBlockTerminated();
 
-    if (entry.outerUnreachable) {
-      // Try was pushed in unreachable context — just restore state.
-      unreachable_ = true;
-    } else if (!entry.inCatch) {
+    if (!entry.inCatch) {
       // Try with no catch clauses (shouldn't happen in valid Wasm, but
       // handle gracefully). End the try body.
       if (fallsThrough) {
@@ -1455,14 +1517,31 @@ void WasmIRGen::onEnd() {
       unreachable_ = !fallsThrough && !entry.branchTargeted;
     }
 
-    if (entry.outerUnreachable)
-      unreachable_ = true;
-
     // Restore value stack and push result phis.
     valueStack_.resize(entry.stackHeight);
     valueStackIsI64Hi_.resize(entry.stackHeight);
     pushResultPhis(entry);
   } else if (entry.kind == ControlEntry::Block || entry.kind == ControlEntry::If) {
+    if (entry.outerUnreachable) {
+      // This block/if was entered in unreachable context (e.g., inside dead
+      // code after a br/return). No real IR was generated. Just restore state
+      // and remain unreachable. Push placeholder values for the result types
+      // so the value stack has the right shape for outer code.
+      valueStack_.resize(entry.stackHeight);
+      valueStackIsI64Hi_.resize(entry.stackHeight);
+      for (auto t : entry.resultTypes) {
+        if (t == WasmValType::I64) {
+          push(builder_.getLiteralUndefined());
+          push(builder_.getLiteralUndefined());
+          valueStackIsI64Hi_.back() = true;
+        } else {
+          push(builder_.getLiteralUndefined());
+        }
+      }
+      unreachable_ = true;
+      return;
+    }
+
     bool fallsThrough = !unreachable_ && !isCurrentBlockTerminated();
 
     if (fallsThrough) {
@@ -1472,8 +1551,7 @@ void WasmIRGen::onEnd() {
     }
 
     // For If without else: the else block branches directly to merge.
-    if (entry.kind == ControlEntry::If && entry.elseBlock != nullptr &&
-        !entry.outerUnreachable) {
+    if (entry.kind == ControlEntry::If && entry.elseBlock != nullptr) {
       auto *savedBlock = builder_.getInsertionBlock();
       builder_.setInsertionBlock(entry.elseBlock);
       builder_.createBranchInst(entry.contBlock);
@@ -1490,13 +1568,32 @@ void WasmIRGen::onEnd() {
         entry.kind == ControlEntry::If && entry.elseBlock != nullptr;
     unreachable_ = !fallsThrough && !entry.branchTargeted && !ifWithoutElse;
 
-    // Restore unreachable if the outer context was unreachable.
-    if (entry.outerUnreachable)
-      unreachable_ = true;
+    // Restore the value stack to the height it was at when the block started.
+    // This removes any leftover values from unreachable code paths inside the
+    // block (e.g., a nested block whose result was pushed but is dead).
+    valueStack_.resize(entry.stackHeight);
+    valueStackIsI64Hi_.resize(entry.stackHeight);
 
     // Push phi results onto the value stack (i64 results push 2 values).
     pushResultPhis(entry);
   } else if (entry.kind == ControlEntry::Loop) {
+    if (entry.outerUnreachable) {
+      // Loop entered in unreachable context — no real IR generated.
+      valueStack_.resize(entry.stackHeight);
+      valueStackIsI64Hi_.resize(entry.stackHeight);
+      for (auto t : entry.resultTypes) {
+        if (t == WasmValType::I64) {
+          push(builder_.getLiteralUndefined());
+          push(builder_.getLiteralUndefined());
+          valueStackIsI64Hi_.back() = true;
+        } else {
+          push(builder_.getLiteralUndefined());
+        }
+      }
+      unreachable_ = true;
+      return;
+    }
+
     bool fallsThrough = !unreachable_ && !isCurrentBlockTerminated();
 
     if (fallsThrough) {
@@ -3090,6 +3187,12 @@ void WasmIRGen::warnUnsupported(
 // --- Helper methods ---
 
 Value *WasmIRGen::pop() {
+  if (unreachable_) {
+    // In unreachable code, return a placeholder without modifying the real
+    // value stack. The stack will be restored by onEnd via resize to
+    // stackHeight.
+    return builder_.getLiteralUndefined();
+  }
   assert(!valueStack_.empty() && "value stack underflow");
   Value *v = valueStack_.back();
   valueStack_.pop_back();
@@ -3098,11 +3201,15 @@ Value *WasmIRGen::pop() {
 }
 
 void WasmIRGen::push(Value *v) {
+  if (unreachable_)
+    return;
   valueStack_.push_back(v);
   valueStackIsI64Hi_.push_back(false);
 }
 
 void WasmIRGen::pushI64(Value *lo, Value *hi) {
+  if (unreachable_)
+    return;
   valueStack_.push_back(lo);
   valueStackIsI64Hi_.push_back(false); // lo32 is not the hi part
   valueStack_.push_back(hi);
@@ -3110,6 +3217,10 @@ void WasmIRGen::pushI64(Value *lo, Value *hi) {
 }
 
 std::pair<Value *, Value *> WasmIRGen::popI64() {
+  if (unreachable_) {
+    auto *undef = builder_.getLiteralUndefined();
+    return {undef, undef};
+  }
   assert(valueStack_.size() >= 2 && "value stack underflow for i64 pop");
   assert(valueStackIsI64Hi_.back() && "expected i64 hi32 on top of stack");
   Value *hi = valueStack_.back();
@@ -3123,6 +3234,8 @@ std::pair<Value *, Value *> WasmIRGen::popI64() {
 }
 
 bool WasmIRGen::isTopI64() const {
+  if (unreachable_)
+    return false;
   return !valueStackIsI64Hi_.empty() && valueStackIsI64Hi_.back();
 }
 
