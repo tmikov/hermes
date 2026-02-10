@@ -12,6 +12,7 @@
 #include "hermes/WasmIRGen/WasmIRGen.h"
 
 #include "wabt/binary-reader.h"
+#include "wabt/binary-reader-nop.h"
 
 namespace hermes {
 
@@ -40,6 +41,23 @@ bool compileWasmModule(
   }
 
   return true;
+}
+
+bool validateWasmBinary(const uint8_t *buffer, size_t size) {
+  // Use a silent reader that suppresses error messages (OnError returns true
+  // = "handled", preventing wabt from printing to stderr).
+  class SilentReader : public wabt::BinaryReaderNop {
+   public:
+    bool OnError(const wabt::Error &) override {
+      return true;
+    }
+  };
+
+  SilentReader reader;
+  wabt::ReadBinaryOptions options;
+  options.features.enable_exceptions();
+  wabt::Result result = wabt::ReadBinary(buffer, size, &reader, options);
+  return wabt::Succeeded(result);
 }
 
 } // namespace hermes

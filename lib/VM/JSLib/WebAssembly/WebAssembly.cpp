@@ -7,16 +7,29 @@
 
 //===----------------------------------------------------------------------===//
 /// \file
-/// Initialize the WebAssembly namespace object and its error types:
-/// WebAssembly.CompileError, WebAssembly.LinkError, WebAssembly.RuntimeError.
+/// Initialize the WebAssembly namespace object, its error types
+/// (CompileError, LinkError, RuntimeError), and static methods
+/// (validate, compile, instantiate).
 //===----------------------------------------------------------------------===//
 
 #include "../JSLibInternal.h"
 
+#include "hermes/VM/JSArrayBuffer.h"
 #include "hermes/VM/JSError.h"
+#include "hermes/VM/JSTypedArray.h"
 #include "hermes/VM/Runtime.h"
 
 namespace hermes {
+
+/// Weak declaration of validateWasmBinary from WasmFrontend.
+/// When the WasmFrontend library is linked (full VM), this resolves to the
+/// real implementation. When it's not linked (lean VM), it resolves to the
+/// weak default which returns false.
+__attribute__((__weak__)) bool
+validateWasmBinary(const uint8_t *buffer, size_t size) {
+  return false;
+}
+
 namespace vm {
 
 /// Constructor function for WebAssembly error types. Works the same as
@@ -189,6 +202,54 @@ static void createWasmErrorType(
       lv.cons.getHermesValue());
 }
 
+/// Extract raw bytes from a BufferSource argument (ArrayBuffer or TypedArray).
+/// \param arg the JS argument value.
+/// \param[out] data pointer to the first byte.
+/// \param[out] size number of bytes.
+/// \returns true if extraction succeeded, false if the argument is not a valid
+///   BufferSource (caller should throw TypeError).
+static bool extractBufferSourceBytes(
+    Runtime &runtime,
+    Handle<> arg,
+    const uint8_t *&data,
+    size_t &size) {
+  if (auto *ab = dyn_vmcast<JSArrayBuffer>(*arg)) {
+    if (!ab->attached()) {
+      return false;
+    }
+    data = ab->getDataBlock(runtime);
+    size = ab->size();
+    return true;
+  }
+  if (auto *ta = dyn_vmcast<JSTypedArrayBase>(*arg)) {
+    if (!ta->attached(runtime)) {
+      return false;
+    }
+    data = ta->data(runtime);
+    size = ta->getByteLength();
+    return true;
+  }
+  return false;
+}
+
+/// WebAssembly.validate(bytes) — validate a Wasm binary module.
+/// Returns true if the bytes form a valid Wasm module, false otherwise.
+static CallResult<HermesValue>
+wasmValidate(void *context, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  const uint8_t *data = nullptr;
+  size_t size = 0;
+  if (!extractBufferSourceBytes(runtime, args.getArgHandle(0), data, size)) {
+    return runtime.raiseTypeError(
+        "WebAssembly.validate(): argument must be an ArrayBuffer or "
+        "typed array");
+  }
+
+  bool valid = hermes::validateWasmBinary(data, size);
+  return HermesValue::encodeBoolValue(valid);
+}
+
 void createWebAssemblyObject(Runtime &runtime, MutableHandle<JSObject> result) {
   struct : public Locals {
     PinnedValue<JSObject> wasmObj;
@@ -264,6 +325,15 @@ void createWebAssemblyObject(Runtime &runtime, MutableHandle<JSObject> result) {
       runtime.wasmRuntimeErrorConstructor);
   (void)res;
   assert(res != ExecutionStatus::EXCEPTION && *res);
+
+  // Register static methods.
+  defineMethod(
+      runtime,
+      lv.wasmObj,
+      Predefined::getSymbolID(Predefined::validate),
+      nullptr,
+      wasmValidate,
+      1);
 
   result.castAndSetHermesValue<JSObject>(lv.wasmObj.getHermesValue());
 }

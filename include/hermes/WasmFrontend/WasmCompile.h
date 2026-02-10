@@ -28,6 +28,12 @@ bool compileWasmModule(
     Module &M,
     std::string &errorMsg);
 
+/// Validate a Wasm binary module without compiling it.
+/// \param buffer The raw .wasm bytes.
+/// \param size Size in bytes.
+/// \returns true if the module is valid.
+bool validateWasmBinary(const uint8_t *buffer, size_t size);
+
 } // namespace hermes
 
 #endif // HERMES_WASMFRONTEND_WASMCOMPILE_H
