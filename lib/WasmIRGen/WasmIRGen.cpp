@@ -2745,5 +2745,114 @@ void WasmIRGen::onStore(
   builder_.createStorePropertyStrictInst(value, viewVal, idx);
 }
 
+// --- Memory size/grow (H.2) ---
+
+void WasmIRGen::onMemorySize() {
+  if (unreachable_)
+    return;
+
+  // Load the HEAPU8 view and get its .length property.
+  auto *heapu8 = loadMemView(HEAPU8);
+  auto *len = builder_.createLoadPropertyInst(
+      heapu8, builder_.getLiteralString("length"));
+
+  // pages = length >>> 16 (divide by 65536).
+  auto *pages = builder_.createBinaryOperatorInst(
+      len,
+      builder_.getLiteralNumber(16),
+      ValueKind::BinaryUnsignedRightShiftInstKind);
+
+  push(pages);
+}
+
+void WasmIRGen::onMemoryGrow() {
+  if (unreachable_)
+    return;
+
+  // Pop delta (number of pages to grow).
+  Value *delta = pop();
+
+  // Load the HEAPU8 view.
+  auto *heapu8 = loadMemView(HEAPU8);
+
+  // Compute old page count: oldPages = HEAPU8.length >>> 16.
+  auto *len = builder_.createLoadPropertyInst(
+      heapu8, builder_.getLiteralString("length"));
+  auto *oldPages = builder_.createBinaryOperatorInst(
+      len,
+      builder_.getLiteralNumber(16),
+      ValueKind::BinaryUnsignedRightShiftInstKind);
+
+  // Get maximum page count from module info.
+  uint32_t maxPages = 65536; // Default: 4GB (max Wasm memory).
+  if (!moduleInfo_.memories.empty()) {
+    if (moduleInfo_.memories[0].limits.hasMaximum) {
+      maxPages = moduleInfo_.memories[0].limits.maximum;
+    }
+  } else {
+    for (auto &imp : moduleInfo_.imports) {
+      if (imp.kind == WasmExternalKind::Memory) {
+        if (imp.memoryType.limits.hasMaximum) {
+          maxPages = imp.memoryType.limits.maximum;
+        }
+        break;
+      }
+    }
+  }
+
+  // Call the grow builtin: wasmMemoryGrow(heapu8, delta, maxPages).
+  // Returns new ArrayBuffer on success, or -1 on failure.
+  auto *result = helpers_.emitMemoryGrow(
+      heapu8, delta, builder_.getLiteralNumber(maxPages));
+
+  // Check if result === -1 (failure).
+  auto *negOne = builder_.getLiteralNumber(-1);
+  auto *isFailure = builder_.createBinaryOperatorInst(
+      result, negOne, ValueKind::BinaryStrictlyEqualInstKind);
+
+  // Create blocks for the conditional.
+  auto *successBlock = builder_.createBasicBlock(currentFunc_);
+  auto *failBlock = builder_.createBasicBlock(currentFunc_);
+  auto *mergeBlock = builder_.createBasicBlock(currentFunc_);
+
+  builder_.createCondBranchInst(isFailure, failBlock, successBlock);
+
+  // --- Fail block: push -1 ---
+  builder_.setInsertionBlock(failBlock);
+  auto *failVal = builder_.getLiteralNumber(-1);
+  builder_.createBranchInst(mergeBlock);
+
+  // --- Success block: create new views and store them ---
+  builder_.setInsertionBlock(successBlock);
+
+  // result is the new ArrayBuffer. Create 8 typed array views from it.
+  static const char *ctorNames[NUM_MEM_VIEWS] = {
+      "Int8Array",
+      "Uint8Array",
+      "Int16Array",
+      "Uint16Array",
+      "Int32Array",
+      "Uint32Array",
+      "Float32Array",
+      "Float64Array",
+  };
+  for (uint8_t i = 0; i < NUM_MEM_VIEWS; ++i) {
+    auto *ctor = builder_.createTryLoadGlobalPropertyInst(ctorNames[i]);
+    auto *view = emitNew(ctor, {result});
+    builder_.createStoreFrameInst(parentScopeInst_, view, memViewVars_[i]);
+  }
+
+  // oldPages was computed before the branch; use it as the success value.
+  builder_.createBranchInst(mergeBlock);
+
+  // --- Merge block: phi for the result ---
+  builder_.setInsertionBlock(mergeBlock);
+  auto *phi = builder_.createPhiInst();
+  phi->addEntry(failVal, failBlock);
+  phi->addEntry(oldPages, successBlock);
+
+  push(phi);
+}
+
 } // namespace wasm
 } // namespace hermes

@@ -221,6 +221,10 @@ PRIVATE_BUILTIN(wasmF32ConvertI64U)
 PRIVATE_BUILTIN(wasmI64ReinterpretF64)
 PRIVATE_BUILTIN(wasmF64ReinterpretI64)
 
+// memory.grow helper (H.2). Takes (heapu8View, delta, maxPages).
+// Returns new ArrayBuffer on success, or -1 on failure.
+PRIVATE_BUILTIN(wasmMemoryGrow)
+
 JS_BUILTIN(spawnAsync)
 MARK_FIRST_JS_BUILTIN(spawnAsync)
 JS_BUILTIN(makeAsyncIterator)

@@ -1306,17 +1306,14 @@ wabt::Result BinaryReaderHermesIRGen::OnStoreExpr(
 
 wabt::Result BinaryReaderHermesIRGen::OnMemorySizeExpr(wabt::Index memidx) {
   if (inFunctionBody_ && irgen_) {
-    // memory.size: 0 inputs, 1 output. Deferred to Part H.
-    irgen_->warnUnsupported("memory.size", 0, 1);
+    irgen_->onMemorySize();
   }
   return wabt::Result::Ok;
 }
 
 wabt::Result BinaryReaderHermesIRGen::OnMemoryGrowExpr(wabt::Index memidx) {
   if (inFunctionBody_ && irgen_) {
-    // memory.grow: 1 input (delta), 1 output (old size or -1). Deferred to
-    // Part H.
-    irgen_->warnUnsupported("memory.grow", 1, 1);
+    irgen_->onMemoryGrow();
   }
   return wabt::Result::Ok;
 }

@@ -170,6 +170,12 @@ class WasmHelpers {
   /// f64.reinterpret_i64: bitcast i64 to f64. Takes split lo/hi.
   Instruction *emitF64ReinterpretI64(Value *lo, Value *hi);
 
+  // --- Memory helpers (H.2) ---
+
+  /// Emit memory.grow: takes (heapu8View, delta, maxPages).
+  /// Returns new ArrayBuffer on success, or -1 on failure.
+  Instruction *emitMemoryGrow(Value *heapu8, Value *delta, Value *maxPages);
+
  private:
   IRBuilder &builder_;
 };

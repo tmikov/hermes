@@ -354,6 +354,15 @@ class WasmIRGen {
       uint32_t alignLog2,
       uint32_t offset);
 
+  // --- Memory size/grow (H.2) ---
+
+  /// Push the current memory size in pages onto the value stack.
+  void onMemorySize();
+
+  /// Pop delta, grow memory by that many pages.
+  /// Pushes old page count on success, or -1 on failure.
+  void onMemoryGrow();
+
   // --- Unsupported opcode handling (D.13) ---
 
   /// Emit a warning for an unsupported opcode. Pops \p numInputs values

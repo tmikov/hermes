@@ -318,5 +318,13 @@ Instruction *WasmHelpers::emitF64ReinterpretI64(Value *lo, Value *hi) {
       BuiltinMethod::HermesBuiltin_wasmF64ReinterpretI64, {lo, hi});
 }
 
+// --- Memory helpers (H.2) ---
+
+Instruction *WasmHelpers::emitMemoryGrow(
+    Value *heapu8, Value *delta, Value *maxPages) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmMemoryGrow, {heapu8, delta, maxPages});
+}
+
 } // namespace wasm
 } // namespace hermes

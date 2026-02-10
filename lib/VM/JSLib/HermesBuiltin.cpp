@@ -13,6 +13,7 @@
 #include "hermes/VM/JSArray.h"
 #include "hermes/VM/JSArrayBuffer.h"
 #include "hermes/VM/JSLib.h"
+#include "hermes/VM/JSTypedArray.h"
 #include "hermes/VM/JSRegExp.h"
 #include "hermes/VM/Operations.h"
 #include "hermes/VM/PrimitiveBox.h"
@@ -833,6 +834,62 @@ CallResult<HermesValue> wasmF64ReinterpretI64(void *, Runtime &runtime) {
   double result;
   memcpy(&result, &bits, sizeof(result));
   return HermesValue::encodeTrustedNumberValue(result);
+}
+
+/// memory.grow helper (H.2).
+/// Args: (heapu8View, delta, maxPages).
+/// Creates a new, larger ArrayBuffer and copies the old data into it.
+/// Returns the new ArrayBuffer on success, or -1 on failure.
+CallResult<HermesValue> wasmMemoryGrow(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  // arg0 is the HEAPU8 view (Uint8Array).
+  auto *heapu8 = vmcast<JSTypedArrayBase>(args.getArg(0));
+  auto delta =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(1).getNumber()));
+  auto maxPages =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(2).getNumber()));
+
+  // Get old buffer size.
+  JSArrayBuffer *oldBuf = heapu8->getBuffer(runtime);
+  uint32_t oldSize = static_cast<uint32_t>(oldBuf->size());
+  uint32_t oldPages = oldSize / 65536;
+
+  // Check for overflow and max pages.
+  uint64_t newPages64 = static_cast<uint64_t>(oldPages) + delta;
+  if (newPages64 > maxPages || newPages64 > 65536) {
+    // 65536 pages = 4GB, the maximum Wasm memory.
+    return HermesValue::encodeTrustedNumberValue(-1);
+  }
+  uint32_t newPages = static_cast<uint32_t>(newPages64);
+  uint32_t newSize = newPages * 65536;
+
+  // Create a new ArrayBuffer with the larger size.
+  struct : public Locals {
+    PinnedValue<JSArrayBuffer> newBuf;
+    PinnedValue<JSArrayBuffer> oldBufHandle;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  lv.oldBufHandle = oldBuf;
+  lv.newBuf = JSArrayBuffer::create(
+      runtime, Handle<JSObject>::vmcast(&runtime.arrayBufferPrototype));
+
+  // Allocate the new data block (zero-initialized for the grown portion).
+  if (JSArrayBuffer::createDataBlock(runtime, lv.newBuf, newSize, true) ==
+      ExecutionStatus::EXCEPTION) {
+    // Allocation failed — return -1 (no trap, just failure).
+    runtime.clearThrownValue();
+    return HermesValue::encodeTrustedNumberValue(-1);
+  }
+
+  // Copy old data to the new buffer.
+  if (oldSize > 0) {
+    JSArrayBuffer::copyDataBlockBytes(
+        runtime, *lv.newBuf, 0, *lv.oldBufHandle, 0, oldSize);
+  }
+
+  return lv.newBuf.getHermesValue();
 }
 
 namespace {
@@ -1827,6 +1884,12 @@ void createHermesBuiltins(Runtime &runtime) {
       P::wasmF64ReinterpretI64,
       wasmF64ReinterpretI64,
       2);
+  // Memory helpers (H.2).
+  defineInternMethod(
+      B::HermesBuiltin_wasmMemoryGrow,
+      P::wasmMemoryGrow,
+      wasmMemoryGrow,
+      3);
 }
 
 } // namespace vm
