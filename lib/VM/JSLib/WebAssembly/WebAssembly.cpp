@@ -21,6 +21,7 @@
 #include "hermes/VM/JSWebAssemblyInstance.h"
 #include "hermes/VM/JSWebAssemblyMemory.h"
 #include "hermes/VM/JSWebAssemblyModule.h"
+#include "hermes/VM/JSWebAssemblyTable.h"
 #include "hermes/VM/Runtime.h"
 #include "hermes/VM/RuntimeModule.h"
 #include "hermes/WasmFrontend/WasmModuleData.h"
@@ -909,6 +910,365 @@ wasmMemoryGrowMethod(void *context, Runtime &runtime) {
 }
 
 //===----------------------------------------------------------------------===//
+// WebAssembly.Table
+//===----------------------------------------------------------------------===//
+
+/// new WebAssembly.Table({element: "anyfunc", initial: N, maximum: M}) —
+/// create a table for function references.
+static CallResult<HermesValue>
+wasmTableConstructor(void *context, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  if (!args.isConstructorCall()) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Table() must be called with 'new'");
+  }
+
+  auto optionsHandle = args.getArgHandle(0);
+  if (!optionsHandle->isObject()) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Table(): argument must be a table descriptor object");
+  }
+
+  struct : public Locals {
+    PinnedValue<JSObject> options;
+    PinnedValue<> elementVal;
+    PinnedValue<> initialVal;
+    PinnedValue<> maximumVal;
+    PinnedValue<JSWebAssemblyTable> tbl;
+    PinnedValue<JSArray> arr;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  lv.options.castAndSetHermesValue<JSObject>(optionsHandle.getHermesValue());
+
+  // Read "element" property (required).
+  auto elementRes = JSObject::getNamed_RJS(
+      lv.options,
+      runtime,
+      Predefined::getSymbolID(Predefined::element));
+  if (LLVM_UNLIKELY(elementRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  lv.elementVal = std::move(*elementRes);
+
+  // The element type must be "anyfunc" (or "funcref", which is equivalent).
+  if (!lv.elementVal->isString()) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Table(): 'element' must be a string");
+  }
+  auto *elemStr = lv.elementVal->getString();
+  bool isAnyfunc = elemStr->equals(
+      runtime.getPredefinedString(Predefined::anyfunc));
+  // Also accept "funcref" as an alias for "anyfunc" per the spec.
+  if (!isAnyfunc) {
+    auto funcrefRes = StringPrimitive::create(
+        runtime, ASCIIRef("funcref", 7));
+    if (LLVM_UNLIKELY(funcrefRes == ExecutionStatus::EXCEPTION)) {
+      return ExecutionStatus::EXCEPTION;
+    }
+    auto *funcrefStr = vmcast<StringPrimitive>(*funcrefRes);
+    if (!elemStr->equals(funcrefStr)) {
+      return runtime.raiseTypeError(
+          "WebAssembly.Table(): 'element' must be 'anyfunc' or 'funcref'");
+    }
+  }
+
+  // Read "initial" property (required).
+  auto initialRes = JSObject::getNamed_RJS(
+      lv.options,
+      runtime,
+      Predefined::getSymbolID(Predefined::initial));
+  if (LLVM_UNLIKELY(initialRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  lv.initialVal = std::move(*initialRes);
+
+  if (lv.initialVal->isUndefined()) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Table(): 'initial' is required");
+  }
+
+  auto initialRes2 = toNumber_RJS(runtime, lv.initialVal);
+  if (LLVM_UNLIKELY(initialRes2 == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  double initialDbl = initialRes2->getDouble();
+  if (initialDbl < 0 || initialDbl > 0xFFFFFFFF ||
+      initialDbl != std::floor(initialDbl)) {
+    return runtime.raiseRangeError(
+        "WebAssembly.Table(): 'initial' must be a non-negative integer");
+  }
+  uint32_t initialSize = static_cast<uint32_t>(initialDbl);
+
+  // Read "maximum" property (optional).
+  uint32_t maxSize = 0; // 0 means no explicit maximum.
+  auto maximumRes = JSObject::getNamed_RJS(
+      lv.options,
+      runtime,
+      Predefined::getSymbolID(Predefined::maximum));
+  if (LLVM_UNLIKELY(maximumRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  lv.maximumVal = std::move(*maximumRes);
+
+  if (!lv.maximumVal->isUndefined()) {
+    auto maximumRes2 = toNumber_RJS(runtime, lv.maximumVal);
+    if (LLVM_UNLIKELY(maximumRes2 == ExecutionStatus::EXCEPTION)) {
+      return ExecutionStatus::EXCEPTION;
+    }
+    double maxDbl = maximumRes2->getDouble();
+    if (maxDbl < 0 || maxDbl > 0xFFFFFFFF ||
+        maxDbl != std::floor(maxDbl)) {
+      return runtime.raiseRangeError(
+          "WebAssembly.Table(): 'maximum' must be a non-negative integer");
+    }
+    maxSize = static_cast<uint32_t>(maxDbl);
+    if (initialSize > maxSize) {
+      return runtime.raiseRangeError(
+          "WebAssembly.Table(): 'initial' must not exceed 'maximum'");
+    }
+  }
+
+  // Create the Table object.
+  Handle<JSObject> tablePrototype{runtime.wasmTablePrototype};
+  lv.tbl = JSWebAssemblyTable::create(runtime, tablePrototype);
+  lv.tbl->setMaxSize(maxSize);
+
+  // Create the backing JSArray with initialSize entries (all null).
+  auto arrRes = JSArray::create(runtime, initialSize, initialSize);
+  if (LLVM_UNLIKELY(arrRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  lv.arr = std::move(*arrRes);
+
+  // Initialize all entries to null.
+  GCScopeMarkerRAII marker{runtime};
+  for (uint32_t i = 0; i < initialSize; ++i) {
+    marker.flush();
+    (void)JSArray::setElementAt(
+        lv.arr,
+        runtime,
+        i,
+        runtime.makeHandle(HermesValue::encodeNullValue()));
+  }
+
+  lv.tbl->setElements(runtime, *lv.arr);
+
+  return lv.tbl.getHermesValue();
+}
+
+/// WebAssembly.Table.prototype.length getter.
+static CallResult<HermesValue>
+wasmTableLengthGetter(void *context, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  auto *tbl = dyn_vmcast<JSWebAssemblyTable>(args.getThisArg());
+  if (!tbl) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Table.prototype.length: 'this' is not a "
+        "WebAssembly.Table");
+  }
+
+  JSArray *arr = tbl->getElements(runtime);
+  if (!arr) {
+    return HermesValue::encodeTrustedNumberValue(0);
+  }
+
+  return HermesValue::encodeTrustedNumberValue(
+      JSArray::getLength(arr, runtime));
+}
+
+/// WebAssembly.Table.prototype.get(index) — return the element at index.
+static CallResult<HermesValue>
+wasmTableGetMethod(void *context, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  auto *tbl = dyn_vmcast<JSWebAssemblyTable>(args.getThisArg());
+  if (!tbl) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Table.prototype.get: 'this' is not a "
+        "WebAssembly.Table");
+  }
+
+  struct : public Locals {
+    PinnedValue<> indexVal;
+    PinnedValue<JSArray> arr;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  lv.indexVal = args.getArg(0);
+  auto indexRes = toNumber_RJS(runtime, lv.indexVal);
+  if (LLVM_UNLIKELY(indexRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  double indexDbl = indexRes->getDouble();
+
+  JSArray *arrPtr = tbl->getElements(runtime);
+  if (!arrPtr) {
+    return runtime.raiseRangeError(
+        "WebAssembly.Table.prototype.get: index out of bounds");
+  }
+  lv.arr = arrPtr;
+
+  uint32_t len = JSArray::getLength(*lv.arr, runtime);
+  if (indexDbl < 0 || indexDbl >= len ||
+      indexDbl != std::floor(indexDbl)) {
+    return runtime.raiseRangeError(
+        "WebAssembly.Table.prototype.get: index out of bounds");
+  }
+  uint32_t index = static_cast<uint32_t>(indexDbl);
+
+  HermesValue elem = lv.arr->at(runtime, index).unboxToHV(runtime);
+  return elem;
+}
+
+/// WebAssembly.Table.prototype.set(index, value) — set the element.
+static CallResult<HermesValue>
+wasmTableSetMethod(void *context, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  auto *tbl = dyn_vmcast<JSWebAssemblyTable>(args.getThisArg());
+  if (!tbl) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Table.prototype.set: 'this' is not a "
+        "WebAssembly.Table");
+  }
+
+  struct : public Locals {
+    PinnedValue<> indexVal;
+    PinnedValue<> funcVal;
+    PinnedValue<JSWebAssemblyTable> tblHandle;
+    PinnedValue<JSArray> arr;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  lv.tblHandle = tbl;
+
+  lv.indexVal = args.getArg(0);
+  auto indexRes = toNumber_RJS(runtime, lv.indexVal);
+  if (LLVM_UNLIKELY(indexRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  double indexDbl = indexRes->getDouble();
+
+  JSArray *arrPtr = lv.tblHandle->getElements(runtime);
+  if (!arrPtr) {
+    return runtime.raiseRangeError(
+        "WebAssembly.Table.prototype.set: index out of bounds");
+  }
+  lv.arr = arrPtr;
+
+  uint32_t len = JSArray::getLength(*lv.arr, runtime);
+  if (indexDbl < 0 || indexDbl >= len ||
+      indexDbl != std::floor(indexDbl)) {
+    return runtime.raiseRangeError(
+        "WebAssembly.Table.prototype.set: index out of bounds");
+  }
+  uint32_t index = static_cast<uint32_t>(indexDbl);
+
+  // The value must be null or a callable function.
+  lv.funcVal = args.getArg(1);
+  if (!lv.funcVal->isNull()) {
+    if (!dyn_vmcast<Callable>(*lv.funcVal)) {
+      return runtime.raiseTypeError(
+          "WebAssembly.Table.prototype.set: value must be null or a "
+          "function");
+    }
+  }
+
+  (void)JSArray::setElementAt(lv.arr, runtime, index, lv.funcVal);
+
+  return HermesValue::encodeUndefinedValue();
+}
+
+/// WebAssembly.Table.prototype.grow(delta) — grow the table.
+static CallResult<HermesValue>
+wasmTableGrowMethod(void *context, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  auto *tbl = dyn_vmcast<JSWebAssemblyTable>(args.getThisArg());
+  if (!tbl) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Table.prototype.grow: 'this' is not a "
+        "WebAssembly.Table");
+  }
+
+  struct : public Locals {
+    PinnedValue<> deltaVal;
+    PinnedValue<JSWebAssemblyTable> tblHandle;
+    PinnedValue<JSArray> oldArr;
+    PinnedValue<JSArray> newArr;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  lv.tblHandle = tbl;
+
+  lv.deltaVal = args.getArg(0);
+  auto deltaRes = toNumber_RJS(runtime, lv.deltaVal);
+  if (LLVM_UNLIKELY(deltaRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  double deltaDbl = deltaRes->getDouble();
+  if (deltaDbl < 0 || deltaDbl > 0xFFFFFFFF ||
+      deltaDbl != std::floor(deltaDbl)) {
+    return runtime.raiseRangeError(
+        "WebAssembly.Table.prototype.grow: invalid delta");
+  }
+  uint32_t delta = static_cast<uint32_t>(deltaDbl);
+
+  JSArray *oldArrPtr = lv.tblHandle->getElements(runtime);
+  uint32_t oldLen = 0;
+  if (oldArrPtr) {
+    lv.oldArr = oldArrPtr;
+    oldLen = JSArray::getLength(*lv.oldArr, runtime);
+  }
+
+  uint64_t newLen64 = static_cast<uint64_t>(oldLen) + delta;
+  uint32_t maxSize = lv.tblHandle->getMaxSize();
+  if (maxSize > 0 && newLen64 > maxSize) {
+    return runtime.raiseRangeError(
+        "WebAssembly.Table.prototype.grow: would exceed maximum");
+  }
+  if (newLen64 > 0xFFFFFFFF) {
+    return runtime.raiseRangeError(
+        "WebAssembly.Table.prototype.grow: would exceed maximum");
+  }
+  uint32_t newLen = static_cast<uint32_t>(newLen64);
+
+  // Create a new array with the larger size.
+  auto arrRes = JSArray::create(runtime, newLen, newLen);
+  if (LLVM_UNLIKELY(arrRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  lv.newArr = std::move(*arrRes);
+
+  GCScopeMarkerRAII marker{runtime};
+
+  // Copy old entries.
+  for (uint32_t i = 0; i < oldLen; ++i) {
+    marker.flush();
+    HermesValue elem = lv.oldArr->at(runtime, i).unboxToHV(runtime);
+    (void)JSArray::setElementAt(
+        lv.newArr, runtime, i, runtime.makeHandle(elem));
+  }
+
+  // Initialize new entries to null.
+  for (uint32_t i = oldLen; i < newLen; ++i) {
+    marker.flush();
+    (void)JSArray::setElementAt(
+        lv.newArr,
+        runtime,
+        i,
+        runtime.makeHandle(HermesValue::encodeNullValue()));
+  }
+
+  lv.tblHandle->setElements(runtime, *lv.newArr);
+
+  return HermesValue::encodeTrustedNumberValue(oldLen);
+}
+
+//===----------------------------------------------------------------------===//
 // createWebAssemblyObject
 //===----------------------------------------------------------------------===//
 
@@ -918,6 +1278,7 @@ void createWebAssemblyObject(Runtime &runtime, MutableHandle<JSObject> result) {
     PinnedValue<NativeConstructor> moduleCons;
     PinnedValue<NativeConstructor> instanceCons;
     PinnedValue<NativeConstructor> memoryCons;
+    PinnedValue<NativeConstructor> tableCons;
   } lv;
   LocalsRAII lraii(runtime, &lv);
 
@@ -1177,6 +1538,93 @@ void createWebAssemblyObject(Runtime &runtime, MutableHandle<JSObject> result) {
       Predefined::getSymbolID(Predefined::Memory),
       dpf,
       runtime.wasmMemoryConstructor);
+  (void)res;
+  assert(res != ExecutionStatus::EXCEPTION && *res);
+
+  // --- WebAssembly.Table constructor ---
+  Handle<JSObject> tablePrototype{runtime.wasmTablePrototype};
+
+  // Set @@toStringTag on the Table prototype.
+  {
+    auto tagDpf = DefinePropertyFlags::getDefaultNewPropertyFlags();
+    tagDpf.writable = 0;
+    tagDpf.enumerable = 0;
+
+    defineProperty(
+        runtime,
+        tablePrototype,
+        Predefined::getSymbolID(Predefined::SymbolToStringTag),
+        runtime.getPredefinedStringHandle(Predefined::Table),
+        tagDpf);
+  }
+
+  // Define "length" as a getter on the prototype.
+  defineAccessor(
+      runtime,
+      tablePrototype,
+      Predefined::getSymbolID(Predefined::length),
+      nullptr,
+      wasmTableLengthGetter,
+      nullptr,
+      false,
+      true);
+
+  // Define "get" as a method on the prototype.
+  defineMethod(
+      runtime,
+      tablePrototype,
+      Predefined::getSymbolID(Predefined::get),
+      nullptr,
+      wasmTableGetMethod,
+      1);
+
+  // Define "set" as a method on the prototype.
+  defineMethod(
+      runtime,
+      tablePrototype,
+      Predefined::getSymbolID(Predefined::set),
+      nullptr,
+      wasmTableSetMethod,
+      2);
+
+  // Define "grow" as a method on the prototype.
+  defineMethod(
+      runtime,
+      tablePrototype,
+      Predefined::getSymbolID(Predefined::grow),
+      nullptr,
+      wasmTableGrowMethod,
+      1);
+
+  lv.tableCons = NativeConstructor::create(
+      runtime,
+      Handle<JSObject>::vmcast(&runtime.functionPrototype),
+      nullptr,
+      wasmTableConstructor,
+      1);
+
+  st = Callable::defineNameLengthAndPrototype(
+      lv.tableCons,
+      runtime,
+      Predefined::getSymbolID(Predefined::Table),
+      1,
+      tablePrototype,
+      Callable::WritablePrototype::No);
+  (void)st;
+  assert(
+      st != ExecutionStatus::EXCEPTION &&
+      "defineNameLengthAndPrototype failed");
+
+  runtime.wasmTableConstructor.castAndSetHermesValue<NativeConstructor>(
+      lv.tableCons.getHermesValue());
+
+  // Register Table constructor as a property of WebAssembly.
+  res = JSObject::defineOwnProperty(
+      lv.wasmObj,
+      runtime,
+      Predefined::getSymbolID(Predefined::Table),
+      dpf,
+      runtime.wasmTableConstructor);
   (void)res;
   assert(res != ExecutionStatus::EXCEPTION && *res);
 

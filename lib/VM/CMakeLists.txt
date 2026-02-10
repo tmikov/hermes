@@ -45,6 +45,7 @@ set(source_files
   JSWebAssemblyInstance.cpp
   JSWebAssemblyMemory.cpp
   JSWebAssemblyModule.cpp
+  JSWebAssemblyTable.cpp
   JSWeakRef.cpp
   LimitedStorageProvider.cpp
   DecoratedObject.cpp
