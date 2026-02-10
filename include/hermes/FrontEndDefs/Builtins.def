@@ -211,6 +211,14 @@ PRIVATE_BUILTIN(wasmI64TruncF64S)
 PRIVATE_BUILTIN(wasmI64TruncF64U)
 PRIVATE_BUILTIN(wasmI64TruncSatF64S)
 PRIVATE_BUILTIN(wasmI64TruncSatF64U)
+// i64 conversion helpers (G.4c). i64→float conversions take split lo/hi args
+// and return a single f64. Reinterpret takes/returns similarly.
+PRIVATE_BUILTIN(wasmF64ConvertI64S)
+PRIVATE_BUILTIN(wasmF64ConvertI64U)
+PRIVATE_BUILTIN(wasmF32ConvertI64S)
+PRIVATE_BUILTIN(wasmF32ConvertI64U)
+PRIVATE_BUILTIN(wasmI64ReinterpretF64)
+PRIVATE_BUILTIN(wasmF64ReinterpretI64)
 
 JS_BUILTIN(spawnAsync)
 MARK_FIRST_JS_BUILTIN(spawnAsync)

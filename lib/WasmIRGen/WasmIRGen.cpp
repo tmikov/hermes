@@ -1931,6 +1931,52 @@ void WasmIRGen::onI64TruncSatF32U() {
   onI64TruncSatF64U();
 }
 
+// --- i64→float conversion helpers (G.4c) ---
+
+void WasmIRGen::onF64ConvertI64S() {
+  if (unreachable_)
+    return;
+  auto [lo, hi] = popI64();
+  push(helpers_.emitF64ConvertI64S(lo, hi));
+}
+
+void WasmIRGen::onF64ConvertI64U() {
+  if (unreachable_)
+    return;
+  auto [lo, hi] = popI64();
+  push(helpers_.emitF64ConvertI64U(lo, hi));
+}
+
+void WasmIRGen::onF32ConvertI64S() {
+  if (unreachable_)
+    return;
+  auto [lo, hi] = popI64();
+  push(helpers_.emitF32ConvertI64S(lo, hi));
+}
+
+void WasmIRGen::onF32ConvertI64U() {
+  if (unreachable_)
+    return;
+  auto [lo, hi] = popI64();
+  push(helpers_.emitF32ConvertI64U(lo, hi));
+}
+
+void WasmIRGen::onI64ReinterpretF64() {
+  if (unreachable_)
+    return;
+  Value *a = pop();
+  Value *lo = helpers_.emitI64ReinterpretF64(a);
+  Value *hi = helpers_.emitI64HiResult();
+  pushI64(lo, hi);
+}
+
+void WasmIRGen::onF64ReinterpretI64() {
+  if (unreachable_)
+    return;
+  auto [lo, hi] = popI64();
+  push(helpers_.emitF64ReinterpretI64(lo, hi));
+}
+
 // --- unreachable and nop (D.11) ---
 
 void WasmIRGen::onUnreachable() {

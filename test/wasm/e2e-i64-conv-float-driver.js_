@@ -1,0 +1,20 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// Driver script for e2e-i64-conv-float.wat
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+
+print("f64_convert_i64_s_small: " + exports.f64_convert_i64_s_small());
+print("f64_convert_i64_s_neg: " + exports.f64_convert_i64_s_neg());
+print("f64_convert_i64_u_small: " + exports.f64_convert_i64_u_small());
+print("f32_convert_i64_s_small: " + exports.f32_convert_i64_s_small());
+print("f32_convert_i64_u_small: " + exports.f32_convert_i64_u_small());
+print("f64_reinterpret_i64_one: " + exports.f64_reinterpret_i64_one());
+print("f64_reinterpret_i64_zero: " + exports.f64_reinterpret_i64_zero());
+print("reinterpret_roundtrip: " + exports.reinterpret_roundtrip());

@@ -3679,4 +3679,177 @@ TEST(WasmIRGenTest, I64TruncF32SDelegatesToF64) {
   irgen.endFunction();
 }
 
+// --- G.4c: i64→float conversions and reinterpret ---
+
+TEST(WasmIRGenTest, F64ConvertI64SEmitsCall) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // (i64.const 42) → f64.convert_i64_s → result on stack as f64
+  moduleInfo.types.push_back(
+      WasmFuncType{{}, {WasmValType::F64}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  irgen.onI64Const(42);
+  irgen.onF64ConvertI64S();
+
+  // Result is a single f64 value (not i64 pair).
+  // Pop it as a regular value (not popI64).
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+  bool found = false;
+  for (auto &BB : *func) {
+    for (auto &I : BB) {
+      if (auto *call = llvh::dyn_cast<CallBuiltinInst>(&I)) {
+        if (call->getBuiltinIndex() ==
+            BuiltinMethod::HermesBuiltin_wasmF64ConvertI64S) {
+          found = true;
+          // Takes 2 args: lo, hi.
+          EXPECT_EQ(call->getNumArguments(), 3u); // +1 for 'this'
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(found);
+}
+
+TEST(WasmIRGenTest, F64ConvertI64UEmitsCall) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  moduleInfo.types.push_back(
+      WasmFuncType{{}, {WasmValType::F64}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  irgen.onI64Const(-1);
+  irgen.onF64ConvertI64U();
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+  bool found = false;
+  for (auto &BB : *func) {
+    for (auto &I : BB) {
+      if (auto *call = llvh::dyn_cast<CallBuiltinInst>(&I)) {
+        if (call->getBuiltinIndex() ==
+            BuiltinMethod::HermesBuiltin_wasmF64ConvertI64U) {
+          found = true;
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(found);
+}
+
+TEST(WasmIRGenTest, F32ConvertI64SEmitsCall) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  moduleInfo.types.push_back(
+      WasmFuncType{{}, {WasmValType::F32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  irgen.onI64Const(100);
+  irgen.onF32ConvertI64S();
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+  bool found = false;
+  for (auto &BB : *func) {
+    for (auto &I : BB) {
+      if (auto *call = llvh::dyn_cast<CallBuiltinInst>(&I)) {
+        if (call->getBuiltinIndex() ==
+            BuiltinMethod::HermesBuiltin_wasmF32ConvertI64S) {
+          found = true;
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(found);
+}
+
+TEST(WasmIRGenTest, I64ReinterpretF64EmitsCallAndHi) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // f64 → i64.reinterpret_f64 → produces i64 (split pair)
+  moduleInfo.types.push_back(
+      WasmFuncType{{}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  irgen.onF64Const(1.0);
+  irgen.onI64ReinterpretF64();
+
+  // Result should be an i64 (split pair).
+  auto [lo, hi] = irgen.popI64();
+
+  auto *loInst = llvh::dyn_cast<CallBuiltinInst>(lo);
+  ASSERT_NE(loInst, nullptr);
+  EXPECT_EQ(
+      loInst->getBuiltinIndex(),
+      BuiltinMethod::HermesBuiltin_wasmI64ReinterpretF64);
+
+  auto *hiInst = llvh::dyn_cast<CallBuiltinInst>(hi);
+  ASSERT_NE(hiInst, nullptr);
+  EXPECT_EQ(
+      hiInst->getBuiltinIndex(),
+      BuiltinMethod::HermesBuiltin_wasmI64HiResult);
+
+  irgen.onI32Const(0);
+  irgen.endFunction();
+}
+
+TEST(WasmIRGenTest, F64ReinterpretI64EmitsCall) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // i64 → f64.reinterpret_i64 → produces f64 (single value)
+  moduleInfo.types.push_back(
+      WasmFuncType{{}, {WasmValType::F64}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  irgen.onI64Const(4607182418800017408LL); // 0x3FF0000000000000 = 1.0
+  irgen.onF64ReinterpretI64();
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+  bool found = false;
+  for (auto &BB : *func) {
+    for (auto &I : BB) {
+      if (auto *call = llvh::dyn_cast<CallBuiltinInst>(&I)) {
+        if (call->getBuiltinIndex() ==
+            BuiltinMethod::HermesBuiltin_wasmF64ReinterpretI64) {
+          found = true;
+          // Takes 2 args: lo, hi.
+          EXPECT_EQ(call->getNumArguments(), 3u); // +1 for 'this'
+        }
+      }
+    }
+  }
+  EXPECT_TRUE(found);
+}
+
 } // namespace

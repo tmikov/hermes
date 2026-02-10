@@ -319,6 +319,21 @@ class WasmIRGen {
   void onI64TruncSatF32U();
   void onI64TruncSatF64U();
 
+  // --- i64 conversion helpers: i64→float and reinterpret (G.4c) ---
+
+  /// f64.convert_i64_s: pop i64, push f64 (signed conversion).
+  void onF64ConvertI64S();
+  /// f64.convert_i64_u: pop i64, push f64 (unsigned conversion).
+  void onF64ConvertI64U();
+  /// f32.convert_i64_s: pop i64, push f32 (signed conversion, as double).
+  void onF32ConvertI64S();
+  /// f32.convert_i64_u: pop i64, push f32 (unsigned conversion, as double).
+  void onF32ConvertI64U();
+  /// i64.reinterpret_f64: pop f64, push i64 (bitcast).
+  void onI64ReinterpretF64();
+  /// f64.reinterpret_i64: pop i64, push f64 (bitcast).
+  void onF64ReinterpretI64();
+
   // --- Unsupported opcode handling (D.13) ---
 
   /// Emit a warning for an unsupported opcode. Pops \p numInputs values

@@ -146,6 +146,27 @@ class WasmHelpers {
   /// saturating truncation from double to unsigned i64.
   Instruction *emitI64TruncSatF64U(Value *a);
 
+  // --- i64→float conversion helpers (G.4c) ---
+  // Take split lo/hi i64 args, return a single f64.
+
+  /// f64.convert_i64_s: convert signed i64 to f64.
+  Instruction *emitF64ConvertI64S(Value *lo, Value *hi);
+
+  /// f64.convert_i64_u: convert unsigned i64 to f64.
+  Instruction *emitF64ConvertI64U(Value *lo, Value *hi);
+
+  /// f32.convert_i64_s: convert signed i64 to f32 (as double).
+  Instruction *emitF32ConvertI64S(Value *lo, Value *hi);
+
+  /// f32.convert_i64_u: convert unsigned i64 to f32 (as double).
+  Instruction *emitF32ConvertI64U(Value *lo, Value *hi);
+
+  /// i64.reinterpret_f64: bitcast f64 to i64. Returns lo32; hi32 stashed.
+  Instruction *emitI64ReinterpretF64(Value *a);
+
+  /// f64.reinterpret_i64: bitcast i64 to f64. Takes split lo/hi.
+  Instruction *emitF64ReinterpretI64(Value *lo, Value *hi);
+
  private:
   IRBuilder &builder_;
 };

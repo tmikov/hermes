@@ -281,5 +281,37 @@ Instruction *WasmHelpers::emitI64TruncSatF64U(Value *a) {
       BuiltinMethod::HermesBuiltin_wasmI64TruncSatF64U, {a});
 }
 
+// --- i64→float conversion helpers (G.4c) ---
+
+Instruction *WasmHelpers::emitF64ConvertI64S(Value *lo, Value *hi) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmF64ConvertI64S, {lo, hi});
+}
+
+Instruction *WasmHelpers::emitF64ConvertI64U(Value *lo, Value *hi) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmF64ConvertI64U, {lo, hi});
+}
+
+Instruction *WasmHelpers::emitF32ConvertI64S(Value *lo, Value *hi) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmF32ConvertI64S, {lo, hi});
+}
+
+Instruction *WasmHelpers::emitF32ConvertI64U(Value *lo, Value *hi) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmF32ConvertI64U, {lo, hi});
+}
+
+Instruction *WasmHelpers::emitI64ReinterpretF64(Value *a) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64ReinterpretF64, {a});
+}
+
+Instruction *WasmHelpers::emitF64ReinterpretI64(Value *lo, Value *hi) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmF64ReinterpretI64, {lo, hi});
+}
+
 } // namespace wasm
 } // namespace hermes

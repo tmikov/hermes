@@ -773,6 +773,60 @@ CallResult<HermesValue> wasmI64TruncSatF64U(void *, Runtime &runtime) {
   return splitU64Result(static_cast<uint64_t>(t));
 }
 
+/// f64.convert_i64_s: convert signed i64 to f64.
+/// Takes split lo/hi args, returns a double.
+CallResult<HermesValue> wasmF64ConvertI64S(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  int64_t a = argsToI64(args, 0, 1);
+  return HermesValue::encodeTrustedNumberValue(static_cast<double>(a));
+}
+
+/// f64.convert_i64_u: convert unsigned i64 to f64.
+/// Takes split lo/hi args, returns a double.
+CallResult<HermesValue> wasmF64ConvertI64U(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  uint64_t a = static_cast<uint64_t>(argsToI64(args, 0, 1));
+  return HermesValue::encodeTrustedNumberValue(static_cast<double>(a));
+}
+
+/// f32.convert_i64_s: convert signed i64 to f32.
+/// Takes split lo/hi args, returns a double (narrowed to float then widened).
+CallResult<HermesValue> wasmF32ConvertI64S(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  int64_t a = argsToI64(args, 0, 1);
+  float result = static_cast<float>(a);
+  return HermesValue::encodeTrustedNumberValue(static_cast<double>(result));
+}
+
+/// f32.convert_i64_u: convert unsigned i64 to f32.
+/// Takes split lo/hi args, returns a double (narrowed to float then widened).
+CallResult<HermesValue> wasmF32ConvertI64U(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  uint64_t a = static_cast<uint64_t>(argsToI64(args, 0, 1));
+  float result = static_cast<float>(a);
+  return HermesValue::encodeTrustedNumberValue(static_cast<double>(result));
+}
+
+/// i64.reinterpret_f64: bitcast f64 to i64.
+/// Takes a single f64 arg, returns lo32; hi32 is stashed.
+CallResult<HermesValue> wasmI64ReinterpretF64(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  double a = args.getArg(0).getNumber();
+  uint64_t bits;
+  memcpy(&bits, &a, sizeof(bits));
+  return splitU64Result(bits);
+}
+
+/// f64.reinterpret_i64: bitcast i64 to f64.
+/// Takes split lo/hi args, returns a double.
+CallResult<HermesValue> wasmF64ReinterpretI64(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  uint64_t bits = static_cast<uint64_t>(argsToI64(args, 0, 1));
+  double result;
+  memcpy(&result, &bits, sizeof(result));
+  return HermesValue::encodeTrustedNumberValue(result);
+}
+
 namespace {
 
 CallResult<HermesValue> copyDataPropertiesSlowPath_RJS(
@@ -1729,6 +1783,37 @@ void createHermesBuiltins(Runtime &runtime) {
       P::wasmI64TruncSatF64U,
       wasmI64TruncSatF64U,
       1);
+  // i64 conversion helpers (G.4c): i64→float and reinterpret.
+  defineInternMethod(
+      B::HermesBuiltin_wasmF64ConvertI64S,
+      P::wasmF64ConvertI64S,
+      wasmF64ConvertI64S,
+      2);
+  defineInternMethod(
+      B::HermesBuiltin_wasmF64ConvertI64U,
+      P::wasmF64ConvertI64U,
+      wasmF64ConvertI64U,
+      2);
+  defineInternMethod(
+      B::HermesBuiltin_wasmF32ConvertI64S,
+      P::wasmF32ConvertI64S,
+      wasmF32ConvertI64S,
+      2);
+  defineInternMethod(
+      B::HermesBuiltin_wasmF32ConvertI64U,
+      P::wasmF32ConvertI64U,
+      wasmF32ConvertI64U,
+      2);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64ReinterpretF64,
+      P::wasmI64ReinterpretF64,
+      wasmI64ReinterpretF64,
+      1);
+  defineInternMethod(
+      B::HermesBuiltin_wasmF64ReinterpretI64,
+      P::wasmF64ReinterpretI64,
+      wasmF64ReinterpretI64,
+      2);
 }
 
 } // namespace vm
