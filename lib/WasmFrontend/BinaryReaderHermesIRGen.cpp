@@ -1006,13 +1006,13 @@ wabt::Result BinaryReaderHermesIRGen::OnConvertExpr(wabt::Opcode opcode) {
       break;
     // --- Int-to-int conversions (deferred to Parts F, G) ---
     case wabt::Opcode::I32WrapI64:
-      irgen_->warnUnsupported("i32.wrap_i64", 1, 1);
+      irgen_->onI32WrapI64();
       break;
     case wabt::Opcode::I64ExtendI32S:
-      irgen_->warnUnsupported("i64.extend_i32_s", 1, 1);
+      irgen_->onI64ExtendI32S();
       break;
     case wabt::Opcode::I64ExtendI32U:
-      irgen_->warnUnsupported("i64.extend_i32_u", 1, 1);
+      irgen_->onI64ExtendI32U();
       break;
     // --- Float-to-int truncations (F.4) ---
     case wabt::Opcode::I32TruncF32S:
@@ -1418,13 +1418,13 @@ wabt::Result BinaryReaderHermesIRGen::OnUnaryExpr(wabt::Opcode opcode) {
       irgen_->onI32Extend16S();
       break;
     case wabt::Opcode::I64Extend8S:
-      irgen_->warnUnsupported("i64.extend8_s", 1, 1);
+      irgen_->onI64Extend8S();
       break;
     case wabt::Opcode::I64Extend16S:
-      irgen_->warnUnsupported("i64.extend16_s", 1, 1);
+      irgen_->onI64Extend16S();
       break;
     case wabt::Opcode::I64Extend32S:
-      irgen_->warnUnsupported("i64.extend32_s", 1, 1);
+      irgen_->onI64Extend32S();
       break;
     default:
       // Non-MVP unary opcode (SIMD, etc.) — warn.

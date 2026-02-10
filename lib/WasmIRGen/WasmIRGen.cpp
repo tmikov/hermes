@@ -1361,6 +1361,88 @@ void WasmIRGen::onI64GeU() {
   push(helpers_.emitI64GeU(loA, hiA, loB, hiB));
 }
 
+// --- i64 conversions: inline IR (G.4a) ---
+
+void WasmIRGen::onI32WrapI64() {
+  if (unreachable_)
+    return;
+  auto [lo, hi] = popI64();
+  // i32.wrap_i64: take lo32, discard hi32.
+  (void)hi;
+  push(lo);
+}
+
+void WasmIRGen::onI64ExtendI32S() {
+  if (unreachable_)
+    return;
+  Value *val = pop();
+  // Sign-extend i32 to i64: lo = val, hi = (val >> 31).
+  auto *hi = builder_.createBinaryOperatorInst(
+      builder_.createAsInt32Inst(val),
+      builder_.getLiteralNumber(31),
+      ValueKind::BinaryRightShiftInstKind);
+  pushI64(val, hi);
+}
+
+void WasmIRGen::onI64ExtendI32U() {
+  if (unreachable_)
+    return;
+  Value *val = pop();
+  // Zero-extend i32 to i64: lo = val, hi = 0.
+  pushI64(val, builder_.getLiteralNumber(0));
+}
+
+void WasmIRGen::onI64Extend8S() {
+  if (unreachable_)
+    return;
+  auto [lo, hi] = popI64();
+  (void)hi;
+  // Sign-extend lowest 8 bits: lo = (lo << 24) >> 24, hi = (lo >> 31).
+  auto *shifted = builder_.createBinaryOperatorInst(
+      lo, builder_.getLiteralNumber(24), ValueKind::BinaryLeftShiftInstKind);
+  auto *newLo = builder_.createBinaryOperatorInst(
+      shifted,
+      builder_.getLiteralNumber(24),
+      ValueKind::BinaryRightShiftInstKind);
+  auto *newHi = builder_.createBinaryOperatorInst(
+      newLo,
+      builder_.getLiteralNumber(31),
+      ValueKind::BinaryRightShiftInstKind);
+  pushI64(newLo, newHi);
+}
+
+void WasmIRGen::onI64Extend16S() {
+  if (unreachable_)
+    return;
+  auto [lo, hi] = popI64();
+  (void)hi;
+  // Sign-extend lowest 16 bits: lo = (lo << 16) >> 16, hi = (lo >> 31).
+  auto *shifted = builder_.createBinaryOperatorInst(
+      lo, builder_.getLiteralNumber(16), ValueKind::BinaryLeftShiftInstKind);
+  auto *newLo = builder_.createBinaryOperatorInst(
+      shifted,
+      builder_.getLiteralNumber(16),
+      ValueKind::BinaryRightShiftInstKind);
+  auto *newHi = builder_.createBinaryOperatorInst(
+      newLo,
+      builder_.getLiteralNumber(31),
+      ValueKind::BinaryRightShiftInstKind);
+  pushI64(newLo, newHi);
+}
+
+void WasmIRGen::onI64Extend32S() {
+  if (unreachable_)
+    return;
+  auto [lo, hi] = popI64();
+  (void)hi;
+  // Sign-extend lowest 32 bits (i.e., the lo half): hi = (lo >> 31).
+  auto *newHi = builder_.createBinaryOperatorInst(
+      builder_.createAsInt32Inst(lo),
+      builder_.getLiteralNumber(31),
+      ValueKind::BinaryRightShiftInstKind);
+  pushI64(lo, newHi);
+}
+
 // --- f64 arithmetic (E.1) ---
 // We use BinaryOperatorInst (not FBinaryMathInst) because the F-prefixed
 // instructions require number-typed inputs, but our values are loaded from

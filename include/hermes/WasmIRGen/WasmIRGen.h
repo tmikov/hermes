@@ -256,6 +256,21 @@ class WasmIRGen {
   void onI64LeU();
   void onI64GeU();
 
+  // --- i64 conversions: inline IR (G.4a) ---
+
+  /// i32.wrap_i64: pop i64, push lo32 as i32 (discard hi32).
+  void onI32WrapI64();
+  /// i64.extend_i32_s: pop i32, sign-extend to i64.
+  void onI64ExtendI32S();
+  /// i64.extend_i32_u: pop i32, zero-extend to i64.
+  void onI64ExtendI32U();
+  /// i64.extend8_s: sign-extend lowest 8 bits of i64.
+  void onI64Extend8S();
+  /// i64.extend16_s: sign-extend lowest 16 bits of i64.
+  void onI64Extend16S();
+  /// i64.extend32_s: sign-extend lowest 32 bits of i64.
+  void onI64Extend32S();
+
   // --- f64/f32 copysign (F.5) ---
 
   void onF64Copysign();

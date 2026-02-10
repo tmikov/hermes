@@ -1,0 +1,34 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-i64-conv-inline.wat.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+
+print("wrap_small:", exports.wrap_small());
+print("wrap_large:", exports.wrap_large());
+print("wrap_zero:", exports.wrap_zero());
+print("wrap_hi_only:", exports.wrap_hi_only());
+print("ext_s_pos_eqz:", exports.ext_s_pos_eqz());
+print("ext_s_zero_eqz:", exports.ext_s_zero_eqz());
+print("ext_s_neg_eq:", exports.ext_s_neg_eq());
+print("ext_s_min_lt:", exports.ext_s_min_lt());
+print("ext_u_pos_eqz:", exports.ext_u_pos_eqz());
+print("ext_u_neg_gt:", exports.ext_u_neg_gt());
+print("ext_u_neg_eq:", exports.ext_u_neg_eq());
+print("ext8s_pos:", exports.ext8s_pos());
+print("ext8s_neg:", exports.ext8s_neg());
+print("ext8s_ff:", exports.ext8s_ff());
+print("ext8s_256:", exports.ext8s_256());
+print("ext16s_pos:", exports.ext16s_pos());
+print("ext16s_neg:", exports.ext16s_neg());
+print("ext16s_ffff:", exports.ext16s_ffff());
+print("ext32s_pos:", exports.ext32s_pos());
+print("ext32s_neg:", exports.ext32s_neg());
+print("ext32s_max:", exports.ext32s_max());
+print("ext32s_hi:", exports.ext32s_hi());
