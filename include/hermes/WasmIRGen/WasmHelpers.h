@@ -127,6 +127,25 @@ class WasmHelpers {
   Instruction *emitI64LeU(Value *loA, Value *hiA, Value *loB, Value *hiB);
   Instruction *emitI64GeU(Value *loA, Value *hiA, Value *loB, Value *hiB);
 
+  // --- i64 conversion helpers (G.4b) ---
+  // Take a single f64 arg, return lo32; hi32 is stashed.
+
+  /// i64.trunc_f64_s (also used for i64.trunc_f32_s):
+  /// trapping truncation from double to signed i64.
+  Instruction *emitI64TruncF64S(Value *a);
+
+  /// i64.trunc_f64_u (also used for i64.trunc_f32_u):
+  /// trapping truncation from double to unsigned i64.
+  Instruction *emitI64TruncF64U(Value *a);
+
+  /// i64.trunc_sat_f64_s (also used for i64.trunc_sat_f32_s):
+  /// saturating truncation from double to signed i64.
+  Instruction *emitI64TruncSatF64S(Value *a);
+
+  /// i64.trunc_sat_f64_u (also used for i64.trunc_sat_f32_u):
+  /// saturating truncation from double to unsigned i64.
+  Instruction *emitI64TruncSatF64U(Value *a);
+
  private:
   IRBuilder &builder_;
 };

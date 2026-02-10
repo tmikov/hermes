@@ -19,10 +19,10 @@
     local.get 0
     i32.load)
 
-  ;; Exercise unsupported conversion (i64 truncation deferred to Part G.4b).
-  (func $trunc_test (param f64) (result i64)
+  ;; Exercise unsupported conversion (i64→float deferred to Part G.4c).
+  (func $convert_test (param i64) (result f64)
     local.get 0
-    i64.trunc_f64_s)
+    f64.convert_i64_s)
 
   ;; Exercise global.get and global.set in function body.
   (func $global_test
@@ -30,6 +30,6 @@
     global.set $g))
 
 ;; CHECK: warning: unsupported Wasm opcode: i32.load
-;; CHECK: warning: unsupported Wasm opcode: i64.trunc_f64_s
+;; CHECK: warning: unsupported Wasm opcode: f64.convert_i64_s
 ;; CHECK: warning: unsupported Wasm opcode: global.get
 ;; CHECK: warning: unsupported Wasm opcode: global.set

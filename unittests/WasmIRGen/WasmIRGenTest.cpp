@@ -3534,4 +3534,149 @@ TEST(WasmIRGenTest, I64ShlEmitsCallAndHi) {
   irgen.endFunction();
 }
 
+TEST(WasmIRGenTest, I64TruncF64SEmitsCallAndHi) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // Type: (f64) -> (i32) — i32 result since we'll wrap the i64 manually.
+  moduleInfo.types.push_back(
+      WasmFuncType{{WasmValType::F64}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  irgen.onLocalGet(0);
+  irgen.onI64TruncF64S();
+
+  // Result should be an i64 (split pair). Pop and verify.
+  auto [lo, hi] = irgen.popI64();
+
+  auto *loInst = llvh::dyn_cast<CallBuiltinInst>(lo);
+  ASSERT_NE(loInst, nullptr);
+  EXPECT_EQ(
+      loInst->getBuiltinIndex(),
+      BuiltinMethod::HermesBuiltin_wasmI64TruncF64S);
+
+  auto *hiInst = llvh::dyn_cast<CallBuiltinInst>(hi);
+  ASSERT_NE(hiInst, nullptr);
+  EXPECT_EQ(
+      hiInst->getBuiltinIndex(),
+      BuiltinMethod::HermesBuiltin_wasmI64HiResult);
+
+  irgen.onI32Const(0);
+  irgen.endFunction();
+}
+
+TEST(WasmIRGenTest, I64TruncF64UEmitsCallAndHi) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  moduleInfo.types.push_back(
+      WasmFuncType{{WasmValType::F64}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  irgen.onLocalGet(0);
+  irgen.onI64TruncF64U();
+
+  auto [lo, hi] = irgen.popI64();
+
+  auto *loInst = llvh::dyn_cast<CallBuiltinInst>(lo);
+  ASSERT_NE(loInst, nullptr);
+  EXPECT_EQ(
+      loInst->getBuiltinIndex(),
+      BuiltinMethod::HermesBuiltin_wasmI64TruncF64U);
+
+  irgen.onI32Const(0);
+  irgen.endFunction();
+}
+
+TEST(WasmIRGenTest, I64TruncSatF64SEmitsCallAndHi) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  moduleInfo.types.push_back(
+      WasmFuncType{{WasmValType::F64}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  irgen.onLocalGet(0);
+  irgen.onI64TruncSatF64S();
+
+  auto [lo, hi] = irgen.popI64();
+
+  auto *loInst = llvh::dyn_cast<CallBuiltinInst>(lo);
+  ASSERT_NE(loInst, nullptr);
+  EXPECT_EQ(
+      loInst->getBuiltinIndex(),
+      BuiltinMethod::HermesBuiltin_wasmI64TruncSatF64S);
+
+  irgen.onI32Const(0);
+  irgen.endFunction();
+}
+
+TEST(WasmIRGenTest, I64TruncSatF64UEmitsCallAndHi) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  moduleInfo.types.push_back(
+      WasmFuncType{{WasmValType::F64}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  irgen.onLocalGet(0);
+  irgen.onI64TruncSatF64U();
+
+  auto [lo, hi] = irgen.popI64();
+
+  auto *loInst = llvh::dyn_cast<CallBuiltinInst>(lo);
+  ASSERT_NE(loInst, nullptr);
+  EXPECT_EQ(
+      loInst->getBuiltinIndex(),
+      BuiltinMethod::HermesBuiltin_wasmI64TruncSatF64U);
+
+  irgen.onI32Const(0);
+  irgen.endFunction();
+}
+
+TEST(WasmIRGenTest, I64TruncF32SDelegatesToF64) {
+  // In Phase 1, f32 and f64 truncations produce the same IR.
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  moduleInfo.types.push_back(
+      WasmFuncType{{WasmValType::F32}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+  irgen.beginFunction(0, {});
+
+  irgen.onLocalGet(0);
+  irgen.onI64TruncF32S();
+
+  // Should emit wasmI64TruncF64S (same builtin as f64 variant).
+  auto [lo, hi] = irgen.popI64();
+
+  auto *loInst = llvh::dyn_cast<CallBuiltinInst>(lo);
+  ASSERT_NE(loInst, nullptr);
+  EXPECT_EQ(
+      loInst->getBuiltinIndex(),
+      BuiltinMethod::HermesBuiltin_wasmI64TruncF64S);
+
+  irgen.onI32Const(0);
+  irgen.endFunction();
+}
+
 } // namespace

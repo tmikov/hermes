@@ -259,5 +259,27 @@ Instruction *WasmHelpers::emitI64GeU(
       BuiltinMethod::HermesBuiltin_wasmI64GeU, {loA, hiA, loB, hiB});
 }
 
+// --- i64 conversion helpers (G.4b) ---
+
+Instruction *WasmHelpers::emitI64TruncF64S(Value *a) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64TruncF64S, {a});
+}
+
+Instruction *WasmHelpers::emitI64TruncF64U(Value *a) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64TruncF64U, {a});
+}
+
+Instruction *WasmHelpers::emitI64TruncSatF64S(Value *a) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64TruncSatF64S, {a});
+}
+
+Instruction *WasmHelpers::emitI64TruncSatF64U(Value *a) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64TruncSatF64U, {a});
+}
+
 } // namespace wasm
 } // namespace hermes

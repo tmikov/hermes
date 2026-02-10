@@ -1873,6 +1873,64 @@ void WasmIRGen::onF32ReinterpretI32() {
   push(helpers_.emitF32ReinterpretI32(a));
 }
 
+// --- i64 conversion helpers: float→i64 truncations (G.4b) ---
+
+void WasmIRGen::onI64TruncF64S() {
+  if (unreachable_)
+    return;
+  Value *a = pop();
+  Value *lo = helpers_.emitI64TruncF64S(a);
+  Value *hi = helpers_.emitI64HiResult();
+  pushI64(lo, hi);
+}
+
+void WasmIRGen::onI64TruncF32S() {
+  // Phase 1: all values are doubles, so f32 and f64 truncation are identical.
+  onI64TruncF64S();
+}
+
+void WasmIRGen::onI64TruncF64U() {
+  if (unreachable_)
+    return;
+  Value *a = pop();
+  Value *lo = helpers_.emitI64TruncF64U(a);
+  Value *hi = helpers_.emitI64HiResult();
+  pushI64(lo, hi);
+}
+
+void WasmIRGen::onI64TruncF32U() {
+  // Phase 1: all values are doubles, so f32 and f64 truncation are identical.
+  onI64TruncF64U();
+}
+
+void WasmIRGen::onI64TruncSatF64S() {
+  if (unreachable_)
+    return;
+  Value *a = pop();
+  Value *lo = helpers_.emitI64TruncSatF64S(a);
+  Value *hi = helpers_.emitI64HiResult();
+  pushI64(lo, hi);
+}
+
+void WasmIRGen::onI64TruncSatF32S() {
+  // Phase 1: all values are doubles, so f32 and f64 truncation are identical.
+  onI64TruncSatF64S();
+}
+
+void WasmIRGen::onI64TruncSatF64U() {
+  if (unreachable_)
+    return;
+  Value *a = pop();
+  Value *lo = helpers_.emitI64TruncSatF64U(a);
+  Value *hi = helpers_.emitI64HiResult();
+  pushI64(lo, hi);
+}
+
+void WasmIRGen::onI64TruncSatF32U() {
+  // Phase 1: all values are doubles, so f32 and f64 truncation are identical.
+  onI64TruncSatF64U();
+}
+
 // --- unreachable and nop (D.11) ---
 
 void WasmIRGen::onUnreachable() {

@@ -205,6 +205,12 @@ PRIVATE_BUILTIN(wasmI64LtU)
 PRIVATE_BUILTIN(wasmI64GtU)
 PRIVATE_BUILTIN(wasmI64LeU)
 PRIVATE_BUILTIN(wasmI64GeU)
+// i64 conversion helpers (G.4b). Take a single f64 arg, return lo32; hi32
+// is stashed and retrieved via wasmI64HiResult.
+PRIVATE_BUILTIN(wasmI64TruncF64S)
+PRIVATE_BUILTIN(wasmI64TruncF64U)
+PRIVATE_BUILTIN(wasmI64TruncSatF64S)
+PRIVATE_BUILTIN(wasmI64TruncSatF64U)
 
 JS_BUILTIN(spawnAsync)
 MARK_FIRST_JS_BUILTIN(spawnAsync)

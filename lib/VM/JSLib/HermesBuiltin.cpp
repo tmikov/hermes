@@ -707,6 +707,72 @@ CallResult<HermesValue> wasmI64GeU(void *, Runtime &runtime) {
   return HermesValue::encodeTrustedNumberValue(a >= b ? 1 : 0);
 }
 
+/// i64.trunc_f64_s (also used for i64.trunc_f32_s):
+/// Truncate double to signed i64, trapping on NaN or out-of-range.
+/// Returns lo32; hi32 is stashed.
+CallResult<HermesValue> wasmI64TruncF64S(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  double a = args.getArg(0).getNumber();
+  if (LLVM_UNLIKELY(std::isnan(a)))
+    return runtime.raiseError("invalid conversion to integer");
+  double t = std::trunc(a);
+  // Signed i64 range: [-9223372036854775808.0, 9223372036854775807.0].
+  // Note: 9223372036854775807.0 is not exactly representable as double;
+  // the closest double is 9223372036854775808.0 (2^63). So we check < 2^63.
+  if (LLVM_UNLIKELY(t < -9223372036854775808.0 || t >= 9223372036854775808.0))
+    return runtime.raiseError("integer overflow");
+  return splitI64Result(static_cast<int64_t>(t));
+}
+
+/// i64.trunc_f64_u (also used for i64.trunc_f32_u):
+/// Truncate double to unsigned i64, trapping on NaN or out-of-range.
+/// Returns lo32; hi32 is stashed.
+CallResult<HermesValue> wasmI64TruncF64U(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  double a = args.getArg(0).getNumber();
+  if (LLVM_UNLIKELY(std::isnan(a)))
+    return runtime.raiseError("invalid conversion to integer");
+  double t = std::trunc(a);
+  // Unsigned i64 range: [0.0, 18446744073709551615.0].
+  // 18446744073709551615.0 is not exactly representable; closest double is
+  // 18446744073709551616.0 (2^64). So we check < 2^64.
+  if (LLVM_UNLIKELY(t < 0.0 || t >= 18446744073709551616.0))
+    return runtime.raiseError("integer overflow");
+  return splitU64Result(static_cast<uint64_t>(t));
+}
+
+/// i64.trunc_sat_f64_s (also used for i64.trunc_sat_f32_s):
+/// Saturating truncation to signed i64. NaN -> 0.
+/// Returns lo32; hi32 is stashed.
+CallResult<HermesValue> wasmI64TruncSatF64S(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  double a = args.getArg(0).getNumber();
+  if (LLVM_UNLIKELY(std::isnan(a)))
+    return splitI64Result(0);
+  double t = std::trunc(a);
+  if (t < -9223372036854775808.0)
+    return splitI64Result(INT64_MIN);
+  if (t >= 9223372036854775808.0)
+    return splitI64Result(INT64_MAX);
+  return splitI64Result(static_cast<int64_t>(t));
+}
+
+/// i64.trunc_sat_f64_u (also used for i64.trunc_sat_f32_u):
+/// Saturating truncation to unsigned i64. NaN -> 0.
+/// Returns lo32; hi32 is stashed.
+CallResult<HermesValue> wasmI64TruncSatF64U(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  double a = args.getArg(0).getNumber();
+  if (LLVM_UNLIKELY(std::isnan(a)))
+    return splitU64Result(0);
+  double t = std::trunc(a);
+  if (t < 0.0)
+    return splitU64Result(0);
+  if (t >= 18446744073709551616.0)
+    return splitU64Result(UINT64_MAX);
+  return splitU64Result(static_cast<uint64_t>(t));
+}
+
 namespace {
 
 CallResult<HermesValue> copyDataPropertiesSlowPath_RJS(
@@ -1642,6 +1708,27 @@ void createHermesBuiltins(Runtime &runtime) {
       B::HermesBuiltin_wasmI64LeU, P::wasmI64LeU, wasmI64LeU, 4);
   defineInternMethod(
       B::HermesBuiltin_wasmI64GeU, P::wasmI64GeU, wasmI64GeU, 4);
+  // i64 conversion helpers (G.4b).
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64TruncF64S,
+      P::wasmI64TruncF64S,
+      wasmI64TruncF64S,
+      1);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64TruncF64U,
+      P::wasmI64TruncF64U,
+      wasmI64TruncF64U,
+      1);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64TruncSatF64S,
+      P::wasmI64TruncSatF64S,
+      wasmI64TruncSatF64S,
+      1);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64TruncSatF64U,
+      P::wasmI64TruncSatF64U,
+      wasmI64TruncSatF64U,
+      1);
 }
 
 } // namespace vm

@@ -1028,16 +1028,16 @@ wabt::Result BinaryReaderHermesIRGen::OnConvertExpr(wabt::Opcode opcode) {
       irgen_->onI32TruncF64U();
       break;
     case wabt::Opcode::I64TruncF32S:
-      irgen_->warnUnsupported("i64.trunc_f32_s", 1, 1);
+      irgen_->onI64TruncF32S();
       break;
     case wabt::Opcode::I64TruncF32U:
-      irgen_->warnUnsupported("i64.trunc_f32_u", 1, 1);
+      irgen_->onI64TruncF32U();
       break;
     case wabt::Opcode::I64TruncF64S:
-      irgen_->warnUnsupported("i64.trunc_f64_s", 1, 1);
+      irgen_->onI64TruncF64S();
       break;
     case wabt::Opcode::I64TruncF64U:
-      irgen_->warnUnsupported("i64.trunc_f64_u", 1, 1);
+      irgen_->onI64TruncF64U();
       break;
     // --- Int-to-float conversions (F.4) ---
     case wabt::Opcode::F32ConvertI32S:
@@ -1098,16 +1098,16 @@ wabt::Result BinaryReaderHermesIRGen::OnConvertExpr(wabt::Opcode opcode) {
       irgen_->onI32TruncSatF64U();
       break;
     case wabt::Opcode::I64TruncSatF32S:
-      irgen_->warnUnsupported("i64.trunc_sat_f32_s", 1, 1);
+      irgen_->onI64TruncSatF32S();
       break;
     case wabt::Opcode::I64TruncSatF32U:
-      irgen_->warnUnsupported("i64.trunc_sat_f32_u", 1, 1);
+      irgen_->onI64TruncSatF32U();
       break;
     case wabt::Opcode::I64TruncSatF64S:
-      irgen_->warnUnsupported("i64.trunc_sat_f64_s", 1, 1);
+      irgen_->onI64TruncSatF64S();
       break;
     case wabt::Opcode::I64TruncSatF64U:
-      irgen_->warnUnsupported("i64.trunc_sat_f64_u", 1, 1);
+      irgen_->onI64TruncSatF64U();
       break;
     default:
       // Non-MVP convert opcode (SIMD, etc.) — warn.
