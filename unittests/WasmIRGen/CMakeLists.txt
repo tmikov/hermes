@@ -7,11 +7,11 @@ set(WasmIRGenSources
   WasmIRGenTest.cpp
   )
 
-add_hermes_unittest(WasmIRGenTest
+add_hermes_unittest(WasmIRGenTests
   ${WasmIRGenSources}
   )
 
-target_link_libraries(WasmIRGenTest
+target_link_libraries(WasmIRGenTests
   hermesWasmIRGen
   hermesWasmFrontend
   wabt
