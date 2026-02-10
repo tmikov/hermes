@@ -128,6 +128,8 @@ RUNTIME_HV_FIELD(wasmLinkErrorConstructor, NativeConstructor)
 RUNTIME_HV_FIELD(wasmLinkErrorPrototype, JSObject)
 RUNTIME_HV_FIELD(wasmRuntimeErrorConstructor, NativeConstructor)
 RUNTIME_HV_FIELD(wasmRuntimeErrorPrototype, JSObject)
+RUNTIME_HV_FIELD(wasmModuleConstructor, NativeConstructor)
+RUNTIME_HV_FIELD(wasmModulePrototype, JSObject)
 #endif
 
 #undef RUNTIME_HV_FIELD

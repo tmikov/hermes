@@ -43,6 +43,59 @@ bool compileWasmModule(
   return true;
 }
 
+/// Convert WasmExternalKind to the JS API string name.
+static const char *externalKindName(wasm::WasmExternalKind kind) {
+  switch (kind) {
+    case wasm::WasmExternalKind::Function:
+      return "function";
+    case wasm::WasmExternalKind::Table:
+      return "table";
+    case wasm::WasmExternalKind::Memory:
+      return "memory";
+    case wasm::WasmExternalKind::Global:
+      return "global";
+    case wasm::WasmExternalKind::Tag:
+      return "tag";
+  }
+  return "unknown";
+}
+
+std::unique_ptr<WasmModuleData> compileWasmToModuleData(
+    const uint8_t *buffer,
+    size_t size,
+    std::string &errorMsg) {
+  // Parse the Wasm binary to extract module info.
+  // Function bodies are not compiled here — the BinaryReaderHermesIRGen
+  // without an IRGen attached will parse module-level sections only.
+  wasm::WasmModuleInfo moduleInfo;
+  wasm::BinaryReaderHermesIRGen reader(moduleInfo);
+  // Don't call reader.setIRGen() — no IR generation needed.
+
+  wabt::ReadBinaryOptions options;
+  options.read_debug_names = true;
+  options.features.enable_exceptions();
+  wabt::Result result = wabt::ReadBinary(buffer, size, &reader, options);
+  if (!wabt::Succeeded(result)) {
+    errorMsg = "invalid Wasm binary";
+    return nullptr;
+  }
+
+  auto data = std::make_unique<WasmModuleData>();
+
+  // Populate export descriptors.
+  for (const auto &exp : moduleInfo.exports) {
+    data->exportDescs.push_back({exp.name, externalKindName(exp.kind)});
+  }
+
+  // Populate import descriptors.
+  for (const auto &imp : moduleInfo.imports) {
+    data->importDescs.push_back(
+        {imp.moduleName, imp.fieldName, externalKindName(imp.kind)});
+  }
+
+  return data;
+}
+
 bool validateWasmBinary(const uint8_t *buffer, size_t size) {
   // Use a silent reader that suppresses error messages (OnError returns true
   // = "handled", preventing wabt from printing to stderr).

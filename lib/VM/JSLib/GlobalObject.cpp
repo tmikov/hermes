@@ -370,6 +370,7 @@ void initGlobalObject(Runtime &runtime, const JSLibFlags &jsLibFlags) {
       JSObject::create(runtime, runtime.ErrorPrototype);
   runtime.wasmRuntimeErrorPrototype =
       JSObject::create(runtime, runtime.ErrorPrototype);
+  runtime.wasmModulePrototype = JSObject::create(runtime);
 #endif
 
   // "Forward declaration" of the internal CallSite prototype. Its properties
