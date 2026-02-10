@@ -428,6 +428,285 @@ CallResult<HermesValue> wasmF32Copysign(void *, Runtime &runtime) {
       static_cast<double>(std::copysign(a, b)));
 }
 
+// ===== i64 split-pair helpers (G.3) =====
+//
+// Phase 1 represents i64 values as two i32 halves (lo, hi). Arithmetic
+// helpers take (lo_a, hi_a, lo_b, hi_b) and return lo_result directly.
+// The hi_result is stashed in a thread-local and retrieved by a subsequent
+// call to wasmI64HiResult(). This is safe because Hermes is single-threaded
+// within a Runtime.
+
+/// Thread-local stash for the hi32 part of the most recent i64 result.
+static thread_local double wasmI64HiStash_ = 0;
+
+/// Helper to reconstruct a 64-bit value from split lo/hi args.
+static int64_t argsToI64(NativeArgs &args, int loIdx, int hiIdx) {
+  auto lo = static_cast<uint32_t>(truncateToInt32(args.getArg(loIdx).getNumber()));
+  auto hi = static_cast<uint32_t>(truncateToInt32(args.getArg(hiIdx).getNumber()));
+  return static_cast<int64_t>(
+      (static_cast<uint64_t>(hi) << 32) | static_cast<uint64_t>(lo));
+}
+
+/// Helper to split a 64-bit result into lo (returned) and hi (stashed).
+static HermesValue splitI64Result(int64_t val) {
+  auto lo = static_cast<int32_t>(static_cast<uint64_t>(val) & 0xFFFFFFFF);
+  auto hi = static_cast<int32_t>(
+      (static_cast<uint64_t>(val) >> 32) & 0xFFFFFFFF);
+  wasmI64HiStash_ = static_cast<double>(hi);
+  return HermesValue::encodeTrustedNumberValue(static_cast<double>(lo));
+}
+
+static HermesValue splitU64Result(uint64_t val) {
+  auto lo = static_cast<int32_t>(val & 0xFFFFFFFF);
+  auto hi = static_cast<int32_t>((val >> 32) & 0xFFFFFFFF);
+  wasmI64HiStash_ = static_cast<double>(hi);
+  return HermesValue::encodeTrustedNumberValue(static_cast<double>(lo));
+}
+
+/// Retrieve the hi32 part of the most recent i64 result.
+CallResult<HermesValue> wasmI64HiResult(void *, Runtime &) {
+  return HermesValue::encodeTrustedNumberValue(wasmI64HiStash_);
+}
+
+/// i64.add
+CallResult<HermesValue> wasmI64Add(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  int64_t a = argsToI64(args, 0, 1);
+  int64_t b = argsToI64(args, 2, 3);
+  return splitI64Result(a + b);
+}
+
+/// i64.sub
+CallResult<HermesValue> wasmI64Sub(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  int64_t a = argsToI64(args, 0, 1);
+  int64_t b = argsToI64(args, 2, 3);
+  return splitI64Result(a - b);
+}
+
+/// i64.mul
+CallResult<HermesValue> wasmI64Mul(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  int64_t a = argsToI64(args, 0, 1);
+  int64_t b = argsToI64(args, 2, 3);
+  return splitI64Result(a * b);
+}
+
+/// i64.div_s: signed division, traps on div by zero and INT64_MIN / -1.
+CallResult<HermesValue> wasmI64DivS(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  int64_t a = argsToI64(args, 0, 1);
+  int64_t b = argsToI64(args, 2, 3);
+  if (LLVM_UNLIKELY(b == 0))
+    return runtime.raiseError("integer divide by zero");
+  if (LLVM_UNLIKELY(a == INT64_MIN && b == -1))
+    return runtime.raiseError("integer overflow");
+  return splitI64Result(a / b);
+}
+
+/// i64.div_u: unsigned division, traps on div by zero.
+CallResult<HermesValue> wasmI64DivU(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  uint64_t a = static_cast<uint64_t>(argsToI64(args, 0, 1));
+  uint64_t b = static_cast<uint64_t>(argsToI64(args, 2, 3));
+  if (LLVM_UNLIKELY(b == 0))
+    return runtime.raiseError("integer divide by zero");
+  return splitU64Result(a / b);
+}
+
+/// i64.rem_s: signed remainder, traps on div by zero.
+/// INT64_MIN % -1 = 0 (not a trap).
+CallResult<HermesValue> wasmI64RemS(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  int64_t a = argsToI64(args, 0, 1);
+  int64_t b = argsToI64(args, 2, 3);
+  if (LLVM_UNLIKELY(b == 0))
+    return runtime.raiseError("integer divide by zero");
+  // INT64_MIN % -1 is 0. Must handle explicitly to avoid potential UB
+  // on platforms where the division traps (x86 idiv).
+  if (LLVM_UNLIKELY(a == INT64_MIN && b == -1))
+    return splitI64Result(0);
+  return splitI64Result(a % b);
+}
+
+/// i64.rem_u: unsigned remainder, traps on div by zero.
+CallResult<HermesValue> wasmI64RemU(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  uint64_t a = static_cast<uint64_t>(argsToI64(args, 0, 1));
+  uint64_t b = static_cast<uint64_t>(argsToI64(args, 2, 3));
+  if (LLVM_UNLIKELY(b == 0))
+    return runtime.raiseError("integer divide by zero");
+  return splitU64Result(a % b);
+}
+
+/// i64.shl
+CallResult<HermesValue> wasmI64Shl(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  uint64_t a = static_cast<uint64_t>(argsToI64(args, 0, 1));
+  uint64_t b = static_cast<uint64_t>(argsToI64(args, 2, 3));
+  return splitU64Result(a << (b & 63));
+}
+
+/// i64.shr_s (arithmetic shift right)
+CallResult<HermesValue> wasmI64ShrS(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  int64_t a = argsToI64(args, 0, 1);
+  uint64_t b = static_cast<uint64_t>(argsToI64(args, 2, 3));
+  // C++ arithmetic right shift on signed is implementation-defined but
+  // in practice always sign-extends on two's complement platforms.
+  return splitI64Result(a >> (b & 63));
+}
+
+/// i64.shr_u (logical shift right)
+CallResult<HermesValue> wasmI64ShrU(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  uint64_t a = static_cast<uint64_t>(argsToI64(args, 0, 1));
+  uint64_t b = static_cast<uint64_t>(argsToI64(args, 2, 3));
+  return splitU64Result(a >> (b & 63));
+}
+
+/// i64.rotl
+CallResult<HermesValue> wasmI64Rotl(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  uint64_t a = static_cast<uint64_t>(argsToI64(args, 0, 1));
+  uint64_t b = static_cast<uint64_t>(argsToI64(args, 2, 3));
+  uint64_t shift = b & 63;
+  uint64_t result = shift == 0 ? a : (a << shift) | (a >> (64 - shift));
+  return splitU64Result(result);
+}
+
+/// i64.rotr
+CallResult<HermesValue> wasmI64Rotr(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  uint64_t a = static_cast<uint64_t>(argsToI64(args, 0, 1));
+  uint64_t b = static_cast<uint64_t>(argsToI64(args, 2, 3));
+  uint64_t shift = b & 63;
+  uint64_t result = shift == 0 ? a : (a >> shift) | (a << (64 - shift));
+  return splitU64Result(result);
+}
+
+/// i64.clz: count leading zeros. Result fits in [0, 64].
+CallResult<HermesValue> wasmI64Clz(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  uint64_t a = static_cast<uint64_t>(argsToI64(args, 0, 1));
+  uint64_t result;
+  if (a == 0) {
+    result = 64;
+  } else {
+    // __builtin_clzll is defined for non-zero values.
+    result = __builtin_clzll(a);
+  }
+  return HermesValue::encodeTrustedNumberValue(static_cast<double>(result));
+}
+
+/// i64.ctz: count trailing zeros. Result fits in [0, 64].
+CallResult<HermesValue> wasmI64Ctz(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  uint64_t a = static_cast<uint64_t>(argsToI64(args, 0, 1));
+  uint64_t result;
+  if (a == 0) {
+    result = 64;
+  } else {
+    result = __builtin_ctzll(a);
+  }
+  return HermesValue::encodeTrustedNumberValue(static_cast<double>(result));
+}
+
+/// i64.popcnt: population count. Result fits in [0, 64].
+CallResult<HermesValue> wasmI64Popcnt(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  uint64_t a = static_cast<uint64_t>(argsToI64(args, 0, 1));
+  return HermesValue::encodeTrustedNumberValue(
+      static_cast<double>(__builtin_popcountll(a)));
+}
+
+/// i64.eqz: test if zero. Returns i32 (0 or 1).
+CallResult<HermesValue> wasmI64Eqz(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  int64_t a = argsToI64(args, 0, 1);
+  return HermesValue::encodeTrustedNumberValue(a == 0 ? 1 : 0);
+}
+
+/// i64.eq: Returns i32 (0 or 1).
+CallResult<HermesValue> wasmI64Eq(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  int64_t a = argsToI64(args, 0, 1);
+  int64_t b = argsToI64(args, 2, 3);
+  return HermesValue::encodeTrustedNumberValue(a == b ? 1 : 0);
+}
+
+/// i64.ne: Returns i32 (0 or 1).
+CallResult<HermesValue> wasmI64Ne(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  int64_t a = argsToI64(args, 0, 1);
+  int64_t b = argsToI64(args, 2, 3);
+  return HermesValue::encodeTrustedNumberValue(a != b ? 1 : 0);
+}
+
+/// i64.lt_s: signed less than. Returns i32.
+CallResult<HermesValue> wasmI64LtS(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  int64_t a = argsToI64(args, 0, 1);
+  int64_t b = argsToI64(args, 2, 3);
+  return HermesValue::encodeTrustedNumberValue(a < b ? 1 : 0);
+}
+
+/// i64.gt_s: signed greater than. Returns i32.
+CallResult<HermesValue> wasmI64GtS(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  int64_t a = argsToI64(args, 0, 1);
+  int64_t b = argsToI64(args, 2, 3);
+  return HermesValue::encodeTrustedNumberValue(a > b ? 1 : 0);
+}
+
+/// i64.le_s: signed less or equal. Returns i32.
+CallResult<HermesValue> wasmI64LeS(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  int64_t a = argsToI64(args, 0, 1);
+  int64_t b = argsToI64(args, 2, 3);
+  return HermesValue::encodeTrustedNumberValue(a <= b ? 1 : 0);
+}
+
+/// i64.ge_s: signed greater or equal. Returns i32.
+CallResult<HermesValue> wasmI64GeS(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  int64_t a = argsToI64(args, 0, 1);
+  int64_t b = argsToI64(args, 2, 3);
+  return HermesValue::encodeTrustedNumberValue(a >= b ? 1 : 0);
+}
+
+/// i64.lt_u: unsigned less than. Returns i32.
+CallResult<HermesValue> wasmI64LtU(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  uint64_t a = static_cast<uint64_t>(argsToI64(args, 0, 1));
+  uint64_t b = static_cast<uint64_t>(argsToI64(args, 2, 3));
+  return HermesValue::encodeTrustedNumberValue(a < b ? 1 : 0);
+}
+
+/// i64.gt_u: unsigned greater than. Returns i32.
+CallResult<HermesValue> wasmI64GtU(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  uint64_t a = static_cast<uint64_t>(argsToI64(args, 0, 1));
+  uint64_t b = static_cast<uint64_t>(argsToI64(args, 2, 3));
+  return HermesValue::encodeTrustedNumberValue(a > b ? 1 : 0);
+}
+
+/// i64.le_u: unsigned less or equal. Returns i32.
+CallResult<HermesValue> wasmI64LeU(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  uint64_t a = static_cast<uint64_t>(argsToI64(args, 0, 1));
+  uint64_t b = static_cast<uint64_t>(argsToI64(args, 2, 3));
+  return HermesValue::encodeTrustedNumberValue(a <= b ? 1 : 0);
+}
+
+/// i64.ge_u: unsigned greater or equal. Returns i32.
+CallResult<HermesValue> wasmI64GeU(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  uint64_t a = static_cast<uint64_t>(argsToI64(args, 0, 1));
+  uint64_t b = static_cast<uint64_t>(argsToI64(args, 2, 3));
+  return HermesValue::encodeTrustedNumberValue(a >= b ? 1 : 0);
+}
+
 namespace {
 
 CallResult<HermesValue> copyDataPropertiesSlowPath_RJS(
@@ -1146,10 +1425,13 @@ CallResult<HermesValue> hermesBuiltinInitRegexNamedGroups(
 }
 
 void createHermesBuiltins(Runtime &runtime) {
+  GCScope gcScope{runtime, "createHermesBuiltins", 128};
+
   struct : public Locals {
     PinnedValue<NativeFunction> method;
   } lv;
   LocalsRAII lraii(runtime, &lv);
+  auto marker = gcScope.createMarker();
 
   auto defineInternMethod = [&](BuiltinMethod::Enum builtinIndex,
                                 Predefined::Str symID,
@@ -1166,6 +1448,7 @@ void createHermesBuiltins(Runtime &runtime) {
         Runtime::makeNullHandle<JSObject>());
     lv.method = std::move(*methodRes);
     runtime.registerBuiltin(builtinIndex, *lv.method);
+    gcScope.flushToMarker(marker);
   };
 
   // HermesBuiltin function properties
@@ -1298,6 +1581,67 @@ void createHermesBuiltins(Runtime &runtime) {
       P::wasmF32Copysign,
       wasmF32Copysign,
       2);
+  // i64 helpers (G.3).
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64HiResult,
+      P::wasmI64HiResult,
+      wasmI64HiResult,
+      0);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64Add, P::wasmI64Add, wasmI64Add, 4);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64Sub, P::wasmI64Sub, wasmI64Sub, 4);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64Mul, P::wasmI64Mul, wasmI64Mul, 4);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64DivS, P::wasmI64DivS, wasmI64DivS, 4);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64DivU, P::wasmI64DivU, wasmI64DivU, 4);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64RemS, P::wasmI64RemS, wasmI64RemS, 4);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64RemU, P::wasmI64RemU, wasmI64RemU, 4);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64Shl, P::wasmI64Shl, wasmI64Shl, 4);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64ShrS, P::wasmI64ShrS, wasmI64ShrS, 4);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64ShrU, P::wasmI64ShrU, wasmI64ShrU, 4);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64Rotl, P::wasmI64Rotl, wasmI64Rotl, 4);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64Rotr, P::wasmI64Rotr, wasmI64Rotr, 4);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64Clz, P::wasmI64Clz, wasmI64Clz, 2);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64Ctz, P::wasmI64Ctz, wasmI64Ctz, 2);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64Popcnt,
+      P::wasmI64Popcnt,
+      wasmI64Popcnt,
+      2);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64Eqz, P::wasmI64Eqz, wasmI64Eqz, 2);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64Eq, P::wasmI64Eq, wasmI64Eq, 4);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64Ne, P::wasmI64Ne, wasmI64Ne, 4);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64LtS, P::wasmI64LtS, wasmI64LtS, 4);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64GtS, P::wasmI64GtS, wasmI64GtS, 4);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64LeS, P::wasmI64LeS, wasmI64LeS, 4);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64GeS, P::wasmI64GeS, wasmI64GeS, 4);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64LtU, P::wasmI64LtU, wasmI64LtU, 4);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64GtU, P::wasmI64GtU, wasmI64GtU, 4);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64LeU, P::wasmI64LeU, wasmI64LeU, 4);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64GeU, P::wasmI64GeU, wasmI64GeU, 4);
 }
 
 } // namespace vm

@@ -89,6 +89,44 @@ class WasmHelpers {
   /// Emit f32.copysign(a, b): copy the sign bit of b onto the magnitude of a.
   Instruction *emitF32Copysign(Value *a, Value *b);
 
+  // --- i64 helpers (G.3) ---
+  // Binary ops return lo32; hi32 is stashed and retrieved via emitI64HiResult.
+
+  /// Retrieve the hi32 part of the most recent i64 helper result.
+  Instruction *emitI64HiResult();
+
+  /// i64 binary arithmetic ops. Take (lo_a, hi_a, lo_b, hi_b), return lo32.
+  Instruction *emitI64Add(Value *loA, Value *hiA, Value *loB, Value *hiB);
+  Instruction *emitI64Sub(Value *loA, Value *hiA, Value *loB, Value *hiB);
+  Instruction *emitI64Mul(Value *loA, Value *hiA, Value *loB, Value *hiB);
+  Instruction *emitI64DivS(Value *loA, Value *hiA, Value *loB, Value *hiB);
+  Instruction *emitI64DivU(Value *loA, Value *hiA, Value *loB, Value *hiB);
+  Instruction *emitI64RemS(Value *loA, Value *hiA, Value *loB, Value *hiB);
+  Instruction *emitI64RemU(Value *loA, Value *hiA, Value *loB, Value *hiB);
+  Instruction *emitI64Shl(Value *loA, Value *hiA, Value *loB, Value *hiB);
+  Instruction *emitI64ShrS(Value *loA, Value *hiA, Value *loB, Value *hiB);
+  Instruction *emitI64ShrU(Value *loA, Value *hiA, Value *loB, Value *hiB);
+  Instruction *emitI64Rotl(Value *loA, Value *hiA, Value *loB, Value *hiB);
+  Instruction *emitI64Rotr(Value *loA, Value *hiA, Value *loB, Value *hiB);
+
+  /// i64 unary ops. Take (lo, hi), return a single i32 result.
+  Instruction *emitI64Clz(Value *lo, Value *hi);
+  Instruction *emitI64Ctz(Value *lo, Value *hi);
+  Instruction *emitI64Popcnt(Value *lo, Value *hi);
+
+  /// i64 comparison ops. Take split args, return i32 (0 or 1).
+  Instruction *emitI64Eqz(Value *lo, Value *hi);
+  Instruction *emitI64Eq(Value *loA, Value *hiA, Value *loB, Value *hiB);
+  Instruction *emitI64Ne(Value *loA, Value *hiA, Value *loB, Value *hiB);
+  Instruction *emitI64LtS(Value *loA, Value *hiA, Value *loB, Value *hiB);
+  Instruction *emitI64GtS(Value *loA, Value *hiA, Value *loB, Value *hiB);
+  Instruction *emitI64LeS(Value *loA, Value *hiA, Value *loB, Value *hiB);
+  Instruction *emitI64GeS(Value *loA, Value *hiA, Value *loB, Value *hiB);
+  Instruction *emitI64LtU(Value *loA, Value *hiA, Value *loB, Value *hiB);
+  Instruction *emitI64GtU(Value *loA, Value *hiA, Value *loB, Value *hiB);
+  Instruction *emitI64LeU(Value *loA, Value *hiA, Value *loB, Value *hiB);
+  Instruction *emitI64GeU(Value *loA, Value *hiA, Value *loB, Value *hiB);
+
  private:
   IRBuilder &builder_;
 };

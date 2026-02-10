@@ -11,25 +11,25 @@
 ;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm --dump-ir -O0 %t.wasm 2>&1 | %FileCheck %s
 
 (module
+  (memory 1)
   (global $g (mut i32) (i32.const 0))
 
-  ;; Exercise unsupported binary op (i64 is still deferred).
-  (func $rotl_test (param i64 i64) (result i64)
+  ;; Exercise unsupported load op (memory access deferred to Part H).
+  (func $load_test (param i32) (result i32)
     local.get 0
-    local.get 1
-    i64.rotl)
+    i32.load)
 
-  ;; Exercise unsupported unary op (i64 is still deferred).
-  (func $clz_test (param i64) (result i64)
+  ;; Exercise unsupported conversion (i64 conversion deferred to Part G.4).
+  (func $wrap_test (param i64) (result i32)
     local.get 0
-    i64.clz)
+    i32.wrap_i64)
 
   ;; Exercise global.get and global.set in function body.
   (func $global_test
     global.get $g
     global.set $g))
 
-;; CHECK: warning: unsupported Wasm opcode: i64.rotl
-;; CHECK: warning: unsupported Wasm opcode: i64.clz
+;; CHECK: warning: unsupported Wasm opcode: i32.load
+;; CHECK: warning: unsupported Wasm opcode: i32.wrap_i64
 ;; CHECK: warning: unsupported Wasm opcode: global.get
 ;; CHECK: warning: unsupported Wasm opcode: global.set

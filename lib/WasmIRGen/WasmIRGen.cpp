@@ -1079,6 +1079,288 @@ void WasmIRGen::onCall(uint32_t funcIndex) {
   }
 }
 
+// --- i64 arithmetic (G.3) ---
+// i64 values are represented as two i32 values on the stack [lo, hi].
+// Binary operations pop two i64 pairs and push one i64 pair.
+// For operations that need a native helper: the helper returns lo32 and
+// stashes hi32, which is retrieved via a second call to emitI64HiResult().
+
+void WasmIRGen::onI64Add() {
+  if (unreachable_)
+    return;
+  auto [loB, hiB] = popI64();
+  auto [loA, hiA] = popI64();
+  auto *lo = helpers_.emitI64Add(loA, hiA, loB, hiB);
+  auto *hi = helpers_.emitI64HiResult();
+  pushI64(lo, hi);
+}
+
+void WasmIRGen::onI64Sub() {
+  if (unreachable_)
+    return;
+  auto [loB, hiB] = popI64();
+  auto [loA, hiA] = popI64();
+  auto *lo = helpers_.emitI64Sub(loA, hiA, loB, hiB);
+  auto *hi = helpers_.emitI64HiResult();
+  pushI64(lo, hi);
+}
+
+void WasmIRGen::onI64Mul() {
+  if (unreachable_)
+    return;
+  auto [loB, hiB] = popI64();
+  auto [loA, hiA] = popI64();
+  auto *lo = helpers_.emitI64Mul(loA, hiA, loB, hiB);
+  auto *hi = helpers_.emitI64HiResult();
+  pushI64(lo, hi);
+}
+
+void WasmIRGen::onI64DivS() {
+  if (unreachable_)
+    return;
+  auto [loB, hiB] = popI64();
+  auto [loA, hiA] = popI64();
+  auto *lo = helpers_.emitI64DivS(loA, hiA, loB, hiB);
+  auto *hi = helpers_.emitI64HiResult();
+  pushI64(lo, hi);
+}
+
+void WasmIRGen::onI64DivU() {
+  if (unreachable_)
+    return;
+  auto [loB, hiB] = popI64();
+  auto [loA, hiA] = popI64();
+  auto *lo = helpers_.emitI64DivU(loA, hiA, loB, hiB);
+  auto *hi = helpers_.emitI64HiResult();
+  pushI64(lo, hi);
+}
+
+void WasmIRGen::onI64RemS() {
+  if (unreachable_)
+    return;
+  auto [loB, hiB] = popI64();
+  auto [loA, hiA] = popI64();
+  auto *lo = helpers_.emitI64RemS(loA, hiA, loB, hiB);
+  auto *hi = helpers_.emitI64HiResult();
+  pushI64(lo, hi);
+}
+
+void WasmIRGen::onI64RemU() {
+  if (unreachable_)
+    return;
+  auto [loB, hiB] = popI64();
+  auto [loA, hiA] = popI64();
+  auto *lo = helpers_.emitI64RemU(loA, hiA, loB, hiB);
+  auto *hi = helpers_.emitI64HiResult();
+  pushI64(lo, hi);
+}
+
+void WasmIRGen::onI64And() {
+  if (unreachable_)
+    return;
+  auto [loB, hiB] = popI64();
+  auto [loA, hiA] = popI64();
+  auto *lo = builder_.createBinaryOperatorInst(
+      loA, loB, ValueKind::BinaryAndInstKind);
+  auto *hi = builder_.createBinaryOperatorInst(
+      hiA, hiB, ValueKind::BinaryAndInstKind);
+  pushI64(lo, hi);
+}
+
+void WasmIRGen::onI64Or() {
+  if (unreachable_)
+    return;
+  auto [loB, hiB] = popI64();
+  auto [loA, hiA] = popI64();
+  auto *lo = builder_.createBinaryOperatorInst(
+      loA, loB, ValueKind::BinaryOrInstKind);
+  auto *hi = builder_.createBinaryOperatorInst(
+      hiA, hiB, ValueKind::BinaryOrInstKind);
+  pushI64(lo, hi);
+}
+
+void WasmIRGen::onI64Xor() {
+  if (unreachable_)
+    return;
+  auto [loB, hiB] = popI64();
+  auto [loA, hiA] = popI64();
+  auto *lo = builder_.createBinaryOperatorInst(
+      loA, loB, ValueKind::BinaryXorInstKind);
+  auto *hi = builder_.createBinaryOperatorInst(
+      hiA, hiB, ValueKind::BinaryXorInstKind);
+  pushI64(lo, hi);
+}
+
+void WasmIRGen::onI64Shl() {
+  if (unreachable_)
+    return;
+  auto [loB, hiB] = popI64();
+  auto [loA, hiA] = popI64();
+  auto *lo = helpers_.emitI64Shl(loA, hiA, loB, hiB);
+  auto *hi = helpers_.emitI64HiResult();
+  pushI64(lo, hi);
+}
+
+void WasmIRGen::onI64ShrS() {
+  if (unreachable_)
+    return;
+  auto [loB, hiB] = popI64();
+  auto [loA, hiA] = popI64();
+  auto *lo = helpers_.emitI64ShrS(loA, hiA, loB, hiB);
+  auto *hi = helpers_.emitI64HiResult();
+  pushI64(lo, hi);
+}
+
+void WasmIRGen::onI64ShrU() {
+  if (unreachable_)
+    return;
+  auto [loB, hiB] = popI64();
+  auto [loA, hiA] = popI64();
+  auto *lo = helpers_.emitI64ShrU(loA, hiA, loB, hiB);
+  auto *hi = helpers_.emitI64HiResult();
+  pushI64(lo, hi);
+}
+
+void WasmIRGen::onI64Rotl() {
+  if (unreachable_)
+    return;
+  auto [loB, hiB] = popI64();
+  auto [loA, hiA] = popI64();
+  auto *lo = helpers_.emitI64Rotl(loA, hiA, loB, hiB);
+  auto *hi = helpers_.emitI64HiResult();
+  pushI64(lo, hi);
+}
+
+void WasmIRGen::onI64Rotr() {
+  if (unreachable_)
+    return;
+  auto [loB, hiB] = popI64();
+  auto [loA, hiA] = popI64();
+  auto *lo = helpers_.emitI64Rotr(loA, hiA, loB, hiB);
+  auto *hi = helpers_.emitI64HiResult();
+  pushI64(lo, hi);
+}
+
+// --- i64 unary (G.3) ---
+// clz/ctz/popcnt return i64 per the Wasm spec, but the result always fits
+// in [0, 64]. The native helper returns a single i32 value. We push it as
+// an i64 with hi = 0.
+
+void WasmIRGen::onI64Clz() {
+  if (unreachable_)
+    return;
+  auto [lo, hi] = popI64();
+  auto *result = helpers_.emitI64Clz(lo, hi);
+  pushI64(result, builder_.getLiteralNumber(0));
+}
+
+void WasmIRGen::onI64Ctz() {
+  if (unreachable_)
+    return;
+  auto [lo, hi] = popI64();
+  auto *result = helpers_.emitI64Ctz(lo, hi);
+  pushI64(result, builder_.getLiteralNumber(0));
+}
+
+void WasmIRGen::onI64Popcnt() {
+  if (unreachable_)
+    return;
+  auto [lo, hi] = popI64();
+  auto *result = helpers_.emitI64Popcnt(lo, hi);
+  pushI64(result, builder_.getLiteralNumber(0));
+}
+
+// --- i64 comparisons (G.3) ---
+// These take i64 operands and return i32 (0 or 1). The result is pushed
+// as a single i32 value (not an i64 pair).
+
+void WasmIRGen::onI64Eqz() {
+  if (unreachable_)
+    return;
+  auto [lo, hi] = popI64();
+  push(helpers_.emitI64Eqz(lo, hi));
+}
+
+void WasmIRGen::onI64Eq() {
+  if (unreachable_)
+    return;
+  auto [loB, hiB] = popI64();
+  auto [loA, hiA] = popI64();
+  push(helpers_.emitI64Eq(loA, hiA, loB, hiB));
+}
+
+void WasmIRGen::onI64Ne() {
+  if (unreachable_)
+    return;
+  auto [loB, hiB] = popI64();
+  auto [loA, hiA] = popI64();
+  push(helpers_.emitI64Ne(loA, hiA, loB, hiB));
+}
+
+void WasmIRGen::onI64LtS() {
+  if (unreachable_)
+    return;
+  auto [loB, hiB] = popI64();
+  auto [loA, hiA] = popI64();
+  push(helpers_.emitI64LtS(loA, hiA, loB, hiB));
+}
+
+void WasmIRGen::onI64GtS() {
+  if (unreachable_)
+    return;
+  auto [loB, hiB] = popI64();
+  auto [loA, hiA] = popI64();
+  push(helpers_.emitI64GtS(loA, hiA, loB, hiB));
+}
+
+void WasmIRGen::onI64LeS() {
+  if (unreachable_)
+    return;
+  auto [loB, hiB] = popI64();
+  auto [loA, hiA] = popI64();
+  push(helpers_.emitI64LeS(loA, hiA, loB, hiB));
+}
+
+void WasmIRGen::onI64GeS() {
+  if (unreachable_)
+    return;
+  auto [loB, hiB] = popI64();
+  auto [loA, hiA] = popI64();
+  push(helpers_.emitI64GeS(loA, hiA, loB, hiB));
+}
+
+void WasmIRGen::onI64LtU() {
+  if (unreachable_)
+    return;
+  auto [loB, hiB] = popI64();
+  auto [loA, hiA] = popI64();
+  push(helpers_.emitI64LtU(loA, hiA, loB, hiB));
+}
+
+void WasmIRGen::onI64GtU() {
+  if (unreachable_)
+    return;
+  auto [loB, hiB] = popI64();
+  auto [loA, hiA] = popI64();
+  push(helpers_.emitI64GtU(loA, hiA, loB, hiB));
+}
+
+void WasmIRGen::onI64LeU() {
+  if (unreachable_)
+    return;
+  auto [loB, hiB] = popI64();
+  auto [loA, hiA] = popI64();
+  push(helpers_.emitI64LeU(loA, hiA, loB, hiB));
+}
+
+void WasmIRGen::onI64GeU() {
+  if (unreachable_)
+    return;
+  auto [loB, hiB] = popI64();
+  auto [loA, hiA] = popI64();
+  push(helpers_.emitI64GeU(loA, hiA, loB, hiB));
+}
+
 // --- f64 arithmetic (E.1) ---
 // We use BinaryOperatorInst (not FBinaryMathInst) because the F-prefixed
 // instructions require number-typed inputs, but our values are loaded from

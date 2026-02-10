@@ -100,5 +100,164 @@ Instruction *WasmHelpers::emitF32Copysign(Value *a, Value *b) {
       BuiltinMethod::HermesBuiltin_wasmF32Copysign, {a, b});
 }
 
+// --- i64 helpers (G.3) ---
+
+Instruction *WasmHelpers::emitI64HiResult() {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64HiResult, {});
+}
+
+Instruction *WasmHelpers::emitI64Add(
+    Value *loA, Value *hiA, Value *loB, Value *hiB) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64Add, {loA, hiA, loB, hiB});
+}
+
+Instruction *WasmHelpers::emitI64Sub(
+    Value *loA, Value *hiA, Value *loB, Value *hiB) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64Sub, {loA, hiA, loB, hiB});
+}
+
+Instruction *WasmHelpers::emitI64Mul(
+    Value *loA, Value *hiA, Value *loB, Value *hiB) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64Mul, {loA, hiA, loB, hiB});
+}
+
+Instruction *WasmHelpers::emitI64DivS(
+    Value *loA, Value *hiA, Value *loB, Value *hiB) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64DivS, {loA, hiA, loB, hiB});
+}
+
+Instruction *WasmHelpers::emitI64DivU(
+    Value *loA, Value *hiA, Value *loB, Value *hiB) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64DivU, {loA, hiA, loB, hiB});
+}
+
+Instruction *WasmHelpers::emitI64RemS(
+    Value *loA, Value *hiA, Value *loB, Value *hiB) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64RemS, {loA, hiA, loB, hiB});
+}
+
+Instruction *WasmHelpers::emitI64RemU(
+    Value *loA, Value *hiA, Value *loB, Value *hiB) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64RemU, {loA, hiA, loB, hiB});
+}
+
+Instruction *WasmHelpers::emitI64Shl(
+    Value *loA, Value *hiA, Value *loB, Value *hiB) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64Shl, {loA, hiA, loB, hiB});
+}
+
+Instruction *WasmHelpers::emitI64ShrS(
+    Value *loA, Value *hiA, Value *loB, Value *hiB) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64ShrS, {loA, hiA, loB, hiB});
+}
+
+Instruction *WasmHelpers::emitI64ShrU(
+    Value *loA, Value *hiA, Value *loB, Value *hiB) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64ShrU, {loA, hiA, loB, hiB});
+}
+
+Instruction *WasmHelpers::emitI64Rotl(
+    Value *loA, Value *hiA, Value *loB, Value *hiB) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64Rotl, {loA, hiA, loB, hiB});
+}
+
+Instruction *WasmHelpers::emitI64Rotr(
+    Value *loA, Value *hiA, Value *loB, Value *hiB) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64Rotr, {loA, hiA, loB, hiB});
+}
+
+Instruction *WasmHelpers::emitI64Clz(Value *lo, Value *hi) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64Clz, {lo, hi});
+}
+
+Instruction *WasmHelpers::emitI64Ctz(Value *lo, Value *hi) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64Ctz, {lo, hi});
+}
+
+Instruction *WasmHelpers::emitI64Popcnt(Value *lo, Value *hi) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64Popcnt, {lo, hi});
+}
+
+Instruction *WasmHelpers::emitI64Eqz(Value *lo, Value *hi) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64Eqz, {lo, hi});
+}
+
+Instruction *WasmHelpers::emitI64Eq(
+    Value *loA, Value *hiA, Value *loB, Value *hiB) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64Eq, {loA, hiA, loB, hiB});
+}
+
+Instruction *WasmHelpers::emitI64Ne(
+    Value *loA, Value *hiA, Value *loB, Value *hiB) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64Ne, {loA, hiA, loB, hiB});
+}
+
+Instruction *WasmHelpers::emitI64LtS(
+    Value *loA, Value *hiA, Value *loB, Value *hiB) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64LtS, {loA, hiA, loB, hiB});
+}
+
+Instruction *WasmHelpers::emitI64GtS(
+    Value *loA, Value *hiA, Value *loB, Value *hiB) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64GtS, {loA, hiA, loB, hiB});
+}
+
+Instruction *WasmHelpers::emitI64LeS(
+    Value *loA, Value *hiA, Value *loB, Value *hiB) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64LeS, {loA, hiA, loB, hiB});
+}
+
+Instruction *WasmHelpers::emitI64GeS(
+    Value *loA, Value *hiA, Value *loB, Value *hiB) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64GeS, {loA, hiA, loB, hiB});
+}
+
+Instruction *WasmHelpers::emitI64LtU(
+    Value *loA, Value *hiA, Value *loB, Value *hiB) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64LtU, {loA, hiA, loB, hiB});
+}
+
+Instruction *WasmHelpers::emitI64GtU(
+    Value *loA, Value *hiA, Value *loB, Value *hiB) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64GtU, {loA, hiA, loB, hiB});
+}
+
+Instruction *WasmHelpers::emitI64LeU(
+    Value *loA, Value *hiA, Value *loB, Value *hiB) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64LeU, {loA, hiA, loB, hiB});
+}
+
+Instruction *WasmHelpers::emitI64GeU(
+    Value *loA, Value *hiA, Value *loB, Value *hiB) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64GeU, {loA, hiA, loB, hiB});
+}
+
 } // namespace wasm
 } // namespace hermes

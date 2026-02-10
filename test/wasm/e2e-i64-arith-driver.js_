@@ -1,0 +1,32 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-i64-arith.wat.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+
+print("eqz_zero:", exports.eqz_zero());
+print("eqz_one:", exports.eqz_one());
+print("eqz_hi:", exports.eqz_hi());
+print("eq_same:", exports.eq_same());
+print("eq_diff:", exports.eq_diff());
+print("lt_s_true:", exports.lt_s_true());
+print("lt_s_false:", exports.lt_s_false());
+print("lt_u_true:", exports.lt_u_true());
+print("lt_u_false:", exports.lt_u_false());
+print("add_not_zero:", exports.add_not_zero());
+print("add_eq_300:", exports.add_eq_300());
+print("sub_eq:", exports.sub_eq());
+print("mul_eq:", exports.mul_eq());
+print("and_eq:", exports.and_eq());
+print("or_eq:", exports.or_eq());
+print("xor_eq:", exports.xor_eq());
+print("shl_eq:", exports.shl_eq());
+print("clz_one:", exports.clz_one());
+print("ctz_hi:", exports.ctz_hi());
+print("popcnt_byte:", exports.popcnt_byte());

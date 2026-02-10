@@ -218,6 +218,44 @@ class WasmIRGen {
   void onF32Le();
   void onF32Ge();
 
+  // --- i64 arithmetic (G.3) ---
+
+  void onI64Add();
+  void onI64Sub();
+  void onI64Mul();
+  void onI64DivS();
+  void onI64DivU();
+  void onI64RemS();
+  void onI64RemU();
+  void onI64And();
+  void onI64Or();
+  void onI64Xor();
+  void onI64Shl();
+  void onI64ShrS();
+  void onI64ShrU();
+  void onI64Rotl();
+  void onI64Rotr();
+
+  // --- i64 unary (G.3) ---
+
+  void onI64Clz();
+  void onI64Ctz();
+  void onI64Popcnt();
+
+  // --- i64 comparisons (G.3) ---
+
+  void onI64Eqz();
+  void onI64Eq();
+  void onI64Ne();
+  void onI64LtS();
+  void onI64GtS();
+  void onI64LeS();
+  void onI64GeS();
+  void onI64LtU();
+  void onI64GtU();
+  void onI64LeU();
+  void onI64GeU();
+
   // --- f64/f32 copysign (F.5) ---
 
   void onF64Copysign();

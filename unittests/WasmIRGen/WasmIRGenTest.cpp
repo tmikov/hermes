@@ -3345,4 +3345,193 @@ TEST(WasmIRGenTest, I64PushI64ThenI32Interleaved) {
   ASSERT_NE(func, nullptr);
 }
 
+// --- i64 arithmetic tests (G.3) ---
+
+TEST(WasmIRGenTest, I64AddEmitsCallAndHi) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // Type: () -> (i32)
+  moduleInfo.types.push_back(WasmFuncType{{}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  irgen.beginFunction(0, {});
+
+  // Push two i64 values.
+  irgen.onI64Const(100);
+  irgen.onI64Const(200);
+
+  // i64.add should pop two i64 pairs, push one i64 pair.
+  irgen.onI64Add();
+
+  // The result should be an i64 on the stack.
+  auto [lo, hi] = irgen.popI64();
+  ASSERT_NE(lo, nullptr);
+  ASSERT_NE(hi, nullptr);
+
+  // lo should be a CallBuiltinInst (wasmI64Add).
+  auto *loInst = llvh::dyn_cast<CallBuiltinInst>(lo);
+  ASSERT_NE(loInst, nullptr);
+  EXPECT_EQ(
+      loInst->getBuiltinIndex(),
+      BuiltinMethod::HermesBuiltin_wasmI64Add);
+
+  // hi should be a CallBuiltinInst (wasmI64HiResult).
+  auto *hiInst = llvh::dyn_cast<CallBuiltinInst>(hi);
+  ASSERT_NE(hiInst, nullptr);
+  EXPECT_EQ(
+      hiInst->getBuiltinIndex(),
+      BuiltinMethod::HermesBuiltin_wasmI64HiResult);
+
+  // Push i32 return value.
+  irgen.onI32Const(0);
+  irgen.endFunction();
+}
+
+TEST(WasmIRGenTest, I64AndEmitsInlineBitwise) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // Type: () -> (i32)
+  moduleInfo.types.push_back(WasmFuncType{{}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  irgen.beginFunction(0, {});
+
+  irgen.onI64Const(0xFF00);
+  irgen.onI64Const(0x0FFF);
+
+  // i64.and should produce inline BinaryAndInst for both lo and hi.
+  irgen.onI64And();
+
+  auto [lo, hi] = irgen.popI64();
+  // Both should be BinaryOperatorInst (BinaryAnd), not CallBuiltinInst.
+  EXPECT_TRUE(llvh::isa<BinaryOperatorInst>(lo));
+  EXPECT_TRUE(llvh::isa<BinaryOperatorInst>(hi));
+
+  irgen.onI32Const(0);
+  irgen.endFunction();
+}
+
+TEST(WasmIRGenTest, I64EqzReturnsI32) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // Type: () -> (i32)
+  moduleInfo.types.push_back(WasmFuncType{{}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  irgen.beginFunction(0, {});
+
+  irgen.onI64Const(42);
+
+  // i64.eqz takes i64, returns i32 — the function should end normally
+  // with the i32 result on the stack.
+  irgen.onI64Eqz();
+
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+  ASSERT_NE(func, nullptr);
+}
+
+TEST(WasmIRGenTest, I64EqEmitsCallBuiltin) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // Type: () -> (i32)
+  moduleInfo.types.push_back(WasmFuncType{{}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  irgen.beginFunction(0, {});
+
+  irgen.onI64Const(42);
+  irgen.onI64Const(42);
+  irgen.onI64Eq();
+
+  // The function should end with i32 on stack (no crash).
+  irgen.endFunction();
+
+  auto *func = irgen.getIRFunctions()[0];
+  ASSERT_NE(func, nullptr);
+}
+
+TEST(WasmIRGenTest, I64ClzReturnsI64WithZeroHi) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // Type: () -> (i32)
+  moduleInfo.types.push_back(WasmFuncType{{}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  irgen.beginFunction(0, {});
+
+  irgen.onI64Const(1);
+  irgen.onI64Clz();
+
+  // Result should be i64 (per Wasm spec, clz returns i64).
+  // Pop via popI64 — if this succeeds, the result was properly pushed as i64.
+  auto [lo, hi] = irgen.popI64();
+
+  // lo should be a CallBuiltinInst (wasmI64Clz).
+  auto *loInst = llvh::dyn_cast<CallBuiltinInst>(lo);
+  ASSERT_NE(loInst, nullptr);
+  EXPECT_EQ(
+      loInst->getBuiltinIndex(),
+      BuiltinMethod::HermesBuiltin_wasmI64Clz);
+
+  // hi should be LiteralNumber(0) since clz result fits in i32.
+  auto *hiNum = llvh::dyn_cast<LiteralNumber>(hi);
+  ASSERT_NE(hiNum, nullptr);
+  EXPECT_EQ(hiNum->getValue(), 0.0);
+
+  irgen.onI32Const(0);
+  irgen.endFunction();
+}
+
+TEST(WasmIRGenTest, I64ShlEmitsCallAndHi) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // Type: () -> (i32)
+  moduleInfo.types.push_back(WasmFuncType{{}, {WasmValType::I32}});
+  moduleInfo.functions.push_back(WasmFunction{0});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  irgen.beginFunction(0, {});
+
+  irgen.onI64Const(1);
+  irgen.onI64Const(32);
+  irgen.onI64Shl();
+
+  // Pop via popI64 — verifies the result was pushed as i64.
+  auto [lo, hi] = irgen.popI64();
+
+  auto *loInst = llvh::dyn_cast<CallBuiltinInst>(lo);
+  ASSERT_NE(loInst, nullptr);
+  EXPECT_EQ(
+      loInst->getBuiltinIndex(),
+      BuiltinMethod::HermesBuiltin_wasmI64Shl);
+
+  irgen.onI32Const(0);
+  irgen.endFunction();
+}
+
 } // namespace
