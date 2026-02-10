@@ -1,0 +1,30 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-import-float.wat.
+// Tests importing JS functions with float arguments and return values.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+
+globalThis.__wasm_imports__ = {
+  env: {
+    // f64 add
+    f64_add: function(a, b) {
+      return a + b;
+    },
+    // f64 -> i32 comparison
+    f64_gt: function(a, b) {
+      return a > b ? 1 : 0;
+    },
+  },
+};
+
+var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+
+print("f64_result(1.5, 2.25) =", exports.test_f64(1.5, 2.25));
+print("gt(3.0, 2.0) =", exports.test_gt(3.0, 2.0));
+print("gt(1.0, 5.0) =", exports.test_gt(1.0, 5.0));

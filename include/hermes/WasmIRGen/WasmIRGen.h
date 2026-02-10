@@ -391,6 +391,11 @@ class WasmIRGen {
   /// pre-created closure. Indexed by Wasm function index.
   std::vector<Variable *> closureVars_;
 
+  /// One Variable per imported function, holding the JS callable passed
+  /// via the imports object. Indexed by import function order (0-based,
+  /// same as Wasm function index for imports since they come first).
+  std::vector<Variable *> importFuncVars_;
+
   /// Typed array view indices into memViewVars_.
   enum MemView : uint8_t {
     HEAP8 = 0,
@@ -560,6 +565,16 @@ class WasmIRGen {
   Function *createExportWrapper(
       uint32_t funcIndex,
       llvh::StringRef exportName,
+      Instruction *tlScope);
+
+  /// Create an import trampoline function for the given imported function.
+  /// The trampoline loads the imported JS function from the top-level scope,
+  /// marshals Wasm-typed arguments to JS, calls the JS function, and
+  /// converts the return value back to the expected Wasm type.
+  /// \p funcIndex is the Wasm function index of the imported function.
+  /// \p tlScope is the CreateScopeInst for the top-level scope.
+  void createImportTrampoline(
+      uint32_t funcIndex,
       Instruction *tlScope);
 };
 

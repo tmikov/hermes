@@ -4,7 +4,7 @@
 ;; LICENSE file in the root directory of this source tree.
 
 ;; Test Wasm module with imports compiles to IR.
-;; Imported functions get placeholder stubs that return undefined.
+;; Imported functions get import trampoline bodies.
 ;; Defined functions are compiled normally.
 
 ;; REQUIRES: wasm
@@ -20,10 +20,13 @@
   (func (export "main") (result i32)
     global.get 0
   )
-;; Imported function placeholder.
+;; Import trampoline for $log.
 ;; CHECK-LABEL: function wasm_func_0(p0: any): any
 ;; CHECK: %BB0:
-;; CHECK-NEXT: ReturnInst undefined: undefined
+;; CHECK:   LoadFrameInst (:any) %{{.*}}: environment, [%VS0.import_func_0]: any
+;; CHECK:   LoadParamInst (:any) %p0: any
+;; CHECK:   CallInst (:any)
+;; CHECK:   ReturnInst undefined: undefined
 ;; CHECK-NEXT: function_end
 
 ;; First defined function.

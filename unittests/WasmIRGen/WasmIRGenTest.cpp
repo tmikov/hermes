@@ -3855,4 +3855,222 @@ TEST(WasmIRGenTest, F64ReinterpretI64EmitsCall) {
   EXPECT_TRUE(found);
 }
 
+// --- Import trampoline tests (I.2) ---
+
+TEST(WasmIRGenTest, ImportTrampolineVoidReturn) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // Type: (i32) -> void
+  moduleInfo.types.push_back(WasmFuncType{{WasmValType::I32}, {}});
+  // One function import.
+  WasmImport imp;
+  imp.moduleName = "env";
+  imp.fieldName = "log";
+  imp.kind = WasmExternalKind::Function;
+  imp.typeIndex = 0;
+  moduleInfo.imports.push_back(imp);
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  auto funcs = irgen.getIRFunctions();
+  ASSERT_EQ(funcs.size(), 1u);
+
+  // The import trampoline should have a body (not just ReturnInst undefined).
+  auto &bb = funcs[0]->getBasicBlockList().front();
+  ASSERT_FALSE(bb.empty());
+
+  // Should contain a CallInst (calling the imported JS function).
+  bool foundCall = false;
+  bool foundReturn = false;
+  for (auto &I : bb) {
+    if (llvh::isa<CallInst>(&I))
+      foundCall = true;
+    if (auto *ret = llvh::dyn_cast<ReturnInst>(&I)) {
+      foundReturn = true;
+      // Void return: should return undefined.
+      EXPECT_TRUE(llvh::isa<LiteralUndefined>(ret->getOperand(0)));
+    }
+  }
+  EXPECT_TRUE(foundCall);
+  EXPECT_TRUE(foundReturn);
+}
+
+TEST(WasmIRGenTest, ImportTrampolineI32Return) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // Type: (i32, i32) -> i32
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::I32, WasmValType::I32}, {WasmValType::I32}});
+  // One function import.
+  WasmImport imp;
+  imp.moduleName = "env";
+  imp.fieldName = "add";
+  imp.kind = WasmExternalKind::Function;
+  imp.typeIndex = 0;
+  moduleInfo.imports.push_back(imp);
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  auto funcs = irgen.getIRFunctions();
+  ASSERT_EQ(funcs.size(), 1u);
+
+  auto &bb = funcs[0]->getBasicBlockList().front();
+
+  // Should contain GetParentScopeInst, LoadFrameInst, LoadParamInst (x2),
+  // CallInst, AsInt32Inst, ReturnInst.
+  bool foundGetParent = false;
+  bool foundLoadFrame = false;
+  bool foundAsInt32 = false;
+  int loadParamCount = 0;
+  for (auto &I : bb) {
+    if (llvh::isa<GetParentScopeInst>(&I))
+      foundGetParent = true;
+    if (llvh::isa<LoadFrameInst>(&I))
+      foundLoadFrame = true;
+    if (llvh::isa<LoadParamInst>(&I))
+      ++loadParamCount;
+    if (llvh::isa<AsInt32Inst>(&I))
+      foundAsInt32 = true;
+  }
+  EXPECT_TRUE(foundGetParent);
+  EXPECT_TRUE(foundLoadFrame);
+  EXPECT_EQ(loadParamCount, 2); // two i32 params
+  EXPECT_TRUE(foundAsInt32); // return value coerced to i32
+}
+
+TEST(WasmIRGenTest, ImportTrampolineF64Return) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // Type: (f64) -> f64
+  moduleInfo.types.push_back(
+      WasmFuncType{{WasmValType::F64}, {WasmValType::F64}});
+  WasmImport imp;
+  imp.moduleName = "env";
+  imp.fieldName = "f64_func";
+  imp.kind = WasmExternalKind::Function;
+  imp.typeIndex = 0;
+  moduleInfo.imports.push_back(imp);
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  auto funcs = irgen.getIRFunctions();
+  ASSERT_EQ(funcs.size(), 1u);
+
+  auto &bb = funcs[0]->getBasicBlockList().front();
+
+  // f64 return: NO AsInt32Inst (return as-is).
+  bool foundAsInt32 = false;
+  bool foundCall = false;
+  ReturnInst *retInst = nullptr;
+  for (auto &I : bb) {
+    if (llvh::isa<AsInt32Inst>(&I))
+      foundAsInt32 = true;
+    if (llvh::isa<CallInst>(&I))
+      foundCall = true;
+    if (auto *ret = llvh::dyn_cast<ReturnInst>(&I))
+      retInst = ret;
+  }
+  EXPECT_TRUE(foundCall);
+  EXPECT_FALSE(foundAsInt32); // f64 return is not coerced to int32
+  ASSERT_NE(retInst, nullptr);
+  // Return value should be the CallInst result directly.
+  EXPECT_TRUE(llvh::isa<CallInst>(retInst->getOperand(0)));
+}
+
+TEST(WasmIRGenTest, ImportTrampolineI64Return) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // Type: () -> i64
+  moduleInfo.types.push_back(WasmFuncType{{}, {WasmValType::I64}});
+  WasmImport imp;
+  imp.moduleName = "env";
+  imp.fieldName = "i64_func";
+  imp.kind = WasmExternalKind::Function;
+  imp.typeIndex = 0;
+  moduleInfo.imports.push_back(imp);
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  auto funcs = irgen.getIRFunctions();
+  ASSERT_EQ(funcs.size(), 1u);
+
+  auto &bb = funcs[0]->getBasicBlockList().front();
+
+  // i64 return: should have AsInt32Inst (for lo32) and
+  // CallBuiltinInst(wasmI64HiStash) to stash hi=0.
+  bool foundAsInt32 = false;
+  bool foundHiStash = false;
+  for (auto &I : bb) {
+    if (llvh::isa<AsInt32Inst>(&I))
+      foundAsInt32 = true;
+    if (auto *call = llvh::dyn_cast<CallBuiltinInst>(&I)) {
+      if (call->getBuiltinIndex() ==
+          BuiltinMethod::HermesBuiltin_wasmI64HiStash) {
+        foundHiStash = true;
+      }
+    }
+  }
+  EXPECT_TRUE(foundAsInt32);
+  EXPECT_TRUE(foundHiStash);
+}
+
+TEST(WasmIRGenTest, ImportTrampolineWithDefinedFunction) {
+  TestModule tm;
+  WasmModuleInfo moduleInfo;
+
+  // Type 0: (i32) -> void (for import)
+  moduleInfo.types.push_back(WasmFuncType{{WasmValType::I32}, {}});
+  // Type 1: (i32) -> i32 (for defined function)
+  moduleInfo.types.push_back(WasmFuncType{
+      {WasmValType::I32}, {WasmValType::I32}});
+
+  // One function import (index 0).
+  WasmImport imp;
+  imp.moduleName = "env";
+  imp.fieldName = "log";
+  imp.kind = WasmExternalKind::Function;
+  imp.typeIndex = 0;
+  moduleInfo.imports.push_back(imp);
+
+  // One defined function (index 1).
+  moduleInfo.functions.push_back(WasmFunction{1});
+
+  WasmIRGen irgen(tm.mod, moduleInfo);
+  irgen.createFunctions();
+
+  auto funcs = irgen.getIRFunctions();
+  ASSERT_EQ(funcs.size(), 2u);
+
+  // Function 0 (import): should have a trampoline body with CallInst.
+  {
+    auto &bb = funcs[0]->getBasicBlockList().front();
+    bool foundCall = false;
+    for (auto &I : bb)
+      if (llvh::isa<CallInst>(&I))
+        foundCall = true;
+    EXPECT_TRUE(foundCall);
+  }
+
+  // Function 1 (defined): should still have stub body with ReturnInst.
+  {
+    auto &bb = funcs[1]->getBasicBlockList().front();
+    ASSERT_FALSE(bb.empty());
+    EXPECT_TRUE(llvh::isa<ReturnInst>(&bb.back()));
+    // No CallInst in the stub.
+    bool foundCall = false;
+    for (auto &I : bb)
+      if (llvh::isa<CallInst>(&I))
+        foundCall = true;
+    EXPECT_FALSE(foundCall);
+  }
+}
+
 } // namespace

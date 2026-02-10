@@ -55,6 +55,18 @@ void WasmIRGen::createFunctions() {
     }
   }
 
+  // Create Variables for imported JS functions in the top-level scope.
+  // These hold the JS callables looked up from the imports object.
+  uint32_t numImportedFuncs = moduleInfo_.importedFunctionCount();
+  importFuncVars_.resize(numImportedFuncs, nullptr);
+  for (uint32_t i = 0; i < numImportedFuncs; ++i) {
+    importFuncVars_[i] = builder_.createVariable(
+        topLevelVS_,
+        ("import_func_" + llvh::Twine(i)),
+        Type::createAnyType(),
+        /* hidden */ true);
+  }
+
   // Create all Wasm functions and a Variable in the top-level scope for each.
   uint32_t totalFuncs = moduleInfo_.totalFunctionCount();
   irFunctions_.resize(totalFuncs, nullptr);
@@ -125,6 +137,30 @@ void WasmIRGen::createFunctions() {
   auto *tlScope = builder_.createCreateScopeInst(
       topLevelVS_, builder_.getEmptySentinel());
 
+  // Resolve imported functions from the imports object.
+  // The imports object is read from the global `__wasm_imports__` property.
+  // It has the shape: { moduleName: { fieldName: func } }.
+  // When M.4 (WebAssembly.Instance) is implemented, the imports will be
+  // passed via the Instance constructor and set on the global before
+  // evaluating the compiled module.
+  if (numImportedFuncs > 0) {
+    auto *importsVal = builder_.createTryLoadGlobalPropertyInst(
+        builder_.getLiteralString("__wasm_imports__"));
+    uint32_t importFuncIdx = 0;
+    for (const auto &imp : moduleInfo_.imports) {
+      if (imp.kind != WasmExternalKind::Function)
+        continue;
+      // imports[moduleName][fieldName]
+      auto *moduleObj = builder_.createLoadPropertyInst(
+          importsVal, builder_.getLiteralString(imp.moduleName));
+      auto *funcVal = builder_.createLoadPropertyInst(
+          moduleObj, builder_.getLiteralString(imp.fieldName));
+      builder_.createStoreFrameInst(
+          tlScope, funcVal, importFuncVars_[importFuncIdx]);
+      ++importFuncIdx;
+    }
+  }
+
   // Pre-create closures for all Wasm functions and store in the environment.
   for (uint32_t i = 0; i < totalFuncs; ++i) {
     auto *closure = builder_.createCreateFunctionInst(
@@ -136,6 +172,16 @@ void WasmIRGen::createFunctions() {
   if (hasMemory) {
     createMemoryViews(tlScope);
   }
+
+  // Create import trampoline bodies for all imported functions.
+  // This replaces the stub bodies (ReturnInst(undefined)) with actual
+  // trampolines that call the imported JS functions.
+  for (uint32_t i = 0; i < numImportedFuncs; ++i) {
+    createImportTrampoline(i, tlScope);
+  }
+
+  // Switch back to the top-level entry block after creating trampolines.
+  builder_.setInsertionBlock(tlEntry);
 
   // Call the start function if specified (load its pre-created closure).
   if (moduleInfo_.startFunction.has_value()) {
@@ -276,6 +322,91 @@ Function *WasmIRGen::createExportWrapper(
   }
 
   return wrapperFunc;
+}
+
+void WasmIRGen::createImportTrampoline(
+    uint32_t funcIndex,
+    Instruction *tlScope) {
+  assert(
+      funcIndex < moduleInfo_.importedFunctionCount() &&
+      "funcIndex out of range for import trampoline");
+
+  const WasmFuncType &funcType = moduleInfo_.getFunctionType(funcIndex);
+  auto *func = irFunctions_[funcIndex];
+
+  // Clear the placeholder stub body (ReturnInst(undefined)).
+  auto &entryBB = func->getBasicBlockList().front();
+  while (!entryBB.empty()) {
+    entryBB.back().eraseFromParent();
+  }
+  builder_.setInsertionBlock(&entryBB);
+
+  // Get the parent scope to load the imported JS function.
+  auto *parentScope = builder_.createGetParentScopeInst(
+      topLevelVS_, func->getParentScopeParam());
+
+  // Load the imported JS callable from the top-level scope.
+  auto *jsFunc = builder_.createLoadFrameInst(
+      parentScope, importFuncVars_[funcIndex]);
+
+  // Marshal Wasm-typed arguments to JS arguments.
+  // The trampoline function uses the split i64 calling convention internally
+  // (matching what onCall() emits), but calls the JS function with JS types.
+  // For Phase 1: i32/f32/f64 → pass through (already JS Numbers).
+  //              i64 → pass only lo32 (JS Numbers can't represent all i64s).
+  llvh::SmallVector<Value *, 8> jsArgs;
+  uint32_t jsParamIdx = 1; // 0 = "this", skip it
+  for (uint32_t i = 0; i < funcType.params.size(); ++i) {
+    auto *param = func->getJSDynamicParam(jsParamIdx);
+    auto *paramVal = builder_.createLoadParamInst(param);
+
+    if (funcType.params[i] == WasmValType::I64) {
+      // Phase 1: pass lo32 only (hi32 is lost to JS).
+      jsArgs.push_back(paramVal);
+      jsParamIdx += 2; // skip both lo and hi JS params
+    } else {
+      jsArgs.push_back(paramVal);
+      jsParamIdx += 1;
+    }
+  }
+
+  // Call the imported JS function.
+  auto *callResult = builder_.createCallInst(
+      jsFunc,
+      /* newTarget */ builder_.getLiteralUndefined(),
+      /* thisValue */ builder_.getLiteralUndefined(),
+      jsArgs);
+
+  // Marshal the JS return value back to the expected Wasm type.
+  if (funcType.results.empty()) {
+    // Void: return undefined.
+    builder_.createReturnInst(builder_.getLiteralUndefined());
+  } else {
+    switch (funcType.results[0]) {
+      case WasmValType::I32:
+        // Coerce JS Number to int32 and return.
+        builder_.createReturnInst(
+            builder_.createAsInt32Inst(callResult));
+        break;
+      case WasmValType::I64: {
+        // Phase 1: treat JS return as lo32, hi32 = 0.
+        // Stash hi32 (0) before returning lo32.
+        auto *lo = builder_.createAsInt32Inst(callResult);
+        helpers_.emitI64HiStash(builder_.getLiteralNumber(0));
+        builder_.createReturnInst(lo);
+        break;
+      }
+      case WasmValType::F32:
+      case WasmValType::F64:
+        // Float/double: return as-is (JS Numbers are doubles).
+        builder_.createReturnInst(callResult);
+        break;
+      default:
+        // FuncRef, ExternRef, etc: pass through for now.
+        builder_.createReturnInst(callResult);
+        break;
+    }
+  }
 }
 
 void WasmIRGen::beginFunction(

@@ -31,16 +31,23 @@
     call $log
   )
   (start $init)
-;; Imported function placeholder for $log.
+;; Import trampoline for $log (void return).
 ;; CHECK-LABEL: function wasm_func_0(p0: any): any
 ;; CHECK: %BB0:
-;; CHECK-NEXT: ReturnInst undefined: undefined
+;; CHECK:   LoadFrameInst (:any) %{{.*}}: environment, [%VS0.import_func_0]: any
+;; CHECK:   LoadParamInst (:any) %p0: any
+;; CHECK:   CallInst (:any)
+;; CHECK:   ReturnInst undefined: undefined
 ;; CHECK-NEXT: function_end
 
-;; Imported function placeholder for $square.
+;; Import trampoline for $square (i32 return).
 ;; CHECK-LABEL: function wasm_func_1(p0: any): any
 ;; CHECK: %BB0:
-;; CHECK-NEXT: ReturnInst undefined: undefined
+;; CHECK:   LoadFrameInst (:any) %{{.*}}: environment, [%VS0.import_func_1]: any
+;; CHECK:   LoadParamInst (:any) %p0: any
+;; CHECK:   %[[CALL:.*]] = CallInst (:any)
+;; CHECK:   %[[RESULT:.*]] = AsInt32Inst (:number) %[[CALL]]: any
+;; CHECK:   ReturnInst %[[RESULT]]: number
 ;; CHECK-NEXT: function_end
 
 ;; $init: calls $log(0).
