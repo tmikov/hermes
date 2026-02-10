@@ -363,6 +363,18 @@ class WasmIRGen {
   /// Pushes old page count on success, or -1 on failure.
   void onMemoryGrow();
 
+  // --- Table operations (J.1) ---
+
+  /// table.get: pop index, push the function reference at that index.
+  void onTableGet(uint32_t tableIndex);
+  /// table.set: pop value and index, set table[index] = value.
+  void onTableSet(uint32_t tableIndex);
+  /// table.size: push the current number of entries in the table.
+  void onTableSize(uint32_t tableIndex);
+  /// table.grow: pop fill value and delta, grow table by delta entries.
+  /// Pushes old size on success, or -1 on failure.
+  void onTableGrow(uint32_t tableIndex);
+
   // --- Unsupported opcode handling (D.13) ---
 
   /// Emit a warning for an unsupported opcode. Pops \p numInputs values
@@ -412,6 +424,13 @@ class WasmIRGen {
   /// Variables holding the 8 typed array views in the top-level scope.
   /// Only populated if the module has a memory section.
   Variable *memViewVars_[NUM_MEM_VIEWS] = {};
+
+  /// Per-table Variables in the top-level scope.
+  /// tableFuncVars_[i] holds a JS Array of closures (null = uninitialized).
+  /// tableTypeVars_[i] holds a JS Array of type indices (-1 = uninitialized).
+  /// Indexed by Wasm table index.
+  std::vector<Variable *> tableFuncVars_;
+  std::vector<Variable *> tableTypeVars_;
 
   /// The VariableScope for the top-level function.
   VariableScope *topLevelVS_ = nullptr;
@@ -537,6 +556,18 @@ class WasmIRGen {
   /// function. Called from createFunctions() if the module has memory.
   /// \p tlScope is the CreateScopeInst for the top-level scope.
   void createMemoryViews(Instruction *tlScope);
+
+  /// Create and initialize tables in the top-level function.
+  /// Allocates JS Array pairs (functions + type indices) for each table,
+  /// initializes them to null/-1, and applies active element segments.
+  /// \p tlScope is the CreateScopeInst for the top-level scope.
+  void createTables(Instruction *tlScope);
+
+  /// Load the table functions array from the top-level scope.
+  Value *loadTableFuncs(uint32_t tableIndex);
+
+  /// Load the table type-indices array from the top-level scope.
+  Value *loadTableTypes(uint32_t tableIndex);
 
   /// Emit a byte-by-byte load from HEAPU8 for unaligned access.
   /// \p addr is the effective byte address.

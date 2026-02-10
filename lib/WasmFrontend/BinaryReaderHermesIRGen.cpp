@@ -1433,5 +1433,39 @@ wabt::Result BinaryReaderHermesIRGen::OnUnaryExpr(wabt::Opcode opcode) {
   return wabt::Result::Ok;
 }
 
+// --- Table instruction callbacks ---
+
+wabt::Result BinaryReaderHermesIRGen::OnTableGetExpr(
+    wabt::Index tableIndex) {
+  if (!inFunctionBody_ || !irgen_)
+    return wabt::Result::Ok;
+  irgen_->onTableGet(static_cast<uint32_t>(tableIndex));
+  return wabt::Result::Ok;
+}
+
+wabt::Result BinaryReaderHermesIRGen::OnTableSetExpr(
+    wabt::Index tableIndex) {
+  if (!inFunctionBody_ || !irgen_)
+    return wabt::Result::Ok;
+  irgen_->onTableSet(static_cast<uint32_t>(tableIndex));
+  return wabt::Result::Ok;
+}
+
+wabt::Result BinaryReaderHermesIRGen::OnTableSizeExpr(
+    wabt::Index tableIndex) {
+  if (!inFunctionBody_ || !irgen_)
+    return wabt::Result::Ok;
+  irgen_->onTableSize(static_cast<uint32_t>(tableIndex));
+  return wabt::Result::Ok;
+}
+
+wabt::Result BinaryReaderHermesIRGen::OnTableGrowExpr(
+    wabt::Index tableIndex) {
+  if (!inFunctionBody_ || !irgen_)
+    return wabt::Result::Ok;
+  irgen_->onTableGrow(static_cast<uint32_t>(tableIndex));
+  return wabt::Result::Ok;
+}
+
 } // namespace wasm
 } // namespace hermes

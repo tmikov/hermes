@@ -1,0 +1,14 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-table.wat.
+// Loads a compiled .hbc Wasm module via hermescli and calls its exports.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+
+print("table size:", exports.get_size());

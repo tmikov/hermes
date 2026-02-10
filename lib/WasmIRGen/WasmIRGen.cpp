@@ -55,6 +55,27 @@ void WasmIRGen::createFunctions() {
     }
   }
 
+  // If the module has tables, create Variables for each table.
+  // Each table gets two JS Arrays: one for function closures, one for type
+  // indices (used by call_indirect for type checking).
+  uint32_t numTables = moduleInfo_.totalTableCount();
+  if (numTables > 0) {
+    tableFuncVars_.resize(numTables, nullptr);
+    tableTypeVars_.resize(numTables, nullptr);
+    for (uint32_t i = 0; i < numTables; ++i) {
+      tableFuncVars_[i] = builder_.createVariable(
+          topLevelVS_,
+          ("table_" + llvh::Twine(i) + "_funcs"),
+          Type::createAnyType(),
+          /* hidden */ true);
+      tableTypeVars_[i] = builder_.createVariable(
+          topLevelVS_,
+          ("table_" + llvh::Twine(i) + "_types"),
+          Type::createAnyType(),
+          /* hidden */ true);
+    }
+  }
+
   // Create Variables for imported JS functions in the top-level scope.
   // These hold the JS callables looked up from the imports object.
   uint32_t numImportedFuncs = moduleInfo_.importedFunctionCount();
@@ -171,6 +192,11 @@ void WasmIRGen::createFunctions() {
   // Create typed array views for the linear memory if present.
   if (hasMemory) {
     createMemoryViews(tlScope);
+  }
+
+  // Create and initialize tables, and apply element segments.
+  if (numTables > 0) {
+    createTables(tlScope);
   }
 
   // Create import trampoline bodies for all imported functions.
@@ -3355,6 +3381,181 @@ void WasmIRGen::onMemoryGrow() {
   phi->addEntry(oldPages, successBlock);
 
   push(phi);
+}
+
+// --- Table operations (J.1) ---
+
+void WasmIRGen::createTables(Instruction *tlScope) {
+  // Determine initial size for each table. Tables may be defined in the
+  // table section or imported.
+  uint32_t numTables = moduleInfo_.totalTableCount();
+
+  for (uint32_t tblIdx = 0; tblIdx < numTables; ++tblIdx) {
+    uint32_t initialSize = 0;
+    uint32_t importedTables = moduleInfo_.importedTableCount();
+
+    if (tblIdx < importedTables) {
+      // Imported table — find the corresponding import.
+      uint32_t importTableIdx = 0;
+      for (const auto &imp : moduleInfo_.imports) {
+        if (imp.kind != WasmExternalKind::Table)
+          continue;
+        if (importTableIdx == tblIdx) {
+          initialSize = imp.tableType.limits.initial;
+          break;
+        }
+        ++importTableIdx;
+      }
+    } else {
+      initialSize = moduleInfo_.tables[tblIdx - importedTables].limits.initial;
+    }
+
+    // Create the functions array: new Array(initialSize)
+    // This creates a sparse JS array with .length = initialSize.
+    // Uninitialized entries read as `undefined`.
+    auto *arrayCtor = builder_.createTryLoadGlobalPropertyInst("Array");
+    auto *sizeVal = builder_.getLiteralNumber(static_cast<double>(initialSize));
+    auto *funcsArr = emitNew(arrayCtor, {sizeVal});
+    builder_.createStoreFrameInst(tlScope, funcsArr, tableFuncVars_[tblIdx]);
+
+    // Create the type-indices array: new Array(initialSize)
+    // Uninitialized entries are `undefined` (treated as -1 / no type).
+    auto *typesArr = emitNew(arrayCtor, {sizeVal});
+    builder_.createStoreFrameInst(tlScope, typesArr, tableTypeVars_[tblIdx]);
+  }
+
+  // Apply active element segments.
+  for (const auto &seg : moduleInfo_.elements) {
+    if (seg.mode != WasmElemSegment::Mode::Active)
+      continue;
+
+    // The offset for active segments. For Phase 1, only i32.const offsets
+    // are supported (global.get offsets would require globals to be
+    // initialized first, which is not yet implemented).
+    Value *offset = nullptr;
+    if (seg.offsetKind == WasmGlobal::InitKind::I32Const) {
+      offset = builder_.getLiteralNumber(
+          static_cast<double>(seg.offsetValue));
+    } else {
+      // Unsupported offset expression — skip this segment.
+      llvh::errs()
+          << "warning: unsupported element segment offset expression\n";
+      continue;
+    }
+
+    // Load the table arrays.
+    auto *funcsArr = builder_.createLoadFrameInst(
+        tlScope, tableFuncVars_[seg.tableIndex]);
+    auto *typesArr = builder_.createLoadFrameInst(
+        tlScope, tableTypeVars_[seg.tableIndex]);
+
+    // Store each function reference and type index into the table.
+    for (uint32_t i = 0; i < seg.funcIndices.size(); ++i) {
+      uint32_t funcIdx = seg.funcIndices[i];
+      // Compute the table index: offset + i.
+      Value *idx;
+      if (i == 0 && seg.offsetValue == 0) {
+        idx = builder_.getLiteralNumber(0);
+      } else {
+        idx = builder_.createBinaryOperatorInst(
+            offset,
+            builder_.getLiteralNumber(static_cast<double>(i)),
+            ValueKind::BinaryAddInstKind);
+      }
+
+      // Store the closure into the functions array.
+      if (funcIdx < closureVars_.size()) {
+        auto *closure = builder_.createLoadFrameInst(
+            tlScope, closureVars_[funcIdx]);
+        builder_.createStorePropertyStrictInst(closure, funcsArr, idx);
+
+        // Store the type index into the type-indices array.
+        uint32_t typeIdx = moduleInfo_.getFunctionType(funcIdx).params.size();
+        // Actually, we need the type index from the function's type, not the
+        // param count. The type index is used for call_indirect matching.
+        typeIdx = 0;
+        if (funcIdx < moduleInfo_.importedFunctionCount()) {
+          // Find the import's type index.
+          uint32_t importFuncIdx = 0;
+          for (const auto &imp : moduleInfo_.imports) {
+            if (imp.kind != WasmExternalKind::Function)
+              continue;
+            if (importFuncIdx == funcIdx) {
+              typeIdx = imp.typeIndex;
+              break;
+            }
+            ++importFuncIdx;
+          }
+        } else {
+          typeIdx = moduleInfo_
+                        .functions[funcIdx -
+                                   moduleInfo_.importedFunctionCount()]
+                        .typeIndex;
+        }
+        builder_.createStorePropertyStrictInst(
+            builder_.getLiteralNumber(static_cast<double>(typeIdx)),
+            typesArr,
+            idx);
+      }
+    }
+  }
+}
+
+Value *WasmIRGen::loadTableFuncs(uint32_t tableIndex) {
+  assert(
+      tableIndex < tableFuncVars_.size() && "table index out of range");
+  return builder_.createLoadFrameInst(
+      parentScopeInst_, tableFuncVars_[tableIndex]);
+}
+
+Value *WasmIRGen::loadTableTypes(uint32_t tableIndex) {
+  assert(
+      tableIndex < tableTypeVars_.size() && "table index out of range");
+  return builder_.createLoadFrameInst(
+      parentScopeInst_, tableTypeVars_[tableIndex]);
+}
+
+void WasmIRGen::onTableGet(uint32_t tableIndex) {
+  if (unreachable_)
+    return;
+
+  Value *idx = pop();
+  auto *funcsArr = loadTableFuncs(tableIndex);
+  auto *result = builder_.createLoadPropertyInst(funcsArr, idx);
+  push(result);
+}
+
+void WasmIRGen::onTableSet(uint32_t tableIndex) {
+  if (unreachable_)
+    return;
+
+  Value *val = pop();
+  Value *idx = pop();
+  auto *funcsArr = loadTableFuncs(tableIndex);
+  builder_.createStorePropertyStrictInst(val, funcsArr, idx);
+}
+
+void WasmIRGen::onTableSize(uint32_t tableIndex) {
+  if (unreachable_)
+    return;
+
+  auto *funcsArr = loadTableFuncs(tableIndex);
+  auto *length = builder_.createLoadPropertyInst(
+      funcsArr, builder_.getLiteralString("length"));
+  push(length);
+}
+
+void WasmIRGen::onTableGrow(uint32_t tableIndex) {
+  if (unreachable_)
+    return;
+
+  // table.grow pops: delta (top), fill value.
+  // Pushes: old size on success, -1 on failure.
+  // Phase 1: not fully implemented — always returns -1 (failure).
+  // This is valid per the Wasm spec (grow can fail).
+  pop(); // delta
+  pop(); // fill value
+  push(builder_.getLiteralNumber(-1));
 }
 
 } // namespace wasm
