@@ -264,6 +264,135 @@ raiseCompileError(Runtime &runtime, const char *msg) {
   return runtime.setThrownValue(lv.err.getHermesValue());
 }
 
+/// Raise a WebAssembly.LinkError with the given message.
+static ExecutionStatus
+raiseLinkError(Runtime &runtime, const char *msg) {
+  struct : public Locals {
+    PinnedValue<> msgStr;
+    PinnedValue<JSError> err;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  auto strRes = StringPrimitive::create(runtime, ASCIIRef(msg, strlen(msg)));
+  if (LLVM_UNLIKELY(strRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  lv.msgStr = std::move(*strRes);
+
+  lv.err = JSError::create(
+      runtime, Handle<JSObject>{runtime.wasmLinkErrorPrototype});
+
+  if (LLVM_UNLIKELY(
+          JSError::setMessage(lv.err, runtime, lv.msgStr) ==
+          ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+
+  JSError::recordStackTrace(lv.err, runtime, true);
+
+  return runtime.setThrownValue(lv.err.getHermesValue());
+}
+
+/// Look up globalThis.Promise.resolve and call it with \p value.
+/// Returns the resolved Promise object.
+static CallResult<HermesValue>
+callPromiseResolve(Runtime &runtime, HermesValue value) {
+  struct : public Locals {
+    PinnedValue<> promiseCons;
+    PinnedValue<> resolveFn;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  // Get globalThis.Promise.
+  auto promiseRes = JSObject::getNamed_RJS(
+      runtime.getGlobal(),
+      runtime,
+      Predefined::getSymbolID(Predefined::Promise));
+  if (LLVM_UNLIKELY(promiseRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  lv.promiseCons = std::move(*promiseRes);
+
+  if (!vmisa<Callable>(*lv.promiseCons)) {
+    return runtime.raiseTypeError("Promise is not a constructor");
+  }
+
+  // Get Promise.resolve.
+  auto resolveRes = JSObject::getNamed_RJS(
+      Handle<JSObject>::vmcast(&lv.promiseCons),
+      runtime,
+      Predefined::getSymbolID(Predefined::resolve));
+  if (LLVM_UNLIKELY(resolveRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  lv.resolveFn = std::move(*resolveRes);
+
+  if (!vmisa<Callable>(*lv.resolveFn)) {
+    return runtime.raiseTypeError("Promise.resolve is not callable");
+  }
+
+  // Call Promise.resolve(value).
+  auto callRes = Callable::executeCall1(
+      Handle<Callable>::vmcast(&lv.resolveFn),
+      runtime,
+      lv.promiseCons,
+      value);
+  if (LLVM_UNLIKELY(callRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  return callRes->getHermesValue();
+}
+
+/// Look up globalThis.Promise.reject and call it with \p error.
+/// Returns the rejected Promise object.
+static CallResult<HermesValue>
+callPromiseReject(Runtime &runtime, HermesValue error) {
+  struct : public Locals {
+    PinnedValue<> promiseCons;
+    PinnedValue<> rejectFn;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  // Get globalThis.Promise.
+  auto promiseRes = JSObject::getNamed_RJS(
+      runtime.getGlobal(),
+      runtime,
+      Predefined::getSymbolID(Predefined::Promise));
+  if (LLVM_UNLIKELY(promiseRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  lv.promiseCons = std::move(*promiseRes);
+
+  if (!vmisa<Callable>(*lv.promiseCons)) {
+    return runtime.raiseTypeError("Promise is not a constructor");
+  }
+
+  // Get Promise.reject.
+  auto rejectRes = JSObject::getNamed_RJS(
+      Handle<JSObject>::vmcast(&lv.promiseCons),
+      runtime,
+      Predefined::getSymbolID(Predefined::reject));
+  if (LLVM_UNLIKELY(rejectRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  lv.rejectFn = std::move(*rejectRes);
+
+  if (!vmisa<Callable>(*lv.rejectFn)) {
+    return runtime.raiseTypeError("Promise.reject is not callable");
+  }
+
+  // Call Promise.reject(error).
+  auto callRes = Callable::executeCall1(
+      Handle<Callable>::vmcast(&lv.rejectFn),
+      runtime,
+      lv.promiseCons,
+      error);
+  if (LLVM_UNLIKELY(callRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  return callRes->getHermesValue();
+}
+
 //===----------------------------------------------------------------------===//
 // WebAssembly.validate
 //===----------------------------------------------------------------------===//
@@ -282,6 +411,263 @@ wasmValidate(void *context, Runtime &runtime) {
 
   bool valid = hermes::validateWasmBinary(data, size);
   return HermesValue::encodeBoolValue(valid);
+}
+
+//===----------------------------------------------------------------------===//
+// WebAssembly.compile
+//===----------------------------------------------------------------------===//
+
+/// WebAssembly.compile(bytes) — compile a Wasm binary asynchronously.
+/// Since Hermes doesn't do async compilation, this is synchronous compilation
+/// wrapped in a resolved Promise. On error, returns a rejected Promise.
+static CallResult<HermesValue>
+wasmCompile(void *context, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  const uint8_t *data = nullptr;
+  size_t size = 0;
+  if (!extractBufferSourceBytes(runtime, args.getArgHandle(0), data, size)) {
+    return runtime.raiseTypeError(
+        "WebAssembly.compile(): argument must be an ArrayBuffer or "
+        "typed array");
+  }
+
+  // Compile the Wasm binary.
+  std::string errorMsg;
+  auto moduleData = hermes::compileWasmToModuleData(data, size, errorMsg);
+  if (!moduleData) {
+    // Create a CompileError and return a rejected Promise.
+    raiseCompileError(runtime, errorMsg.c_str());
+    HermesValue thrownError = runtime.getThrownValue();
+    runtime.clearThrownValue();
+    return callPromiseReject(runtime, thrownError);
+  }
+
+  struct : public Locals {
+    PinnedValue<JSWebAssemblyModule> mod;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  Handle<JSObject> prototype{runtime.wasmModulePrototype};
+  lv.mod = JSWebAssemblyModule::create(runtime, prototype);
+  lv.mod->setModuleData(std::move(moduleData));
+
+  return callPromiseResolve(runtime, lv.mod.getHermesValue());
+}
+
+//===----------------------------------------------------------------------===//
+// WebAssembly.instantiate
+//===----------------------------------------------------------------------===//
+
+/// Helper: instantiate a module (shared by wasmInstantiate and Instance ctor).
+/// Returns the Instance HermesValue on success.
+static CallResult<HermesValue>
+instantiateModuleImpl(Runtime &runtime, JSWebAssemblyModule *mod, Handle<> importObj) {
+  auto *moduleData = mod->getModuleData();
+  if (!moduleData) {
+    raiseLinkError(runtime, "module has no compiled data");
+    return ExecutionStatus::EXCEPTION;
+  }
+
+  if (!moduleData->bytecodeProvider) {
+    raiseLinkError(runtime, "module was not fully compiled");
+    return ExecutionStatus::EXCEPTION;
+  }
+
+  struct : public Locals {
+    PinnedValue<JSWebAssemblyInstance> inst;
+    PinnedValue<JSObject> exportsObj;
+    PinnedValue<> result;
+    PinnedValue<> oldImports;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  // Validate imports: if the module has imports, the second argument must
+  // be an object providing them.
+  bool hasImports = !moduleData->importDescs.empty();
+
+  if (hasImports && !importObj->isObject()) {
+    raiseLinkError(
+        runtime,
+        "module has imports but no import object provided");
+    return ExecutionStatus::EXCEPTION;
+  }
+
+  // Set globalThis.__wasm_imports__ to the import object so the compiled
+  // Wasm top-level function can resolve imports from it.
+  auto wasmImportsSymbol =
+      Predefined::getSymbolID(Predefined::__wasm_imports__);
+
+  // Save the previous value (if any) to restore it later.
+  auto prevRes = JSObject::getNamed_RJS(
+      runtime.getGlobal(), runtime, wasmImportsSymbol);
+  if (LLVM_UNLIKELY(prevRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  lv.oldImports = std::move(*prevRes);
+
+  if (hasImports) {
+    auto putRes = JSObject::putNamed_RJS(
+        runtime.getGlobal(),
+        runtime,
+        wasmImportsSymbol,
+        importObj);
+    if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION)) {
+      return ExecutionStatus::EXCEPTION;
+    }
+  }
+
+  // Run the compiled bytecode.
+  auto bcProvider = moduleData->bytecodeProvider;
+  auto runRes = runtime.runBytecode(
+      std::move(bcProvider),
+      RuntimeModuleFlags{},
+      "wasm-module",
+      Runtime::makeNullHandle<Environment>());
+
+  // Restore the old __wasm_imports__ value regardless of success/failure.
+  {
+    auto restoreRes = JSObject::putNamed_RJS(
+        runtime.getGlobal(),
+        runtime,
+        wasmImportsSymbol,
+        lv.oldImports);
+    (void)restoreRes;
+  }
+
+  if (LLVM_UNLIKELY(runRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+
+  lv.result = std::move(*runRes);
+
+  if (!lv.result->isObject()) {
+    raiseLinkError(
+        runtime, "WebAssembly instantiation failed: unexpected result");
+    return ExecutionStatus::EXCEPTION;
+  }
+
+  lv.exportsObj.castAndSetHermesValue<JSObject>(lv.result.getHermesValue());
+
+  // Freeze the exports object.
+  if (LLVM_UNLIKELY(
+          JSObject::freeze(lv.exportsObj, runtime) ==
+          ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+
+  // Create the Instance object.
+  Handle<JSObject> instancePrototype{runtime.wasmInstancePrototype};
+  lv.inst = JSWebAssemblyInstance::create(runtime, instancePrototype);
+
+  // Define the "exports" property as non-writable, non-configurable,
+  // enumerable (per the WebAssembly spec).
+  DefinePropertyFlags exportsDpf{};
+  exportsDpf.setWritable = 1;
+  exportsDpf.writable = 0;
+  exportsDpf.setConfigurable = 1;
+  exportsDpf.configurable = 0;
+  exportsDpf.setEnumerable = 1;
+  exportsDpf.enumerable = 1;
+  exportsDpf.setValue = 1;
+
+  auto defRes = JSObject::defineOwnProperty(
+      lv.inst,
+      runtime,
+      Predefined::getSymbolID(Predefined::exports),
+      exportsDpf,
+      lv.exportsObj);
+  if (LLVM_UNLIKELY(defRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+
+  return lv.inst.getHermesValue();
+}
+
+/// WebAssembly.instantiate(bytesOrModule, importObject) — two overloads:
+/// 1. instantiate(bytes, imports) → Promise<{module, instance}>
+/// 2. instantiate(module, imports) → Promise<instance>
+static CallResult<HermesValue>
+wasmInstantiate(void *context, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  struct : public Locals {
+    PinnedValue<JSWebAssemblyModule> mod;
+    PinnedValue<> importArg;
+    PinnedValue<> instanceVal;
+    PinnedValue<JSObject> resultObj;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  lv.importArg = args.getArg(1);
+
+  // Check if the first argument is a Module (overload 2).
+  if (auto *existingMod = dyn_vmcast<JSWebAssemblyModule>(args.getArg(0))) {
+    // Overload 2: instantiate(module, imports) → Promise<instance>
+    auto instRes = instantiateModuleImpl(runtime, existingMod, lv.importArg);
+    if (LLVM_UNLIKELY(instRes == ExecutionStatus::EXCEPTION)) {
+      HermesValue thrownError = runtime.getThrownValue();
+      runtime.clearThrownValue();
+      return callPromiseReject(runtime, thrownError);
+    }
+    return callPromiseResolve(runtime, *instRes);
+  }
+
+  // Overload 1: instantiate(bytes, imports) → Promise<{module, instance}>
+  const uint8_t *data = nullptr;
+  size_t size = 0;
+  if (!extractBufferSourceBytes(runtime, args.getArgHandle(0), data, size)) {
+    return runtime.raiseTypeError(
+        "WebAssembly.instantiate(): first argument must be a "
+        "WebAssembly.Module, ArrayBuffer, or typed array");
+  }
+
+  // Compile the Wasm binary.
+  std::string errorMsg;
+  auto moduleData = hermes::compileWasmToModuleData(data, size, errorMsg);
+  if (!moduleData) {
+    raiseCompileError(runtime, errorMsg.c_str());
+    HermesValue thrownError = runtime.getThrownValue();
+    runtime.clearThrownValue();
+    return callPromiseReject(runtime, thrownError);
+  }
+
+  Handle<JSObject> prototype{runtime.wasmModulePrototype};
+  lv.mod = JSWebAssemblyModule::create(runtime, prototype);
+  lv.mod->setModuleData(std::move(moduleData));
+
+  // Instantiate the compiled module.
+  auto instRes = instantiateModuleImpl(
+      runtime, vmcast<JSWebAssemblyModule>(*lv.mod), lv.importArg);
+  if (LLVM_UNLIKELY(instRes == ExecutionStatus::EXCEPTION)) {
+    HermesValue thrownError = runtime.getThrownValue();
+    runtime.clearThrownValue();
+    return callPromiseReject(runtime, thrownError);
+  }
+  lv.instanceVal = *instRes;
+
+  // Create the result object {module, instance}.
+  lv.resultObj = JSObject::create(runtime);
+
+  auto putRes = JSObject::putNamed_RJS(
+      lv.resultObj,
+      runtime,
+      Predefined::getSymbolID(Predefined::module),
+      lv.mod);
+  if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+
+  putRes = JSObject::putNamed_RJS(
+      lv.resultObj,
+      runtime,
+      Predefined::getSymbolID(Predefined::instance),
+      lv.instanceVal);
+  if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+
+  return callPromiseResolve(runtime, lv.resultObj.getHermesValue());
 }
 
 //===----------------------------------------------------------------------===//
@@ -521,35 +907,6 @@ wasmModuleImports(void *context, Runtime &runtime) {
 // WebAssembly.Instance
 //===----------------------------------------------------------------------===//
 
-/// Raise a WebAssembly.LinkError with the given message.
-static ExecutionStatus
-raiseLinkError(Runtime &runtime, const char *msg) {
-  struct : public Locals {
-    PinnedValue<> msgStr;
-    PinnedValue<JSError> err;
-  } lv;
-  LocalsRAII lraii(runtime, &lv);
-
-  auto strRes = StringPrimitive::create(runtime, ASCIIRef(msg, strlen(msg)));
-  if (LLVM_UNLIKELY(strRes == ExecutionStatus::EXCEPTION)) {
-    return ExecutionStatus::EXCEPTION;
-  }
-  lv.msgStr = std::move(*strRes);
-
-  lv.err = JSError::create(
-      runtime, Handle<JSObject>{runtime.wasmLinkErrorPrototype});
-
-  if (LLVM_UNLIKELY(
-          JSError::setMessage(lv.err, runtime, lv.msgStr) ==
-          ExecutionStatus::EXCEPTION)) {
-    return ExecutionStatus::EXCEPTION;
-  }
-
-  JSError::recordStackTrace(lv.err, runtime, true);
-
-  return runtime.setThrownValue(lv.err.getHermesValue());
-}
-
 /// new WebAssembly.Instance(module, importObject) — instantiate a compiled
 /// Wasm module with the given import object.
 static CallResult<HermesValue>
@@ -569,133 +926,13 @@ wasmInstanceConstructor(void *context, Runtime &runtime) {
         "WebAssembly.Module");
   }
 
-  auto *moduleData = mod->getModuleData();
-  if (!moduleData) {
-    return runtime.raiseTypeError(
-        "WebAssembly.Instance(): module has no compiled data");
-  }
-
-  if (!moduleData->bytecodeProvider) {
-    raiseLinkError(runtime, "module was not fully compiled");
-    return ExecutionStatus::EXCEPTION;
-  }
-
   struct : public Locals {
-    PinnedValue<JSWebAssemblyInstance> inst;
-    PinnedValue<JSObject> exportsObj;
     PinnedValue<> importObj;
-    PinnedValue<> result;
-    PinnedValue<> oldImports;
   } lv;
   LocalsRAII lraii(runtime, &lv);
 
-  // Validate imports: if the module has imports, the second argument must
-  // be an object providing them.
-  bool hasImports = !moduleData->importDescs.empty();
   lv.importObj = args.getArg(1);
-
-  if (hasImports && !lv.importObj->isObject()) {
-    raiseLinkError(
-        runtime,
-        "WebAssembly.Instance(): module has imports but no import "
-        "object provided");
-    return ExecutionStatus::EXCEPTION;
-  }
-
-  // Set globalThis.__wasm_imports__ to the import object so the compiled
-  // Wasm top-level function can resolve imports from it.
-  auto wasmImportsSymbol =
-      Predefined::getSymbolID(Predefined::__wasm_imports__);
-
-  // Save the previous value (if any) to restore it later.
-  auto prevRes = JSObject::getNamed_RJS(
-      runtime.getGlobal(), runtime, wasmImportsSymbol);
-  if (LLVM_UNLIKELY(prevRes == ExecutionStatus::EXCEPTION)) {
-    return ExecutionStatus::EXCEPTION;
-  }
-  lv.oldImports = std::move(*prevRes);
-
-  if (hasImports) {
-    auto putRes = JSObject::putNamed_RJS(
-        runtime.getGlobal(),
-        runtime,
-        wasmImportsSymbol,
-        lv.importObj);
-    if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION)) {
-      return ExecutionStatus::EXCEPTION;
-    }
-  }
-
-  // Run the compiled bytecode. The top-level function initializes memory,
-  // tables, globals, element segments, data segments, runs the start
-  // function (if any), and returns the exports object.
-  // Make a copy of the shared_ptr since runBytecode takes by rvalue ref.
-  auto bcProvider = moduleData->bytecodeProvider;
-  auto runRes = runtime.runBytecode(
-      std::move(bcProvider),
-      RuntimeModuleFlags{},
-      "wasm-module",
-      Runtime::makeNullHandle<Environment>());
-
-  // Restore the old __wasm_imports__ value regardless of success/failure.
-  {
-    auto restoreRes = JSObject::putNamed_RJS(
-        runtime.getGlobal(),
-        runtime,
-        wasmImportsSymbol,
-        lv.oldImports);
-    (void)restoreRes;
-  }
-
-  if (LLVM_UNLIKELY(runRes == ExecutionStatus::EXCEPTION)) {
-    return ExecutionStatus::EXCEPTION;
-  }
-
-  lv.result = std::move(*runRes);
-
-  // The result should be the exports object returned by the top-level
-  // function. Freeze it per the WebAssembly spec.
-  if (!lv.result->isObject()) {
-    raiseLinkError(
-        runtime, "WebAssembly instantiation failed: unexpected result");
-    return ExecutionStatus::EXCEPTION;
-  }
-
-  lv.exportsObj.castAndSetHermesValue<JSObject>(lv.result.getHermesValue());
-
-  // Freeze the exports object.
-  if (LLVM_UNLIKELY(
-          JSObject::freeze(lv.exportsObj, runtime) ==
-          ExecutionStatus::EXCEPTION)) {
-    return ExecutionStatus::EXCEPTION;
-  }
-
-  // Create the Instance object.
-  Handle<JSObject> instancePrototype{runtime.wasmInstancePrototype};
-  lv.inst = JSWebAssemblyInstance::create(runtime, instancePrototype);
-
-  // Define the "exports" property as non-writable, non-configurable,
-  // enumerable (per the WebAssembly spec).
-  DefinePropertyFlags exportsDpf{};
-  exportsDpf.setWritable = 1;
-  exportsDpf.writable = 0;
-  exportsDpf.setConfigurable = 1;
-  exportsDpf.configurable = 0;
-  exportsDpf.setEnumerable = 1;
-  exportsDpf.enumerable = 1;
-  exportsDpf.setValue = 1;
-
-  auto defRes = JSObject::defineOwnProperty(
-      lv.inst,
-      runtime,
-      Predefined::getSymbolID(Predefined::exports),
-      exportsDpf,
-      lv.exportsObj);
-  if (LLVM_UNLIKELY(defRes == ExecutionStatus::EXCEPTION)) {
-    return ExecutionStatus::EXCEPTION;
-  }
-
-  return lv.inst.getHermesValue();
+  return instantiateModuleImpl(runtime, mod, lv.importObj);
 }
 
 //===----------------------------------------------------------------------===//
@@ -1533,6 +1770,22 @@ void createWebAssemblyObject(Runtime &runtime, MutableHandle<JSObject> result) {
       Predefined::getSymbolID(Predefined::validate),
       nullptr,
       wasmValidate,
+      1);
+
+  defineMethod(
+      runtime,
+      lv.wasmObj,
+      Predefined::getSymbolID(Predefined::compile),
+      nullptr,
+      wasmCompile,
+      1);
+
+  defineMethod(
+      runtime,
+      lv.wasmObj,
+      Predefined::getSymbolID(Predefined::instantiate),
+      nullptr,
+      wasmInstantiate,
       1);
 
   // --- WebAssembly.Module constructor ---
