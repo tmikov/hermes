@@ -548,6 +548,19 @@ class WasmIRGen {
   /// Get the natural alignment (log2) for a given load/store opcode.
   /// Returns 0 for byte ops, 1 for 16-bit, 2 for 32-bit, 3 for 64-bit.
   static uint8_t getNaturalAlignLog2(llvh::StringRef opcodeName);
+
+  /// Create an export wrapper function for the given Wasm function export.
+  /// The wrapper presents a clean JS-compatible interface: 1 param per Wasm
+  /// param, argument coercion, and return value marshaling.
+  /// \p funcIndex is the Wasm function index of the exported function.
+  /// \p exportName is the export name used for the wrapper function name.
+  /// \p tlScope is the CreateScopeInst for the top-level scope, used to
+  ///   load the internal function's closure.
+  /// \return the created wrapper IR Function.
+  Function *createExportWrapper(
+      uint32_t funcIndex,
+      llvh::StringRef exportName,
+      Instruction *tlScope);
 };
 
 } // namespace wasm

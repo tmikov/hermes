@@ -3009,8 +3009,8 @@ TEST(WasmIRGenTest, CreateFunctionsExportsObject) {
 
   // The top-level function should contain:
   //   AllocObjectLiteralInst (exports object)
-  //   LoadFrameInst (load closure for exported func)
-  //   StorePropertyStrictInst (store closure on exports object)
+  //   CreateFunctionInst (create wrapper closure for exported func)
+  //   StorePropertyStrictInst (store wrapper closure on exports object)
   //   ReturnInst (return the exports object, not undefined)
   auto *topLevel = tm.mod.getTopLevelFunction();
   ASSERT_NE(topLevel, nullptr);
@@ -3021,15 +3021,19 @@ TEST(WasmIRGenTest, CreateFunctionsExportsObject) {
   AllocObjectLiteralInst *allocObj = nullptr;
   StorePropertyStrictInst *storeProp = nullptr;
   ReturnInst *ret = nullptr;
-  unsigned loadFrameCount = 0;
+  unsigned wrapperCreateFuncCount = 0;
+  bool seenAllocObj = false;
 
   for (auto &inst : bb) {
-    if (auto *a = llvh::dyn_cast<AllocObjectLiteralInst>(&inst))
+    if (auto *a = llvh::dyn_cast<AllocObjectLiteralInst>(&inst)) {
       allocObj = a;
+      seenAllocObj = true;
+    }
     if (auto *s = llvh::dyn_cast<StorePropertyStrictInst>(&inst))
       storeProp = s;
-    if (llvh::isa<LoadFrameInst>(&inst))
-      ++loadFrameCount;
+    // Count CreateFunctionInst after AllocObjectLiteralInst (wrapper closures).
+    if (seenAllocObj && llvh::isa<CreateFunctionInst>(&inst))
+      ++wrapperCreateFuncCount;
     if (auto *r = llvh::dyn_cast<ReturnInst>(&inst))
       ret = r;
   }
@@ -3046,9 +3050,8 @@ TEST(WasmIRGenTest, CreateFunctionsExportsObject) {
   ASSERT_NE(propLit, nullptr);
   EXPECT_EQ(propLit->getValue().str(), "add");
 
-  // There should be a LoadFrameInst for the exported closure
-  // (in addition to the StoreFrameInst/CreateFunctionInst for all funcs).
-  EXPECT_GE(loadFrameCount, 1u);
+  // There should be a CreateFunctionInst for the export wrapper closure.
+  EXPECT_GE(wrapperCreateFuncCount, 1u);
 
   // ReturnInst should return the exports object, not undefined.
   ASSERT_NE(ret, nullptr);

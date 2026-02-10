@@ -151,23 +151,131 @@ void WasmIRGen::createFunctions() {
     }
   }
 
-  // Build the exports object: a plain JS object mapping export names to
-  // their pre-created closures. Only function exports are handled; other
-  // export kinds (memory, table, global) are silently skipped for now.
-  auto *exportsObj = builder_.createAllocObjectLiteralInst({});
+  // Build export wrapper functions and the exports object.
+  // For each exported function, create a wrapper that presents a clean
+  // JS-compatible interface (1 param per Wasm param, argument coercion,
+  // return value marshaling). The exports object maps export names to
+  // wrapper closures. Only function exports are handled; other export kinds
+  // (memory, table, global) are silently skipped for now.
+
+  // Create wrapper functions first (this switches insertion point).
+  struct ExportWrapperInfo {
+    std::string name;
+    Function *wrapperFunc;
+  };
+  std::vector<ExportWrapperInfo> wrappers;
   for (const auto &exp : moduleInfo_.exports) {
     if (exp.kind != WasmExternalKind::Function)
       continue;
     assert(
         exp.index < closureVars_.size() &&
         "export function index out of range");
-    auto *closure = builder_.createLoadFrameInst(
-        tlScope, closureVars_[exp.index]);
+    auto *wrapperFunc =
+        createExportWrapper(exp.index, exp.name, tlScope);
+    wrappers.push_back({exp.name, wrapperFunc});
+  }
+
+  // Switch back to the top-level entry block to emit closures and the
+  // exports object.
+  builder_.setInsertionBlock(tlEntry);
+
+  auto *exportsObj = builder_.createAllocObjectLiteralInst({});
+  for (const auto &w : wrappers) {
+    auto *wrapperClosure = builder_.createCreateFunctionInst(
+        tlScope, w.wrapperFunc);
     builder_.createStorePropertyStrictInst(
-        closure, exportsObj, builder_.getLiteralString(exp.name));
+        wrapperClosure, exportsObj, builder_.getLiteralString(w.name));
   }
 
   builder_.createReturnInst(exportsObj);
+}
+
+Function *WasmIRGen::createExportWrapper(
+    uint32_t funcIndex,
+    llvh::StringRef exportName,
+    Instruction *tlScope) {
+  const WasmFuncType &funcType = moduleInfo_.getFunctionType(funcIndex);
+
+  // Create the wrapper function.
+  auto *wrapperFunc = builder_.createFunction(
+      ("wasm_export_" + exportName).str(),
+      Function::DefinitionKind::ES5Function,
+      true /* strictMode */);
+
+  // Wrapper takes 1 JS param per Wasm param (not split for i64).
+  builder_.createJSThisParam(wrapperFunc);
+  uint32_t numParams = funcType.params.size();
+  for (uint32_t i = 0; i < numParams; ++i) {
+    builder_.createJSDynamicParam(
+        wrapperFunc, ("p" + llvh::Twine(i)).str());
+  }
+  wrapperFunc->setExpectedParamCountIncludingThis(numParams + 1);
+
+  // Build the wrapper function body.
+  auto *entryBB = builder_.createBasicBlock(wrapperFunc);
+  builder_.setInsertionBlock(entryBB);
+
+  // Get the parent scope to load the internal function's closure.
+  auto *parentScope = builder_.createGetParentScopeInst(
+      topLevelVS_, wrapperFunc->getParentScopeParam());
+
+  // Load the internal function's closure from the top-level scope.
+  auto *internalClosure = builder_.createLoadFrameInst(
+      parentScope, closureVars_[funcIndex]);
+
+  // Marshal arguments: coerce each JS param to the expected Wasm type.
+  // For i64 params, the internal function expects two JS args (lo, hi).
+  llvh::SmallVector<Value *, 8> callArgs;
+  for (uint32_t i = 0; i < numParams; ++i) {
+    // JS param index: 0=this, 1..N=user params. getJSDynamicParam(1+i).
+    auto *jsParam = wrapperFunc->getJSDynamicParam(1 + i);
+    auto *paramVal = builder_.createLoadParamInst(jsParam);
+
+    switch (funcType.params[i]) {
+      case WasmValType::I32:
+        // Coerce to int32.
+        callArgs.push_back(builder_.createAsInt32Inst(paramVal));
+        break;
+      case WasmValType::I64:
+        // Phase 1: split into lo32 (truncated) and hi32 (0).
+        // JS callers pass a Number; we truncate to int32 for lo,
+        // and set hi to 0.
+        callArgs.push_back(builder_.createAsInt32Inst(paramVal));
+        callArgs.push_back(builder_.getLiteralNumber(0));
+        break;
+      case WasmValType::F32:
+      case WasmValType::F64:
+        // Float/double: pass through (already a JS Number).
+        callArgs.push_back(paramVal);
+        break;
+      default:
+        // FuncRef, ExternRef, etc: pass through for now.
+        callArgs.push_back(paramVal);
+        break;
+    }
+  }
+
+  // Call the internal Wasm function.
+  auto *callResult = builder_.createCallInst(
+      internalClosure,
+      /* newTarget */ builder_.getLiteralUndefined(),
+      /* thisValue */ builder_.getLiteralUndefined(),
+      callArgs);
+
+  // Marshal the return value.
+  if (funcType.results.empty()) {
+    // Void function: return undefined.
+    builder_.createReturnInst(builder_.getLiteralUndefined());
+  } else if (funcType.results[0] == WasmValType::I64) {
+    // Phase 1: the internal function returns lo32 and stashes hi32.
+    // We just return lo32 (hi32 is lost to JS callers).
+    builder_.createReturnInst(callResult);
+  } else {
+    // i32/f32/f64: return the call result directly.
+    builder_.createReturnInst(callResult);
+  }
+
+  return wrapperFunc;
 }
 
 void WasmIRGen::beginFunction(
