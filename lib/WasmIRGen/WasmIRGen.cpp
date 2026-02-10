@@ -33,6 +33,28 @@ void WasmIRGen::createFunctions() {
   // Create a VariableScope for the top-level function (no parent).
   topLevelVS_ = builder_.createVariableScope(nullptr);
 
+  // If the module has memory, create Variables for the 8 typed array views.
+  bool hasMemory = moduleInfo_.totalMemoryCount() > 0;
+  if (hasMemory) {
+    static const char *viewNames[NUM_MEM_VIEWS] = {
+        "HEAP8",
+        "HEAPU8",
+        "HEAP16",
+        "HEAPU16",
+        "HEAP32",
+        "HEAPU32",
+        "HEAPF32",
+        "HEAPF64",
+    };
+    for (uint8_t i = 0; i < NUM_MEM_VIEWS; ++i) {
+      memViewVars_[i] = builder_.createVariable(
+          topLevelVS_,
+          viewNames[i],
+          Type::createAnyType(),
+          /* hidden */ true);
+    }
+  }
+
   // Create all Wasm functions and a Variable in the top-level scope for each.
   uint32_t totalFuncs = moduleInfo_.totalFunctionCount();
   irFunctions_.resize(totalFuncs, nullptr);
@@ -108,6 +130,11 @@ void WasmIRGen::createFunctions() {
     auto *closure = builder_.createCreateFunctionInst(
         tlScope, irFunctions_[i]);
     builder_.createStoreFrameInst(tlScope, closure, closureVars_[i]);
+  }
+
+  // Create typed array views for the linear memory if present.
+  if (hasMemory) {
+    createMemoryViews(tlScope);
   }
 
   // Call the start function if specified (load its pre-created closure).
@@ -2275,6 +2302,447 @@ bool WasmIRGen::isCurrentBlockTerminated() {
   if (!bb || bb->empty())
     return false;
   return llvh::isa<TerminatorInst>(&bb->back());
+}
+
+// --- Memory access (H.1) ---
+
+Value *WasmIRGen::emitNew(Value *constructor, llvh::ArrayRef<Value *> args) {
+  auto *thisArg = builder_.createCreateThisInst(constructor, constructor);
+  auto *call = builder_.createCallInst(
+      constructor, constructor, thisArg, args);
+  return builder_.createGetConstructedObjectInst(thisArg, call);
+}
+
+void WasmIRGen::createMemoryViews(Instruction *tlScope) {
+  // Determine initial memory size in bytes.
+  // Use the first memory (Wasm MVP has at most one).
+  uint32_t initialPages = 0;
+  if (!moduleInfo_.memories.empty()) {
+    initialPages = moduleInfo_.memories[0].limits.initial;
+  } else {
+    // Check imported memories.
+    for (auto &imp : moduleInfo_.imports) {
+      if (imp.kind == WasmExternalKind::Memory) {
+        initialPages = imp.memoryType.limits.initial;
+        break;
+      }
+    }
+  }
+
+  auto *memSize = builder_.getLiteralNumber(
+      static_cast<double>(initialPages) * 65536.0);
+
+  // Create: var buffer = new ArrayBuffer(memSize)
+  auto *abCtor = builder_.createTryLoadGlobalPropertyInst("ArrayBuffer");
+  auto *buffer = emitNew(abCtor, {memSize});
+
+  // Create typed array views and store in top-level scope variables.
+  static const char *ctorNames[NUM_MEM_VIEWS] = {
+      "Int8Array",
+      "Uint8Array",
+      "Int16Array",
+      "Uint16Array",
+      "Int32Array",
+      "Uint32Array",
+      "Float32Array",
+      "Float64Array",
+  };
+  for (uint8_t i = 0; i < NUM_MEM_VIEWS; ++i) {
+    auto *ctor = builder_.createTryLoadGlobalPropertyInst(ctorNames[i]);
+    auto *view = emitNew(ctor, {buffer});
+    builder_.createStoreFrameInst(tlScope, view, memViewVars_[i]);
+  }
+}
+
+Value *WasmIRGen::loadMemView(MemView view) {
+  return builder_.createLoadFrameInst(parentScopeInst_, memViewVars_[view]);
+}
+
+void WasmIRGen::onLoad(
+    const char *opcodeName,
+    uint32_t alignLog2,
+    uint32_t offset) {
+  if (unreachable_)
+    return;
+
+  // Pop the base address.
+  Value *base = pop();
+
+  // Compute effective address: base + offset.
+  Value *addr;
+  if (offset != 0) {
+    addr = builder_.createBinaryOperatorInst(
+        base,
+        builder_.getLiteralNumber(static_cast<double>(offset)),
+        ValueKind::BinaryAddInstKind);
+  } else {
+    addr = base;
+  }
+
+  // Determine which view to use and the element shift based on the opcode.
+  llvh::StringRef op(opcodeName);
+
+  // i64 loads: handled specially (split into lo/hi).
+  if (op == "i64.load") {
+    // Load two consecutive i32 values from HEAPU32.
+    auto *view = loadMemView(HEAPU32);
+    auto *idx = builder_.createBinaryOperatorInst(
+        addr,
+        builder_.getLiteralNumber(2),
+        ValueKind::BinaryUnsignedRightShiftInstKind);
+    auto *lo = builder_.createLoadPropertyInst(view, idx);
+    // Check OOB: if result === undefined, trap.
+    auto *isUndef = builder_.createBinaryOperatorInst(
+        lo,
+        builder_.getLiteralUndefined(),
+        ValueKind::BinaryStrictlyEqualInstKind);
+    auto *trapBlock = builder_.createBasicBlock(currentFunc_);
+    auto *okBlock = builder_.createBasicBlock(currentFunc_);
+    builder_.createCondBranchInst(isUndef, trapBlock, okBlock);
+
+    builder_.setInsertionBlock(trapBlock);
+    helpers_.emitTrap();
+    builder_.createUnreachableInst();
+
+    builder_.setInsertionBlock(okBlock);
+    // Load the hi32 word at idx+1.
+    auto *idx1 = builder_.createBinaryOperatorInst(
+        idx,
+        builder_.getLiteralNumber(1),
+        ValueKind::BinaryAddInstKind);
+    auto *hi = builder_.createLoadPropertyInst(view, idx1);
+    pushI64(lo, hi);
+    return;
+  }
+
+  if (op == "i64.load8_s" || op == "i64.load8_u") {
+    bool isSigned = (op == "i64.load8_s");
+    auto *view = loadMemView(isSigned ? HEAP8 : HEAPU8);
+    auto *lo = builder_.createLoadPropertyInst(view, addr);
+    // OOB check.
+    auto *isUndef = builder_.createBinaryOperatorInst(
+        lo,
+        builder_.getLiteralUndefined(),
+        ValueKind::BinaryStrictlyEqualInstKind);
+    auto *trapBlock = builder_.createBasicBlock(currentFunc_);
+    auto *okBlock = builder_.createBasicBlock(currentFunc_);
+    builder_.createCondBranchInst(isUndef, trapBlock, okBlock);
+
+    builder_.setInsertionBlock(trapBlock);
+    helpers_.emitTrap();
+    builder_.createUnreachableInst();
+
+    builder_.setInsertionBlock(okBlock);
+    // Result as i32 (lower byte), zero or sign extended.
+    auto *loI32 = builder_.createAsInt32Inst(lo);
+    // For i64: hi = sign-extended bits or 0.
+    Value *hi;
+    if (isSigned) {
+      // Sign-extend: hi = lo >> 31 (arithmetic shift fills with sign bit).
+      hi = builder_.createBinaryOperatorInst(
+          loI32,
+          builder_.getLiteralNumber(31),
+          ValueKind::BinaryRightShiftInstKind);
+    } else {
+      hi = builder_.getLiteralNumber(0);
+    }
+    pushI64(loI32, hi);
+    return;
+  }
+
+  if (op == "i64.load16_s" || op == "i64.load16_u") {
+    bool isSigned = (op == "i64.load16_s");
+    auto *view = loadMemView(isSigned ? HEAP16 : HEAPU16);
+    auto *idx = builder_.createBinaryOperatorInst(
+        addr,
+        builder_.getLiteralNumber(1),
+        ValueKind::BinaryUnsignedRightShiftInstKind);
+    auto *lo = builder_.createLoadPropertyInst(view, idx);
+    auto *isUndef = builder_.createBinaryOperatorInst(
+        lo,
+        builder_.getLiteralUndefined(),
+        ValueKind::BinaryStrictlyEqualInstKind);
+    auto *trapBlock = builder_.createBasicBlock(currentFunc_);
+    auto *okBlock = builder_.createBasicBlock(currentFunc_);
+    builder_.createCondBranchInst(isUndef, trapBlock, okBlock);
+
+    builder_.setInsertionBlock(trapBlock);
+    helpers_.emitTrap();
+    builder_.createUnreachableInst();
+
+    builder_.setInsertionBlock(okBlock);
+    auto *loI32 = builder_.createAsInt32Inst(lo);
+    Value *hi;
+    if (isSigned) {
+      hi = builder_.createBinaryOperatorInst(
+          loI32,
+          builder_.getLiteralNumber(31),
+          ValueKind::BinaryRightShiftInstKind);
+    } else {
+      hi = builder_.getLiteralNumber(0);
+    }
+    pushI64(loI32, hi);
+    return;
+  }
+
+  if (op == "i64.load32_s" || op == "i64.load32_u") {
+    bool isSigned = (op == "i64.load32_s");
+    auto *view = loadMemView(isSigned ? HEAP32 : HEAPU32);
+    auto *idx = builder_.createBinaryOperatorInst(
+        addr,
+        builder_.getLiteralNumber(2),
+        ValueKind::BinaryUnsignedRightShiftInstKind);
+    auto *lo = builder_.createLoadPropertyInst(view, idx);
+    auto *isUndef = builder_.createBinaryOperatorInst(
+        lo,
+        builder_.getLiteralUndefined(),
+        ValueKind::BinaryStrictlyEqualInstKind);
+    auto *trapBlock = builder_.createBasicBlock(currentFunc_);
+    auto *okBlock = builder_.createBasicBlock(currentFunc_);
+    builder_.createCondBranchInst(isUndef, trapBlock, okBlock);
+
+    builder_.setInsertionBlock(trapBlock);
+    helpers_.emitTrap();
+    builder_.createUnreachableInst();
+
+    builder_.setInsertionBlock(okBlock);
+    Value *hi;
+    if (isSigned) {
+      // The HEAP32 (Int32Array) already returns a signed i32.
+      // Sign-extend hi from bit 31.
+      auto *loI32 = builder_.createAsInt32Inst(lo);
+      hi = builder_.createBinaryOperatorInst(
+          loI32,
+          builder_.getLiteralNumber(31),
+          ValueKind::BinaryRightShiftInstKind);
+    } else {
+      hi = builder_.getLiteralNumber(0);
+    }
+    pushI64(lo, hi);
+    return;
+  }
+
+  if (op == "i64.store" || op == "i64.store8" || op == "i64.store16" ||
+      op == "i64.store32") {
+    // This is actually a load dispatch error — stores go through onStore.
+    // But just in case, handle gracefully.
+    assert(false && "i64 store dispatched to onLoad");
+    return;
+  }
+
+  // Non-i64 loads.
+  MemView view;
+  uint8_t shift = 0; // log2(element_size)
+
+  if (op == "i32.load") {
+    view = HEAP32;
+    shift = 2;
+  } else if (op == "i32.load8_s") {
+    // Int8Array returns signed values natively.
+    view = HEAP8;
+    shift = 0;
+  } else if (op == "i32.load8_u") {
+    view = HEAPU8;
+    shift = 0;
+  } else if (op == "i32.load16_s") {
+    // Int16Array returns signed values natively.
+    view = HEAP16;
+    shift = 1;
+  } else if (op == "i32.load16_u") {
+    view = HEAPU16;
+    shift = 1;
+  } else if (op == "f32.load") {
+    view = HEAPF32;
+    shift = 2;
+  } else if (op == "f64.load") {
+    view = HEAPF64;
+    shift = 3;
+  } else {
+    // Unknown load opcode.
+    llvh::errs() << "WARNING: unsupported load opcode: " << op << "\n";
+    push(builder_.getLiteralUndefined());
+    return;
+  }
+
+  // Compute typed array index.
+  Value *idx;
+  if (shift > 0) {
+    idx = builder_.createBinaryOperatorInst(
+        addr,
+        builder_.getLiteralNumber(shift),
+        ValueKind::BinaryUnsignedRightShiftInstKind);
+  } else {
+    idx = addr;
+  }
+
+  // Load from the typed array view.
+  auto *viewVal = loadMemView(view);
+  auto *loaded = builder_.createLoadPropertyInst(viewVal, idx);
+
+  // OOB check: typed arrays return undefined for out-of-bounds reads.
+  auto *isUndef = builder_.createBinaryOperatorInst(
+      loaded,
+      builder_.getLiteralUndefined(),
+      ValueKind::BinaryStrictlyEqualInstKind);
+  auto *trapBlock = builder_.createBasicBlock(currentFunc_);
+  auto *okBlock = builder_.createBasicBlock(currentFunc_);
+  builder_.createCondBranchInst(isUndef, trapBlock, okBlock);
+
+  builder_.setInsertionBlock(trapBlock);
+  helpers_.emitTrap();
+  builder_.createUnreachableInst();
+
+  builder_.setInsertionBlock(okBlock);
+  push(loaded);
+}
+
+void WasmIRGen::onStore(
+    const char *opcodeName,
+    uint32_t alignLog2,
+    uint32_t offset) {
+  if (unreachable_)
+    return;
+
+  llvh::StringRef op(opcodeName);
+
+  // i64 stores: pop i64 pair (lo, hi) then base address.
+  if (op == "i64.store") {
+    auto [lo, hi] = popI64();
+    Value *base = pop();
+    Value *addr;
+    if (offset != 0) {
+      addr = builder_.createBinaryOperatorInst(
+          base,
+          builder_.getLiteralNumber(static_cast<double>(offset)),
+          ValueKind::BinaryAddInstKind);
+    } else {
+      addr = base;
+    }
+    auto *view = loadMemView(HEAPU32);
+    auto *idx = builder_.createBinaryOperatorInst(
+        addr,
+        builder_.getLiteralNumber(2),
+        ValueKind::BinaryUnsignedRightShiftInstKind);
+    builder_.createStorePropertyStrictInst(lo, view, idx);
+    auto *idx1 = builder_.createBinaryOperatorInst(
+        idx,
+        builder_.getLiteralNumber(1),
+        ValueKind::BinaryAddInstKind);
+    builder_.createStorePropertyStrictInst(hi, view, idx1);
+    return;
+  }
+
+  if (op == "i64.store8") {
+    auto [lo, hi] = popI64();
+    (void)hi;
+    Value *base = pop();
+    Value *addr;
+    if (offset != 0) {
+      addr = builder_.createBinaryOperatorInst(
+          base,
+          builder_.getLiteralNumber(static_cast<double>(offset)),
+          ValueKind::BinaryAddInstKind);
+    } else {
+      addr = base;
+    }
+    auto *view = loadMemView(HEAPU8);
+    builder_.createStorePropertyStrictInst(lo, view, addr);
+    return;
+  }
+
+  if (op == "i64.store16") {
+    auto [lo, hi] = popI64();
+    (void)hi;
+    Value *base = pop();
+    Value *addr;
+    if (offset != 0) {
+      addr = builder_.createBinaryOperatorInst(
+          base,
+          builder_.getLiteralNumber(static_cast<double>(offset)),
+          ValueKind::BinaryAddInstKind);
+    } else {
+      addr = base;
+    }
+    auto *view = loadMemView(HEAPU16);
+    auto *idx = builder_.createBinaryOperatorInst(
+        addr,
+        builder_.getLiteralNumber(1),
+        ValueKind::BinaryUnsignedRightShiftInstKind);
+    builder_.createStorePropertyStrictInst(lo, view, idx);
+    return;
+  }
+
+  if (op == "i64.store32") {
+    auto [lo, hi] = popI64();
+    (void)hi;
+    Value *base = pop();
+    Value *addr;
+    if (offset != 0) {
+      addr = builder_.createBinaryOperatorInst(
+          base,
+          builder_.getLiteralNumber(static_cast<double>(offset)),
+          ValueKind::BinaryAddInstKind);
+    } else {
+      addr = base;
+    }
+    auto *view = loadMemView(HEAPU32);
+    auto *idx = builder_.createBinaryOperatorInst(
+        addr,
+        builder_.getLiteralNumber(2),
+        ValueKind::BinaryUnsignedRightShiftInstKind);
+    builder_.createStorePropertyStrictInst(lo, view, idx);
+    return;
+  }
+
+  // Non-i64 stores: pop value, then base address.
+  Value *value = pop();
+  Value *base = pop();
+
+  Value *addr;
+  if (offset != 0) {
+    addr = builder_.createBinaryOperatorInst(
+        base,
+        builder_.getLiteralNumber(static_cast<double>(offset)),
+        ValueKind::BinaryAddInstKind);
+  } else {
+    addr = base;
+  }
+
+  MemView view;
+  uint8_t shift = 0;
+
+  if (op == "i32.store") {
+    view = HEAP32;
+    shift = 2;
+  } else if (op == "i32.store8") {
+    view = HEAPU8;
+    shift = 0;
+  } else if (op == "i32.store16") {
+    view = HEAPU16;
+    shift = 1;
+  } else if (op == "f32.store") {
+    view = HEAPF32;
+    shift = 2;
+  } else if (op == "f64.store") {
+    view = HEAPF64;
+    shift = 3;
+  } else {
+    llvh::errs() << "WARNING: unsupported store opcode: " << op << "\n";
+    return;
+  }
+
+  Value *idx;
+  if (shift > 0) {
+    idx = builder_.createBinaryOperatorInst(
+        addr,
+        builder_.getLiteralNumber(shift),
+        ValueKind::BinaryUnsignedRightShiftInstKind);
+  } else {
+    idx = addr;
+  }
+
+  auto *viewVal = loadMemView(view);
+  builder_.createStorePropertyStrictInst(value, viewVal, idx);
 }
 
 } // namespace wasm

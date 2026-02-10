@@ -1280,9 +1280,10 @@ wabt::Result BinaryReaderHermesIRGen::OnLoadExpr(
   if (!inFunctionBody_ || !irgen_)
     return wabt::Result::Ok;
 
-  // All load operations consume 1 value (address) and produce 1 value.
-  // Deferred to Part H.
-  irgen_->warnUnsupported(opcode.GetName(), 1, 1);
+  irgen_->onLoad(
+      opcode.GetName(),
+      static_cast<uint32_t>(alignmentLog2),
+      static_cast<uint32_t>(offset));
   return wabt::Result::Ok;
 }
 
@@ -1294,9 +1295,10 @@ wabt::Result BinaryReaderHermesIRGen::OnStoreExpr(
   if (!inFunctionBody_ || !irgen_)
     return wabt::Result::Ok;
 
-  // All store operations consume 2 values (address + value) and produce 0.
-  // Deferred to Part H.
-  irgen_->warnUnsupported(opcode.GetName(), 2, 0);
+  irgen_->onStore(
+      opcode.GetName(),
+      static_cast<uint32_t>(alignmentLog2),
+      static_cast<uint32_t>(offset));
   return wabt::Result::Ok;
 }
 

@@ -334,6 +334,26 @@ class WasmIRGen {
   /// f64.reinterpret_i64: pop i64, push f64 (bitcast).
   void onF64ReinterpretI64();
 
+  // --- Memory access (H.1) ---
+
+  /// Emit a memory load instruction.
+  /// \p opcodeName identifies the load variant (e.g., "i32.load").
+  /// \p alignLog2 is the log2 of the alignment annotation.
+  /// \p offset is the static offset immediate.
+  void onLoad(
+      const char *opcodeName,
+      uint32_t alignLog2,
+      uint32_t offset);
+
+  /// Emit a memory store instruction.
+  /// \p opcodeName identifies the store variant (e.g., "i32.store").
+  /// \p alignLog2 is the log2 of the alignment annotation.
+  /// \p offset is the static offset immediate.
+  void onStore(
+      const char *opcodeName,
+      uint32_t alignLog2,
+      uint32_t offset);
+
   // --- Unsupported opcode handling (D.13) ---
 
   /// Emit a warning for an unsupported opcode. Pops \p numInputs values
@@ -361,6 +381,23 @@ class WasmIRGen {
   /// One Variable per Wasm function in the top-level scope, holding the
   /// pre-created closure. Indexed by Wasm function index.
   std::vector<Variable *> closureVars_;
+
+  /// Typed array view indices into memViewVars_.
+  enum MemView : uint8_t {
+    HEAP8 = 0,
+    HEAPU8,
+    HEAP16,
+    HEAPU16,
+    HEAP32,
+    HEAPU32,
+    HEAPF32,
+    HEAPF64,
+    NUM_MEM_VIEWS,
+  };
+
+  /// Variables holding the 8 typed array views in the top-level scope.
+  /// Only populated if the module has a memory section.
+  Variable *memViewVars_[NUM_MEM_VIEWS] = {};
 
   /// The VariableScope for the top-level function.
   VariableScope *topLevelVS_ = nullptr;
@@ -474,6 +511,18 @@ class WasmIRGen {
   /// Check if the current insertion block is terminated (ends with a
   /// terminator instruction).
   bool isCurrentBlockTerminated();
+
+  /// Load a memory view variable from the top-level scope.
+  /// \return the LoadFrameInst for the view.
+  Value *loadMemView(MemView view);
+
+  /// Emit `new Constructor(args)` and return the constructed object.
+  Value *emitNew(Value *constructor, llvh::ArrayRef<Value *> args);
+
+  /// Create the typed array views for the linear memory in the top-level
+  /// function. Called from createFunctions() if the module has memory.
+  /// \p tlScope is the CreateScopeInst for the top-level scope.
+  void createMemoryViews(Instruction *tlScope);
 };
 
 } // namespace wasm
