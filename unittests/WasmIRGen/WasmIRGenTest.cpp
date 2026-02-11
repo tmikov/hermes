@@ -850,7 +850,7 @@ TEST(WasmIRGenTest, BlockWithResult) {
   irgen.beginFunction(0, {});
 
   // (block (result i32) (i32.const 42) (end))
-  irgen.onBlock({WasmValType::I32});
+  irgen.onBlock({}, {WasmValType::I32});
   irgen.onI32Const(42);
   irgen.onEnd(); // end of block
   // At this point, the block result (42) should be on the value stack.
@@ -879,7 +879,7 @@ TEST(WasmIRGenTest, BlockBrWithResult) {
   irgen.beginFunction(0, {});
 
   // (block (result i32) (i32.const 42) (br 0) (end))
-  irgen.onBlock({WasmValType::I32});
+  irgen.onBlock({}, {WasmValType::I32});
   irgen.onI32Const(42);
   irgen.onBr(0);
   irgen.onEnd();
@@ -925,7 +925,7 @@ TEST(WasmIRGenTest, BlockVoid) {
   irgen.beginFunction(0, {});
 
   // (block (nop) (end))
-  irgen.onBlock({});
+  irgen.onBlock({}, {});
   // No operations inside the block.
   irgen.onEnd();
 
@@ -955,7 +955,7 @@ TEST(WasmIRGenTest, BrIfTaken) {
   irgen.beginFunction(0, {});
 
   // (block (i32.const 1) (br_if 0) (end))
-  irgen.onBlock({});
+  irgen.onBlock({}, {});
   irgen.onI32Const(1);
   irgen.onBrIf(0);
   irgen.onEnd();
@@ -994,8 +994,8 @@ TEST(WasmIRGenTest, NestedBlocksBr) {
   //   )
   //   (i32.const 0)
   // )
-  irgen.onBlock({WasmValType::I32}); // outer block
-  irgen.onBlock({});                  // inner block
+  irgen.onBlock({}, {WasmValType::I32}); // outer block
+  irgen.onBlock({}, {});                  // inner block
   irgen.onI32Const(55);
   irgen.onBr(1); // br to outer block (depth 1)
   irgen.onEnd(); // end inner block
@@ -1040,7 +1040,7 @@ TEST(WasmIRGenTest, LoopFallthrough) {
   irgen.beginFunction(0, {});
 
   // (loop (nop) (end))
-  irgen.onLoop({});
+  irgen.onLoop({}, {});
   // No operations inside the loop — just falls through.
   irgen.onEnd();
 
@@ -1071,7 +1071,7 @@ TEST(WasmIRGenTest, LoopBrBack) {
 
   // (loop (br 0) (end))
   // The br 0 targets the loop header (infinite loop).
-  irgen.onLoop({});
+  irgen.onLoop({}, {});
   irgen.onBr(0); // br to loop header
   irgen.onEnd();
 
@@ -1114,7 +1114,7 @@ TEST(WasmIRGenTest, LoopWithBrIf) {
 
   // (loop (local.get 0) (br_if 0) (end))
   // Conditional loop back: loop while param 0 is non-zero.
-  irgen.onLoop({});
+  irgen.onLoop({}, {});
   irgen.onLocalGet(0);
   irgen.onBrIf(0); // br_if to loop header
   irgen.onEnd();
@@ -1148,7 +1148,7 @@ TEST(WasmIRGenTest, LoopWithResult) {
 
   // (loop (result i32) (i32.const 42) (end))
   // Loop with result type — the result is the fallthrough value.
-  irgen.onLoop({WasmValType::I32});
+  irgen.onLoop({}, {WasmValType::I32});
   irgen.onI32Const(42);
   irgen.onEnd(); // loop end — 42 falls through as the result
 
@@ -1193,7 +1193,7 @@ TEST(WasmIRGenTest, IfElseWithResult) {
   //   (then (i32.const 42))
   //   (else (i32.const 99)))
   irgen.onLocalGet(0);
-  irgen.onIf({WasmValType::I32});
+  irgen.onIf({}, {WasmValType::I32});
   irgen.onI32Const(42);
   irgen.onElse();
   irgen.onI32Const(99);
@@ -1251,7 +1251,7 @@ TEST(WasmIRGenTest, IfWithoutElseVoid) {
   // (if (local.get 0)
   //   (then (i32.const 1) (local.set 1)))
   irgen.onLocalGet(0);
-  irgen.onIf({});
+  irgen.onIf({}, {});
   irgen.onI32Const(1);
   irgen.onLocalSet(1);
   irgen.onEnd(); // end if (no else)
@@ -1297,9 +1297,9 @@ TEST(WasmIRGenTest, NestedIfElse) {
   //       (else (i32.const 2))))
   //   (else (i32.const 3)))
   irgen.onLocalGet(0);
-  irgen.onIf({WasmValType::I32}); // outer if
+  irgen.onIf({}, {WasmValType::I32}); // outer if
   irgen.onLocalGet(1);
-  irgen.onIf({WasmValType::I32}); // inner if
+  irgen.onIf({}, {WasmValType::I32}); // inner if
   irgen.onI32Const(1);
   irgen.onElse(); // inner else
   irgen.onI32Const(2);
@@ -1365,9 +1365,9 @@ TEST(WasmIRGenTest, IfWithBr) {
   //     (then (i32.const 42) (br 1))
   //   )
   //   (i32.const 99))
-  irgen.onBlock({WasmValType::I32}); // outer block
+  irgen.onBlock({}, {WasmValType::I32}); // outer block
   irgen.onLocalGet(0);
-  irgen.onIf({}); // void if
+  irgen.onIf({}, {}); // void if
   irgen.onI32Const(42);
   irgen.onBr(1); // br to outer block
   irgen.onEnd(); // end if
@@ -1425,9 +1425,9 @@ TEST(WasmIRGenTest, BrTableBasic) {
   //       (local.get 0)
   //       (br_table $b0 $b1 $b2)  ;; 0->$b0, 1->$b1, default->$b2
   //     )))
-  irgen.onBlock({}); // $b0 (depth 2 from innermost)
-  irgen.onBlock({}); // $b1 (depth 1)
-  irgen.onBlock({}); // $b2 (depth 0)
+  irgen.onBlock({}, {}); // $b0 (depth 2 from innermost)
+  irgen.onBlock({}, {}); // $b1 (depth 1)
+  irgen.onBlock({}, {}); // $b2 (depth 0)
   irgen.onLocalGet(0);
   uint32_t depths[] = {2, 1};
   irgen.onBrTable(depths, 2, 0);
@@ -1469,7 +1469,7 @@ TEST(WasmIRGenTest, BrTableWithResult) {
   //   (local.get 0)
   //   (br_table 0 0)   ;; case 0 and default both go to the block end
   // )
-  irgen.onBlock({WasmValType::I32});
+  irgen.onBlock({}, {WasmValType::I32});
   irgen.onI32Const(10);
   irgen.onLocalGet(0);
   uint32_t depths[] = {0};
@@ -1520,8 +1520,8 @@ TEST(WasmIRGenTest, BrTableSameDepthMerge) {
   //     (local.get 0)
   //     (br_table $b0 $b0 $b1)  ;; 0->$b0, 1->$b0, default->$b1
   //   ))
-  irgen.onBlock({}); // $b0 (depth 1)
-  irgen.onBlock({}); // $b1 (depth 0)
+  irgen.onBlock({}, {}); // $b0 (depth 1)
+  irgen.onBlock({}, {}); // $b1 (depth 0)
   irgen.onLocalGet(0);
   uint32_t depths[] = {1, 1};
   irgen.onBrTable(depths, 2, 0);

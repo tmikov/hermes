@@ -407,7 +407,9 @@ CallResult<HermesValue> wasmF32ReinterpretI32(void *, Runtime &runtime) {
   int32_t bits = truncateToInt32(args.getArg(0).getNumber());
   float f;
   memcpy(&f, &bits, sizeof(f));
-  return HermesValue::encodeTrustedNumberValue(static_cast<double>(f));
+  // Use encodeUntrustedNumberValue because reinterpreted bits can produce
+  // NaN values whose double representation collides with NaN-boxing tags.
+  return HermesValue::encodeUntrustedNumberValue(static_cast<double>(f));
 }
 
 /// Wasm f64.copysign(a, b): copy the sign bit of b onto the magnitude of a.
@@ -833,7 +835,9 @@ CallResult<HermesValue> wasmF64ReinterpretI64(void *, Runtime &runtime) {
   uint64_t bits = static_cast<uint64_t>(argsToI64(args, 0, 1));
   double result;
   memcpy(&result, &bits, sizeof(result));
-  return HermesValue::encodeTrustedNumberValue(result);
+  // Use encodeUntrustedNumberValue because reinterpreted bits can produce
+  // NaN values whose double representation collides with NaN-boxing tags.
+  return HermesValue::encodeUntrustedNumberValue(result);
 }
 
 /// memory.grow helper (H.2).

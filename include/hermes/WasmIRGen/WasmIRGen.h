@@ -135,13 +135,19 @@ class WasmIRGen {
 
   // --- Control flow (D.6, D.7, D.8) ---
 
-  /// Enter a block with the given result types.
-  void onBlock(const std::vector<WasmValType> &resultTypes);
-  /// Enter a loop with the given result types.
-  void onLoop(const std::vector<WasmValType> &resultTypes);
-  /// Enter an if construct with the given result types.
+  /// Enter a block with the given param and result types.
+  void onBlock(
+      const std::vector<WasmValType> &paramTypes,
+      const std::vector<WasmValType> &resultTypes);
+  /// Enter a loop with the given param and result types.
+  void onLoop(
+      const std::vector<WasmValType> &paramTypes,
+      const std::vector<WasmValType> &resultTypes);
+  /// Enter an if construct with the given param and result types.
   /// Pops the condition from the value stack.
-  void onIf(const std::vector<WasmValType> &resultTypes);
+  void onIf(
+      const std::vector<WasmValType> &paramTypes,
+      const std::vector<WasmValType> &resultTypes);
   /// Switch to the else branch of the current if construct.
   void onElse();
   /// End the current block/loop/if.
@@ -576,14 +582,19 @@ class WasmIRGen {
     BasicBlock *endBlock = nullptr;
     /// Only for If: the else block.
     BasicBlock *elseBlock = nullptr;
+    /// Block signature param types (for block params proposal).
+    std::vector<WasmValType> paramTypes;
     /// Block signature result types.
     std::vector<WasmValType> resultTypes;
-    /// Value stack height at entry.
+    /// Value stack height at entry (below any block params).
     size_t stackHeight;
     /// Phi nodes for results at the continuation block.
     /// For Block/If/Try: phis in contBlock for results from br/fallthrough.
     /// For Loop: phis in endBlock for results from fallthrough.
     std::vector<PhiInst *> resultPhis;
+    /// Saved param values for If blocks with params, so they can be
+    /// re-pushed at the start of the else branch.
+    std::vector<Value *> savedParamValues;
     /// Whether the code was unreachable when this entry was pushed.
     bool outerUnreachable = false;
     /// Whether any branch (br/br_if) has targeted this entry's contBlock.

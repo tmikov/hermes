@@ -98,6 +98,27 @@ def value_to_js_arg(val):
         return "undefined"
 
 
+def escape_js_string(s):
+    """Escape a string for use inside a JS double-quoted string literal."""
+    s = s.replace('\\', '\\\\')
+    s = s.replace('"', '\\"')
+    s = s.replace('\n', '\\n')
+    s = s.replace('\r', '\\r')
+    s = s.replace('\t', '\\t')
+    # Escape any other non-printable or non-ASCII chars as unicode escapes.
+    result = []
+    for ch in s:
+        code = ord(ch)
+        if code < 0x20 or code > 0x7e:
+            if code > 0xffff:
+                result.append(f'\\u{{{code:x}}}')
+            else:
+                result.append(f'\\u{code:04x}')
+        else:
+            result.append(ch)
+    return ''.join(result)
+
+
 def gen_expected_check(expected, result_var):
     """Generate JS code to check an expected value against a result."""
     if not expected:
@@ -230,7 +251,7 @@ def generate_js_harness(spec, wasm_dir):
             lines.append(f'  currentInstance = loadModuleWithImports("{wasm_file}");')
             lines.append("  currentExports = currentInstance.exports;")
             if name:
-                lines.append(f'  namedModules["{name}"] = currentInstance;')
+                lines.append(f'  namedModules["{escape_js_string(name)}"] = currentInstance;')
             lines.append("} catch(e) {")
             lines.append(f'  print("FAIL: line {line}: module load failed: " + e.message);')
             lines.append("  failed++;")
@@ -244,9 +265,11 @@ def generate_js_harness(spec, wasm_dir):
             name = cmd.get('name', None)
             lines.append(f"// Line {line}: register as '{as_name}'")
             if name:
-                lines.append(f'if (namedModules["{name}"]) registry["{as_name}"] = namedModules["{name}"].exports;')
+                esc_name = escape_js_string(name)
+                esc_as = escape_js_string(as_name)
+                lines.append(f'if (namedModules["{esc_name}"]) registry["{esc_as}"] = namedModules["{esc_name}"].exports;')
             else:
-                lines.append(f'if (currentExports) registry["{as_name}"] = currentExports;')
+                lines.append(f'if (currentExports) registry["{escape_js_string(as_name)}"] = currentExports;')
             lines.append("")
 
         elif cmd_type == 'assert_return':
@@ -255,25 +278,26 @@ def generate_js_harness(spec, wasm_dir):
 
             if action['type'] == 'invoke':
                 field = action['field']
+                esc_field = escape_js_string(field)
                 args = action.get('args', [])
                 module_name = action.get('module', None)
 
                 js_args = ", ".join(value_to_js_arg(a) for a in args)
 
-                lines.append(f"// Line {line}: assert_return invoke {field}")
+                lines.append(f"// Line {line}: assert_return invoke {esc_field}")
                 lines.append("try {")
                 if module_name:
-                    lines.append(f'  var exports__ = namedModules["{module_name}"].exports;')
+                    lines.append(f'  var exports__ = namedModules["{escape_js_string(module_name)}"].exports;')
                 else:
                     lines.append("  var exports__ = currentExports;")
-                lines.append(f'  var result__ = exports__["{field}"]({js_args});')
+                lines.append(f'  var result__ = exports__["{esc_field}"]({js_args});')
 
                 if expected:
                     check = gen_expected_check(expected, "result__")
                     lines.append(f"  if ({check}) {{")
                     lines.append("    passed++;")
                     lines.append("  } else {")
-                    lines.append(f'    print("FAIL: line {line}: {field}: expected " + {json.dumps(str(expected))} + " got " + result__);')
+                    lines.append(f'    print("FAIL: line {line}: {esc_field}: expected " + {json.dumps(str(expected))} + " got " + result__);')
                     lines.append("    failed++;")
                     lines.append("  }")
                 else:
@@ -281,22 +305,23 @@ def generate_js_harness(spec, wasm_dir):
                     lines.append("  passed++;")
 
                 lines.append("} catch(e) {")
-                lines.append(f'  print("FAIL: line {line}: {field}: unexpected exception: " + e.message);')
+                lines.append(f'  print("FAIL: line {line}: {esc_field}: unexpected exception: " + e.message);')
                 lines.append("  failed++;")
                 lines.append("}")
                 lines.append("")
 
             elif action['type'] == 'get':
                 field = action['field']
+                esc_field = escape_js_string(field)
                 module_name = action.get('module', None)
 
-                lines.append(f"// Line {line}: assert_return get {field}")
+                lines.append(f"// Line {line}: assert_return get {esc_field}")
                 lines.append("try {")
                 if module_name:
-                    lines.append(f'  var exports__ = namedModules["{module_name}"].exports;')
+                    lines.append(f'  var exports__ = namedModules["{escape_js_string(module_name)}"].exports;')
                 else:
                     lines.append("  var exports__ = currentExports;")
-                lines.append(f'  var result__ = exports__["{field}"];')
+                lines.append(f'  var result__ = exports__["{esc_field}"];')
 
                 # For global exports, the value might be a WebAssembly.Global
                 # Need to handle both raw value and Global.value
@@ -309,14 +334,14 @@ def generate_js_harness(spec, wasm_dir):
                     lines.append(f"  if ({check}) {{")
                     lines.append("    passed++;")
                     lines.append("  } else {")
-                    lines.append(f'    print("FAIL: line {line}: get {field}: expected " + {json.dumps(str(expected))} + " got " + result__);')
+                    lines.append(f'    print("FAIL: line {line}: get {esc_field}: expected " + {json.dumps(str(expected))} + " got " + result__);')
                     lines.append("    failed++;")
                     lines.append("  }")
                 else:
                     lines.append("  passed++;")
 
                 lines.append("} catch(e) {")
-                lines.append(f'  print("FAIL: line {line}: get {field}: unexpected exception: " + e.message);')
+                lines.append(f'  print("FAIL: line {line}: get {esc_field}: unexpected exception: " + e.message);')
                 lines.append("  failed++;")
                 lines.append("}")
                 lines.append("")
@@ -327,18 +352,19 @@ def generate_js_harness(spec, wasm_dir):
 
             if action['type'] == 'invoke':
                 field = action['field']
+                esc_field = escape_js_string(field)
                 args = action.get('args', [])
                 module_name = action.get('module', None)
                 js_args = ", ".join(value_to_js_arg(a) for a in args)
 
-                lines.append(f"// Line {line}: assert_trap invoke {field}")
+                lines.append(f"// Line {line}: assert_trap invoke {esc_field}")
                 lines.append("try {")
                 if module_name:
-                    lines.append(f'  var exports__ = namedModules["{module_name}"].exports;')
+                    lines.append(f'  var exports__ = namedModules["{escape_js_string(module_name)}"].exports;')
                 else:
                     lines.append("  var exports__ = currentExports;")
-                lines.append(f'  exports__["{field}"]({js_args});')
-                lines.append(f'  print("FAIL: line {line}: {field}: expected trap but succeeded");')
+                lines.append(f'  exports__["{esc_field}"]({js_args});')
+                lines.append(f'  print("FAIL: line {line}: {esc_field}: expected trap but succeeded");')
                 lines.append("  failed++;")
                 lines.append("} catch(e) {")
                 lines.append("  passed++;")
@@ -418,16 +444,17 @@ def generate_js_harness(spec, wasm_dir):
             action = cmd['action']
             if action['type'] == 'invoke':
                 field = action['field']
+                esc_field = escape_js_string(field)
                 args = action.get('args', [])
                 module_name = action.get('module', None)
                 js_args = ", ".join(value_to_js_arg(a) for a in args)
 
-                lines.append(f"// Line {line}: action invoke {field}")
+                lines.append(f"// Line {line}: action invoke {esc_field}")
                 lines.append("try {")
                 if module_name:
-                    lines.append(f'  namedModules["{module_name}"].exports["{field}"]({js_args});')
+                    lines.append(f'  namedModules["{escape_js_string(module_name)}"].exports["{esc_field}"]({js_args});')
                 else:
-                    lines.append(f'  currentExports["{field}"]({js_args});')
+                    lines.append(f'  currentExports["{esc_field}"]({js_args});')
                 lines.append("} catch(e) {}")
                 lines.append("")
 
@@ -464,7 +491,7 @@ def main():
         # Step 1: Convert .wast to JSON + .wasm files
         wast2json_cmd = [
             args.wast2json,
-            '--enable-exceptions',
+            '--enable-all',
             wast_file,
             '-o', json_file
         ]
@@ -473,7 +500,13 @@ def main():
 
         result = subprocess.run(wast2json_cmd, capture_output=True, text=True)
         if result.returncode != 0:
+            # Report as a clean FAIL rather than producing no output (which
+            # the test runner would report as CRASH).
             print(f"wast2json failed: {result.stderr}", file=sys.stderr)
+            print("PASSED: 0")
+            print("FAILED: 1")
+            print("SKIPPED: 0")
+            print("SPEC TEST FAILED")
             return 1
 
         # Step 2: Read JSON spec

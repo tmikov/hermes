@@ -846,20 +846,33 @@ void WasmIRGen::endFunction() {
   }
 
   // Emit a return if the current block is not terminated.
+  // Clear unreachable for the final return emission — we need to access
+  // the value stack directly to get the function result phi.
   if (!isCurrentBlockTerminated()) {
-    // Clear unreachable for the final return emission — we need to access
-    // the value stack directly to get the function result phi.
     unreachable_ = false;
     const WasmFuncType &funcType =
         moduleInfo_.getFunctionType(currentFuncIndex_);
     if (!funcType.results.empty() && !valueStack_.empty()) {
+      // Pop trailing results (index > 0) in reverse order and discard.
+      for (size_t i = funcType.results.size(); i > 1; --i) {
+        if (valueStack_.empty())
+          break;
+        if (funcType.results[i - 1] == WasmValType::I64 && isTopI64()) {
+          popI64();
+        } else {
+          pop();
+        }
+      }
+      // Pop and return the first result.
       if (funcType.results[0] == WasmValType::I64 && isTopI64()) {
         auto [lo, hi] = popI64();
         helpers_.emitI64HiStash(hi);
         builder_.createReturnInst(lo);
-      } else {
+      } else if (!valueStack_.empty()) {
         Value *result = pop();
         builder_.createReturnInst(result);
+      } else {
+        builder_.createReturnInst(builder_.getLiteralUndefined());
       }
     } else {
       builder_.createReturnInst(builder_.getLiteralUndefined());
@@ -979,6 +992,18 @@ void WasmIRGen::onReturn() {
       moduleInfo_.getFunctionType(currentFuncIndex_);
 
   if (!funcType.results.empty()) {
+    // Pop all result values from the stack in reverse order (last result
+    // type is on top of stack). For multi-value returns, we discard all
+    // but the first result since JS functions can only return one value.
+    // Pop trailing results (index > 0) in reverse order and discard.
+    for (size_t i = funcType.results.size(); i > 1; --i) {
+      if (funcType.results[i - 1] == WasmValType::I64) {
+        popI64();
+      } else {
+        pop();
+      }
+    }
+    // Pop and return the first result.
     if (funcType.results[0] == WasmValType::I64) {
       auto [lo, hi] = popI64();
       helpers_.emitI64HiStash(hi);
@@ -1302,12 +1327,21 @@ void WasmIRGen::onI32Eqz() {
 
 // --- Control flow (D.6, D.7) ---
 
-void WasmIRGen::onBlock(const std::vector<WasmValType> &resultTypes) {
+void WasmIRGen::onBlock(
+    const std::vector<WasmValType> &paramTypes,
+    const std::vector<WasmValType> &resultTypes) {
+  // Count param stack slots (i64 params use 2 slots).
+  size_t numParamSlots = 0;
+  for (auto t : paramTypes) {
+    numParamSlots += (t == WasmValType::I64) ? 2 : 1;
+  }
+
   if (unreachable_) {
     // In unreachable code, push a lightweight entry so onEnd can pop it.
     ControlEntry entry;
     entry.kind = ControlEntry::Block;
     entry.contBlock = nullptr;
+    entry.paramTypes = paramTypes;
     entry.resultTypes = resultTypes;
     entry.stackHeight = valueStack_.size();
     entry.outerUnreachable = true;
@@ -1321,8 +1355,11 @@ void WasmIRGen::onBlock(const std::vector<WasmValType> &resultTypes) {
   ControlEntry entry;
   entry.kind = ControlEntry::Block;
   entry.contBlock = contBlock;
+  entry.paramTypes = paramTypes;
   entry.resultTypes = resultTypes;
-  entry.stackHeight = valueStack_.size();
+  // Stack height is set below the params so they are part of the block's
+  // accessible stack.
+  entry.stackHeight = valueStack_.size() - numParamSlots;
   entry.outerUnreachable = false;
 
   // Create phi nodes in the continuation block (i64 results get 2 phis).
@@ -1333,13 +1370,22 @@ void WasmIRGen::onBlock(const std::vector<WasmValType> &resultTypes) {
   controlStack_.push_back(std::move(entry));
 }
 
-void WasmIRGen::onLoop(const std::vector<WasmValType> &resultTypes) {
+void WasmIRGen::onLoop(
+    const std::vector<WasmValType> &paramTypes,
+    const std::vector<WasmValType> &resultTypes) {
+  // Count param stack slots (i64 params use 2 slots).
+  size_t numParamSlots = 0;
+  for (auto t : paramTypes) {
+    numParamSlots += (t == WasmValType::I64) ? 2 : 1;
+  }
+
   if (unreachable_) {
     // In unreachable code, push a lightweight entry so onEnd can pop it.
     ControlEntry entry;
     entry.kind = ControlEntry::Loop;
     entry.contBlock = nullptr;
     entry.endBlock = nullptr;
+    entry.paramTypes = paramTypes;
     entry.resultTypes = resultTypes;
     entry.stackHeight = valueStack_.size();
     entry.outerUnreachable = true;
@@ -1357,8 +1403,10 @@ void WasmIRGen::onLoop(const std::vector<WasmValType> &resultTypes) {
   entry.kind = ControlEntry::Loop;
   entry.contBlock = headerBlock; // br targets the loop header
   entry.endBlock = endBlock; // fallthrough after end goes here
+  entry.paramTypes = paramTypes;
   entry.resultTypes = resultTypes;
-  entry.stackHeight = valueStack_.size();
+  // Stack height is set below the params.
+  entry.stackHeight = valueStack_.size() - numParamSlots;
   entry.outerUnreachable = false;
 
   // Result phis go in the end block (for fallthrough values).
@@ -1378,13 +1426,22 @@ void WasmIRGen::onLoop(const std::vector<WasmValType> &resultTypes) {
   controlStack_.push_back(std::move(entry));
 }
 
-void WasmIRGen::onIf(const std::vector<WasmValType> &resultTypes) {
+void WasmIRGen::onIf(
+    const std::vector<WasmValType> &paramTypes,
+    const std::vector<WasmValType> &resultTypes) {
+  // Count param stack slots (i64 params use 2 slots).
+  size_t numParamSlots = 0;
+  for (auto t : paramTypes) {
+    numParamSlots += (t == WasmValType::I64) ? 2 : 1;
+  }
+
   if (unreachable_) {
     // Push a dummy If entry so onEnd/onElse can pop it.
     ControlEntry entry;
     entry.kind = ControlEntry::If;
     entry.contBlock = nullptr;
     entry.elseBlock = nullptr;
+    entry.paramTypes = paramTypes;
     entry.resultTypes = resultTypes;
     entry.stackHeight = valueStack_.size();
     entry.outerUnreachable = true;
@@ -1407,9 +1464,18 @@ void WasmIRGen::onIf(const std::vector<WasmValType> &resultTypes) {
   entry.kind = ControlEntry::If;
   entry.contBlock = mergeBlock; // br target and end continuation
   entry.elseBlock = elseBlock;
+  entry.paramTypes = paramTypes;
   entry.resultTypes = resultTypes;
-  entry.stackHeight = valueStack_.size();
   entry.outerUnreachable = unreachable_;
+
+  // Stack height is set below the params so they are accessible inside
+  // the block body. Save the param values so they can be re-pushed
+  // at the start of the else branch.
+  entry.stackHeight = valueStack_.size() - numParamSlots;
+  if (numParamSlots > 0) {
+    entry.savedParamValues.assign(
+        valueStack_.end() - numParamSlots, valueStack_.end());
+  }
 
   // Create phi nodes in the merge block for results (i64 results get 2 phis).
   if (!resultTypes.empty()) {
@@ -1447,8 +1513,21 @@ void WasmIRGen::onElse() {
   valueStack_.resize(entry.stackHeight);
   valueStackIsI64Hi_.resize(entry.stackHeight);
 
-  // Reset unreachable for the else arm.
+  // Reset unreachable for the else arm BEFORE re-pushing params,
+  // because push() is a no-op when unreachable_ is true.
   unreachable_ = entry.outerUnreachable;
+
+  // Re-push the saved param values for the else branch.
+  if (!entry.savedParamValues.empty()) {
+    size_t paramIdx = 0;
+    for (auto t : entry.paramTypes) {
+      push(entry.savedParamValues[paramIdx++]);
+      if (t == WasmValType::I64) {
+        push(entry.savedParamValues[paramIdx++]);
+        valueStackIsI64Hi_.back() = true;
+      }
+    }
+  }
 
   // Mark that we've consumed the else block (so onEnd knows).
   entry.elseBlock = nullptr;
@@ -1551,9 +1630,19 @@ void WasmIRGen::onEnd() {
     }
 
     // For If without else: the else block branches directly to merge.
+    // If the block has params, pass them through as results (Wasm validation
+    // guarantees params == results for if-without-else).
     if (entry.kind == ControlEntry::If && entry.elseBlock != nullptr) {
       auto *savedBlock = builder_.getInsertionBlock();
       builder_.setInsertionBlock(entry.elseBlock);
+      if (!entry.resultPhis.empty() && !entry.savedParamValues.empty()) {
+        for (size_t i = 0; i < entry.resultPhis.size(); ++i) {
+          Value *val = (i < entry.savedParamValues.size())
+              ? entry.savedParamValues[i]
+              : builder_.getLiteralUndefined();
+          entry.resultPhis[i]->addEntry(val, entry.elseBlock);
+        }
+      }
       builder_.createBranchInst(entry.contBlock);
       builder_.setInsertionBlock(savedBlock);
     }
@@ -1880,14 +1969,25 @@ void WasmIRGen::onCall(uint32_t funcIndex) {
       /* thisValue */ builder_.getLiteralUndefined(),
       args);
 
-  // Push the return value if the function has a result type.
+  // Push return values onto the stack. The JS call only returns a single
+  // value (the first result), so additional results get placeholders.
   if (!funcType.results.empty()) {
+    // Push the first result (available from the JS return value).
     if (funcType.results[0] == WasmValType::I64) {
-      // i64 result: lo32 is the call return value, hi32 is in the stash.
       auto *hi = helpers_.emitI64HiResult();
       pushI64(call, hi);
     } else {
       push(call);
+    }
+    // Push undefined placeholders for additional results (multi-value).
+    for (size_t i = 1; i < funcType.results.size(); ++i) {
+      if (funcType.results[i] == WasmValType::I64) {
+        pushI64(
+            builder_.getLiteralUndefined(),
+            builder_.getLiteralUndefined());
+      } else {
+        push(builder_.getLiteralUndefined());
+      }
     }
   }
 }
@@ -1946,13 +2046,25 @@ void WasmIRGen::onCallIndirect(uint32_t sigIndex, uint32_t tableIndex) {
       /* thisValue */ builder_.getLiteralUndefined(),
       args);
 
-  // Push the return value if the function has a result type.
+  // Push return values onto the stack. The JS call only returns a single
+  // value (the first result), so additional results get placeholders.
   if (!funcType.results.empty()) {
+    // Push the first result (available from the JS return value).
     if (funcType.results[0] == WasmValType::I64) {
       auto *hi = helpers_.emitI64HiResult();
       pushI64(call, hi);
     } else {
       push(call);
+    }
+    // Push undefined placeholders for additional results (multi-value).
+    for (size_t i = 1; i < funcType.results.size(); ++i) {
+      if (funcType.results[i] == WasmValType::I64) {
+        pushI64(
+            builder_.getLiteralUndefined(),
+            builder_.getLiteralUndefined());
+      } else {
+        push(builder_.getLiteralUndefined());
+      }
     }
   }
 }

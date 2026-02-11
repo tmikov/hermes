@@ -7,6 +7,7 @@
 
 #include "hermes/WasmFrontend/BinaryReaderHermesIRGen.h"
 
+#include "hermes/Support/UTF8.h"
 #include "hermes/WasmIRGen/WasmIRGen.h"
 
 #include <cassert>
@@ -16,6 +17,35 @@
 namespace {
 constexpr uint8_t SegPassive = 1;
 constexpr uint8_t SegDeclared = 3;
+
+/// Normalize a UTF-8 string to Hermes's internal representation.
+/// Hermes encodes supplementary plane characters (>= U+10000) as surrogate
+/// pairs, with each surrogate individually encoded in UTF-8 (6 bytes total),
+/// rather than as standard 4-byte UTF-8 sequences.  Wasm binary names use
+/// standard UTF-8, so we must convert them to match Hermes's encoding before
+/// they enter the string table.  This performs the same UTF-8 -> UTF-16 ->
+/// UTF-8 roundtrip that ConsecutiveStringStorage uses, ensuring consistent
+/// keys.
+std::string normalizeToHermesUTF8(std::string_view input) {
+  // Fast path: pure ASCII needs no conversion.
+  bool hasNonASCII = false;
+  for (char c : input) {
+    if (static_cast<unsigned char>(c) > 0x7F) {
+      hasNonASCII = true;
+      break;
+    }
+  }
+  if (!hasNonASCII)
+    return std::string(input);
+
+  // Convert UTF-8 -> UTF-16 -> UTF-8 (Hermes internal representation).
+  std::vector<char16_t> u16;
+  hermes::convertUTF8WithSurrogatesToUTF16(
+      std::back_inserter(u16), input.data(), input.data() + input.size());
+  std::string result;
+  hermes::convertUTF16ToUTF8WithSingleSurrogates(result, u16);
+  return result;
+}
 } // namespace
 
 namespace hermes {
@@ -118,8 +148,8 @@ wabt::Result BinaryReaderHermesIRGen::OnImportFunc(
     wabt::Index funcIndex,
     wabt::Index sigIndex) {
   WasmImport imp;
-  imp.moduleName = std::string(moduleName);
-  imp.fieldName = std::string(fieldName);
+  imp.moduleName = normalizeToHermesUTF8(moduleName);
+  imp.fieldName = normalizeToHermesUTF8(fieldName);
   imp.kind = WasmExternalKind::Function;
   imp.typeIndex = sigIndex;
   moduleInfo_.imports.push_back(std::move(imp));
@@ -134,8 +164,8 @@ wabt::Result BinaryReaderHermesIRGen::OnImportTable(
     wabt::Type elemType,
     const wabt::Limits *elemLimits) {
   WasmImport imp;
-  imp.moduleName = std::string(moduleName);
-  imp.fieldName = std::string(fieldName);
+  imp.moduleName = normalizeToHermesUTF8(moduleName);
+  imp.fieldName = normalizeToHermesUTF8(fieldName);
   imp.kind = WasmExternalKind::Table;
   imp.tableType.elemType = convertType(elemType);
   imp.tableType.limits = convertLimits(elemLimits);
@@ -151,8 +181,8 @@ wabt::Result BinaryReaderHermesIRGen::OnImportMemory(
     const wabt::Limits *pageLimits,
     uint32_t pageSize) {
   WasmImport imp;
-  imp.moduleName = std::string(moduleName);
-  imp.fieldName = std::string(fieldName);
+  imp.moduleName = normalizeToHermesUTF8(moduleName);
+  imp.fieldName = normalizeToHermesUTF8(fieldName);
   imp.kind = WasmExternalKind::Memory;
   imp.memoryType.limits = convertLimits(pageLimits);
   moduleInfo_.imports.push_back(std::move(imp));
@@ -167,8 +197,8 @@ wabt::Result BinaryReaderHermesIRGen::OnImportGlobal(
     wabt::Type type,
     bool mutable_) {
   WasmImport imp;
-  imp.moduleName = std::string(moduleName);
-  imp.fieldName = std::string(fieldName);
+  imp.moduleName = normalizeToHermesUTF8(moduleName);
+  imp.fieldName = normalizeToHermesUTF8(fieldName);
   imp.kind = WasmExternalKind::Global;
   imp.globalType.type = convertType(type);
   imp.globalType.mutable_ = mutable_;
@@ -183,8 +213,8 @@ wabt::Result BinaryReaderHermesIRGen::OnImportTag(
     wabt::Index tagIndex,
     wabt::Index sigIndex) {
   WasmImport imp;
-  imp.moduleName = std::string(moduleName);
-  imp.fieldName = std::string(fieldName);
+  imp.moduleName = normalizeToHermesUTF8(moduleName);
+  imp.fieldName = normalizeToHermesUTF8(fieldName);
   imp.kind = WasmExternalKind::Tag;
   imp.tagTypeIndex = sigIndex;
   moduleInfo_.imports.push_back(std::move(imp));
@@ -304,7 +334,7 @@ wabt::Result BinaryReaderHermesIRGen::OnExport(
     wabt::Index itemIndex,
     std::string_view name) {
   WasmExport exp;
-  exp.name = std::string(name);
+  exp.name = normalizeToHermesUTF8(name);
   exp.kind = convertExternalKind(kind);
   exp.index = itemIndex;
   moduleInfo_.exports.push_back(std::move(exp));
@@ -434,7 +464,7 @@ wabt::Result BinaryReaderHermesIRGen::EndDataSegment(wabt::Index index) {
 // --- Names section ---
 
 wabt::Result BinaryReaderHermesIRGen::OnModuleName(std::string_view name) {
-  moduleInfo_.names.moduleName = std::string(name);
+  moduleInfo_.names.moduleName = normalizeToHermesUTF8(name);
   return wabt::Result::Ok;
 }
 
@@ -456,7 +486,7 @@ wabt::Result BinaryReaderHermesIRGen::OnFunctionName(
     std::string_view functionName) {
   if (functionIndex < moduleInfo_.names.functionNames.size()) {
     moduleInfo_.names.functionNames[functionIndex] =
-        std::string(functionName);
+        normalizeToHermesUTF8(functionName);
   }
   return wabt::Result::Ok;
 }
@@ -1169,35 +1199,36 @@ wabt::Result BinaryReaderHermesIRGen::OnDropExpr() {
 
 // --- Block/end/br/br_if instruction callbacks ---
 
-/// Convert a block/loop/if/try signature type to a vector of result types.
-/// Handles both simple value types (void, i32, f64, etc.) and type index
-/// references (for multi-value blocks).
-std::vector<WasmValType> BinaryReaderHermesIRGen::convertBlockSigType(
+/// Convert a block/loop/if/try signature type to a WasmFuncType with both
+/// params and results. Handles both simple value types (void, i32, f64, etc.)
+/// and type index references (for multi-value blocks and block params).
+WasmFuncType BinaryReaderHermesIRGen::convertBlockSigType(
     wabt::Type sigType) {
-  std::vector<WasmValType> resultTypes;
+  WasmFuncType blockType;
   if (static_cast<wabt::Type::Enum>(sigType) == wabt::Type::Void) {
-    // No results.
-    return resultTypes;
+    // No params or results.
+    return blockType;
   }
   if (sigType.IsIndex()) {
-    // Multi-value block: look up the type index in the module's type section.
+    // Multi-value block or block with params: look up the type index.
     auto idx = sigType.GetIndex();
     if (idx < moduleInfo_.types.size()) {
-      return moduleInfo_.types[idx].results;
+      return moduleInfo_.types[idx];
     }
     // Invalid type index — return empty (treated as void).
-    return resultTypes;
+    return blockType;
   }
-  // Simple value type.
-  resultTypes.push_back(convertType(sigType));
-  return resultTypes;
+  // Simple value type — no params, one result.
+  blockType.results.push_back(convertType(sigType));
+  return blockType;
 }
 
 wabt::Result BinaryReaderHermesIRGen::OnBlockExpr(wabt::Type sigType) {
   if (!inFunctionBody_ || !irgen_)
     return wabt::Result::Ok;
 
-  irgen_->onBlock(convertBlockSigType(sigType));
+  auto blockType = convertBlockSigType(sigType);
+  irgen_->onBlock(blockType.params, blockType.results);
   return wabt::Result::Ok;
 }
 
@@ -1205,7 +1236,8 @@ wabt::Result BinaryReaderHermesIRGen::OnLoopExpr(wabt::Type sigType) {
   if (!inFunctionBody_ || !irgen_)
     return wabt::Result::Ok;
 
-  irgen_->onLoop(convertBlockSigType(sigType));
+  auto blockType = convertBlockSigType(sigType);
+  irgen_->onLoop(blockType.params, blockType.results);
   return wabt::Result::Ok;
 }
 
@@ -1213,7 +1245,8 @@ wabt::Result BinaryReaderHermesIRGen::OnIfExpr(wabt::Type sigType) {
   if (!inFunctionBody_ || !irgen_)
     return wabt::Result::Ok;
 
-  irgen_->onIf(convertBlockSigType(sigType));
+  auto blockType = convertBlockSigType(sigType);
+  irgen_->onIf(blockType.params, blockType.results);
   return wabt::Result::Ok;
 }
 
@@ -1578,7 +1611,7 @@ wabt::Result BinaryReaderHermesIRGen::OnTryExpr(wabt::Type sigType) {
   if (!inFunctionBody_ || !irgen_)
     return wabt::Result::Ok;
 
-  irgen_->onTry(convertBlockSigType(sigType));
+  irgen_->onTry(convertBlockSigType(sigType).results);
   return wabt::Result::Ok;
 }
 

@@ -30,19 +30,51 @@ def main():
 
     runner = os.path.join(os.path.dirname(__file__), 'run-spec-test.py')
 
-    # Default test list
+    # Default test list — core Wasm MVP and bulk memory tests.
+    # Excludes SIMD, GC, memory64, and other advanced proposal tests.
+    # Also excludes tests that are known to crash (fac, throw,
+    # memory_trap) or always timeout (skip-stack-guard-page).
     default_tests = [
-        'nop', 'type', 'start', 'func',
+        # Basic structure and types
+        'nop', 'type', 'start', 'func', 'func_ptrs',
+        # Numeric operations
         'i32', 'i64', 'f32', 'f64',
+        'f32_bitwise', 'f32_cmp', 'f64_bitwise', 'f64_cmp',
+        'float_exprs', 'float_literals', 'float_memory', 'float_misc',
+        'int_exprs', 'int_literals', 'conversions', 'const',
+        # Control flow
         'block', 'loop', 'if',
         'br', 'br_if', 'br_table',
+        'switch', 'return', 'unreachable',
+        'unreached-valid', 'labels', 'forward', 'left-to-right',
+        # Calls
         'call', 'call_indirect',
-        'local_get', 'local_set', 'local_tee',
-        'global', 'memory', 'select',
-        'conversions', 'return', 'unreachable',
-        'traps', 'stack', 'names',
-        'table', 'elem', 'data',
-        'imports', 'exports',
+        # Variables
+        'local_get', 'local_set', 'local_tee', 'global',
+        # Memory
+        'memory', 'load', 'store',
+        'memory_grow', 'memory_size', 'memory_redundancy',
+        'address', 'align', 'endianness',
+        # Bulk memory operations
+        'memory_copy', 'memory_fill', 'memory_init',
+        'bulk', 'data',
+        # Table operations
+        'table', 'elem',
+        'table_copy', 'table_fill', 'table_get', 'table_grow',
+        'table_init', 'table_set', 'table_size',
+        # Other
+        'select', 'stack', 'traps', 'unwind',
+        'names', 'imports', 'exports', 'custom', 'binary',
+        'binary-leb128', 'comments', 'token',
+        # UTF-8 validation
+        'utf8-custom-section-id', 'utf8-import-field',
+        'utf8-import-module', 'utf8-invalid-encoding',
+        # Exception handling
+        'tag',
+        # Reference types
+        'ref_is_null', 'ref_null',
+        # Linking
+        'linking',
     ]
 
     test_names = args.tests or default_tests
