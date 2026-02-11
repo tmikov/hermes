@@ -2615,92 +2615,99 @@ void WasmIRGen::onF64Ge() {
 }
 
 // --- f32 arithmetic (E.2) ---
-// In Phase 1, f32 operations use f64 precision — we don't have Math.fround
-// as a CallBuiltin. Constants are correctly rounded to f32 via onF32Const.
-// This means intermediate results may accumulate f64 precision, but the
-// overall correctness is acceptable for Phase 1. True f32 rounding will be
-// added when Math.fround becomes a Hermes builtin or via Part F helpers.
+// All f32 operations produce f32-precision results by wrapping the result
+// in Math.fround. Constants are correctly rounded via float cast in
+// onF32Const, so they don't need fround.
 
 void WasmIRGen::onF32Add() {
   Value *rhs = pop();
   Value *lhs = pop();
-  push(builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryAddInstKind));
+  push(emitFround(builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryAddInstKind)));
 }
 
 void WasmIRGen::onF32Sub() {
   Value *rhs = pop();
   Value *lhs = pop();
-  push(builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinarySubtractInstKind));
+  push(emitFround(builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinarySubtractInstKind)));
 }
 
 void WasmIRGen::onF32Mul() {
   Value *rhs = pop();
   Value *lhs = pop();
-  push(builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryMultiplyInstKind));
+  push(emitFround(builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryMultiplyInstKind)));
 }
 
 void WasmIRGen::onF32Div() {
   Value *rhs = pop();
   Value *lhs = pop();
-  push(builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryDivideInstKind));
+  push(emitFround(builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryDivideInstKind)));
 }
 
 void WasmIRGen::onF32Neg() {
   Value *val = pop();
-  push(builder_.createUnaryOperatorInst(
-      val, ValueKind::UnaryMinusInstKind));
+  push(emitFround(builder_.createUnaryOperatorInst(
+      val, ValueKind::UnaryMinusInstKind)));
 }
 
 void WasmIRGen::onF32Abs() {
   Value *val = pop();
-  push(builder_.createCallBuiltinInst(BuiltinMethod::Math_abs, {val}));
+  push(emitFround(
+      builder_.createCallBuiltinInst(BuiltinMethod::Math_abs, {val})));
 }
 
 void WasmIRGen::onF32Sqrt() {
   Value *val = pop();
-  push(builder_.createCallBuiltinInst(BuiltinMethod::Math_sqrt, {val}));
+  push(emitFround(
+      builder_.createCallBuiltinInst(BuiltinMethod::Math_sqrt, {val})));
 }
 
 void WasmIRGen::onF32Ceil() {
   Value *val = pop();
-  push(builder_.createCallBuiltinInst(BuiltinMethod::Math_ceil, {val}));
+  push(emitFround(
+      builder_.createCallBuiltinInst(BuiltinMethod::Math_ceil, {val})));
 }
 
 void WasmIRGen::onF32Floor() {
   Value *val = pop();
-  push(builder_.createCallBuiltinInst(BuiltinMethod::Math_floor, {val}));
+  push(emitFround(
+      builder_.createCallBuiltinInst(BuiltinMethod::Math_floor, {val})));
 }
 
 void WasmIRGen::onF32Trunc() {
   Value *val = pop();
-  push(builder_.createCallBuiltinInst(BuiltinMethod::Math_trunc, {val}));
+  push(emitFround(
+      builder_.createCallBuiltinInst(BuiltinMethod::Math_trunc, {val})));
 }
 
 void WasmIRGen::onF32Nearest() {
   // Same approximation as f64.nearest: Math.round instead of round-ties-even.
   Value *val = pop();
-  push(builder_.createCallBuiltinInst(BuiltinMethod::Math_round, {val}));
+  push(emitFround(
+      builder_.createCallBuiltinInst(BuiltinMethod::Math_round, {val})));
 }
 
 void WasmIRGen::onF32Min() {
   Value *rhs = pop();
   Value *lhs = pop();
-  push(builder_.createCallBuiltinInst(BuiltinMethod::Math_min, {lhs, rhs}));
+  push(emitFround(
+      builder_.createCallBuiltinInst(BuiltinMethod::Math_min, {lhs, rhs})));
 }
 
 void WasmIRGen::onF32Max() {
   Value *rhs = pop();
   Value *lhs = pop();
-  push(builder_.createCallBuiltinInst(BuiltinMethod::Math_max, {lhs, rhs}));
+  push(emitFround(
+      builder_.createCallBuiltinInst(BuiltinMethod::Math_max, {lhs, rhs})));
 }
 
 // --- f32 comparisons (E.3) ---
-// Same pattern as f64 comparisons. Since values are doubles in Phase 1,
-// comparisons work correctly including NaN handling (IEEE 754).
+// Same pattern as f64 comparisons. f32 values are represented as doubles
+// that are already f32-precise, so comparisons work correctly including
+// NaN handling (IEEE 754).
 
 void WasmIRGen::onF32Eq() {
   Value *rhs = pop();
@@ -2771,21 +2778,20 @@ void WasmIRGen::onF32Copysign() {
     return;
   Value *b = pop();
   Value *a = pop();
-  push(helpers_.emitF32Copysign(a, b));
+  push(emitFround(helpers_.emitF32Copysign(a, b)));
 }
 
 // --- f64/f32 conversions (E.1, E.2) ---
 
 void WasmIRGen::onF64PromoteF32() {
-  // f32 is already represented as double in our Phase 1 implementation,
-  // so promotion is a no-op (the value is already f64).
-  // Just leave the value on the stack.
+  // f32 values are already represented as f64 doubles, so promotion is a
+  // no-op. Just leave the value on the stack.
 }
 
 void WasmIRGen::onF32DemoteF64() {
-  // In Phase 1, demote is a no-op because we don't have Math.fround as a
-  // CallBuiltin. The value stays at f64 precision. This is a known Phase 1
-  // limitation — true f32 rounding will be added in a later phase.
+  // Round f64 down to f32 precision via Math.fround.
+  Value *val = pop();
+  push(emitFround(val));
 }
 
 // --- Type conversions (F.4) ---
@@ -2794,7 +2800,7 @@ void WasmIRGen::onI32TruncF32S() {
   if (unreachable_)
     return;
   Value *a = pop();
-  // In Phase 1, f32 values are doubles — reuse the f64 trapping truncation.
+  // f32 values are f32-precise doubles — reuse the f64 trapping truncation.
   push(helpers_.emitI32TruncF64S(a));
 }
 
@@ -2850,22 +2856,19 @@ void WasmIRGen::onI32TruncSatF64U() {
 void WasmIRGen::onF32ConvertI32S() {
   if (unreachable_)
     return;
-  // Convert signed i32 to f32.
-  // In Phase 1, we simply reinterpret via AsInt32Inst (which ensures the
-  // value is treated as signed). The result is a double that exactly
-  // represents the int32 value. No Math.fround rounding in Phase 1.
+  // Convert signed i32 to f32. AsInt32Inst ensures the value is treated as
+  // signed, then fround rounds to f32 precision.
   Value *a = pop();
-  push(builder_.createAsInt32Inst(a));
+  push(emitFround(builder_.createAsInt32Inst(a)));
 }
 
 void WasmIRGen::onF32ConvertI32U() {
   if (unreachable_)
     return;
-  // Convert unsigned i32 to f32.
-  // AsUint32Inst ensures the value is treated as unsigned.
-  // No Math.fround rounding in Phase 1.
+  // Convert unsigned i32 to f32. AsUint32Inst ensures the value is treated as
+  // unsigned, then fround rounds to f32 precision.
   Value *a = pop();
-  push(builder_.createAsUint32Inst(a));
+  push(emitFround(builder_.createAsUint32Inst(a)));
 }
 
 void WasmIRGen::onF64ConvertI32S() {
@@ -3353,6 +3356,10 @@ void WasmIRGen::push(Value *v) {
     return;
   valueStack_.push_back(v);
   valueStackIsI64Hi_.push_back(false);
+}
+
+Value *WasmIRGen::emitFround(Value *val) {
+  return builder_.createCallBuiltinInst(BuiltinMethod::Math_fround, {val});
 }
 
 void WasmIRGen::pushI64(Value *lo, Value *hi) {

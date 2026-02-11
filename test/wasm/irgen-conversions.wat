@@ -150,30 +150,32 @@
 ;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
-  ;; func 10: f32.convert_i32_s — signed int to f32 via AsInt32Inst.
+  ;; func 10: f32.convert_i32_s — signed int to f32 via AsInt32Inst + Math.fround.
   (func (export "f32_convert_i32_s") (param i32) (result f32)
     local.get 0
     f32.convert_i32_s)
 ;; CHECK-LABEL: function wasm_func_10(p0: any): any
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
 ;; CHECK-NEXT: %[[CONV:.*]] = AsInt32Inst (:number) %[[A]]: any
-;; CHECK-NEXT:                BranchInst %BB1
+;; CHECK-NEXT: %[[FR:.*]] = CallBuiltinInst (:any) [Math.fround]{{.*}}, %[[CONV]]: number
+;; CHECK-NEXT:              BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[CONV]]: number, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[FR]]: any, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
 ;; CHECK-NEXT: function_end
 
-  ;; func 11: f32.convert_i32_u — unsigned int to f32 via AsUint32Inst.
+  ;; func 11: f32.convert_i32_u — unsigned int to f32 via AsUint32Inst + Math.fround.
   (func (export "f32_convert_i32_u") (param i32) (result f32)
     local.get 0
     f32.convert_i32_u)
 ;; CHECK-LABEL: function wasm_func_11(p0: any): any
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
 ;; CHECK-NEXT: %[[CONV:.*]] = AsUint32Inst (:number) %[[A]]: any
-;; CHECK-NEXT:                BranchInst %BB1
+;; CHECK-NEXT: %[[FR:.*]] = CallBuiltinInst (:any) [Math.fround]{{.*}}, %[[CONV]]: number
+;; CHECK-NEXT:              BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[CONV]]: number, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[FR]]: any, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
 ;; CHECK-NEXT: function_end
 
   ;; func 12: i32.reinterpret_f32 — bitcast f32 to i32.

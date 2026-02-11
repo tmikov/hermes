@@ -210,8 +210,8 @@ class WasmIRGen {
   void onF64Ge();
 
   // --- f32 arithmetic (E.2) ---
-  // In Phase 1, f32 operations use f64 precision (no per-op rounding).
-  // Constants are correctly rounded via float cast in onF32Const.
+  // f32 operations produce f32-precision results by wrapping the result
+  // in Math.fround via emitFround().
 
   void onF32Add();
   void onF32Sub();
@@ -626,6 +626,9 @@ class WasmIRGen {
   Value *pop();
   /// Push a value onto the value stack.
   void push(Value *v);
+
+  /// Wrap a value in Math.fround to produce f32 precision.
+  Value *emitFround(Value *val);
 
   /// Check if the top of the value stack is the hi32 part of an i64.
   bool isTopI64() const;

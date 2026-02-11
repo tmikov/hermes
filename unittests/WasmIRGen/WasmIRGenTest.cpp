@@ -2299,8 +2299,8 @@ TEST(WasmIRGenTest, F32NegAbsSqrt) {
       ++builtinCount;
   }
   EXPECT_TRUE(foundNeg);
-  // abs + sqrt = 2 CallBuiltinInst
-  EXPECT_EQ(builtinCount, 2u);
+  // neg's fround + abs + abs's fround + sqrt + sqrt's fround = 5
+  EXPECT_EQ(builtinCount, 5u);
 }
 
 TEST(WasmIRGenTest, F32RoundingOps) {
@@ -2340,7 +2340,8 @@ TEST(WasmIRGenTest, F32RoundingOps) {
     if (llvh::isa<CallBuiltinInst>(&inst))
       ++builtinCount;
   }
-  EXPECT_EQ(builtinCount, 4u);
+  // ceil + fround + floor + fround + trunc + fround + nearest + fround = 8
+  EXPECT_EQ(builtinCount, 8u);
 }
 
 TEST(WasmIRGenTest, F32MinMax) {
@@ -2375,8 +2376,8 @@ TEST(WasmIRGenTest, F32MinMax) {
     if (llvh::isa<CallBuiltinInst>(&inst))
       ++builtinCount;
   }
-  // min + max = 2 CallBuiltinInst
-  EXPECT_EQ(builtinCount, 2u);
+  // min + fround + max + fround = 4
+  EXPECT_EQ(builtinCount, 4u);
 }
 
 // --- f32 comparison tests (E.3) ---
@@ -2474,7 +2475,7 @@ TEST(WasmIRGenTest, F32DemoteF64) {
   irgen.createFunctions();
   irgen.beginFunction(0, {});
 
-  // f32.demote_f64 is a no-op in Phase 1 (no rounding)
+  // f32.demote_f64 rounds to f32 via Math.fround
   irgen.onLocalGet(0);
   irgen.onF32DemoteF64();
 
@@ -2483,12 +2484,15 @@ TEST(WasmIRGenTest, F32DemoteF64) {
   auto *func = irgen.getIRFunctions()[0];
   auto &bb = func->getBasicBlockList().front();
 
-  // There should be NO arithmetic, conversion, or builtin instruction.
+  // Should have exactly 1 CallBuiltinInst (Math.fround), no arithmetic.
+  unsigned builtinCount = 0;
   for (auto &inst : bb) {
-    EXPECT_FALSE(llvh::isa<CallBuiltinInst>(&inst));
+    if (llvh::isa<CallBuiltinInst>(&inst))
+      ++builtinCount;
     EXPECT_FALSE(llvh::isa<BinaryOperatorInst>(&inst));
     EXPECT_FALSE(llvh::isa<UnaryOperatorInst>(&inst));
   }
+  EXPECT_EQ(builtinCount, 1u);
 }
 
 // --- WasmHelpers tests (F.1) ---
