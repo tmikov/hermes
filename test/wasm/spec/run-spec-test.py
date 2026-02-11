@@ -528,8 +528,12 @@ def main():
             print(f"Commands: {len(spec['commands'])}", file=sys.stderr)
 
         # Step 4: Run with hermes
+        # Use -O0 for the JS harness to avoid slow compilation of large
+        # generated test scripts. This only affects the JS compiler; wasm
+        # modules are compiled with full optimizations independently.
         hermes_cmd = [
             args.hermes,
+            '-O0',
             '-Xhermes-internal-test-methods',
             js_file
         ]
