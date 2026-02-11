@@ -1415,6 +1415,9 @@ void WasmIRGen::onLoop(
     entry.resultPhis = createResultPhis(endBlock, resultTypes);
   }
 
+  // Save the pre-loop block for phi entries.
+  auto *preLoopBlock = builder_.getInsertionBlock();
+
   // Branch from the current block to the loop header.
   if (!isCurrentBlockTerminated()) {
     builder_.createBranchInst(headerBlock);
@@ -1422,6 +1425,26 @@ void WasmIRGen::onLoop(
 
   // Set insertion point to the loop header.
   builder_.setInsertionBlock(headerBlock);
+
+  // Create phi nodes in the header block for loop parameters.
+  // br/br_if targeting this loop will pass updated values via these phis.
+  if (!paramTypes.empty()) {
+    entry.paramPhis = createResultPhis(headerBlock, paramTypes);
+
+    // Add initial values from the pre-loop block.
+    size_t numPhis = entry.paramPhis.size();
+    size_t stackTop = valueStack_.size();
+    for (size_t i = 0; i < numPhis; ++i) {
+      entry.paramPhis[i]->addEntry(
+          valueStack_[stackTop - numPhis + i], preLoopBlock);
+    }
+
+    // Replace the param values on the stack with the phi nodes,
+    // so the loop body uses the phis (updated on each back-edge).
+    for (size_t i = 0; i < numPhis; ++i) {
+      valueStack_[stackTop - numPhis + i] = entry.paramPhis[i];
+    }
+  }
 
   controlStack_.push_back(std::move(entry));
 }
@@ -1832,8 +1855,7 @@ void WasmIRGen::onBrTable(
 
     // Add phi operands. For Block/If entries, peek at the value stack and
     // add values as phi incoming edges (the values were on the stack before
-    // the index was popped, so they're still there). For Loop entries,
-    // no phi operands (br to loop targets the header).
+    // the index was popped, so they're still there).
     if ((entry.kind == ControlEntry::Block ||
          entry.kind == ControlEntry::If) &&
         !entry.resultPhis.empty()) {
@@ -1847,6 +1869,20 @@ void WasmIRGen::onBrTable(
           val = builder_.getLiteralUndefined();
         }
         entry.resultPhis[i]->addEntry(val, trampoline);
+      }
+    }
+    // For Loop entries, br targets the header and passes param values.
+    if (entry.kind == ControlEntry::Loop && !entry.paramPhis.empty()) {
+      size_t numPhis = entry.paramPhis.size();
+      size_t available = valueStack_.size();
+      for (size_t i = 0; i < numPhis; ++i) {
+        Value *val;
+        if (available >= numPhis) {
+          val = valueStack_[available - numPhis + i];
+        } else {
+          val = builder_.getLiteralUndefined();
+        }
+        entry.paramPhis[i]->addEntry(val, trampoline);
       }
     }
 
@@ -3410,8 +3446,30 @@ void WasmIRGen::addBranchPhiOperands(ControlEntry &entry) {
       valueStackIsI64Hi_.clear();
     }
   }
-  // For Loop entries, br targets the loop header. Loop phis are for
-  // loop parameters which will be handled in D.7.
+  // For Loop entries, br targets the loop header and passes param values.
+  if (entry.kind == ControlEntry::Loop && !entry.paramPhis.empty()) {
+    auto *currentBlock = builder_.getInsertionBlock();
+    size_t numPhis = entry.paramPhis.size();
+    size_t available = valueStack_.size();
+
+    if (available >= numPhis) {
+      for (size_t i = 0; i < numPhis; ++i) {
+        Value *val = valueStack_[available - numPhis + i];
+        entry.paramPhis[i]->addEntry(val, currentBlock);
+      }
+      valueStack_.resize(available - numPhis);
+      valueStackIsI64Hi_.resize(available - numPhis);
+    } else {
+      for (size_t i = 0; i < numPhis; ++i) {
+        Value *val = (i >= numPhis - available)
+            ? valueStack_[i - (numPhis - available)]
+            : builder_.getLiteralUndefined();
+        entry.paramPhis[i]->addEntry(val, currentBlock);
+      }
+      valueStack_.clear();
+      valueStackIsI64Hi_.clear();
+    }
+  }
 }
 
 void WasmIRGen::peekBranchPhiOperands(ControlEntry &entry) {
@@ -3429,6 +3487,22 @@ void WasmIRGen::peekBranchPhiOperands(ControlEntry &entry) {
         val = builder_.getLiteralUndefined();
       }
       entry.resultPhis[i]->addEntry(val, currentBlock);
+    }
+  }
+  // For Loop entries, br_if peeks at param values (don't pop — fallthrough
+  // still needs them).
+  if (entry.kind == ControlEntry::Loop && !entry.paramPhis.empty()) {
+    size_t numPhis = entry.paramPhis.size();
+    size_t available = valueStack_.size();
+    auto *currentBlock = builder_.getInsertionBlock();
+    for (size_t i = 0; i < numPhis; ++i) {
+      Value *val;
+      if (available >= numPhis) {
+        val = valueStack_[available - numPhis + i];
+      } else {
+        val = builder_.getLiteralUndefined();
+      }
+      entry.paramPhis[i]->addEntry(val, currentBlock);
     }
   }
 }

@@ -592,6 +592,9 @@ class WasmIRGen {
     /// For Block/If/Try: phis in contBlock for results from br/fallthrough.
     /// For Loop: phis in endBlock for results from fallthrough.
     std::vector<PhiInst *> resultPhis;
+    /// For Loop: phi nodes in the header block for loop parameters.
+    /// br/br_if targeting a loop passes values via these phis.
+    std::vector<PhiInst *> paramPhis;
     /// Saved param values for If blocks with params, so they can be
     /// re-pushed at the start of the else branch.
     std::vector<Value *> savedParamValues;
