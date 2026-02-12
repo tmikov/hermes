@@ -250,6 +250,12 @@ PRIVATE_BUILTIN(wasmMemoryInit)
 // wasmDataDrop(dataSegs, segIdx): mark a data segment as dropped.
 PRIVATE_BUILTIN(wasmDataDrop)
 
+// BigInt ↔ i64 conversion helpers for export/import wrappers.
+// wasmBigIntToI64(bigint): extracts i64 from BigInt, returns lo32, stashes hi32.
+PRIVATE_BUILTIN(wasmBigIntToI64)
+// wasmI64ToBigInt(lo, hi): converts split lo/hi to BigInt.
+PRIVATE_BUILTIN(wasmI64ToBigInt)
+
 // Bulk table operations (N.2).
 // wasmTableFill(funcsArr, idx, val, count): fill table entries with val.
 PRIVATE_BUILTIN(wasmTableFill)

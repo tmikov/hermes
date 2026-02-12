@@ -11,6 +11,7 @@
 #include "hermes/Support/Base64vlq.h"
 #include "hermes/VM/Callable.h"
 #include "hermes/VM/JSArray.h"
+#include "hermes/VM/BigIntPrimitive.h"
 #include "hermes/VM/JSArrayBuffer.h"
 #include "hermes/VM/JSLib.h"
 #include "hermes/VM/JSTypedArray.h"
@@ -477,6 +478,24 @@ CallResult<HermesValue> wasmI64HiStash(void *, Runtime &runtime) {
 /// Retrieve the hi32 part of the most recent i64 result.
 CallResult<HermesValue> wasmI64HiResult(void *, Runtime &) {
   return HermesValue::encodeTrustedNumberValue(wasmI64HiStash_);
+}
+
+/// wasmBigIntToI64(bigintVal): Takes a BigInt, extracts the i64 value.
+/// Returns lo32 (as Number), stashes hi32 via wasmI64HiStash_.
+CallResult<HermesValue> wasmBigIntToI64(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  auto val = args.getArg(0);
+  if (LLVM_UNLIKELY(!val.isBigInt()))
+    return runtime.raiseTypeError("i64 argument must be a BigInt");
+  uint64_t bits = val.getBigInt()->truncateToSingleDigit();
+  return splitI64Result(static_cast<int64_t>(bits));
+}
+
+/// wasmI64ToBigInt(lo, hi): Takes lo32/hi32 as Numbers, returns a BigInt.
+CallResult<HermesValue> wasmI64ToBigInt(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  int64_t val = argsToI64(args, 0, 1);
+  return BigIntPrimitive::fromSigned(runtime, val);
 }
 
 /// i64.add
@@ -2378,6 +2397,18 @@ void createHermesBuiltins(Runtime &runtime) {
       B::HermesBuiltin_wasmDataDrop,
       P::wasmDataDrop,
       wasmDataDrop,
+      2);
+
+  // BigInt ↔ i64 conversion helpers.
+  defineInternMethod(
+      B::HermesBuiltin_wasmBigIntToI64,
+      P::wasmBigIntToI64,
+      wasmBigIntToI64,
+      1);
+  defineInternMethod(
+      B::HermesBuiltin_wasmI64ToBigInt,
+      P::wasmI64ToBigInt,
+      wasmI64ToBigInt,
       2);
 
   // Bulk table helpers (N.2).

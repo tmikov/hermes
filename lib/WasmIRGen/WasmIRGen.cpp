@@ -528,7 +528,7 @@ Function *WasmIRGen::createExportWrapper(
       Function::DefinitionKind::ES5Function,
       true /* strictMode */);
 
-  // Wrapper takes 1 JS param per Wasm param (not split for i64).
+  // Wrapper takes 1 JS param per Wasm param (BigInt for i64).
   builder_.createJSThisParam(wrapperFunc);
   uint32_t numParams = funcType.params.size();
   for (uint32_t i = 0; i < numParams; ++i) {
@@ -562,13 +562,14 @@ Function *WasmIRGen::createExportWrapper(
         // Coerce to int32.
         callArgs.push_back(builder_.createAsInt32Inst(paramVal));
         break;
-      case WasmValType::I64:
-        // Phase 1: split into lo32 (truncated) and hi32 (0).
-        // JS callers pass a Number; we truncate to int32 for lo,
-        // and set hi to 0.
-        callArgs.push_back(builder_.createAsInt32Inst(paramVal));
-        callArgs.push_back(builder_.getLiteralNumber(0));
+      case WasmValType::I64: {
+        // JS passes a BigInt. Convert to split (lo, hi) for internal call.
+        auto *lo = helpers_.emitBigIntToI64(paramVal);
+        auto *hi = helpers_.emitI64HiResult();
+        callArgs.push_back(lo);
+        callArgs.push_back(hi);
         break;
+      }
       case WasmValType::F32:
       case WasmValType::F64:
         // Float/double: pass through (already a JS Number).
@@ -593,9 +594,12 @@ Function *WasmIRGen::createExportWrapper(
     // Void function: return undefined.
     builder_.createReturnInst(builder_.getLiteralUndefined());
   } else if (funcType.results[0] == WasmValType::I64) {
-    // Phase 1: the internal function returns lo32 and stashes hi32.
-    // We just return lo32 (hi32 is lost to JS callers).
-    builder_.createReturnInst(callResult);
+    // Internal function returns lo32 and stashes hi32.
+    // Combine into a BigInt for JS.
+    auto *lo = callResult;
+    auto *hi = helpers_.emitI64HiResult();
+    auto *bigint = helpers_.emitI64ToBigInt(lo, hi);
+    builder_.createReturnInst(bigint);
   } else {
     // i32/f32/f64: return the call result directly.
     builder_.createReturnInst(callResult);
@@ -632,8 +636,8 @@ void WasmIRGen::createImportTrampoline(
   // Marshal Wasm-typed arguments to JS arguments.
   // The trampoline function uses the split i64 calling convention internally
   // (matching what onCall() emits), but calls the JS function with JS types.
-  // For Phase 1: i32/f32/f64 → pass through (already JS Numbers).
-  //              i64 → pass only lo32 (JS Numbers can't represent all i64s).
+  // i32/f32/f64 → pass through (already JS Numbers).
+  // i64 → convert split (lo, hi) to BigInt for JS.
   llvh::SmallVector<Value *, 8> jsArgs;
   uint32_t jsParamIdx = 1; // 0 = "this", skip it
   for (uint32_t i = 0; i < funcType.params.size(); ++i) {
@@ -641,8 +645,10 @@ void WasmIRGen::createImportTrampoline(
     auto *paramVal = builder_.createLoadParamInst(param);
 
     if (funcType.params[i] == WasmValType::I64) {
-      // Phase 1: pass lo32 only (hi32 is lost to JS).
-      jsArgs.push_back(paramVal);
+      // Convert split (lo, hi) to BigInt for the JS callee.
+      auto *hiParam = func->getJSDynamicParam(jsParamIdx + 1);
+      auto *hiVal = builder_.createLoadParamInst(hiParam);
+      jsArgs.push_back(helpers_.emitI64ToBigInt(paramVal, hiVal));
       jsParamIdx += 2; // skip both lo and hi JS params
     } else {
       jsArgs.push_back(paramVal);
@@ -669,10 +675,9 @@ void WasmIRGen::createImportTrampoline(
             builder_.createAsInt32Inst(callResult));
         break;
       case WasmValType::I64: {
-        // Phase 1: treat JS return as lo32, hi32 = 0.
-        // Stash hi32 (0) before returning lo32.
-        auto *lo = builder_.createAsInt32Inst(callResult);
-        helpers_.emitI64HiStash(builder_.getLiteralNumber(0));
+        // JS import returns a BigInt. Convert to split (lo, hi).
+        // emitBigIntToI64 returns lo32 and stashes hi32.
+        auto *lo = helpers_.emitBigIntToI64(callResult);
         builder_.createReturnInst(lo);
         break;
       }

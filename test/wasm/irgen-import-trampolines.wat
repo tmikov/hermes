@@ -23,7 +23,7 @@
   ;; Import 4: f64 function with two f64 params.
   (import "env" "f64_add" (func $f64_add (param f64 f64) (result f64)))
 
-  ;; Import 5: i64 function with one i64 param (Phase 1: lo32 only).
+  ;; Import 5: i64 function with one i64 param (BigInt conversion).
   (import "env" "i64_id" (func $i64_id (param i64) (result i64)))
 
   ;; A defined function that calls all imports.
@@ -95,14 +95,15 @@
 ;; CHECK-NEXT: function_end
 
 ;; Import trampoline 5: $i64_id(i64) -> i64.
-;; i64 param splits into two JS params (lo, hi). Trampoline passes only lo.
-;; i64 return: stashes hi=0, returns lo.
+;; i64 param splits into two JS params (lo, hi). Trampoline converts to BigInt.
+;; i64 return: BigInt converted back to split (lo, hi).
 ;; CHECK-LABEL: function wasm_func_4(p0_lo: any, p0_hi: any): any
 ;; CHECK: %BB0:
 ;; CHECK:   %[[FUNC4:.*]] = LoadFrameInst (:any) %{{.*}}: environment, [%VS0.import_func_4]: any
 ;; CHECK:   %[[LO:.*]] = LoadParamInst (:any) %p0_lo: any
-;; CHECK:   %[[CALL4:.*]] = CallInst (:any) %[[FUNC4]]: any, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %[[LO]]: any
-;; CHECK:   %[[RES_LO:.*]] = AsInt32Inst (:number) %[[CALL4]]: any
-;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI64HiStash]
-;; CHECK:   ReturnInst %[[RES_LO]]: number
+;; CHECK:   %[[HI:.*]] = LoadParamInst (:any) %p0_hi: any
+;; CHECK:   %[[BIGINT:.*]] = CallBuiltinInst (:any) {{.*}}[HermesBuiltin.wasmI64ToBigInt]{{.*}}%[[LO]]{{.*}}%[[HI]]
+;; CHECK:   %[[CALL4:.*]] = CallInst (:any) %[[FUNC4]]: any, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %[[BIGINT]]: any
+;; CHECK:   %[[RES_LO:.*]] = CallBuiltinInst (:any) {{.*}}[HermesBuiltin.wasmBigIntToI64]{{.*}}%[[CALL4]]
+;; CHECK:   ReturnInst %[[RES_LO]]: any
 ;; CHECK-NEXT: function_end

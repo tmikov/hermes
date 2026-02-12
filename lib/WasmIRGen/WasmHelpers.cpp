@@ -433,5 +433,17 @@ Instruction *WasmHelpers::emitElemDrop(Value *elemSegs, Value *segIdx) {
       BuiltinMethod::HermesBuiltin_wasmElemDrop, {elemSegs, segIdx});
 }
 
+// --- BigInt ↔ i64 conversion helpers ---
+
+Instruction *WasmHelpers::emitBigIntToI64(Value *bigint) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmBigIntToI64, {bigint});
+}
+
+Instruction *WasmHelpers::emitI64ToBigInt(Value *lo, Value *hi) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmI64ToBigInt, {lo, hi});
+}
+
 } // namespace wasm
 } // namespace hermes

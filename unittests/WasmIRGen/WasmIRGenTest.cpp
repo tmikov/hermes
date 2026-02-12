@@ -4011,22 +4011,18 @@ TEST(WasmIRGenTest, ImportTrampolineI64Return) {
 
   auto &bb = funcs[0]->getBasicBlockList().front();
 
-  // i64 return: should have AsInt32Inst (for lo32) and
-  // CallBuiltinInst(wasmI64HiStash) to stash hi=0.
-  bool foundAsInt32 = false;
-  bool foundHiStash = false;
+  // i64 return: should have CallBuiltinInst(wasmBigIntToI64) to convert
+  // the JS BigInt return value back to split (lo, hi).
+  bool foundBigIntToI64 = false;
   for (auto &I : bb) {
-    if (llvh::isa<AsInt32Inst>(&I))
-      foundAsInt32 = true;
     if (auto *call = llvh::dyn_cast<CallBuiltinInst>(&I)) {
       if (call->getBuiltinIndex() ==
-          BuiltinMethod::HermesBuiltin_wasmI64HiStash) {
-        foundHiStash = true;
+          BuiltinMethod::HermesBuiltin_wasmBigIntToI64) {
+        foundBigIntToI64 = true;
       }
     }
   }
-  EXPECT_TRUE(foundAsInt32);
-  EXPECT_TRUE(foundHiStash);
+  EXPECT_TRUE(foundBigIntToI64);
 }
 
 TEST(WasmIRGenTest, ImportTrampolineWithDefinedFunction) {

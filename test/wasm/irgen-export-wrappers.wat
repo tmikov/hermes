@@ -33,7 +33,7 @@
     local.get 1
     f64.add)
 
-  ;; (i64) -> i64: i64 wrapper splits arg and merges return (Phase 1).
+  ;; (i64) -> i64: i64 wrapper converts BigInt arg and returns BigInt.
   (func $id_i64 (export "id_i64") (param i64) (result i64)
     local.get 0)
 )
@@ -75,11 +75,14 @@
 ;; CHECK-NEXT:   CallInst
 ;; CHECK-NEXT:   ReturnInst
 
-;; --- Wrapper for id_i64: i64 param split to lo/hi, call with 2 args ---
+;; --- Wrapper for id_i64: BigInt param converted to lo/hi, result back to BigInt ---
 ;; CHECK-LABEL: function wasm_export_id_i64(p0: any): any
 ;; CHECK:   GetParentScopeInst
 ;; CHECK-NEXT:   LoadFrameInst
 ;; CHECK-NEXT:   LoadParamInst
-;; CHECK-NEXT:   AsInt32Inst
+;; CHECK-NEXT:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmBigIntToI64]
+;; CHECK-NEXT:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI64HiResult]
 ;; CHECK-NEXT:   CallInst
+;; CHECK-NEXT:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI64HiResult]
+;; CHECK-NEXT:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI64ToBigInt]
 ;; CHECK-NEXT:   ReturnInst

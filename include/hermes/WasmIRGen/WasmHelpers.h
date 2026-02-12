@@ -260,6 +260,15 @@ class WasmHelpers {
   /// \p elemSegs is the element segments array.
   Instruction *emitElemDrop(Value *elemSegs, Value *segIdx);
 
+  // --- BigInt ↔ i64 conversion helpers ---
+
+  /// Convert a JS BigInt to split (lo, hi). Returns lo32; hi32 is stashed
+  /// and can be retrieved via emitI64HiResult().
+  Instruction *emitBigIntToI64(Value *bigint);
+
+  /// Convert split (lo, hi) to a JS BigInt.
+  Instruction *emitI64ToBigInt(Value *lo, Value *hi);
+
  private:
   IRBuilder &builder_;
 };

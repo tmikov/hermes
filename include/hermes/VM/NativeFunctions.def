@@ -473,6 +473,8 @@ NATIVE_FUNCTION(wasmTableFill)
 NATIVE_FUNCTION(wasmTableCopy)
 NATIVE_FUNCTION(wasmTableInit)
 NATIVE_FUNCTION(wasmElemDrop)
+NATIVE_FUNCTION(wasmBigIntToI64)
+NATIVE_FUNCTION(wasmI64ToBigInt)
 
 #define ALL_ERROR_TYPE(name) NATIVE_FUNCTION(name##Constructor)
 #include "hermes/VM/NativeErrorTypes.def"

@@ -71,14 +71,15 @@ def i32_value_to_js(val_str):
     return str(val)
 
 
-def i64_value_to_js(val_str):
-    """Convert i64 value (unsigned decimal string) to lo32 value.
-    Phase 1: i64 exports only return lo32."""
-    val = int(val_str) & 0xFFFFFFFFFFFFFFFF
-    lo = val & 0xFFFFFFFF
-    if lo >= 0x80000000:
-        lo -= 0x100000000
-    return str(lo)
+def i64_value_to_bigint_literal(val_str):
+    """Convert i64 value (unsigned decimal string) to JS BigInt literal."""
+    bits = int(val_str) & 0xFFFFFFFFFFFFFFFF
+    # Convert to signed for BigInt constructor
+    if bits >= 0x8000000000000000:
+        signed_val = bits - 0x10000000000000000
+    else:
+        signed_val = bits
+    return f'BigInt("{signed_val}")'
 
 
 def value_to_js_arg(val):
@@ -88,8 +89,7 @@ def value_to_js_arg(val):
     if typ == 'i32':
         return i32_value_to_js(v)
     elif typ == 'i64':
-        # Phase 1: i64 args are truncated to lo32 by export wrappers
-        return i64_value_to_js(v)
+        return i64_value_to_bigint_literal(v)
     elif typ == 'f32':
         return f32_bits_to_js(v)
     elif typ == 'f64':
@@ -142,9 +142,8 @@ def gen_expected_check(expected, result_var):
         expected_js = i32_value_to_js(v)
         return f"(({result_var} | 0) === ({expected_js} | 0))"
     elif typ == 'i64':
-        # Phase 1: only check lo32
-        expected_js = i64_value_to_js(v)
-        return f"(({result_var} | 0) === ({expected_js} | 0))"
+        expected_js = i64_value_to_bigint_literal(v)
+        return f"({result_var} === {expected_js})"
     elif typ == 'f32':
         bits = int(v) & 0xFFFFFFFF
         # Check special float values
