@@ -12,6 +12,8 @@
 #include "hermes/WasmFrontend/WasmModuleInfo.h"
 #include "hermes/WasmIRGen/WasmHelpers.h"
 
+#include "llvh/ADT/DenseMap.h"
+
 namespace hermes {
 
 class Module;
@@ -560,6 +562,12 @@ class WasmIRGen {
 
   /// Wasm type of each Wasm local (params then declared locals).
   std::vector<WasmValType> localTypes_;
+
+  /// Map from f32 LiteralNumber (promoted to f64) to original f32 bit pattern.
+  /// Needed because f32→f64 promotion may alter NaN payload bits, and Hermes
+  /// canonicalizes NaN when emitting bytecode. We record the original bits so
+  /// that i32.reinterpret_f32 can fold them at compile time.
+  llvh::DenseMap<LiteralNumber *, uint32_t> f32NanBitsMap_;
 
   /// The parent (top-level) scope instruction, used to load pre-created
   /// closures from the environment at call sites.

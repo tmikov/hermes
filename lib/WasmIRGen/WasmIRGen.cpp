@@ -19,6 +19,8 @@
 #include "llvh/ADT/Twine.h"
 #include "llvh/Support/raw_ostream.h"
 
+#include <cmath>
+
 namespace hermes {
 namespace wasm {
 
@@ -932,7 +934,11 @@ void WasmIRGen::onI64Const(int64_t value) {
 void WasmIRGen::onF32Const(float value) {
   if (unreachable_)
     return;
-  push(builder_.getLiteralNumber(static_cast<double>(value)));
+  auto *lit = builder_.getLiteralNumber(static_cast<double>(value));
+  // Record original f32 NaN bits before promotion to f64 loses them.
+  if (LLVM_UNLIKELY(std::isnan(value)))
+    f32NanBitsMap_[lit] = llvh::FloatToBits(value);
+  push(lit);
 }
 
 void WasmIRGen::onF64Const(double value) {
@@ -2897,6 +2903,22 @@ void WasmIRGen::onI32ReinterpretF32() {
   if (unreachable_)
     return;
   Value *a = pop();
+  // Compile-time constant folding: recover the original f32 bit pattern.
+  // For NaN values, use the saved bits from onF32Const since f32→f64
+  // promotion may alter NaN payloads. For non-NaN values, convert back
+  // to float directly.
+  if (auto *lit = llvh::dyn_cast<LiteralNumber>(a)) {
+    uint32_t bits;
+    auto it = f32NanBitsMap_.find(lit);
+    if (it != f32NanBitsMap_.end()) {
+      bits = it->second;
+    } else {
+      bits = llvh::FloatToBits(static_cast<float>(lit->getValue()));
+    }
+    push(builder_.getLiteralNumber(
+        static_cast<double>(static_cast<int32_t>(bits))));
+    return;
+  }
   push(helpers_.emitI32ReinterpretF32(a));
 }
 
@@ -2999,6 +3021,18 @@ void WasmIRGen::onI64ReinterpretF64() {
   if (unreachable_)
     return;
   Value *a = pop();
+  // Compile-time constant folding: extract the raw bits directly from the
+  // literal. This is essential for NaN values, whose bit patterns would be
+  // canonicalized (and thus corrupted) by Hermes bytecode emission.
+  if (auto *lit = llvh::dyn_cast<LiteralNumber>(a)) {
+    uint64_t bits = llvh::DoubleToBits(lit->getValue());
+    auto lo = static_cast<int32_t>(bits & 0xFFFFFFFF);
+    auto hi = static_cast<int32_t>((bits >> 32) & 0xFFFFFFFF);
+    pushI64(
+        builder_.getLiteralNumber(static_cast<double>(lo)),
+        builder_.getLiteralNumber(static_cast<double>(hi)));
+    return;
+  }
   Value *lo = helpers_.emitI64ReinterpretF64(a);
   Value *hi = helpers_.emitI64HiResult();
   pushI64(lo, hi);

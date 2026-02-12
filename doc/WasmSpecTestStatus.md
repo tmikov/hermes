@@ -6,12 +6,12 @@ Last updated: 2026-02-11 (branch `wasm`)
 
 | Metric | Value |
 |--------|-------|
-| Test files passing | 23 / 83 (28%) |
-| Test files failing | 60 / 83 |
+| Test files passing | 24 / 83 (29%) |
+| Test files failing | 59 / 83 |
 | Crashes | 0 |
 | Timeouts | 0 |
-| Assertions passing | 23,320 |
-| Assertions failing | 1,479 |
+| Assertions passing | 23,336 |
+| Assertions failing | 1,463 |
 
 ## How to Run
 
@@ -30,7 +30,7 @@ python3 test/wasm/spec/run-spec-test.py \
   external/wasm-testsuite/tests/i32.wast
 ```
 
-## Passing Tests (23)
+## Passing Tests (24)
 
 | Test | Passed | Failed | Skipped |
 |------|--------|--------|---------|
@@ -38,6 +38,7 @@ python3 test/wasm/spec/run-spec-test.py \
 | int_literals | 30 | 0 | 20 |
 | int_exprs | 89 | 0 | 0 |
 | const | 300 | 0 | 76 |
+| float_literals | 99 | 0 | 78 |
 | unreachable | 63 | 0 | 0 |
 | forward | 4 | 0 | 0 |
 | left-to-right | 95 | 0 | 0 |
@@ -58,7 +59,7 @@ python3 test/wasm/spec/run-spec-test.py \
 | utf8-import-module | 176 | 0 | 0 |
 | utf8-invalid-encoding | 0 | 0 | 176 |
 
-## Failing Tests (60)
+## Failing Tests (59)
 
 ### Failure Categories
 
@@ -73,7 +74,7 @@ or other structural invalidity in many cases.
 
 **Affected tests:** nop (4), f32 (9), f64 (9), f32_bitwise (9), f32_cmp (6),
 f64_bitwise (9), f64_cmp (6), float_exprs (8), float_misc (6),
-float_literals (16), block (most of 155), if (most of 95), func (most of 52),
+block (most of 155), if (most of 95), func (most of 52),
 i32 (83), i64 (some), conversions (some), local_get (16), local_set (33),
 load (46), store (51), memory_copy (64), memory_fill (64), memory_init (65),
 table_fill (9), table_get (9), table_grow (some), table_init (67),
@@ -172,7 +173,6 @@ subnormals.
 | f64_bitwise | 344 | 19 | 0 | Copysign + Validator |
 | f64_cmp | 2,400 | 6 | 0 | Validator |
 | float_exprs | 811 | 8 | 0 | Validator |
-| float_literals | 83 | 16 | 78 | Validator |
 | float_memory | 50 | 10 | 0 | Validator |
 | float_misc | 464 | 6 | 0 | Validator + nearest |
 | conversions | 585 | 33 | 0 | i64 conversions |

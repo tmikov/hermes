@@ -3792,11 +3792,12 @@ TEST(WasmIRGenTest, F32ConvertI64SEmitsCall) {
   EXPECT_TRUE(found);
 }
 
-TEST(WasmIRGenTest, I64ReinterpretF64EmitsCallAndHi) {
+TEST(WasmIRGenTest, I64ReinterpretF64ConstantFolds) {
   TestModule tm;
   WasmModuleInfo moduleInfo;
 
-  // f64 → i64.reinterpret_f64 → produces i64 (split pair)
+  // f64.const 1.0 followed by i64.reinterpret_f64 should be constant-folded.
+  // 1.0 = 0x3FF0000000000000 → lo=0, hi=0x3FF00000=1072693248.
   moduleInfo.types.push_back(
       WasmFuncType{{}, {WasmValType::I32}});
   moduleInfo.functions.push_back(WasmFunction{0});
@@ -3808,20 +3809,16 @@ TEST(WasmIRGenTest, I64ReinterpretF64EmitsCallAndHi) {
   irgen.onF64Const(1.0);
   irgen.onI64ReinterpretF64();
 
-  // Result should be an i64 (split pair).
+  // Result should be an i64 (split pair) of literal constants.
   auto [lo, hi] = irgen.popI64();
 
-  auto *loInst = llvh::dyn_cast<CallBuiltinInst>(lo);
-  ASSERT_NE(loInst, nullptr);
-  EXPECT_EQ(
-      loInst->getBuiltinIndex(),
-      BuiltinMethod::HermesBuiltin_wasmI64ReinterpretF64);
+  auto *loLit = llvh::dyn_cast<LiteralNumber>(lo);
+  ASSERT_NE(loLit, nullptr);
+  EXPECT_EQ(loLit->getValue(), 0.0);
 
-  auto *hiInst = llvh::dyn_cast<CallBuiltinInst>(hi);
-  ASSERT_NE(hiInst, nullptr);
-  EXPECT_EQ(
-      hiInst->getBuiltinIndex(),
-      BuiltinMethod::HermesBuiltin_wasmI64HiResult);
+  auto *hiLit = llvh::dyn_cast<LiteralNumber>(hi);
+  ASSERT_NE(hiLit, nullptr);
+  EXPECT_EQ(hiLit->getValue(), 1072693248.0); // 0x3FF00000
 
   irgen.onI32Const(0);
   irgen.endFunction();

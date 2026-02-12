@@ -47,8 +47,9 @@
     i64.reinterpret_f64)
 
 ;; CHECK-LABEL: function wasm_func_4()
-;; CHECK: CallBuiltinInst {{.*}}[HermesBuiltin.wasmI64ReinterpretF64]
-;; CHECK: CallBuiltinInst {{.*}}[HermesBuiltin.wasmI64HiResult]
+;; Constant-folded: f64.const 1.0 has bits 0x3FF0000000000000 (lo=0, hi=1072693248).
+;; CHECK-NOT: CallBuiltinInst {{.*}}[HermesBuiltin.wasmI64ReinterpretF64]
+;; CHECK: CallBuiltinInst {{.*}}[HermesBuiltin.wasmI64HiStash]
 
   ;; f64.reinterpret_i64: bitcast i64 to f64
   (func $f64_reinterpret_i64 (result f64)
