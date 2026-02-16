@@ -4694,11 +4694,42 @@ void WasmIRGen::onTableGrow(uint32_t tableIndex) {
 
   // table.grow pops: delta (top), fill value.
   // Pushes: old size on success, -1 on failure.
-  // Phase 1: not fully implemented — always returns -1 (failure).
-  // This is valid per the Wasm spec (grow can fail).
-  pop(); // delta
-  pop(); // fill value
-  push(builder_.getLiteralNumber(-1));
+  auto *delta = pop();
+  auto *fillVal = pop();
+
+  auto *funcsArr = loadTableFuncs(tableIndex);
+  auto *typesArr = loadTableTypes(tableIndex);
+
+  // Get maximum table size from module info.
+  uint32_t maxEntries = UINT32_MAX;
+  uint32_t importedTables = moduleInfo_.importedTableCount();
+  if (tableIndex < importedTables) {
+    uint32_t importTableIdx = 0;
+    for (const auto &imp : moduleInfo_.imports) {
+      if (imp.kind != WasmExternalKind::Table)
+        continue;
+      if (importTableIdx == tableIndex) {
+        if (imp.tableType.limits.hasMaximum)
+          maxEntries = imp.tableType.limits.maximum;
+        break;
+      }
+      ++importTableIdx;
+    }
+  } else {
+    const auto &tbl =
+        moduleInfo_.tables[tableIndex - importedTables];
+    if (tbl.limits.hasMaximum)
+      maxEntries = tbl.limits.maximum;
+  }
+
+  auto *result = helpers_.emitTableGrow(
+      funcsArr,
+      typesArr,
+      delta,
+      fillVal,
+      builder_.getLiteralNumber(static_cast<double>(maxEntries)));
+
+  push(result);
 }
 
 // --- Bulk table operations (N.2) ---

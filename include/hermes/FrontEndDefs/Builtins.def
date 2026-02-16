@@ -268,6 +268,10 @@ PRIVATE_BUILTIN(wasmTableCopy)
 PRIVATE_BUILTIN(wasmTableInit)
 // wasmElemDrop(elemSegs, segIdx): mark an element segment as dropped.
 PRIVATE_BUILTIN(wasmElemDrop)
+// wasmTableGrow(funcsArr, typesArr, delta, fillVal, maxEntries):
+// grow table by delta entries, filling with fillVal. Returns old size on
+// success, -1 on failure.
+PRIVATE_BUILTIN(wasmTableGrow)
 
 JS_BUILTIN(spawnAsync)
 MARK_FIRST_JS_BUILTIN(spawnAsync)

@@ -1,17 +1,17 @@
 # Wasm Spec Test Status
 
-Last updated: 2026-02-15 (branch `wasm`)
+Last updated: 2026-02-16 (branch `wasm`)
 
 ## Summary
 
 | Metric | Value |
 |--------|-------|
-| Test files passing | 53 / 83 (64%) |
-| Test files failing | 30 / 83 |
+| Test files passing | 54 / 83 (65%) |
+| Test files failing | 29 / 83 |
 | Crashes | 0 |
 | Timeouts | 0 |
-| Assertions passing | 24,461 |
-| Assertions failing | 345 |
+| Assertions passing | 24,489 |
+| Assertions failing | 317 |
 
 ## How to Run
 
@@ -88,40 +88,11 @@ python3 test/wasm/spec/run-spec-test.py \
 | utf8-invalid-encoding | 0 | 0 | 176 |
 | endianness | 68 | 0 | 0 |
 
-## Failing Tests (30)
+## Failing Tests (29)
 
 ### Failure Categories
 
-#### 1. table.grow Not Implemented (38 failures)
-
-`table.grow` always returns -1 (failure) instead of growing the table. This
-causes all table_grow tests to fail directly, and table_size tests to fail as
-a consequence (sizes remain unchanged after failed grows).
-
-**Root cause:** In `lib/WasmIRGen/WasmIRGen.cpp` line 4667, `onTableGrow()`
-pops both operands (delta and fill value) and unconditionally pushes -1:
-
-```cpp
-void WasmIRGen::onTableGrow(uint32_t tableIndex) {
-  // Phase 1: not fully implemented — always returns -1 (failure).
-  pop(); // delta
-  pop(); // fill value
-  push(builder_.getLiteralNumber(-1));
-}
-```
-
-This is technically spec-compliant (table.grow is allowed to fail), but it
-means no table can ever be grown at runtime.
-
-**Affected tests:** table_grow (23), table_size (15)
-
-Example (table_grow.wast):
-```
-grow: expected [{'type': 'i32', 'value': '0'}] got -1
-size: expected [{'type': 'i32', 'value': '5'}] got 2
-```
-
-#### 2. NaN Bit Pattern Corruption (58 failures)
+#### 1. NaN Bit Pattern Corruption (58 failures)
 
 All Wasm f32/f64 values are stored as NaN-boxed `HermesValue`s on the register
 stack. NaN-boxing reserves the sign bit and fraction bits of NaN patterns for
@@ -160,7 +131,7 @@ NaN-boxing.
 **Affected tests:** f32_bitwise (16), f64_bitwise (16), conversions (8),
 float_memory (10), float_exprs (8)
 
-#### 3. Missing Trap on Out-of-Bounds Memory Access (38 failures)
+#### 2. Missing Trap on Out-of-Bounds Memory Access (38 failures)
 
 Memory loads/stores with large offsets that should trap (out of bounds) instead
 succeed, returning incorrect values. The compiled code does not check whether
@@ -170,20 +141,20 @@ succeed, returning incorrect values. The compiled code does not check whether
 
 Example: `i32.load offset=65536 (i32.const 0)` should trap but succeeds.
 
-#### 4. Missing Trap on Out-of-Bounds Table Access (12 failures)
+#### 3. Missing Trap on Out-of-Bounds Table Access (22 failures)
 
 `table.get` and `table.set` with out-of-bounds indices succeed instead of
-trapping. Same class of issue as the memory OOB problem (category 3) but for
+trapping. Same class of issue as the memory OOB problem (category 2) but for
 table operations.
 
-**Root cause:** In `lib/WasmIRGen/WasmIRGen.cpp`, `onTableGet()` (line 4637)
-uses `createLoadPropertyInst(funcsArr, idx)` and `onTableSet()` (line 4647)
+**Root cause:** In `lib/WasmIRGen/WasmIRGen.cpp`, `onTableGet()`
+uses `createLoadPropertyInst(funcsArr, idx)` and `onTableSet()`
 uses `createStorePropertyStrictInst(val, funcsArr, idx)`. These are JS
 property operations — loading an out-of-bounds index from a JS array returns
 `undefined` rather than trapping, and storing silently extends the array.
 The Wasm spec requires a trap for out-of-bounds table access.
 
-**Affected tests:** table_get (4), table_set (8)
+**Affected tests:** table_get (4), table_set (8), table_grow (10)
 
 Example (table_get.wast):
 ```
@@ -191,23 +162,34 @@ get-externref: expected trap but succeeded
 get-funcref: expected trap but succeeded
 ```
 
-#### 5. Unlinkable / Uninstantiable Modules Not Rejected (126 failures)
+#### 4. Unlinkable / Uninstantiable Modules Not Rejected (126 failures)
 
 Modules that should fail at instantiation time (e.g., out-of-bounds data
 segments, incompatible imports) are instantiated successfully.
 
 **Affected tests:** imports (106), data (20)
 
-#### 6. Module Load Failures / Missing Features (53 failures)
+#### 5. Module Load Failures / Missing Features (53 failures)
 
-Some modules fail to load (`invalid Wasm binary`) due to unsupported features
-like multiple memories, certain import/export combinations, or advanced memory
-operations.
+Hermes's Wasm binary parser rejects modules that use features it doesn't
+support. The module validates fine through WABT, but Hermes's own validation
+fails when loading the resulting `.wasm` binary.
 
-**Affected tests:** memory_grow (50 — first module fails to load, cascading to
-all subsequent assertions), memory_redundancy (3)
+**memory_grow (50):** The very first module in `memory_grow.wast` declares two
+memories (`(memory (export "mem1") 2 5) (memory (export "mem2") 0)`). Hermes
+doesn't support the multi-memory proposal and rejects any module with more than
+one memory declaration. Since this first module fails to load, every subsequent
+assertion (all 50) cascades to failure — the module instance is null and all
+exported function calls fail with "Cannot read property ... of null". The
+`memory.grow` instruction itself works; the failures are entirely due to
+multi-memory rejection.
 
-#### 7. Multi-Value Return from Calls Not Implemented (6 failures)
+**memory_redundancy (3):** Similar module load failures due to unsupported
+features.
+
+**Affected tests:** memory_grow (50), memory_redundancy (3)
+
+#### 6. Multi-Value Return from Calls Not Implemented (6 failures)
 
 When a Wasm function returns multiple values (e.g., `(result i64 i32)`), only
 the first return value survives. All additional return values are replaced with
@@ -270,7 +252,7 @@ N>1 results, use N-1 additional stash slots (global-like variables) to pass
 extra return values out-of-band. The callee stores extra results into stash
 slots before `ReturnInst`, and the caller reads them after `CallInst`.
 
-#### 8. wast2json Parse Errors (14 failures)
+#### 7. wast2json Parse Errors (14 failures)
 
 Test files using syntax from newer Wasm proposals (GC types, typed function
 references) that the bundled `wast2json` (from WABT) cannot parse. These fail
@@ -289,51 +271,49 @@ br_if.wast:670:26: error: unexpected token "null", expected a numeric index
 
 | Test | Passed | Failed | Skipped | Primary Failure Mode |
 |------|--------|--------|---------|---------------------|
-| f32_bitwise | 347 | 16 | 0 | NaN copysign (cat 2) |
-| f64_bitwise | 347 | 16 | 0 | NaN copysign (cat 2) |
-| float_exprs | 811 | 8 | 0 | NaN bit patterns (cat 2) |
-| float_memory | 50 | 10 | 0 | NaN through memory (cat 2) |
-| conversions | 610 | 8 | 0 | NaN reinterpret (cat 2) |
-| if | 213 | 3 | 24 | Multi-value return (cat 7) |
-| br_if | 0 | 1 | 0 | wast2json parse error (cat 8) |
-| br_table | 0 | 1 | 0 | wast2json parse error (cat 8) |
-| unreached-valid | 0 | 1 | 0 | wast2json parse error (cat 8) |
-| call | 85 | 3 | 0 | Multi-value return (cat 7) |
-| local_tee | 0 | 1 | 0 | wast2json parse error (cat 8) |
-| global | 0 | 1 | 0 | wast2json parse error (cat 8) |
-| memory | 0 | 1 | 0 | wast2json parse error (cat 8) |
-| memory_grow | 0 | 50 | 0 | Module load failure (cat 6) |
-| memory_redundancy | 1 | 3 | 0 | Module load (cat 6) |
-| address | 218 | 38 | 0 | Memory OOB (cat 3) |
-| align | 0 | 1 | 0 | wast2json parse error (cat 8) |
-| data | 20 | 20 | 0 | Uninstantiable (cat 5) |
-| table | 0 | 1 | 0 | wast2json parse error (cat 8) |
-| elem | 0 | 1 | 0 | wast2json parse error (cat 8) |
-| table_get | 10 | 4 | 0 | Table OOB (cat 4) |
-| table_grow | 25 | 23 | 0 | table.grow unimplemented (cat 1) |
-| table_set | 17 | 8 | 0 | Table OOB (cat 4) |
-| table_size | 23 | 15 | 0 | table.grow unimplemented (cat 1) |
-| select | 0 | 1 | 0 | wast2json parse error (cat 8) |
-| imports | 22 | 106 | 16 | Unlinkable (cat 5) |
-| tag | 0 | 1 | 0 | wast2json parse error (cat 8) |
-| ref_is_null | 0 | 1 | 0 | wast2json parse error (cat 8) |
-| ref_null | 0 | 1 | 0 | wast2json parse error (cat 8) |
-| linking | 0 | 1 | 0 | wast2json parse error (cat 8) |
+| f32_bitwise | 347 | 16 | 0 | NaN copysign (cat 1) |
+| f64_bitwise | 347 | 16 | 0 | NaN copysign (cat 1) |
+| float_exprs | 811 | 8 | 0 | NaN bit patterns (cat 1) |
+| float_memory | 50 | 10 | 0 | NaN through memory (cat 1) |
+| conversions | 610 | 8 | 0 | NaN reinterpret (cat 1) |
+| if | 213 | 3 | 24 | Multi-value return (cat 6) |
+| br_if | 0 | 1 | 0 | wast2json parse error (cat 7) |
+| br_table | 0 | 1 | 0 | wast2json parse error (cat 7) |
+| unreached-valid | 0 | 1 | 0 | wast2json parse error (cat 7) |
+| call | 85 | 3 | 0 | Multi-value return (cat 6) |
+| local_tee | 0 | 1 | 0 | wast2json parse error (cat 7) |
+| global | 0 | 1 | 0 | wast2json parse error (cat 7) |
+| memory | 0 | 1 | 0 | wast2json parse error (cat 7) |
+| memory_grow | 0 | 50 | 0 | Module load failure (cat 5) |
+| memory_redundancy | 1 | 3 | 0 | Module load (cat 5) |
+| address | 218 | 38 | 0 | Memory OOB (cat 2) |
+| align | 0 | 1 | 0 | wast2json parse error (cat 7) |
+| data | 20 | 20 | 0 | Uninstantiable (cat 4) |
+| table | 0 | 1 | 0 | wast2json parse error (cat 7) |
+| elem | 0 | 1 | 0 | wast2json parse error (cat 7) |
+| table_get | 10 | 4 | 0 | Table OOB (cat 3) |
+| table_grow | 38 | 10 | 0 | Table OOB (cat 3) |
+| table_set | 17 | 8 | 0 | Table OOB (cat 3) |
+| table_size | 38 | 0 | 0 | ✓ all pass |
+| select | 0 | 1 | 0 | wast2json parse error (cat 7) |
+| imports | 22 | 106 | 16 | Unlinkable (cat 4) |
+| tag | 0 | 1 | 0 | wast2json parse error (cat 7) |
+| ref_is_null | 0 | 1 | 0 | wast2json parse error (cat 7) |
+| ref_null | 0 | 1 | 0 | wast2json parse error (cat 7) |
+| linking | 0 | 1 | 0 | wast2json parse error (cat 7) |
 
 ### Priority for Fixing
 
-1. **table.grow implementation** (cat 1) — entirely missing feature. 38
-   failures, blocks table_size tests too.
-2. **Memory bounds checking** (cat 3) — runtime correctness; OOB memory access
+1. **Memory bounds checking** (cat 2) — runtime correctness; OOB memory access
    succeeds instead of trapping. 38 failures.
-3. **Table bounds checking** (cat 4) — runtime correctness; OOB table access
-   succeeds instead of trapping. 12 failures.
-4. **Multi-value call returns** (cat 7) — semantic correctness; multi-value
+2. **Table bounds checking** (cat 3) — runtime correctness; OOB table access
+   succeeds instead of trapping. 22 failures.
+3. **Multi-value call returns** (cat 6) — semantic correctness; multi-value
    returns from calls produce wrong results. 6 failures.
-5. **Instantiation-time validation** (cat 5) — data segments, imports. 126
+4. **Instantiation-time validation** (cat 4) — data segments, imports. 126
    failures.
-6. **Module load failures** (cat 6) — multiple memories, etc. 53 failures.
-7. **wast2json upgrade** (cat 8) — would unblock 14 test files using newer
+5. **Module load failures** (cat 5) — multiple memories, etc. 53 failures.
+6. **wast2json upgrade** (cat 7) — would unblock 14 test files using newer
    proposal syntax.
-8. **NaN-boxing limitations** (cat 2) — requires non-NaN-boxed Wasm value
+7. **NaN-boxing limitations** (cat 1) — requires non-NaN-boxed Wasm value
    representation. 58 failures.

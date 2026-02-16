@@ -1198,6 +1198,53 @@ CallResult<HermesValue> wasmTableFill(void *, Runtime &runtime) {
   return HermesValue::encodeUndefinedValue();
 }
 
+/// Wasm table.grow: grow table by delta entries, filling with fillVal.
+/// Args: (funcsArr, typesArr, delta, fillVal, maxEntries).
+/// Returns old size on success, -1 on failure.
+CallResult<HermesValue> wasmTableGrow(void *, Runtime &runtime) {
+  struct : public Locals {
+    PinnedValue<JSArray> funcsArr;
+    PinnedValue<JSArray> typesArr;
+    PinnedValue<> fillVal;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  lv.funcsArr = vmcast<JSArray>(args.getArg(0));
+  lv.typesArr = vmcast<JSArray>(args.getArg(1));
+  uint32_t delta =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(2).getNumber()));
+  lv.fillVal = args.getArg(3);
+  uint32_t maxEntries =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(4).getNumber()));
+
+  uint32_t oldLen = JSArray::getLength(*lv.funcsArr, runtime);
+
+  // Check for overflow and max limit.
+  uint64_t newLen64 = static_cast<uint64_t>(oldLen) + delta;
+  if (newLen64 > maxEntries) {
+    return HermesValue::encodeTrustedNumberValue(-1);
+  }
+  uint32_t newLen = static_cast<uint32_t>(newLen64);
+
+  // Grow both arrays by setting their length.
+  auto res1 = JSArray::setLengthProperty(lv.funcsArr, runtime, newLen);
+  if (LLVM_UNLIKELY(res1 == ExecutionStatus::EXCEPTION))
+    return ExecutionStatus::EXCEPTION;
+  auto res2 = JSArray::setLengthProperty(lv.typesArr, runtime, newLen);
+  if (LLVM_UNLIKELY(res2 == ExecutionStatus::EXCEPTION))
+    return ExecutionStatus::EXCEPTION;
+
+  // Fill new func entries with fillVal. Type entries remain undefined
+  // (no type info for fill entries — they are not callable via
+  // call_indirect).
+  for (uint32_t i = oldLen; i < newLen; ++i) {
+    (void)JSArray::setElementAt(lv.funcsArr, runtime, i, lv.fillVal);
+  }
+
+  return HermesValue::encodeTrustedNumberValue(oldLen);
+}
+
 /// Wasm table.copy: copy \p count entries from src table to dst table.
 /// Args: (dstFuncs, srcFuncs, dstTypes, srcTypes, dst, src, count).
 /// Traps on out-of-bounds. Handles overlapping regions correctly.
@@ -2444,6 +2491,11 @@ void createHermesBuiltins(Runtime &runtime) {
       P::wasmElemDrop,
       wasmElemDrop,
       2);
+  defineInternMethod(
+      B::HermesBuiltin_wasmTableGrow,
+      P::wasmTableGrow,
+      wasmTableGrow,
+      5);
 }
 
 } // namespace vm

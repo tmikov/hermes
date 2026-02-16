@@ -438,6 +438,17 @@ Instruction *WasmHelpers::emitElemDrop(Value *elemSegs, Value *segIdx) {
       BuiltinMethod::HermesBuiltin_wasmElemDrop, {elemSegs, segIdx});
 }
 
+Instruction *WasmHelpers::emitTableGrow(
+    Value *funcsArr,
+    Value *typesArr,
+    Value *delta,
+    Value *fillVal,
+    Value *maxEntries) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmTableGrow,
+      {funcsArr, typesArr, delta, fillVal, maxEntries});
+}
+
 // --- BigInt ↔ i64 conversion helpers ---
 
 Instruction *WasmHelpers::emitBigIntToI64(Value *bigint) {

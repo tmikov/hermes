@@ -263,6 +263,17 @@ class WasmHelpers {
   /// \p elemSegs is the element segments array.
   Instruction *emitElemDrop(Value *elemSegs, Value *segIdx);
 
+  /// Emit table.grow: grows both funcs and types arrays by \p delta entries,
+  /// filling new func entries with \p fillVal.
+  /// \p maxEntries is the table's declared maximum size.
+  /// Returns old size on success, -1 on failure.
+  Instruction *emitTableGrow(
+      Value *funcsArr,
+      Value *typesArr,
+      Value *delta,
+      Value *fillVal,
+      Value *maxEntries);
+
   // --- BigInt ↔ i64 conversion helpers ---
 
   /// Convert a JS BigInt to split (lo, hi). Returns lo32; hi32 is stashed
