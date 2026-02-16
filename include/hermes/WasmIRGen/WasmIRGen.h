@@ -475,6 +475,12 @@ class WasmIRGen {
   /// same as Wasm function index for imports since they come first).
   std::vector<Variable *> importFuncVars_;
 
+  /// One Variable per imported global, holding the raw import value
+  /// (either a WebAssembly.Global object or a plain JS number) loaded
+  /// from the imports object during validation. Used by initializeGlobals()
+  /// to read the actual imported value.
+  std::vector<Variable *> importGlobalVals_;
+
   /// Typed array view indices into memViewVars_.
   enum MemView : uint8_t {
     HEAP8 = 0,

@@ -3136,8 +3136,10 @@ TEST(WasmIRGenTest, CreateFunctionsSkipsNonFunctionExports) {
       ++storePropCount;
   }
 
-  // Only the function export should produce a StorePropertyStrictInst.
-  EXPECT_EQ(storePropCount, 1u);
+  // The function export produces two StorePropertyStrictInst:
+  // one for __wasm_type__ on the wrapper closure, one for the export name
+  // on the exports object. The memory export should be skipped.
+  EXPECT_EQ(storePropCount, 2u);
 }
 
 TEST(WasmIRGenTest, F64Copysign) {

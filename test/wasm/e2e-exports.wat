@@ -39,8 +39,10 @@
 ;; CHECK-NEXT:   StoreFrameInst
 ;; CHECK:   AllocObjectLiteralInst
 ;; CHECK-NEXT:   CreateFunctionInst
+;; CHECK-NEXT:   StorePropertyStrictInst {{.*}}, {{.*}}, "__wasm_type__"
 ;; CHECK-NEXT:   StorePropertyStrictInst {{.*}}, {{.*}}, "add"
 ;; CHECK-NEXT:   CreateFunctionInst
+;; CHECK-NEXT:   StorePropertyStrictInst {{.*}}, {{.*}}, "__wasm_type__"
 ;; CHECK-NEXT:   StorePropertyStrictInst {{.*}}, {{.*}}, "sub"
 ;; CHECK-NEXT:   ReturnInst
 

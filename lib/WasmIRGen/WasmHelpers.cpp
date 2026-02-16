@@ -461,5 +461,10 @@ Instruction *WasmHelpers::emitI64ToBigInt(Value *lo, Value *hi) {
       BuiltinMethod::HermesBuiltin_wasmI64ToBigInt, {lo, hi});
 }
 
+Instruction *WasmHelpers::emitLinkError(Value *message) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmLinkError, {message});
+}
+
 } // namespace wasm
 } // namespace hermes

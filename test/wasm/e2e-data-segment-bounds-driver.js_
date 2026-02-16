@@ -10,6 +10,10 @@
 // expressions are applied correctly.
 
 var hbcPath = hermescli.getScriptArgs()[0];
+
+// Provide the imported global "env.g" = 0.
+globalThis.__wasm_imports__ = { env: { g: 0 } };
+
 var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
 
 // GlobalGet segment: "Hi" at offset 0 (global 0 = 0).

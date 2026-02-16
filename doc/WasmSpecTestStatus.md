@@ -10,8 +10,8 @@ Last updated: 2026-02-16 (branch `wasm`)
 | Test files failing | 29 / 83 |
 | Crashes | 0 |
 | Timeouts | 0 |
-| Assertions passing | 24,503 |
-| Assertions failing | 299 |
+| Assertions passing | 24,586 |
+| Assertions failing | 244 |
 
 ## How to Run
 
@@ -162,26 +162,37 @@ get-externref: expected trap but succeeded
 get-funcref: expected trap but succeeded
 ```
 
-#### 4. Unlinkable / Uninstantiable Modules Not Rejected (108 failures)
+#### 4. Unlinkable / Uninstantiable Modules Not Rejected (49 failures)
 
 Modules that should be rejected at instantiation time are accepted by Hermes.
-The spec requires validation between parsing and execution; Hermes skips most
+The spec requires validation between parsing and execution; Hermes skips some
 of these checks, so errors surface later (or not at all) as wrong results.
 
-**imports (106 failures):** The spec requires that every import is matched
-against the provided imports object and validated for type compatibility at
-instantiation time. Mismatches must produce a `LinkError`. For example:
+**imports (47 failures):** Import type validation is now implemented using
+`__wasm_type__` string comparison at instantiation time. The compiled IR
+checks each import value against the expected type string, throwing a
+`WebAssembly.LinkError` on mismatch. This covers:
 
-- Importing a function with the wrong signature should fail
-- Importing a memory or table with limits that don't satisfy the declared
-  minimums/maximums should fail
-- A missing import should fail
+- Function signature mismatches (Wasm-to-Wasm and JS-to-Wasm)
+- Global type and mutability mismatches (when `__wasm_type__` is present)
+- Table/memory kind mismatches and limit validation
+- Cross-kind mismatches (e.g., importing a memory as a function)
+- Missing imports (undefined module or field)
+- Non-callable values imported as functions
 
-Hermes currently does minimal or no validation of imports at link time. If a
-module declares `(import "env" "foo" (func (param i32) (result i32)))` but the
-host provides a function with a different signature (or a non-function),
-instantiation succeeds. The mismatch only surfaces later at call time (if at
-all), producing wrong results instead of an upfront `LinkError`.
+Remaining failures (47) are due to:
+
+- **Tag exports not implemented (3):** Modules that export/import tags cannot
+  participate in cross-module linking. The initial "test" module's tag exports
+  are missing, causing cascading failures.
+- **Raw global exports lack type metadata (12):** Wasm global exports are
+  currently raw numeric values without `__wasm_type__`. Cross-module global
+  type validation requires wrapping globals in `WebAssembly.Global` objects.
+- **Table/memory exports not implemented (26):** Tables and memories are not
+  exported as `WebAssembly.Table`/`Memory` objects, so cross-module
+  table/memory imports fail with "unknown import".
+- **Memory data offset / grow issues (6):** Pre-existing limitations with
+  imported memory data segments and memory.grow on imported memories.
 
 **data (2 failures):** Active data segments have an offset expression (e.g.,
 `(data (i32.const 65536) "hello")`). If the offset + data length exceeds the
@@ -193,12 +204,12 @@ check), and for extended constant expressions (`i32.add`/`i32.sub`/`i32.mul`).
 The remaining 2 failures (lines 89, 90) use `global.get` on non-imported
 globals, which wast2json rejects.
 
-**Fix approach:** Add validation passes in the instantiation path — check
-import compatibility (function signatures, memory/table limits) and data/element
-segment bounds against actual memory/table sizes before any exported functions
-are called.
+**Fix approach:** The remaining failures require implementing table/memory
+exports as proper `WebAssembly.Table`/`Memory` objects, wrapping global exports
+in `WebAssembly.Global` objects with `__wasm_type__`, and implementing tag
+exports.
 
-**Affected tests:** imports (106), data (2)
+**Affected tests:** imports (47), data (2)
 
 #### 5. Module Load Failures / Missing Features (53 failures)
 
@@ -327,7 +338,7 @@ br_if.wast:670:26: error: unexpected token "null", expected a numeric index
 | table_set | 17 | 8 | 0 | Table OOB (cat 3) |
 | table_size | 38 | 0 | 0 | ✓ all pass |
 | select | 0 | 1 | 0 | wast2json parse error (cat 7) |
-| imports | 22 | 106 | 16 | Unlinkable (cat 4) |
+| imports | 107 | 47 | 16 | Unlinkable (cat 4) |
 | tag | 0 | 1 | 0 | wast2json parse error (cat 7) |
 | ref_is_null | 0 | 1 | 0 | wast2json parse error (cat 7) |
 | ref_null | 0 | 1 | 0 | wast2json parse error (cat 7) |
@@ -341,7 +352,7 @@ br_if.wast:670:26: error: unexpected token "null", expected a numeric index
    succeeds instead of trapping. 22 failures.
 3. **Multi-value call returns** (cat 6) — semantic correctness; multi-value
    returns from calls produce wrong results. 6 failures.
-4. **Instantiation-time validation** (cat 4) — data segments, imports. 108
+4. **Instantiation-time validation** (cat 4) — data segments, imports. 49
    failures.
 5. **Module load failures** (cat 5) — multiple memories, etc. 53 failures.
 6. **wast2json upgrade** (cat 7) — would unblock 14 test files using newer
@@ -358,8 +369,13 @@ can run.
 
 ### Non-Function Imports Not Wired In
 
-Only **function imports** are resolved from the imports object and connected to
-the compiled module. All other import kinds are stubbed:
+**Function imports** and **global imports** are resolved from the imports
+object and connected to the compiled module. Function imports are validated
+for type compatibility using `__wasm_type__` strings. Global imports read
+their value from the import object (either a `WebAssembly.Global`'s `.value`
+property or a raw JS number).
+
+Other import kinds are stubbed:
 
 - **Memory imports ignored:** The compiled code always creates a fresh
   `ArrayBuffer` regardless of whether the module imports a memory
@@ -370,11 +386,6 @@ the compiled module. All other import kinds are stubbed:
   for table storage (`WasmIRGen.cpp`, `createTables()`). The
   `WebAssembly.Table` object from the imports object is never used. Functions
   from one module cannot appear in another module's table through imports.
-
-- **Global imports hard-coded to zero:** Imported globals are initialized to 0
-  (`WasmIRGen.cpp`, `initializeGlobals()`). The actual value from the imports
-  object is ignored, even though `WebAssembly.Global` JS API objects are fully
-  implemented.
 
 ### Memory and Table Exports Missing
 

@@ -1045,6 +1045,39 @@ wasmMemoryConstructor(void *context, Runtime &runtime) {
 
   lv.mem->setBuffer(runtime, *lv.buf);
 
+  // Set type metadata for import validation.
+  {
+    auto typeRes = StringPrimitive::create(
+        runtime, ASCIIRef("memory", 6));
+    if (LLVM_UNLIKELY(typeRes == ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
+    auto putRes = JSObject::putNamed_RJS(
+        lv.mem,
+        runtime,
+        Predefined::getSymbolID(Predefined::__wasm_type__),
+        runtime.makeHandle(std::move(*typeRes)));
+    if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
+    putRes = JSObject::putNamed_RJS(
+        lv.mem,
+        runtime,
+        Predefined::getSymbolID(Predefined::__wasm_min__),
+        runtime.makeHandle(HermesValue::encodeTrustedNumberValue(
+            initialPages)));
+    if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
+    putRes = JSObject::putNamed_RJS(
+        lv.mem,
+        runtime,
+        Predefined::getSymbolID(Predefined::__wasm_max__),
+        runtime.makeHandle(HermesValue::encodeTrustedNumberValue(
+            lv.maximumVal->isUndefined()
+                ? -1.0
+                : static_cast<double>(maxPages))));
+    if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
+  }
+
   return lv.mem.getHermesValue();
 }
 
@@ -1294,6 +1327,37 @@ wasmTableConstructor(void *context, Runtime &runtime) {
   }
 
   lv.tbl->setElements(runtime, *lv.arr);
+
+  // Set type metadata for import validation.
+  {
+    auto typeRes = StringPrimitive::create(
+        runtime, ASCIIRef("table:funcref", 13));
+    if (LLVM_UNLIKELY(typeRes == ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
+    auto putRes = JSObject::putNamed_RJS(
+        lv.tbl,
+        runtime,
+        Predefined::getSymbolID(Predefined::__wasm_type__),
+        runtime.makeHandle(std::move(*typeRes)));
+    if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
+    putRes = JSObject::putNamed_RJS(
+        lv.tbl,
+        runtime,
+        Predefined::getSymbolID(Predefined::__wasm_min__),
+        runtime.makeHandle(HermesValue::encodeTrustedNumberValue(
+            initialSize)));
+    if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
+    putRes = JSObject::putNamed_RJS(
+        lv.tbl,
+        runtime,
+        Predefined::getSymbolID(Predefined::__wasm_max__),
+        runtime.makeHandle(HermesValue::encodeTrustedNumberValue(
+            maxSize == 0 ? -1.0 : static_cast<double>(maxSize))));
+    if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
+  }
 
   return lv.tbl.getHermesValue();
 }
@@ -1618,6 +1682,37 @@ wasmGlobalConstructor(void *context, Runtime &runtime) {
   lv.glob->setValType(valType);
   lv.glob->setMutable(isMutable);
   lv.glob->setValue(initValue);
+
+  // Set type metadata for import validation.
+  // Format: "global:<type>:<mut>" e.g. "global:i32:const" or "global:f64:var"
+  {
+    const char *typeName;
+    switch (valType) {
+      case JSWebAssemblyGlobal::ValType::I32:
+        typeName = isMutable ? "global:i32:var" : "global:i32:const";
+        break;
+      case JSWebAssemblyGlobal::ValType::I64:
+        typeName = isMutable ? "global:i64:var" : "global:i64:const";
+        break;
+      case JSWebAssemblyGlobal::ValType::F32:
+        typeName = isMutable ? "global:f32:var" : "global:f32:const";
+        break;
+      case JSWebAssemblyGlobal::ValType::F64:
+        typeName = isMutable ? "global:f64:var" : "global:f64:const";
+        break;
+    }
+    auto typeRes = StringPrimitive::create(
+        runtime, ASCIIRef(typeName, strlen(typeName)));
+    if (LLVM_UNLIKELY(typeRes == ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
+    auto putRes = JSObject::putNamed_RJS(
+        lv.glob,
+        runtime,
+        Predefined::getSymbolID(Predefined::__wasm_type__),
+        runtime.makeHandle(std::move(*typeRes)));
+    if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
+  }
 
   return lv.glob.getHermesValue();
 }

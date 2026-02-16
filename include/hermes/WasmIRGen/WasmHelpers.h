@@ -283,6 +283,11 @@ class WasmHelpers {
   /// Convert split (lo, hi) to a JS BigInt.
   Instruction *emitI64ToBigInt(Value *lo, Value *hi);
 
+  /// Emit a call to the wasmLinkError builtin, which creates and throws a
+  /// WebAssembly.LinkError with the given message string. Used for import
+  /// type validation at instantiation time.
+  Instruction *emitLinkError(Value *message);
+
  private:
   IRBuilder &builder_;
 };

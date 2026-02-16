@@ -1413,6 +1413,35 @@ CallResult<HermesValue> wasmElemDrop(void *, Runtime &runtime) {
   return HermesValue::encodeUndefinedValue();
 }
 
+/// Wasm link error: creates and throws a WebAssembly.LinkError with the
+/// given message string. Used by Wasm-generated IR for import type
+/// validation at instantiation time.
+/// Args: (message).
+CallResult<HermesValue> wasmLinkError(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  struct : public Locals {
+    PinnedValue<> msgHandle;
+    PinnedValue<JSError> err;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  lv.msgHandle = args.getArg(0);
+
+  lv.err = JSError::create(
+      runtime, Handle<JSObject>{runtime.wasmLinkErrorPrototype});
+
+  if (LLVM_UNLIKELY(
+          JSError::setMessage(lv.err, runtime, lv.msgHandle) ==
+          ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+
+  JSError::recordStackTrace(lv.err, runtime, true);
+
+  return runtime.setThrownValue(lv.err.getHermesValue());
+}
+
 namespace {
 
 CallResult<HermesValue> copyDataPropertiesSlowPath_RJS(
@@ -2496,6 +2525,11 @@ void createHermesBuiltins(Runtime &runtime) {
       P::wasmTableGrow,
       wasmTableGrow,
       5);
+  defineInternMethod(
+      B::HermesBuiltin_wasmLinkError,
+      P::wasmLinkError,
+      wasmLinkError,
+      1);
 }
 
 } // namespace vm

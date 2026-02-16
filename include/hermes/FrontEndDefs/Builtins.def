@@ -273,6 +273,11 @@ PRIVATE_BUILTIN(wasmElemDrop)
 // success, -1 on failure.
 PRIVATE_BUILTIN(wasmTableGrow)
 
+// Import type validation (Category 4).
+// wasmLinkError(message): creates and throws a WebAssembly.LinkError with the
+// given message string. Used by Wasm-generated IR during instantiation.
+PRIVATE_BUILTIN(wasmLinkError)
+
 JS_BUILTIN(spawnAsync)
 MARK_FIRST_JS_BUILTIN(spawnAsync)
 JS_BUILTIN(makeAsyncIterator)

@@ -24,6 +24,51 @@
 namespace hermes {
 namespace wasm {
 
+/// Map a WasmValType to a single character code for type strings.
+static char valTypeChar(WasmValType vt) {
+  switch (vt) {
+    case WasmValType::I32: return 'i';
+    case WasmValType::I64: return 'l';
+    case WasmValType::F32: return 'f';
+    case WasmValType::F64: return 'd';
+    case WasmValType::FuncRef: return 'r';
+    case WasmValType::ExternRef: return 'e';
+    case WasmValType::V128: return 'v';
+  }
+  return '?';
+}
+
+/// Build a type string for a function type, e.g. "func:ii:i".
+static std::string buildFuncTypeString(const WasmFuncType &ft) {
+  std::string s = "func:";
+  for (auto p : ft.params)
+    s += valTypeChar(p);
+  s += ':';
+  for (auto r : ft.results)
+    s += valTypeChar(r);
+  return s;
+}
+
+/// Build a type string for a global type, e.g. "global:i32:const".
+static std::string buildGlobalTypeString(const WasmGlobalType &gt) {
+  std::string s = "global:";
+  switch (gt.type) {
+    case WasmValType::I32: s += "i32:"; break;
+    case WasmValType::I64: s += "i64:"; break;
+    case WasmValType::F32: s += "f32:"; break;
+    case WasmValType::F64: s += "f64:"; break;
+    default: s += "unknown:"; break;
+  }
+  s += gt.mutable_ ? "var" : "const";
+  return s;
+}
+
+/// Build a type string for a table type, e.g. "table:funcref".
+static std::string buildTableTypeString(const WasmTableType &tt) {
+  return tt.elemType == WasmValType::FuncRef
+      ? "table:funcref" : "table:externref";
+}
+
 WasmIRGen::WasmIRGen(Module &M, WasmModuleInfo &moduleInfo)
     : moduleInfo_(moduleInfo), builder_(&M), helpers_(builder_) {}
 
@@ -158,6 +203,18 @@ void WasmIRGen::createFunctions() {
         /* hidden */ true);
   }
 
+  // Create Variables for imported global values in the top-level scope.
+  // These hold the raw import value (WebAssembly.Global or JS number)
+  // loaded during import validation. initializeGlobals() reads from these.
+  importGlobalVals_.resize(numImportedGlobals, nullptr);
+  for (uint32_t i = 0; i < numImportedGlobals; ++i) {
+    importGlobalVals_[i] = builder_.createVariable(
+        topLevelVS_,
+        ("import_global_val_" + llvh::Twine(i)),
+        Type::createAnyType(),
+        /* hidden */ true);
+  }
+
   // Create all Wasm functions and a Variable in the top-level scope for each.
   uint32_t totalFuncs = moduleInfo_.totalFunctionCount();
   irFunctions_.resize(totalFuncs, nullptr);
@@ -229,27 +286,357 @@ void WasmIRGen::createFunctions() {
       topLevelVS_, builder_.getEmptySentinel());
   auto *tlScope = tlScope_;
 
-  // Resolve imported functions from the imports object.
+  // Resolve and validate ALL imports from the imports object.
   // The imports object is read from the global `__wasm_imports__` property.
-  // It has the shape: { moduleName: { fieldName: func } }.
-  // When M.4 (WebAssembly.Instance) is implemented, the imports will be
-  // passed via the Instance constructor and set on the global before
-  // evaluating the compiled module.
-  if (numImportedFuncs > 0) {
+  // It has the shape: { moduleName: { fieldName: value } }.
+  // Each import is validated:
+  //   - Module object must not be undefined.
+  //   - Import value must not be undefined.
+  //   - Type must match via __wasm_type__ string comparison.
+  // For function imports, plain JS callables (no __wasm_type__) are accepted.
+  // For global imports, plain JS numbers (no __wasm_type__) are accepted.
+  // For table/memory imports, __wasm_type__ must be present and match.
+  if (!moduleInfo_.imports.empty()) {
     auto *importsVal = builder_.createTryLoadGlobalPropertyInst(
         builder_.getLiteralString("__wasm_imports__"));
+    auto *undefinedVal = builder_.getLiteralUndefined();
+    auto *topLevelFunc = tlEntry_->getParent();
+
     uint32_t importFuncIdx = 0;
+    uint32_t importGlobalIdx = 0;
+
+    // Cache module objects to avoid redundant loads for the same module.
+    std::string lastModuleName;
+    Value *lastModuleObj = nullptr;
+
     for (const auto &imp : moduleInfo_.imports) {
-      if (imp.kind != WasmExternalKind::Function)
-        continue;
-      // imports[moduleName][fieldName]
-      auto *moduleObj = builder_.createLoadPropertyInst(
-          importsVal, builder_.getLiteralString(imp.moduleName));
-      auto *funcVal = builder_.createLoadPropertyInst(
+      // Load module object (deduplicate consecutive same-module loads).
+      Value *moduleObj;
+      if (imp.moduleName == lastModuleName && lastModuleObj) {
+        moduleObj = lastModuleObj;
+      } else {
+        moduleObj = builder_.createLoadPropertyInst(
+            importsVal, builder_.getLiteralString(imp.moduleName));
+
+        // Check module object is not undefined.
+        auto *modIsUndef = builder_.createBinaryOperatorInst(
+            moduleObj, undefinedVal,
+            ValueKind::BinaryStrictlyEqualInstKind);
+        auto *modFailBB = builder_.createBasicBlock(topLevelFunc);
+        auto *modOkBB = builder_.createBasicBlock(topLevelFunc);
+        builder_.createCondBranchInst(modIsUndef, modFailBB, modOkBB);
+
+        builder_.setInsertionBlock(modFailBB);
+        helpers_.emitLinkError(
+            builder_.getLiteralString("unknown import module"));
+        builder_.createUnreachableInst();
+
+        builder_.setInsertionBlock(modOkBB);
+        tlEntry_ = modOkBB;
+
+        lastModuleName = imp.moduleName;
+        lastModuleObj = moduleObj;
+      }
+
+      // Load the import value.
+      auto *importVal = builder_.createLoadPropertyInst(
           moduleObj, builder_.getLiteralString(imp.fieldName));
-      builder_.createStoreFrameInst(
-          tlScope, funcVal, importFuncVars_[importFuncIdx]);
-      ++importFuncIdx;
+
+      // Check import value is not undefined.
+      auto *impIsUndef = builder_.createBinaryOperatorInst(
+          importVal, undefinedVal,
+          ValueKind::BinaryStrictlyEqualInstKind);
+      auto *impFailBB = builder_.createBasicBlock(topLevelFunc);
+      auto *impOkBB = builder_.createBasicBlock(topLevelFunc);
+      builder_.createCondBranchInst(impIsUndef, impFailBB, impOkBB);
+
+      builder_.setInsertionBlock(impFailBB);
+      helpers_.emitLinkError(
+          builder_.getLiteralString("unknown import"));
+      builder_.createUnreachableInst();
+
+      builder_.setInsertionBlock(impOkBB);
+      tlEntry_ = impOkBB;
+
+      // Per-kind type validation.
+      switch (imp.kind) {
+        case WasmExternalKind::Function: {
+          // Load __wasm_type__ from the import value.
+          auto *typeStr = builder_.createLoadPropertyInst(
+              importVal, builder_.getLiteralString("__wasm_type__"));
+          auto *typeIsUndef = builder_.createBinaryOperatorInst(
+              typeStr, undefinedVal,
+              ValueKind::BinaryStrictlyEqualInstKind);
+          // If undefined → could be plain JS function. Check typeof.
+          auto *checkCallableBB =
+              builder_.createBasicBlock(topLevelFunc);
+          auto *checkTypeBB = builder_.createBasicBlock(topLevelFunc);
+          auto *acceptBB = builder_.createBasicBlock(topLevelFunc);
+          auto *linkErrorBB = builder_.createBasicBlock(topLevelFunc);
+          builder_.createCondBranchInst(
+              typeIsUndef, checkCallableBB, checkTypeBB);
+
+          // Check that the import value is callable (typeof === "function").
+          builder_.setInsertionBlock(checkCallableBB);
+          auto *typeofVal = builder_.createTypeOfInst(importVal);
+          auto *isFunc = builder_.createBinaryOperatorInst(
+              typeofVal,
+              builder_.getLiteralString("function"),
+              ValueKind::BinaryStrictlyEqualInstKind);
+          builder_.createCondBranchInst(
+              isFunc, acceptBB, linkErrorBB);
+
+          builder_.setInsertionBlock(checkTypeBB);
+          // Compare type string against expected.
+          std::string expectedType =
+              buildFuncTypeString(moduleInfo_.getFunctionType(
+                  importFuncIdx));
+          auto *mismatch = builder_.createBinaryOperatorInst(
+              typeStr,
+              builder_.getLiteralString(expectedType),
+              ValueKind::BinaryStrictlyNotEqualInstKind);
+          builder_.createCondBranchInst(
+              mismatch, linkErrorBB, acceptBB);
+
+          builder_.setInsertionBlock(linkErrorBB);
+          helpers_.emitLinkError(
+              builder_.getLiteralString("incompatible import type"));
+          builder_.createUnreachableInst();
+
+          builder_.setInsertionBlock(acceptBB);
+          tlEntry_ = acceptBB;
+
+          // Store the validated import function.
+          builder_.createStoreFrameInst(
+              tlScope, importVal, importFuncVars_[importFuncIdx]);
+          ++importFuncIdx;
+          break;
+        }
+
+        case WasmExternalKind::Global: {
+          // Load __wasm_type__ from the import value.
+          auto *typeStr = builder_.createLoadPropertyInst(
+              importVal, builder_.getLiteralString("__wasm_type__"));
+          auto *typeIsUndef = builder_.createBinaryOperatorInst(
+              typeStr, undefinedVal,
+              ValueKind::BinaryStrictlyEqualInstKind);
+          // If undefined → could be raw JS number. Check typeof.
+          auto *checkNumberBB =
+              builder_.createBasicBlock(topLevelFunc);
+          auto *checkTypeBB = builder_.createBasicBlock(topLevelFunc);
+          auto *acceptBB = builder_.createBasicBlock(topLevelFunc);
+          auto *linkErrorBB = builder_.createBasicBlock(topLevelFunc);
+          builder_.createCondBranchInst(
+              typeIsUndef, checkNumberBB, checkTypeBB);
+
+          // Check that the import value is a number or bigint
+          // (typeof === "number" || typeof === "bigint").
+          builder_.setInsertionBlock(checkNumberBB);
+          auto *typeofVal = builder_.createTypeOfInst(importVal);
+          auto *isNum = builder_.createBinaryOperatorInst(
+              typeofVal,
+              builder_.getLiteralString("number"),
+              ValueKind::BinaryStrictlyEqualInstKind);
+          auto *checkBigIntBB =
+              builder_.createBasicBlock(topLevelFunc);
+          builder_.createCondBranchInst(
+              isNum, acceptBB, checkBigIntBB);
+
+          builder_.setInsertionBlock(checkBigIntBB);
+          auto *isBigInt = builder_.createBinaryOperatorInst(
+              typeofVal,
+              builder_.getLiteralString("bigint"),
+              ValueKind::BinaryStrictlyEqualInstKind);
+          builder_.createCondBranchInst(
+              isBigInt, acceptBB, linkErrorBB);
+
+          builder_.setInsertionBlock(checkTypeBB);
+          std::string expectedType =
+              buildGlobalTypeString(imp.globalType);
+          auto *mismatch = builder_.createBinaryOperatorInst(
+              typeStr,
+              builder_.getLiteralString(expectedType),
+              ValueKind::BinaryStrictlyNotEqualInstKind);
+          builder_.createCondBranchInst(
+              mismatch, linkErrorBB, acceptBB);
+
+          builder_.setInsertionBlock(linkErrorBB);
+          helpers_.emitLinkError(
+              builder_.getLiteralString("incompatible import type"));
+          builder_.createUnreachableInst();
+
+          builder_.setInsertionBlock(acceptBB);
+          tlEntry_ = acceptBB;
+
+          // Store the import value into importGlobalVals_ for later
+          // use by initializeGlobals. We use a new Variable per
+          // imported global to pass the value.
+          if (importGlobalIdx < importGlobalVals_.size()) {
+            builder_.createStoreFrameInst(
+                tlScope, importVal,
+                importGlobalVals_[importGlobalIdx]);
+          }
+          ++importGlobalIdx;
+          break;
+        }
+
+        case WasmExternalKind::Table: {
+          // Load __wasm_type__ from the import value.
+          auto *typeStr = builder_.createLoadPropertyInst(
+              importVal, builder_.getLiteralString("__wasm_type__"));
+          auto *typeIsUndef = builder_.createBinaryOperatorInst(
+              typeStr, undefinedVal,
+              ValueKind::BinaryStrictlyEqualInstKind);
+          // If undefined → not a Wasm table, reject.
+          auto *checkTypeBB = builder_.createBasicBlock(topLevelFunc);
+          auto *linkErrorBB = builder_.createBasicBlock(topLevelFunc);
+          auto *acceptBB = builder_.createBasicBlock(topLevelFunc);
+          builder_.createCondBranchInst(
+              typeIsUndef, linkErrorBB, checkTypeBB);
+
+          builder_.setInsertionBlock(checkTypeBB);
+          std::string expectedType =
+              buildTableTypeString(imp.tableType);
+          auto *mismatch = builder_.createBinaryOperatorInst(
+              typeStr,
+              builder_.getLiteralString(expectedType),
+              ValueKind::BinaryStrictlyNotEqualInstKind);
+          auto *checkLimitsBB = builder_.createBasicBlock(topLevelFunc);
+          builder_.createCondBranchInst(
+              mismatch, linkErrorBB, checkLimitsBB);
+
+          // Check limits: actualMin >= expectedMin
+          builder_.setInsertionBlock(checkLimitsBB);
+          auto *actualMin = builder_.createLoadPropertyInst(
+              importVal, builder_.getLiteralString("__wasm_min__"));
+          auto *minOk = builder_.createBinaryOperatorInst(
+              actualMin,
+              builder_.getLiteralNumber(
+                  static_cast<double>(imp.tableType.limits.initial)),
+              ValueKind::BinaryGreaterThanOrEqualInstKind);
+
+          if (imp.tableType.limits.hasMaximum) {
+            auto *checkMaxBB =
+                builder_.createBasicBlock(topLevelFunc);
+            builder_.createCondBranchInst(
+                minOk, checkMaxBB, linkErrorBB);
+
+            // If import requires max, actual must also have max.
+            builder_.setInsertionBlock(checkMaxBB);
+            auto *actualMax = builder_.createLoadPropertyInst(
+                importVal, builder_.getLiteralString("__wasm_max__"));
+            auto *hasNoMax = builder_.createBinaryOperatorInst(
+                actualMax,
+                builder_.getLiteralNumber(-1),
+                ValueKind::BinaryStrictlyEqualInstKind);
+            auto *checkMaxValBB =
+                builder_.createBasicBlock(topLevelFunc);
+            builder_.createCondBranchInst(
+                hasNoMax, linkErrorBB, checkMaxValBB);
+
+            builder_.setInsertionBlock(checkMaxValBB);
+            auto *maxOk = builder_.createBinaryOperatorInst(
+                actualMax,
+                builder_.getLiteralNumber(
+                    static_cast<double>(
+                        imp.tableType.limits.maximum)),
+                ValueKind::BinaryLessThanOrEqualInstKind);
+            builder_.createCondBranchInst(
+                maxOk, acceptBB, linkErrorBB);
+          } else {
+            builder_.createCondBranchInst(
+                minOk, acceptBB, linkErrorBB);
+          }
+
+          builder_.setInsertionBlock(linkErrorBB);
+          helpers_.emitLinkError(
+              builder_.getLiteralString("incompatible import type"));
+          builder_.createUnreachableInst();
+
+          builder_.setInsertionBlock(acceptBB);
+          tlEntry_ = acceptBB;
+          break;
+        }
+
+        case WasmExternalKind::Memory: {
+          // Load __wasm_type__ from the import value.
+          auto *typeStr = builder_.createLoadPropertyInst(
+              importVal, builder_.getLiteralString("__wasm_type__"));
+          auto *typeIsUndef = builder_.createBinaryOperatorInst(
+              typeStr, undefinedVal,
+              ValueKind::BinaryStrictlyEqualInstKind);
+          // If undefined → not a Wasm memory, reject.
+          auto *checkTypeBB = builder_.createBasicBlock(topLevelFunc);
+          auto *linkErrorBB = builder_.createBasicBlock(topLevelFunc);
+          auto *acceptBB = builder_.createBasicBlock(topLevelFunc);
+          builder_.createCondBranchInst(
+              typeIsUndef, linkErrorBB, checkTypeBB);
+
+          builder_.setInsertionBlock(checkTypeBB);
+          auto *mismatch = builder_.createBinaryOperatorInst(
+              typeStr,
+              builder_.getLiteralString("memory"),
+              ValueKind::BinaryStrictlyNotEqualInstKind);
+          auto *checkLimitsBB = builder_.createBasicBlock(topLevelFunc);
+          builder_.createCondBranchInst(
+              mismatch, linkErrorBB, checkLimitsBB);
+
+          // Check limits: actualMin >= expectedMin
+          builder_.setInsertionBlock(checkLimitsBB);
+          auto *actualMin = builder_.createLoadPropertyInst(
+              importVal, builder_.getLiteralString("__wasm_min__"));
+          auto *minOk = builder_.createBinaryOperatorInst(
+              actualMin,
+              builder_.getLiteralNumber(
+                  static_cast<double>(imp.memoryType.limits.initial)),
+              ValueKind::BinaryGreaterThanOrEqualInstKind);
+
+          if (imp.memoryType.limits.hasMaximum) {
+            auto *checkMaxBB =
+                builder_.createBasicBlock(topLevelFunc);
+            builder_.createCondBranchInst(
+                minOk, checkMaxBB, linkErrorBB);
+
+            builder_.setInsertionBlock(checkMaxBB);
+            auto *actualMax = builder_.createLoadPropertyInst(
+                importVal, builder_.getLiteralString("__wasm_max__"));
+            auto *hasNoMax = builder_.createBinaryOperatorInst(
+                actualMax,
+                builder_.getLiteralNumber(-1),
+                ValueKind::BinaryStrictlyEqualInstKind);
+            auto *checkMaxValBB =
+                builder_.createBasicBlock(topLevelFunc);
+            builder_.createCondBranchInst(
+                hasNoMax, linkErrorBB, checkMaxValBB);
+
+            builder_.setInsertionBlock(checkMaxValBB);
+            auto *maxOk = builder_.createBinaryOperatorInst(
+                actualMax,
+                builder_.getLiteralNumber(
+                    static_cast<double>(
+                        imp.memoryType.limits.maximum)),
+                ValueKind::BinaryLessThanOrEqualInstKind);
+            builder_.createCondBranchInst(
+                maxOk, acceptBB, linkErrorBB);
+          } else {
+            builder_.createCondBranchInst(
+                minOk, acceptBB, linkErrorBB);
+          }
+
+          builder_.setInsertionBlock(linkErrorBB);
+          helpers_.emitLinkError(
+              builder_.getLiteralString("incompatible import type"));
+          builder_.createUnreachableInst();
+
+          builder_.setInsertionBlock(acceptBB);
+          tlEntry_ = acceptBB;
+          break;
+        }
+
+        case WasmExternalKind::Tag:
+          // Tag imports are not validated yet.
+          break;
+      }
     }
   }
 
@@ -664,6 +1051,7 @@ void WasmIRGen::finalizeModule() {
   struct ExportWrapperInfo {
     std::string name;
     Function *wrapperFunc;
+    uint32_t funcIndex;
   };
   std::vector<ExportWrapperInfo> wrappers;
   for (const auto &exp : moduleInfo_.exports) {
@@ -674,7 +1062,7 @@ void WasmIRGen::finalizeModule() {
         "export function index out of range");
     auto *wrapperFunc =
         createExportWrapper(exp.index, exp.name, tlScope);
-    wrappers.push_back({exp.name, wrapperFunc});
+    wrappers.push_back({exp.name, wrapperFunc, exp.index});
   }
 
   // Switch back to the top-level entry block to emit closures and the
@@ -685,6 +1073,13 @@ void WasmIRGen::finalizeModule() {
   for (const auto &w : wrappers) {
     auto *wrapperClosure = builder_.createCreateFunctionInst(
         tlScope, w.wrapperFunc);
+    // Set __wasm_type__ on the wrapper closure for import type validation.
+    std::string typeStr =
+        buildFuncTypeString(moduleInfo_.getFunctionType(w.funcIndex));
+    builder_.createStorePropertyStrictInst(
+        builder_.getLiteralString(typeStr),
+        wrapperClosure,
+        builder_.getLiteralString("__wasm_type__"));
     builder_.createStorePropertyStrictInst(
         wrapperClosure, exportsObj, builder_.getLiteralString(w.name));
   }
@@ -4955,11 +5350,11 @@ void WasmIRGen::onElemDrop(uint32_t segmentIndex) {
 void WasmIRGen::initializeGlobals(Instruction *tlScope) {
   uint32_t numImportedGlobals = moduleInfo_.importedGlobalCount();
 
-  // Initialize imported globals from the imports object.
-  // Imported globals are read from __wasm_imports__[module][field].value
-  // (for WebAssembly.Global objects) or directly as numbers.
-  // Phase 1: treat imported globals as their numeric initial value (0).
-  // This will be properly implemented when M.7 (WebAssembly.Global) exists.
+  // Initialize imported globals from the validated import values.
+  // During import validation, the raw import value was stored in
+  // importGlobalVals_[i]. If the import has __wasm_type__ (i.e., it is
+  // a WebAssembly.Global), we read its .value property; otherwise we
+  // use the import value directly (raw JS number).
   for (uint32_t i = 0; i < numImportedGlobals; ++i) {
     uint32_t slotIdx = globalSlotIndex_[i];
 
@@ -4976,17 +5371,49 @@ void WasmIRGen::initializeGlobals(Instruction *tlScope) {
       ++importGlobalIdx;
     }
 
-    // Phase 1: initialize imported globals to 0.
+    // Load the raw import value stored during validation.
+    auto *importVal = builder_.createLoadFrameInst(
+        tlScope, importGlobalVals_[i]);
+
+    // Check if import has __wasm_type__ (WebAssembly.Global object).
+    // If so, read .value; otherwise use the raw number directly.
+    auto *typeStr = builder_.createLoadPropertyInst(
+        importVal, builder_.getLiteralString("__wasm_type__"));
+    auto *typeIsUndef = builder_.createBinaryOperatorInst(
+        typeStr, builder_.getLiteralUndefined(),
+        ValueKind::BinaryStrictlyEqualInstKind);
+    auto *topLevelFunc = tlEntry_->getParent();
+    auto *rawValBB = builder_.createBasicBlock(topLevelFunc);
+    auto *globalObjBB = builder_.createBasicBlock(topLevelFunc);
+    auto *storeBB = builder_.createBasicBlock(topLevelFunc);
+    builder_.createCondBranchInst(typeIsUndef, rawValBB, globalObjBB);
+
+    // Raw JS number path: use importVal directly.
+    builder_.setInsertionBlock(rawValBB);
+    builder_.createBranchInst(storeBB);
+
+    // WebAssembly.Global object path: read .value property.
+    builder_.setInsertionBlock(globalObjBB);
+    auto *globalValue = builder_.createLoadPropertyInst(
+        importVal, builder_.getLiteralString("value"));
+    builder_.createBranchInst(storeBB);
+
+    // Store the resolved value.
+    builder_.setInsertionBlock(storeBB);
+    auto *resolvedVal = builder_.createPhiInst();
+    resolvedVal->addEntry(importVal, rawValBB);
+    resolvedVal->addEntry(globalValue, globalObjBB);
+
     builder_.createStoreFrameInst(
-        tlScope,
-        builder_.getLiteralNumber(0),
-        globalVars_[slotIdx]);
+        tlScope, resolvedVal, globalVars_[slotIdx]);
     if (gType == WasmValType::I64) {
+      // For i64, store 0 for hi32 (TODO: proper i64 Global support).
       builder_.createStoreFrameInst(
           tlScope,
           builder_.getLiteralNumber(0),
           globalVars_[slotIdx + 1]);
     }
+    tlEntry_ = storeBB;
   }
 
   // Initialize defined globals from their init expressions.
