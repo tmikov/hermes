@@ -10,8 +10,8 @@ Last updated: 2026-02-15 (branch `wasm`)
 | Test files failing | 58 / 83 |
 | Crashes | 0 |
 | Timeouts | 0 |
-| Assertions passing | 23,344 |
-| Assertions failing | 1,455 |
+| Assertions passing | 23,347 |
+| Assertions failing | 1,452 |
 
 ## How to Run
 
@@ -82,7 +82,7 @@ block (most of 155), if (most of 95), func (most of 52),
 i32 (83), i64 (29), conversions (25), local_get (16), local_set (33),
 load (46), store (51), memory_copy (64), memory_fill (64), memory_init (65),
 table_fill (9), table_get (9), table_grow (some), table_init (67),
-table_set (15), table_size (17), address (some), exports (32 of 35),
+table_set (15), table_size (17), address (some), exports (32),
 memory_size (2), switch (1)
 
 #### 2. wast2json Parse Errors (GC/Reference Type Proposals)
@@ -123,12 +123,10 @@ memory_init (some)
 
 Some modules fail to load (`invalid Wasm binary`) due to unsupported features
 like multiple memories, certain import/export combinations, or advanced memory
-operations. Global exports are not wired up to the JS-visible `exports`
-property (3 failures in exports test — globals work correctly internally).
+operations.
 
 **Affected tests:** memory_grow (49 — first module fails, cascading to all),
-memory_redundancy (3), start (3), exports (3 — `get` of global returns
-`undefined`)
+memory_redundancy (3), start (3)
 
 #### 6. NaN-Boxing Limitations (Phase 2)
 
@@ -213,7 +211,7 @@ NaN-boxing (Phase 2).
 | table_size | 21 | 17 | 0 | Validator |
 | select | 0 | 1 | 0 | wast2json parse error |
 | imports | 21 | 107 | 16 | Unlinkable not rejected |
-| exports | 6 | 35 | 0 | Validator (32) + missing global export (3) |
+| exports | 9 | 32 | 0 | Validator (32) |
 | tag | 0 | 1 | 0 | wast2json parse error |
 | ref_is_null | 0 | 1 | 0 | wast2json parse error |
 | ref_null | 0 | 1 | 0 | wast2json parse error |
@@ -225,5 +223,5 @@ NaN-boxing (Phase 2).
 2. **Bounds checking** for memory access — the only runtime correctness issue
 3. **Instantiation-time validation** (data segments, imports) — many tests blocked
 4. **wast2json upgrade** — would unblock tests using newer proposal syntax
-5. **Missing features** (global exports, multiple memories) — small scope
+5. **Missing features** (multiple memories) — small scope
 6. **NaN-boxing limitations** — requires Phase 2 (non-NaN-boxed Wasm values)

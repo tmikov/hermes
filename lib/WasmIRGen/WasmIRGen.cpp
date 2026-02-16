@@ -483,8 +483,8 @@ void WasmIRGen::finalizeModule() {
   // For each exported function, create a wrapper that presents a clean
   // JS-compatible interface (1 param per Wasm param, argument coercion,
   // return value marshaling). The exports object maps export names to
-  // wrapper closures. Only function exports are handled; other export kinds
-  // (memory, table, global) are silently skipped for now.
+  // wrapper closures. Function and global exports are handled; other export
+  // kinds (memory, table) are silently skipped for now.
 
   // Create wrapper functions first (this switches insertion point).
   struct ExportWrapperInfo {
@@ -513,6 +513,45 @@ void WasmIRGen::finalizeModule() {
         tlScope, w.wrapperFunc);
     builder_.createStorePropertyStrictInst(
         wrapperClosure, exportsObj, builder_.getLiteralString(w.name));
+  }
+
+  // Add global exports (snapshot of current value at init time).
+  // For immutable globals this is correct per spec. Mutable globals would
+  // need a WebAssembly.Global wrapper to reflect mutations (Phase 2).
+  for (const auto &exp : moduleInfo_.exports) {
+    if (exp.kind != WasmExternalKind::Global)
+      continue;
+    assert(exp.index < globalSlotIndex_.size() && "global index out of range");
+    uint32_t slotIdx = globalSlotIndex_[exp.index];
+    auto *val = builder_.createLoadFrameInst(tlScope, globalVars_[slotIdx]);
+
+    // Determine the global's type for i64 handling.
+    uint32_t numImportedGlobals = moduleInfo_.importedGlobalCount();
+    WasmValType gType = WasmValType::I32;
+    if (exp.index < numImportedGlobals) {
+      uint32_t idx = 0;
+      for (const auto &imp : moduleInfo_.imports) {
+        if (imp.kind != WasmExternalKind::Global)
+          continue;
+        if (idx == exp.index) {
+          gType = imp.globalType.type;
+          break;
+        }
+        ++idx;
+      }
+    } else {
+      gType = moduleInfo_.globals[exp.index - numImportedGlobals].type.type;
+    }
+
+    Value *exportVal = val;
+    if (gType == WasmValType::I64) {
+      auto *hi =
+          builder_.createLoadFrameInst(tlScope, globalVars_[slotIdx + 1]);
+      exportVal = helpers_.emitI64ToBigInt(val, hi);
+    }
+
+    builder_.createStorePropertyStrictInst(
+        exportVal, exportsObj, builder_.getLiteralString(exp.name));
   }
 
   builder_.createReturnInst(exportsObj);
