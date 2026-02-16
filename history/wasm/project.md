@@ -839,6 +839,22 @@ Steps 5-6 must check bounds before copying: if `offset + data.length >
 memory.size` (or table size), the entire instantiation fails with a
 `LinkError` and no partial initialization occurs.
 
+**IMPORTANT — AOT compatibility requirement**: All instantiation logic,
+including import validation (step 1), must be emitted as IR by WasmIRGen into
+the compiled top-level function. It must NOT be implemented as a separate
+runtime step outside the compiled bytecode. This is because the same compiled
+bytecode runs in both the JS API path (`new WebAssembly.Instance()`) and the
+AOT path (`hermesc --wasm foo.wasm -o foo.hbc`). In the AOT path, the `.hbc`
+file is a self-contained program — there is no `WebAssembly.Instance`
+constructor or `WasmModuleData` at runtime. The compiled top-level function
+reads imports from `globalThis.__wasm_imports__`, performs all initialization,
+and returns the exports object. If import validation were implemented outside
+the bytecode (e.g., in `instantiateModuleImpl` using metadata from
+`WasmModuleData`), it would only work for the JS API path and would be
+silently skipped in the AOT path. Emitting validation as IR ensures it works
+identically in both paths, requires no HBC format extensions, and keeps the
+compiled module self-contained.
+
 #### 4.8.6 Future: Joint JS+Wasm Compilation
 
 A significant performance opportunity exists in compiling JS and Wasm sources
