@@ -6,12 +6,12 @@ Last updated: 2026-02-15 (branch `wasm`)
 
 | Metric | Value |
 |--------|-------|
-| Test files passing | 50 / 83 (60%) |
-| Test files failing | 33 / 83 |
+| Test files passing | 53 / 83 (64%) |
+| Test files failing | 30 / 83 |
 | Crashes | 0 |
 | Timeouts | 0 |
-| Assertions passing | 24,440 |
-| Assertions failing | 366 |
+| Assertions passing | 24,461 |
+| Assertions failing | 345 |
 
 ## How to Run
 
@@ -30,13 +30,15 @@ python3 test/wasm/spec/run-spec-test.py \
   external/wasm-testsuite/tests/i32.wast
 ```
 
-## Passing Tests (50)
+## Passing Tests (53)
 
 | Test | Passed | Failed | Skipped |
 |------|--------|--------|---------|
 | nop | 87 | 0 | 0 |
 | type | 0 | 0 | 2 |
 | start | 10 | 0 | 1 |
+| func | 148 | 0 | 23 |
+| func_ptrs | 32 | 0 | 0 |
 | i32 | 457 | 0 | 2 |
 | i64 | 413 | 0 | 2 |
 | f32 | 2,511 | 0 | 2 |
@@ -57,6 +59,7 @@ python3 test/wasm/spec/run-spec-test.py \
 | labels | 28 | 0 | 0 |
 | forward | 4 | 0 | 0 |
 | left-to-right | 95 | 0 | 0 |
+| call_indirect | 156 | 0 | 11 |
 | local_get | 35 | 0 | 0 |
 | local_set | 52 | 0 | 0 |
 | load | 83 | 0 | 13 |
@@ -85,39 +88,11 @@ python3 test/wasm/spec/run-spec-test.py \
 | utf8-invalid-encoding | 0 | 0 | 176 |
 | endianness | 68 | 0 | 0 |
 
-## Failing Tests (33)
+## Failing Tests (30)
 
 ### Failure Categories
 
-#### 1. call_indirect Structural Type Mismatch (20 failures)
-
-`call_indirect` compares function types by type index rather than structural
-equivalence. When two type sections define structurally identical signatures
-(e.g., both `(i64) -> i64`), `call_indirect` throws "type mismatch" because
-the indices differ, even though the spec requires structural comparison.
-
-**Root cause:** In `lib/VM/JSLib/HermesBuiltin.cpp` line 957, the runtime check
-is `actualTypeIdx != expectedTypeIdx` — a direct integer comparison of type
-indices. The Wasm spec requires that `call_indirect` compare function type
-*signatures* structurally (same param types and result types), not by index.
-
-During IR generation (`lib/WasmIRGen/WasmIRGen.cpp`, `onCallIndirect()`), each
-function in the table is tagged with its type index from the module's type
-section. When two modules (or two type declarations within the same module)
-define the same signature at different indices, calls fail spuriously.
-
-**Fix approach:** Either canonicalize type indices at module load time so
-structurally identical types share the same index, or replace the integer
-comparison with a structural signature comparison at runtime.
-
-**Affected tests:** call_indirect (13), func_ptrs (7)
-
-Example (call_indirect.wast line 497+):
-```
-dispatch-structural-i64: unexpected exception: call_indirect: type mismatch
-```
-
-#### 2. table.grow Not Implemented (38 failures)
+#### 1. table.grow Not Implemented (38 failures)
 
 `table.grow` always returns -1 (failure) instead of growing the table. This
 causes all table_grow tests to fail directly, and table_size tests to fail as
@@ -146,7 +121,7 @@ grow: expected [{'type': 'i32', 'value': '0'}] got -1
 size: expected [{'type': 'i32', 'value': '5'}] got 2
 ```
 
-#### 3. NaN Bit Pattern Corruption (58 failures)
+#### 2. NaN Bit Pattern Corruption (58 failures)
 
 All Wasm f32/f64 values are stored as NaN-boxed `HermesValue`s on the register
 stack. NaN-boxing reserves the sign bit and fraction bits of NaN patterns for
@@ -185,7 +160,7 @@ NaN-boxing.
 **Affected tests:** f32_bitwise (16), f64_bitwise (16), conversions (8),
 float_memory (10), float_exprs (8)
 
-#### 4. Missing Trap on Out-of-Bounds Memory Access (38 failures)
+#### 3. Missing Trap on Out-of-Bounds Memory Access (38 failures)
 
 Memory loads/stores with large offsets that should trap (out of bounds) instead
 succeed, returning incorrect values. The compiled code does not check whether
@@ -195,10 +170,10 @@ succeed, returning incorrect values. The compiled code does not check whether
 
 Example: `i32.load offset=65536 (i32.const 0)` should trap but succeeds.
 
-#### 5. Missing Trap on Out-of-Bounds Table Access (12 failures)
+#### 4. Missing Trap on Out-of-Bounds Table Access (12 failures)
 
 `table.get` and `table.set` with out-of-bounds indices succeed instead of
-trapping. Same class of issue as the memory OOB problem (category 4) but for
+trapping. Same class of issue as the memory OOB problem (category 3) but for
 table operations.
 
 **Root cause:** In `lib/WasmIRGen/WasmIRGen.cpp`, `onTableGet()` (line 4637)
@@ -216,23 +191,23 @@ get-externref: expected trap but succeeded
 get-funcref: expected trap but succeeded
 ```
 
-#### 6. Unlinkable / Uninstantiable Modules Not Rejected (126 failures)
+#### 5. Unlinkable / Uninstantiable Modules Not Rejected (126 failures)
 
 Modules that should fail at instantiation time (e.g., out-of-bounds data
 segments, incompatible imports) are instantiated successfully.
 
 **Affected tests:** imports (106), data (20)
 
-#### 7. Module Load Failures / Missing Features (54 failures)
+#### 6. Module Load Failures / Missing Features (53 failures)
 
 Some modules fail to load (`invalid Wasm binary`) due to unsupported features
 like multiple memories, certain import/export combinations, or advanced memory
 operations.
 
 **Affected tests:** memory_grow (50 — first module fails to load, cascading to
-all subsequent assertions), memory_redundancy (3), func (1)
+all subsequent assertions), memory_redundancy (3)
 
-#### 8. Multi-Value Return from Calls Not Implemented (6 failures)
+#### 7. Multi-Value Return from Calls Not Implemented (6 failures)
 
 When a Wasm function returns multiple values (e.g., `(result i64 i32)`), only
 the first return value survives. All additional return values are replaced with
@@ -295,7 +270,7 @@ N>1 results, use N-1 additional stash slots (global-like variables) to pass
 extra return values out-of-band. The callee stores extra results into stash
 slots before `ReturnInst`, and the caller reads them after `CallInst`.
 
-#### 9. wast2json Parse Errors (14 failures)
+#### 8. wast2json Parse Errors (14 failures)
 
 Test files using syntax from newer Wasm proposals (GC types, typed function
 references) that the bundled `wast2json` (from WABT) cannot parse. These fail
@@ -314,57 +289,51 @@ br_if.wast:670:26: error: unexpected token "null", expected a numeric index
 
 | Test | Passed | Failed | Skipped | Primary Failure Mode |
 |------|--------|--------|---------|---------------------|
-| func | 147 | 1 | 23 | Module load (cat 7) |
-| func_ptrs | 25 | 7 | 0 | call_indirect type mismatch (cat 1) |
-| f32_bitwise | 347 | 16 | 0 | NaN copysign (cat 3) |
-| f64_bitwise | 347 | 16 | 0 | NaN copysign (cat 3) |
-| float_exprs | 811 | 8 | 0 | NaN bit patterns (cat 3) |
-| float_memory | 50 | 10 | 0 | NaN through memory (cat 3) |
-| conversions | 610 | 8 | 0 | NaN reinterpret (cat 3) |
-| if | 213 | 3 | 24 | Multi-value return (cat 8) |
-| br_if | 0 | 1 | 0 | wast2json parse error (cat 9) |
-| br_table | 0 | 1 | 0 | wast2json parse error (cat 9) |
-| unreached-valid | 0 | 1 | 0 | wast2json parse error (cat 9) |
-| call | 85 | 3 | 0 | Multi-value return (cat 8) |
-| call_indirect | 143 | 13 | 11 | Type index mismatch (cat 1) |
-| local_tee | 0 | 1 | 0 | wast2json parse error (cat 9) |
-| global | 0 | 1 | 0 | wast2json parse error (cat 9) |
-| memory | 0 | 1 | 0 | wast2json parse error (cat 9) |
-| memory_grow | 0 | 50 | 0 | Module load failure (cat 7) |
-| memory_redundancy | 1 | 3 | 0 | Module load (cat 7) |
-| address | 218 | 38 | 0 | Memory OOB (cat 4) |
-| align | 0 | 1 | 0 | wast2json parse error (cat 9) |
-| data | 20 | 20 | 0 | Uninstantiable (cat 6) |
-| table | 0 | 1 | 0 | wast2json parse error (cat 9) |
-| elem | 0 | 1 | 0 | wast2json parse error (cat 9) |
-| table_get | 10 | 4 | 0 | Table OOB (cat 5) |
-| table_grow | 25 | 23 | 0 | table.grow unimplemented (cat 2) |
-| table_set | 17 | 8 | 0 | Table OOB (cat 5) |
-| table_size | 23 | 15 | 0 | table.grow unimplemented (cat 2) |
-| select | 0 | 1 | 0 | wast2json parse error (cat 9) |
-| imports | 22 | 106 | 16 | Unlinkable (cat 6) |
-| tag | 0 | 1 | 0 | wast2json parse error (cat 9) |
-| ref_is_null | 0 | 1 | 0 | wast2json parse error (cat 9) |
-| ref_null | 0 | 1 | 0 | wast2json parse error (cat 9) |
-| linking | 0 | 1 | 0 | wast2json parse error (cat 9) |
+| f32_bitwise | 347 | 16 | 0 | NaN copysign (cat 2) |
+| f64_bitwise | 347 | 16 | 0 | NaN copysign (cat 2) |
+| float_exprs | 811 | 8 | 0 | NaN bit patterns (cat 2) |
+| float_memory | 50 | 10 | 0 | NaN through memory (cat 2) |
+| conversions | 610 | 8 | 0 | NaN reinterpret (cat 2) |
+| if | 213 | 3 | 24 | Multi-value return (cat 7) |
+| br_if | 0 | 1 | 0 | wast2json parse error (cat 8) |
+| br_table | 0 | 1 | 0 | wast2json parse error (cat 8) |
+| unreached-valid | 0 | 1 | 0 | wast2json parse error (cat 8) |
+| call | 85 | 3 | 0 | Multi-value return (cat 7) |
+| local_tee | 0 | 1 | 0 | wast2json parse error (cat 8) |
+| global | 0 | 1 | 0 | wast2json parse error (cat 8) |
+| memory | 0 | 1 | 0 | wast2json parse error (cat 8) |
+| memory_grow | 0 | 50 | 0 | Module load failure (cat 6) |
+| memory_redundancy | 1 | 3 | 0 | Module load (cat 6) |
+| address | 218 | 38 | 0 | Memory OOB (cat 3) |
+| align | 0 | 1 | 0 | wast2json parse error (cat 8) |
+| data | 20 | 20 | 0 | Uninstantiable (cat 5) |
+| table | 0 | 1 | 0 | wast2json parse error (cat 8) |
+| elem | 0 | 1 | 0 | wast2json parse error (cat 8) |
+| table_get | 10 | 4 | 0 | Table OOB (cat 4) |
+| table_grow | 25 | 23 | 0 | table.grow unimplemented (cat 1) |
+| table_set | 17 | 8 | 0 | Table OOB (cat 4) |
+| table_size | 23 | 15 | 0 | table.grow unimplemented (cat 1) |
+| select | 0 | 1 | 0 | wast2json parse error (cat 8) |
+| imports | 22 | 106 | 16 | Unlinkable (cat 5) |
+| tag | 0 | 1 | 0 | wast2json parse error (cat 8) |
+| ref_is_null | 0 | 1 | 0 | wast2json parse error (cat 8) |
+| ref_null | 0 | 1 | 0 | wast2json parse error (cat 8) |
+| linking | 0 | 1 | 0 | wast2json parse error (cat 8) |
 
 ### Priority for Fixing
 
-1. **call_indirect structural type comparison** (cat 1) — semantic correctness
-   bug; `call_indirect` must compare function signatures structurally, not by
-   type index. 20 failures.
-2. **table.grow implementation** (cat 2) — entirely missing feature. 38
+1. **table.grow implementation** (cat 1) — entirely missing feature. 38
    failures, blocks table_size tests too.
-3. **Memory bounds checking** (cat 4) — runtime correctness; OOB memory access
+2. **Memory bounds checking** (cat 3) — runtime correctness; OOB memory access
    succeeds instead of trapping. 38 failures.
-4. **Table bounds checking** (cat 5) — runtime correctness; OOB table access
+3. **Table bounds checking** (cat 4) — runtime correctness; OOB table access
    succeeds instead of trapping. 12 failures.
-5. **Multi-value call returns** (cat 8) — semantic correctness; multi-value
+4. **Multi-value call returns** (cat 7) — semantic correctness; multi-value
    returns from calls produce wrong results. 6 failures.
-6. **Instantiation-time validation** (cat 6) — data segments, imports. 126
+5. **Instantiation-time validation** (cat 5) — data segments, imports. 126
    failures.
-7. **Module load failures** (cat 7) — multiple memories, etc. 54 failures.
-8. **wast2json upgrade** (cat 9) — would unblock 14 test files using newer
+6. **Module load failures** (cat 6) — multiple memories, etc. 53 failures.
+7. **wast2json upgrade** (cat 8) — would unblock 14 test files using newer
    proposal syntax.
-9. **NaN-boxing limitations** (cat 3) — requires non-NaN-boxed Wasm value
+8. **NaN-boxing limitations** (cat 2) — requires non-NaN-boxed Wasm value
    representation. 58 failures.

@@ -511,6 +511,11 @@ class WasmIRGen {
   /// globalVars_[globalSlotIndex_[i]+1] is hi32.
   std::vector<uint32_t> globalSlotIndex_;
 
+  /// Maps raw type section indices to canonical indices. Structurally
+  /// identical types share the same canonical index, ensuring that
+  /// call_indirect uses structural type equivalence rather than nominal.
+  std::vector<uint32_t> canonicalTypeIndex_;
+
   /// Variable holding a JS Array of data segments in the top-level scope.
   /// Each element is either a Uint8Array (segment bytes) or null (dropped).
   /// Only populated if the module has data segments.
@@ -699,6 +704,10 @@ class WasmIRGen {
   /// initializes them to null/-1, and applies active element segments.
   /// \p tlScope is the CreateScopeInst for the top-level scope.
   void createTables(Instruction *tlScope);
+
+  /// Build the canonical type index map. Structurally identical types
+  /// (same params and results) get the same canonical index.
+  void buildCanonicalTypeMap();
 
   /// Initialize Wasm globals in the top-level function.
   /// Evaluates init expressions and stores initial values.

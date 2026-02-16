@@ -27,7 +27,28 @@ namespace wasm {
 WasmIRGen::WasmIRGen(Module &M, WasmModuleInfo &moduleInfo)
     : moduleInfo_(moduleInfo), builder_(&M), helpers_(builder_) {}
 
+void WasmIRGen::buildCanonicalTypeMap() {
+  const auto &types = moduleInfo_.types;
+  canonicalTypeIndex_.resize(types.size());
+
+  for (uint32_t i = 0; i < types.size(); ++i) {
+    // Find the first type with the same signature.
+    uint32_t canon = i;
+    for (uint32_t j = 0; j < i; ++j) {
+      if (types[j].params == types[i].params &&
+          types[j].results == types[i].results) {
+        canon = canonicalTypeIndex_[j];
+        break;
+      }
+    }
+    canonicalTypeIndex_[i] = canon;
+  }
+}
+
 void WasmIRGen::createFunctions() {
+  // Build canonical type index map for structural type comparison.
+  buildCanonicalTypeMap();
+
   // Create the top-level function first (must be before other functions).
   auto *topLevel = builder_.createTopLevelFunction(
       "global", true /* strictMode */);
@@ -424,7 +445,7 @@ void WasmIRGen::finalizeModule() {
               builder_.getLiteralNumber(static_cast<double>(i * 2)));
         }
 
-        // Store the type index.
+        // Store the type index (canonical for structural comparison).
         uint32_t typeIdx = 0;
         if (funcIdx < moduleInfo_.importedFunctionCount()) {
           uint32_t importFuncIdx = 0;
@@ -444,7 +465,8 @@ void WasmIRGen::finalizeModule() {
                         .typeIndex;
         }
         builder_.createStorePropertyStrictInst(
-            builder_.getLiteralNumber(static_cast<double>(typeIdx)),
+            builder_.getLiteralNumber(
+                static_cast<double>(canonicalTypeIndex_[typeIdx])),
             segArr,
             builder_.getLiteralNumber(static_cast<double>(i * 2 + 1)));
       }
@@ -2121,7 +2143,8 @@ void WasmIRGen::onCallIndirect(uint32_t sigIndex, uint32_t tableIndex) {
 
   // Call the builtin helper to validate and get the closure.
   // Takes (funcsArr, typesArr, index, expectedTypeIdx).
-  auto *sigIdxLit = builder_.getLiteralNumber(sigIndex);
+  auto *sigIdxLit =
+      builder_.getLiteralNumber(canonicalTypeIndex_[sigIndex]);
   auto *closure =
       helpers_.emitCallIndirect(funcsArr, typesArr, tableIdx, sigIdxLit);
 
@@ -4588,7 +4611,7 @@ void WasmIRGen::createTables(Instruction *tlScope) {
             tlScope, closureVars_[funcIdx]);
         builder_.createStorePropertyStrictInst(closure, funcsArr, idx);
 
-        // Store the type index into the type-indices array.
+        // Store the type index (canonical for structural comparison).
         uint32_t typeIdx = moduleInfo_.getFunctionType(funcIdx).params.size();
         // Actually, we need the type index from the function's type, not the
         // param count. The type index is used for call_indirect matching.
@@ -4612,7 +4635,8 @@ void WasmIRGen::createTables(Instruction *tlScope) {
                         .typeIndex;
         }
         builder_.createStorePropertyStrictInst(
-            builder_.getLiteralNumber(static_cast<double>(typeIdx)),
+            builder_.getLiteralNumber(
+                static_cast<double>(canonicalTypeIndex_[typeIdx])),
             typesArr,
             idx);
       }
