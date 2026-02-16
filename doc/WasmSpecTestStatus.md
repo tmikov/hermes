@@ -64,7 +64,10 @@ python3 test/wasm/spec/run-spec-test.py \
 
 ### Failure Categories
 
-The failures fall into several distinct categories:
+The failures fall into several distinct categories. Notably, **no execution
+semantics bugs remain** — all correctly-loaded modules produce correct results
+for all non-NaN-bit-pattern operations. The failures are all about validation,
+rejection of bad modules, missing features, and NaN-boxing limitations.
 
 #### 1. Incomplete Validator (`assert_invalid: validate returned true`)
 
@@ -73,13 +76,13 @@ rejected. This is the **most common** failure mode, affecting nearly every
 failing test file. The validator does not catch type errors, arity mismatches,
 or other structural invalidity in many cases.
 
-**Affected tests:** nop (4), f32 (11), f64 (11), f32_bitwise (9), f32_cmp (6),
-f64_bitwise (9), f64_cmp (6), float_exprs (8),
+**Affected tests:** nop (4), f32 (11), f64 (11), f32_bitwise (3), f32_cmp (6),
+f64_bitwise (3), f64_cmp (6), float_exprs (8), float_memory (10),
 block (most of 155), if (most of 95), func (most of 52),
-i32 (83), i64 (some), conversions (some), local_get (16), local_set (33),
+i32 (83), i64 (29), conversions (25), local_get (16), local_set (33),
 load (46), store (51), memory_copy (64), memory_fill (64), memory_init (65),
 table_fill (9), table_get (9), table_grow (some), table_init (67),
-table_set (15), table_size (17), address (some), exports (most of 35),
+table_set (15), table_size (17), address (some), exports (32 of 35),
 memory_size (2), switch (1)
 
 #### 2. wast2json Parse Errors (GC/Reference Type Proposals)
@@ -97,36 +100,18 @@ br_if.wast:670:26: error: unexpected token "null", expected a numeric index
     (func $f (param (ref null $t)) (result funcref) (local.get 0))
 ```
 
-#### 3. i64 Remaining Failures
-
-i64 values are now correctly represented as BigInt at the JS/Wasm boundary.
-Internal i64 arithmetic uses split lo/hi 32-bit representation. The remaining
-i64 failures (29 in the i64 test) are primarily due to incomplete validation
-and some edge cases in type conversions.
-
-**Affected tests:** i64 (29), conversions (33 — mostly `f32.convert_i64_s/u`
-and `f64.convert_i64_s/u`)
-
-#### 4. Missing Trap on Out-of-Bounds Memory Access
+#### 3. Missing Trap on Out-of-Bounds Memory Access
 
 Memory loads/stores with large offsets that should trap (out of bounds) instead
 succeed, returning incorrect values. The compiled code does not check whether
-`base + offset` exceeds the memory size.
+`base + offset` exceeds the memory size. This is the only category that
+affects runtime correctness (though not for well-formed programs).
 
 **Affected tests:** address (38), load (some), store (some)
 
 Example: `i32.load offset=65536 (i32.const 0)` should trap but succeeds.
 
-#### 5. Module Load Failures / Missing Features
-
-Some modules fail to load (`invalid Wasm binary`) due to unsupported features
-like multiple memories, certain import/export combinations, or advanced memory
-operations.
-
-**Affected tests:** memory_grow (49 — first module fails, cascading to all),
-memory_redundancy (3), start (3)
-
-#### 6. Unlinkable / Uninstantiable Modules Not Rejected
+#### 4. Unlinkable / Uninstantiable Modules Not Rejected
 
 Modules that should fail at instantiation time (e.g., out-of-bounds data
 segments, incompatible imports) are instantiated successfully.
@@ -134,20 +119,42 @@ segments, incompatible imports) are instantiated successfully.
 **Affected tests:** data (34), imports (most of 107), memory_fill (some),
 memory_init (some)
 
-#### 7. Global/Memory Export Issues
+#### 5. Module Load Failures / Missing Features
 
-Exported globals return `undefined` instead of their values. Memory and table
-exports may not work correctly.
+Some modules fail to load (`invalid Wasm binary`) due to unsupported features
+like multiple memories, certain import/export combinations, or advanced memory
+operations. Global exports are not wired up to the JS-visible `exports`
+property (3 failures in exports test — globals work correctly internally).
 
-**Affected tests:** exports (some — `get e` returns `undefined`), imports (some)
+**Affected tests:** memory_grow (49 — first module fails, cascading to all),
+memory_redundancy (3), start (3), exports (3 — `get` of global returns
+`undefined`)
 
-#### 8. f32/f64 Copysign Bit-Level Issues
+#### 6. NaN-Boxing Limitations (Phase 2)
 
-`f32.copysign` and `f64.copysign` produce incorrect results for certain
-sign/magnitude combinations, particularly involving signed zeros and
-subnormals.
+All Wasm f32/f64 values are stored as NaN-boxed `HermesValue`s on the register
+stack. NaN-boxing reserves the sign bit and fraction bits of NaN patterns for
+type tags (pointers, booleans, etc.), so only one canonical NaN bit pattern
+survives — Hermes's internal NaN, which has a **negative** sign bit
+(`0xFFF8...`). A positive-sign NaN (`0x7FF8...`) would be misinterpreted as a
+tagged non-number value.
 
-**Affected tests:** f32_bitwise (10), f64_bitwise (10)
+This causes two classes of failures:
+
+**Copysign with NaN sign source:** `copysign(x, nan)` produces wrong-sign
+results because the spec's positive NaN becomes Hermes's negative NaN.
+`std::copysign(x, negative_NaN)` copies the negative sign, producing `-x`
+instead of `+x`. The C++ implementation is correct — the sign bit is already
+wrong before copysign sees it. 16 failures per file in f32/f64_bitwise.
+
+**Reinterpret of NaN values:** `i32.reinterpret_f32` and `i64.reinterpret_f64`
+return wrong bit patterns for NaN inputs because non-canonical NaN bit patterns
+cannot survive on the register stack. 8 failures in conversions.
+
+This cannot be fixed without a separate Wasm value representation that bypasses
+NaN-boxing (Phase 2).
+
+**Affected tests:** f32_bitwise (16), f64_bitwise (16), conversions (8)
 
 ### Detailed Failure Table
 
@@ -158,16 +165,16 @@ subnormals.
 | func | 96 | 52 | 23 | Validator |
 | func_ptrs | 18 | 14 | 0 | Validator / call_indirect |
 | i32 | 374 | 83 | 2 | Validator |
-| i64 | 384 | 29 | 2 | Validator + conversions |
+| i64 | 384 | 29 | 2 | Validator (29) |
 | f32 | 2,500 | 11 | 2 | Validator |
 | f64 | 2,500 | 11 | 2 | Validator |
-| f32_bitwise | 344 | 19 | 0 | Copysign + Validator |
+| f32_bitwise | 344 | 19 | 0 | NaN-boxing copysign (16) + Validator (3) |
 | f32_cmp | 2,400 | 6 | 0 | Validator |
-| f64_bitwise | 344 | 19 | 0 | Copysign + Validator |
+| f64_bitwise | 344 | 19 | 0 | NaN-boxing copysign (16) + Validator (3) |
 | f64_cmp | 2,400 | 6 | 0 | Validator |
 | float_exprs | 811 | 8 | 0 | Validator |
 | float_memory | 50 | 10 | 0 | Validator |
-| conversions | 585 | 33 | 0 | i64 conversions |
+| conversions | 585 | 33 | 0 | Validator (25) + NaN-boxing reinterpret (8) |
 | block | 52 | 155 | 15 | Validator (multi-value) |
 | loop | 77 | 27 | 15 | Validator |
 | if | 121 | 95 | 24 | Validator |
@@ -206,7 +213,7 @@ subnormals.
 | table_size | 21 | 17 | 0 | Validator |
 | select | 0 | 1 | 0 | wast2json parse error |
 | imports | 21 | 107 | 16 | Unlinkable not rejected |
-| exports | 6 | 35 | 0 | Validator + global export |
+| exports | 6 | 35 | 0 | Validator (32) + missing global export (3) |
 | tag | 0 | 1 | 0 | wast2json parse error |
 | ref_is_null | 0 | 1 | 0 | wast2json parse error |
 | ref_null | 0 | 1 | 0 | wast2json parse error |
@@ -215,7 +222,8 @@ subnormals.
 ### Priority for Fixing
 
 1. **Validator completeness** — would fix the most tests with one effort
-2. **Bounds checking** for memory access — needed for correctness/security
+2. **Bounds checking** for memory access — the only runtime correctness issue
 3. **Instantiation-time validation** (data segments, imports) — many tests blocked
-4. **f32/f64.copysign** bit-level precision — affects bitwise tests
-5. **wast2json upgrade** — would unblock tests using newer proposal syntax
+4. **wast2json upgrade** — would unblock tests using newer proposal syntax
+5. **Missing features** (global exports, multiple memories) — small scope
+6. **NaN-boxing limitations** — requires Phase 2 (non-NaN-boxed Wasm values)
