@@ -4,9 +4,5 @@
 ;; LICENSE file in the root directory of this source tree.
 
 ;; REQUIRES: wasm
-;; XFAIL: *
 ;; RUN: python3 %S/run-spec-test.py --wast2json %wast2json --hermes %hermes %wasm_testsuite/loop.wast | %FileCheck %s
 ;; CHECK: SPEC TEST PASSED
-
-;; Remaining failures: f32 precision in "nesting" tests (lines 519-520),
-;; and missing assert_invalid validation (lines 601+).

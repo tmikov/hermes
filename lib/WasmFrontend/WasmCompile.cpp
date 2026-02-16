@@ -16,7 +16,8 @@
 #include "hermes/WasmIRGen/WasmIRGen.h"
 
 #include "wabt/binary-reader.h"
-#include "wabt/binary-reader-nop.h"
+#include "wabt/binary-reader-ir.h"
+#include "wabt/validator.h"
 
 namespace hermes {
 
@@ -68,6 +69,15 @@ std::unique_ptr<WasmModuleData> compileWasmToModuleData(
     const uint8_t *buffer,
     size_t size,
     std::string &errorMsg) {
+  // Validate the module first. The Wasm spec requires that
+  // new WebAssembly.Module() reject semantically invalid modules with a
+  // CompileError. Our compile path (ReadBinary + BinaryReaderHermesIRGen) only
+  // does structural parsing, so we run WABT's full semantic validator first.
+  if (!validateWasmBinary(buffer, size)) {
+    errorMsg = "Wasm module validation failed";
+    return nullptr;
+  }
+
   // Full compilation: parse → IR → optimize → bytecode.
   auto context = std::make_shared<Context>();
   auto M = std::make_shared<Module>(context);
@@ -123,20 +133,20 @@ std::unique_ptr<WasmModuleData> compileWasmToModuleData(
 }
 
 bool validateWasmBinary(const uint8_t *buffer, size_t size) {
-  // Use a silent reader that suppresses error messages (OnError returns true
-  // = "handled", preventing wabt from printing to stderr).
-  class SilentReader : public wabt::BinaryReaderNop {
-   public:
-    bool OnError(const wabt::Error &) override {
-      return true;
-    }
-  };
+  wabt::Module module;
+  wabt::Errors errors;
+  wabt::ReadBinaryOptions readOptions;
+  readOptions.features.enable_exceptions();
 
-  SilentReader reader;
-  wabt::ReadBinaryOptions options;
-  options.features.enable_exceptions();
-  wabt::Result result = wabt::ReadBinary(buffer, size, &reader, options);
-  return wabt::Succeeded(result);
+  wabt::Result readResult = wabt::ReadBinaryIr(
+      "<validate>", buffer, size, readOptions, &errors, &module);
+  if (wabt::Failed(readResult))
+    return false;
+
+  wabt::ValidateOptions validateOptions(readOptions.features);
+  wabt::Result validateResult =
+      wabt::ValidateModule(&module, &errors, validateOptions);
+  return wabt::Succeeded(validateResult);
 }
 
 } // namespace hermes
