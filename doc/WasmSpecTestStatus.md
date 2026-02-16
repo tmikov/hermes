@@ -348,3 +348,49 @@ br_if.wast:670:26: error: unexpected token "null", expected a numeric index
    proposal syntax.
 7. **NaN-boxing limitations** (cat 1) — requires non-NaN-boxed Wasm value
    representation. 58 failures.
+
+## Known Architectural Limitations
+
+These limitations are not yet surfaced as spec test failures because the
+`linking.wast` test (which exercises cross-module scenarios) is blocked by a
+wast2json parse error (cat 7). They will become visible once cross-module tests
+can run.
+
+### Non-Function Imports Not Wired In
+
+Only **function imports** are resolved from the imports object and connected to
+the compiled module. All other import kinds are stubbed:
+
+- **Memory imports ignored:** The compiled code always creates a fresh
+  `ArrayBuffer` regardless of whether the module imports a memory
+  (`WasmIRGen.cpp`, `createMemoryViews()`). The `WebAssembly.Memory` object
+  from the imports object is never read. Two modules cannot share linear memory.
+
+- **Table imports ignored:** The compiled code always creates fresh JS Arrays
+  for table storage (`WasmIRGen.cpp`, `createTables()`). The
+  `WebAssembly.Table` object from the imports object is never used. Functions
+  from one module cannot appear in another module's table through imports.
+
+- **Global imports hard-coded to zero:** Imported globals are initialized to 0
+  (`WasmIRGen.cpp`, `initializeGlobals()`). The actual value from the imports
+  object is ignored, even though `WebAssembly.Global` JS API objects are fully
+  implemented.
+
+### Memory and Table Exports Missing
+
+The exports object only includes function exports and (immutable) global
+snapshots. Memory and table exports are silently skipped
+(`WasmIRGen.cpp`, `finalizeModule()`), so `instance.exports.memory` and
+`instance.exports.table` are `undefined`. This prevents JS code from accessing
+the module's memory or table, and prevents passing them as imports to other
+modules.
+
+### Cross-Module `call_indirect` Type Indices
+
+The canonical type index map (commit d1907f2a3) is built per-module. If two
+modules define the same function signature, they may assign different canonical
+indices. When a function from module A is placed in module B's table (via shared
+`WebAssembly.Table`), `call_indirect` in module B will compare module B's
+canonical index against the index stored when module A populated the table — a
+mismatch. Fixing this requires either a runtime-level cross-module type
+registry or structural signature comparison at call time.
