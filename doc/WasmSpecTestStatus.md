@@ -6,12 +6,12 @@ Last updated: 2026-02-15 (branch `wasm`)
 
 | Metric | Value |
 |--------|-------|
-| Test files passing | 49 / 83 (59%) |
+| Test files passing | 50 / 83 (60%) |
 | Test files failing | 33 / 83 |
 | Crashes | 0 |
-| Timeouts | 1 |
-| Assertions passing | 24,333 |
-| Assertions failing | 359 |
+| Timeouts | 0 |
+| Assertions passing | 24,440 |
+| Assertions failing | 366 |
 
 ## How to Run
 
@@ -30,7 +30,7 @@ python3 test/wasm/spec/run-spec-test.py \
   external/wasm-testsuite/tests/i32.wast
 ```
 
-## Passing Tests (49)
+## Passing Tests (50)
 
 | Test | Passed | Failed | Skipped |
 |------|--------|--------|---------|
@@ -75,6 +75,7 @@ python3 test/wasm/spec/run-spec-test.py \
 | names | 482 | 0 | 0 |
 | exports | 41 | 0 | 0 |
 | custom | 8 | 0 | 0 |
+| binary | 107 | 0 | 0 |
 | binary-leb128 | 58 | 0 | 0 |
 | comments | 3 | 0 | 0 |
 | token | 0 | 0 | 26 |
@@ -88,14 +89,215 @@ python3 test/wasm/spec/run-spec-test.py \
 
 ### Failure Categories
 
-The failures fall into several distinct categories. Notably, **no execution
-semantics bugs remain** — all correctly-loaded modules produce correct results
-for all non-NaN-bit-pattern operations. The failures are about missing features,
-rejection of bad modules, and NaN-boxing limitations.
+#### 1. call_indirect Structural Type Mismatch (20 failures)
 
-#### 1. wast2json Parse Errors (GC/Reference Type Proposals)
+`call_indirect` compares function types by type index rather than structural
+equivalence. When two type sections define structurally identical signatures
+(e.g., both `(i64) -> i64`), `call_indirect` throws "type mismatch" because
+the indices differ, even though the spec requires structural comparison.
 
-Some test files use syntax from newer Wasm proposals (GC types, typed function
+**Root cause:** In `lib/VM/JSLib/HermesBuiltin.cpp` line 957, the runtime check
+is `actualTypeIdx != expectedTypeIdx` — a direct integer comparison of type
+indices. The Wasm spec requires that `call_indirect` compare function type
+*signatures* structurally (same param types and result types), not by index.
+
+During IR generation (`lib/WasmIRGen/WasmIRGen.cpp`, `onCallIndirect()`), each
+function in the table is tagged with its type index from the module's type
+section. When two modules (or two type declarations within the same module)
+define the same signature at different indices, calls fail spuriously.
+
+**Fix approach:** Either canonicalize type indices at module load time so
+structurally identical types share the same index, or replace the integer
+comparison with a structural signature comparison at runtime.
+
+**Affected tests:** call_indirect (13), func_ptrs (7)
+
+Example (call_indirect.wast line 497+):
+```
+dispatch-structural-i64: unexpected exception: call_indirect: type mismatch
+```
+
+#### 2. table.grow Not Implemented (38 failures)
+
+`table.grow` always returns -1 (failure) instead of growing the table. This
+causes all table_grow tests to fail directly, and table_size tests to fail as
+a consequence (sizes remain unchanged after failed grows).
+
+**Root cause:** In `lib/WasmIRGen/WasmIRGen.cpp` line 4667, `onTableGrow()`
+pops both operands (delta and fill value) and unconditionally pushes -1:
+
+```cpp
+void WasmIRGen::onTableGrow(uint32_t tableIndex) {
+  // Phase 1: not fully implemented — always returns -1 (failure).
+  pop(); // delta
+  pop(); // fill value
+  push(builder_.getLiteralNumber(-1));
+}
+```
+
+This is technically spec-compliant (table.grow is allowed to fail), but it
+means no table can ever be grown at runtime.
+
+**Affected tests:** table_grow (23), table_size (15)
+
+Example (table_grow.wast):
+```
+grow: expected [{'type': 'i32', 'value': '0'}] got -1
+size: expected [{'type': 'i32', 'value': '5'}] got 2
+```
+
+#### 3. NaN Bit Pattern Corruption (58 failures)
+
+All Wasm f32/f64 values are stored as NaN-boxed `HermesValue`s on the register
+stack. NaN-boxing reserves the sign bit and fraction bits of NaN patterns for
+type tags (pointers, booleans, etc.), so only one canonical NaN bit pattern
+survives — Hermes's internal NaN, which has a **negative** sign bit
+(`0xFFF8...`). A positive-sign NaN (`0x7FF8...`) would be misinterpreted as a
+tagged non-number value.
+
+This causes four classes of failures:
+
+**Copysign with NaN sign source (32 failures):** `copysign(x, nan)` produces
+wrong-sign results because the spec's positive NaN becomes Hermes's negative
+NaN. `std::copysign(x, negative_NaN)` copies the negative sign, producing `-x`
+instead of `+x`.
+
+**Reinterpret of NaN values (8 failures):** `i32.reinterpret_f32` and
+`i64.reinterpret_f64` return wrong bit patterns for NaN inputs because
+non-canonical NaN bit patterns cannot survive on the register stack.
+
+**NaN bit patterns through linear memory (10 failures):** Storing a
+non-canonical NaN to a Wasm register and then reading it back (or loading it
+from memory after storing via the register) corrupts the bit pattern. This
+affects `float_memory` tests where specific NaN bit patterns are stored to
+linear memory and loaded back with `i32.load`/`i64.load`, returning
+Hermes's canonical NaN bits instead of the original.
+
+**Non-arithmetic NaN bit patterns (8 failures):** `float_exprs` tests
+`f32.nonarithmetic_nan_bitpattern` and `f64.nonarithmetic_nan_bitpattern` check
+that specific non-canonical NaN bit patterns survive through non-arithmetic
+operations (reinterpret, load/store). They don't, because all NaN values
+collapse to the canonical NaN on the register stack.
+
+This cannot be fixed without a separate Wasm value representation that bypasses
+NaN-boxing.
+
+**Affected tests:** f32_bitwise (16), f64_bitwise (16), conversions (8),
+float_memory (10), float_exprs (8)
+
+#### 4. Missing Trap on Out-of-Bounds Memory Access (38 failures)
+
+Memory loads/stores with large offsets that should trap (out of bounds) instead
+succeed, returning incorrect values. The compiled code does not check whether
+`base + offset` exceeds the memory size.
+
+**Affected tests:** address (38)
+
+Example: `i32.load offset=65536 (i32.const 0)` should trap but succeeds.
+
+#### 5. Missing Trap on Out-of-Bounds Table Access (12 failures)
+
+`table.get` and `table.set` with out-of-bounds indices succeed instead of
+trapping. Same class of issue as the memory OOB problem (category 4) but for
+table operations.
+
+**Root cause:** In `lib/WasmIRGen/WasmIRGen.cpp`, `onTableGet()` (line 4637)
+uses `createLoadPropertyInst(funcsArr, idx)` and `onTableSet()` (line 4647)
+uses `createStorePropertyStrictInst(val, funcsArr, idx)`. These are JS
+property operations — loading an out-of-bounds index from a JS array returns
+`undefined` rather than trapping, and storing silently extends the array.
+The Wasm spec requires a trap for out-of-bounds table access.
+
+**Affected tests:** table_get (4), table_set (8)
+
+Example (table_get.wast):
+```
+get-externref: expected trap but succeeded
+get-funcref: expected trap but succeeded
+```
+
+#### 6. Unlinkable / Uninstantiable Modules Not Rejected (126 failures)
+
+Modules that should fail at instantiation time (e.g., out-of-bounds data
+segments, incompatible imports) are instantiated successfully.
+
+**Affected tests:** imports (106), data (20)
+
+#### 7. Module Load Failures / Missing Features (54 failures)
+
+Some modules fail to load (`invalid Wasm binary`) due to unsupported features
+like multiple memories, certain import/export combinations, or advanced memory
+operations.
+
+**Affected tests:** memory_grow (50 — first module fails to load, cascading to
+all subsequent assertions), memory_redundancy (3), func (1)
+
+#### 8. Multi-Value Return from Calls Not Implemented (6 failures)
+
+When a Wasm function returns multiple values (e.g., `(result i64 i32)`), only
+the first return value survives. All additional return values are replaced with
+`undefined`. This is an explicit limitation in WasmIRGen — the code comments
+say `"Push undefined placeholders for additional results (multi-value)"`.
+
+**Root cause:** Hermes IR functions can only return a single value via
+`ReturnInst`. The i64 case already works around this with a side-channel stash
+for the hi32 half, but there is no mechanism for passing additional return
+values from multi-value functions.
+
+**6 locations in `lib/WasmIRGen/WasmIRGen.cpp` are affected:**
+
+1. **`onReturn()` (~line 1037):** Pops all results beyond the first and
+   discards them. Only the first result is passed to `ReturnInst`.
+
+2. **`endFunction()` (~line 887):** Same as `onReturn()` for the fallthrough
+   return path at the end of a function body.
+
+3. **`onCall()` (~line 2013):** After a call, pushes `undefined` for all
+   results beyond the first instead of actual values.
+
+4. **`onCallIndirect()` (~line 2081):** Same as `onCall()`.
+
+5. **`createExportWrapper()` (~line 560):** Only marshals `results[0]` to JS.
+
+6. **`createImportTrampoline()` (~line 652):** Only unmarshals the first
+   result from a JS import call.
+
+**Note:** Multi-value *blocks* (block/loop/if with params and results within a
+single function) work correctly — the phi infrastructure handles them. Only
+cross-function-boundary multi-value is broken.
+
+**How the `if` test fails:** `add64_u_with_carry` returns `(i64, i32)` where
+the i32 is a carry flag. The caller `add64_u_saturated` uses this carry as the
+condition for `if (param i64) (result i64)`. But `onCall()` pushes `undefined`
+for the carry, so the `if` condition is always falsy and the saturation branch
+never executes.
+
+**Affected tests:** call (3), if (3)
+
+```
+;; add64_u_with_carry returns (sum: i64, carry: i32) — carry is lost
+(call $add64_u_with_carry (local.get 0) (local.get 1) (i32.const 0))
+(if (param i64) (result i64)    ;; carry (i32) is condition, sum (i64) is param
+  (then (drop) (i64.const -1))  ;; never reached because carry = undefined
+)
+```
+
+```
+call.wast line 306: as-binary-all-operands: expected 7 got 0
+call.wast line 308: as-call-all-operands: expected [3, 4] got undefined
+if.wast line 722: add64_u_saturated(-1, 1): expected UINT64_MAX got 0
+if.wast line 725: add64_u_saturated(-1, -1): expected UINT64_MAX got -2
+if.wast line 728: add64_u_saturated(MIN, MIN): expected UINT64_MAX got 0
+```
+
+**Fix approach:** Extend the existing i64 hi-stash pattern. For functions with
+N>1 results, use N-1 additional stash slots (global-like variables) to pass
+extra return values out-of-band. The callee stores extra results into stash
+slots before `ReturnInst`, and the caller reads them after `CallInst`.
+
+#### 9. wast2json Parse Errors (14 failures)
+
+Test files using syntax from newer Wasm proposals (GC types, typed function
 references) that the bundled `wast2json` (from WABT) cannot parse. These fail
 immediately with 0 pass / 1 fail before any assertions run.
 
@@ -108,111 +310,61 @@ br_if.wast:670:26: error: unexpected token "null", expected a numeric index
     (func $f (param (ref null $t)) (result funcref) (local.get 0))
 ```
 
-#### 2. Missing Trap on Out-of-Bounds Memory Access
-
-Memory loads/stores with large offsets that should trap (out of bounds) instead
-succeed, returning incorrect values. The compiled code does not check whether
-`base + offset` exceeds the memory size. This is the only category that
-affects runtime correctness (though not for well-formed programs).
-
-**Affected tests:** address (38)
-
-Example: `i32.load offset=65536 (i32.const 0)` should trap but succeeds.
-
-#### 3. Unlinkable / Uninstantiable Modules Not Rejected
-
-Modules that should fail at instantiation time (e.g., out-of-bounds data
-segments, incompatible imports) are instantiated successfully.
-
-**Affected tests:** data (14), imports (106)
-
-#### 4. Module Load Failures / Missing Features
-
-Some modules fail to load (`invalid Wasm binary`) due to unsupported features
-like multiple memories, certain import/export combinations, or advanced memory
-operations.
-
-**Affected tests:** memory_grow (49 — first module fails, cascading to all),
-memory_redundancy (3), func (1)
-
-#### 5. NaN-Boxing Limitations (Phase 2)
-
-All Wasm f32/f64 values are stored as NaN-boxed `HermesValue`s on the register
-stack. NaN-boxing reserves the sign bit and fraction bits of NaN patterns for
-type tags (pointers, booleans, etc.), so only one canonical NaN bit pattern
-survives — Hermes's internal NaN, which has a **negative** sign bit
-(`0xFFF8...`). A positive-sign NaN (`0x7FF8...`) would be misinterpreted as a
-tagged non-number value.
-
-This causes two classes of failures:
-
-**Copysign with NaN sign source:** `copysign(x, nan)` produces wrong-sign
-results because the spec's positive NaN becomes Hermes's negative NaN.
-`std::copysign(x, negative_NaN)` copies the negative sign, producing `-x`
-instead of `+x`. The C++ implementation is correct — the sign bit is already
-wrong before copysign sees it. 16 failures per file in f32/f64_bitwise.
-
-**Reinterpret of NaN values:** `i32.reinterpret_f32` and `i64.reinterpret_f64`
-return wrong bit patterns for NaN inputs because non-canonical NaN bit patterns
-cannot survive on the register stack. 8 failures in conversions.
-
-This cannot be fixed without a separate Wasm value representation that bypasses
-NaN-boxing (Phase 2).
-
-**Affected tests:** f32_bitwise (16), f64_bitwise (16), conversions (8)
-
-#### 6. Miscellaneous Runtime Issues
-
-Various remaining issues including call_indirect type mismatches, table
-operation failures, and float expression edge cases.
-
-**Affected tests:** call (3), call_indirect (13), float_exprs (8),
-float_memory (10), func_ptrs (7), if (3), table_get (4), table_grow (23),
-table_set (8), table_size (15)
-
 ### Detailed Failure Table
 
 | Test | Passed | Failed | Skipped | Primary Failure Mode |
 |------|--------|--------|---------|---------------------|
-| func | 147 | 1 | 23 | Module load |
-| func_ptrs | 25 | 7 | 0 | call_indirect |
-| f32_bitwise | 347 | 16 | 0 | NaN-boxing copysign (16) |
-| f64_bitwise | 347 | 16 | 0 | NaN-boxing copysign (16) |
-| float_exprs | 811 | 8 | 0 | Float edge cases |
-| float_memory | 50 | 10 | 0 | Float edge cases |
-| conversions | 610 | 8 | 0 | NaN-boxing reinterpret (8) |
-| if | 213 | 3 | 24 | Runtime |
-| br_if | 0 | 1 | 0 | wast2json parse error |
-| br_table | 0 | 1 | 0 | wast2json parse error |
-| unreached-valid | 0 | 1 | 0 | wast2json parse error |
-| call | 85 | 3 | 0 | Runtime |
-| call_indirect | 143 | 13 | 11 | Type mismatch |
-| local_tee | 0 | 1 | 0 | wast2json parse error |
-| global | 0 | 1 | 0 | wast2json parse error |
-| memory | 0 | 1 | 0 | wast2json parse error |
-| memory_grow | 0 | 49 | 0 | Module load failure |
-| memory_redundancy | 1 | 3 | 0 | Module load |
-| address | 218 | 38 | 0 | OOB traps + offsets |
-| align | 0 | 1 | 0 | wast2json parse error |
-| data | 20 | 14 | 0 | Uninstantiable not rejected |
-| table | 0 | 1 | 0 | wast2json parse error |
-| elem | 0 | 1 | 0 | wast2json parse error |
-| table_get | 10 | 4 | 0 | Missing feature |
-| table_grow | 25 | 23 | 0 | Missing feature |
-| table_set | 17 | 8 | 0 | Missing feature |
-| table_size | 23 | 15 | 0 | Missing feature |
-| select | 0 | 1 | 0 | wast2json parse error |
-| imports | 22 | 106 | 16 | Unlinkable not rejected |
-| tag | 0 | 1 | 0 | wast2json parse error |
-| ref_is_null | 0 | 1 | 0 | wast2json parse error |
-| ref_null | 0 | 1 | 0 | wast2json parse error |
-| linking | 0 | 1 | 0 | wast2json parse error |
-| binary | 0 | 0 | 0 | Timeout |
+| func | 147 | 1 | 23 | Module load (cat 7) |
+| func_ptrs | 25 | 7 | 0 | call_indirect type mismatch (cat 1) |
+| f32_bitwise | 347 | 16 | 0 | NaN copysign (cat 3) |
+| f64_bitwise | 347 | 16 | 0 | NaN copysign (cat 3) |
+| float_exprs | 811 | 8 | 0 | NaN bit patterns (cat 3) |
+| float_memory | 50 | 10 | 0 | NaN through memory (cat 3) |
+| conversions | 610 | 8 | 0 | NaN reinterpret (cat 3) |
+| if | 213 | 3 | 24 | Multi-value return (cat 8) |
+| br_if | 0 | 1 | 0 | wast2json parse error (cat 9) |
+| br_table | 0 | 1 | 0 | wast2json parse error (cat 9) |
+| unreached-valid | 0 | 1 | 0 | wast2json parse error (cat 9) |
+| call | 85 | 3 | 0 | Multi-value return (cat 8) |
+| call_indirect | 143 | 13 | 11 | Type index mismatch (cat 1) |
+| local_tee | 0 | 1 | 0 | wast2json parse error (cat 9) |
+| global | 0 | 1 | 0 | wast2json parse error (cat 9) |
+| memory | 0 | 1 | 0 | wast2json parse error (cat 9) |
+| memory_grow | 0 | 50 | 0 | Module load failure (cat 7) |
+| memory_redundancy | 1 | 3 | 0 | Module load (cat 7) |
+| address | 218 | 38 | 0 | Memory OOB (cat 4) |
+| align | 0 | 1 | 0 | wast2json parse error (cat 9) |
+| data | 20 | 20 | 0 | Uninstantiable (cat 6) |
+| table | 0 | 1 | 0 | wast2json parse error (cat 9) |
+| elem | 0 | 1 | 0 | wast2json parse error (cat 9) |
+| table_get | 10 | 4 | 0 | Table OOB (cat 5) |
+| table_grow | 25 | 23 | 0 | table.grow unimplemented (cat 2) |
+| table_set | 17 | 8 | 0 | Table OOB (cat 5) |
+| table_size | 23 | 15 | 0 | table.grow unimplemented (cat 2) |
+| select | 0 | 1 | 0 | wast2json parse error (cat 9) |
+| imports | 22 | 106 | 16 | Unlinkable (cat 6) |
+| tag | 0 | 1 | 0 | wast2json parse error (cat 9) |
+| ref_is_null | 0 | 1 | 0 | wast2json parse error (cat 9) |
+| ref_null | 0 | 1 | 0 | wast2json parse error (cat 9) |
+| linking | 0 | 1 | 0 | wast2json parse error (cat 9) |
 
 ### Priority for Fixing
 
-1. **Bounds checking** for memory access — the only runtime correctness issue
-2. **Instantiation-time validation** (data segments, imports) — many tests blocked
-3. **wast2json upgrade** — would unblock tests using newer proposal syntax
-4. **Missing features** (multiple memories, table operations) — small scope
-5. **NaN-boxing limitations** — requires Phase 2 (non-NaN-boxed Wasm values)
+1. **call_indirect structural type comparison** (cat 1) — semantic correctness
+   bug; `call_indirect` must compare function signatures structurally, not by
+   type index. 20 failures.
+2. **table.grow implementation** (cat 2) — entirely missing feature. 38
+   failures, blocks table_size tests too.
+3. **Memory bounds checking** (cat 4) — runtime correctness; OOB memory access
+   succeeds instead of trapping. 38 failures.
+4. **Table bounds checking** (cat 5) — runtime correctness; OOB table access
+   succeeds instead of trapping. 12 failures.
+5. **Multi-value call returns** (cat 8) — semantic correctness; multi-value
+   returns from calls produce wrong results. 6 failures.
+6. **Instantiation-time validation** (cat 6) — data segments, imports. 126
+   failures.
+7. **Module load failures** (cat 7) — multiple memories, etc. 54 failures.
+8. **wast2json upgrade** (cat 9) — would unblock 14 test files using newer
+   proposal syntax.
+9. **NaN-boxing limitations** (cat 3) — requires non-NaN-boxed Wasm value
+   representation. 58 failures.
