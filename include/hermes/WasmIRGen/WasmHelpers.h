@@ -89,6 +89,9 @@ class WasmHelpers {
   /// Emit f32.copysign(a, b): copy the sign bit of b onto the magnitude of a.
   Instruction *emitF32Copysign(Value *a, Value *b);
 
+  /// Emit f64.nearest / f32.nearest: IEEE 754 round-ties-to-even.
+  Instruction *emitNearest(Value *a);
+
   // --- i64 helpers (G.3) ---
   // Binary ops return lo32; hi32 is stashed and retrieved via emitI64HiResult.
 

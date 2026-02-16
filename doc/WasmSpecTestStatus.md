@@ -1,17 +1,17 @@
 # Wasm Spec Test Status
 
-Last updated: 2026-02-11 (branch `wasm`)
+Last updated: 2026-02-15 (branch `wasm`)
 
 ## Summary
 
 | Metric | Value |
 |--------|-------|
-| Test files passing | 24 / 83 (29%) |
-| Test files failing | 59 / 83 |
+| Test files passing | 25 / 83 (30%) |
+| Test files failing | 58 / 83 |
 | Crashes | 0 |
 | Timeouts | 0 |
-| Assertions passing | 23,336 |
-| Assertions failing | 1,463 |
+| Assertions passing | 23,344 |
+| Assertions failing | 1,455 |
 
 ## How to Run
 
@@ -30,7 +30,7 @@ python3 test/wasm/spec/run-spec-test.py \
   external/wasm-testsuite/tests/i32.wast
 ```
 
-## Passing Tests (24)
+## Passing Tests (25)
 
 | Test | Passed | Failed | Skipped |
 |------|--------|--------|---------|
@@ -57,9 +57,10 @@ python3 test/wasm/spec/run-spec-test.py \
 | utf8-custom-section-id | 176 | 0 | 0 |
 | utf8-import-field | 176 | 0 | 0 |
 | utf8-import-module | 176 | 0 | 0 |
+| float_misc | 470 | 0 | 0 |
 | utf8-invalid-encoding | 0 | 0 | 176 |
 
-## Failing Tests (59)
+## Failing Tests (58)
 
 ### Failure Categories
 
@@ -72,8 +73,8 @@ rejected. This is the **most common** failure mode, affecting nearly every
 failing test file. The validator does not catch type errors, arity mismatches,
 or other structural invalidity in many cases.
 
-**Affected tests:** nop (4), f32 (9), f64 (9), f32_bitwise (9), f32_cmp (6),
-f64_bitwise (9), f64_cmp (6), float_exprs (8), float_misc (6),
+**Affected tests:** nop (4), f32 (11), f64 (11), f32_bitwise (9), f32_cmp (6),
+f64_bitwise (9), f64_cmp (6), float_exprs (8),
 block (most of 155), if (most of 95), func (most of 52),
 i32 (83), i64 (some), conversions (some), local_get (16), local_set (33),
 load (46), store (51), memory_copy (64), memory_fill (64), memory_init (65),
@@ -140,15 +141,7 @@ exports may not work correctly.
 
 **Affected tests:** exports (some — `get e` returns `undefined`), imports (some)
 
-#### 8. f32.nearest / Math.round Semantics
-
-`f32.nearest` uses `Math.round`, but Wasm's `nearest` uses banker's rounding
-(round half to even), while JS `Math.round` rounds half up. This causes
-`f32.nearest(0.5)` to return `1` instead of `0`.
-
-**Affected tests:** f32 (1), float_misc (some)
-
-#### 9. f32 Copysign Bit-Level Issues
+#### 8. f32/f64 Copysign Bit-Level Issues
 
 `f32.copysign` and `f64.copysign` produce incorrect results for certain
 sign/magnitude combinations, particularly involving signed zeros and
@@ -166,15 +159,14 @@ subnormals.
 | func_ptrs | 18 | 14 | 0 | Validator / call_indirect |
 | i32 | 374 | 83 | 2 | Validator |
 | i64 | 384 | 29 | 2 | Validator + conversions |
-| f32 | 2,499 | 12 | 2 | Validator + nearest |
-| f64 | 2,499 | 12 | 2 | Validator |
+| f32 | 2,500 | 11 | 2 | Validator |
+| f64 | 2,500 | 11 | 2 | Validator |
 | f32_bitwise | 344 | 19 | 0 | Copysign + Validator |
 | f32_cmp | 2,400 | 6 | 0 | Validator |
 | f64_bitwise | 344 | 19 | 0 | Copysign + Validator |
 | f64_cmp | 2,400 | 6 | 0 | Validator |
 | float_exprs | 811 | 8 | 0 | Validator |
 | float_memory | 50 | 10 | 0 | Validator |
-| float_misc | 464 | 6 | 0 | Validator + nearest |
 | conversions | 585 | 33 | 0 | i64 conversions |
 | block | 52 | 155 | 15 | Validator (multi-value) |
 | loop | 77 | 27 | 15 | Validator |
@@ -225,6 +217,5 @@ subnormals.
 1. **Validator completeness** — would fix the most tests with one effort
 2. **Bounds checking** for memory access — needed for correctness/security
 3. **Instantiation-time validation** (data segments, imports) — many tests blocked
-4. **f32.nearest** semantics (banker's rounding) — easy, 1 assertion
-5. **f32/f64.copysign** bit-level precision — affects bitwise tests
-6. **wast2json upgrade** — would unblock tests using newer proposal syntax
+4. **f32/f64.copysign** bit-level precision — affects bitwise tests
+5. **wast2json upgrade** — would unblock tests using newer proposal syntax

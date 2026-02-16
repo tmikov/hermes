@@ -175,6 +175,7 @@ PRIVATE_BUILTIN(wasmI32ReinterpretF32)
 PRIVATE_BUILTIN(wasmF32ReinterpretI32)
 PRIVATE_BUILTIN(wasmF64Copysign)
 PRIVATE_BUILTIN(wasmF32Copysign)
+PRIVATE_BUILTIN(wasmNearest)
 // i64 hi32 stash/retrieve helpers. Used for i64 function returns and i64
 // arithmetic helpers that return split lo/hi results.
 PRIVATE_BUILTIN(wasmI64HiStash)

@@ -2546,10 +2546,8 @@ void WasmIRGen::onF64Trunc() {
 }
 
 void WasmIRGen::onF64Nearest() {
-  // Note: Wasm nearest is "round ties to even" (IEEE 754), while Math.round
-  // rounds ties to +infinity. This is a known approximation for Phase 1.
   Value *val = pop();
-  push(builder_.createCallBuiltinInst(BuiltinMethod::Math_round, {val}));
+  push(helpers_.emitNearest(val));
 }
 
 void WasmIRGen::onF64Min() {
@@ -2695,10 +2693,8 @@ void WasmIRGen::onF32Trunc() {
 }
 
 void WasmIRGen::onF32Nearest() {
-  // Same approximation as f64.nearest: Math.round instead of round-ties-even.
   Value *val = pop();
-  push(emitFround(
-      builder_.createCallBuiltinInst(BuiltinMethod::Math_round, {val})));
+  push(emitFround(helpers_.emitNearest(val)));
 }
 
 void WasmIRGen::onF32Min() {

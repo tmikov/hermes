@@ -100,6 +100,11 @@ Instruction *WasmHelpers::emitF32Copysign(Value *a, Value *b) {
       BuiltinMethod::HermesBuiltin_wasmF32Copysign, {a, b});
 }
 
+Instruction *WasmHelpers::emitNearest(Value *a) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmNearest, {a});
+}
+
 // --- i64 helpers (G.3, G.5) ---
 
 Instruction *WasmHelpers::emitI64HiStash(Value *hi) {

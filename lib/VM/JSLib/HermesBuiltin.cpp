@@ -432,6 +432,13 @@ CallResult<HermesValue> wasmF32Copysign(void *, Runtime &runtime) {
       static_cast<double>(std::copysign(a, b)));
 }
 
+/// Wasm f64.nearest / f32.nearest: IEEE 754 round-ties-to-even.
+CallResult<HermesValue> wasmNearest(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  double val = args.getArg(0).getNumber();
+  return HermesValue::encodeTrustedNumberValue(std::nearbyint(val));
+}
+
 // ===== i64 split-pair helpers (G.3) =====
 //
 // Phase 1 represents i64 values as two i32 halves (lo, hi). Arithmetic
@@ -2233,6 +2240,11 @@ void createHermesBuiltins(Runtime &runtime) {
       P::wasmF32Copysign,
       wasmF32Copysign,
       2);
+  defineInternMethod(
+      B::HermesBuiltin_wasmNearest,
+      P::wasmNearest,
+      wasmNearest,
+      1);
   // i64 helpers (G.3, G.5).
   defineInternMethod(
       B::HermesBuiltin_wasmI64HiStash,

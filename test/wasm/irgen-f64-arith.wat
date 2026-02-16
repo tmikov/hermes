@@ -165,7 +165,7 @@
 
 ;; CHECK-LABEL: function wasm_func_10(p0: any): any
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[R:.*]] = CallBuiltinInst (:any) [Math.round]{{.*}}, %[[A]]: any
+;; CHECK-NEXT: %[[R:.*]] = CallBuiltinInst (:any) [HermesBuiltin.wasmNearest]{{.*}}, %[[A]]: any
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
 ;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[R]]: any, %BB0
