@@ -191,8 +191,22 @@ Remaining failures (47) are due to:
 - **Table/memory exports not implemented (26):** Tables and memories are not
   exported as `WebAssembly.Table`/`Memory` objects, so cross-module
   table/memory imports fail with "unknown import".
-- **Memory data offset / grow issues (6):** Pre-existing limitations with
-  imported memory data segments and memory.grow on imported memories.
+- **Alignment hint trusted for memory access (2):** The spec allows
+  alignment hints on load/store instructions that are strictly advisory —
+  implementations must produce correct results even when the actual address
+  is less aligned than the hint declares. The current compiled code trusts
+  alignment hints and uses typed array views (e.g., `HEAP32[addr >>> 2]`)
+  which silently round the address down to the element boundary. Two test
+  cases import a memory, write a byte via `data` segment at an unaligned
+  offset, then `i32.load` at that offset with the default alignment hint
+  (align=4). The address is a function parameter (not constant at compile
+  time), so this cannot be detected statically. See "Alignment Hints
+  Trusted" under Known Architectural Limitations. A patched copy of the
+  test (`test/wasm/spec/imports_patched.wast_`) changes these two
+  instructions to `align=1`, reducing the failure count by 2.
+- **`memory.grow` on imported memory (4):** `memory.grow` operates on the
+  locally-created ArrayBuffer, not the imported `WebAssembly.Memory`
+  object, so grow has no effect on the shared memory.
 
 **data (2 failures):** Active data segments have an offset expression (e.g.,
 `(data (i32.const 65536) "hello")`). If the offset + data length exceeds the
@@ -204,10 +218,32 @@ check), and for extended constant expressions (`i32.add`/`i32.sub`/`i32.mul`).
 The remaining 2 failures (lines 89, 90) use `global.get` on non-imported
 globals, which wast2json rejects.
 
-**Fix approach:** The remaining failures require implementing table/memory
-exports as proper `WebAssembly.Table`/`Memory` objects, wrapping global exports
-in `WebAssembly.Global` objects with `__wasm_type__`, and implementing tag
-exports.
+**Fix approach — dependency graph:**
+
+The remaining failures have the following dependency structure:
+
+```
+Export globals as WebAssembly.Global ──→ Global type validation works (12 fixed)
+                                          (no further dependency)
+
+Export tables as WebAssembly.Table ────→ Table imports resolve (12 fixed)
+                                    └──→ Wire imported table into compiled code
+                                          (needed for linking.wast, not imports.wast)
+
+Export memories as WebAssembly.Memory ─→ Memory imports resolve (13 fixed)
+                                    └──→ Wire imported memory into compiled code
+                                     └──→ memory.grow on imported memory works (4 fixed)
+
+Tags (independent) ───────────────────→ Tag import/export support (3+1 fixed)
+```
+
+The global path is independent and simplest — no "wiring" needed, just wrap
+the exported value in a `WebAssembly.Global` object with `__wasm_type__`.
+The memory path is the deepest: export → import resolution → wire buffer →
+memory.grow. Tags are fully independent of all three but least impactful
+(4 failures). Recommended order: globals first (12 fixes, self-contained),
+then memory exports (13 fixes from just the export side), then table
+exports (12 fixes from just the export side).
 
 **Affected tests:** imports (47), data (2)
 
@@ -395,6 +431,38 @@ snapshots. Memory and table exports are silently skipped
 `instance.exports.table` are `undefined`. This prevents JS code from accessing
 the module's memory or table, and prevents passing them as imports to other
 modules.
+
+### Alignment Hints Trusted
+
+Wasm load/store instructions include an alignment hint (e.g., `align=4` for
+`i32.load`). The spec says this hint is advisory: implementations must
+produce correct results regardless of whether the actual effective address
+satisfies the declared alignment. The hint exists so that engines targeting
+native code can emit faster aligned-load instructions when the hint
+guarantees alignment.
+
+The current compiled code trusts alignment hints. When `alignLog2 ==
+naturalAlign` (the common case, including all default-aligned loads/stores),
+it uses typed array element access: `HEAP32[addr >>> 2]`,
+`HEAPF64[addr >>> 3]`, etc. These typed array accesses implicitly round the
+byte address down to the element boundary, silently reading/writing the
+wrong bytes when the actual address is not aligned.
+
+An unaligned byte-assembly path exists (`emitUnalignedLoad` /
+`emitUnalignedStore` in `WasmIRGen.cpp`) and is used when `alignLog2 <
+naturalAlign` — i.e., when the Wasm author explicitly declares sub-natural
+alignment. But when the hint says "naturally aligned" and the runtime
+address is not, the fast path is taken and produces incorrect results.
+
+Always using the byte-assembly path would fix correctness but impose a
+significant performance cost on every memory access. A runtime alignment
+check (`if (addr & (align - 1))`) that branches to the slow path is
+possible but adds IR complexity and branch overhead to every load/store.
+
+In practice, well-formed Wasm compilers (LLVM, Binaryen) emit correct
+alignment hints. The spec test deliberately passes incorrect hints to verify
+engine robustness. This causes 2 failures in `imports.wast` (lines 502,
+514).
 
 ### Cross-Module `call_indirect` Type Indices
 
