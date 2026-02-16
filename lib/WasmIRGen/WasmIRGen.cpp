@@ -338,10 +338,44 @@ void WasmIRGen::finalizeModule() {
 
   // Apply active data segments: copy bytes into linear memory.
   if (hasMemory) {
+    // Compute initial memory size for data segment bounds checking.
+    // Only check at compile time for locally-defined memories, where the
+    // initial size is known exactly. For imported memories, the declared
+    // limits are minimums — the actual memory provided by the host may be
+    // larger, so bounds checking must happen at runtime.
+    uint64_t memoryBytes = 0;
+    bool canBoundsCheck = false;
+    if (!moduleInfo_.memories.empty()) {
+      memoryBytes =
+          static_cast<uint64_t>(moduleInfo_.memories[0].limits.initial) *
+          65536;
+      canBoundsCheck = true;
+    }
+
     for (uint32_t si = 0; si < moduleInfo_.dataSegments.size(); ++si) {
       const auto &seg = moduleInfo_.dataSegments[si];
       if (seg.mode != WasmDataSegment::Mode::Active)
         continue;
+
+      // Bounds check: offset + size must not exceed initial memory.
+      if (canBoundsCheck &&
+          seg.offsetKind == WasmGlobal::InitKind::I32Const) {
+        uint64_t offsetU =
+            static_cast<uint64_t>(static_cast<uint32_t>(seg.offsetValue));
+        if (offsetU + seg.data.size() > memoryBytes) {
+          helpers_.emitTrap();
+          builder_.createUnreachableInst();
+          // Create a new dead block for remaining initialization code.
+          // Replace tlEntry_ so that code after createExportWrapper()
+          // (which resets insertion to tlEntry_) also goes into the dead
+          // block.
+          tlEntry_ = builder_.createBasicBlock(
+              tlEntry_->getParent());
+          builder_.setInsertionBlock(tlEntry_);
+          break;
+        }
+      }
+
       if (seg.data.empty())
         continue;
 

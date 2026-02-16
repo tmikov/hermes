@@ -10,8 +10,8 @@ Last updated: 2026-02-16 (branch `wasm`)
 | Test files failing | 29 / 83 |
 | Crashes | 0 |
 | Timeouts | 0 |
-| Assertions passing | 24,489 |
-| Assertions failing | 317 |
+| Assertions passing | 24,499 |
+| Assertions failing | 307 |
 
 ## How to Run
 
@@ -162,12 +162,43 @@ get-externref: expected trap but succeeded
 get-funcref: expected trap but succeeded
 ```
 
-#### 4. Unlinkable / Uninstantiable Modules Not Rejected (126 failures)
+#### 4. Unlinkable / Uninstantiable Modules Not Rejected (116 failures)
 
-Modules that should fail at instantiation time (e.g., out-of-bounds data
-segments, incompatible imports) are instantiated successfully.
+Modules that should be rejected at instantiation time are accepted by Hermes.
+The spec requires validation between parsing and execution; Hermes skips most
+of these checks, so errors surface later (or not at all) as wrong results.
 
-**Affected tests:** imports (106), data (20)
+**imports (106 failures):** The spec requires that every import is matched
+against the provided imports object and validated for type compatibility at
+instantiation time. Mismatches must produce a `LinkError`. For example:
+
+- Importing a function with the wrong signature should fail
+- Importing a memory or table with limits that don't satisfy the declared
+  minimums/maximums should fail
+- A missing import should fail
+
+Hermes currently does minimal or no validation of imports at link time. If a
+module declares `(import "env" "foo" (func (param i32) (result i32)))` but the
+host provides a function with a different signature (or a non-function),
+instantiation succeeds. The mismatch only surfaces later at call time (if at
+all), producing wrong results instead of an upfront `LinkError`.
+
+**data (10 failures):** Active data segments have an offset expression (e.g.,
+`(data (i32.const 65536) "hello")`). If the offset + data length exceeds the
+memory size, the spec requires the module to trap during instantiation with an
+"out of bounds memory access" error. Bounds checking for `i32.const` offsets
+with locally-defined memories is now implemented. The remaining 10 failures
+are: 6 module-load failures from unsupported offset expressions (`global.get`,
+extended constant expressions like `i32.add`/`i32.sub`/`i32.mul`), 1
+`global.get` offset bounds check (needs runtime check), and 3 imported-memory
+bounds checks (the actual imported memory size is only known at runtime).
+
+**Fix approach:** Add validation passes in the instantiation path — check
+import compatibility (function signatures, memory/table limits) and data/element
+segment bounds against actual memory/table sizes before any exported functions
+are called.
+
+**Affected tests:** imports (106), data (10)
 
 #### 5. Module Load Failures / Missing Features (53 failures)
 
@@ -288,7 +319,7 @@ br_if.wast:670:26: error: unexpected token "null", expected a numeric index
 | memory_redundancy | 1 | 3 | 0 | Module load (cat 5) |
 | address | 218 | 38 | 0 | Memory OOB (cat 2) |
 | align | 0 | 1 | 0 | wast2json parse error (cat 7) |
-| data | 20 | 20 | 0 | Uninstantiable (cat 4) |
+| data | 30 | 10 | 0 | Uninstantiable (cat 4) |
 | table | 0 | 1 | 0 | wast2json parse error (cat 7) |
 | elem | 0 | 1 | 0 | wast2json parse error (cat 7) |
 | table_get | 10 | 4 | 0 | Table OOB (cat 3) |
@@ -310,7 +341,7 @@ br_if.wast:670:26: error: unexpected token "null", expected a numeric index
    succeeds instead of trapping. 22 failures.
 3. **Multi-value call returns** (cat 6) — semantic correctness; multi-value
    returns from calls produce wrong results. 6 failures.
-4. **Instantiation-time validation** (cat 4) — data segments, imports. 126
+4. **Instantiation-time validation** (cat 4) — data segments, imports. 116
    failures.
 5. **Module load failures** (cat 5) — multiple memories, etc. 53 failures.
 6. **wast2json upgrade** (cat 7) — would unblock 14 test files using newer
