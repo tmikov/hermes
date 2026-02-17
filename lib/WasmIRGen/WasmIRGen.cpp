@@ -63,6 +63,16 @@ static std::string buildGlobalTypeString(const WasmGlobalType &gt) {
   return s;
 }
 
+/// Build a type string for a tag type, e.g. "tag:i:".
+/// Tags have parameters but no results per spec.
+static std::string buildTagTypeString(const WasmFuncType &ft) {
+  std::string s = "tag:";
+  for (auto p : ft.params)
+    s += valTypeChar(p);
+  s += ':';
+  return s;
+}
+
 /// Build a type string for a table type, e.g. "table:funcref".
 static std::string buildTableTypeString(const WasmTableType &tt) {
   return tt.elemType == WasmValType::FuncRef
@@ -644,9 +654,40 @@ void WasmIRGen::createFunctions() {
           break;
         }
 
-        case WasmExternalKind::Tag:
-          // Tag imports are not validated yet.
+        case WasmExternalKind::Tag: {
+          // Load __wasm_type__ from the import value.
+          auto *typeStr = builder_.createLoadPropertyInst(
+              importVal, builder_.getLiteralString("__wasm_type__"));
+          auto *typeIsUndef = builder_.createBinaryOperatorInst(
+              typeStr, undefinedVal,
+              ValueKind::BinaryStrictlyEqualInstKind);
+          auto *acceptBB = builder_.createBasicBlock(topLevelFunc);
+          auto *checkTypeBB = builder_.createBasicBlock(topLevelFunc);
+          auto *linkErrorBB = builder_.createBasicBlock(topLevelFunc);
+          // If __wasm_type__ is undefined, accept (raw JS value as tag).
+          builder_.createCondBranchInst(
+              typeIsUndef, acceptBB, checkTypeBB);
+
+          builder_.setInsertionBlock(checkTypeBB);
+          const WasmFuncType &tagFuncType =
+              moduleInfo_.types[imp.tagTypeIndex];
+          std::string expectedType = buildTagTypeString(tagFuncType);
+          auto *mismatch = builder_.createBinaryOperatorInst(
+              typeStr,
+              builder_.getLiteralString(expectedType),
+              ValueKind::BinaryStrictlyNotEqualInstKind);
+          builder_.createCondBranchInst(
+              mismatch, linkErrorBB, acceptBB);
+
+          builder_.setInsertionBlock(linkErrorBB);
+          helpers_.emitLinkError(
+              builder_.getLiteralString("incompatible import type"));
+          builder_.createUnreachableInst();
+
+          builder_.setInsertionBlock(acceptBB);
+          tlEntry_ = acceptBB;
           break;
+        }
       }
     }
   }
@@ -1273,6 +1314,22 @@ void WasmIRGen::finalizeModule() {
 
     builder_.createStorePropertyStrictInst(
         globalObj, exportsObj, builder_.getLiteralString(exp.name));
+  }
+
+  // Add tag exports as plain objects with __wasm_type__ metadata.
+  for (const auto &exp : moduleInfo_.exports) {
+    if (exp.kind != WasmExternalKind::Tag)
+      continue;
+    const WasmFuncType &tagType = moduleInfo_.getTagType(exp.index);
+    std::string typeStr = buildTagTypeString(tagType);
+
+    auto *tagObj = builder_.createAllocObjectLiteralInst({});
+    builder_.createStorePropertyStrictInst(
+        builder_.getLiteralString(typeStr),
+        tagObj,
+        builder_.getLiteralString("__wasm_type__"));
+    builder_.createStorePropertyStrictInst(
+        tagObj, exportsObj, builder_.getLiteralString(exp.name));
   }
 
   builder_.createReturnInst(exportsObj);

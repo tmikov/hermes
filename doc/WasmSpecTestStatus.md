@@ -10,8 +10,8 @@ Last updated: 2026-02-16 (branch `wasm`)
 | Test files failing | 29 / 83 |
 | Crashes | 0 |
 | Timeouts | 0 |
-| Assertions passing | 24,598 |
-| Assertions failing | 232 |
+| Assertions passing | 24,601 |
+| Assertions failing | 228 |
 
 ## How to Run
 
@@ -162,13 +162,13 @@ get-externref: expected trap but succeeded
 get-funcref: expected trap but succeeded
 ```
 
-#### 4. Unlinkable / Uninstantiable Modules Not Rejected (37 failures)
+#### 4. Unlinkable / Uninstantiable Modules Not Rejected (33 failures)
 
 Modules that should be rejected at instantiation time are accepted by Hermes.
 The spec requires validation between parsing and execution; Hermes skips some
 of these checks, so errors surface later (or not at all) as wrong results.
 
-**imports (35 failures):** Import type validation is now implemented using
+**imports (31 failures, 29 with patched test):** Import type validation is now implemented using
 `__wasm_type__` string comparison at instantiation time. The compiled IR
 checks each import value against the expected type string, throwing a
 `WebAssembly.LinkError` on mismatch. This covers:
@@ -179,14 +179,17 @@ checks each import value against the expected type string, throwing a
 - Cross-kind mismatches (e.g., importing a memory as a function)
 - Missing imports (undefined module or field)
 - Non-callable values imported as functions
+- Tag type mismatches (via `__wasm_type__` on tag export objects)
 
-Remaining failures (35) are due to:
+Remaining failures (31, or 29 with patched test) are due to:
 
-- **Tag exports not implemented (3+1):** Modules that export/import tags
-  cannot participate in cross-module linking. The initial "test" module's
-  tag exports are missing, causing cascading failures. Additionally, one
-  `assert_unlinkable` test (line 256) imports a function as a tag — since
-  tag imports are not validated, this incorrectly succeeds.
+- **~~Tag exports not implemented (3+1):~~** Fixed. Tag exports are now
+  implemented as plain objects with `__wasm_type__` metadata (e.g.
+  "tag:i:"), and tag import validation checks the type string. This fixed
+  4 failures: the initial test module's tag exports are now present
+  (unblocking the module at line 35 and its 2 cascading failures at lines
+  97–98), and the cross-kind mismatch at line 256 is now correctly
+  rejected.
 - **~~Raw global exports lack type metadata (12):~~** Fixed. Global exports
   are now wrapped in `WebAssembly.Global` objects with `__wasm_type__`
   metadata, enabling cross-module global type and mutability validation.
@@ -235,7 +238,7 @@ Export memories as WebAssembly.Memory ─→ Memory imports resolve (13 fixed)
                                     └──→ Wire imported memory into compiled code
                                      └──→ memory.grow on imported memory works (4 fixed)
 
-Tags (independent) ───────────────────→ Tag import/export support (3+1 fixed)
+Tags (independent) ───────────────────→ Tag import/export support (3+1 fixed) ✓ DONE
 ```
 
 The memory path is the deepest: export → import resolution → wire buffer →
@@ -243,7 +246,7 @@ memory.grow. Tags are fully independent of all three but least impactful
 (4 failures). Recommended order: memory exports (13 fixes from just the
 export side), then table exports (12 fixes from just the export side).
 
-**Affected tests:** imports (35), data (2)
+**Affected tests:** imports (31), data (2)
 
 #### 5. Module Load Failures / Missing Features (53 failures)
 
@@ -372,7 +375,7 @@ br_if.wast:670:26: error: unexpected token "null", expected a numeric index
 | table_set | 17 | 8 | 0 | Table OOB (cat 3) |
 | table_size | 38 | 0 | 0 | ✓ all pass |
 | select | 0 | 1 | 0 | wast2json parse error (cat 7) |
-| imports | 119 | 35 | 16 | Unlinkable (cat 4) |
+| imports | 122 | 31 | 16 | Unlinkable (cat 4) |
 | tag | 0 | 1 | 0 | wast2json parse error (cat 7) |
 | ref_is_null | 0 | 1 | 0 | wast2json parse error (cat 7) |
 | ref_null | 0 | 1 | 0 | wast2json parse error (cat 7) |
@@ -386,7 +389,7 @@ br_if.wast:670:26: error: unexpected token "null", expected a numeric index
    succeeds instead of trapping. 22 failures.
 3. **Multi-value call returns** (cat 6) — semantic correctness; multi-value
    returns from calls produce wrong results. 6 failures.
-4. **Instantiation-time validation** (cat 4) — data segments, imports. 37
+4. **Instantiation-time validation** (cat 4) — data segments, imports. 33
    failures.
 5. **Module load failures** (cat 5) — multiple memories, etc. 53 failures.
 6. **wast2json upgrade** (cat 7) — would unblock 14 test files using newer
@@ -423,9 +426,10 @@ Other import kinds are stubbed:
 
 ### Memory and Table Exports Missing
 
-The exports object includes function exports (with `__wasm_type__` metadata)
-and global exports (wrapped in `WebAssembly.Global` objects with
-`__wasm_type__`). Memory and table exports are silently skipped
+The exports object includes function exports (with `__wasm_type__` metadata),
+global exports (wrapped in `WebAssembly.Global` objects with `__wasm_type__`),
+and tag exports (plain objects with `__wasm_type__`). Memory and table exports
+are silently skipped
 (`WasmIRGen.cpp`, `finalizeModule()`), so `instance.exports.memory` and
 `instance.exports.table` are `undefined`. This prevents JS code from accessing
 the module's memory or table, and prevents passing them as imports to other

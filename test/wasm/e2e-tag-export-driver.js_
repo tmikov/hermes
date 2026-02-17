@@ -1,0 +1,27 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-tag-export.wat.
+// Verifies that exported tags are plain objects with __wasm_type__ metadata.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var bytes = hermescli.loadFile(hbcPath);
+var mod = new WebAssembly.Module(bytes);
+var instance = new WebAssembly.Instance(mod);
+var exports = instance.exports;
+
+print("tag_empty type:", typeof exports.tag_empty);
+print("tag_empty __wasm_type__:", exports.tag_empty.__wasm_type__);
+
+print("tag_i32 type:", typeof exports.tag_i32);
+print("tag_i32 __wasm_type__:", exports.tag_i32.__wasm_type__);
+
+print("tag_f32 type:", typeof exports.tag_f32);
+print("tag_f32 __wasm_type__:", exports.tag_f32.__wasm_type__);
+
+print("tag_i32_f64 type:", typeof exports.tag_i32_f64);
+print("tag_i32_f64 __wasm_type__:", exports.tag_i32_f64.__wasm_type__);
