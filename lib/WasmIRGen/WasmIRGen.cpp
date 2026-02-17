@@ -1428,6 +1428,9 @@ void WasmIRGen::finalizeModule() {
           tlScope, closureVars_[startIdx]);
       builder_.createCallInst(
           closure,
+          /* target */ irFunctions_[startIdx],
+          /* calleeIsAlwaysClosure */ true,
+          /* env */ builder_.getEmptySentinel(),
           /* newTarget */ builder_.getLiteralUndefined(),
           /* thisValue */ builder_.getLiteralUndefined(),
           {});
@@ -1818,6 +1821,9 @@ Function *WasmIRGen::createExportWrapper(
   // Call the internal Wasm function.
   auto *callResult = builder_.createCallInst(
       internalClosure,
+      /* target */ irFunctions_[funcIndex],
+      /* calleeIsAlwaysClosure */ true,
+      /* env */ builder_.getEmptySentinel(),
       /* newTarget */ builder_.getLiteralUndefined(),
       /* thisValue */ builder_.getLiteralUndefined(),
       callArgs);
@@ -3373,6 +3379,9 @@ void WasmIRGen::onCall(uint32_t funcIndex) {
       parentScopeInst_, closureVars_[funcIndex]);
   auto *call = builder_.createCallInst(
       closure,
+      /* target */ irFunctions_[funcIndex],
+      /* calleeIsAlwaysClosure */ true,
+      /* env */ builder_.getEmptySentinel(),
       /* newTarget */ builder_.getLiteralUndefined(),
       /* thisValue */ builder_.getLiteralUndefined(),
       args);

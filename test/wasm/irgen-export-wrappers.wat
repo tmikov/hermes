@@ -233,7 +233,7 @@
 ;; CHECK-NEXT:   %3 = AsInt32Inst (:number) %2: any
 ;; CHECK-NEXT:   %4 = LoadParamInst (:any) %p1: any
 ;; CHECK-NEXT:   %5 = AsInt32Inst (:number) %4: any
-;; CHECK-NEXT:   %6 = CallInst (:any) %1: any, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %3: number, %5: number
+;; CHECK-NEXT:   %6 = CallInst (:any) %1: any, %wasm_func_0(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined, %3: number, %5: number
 ;; CHECK-NEXT:        ReturnInst %6: any
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
@@ -241,7 +241,7 @@
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.closure_1]: any
-;; CHECK-NEXT:   %2 = CallInst (:any) %1: any, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined
+;; CHECK-NEXT:   %2 = CallInst (:any) %1: any, %wasm_func_1(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined
 ;; CHECK-NEXT:        ReturnInst undefined: undefined
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
@@ -251,7 +251,7 @@
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.closure_2]: any
 ;; CHECK-NEXT:   %2 = LoadParamInst (:any) %p0: any
 ;; CHECK-NEXT:   %3 = LoadParamInst (:any) %p1: any
-;; CHECK-NEXT:   %4 = CallInst (:any) %1: any, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %2: any, %3: any
+;; CHECK-NEXT:   %4 = CallInst (:any) %1: any, %wasm_func_2(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined, %2: any, %3: any
 ;; CHECK-NEXT:        ReturnInst %4: any
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
@@ -262,7 +262,7 @@
 ;; CHECK-NEXT:   %2 = LoadParamInst (:any) %p0: any
 ;; CHECK-NEXT:   %3 = AsInt32Inst (:number) %2: any
 ;; CHECK-NEXT:   %4 = LoadParamInst (:any) %p1: any
-;; CHECK-NEXT:   %5 = CallInst (:any) %1: any, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %3: number, %4: any
+;; CHECK-NEXT:   %5 = CallInst (:any) %1: any, %wasm_func_3(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined, %3: number, %4: any
 ;; CHECK-NEXT:        ReturnInst %5: any
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
@@ -276,7 +276,7 @@
 ;; CHECK-NEXT:   %5 = CallBuiltinInst (:any) [HermesBuiltin.wasmBigIntToI64]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %2: any, %4: any
 ;; CHECK-NEXT:   %6 = LoadPropertyInst (:any) %2: any, 0: number
 ;; CHECK-NEXT:   %7 = LoadPropertyInst (:any) %2: any, 1: number
-;; CHECK-NEXT:   %8 = CallInst (:any) %1: any, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %2: any, %3: any, %6: any, %7: any
+;; CHECK-NEXT:   %8 = CallInst (:any) %1: any, %wasm_func_4(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined, %2: any, %3: any, %6: any, %7: any
 ;; CHECK-NEXT:   %9 = LoadPropertyInst (:any) %2: any, 0: number
 ;; CHECK-NEXT:   %10 = LoadPropertyInst (:any) %2: any, 1: number
 ;; CHECK-NEXT:   %11 = CallBuiltinInst (:any) [HermesBuiltin.wasmI64ToBigInt]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %9: any, %10: any
