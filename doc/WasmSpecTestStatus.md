@@ -162,7 +162,7 @@ get-externref: expected trap but succeeded
 get-funcref: expected trap but succeeded
 ```
 
-#### 4. Unlinkable / Uninstantiable Modules Not Rejected (4 failures)
+#### 4. Unlinkable / Uninstantiable Modules Not Rejected (2 failures)
 
 Modules that should be rejected at instantiation time are accepted by Hermes.
 The spec requires validation between parsing and execution; Hermes skips some
@@ -217,15 +217,7 @@ Remaining failures (2, or 0 with patched test) are due to:
   `__wasm_max__` limit. This ensures the locally-created ArrayBuffer has
   the correct initial size and growth limit.
 
-**data (2 failures):** Active data segments have an offset expression (e.g.,
-`(data (i32.const 65536) "hello")`). If the offset + data length exceeds the
-memory size, the spec requires the module to trap during instantiation with an
-"out of bounds memory access" error. Bounds checking is implemented for
-`i32.const` offsets (both locally-defined and imported memories with non-zero
-minimum), for `global.get` offsets on locally-defined memories (runtime
-check), and for extended constant expressions (`i32.add`/`i32.sub`/`i32.mul`).
-The remaining 2 failures (lines 89, 90) use `global.get` on non-imported
-globals, which wast2json rejects.
+**Affected tests:** imports (2)
 
 **Fix approach — dependency graph:**
 
@@ -250,7 +242,7 @@ imports.wast failures (2, unpatched) are due to alignment hints being
 trusted (architectural limitation, not an import/export issue). The
 patched test passes 100%.
 
-**Affected tests:** imports (2), data (2)
+**Affected tests:** imports (2)
 
 #### 5. Module Load Failures / Missing Features (53 failures)
 
@@ -335,14 +327,21 @@ N>1 results, use N-1 additional stash slots (global-like variables) to pass
 extra return values out-of-band. The callee stores extra results into stash
 slots before `ReturnInst`, and the caller reads them after `CallInst`.
 
-#### 7. wast2json Parse Errors (14 failures)
+#### 7. wast2json Parse/Validation Errors (16 failures)
 
 Test files using syntax from newer Wasm proposals (GC types, typed function
-references) that the bundled `wast2json` (from WABT) cannot parse. These fail
-immediately with 0 pass / 1 fail before any assertions run.
+references, extended constant expressions) that the bundled `wast2json` (from
+WABT) cannot parse or validate. These fail immediately before any assertions
+run — the module binary is never produced, so Hermes never sees them.
+
+Most (14) fail with 0 pass / 1 fail because the entire test file is rejected.
+The `data` test (2 failures) partially works but wast2json rejects two modules
+that use `global.get` on non-imported globals in data segment offset
+expressions — valid in the current spec but not in the older spec version
+wast2json implements.
 
 **Affected tests:** br_if, br_table, local_tee, global, memory, table, elem,
-select, align, unreached-valid, tag, ref_is_null, ref_null, linking
+select, align, unreached-valid, tag, ref_is_null, ref_null, linking, data (2)
 
 Example error:
 ```
@@ -371,7 +370,7 @@ br_if.wast:670:26: error: unexpected token "null", expected a numeric index
 | memory_redundancy | 1 | 3 | 0 | Module load (cat 5) |
 | address | 218 | 38 | 0 | Memory OOB (cat 2) |
 | align | 0 | 1 | 0 | wast2json parse error (cat 7) |
-| data | 34 | 2 | 0 | Uninstantiable (cat 4) |
+| data | 34 | 2 | 0 | wast2json validation error (cat 7) |
 | table | 0 | 1 | 0 | wast2json parse error (cat 7) |
 | elem | 0 | 1 | 0 | wast2json parse error (cat 7) |
 | table_get | 10 | 4 | 0 | Table OOB (cat 3) |
@@ -393,11 +392,11 @@ br_if.wast:670:26: error: unexpected token "null", expected a numeric index
    succeeds instead of trapping. 26 failures.
 3. **Multi-value call returns** (cat 6) — semantic correctness; multi-value
    returns from calls produce wrong results. 6 failures.
-4. **Instantiation-time validation** (cat 4) — data segments, imports. 4
-   failures.
+4. **Instantiation-time validation** (cat 4) — alignment hints trusted in
+   imports. 2 failures (0 with patched test).
 5. **Module load failures** (cat 5) — multiple memories, etc. 53 failures.
 6. **wast2json upgrade** (cat 7) — would unblock 14 test files using newer
-   proposal syntax.
+   proposal syntax plus 2 data.wast failures. 16 failures.
 7. **NaN-boxing limitations** (cat 1) — requires non-NaN-boxed Wasm value
    representation. 58 failures.
 
