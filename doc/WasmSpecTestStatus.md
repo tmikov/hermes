@@ -10,8 +10,8 @@ Last updated: 2026-02-16 (branch `wasm`)
 | Test files failing | 29 / 83 |
 | Crashes | 0 |
 | Timeouts | 0 |
-| Assertions passing | 24,601 |
-| Assertions failing | 203 |
+| Assertions passing | 24,605 |
+| Assertions failing | 199 |
 
 ## How to Run
 
@@ -162,13 +162,13 @@ get-externref: expected trap but succeeded
 get-funcref: expected trap but succeeded
 ```
 
-#### 4. Unlinkable / Uninstantiable Modules Not Rejected (8 failures)
+#### 4. Unlinkable / Uninstantiable Modules Not Rejected (4 failures)
 
 Modules that should be rejected at instantiation time are accepted by Hermes.
 The spec requires validation between parsing and execution; Hermes skips some
 of these checks, so errors surface later (or not at all) as wrong results.
 
-**imports (6 failures, 4 with patched test):** Import type validation is now implemented using
+**imports (2 failures, 0 with patched test):** Import type validation is now implemented using
 `__wasm_type__` string comparison at instantiation time. The compiled IR
 checks each import value against the expected type string, throwing a
 `WebAssembly.LinkError` on mismatch. This covers:
@@ -181,7 +181,7 @@ checks each import value against the expected type string, throwing a
 - Non-callable values imported as functions
 - Tag type mismatches (via `__wasm_type__` on tag export objects)
 
-Remaining failures (6, or 4 with patched test) are due to:
+Remaining failures (2, or 0 with patched test) are due to:
 
 - **~~Tag exports not implemented (3+1):~~** Fixed. Tag exports are now
   implemented as plain objects with `__wasm_type__` metadata (e.g.
@@ -210,9 +210,12 @@ Remaining failures (6, or 4 with patched test) are due to:
   Trusted" under Known Architectural Limitations. A patched copy of the
   test (`test/wasm/spec/imports_patched.wast_`) changes these two
   instructions to `align=1`, reducing the failure count by 2.
-- **`memory.grow` on imported memory (4):** `memory.grow` operates on the
-  locally-created ArrayBuffer, not the imported `WebAssembly.Memory`
-  object, so grow has no effect on the shared memory.
+- **~~`memory.grow` on imported memory (4):~~** Fixed. When a module imports
+  a memory, `createMemoryViews()` now uses the imported memory's actual
+  `__wasm_min__` (initial page count) instead of the import declaration's
+  minimum. Similarly, `onMemoryGrow()` uses the imported memory's actual
+  `__wasm_max__` limit. This ensures the locally-created ArrayBuffer has
+  the correct initial size and growth limit.
 
 **data (2 failures):** Active data segments have an offset expression (e.g.,
 `(data (i32.const 65536) "hello")`). If the offset + data length exceeds the
@@ -237,19 +240,17 @@ Export tables as WebAssembly.Table ────→ Table imports resolve (12 fix
 
 Export memories as WebAssembly.Memory ─→ Memory imports resolve (13 fixed) ✓ DONE
                                     └──→ Wire imported memory into compiled code
-                                     └──→ memory.grow on imported memory works (4 fixed)
+                                     └──→ memory.grow on imported memory works (4 fixed) ✓ DONE
 
 Tags (independent) ───────────────────→ Tag import/export support (3+1 fixed) ✓ DONE
 ```
 
-The memory path is the deepest: export → import resolution → wire buffer →
-memory.grow. Tags are fully independent of all three but least impactful
-(4 failures). Both memory and table exports are now done. The remaining
-imports failures (6, or 4 with patched test) are the alignment hint issues
-(2) and `memory.grow` on imported memory (4), which require wiring
-imported buffers into the compiled module.
+All import/export type validation is now complete. The only remaining
+imports.wast failures (2, unpatched) are due to alignment hints being
+trusted (architectural limitation, not an import/export issue). The
+patched test passes 100%.
 
-**Affected tests:** imports (6), data (2)
+**Affected tests:** imports (2), data (2)
 
 #### 5. Module Load Failures / Missing Features (53 failures)
 
@@ -378,7 +379,7 @@ br_if.wast:670:26: error: unexpected token "null", expected a numeric index
 | table_set | 17 | 8 | 0 | Table OOB (cat 3) |
 | table_size | 38 | 0 | 0 | ✓ all pass |
 | select | 0 | 1 | 0 | wast2json parse error (cat 7) |
-| imports | 147 | 6 | 16 | Unlinkable (cat 4) |
+| imports | 147 | 2 | 16 | Unlinkable (cat 4) |
 | tag | 0 | 1 | 0 | wast2json parse error (cat 7) |
 | ref_is_null | 0 | 1 | 0 | wast2json parse error (cat 7) |
 | ref_null | 0 | 1 | 0 | wast2json parse error (cat 7) |
@@ -392,7 +393,7 @@ br_if.wast:670:26: error: unexpected token "null", expected a numeric index
    succeeds instead of trapping. 26 failures.
 3. **Multi-value call returns** (cat 6) — semantic correctness; multi-value
    returns from calls produce wrong results. 6 failures.
-4. **Instantiation-time validation** (cat 4) — data segments, imports. 8
+4. **Instantiation-time validation** (cat 4) — data segments, imports. 4
    failures.
 5. **Module load failures** (cat 5) — multiple memories, etc. 53 failures.
 6. **wast2json upgrade** (cat 7) — would unblock 14 test files using newer
@@ -417,10 +418,12 @@ property or a raw JS number).
 
 Other import kinds are stubbed:
 
-- **Memory imports ignored:** The compiled code always creates a fresh
-  `ArrayBuffer` regardless of whether the module imports a memory
-  (`WasmIRGen.cpp`, `createMemoryViews()`). The `WebAssembly.Memory` object
-  from the imports object is never read. Two modules cannot share linear memory.
+- **Memory imports partially wired:** The compiled code creates a fresh
+  `ArrayBuffer` sized to the imported memory's actual `__wasm_min__` (not
+  the import declaration's lower bound). `memory.grow` also respects the
+  imported memory's `__wasm_max__` limit. However, the actual buffer from
+  the imported `WebAssembly.Memory` object is not used — two modules
+  cannot share linear memory contents.
 
 - **Table imports ignored:** The compiled code always creates fresh JS Arrays
   for table storage (`WasmIRGen.cpp`, `createTables()`). The

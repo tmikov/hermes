@@ -225,6 +225,23 @@ void WasmIRGen::createFunctions() {
         /* hidden */ true);
   }
 
+  // If the module imports a memory, create variables to hold the imported
+  // memory's __wasm_min__ and __wasm_max__ values. These are the actual
+  // initial page count and maximum from the imported WebAssembly.Memory
+  // object, which may differ from the import declaration's bounds.
+  if (moduleInfo_.importedMemoryCount() > 0) {
+    importedMemMinVar_ = builder_.createVariable(
+        topLevelVS_,
+        "imported_mem_min",
+        Type::createAnyType(),
+        /* hidden */ true);
+    importedMemMaxVar_ = builder_.createVariable(
+        topLevelVS_,
+        "imported_mem_max",
+        Type::createAnyType(),
+        /* hidden */ true);
+  }
+
   // Create all Wasm functions and a Variable in the top-level scope for each.
   uint32_t totalFuncs = moduleInfo_.totalFunctionCount();
   irFunctions_.resize(totalFuncs, nullptr);
@@ -650,6 +667,14 @@ void WasmIRGen::createFunctions() {
           builder_.createUnreachableInst();
 
           builder_.setInsertionBlock(acceptBB);
+          // Store the imported memory's actual page count and maximum for
+          // createMemoryViews() and onMemoryGrow() to use.
+          builder_.createStoreFrameInst(
+              tlScope, actualMin, importedMemMinVar_);
+          auto *actualMaxForStore = builder_.createLoadPropertyInst(
+              importVal, builder_.getLiteralString("__wasm_max__"));
+          builder_.createStoreFrameInst(
+              tlScope, actualMaxForStore, importedMemMaxVar_);
           tlEntry_ = acceptBB;
           break;
         }
@@ -4536,21 +4561,26 @@ Value *WasmIRGen::emitNew(Value *constructor, llvh::ArrayRef<Value *> args) {
 void WasmIRGen::createMemoryViews(Instruction *tlScope) {
   // Determine initial memory size in bytes.
   // Use the first memory (Wasm MVP has at most one).
-  uint32_t initialPages = 0;
+  Value *memSize = nullptr;
   if (!moduleInfo_.memories.empty()) {
-    initialPages = moduleInfo_.memories[0].limits.initial;
+    // Locally-defined memory: use the declared initial size.
+    uint32_t initialPages = moduleInfo_.memories[0].limits.initial;
+    memSize = builder_.getLiteralNumber(
+        static_cast<double>(initialPages) * 65536.0);
+  } else if (importedMemMinVar_) {
+    // Imported memory: use the actual initial size from the imported
+    // WebAssembly.Memory object's __wasm_min__, not the import declaration's
+    // minimum (which is a lower bound, not the actual size).
+    auto *actualMin =
+        builder_.createLoadFrameInst(tlScope, importedMemMinVar_);
+    memSize = builder_.createBinaryOperatorInst(
+        actualMin,
+        builder_.getLiteralNumber(65536.0),
+        ValueKind::BinaryMultiplyInstKind);
   } else {
-    // Check imported memories.
-    for (auto &imp : moduleInfo_.imports) {
-      if (imp.kind == WasmExternalKind::Memory) {
-        initialPages = imp.memoryType.limits.initial;
-        break;
-      }
-    }
+    // Fallback (shouldn't happen if hasMemory is checked before calling).
+    memSize = builder_.getLiteralNumber(0);
   }
-
-  auto *memSize = builder_.getLiteralNumber(
-      static_cast<double>(initialPages) * 65536.0);
 
   // Create: var buffer = new ArrayBuffer(memSize)
   auto *abCtor = builder_.createTryLoadGlobalPropertyInst("ArrayBuffer");
@@ -5289,27 +5319,28 @@ void WasmIRGen::onMemoryGrow() {
       builder_.getLiteralNumber(16),
       ValueKind::BinaryUnsignedRightShiftInstKind);
 
-  // Get maximum page count from module info.
-  uint32_t maxPages = 65536; // Default: 4GB (max Wasm memory).
+  // Get maximum page count.
+  // For locally-defined memories, use the declared maximum (compile-time).
+  // For imported memories, use the actual __wasm_max__ from the imported
+  // WebAssembly.Memory object (runtime), which may be more restrictive
+  // than the import declaration's maximum.
+  Value *maxPagesVal = nullptr;
   if (!moduleInfo_.memories.empty()) {
+    uint32_t maxPages = 65536; // Default: 4GB (max Wasm memory).
     if (moduleInfo_.memories[0].limits.hasMaximum) {
       maxPages = moduleInfo_.memories[0].limits.maximum;
     }
+    maxPagesVal = builder_.getLiteralNumber(maxPages);
+  } else if (importedMemMaxVar_) {
+    maxPagesVal =
+        builder_.createLoadFrameInst(parentScopeInst_, importedMemMaxVar_);
   } else {
-    for (auto &imp : moduleInfo_.imports) {
-      if (imp.kind == WasmExternalKind::Memory) {
-        if (imp.memoryType.limits.hasMaximum) {
-          maxPages = imp.memoryType.limits.maximum;
-        }
-        break;
-      }
-    }
+    maxPagesVal = builder_.getLiteralNumber(65536);
   }
 
   // Call the grow builtin: wasmMemoryGrow(heapu8, delta, maxPages).
   // Returns new ArrayBuffer on success, or -1 on failure.
-  auto *result = helpers_.emitMemoryGrow(
-      heapu8, delta, builder_.getLiteralNumber(maxPages));
+  auto *result = helpers_.emitMemoryGrow(heapu8, delta, maxPagesVal);
 
   // Check if result === -1 (failure).
   auto *negOne = builder_.getLiteralNumber(-1);

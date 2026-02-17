@@ -481,6 +481,19 @@ class WasmIRGen {
   /// to read the actual imported value.
   std::vector<Variable *> importGlobalVals_;
 
+  /// Variable holding the imported memory's __wasm_min__ value (number of
+  /// pages). Set during import validation when a memory import is present.
+  /// createMemoryViews() uses this to determine the actual initial size
+  /// instead of the import declaration's minimum (which is a lower bound,
+  /// not the actual size). nullptr if no memory is imported.
+  Variable *importedMemMinVar_ = nullptr;
+
+  /// Variable holding the imported memory's __wasm_max__ value (max pages,
+  /// or -1 if unbounded). Set during import validation. onMemoryGrow()
+  /// uses this as the actual growth limit instead of the import
+  /// declaration's maximum. nullptr if no memory is imported.
+  Variable *importedMemMaxVar_ = nullptr;
+
   /// Typed array view indices into memViewVars_.
   enum MemView : uint8_t {
     HEAP8 = 0,
