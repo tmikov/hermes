@@ -82,6 +82,178 @@ static std::string buildTableTypeString(const WasmTableType &tt) {
 WasmIRGen::WasmIRGen(Module &M, WasmModuleInfo &moduleInfo)
     : moduleInfo_(moduleInfo), builder_(&M), helpers_(builder_) {}
 
+bool WasmIRGen::needsReturnBuffer(const WasmFuncType &funcType) {
+  if (funcType.results.size() > 1)
+    return true;
+  if (funcType.results.size() == 1 && funcType.results[0] == WasmValType::I64)
+    return true;
+  return false;
+}
+
+std::pair<std::vector<uint32_t>, uint32_t> WasmIRGen::computeRetBufLayout(
+    const std::vector<WasmValType> &results) {
+  std::vector<uint32_t> offsets;
+  uint32_t offset = 0;
+  for (auto vt : results) {
+    switch (vt) {
+      case WasmValType::I32:
+        // Align to 4.
+        offset = (offset + 3) & ~3u;
+        offsets.push_back(offset);
+        offset += 4;
+        break;
+      case WasmValType::I64:
+        // Align to 4. Uses I[offset/4] (lo) + I[offset/4+1] (hi).
+        offset = (offset + 3) & ~3u;
+        offsets.push_back(offset);
+        offset += 8;
+        break;
+      case WasmValType::F32:
+      case WasmValType::F64:
+        // Align to 8. Uses F[offset/8].
+        offset = (offset + 7) & ~7u;
+        offsets.push_back(offset);
+        offset += 8;
+        break;
+      default:
+        // FuncRef, ExternRef, etc: treat like i32.
+        offset = (offset + 3) & ~3u;
+        offsets.push_back(offset);
+        offset += 4;
+        break;
+    }
+  }
+  return {offsets, offset};
+}
+
+std::pair<Value *, Value *> WasmIRGen::readI64FromRetBuf() {
+  auto *loRaw = builder_.createLoadPropertyInst(
+      retBufI_, builder_.getLiteralNumber(0));
+  auto *hiRaw = builder_.createLoadPropertyInst(
+      retBufI_, builder_.getLiteralNumber(1));
+  // Uint32Array returns unsigned values. Convert to signed int32 so that
+  // the split i64 representation is consistent (lo/hi are signed int32 values
+  // that reconstruct the i64 when combined). This ensures i32.wrap_i64 and
+  // other consumers see the correct signed value.
+  auto *lo = builder_.createAsInt32Inst(loRaw);
+  auto *hi = builder_.createAsInt32Inst(hiRaw);
+  return {lo, hi};
+}
+
+void WasmIRGen::emitRetBufStores(const WasmFuncType &funcType) {
+  auto [offsets, totalSize] = computeRetBufLayout(funcType.results);
+
+  // Collect all result values from the stack (pop in reverse order).
+  llvh::SmallVector<Value *, 8> resultVals;
+  // For i64, we store lo and hi separately.
+  llvh::SmallVector<Value *, 4> i64His;
+
+  // Pop in reverse order.
+  llvh::SmallVector<std::pair<Value *, Value *>, 8> poppedResults(
+      funcType.results.size());
+  for (size_t i = funcType.results.size(); i > 0; --i) {
+    if (funcType.results[i - 1] == WasmValType::I64) {
+      poppedResults[i - 1] = popI64();
+    } else {
+      poppedResults[i - 1] = {pop(), nullptr};
+    }
+  }
+
+  // Store each result into the buffer at its computed offset.
+  for (size_t i = 0; i < funcType.results.size(); ++i) {
+    uint32_t byteOff = offsets[i];
+    switch (funcType.results[i]) {
+      case WasmValType::I32: {
+        // I[byteOff / 4] = val
+        uint32_t idx = byteOff / 4;
+        builder_.createStorePropertyStrictInst(
+            poppedResults[i].first,
+            retBufI_,
+            builder_.getLiteralNumber(idx));
+        break;
+      }
+      case WasmValType::I64: {
+        // I[byteOff / 4] = lo, I[byteOff / 4 + 1] = hi
+        uint32_t idx = byteOff / 4;
+        builder_.createStorePropertyStrictInst(
+            poppedResults[i].first,
+            retBufI_,
+            builder_.getLiteralNumber(idx));
+        builder_.createStorePropertyStrictInst(
+            poppedResults[i].second,
+            retBufI_,
+            builder_.getLiteralNumber(idx + 1));
+        break;
+      }
+      case WasmValType::F32:
+      case WasmValType::F64: {
+        // F[byteOff / 8] = val
+        uint32_t idx = byteOff / 8;
+        builder_.createStorePropertyStrictInst(
+            poppedResults[i].first,
+            retBufF_,
+            builder_.getLiteralNumber(idx));
+        break;
+      }
+      default: {
+        uint32_t idx = byteOff / 4;
+        builder_.createStorePropertyStrictInst(
+            poppedResults[i].first,
+            retBufI_,
+            builder_.getLiteralNumber(idx));
+        break;
+      }
+    }
+  }
+
+  builder_.createReturnInst(builder_.getLiteralNumber(0));
+}
+
+void WasmIRGen::emitRetBufLoads(const WasmFuncType &funcType) {
+  auto [offsets, totalSize] = computeRetBufLayout(funcType.results);
+
+  for (size_t i = 0; i < funcType.results.size(); ++i) {
+    uint32_t byteOff = offsets[i];
+    switch (funcType.results[i]) {
+      case WasmValType::I32: {
+        uint32_t idx = byteOff / 4;
+        auto *raw = builder_.createLoadPropertyInst(
+            retBufI_, builder_.getLiteralNumber(idx));
+        // Convert Uint32Array unsigned value to signed int32.
+        push(builder_.createAsInt32Inst(raw));
+        break;
+      }
+      case WasmValType::I64: {
+        uint32_t idx = byteOff / 4;
+        auto *loRaw = builder_.createLoadPropertyInst(
+            retBufI_, builder_.getLiteralNumber(idx));
+        auto *hiRaw = builder_.createLoadPropertyInst(
+            retBufI_, builder_.getLiteralNumber(idx + 1));
+        // Convert Uint32Array unsigned values to signed int32.
+        pushI64(
+            builder_.createAsInt32Inst(loRaw),
+            builder_.createAsInt32Inst(hiRaw));
+        break;
+      }
+      case WasmValType::F32:
+      case WasmValType::F64: {
+        uint32_t idx = byteOff / 8;
+        auto *val = builder_.createLoadPropertyInst(
+            retBufF_, builder_.getLiteralNumber(idx));
+        push(val);
+        break;
+      }
+      default: {
+        uint32_t idx = byteOff / 4;
+        auto *raw = builder_.createLoadPropertyInst(
+            retBufI_, builder_.getLiteralNumber(idx));
+        push(builder_.createAsInt32Inst(raw));
+        break;
+      }
+    }
+  }
+}
+
 void WasmIRGen::buildCanonicalTypeMap() {
   const auto &types = moduleInfo_.types;
   canonicalTypeIndex_.resize(types.size());
@@ -242,6 +414,36 @@ void WasmIRGen::createFunctions() {
         /* hidden */ true);
   }
 
+  // Determine the return buffer size. The buffer is used for i64 arithmetic
+  // builtins (which write lo/hi to retBufI[0]/[1]) and multi-value returns.
+  // We always create at least an 8-byte buffer because function bodies may
+  // use i64 operations even if no function type signature mentions i64.
+  {
+    uint32_t maxRetBufSize = 8; // Minimum for i64 arithmetic builtins.
+    for (const auto &ft : moduleInfo_.types) {
+      if (needsReturnBuffer(ft)) {
+        auto [offsets, size] = computeRetBufLayout(ft.results);
+        maxRetBufSize = std::max(maxRetBufSize, size);
+      }
+    }
+
+    // Round up to a multiple of 8 so Float64Array can be created on the
+    // same ArrayBuffer.
+    maxRetBufSize = (maxRetBufSize + 7) & ~7u;
+
+    retBufIVar_ = builder_.createVariable(
+        topLevelVS_,
+        "retBufI",
+        Type::createAnyType(),
+        /* hidden */ true);
+    retBufFVar_ = builder_.createVariable(
+        topLevelVS_,
+        "retBufF",
+        Type::createAnyType(),
+        /* hidden */ true);
+    retBufSize_ = maxRetBufSize;
+  }
+
   // Create all Wasm functions and a Variable in the top-level scope for each.
   uint32_t totalFuncs = moduleInfo_.totalFunctionCount();
   irFunctions_.resize(totalFuncs, nullptr);
@@ -275,9 +477,17 @@ void WasmIRGen::createFunctions() {
     // Add a "this" parameter (required by Hermes calling convention).
     builder_.createJSThisParam(func);
 
+    // For functions that need a return buffer (i64 or multi-value returns),
+    // prepend retBufI and retBufF parameters before the Wasm params.
+    uint32_t jsParamCount = 0;
+    if (needsReturnBuffer(funcType)) {
+      builder_.createJSDynamicParam(func, "retbuf_I");
+      builder_.createJSDynamicParam(func, "retbuf_F");
+      jsParamCount += 2;
+    }
+
     // Add JSDynamicParams per Wasm parameter. i64 params need two slots
     // (lo32, hi32) for the split representation.
-    uint32_t jsParamCount = 0;
     for (uint32_t p = 0; p < funcType.params.size(); ++p) {
       if (funcType.params[p] == WasmValType::I64) {
         builder_.createJSDynamicParam(
@@ -727,6 +937,23 @@ void WasmIRGen::createFunctions() {
   // Create typed array views for the linear memory if present.
   if (hasMemory) {
     createMemoryViews(tlScope);
+  }
+
+  // Create the per-module return buffer if needed.
+  if (retBufSize_ > 0) {
+    auto *ArrayBufferCtor =
+        builder_.createTryLoadGlobalPropertyInst("ArrayBuffer");
+    auto *Uint32ArrayCtor =
+        builder_.createTryLoadGlobalPropertyInst("Uint32Array");
+    auto *Float64ArrayCtor =
+        builder_.createTryLoadGlobalPropertyInst("Float64Array");
+    auto *buf = emitNew(
+        ArrayBufferCtor,
+        {builder_.getLiteralNumber(static_cast<double>(retBufSize_))});
+    auto *retBufI = emitNew(Uint32ArrayCtor, {buf});
+    auto *retBufF = emitNew(Float64ArrayCtor, {buf});
+    builder_.createStoreFrameInst(tlScope, retBufI, retBufIVar_);
+    builder_.createStoreFrameInst(tlScope, retBufF, retBufFVar_);
   }
 
   // Create and initialize tables, and apply element segments.
@@ -1531,6 +1758,29 @@ Function *WasmIRGen::createExportWrapper(
   // Marshal arguments: coerce each JS param to the expected Wasm type.
   // For i64 params, the internal function expects two JS args (lo, hi).
   llvh::SmallVector<Value *, 8> callArgs;
+
+  // Check if we need retBufI for any purpose (return buffer or i64 params).
+  bool hasI64Param = false;
+  for (auto p : funcType.params)
+    if (p == WasmValType::I64)
+      hasI64Param = true;
+
+  // Load retBuf views if needed.
+  Value *rbI = nullptr;
+  Value *rbF = nullptr;
+  if (retBufIVar_ && (needsReturnBuffer(funcType) || hasI64Param)) {
+    rbI = builder_.createLoadFrameInst(parentScope, retBufIVar_);
+  }
+  if (retBufFVar_ && needsReturnBuffer(funcType)) {
+    rbF = builder_.createLoadFrameInst(parentScope, retBufFVar_);
+  }
+
+  // If the internal function needs a return buffer, prepend retBufI/retBufF.
+  if (needsReturnBuffer(funcType)) {
+    callArgs.push_back(rbI);
+    callArgs.push_back(rbF);
+  }
+
   for (uint32_t i = 0; i < numParams; ++i) {
     // JS param index: 0=this, 1..N=user params. getJSDynamicParam(1+i).
     auto *jsParam = wrapperFunc->getJSDynamicParam(1 + i);
@@ -1543,8 +1793,12 @@ Function *WasmIRGen::createExportWrapper(
         break;
       case WasmValType::I64: {
         // JS passes a BigInt. Convert to split (lo, hi) for internal call.
-        auto *lo = helpers_.emitBigIntToI64(paramVal);
-        auto *hi = helpers_.emitI64HiResult();
+        // emitBigIntToI64 writes lo/hi to retBufI[0]/[1].
+        helpers_.emitBigIntToI64(rbI, paramVal);
+        auto *lo = builder_.createLoadPropertyInst(
+            rbI, builder_.getLiteralNumber(0));
+        auto *hi = builder_.createLoadPropertyInst(
+            rbI, builder_.getLiteralNumber(1));
         callArgs.push_back(lo);
         callArgs.push_back(hi);
         break;
@@ -1572,13 +1826,65 @@ Function *WasmIRGen::createExportWrapper(
   if (funcType.results.empty()) {
     // Void function: return undefined.
     builder_.createReturnInst(builder_.getLiteralUndefined());
-  } else if (funcType.results[0] == WasmValType::I64) {
-    // Internal function returns lo32 and stashes hi32.
-    // Combine into a BigInt for JS.
-    auto *lo = callResult;
-    auto *hi = helpers_.emitI64HiResult();
-    auto *bigint = helpers_.emitI64ToBigInt(lo, hi);
-    builder_.createReturnInst(bigint);
+  } else if (needsReturnBuffer(funcType)) {
+    if (funcType.results.size() == 1 &&
+        funcType.results[0] == WasmValType::I64) {
+      // Single i64: read lo/hi from buffer, convert to BigInt.
+      auto *lo = builder_.createLoadPropertyInst(
+          rbI, builder_.getLiteralNumber(0));
+      auto *hi = builder_.createLoadPropertyInst(
+          rbI, builder_.getLiteralNumber(1));
+      auto *bigint = helpers_.emitI64ToBigInt(lo, hi);
+      builder_.createReturnInst(bigint);
+    } else {
+      // Multi-value: return a JS Array of results.
+      auto [offsets, totalSize] = computeRetBufLayout(funcType.results);
+      auto *ArrayCtor =
+          builder_.createTryLoadGlobalPropertyInst("Array");
+      auto *resultArr = emitNew(
+          ArrayCtor,
+          {builder_.getLiteralNumber(
+              static_cast<double>(funcType.results.size()))});
+      for (size_t i = 0; i < funcType.results.size(); ++i) {
+        uint32_t byteOff = offsets[i];
+        Value *val;
+        switch (funcType.results[i]) {
+          case WasmValType::I32: {
+            uint32_t idx = byteOff / 4;
+            auto *raw = builder_.createLoadPropertyInst(
+                rbI, builder_.getLiteralNumber(idx));
+            val = builder_.createAsInt32Inst(raw);
+            break;
+          }
+          case WasmValType::I64: {
+            uint32_t idx = byteOff / 4;
+            auto *lo = builder_.createLoadPropertyInst(
+                rbI, builder_.getLiteralNumber(idx));
+            auto *hi = builder_.createLoadPropertyInst(
+                rbI, builder_.getLiteralNumber(idx + 1));
+            val = helpers_.emitI64ToBigInt(lo, hi);
+            break;
+          }
+          case WasmValType::F32:
+          case WasmValType::F64: {
+            uint32_t idx = byteOff / 8;
+            val = builder_.createLoadPropertyInst(
+                rbF, builder_.getLiteralNumber(idx));
+            break;
+          }
+          default: {
+            uint32_t idx = byteOff / 4;
+            val = builder_.createLoadPropertyInst(
+                rbI, builder_.getLiteralNumber(idx));
+            break;
+          }
+        }
+        builder_.createStorePropertyStrictInst(
+            val, resultArr,
+            builder_.getLiteralNumber(static_cast<double>(i)));
+      }
+      builder_.createReturnInst(resultArr);
+    }
   } else {
     // i32/f32/f64: return the call result directly.
     builder_.createReturnInst(callResult);
@@ -1618,7 +1924,18 @@ void WasmIRGen::createImportTrampoline(
   // i32/f32/f64 → pass through (already JS Numbers).
   // i64 → convert split (lo, hi) to BigInt for JS.
   llvh::SmallVector<Value *, 8> jsArgs;
-  uint32_t jsParamIdx = 1; // 0 = "this", skip it
+  // Skip retBuf params if present.
+  uint32_t jsParamIdx = needsReturnBuffer(funcType) ? 3 : 1; // 0 = "this"
+
+  // Load retBuf params if this function uses them.
+  Value *rbI = nullptr;
+  Value *rbF = nullptr;
+  if (needsReturnBuffer(funcType)) {
+    auto *paramI = func->getJSDynamicParam(1);
+    auto *paramF = func->getJSDynamicParam(2);
+    rbI = builder_.createLoadParamInst(paramI);
+    rbF = builder_.createLoadParamInst(paramF);
+  }
   for (uint32_t i = 0; i < funcType.params.size(); ++i) {
     auto *param = func->getJSDynamicParam(jsParamIdx);
     auto *paramVal = builder_.createLoadParamInst(param);
@@ -1646,6 +1963,63 @@ void WasmIRGen::createImportTrampoline(
   if (funcType.results.empty()) {
     // Void: return undefined.
     builder_.createReturnInst(builder_.getLiteralUndefined());
+  } else if (needsReturnBuffer(funcType)) {
+    // Write results to the return buffer and return 0.
+    if (funcType.results.size() == 1 &&
+        funcType.results[0] == WasmValType::I64) {
+      // Single i64: JS import returns a BigInt. Convert to lo/hi in buffer.
+      helpers_.emitBigIntToI64(rbI, callResult);
+      builder_.createReturnInst(builder_.getLiteralNumber(0));
+    } else {
+      // Multi-value: JS import returns an Array. Read elements and store.
+      auto [offsets, totalSize] = computeRetBufLayout(funcType.results);
+      for (size_t i = 0; i < funcType.results.size(); ++i) {
+        uint32_t byteOff = offsets[i];
+        auto *jsVal = builder_.createLoadPropertyInst(
+            callResult,
+            builder_.getLiteralNumber(static_cast<double>(i)));
+        switch (funcType.results[i]) {
+          case WasmValType::I32: {
+            uint32_t idx = byteOff / 4;
+            auto *coerced = builder_.createAsInt32Inst(jsVal);
+            builder_.createStorePropertyStrictInst(
+                coerced, rbI, builder_.getLiteralNumber(idx));
+            break;
+          }
+          case WasmValType::I64: {
+            uint32_t idx = byteOff / 4;
+            // JS element is a BigInt; convert to lo/hi.
+            helpers_.emitBigIntToI64(rbI, jsVal);
+            // BigIntToI64 writes to rbI[0]/[1]; copy to correct offset.
+            if (idx != 0) {
+              auto *lo = builder_.createLoadPropertyInst(
+                  rbI, builder_.getLiteralNumber(0));
+              auto *hi = builder_.createLoadPropertyInst(
+                  rbI, builder_.getLiteralNumber(1));
+              builder_.createStorePropertyStrictInst(
+                  lo, rbI, builder_.getLiteralNumber(idx));
+              builder_.createStorePropertyStrictInst(
+                  hi, rbI, builder_.getLiteralNumber(idx + 1));
+            }
+            break;
+          }
+          case WasmValType::F32:
+          case WasmValType::F64: {
+            uint32_t idx = byteOff / 8;
+            builder_.createStorePropertyStrictInst(
+                jsVal, rbF, builder_.getLiteralNumber(idx));
+            break;
+          }
+          default: {
+            uint32_t idx = byteOff / 4;
+            builder_.createStorePropertyStrictInst(
+                jsVal, rbI, builder_.getLiteralNumber(idx));
+            break;
+          }
+        }
+      }
+      builder_.createReturnInst(builder_.getLiteralNumber(0));
+    }
   } else {
     switch (funcType.results[0]) {
       case WasmValType::I32:
@@ -1653,13 +2027,6 @@ void WasmIRGen::createImportTrampoline(
         builder_.createReturnInst(
             builder_.createAsInt32Inst(callResult));
         break;
-      case WasmValType::I64: {
-        // JS import returns a BigInt. Convert to split (lo, hi).
-        // emitBigIntToI64 returns lo32 and stashes hi32.
-        auto *lo = helpers_.emitBigIntToI64(callResult);
-        builder_.createReturnInst(lo);
-        break;
-      }
       case WasmValType::F32:
       case WasmValType::F64:
         // Float/double: return as-is (JS Numbers are doubles).
@@ -1708,6 +2075,22 @@ void WasmIRGen::beginFunction(
   parentScopeInst_ = builder_.createGetParentScopeInst(
       topLevelVS_, currentFunc_->getParentScopeParam());
 
+  // Load return buffer views for this function.
+  retBufI_ = nullptr;
+  retBufF_ = nullptr;
+  if (needsReturnBuffer(funcType)) {
+    // Function receives retBufI and retBufF as its first two params.
+    auto *paramI = currentFunc_->getJSDynamicParam(1);
+    auto *paramF = currentFunc_->getJSDynamicParam(2);
+    retBufI_ = builder_.createLoadParamInst(paramI);
+    retBufF_ = builder_.createLoadParamInst(paramF);
+  } else if (retBufIVar_) {
+    // Function doesn't receive buffer params but may do i64 arithmetic.
+    // Load retBufI from the top-level scope.
+    retBufI_ = builder_.createLoadFrameInst(
+        parentScopeInst_, retBufIVar_);
+  }
+
   // Build local type map (params + declared locals).
   uint32_t numParams = funcType.params.size();
   for (uint32_t i = 0; i < numParams; ++i) {
@@ -1719,7 +2102,8 @@ void WasmIRGen::beginFunction(
 
   // Create AllocStackInst for each parameter. i64 params use 2 slots.
   // JSDynamicParam index tracks the expanding JS param list.
-  uint32_t jsParamIdx = 1; // 0 = "this"
+  // Skip retBuf params (indices 1,2) if this function has them.
+  uint32_t jsParamIdx = needsReturnBuffer(funcType) ? 3 : 1; // 0 = "this"
   for (uint32_t i = 0; i < numParams; ++i) {
     localSlotIndex_.push_back(locals_.size());
     if (funcType.params[i] == WasmValType::I64) {
@@ -1836,7 +2220,10 @@ void WasmIRGen::endFunction() {
     unreachable_ = false;
     const WasmFuncType &funcType =
         moduleInfo_.getFunctionType(currentFuncIndex_);
-    if (!funcType.results.empty() && !valueStack_.empty()) {
+    if (needsReturnBuffer(funcType) && !valueStack_.empty()) {
+      // Store all results to the return buffer and return 0.
+      emitRetBufStores(funcType);
+    } else if (!funcType.results.empty() && !valueStack_.empty()) {
       // Pop trailing results (index > 0) in reverse order and discard.
       for (size_t i = funcType.results.size(); i > 1; --i) {
         if (valueStack_.empty())
@@ -1850,7 +2237,7 @@ void WasmIRGen::endFunction() {
       // Pop and return the first result.
       if (funcType.results[0] == WasmValType::I64 && isTopI64()) {
         auto [lo, hi] = popI64();
-        helpers_.emitI64HiStash(hi);
+        // Single i64 uses retBuf — should have been caught above.
         builder_.createReturnInst(lo);
       } else if (!valueStack_.empty()) {
         Value *result = pop();
@@ -1882,6 +2269,8 @@ void WasmIRGen::endFunction() {
 
   currentFunc_ = nullptr;
   parentScopeInst_ = nullptr;
+  retBufI_ = nullptr;
+  retBufF_ = nullptr;
   valueStack_.clear();
   valueStackIsI64Hi_.clear();
   locals_.clear();
@@ -1979,27 +2368,13 @@ void WasmIRGen::onReturn() {
   const WasmFuncType &funcType =
       moduleInfo_.getFunctionType(currentFuncIndex_);
 
-  if (!funcType.results.empty()) {
-    // Pop all result values from the stack in reverse order (last result
-    // type is on top of stack). For multi-value returns, we discard all
-    // but the first result since JS functions can only return one value.
-    // Pop trailing results (index > 0) in reverse order and discard.
-    for (size_t i = funcType.results.size(); i > 1; --i) {
-      if (funcType.results[i - 1] == WasmValType::I64) {
-        popI64();
-      } else {
-        pop();
-      }
-    }
-    // Pop and return the first result.
-    if (funcType.results[0] == WasmValType::I64) {
-      auto [lo, hi] = popI64();
-      helpers_.emitI64HiStash(hi);
-      builder_.createReturnInst(lo);
-    } else {
-      Value *result = pop();
-      builder_.createReturnInst(result);
-    }
+  if (needsReturnBuffer(funcType)) {
+    // Store all results to the return buffer and return 0.
+    emitRetBufStores(funcType);
+  } else if (!funcType.results.empty()) {
+    // Single i32/f32/f64 result — pop and return directly.
+    Value *result = pop();
+    builder_.createReturnInst(result);
   } else {
     builder_.createReturnInst(builder_.getLiteralUndefined());
   }
@@ -2975,6 +3350,15 @@ void WasmIRGen::onCall(uint32_t funcIndex) {
     }
   }
   // Build the JS arg list in forward order.
+  // If the callee needs a return buffer, prepend retBufI and retBufF.
+  if (needsReturnBuffer(funcType)) {
+    auto *rbI = builder_.createLoadFrameInst(
+        parentScopeInst_, retBufIVar_);
+    auto *rbF = builder_.createLoadFrameInst(
+        parentScopeInst_, retBufFVar_);
+    args.push_back(rbI);
+    args.push_back(rbF);
+  }
   for (uint32_t i = 0; i < funcType.params.size(); ++i) {
     if (funcType.params[i] == WasmValType::I64) {
       args.push_back(wasmArgs[i].first); // lo
@@ -2993,26 +3377,13 @@ void WasmIRGen::onCall(uint32_t funcIndex) {
       /* thisValue */ builder_.getLiteralUndefined(),
       args);
 
-  // Push return values onto the stack. The JS call only returns a single
-  // value (the first result), so additional results get placeholders.
-  if (!funcType.results.empty()) {
-    // Push the first result (available from the JS return value).
-    if (funcType.results[0] == WasmValType::I64) {
-      auto *hi = helpers_.emitI64HiResult();
-      pushI64(call, hi);
-    } else {
-      push(call);
-    }
-    // Push undefined placeholders for additional results (multi-value).
-    for (size_t i = 1; i < funcType.results.size(); ++i) {
-      if (funcType.results[i] == WasmValType::I64) {
-        pushI64(
-            builder_.getLiteralUndefined(),
-            builder_.getLiteralUndefined());
-      } else {
-        push(builder_.getLiteralUndefined());
-      }
-    }
+  // Push return values onto the stack.
+  if (needsReturnBuffer(funcType)) {
+    // All results are in the return buffer. Read them out.
+    emitRetBufLoads(funcType);
+  } else if (!funcType.results.empty()) {
+    // Single non-buffer result: push the JS return value.
+    push(call);
   }
 }
 
@@ -3044,6 +3415,15 @@ void WasmIRGen::onCallIndirect(uint32_t sigIndex, uint32_t tableIndex) {
     }
   }
   // Build the JS arg list in forward order.
+  // If the callee needs a return buffer, prepend retBufI and retBufF.
+  if (needsReturnBuffer(funcType)) {
+    auto *rbI = builder_.createLoadFrameInst(
+        parentScopeInst_, retBufIVar_);
+    auto *rbF = builder_.createLoadFrameInst(
+        parentScopeInst_, retBufFVar_);
+    args.push_back(rbI);
+    args.push_back(rbF);
+  }
   for (uint32_t i = 0; i < funcType.params.size(); ++i) {
     if (funcType.params[i] == WasmValType::I64) {
       args.push_back(wasmArgs[i].first); // lo
@@ -3071,42 +3451,29 @@ void WasmIRGen::onCallIndirect(uint32_t sigIndex, uint32_t tableIndex) {
       /* thisValue */ builder_.getLiteralUndefined(),
       args);
 
-  // Push return values onto the stack. The JS call only returns a single
-  // value (the first result), so additional results get placeholders.
-  if (!funcType.results.empty()) {
-    // Push the first result (available from the JS return value).
-    if (funcType.results[0] == WasmValType::I64) {
-      auto *hi = helpers_.emitI64HiResult();
-      pushI64(call, hi);
-    } else {
-      push(call);
-    }
-    // Push undefined placeholders for additional results (multi-value).
-    for (size_t i = 1; i < funcType.results.size(); ++i) {
-      if (funcType.results[i] == WasmValType::I64) {
-        pushI64(
-            builder_.getLiteralUndefined(),
-            builder_.getLiteralUndefined());
-      } else {
-        push(builder_.getLiteralUndefined());
-      }
-    }
+  // Push return values onto the stack.
+  if (needsReturnBuffer(funcType)) {
+    // All results are in the return buffer. Read them out.
+    emitRetBufLoads(funcType);
+  } else if (!funcType.results.empty()) {
+    // Single non-buffer result: push the JS return value.
+    push(call);
   }
 }
 
 // --- i64 arithmetic (G.3) ---
 // i64 values are represented as two i32 values on the stack [lo, hi].
 // Binary operations pop two i64 pairs and push one i64 pair.
-// For operations that need a native helper: the helper returns lo32 and
-// stashes hi32, which is retrieved via a second call to emitI64HiResult().
+// For operations that need a native helper: the helper takes retBufI as
+// its first arg and writes lo/hi to retBufI[0]/[1].
 
 void WasmIRGen::onI64Add() {
   if (unreachable_)
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  auto *lo = helpers_.emitI64Add(loA, hiA, loB, hiB);
-  auto *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64Add(retBufI_, loA, hiA, loB, hiB);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -3115,8 +3482,8 @@ void WasmIRGen::onI64Sub() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  auto *lo = helpers_.emitI64Sub(loA, hiA, loB, hiB);
-  auto *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64Sub(retBufI_, loA, hiA, loB, hiB);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -3125,8 +3492,8 @@ void WasmIRGen::onI64Mul() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  auto *lo = helpers_.emitI64Mul(loA, hiA, loB, hiB);
-  auto *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64Mul(retBufI_, loA, hiA, loB, hiB);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -3135,8 +3502,8 @@ void WasmIRGen::onI64DivS() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  auto *lo = helpers_.emitI64DivS(loA, hiA, loB, hiB);
-  auto *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64DivS(retBufI_, loA, hiA, loB, hiB);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -3145,8 +3512,8 @@ void WasmIRGen::onI64DivU() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  auto *lo = helpers_.emitI64DivU(loA, hiA, loB, hiB);
-  auto *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64DivU(retBufI_, loA, hiA, loB, hiB);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -3155,8 +3522,8 @@ void WasmIRGen::onI64RemS() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  auto *lo = helpers_.emitI64RemS(loA, hiA, loB, hiB);
-  auto *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64RemS(retBufI_, loA, hiA, loB, hiB);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -3165,8 +3532,8 @@ void WasmIRGen::onI64RemU() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  auto *lo = helpers_.emitI64RemU(loA, hiA, loB, hiB);
-  auto *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64RemU(retBufI_, loA, hiA, loB, hiB);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -3211,8 +3578,8 @@ void WasmIRGen::onI64Shl() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  auto *lo = helpers_.emitI64Shl(loA, hiA, loB, hiB);
-  auto *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64Shl(retBufI_, loA, hiA, loB, hiB);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -3221,8 +3588,8 @@ void WasmIRGen::onI64ShrS() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  auto *lo = helpers_.emitI64ShrS(loA, hiA, loB, hiB);
-  auto *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64ShrS(retBufI_, loA, hiA, loB, hiB);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -3231,8 +3598,8 @@ void WasmIRGen::onI64ShrU() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  auto *lo = helpers_.emitI64ShrU(loA, hiA, loB, hiB);
-  auto *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64ShrU(retBufI_, loA, hiA, loB, hiB);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -3241,8 +3608,8 @@ void WasmIRGen::onI64Rotl() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  auto *lo = helpers_.emitI64Rotl(loA, hiA, loB, hiB);
-  auto *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64Rotl(retBufI_, loA, hiA, loB, hiB);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -3251,8 +3618,8 @@ void WasmIRGen::onI64Rotr() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  auto *lo = helpers_.emitI64Rotr(loA, hiA, loB, hiB);
-  auto *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64Rotr(retBufI_, loA, hiA, loB, hiB);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -3909,8 +4276,8 @@ void WasmIRGen::onI64TruncF64S() {
   if (unreachable_)
     return;
   Value *a = pop();
-  Value *lo = helpers_.emitI64TruncF64S(a);
-  Value *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64TruncF64S(retBufI_, a);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -3923,8 +4290,8 @@ void WasmIRGen::onI64TruncF64U() {
   if (unreachable_)
     return;
   Value *a = pop();
-  Value *lo = helpers_.emitI64TruncF64U(a);
-  Value *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64TruncF64U(retBufI_, a);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -3937,8 +4304,8 @@ void WasmIRGen::onI64TruncSatF64S() {
   if (unreachable_)
     return;
   Value *a = pop();
-  Value *lo = helpers_.emitI64TruncSatF64S(a);
-  Value *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64TruncSatF64S(retBufI_, a);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -3951,8 +4318,8 @@ void WasmIRGen::onI64TruncSatF64U() {
   if (unreachable_)
     return;
   Value *a = pop();
-  Value *lo = helpers_.emitI64TruncSatF64U(a);
-  Value *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64TruncSatF64U(retBufI_, a);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -4007,8 +4374,8 @@ void WasmIRGen::onI64ReinterpretF64() {
         builder_.getLiteralNumber(static_cast<double>(hi)));
     return;
   }
-  Value *lo = helpers_.emitI64ReinterpretF64(a);
-  Value *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64ReinterpretF64(retBufI_, a);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -5248,9 +5615,12 @@ void WasmIRGen::onStore(
   if (alignLog2 < naturalAlign) {
     if (op == "f64.store") {
       // Reinterpret f64 → i64 (split lo/hi), then byte-store each half.
-      auto *reinterp = helpers_.emitI64ReinterpretF64(value);
-      auto *hi = helpers_.emitI64HiResult();
-      emitUnalignedStore(addr, reinterp, 4);
+      helpers_.emitI64ReinterpretF64(retBufI_, value);
+      auto *lo = builder_.createLoadPropertyInst(
+          retBufI_, builder_.getLiteralNumber(0));
+      auto *hi = builder_.createLoadPropertyInst(
+          retBufI_, builder_.getLiteralNumber(1));
+      emitUnalignedStore(addr, lo, 4);
       auto *addrHi = builder_.createBinaryOperatorInst(
           addr,
           builder_.getLiteralNumber(4),

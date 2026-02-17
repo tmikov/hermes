@@ -1,17 +1,17 @@
 # Wasm Spec Test Status
 
-Last updated: 2026-02-16 (branch `wasm`)
+Last updated: 2026-02-17 (branch `wasm`)
 
 ## Summary
 
 | Metric | Value |
 |--------|-------|
-| Test files passing | 54 / 83 (65%) |
-| Test files failing | 29 / 83 |
+| Test files passing | 56 / 83 (67%) |
+| Test files failing | 27 / 83 |
 | Crashes | 0 |
 | Timeouts | 0 |
-| Assertions passing | 24,605 |
-| Assertions failing | 199 |
+| Assertions passing | 24,611 |
+| Assertions failing | 193 |
 
 ## How to Run
 
@@ -30,7 +30,7 @@ python3 test/wasm/spec/run-spec-test.py \
   external/wasm-testsuite/tests/i32.wast
 ```
 
-## Passing Tests (54)
+## Passing Tests (56)
 
 | Test | Passed | Failed | Skipped |
 |------|--------|--------|---------|
@@ -52,6 +52,7 @@ python3 test/wasm/spec/run-spec-test.py \
 | const | 300 | 0 | 76 |
 | block | 207 | 0 | 15 |
 | loop | 104 | 0 | 15 |
+| if | 216 | 0 | 24 |
 | br | 96 | 0 | 0 |
 | switch | 27 | 0 | 0 |
 | return | 83 | 0 | 0 |
@@ -59,6 +60,7 @@ python3 test/wasm/spec/run-spec-test.py \
 | labels | 28 | 0 | 0 |
 | forward | 4 | 0 | 0 |
 | left-to-right | 95 | 0 | 0 |
+| call | 88 | 0 | 0 |
 | call_indirect | 156 | 0 | 11 |
 | local_get | 35 | 0 | 0 |
 | local_set | 52 | 0 | 0 |
@@ -88,7 +90,7 @@ python3 test/wasm/spec/run-spec-test.py \
 | utf8-invalid-encoding | 0 | 0 | 176 |
 | endianness | 68 | 0 | 0 |
 
-## Failing Tests (29)
+## Failing Tests (27)
 
 ### Failure Categories
 
@@ -264,68 +266,20 @@ features.
 
 **Affected tests:** memory_grow (50), memory_redundancy (3)
 
-#### 6. Multi-Value Return from Calls Not Implemented (6 failures)
+#### ~~6. Multi-Value Return from Calls Not Implemented (was 6 failures — FIXED)~~
 
-When a Wasm function returns multiple values (e.g., `(result i64 i32)`), only
-the first return value survives. All additional return values are replaced with
-`undefined`. This is an explicit limitation in WasmIRGen — the code comments
-say `"Push undefined placeholders for additional results (multi-value)"`.
+Fixed by replacing the thread-local `wasmI64HiStash_`/`wasmI64HiResult`
+mechanism with a per-module return buffer (ArrayBuffer with Uint32Array +
+Float64Array views). Functions returning i64 or multiple values now receive
+buffer views as parameters and store results there. All 18 i64-returning
+builtins take `retBufI` as their first argument. The `wasmI64HiStash` and
+`wasmI64HiResult` builtins are deleted. Bytecode version bumped 116 → 117.
 
-**Root cause:** Hermes IR functions can only return a single value via
-`ReturnInst`. The i64 case already works around this with a side-channel stash
-for the hi32 half, but there is no mechanism for passing additional return
-values from multi-value functions.
+Multi-value returns are now fully supported: callees store all results into
+the shared buffer, callers read them back, and export wrappers marshal
+multi-value results to/from JS Arrays.
 
-**6 locations in `lib/WasmIRGen/WasmIRGen.cpp` are affected:**
-
-1. **`onReturn()` (~line 1037):** Pops all results beyond the first and
-   discards them. Only the first result is passed to `ReturnInst`.
-
-2. **`endFunction()` (~line 887):** Same as `onReturn()` for the fallthrough
-   return path at the end of a function body.
-
-3. **`onCall()` (~line 2013):** After a call, pushes `undefined` for all
-   results beyond the first instead of actual values.
-
-4. **`onCallIndirect()` (~line 2081):** Same as `onCall()`.
-
-5. **`createExportWrapper()` (~line 560):** Only marshals `results[0]` to JS.
-
-6. **`createImportTrampoline()` (~line 652):** Only unmarshals the first
-   result from a JS import call.
-
-**Note:** Multi-value *blocks* (block/loop/if with params and results within a
-single function) work correctly — the phi infrastructure handles them. Only
-cross-function-boundary multi-value is broken.
-
-**How the `if` test fails:** `add64_u_with_carry` returns `(i64, i32)` where
-the i32 is a carry flag. The caller `add64_u_saturated` uses this carry as the
-condition for `if (param i64) (result i64)`. But `onCall()` pushes `undefined`
-for the carry, so the `if` condition is always falsy and the saturation branch
-never executes.
-
-**Affected tests:** call (3), if (3)
-
-```
-;; add64_u_with_carry returns (sum: i64, carry: i32) — carry is lost
-(call $add64_u_with_carry (local.get 0) (local.get 1) (i32.const 0))
-(if (param i64) (result i64)    ;; carry (i32) is condition, sum (i64) is param
-  (then (drop) (i64.const -1))  ;; never reached because carry = undefined
-)
-```
-
-```
-call.wast line 306: as-binary-all-operands: expected 7 got 0
-call.wast line 308: as-call-all-operands: expected [3, 4] got undefined
-if.wast line 722: add64_u_saturated(-1, 1): expected UINT64_MAX got 0
-if.wast line 725: add64_u_saturated(-1, -1): expected UINT64_MAX got -2
-if.wast line 728: add64_u_saturated(MIN, MIN): expected UINT64_MAX got 0
-```
-
-**Fix approach:** Extend the existing i64 hi-stash pattern. For functions with
-N>1 results, use N-1 additional stash slots (global-like variables) to pass
-extra return values out-of-band. The callee stores extra results into stash
-slots before `ReturnInst`, and the caller reads them after `CallInst`.
+**Previously affected tests:** call (3 → 0), if (3 → 0)
 
 #### 7. wast2json Parse/Validation Errors (16 failures)
 
@@ -358,11 +312,9 @@ br_if.wast:670:26: error: unexpected token "null", expected a numeric index
 | float_exprs | 811 | 8 | 0 | NaN bit patterns (cat 1) |
 | float_memory | 50 | 10 | 0 | NaN through memory (cat 1) |
 | conversions | 610 | 8 | 0 | NaN reinterpret (cat 1) |
-| if | 213 | 3 | 24 | Multi-value return (cat 6) |
 | br_if | 0 | 1 | 0 | wast2json parse error (cat 7) |
 | br_table | 0 | 1 | 0 | wast2json parse error (cat 7) |
 | unreached-valid | 0 | 1 | 0 | wast2json parse error (cat 7) |
-| call | 85 | 3 | 0 | Multi-value return (cat 6) |
 | local_tee | 0 | 1 | 0 | wast2json parse error (cat 7) |
 | global | 0 | 1 | 0 | wast2json parse error (cat 7) |
 | memory | 0 | 1 | 0 | wast2json parse error (cat 7) |
@@ -376,9 +328,8 @@ br_if.wast:670:26: error: unexpected token "null", expected a numeric index
 | table_get | 10 | 4 | 0 | Table OOB (cat 3) |
 | table_grow | 36 | 14 | 0 | Table OOB (cat 3) |
 | table_set | 17 | 8 | 0 | Table OOB (cat 3) |
-| table_size | 38 | 0 | 0 | ✓ all pass |
 | select | 0 | 1 | 0 | wast2json parse error (cat 7) |
-| imports | 147 | 2 | 16 | Unlinkable (cat 4) |
+| imports | 126 | 2 | 16 | Unlinkable (cat 4) |
 | tag | 0 | 1 | 0 | wast2json parse error (cat 7) |
 | ref_is_null | 0 | 1 | 0 | wast2json parse error (cat 7) |
 | ref_null | 0 | 1 | 0 | wast2json parse error (cat 7) |
@@ -390,14 +341,12 @@ br_if.wast:670:26: error: unexpected token "null", expected a numeric index
    succeeds instead of trapping. 38 failures.
 2. **Table bounds checking** (cat 3) — runtime correctness; OOB table access
    succeeds instead of trapping. 26 failures.
-3. **Multi-value call returns** (cat 6) — semantic correctness; multi-value
-   returns from calls produce wrong results. 6 failures.
-4. **Instantiation-time validation** (cat 4) — alignment hints trusted in
+3. **Instantiation-time validation** (cat 4) — alignment hints trusted in
    imports. 2 failures (0 with patched test).
-5. **Module load failures** (cat 5) — multiple memories, etc. 53 failures.
-6. **wast2json upgrade** (cat 7) — would unblock 14 test files using newer
+4. **Module load failures** (cat 5) — multiple memories, etc. 53 failures.
+5. **wast2json upgrade** (cat 7) — would unblock 14 test files using newer
    proposal syntax plus 2 data.wast failures. 16 failures.
-7. **NaN-boxing limitations** (cat 1) — requires non-NaN-boxed Wasm value
+6. **NaN-boxing limitations** (cat 1) — requires non-NaN-boxed Wasm value
    representation. 58 failures.
 
 ## Known Architectural Limitations

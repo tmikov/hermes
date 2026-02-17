@@ -545,6 +545,16 @@ class WasmIRGen {
   /// or null (dropped). Only populated if the module has element segments.
   Variable *elemSegVar_ = nullptr;
 
+  /// Per-module return buffer variables. Only created if the module uses i64
+  /// or multi-value returns. The buffer is an ArrayBuffer shared by all
+  /// functions. retBufIVar_ is a Uint32Array view, retBufFVar_ is a
+  /// Float64Array view.
+  Variable *retBufIVar_ = nullptr;
+  Variable *retBufFVar_ = nullptr;
+
+  /// Size of the return buffer in bytes. Set during createFunctions().
+  uint32_t retBufSize_ = 0;
+
   /// The __wasm_instantiate__ IR Function, created in createFunctions().
   /// Contains the initialization body (import resolution, closures, memory,
   /// tables, globals, trampolines, data/elem segments, start, exports).
@@ -601,6 +611,14 @@ class WasmIRGen {
   /// The parent (top-level) scope instruction, used to load pre-created
   /// closures from the environment at call sites.
   GetParentScopeInst *parentScopeInst_ = nullptr;
+
+  /// Per-function cached return buffer views (valid between
+  /// beginFunction/endFunction). For functions that receive retBufI/retBufF
+  /// as params, these point to LoadParamInst. For functions that only need
+  /// the buffer for i64 arithmetic, retBufI_ is loaded from the top-level
+  /// scope. nullptr if the module has no i64 at all.
+  Value *retBufI_ = nullptr;
+  Value *retBufF_ = nullptr;
 
   /// Whether we are in unreachable code (after an unconditional br, return,
   /// or unreachable). In unreachable mode, instructions are no-ops until
@@ -783,6 +801,28 @@ class WasmIRGen {
   void createImportTrampoline(
       uint32_t funcIndex,
       Instruction *tlScope);
+
+  /// Returns true if the given function type needs buffer params (returns
+  /// i64 or has multiple results).
+  static bool needsReturnBuffer(const WasmFuncType &funcType);
+
+  /// Compute byte layout for results in the return buffer.
+  /// \return {vector of byte offsets per result, total buffer size}.
+  static std::pair<std::vector<uint32_t>, uint32_t> computeRetBufLayout(
+      const std::vector<WasmValType> &results);
+
+  /// Callee: pop results, store to buffer, return 0. Called from onReturn()
+  /// and endFunction() when the function uses a return buffer.
+  void emitRetBufStores(const WasmFuncType &funcType);
+
+  /// Caller: read results from buffer, push onto value stack.
+  /// Called from onCall/onCallIndirect after a call to a function that
+  /// uses a return buffer.
+  void emitRetBufLoads(const WasmFuncType &funcType);
+
+  /// Read i64 from retBufI_[0] and retBufI_[1]. Used after i64 arithmetic
+  /// builtins that write their result to the return buffer.
+  std::pair<Value *, Value *> readI64FromRetBuf();
 };
 
 } // namespace wasm

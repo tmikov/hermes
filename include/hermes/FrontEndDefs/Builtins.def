@@ -176,10 +176,8 @@ PRIVATE_BUILTIN(wasmF32ReinterpretI32)
 PRIVATE_BUILTIN(wasmF64Copysign)
 PRIVATE_BUILTIN(wasmF32Copysign)
 PRIVATE_BUILTIN(wasmNearest)
-// i64 hi32 stash/retrieve helpers. Used for i64 function returns and i64
-// arithmetic helpers that return split lo/hi results.
-PRIVATE_BUILTIN(wasmI64HiStash)
-PRIVATE_BUILTIN(wasmI64HiResult)
+// i64 binary arithmetic helpers. Take (retBufI, lo_a, hi_a, lo_b, hi_b),
+// write lo/hi result to retBufI[0]/[1], return 0.
 PRIVATE_BUILTIN(wasmI64Add)
 PRIVATE_BUILTIN(wasmI64Sub)
 PRIVATE_BUILTIN(wasmI64Mul)
@@ -208,8 +206,8 @@ PRIVATE_BUILTIN(wasmI64LtU)
 PRIVATE_BUILTIN(wasmI64GtU)
 PRIVATE_BUILTIN(wasmI64LeU)
 PRIVATE_BUILTIN(wasmI64GeU)
-// i64 conversion helpers (G.4b). Take a single f64 arg, return lo32; hi32
-// is stashed and retrieved via wasmI64HiResult.
+// i64 conversion helpers (G.4b). Take (retBufI, f64_arg), write lo/hi result
+// to retBufI[0]/[1], return 0.
 PRIVATE_BUILTIN(wasmI64TruncF64S)
 PRIVATE_BUILTIN(wasmI64TruncF64U)
 PRIVATE_BUILTIN(wasmI64TruncSatF64S)
@@ -252,7 +250,8 @@ PRIVATE_BUILTIN(wasmMemoryInit)
 PRIVATE_BUILTIN(wasmDataDrop)
 
 // BigInt ↔ i64 conversion helpers for export/import wrappers.
-// wasmBigIntToI64(bigint): extracts i64 from BigInt, returns lo32, stashes hi32.
+// wasmBigIntToI64(retBufI, bigint): extracts i64 from BigInt, writes lo/hi
+// to retBufI[0]/[1], returns 0.
 PRIVATE_BUILTIN(wasmBigIntToI64)
 // wasmI64ToBigInt(lo, hi): converts split lo/hi to BigInt.
 PRIVATE_BUILTIN(wasmI64ToBigInt)

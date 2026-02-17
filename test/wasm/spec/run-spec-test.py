@@ -120,52 +120,63 @@ def escape_js_string(s):
 
 
 def gen_expected_check(expected, result_var):
-    """Generate JS code to check an expected value against a result."""
+    """Generate JS code to check expected value(s) against a result.
+
+    For single-value returns, result_var is the value directly.
+    For multi-value returns (len(expected) > 1), result_var is an Array.
+    """
     if not expected:
         return f"true /* void */"
 
-    val = expected[0]
+    if len(expected) == 1:
+        return gen_single_expected_check(expected[0], result_var)
+
+    # Multi-value: result_var is an Array. Check each element.
+    checks = []
+    for i, val in enumerate(expected):
+        check = gen_single_expected_check(val, f"{result_var}[{i}]")
+        checks.append(check)
+    return " && ".join(checks)
+
+
+def gen_single_expected_check(val, result_expr):
+    """Generate JS code to check a single expected value."""
     typ = val['type']
     v = val.get('value', None)
 
     if v is None:
-        # No value specified (e.g., assert_trap expected type only)
         return "true"
 
     if v == "nan:canonical" or v == "nan:arithmetic":
-        return f"Number.isNaN({result_var})"
+        return f"Number.isNaN({result_expr})"
 
     if typ == 'i32':
-        # Use bitwise OR to normalize both to signed int32 for comparison.
-        # This handles the case where runtime returns unsigned (e.g., 2147483648)
-        # but spec expects the same bit pattern interpreted as signed (-2147483648).
         expected_js = i32_value_to_js(v)
-        return f"(({result_var} | 0) === ({expected_js} | 0))"
+        return f"(({result_expr} | 0) === ({expected_js} | 0))"
     elif typ == 'i64':
         expected_js = i64_value_to_bigint_literal(v)
-        return f"({result_var} === {expected_js})"
+        return f"({result_expr} === {expected_js})"
     elif typ == 'f32':
         bits = int(v) & 0xFFFFFFFF
-        # Check special float values
         if (bits & 0x7F800000) == 0x7F800000 and (bits & 0x007FFFFF) != 0:
-            return f"Number.isNaN({result_var})"
+            return f"Number.isNaN({result_expr})"
         js_val = f32_bits_to_js(v)
         if js_val == "-0.0":
-            return f"(Object.is({result_var}, -0))"
+            return f"(Object.is({result_expr}, -0))"
         if js_val == "0.0":
-            return f"({result_var} === 0 && !Object.is({result_var}, -0))"
-        return f"({result_var} === {js_val})"
+            return f"({result_expr} === 0 && !Object.is({result_expr}, -0))"
+        return f"({result_expr} === {js_val})"
     elif typ == 'f64':
         bits = int(v) & 0xFFFFFFFFFFFFFFFF
         if (bits & 0x7FF0000000000000) == 0x7FF0000000000000 and \
            (bits & 0x000FFFFFFFFFFFFF) != 0:
-            return f"Number.isNaN({result_var})"
+            return f"Number.isNaN({result_expr})"
         js_val = f64_bits_to_js(v)
         if js_val == "-0.0":
-            return f"(Object.is({result_var}, -0))"
+            return f"(Object.is({result_expr}, -0))"
         if js_val == "0.0":
-            return f"({result_var} === 0 && !Object.is({result_var}, -0))"
-        return f"({result_var} === {js_val})"
+            return f"({result_expr} === 0 && !Object.is({result_expr}, -0))"
+        return f"({result_expr} === {js_val})"
     else:
         return "true"
 

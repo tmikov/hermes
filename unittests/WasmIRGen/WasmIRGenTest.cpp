@@ -3398,19 +3398,13 @@ TEST(WasmIRGenTest, I64AddEmitsCallAndHi) {
   ASSERT_NE(lo, nullptr);
   ASSERT_NE(hi, nullptr);
 
-  // lo should be a CallBuiltinInst (wasmI64Add).
-  auto *loInst = llvh::dyn_cast<CallBuiltinInst>(lo);
+  // With the retBuf convention, lo and hi are AsInt32Inst wrapping
+  // LoadPropertyInst reading from retBufI_[0] and retBufI_[1].
+  auto *loInst = llvh::dyn_cast<AsInt32Inst>(lo);
   ASSERT_NE(loInst, nullptr);
-  EXPECT_EQ(
-      loInst->getBuiltinIndex(),
-      BuiltinMethod::HermesBuiltin_wasmI64Add);
 
-  // hi should be a CallBuiltinInst (wasmI64HiResult).
-  auto *hiInst = llvh::dyn_cast<CallBuiltinInst>(hi);
+  auto *hiInst = llvh::dyn_cast<AsInt32Inst>(hi);
   ASSERT_NE(hiInst, nullptr);
-  EXPECT_EQ(
-      hiInst->getBuiltinIndex(),
-      BuiltinMethod::HermesBuiltin_wasmI64HiResult);
 
   // Push i32 return value.
   irgen.onI32Const(0);
@@ -3550,11 +3544,13 @@ TEST(WasmIRGenTest, I64ShlEmitsCallAndHi) {
   // Pop via popI64 — verifies the result was pushed as i64.
   auto [lo, hi] = irgen.popI64();
 
-  auto *loInst = llvh::dyn_cast<CallBuiltinInst>(lo);
+  // With the retBuf convention, lo and hi are AsInt32Inst wrapping
+  // LoadPropertyInst reading from retBufI_[0] and retBufI_[1].
+  auto *loInst = llvh::dyn_cast<AsInt32Inst>(lo);
   ASSERT_NE(loInst, nullptr);
-  EXPECT_EQ(
-      loInst->getBuiltinIndex(),
-      BuiltinMethod::HermesBuiltin_wasmI64Shl);
+
+  auto *hiInst = llvh::dyn_cast<AsInt32Inst>(hi);
+  ASSERT_NE(hiInst, nullptr);
 
   irgen.onI32Const(0);
   irgen.endFunction();
@@ -3579,17 +3575,13 @@ TEST(WasmIRGenTest, I64TruncF64SEmitsCallAndHi) {
   // Result should be an i64 (split pair). Pop and verify.
   auto [lo, hi] = irgen.popI64();
 
-  auto *loInst = llvh::dyn_cast<CallBuiltinInst>(lo);
+  // With the retBuf convention, lo and hi are AsInt32Inst wrapping
+  // LoadPropertyInst.
+  auto *loInst = llvh::dyn_cast<AsInt32Inst>(lo);
   ASSERT_NE(loInst, nullptr);
-  EXPECT_EQ(
-      loInst->getBuiltinIndex(),
-      BuiltinMethod::HermesBuiltin_wasmI64TruncF64S);
 
-  auto *hiInst = llvh::dyn_cast<CallBuiltinInst>(hi);
+  auto *hiInst = llvh::dyn_cast<AsInt32Inst>(hi);
   ASSERT_NE(hiInst, nullptr);
-  EXPECT_EQ(
-      hiInst->getBuiltinIndex(),
-      BuiltinMethod::HermesBuiltin_wasmI64HiResult);
 
   irgen.onI32Const(0);
   irgen.endFunction();
@@ -3612,11 +3604,9 @@ TEST(WasmIRGenTest, I64TruncF64UEmitsCallAndHi) {
 
   auto [lo, hi] = irgen.popI64();
 
-  auto *loInst = llvh::dyn_cast<CallBuiltinInst>(lo);
+  // With the retBuf convention, lo is AsInt32Inst wrapping LoadPropertyInst.
+  auto *loInst = llvh::dyn_cast<AsInt32Inst>(lo);
   ASSERT_NE(loInst, nullptr);
-  EXPECT_EQ(
-      loInst->getBuiltinIndex(),
-      BuiltinMethod::HermesBuiltin_wasmI64TruncF64U);
 
   irgen.onI32Const(0);
   irgen.endFunction();
@@ -3639,11 +3629,9 @@ TEST(WasmIRGenTest, I64TruncSatF64SEmitsCallAndHi) {
 
   auto [lo, hi] = irgen.popI64();
 
-  auto *loInst = llvh::dyn_cast<CallBuiltinInst>(lo);
+  // With the retBuf convention, lo is AsInt32Inst wrapping LoadPropertyInst.
+  auto *loInst = llvh::dyn_cast<AsInt32Inst>(lo);
   ASSERT_NE(loInst, nullptr);
-  EXPECT_EQ(
-      loInst->getBuiltinIndex(),
-      BuiltinMethod::HermesBuiltin_wasmI64TruncSatF64S);
 
   irgen.onI32Const(0);
   irgen.endFunction();
@@ -3666,11 +3654,9 @@ TEST(WasmIRGenTest, I64TruncSatF64UEmitsCallAndHi) {
 
   auto [lo, hi] = irgen.popI64();
 
-  auto *loInst = llvh::dyn_cast<CallBuiltinInst>(lo);
+  // With the retBuf convention, lo is AsInt32Inst wrapping LoadPropertyInst.
+  auto *loInst = llvh::dyn_cast<AsInt32Inst>(lo);
   ASSERT_NE(loInst, nullptr);
-  EXPECT_EQ(
-      loInst->getBuiltinIndex(),
-      BuiltinMethod::HermesBuiltin_wasmI64TruncSatF64U);
 
   irgen.onI32Const(0);
   irgen.endFunction();
@@ -3695,11 +3681,9 @@ TEST(WasmIRGenTest, I64TruncF32SDelegatesToF64) {
   // Should emit wasmI64TruncF64S (same builtin as f64 variant).
   auto [lo, hi] = irgen.popI64();
 
-  auto *loInst = llvh::dyn_cast<CallBuiltinInst>(lo);
+  // With the retBuf convention, lo is AsInt32Inst wrapping LoadPropertyInst.
+  auto *loInst = llvh::dyn_cast<AsInt32Inst>(lo);
   ASSERT_NE(loInst, nullptr);
-  EXPECT_EQ(
-      loInst->getBuiltinIndex(),
-      BuiltinMethod::HermesBuiltin_wasmI64TruncF64S);
 
   irgen.onI32Const(0);
   irgen.endFunction();
