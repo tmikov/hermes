@@ -127,7 +127,6 @@ if(HERMES_ENABLE_WASM)
   target_link_libraries(hermescompiler PUBLIC
     hermesWasmFrontend_obj
     hermesWasmIRGen_obj
-    wabt
     )
 endif()
 
@@ -280,7 +279,6 @@ if(HERMES_ENABLE_WASM)
   target_link_libraries(hermesvm_a PUBLIC
     hermesWasmFrontend_obj
     hermesWasmIRGen_obj
-    wabt
     )
 endif()
 

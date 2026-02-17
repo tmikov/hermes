@@ -13,5 +13,4 @@ add_hermes_unittest(WasmFrontendTests
 
 target_link_libraries(WasmFrontendTests
   hermesWasmFrontend
-  wabt
   )

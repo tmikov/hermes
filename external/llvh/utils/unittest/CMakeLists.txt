@@ -45,19 +45,12 @@ if (NOT LLVM_ENABLE_THREADS)
   add_definitions( -DGTEST_HAS_PTHREAD=0 )
 endif()
 
-find_library(LLVM_PTHREAD_LIBRARY_PATH pthread)
-if (LLVM_PTHREAD_LIBRARY_PATH)
-  list(APPEND LIBS pthread)
-endif()
-
 add_hermes_library(gtest STATIC
   googletest/src/gtest-all.cc
   googlemock/src/gmock-all.cc
 
   LINK_OBJLIBS
-  LLVHSupport # Depends on llvh::raw_ostream
-  LINK_LIBS
-  ${LIBS}
+  LLVHSupport # Depends on llvh::raw_ostream; also provides pthread transitively
 )
 
 add_subdirectory(UnitTestMain)
