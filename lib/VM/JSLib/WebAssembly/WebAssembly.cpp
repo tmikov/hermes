@@ -27,6 +27,8 @@
 #include "hermes/VM/JSWebAssemblyTable.h"
 #include "hermes/VM/Runtime.h"
 #include "hermes/VM/RuntimeModule.h"
+#include "hermes/BCGen/HBC/BCProvider.h"
+#include "hermes/Support/MemoryBuffer.h"
 #include "hermes/WasmFrontend/WasmModuleData.h"
 
 #include <cmath>
@@ -396,6 +398,251 @@ callPromiseReject(Runtime &runtime, HermesValue error) {
 }
 
 //===----------------------------------------------------------------------===//
+// Shared helpers for HBC detection and module info extraction
+//===----------------------------------------------------------------------===//
+
+/// Extract export/import descriptors from the JS module info object returned
+/// by running the top-level Wasm bytecode. Populates the WasmModuleData
+/// exportDescs and importDescs vectors.
+static ExecutionStatus extractDescriptorsFromModuleInfo(
+    Runtime &runtime,
+    Handle<JSObject> moduleInfoObj,
+    WasmModuleData &moduleData) {
+  struct : public Locals {
+    PinnedValue<> arr;
+    PinnedValue<> elem;
+    PinnedValue<> prop;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  GCScopeMarkerRAII marker{runtime};
+
+  // Extract exportDescs.
+  {
+    auto res = JSObject::getNamed_RJS(
+        moduleInfoObj, runtime,
+        Predefined::getSymbolID(Predefined::exportDescs));
+    if (LLVM_UNLIKELY(res == ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
+    lv.arr = std::move(*res);
+  }
+
+  if (lv.arr->isObject()) {
+    auto lengthRes = JSObject::getNamed_RJS(
+        Handle<JSObject>::vmcast(&lv.arr), runtime,
+        Predefined::getSymbolID(Predefined::length));
+    if (LLVM_UNLIKELY(lengthRes == ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
+    uint32_t len = 0;
+    if (lengthRes->getHermesValue().isNumber())
+      len = static_cast<uint32_t>(lengthRes->getHermesValue().getDouble());
+
+    moduleData.exportDescs.resize(len);
+    for (uint32_t i = 0; i < len; ++i) {
+      marker.flush();
+      auto elemRes = JSObject::getComputed_RJS(
+          Handle<JSObject>::vmcast(&lv.arr), runtime,
+          runtime.makeHandle(HermesValue::encodeTrustedNumberValue(i)));
+      if (LLVM_UNLIKELY(elemRes == ExecutionStatus::EXCEPTION))
+        return ExecutionStatus::EXCEPTION;
+      lv.elem = std::move(*elemRes);
+
+      if (!lv.elem->isObject())
+        continue;
+
+      // Get 'name'.
+      auto nameRes = JSObject::getNamed_RJS(
+          Handle<JSObject>::vmcast(&lv.elem), runtime,
+          Predefined::getSymbolID(Predefined::name));
+      if (LLVM_UNLIKELY(nameRes == ExecutionStatus::EXCEPTION))
+        return ExecutionStatus::EXCEPTION;
+      lv.prop = std::move(*nameRes);
+      if (auto *str = dyn_vmcast<StringPrimitive>(*lv.prop)) {
+        llvh::SmallVector<char16_t, 32> buf;
+        str->appendUTF16String(buf);
+        std::string utf8;
+        for (auto ch : buf)
+          utf8.push_back(static_cast<char>(ch));
+        moduleData.exportDescs[i].name = std::move(utf8);
+      }
+
+      // Get 'kind'.
+      auto kindRes = JSObject::getNamed_RJS(
+          Handle<JSObject>::vmcast(&lv.elem), runtime,
+          Predefined::getSymbolID(Predefined::kind));
+      if (LLVM_UNLIKELY(kindRes == ExecutionStatus::EXCEPTION))
+        return ExecutionStatus::EXCEPTION;
+      lv.prop = std::move(*kindRes);
+      if (auto *str = dyn_vmcast<StringPrimitive>(*lv.prop)) {
+        llvh::SmallVector<char16_t, 32> buf;
+        str->appendUTF16String(buf);
+        std::string utf8;
+        for (auto ch : buf)
+          utf8.push_back(static_cast<char>(ch));
+        moduleData.exportDescs[i].kind = std::move(utf8);
+      }
+    }
+  }
+
+  // Extract importDescs.
+  {
+    auto res = JSObject::getNamed_RJS(
+        moduleInfoObj, runtime,
+        Predefined::getSymbolID(Predefined::importDescs));
+    if (LLVM_UNLIKELY(res == ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
+    lv.arr = std::move(*res);
+  }
+
+  if (lv.arr->isObject()) {
+    auto lengthRes = JSObject::getNamed_RJS(
+        Handle<JSObject>::vmcast(&lv.arr), runtime,
+        Predefined::getSymbolID(Predefined::length));
+    if (LLVM_UNLIKELY(lengthRes == ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
+    uint32_t len = 0;
+    if (lengthRes->getHermesValue().isNumber())
+      len = static_cast<uint32_t>(lengthRes->getHermesValue().getDouble());
+
+    moduleData.importDescs.resize(len);
+    for (uint32_t i = 0; i < len; ++i) {
+      marker.flush();
+      auto elemRes = JSObject::getComputed_RJS(
+          Handle<JSObject>::vmcast(&lv.arr), runtime,
+          runtime.makeHandle(HermesValue::encodeTrustedNumberValue(i)));
+      if (LLVM_UNLIKELY(elemRes == ExecutionStatus::EXCEPTION))
+        return ExecutionStatus::EXCEPTION;
+      lv.elem = std::move(*elemRes);
+
+      if (!lv.elem->isObject())
+        continue;
+
+      // Get 'module'.
+      auto modRes = JSObject::getNamed_RJS(
+          Handle<JSObject>::vmcast(&lv.elem), runtime,
+          Predefined::getSymbolID(Predefined::module));
+      if (LLVM_UNLIKELY(modRes == ExecutionStatus::EXCEPTION))
+        return ExecutionStatus::EXCEPTION;
+      lv.prop = std::move(*modRes);
+      if (auto *str = dyn_vmcast<StringPrimitive>(*lv.prop)) {
+        llvh::SmallVector<char16_t, 32> buf;
+        str->appendUTF16String(buf);
+        std::string utf8;
+        for (auto ch : buf)
+          utf8.push_back(static_cast<char>(ch));
+        moduleData.importDescs[i].module = std::move(utf8);
+      }
+
+      // Get 'name'.
+      auto nameRes = JSObject::getNamed_RJS(
+          Handle<JSObject>::vmcast(&lv.elem), runtime,
+          Predefined::getSymbolID(Predefined::name));
+      if (LLVM_UNLIKELY(nameRes == ExecutionStatus::EXCEPTION))
+        return ExecutionStatus::EXCEPTION;
+      lv.prop = std::move(*nameRes);
+      if (auto *str = dyn_vmcast<StringPrimitive>(*lv.prop)) {
+        llvh::SmallVector<char16_t, 32> buf;
+        str->appendUTF16String(buf);
+        std::string utf8;
+        for (auto ch : buf)
+          utf8.push_back(static_cast<char>(ch));
+        moduleData.importDescs[i].name = std::move(utf8);
+      }
+
+      // Get 'kind'.
+      auto kindRes = JSObject::getNamed_RJS(
+          Handle<JSObject>::vmcast(&lv.elem), runtime,
+          Predefined::getSymbolID(Predefined::kind));
+      if (LLVM_UNLIKELY(kindRes == ExecutionStatus::EXCEPTION))
+        return ExecutionStatus::EXCEPTION;
+      lv.prop = std::move(*kindRes);
+      if (auto *str = dyn_vmcast<StringPrimitive>(*lv.prop)) {
+        llvh::SmallVector<char16_t, 32> buf;
+        str->appendUTF16String(buf);
+        std::string utf8;
+        for (auto ch : buf)
+          utf8.push_back(static_cast<char>(ch));
+        moduleData.importDescs[i].kind = std::move(utf8);
+      }
+    }
+  }
+
+  return ExecutionStatus::RETURNED;
+}
+
+/// Shared helper: create a WasmModuleData from raw bytes.
+/// Detects whether the bytes are a precompiled .hbc file or a .wasm binary,
+/// compiles/loads accordingly, runs the lightweight top-level to extract
+/// descriptors, and returns a populated WasmModuleData.
+/// Returns nullptr on error (errorMsg is set, or an exception is thrown).
+static std::unique_ptr<WasmModuleData> createModuleFromBytes(
+    Runtime &runtime,
+    const uint8_t *data,
+    size_t size,
+    std::string &errorMsg) {
+  std::shared_ptr<hbc::BCProviderBase> bcProvider;
+
+  if (hbc::BCProviderFromBuffer::isBytecodeStream(
+          llvh::ArrayRef<uint8_t>(data, size))) {
+    // Precompiled HBC path — load directly.
+    auto llvmBuf = llvh::MemoryBuffer::getMemBufferCopy(
+        llvh::StringRef(reinterpret_cast<const char *>(data), size));
+    auto ret = hbc::BCProviderFromBuffer::createBCProviderFromBuffer(
+        std::make_unique<OwnedMemoryBuffer>(std::move(llvmBuf)));
+    if (!ret.first) {
+      errorMsg = ret.second.empty()
+          ? "invalid HBC bytecode" : std::string(ret.second);
+      return nullptr;
+    }
+    bcProvider = std::shared_ptr<hbc::BCProviderBase>(std::move(ret.first));
+  } else {
+    // .wasm path — compile to HBC first.
+    auto compiledData = hermes::compileWasmToModuleData(data, size, errorMsg);
+    if (!compiledData) {
+      return nullptr;
+    }
+    bcProvider = compiledData->bytecodeProvider;
+  }
+
+  // Run the lightweight top-level to extract descriptors.
+  auto bcCopy = bcProvider;
+  auto runRes = runtime.runBytecode(
+      std::move(bcCopy),
+      RuntimeModuleFlags{},
+      "wasm-module",
+      Runtime::makeNullHandle<Environment>());
+
+  if (LLVM_UNLIKELY(runRes == ExecutionStatus::EXCEPTION)) {
+    errorMsg = "failed to run Wasm module top-level";
+    return nullptr;
+  }
+
+  if (!runRes->isObject()) {
+    errorMsg = "Wasm module top-level did not return an object";
+    return nullptr;
+  }
+
+  auto moduleData = std::make_unique<WasmModuleData>();
+  moduleData->bytecodeProvider = bcProvider;
+
+  struct : public Locals {
+    PinnedValue<JSObject> moduleInfoObj;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+  lv.moduleInfoObj.castAndSetHermesValue<JSObject>(*runRes);
+
+  if (LLVM_UNLIKELY(
+          extractDescriptorsFromModuleInfo(
+              runtime, lv.moduleInfoObj, *moduleData) ==
+          ExecutionStatus::EXCEPTION)) {
+    errorMsg = "failed to extract descriptors from module info";
+    return nullptr;
+  }
+
+  return moduleData;
+}
+
+//===----------------------------------------------------------------------===//
 // WebAssembly.validate
 //===----------------------------------------------------------------------===//
 
@@ -419,9 +666,10 @@ wasmValidate(void *context, Runtime &runtime) {
 // WebAssembly.compile
 //===----------------------------------------------------------------------===//
 
-/// WebAssembly.compile(bytes) — compile a Wasm binary asynchronously.
-/// Since Hermes doesn't do async compilation, this is synchronous compilation
-/// wrapped in a resolved Promise. On error, returns a rejected Promise.
+/// WebAssembly.compile(bytes) — compile a Wasm binary or load .hbc
+/// asynchronously. Since Hermes doesn't do async compilation, this is
+/// synchronous compilation wrapped in a resolved Promise. On error, returns
+/// a rejected Promise.
 static CallResult<HermesValue>
 wasmCompile(void *context, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
@@ -434,12 +682,14 @@ wasmCompile(void *context, Runtime &runtime) {
         "typed array");
   }
 
-  // Compile the Wasm binary.
+  // Compile from .wasm or load from .hbc (auto-detected).
   std::string errorMsg;
-  auto moduleData = hermes::compileWasmToModuleData(data, size, errorMsg);
+  auto moduleData = createModuleFromBytes(runtime, data, size, errorMsg);
   if (!moduleData) {
     // Create a CompileError and return a rejected Promise.
-    raiseCompileError(runtime, errorMsg.c_str());
+    if (runtime.getThrownValue().isEmpty()) {
+      raiseCompileError(runtime, errorMsg.c_str());
+    }
     HermesValue thrownError = runtime.getThrownValue();
     runtime.clearThrownValue();
     return callPromiseReject(runtime, thrownError);
@@ -479,7 +729,8 @@ instantiateModuleImpl(Runtime &runtime, JSWebAssemblyModule *mod, Handle<> impor
   struct : public Locals {
     PinnedValue<JSWebAssemblyInstance> inst;
     PinnedValue<JSObject> exportsObj;
-    PinnedValue<> result;
+    PinnedValue<> moduleInfoObj;
+    PinnedValue<> instantiateFn;
     PinnedValue<> oldImports;
   } lv;
   LocalsRAII lraii(runtime, &lv);
@@ -495,8 +746,48 @@ instantiateModuleImpl(Runtime &runtime, JSWebAssemblyModule *mod, Handle<> impor
     return ExecutionStatus::EXCEPTION;
   }
 
-  // Set globalThis.__wasm_imports__ to the import object so the compiled
-  // Wasm top-level function can resolve imports from it.
+  // Run the compiled bytecode top-level to get the module info object.
+  // The top-level returns {instantiate, exportDescs, importDescs}.
+  auto bcProvider = moduleData->bytecodeProvider;
+  auto runRes = runtime.runBytecode(
+      std::move(bcProvider),
+      RuntimeModuleFlags{},
+      "wasm-module",
+      Runtime::makeNullHandle<Environment>());
+
+  if (LLVM_UNLIKELY(runRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+
+  lv.moduleInfoObj = std::move(*runRes);
+
+  if (!lv.moduleInfoObj->isObject()) {
+    raiseLinkError(
+        runtime, "WebAssembly instantiation failed: unexpected result");
+    return ExecutionStatus::EXCEPTION;
+  }
+
+  // Extract the instantiate closure from the module info object.
+  {
+    auto instRes = JSObject::getNamed_RJS(
+        Handle<JSObject>::vmcast(&lv.moduleInfoObj),
+        runtime,
+        Predefined::getSymbolID(Predefined::instantiate));
+    if (LLVM_UNLIKELY(instRes == ExecutionStatus::EXCEPTION)) {
+      return ExecutionStatus::EXCEPTION;
+    }
+    lv.instantiateFn = std::move(*instRes);
+  }
+
+  if (!vmisa<Callable>(*lv.instantiateFn)) {
+    raiseLinkError(
+        runtime,
+        "WebAssembly instantiation failed: instantiate is not callable");
+    return ExecutionStatus::EXCEPTION;
+  }
+
+  // Set globalThis.__wasm_imports__ to the import object so the instantiate
+  // function can resolve imports from it.
   auto wasmImportsSymbol =
       Predefined::getSymbolID(Predefined::__wasm_imports__);
 
@@ -519,13 +810,11 @@ instantiateModuleImpl(Runtime &runtime, JSWebAssemblyModule *mod, Handle<> impor
     }
   }
 
-  // Run the compiled bytecode.
-  auto bcProvider = moduleData->bytecodeProvider;
-  auto runRes = runtime.runBytecode(
-      std::move(bcProvider),
-      RuntimeModuleFlags{},
-      "wasm-module",
-      Runtime::makeNullHandle<Environment>());
+  // Call instantiate() to perform initialization and get the exports object.
+  auto callRes = Callable::executeCall0(
+      Handle<Callable>::vmcast(&lv.instantiateFn),
+      runtime,
+      Runtime::getUndefinedValue());
 
   // Restore the old __wasm_imports__ value regardless of success/failure.
   {
@@ -537,19 +826,17 @@ instantiateModuleImpl(Runtime &runtime, JSWebAssemblyModule *mod, Handle<> impor
     (void)restoreRes;
   }
 
-  if (LLVM_UNLIKELY(runRes == ExecutionStatus::EXCEPTION)) {
+  if (LLVM_UNLIKELY(callRes == ExecutionStatus::EXCEPTION)) {
     return ExecutionStatus::EXCEPTION;
   }
 
-  lv.result = std::move(*runRes);
-
-  if (!lv.result->isObject()) {
+  if (!callRes->getHermesValue().isObject()) {
     raiseLinkError(
         runtime, "WebAssembly instantiation failed: unexpected result");
     return ExecutionStatus::EXCEPTION;
   }
 
-  lv.exportsObj.castAndSetHermesValue<JSObject>(lv.result.getHermesValue());
+  lv.exportsObj.castAndSetHermesValue<JSObject>(callRes->getHermesValue());
 
   // Freeze the exports object.
   if (LLVM_UNLIKELY(
@@ -624,11 +911,13 @@ wasmInstantiate(void *context, Runtime &runtime) {
         "WebAssembly.Module, ArrayBuffer, or typed array");
   }
 
-  // Compile the Wasm binary.
+  // Compile from .wasm or load from .hbc (auto-detected).
   std::string errorMsg;
-  auto moduleData = hermes::compileWasmToModuleData(data, size, errorMsg);
+  auto moduleData = createModuleFromBytes(runtime, data, size, errorMsg);
   if (!moduleData) {
-    raiseCompileError(runtime, errorMsg.c_str());
+    if (runtime.getThrownValue().isEmpty()) {
+      raiseCompileError(runtime, errorMsg.c_str());
+    }
     HermesValue thrownError = runtime.getThrownValue();
     runtime.clearThrownValue();
     return callPromiseReject(runtime, thrownError);
@@ -676,7 +965,8 @@ wasmInstantiate(void *context, Runtime &runtime) {
 // WebAssembly.Module
 //===----------------------------------------------------------------------===//
 
-/// new WebAssembly.Module(bytes) — compile a Wasm binary module.
+/// new WebAssembly.Module(bytes) — compile a Wasm binary module or load
+/// a precompiled .hbc module.
 static CallResult<HermesValue>
 wasmModuleConstructor(void *context, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
@@ -694,11 +984,13 @@ wasmModuleConstructor(void *context, Runtime &runtime) {
         "typed array");
   }
 
-  // Compile the Wasm binary.
+  // Compile from .wasm or load from .hbc (auto-detected).
   std::string errorMsg;
-  auto moduleData = hermes::compileWasmToModuleData(data, size, errorMsg);
+  auto moduleData = createModuleFromBytes(runtime, data, size, errorMsg);
   if (!moduleData) {
-    raiseCompileError(runtime, errorMsg.c_str());
+    if (runtime.getThrownValue().isEmpty()) {
+      raiseCompileError(runtime, errorMsg.c_str());
+    }
     return ExecutionStatus::EXCEPTION;
   }
 

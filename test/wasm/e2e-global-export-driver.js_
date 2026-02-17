@@ -10,7 +10,10 @@
 // __wasm_type__ metadata, not raw numeric values.
 
 var hbcPath = hermescli.getScriptArgs()[0];
-var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+var bytes = hermescli.loadFile(hbcPath);
+var mod = new WebAssembly.Module(bytes);
+var instance = new WebAssembly.Instance(mod);
+var exports = instance.exports;
 
 // Each exported global should be a WebAssembly.Global object, not a number.
 print("g_i32 type:", typeof exports.g_i32);

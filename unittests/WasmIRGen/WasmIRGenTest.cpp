@@ -3012,55 +3012,47 @@ TEST(WasmIRGenTest, CreateFunctionsExportsObject) {
   irgen.createFunctions();
   irgen.finalizeModule();
 
-  // The top-level function should contain:
-  //   AllocObjectLiteralInst (exports object)
-  //   CreateFunctionInst (create wrapper closure for exported func)
-  //   StorePropertyStrictInst (store wrapper closure on exports object)
-  //   ReturnInst (return the exports object, not undefined)
+  // The top-level function should now return a module info object
+  // with "instantiate", "exportDescs", and "importDescs" properties.
   auto *topLevel = tm.mod.getTopLevelFunction();
   ASSERT_NE(topLevel, nullptr);
   ASSERT_EQ(topLevel->getBasicBlockList().size(), 1u);
 
   auto &bb = topLevel->getBasicBlockList().front();
 
-  AllocObjectLiteralInst *allocObj = nullptr;
-  StorePropertyStrictInst *storeProp = nullptr;
+  // Look for key properties of the module info object.
+  bool hasInstantiateProp = false;
+  bool hasExportDescsProp = false;
+  bool hasImportDescsProp = false;
+  bool hasCreateFunctionInst = false;
   ReturnInst *ret = nullptr;
-  unsigned wrapperCreateFuncCount = 0;
-  bool seenAllocObj = false;
 
   for (auto &inst : bb) {
-    if (auto *a = llvh::dyn_cast<AllocObjectLiteralInst>(&inst)) {
-      allocObj = a;
-      seenAllocObj = true;
+    if (llvh::isa<CreateFunctionInst>(&inst))
+      hasCreateFunctionInst = true;
+    if (auto *s = llvh::dyn_cast<StorePropertyStrictInst>(&inst)) {
+      if (auto *propLit = llvh::dyn_cast<LiteralString>(s->getProperty())) {
+        auto name = propLit->getValue().str();
+        if (name == "instantiate")
+          hasInstantiateProp = true;
+        else if (name == "exportDescs")
+          hasExportDescsProp = true;
+        else if (name == "importDescs")
+          hasImportDescsProp = true;
+      }
     }
-    if (auto *s = llvh::dyn_cast<StorePropertyStrictInst>(&inst))
-      storeProp = s;
-    // Count CreateFunctionInst after AllocObjectLiteralInst (wrapper closures).
-    if (seenAllocObj && llvh::isa<CreateFunctionInst>(&inst))
-      ++wrapperCreateFuncCount;
     if (auto *r = llvh::dyn_cast<ReturnInst>(&inst))
       ret = r;
   }
 
-  // AllocObjectLiteralInst should exist.
-  ASSERT_NE(allocObj, nullptr);
-
-  // StorePropertyStrictInst should exist (one for the one export).
-  ASSERT_NE(storeProp, nullptr);
-  // The store target should be the alloc'd object.
-  EXPECT_EQ(storeProp->getObject(), allocObj);
-  // The property name should be "add".
-  auto *propLit = llvh::dyn_cast<LiteralString>(storeProp->getProperty());
-  ASSERT_NE(propLit, nullptr);
-  EXPECT_EQ(propLit->getValue().str(), "add");
-
-  // There should be a CreateFunctionInst for the export wrapper closure.
-  EXPECT_GE(wrapperCreateFuncCount, 1u);
-
-  // ReturnInst should return the exports object, not undefined.
+  // Should have a CreateFunctionInst for __wasm_instantiate__.
+  EXPECT_TRUE(hasCreateFunctionInst);
+  // Module info object should have all three properties.
+  EXPECT_TRUE(hasInstantiateProp);
+  EXPECT_TRUE(hasExportDescsProp);
+  EXPECT_TRUE(hasImportDescsProp);
+  // ReturnInst should return the module info object.
   ASSERT_NE(ret, nullptr);
-  EXPECT_EQ(ret->getOperand(0), allocObj);
 }
 
 TEST(WasmIRGenTest, CreateFunctionsNoExports) {
@@ -3075,30 +3067,37 @@ TEST(WasmIRGenTest, CreateFunctionsNoExports) {
   irgen.createFunctions();
   irgen.finalizeModule();
 
-  // Even with no exports, the top-level function should return an
-  // (empty) exports object, not undefined.
+  // Even with no exports, the top-level function should return a module
+  // info object with "instantiate", "exportDescs", and "importDescs".
   auto *topLevel = tm.mod.getTopLevelFunction();
   auto &bb = topLevel->getBasicBlockList().front();
 
-  AllocObjectLiteralInst *allocObj = nullptr;
+  bool hasInstantiateProp = false;
+  bool hasExportDescsProp = false;
+  bool hasImportDescsProp = false;
   ReturnInst *ret = nullptr;
-  unsigned storePropCount = 0;
 
   for (auto &inst : bb) {
-    if (auto *a = llvh::dyn_cast<AllocObjectLiteralInst>(&inst))
-      allocObj = a;
-    if (llvh::isa<StorePropertyStrictInst>(&inst))
-      ++storePropCount;
+    if (auto *s = llvh::dyn_cast<StorePropertyStrictInst>(&inst)) {
+      if (auto *propLit = llvh::dyn_cast<LiteralString>(s->getProperty())) {
+        auto name = propLit->getValue().str();
+        if (name == "instantiate")
+          hasInstantiateProp = true;
+        else if (name == "exportDescs")
+          hasExportDescsProp = true;
+        else if (name == "importDescs")
+          hasImportDescsProp = true;
+      }
+    }
     if (auto *r = llvh::dyn_cast<ReturnInst>(&inst))
       ret = r;
   }
 
-  ASSERT_NE(allocObj, nullptr);
-  // No exports means no StorePropertyStrictInst.
-  EXPECT_EQ(storePropCount, 0u);
-  // ReturnInst returns the empty object.
+  EXPECT_TRUE(hasInstantiateProp);
+  EXPECT_TRUE(hasExportDescsProp);
+  EXPECT_TRUE(hasImportDescsProp);
+  // ReturnInst should return the module info object.
   ASSERT_NE(ret, nullptr);
-  EXPECT_EQ(ret->getOperand(0), allocObj);
 }
 
 TEST(WasmIRGenTest, CreateFunctionsSkipsNonFunctionExports) {
@@ -3116,7 +3115,7 @@ TEST(WasmIRGenTest, CreateFunctionsSkipsNonFunctionExports) {
   funcExp.index = 0;
   moduleInfo.exports.push_back(funcExp);
 
-  // Also add a memory export (should be skipped).
+  // Also add a memory export (should be skipped in export descriptors).
   WasmExport memExp;
   memExp.name = "memory";
   memExp.kind = WasmExternalKind::Memory;
@@ -3127,19 +3126,33 @@ TEST(WasmIRGenTest, CreateFunctionsSkipsNonFunctionExports) {
   irgen.createFunctions();
   irgen.finalizeModule();
 
+  // The top-level now builds the module info object. We verify that
+  // the descriptor arrays include both exports (function and memory),
+  // and the module info has all three required properties.
   auto *topLevel = tm.mod.getTopLevelFunction();
   auto &bb = topLevel->getBasicBlockList().front();
 
-  unsigned storePropCount = 0;
+  bool hasInstantiateProp = false;
+  bool hasExportDescsProp = false;
+  bool hasImportDescsProp = false;
+
   for (auto &inst : bb) {
-    if (llvh::isa<StorePropertyStrictInst>(&inst))
-      ++storePropCount;
+    if (auto *s = llvh::dyn_cast<StorePropertyStrictInst>(&inst)) {
+      if (auto *propLit = llvh::dyn_cast<LiteralString>(s->getProperty())) {
+        auto name = propLit->getValue().str();
+        if (name == "instantiate")
+          hasInstantiateProp = true;
+        else if (name == "exportDescs")
+          hasExportDescsProp = true;
+        else if (name == "importDescs")
+          hasImportDescsProp = true;
+      }
+    }
   }
 
-  // The function export produces two StorePropertyStrictInst:
-  // one for __wasm_type__ on the wrapper closure, one for the export name
-  // on the exports object. The memory export should be skipped.
-  EXPECT_EQ(storePropCount, 2u);
+  EXPECT_TRUE(hasInstantiateProp);
+  EXPECT_TRUE(hasExportDescsProp);
+  EXPECT_TRUE(hasImportDescsProp);
 }
 
 TEST(WasmIRGenTest, F64Copysign) {

@@ -276,9 +276,20 @@ void WasmIRGen::createFunctions() {
     irFunctions_[i] = func;
   }
 
-  // Populate the top-level function body.
+  // Create the __wasm_instantiate__ function. This will contain all the
+  // initialization logic (import resolution, closures, memory views, tables,
+  // globals, trampolines). The top-level function will just return a module
+  // info object with an instantiate closure and descriptor arrays.
+  instantiateFunc_ = builder_.createFunction(
+      "__wasm_instantiate__",
+      Function::DefinitionKind::ES5Function,
+      true /* strictMode */);
+  instantiateFunc_->setExpectedParamCountIncludingThis(1); // just "this"
+  builder_.createJSThisParam(instantiateFunc_);
+
+  // Populate the __wasm_instantiate__ function body.
   // Create all closures once and store them in the top-level scope.
-  tlEntry_ = builder_.createBasicBlock(topLevel);
+  tlEntry_ = builder_.createBasicBlock(instantiateFunc_);
   builder_.setInsertionBlock(tlEntry_);
 
   // Create a scope for the top-level function.
@@ -669,16 +680,106 @@ void WasmIRGen::createFunctions() {
     createImportTrampoline(i, tlScope);
   }
 
-  // Switch back to the top-level entry block after creating trampolines.
-  // finalizeModule() will continue from here.
+  // Switch back to the instantiate function entry block after creating
+  // trampolines. finalizeModule() will continue building this function.
   builder_.setInsertionBlock(tlEntry_);
+
+  // --- Build the top-level function body ---
+  // The top-level function returns a module info object:
+  //   {instantiate: <closure>, exportDescs: [...], importDescs: [...]}
+  // This is a lightweight function; the real initialization happens when
+  // the instantiate closure is called.
+
+  auto *topLevelBody = builder_.createBasicBlock(topLevel);
+  builder_.setInsertionBlock(topLevelBody);
+
+  // Create a scope instance of topLevelVS_ so we can create the instantiate
+  // closure via CreateFunctionInst.
+  auto *topLevelScope = builder_.createCreateScopeInst(
+      topLevelVS_,
+      builder_.getEmptySentinel());
+
+  // Create the instantiate closure.
+  auto *instClosure = builder_.createCreateFunctionInst(
+      topLevelScope, instantiateFunc_);
+
+  // Helper: convert WasmExternalKind to a string literal.
+  auto kindToString = [this](WasmExternalKind kind) -> LiteralString * {
+    switch (kind) {
+      case WasmExternalKind::Function:
+        return builder_.getLiteralString("function");
+      case WasmExternalKind::Table:
+        return builder_.getLiteralString("table");
+      case WasmExternalKind::Memory:
+        return builder_.getLiteralString("memory");
+      case WasmExternalKind::Global:
+        return builder_.getLiteralString("global");
+      case WasmExternalKind::Tag:
+        return builder_.getLiteralString("tag");
+    }
+    return builder_.getLiteralString("function");
+  };
+
+  // Build exportDescs array.
+  auto *exportDescsArr = emitNew(
+      builder_.createTryLoadGlobalPropertyInst("Array"),
+      {builder_.getLiteralNumber(
+          static_cast<double>(moduleInfo_.exports.size()))});
+  for (uint32_t i = 0; i < moduleInfo_.exports.size(); ++i) {
+    const auto &exp = moduleInfo_.exports[i];
+    auto *desc = builder_.createAllocObjectLiteralInst({});
+    builder_.createStorePropertyStrictInst(
+        builder_.getLiteralString(exp.name), desc,
+        builder_.getLiteralString("name"));
+    builder_.createStorePropertyStrictInst(
+        kindToString(exp.kind), desc,
+        builder_.getLiteralString("kind"));
+    builder_.createStorePropertyStrictInst(
+        desc, exportDescsArr,
+        builder_.getLiteralNumber(static_cast<double>(i)));
+  }
+
+  // Build importDescs array.
+  auto *importDescsArr = emitNew(
+      builder_.createTryLoadGlobalPropertyInst("Array"),
+      {builder_.getLiteralNumber(
+          static_cast<double>(moduleInfo_.imports.size()))});
+  for (uint32_t i = 0; i < moduleInfo_.imports.size(); ++i) {
+    const auto &imp = moduleInfo_.imports[i];
+    auto *desc = builder_.createAllocObjectLiteralInst({});
+    builder_.createStorePropertyStrictInst(
+        builder_.getLiteralString(imp.moduleName), desc,
+        builder_.getLiteralString("module"));
+    builder_.createStorePropertyStrictInst(
+        builder_.getLiteralString(imp.fieldName), desc,
+        builder_.getLiteralString("name"));
+    builder_.createStorePropertyStrictInst(
+        kindToString(imp.kind), desc,
+        builder_.getLiteralString("kind"));
+    builder_.createStorePropertyStrictInst(
+        desc, importDescsArr,
+        builder_.getLiteralNumber(static_cast<double>(i)));
+  }
+
+  // Build module info object: {instantiate, exportDescs, importDescs}.
+  auto *moduleInfoObj = builder_.createAllocObjectLiteralInst({});
+  builder_.createStorePropertyStrictInst(
+      instClosure, moduleInfoObj,
+      builder_.getLiteralString("instantiate"));
+  builder_.createStorePropertyStrictInst(
+      exportDescsArr, moduleInfoObj,
+      builder_.getLiteralString("exportDescs"));
+  builder_.createStorePropertyStrictInst(
+      importDescsArr, moduleInfoObj,
+      builder_.getLiteralString("importDescs"));
+  builder_.createReturnInst(moduleInfoObj);
 }
 
 void WasmIRGen::finalizeModule() {
   auto *tlScope = tlScope_;
   bool hasMemory = moduleInfo_.totalMemoryCount() > 0;
 
-  // Ensure insertion is at the top-level entry block.
+  // Ensure insertion is at the instantiate function's entry block.
   builder_.setInsertionBlock(tlEntry_);
 
   // Initialize the data segments array (for memory.init/data.drop).
@@ -1065,8 +1166,8 @@ void WasmIRGen::finalizeModule() {
     wrappers.push_back({exp.name, wrapperFunc, exp.index});
   }
 
-  // Switch back to the top-level entry block to emit closures and the
-  // exports object.
+  // Switch back to the instantiate function's entry block to emit closures
+  // and the exports object.
   builder_.setInsertionBlock(tlEntry_);
 
   auto *exportsObj = builder_.createAllocObjectLiteralInst({});

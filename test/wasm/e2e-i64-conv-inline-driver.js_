@@ -8,7 +8,10 @@
 // JS driver for e2e-i64-conv-inline.wat.
 
 var hbcPath = hermescli.getScriptArgs()[0];
-var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+var bytes = hermescli.loadFile(hbcPath);
+var mod = new WebAssembly.Module(bytes);
+var instance = new WebAssembly.Instance(mod);
+var exports = instance.exports;
 
 print("wrap_small:", exports.wrap_small());
 print("wrap_large:", exports.wrap_large());

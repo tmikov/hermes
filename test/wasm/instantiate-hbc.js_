@@ -5,14 +5,15 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-// Driver for regress-i64-export-wrapper.wat: calls test_neg_div with BigInt args.
+// Instantiation-only driver: loads a compiled Wasm HBC module and
+// instantiates it via WebAssembly API. Used for tests that expect
+// traps during instantiation (e.g., start function traps, OOB data
+// segments). The trap error will propagate to the caller.
+//
+// Usage: hermes -Xhermes-internal-test-methods instantiate-hbc.js_ -- <hbc-path>
+
 var args = hermescli.getScriptArgs();
 var hbcPath = args[0];
 var bytes = hermescli.loadFile(hbcPath);
 var mod = new WebAssembly.Module(bytes);
 var instance = new WebAssembly.Instance(mod);
-var exports = instance.exports;
-
-// i64 export wrappers expect BigInt arguments.
-var result = exports.test_neg_div(BigInt("-5"), BigInt("2"));
-print(result.toString());

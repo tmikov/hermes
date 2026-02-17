@@ -11,8 +11,8 @@
 
 var hbcPath = hermescli.getScriptArgs()[0];
 
-// Set up the imports object on globalThis so the Wasm module can find it.
-globalThis.__wasm_imports__ = {
+// Set up the imports object for the Wasm module.
+var imports = {
   env: {
     // Test 1: log function that prints its argument.
     log: function(x) {
@@ -31,7 +31,10 @@ globalThis.__wasm_imports__ = {
   },
 };
 
-var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+var bytes = hermescli.loadFile(hbcPath);
+var mod = new WebAssembly.Module(bytes);
+var instance = new WebAssembly.Instance(mod, imports);
+var exports = instance.exports;
 
 // Test 1: call log.
 exports.call_log(42);

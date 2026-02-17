@@ -28,8 +28,8 @@
   (export "f0" (func $f0))
 )
 
-;; The top-level function creates table arrays and applies elem segments.
-;; CHECK-LABEL: function global(): any
+;; The instantiate function creates table arrays and applies elem segments.
+;; CHECK-LABEL: function __wasm_instantiate__(): any
 ;; CHECK: CreateScopeInst (:environment)
 
 ;; Table arrays creation: new Array(4) for functions and types.

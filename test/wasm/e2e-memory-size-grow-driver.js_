@@ -8,7 +8,10 @@
 // JS driver for e2e-memory-size-grow.wat.
 
 var hbcPath = hermescli.getScriptArgs()[0];
-var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+var bytes = hermescli.loadFile(hbcPath);
+var mod = new WebAssembly.Module(bytes);
+var instance = new WebAssembly.Instance(mod);
+var exports = instance.exports;
 
 // 1. Initial memory.size should be 1 (1 page).
 print("initial size =", exports.size());

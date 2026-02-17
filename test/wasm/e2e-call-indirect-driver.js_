@@ -9,7 +9,10 @@
 // Tests correct dispatch, out-of-bounds, null entry, and type mismatch.
 
 var hbcPath = hermescli.getScriptArgs()[0];
-var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+var bytes = hermescli.loadFile(hbcPath);
+var mod = new WebAssembly.Module(bytes);
+var instance = new WebAssembly.Instance(mod);
+var exports = instance.exports;
 
 // Test 1: Correct dispatch — call functions at known indices.
 print("call f0:", exports.call_type0(0));

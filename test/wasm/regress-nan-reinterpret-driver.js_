@@ -8,7 +8,10 @@
 // Driver for regress-nan-reinterpret.wat
 var args = hermescli.getScriptArgs();
 var hbcPath = args[0];
-var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+var bytes = hermescli.loadFile(hbcPath);
+var mod = new WebAssembly.Module(bytes);
+var instance = new WebAssembly.Instance(mod);
+var exports = instance.exports;
 
 // Print as unsigned hex by converting via BigInt unsigned interpretation.
 function toHex64(bigint) {

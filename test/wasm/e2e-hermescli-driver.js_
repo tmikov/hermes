@@ -6,10 +6,13 @@
  */
 
 // JS driver for e2e-hermescli.wat.
-// Loads a compiled .hbc Wasm module via hermescli and calls its exports.
+// Loads a compiled Wasm module via WebAssembly API and calls its exports.
 
 var hbcPath = hermescli.getScriptArgs()[0];
-var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+var bytes = hermescli.loadFile(hbcPath);
+var mod = new WebAssembly.Module(bytes);
+var instance = new WebAssembly.Instance(mod);
+var exports = instance.exports;
 
 print("exports type:", typeof exports);
 print("add(3, 4) =", exports.add(3, 4));

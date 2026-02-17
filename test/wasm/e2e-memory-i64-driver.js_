@@ -8,7 +8,10 @@
 // JS driver for e2e-memory-i64.wat.
 
 var hbcPath = hermescli.getScriptArgs()[0];
-var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+var bytes = hermescli.loadFile(hbcPath);
+var mod = new WebAssembly.Module(bytes);
+var instance = new WebAssembly.Instance(mod);
+var exports = instance.exports;
 
 print("i64_store_load_lo =", exports.i64_store_load_lo());
 print("i64_store_load_hi =", exports.i64_store_load_hi());

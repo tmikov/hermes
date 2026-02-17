@@ -12,9 +12,12 @@
 var hbcPath = hermescli.getScriptArgs()[0];
 
 // Provide the imported global "env.g" = 0.
-globalThis.__wasm_imports__ = { env: { g: 0 } };
+var imports = { env: { g: 0 } };
 
-var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+var bytes = hermescli.loadFile(hbcPath);
+var mod = new WebAssembly.Module(bytes);
+var instance = new WebAssembly.Instance(mod, imports);
+var exports = instance.exports;
 
 // GlobalGet segment: "Hi" at offset 0 (global 0 = 0).
 // 'H' = 72, 'i' = 105

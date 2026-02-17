@@ -532,6 +532,11 @@ class WasmIRGen {
   /// or null (dropped). Only populated if the module has element segments.
   Variable *elemSegVar_ = nullptr;
 
+  /// The __wasm_instantiate__ IR Function, created in createFunctions().
+  /// Contains the initialization body (import resolution, closures, memory,
+  /// tables, globals, trampolines, data/elem segments, start, exports).
+  Function *instantiateFunc_ = nullptr;
+
   /// The VariableScope for the top-level function.
   VariableScope *topLevelVS_ = nullptr;
 

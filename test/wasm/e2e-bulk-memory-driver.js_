@@ -9,7 +9,10 @@
 // Tests memory.fill, memory.copy, memory.init, and data.drop.
 
 var hbcPath = hermescli.getScriptArgs()[0];
-var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+var bytes = hermescli.loadFile(hbcPath);
+var mod = new WebAssembly.Module(bytes);
+var instance = new WebAssembly.Instance(mod);
+var exports = instance.exports;
 
 // --- memory.fill ---
 print("=== memory.fill ===");

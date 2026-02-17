@@ -8,7 +8,10 @@
 // JS driver for e2e-unaligned-access.wat.
 
 var hbcPath = hermescli.getScriptArgs()[0];
-var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+var bytes = hermescli.loadFile(hbcPath);
+var mod = new WebAssembly.Module(bytes);
+var instance = new WebAssembly.Instance(mod);
+var exports = instance.exports;
 
 // Test 1: i32.store/load at an odd address (align=1).
 exports.store_i32_u1(1, 0xDEADBEEF);

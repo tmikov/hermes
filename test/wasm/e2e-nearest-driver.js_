@@ -8,7 +8,10 @@
 // JS driver for e2e-nearest.wat.
 
 var hbcPath = hermescli.getScriptArgs()[0];
-var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+var bytes = hermescli.loadFile(hbcPath);
+var mod = new WebAssembly.Module(bytes);
+var instance = new WebAssembly.Instance(mod);
+var exports = instance.exports;
 
 // Ties-to-even: 0.5 rounds to 0 (even), 1.5 rounds to 2 (even), etc.
 print("f64.nearest(0.5) =", exports.f64_nearest(0.5));
