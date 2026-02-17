@@ -11,7 +11,7 @@ Last updated: 2026-02-16 (branch `wasm`)
 | Crashes | 0 |
 | Timeouts | 0 |
 | Assertions passing | 24,601 |
-| Assertions failing | 215 |
+| Assertions failing | 203 |
 
 ## How to Run
 
@@ -162,13 +162,13 @@ get-externref: expected trap but succeeded
 get-funcref: expected trap but succeeded
 ```
 
-#### 4. Unlinkable / Uninstantiable Modules Not Rejected (20 failures)
+#### 4. Unlinkable / Uninstantiable Modules Not Rejected (8 failures)
 
 Modules that should be rejected at instantiation time are accepted by Hermes.
 The spec requires validation between parsing and execution; Hermes skips some
 of these checks, so errors surface later (or not at all) as wrong results.
 
-**imports (18 failures, 16 with patched test):** Import type validation is now implemented using
+**imports (6 failures, 4 with patched test):** Import type validation is now implemented using
 `__wasm_type__` string comparison at instantiation time. The compiled IR
 checks each import value against the expected type string, throwing a
 `WebAssembly.LinkError` on mismatch. This covers:
@@ -181,7 +181,7 @@ checks each import value against the expected type string, throwing a
 - Non-callable values imported as functions
 - Tag type mismatches (via `__wasm_type__` on tag export objects)
 
-Remaining failures (18, or 16 with patched test) are due to:
+Remaining failures (6, or 4 with patched test) are due to:
 
 - **~~Tag exports not implemented (3+1):~~** Fixed. Tag exports are now
   implemented as plain objects with `__wasm_type__` metadata (e.g.
@@ -193,10 +193,10 @@ Remaining failures (18, or 16 with patched test) are due to:
 - **~~Raw global exports lack type metadata (12):~~** Fixed. Global exports
   are now wrapped in `WebAssembly.Global` objects with `__wasm_type__`
   metadata, enabling cross-module global type and mutability validation.
-- **~~Table/memory exports not implemented (26):~~** Memory exports are now
-  implemented as `WebAssembly.Memory` objects (13 fixed). Table exports are
-  still missing — tables are not exported as `WebAssembly.Table` objects,
-  so cross-module table imports fail with "unknown import" (12 remaining).
+- **~~Table/memory exports not implemented (26):~~** Fixed. Memory exports are
+  now implemented as `WebAssembly.Memory` objects (13 fixed) and table exports
+  as `WebAssembly.Table` objects (12 fixed). All 25 table/memory import
+  validation failures are resolved.
 - **Alignment hint trusted for memory access (2):** The spec allows
   alignment hints on load/store instructions that are strictly advisory —
   implementations must produce correct results even when the actual address
@@ -231,7 +231,7 @@ The remaining failures have the following dependency structure:
 ```
 Export globals as WebAssembly.Global ──→ Global type validation works (12 fixed) ✓ DONE
 
-Export tables as WebAssembly.Table ────→ Table imports resolve (12 fixed)
+Export tables as WebAssembly.Table ────→ Table imports resolve (12 fixed) ✓ DONE
                                     └──→ Wire imported table into compiled code
                                           (needed for linking.wast, not imports.wast)
 
@@ -244,10 +244,12 @@ Tags (independent) ───────────────────→ 
 
 The memory path is the deepest: export → import resolution → wire buffer →
 memory.grow. Tags are fully independent of all three but least impactful
-(4 failures). Recommended order: memory exports (13 fixes from just the
-export side), then table exports (12 fixes from just the export side).
+(4 failures). Both memory and table exports are now done. The remaining
+imports failures (6, or 4 with patched test) are the alignment hint issues
+(2) and `memory.grow` on imported memory (4), which require wiring
+imported buffers into the compiled module.
 
-**Affected tests:** imports (18), data (2)
+**Affected tests:** imports (6), data (2)
 
 #### 5. Module Load Failures / Missing Features (53 failures)
 
@@ -376,7 +378,7 @@ br_if.wast:670:26: error: unexpected token "null", expected a numeric index
 | table_set | 17 | 8 | 0 | Table OOB (cat 3) |
 | table_size | 38 | 0 | 0 | ✓ all pass |
 | select | 0 | 1 | 0 | wast2json parse error (cat 7) |
-| imports | 135 | 18 | 16 | Unlinkable (cat 4) |
+| imports | 147 | 6 | 16 | Unlinkable (cat 4) |
 | tag | 0 | 1 | 0 | wast2json parse error (cat 7) |
 | ref_is_null | 0 | 1 | 0 | wast2json parse error (cat 7) |
 | ref_null | 0 | 1 | 0 | wast2json parse error (cat 7) |
@@ -390,7 +392,7 @@ br_if.wast:670:26: error: unexpected token "null", expected a numeric index
    succeeds instead of trapping. 26 failures.
 3. **Multi-value call returns** (cat 6) — semantic correctness; multi-value
    returns from calls produce wrong results. 6 failures.
-4. **Instantiation-time validation** (cat 4) — data segments, imports. 20
+4. **Instantiation-time validation** (cat 4) — data segments, imports. 8
    failures.
 5. **Module load failures** (cat 5) — multiple memories, etc. 53 failures.
 6. **wast2json upgrade** (cat 7) — would unblock 14 test files using newer
@@ -425,22 +427,19 @@ Other import kinds are stubbed:
   `WebAssembly.Table` object from the imports object is never used. Functions
   from one module cannot appear in another module's table through imports.
 
-### Table Exports Missing
+### Export Objects Have Separate Storage
 
 The exports object includes function exports (with `__wasm_type__` metadata),
-global exports (wrapped in `WebAssembly.Global` objects with `__wasm_type__`),
-tag exports (plain objects with `__wasm_type__`), and memory exports (wrapped
-in `WebAssembly.Memory` objects with `__wasm_type__`, `__wasm_min__`,
-`__wasm_max__` metadata). Table exports are silently skipped
-(`WasmIRGen.cpp`, `finalizeModule()`), so `instance.exports.table` is
-`undefined`. This prevents JS code from accessing the module's table, and
-prevents passing it as an import to other modules.
+global exports (wrapped in `WebAssembly.Global`), tag exports (plain objects
+with `__wasm_type__`), memory exports (wrapped in `WebAssembly.Memory`), and
+table exports (wrapped in `WebAssembly.Table`). All export kinds are handled.
 
-Note: The exported `WebAssembly.Memory` object has its own separate buffer —
-it does NOT share the module's internal linear memory. This means import
-*type validation* works (initial/maximum limit checks pass), but cross-module
-memory sharing does not. Wiring the imported memory's ArrayBuffer into the
-compiled module is a separate change.
+However, the exported `WebAssembly.Memory` and `WebAssembly.Table` objects have
+their own separate storage — they do NOT share the module's internal linear
+memory or table arrays. This means import *type validation* works
+(initial/maximum limit checks pass), but cross-module memory/table sharing does
+not. Wiring imported memory buffers and table arrays into the compiled module
+is a separate change.
 
 ### Alignment Hints Trusted
 

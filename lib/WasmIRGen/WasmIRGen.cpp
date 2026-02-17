@@ -1186,8 +1186,8 @@ void WasmIRGen::finalizeModule() {
   // For each exported function, create a wrapper that presents a clean
   // JS-compatible interface (1 param per Wasm param, argument coercion,
   // return value marshaling). The exports object maps export names to
-  // wrapper closures. Function, global, tag, and memory exports are
-  // handled; table exports are silently skipped for now.
+  // wrapper closures. Function, global, tag, memory, and table exports are
+  // handled.
 
   // Create wrapper functions first (this switches insertion point).
   struct ExportWrapperInfo {
@@ -1393,6 +1393,78 @@ void WasmIRGen::finalizeModule() {
 
     builder_.createStorePropertyStrictInst(
         memObj, exportsObj, builder_.getLiteralString(exp.name));
+  }
+
+  // Add table exports as WebAssembly.Table objects.
+  // The Table constructor sets __wasm_type__, __wasm_min__, __wasm_max__
+  // automatically. The Table object does NOT share the module's internal
+  // table array (table sharing is a separate change).
+  Value *wasmTableCtor = nullptr;
+  bool hasTableExports = std::any_of(
+      moduleInfo_.exports.begin(),
+      moduleInfo_.exports.end(),
+      [](const WasmExport &e) {
+        return e.kind == WasmExternalKind::Table;
+      });
+  if (hasTableExports) {
+    auto *wasmObj =
+        builder_.createTryLoadGlobalPropertyInst("WebAssembly");
+    wasmTableCtor = builder_.createLoadPropertyInst(
+        wasmObj, builder_.getLiteralString("Table"));
+  }
+
+  for (const auto &exp : moduleInfo_.exports) {
+    if (exp.kind != WasmExternalKind::Table)
+      continue;
+
+    // Determine table type from the table index space.
+    // Imported tables come first, then defined tables.
+    uint32_t numImportedTables = moduleInfo_.importedTableCount();
+    WasmTableType tType{};
+    if (exp.index < numImportedTables) {
+      uint32_t idx = 0;
+      for (const auto &imp : moduleInfo_.imports) {
+        if (imp.kind != WasmExternalKind::Table)
+          continue;
+        if (idx == exp.index) {
+          tType = imp.tableType;
+          break;
+        }
+        ++idx;
+      }
+    } else {
+      tType = moduleInfo_.tables[exp.index - numImportedTables];
+    }
+
+    // Build descriptor: {element: "anyfunc", initial: N}
+    // or {element: "anyfunc", initial: N, maximum: M}
+    auto *descriptor = builder_.createAllocObjectLiteralInst({});
+    // The Table constructor accepts "anyfunc" or "funcref" for funcref
+    // tables. Use "anyfunc" for broadest compatibility.
+    builder_.createStorePropertyStrictInst(
+        builder_.getLiteralString(
+            tType.elemType == WasmValType::FuncRef ? "anyfunc"
+                                                   : "externref"),
+        descriptor,
+        builder_.getLiteralString("element"));
+    builder_.createStorePropertyStrictInst(
+        builder_.getLiteralNumber(
+            static_cast<double>(tType.limits.initial)),
+        descriptor,
+        builder_.getLiteralString("initial"));
+    if (tType.limits.hasMaximum) {
+      builder_.createStorePropertyStrictInst(
+          builder_.getLiteralNumber(
+              static_cast<double>(tType.limits.maximum)),
+          descriptor,
+          builder_.getLiteralString("maximum"));
+    }
+
+    // Construct: new WebAssembly.Table(descriptor)
+    auto *tableObj = emitNew(wasmTableCtor, {descriptor});
+
+    builder_.createStorePropertyStrictInst(
+        tableObj, exportsObj, builder_.getLiteralString(exp.name));
   }
 
   builder_.createReturnInst(exportsObj);
