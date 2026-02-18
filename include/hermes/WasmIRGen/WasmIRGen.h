@@ -462,6 +462,9 @@ class WasmIRGen {
   IRBuilder builder_;
   WasmHelpers helpers_;
 
+  /// Whether to enable strict Wasm memory bounds checking (from --test262).
+  bool test262_ = false;
+
   /// One IR Function per Wasm function, indexed by Wasm function index.
   /// Includes both imported and defined functions.
   std::vector<Function *> irFunctions_;
@@ -782,6 +785,15 @@ class WasmIRGen {
   /// Get the natural alignment (log2) for a given load/store opcode.
   /// Returns 0 for byte ops, 1 for 16-bit, 2 for 32-bit, 3 for 64-bit.
   static uint8_t getNaturalAlignLog2(llvh::StringRef opcodeName);
+
+  /// Compute effective address: when test262_ is set, treats the base as
+  /// unsigned via (base >>> 0), then adds offset. Otherwise just base + offset.
+  /// \return the effective byte address.
+  Value *emitEffectiveAddr(Value *base, uint32_t offset);
+
+  /// Emit a bounds check that traps if addr + numBytes > HEAPU8.length.
+  /// No-op when test262_ is false.
+  void emitMemoryBoundsCheck(Value *addr, uint32_t numBytes);
 
   /// Create an export wrapper function for the given Wasm function export.
   /// The wrapper presents a clean JS-compatible interface: 1 param per Wasm

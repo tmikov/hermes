@@ -80,7 +80,10 @@ static std::string buildTableTypeString(const WasmTableType &tt) {
 }
 
 WasmIRGen::WasmIRGen(Module &M, WasmModuleInfo &moduleInfo)
-    : moduleInfo_(moduleInfo), builder_(&M), helpers_(builder_) {}
+    : moduleInfo_(moduleInfo),
+      builder_(&M),
+      helpers_(builder_),
+      test262_(M.getContext().getCodeGenerationSettings().test262) {}
 
 bool WasmIRGen::needsReturnBuffer(const WasmFuncType &funcType) {
   if (funcType.results.size() > 1)
@@ -5100,6 +5103,44 @@ void WasmIRGen::emitUnalignedStore(
   }
 }
 
+Value *WasmIRGen::emitEffectiveAddr(Value *base, uint32_t offset) {
+  Value *b = base;
+  if (test262_) {
+    // Treat the base as unsigned: base >>> 0.
+    b = builder_.createBinaryOperatorInst(
+        base,
+        builder_.getLiteralNumber(0),
+        ValueKind::BinaryUnsignedRightShiftInstKind);
+  }
+  if (offset != 0) {
+    return builder_.createBinaryOperatorInst(
+        b,
+        builder_.getLiteralNumber(static_cast<double>(offset)),
+        ValueKind::BinaryAddInstKind);
+  }
+  return b;
+}
+
+void WasmIRGen::emitMemoryBoundsCheck(Value *addr, uint32_t numBytes) {
+  if (!test262_)
+    return;
+  auto *end = builder_.createBinaryOperatorInst(
+      addr,
+      builder_.getLiteralNumber(static_cast<double>(numBytes)),
+      ValueKind::BinaryAddInstKind);
+  auto *memLength = builder_.createLoadPropertyInst(
+      loadMemView(HEAPU8), builder_.getLiteralString("length"));
+  auto *isOOB = builder_.createBinaryOperatorInst(
+      end, memLength, ValueKind::BinaryGreaterThanInstKind);
+  auto *trapBlock = builder_.createBasicBlock(currentFunc_);
+  auto *okBlock = builder_.createBasicBlock(currentFunc_);
+  builder_.createCondBranchInst(isOOB, trapBlock, okBlock);
+  builder_.setInsertionBlock(trapBlock);
+  helpers_.emitTrap();
+  builder_.createUnreachableInst();
+  builder_.setInsertionBlock(okBlock);
+}
+
 void WasmIRGen::onLoad(
     const char *opcodeName,
     uint32_t alignLog2,
@@ -5110,16 +5151,8 @@ void WasmIRGen::onLoad(
   // Pop the base address.
   Value *base = pop();
 
-  // Compute effective address: base + offset.
-  Value *addr;
-  if (offset != 0) {
-    addr = builder_.createBinaryOperatorInst(
-        base,
-        builder_.getLiteralNumber(static_cast<double>(offset)),
-        ValueKind::BinaryAddInstKind);
-  } else {
-    addr = base;
-  }
+  // Compute effective address: base + offset (with unsigned base in test262).
+  Value *addr = emitEffectiveAddr(base, offset);
 
   // Determine which view to use and the element shift based on the opcode.
   llvh::StringRef op(opcodeName);
@@ -5129,6 +5162,7 @@ void WasmIRGen::onLoad(
 
   // i64 loads: handled specially (split into lo/hi).
   if (op == "i64.load") {
+    emitMemoryBoundsCheck(addr, 8);
     if (alignLog2 < naturalAlign) {
       // Unaligned: byte-assemble lo32 and hi32 separately.
       auto *lo = emitUnalignedLoad(addr, 4);
@@ -5172,6 +5206,7 @@ void WasmIRGen::onLoad(
   }
 
   if (op == "i64.load8_s" || op == "i64.load8_u") {
+    emitMemoryBoundsCheck(addr, 1);
     bool isSigned = (op == "i64.load8_s");
     auto *view = loadMemView(isSigned ? HEAP8 : HEAPU8);
     auto *lo = builder_.createLoadPropertyInst(view, addr);
@@ -5207,6 +5242,7 @@ void WasmIRGen::onLoad(
   }
 
   if (op == "i64.load16_s" || op == "i64.load16_u") {
+    emitMemoryBoundsCheck(addr, 2);
     bool isSigned = (op == "i64.load16_s");
 
     if (alignLog2 < naturalAlign) {
@@ -5274,6 +5310,7 @@ void WasmIRGen::onLoad(
   }
 
   if (op == "i64.load32_s" || op == "i64.load32_u") {
+    emitMemoryBoundsCheck(addr, 4);
     bool isSigned = (op == "i64.load32_s");
 
     if (alignLog2 < naturalAlign) {
@@ -5379,6 +5416,8 @@ void WasmIRGen::onLoad(
     return;
   }
 
+  emitMemoryBoundsCheck(addr, numBytes);
+
   // Unaligned path: byte-assemble from HEAPU8.
   if (alignLog2 < naturalAlign) {
     if (op == "f64.load") {
@@ -5462,15 +5501,8 @@ void WasmIRGen::onStore(
   if (op == "i64.store") {
     auto [lo, hi] = popI64();
     Value *base = pop();
-    Value *addr;
-    if (offset != 0) {
-      addr = builder_.createBinaryOperatorInst(
-          base,
-          builder_.getLiteralNumber(static_cast<double>(offset)),
-          ValueKind::BinaryAddInstKind);
-    } else {
-      addr = base;
-    }
+    Value *addr = emitEffectiveAddr(base, offset);
+    emitMemoryBoundsCheck(addr, 8);
 
     if (alignLog2 < naturalAlign) {
       // Unaligned: byte-store lo32 and hi32 separately.
@@ -5502,15 +5534,8 @@ void WasmIRGen::onStore(
     auto [lo, hi] = popI64();
     (void)hi;
     Value *base = pop();
-    Value *addr;
-    if (offset != 0) {
-      addr = builder_.createBinaryOperatorInst(
-          base,
-          builder_.getLiteralNumber(static_cast<double>(offset)),
-          ValueKind::BinaryAddInstKind);
-    } else {
-      addr = base;
-    }
+    Value *addr = emitEffectiveAddr(base, offset);
+    emitMemoryBoundsCheck(addr, 1);
     // Byte stores are always naturally aligned (natural align = 0).
     auto *view = loadMemView(HEAPU8);
     builder_.createStorePropertyStrictInst(lo, view, addr);
@@ -5521,15 +5546,8 @@ void WasmIRGen::onStore(
     auto [lo, hi] = popI64();
     (void)hi;
     Value *base = pop();
-    Value *addr;
-    if (offset != 0) {
-      addr = builder_.createBinaryOperatorInst(
-          base,
-          builder_.getLiteralNumber(static_cast<double>(offset)),
-          ValueKind::BinaryAddInstKind);
-    } else {
-      addr = base;
-    }
+    Value *addr = emitEffectiveAddr(base, offset);
+    emitMemoryBoundsCheck(addr, 2);
 
     if (alignLog2 < naturalAlign) {
       // Unaligned: byte-store the lo 2 bytes.
@@ -5551,15 +5569,8 @@ void WasmIRGen::onStore(
     auto [lo, hi] = popI64();
     (void)hi;
     Value *base = pop();
-    Value *addr;
-    if (offset != 0) {
-      addr = builder_.createBinaryOperatorInst(
-          base,
-          builder_.getLiteralNumber(static_cast<double>(offset)),
-          ValueKind::BinaryAddInstKind);
-    } else {
-      addr = base;
-    }
+    Value *addr = emitEffectiveAddr(base, offset);
+    emitMemoryBoundsCheck(addr, 4);
 
     if (alignLog2 < naturalAlign) {
       // Unaligned: byte-store 4 bytes.
@@ -5581,15 +5592,7 @@ void WasmIRGen::onStore(
   Value *value = pop();
   Value *base = pop();
 
-  Value *addr;
-  if (offset != 0) {
-    addr = builder_.createBinaryOperatorInst(
-        base,
-        builder_.getLiteralNumber(static_cast<double>(offset)),
-        ValueKind::BinaryAddInstKind);
-  } else {
-    addr = base;
-  }
+  Value *addr = emitEffectiveAddr(base, offset);
 
   MemView view;
   uint8_t shift = 0;
@@ -5619,6 +5622,8 @@ void WasmIRGen::onStore(
     llvh::errs() << "WARNING: unsupported store opcode: " << op << "\n";
     return;
   }
+
+  emitMemoryBoundsCheck(addr, numBytes);
 
   // Unaligned path: byte-store to HEAPU8.
   if (alignLog2 < naturalAlign) {

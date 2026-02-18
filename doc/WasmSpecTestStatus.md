@@ -10,8 +10,8 @@ Last updated: 2026-02-17 (branch `wasm`)
 | Test files failing | 25 / 83 |
 | Crashes | 0 |
 | Timeouts | 0 |
-| Assertions passing | 24,633 |
-| Assertions failing | 171 |
+| Assertions passing | 24,662 |
+| Assertions failing | 142 |
 
 ## How to Run
 
@@ -136,15 +136,20 @@ NaN-boxing.
 **Affected tests:** f32_bitwise (16), f64_bitwise (16), conversions (8),
 float_memory (10), float_exprs (8)
 
-#### 2. Missing Trap on Out-of-Bounds Memory Access (38 failures)
+#### ~~2. Missing Trap on Out-of-Bounds Memory Access (was 38 failures — mostly FIXED)~~
 
-Memory loads/stores with large offsets that should trap (out of bounds) instead
-succeed, returning incorrect values. The compiled code does not check whether
-`base + offset` exceeds the memory size.
+Fixed by adding explicit memory bounds checking to `onLoad()` and `onStore()`
+in `lib/WasmIRGen/WasmIRGen.cpp`, gated behind the `--test262` flag (now passed
+automatically by `run-spec-test.py`). New helpers `emitEffectiveAddr()` (treats
+the base address as unsigned via `>>> 0` to prevent signed wrap-around) and
+`emitMemoryBoundsCheck()` (emits `if (addr + numBytes > HEAPU8.length) trap`)
+catch OOB accesses before they reach the typed array views.
 
-**Affected tests:** address (38)
+Results: address (38 → 9). The remaining 9 failures are due to alignment hints
+being trusted (misaligned typed array access returns wrong values — see
+"Alignment Hints Trusted" under Known Architectural Limitations).
 
-Example: `i32.load offset=65536 (i32.const 0)` should trap but succeeds.
+**Affected tests:** address (9)
 
 #### ~~3. Missing Trap on Out-of-Bounds Table Access (was 26 failures — mostly FIXED)~~
 
@@ -316,7 +321,7 @@ br_if.wast:670:26: error: unexpected token "null", expected a numeric index
 | memory | 0 | 1 | 0 | wast2json parse error (cat 7) |
 | memory_grow | 0 | 50 | 0 | Module load failure (cat 5) |
 | memory_redundancy | 1 | 3 | 0 | Module load (cat 5) |
-| address | 218 | 38 | 0 | Memory OOB (cat 2) |
+| address | 247 | 9 | 0 | Memory OOB alignment (cat 2) |
 | align | 0 | 1 | 0 | wast2json parse error (cat 7) |
 | data | 34 | 2 | 0 | wast2json validation error (cat 7) |
 | table | 0 | 1 | 0 | wast2json parse error (cat 7) |
@@ -331,8 +336,9 @@ br_if.wast:670:26: error: unexpected token "null", expected a numeric index
 
 ### Priority for Fixing
 
-1. **Memory bounds checking** (cat 2) — runtime correctness; OOB memory access
-   succeeds instead of trapping. 38 failures.
+1. ~~**Memory bounds checking** (cat 2) — mostly fixed. 29 of 38 failures
+   resolved by adding bounds checks in `emitMemoryBoundsCheck()`. Remaining 9
+   are alignment-hint-trusted issues (misaligned typed array access).~~
 2. ~~**Table bounds checking** (cat 3) — mostly fixed. 22 of 26 failures
    resolved by adding bounds checks in `emitTableBoundsCheck()`. Remaining 4
    table_grow failures are import/linking issues.~~

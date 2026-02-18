@@ -50,7 +50,8 @@ __attribute__((__weak__)) std::unique_ptr<WasmModuleData>
 compileWasmToModuleData(
     const uint8_t *buffer,
     size_t size,
-    std::string &errorMsg) {
+    std::string &errorMsg,
+    bool test262) {
   errorMsg = "WebAssembly support not compiled";
   return nullptr;
 }
@@ -597,7 +598,8 @@ static std::unique_ptr<WasmModuleData> createModuleFromBytes(
     bcProvider = std::shared_ptr<hbc::BCProviderBase>(std::move(ret.first));
   } else {
     // .wasm path — compile to HBC first.
-    auto compiledData = hermes::compileWasmToModuleData(data, size, errorMsg);
+    auto compiledData = hermes::compileWasmToModuleData(
+        data, size, errorMsg, runtime.test262);
     if (!compiledData) {
       return nullptr;
     }

@@ -551,6 +551,7 @@ def main():
         hermes_cmd = [
             args.hermes,
             '-O0',
+            '--test262',
             '-Xhermes-internal-test-methods',
             js_file
         ]

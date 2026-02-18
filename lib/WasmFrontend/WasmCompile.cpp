@@ -69,7 +69,8 @@ static const char *externalKindName(wasm::WasmExternalKind kind) {
 std::unique_ptr<WasmModuleData> compileWasmToModuleData(
     const uint8_t *buffer,
     size_t size,
-    std::string &errorMsg) {
+    std::string &errorMsg,
+    bool test262) {
   // Validate the module first. The Wasm spec requires that
   // new WebAssembly.Module() reject semantically invalid modules with a
   // CompileError. Our compile path (ReadBinary + BinaryReaderHermesIRGen) only
@@ -80,7 +81,9 @@ std::unique_ptr<WasmModuleData> compileWasmToModuleData(
   }
 
   // Full compilation: parse → IR → optimize → bytecode.
-  auto context = std::make_shared<Context>();
+  CodeGenerationSettings codeGenOpts;
+  codeGenOpts.test262 = test262;
+  auto context = std::make_shared<Context>(std::move(codeGenOpts));
   auto M = std::make_shared<Module>(context);
 
   wasm::WasmModuleInfo moduleInfo;
