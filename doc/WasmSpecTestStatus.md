@@ -1,17 +1,17 @@
 # Wasm Spec Test Status
 
-Last updated: 2026-02-17 (branch `wasm`)
+Last updated: 2026-02-18 (branch `wasm`)
 
 ## Summary
 
 | Metric | Value |
 |--------|-------|
-| Test files passing | 61 / 83 (73%) |
-| Test files failing | 22 / 83 |
+| Test files passing | 62 / 83 (75%) |
+| Test files failing | 21 / 83 |
 | Crashes | 0 |
 | Timeouts | 0 |
-| Assertions passing | 24,680 |
-| Assertions failing | 124 |
+| Assertions passing | 24,682 |
+| Assertions failing | 120 |
 
 ## How to Run
 
@@ -30,7 +30,7 @@ python3 test/wasm/spec/run-spec-test.py \
   external/wasm-testsuite/tests/i32.wast
 ```
 
-## Passing Tests (61)
+## Passing Tests (62)
 
 | Test | Passed | Failed | Skipped |
 |------|--------|--------|---------|
@@ -74,6 +74,7 @@ python3 test/wasm/spec/run-spec-test.py \
 | table_copy | 1,649 | 0 | 0 |
 | table_fill | 44 | 0 | 0 |
 | table_get | 14 | 0 | 0 |
+| table_grow | 48 | 0 | 0 |
 | table_init | 729 | 0 | 0 |
 | table_set | 25 | 0 | 0 |
 | table_size | 38 | 0 | 0 |
@@ -96,7 +97,7 @@ python3 test/wasm/spec/run-spec-test.py \
 | imports | 128 | 0 | 16 |
 | memory_redundancy | 4 | 0 | 0 |
 
-## Failing Tests (22)
+## Failing Tests (21)
 
 ### Failure Categories
 
@@ -156,7 +157,7 @@ and `onStore()`).
 
 **Previously affected tests:** address (38 → 0)
 
-#### ~~3. Missing Trap on Out-of-Bounds Table Access (was 26 failures — mostly FIXED)~~
+#### ~~3. Missing Trap on Out-of-Bounds Table Access (was 26 failures — FIXED)~~
 
 Fixed by adding bounds checking to `onTableGet()` and `onTableSet()` in
 `lib/WasmIRGen/WasmIRGen.cpp`. A new helper `emitTableBoundsCheck()` emits an
@@ -164,11 +165,18 @@ unsigned comparison of the index against the table array's length, branching to
 a trap block on OOB. This follows the same pattern used for data segment OOB
 checks.
 
-Results: table_get (4 → 0), table_set (8 → 0), table_grow (14 → 4). The
-remaining 4 table_grow failures are due to import/linking issues (modules
-importing tables from other modules fail to load), not bounds checking.
+The remaining 4 table_grow failures were due to imported tables not being wired
+into the compiled module. Fixed by storing `__wasm_funcs__` and `__wasm_types__`
+arrays on exported `WebAssembly.Table` objects and extracting them during import
+validation. The import min check now uses `__wasm_funcs__.length` (actual
+current size after `table.grow`) instead of `__wasm_min__` (original declared
+size). `createTables()` skips imported tables since their arrays are already
+wired during import processing.
 
-**Affected tests:** table_grow (4)
+Results: table_get (4 → 0), table_set (8 → 0), table_grow (14 → 0).
+
+**Previously affected tests:** table_get (4 → 0), table_set (8 → 0),
+table_grow (14 → 0)
 
 #### ~~4. Unlinkable / Uninstantiable Modules Not Rejected (was 2 failures — FIXED)~~
 
@@ -227,8 +235,8 @@ The remaining failures have the following dependency structure:
 Export globals as WebAssembly.Global ──→ Global type validation works (12 fixed) ✓ DONE
 
 Export tables as WebAssembly.Table ────→ Table imports resolve (12 fixed) ✓ DONE
-                                    └──→ Wire imported table into compiled code
-                                          (needed for linking.wast, not imports.wast)
+                                    └──→ Wire imported table into compiled code ✓ DONE
+                                          (table_grow 4 → 0)
 
 Export memories as WebAssembly.Memory ─→ Memory imports resolve (13 fixed) ✓ DONE
                                     └──→ Wire imported memory into compiled code
@@ -325,7 +333,6 @@ br_if.wast:670:26: error: unexpected token "null", expected a numeric index
 | data | 34 | 2 | 0 | Unsupported proposal (cat 7) |
 | table | 0 | 1 | 0 | Unsupported proposal (cat 7) |
 | elem | 0 | 1 | 0 | Unsupported proposal (cat 7) |
-| table_grow | 46 | 4 | 0 | Import/linking (cat 3) |
 | select | 0 | 1 | 0 | Unsupported proposal (cat 7) |
 | tag | 0 | 1 | 0 | Unsupported proposal (cat 7) |
 | ref_is_null | 0 | 1 | 0 | Unsupported proposal (cat 7) |
@@ -337,9 +344,9 @@ br_if.wast:670:26: error: unexpected token "null", expected a numeric index
 1. ~~**Memory bounds checking** (cat 2) — FIXED. All 38 failures resolved:
    29 by bounds checks in `emitMemoryBoundsCheck()`, remaining 9 by forcing
    the unaligned byte-assembly path when `--test262` is active.~~
-2. ~~**Table bounds checking** (cat 3) — mostly fixed. 22 of 26 failures
-   resolved by adding bounds checks in `emitTableBoundsCheck()`. Remaining 4
-   table_grow failures are import/linking issues.~~
+2. ~~**Table bounds checking** (cat 3) — FIXED. All 26 failures resolved:
+   22 by bounds checks in `emitTableBoundsCheck()`, remaining 4 by wiring
+   imported table arrays into the compiled module.~~
 3. ~~**Instantiation-time validation** (cat 4) — FIXED. All import/export
    validation and alignment issues resolved. 0 failures.~~
 4. **Module load failures** (cat 5) — multi-memory proposal not supported.
@@ -357,13 +364,17 @@ These limitations are not yet surfaced as spec test failures because the
 Unsupported proposal (cat 7). They will become visible once cross-module tests
 can run.
 
-### Non-Function Imports Not Wired In
+### Non-Function Imports Not Fully Wired
 
-**Function imports** and **global imports** are resolved from the imports
-object and connected to the compiled module. Function imports are validated
-for type compatibility using `__wasm_type__` strings. Global imports read
-their value from the import object (either a `WebAssembly.Global`'s `.value`
-property or a raw JS number).
+**Function imports**, **global imports**, and **table imports** are resolved
+from the imports object and connected to the compiled module. Function imports
+are validated for type compatibility using `__wasm_type__` strings. Global
+imports read their value from the import object (either a
+`WebAssembly.Global`'s `.value` property or a raw JS number). Table imports
+from Wasm-exported tables share the exporter's internal arrays
+(`__wasm_funcs__` and `__wasm_types__`) so that `table.grow`, `table.get`,
+`table.set`, and `call_indirect` operate on the same storage. Tables imported
+from JS-API `WebAssembly.Table` objects get fresh arrays (no sharing).
 
 Other import kinds are stubbed:
 
@@ -374,24 +385,30 @@ Other import kinds are stubbed:
   the imported `WebAssembly.Memory` object is not used — two modules
   cannot share linear memory contents.
 
-- **Table imports ignored:** The compiled code always creates fresh JS Arrays
-  for table storage (`WasmIRGen.cpp`, `createTables()`). The
-  `WebAssembly.Table` object from the imports object is never used. Functions
-  from one module cannot appear in another module's table through imports.
+- **Table imports wired for Wasm-exported tables:** When a module imports a
+  table that was exported by another Wasm module, the importing module uses the
+  exporter's `__wasm_funcs__` and `__wasm_types__` arrays directly.
+  `table.grow` in either module affects both (since `JSArray::setLengthProperty`
+  grows arrays in-place). Tables imported from JS-API `WebAssembly.Table`
+  objects (without `__wasm_funcs__`) get fresh empty arrays — the Table's
+  internal storage is not shared.
 
-### Export Objects Have Separate Storage
+### Export Objects — Partial Storage Sharing
 
 The exports object includes function exports (with `__wasm_type__` metadata),
 global exports (wrapped in `WebAssembly.Global`), tag exports (plain objects
 with `__wasm_type__`), memory exports (wrapped in `WebAssembly.Memory`), and
 table exports (wrapped in `WebAssembly.Table`). All export kinds are handled.
 
-However, the exported `WebAssembly.Memory` and `WebAssembly.Table` objects have
-their own separate storage — they do NOT share the module's internal linear
-memory or table arrays. This means import *type validation* works
-(initial/maximum limit checks pass), but cross-module memory/table sharing does
-not. Wiring imported memory buffers and table arrays into the compiled module
-is a separate change.
+Exported `WebAssembly.Table` objects now carry `__wasm_funcs__` and
+`__wasm_types__` properties pointing to the module's internal table arrays,
+enabling cross-module table sharing via imports.
+
+However, exported `WebAssembly.Memory` objects still have their own separate
+storage — they do NOT share the module's internal linear memory. Import *type
+validation* works (initial/maximum limit checks pass), but cross-module
+memory sharing does not. Wiring imported memory buffers into the compiled
+module is a separate change.
 
 ### Alignment Hints Trusted (without `--test262`)
 

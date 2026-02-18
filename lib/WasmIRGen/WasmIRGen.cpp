@@ -555,6 +555,7 @@ void WasmIRGen::createFunctions() {
 
     uint32_t importFuncIdx = 0;
     uint32_t importGlobalIdx = 0;
+    uint32_t importTableIdx = 0;
 
     // Cache module objects to avoid redundant loads for the same module.
     std::string lastModuleName;
@@ -757,9 +758,40 @@ void WasmIRGen::createFunctions() {
               mismatch, linkErrorBB, checkLimitsBB);
 
           // Check limits: actualMin >= expectedMin
+          // If __wasm_funcs__ exists (Wasm-exported table), use its .length
+          // as the actual current size (reflects table.grow). Otherwise
+          // fall back to __wasm_min__ (JS-API WebAssembly.Table).
           builder_.setInsertionBlock(checkLimitsBB);
-          auto *actualMin = builder_.createLoadPropertyInst(
+          auto *funcsArrCheck = builder_.createLoadPropertyInst(
+              importVal, builder_.getLiteralString("__wasm_funcs__"));
+          auto *funcsIsUndef = builder_.createBinaryOperatorInst(
+              funcsArrCheck, undefinedVal,
+              ValueKind::BinaryStrictlyEqualInstKind);
+          auto *useFuncsLenBB =
+              builder_.createBasicBlock(topLevelFunc);
+          auto *useWasmMinBB =
+              builder_.createBasicBlock(topLevelFunc);
+          auto *checkMinBB = builder_.createBasicBlock(topLevelFunc);
+          builder_.createCondBranchInst(
+              funcsIsUndef, useWasmMinBB, useFuncsLenBB);
+
+          // Branch: __wasm_funcs__ exists → use .length
+          builder_.setInsertionBlock(useFuncsLenBB);
+          auto *funcsLen = builder_.createLoadPropertyInst(
+              funcsArrCheck, builder_.getLiteralString("length"));
+          builder_.createBranchInst(checkMinBB);
+
+          // Branch: no __wasm_funcs__ → use __wasm_min__
+          builder_.setInsertionBlock(useWasmMinBB);
+          auto *wasmMin = builder_.createLoadPropertyInst(
               importVal, builder_.getLiteralString("__wasm_min__"));
+          builder_.createBranchInst(checkMinBB);
+
+          // Merge actualMin via Phi.
+          builder_.setInsertionBlock(checkMinBB);
+          auto *actualMin = builder_.createPhiInst();
+          actualMin->addEntry(funcsLen, useFuncsLenBB);
+          actualMin->addEntry(wasmMin, useWasmMinBB);
           auto *minOk = builder_.createBinaryOperatorInst(
               actualMin,
               builder_.getLiteralNumber(
@@ -805,7 +837,57 @@ void WasmIRGen::createFunctions() {
           builder_.createUnreachableInst();
 
           builder_.setInsertionBlock(acceptBB);
-          tlEntry_ = acceptBB;
+
+          // Wire imported table arrays for sharing.
+          // If __wasm_funcs__ exists (Wasm-exported table), use the
+          // exported arrays. Otherwise (JS-API Table), create fresh arrays.
+          auto *impFuncsCheck = builder_.createLoadPropertyInst(
+              importVal, builder_.getLiteralString("__wasm_funcs__"));
+          auto *impFuncsIsUndef = builder_.createBinaryOperatorInst(
+              impFuncsCheck, undefinedVal,
+              ValueKind::BinaryStrictlyEqualInstKind);
+          auto *wireExportedBB =
+              builder_.createBasicBlock(topLevelFunc);
+          auto *createFreshBB =
+              builder_.createBasicBlock(topLevelFunc);
+          auto *wireDoneBB = builder_.createBasicBlock(topLevelFunc);
+          builder_.createCondBranchInst(
+              impFuncsIsUndef, createFreshBB, wireExportedBB);
+
+          // Branch: Wasm-exported table → use its arrays.
+          builder_.setInsertionBlock(wireExportedBB);
+          auto *expFuncs = impFuncsCheck;
+          auto *expTypes = builder_.createLoadPropertyInst(
+              importVal, builder_.getLiteralString("__wasm_types__"));
+          builder_.createBranchInst(wireDoneBB);
+
+          // Branch: JS-API table → create fresh arrays.
+          builder_.setInsertionBlock(createFreshBB);
+          auto *arrayCtor =
+              builder_.createTryLoadGlobalPropertyInst("Array");
+          auto *freshSize = builder_.getLiteralNumber(
+              static_cast<double>(imp.tableType.limits.initial));
+          auto *freshFuncs = emitNew(arrayCtor, {freshSize});
+          auto *freshTypes = emitNew(arrayCtor, {freshSize});
+          builder_.createBranchInst(wireDoneBB);
+
+          // Merge via Phi and store.
+          // All Phis must precede non-Phi instructions in a block.
+          builder_.setInsertionBlock(wireDoneBB);
+          auto *funcsResult = builder_.createPhiInst();
+          funcsResult->addEntry(expFuncs, wireExportedBB);
+          funcsResult->addEntry(freshFuncs, createFreshBB);
+          auto *typesResult = builder_.createPhiInst();
+          typesResult->addEntry(expTypes, wireExportedBB);
+          typesResult->addEntry(freshTypes, createFreshBB);
+
+          builder_.createStoreFrameInst(
+              tlScope, funcsResult, tableFuncVars_[importTableIdx]);
+          builder_.createStoreFrameInst(
+              tlScope, typesResult, tableTypeVars_[importTableIdx]);
+
+          ++importTableIdx;
+          tlEntry_ = wireDoneBB;
           break;
         }
 
@@ -1655,8 +1737,8 @@ void WasmIRGen::finalizeModule() {
 
   // Add table exports as WebAssembly.Table objects.
   // The Table constructor sets __wasm_type__, __wasm_min__, __wasm_max__
-  // automatically. The Table object does NOT share the module's internal
-  // table array (table sharing is a separate change).
+  // automatically. We also store __wasm_funcs__ and __wasm_types__ arrays
+  // on the Table object to enable cross-module table sharing.
   Value *wasmTableCtor = nullptr;
   bool hasTableExports = std::any_of(
       moduleInfo_.exports.begin(),
@@ -1720,6 +1802,18 @@ void WasmIRGen::finalizeModule() {
 
     // Construct: new WebAssembly.Table(descriptor)
     auto *tableObj = emitNew(wasmTableCtor, {descriptor});
+
+    // Store internal table arrays for cross-module sharing.
+    auto *expFuncsArr = builder_.createLoadFrameInst(
+        tlScope, tableFuncVars_[exp.index]);
+    builder_.createStorePropertyStrictInst(
+        expFuncsArr, tableObj,
+        builder_.getLiteralString("__wasm_funcs__"));
+    auto *expTypesArr = builder_.createLoadFrameInst(
+        tlScope, tableTypeVars_[exp.index]);
+    builder_.createStorePropertyStrictInst(
+        expTypesArr, tableObj,
+        builder_.getLiteralString("__wasm_types__"));
 
     builder_.createStorePropertyStrictInst(
         tableObj, exportsObj, builder_.getLiteralString(exp.name));
@@ -5849,24 +5943,15 @@ void WasmIRGen::createTables(Instruction *tlScope) {
   uint32_t numTables = moduleInfo_.totalTableCount();
 
   for (uint32_t tblIdx = 0; tblIdx < numTables; ++tblIdx) {
-    uint32_t initialSize = 0;
     uint32_t importedTables = moduleInfo_.importedTableCount();
 
     if (tblIdx < importedTables) {
-      // Imported table — find the corresponding import.
-      uint32_t importTableIdx = 0;
-      for (const auto &imp : moduleInfo_.imports) {
-        if (imp.kind != WasmExternalKind::Table)
-          continue;
-        if (importTableIdx == tblIdx) {
-          initialSize = imp.tableType.limits.initial;
-          break;
-        }
-        ++importTableIdx;
-      }
-    } else {
-      initialSize = moduleInfo_.tables[tblIdx - importedTables].limits.initial;
+      // Imported table — arrays already wired during import validation.
+      continue;
     }
+
+    uint32_t initialSize =
+        moduleInfo_.tables[tblIdx - importedTables].limits.initial;
 
     // Create the functions array: new Array(initialSize)
     // This creates a sparse JS array with .length = initialSize.
