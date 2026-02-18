@@ -6,12 +6,12 @@ Last updated: 2026-02-17 (branch `wasm`)
 
 | Metric | Value |
 |--------|-------|
-| Test files passing | 56 / 83 (67%) |
-| Test files failing | 27 / 83 |
+| Test files passing | 58 / 83 (70%) |
+| Test files failing | 25 / 83 |
 | Crashes | 0 |
 | Timeouts | 0 |
-| Assertions passing | 24,611 |
-| Assertions failing | 193 |
+| Assertions passing | 24,633 |
+| Assertions failing | 171 |
 
 ## How to Run
 
@@ -30,7 +30,7 @@ python3 test/wasm/spec/run-spec-test.py \
   external/wasm-testsuite/tests/i32.wast
 ```
 
-## Passing Tests (56)
+## Passing Tests (58)
 
 | Test | Passed | Failed | Skipped |
 |------|--------|--------|---------|
@@ -73,7 +73,10 @@ python3 test/wasm/spec/run-spec-test.py \
 | bulk | 66 | 0 | 0 |
 | table_copy | 1,649 | 0 | 0 |
 | table_fill | 44 | 0 | 0 |
+| table_get | 14 | 0 | 0 |
 | table_init | 729 | 0 | 0 |
+| table_set | 25 | 0 | 0 |
+| table_size | 38 | 0 | 0 |
 | stack | 5 | 0 | 0 |
 | traps | 32 | 0 | 0 |
 | unwind | 49 | 0 | 0 |
@@ -90,7 +93,7 @@ python3 test/wasm/spec/run-spec-test.py \
 | utf8-invalid-encoding | 0 | 0 | 176 |
 | endianness | 68 | 0 | 0 |
 
-## Failing Tests (27)
+## Failing Tests (25)
 
 ### Failure Categories
 
@@ -143,26 +146,19 @@ succeed, returning incorrect values. The compiled code does not check whether
 
 Example: `i32.load offset=65536 (i32.const 0)` should trap but succeeds.
 
-#### 3. Missing Trap on Out-of-Bounds Table Access (26 failures)
+#### ~~3. Missing Trap on Out-of-Bounds Table Access (was 26 failures — mostly FIXED)~~
 
-`table.get` and `table.set` with out-of-bounds indices succeed instead of
-trapping. Same class of issue as the memory OOB problem (category 2) but for
-table operations.
+Fixed by adding bounds checking to `onTableGet()` and `onTableSet()` in
+`lib/WasmIRGen/WasmIRGen.cpp`. A new helper `emitTableBoundsCheck()` emits an
+unsigned comparison of the index against the table array's length, branching to
+a trap block on OOB. This follows the same pattern used for data segment OOB
+checks.
 
-**Root cause:** In `lib/WasmIRGen/WasmIRGen.cpp`, `onTableGet()`
-uses `createLoadPropertyInst(funcsArr, idx)` and `onTableSet()`
-uses `createStorePropertyStrictInst(val, funcsArr, idx)`. These are JS
-property operations — loading an out-of-bounds index from a JS array returns
-`undefined` rather than trapping, and storing silently extends the array.
-The Wasm spec requires a trap for out-of-bounds table access.
+Results: table_get (4 → 0), table_set (8 → 0), table_grow (14 → 4). The
+remaining 4 table_grow failures are due to import/linking issues (modules
+importing tables from other modules fail to load), not bounds checking.
 
-**Affected tests:** table_get (4), table_set (8), table_grow (14)
-
-Example (table_get.wast):
-```
-get-externref: expected trap but succeeded
-get-funcref: expected trap but succeeded
-```
+**Affected tests:** table_grow (4)
 
 #### 4. Unlinkable / Uninstantiable Modules Not Rejected (2 failures)
 
@@ -325,9 +321,7 @@ br_if.wast:670:26: error: unexpected token "null", expected a numeric index
 | data | 34 | 2 | 0 | wast2json validation error (cat 7) |
 | table | 0 | 1 | 0 | wast2json parse error (cat 7) |
 | elem | 0 | 1 | 0 | wast2json parse error (cat 7) |
-| table_get | 10 | 4 | 0 | Table OOB (cat 3) |
-| table_grow | 36 | 14 | 0 | Table OOB (cat 3) |
-| table_set | 17 | 8 | 0 | Table OOB (cat 3) |
+| table_grow | 46 | 4 | 0 | Import/linking (cat 3) |
 | select | 0 | 1 | 0 | wast2json parse error (cat 7) |
 | imports | 126 | 2 | 16 | Unlinkable (cat 4) |
 | tag | 0 | 1 | 0 | wast2json parse error (cat 7) |
@@ -339,8 +333,9 @@ br_if.wast:670:26: error: unexpected token "null", expected a numeric index
 
 1. **Memory bounds checking** (cat 2) — runtime correctness; OOB memory access
    succeeds instead of trapping. 38 failures.
-2. **Table bounds checking** (cat 3) — runtime correctness; OOB table access
-   succeeds instead of trapping. 26 failures.
+2. ~~**Table bounds checking** (cat 3) — mostly fixed. 22 of 26 failures
+   resolved by adding bounds checks in `emitTableBoundsCheck()`. Remaining 4
+   table_grow failures are import/linking issues.~~
 3. **Instantiation-time validation** (cat 4) — alignment hints trusted in
    imports. 2 failures (0 with patched test).
 4. **Module load failures** (cat 5) — multiple memories, etc. 53 failures.

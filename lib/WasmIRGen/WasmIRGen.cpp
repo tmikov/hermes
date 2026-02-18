@@ -5959,12 +5959,34 @@ Value *WasmIRGen::loadTableTypes(uint32_t tableIndex) {
       parentScopeInst_, tableTypeVars_[tableIndex]);
 }
 
+void WasmIRGen::emitTableBoundsCheck(Value *idx, Value *funcsArr) {
+  auto *length = builder_.createLoadPropertyInst(
+      funcsArr, builder_.getLiteralString("length"));
+  // Unsigned comparison: (idx >>> 0) >= length
+  auto *idxU = builder_.createBinaryOperatorInst(
+      idx,
+      builder_.getLiteralNumber(0),
+      ValueKind::BinaryUnsignedRightShiftInstKind);
+  auto *isOOB = builder_.createBinaryOperatorInst(
+      idxU, length, ValueKind::BinaryGreaterThanOrEqualInstKind);
+  auto *trapBlock = builder_.createBasicBlock(currentFunc_);
+  auto *okBlock = builder_.createBasicBlock(currentFunc_);
+  builder_.createCondBranchInst(isOOB, trapBlock, okBlock);
+
+  builder_.setInsertionBlock(trapBlock);
+  helpers_.emitTrap();
+  builder_.createUnreachableInst();
+
+  builder_.setInsertionBlock(okBlock);
+}
+
 void WasmIRGen::onTableGet(uint32_t tableIndex) {
   if (unreachable_)
     return;
 
   Value *idx = pop();
   auto *funcsArr = loadTableFuncs(tableIndex);
+  emitTableBoundsCheck(idx, funcsArr);
   auto *result = builder_.createLoadPropertyInst(funcsArr, idx);
   push(result);
 }
@@ -5976,6 +5998,7 @@ void WasmIRGen::onTableSet(uint32_t tableIndex) {
   Value *val = pop();
   Value *idx = pop();
   auto *funcsArr = loadTableFuncs(tableIndex);
+  emitTableBoundsCheck(idx, funcsArr);
   builder_.createStorePropertyStrictInst(val, funcsArr, idx);
 }
 

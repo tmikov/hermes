@@ -760,6 +760,10 @@ class WasmIRGen {
   /// Load the table functions array from the top-level scope.
   Value *loadTableFuncs(uint32_t tableIndex);
 
+  /// Emit a bounds check for table access, trapping if \p idx is out of
+  /// bounds for \p funcsArr. Leaves the builder positioned in the ok block.
+  void emitTableBoundsCheck(Value *idx, Value *funcsArr);
+
   /// Load the table type-indices array from the top-level scope.
   Value *loadTableTypes(uint32_t tableIndex);
 
