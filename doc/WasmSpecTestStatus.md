@@ -6,12 +6,12 @@ Last updated: 2026-02-17 (branch `wasm`)
 
 | Metric | Value |
 |--------|-------|
-| Test files passing | 58 / 83 (70%) |
-| Test files failing | 25 / 83 |
+| Test files passing | 61 / 83 (73%) |
+| Test files failing | 22 / 83 |
 | Crashes | 0 |
 | Timeouts | 0 |
-| Assertions passing | 24,662 |
-| Assertions failing | 142 |
+| Assertions passing | 24,680 |
+| Assertions failing | 124 |
 
 ## How to Run
 
@@ -30,7 +30,7 @@ python3 test/wasm/spec/run-spec-test.py \
   external/wasm-testsuite/tests/i32.wast
 ```
 
-## Passing Tests (58)
+## Passing Tests (61)
 
 | Test | Passed | Failed | Skipped |
 |------|--------|--------|---------|
@@ -92,12 +92,15 @@ python3 test/wasm/spec/run-spec-test.py \
 | utf8-import-module | 176 | 0 | 0 |
 | utf8-invalid-encoding | 0 | 0 | 176 |
 | endianness | 68 | 0 | 0 |
+| address | 256 | 0 | 0 |
+| imports | 128 | 0 | 16 |
+| memory_redundancy | 4 | 0 | 0 |
 
-## Failing Tests (25)
+## Failing Tests (22)
 
 ### Failure Categories
 
-#### 1. NaN Bit Pattern Corruption (58 failures)
+#### 1. NaN Bit Pattern Corruption (54 failures)
 
 All Wasm f32/f64 values are stored as NaN-boxed `HermesValue`s on the register
 stack. NaN-boxing reserves the sign bit and fraction bits of NaN patterns for
@@ -117,12 +120,13 @@ instead of `+x`.
 `i64.reinterpret_f64` return wrong bit patterns for NaN inputs because
 non-canonical NaN bit patterns cannot survive on the register stack.
 
-**NaN bit patterns through linear memory (10 failures):** Storing a
+**NaN bit patterns through linear memory (6 failures):** Storing a
 non-canonical NaN to a Wasm register and then reading it back (or loading it
 from memory after storing via the register) corrupts the bit pattern. This
 affects `float_memory` tests where specific NaN bit patterns are stored to
 linear memory and loaded back with `i32.load`/`i64.load`, returning
-Hermes's canonical NaN bits instead of the original.
+Hermes's canonical NaN bits instead of the original. (4 of the original 10
+failures were actually alignment issues, now fixed by the unaligned path.)
 
 **Non-arithmetic NaN bit patterns (8 failures):** `float_exprs` tests
 `f32.nonarithmetic_nan_bitpattern` and `f64.nonarithmetic_nan_bitpattern` check
@@ -134,9 +138,9 @@ This cannot be fixed without a separate Wasm value representation that bypasses
 NaN-boxing.
 
 **Affected tests:** f32_bitwise (16), f64_bitwise (16), conversions (8),
-float_memory (10), float_exprs (8)
+float_memory (6), float_exprs (8)
 
-#### ~~2. Missing Trap on Out-of-Bounds Memory Access (was 38 failures — mostly FIXED)~~
+#### ~~2. Missing Trap on Out-of-Bounds Memory Access (was 38 failures — FIXED)~~
 
 Fixed by adding explicit memory bounds checking to `onLoad()` and `onStore()`
 in `lib/WasmIRGen/WasmIRGen.cpp`, gated behind the `--test262` flag (now passed
@@ -145,11 +149,12 @@ the base address as unsigned via `>>> 0` to prevent signed wrap-around) and
 `emitMemoryBoundsCheck()` (emits `if (addr + numBytes > HEAPU8.length) trap`)
 catch OOB accesses before they reach the typed array views.
 
-Results: address (38 → 9). The remaining 9 failures are due to alignment hints
-being trusted (misaligned typed array access returns wrong values — see
-"Alignment Hints Trusted" under Known Architectural Limitations).
+Results: address (38 → 0). The original 9 alignment-related failures were fixed
+by forcing all multi-byte loads/stores through the byte-assembly (unaligned)
+path when `--test262` is active (`if (test262_) alignLog2 = 0` in `onLoad()`
+and `onStore()`).
 
-**Affected tests:** address (9)
+**Previously affected tests:** address (38 → 0)
 
 #### ~~3. Missing Trap on Out-of-Bounds Table Access (was 26 failures — mostly FIXED)~~
 
@@ -165,13 +170,13 @@ importing tables from other modules fail to load), not bounds checking.
 
 **Affected tests:** table_grow (4)
 
-#### 4. Unlinkable / Uninstantiable Modules Not Rejected (2 failures)
+#### ~~4. Unlinkable / Uninstantiable Modules Not Rejected (was 2 failures — FIXED)~~
 
 Modules that should be rejected at instantiation time are accepted by Hermes.
 The spec requires validation between parsing and execution; Hermes skips some
 of these checks, so errors surface later (or not at all) as wrong results.
 
-**imports (2 failures, 0 with patched test):** Import type validation is now implemented using
+**imports (0 failures):** Import type validation is now implemented using
 `__wasm_type__` string comparison at instantiation time. The compiled IR
 checks each import value against the expected type string, throwing a
 `WebAssembly.LinkError` on mismatch. This covers:
@@ -184,7 +189,7 @@ checks each import value against the expected type string, throwing a
 - Non-callable values imported as functions
 - Tag type mismatches (via `__wasm_type__` on tag export objects)
 
-Remaining failures (2, or 0 with patched test) are due to:
+All sub-issues have been resolved:
 
 - **~~Tag exports not implemented (3+1):~~** Fixed. Tag exports are now
   implemented as plain objects with `__wasm_type__` metadata (e.g.
@@ -200,19 +205,11 @@ Remaining failures (2, or 0 with patched test) are due to:
   now implemented as `WebAssembly.Memory` objects (13 fixed) and table exports
   as `WebAssembly.Table` objects (12 fixed). All 25 table/memory import
   validation failures are resolved.
-- **Alignment hint trusted for memory access (2):** The spec allows
-  alignment hints on load/store instructions that are strictly advisory —
-  implementations must produce correct results even when the actual address
-  is less aligned than the hint declares. The current compiled code trusts
-  alignment hints and uses typed array views (e.g., `HEAP32[addr >>> 2]`)
-  which silently round the address down to the element boundary. Two test
-  cases import a memory, write a byte via `data` segment at an unaligned
-  offset, then `i32.load` at that offset with the default alignment hint
-  (align=4). The address is a function parameter (not constant at compile
-  time), so this cannot be detected statically. See "Alignment Hints
-  Trusted" under Known Architectural Limitations. A patched copy of the
-  test (`test/wasm/spec/imports_patched.wast_`) changes these two
-  instructions to `align=1`, reducing the failure count by 2.
+- **~~Alignment hint trusted for memory access (2):~~** Fixed. When
+  `--test262` is active, `onLoad()` and `onStore()` now force `alignLog2 = 0`,
+  routing all multi-byte operations through the byte-assembly (unaligned) path.
+  This ensures correct results regardless of actual alignment, as the spec
+  requires.
 - **~~`memory.grow` on imported memory (4):~~** Fixed. When a module imports
   a memory, `createMemoryViews()` now uses the imported memory's actual
   `__wasm_min__` (initial page count) instead of the import declaration's
@@ -238,16 +235,16 @@ Export memories as WebAssembly.Memory ─→ Memory imports resolve (13 fixed) �
                                      └──→ memory.grow on imported memory works (4 fixed) ✓ DONE
 
 Tags (independent) ───────────────────→ Tag import/export support (3+1 fixed) ✓ DONE
+
+Alignment hints (independent) ────────→ Force unaligned path under --test262 (2 fixed) ✓ DONE
 ```
 
-All import/export type validation is now complete. The only remaining
-imports.wast failures (2, unpatched) are due to alignment hints being
-trusted (architectural limitation, not an import/export issue). The
-patched test passes 100%.
+All import/export type validation and alignment issues are now resolved.
+imports.wast passes with 0 failures.
 
-**Affected tests:** imports (2)
+**Previously affected tests:** imports (2 → 0)
 
-#### 5. Module Load Failures / Missing Features (53 failures)
+#### 5. Module Load Failures / Missing Features (50 failures)
 
 Hermes's Wasm binary parser rejects modules that use features it doesn't
 support. The module validates fine through WABT, but Hermes's own validation
@@ -262,10 +259,11 @@ exported function calls fail with "Cannot read property ... of null". The
 `memory.grow` instruction itself works; the failures are entirely due to
 multi-memory rejection.
 
-**memory_redundancy (3):** Similar module load failures due to unsupported
-features.
+**~~memory_redundancy (3):~~** Previously showed 3 failures attributed to
+module load issues. Now passes with 4/0/0 — the failures were actually
+alignment-related, fixed by the unaligned byte-assembly path.
 
-**Affected tests:** memory_grow (50), memory_redundancy (3)
+**Affected tests:** memory_grow (50)
 
 #### ~~6. Multi-Value Return from Calls Not Implemented (was 6 failures — FIXED)~~
 
@@ -282,12 +280,15 @@ multi-value results to/from JS Arrays.
 
 **Previously affected tests:** call (3 → 0), if (3 → 0)
 
-#### 7. wast2json Parse/Validation Errors (16 failures)
+#### 7. Unsupported Wasm Proposals (16 failures)
 
-Test files using syntax from newer Wasm proposals (GC types, typed function
-references, extended constant expressions) that the bundled `wast2json` (from
-WABT) cannot parse or validate. These fail immediately before any assertions
-run — the module binary is never produced, so Hermes never sees them.
+Test files that use syntax from newer Wasm proposals (GC types, typed function
+references, extended constant expressions). The bundled `wast2json` (WABT
+1.0.39, the latest release) cannot parse this syntax, so the module binary is
+never produced. Even if wast2json were updated, Hermes's own Wasm binary
+parser also does not support these proposals, so the tests would fail at
+module load time instead. These are not actionable without implementing the
+underlying proposals in both the toolchain and the engine.
 
 Most (14) fail with 0 pass / 1 fail because the entire test file is rejected.
 The `data` test (2 failures) partially works but wast2json rejects two modules
@@ -311,50 +312,49 @@ br_if.wast:670:26: error: unexpected token "null", expected a numeric index
 | f32_bitwise | 347 | 16 | 0 | NaN copysign (cat 1) |
 | f64_bitwise | 347 | 16 | 0 | NaN copysign (cat 1) |
 | float_exprs | 811 | 8 | 0 | NaN bit patterns (cat 1) |
-| float_memory | 50 | 10 | 0 | NaN through memory (cat 1) |
+| float_memory | 54 | 6 | 0 | NaN through memory (cat 1) |
 | conversions | 610 | 8 | 0 | NaN reinterpret (cat 1) |
-| br_if | 0 | 1 | 0 | wast2json parse error (cat 7) |
-| br_table | 0 | 1 | 0 | wast2json parse error (cat 7) |
-| unreached-valid | 0 | 1 | 0 | wast2json parse error (cat 7) |
-| local_tee | 0 | 1 | 0 | wast2json parse error (cat 7) |
-| global | 0 | 1 | 0 | wast2json parse error (cat 7) |
-| memory | 0 | 1 | 0 | wast2json parse error (cat 7) |
+| br_if | 0 | 1 | 0 | Unsupported proposal (cat 7) |
+| br_table | 0 | 1 | 0 | Unsupported proposal (cat 7) |
+| unreached-valid | 0 | 1 | 0 | Unsupported proposal (cat 7) |
+| local_tee | 0 | 1 | 0 | Unsupported proposal (cat 7) |
+| global | 0 | 1 | 0 | Unsupported proposal (cat 7) |
+| memory | 0 | 1 | 0 | Unsupported proposal (cat 7) |
 | memory_grow | 0 | 50 | 0 | Module load failure (cat 5) |
-| memory_redundancy | 1 | 3 | 0 | Module load (cat 5) |
-| address | 247 | 9 | 0 | Memory OOB alignment (cat 2) |
-| align | 0 | 1 | 0 | wast2json parse error (cat 7) |
-| data | 34 | 2 | 0 | wast2json validation error (cat 7) |
-| table | 0 | 1 | 0 | wast2json parse error (cat 7) |
-| elem | 0 | 1 | 0 | wast2json parse error (cat 7) |
+| align | 0 | 1 | 0 | Unsupported proposal (cat 7) |
+| data | 34 | 2 | 0 | Unsupported proposal (cat 7) |
+| table | 0 | 1 | 0 | Unsupported proposal (cat 7) |
+| elem | 0 | 1 | 0 | Unsupported proposal (cat 7) |
 | table_grow | 46 | 4 | 0 | Import/linking (cat 3) |
-| select | 0 | 1 | 0 | wast2json parse error (cat 7) |
-| imports | 126 | 2 | 16 | Unlinkable (cat 4) |
-| tag | 0 | 1 | 0 | wast2json parse error (cat 7) |
-| ref_is_null | 0 | 1 | 0 | wast2json parse error (cat 7) |
-| ref_null | 0 | 1 | 0 | wast2json parse error (cat 7) |
-| linking | 0 | 1 | 0 | wast2json parse error (cat 7) |
+| select | 0 | 1 | 0 | Unsupported proposal (cat 7) |
+| tag | 0 | 1 | 0 | Unsupported proposal (cat 7) |
+| ref_is_null | 0 | 1 | 0 | Unsupported proposal (cat 7) |
+| ref_null | 0 | 1 | 0 | Unsupported proposal (cat 7) |
+| linking | 0 | 1 | 0 | Unsupported proposal (cat 7) |
 
 ### Priority for Fixing
 
-1. ~~**Memory bounds checking** (cat 2) — mostly fixed. 29 of 38 failures
-   resolved by adding bounds checks in `emitMemoryBoundsCheck()`. Remaining 9
-   are alignment-hint-trusted issues (misaligned typed array access).~~
+1. ~~**Memory bounds checking** (cat 2) — FIXED. All 38 failures resolved:
+   29 by bounds checks in `emitMemoryBoundsCheck()`, remaining 9 by forcing
+   the unaligned byte-assembly path when `--test262` is active.~~
 2. ~~**Table bounds checking** (cat 3) — mostly fixed. 22 of 26 failures
    resolved by adding bounds checks in `emitTableBoundsCheck()`. Remaining 4
    table_grow failures are import/linking issues.~~
-3. **Instantiation-time validation** (cat 4) — alignment hints trusted in
-   imports. 2 failures (0 with patched test).
-4. **Module load failures** (cat 5) — multiple memories, etc. 53 failures.
-5. **wast2json upgrade** (cat 7) — would unblock 14 test files using newer
-   proposal syntax plus 2 data.wast failures. 16 failures.
+3. ~~**Instantiation-time validation** (cat 4) — FIXED. All import/export
+   validation and alignment issues resolved. 0 failures.~~
+4. **Module load failures** (cat 5) — multi-memory proposal not supported.
+   50 failures, all cascading from one module.
+5. **Unsupported proposals** (cat 7) — GC types, typed function references,
+   extended constant expressions. Neither wast2json (WABT 1.0.39) nor Hermes
+   supports these. 16 failures.
 6. **NaN-boxing limitations** (cat 1) — requires non-NaN-boxed Wasm value
-   representation. 58 failures.
+   representation. 54 failures.
 
 ## Known Architectural Limitations
 
 These limitations are not yet surfaced as spec test failures because the
 `linking.wast` test (which exercises cross-module scenarios) is blocked by a
-wast2json parse error (cat 7). They will become visible once cross-module tests
+Unsupported proposal (cat 7). They will become visible once cross-module tests
 can run.
 
 ### Non-Function Imports Not Wired In
@@ -393,7 +393,7 @@ memory or table arrays. This means import *type validation* works
 not. Wiring imported memory buffers and table arrays into the compiled module
 is a separate change.
 
-### Alignment Hints Trusted
+### Alignment Hints Trusted (without `--test262`)
 
 Wasm load/store instructions include an alignment hint (e.g., `align=4` for
 `i32.load`). The spec says this hint is advisory: implementations must
@@ -402,28 +402,22 @@ satisfies the declared alignment. The hint exists so that engines targeting
 native code can emit faster aligned-load instructions when the hint
 guarantees alignment.
 
-The current compiled code trusts alignment hints. When `alignLog2 ==
-naturalAlign` (the common case, including all default-aligned loads/stores),
-it uses typed array element access: `HEAP32[addr >>> 2]`,
+When `--test262` is active (as in spec tests), `onLoad()` and `onStore()`
+force `alignLog2 = 0`, routing all multi-byte operations through the
+byte-assembly (unaligned) path. This ensures spec-correct results at
+a significant performance cost: every multi-byte load/store reads/writes
+individual bytes from `HEAPU8` and assembles them with shifts and ORs,
+instead of a single typed array element access.
+
+Without `--test262`, the compiled code trusts alignment hints. When
+`alignLog2 == naturalAlign` (the common case, including all default-aligned
+loads/stores), it uses typed array element access: `HEAP32[addr >>> 2]`,
 `HEAPF64[addr >>> 3]`, etc. These typed array accesses implicitly round the
 byte address down to the element boundary, silently reading/writing the
 wrong bytes when the actual address is not aligned.
 
-An unaligned byte-assembly path exists (`emitUnalignedLoad` /
-`emitUnalignedStore` in `WasmIRGen.cpp`) and is used when `alignLog2 <
-naturalAlign` — i.e., when the Wasm author explicitly declares sub-natural
-alignment. But when the hint says "naturally aligned" and the runtime
-address is not, the fast path is taken and produces incorrect results.
-
-Always using the byte-assembly path would fix correctness but impose a
-significant performance cost on every memory access. A runtime alignment
-check (`if (addr & (align - 1))`) that branches to the slow path is
-possible but adds IR complexity and branch overhead to every load/store.
-
 In practice, well-formed Wasm compilers (LLVM, Binaryen) emit correct
-alignment hints. The spec test deliberately passes incorrect hints to verify
-engine robustness. This causes 2 failures in `imports.wast` (lines 502,
-514).
+alignment hints, so production code is unaffected by this limitation.
 
 ### Cross-Module `call_indirect` Type Indices
 

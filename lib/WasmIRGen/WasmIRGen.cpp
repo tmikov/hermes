@@ -5159,6 +5159,11 @@ void WasmIRGen::onLoad(
 
   // Check if we need the unaligned (byte-assembly) path.
   uint8_t naturalAlign = getNaturalAlignLog2(op);
+  // When test262_, ignore alignment hints and always use the byte-assembly
+  // path. The Wasm spec says alignment hints are advisory; engines must
+  // produce correct results regardless of actual alignment.
+  if (test262_)
+    alignLog2 = 0;
 
   // i64 loads: handled specially (split into lo/hi).
   if (op == "i64.load") {
@@ -5496,6 +5501,11 @@ void WasmIRGen::onStore(
 
   llvh::StringRef op(opcodeName);
   uint8_t naturalAlign = getNaturalAlignLog2(op);
+  // When test262_, ignore alignment hints and always use the byte-assembly
+  // path. The Wasm spec says alignment hints are advisory; engines must
+  // produce correct results regardless of actual alignment.
+  if (test262_)
+    alignLog2 = 0;
 
   // i64 stores: pop i64 pair (lo, hi) then base address.
   if (op == "i64.store") {

@@ -4,5 +4,5 @@
 ;; LICENSE file in the root directory of this source tree.
 
 ;; REQUIRES: wasm
-;; RUN: python3 %S/run-spec-test.py --wast2json %wast2json --hermes %hermes %wasm_testsuite/imports.wast | %FileCheck %s
+;; RUN: python3 %S/run-spec-test.py --wast2json %wast2json --hermes %hermes %wasm_testsuite/memory_redundancy.wast | %FileCheck %s
 ;; CHECK: SPEC TEST PASSED
