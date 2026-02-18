@@ -613,13 +613,6 @@ static CLFlag StripFunctionNames(
     "Strip function names to reduce string table size",
     CompilerCategory);
 
-static opt<bool> Test262(
-    "test262",
-    init(false),
-    Hidden,
-    desc("Increase compliance with test262 by moving more checks to runtime"),
-    cat(CompilerCategory));
-
 static opt<bool> EnableFastNoncompliant(
     "Xenable-fast-noncompliant",
     init(false),
@@ -1107,7 +1100,7 @@ std::shared_ptr<Context> createContext(
     std::unique_ptr<Context::ResolutionTable> resolutionTable,
     std::vector<uint32_t> segments) {
   CodeGenerationSettings codeGenOpts;
-  codeGenOpts.test262 = cl::Test262;
+  codeGenOpts.test262 = cl::compilerRuntimeFlags.Test262;
   codeGenOpts.enableTDZ = !cl::EnableFastNoncompliant && cl::EnableTDZ;
   codeGenOpts.enableFastDestructure =
       cl::EnableFastNoncompliant || cl::EnableFastDestructure;
