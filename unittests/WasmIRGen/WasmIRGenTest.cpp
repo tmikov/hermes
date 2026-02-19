@@ -3115,7 +3115,8 @@ TEST(WasmIRGenTest, CreateFunctionsSkipsNonFunctionExports) {
   funcExp.index = 0;
   moduleInfo.exports.push_back(funcExp);
 
-  // Also add a memory export (should be skipped in export descriptors).
+  // Also add a memory export.
+  moduleInfo.memories.push_back(WasmMemoryType{{1, 4, true}});
   WasmExport memExp;
   memExp.name = "memory";
   memExp.kind = WasmExternalKind::Memory;

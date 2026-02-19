@@ -1186,8 +1186,8 @@ void WasmIRGen::finalizeModule() {
   // For each exported function, create a wrapper that presents a clean
   // JS-compatible interface (1 param per Wasm param, argument coercion,
   // return value marshaling). The exports object maps export names to
-  // wrapper closures. Function and global exports are handled; other export
-  // kinds (memory, table) are silently skipped for now.
+  // wrapper closures. Function, global, tag, and memory exports are
+  // handled; table exports are silently skipped for now.
 
   // Create wrapper functions first (this switches insertion point).
   struct ExportWrapperInfo {
@@ -1330,6 +1330,69 @@ void WasmIRGen::finalizeModule() {
         builder_.getLiteralString("__wasm_type__"));
     builder_.createStorePropertyStrictInst(
         tagObj, exportsObj, builder_.getLiteralString(exp.name));
+  }
+
+  // Add memory exports as WebAssembly.Memory objects.
+  // The Memory constructor sets __wasm_type__, __wasm_min__, __wasm_max__
+  // automatically. The Memory has its own buffer — it does NOT share the
+  // module's internal linear memory (buffer sharing is a separate change).
+  Value *wasmMemoryCtor = nullptr;
+  bool hasMemoryExports = std::any_of(
+      moduleInfo_.exports.begin(),
+      moduleInfo_.exports.end(),
+      [](const WasmExport &e) {
+        return e.kind == WasmExternalKind::Memory;
+      });
+  if (hasMemoryExports) {
+    auto *wasmObj =
+        builder_.createTryLoadGlobalPropertyInst("WebAssembly");
+    wasmMemoryCtor = builder_.createLoadPropertyInst(
+        wasmObj, builder_.getLiteralString("Memory"));
+  }
+
+  for (const auto &exp : moduleInfo_.exports) {
+    if (exp.kind != WasmExternalKind::Memory)
+      continue;
+
+    // Determine memory limits from the memory index space.
+    // Imported memories come first, then defined memories.
+    uint32_t numImportedMemories = moduleInfo_.importedMemoryCount();
+    WasmMemoryType mType{};
+    if (exp.index < numImportedMemories) {
+      uint32_t idx = 0;
+      for (const auto &imp : moduleInfo_.imports) {
+        if (imp.kind != WasmExternalKind::Memory)
+          continue;
+        if (idx == exp.index) {
+          mType = imp.memoryType;
+          break;
+        }
+        ++idx;
+      }
+    } else {
+      mType = moduleInfo_.memories[exp.index - numImportedMemories];
+    }
+
+    // Build descriptor: {initial: N} or {initial: N, maximum: M}
+    auto *descriptor = builder_.createAllocObjectLiteralInst({});
+    builder_.createStorePropertyStrictInst(
+        builder_.getLiteralNumber(
+            static_cast<double>(mType.limits.initial)),
+        descriptor,
+        builder_.getLiteralString("initial"));
+    if (mType.limits.hasMaximum) {
+      builder_.createStorePropertyStrictInst(
+          builder_.getLiteralNumber(
+              static_cast<double>(mType.limits.maximum)),
+          descriptor,
+          builder_.getLiteralString("maximum"));
+    }
+
+    // Construct: new WebAssembly.Memory(descriptor)
+    auto *memObj = emitNew(wasmMemoryCtor, {descriptor});
+
+    builder_.createStorePropertyStrictInst(
+        memObj, exportsObj, builder_.getLiteralString(exp.name));
   }
 
   builder_.createReturnInst(exportsObj);

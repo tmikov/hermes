@@ -11,7 +11,7 @@ Last updated: 2026-02-16 (branch `wasm`)
 | Crashes | 0 |
 | Timeouts | 0 |
 | Assertions passing | 24,601 |
-| Assertions failing | 228 |
+| Assertions failing | 215 |
 
 ## How to Run
 
@@ -30,7 +30,7 @@ python3 test/wasm/spec/run-spec-test.py \
   external/wasm-testsuite/tests/i32.wast
 ```
 
-## Passing Tests (53)
+## Passing Tests (54)
 
 | Test | Passed | Failed | Skipped |
 |------|--------|--------|---------|
@@ -141,7 +141,7 @@ succeed, returning incorrect values. The compiled code does not check whether
 
 Example: `i32.load offset=65536 (i32.const 0)` should trap but succeeds.
 
-#### 3. Missing Trap on Out-of-Bounds Table Access (22 failures)
+#### 3. Missing Trap on Out-of-Bounds Table Access (26 failures)
 
 `table.get` and `table.set` with out-of-bounds indices succeed instead of
 trapping. Same class of issue as the memory OOB problem (category 2) but for
@@ -154,7 +154,7 @@ property operations — loading an out-of-bounds index from a JS array returns
 `undefined` rather than trapping, and storing silently extends the array.
 The Wasm spec requires a trap for out-of-bounds table access.
 
-**Affected tests:** table_get (4), table_set (8), table_grow (10)
+**Affected tests:** table_get (4), table_set (8), table_grow (14)
 
 Example (table_get.wast):
 ```
@@ -162,13 +162,13 @@ get-externref: expected trap but succeeded
 get-funcref: expected trap but succeeded
 ```
 
-#### 4. Unlinkable / Uninstantiable Modules Not Rejected (33 failures)
+#### 4. Unlinkable / Uninstantiable Modules Not Rejected (20 failures)
 
 Modules that should be rejected at instantiation time are accepted by Hermes.
 The spec requires validation between parsing and execution; Hermes skips some
 of these checks, so errors surface later (or not at all) as wrong results.
 
-**imports (31 failures, 29 with patched test):** Import type validation is now implemented using
+**imports (18 failures, 16 with patched test):** Import type validation is now implemented using
 `__wasm_type__` string comparison at instantiation time. The compiled IR
 checks each import value against the expected type string, throwing a
 `WebAssembly.LinkError` on mismatch. This covers:
@@ -181,7 +181,7 @@ checks each import value against the expected type string, throwing a
 - Non-callable values imported as functions
 - Tag type mismatches (via `__wasm_type__` on tag export objects)
 
-Remaining failures (31, or 29 with patched test) are due to:
+Remaining failures (18, or 16 with patched test) are due to:
 
 - **~~Tag exports not implemented (3+1):~~** Fixed. Tag exports are now
   implemented as plain objects with `__wasm_type__` metadata (e.g.
@@ -193,9 +193,10 @@ Remaining failures (31, or 29 with patched test) are due to:
 - **~~Raw global exports lack type metadata (12):~~** Fixed. Global exports
   are now wrapped in `WebAssembly.Global` objects with `__wasm_type__`
   metadata, enabling cross-module global type and mutability validation.
-- **Table/memory exports not implemented (26):** Tables and memories are not
-  exported as `WebAssembly.Table`/`Memory` objects, so cross-module
-  table/memory imports fail with "unknown import".
+- **~~Table/memory exports not implemented (26):~~** Memory exports are now
+  implemented as `WebAssembly.Memory` objects (13 fixed). Table exports are
+  still missing — tables are not exported as `WebAssembly.Table` objects,
+  so cross-module table imports fail with "unknown import" (12 remaining).
 - **Alignment hint trusted for memory access (2):** The spec allows
   alignment hints on load/store instructions that are strictly advisory —
   implementations must produce correct results even when the actual address
@@ -234,7 +235,7 @@ Export tables as WebAssembly.Table ────→ Table imports resolve (12 fix
                                     └──→ Wire imported table into compiled code
                                           (needed for linking.wast, not imports.wast)
 
-Export memories as WebAssembly.Memory ─→ Memory imports resolve (13 fixed)
+Export memories as WebAssembly.Memory ─→ Memory imports resolve (13 fixed) ✓ DONE
                                     └──→ Wire imported memory into compiled code
                                      └──→ memory.grow on imported memory works (4 fixed)
 
@@ -246,7 +247,7 @@ memory.grow. Tags are fully independent of all three but least impactful
 (4 failures). Recommended order: memory exports (13 fixes from just the
 export side), then table exports (12 fixes from just the export side).
 
-**Affected tests:** imports (31), data (2)
+**Affected tests:** imports (18), data (2)
 
 #### 5. Module Load Failures / Missing Features (53 failures)
 
@@ -367,15 +368,15 @@ br_if.wast:670:26: error: unexpected token "null", expected a numeric index
 | memory_redundancy | 1 | 3 | 0 | Module load (cat 5) |
 | address | 218 | 38 | 0 | Memory OOB (cat 2) |
 | align | 0 | 1 | 0 | wast2json parse error (cat 7) |
-| data | 38 | 2 | 0 | Uninstantiable (cat 4) |
+| data | 34 | 2 | 0 | Uninstantiable (cat 4) |
 | table | 0 | 1 | 0 | wast2json parse error (cat 7) |
 | elem | 0 | 1 | 0 | wast2json parse error (cat 7) |
 | table_get | 10 | 4 | 0 | Table OOB (cat 3) |
-| table_grow | 38 | 10 | 0 | Table OOB (cat 3) |
+| table_grow | 36 | 14 | 0 | Table OOB (cat 3) |
 | table_set | 17 | 8 | 0 | Table OOB (cat 3) |
 | table_size | 38 | 0 | 0 | ✓ all pass |
 | select | 0 | 1 | 0 | wast2json parse error (cat 7) |
-| imports | 122 | 31 | 16 | Unlinkable (cat 4) |
+| imports | 135 | 18 | 16 | Unlinkable (cat 4) |
 | tag | 0 | 1 | 0 | wast2json parse error (cat 7) |
 | ref_is_null | 0 | 1 | 0 | wast2json parse error (cat 7) |
 | ref_null | 0 | 1 | 0 | wast2json parse error (cat 7) |
@@ -386,10 +387,10 @@ br_if.wast:670:26: error: unexpected token "null", expected a numeric index
 1. **Memory bounds checking** (cat 2) — runtime correctness; OOB memory access
    succeeds instead of trapping. 38 failures.
 2. **Table bounds checking** (cat 3) — runtime correctness; OOB table access
-   succeeds instead of trapping. 22 failures.
+   succeeds instead of trapping. 26 failures.
 3. **Multi-value call returns** (cat 6) — semantic correctness; multi-value
    returns from calls produce wrong results. 6 failures.
-4. **Instantiation-time validation** (cat 4) — data segments, imports. 33
+4. **Instantiation-time validation** (cat 4) — data segments, imports. 20
    failures.
 5. **Module load failures** (cat 5) — multiple memories, etc. 53 failures.
 6. **wast2json upgrade** (cat 7) — would unblock 14 test files using newer
@@ -424,16 +425,22 @@ Other import kinds are stubbed:
   `WebAssembly.Table` object from the imports object is never used. Functions
   from one module cannot appear in another module's table through imports.
 
-### Memory and Table Exports Missing
+### Table Exports Missing
 
 The exports object includes function exports (with `__wasm_type__` metadata),
 global exports (wrapped in `WebAssembly.Global` objects with `__wasm_type__`),
-and tag exports (plain objects with `__wasm_type__`). Memory and table exports
-are silently skipped
-(`WasmIRGen.cpp`, `finalizeModule()`), so `instance.exports.memory` and
-`instance.exports.table` are `undefined`. This prevents JS code from accessing
-the module's memory or table, and prevents passing them as imports to other
-modules.
+tag exports (plain objects with `__wasm_type__`), and memory exports (wrapped
+in `WebAssembly.Memory` objects with `__wasm_type__`, `__wasm_min__`,
+`__wasm_max__` metadata). Table exports are silently skipped
+(`WasmIRGen.cpp`, `finalizeModule()`), so `instance.exports.table` is
+`undefined`. This prevents JS code from accessing the module's table, and
+prevents passing it as an import to other modules.
+
+Note: The exported `WebAssembly.Memory` object has its own separate buffer —
+it does NOT share the module's internal linear memory. This means import
+*type validation* works (initial/maximum limit checks pass), but cross-module
+memory sharing does not. Wiring the imported memory's ArrayBuffer into the
+compiled module is a separate change.
 
 ### Alignment Hints Trusted
 

@@ -1,0 +1,25 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-memory-export.wat.
+// Verifies that exported memories are WebAssembly.Memory objects with
+// __wasm_type__ metadata, not undefined.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var bytes = hermescli.loadFile(hbcPath);
+var mod = new WebAssembly.Module(bytes);
+var instance = new WebAssembly.Instance(mod);
+var exports = instance.exports;
+
+// The exported memory should be a WebAssembly.Memory object.
+print("mem type:", typeof exports.mem);
+print("mem __wasm_type__:", exports.mem.__wasm_type__);
+print("mem __wasm_min__:", exports.mem.__wasm_min__);
+print("mem __wasm_max__:", exports.mem.__wasm_max__);
+print("mem has buffer:", exports.mem.buffer instanceof ArrayBuffer);
+// 2 pages * 65536 bytes/page = 131072
+print("mem buffer size:", exports.mem.buffer.byteLength);
