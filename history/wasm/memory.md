@@ -543,6 +543,12 @@
 ## Unit Test Naming Convention
 - `add_hermes_unittest` target names MUST end with `Tests` (plural) — lit's `GoogleTest(".", "Tests")` format uses this suffix to discover test binaries. `Test` (singular) silently skips them.
 
+## Testing
+- **Primary test build**: `cmake-build-asan` — always run tests here, not just `cmake-build-debug`. Configured with Debug+ASan+handle sanitization+Wasm, plus `-O2` to compensate for ASan slowness.
+- ASan build uses Clang (default on macOS; must be explicitly configured on Linux with `-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++`).
+- Unit tests (`WasmIRGenTests`, `WasmFrontendTests`, etc.) exercise IR generation paths that may not be covered by lit e2e tests — ASan catches OOB accesses that silently succeed in non-sanitized builds.
+- Example: a unit test with a memory export but no entry in `moduleInfo.memories` caused a SEGV only under ASan (the debug build happened to read valid-looking memory at the OOB address).
+
 ## Workflow
 - Branch: `wasm`, PR target: `static_h`
 - After completing a task: update `.ralph/progress.md` (status + context notes), then commit
