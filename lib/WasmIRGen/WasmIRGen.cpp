@@ -339,10 +339,13 @@ void WasmIRGen::finalizeModule() {
   // Apply active data segments: copy bytes into linear memory.
   if (hasMemory) {
     // Compute initial memory size for data segment bounds checking.
-    // Only check at compile time for locally-defined memories, where the
-    // initial size is known exactly. For imported memories, the declared
-    // limits are minimums — the actual memory provided by the host may be
-    // larger, so bounds checking must happen at runtime.
+    // For locally-defined memories, the initial size is known exactly.
+    // For imported memories, use the declared minimum as the actual size
+    // — Hermes creates a fresh ArrayBuffer of this size (imported
+    // Memory objects are not wired in yet). Compile-time bounds checking
+    // against this value is correct when the minimum is > 0. When the
+    // minimum is 0, we skip checking because the actual host-provided
+    // memory may be larger.
     uint64_t memoryBytes = 0;
     bool canBoundsCheck = false;
     if (!moduleInfo_.memories.empty()) {
@@ -350,6 +353,17 @@ void WasmIRGen::finalizeModule() {
           static_cast<uint64_t>(moduleInfo_.memories[0].limits.initial) *
           65536;
       canBoundsCheck = true;
+    } else {
+      for (const auto &imp : moduleInfo_.imports) {
+        if (imp.kind == WasmExternalKind::Memory) {
+          memoryBytes =
+              static_cast<uint64_t>(imp.memoryType.limits.initial) *
+              65536;
+          if (memoryBytes > 0)
+            canBoundsCheck = true;
+          break;
+        }
+      }
     }
 
     for (uint32_t si = 0; si < moduleInfo_.dataSegments.size(); ++si) {
@@ -357,7 +371,24 @@ void WasmIRGen::finalizeModule() {
       if (seg.mode != WasmDataSegment::Mode::Active)
         continue;
 
-      // Bounds check: offset + size must not exceed initial memory.
+      // Step 1: Compute offset as an IR Value.
+      Value *offset = nullptr;
+      if (seg.offsetKind == WasmGlobal::InitKind::I32Const) {
+        offset = builder_.getLiteralNumber(
+            static_cast<double>(seg.offsetValue));
+      } else if (seg.offsetKind == WasmGlobal::InitKind::GlobalGet) {
+        uint32_t slotIdx = globalSlotIndex_[seg.offsetGlobalIdx];
+        offset =
+            builder_.createLoadFrameInst(tlScope, globalVars_[slotIdx]);
+      } else {
+        llvh::errs()
+            << "warning: unsupported data segment offset expression\n";
+        continue;
+      }
+
+      // Step 2: Compile-time bounds check (locally-defined memory +
+      // I32Const offset only). An OOB segment traps unconditionally and
+      // prevents all further initialization.
       if (canBoundsCheck &&
           seg.offsetKind == WasmGlobal::InitKind::I32Const) {
         uint64_t offsetU =
@@ -376,19 +407,57 @@ void WasmIRGen::finalizeModule() {
         }
       }
 
+      // Step 3: Runtime bounds check when the offset is a GlobalGet
+      // (unknown value at compile time). Emits: if (offset >>> 0 +
+      // data_size > HEAPU8.length) trap. Only applies when
+      // canBoundsCheck is true (memory size is reliable enough for
+      // checking — locally-defined memories always qualify; imported
+      // memories qualify when the declared minimum is > 0, since Hermes
+      // creates the memory with exactly that size).
+      if (canBoundsCheck &&
+          seg.offsetKind == WasmGlobal::InitKind::GlobalGet) {
+        // Get memory byte length: HEAPU8.length
+        auto *heapu8Chk = builder_.createLoadFrameInst(
+            tlScope,
+            memViewVars_[static_cast<uint8_t>(MemView::HEAPU8)]);
+        auto *memLength = builder_.createLoadPropertyInst(
+            heapu8Chk, builder_.getLiteralString("length"));
+
+        // Treat offset as unsigned: offset >>> 0
+        auto *offsetU = builder_.createBinaryOperatorInst(
+            offset,
+            builder_.getLiteralNumber(0),
+            ValueKind::BinaryUnsignedRightShiftInstKind);
+
+        // end = offsetU + seg.data.size()
+        auto *end = builder_.createBinaryOperatorInst(
+            offsetU,
+            builder_.getLiteralNumber(
+                static_cast<double>(seg.data.size())),
+            ValueKind::BinaryAddInstKind);
+
+        // if (end > memLength) trap;
+        auto *isOOB = builder_.createBinaryOperatorInst(
+            end, memLength, ValueKind::BinaryGreaterThanInstKind);
+        auto *trapBlock =
+            builder_.createBasicBlock(tlEntry_->getParent());
+        auto *okBlock =
+            builder_.createBasicBlock(tlEntry_->getParent());
+        builder_.createCondBranchInst(isOOB, trapBlock, okBlock);
+
+        builder_.setInsertionBlock(trapBlock);
+        helpers_.emitTrap();
+        builder_.createUnreachableInst();
+
+        builder_.setInsertionBlock(okBlock);
+        // Update tlEntry_ so that code after createExportWrapper()
+        // (which resets insertion to tlEntry_) continues in the ok
+        // block rather than the now-terminated original entry block.
+        tlEntry_ = okBlock;
+      }
+
       if (seg.data.empty())
         continue;
-
-      // Compute offset.
-      Value *offset = nullptr;
-      if (seg.offsetKind == WasmGlobal::InitKind::I32Const) {
-        offset = builder_.getLiteralNumber(
-            static_cast<double>(seg.offsetValue));
-      } else {
-        llvh::errs()
-            << "warning: unsupported data segment offset expression\n";
-        continue;
-      }
 
       // Load HEAPU8 view for byte-level writes.
       auto *heapu8 = builder_.createLoadFrameInst(
