@@ -7,7 +7,7 @@
 ;; Tests that GlobalGet offsets work correctly and that OOB data segments trap.
 
 ;; REQUIRES: wasm
-;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods %S/e2e-data-segment-bounds-driver.js_ -- %t.hbc | %FileCheck --match-full-lines %s
+;; RUN: %wat2wasm --enable-extended-const %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods %S/e2e-data-segment-bounds-driver.js_ -- %t.hbc | %FileCheck --match-full-lines %s
 
 (module
   (import "env" "g" (global i32))
@@ -21,6 +21,10 @@
   ;; both kinds coexist correctly.
   (data (i32.const 10) "OK")
 
+  ;; Extended const expression: (i32.add (i32.const 10) (i32.const 10))
+  ;; places "EX" at byte 20.
+  (data (i32.add (i32.const 10) (i32.const 10)) "EX")
+
   (func (export "get_byte") (param i32) (result i32)
     local.get 0
     i32.load8_u
@@ -31,4 +35,6 @@
 ;; CHECK-NEXT: byte 1: 105
 ;; CHECK-NEXT: byte 10: 79
 ;; CHECK-NEXT: byte 11: 75
+;; CHECK-NEXT: byte 20: 69
+;; CHECK-NEXT: byte 21: 88
 ;; CHECK-NEXT: done

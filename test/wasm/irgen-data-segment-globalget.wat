@@ -3,20 +3,22 @@
 ;; This source code is licensed under the MIT license found in the
 ;; LICENSE file in the root directory of this source tree.
 
-;; Test IR generation for data segment runtime bounds check with GlobalGet.
-;; The offset comes from global.get, so its value is unknown at compile time.
-;; This should emit a conditional branch: if (offset >>> 0 + size > length) trap.
+;; Test IR generation for data segment offsets with GlobalGet and extended
+;; constant expressions. GlobalGet offset should emit a runtime bounds check.
+;; Extended const expr (i32.add) should emit BinaryAddInst + BinaryOrInst.
 
 ;; REQUIRES: wasm
-;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s
+;; RUN: %wat2wasm --enable-extended-const %s -o %t.wasm && %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s
 
 (module
   (import "env" "g" (global i32))
   (memory 1)
   (data (global.get 0) "ab")
+  (data (i32.add (i32.const 10) (i32.const 5)) "cd")
 )
 
 ;; CHECK-LABEL: function global()
+;; --- Segment 0: global.get offset ---
 ;; Load the global value (offset).
 ;; CHECK:       LoadFrameInst {{.*}}[%VS0.global_0]
 ;; Load HEAPU8 and get its .length for the runtime bounds check.
@@ -36,3 +38,18 @@
 ;; OK block: stores data bytes ('a' = 97, 'b' = 98)
 ;; CHECK:       StorePropertyStrictInst 97
 ;; CHECK:       StorePropertyStrictInst 98
+
+;; --- Segment 1: extended const expr (i32.add) ---
+;; CHECK:       BinaryAddInst {{.*}} 10: number, 5: number
+;; Truncate to i32: result | 0
+;; CHECK:       BinaryOrInst {{.*}} 0: number
+;; Runtime bounds check for extended const expr
+;; CHECK:       LoadFrameInst {{.*}}[%VS0.HEAPU8]
+;; CHECK:       LoadPropertyInst {{.*}} "length"
+;; CHECK:       BinaryUnsignedRightShiftInst {{.*}} 0
+;; CHECK:       BinaryAddInst {{.*}} 2
+;; CHECK:       BinaryGreaterThanInst
+;; CHECK:       CondBranchInst
+;; Stores data bytes ('c' = 99, 'd' = 100)
+;; CHECK:       StorePropertyStrictInst 99
+;; CHECK:       StorePropertyStrictInst 100

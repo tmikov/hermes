@@ -11,7 +11,7 @@ Last updated: 2026-02-16 (branch `wasm`)
 | Crashes | 0 |
 | Timeouts | 0 |
 | Assertions passing | 24,503 |
-| Assertions failing | 303 |
+| Assertions failing | 299 |
 
 ## How to Run
 
@@ -162,7 +162,7 @@ get-externref: expected trap but succeeded
 get-funcref: expected trap but succeeded
 ```
 
-#### 4. Unlinkable / Uninstantiable Modules Not Rejected (112 failures)
+#### 4. Unlinkable / Uninstantiable Modules Not Rejected (108 failures)
 
 Modules that should be rejected at instantiation time are accepted by Hermes.
 The spec requires validation between parsing and execution; Hermes skips most
@@ -183,23 +183,22 @@ host provides a function with a different signature (or a non-function),
 instantiation succeeds. The mismatch only surfaces later at call time (if at
 all), producing wrong results instead of an upfront `LinkError`.
 
-**data (6 failures):** Active data segments have an offset expression (e.g.,
+**data (2 failures):** Active data segments have an offset expression (e.g.,
 `(data (i32.const 65536) "hello")`). If the offset + data length exceeds the
 memory size, the spec requires the module to trap during instantiation with an
 "out of bounds memory access" error. Bounds checking is implemented for
 `i32.const` offsets (both locally-defined and imported memories with non-zero
-minimum) and for `global.get` offsets on locally-defined memories (runtime
-check). The remaining 6 failures are module-load failures: 4 use extended
-constant expressions (`i32.add`/`i32.sub`/`i32.mul`) which Hermes's binary
-reader does not support, and 2 use `global.get` on non-imported globals which
-wast2json rejects.
+minimum), for `global.get` offsets on locally-defined memories (runtime
+check), and for extended constant expressions (`i32.add`/`i32.sub`/`i32.mul`).
+The remaining 2 failures (lines 89, 90) use `global.get` on non-imported
+globals, which wast2json rejects.
 
 **Fix approach:** Add validation passes in the instantiation path — check
 import compatibility (function signatures, memory/table limits) and data/element
 segment bounds against actual memory/table sizes before any exported functions
 are called.
 
-**Affected tests:** imports (106), data (6)
+**Affected tests:** imports (106), data (2)
 
 #### 5. Module Load Failures / Missing Features (53 failures)
 
@@ -320,7 +319,7 @@ br_if.wast:670:26: error: unexpected token "null", expected a numeric index
 | memory_redundancy | 1 | 3 | 0 | Module load (cat 5) |
 | address | 218 | 38 | 0 | Memory OOB (cat 2) |
 | align | 0 | 1 | 0 | wast2json parse error (cat 7) |
-| data | 34 | 6 | 0 | Uninstantiable (cat 4) |
+| data | 38 | 2 | 0 | Uninstantiable (cat 4) |
 | table | 0 | 1 | 0 | wast2json parse error (cat 7) |
 | elem | 0 | 1 | 0 | wast2json parse error (cat 7) |
 | table_get | 10 | 4 | 0 | Table OOB (cat 3) |
@@ -342,7 +341,7 @@ br_if.wast:670:26: error: unexpected token "null", expected a numeric index
    succeeds instead of trapping. 22 failures.
 3. **Multi-value call returns** (cat 6) — semantic correctness; multi-value
    returns from calls produce wrong results. 6 failures.
-4. **Instantiation-time validation** (cat 4) — data segments, imports. 112
+4. **Instantiation-time validation** (cat 4) — data segments, imports. 108
    failures.
 5. **Module load failures** (cat 5) — multiple memories, etc. 53 failures.
 6. **wast2json upgrade** (cat 7) — would unblock 14 test files using newer

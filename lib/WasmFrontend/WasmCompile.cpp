@@ -38,6 +38,7 @@ bool compileWasmModule(
   wabt::ReadBinaryOptions options;
   options.read_debug_names = true;
   options.features.enable_exceptions();
+  options.features.enable_extended_const();
   wabt::Result result =
       wabt::ReadBinary(buffer, size, &reader, options);
   if (!wabt::Succeeded(result)) {
@@ -90,6 +91,7 @@ std::unique_ptr<WasmModuleData> compileWasmToModuleData(
   wabt::ReadBinaryOptions options;
   options.read_debug_names = true;
   options.features.enable_exceptions();
+  options.features.enable_extended_const();
   wabt::Result result = wabt::ReadBinary(buffer, size, &reader, options);
   if (!wabt::Succeeded(result)) {
     errorMsg = "invalid Wasm binary";
@@ -137,6 +139,7 @@ bool validateWasmBinary(const uint8_t *buffer, size_t size) {
   wabt::Errors errors;
   wabt::ReadBinaryOptions readOptions;
   readOptions.features.enable_exceptions();
+  readOptions.features.enable_extended_const();
 
   wabt::Result readResult = wabt::ReadBinaryIr(
       "<validate>", buffer, size, readOptions, &errors, &module);

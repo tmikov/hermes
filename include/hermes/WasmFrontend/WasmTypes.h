@@ -134,6 +134,46 @@ struct WasmGlobal {
   } initValue;
 };
 
+/// A single operation in a Wasm init expression (small stack machine).
+/// Used to represent extended constant expressions like
+/// (i32.add (i32.const 1) (i32.const 2)).
+struct InitExprOp {
+  enum class Kind : uint8_t {
+    I32Const,
+    GlobalGet,
+    I32Add,
+    I32Sub,
+    I32Mul,
+  };
+  Kind kind;
+  union {
+    int32_t i32Val;
+    uint32_t globalIdx;
+  };
+
+  static InitExprOp makeI32Const(int32_t v) {
+    InitExprOp op;
+    op.kind = Kind::I32Const;
+    op.i32Val = v;
+    return op;
+  }
+  static InitExprOp makeGlobalGet(uint32_t idx) {
+    InitExprOp op;
+    op.kind = Kind::GlobalGet;
+    op.globalIdx = idx;
+    return op;
+  }
+  static InitExprOp makeAdd() {
+    return {Kind::I32Add, {}};
+  }
+  static InitExprOp makeSub() {
+    return {Kind::I32Sub, {}};
+  }
+  static InitExprOp makeMul() {
+    return {Kind::I32Mul, {}};
+  }
+};
+
 /// A Wasm element segment (populates a table).
 struct WasmElemSegment {
   enum class Mode : uint8_t { Active, Passive, Declarative };
@@ -146,6 +186,9 @@ struct WasmElemSegment {
   int32_t offsetValue = 0;
   /// Global index for global.get offset expression.
   uint32_t offsetGlobalIdx = 0;
+  /// Offset init expression as a sequence of stack-machine operations.
+  /// When size > 1, this replaces offsetKind/offsetValue/offsetGlobalIdx.
+  std::vector<InitExprOp> offsetExpr;
   /// Element values (function indices).
   std::vector<uint32_t> funcIndices;
 };
@@ -162,6 +205,9 @@ struct WasmDataSegment {
   int32_t offsetValue = 0;
   /// Global index for global.get offset expression.
   uint32_t offsetGlobalIdx = 0;
+  /// Offset init expression as a sequence of stack-machine operations.
+  /// When size > 1, this replaces offsetKind/offsetValue/offsetGlobalIdx.
+  std::vector<InitExprOp> offsetExpr;
   /// Raw data bytes.
   std::vector<uint8_t> data;
 };

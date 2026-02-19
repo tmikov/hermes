@@ -373,23 +373,70 @@ void WasmIRGen::finalizeModule() {
 
       // Step 1: Compute offset as an IR Value.
       Value *offset = nullptr;
-      if (seg.offsetKind == WasmGlobal::InitKind::I32Const) {
-        offset = builder_.getLiteralNumber(
-            static_cast<double>(seg.offsetValue));
-      } else if (seg.offsetKind == WasmGlobal::InitKind::GlobalGet) {
-        uint32_t slotIdx = globalSlotIndex_[seg.offsetGlobalIdx];
-        offset =
-            builder_.createLoadFrameInst(tlScope, globalVars_[slotIdx]);
+      if (seg.offsetExpr.size() <= 1) {
+        // Simple case: single I32Const or GlobalGet.
+        if (seg.offsetKind == WasmGlobal::InitKind::I32Const) {
+          offset = builder_.getLiteralNumber(
+              static_cast<double>(seg.offsetValue));
+        } else if (seg.offsetKind == WasmGlobal::InitKind::GlobalGet) {
+          uint32_t slotIdx = globalSlotIndex_[seg.offsetGlobalIdx];
+          offset =
+              builder_.createLoadFrameInst(tlScope, globalVars_[slotIdx]);
+        } else {
+          llvh::errs()
+              << "warning: unsupported data segment offset expression\n";
+          continue;
+        }
       } else {
-        llvh::errs()
-            << "warning: unsupported data segment offset expression\n";
-        continue;
+        // Extended const expression: evaluate the stack machine.
+        llvh::SmallVector<Value *, 4> stack;
+        for (const auto &op : seg.offsetExpr) {
+          switch (op.kind) {
+            case InitExprOp::Kind::I32Const:
+              stack.push_back(builder_.getLiteralNumber(
+                  static_cast<double>(op.i32Val)));
+              break;
+            case InitExprOp::Kind::GlobalGet: {
+              uint32_t slotIdx = globalSlotIndex_[op.globalIdx];
+              stack.push_back(builder_.createLoadFrameInst(
+                  tlScope, globalVars_[slotIdx]));
+              break;
+            }
+            case InitExprOp::Kind::I32Add:
+            case InitExprOp::Kind::I32Sub:
+            case InitExprOp::Kind::I32Mul: {
+              assert(
+                  stack.size() >= 2 &&
+                  "init expression stack underflow");
+              Value *rhs = stack.pop_back_val();
+              Value *lhs = stack.pop_back_val();
+              ValueKind binOp =
+                  op.kind == InitExprOp::Kind::I32Add
+                  ? ValueKind::BinaryAddInstKind
+                  : op.kind == InitExprOp::Kind::I32Sub
+                  ? ValueKind::BinarySubtractInstKind
+                  : ValueKind::BinaryMultiplyInstKind;
+              auto *result =
+                  builder_.createBinaryOperatorInst(lhs, rhs, binOp);
+              // Truncate to i32: result | 0
+              stack.push_back(builder_.createBinaryOperatorInst(
+                  result,
+                  builder_.getLiteralNumber(0),
+                  ValueKind::BinaryOrInstKind));
+              break;
+            }
+          }
+        }
+        assert(
+            stack.size() == 1 &&
+            "init expression must produce exactly one value");
+        offset = stack[0];
       }
 
       // Step 2: Compile-time bounds check (locally-defined memory +
       // I32Const offset only). An OOB segment traps unconditionally and
       // prevents all further initialization.
-      if (canBoundsCheck &&
+      if (canBoundsCheck && seg.offsetExpr.size() <= 1 &&
           seg.offsetKind == WasmGlobal::InitKind::I32Const) {
         uint64_t offsetU =
             static_cast<uint64_t>(static_cast<uint32_t>(seg.offsetValue));
@@ -407,15 +454,17 @@ void WasmIRGen::finalizeModule() {
         }
       }
 
-      // Step 3: Runtime bounds check when the offset is a GlobalGet
-      // (unknown value at compile time). Emits: if (offset >>> 0 +
-      // data_size > HEAPU8.length) trap. Only applies when
-      // canBoundsCheck is true (memory size is reliable enough for
+      // Step 3: Runtime bounds check when the offset is not a simple
+      // i32.const (unknown value at compile time). This includes
+      // GlobalGet offsets and extended const expressions. Emits:
+      // if (offset >>> 0 + data_size > HEAPU8.length) trap. Only applies
+      // when canBoundsCheck is true (memory size is reliable enough for
       // checking — locally-defined memories always qualify; imported
       // memories qualify when the declared minimum is > 0, since Hermes
       // creates the memory with exactly that size).
       if (canBoundsCheck &&
-          seg.offsetKind == WasmGlobal::InitKind::GlobalGet) {
+          !(seg.offsetExpr.size() <= 1 &&
+            seg.offsetKind == WasmGlobal::InitKind::I32Const)) {
         // Get memory byte length: HEAPU8.length
         auto *heapu8Chk = builder_.createLoadFrameInst(
             tlScope,
