@@ -29,11 +29,11 @@
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:any) %[[L0]]: any
 ;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any) %[[L1]]: any
 ;; CHECK-NEXT: %[[CMP:.*]] = BinaryStrictlyEqualInst (:any) %[[A]]: any, %[[B]]: any
-;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:any) %[[CMP]]: any, 0: number
+;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:number) %[[CMP]]: any, 0: number
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[R]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 1: i32.ne
@@ -46,11 +46,11 @@
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
 ;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any)
 ;; CHECK-NEXT: %[[CMP:.*]] = BinaryStrictlyNotEqualInst (:any) %[[A]]: any, %[[B]]: any
-;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:any) %[[CMP]]: any, 0: number
+;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:number) %[[CMP]]: any, 0: number
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[R]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 2: i32.lt_s (signed: AsInt32 both operands first)
@@ -65,11 +65,11 @@
 ;; CHECK-NEXT: %[[SA:.*]] = AsInt32Inst (:number) %[[A]]: any
 ;; CHECK-NEXT: %[[SB:.*]] = AsInt32Inst (:number) %[[B]]: any
 ;; CHECK-NEXT: %[[CMP:.*]] = BinaryLessThanInst (:any) %[[SA]]: number, %[[SB]]: number
-;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:any) %[[CMP]]: any, 0: number
+;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:number) %[[CMP]]: any, 0: number
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[R]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 3: i32.gt_s
@@ -84,11 +84,11 @@
 ;; CHECK-NEXT: %[[SA:.*]] = AsInt32Inst (:number) %[[A]]: any
 ;; CHECK-NEXT: %[[SB:.*]] = AsInt32Inst (:number) %[[B]]: any
 ;; CHECK-NEXT: %[[CMP:.*]] = BinaryGreaterThanInst (:any) %[[SA]]: number, %[[SB]]: number
-;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:any) %[[CMP]]: any, 0: number
+;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:number) %[[CMP]]: any, 0: number
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[R]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 4: i32.le_s
@@ -103,11 +103,11 @@
 ;; CHECK-NEXT: %[[SA:.*]] = AsInt32Inst (:number) %[[A]]: any
 ;; CHECK-NEXT: %[[SB:.*]] = AsInt32Inst (:number) %[[B]]: any
 ;; CHECK-NEXT: %[[CMP:.*]] = BinaryLessThanOrEqualInst (:any) %[[SA]]: number, %[[SB]]: number
-;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:any) %[[CMP]]: any, 0: number
+;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:number) %[[CMP]]: any, 0: number
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[R]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 5: i32.ge_s
@@ -122,11 +122,11 @@
 ;; CHECK-NEXT: %[[SA:.*]] = AsInt32Inst (:number) %[[A]]: any
 ;; CHECK-NEXT: %[[SB:.*]] = AsInt32Inst (:number) %[[B]]: any
 ;; CHECK-NEXT: %[[CMP:.*]] = BinaryGreaterThanOrEqualInst (:any) %[[SA]]: number, %[[SB]]: number
-;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:any) %[[CMP]]: any, 0: number
+;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:number) %[[CMP]]: any, 0: number
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[R]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 6: i32.lt_u (unsigned: AsUint32 both operands first)
@@ -141,11 +141,11 @@
 ;; CHECK-NEXT: %[[UA:.*]] = AsUint32Inst (:number) %[[A]]: any
 ;; CHECK-NEXT: %[[UB:.*]] = AsUint32Inst (:number) %[[B]]: any
 ;; CHECK-NEXT: %[[CMP:.*]] = BinaryLessThanInst (:any) %[[UA]]: number, %[[UB]]: number
-;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:any) %[[CMP]]: any, 0: number
+;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:number) %[[CMP]]: any, 0: number
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[R]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 7: i32.gt_u
@@ -160,11 +160,11 @@
 ;; CHECK-NEXT: %[[UA:.*]] = AsUint32Inst (:number) %[[A]]: any
 ;; CHECK-NEXT: %[[UB:.*]] = AsUint32Inst (:number) %[[B]]: any
 ;; CHECK-NEXT: %[[CMP:.*]] = BinaryGreaterThanInst (:any) %[[UA]]: number, %[[UB]]: number
-;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:any) %[[CMP]]: any, 0: number
+;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:number) %[[CMP]]: any, 0: number
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[R]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 8: i32.le_u
@@ -179,11 +179,11 @@
 ;; CHECK-NEXT: %[[UA:.*]] = AsUint32Inst (:number) %[[A]]: any
 ;; CHECK-NEXT: %[[UB:.*]] = AsUint32Inst (:number) %[[B]]: any
 ;; CHECK-NEXT: %[[CMP:.*]] = BinaryLessThanOrEqualInst (:any) %[[UA]]: number, %[[UB]]: number
-;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:any) %[[CMP]]: any, 0: number
+;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:number) %[[CMP]]: any, 0: number
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[R]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 9: i32.ge_u
@@ -198,11 +198,11 @@
 ;; CHECK-NEXT: %[[UA:.*]] = AsUint32Inst (:number) %[[A]]: any
 ;; CHECK-NEXT: %[[UB:.*]] = AsUint32Inst (:number) %[[B]]: any
 ;; CHECK-NEXT: %[[CMP:.*]] = BinaryGreaterThanOrEqualInst (:any) %[[UA]]: number, %[[UB]]: number
-;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:any) %[[CMP]]: any, 0: number
+;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:number) %[[CMP]]: any, 0: number
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[R]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 10: i32.eqz (unary: compare with 0)
@@ -213,9 +213,9 @@
 ;; CHECK-LABEL: function wasm_func_10(p0: any): any
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
 ;; CHECK-NEXT: %[[CMP:.*]] = BinaryStrictlyEqualInst (:any) %[[A]]: any, 0: number
-;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:any) %[[CMP]]: any, 0: number
+;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:number) %[[CMP]]: any, 0: number
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[R]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end

@@ -26,14 +26,14 @@
 ;; CHECK-NEXT:   %[[P1:.*]] = LoadParamInst (:any) %p1: any
 ;; CHECK-NEXT:        StoreStackInst %[[P1]]: any, %[[L1]]: any
 ;; Declared local initialized to zero.
-;; CHECK-NEXT:   %[[L2:.*]] = AllocStackInst (:any) $local_2: any
-;; CHECK-NEXT:        StoreStackInst 0: number, %[[L2]]: any
+;; CHECK-NEXT:   %[[L2:.*]] = AllocStackInst (:number) $local_2: any
+;; CHECK-NEXT:        StoreStackInst 0: number, %[[L2]]: number
 ;; local.get 0, local.set 2, local.get 2.
 ;; CHECK-NEXT:   %[[V0:.*]] = LoadStackInst (:any) %[[L0]]: any
-;; CHECK-NEXT:         StoreStackInst %[[V0]]: any, %[[L2]]: any
-;; CHECK-NEXT:   %[[V2:.*]] = LoadStackInst (:any) %[[L2]]: any
+;; CHECK-NEXT:         StoreStackInst %[[V0]]: any, %[[L2]]: number
+;; CHECK-NEXT:   %[[V2:.*]] = LoadStackInst (:number) %[[L2]]: number
 ;; CHECK-NEXT:         BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %[[PHI:.*]] = PhiInst (:any) %[[V2]]: any, %BB0
-;; CHECK-NEXT:         ReturnInst %[[PHI]]: any
+;; CHECK-NEXT:   %[[PHI:.*]] = PhiInst (:number) %[[V2]]: number, %BB0
+;; CHECK-NEXT:         ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end

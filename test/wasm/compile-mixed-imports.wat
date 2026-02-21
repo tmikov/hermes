@@ -52,7 +52,7 @@
 
 ;; CHECK: scope %VS0 [HEAP8: any, HEAPU8: any, HEAP16: any, HEAPU16: any, HEAP32: any, HEAPU32: any, HEAPF32: any, HEAPF64: any, table_0_funcs: any, table_0_types: any, global_0: any, import_func_0: any, import_func_1: any, import_global_val_0: any, imported_mem_min: any, imported_mem_max: any, retBufI: any, retBufF: any, closure_0: any, closure_1: any, closure_2: any, closure_3: any, closure_4: any]
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function global(): any 
+;; CHECK-NEXT: function global(): object
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = CreateScopeInst (:environment) %VS0: any, empty: any
 ;; CHECK-NEXT:   %1 = CreateFunctionInst (:object) %0: environment, %VS0: any, %__wasm_instantiate__(): functionCode
@@ -156,7 +156,7 @@
 ;; CHECK-NEXT:         ReturnInst %9: any
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function __wasm_instantiate__(): any 
+;; CHECK-NEXT: function __wasm_instantiate__(): object
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = CreateScopeInst (:environment) %VS0: any, empty: any
 ;; CHECK-NEXT:   %1 = TryLoadGlobalPropertyInst (:any) globalObject: object, "__wasm_imports__": string

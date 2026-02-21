@@ -53,7 +53,7 @@
 ;; CHECK-LABEL: function wasm_func_2(p0: any): any
 ;; CHECK:         CondBranchInst %[[COND:.*]]: any, %BB2, %BB3
 ;; CHECK:       %BB2:
-;; CHECK-NEXT:    StoreStackInst 20: number, %[[LOCAL:.*]]: any
+;; CHECK-NEXT:    StoreStackInst 20: number, %[[LOCAL:.*]]: number
 ;; CHECK-NEXT:    BranchInst %BB4
 ;; CHECK:       %BB3:
 ;; CHECK-NEXT:    BranchInst %BB4

@@ -42,7 +42,7 @@
 
 ;; CHECK: scope %VS0 [retBufI: any, retBufF: any, closure_0: any, closure_1: any, closure_2: any, closure_3: any, closure_4: any, closure_5: any]
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function global(): any 
+;; CHECK-NEXT: function global(): object
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = CreateScopeInst (:environment) %VS0: any, empty: any
 ;; CHECK-NEXT:   %1 = CreateFunctionInst (:object) %0: environment, %VS0: any, %__wasm_instantiate__(): functionCode
@@ -95,8 +95,8 @@
 ;; CHECK-NEXT:        StoreStackInst %6: any, %5: any
 ;; CHECK-NEXT:   %8 = LoadStackInst (:any) %2: any
 ;; CHECK-NEXT:   %9 = LoadStackInst (:any) %5: any
-;; CHECK-NEXT:   %10 = BinaryAddInst (:any) %8: any, %9: any
-;; CHECK-NEXT:   %11 = AsInt32Inst (:number) %10: any
+;; CHECK-NEXT:   %10 = BinaryAddInst (:number) %8: any, %9: any
+;; CHECK-NEXT:   %11 = AsInt32Inst (:number) %10: number
 ;; CHECK-NEXT:         BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
 ;; CHECK-NEXT:   %13 = PhiInst (:number) %11: number, %BB0
@@ -135,7 +135,7 @@
 ;; CHECK-NEXT:        ReturnInst undefined: undefined
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function __wasm_instantiate__(): any 
+;; CHECK-NEXT: function __wasm_instantiate__(): object
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = CreateScopeInst (:environment) %VS0: any, empty: any
 ;; CHECK-NEXT:   %1 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_func_0(): functionCode

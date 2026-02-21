@@ -104,7 +104,7 @@
   (start 8)
 )
 
-;; CHECK-LABEL: function global(): any
+;; CHECK-LABEL: function global(): object
 ;; CHECK:   CreateScopeInst
 ;; CHECK:   CreateFunctionInst
 ;; CHECK:   CallInst

@@ -51,8 +51,8 @@
 ;; CHECK-NEXT: %[[P0:.*]] = LoadParamInst (:any) %p0: any
 ;; CHECK-NEXT:              StoreStackInst %[[P0]]: any, %[[L0]]: any
 ;; CHECK:   %[[V:.*]] = LoadStackInst (:any) %[[L0]]: any
-;; CHECK-NEXT: %[[ADD:.*]] = BinaryAddInst (:any) %[[V]]: any, 1: number
-;; CHECK-NEXT: %[[TRUNC:.*]] = AsInt32Inst (:number) %[[ADD]]: any
+;; CHECK-NEXT: %[[ADD:.*]] = BinaryAddInst (:number) %[[V]]: any, 1: number
+;; CHECK-NEXT: %[[TRUNC:.*]] = AsInt32Inst (:number) %[[ADD]]: number
 ;; CHECK-NEXT:                 BranchInst %BB1
 ;; CHECK: %BB1:
 ;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[TRUNC]]: number, %BB0

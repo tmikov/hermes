@@ -29,13 +29,13 @@
 )
 
 ;; CHECK-LABEL: function wasm_func_0(): any
-;; CHECK:   %[[L:.*]] = AllocStackInst (:any) $local_0
+;; CHECK:   %[[L:.*]] = AllocStackInst (:number) $local_0
 ;; CHECK:   StoreStackInst 0: number, %[[L]]
 ;; CHECK:   StoreStackInst 42: number, %[[L]]
-;; CHECK:   %[[V:.*]] = LoadStackInst (:any) %[[L]]
+;; CHECK:   %[[V:.*]] = LoadStackInst (:number) %[[L]]
 ;; CHECK:   BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK:   %[[PHI:.*]] = PhiInst (:any) %[[V]]: any, %BB0
+;; CHECK:   %[[PHI:.*]] = PhiInst (:number) %[[V]]: number, %BB0
 ;; CHECK:   ReturnInst %[[PHI]]
 ;; CHECK:   function_end
 
@@ -58,7 +58,7 @@
 ;; CHECK:   AsInt32Inst
 ;; CHECK:   StoreStackInst
 ;; CHECK:   LoadStackInst
-;; CHECK:   CallBuiltinInst (:any) [Math.imul]
+;; CHECK:   CallBuiltinInst (:number) [Math.imul]
 ;; CHECK:   BranchInst %BB1
 ;; CHECK:   function_end
 

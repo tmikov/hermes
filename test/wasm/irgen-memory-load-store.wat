@@ -38,7 +38,7 @@
 )
 
 ;; Check that the top-level function builds the module info object.
-;; CHECK-LABEL: function global(): any
+;; CHECK-LABEL: function global(): object
 ;; CHECK:   CreateFunctionInst {{.*}}__wasm_instantiate__
 ;; CHECK:   ReturnInst
 
@@ -66,7 +66,7 @@
 ;; CHECK: LoadPropertyInst
 
 ;; Check that the instantiate function creates ArrayBuffer and typed array views.
-;; CHECK-LABEL: function __wasm_instantiate__(): any
+;; CHECK-LABEL: function __wasm_instantiate__(): object
 ;; CHECK: TryLoadGlobalPropertyInst {{.*}}"ArrayBuffer"
 ;; CHECK: TryLoadGlobalPropertyInst {{.*}}"Int8Array"
 ;; CHECK: TryLoadGlobalPropertyInst {{.*}}"Int32Array"

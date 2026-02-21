@@ -22,11 +22,11 @@
 ;; CHECK:   %[[P0:.*]] = LoadParamInst (:any) %p0: any
 ;; CHECK-NEXT:            StoreStackInst %[[P0]]: any, %[[L0]]: any
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:any) %[[L0]]: any
-;; CHECK-NEXT: %[[TRUNC:.*]] = CallBuiltinInst (:any) [HermesBuiltin.wasmI32TruncF64S]{{.*}}, %[[A]]: any
+;; CHECK-NEXT: %[[TRUNC:.*]] = CallBuiltinInst (:number) [HermesBuiltin.wasmI32TruncF64S]{{.*}}, %[[A]]: any
 ;; CHECK-NEXT:                 BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[TRUNC]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[TRUNC]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 1: i32.trunc_f64_u — trapping unsigned truncation from f64.
@@ -35,11 +35,11 @@
     i32.trunc_f64_u)
 ;; CHECK-LABEL: function wasm_func_1(p0: any): any
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[TRUNC:.*]] = CallBuiltinInst (:any) [HermesBuiltin.wasmI32TruncF64U]{{.*}}, %[[A]]: any
+;; CHECK-NEXT: %[[TRUNC:.*]] = CallBuiltinInst (:number) [HermesBuiltin.wasmI32TruncF64U]{{.*}}, %[[A]]: any
 ;; CHECK-NEXT:                 BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[TRUNC]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[TRUNC]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 2: i32.trunc_f32_s — trapping signed truncation from f32.
@@ -49,11 +49,11 @@
     i32.trunc_f32_s)
 ;; CHECK-LABEL: function wasm_func_2(p0: any): any
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[TRUNC:.*]] = CallBuiltinInst (:any) [HermesBuiltin.wasmI32TruncF64S]{{.*}}, %[[A]]: any
+;; CHECK-NEXT: %[[TRUNC:.*]] = CallBuiltinInst (:number) [HermesBuiltin.wasmI32TruncF64S]{{.*}}, %[[A]]: any
 ;; CHECK-NEXT:                 BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[TRUNC]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[TRUNC]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 3: i32.trunc_f32_u — trapping unsigned truncation from f32.
@@ -63,11 +63,11 @@
     i32.trunc_f32_u)
 ;; CHECK-LABEL: function wasm_func_3(p0: any): any
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[TRUNC:.*]] = CallBuiltinInst (:any) [HermesBuiltin.wasmI32TruncF64U]{{.*}}, %[[A]]: any
+;; CHECK-NEXT: %[[TRUNC:.*]] = CallBuiltinInst (:number) [HermesBuiltin.wasmI32TruncF64U]{{.*}}, %[[A]]: any
 ;; CHECK-NEXT:                 BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[TRUNC]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[TRUNC]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 4: i32.trunc_sat_f64_s — saturating signed truncation from f64.
@@ -76,11 +76,11 @@
     i32.trunc_sat_f64_s)
 ;; CHECK-LABEL: function wasm_func_4(p0: any): any
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[SAT:.*]] = CallBuiltinInst (:any) [HermesBuiltin.wasmI32TruncSatF64S]{{.*}}, %[[A]]: any
+;; CHECK-NEXT: %[[SAT:.*]] = CallBuiltinInst (:number) [HermesBuiltin.wasmI32TruncSatF64S]{{.*}}, %[[A]]: any
 ;; CHECK-NEXT:               BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[SAT]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[SAT]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 5: i32.trunc_sat_f64_u — saturating unsigned truncation from f64.
@@ -89,11 +89,11 @@
     i32.trunc_sat_f64_u)
 ;; CHECK-LABEL: function wasm_func_5(p0: any): any
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[SAT:.*]] = CallBuiltinInst (:any) [HermesBuiltin.wasmI32TruncSatF64U]{{.*}}, %[[A]]: any
+;; CHECK-NEXT: %[[SAT:.*]] = CallBuiltinInst (:number) [HermesBuiltin.wasmI32TruncSatF64U]{{.*}}, %[[A]]: any
 ;; CHECK-NEXT:               BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[SAT]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[SAT]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 6: i32.trunc_sat_f32_s — saturating signed truncation from f32.
@@ -103,11 +103,11 @@
     i32.trunc_sat_f32_s)
 ;; CHECK-LABEL: function wasm_func_6(p0: any): any
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[SAT:.*]] = CallBuiltinInst (:any) [HermesBuiltin.wasmI32TruncSatF64S]{{.*}}, %[[A]]: any
+;; CHECK-NEXT: %[[SAT:.*]] = CallBuiltinInst (:number) [HermesBuiltin.wasmI32TruncSatF64S]{{.*}}, %[[A]]: any
 ;; CHECK-NEXT:               BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[SAT]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[SAT]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 7: i32.trunc_sat_f32_u — saturating unsigned truncation from f32.
@@ -117,11 +117,11 @@
     i32.trunc_sat_f32_u)
 ;; CHECK-LABEL: function wasm_func_7(p0: any): any
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[SAT:.*]] = CallBuiltinInst (:any) [HermesBuiltin.wasmI32TruncSatF64U]{{.*}}, %[[A]]: any
+;; CHECK-NEXT: %[[SAT:.*]] = CallBuiltinInst (:number) [HermesBuiltin.wasmI32TruncSatF64U]{{.*}}, %[[A]]: any
 ;; CHECK-NEXT:               BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[SAT]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[SAT]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 8: f64.convert_i32_s — signed int to f64 via AsInt32Inst.
@@ -157,11 +157,11 @@
 ;; CHECK-LABEL: function wasm_func_10(p0: any): any
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
 ;; CHECK-NEXT: %[[CONV:.*]] = AsInt32Inst (:number) %[[A]]: any
-;; CHECK-NEXT: %[[FR:.*]] = CallBuiltinInst (:any) [Math.fround]{{.*}}, %[[CONV]]: number
+;; CHECK-NEXT: %[[FR:.*]] = CallBuiltinInst (:number) [Math.fround]{{.*}}, %[[CONV]]: number
 ;; CHECK-NEXT:              BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[FR]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[FR]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 11: f32.convert_i32_u — unsigned int to f32 via AsUint32Inst + Math.fround.
@@ -171,11 +171,11 @@
 ;; CHECK-LABEL: function wasm_func_11(p0: any): any
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
 ;; CHECK-NEXT: %[[CONV:.*]] = AsUint32Inst (:number) %[[A]]: any
-;; CHECK-NEXT: %[[FR:.*]] = CallBuiltinInst (:any) [Math.fround]{{.*}}, %[[CONV]]: number
+;; CHECK-NEXT: %[[FR:.*]] = CallBuiltinInst (:number) [Math.fround]{{.*}}, %[[CONV]]: number
 ;; CHECK-NEXT:              BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[FR]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[FR]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 12: i32.reinterpret_f32 — bitcast f32 to i32.
@@ -184,11 +184,11 @@
     i32.reinterpret_f32)
 ;; CHECK-LABEL: function wasm_func_12(p0: any): any
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[REINT:.*]] = CallBuiltinInst (:any) [HermesBuiltin.wasmI32ReinterpretF32]{{.*}}, %[[A]]: any
+;; CHECK-NEXT: %[[REINT:.*]] = CallBuiltinInst (:number) [HermesBuiltin.wasmI32ReinterpretF32]{{.*}}, %[[A]]: any
 ;; CHECK-NEXT:                 BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[REINT]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[REINT]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 13: f32.reinterpret_i32 — bitcast i32 to f32.
@@ -198,9 +198,9 @@
 )
 ;; CHECK-LABEL: function wasm_func_13(p0: any): any
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[REINT:.*]] = CallBuiltinInst (:any) [HermesBuiltin.wasmF32ReinterpretI32]{{.*}}, %[[A]]: any
+;; CHECK-NEXT: %[[REINT:.*]] = CallBuiltinInst (:number) [HermesBuiltin.wasmF32ReinterpretI32]{{.*}}, %[[A]]: any
 ;; CHECK-NEXT:                 BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[REINT]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[REINT]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end

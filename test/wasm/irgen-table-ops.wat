@@ -37,4 +37,4 @@
 ;; CHECK-LABEL: function wasm_func_2(p0: any): any
 ;; CHECK: LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_funcs]
 ;; CHECK: LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_types]
-;; CHECK: CallBuiltinInst (:any) [HermesBuiltin.wasmTableGrow]
+;; CHECK: CallBuiltinInst (:number) [HermesBuiltin.wasmTableGrow]

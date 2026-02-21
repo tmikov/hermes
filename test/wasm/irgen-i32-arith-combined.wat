@@ -36,13 +36,13 @@
 ;; CHECK-NEXT:           StoreStackInst %[[P3]]: any, %[[L3]]: any
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:any) %[[L0]]: any
 ;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any) %[[L1]]: any
-;; CHECK-NEXT: %[[ADD:.*]] = BinaryAddInst (:any) %[[A]]: any, %[[B]]: any
-;; CHECK-NEXT: %[[TRUNC1:.*]] = AsInt32Inst (:number) %[[ADD]]: any
+;; CHECK-NEXT: %[[ADD:.*]] = BinaryAddInst (:number) %[[A]]: any, %[[B]]: any
+;; CHECK-NEXT: %[[TRUNC1:.*]] = AsInt32Inst (:number) %[[ADD]]: number
 ;; CHECK-NEXT: %[[C:.*]] = LoadStackInst (:any) %[[L2]]: any
-;; CHECK-NEXT: %[[MUL:.*]] = CallBuiltinInst (:any) [Math.imul]{{.*}}, %[[TRUNC1]]: number, %[[C]]: any
+;; CHECK-NEXT: %[[MUL:.*]] = CallBuiltinInst (:number) [Math.imul]{{.*}}, %[[TRUNC1]]: number, %[[C]]: any
 ;; CHECK-NEXT: %[[D:.*]] = LoadStackInst (:any) %[[L3]]: any
-;; CHECK-NEXT: %[[SUB:.*]] = BinarySubtractInst (:any) %[[MUL]]: any, %[[D]]: any
-;; CHECK-NEXT: %[[TRUNC2:.*]] = AsInt32Inst (:number) %[[SUB]]: any
+;; CHECK-NEXT: %[[SUB:.*]] = BinarySubtractInst (:number) %[[MUL]]: number, %[[D]]: any
+;; CHECK-NEXT: %[[TRUNC2:.*]] = AsInt32Inst (:number) %[[SUB]]: number
 ;; CHECK-NEXT:                  BranchInst %BB1
 ;; CHECK: %BB1:
 ;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[TRUNC2]]: number, %BB0

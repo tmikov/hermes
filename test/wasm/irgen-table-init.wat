@@ -29,7 +29,7 @@
 )
 
 ;; The instantiate function creates table arrays and applies elem segments.
-;; CHECK-LABEL: function __wasm_instantiate__(): any
+;; CHECK-LABEL: function __wasm_instantiate__(): object
 ;; CHECK: CreateScopeInst (:environment)
 
 ;; Table arrays creation: new Array(4) for functions and types.

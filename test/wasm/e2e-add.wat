@@ -30,7 +30,7 @@
   (start 1)
 )
 
-;; CHECK-LABEL: function global(): any
+;; CHECK-LABEL: function global(): object
 ;; CHECK:   CreateScopeInst
 ;; CHECK:   CreateFunctionInst {{.*}}__wasm_instantiate__
 ;; CHECK:   ReturnInst

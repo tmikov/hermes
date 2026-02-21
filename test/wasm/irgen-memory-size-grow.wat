@@ -17,7 +17,7 @@
 ;; CHECK-LABEL: function wasm_func_0(): any
 ;; CHECK:   LoadFrameInst (:any) %{{.*}}, [%VS0.HEAPU8]: any
 ;; CHECK:   LoadPropertyInst (:any) %{{.*}}, "length": string
-;; CHECK:   BinaryUnsignedRightShiftInst (:any) %{{.*}}, 16: number
+;; CHECK:   BinaryUnsignedRightShiftInst (:number) %{{.*}}, 16: number
 
   ;; memory.grow: pops delta, calls wasmMemoryGrow builtin, conditionally
   ;; creates new views on success.
@@ -30,9 +30,9 @@
 ;; Load HEAPU8 and compute old page count.
 ;; CHECK:   LoadFrameInst (:any) %{{.*}}, [%VS0.HEAPU8]: any
 ;; CHECK:   LoadPropertyInst (:any) %{{.*}}, "length": string
-;; CHECK:   BinaryUnsignedRightShiftInst (:any) %{{.*}}, 16: number
+;; CHECK:   BinaryUnsignedRightShiftInst (:number) %{{.*}}, 16: number
 ;; Call the grow builtin with heapu8, delta, maxPages=4.
-;; CHECK:   CallBuiltinInst (:any) [HermesBuiltin.wasmMemoryGrow]{{.*}}4: number
+;; CHECK:   CallBuiltinInst (:number) [HermesBuiltin.wasmMemoryGrow]{{.*}}4: number
 ;; Compare result to -1.
 ;; CHECK:   BinaryStrictlyEqualInst (:any) %{{.*}}, -1: number
 ;; CHECK:   CondBranchInst
@@ -42,5 +42,5 @@
 ;; CHECK:   TryLoadGlobalPropertyInst (:any) globalObject: object, "Uint8Array": string
 ;; CHECK:   StoreFrameInst %{{.*}}, %{{.*}}, [%VS0.HEAPU8]: any
 ;; The phi merges -1 (failure) with oldPages (success).
-;; CHECK:   PhiInst (:any) -1: number, %BB{{[0-9]+}}, %{{.*}}, %BB{{[0-9]+}}
+;; CHECK:   PhiInst (:number) -1: number, %BB{{[0-9]+}}, %{{.*}}, %BB{{[0-9]+}}
 )

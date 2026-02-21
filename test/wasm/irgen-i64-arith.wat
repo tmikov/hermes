@@ -93,7 +93,7 @@
 
 ;; CHECK: scope %VS0 [retBufI: any, retBufF: any, closure_0: any, closure_1: any, closure_2: any, closure_3: any, closure_4: any, closure_5: any, closure_6: any, closure_7: any, closure_8: any, closure_9: any]
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function global(): any 
+;; CHECK-NEXT: function global(): object
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = CreateScopeInst (:environment) %VS0: any, empty: any
 ;; CHECK-NEXT:   %1 = CreateFunctionInst (:object) %0: environment, %VS0: any, %__wasm_instantiate__(): functionCode
@@ -116,16 +116,16 @@
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.retBufI]: any
-;; CHECK-NEXT:   %2 = CallBuiltinInst (:any) [HermesBuiltin.wasmI64Add]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %1: any, 100: number, 0: number, 200: number, 0: number
+;; CHECK-NEXT:   %2 = CallBuiltinInst (:number) [HermesBuiltin.wasmI64Add]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %1: any, 100: number, 0: number, 200: number, 0: number
 ;; CHECK-NEXT:   %3 = LoadPropertyInst (:any) %1: any, 0: number
 ;; CHECK-NEXT:   %4 = LoadPropertyInst (:any) %1: any, 1: number
 ;; CHECK-NEXT:   %5 = AsInt32Inst (:number) %3: any
 ;; CHECK-NEXT:   %6 = AsInt32Inst (:number) %4: any
-;; CHECK-NEXT:   %7 = CallBuiltinInst (:any) [HermesBuiltin.wasmI64Eqz]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %5: number, %6: number
+;; CHECK-NEXT:   %7 = CallBuiltinInst (:number) [HermesBuiltin.wasmI64Eqz]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %5: number, %6: number
 ;; CHECK-NEXT:        BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %9 = PhiInst (:any) %7: any, %BB0
-;; CHECK-NEXT:         ReturnInst %9: any
+;; CHECK-NEXT:   %9 = PhiInst (:number) %7: number, %BB0
+;; CHECK-NEXT:         ReturnInst %9: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
 ;; CHECK-NEXT: function wasm_func_1(): any 
@@ -134,11 +134,11 @@
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.retBufI]: any
 ;; CHECK-NEXT:   %2 = BinaryAndInst (:any) 65280: number, 4095: number
 ;; CHECK-NEXT:   %3 = BinaryAndInst (:any) 0: number, 0: number
-;; CHECK-NEXT:   %4 = CallBuiltinInst (:any) [HermesBuiltin.wasmI64Eqz]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %2: any, %3: any
+;; CHECK-NEXT:   %4 = CallBuiltinInst (:number) [HermesBuiltin.wasmI64Eqz]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %2: any, %3: any
 ;; CHECK-NEXT:        BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %6 = PhiInst (:any) %4: any, %BB0
-;; CHECK-NEXT:        ReturnInst %6: any
+;; CHECK-NEXT:   %6 = PhiInst (:number) %4: number, %BB0
+;; CHECK-NEXT:        ReturnInst %6: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
 ;; CHECK-NEXT: function wasm_func_2(): any 
@@ -147,11 +147,11 @@
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.retBufI]: any
 ;; CHECK-NEXT:   %2 = BinaryOrInst (:any) 65280: number, 255: number
 ;; CHECK-NEXT:   %3 = BinaryOrInst (:any) 0: number, 0: number
-;; CHECK-NEXT:   %4 = CallBuiltinInst (:any) [HermesBuiltin.wasmI64Eqz]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %2: any, %3: any
+;; CHECK-NEXT:   %4 = CallBuiltinInst (:number) [HermesBuiltin.wasmI64Eqz]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %2: any, %3: any
 ;; CHECK-NEXT:        BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %6 = PhiInst (:any) %4: any, %BB0
-;; CHECK-NEXT:        ReturnInst %6: any
+;; CHECK-NEXT:   %6 = PhiInst (:number) %4: number, %BB0
+;; CHECK-NEXT:        ReturnInst %6: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
 ;; CHECK-NEXT: function wasm_func_3(): any 
@@ -160,96 +160,96 @@
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.retBufI]: any
 ;; CHECK-NEXT:   %2 = BinaryXorInst (:any) 255: number, 15: number
 ;; CHECK-NEXT:   %3 = BinaryXorInst (:any) 0: number, 0: number
-;; CHECK-NEXT:   %4 = CallBuiltinInst (:any) [HermesBuiltin.wasmI64Eqz]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %2: any, %3: any
+;; CHECK-NEXT:   %4 = CallBuiltinInst (:number) [HermesBuiltin.wasmI64Eqz]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %2: any, %3: any
 ;; CHECK-NEXT:        BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %6 = PhiInst (:any) %4: any, %BB0
-;; CHECK-NEXT:        ReturnInst %6: any
+;; CHECK-NEXT:   %6 = PhiInst (:number) %4: number, %BB0
+;; CHECK-NEXT:        ReturnInst %6: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
 ;; CHECK-NEXT: function wasm_func_4(): any 
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.retBufI]: any
-;; CHECK-NEXT:   %2 = CallBuiltinInst (:any) [HermesBuiltin.wasmI64Shl]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %1: any, 1: number, 0: number, 32: number, 0: number
+;; CHECK-NEXT:   %2 = CallBuiltinInst (:number) [HermesBuiltin.wasmI64Shl]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %1: any, 1: number, 0: number, 32: number, 0: number
 ;; CHECK-NEXT:   %3 = LoadPropertyInst (:any) %1: any, 0: number
 ;; CHECK-NEXT:   %4 = LoadPropertyInst (:any) %1: any, 1: number
 ;; CHECK-NEXT:   %5 = AsInt32Inst (:number) %3: any
 ;; CHECK-NEXT:   %6 = AsInt32Inst (:number) %4: any
-;; CHECK-NEXT:   %7 = CallBuiltinInst (:any) [HermesBuiltin.wasmI64Eqz]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %5: number, %6: number
+;; CHECK-NEXT:   %7 = CallBuiltinInst (:number) [HermesBuiltin.wasmI64Eqz]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %5: number, %6: number
 ;; CHECK-NEXT:        BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %9 = PhiInst (:any) %7: any, %BB0
-;; CHECK-NEXT:         ReturnInst %9: any
+;; CHECK-NEXT:   %9 = PhiInst (:number) %7: number, %BB0
+;; CHECK-NEXT:         ReturnInst %9: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
 ;; CHECK-NEXT: function wasm_func_5(): any 
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.retBufI]: any
-;; CHECK-NEXT:   %2 = CallBuiltinInst (:any) [HermesBuiltin.wasmI64Clz]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, 1: number, 0: number
-;; CHECK-NEXT:   %3 = CallBuiltinInst (:any) [HermesBuiltin.wasmI64Eqz]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %2: any, 0: number
+;; CHECK-NEXT:   %2 = CallBuiltinInst (:number) [HermesBuiltin.wasmI64Clz]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, 1: number, 0: number
+;; CHECK-NEXT:   %3 = CallBuiltinInst (:number) [HermesBuiltin.wasmI64Eqz]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %2: number, 0: number
 ;; CHECK-NEXT:        BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %5 = PhiInst (:any) %3: any, %BB0
-;; CHECK-NEXT:        ReturnInst %5: any
+;; CHECK-NEXT:   %5 = PhiInst (:number) %3: number, %BB0
+;; CHECK-NEXT:        ReturnInst %5: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
 ;; CHECK-NEXT: function wasm_func_6(): any 
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.retBufI]: any
-;; CHECK-NEXT:   %2 = CallBuiltinInst (:any) [HermesBuiltin.wasmI64Eq]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, 42: number, 0: number, 42: number, 0: number
+;; CHECK-NEXT:   %2 = CallBuiltinInst (:number) [HermesBuiltin.wasmI64Eq]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, 42: number, 0: number, 42: number, 0: number
 ;; CHECK-NEXT:        BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %4 = PhiInst (:any) %2: any, %BB0
-;; CHECK-NEXT:        ReturnInst %4: any
+;; CHECK-NEXT:   %4 = PhiInst (:number) %2: number, %BB0
+;; CHECK-NEXT:        ReturnInst %4: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
 ;; CHECK-NEXT: function wasm_func_7(): any 
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.retBufI]: any
-;; CHECK-NEXT:   %2 = CallBuiltinInst (:any) [HermesBuiltin.wasmI64Eqz]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, 0: number, 0: number
+;; CHECK-NEXT:   %2 = CallBuiltinInst (:number) [HermesBuiltin.wasmI64Eqz]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, 0: number, 0: number
 ;; CHECK-NEXT:        BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %4 = PhiInst (:any) %2: any, %BB0
-;; CHECK-NEXT:        ReturnInst %4: any
+;; CHECK-NEXT:   %4 = PhiInst (:number) %2: number, %BB0
+;; CHECK-NEXT:        ReturnInst %4: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
 ;; CHECK-NEXT: function wasm_func_8(): any 
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.retBufI]: any
-;; CHECK-NEXT:   %2 = CallBuiltinInst (:any) [HermesBuiltin.wasmI64Sub]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %1: any, 500: number, 0: number, 200: number, 0: number
+;; CHECK-NEXT:   %2 = CallBuiltinInst (:number) [HermesBuiltin.wasmI64Sub]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %1: any, 500: number, 0: number, 200: number, 0: number
 ;; CHECK-NEXT:   %3 = LoadPropertyInst (:any) %1: any, 0: number
 ;; CHECK-NEXT:   %4 = LoadPropertyInst (:any) %1: any, 1: number
 ;; CHECK-NEXT:   %5 = AsInt32Inst (:number) %3: any
 ;; CHECK-NEXT:   %6 = AsInt32Inst (:number) %4: any
-;; CHECK-NEXT:   %7 = CallBuiltinInst (:any) [HermesBuiltin.wasmI64Eq]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %5: number, %6: number, 300: number, 0: number
+;; CHECK-NEXT:   %7 = CallBuiltinInst (:number) [HermesBuiltin.wasmI64Eq]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %5: number, %6: number, 300: number, 0: number
 ;; CHECK-NEXT:        BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %9 = PhiInst (:any) %7: any, %BB0
-;; CHECK-NEXT:         ReturnInst %9: any
+;; CHECK-NEXT:   %9 = PhiInst (:number) %7: number, %BB0
+;; CHECK-NEXT:         ReturnInst %9: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
 ;; CHECK-NEXT: function wasm_func_9(): any 
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.retBufI]: any
-;; CHECK-NEXT:   %2 = CallBuiltinInst (:any) [HermesBuiltin.wasmI64Mul]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %1: any, 6: number, 0: number, 7: number, 0: number
+;; CHECK-NEXT:   %2 = CallBuiltinInst (:number) [HermesBuiltin.wasmI64Mul]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %1: any, 6: number, 0: number, 7: number, 0: number
 ;; CHECK-NEXT:   %3 = LoadPropertyInst (:any) %1: any, 0: number
 ;; CHECK-NEXT:   %4 = LoadPropertyInst (:any) %1: any, 1: number
 ;; CHECK-NEXT:   %5 = AsInt32Inst (:number) %3: any
 ;; CHECK-NEXT:   %6 = AsInt32Inst (:number) %4: any
-;; CHECK-NEXT:   %7 = CallBuiltinInst (:any) [HermesBuiltin.wasmI64Eq]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %5: number, %6: number, 42: number, 0: number
+;; CHECK-NEXT:   %7 = CallBuiltinInst (:number) [HermesBuiltin.wasmI64Eq]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %5: number, %6: number, 42: number, 0: number
 ;; CHECK-NEXT:        BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %9 = PhiInst (:any) %7: any, %BB0
-;; CHECK-NEXT:         ReturnInst %9: any
+;; CHECK-NEXT:   %9 = PhiInst (:number) %7: number, %BB0
+;; CHECK-NEXT:         ReturnInst %9: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function __wasm_instantiate__(): any 
+;; CHECK-NEXT: function __wasm_instantiate__(): object
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = CreateScopeInst (:environment) %VS0: any, empty: any
 ;; CHECK-NEXT:   %1 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_func_0(): functionCode

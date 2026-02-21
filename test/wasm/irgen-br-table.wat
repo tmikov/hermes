@@ -93,14 +93,14 @@
 ;; CHECK-LABEL: function wasm_func_2(p0: any): any
 ;; CHECK: %BB0:
 ;; CHECK:   %[[L0_2:.*]] = AllocStackInst (:any)
-;; CHECK:   %[[L1_2:.*]] = AllocStackInst (:any)
-;; CHECK:        StoreStackInst 0: number, %[[L1_2]]: any
+;; CHECK:   %[[L1_2:.*]] = AllocStackInst (:number)
+;; CHECK:        StoreStackInst 0: number, %[[L1_2]]: number
 ;; CHECK:        BranchInst %BB3
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI2:.*]] = PhiInst (:any) %{{.*}}: any, %BB2
-;; CHECK-NEXT:                ReturnInst %[[PHI2]]: any
+;; CHECK-NEXT: %[[PHI2:.*]] = PhiInst (:number) %{{.*}}: number, %BB2
+;; CHECK-NEXT:                ReturnInst %[[PHI2]]: number
 ;; CHECK: %BB2:
-;; CHECK-NEXT: %{{.*}} = LoadStackInst (:any) %[[L1_2]]: any
+;; CHECK-NEXT: %{{.*}} = LoadStackInst (:number) %[[L1_2]]: number
 ;; CHECK-NEXT:           BranchInst %BB1
 ;; CHECK: %BB3:
 ;; CHECK-NEXT: %[[LIDX:.*]] = LoadStackInst (:any) %[[L0_2]]: any

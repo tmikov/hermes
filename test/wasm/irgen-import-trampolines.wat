@@ -67,7 +67,7 @@
 
 ;; CHECK: scope %VS0 [import_func_0: any, import_func_1: any, import_func_2: any, import_func_3: any, import_func_4: any, retBufI: any, retBufF: any, closure_0: any, closure_1: any, closure_2: any, closure_3: any, closure_4: any, closure_5: any]
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function global(): any 
+;; CHECK-NEXT: function global(): object
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = CreateScopeInst (:environment) %VS0: any, empty: any
 ;; CHECK-NEXT:   %1 = CreateFunctionInst (:object) %0: environment, %VS0: any, %__wasm_instantiate__(): functionCode
@@ -153,17 +153,17 @@
 ;; CHECK-NEXT:        ReturnInst %4: any
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_4(retbuf_I: any, retbuf_F: any, p0_lo: any, p0_hi: any): any 
+;; CHECK-NEXT: function wasm_func_4(retbuf_I: object, retbuf_F: object, p0_lo: any, p0_hi: any): any 
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.import_func_4]: any
-;; CHECK-NEXT:   %2 = LoadParamInst (:any) %retbuf_I: any
-;; CHECK-NEXT:   %3 = LoadParamInst (:any) %retbuf_F: any
+;; CHECK-NEXT:   %2 = LoadParamInst (:object) %retbuf_I: object
+;; CHECK-NEXT:   %3 = LoadParamInst (:object) %retbuf_F: object
 ;; CHECK-NEXT:   %4 = LoadParamInst (:any) %p0_lo: any
 ;; CHECK-NEXT:   %5 = LoadParamInst (:any) %p0_hi: any
-;; CHECK-NEXT:   %6 = CallBuiltinInst (:any) [HermesBuiltin.wasmI64ToBigInt]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %4: any, %5: any
-;; CHECK-NEXT:   %7 = CallInst (:any) %1: any, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %6: any
-;; CHECK-NEXT:   %8 = CallBuiltinInst (:any) [HermesBuiltin.wasmBigIntToI64]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %2: any, %7: any
+;; CHECK-NEXT:   %6 = CallBuiltinInst (:bigint) [HermesBuiltin.wasmI64ToBigInt]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %4: any, %5: any
+;; CHECK-NEXT:   %7 = CallInst (:any) %1: any, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %6: bigint
+;; CHECK-NEXT:   %8 = CallBuiltinInst (:any) [HermesBuiltin.wasmBigIntToI64]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %2: object, %7: any
 ;; CHECK-NEXT:        ReturnInst 0: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
@@ -192,7 +192,7 @@
 ;; CHECK-NEXT:         ReturnInst undefined: undefined
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function __wasm_instantiate__(): any 
+;; CHECK-NEXT: function __wasm_instantiate__(): object
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = CreateScopeInst (:environment) %VS0: any, empty: any
 ;; CHECK-NEXT:   %1 = TryLoadGlobalPropertyInst (:any) globalObject: object, "__wasm_imports__": string

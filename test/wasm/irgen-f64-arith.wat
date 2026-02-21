@@ -19,11 +19,11 @@
 ;; CHECK-LABEL: function wasm_func_0(p0: any, p1: any): any
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
 ;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[R:.*]] = BinaryAddInst (:any) %[[A]]: any, %[[B]]: any
+;; CHECK-NEXT: %[[R:.*]] = BinaryAddInst (:number) %[[A]]: any, %[[B]]: any
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[R]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 1: f64.sub
@@ -35,11 +35,11 @@
 ;; CHECK-LABEL: function wasm_func_1(p0: any, p1: any): any
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
 ;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[R:.*]] = BinarySubtractInst (:any) %[[A]]: any, %[[B]]: any
+;; CHECK-NEXT: %[[R:.*]] = BinarySubtractInst (:number) %[[A]]: any, %[[B]]: any
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[R]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 2: f64.mul
@@ -51,11 +51,11 @@
 ;; CHECK-LABEL: function wasm_func_2(p0: any, p1: any): any
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
 ;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[R:.*]] = BinaryMultiplyInst (:any) %[[A]]: any, %[[B]]: any
+;; CHECK-NEXT: %[[R:.*]] = BinaryMultiplyInst (:number) %[[A]]: any, %[[B]]: any
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[R]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 3: f64.div
@@ -67,11 +67,11 @@
 ;; CHECK-LABEL: function wasm_func_3(p0: any, p1: any): any
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
 ;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[R:.*]] = BinaryDivideInst (:any) %[[A]]: any, %[[B]]: any
+;; CHECK-NEXT: %[[R:.*]] = BinaryDivideInst (:number) %[[A]]: any, %[[B]]: any
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[R]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 4: f64.neg
@@ -81,11 +81,11 @@
 
 ;; CHECK-LABEL: function wasm_func_4(p0: any): any
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[R:.*]] = UnaryMinusInst (:any) %[[A]]: any
+;; CHECK-NEXT: %[[R:.*]] = UnaryMinusInst (:number) %[[A]]: any
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[R]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 5: f64.abs
@@ -165,11 +165,11 @@
 
 ;; CHECK-LABEL: function wasm_func_10(p0: any): any
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[R:.*]] = CallBuiltinInst (:any) [HermesBuiltin.wasmNearest]{{.*}}, %[[A]]: any
+;; CHECK-NEXT: %[[R:.*]] = CallBuiltinInst (:number) [HermesBuiltin.wasmNearest]{{.*}}, %[[A]]: any
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[R]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 11: f64.min

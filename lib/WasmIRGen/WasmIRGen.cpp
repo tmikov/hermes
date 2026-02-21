@@ -79,6 +79,24 @@ static std::string buildTableTypeString(const WasmTableType &tt) {
       ? "table:funcref" : "table:externref";
 }
 
+/// Map a WasmValType to an IR Type.
+static Type wasmValTypeToIRType(WasmValType vt) {
+  switch (vt) {
+    case WasmValType::I32:
+    case WasmValType::I64:
+    case WasmValType::F32:
+    case WasmValType::F64:
+      return Type::createNumber();
+    case WasmValType::FuncRef:
+      return Type::createObject();
+    case WasmValType::ExternRef:
+      return Type::createAnyType();
+    case WasmValType::V128:
+      return Type::createAnyType();
+  }
+  return Type::createAnyType();
+}
+
 WasmIRGen::WasmIRGen(Module &M, WasmModuleInfo &moduleInfo)
     : moduleInfo_(moduleInfo),
       builder_(&M),
@@ -282,6 +300,7 @@ void WasmIRGen::createFunctions() {
   // Create the top-level function first (must be before other functions).
   auto *topLevel = builder_.createTopLevelFunction(
       "global", true /* strictMode */);
+  topLevel->setReturnType(Type::createObject());
   topLevel->setExpectedParamCountIncludingThis(1); // just "this"
 
   // Create a VariableScope for the top-level function (no parent).
@@ -470,6 +489,12 @@ void WasmIRGen::createFunctions() {
         Function::DefinitionKind::ES5Function,
         true /* strictMode */);
 
+    // Set the return type based on the Wasm function type.
+    // NOTE: We do NOT set the return type on wasm functions because after
+    // inlining into export wrappers, the return type annotation can cause
+    // verifier failures when the wrapper's return type is `:any`.
+    // func->setReturnType(wasmReturnTypeToIRType(funcType));
+
     // Create a variable in the top-level scope to hold the pre-created closure.
     closureVars_[i] = builder_.createVariable(
         topLevelVS_,
@@ -484,13 +509,21 @@ void WasmIRGen::createFunctions() {
     // prepend retBufI and retBufF parameters before the Wasm params.
     uint32_t jsParamCount = 0;
     if (needsReturnBuffer(funcType)) {
-      builder_.createJSDynamicParam(func, "retbuf_I");
-      builder_.createJSDynamicParam(func, "retbuf_F");
+      auto *rbI = builder_.createJSDynamicParam(func, "retbuf_I");
+      rbI->setType(Type::createObject());
+      auto *rbF = builder_.createJSDynamicParam(func, "retbuf_F");
+      rbF->setType(Type::createObject());
       jsParamCount += 2;
     }
 
     // Add JSDynamicParams per Wasm parameter. i64 params need two slots
     // (lo32, hi32) for the split representation.
+    // NOTE: We do NOT set types on JSDynamicParam. While the types are known,
+    // setting them causes LoadParamInst to carry `:number` types, which makes
+    // InstSimplify promote BinaryOperatorInst to FBinaryMathInst. After
+    // inlining into export wrappers (where arguments are `:any`), the
+    // FBinaryMathInst operand type assertions fail. Instead, types propagate
+    // safely through the typed AllocStackInst locals.
     for (uint32_t p = 0; p < funcType.params.size(); ++p) {
       if (funcType.params[p] == WasmValType::I64) {
         builder_.createJSDynamicParam(
@@ -524,6 +557,7 @@ void WasmIRGen::createFunctions() {
       "__wasm_instantiate__",
       Function::DefinitionKind::ES5Function,
       true /* strictMode */);
+  instantiateFunc_->setReturnType(Type::createObject());
   instantiateFunc_->setExpectedParamCountIncludingThis(1); // just "this"
   builder_.createJSThisParam(instantiateFunc_);
 
@@ -2220,6 +2254,15 @@ void WasmIRGen::beginFunction(
   // Create AllocStackInst for each parameter. i64 params use 2 slots.
   // JSDynamicParam index tracks the expanding JS param list.
   // Skip retBuf params (indices 1,2) if this function has them.
+  //
+  // NOTE: Parameter locals are typed as `:any` rather than their Wasm type.
+  // While we know the types, typing them causes a pipeline issue:
+  // InstSimplify runs before Mem2Reg and sees `:number` operands from
+  // LoadStackInst, promoting BinaryAddInst → FAddInst. Mem2Reg then
+  // replaces the LoadStackInst with LoadParamInst (`:any`), leaving
+  // FAddInst with `:any` operands, which fails verification. Declared
+  // locals (below) are safe to type because their values always come from
+  // typed wasm operations.
   uint32_t jsParamIdx = needsReturnBuffer(funcType) ? 3 : 1; // 0 = "this"
   for (uint32_t i = 0; i < numParams; ++i) {
     localSlotIndex_.push_back(locals_.size());
@@ -2261,10 +2304,10 @@ void WasmIRGen::beginFunction(
       // i64 local: allocate lo and hi stack slots, both initialized to 0.
       auto *allocLo = builder_.createAllocStackInst(
           ("local_" + llvh::Twine(numParams + i) + "_lo").str(),
-          Type::createAnyType());
+          Type::createNumber());
       auto *allocHi = builder_.createAllocStackInst(
           ("local_" + llvh::Twine(numParams + i) + "_hi").str(),
-          Type::createAnyType());
+          Type::createNumber());
       locals_.push_back(allocLo);
       locals_.push_back(allocHi);
       builder_.createStoreStackInst(builder_.getLiteralNumber(0), allocLo);
@@ -2272,7 +2315,7 @@ void WasmIRGen::beginFunction(
     } else {
       auto *alloc = builder_.createAllocStackInst(
           ("local_" + llvh::Twine(numParams + i)).str(),
-          Type::createAnyType());
+          wasmValTypeToIRType(localTypes[i]));
       locals_.push_back(alloc);
 
       // Initialize locals to their zero value.
@@ -2521,6 +2564,7 @@ void WasmIRGen::onI32Add() {
   Value *lhs = pop();
   auto *add = builder_.createBinaryOperatorInst(
       lhs, rhs, ValueKind::BinaryAddInstKind);
+  add->setType(Type::createNumber());
   push(builder_.createAsInt32Inst(add));
 }
 
@@ -2529,6 +2573,7 @@ void WasmIRGen::onI32Sub() {
   Value *lhs = pop();
   auto *sub = builder_.createBinaryOperatorInst(
       lhs, rhs, ValueKind::BinarySubtractInstKind);
+  sub->setType(Type::createNumber());
   push(builder_.createAsInt32Inst(sub));
 }
 
@@ -2539,49 +2584,62 @@ void WasmIRGen::onI32Mul() {
   Value *lhs = pop();
   auto *imul = builder_.createCallBuiltinInst(
       BuiltinMethod::Math_imul, {lhs, rhs});
+  imul->setType(Type::createNumber());
   push(imul);
 }
 
 void WasmIRGen::onI32And() {
   Value *rhs = pop();
   Value *lhs = pop();
-  push(builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryAndInstKind));
+  auto *inst = builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryAndInstKind);
+  inst->setType(Type::createNumber());
+  push(inst);
 }
 
 void WasmIRGen::onI32Or() {
   Value *rhs = pop();
   Value *lhs = pop();
-  push(builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryOrInstKind));
+  auto *inst = builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryOrInstKind);
+  inst->setType(Type::createNumber());
+  push(inst);
 }
 
 void WasmIRGen::onI32Xor() {
   Value *rhs = pop();
   Value *lhs = pop();
-  push(builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryXorInstKind));
+  auto *inst = builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryXorInstKind);
+  inst->setType(Type::createNumber());
+  push(inst);
 }
 
 void WasmIRGen::onI32Shl() {
   Value *rhs = pop();
   Value *lhs = pop();
-  push(builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryLeftShiftInstKind));
+  auto *inst = builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryLeftShiftInstKind);
+  inst->setType(Type::createNumber());
+  push(inst);
 }
 
 void WasmIRGen::onI32ShrS() {
   Value *rhs = pop();
   Value *lhs = pop();
-  push(builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryRightShiftInstKind));
+  auto *inst = builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryRightShiftInstKind);
+  inst->setType(Type::createNumber());
+  push(inst);
 }
 
 void WasmIRGen::onI32ShrU() {
   Value *rhs = pop();
   Value *lhs = pop();
-  push(builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryUnsignedRightShiftInstKind));
+  auto *inst = builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryUnsignedRightShiftInstKind);
+  inst->setType(Type::createNumber());
+  push(inst);
 }
 
 // --- i32 trapping division (F.2) ---
@@ -2664,10 +2722,13 @@ void WasmIRGen::onI32Extend8S() {
   // Sign-extend from 8 bits: (a << 24) >> 24
   auto *shifted = builder_.createBinaryOperatorInst(
       a, builder_.getLiteralNumber(24), ValueKind::BinaryLeftShiftInstKind);
-  push(builder_.createBinaryOperatorInst(
+  shifted->setType(Type::createNumber());
+  auto *result = builder_.createBinaryOperatorInst(
       shifted,
       builder_.getLiteralNumber(24),
-      ValueKind::BinaryRightShiftInstKind));
+      ValueKind::BinaryRightShiftInstKind);
+  result->setType(Type::createNumber());
+  push(result);
 }
 
 void WasmIRGen::onI32Extend16S() {
@@ -2677,10 +2738,13 @@ void WasmIRGen::onI32Extend16S() {
   // Sign-extend from 16 bits: (a << 16) >> 16
   auto *shifted = builder_.createBinaryOperatorInst(
       a, builder_.getLiteralNumber(16), ValueKind::BinaryLeftShiftInstKind);
-  push(builder_.createBinaryOperatorInst(
+  shifted->setType(Type::createNumber());
+  auto *result = builder_.createBinaryOperatorInst(
       shifted,
       builder_.getLiteralNumber(16),
-      ValueKind::BinaryRightShiftInstKind));
+      ValueKind::BinaryRightShiftInstKind);
+  result->setType(Type::createNumber());
+  push(result);
 }
 
 // --- i32 comparisons (D.4) ---
@@ -2691,8 +2755,10 @@ void WasmIRGen::onI32Eq() {
   auto *cmp = builder_.createBinaryOperatorInst(
       lhs, rhs, ValueKind::BinaryStrictlyEqualInstKind);
   // Convert boolean to i32 (true→1, false→0) via BitOr with 0.
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  auto *asI32 = builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
+  asI32->setType(Type::createNumber());
+  push(asI32);
 }
 
 void WasmIRGen::onI32Ne() {
@@ -2700,8 +2766,10 @@ void WasmIRGen::onI32Ne() {
   Value *lhs = pop();
   auto *cmp = builder_.createBinaryOperatorInst(
       lhs, rhs, ValueKind::BinaryStrictlyNotEqualInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  auto *asI32 = builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
+  asI32->setType(Type::createNumber());
+  push(asI32);
 }
 
 void WasmIRGen::onI32LtS() {
@@ -2712,8 +2780,10 @@ void WasmIRGen::onI32LtS() {
   auto *rhsI32 = builder_.createAsInt32Inst(rhs);
   auto *cmp = builder_.createBinaryOperatorInst(
       lhsI32, rhsI32, ValueKind::BinaryLessThanInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  auto *asI32 = builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
+  asI32->setType(Type::createNumber());
+  push(asI32);
 }
 
 void WasmIRGen::onI32GtS() {
@@ -2723,8 +2793,10 @@ void WasmIRGen::onI32GtS() {
   auto *rhsI32 = builder_.createAsInt32Inst(rhs);
   auto *cmp = builder_.createBinaryOperatorInst(
       lhsI32, rhsI32, ValueKind::BinaryGreaterThanInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  auto *asI32 = builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
+  asI32->setType(Type::createNumber());
+  push(asI32);
 }
 
 void WasmIRGen::onI32LeS() {
@@ -2734,8 +2806,10 @@ void WasmIRGen::onI32LeS() {
   auto *rhsI32 = builder_.createAsInt32Inst(rhs);
   auto *cmp = builder_.createBinaryOperatorInst(
       lhsI32, rhsI32, ValueKind::BinaryLessThanOrEqualInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  auto *asI32 = builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
+  asI32->setType(Type::createNumber());
+  push(asI32);
 }
 
 void WasmIRGen::onI32GeS() {
@@ -2745,8 +2819,10 @@ void WasmIRGen::onI32GeS() {
   auto *rhsI32 = builder_.createAsInt32Inst(rhs);
   auto *cmp = builder_.createBinaryOperatorInst(
       lhsI32, rhsI32, ValueKind::BinaryGreaterThanOrEqualInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  auto *asI32 = builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
+  asI32->setType(Type::createNumber());
+  push(asI32);
 }
 
 void WasmIRGen::onI32LtU() {
@@ -2757,8 +2833,10 @@ void WasmIRGen::onI32LtU() {
   auto *rhsU32 = builder_.createAsUint32Inst(rhs);
   auto *cmp = builder_.createBinaryOperatorInst(
       lhsU32, rhsU32, ValueKind::BinaryLessThanInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  auto *asI32 = builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
+  asI32->setType(Type::createNumber());
+  push(asI32);
 }
 
 void WasmIRGen::onI32GtU() {
@@ -2768,8 +2846,10 @@ void WasmIRGen::onI32GtU() {
   auto *rhsU32 = builder_.createAsUint32Inst(rhs);
   auto *cmp = builder_.createBinaryOperatorInst(
       lhsU32, rhsU32, ValueKind::BinaryGreaterThanInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  auto *asI32 = builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
+  asI32->setType(Type::createNumber());
+  push(asI32);
 }
 
 void WasmIRGen::onI32LeU() {
@@ -2779,8 +2859,10 @@ void WasmIRGen::onI32LeU() {
   auto *rhsU32 = builder_.createAsUint32Inst(rhs);
   auto *cmp = builder_.createBinaryOperatorInst(
       lhsU32, rhsU32, ValueKind::BinaryLessThanOrEqualInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  auto *asI32 = builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
+  asI32->setType(Type::createNumber());
+  push(asI32);
 }
 
 void WasmIRGen::onI32GeU() {
@@ -2790,8 +2872,10 @@ void WasmIRGen::onI32GeU() {
   auto *rhsU32 = builder_.createAsUint32Inst(rhs);
   auto *cmp = builder_.createBinaryOperatorInst(
       lhsU32, rhsU32, ValueKind::BinaryGreaterThanOrEqualInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  auto *asI32 = builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
+  asI32->setType(Type::createNumber());
+  push(asI32);
 }
 
 void WasmIRGen::onI32Eqz() {
@@ -2801,8 +2885,10 @@ void WasmIRGen::onI32Eqz() {
       val,
       builder_.getLiteralNumber(0),
       ValueKind::BinaryStrictlyEqualInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  auto *asI32 = builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
+  asI32->setType(Type::createNumber());
+  push(asI32);
 }
 
 // --- Control flow (D.6, D.7) ---
@@ -3883,6 +3969,7 @@ void WasmIRGen::onI64ExtendI32S() {
       builder_.createAsInt32Inst(val),
       builder_.getLiteralNumber(31),
       ValueKind::BinaryRightShiftInstKind);
+  hi->setType(Type::createNumber());
   pushI64(val, hi);
 }
 
@@ -3902,14 +3989,17 @@ void WasmIRGen::onI64Extend8S() {
   // Sign-extend lowest 8 bits: lo = (lo << 24) >> 24, hi = (lo >> 31).
   auto *shifted = builder_.createBinaryOperatorInst(
       lo, builder_.getLiteralNumber(24), ValueKind::BinaryLeftShiftInstKind);
+  shifted->setType(Type::createNumber());
   auto *newLo = builder_.createBinaryOperatorInst(
       shifted,
       builder_.getLiteralNumber(24),
       ValueKind::BinaryRightShiftInstKind);
+  newLo->setType(Type::createNumber());
   auto *newHi = builder_.createBinaryOperatorInst(
       newLo,
       builder_.getLiteralNumber(31),
       ValueKind::BinaryRightShiftInstKind);
+  newHi->setType(Type::createNumber());
   pushI64(newLo, newHi);
 }
 
@@ -3921,14 +4011,17 @@ void WasmIRGen::onI64Extend16S() {
   // Sign-extend lowest 16 bits: lo = (lo << 16) >> 16, hi = (lo >> 31).
   auto *shifted = builder_.createBinaryOperatorInst(
       lo, builder_.getLiteralNumber(16), ValueKind::BinaryLeftShiftInstKind);
+  shifted->setType(Type::createNumber());
   auto *newLo = builder_.createBinaryOperatorInst(
       shifted,
       builder_.getLiteralNumber(16),
       ValueKind::BinaryRightShiftInstKind);
+  newLo->setType(Type::createNumber());
   auto *newHi = builder_.createBinaryOperatorInst(
       newLo,
       builder_.getLiteralNumber(31),
       ValueKind::BinaryRightShiftInstKind);
+  newHi->setType(Type::createNumber());
   pushI64(newLo, newHi);
 }
 
@@ -3942,6 +4035,7 @@ void WasmIRGen::onI64Extend32S() {
       builder_.createAsInt32Inst(lo),
       builder_.getLiteralNumber(31),
       ValueKind::BinaryRightShiftInstKind);
+  newHi->setType(Type::createNumber());
   pushI64(lo, newHi);
 }
 
@@ -3954,35 +4048,45 @@ void WasmIRGen::onI64Extend32S() {
 void WasmIRGen::onF64Add() {
   Value *rhs = pop();
   Value *lhs = pop();
-  push(builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryAddInstKind));
+  auto *inst = builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryAddInstKind);
+  inst->setType(Type::createNumber());
+  push(inst);
 }
 
 void WasmIRGen::onF64Sub() {
   Value *rhs = pop();
   Value *lhs = pop();
-  push(builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinarySubtractInstKind));
+  auto *inst = builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinarySubtractInstKind);
+  inst->setType(Type::createNumber());
+  push(inst);
 }
 
 void WasmIRGen::onF64Mul() {
   Value *rhs = pop();
   Value *lhs = pop();
-  push(builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryMultiplyInstKind));
+  auto *inst = builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryMultiplyInstKind);
+  inst->setType(Type::createNumber());
+  push(inst);
 }
 
 void WasmIRGen::onF64Div() {
   Value *rhs = pop();
   Value *lhs = pop();
-  push(builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryDivideInstKind));
+  auto *inst = builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryDivideInstKind);
+  inst->setType(Type::createNumber());
+  push(inst);
 }
 
 void WasmIRGen::onF64Neg() {
   Value *val = pop();
-  push(builder_.createUnaryOperatorInst(
-      val, ValueKind::UnaryMinusInstKind));
+  auto *inst = builder_.createUnaryOperatorInst(
+      val, ValueKind::UnaryMinusInstKind);
+  inst->setType(Type::createNumber());
+  push(inst);
 }
 
 void WasmIRGen::onF64Abs() {
@@ -4039,8 +4143,10 @@ void WasmIRGen::onF64Eq() {
   auto *cmp = builder_.createBinaryOperatorInst(
       lhs, rhs, ValueKind::BinaryStrictlyEqualInstKind);
   // Convert boolean to i32 (true→1, false→0) via BitOr with 0.
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  auto *asI32 = builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
+  asI32->setType(Type::createNumber());
+  push(asI32);
 }
 
 void WasmIRGen::onF64Ne() {
@@ -4048,8 +4154,10 @@ void WasmIRGen::onF64Ne() {
   Value *lhs = pop();
   auto *cmp = builder_.createBinaryOperatorInst(
       lhs, rhs, ValueKind::BinaryStrictlyNotEqualInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  auto *asI32 = builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
+  asI32->setType(Type::createNumber());
+  push(asI32);
 }
 
 void WasmIRGen::onF64Lt() {
@@ -4057,8 +4165,10 @@ void WasmIRGen::onF64Lt() {
   Value *lhs = pop();
   auto *cmp = builder_.createBinaryOperatorInst(
       lhs, rhs, ValueKind::BinaryLessThanInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  auto *asI32 = builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
+  asI32->setType(Type::createNumber());
+  push(asI32);
 }
 
 void WasmIRGen::onF64Gt() {
@@ -4066,8 +4176,10 @@ void WasmIRGen::onF64Gt() {
   Value *lhs = pop();
   auto *cmp = builder_.createBinaryOperatorInst(
       lhs, rhs, ValueKind::BinaryGreaterThanInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  auto *asI32 = builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
+  asI32->setType(Type::createNumber());
+  push(asI32);
 }
 
 void WasmIRGen::onF64Le() {
@@ -4075,8 +4187,10 @@ void WasmIRGen::onF64Le() {
   Value *lhs = pop();
   auto *cmp = builder_.createBinaryOperatorInst(
       lhs, rhs, ValueKind::BinaryLessThanOrEqualInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  auto *asI32 = builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
+  asI32->setType(Type::createNumber());
+  push(asI32);
 }
 
 void WasmIRGen::onF64Ge() {
@@ -4084,8 +4198,10 @@ void WasmIRGen::onF64Ge() {
   Value *lhs = pop();
   auto *cmp = builder_.createBinaryOperatorInst(
       lhs, rhs, ValueKind::BinaryGreaterThanOrEqualInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  auto *asI32 = builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
+  asI32->setType(Type::createNumber());
+  push(asI32);
 }
 
 // --- f32 arithmetic (E.2) ---
@@ -4186,8 +4302,10 @@ void WasmIRGen::onF32Eq() {
   Value *lhs = pop();
   auto *cmp = builder_.createBinaryOperatorInst(
       lhs, rhs, ValueKind::BinaryStrictlyEqualInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  auto *asI32 = builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
+  asI32->setType(Type::createNumber());
+  push(asI32);
 }
 
 void WasmIRGen::onF32Ne() {
@@ -4195,8 +4313,10 @@ void WasmIRGen::onF32Ne() {
   Value *lhs = pop();
   auto *cmp = builder_.createBinaryOperatorInst(
       lhs, rhs, ValueKind::BinaryStrictlyNotEqualInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  auto *asI32 = builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
+  asI32->setType(Type::createNumber());
+  push(asI32);
 }
 
 void WasmIRGen::onF32Lt() {
@@ -4204,8 +4324,10 @@ void WasmIRGen::onF32Lt() {
   Value *lhs = pop();
   auto *cmp = builder_.createBinaryOperatorInst(
       lhs, rhs, ValueKind::BinaryLessThanInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  auto *asI32 = builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
+  asI32->setType(Type::createNumber());
+  push(asI32);
 }
 
 void WasmIRGen::onF32Gt() {
@@ -4213,8 +4335,10 @@ void WasmIRGen::onF32Gt() {
   Value *lhs = pop();
   auto *cmp = builder_.createBinaryOperatorInst(
       lhs, rhs, ValueKind::BinaryGreaterThanInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  auto *asI32 = builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
+  asI32->setType(Type::createNumber());
+  push(asI32);
 }
 
 void WasmIRGen::onF32Le() {
@@ -4222,8 +4346,10 @@ void WasmIRGen::onF32Le() {
   Value *lhs = pop();
   auto *cmp = builder_.createBinaryOperatorInst(
       lhs, rhs, ValueKind::BinaryLessThanOrEqualInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  auto *asI32 = builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
+  asI32->setType(Type::createNumber());
+  push(asI32);
 }
 
 void WasmIRGen::onF32Ge() {
@@ -4231,8 +4357,10 @@ void WasmIRGen::onF32Ge() {
   Value *lhs = pop();
   auto *cmp = builder_.createBinaryOperatorInst(
       lhs, rhs, ValueKind::BinaryGreaterThanOrEqualInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  auto *asI32 = builder_.createBinaryOperatorInst(
+      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
+  asI32->setType(Type::createNumber());
+  push(asI32);
 }
 
 // --- f64/f32 copysign (F.5) ---
@@ -4859,7 +4987,10 @@ void WasmIRGen::push(Value *v) {
 }
 
 Value *WasmIRGen::emitFround(Value *val) {
-  return builder_.createCallBuiltinInst(BuiltinMethod::Math_fround, {val});
+  auto *inst = builder_.createCallBuiltinInst(
+      BuiltinMethod::Math_fround, {val});
+  inst->setType(Type::createNumber());
+  return inst;
 }
 
 void WasmIRGen::pushI64(Value *lo, Value *hi) {
@@ -5157,24 +5288,30 @@ Value *WasmIRGen::emitUnalignedLoad(Value *addr, uint32_t numBytes) {
   builder_.createUnreachableInst();
 
   builder_.setInsertionBlock(okBlock);
+  // We proved b0 !== undefined, so it must be a Number.
+  auto *b0Typed = builder_.createUnionNarrowTrustedInst(
+      b0, Type::createNumber());
 
   if (numBytes == 1)
-    return b0;
+    return b0Typed;
 
   // Assemble multi-byte value: result = b0 | (b1 << 8) | (b2 << 16) | ...
-  Value *result = b0;
+  Value *result = b0Typed;
   for (uint32_t i = 1; i < numBytes; ++i) {
     auto *addrI = builder_.createBinaryOperatorInst(
         addr,
         builder_.getLiteralNumber(static_cast<double>(i)),
         ValueKind::BinaryAddInstKind);
+    addrI->setType(Type::createNumber());
     auto *bi = builder_.createLoadPropertyInst(view, addrI);
     auto *shifted = builder_.createBinaryOperatorInst(
         bi,
         builder_.getLiteralNumber(static_cast<double>(i * 8)),
         ValueKind::BinaryLeftShiftInstKind);
+    shifted->setType(Type::createNumber());
     result = builder_.createBinaryOperatorInst(
         result, shifted, ValueKind::BinaryOrInstKind);
+    result->setType(Type::createNumber());
   }
   return result;
 }
@@ -5191,6 +5328,7 @@ void WasmIRGen::emitUnalignedStore(
       value,
       builder_.getLiteralNumber(0xFF),
       ValueKind::BinaryAndInstKind);
+  b0->setType(Type::createNumber());
   builder_.createStorePropertyStrictInst(b0, view, addr);
 
   for (uint32_t i = 1; i < numBytes; ++i) {
@@ -5198,15 +5336,18 @@ void WasmIRGen::emitUnalignedStore(
         addr,
         builder_.getLiteralNumber(static_cast<double>(i)),
         ValueKind::BinaryAddInstKind);
+    addrI->setType(Type::createNumber());
     // Shift right by i*8, then mask to get byte i.
     auto *shifted = builder_.createBinaryOperatorInst(
         value,
         builder_.getLiteralNumber(static_cast<double>(i * 8)),
         ValueKind::BinaryUnsignedRightShiftInstKind);
+    shifted->setType(Type::createNumber());
     auto *bi = builder_.createBinaryOperatorInst(
         shifted,
         builder_.getLiteralNumber(0xFF),
         ValueKind::BinaryAndInstKind);
+    bi->setType(Type::createNumber());
     builder_.createStorePropertyStrictInst(bi, view, addrI);
   }
 }
@@ -5219,12 +5360,15 @@ Value *WasmIRGen::emitEffectiveAddr(Value *base, uint32_t offset) {
         base,
         builder_.getLiteralNumber(0),
         ValueKind::BinaryUnsignedRightShiftInstKind);
+    b->setType(Type::createNumber());
   }
   if (offset != 0) {
-    return builder_.createBinaryOperatorInst(
+    auto *addr = builder_.createBinaryOperatorInst(
         b,
         builder_.getLiteralNumber(static_cast<double>(offset)),
         ValueKind::BinaryAddInstKind);
+    addr->setType(Type::createNumber());
+    return addr;
   }
   return b;
 }
@@ -5236,6 +5380,7 @@ void WasmIRGen::emitMemoryBoundsCheck(Value *addr, uint32_t numBytes) {
       addr,
       builder_.getLiteralNumber(static_cast<double>(numBytes)),
       ValueKind::BinaryAddInstKind);
+  end->setType(Type::createNumber());
   auto *memLength = builder_.createLoadPropertyInst(
       loadMemView(HEAPU8), builder_.getLiteralString("length"));
   auto *isOOB = builder_.createBinaryOperatorInst(
@@ -5283,6 +5428,7 @@ void WasmIRGen::onLoad(
           addr,
           builder_.getLiteralNumber(4),
           ValueKind::BinaryAddInstKind);
+      addrHi->setType(Type::createNumber());
       auto *hi = emitUnalignedLoad(addrHi, 4);
       pushI64(lo, hi);
       return;
@@ -5293,6 +5439,7 @@ void WasmIRGen::onLoad(
         addr,
         builder_.getLiteralNumber(2),
         ValueKind::BinaryUnsignedRightShiftInstKind);
+    idx->setType(Type::createNumber());
     auto *lo = builder_.createLoadPropertyInst(view, idx);
     // Check OOB: if result === undefined, trap.
     auto *isUndef = builder_.createBinaryOperatorInst(
@@ -5308,13 +5455,20 @@ void WasmIRGen::onLoad(
     builder_.createUnreachableInst();
 
     builder_.setInsertionBlock(okBlock);
+    // We proved lo !== undefined, so it must be a Number.
+    auto *loTyped = builder_.createUnionNarrowTrustedInst(
+        lo, Type::createNumber());
     // Load the hi32 word at idx+1.
     auto *idx1 = builder_.createBinaryOperatorInst(
         idx,
         builder_.getLiteralNumber(1),
         ValueKind::BinaryAddInstKind);
+    idx1->setType(Type::createNumber());
     auto *hi = builder_.createLoadPropertyInst(view, idx1);
-    pushI64(lo, hi);
+    // hi is also a number from the typed array (we trust it since lo was valid).
+    auto *hiTyped = builder_.createUnionNarrowTrustedInst(
+        hi, Type::createNumber());
+    pushI64(loTyped, hiTyped);
     return;
   }
 
@@ -5337,8 +5491,11 @@ void WasmIRGen::onLoad(
     builder_.createUnreachableInst();
 
     builder_.setInsertionBlock(okBlock);
+    // We proved lo !== undefined, so it must be a Number.
+    auto *loNarrow = builder_.createUnionNarrowTrustedInst(
+        lo, Type::createNumber());
     // Result as i32 (lower byte), zero or sign extended.
-    auto *loI32 = builder_.createAsInt32Inst(lo);
+    auto *loI32 = builder_.createAsInt32Inst(loNarrow);
     // For i64: hi = sign-extended bits or 0.
     Value *hi;
     if (isSigned) {
@@ -5347,6 +5504,7 @@ void WasmIRGen::onLoad(
           loI32,
           builder_.getLiteralNumber(31),
           ValueKind::BinaryRightShiftInstKind);
+      hi->setType(Type::createNumber());
     } else {
       hi = builder_.getLiteralNumber(0);
     }
@@ -5368,10 +5526,12 @@ void WasmIRGen::onLoad(
             raw,
             builder_.getLiteralNumber(16),
             ValueKind::BinaryLeftShiftInstKind);
+        shifted->setType(Type::createNumber());
         loI32 = builder_.createBinaryOperatorInst(
             shifted,
             builder_.getLiteralNumber(16),
             ValueKind::BinaryRightShiftInstKind);
+        loI32->setType(Type::createNumber());
       } else {
         loI32 = raw;
       }
@@ -5381,6 +5541,7 @@ void WasmIRGen::onLoad(
             loI32,
             builder_.getLiteralNumber(31),
             ValueKind::BinaryRightShiftInstKind);
+        hi->setType(Type::createNumber());
       } else {
         hi = builder_.getLiteralNumber(0);
       }
@@ -5394,6 +5555,7 @@ void WasmIRGen::onLoad(
         addr,
         builder_.getLiteralNumber(1),
         ValueKind::BinaryUnsignedRightShiftInstKind);
+    idx->setType(Type::createNumber());
     auto *lo = builder_.createLoadPropertyInst(view, idx);
     auto *isUndef = builder_.createBinaryOperatorInst(
         lo,
@@ -5408,13 +5570,17 @@ void WasmIRGen::onLoad(
     builder_.createUnreachableInst();
 
     builder_.setInsertionBlock(okBlock);
-    auto *loI32 = builder_.createAsInt32Inst(lo);
+    // We proved lo !== undefined, so it must be a Number.
+    auto *loNarrow = builder_.createUnionNarrowTrustedInst(
+        lo, Type::createNumber());
+    auto *loI32 = builder_.createAsInt32Inst(loNarrow);
     Value *hi;
     if (isSigned) {
       hi = builder_.createBinaryOperatorInst(
           loI32,
           builder_.getLiteralNumber(31),
           ValueKind::BinaryRightShiftInstKind);
+      hi->setType(Type::createNumber());
     } else {
       hi = builder_.getLiteralNumber(0);
     }
@@ -5436,6 +5602,7 @@ void WasmIRGen::onLoad(
             loI32,
             builder_.getLiteralNumber(31),
             ValueKind::BinaryRightShiftInstKind);
+        hi->setType(Type::createNumber());
       } else {
         hi = builder_.getLiteralNumber(0);
       }
@@ -5449,6 +5616,7 @@ void WasmIRGen::onLoad(
         addr,
         builder_.getLiteralNumber(2),
         ValueKind::BinaryUnsignedRightShiftInstKind);
+    idx->setType(Type::createNumber());
     auto *lo = builder_.createLoadPropertyInst(view, idx);
     auto *isUndef = builder_.createBinaryOperatorInst(
         lo,
@@ -5463,19 +5631,23 @@ void WasmIRGen::onLoad(
     builder_.createUnreachableInst();
 
     builder_.setInsertionBlock(okBlock);
+    // We proved lo !== undefined, so it must be a Number.
+    auto *loNarrow = builder_.createUnionNarrowTrustedInst(
+        lo, Type::createNumber());
     Value *hi;
     if (isSigned) {
       // The HEAP32 (Int32Array) already returns a signed i32.
       // Sign-extend hi from bit 31.
-      auto *loI32 = builder_.createAsInt32Inst(lo);
+      auto *loI32 = builder_.createAsInt32Inst(loNarrow);
       hi = builder_.createBinaryOperatorInst(
           loI32,
           builder_.getLiteralNumber(31),
           ValueKind::BinaryRightShiftInstKind);
+      hi->setType(Type::createNumber());
     } else {
       hi = builder_.getLiteralNumber(0);
     }
-    pushI64(lo, hi);
+    pushI64(loNarrow, hi);
     return;
   }
 
@@ -5541,6 +5713,7 @@ void WasmIRGen::onLoad(
           addr,
           builder_.getLiteralNumber(4),
           ValueKind::BinaryAddInstKind);
+      addrHi->setType(Type::createNumber());
       auto *hi = emitUnalignedLoad(addrHi, 4);
       push(helpers_.emitF64ReinterpretI64(lo, hi));
     } else if (op == "f32.load") {
@@ -5555,10 +5728,13 @@ void WasmIRGen::onLoad(
           raw,
           builder_.getLiteralNumber(16),
           ValueKind::BinaryLeftShiftInstKind);
-      push(builder_.createBinaryOperatorInst(
+      shifted->setType(Type::createNumber());
+      auto *result = builder_.createBinaryOperatorInst(
           shifted,
           builder_.getLiteralNumber(16),
-          ValueKind::BinaryRightShiftInstKind));
+          ValueKind::BinaryRightShiftInstKind);
+      result->setType(Type::createNumber());
+      push(result);
     } else {
       auto *raw = emitUnalignedLoad(addr, numBytes);
       push(raw);
@@ -5575,6 +5751,7 @@ void WasmIRGen::onLoad(
         addr,
         builder_.getLiteralNumber(shift),
         ValueKind::BinaryUnsignedRightShiftInstKind);
+    idx->setType(Type::createNumber());
   } else {
     idx = addr;
   }
@@ -5597,7 +5774,10 @@ void WasmIRGen::onLoad(
   builder_.createUnreachableInst();
 
   builder_.setInsertionBlock(okBlock);
-  push(loaded);
+  // We proved loaded !== undefined, so it must be a Number.
+  auto *typed = builder_.createUnionNarrowTrustedInst(
+      loaded, Type::createNumber());
+  push(typed);
 }
 
 void WasmIRGen::onStore(
@@ -5629,6 +5809,7 @@ void WasmIRGen::onStore(
           addr,
           builder_.getLiteralNumber(4),
           ValueKind::BinaryAddInstKind);
+      addrHi->setType(Type::createNumber());
       emitUnalignedStore(addrHi, hi, 4);
       return;
     }
@@ -5639,11 +5820,13 @@ void WasmIRGen::onStore(
         addr,
         builder_.getLiteralNumber(2),
         ValueKind::BinaryUnsignedRightShiftInstKind);
+    idx->setType(Type::createNumber());
     builder_.createStorePropertyStrictInst(lo, view, idx);
     auto *idx1 = builder_.createBinaryOperatorInst(
         idx,
         builder_.getLiteralNumber(1),
         ValueKind::BinaryAddInstKind);
+    idx1->setType(Type::createNumber());
     builder_.createStorePropertyStrictInst(hi, view, idx1);
     return;
   }
@@ -5679,6 +5862,7 @@ void WasmIRGen::onStore(
         addr,
         builder_.getLiteralNumber(1),
         ValueKind::BinaryUnsignedRightShiftInstKind);
+    idx->setType(Type::createNumber());
     builder_.createStorePropertyStrictInst(lo, view, idx);
     return;
   }
@@ -5702,6 +5886,7 @@ void WasmIRGen::onStore(
         addr,
         builder_.getLiteralNumber(2),
         ValueKind::BinaryUnsignedRightShiftInstKind);
+    idx->setType(Type::createNumber());
     builder_.createStorePropertyStrictInst(lo, view, idx);
     return;
   }
@@ -5757,6 +5942,7 @@ void WasmIRGen::onStore(
           addr,
           builder_.getLiteralNumber(4),
           ValueKind::BinaryAddInstKind);
+      addrHi->setType(Type::createNumber());
       emitUnalignedStore(addrHi, hi, 4);
     } else if (op == "f32.store") {
       // Reinterpret f32 → i32, then byte-store.
@@ -5775,6 +5961,7 @@ void WasmIRGen::onStore(
         addr,
         builder_.getLiteralNumber(shift),
         ValueKind::BinaryUnsignedRightShiftInstKind);
+    idx->setType(Type::createNumber());
   } else {
     idx = addr;
   }
@@ -5799,6 +5986,7 @@ void WasmIRGen::onMemorySize() {
       len,
       builder_.getLiteralNumber(16),
       ValueKind::BinaryUnsignedRightShiftInstKind);
+  pages->setType(Type::createNumber());
 
   push(pages);
 }
@@ -5820,6 +6008,7 @@ void WasmIRGen::onMemoryGrow() {
       len,
       builder_.getLiteralNumber(16),
       ValueKind::BinaryUnsignedRightShiftInstKind);
+  oldPages->setType(Type::createNumber());
 
   // Get maximum page count.
   // For locally-defined memories, use the declared maximum (compile-time).

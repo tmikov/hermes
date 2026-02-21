@@ -45,7 +45,7 @@
 
 ;; CHECK: scope %VS0 [retBufI: any, retBufF: any, closure_0: any, closure_1: any, closure_2: any]
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function global(): any 
+;; CHECK-NEXT: function global(): object
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = CreateScopeInst (:environment) %VS0: any, empty: any
 ;; CHECK-NEXT:   %1 = CreateFunctionInst (:object) %0: environment, %VS0: any, %__wasm_instantiate__(): functionCode
@@ -64,11 +64,11 @@
 ;; CHECK-NEXT:         ReturnInst %10: object
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_0(retbuf_I: any, retbuf_F: any, p0_lo: any, p0_hi: any): any 
+;; CHECK-NEXT: function wasm_func_0(retbuf_I: object, retbuf_F: object, p0_lo: any, p0_hi: any): any 
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
-;; CHECK-NEXT:   %1 = LoadParamInst (:any) %retbuf_I: any
-;; CHECK-NEXT:   %2 = LoadParamInst (:any) %retbuf_F: any
+;; CHECK-NEXT:   %1 = LoadParamInst (:object) %retbuf_I: object
+;; CHECK-NEXT:   %2 = LoadParamInst (:object) %retbuf_F: object
 ;; CHECK-NEXT:   %3 = AllocStackInst (:any) $local_0_lo: any
 ;; CHECK-NEXT:   %4 = AllocStackInst (:any) $local_0_hi: any
 ;; CHECK-NEXT:   %5 = LoadParamInst (:any) %p0_lo: any
@@ -81,38 +81,38 @@
 ;; CHECK-NEXT: %BB1:
 ;; CHECK-NEXT:   %12 = PhiInst (:any) %9: any, %BB0
 ;; CHECK-NEXT:   %13 = PhiInst (:any) %10: any, %BB0
-;; CHECK-NEXT:         StorePropertyStrictInst %12: any, %1: any, 0: number
-;; CHECK-NEXT:         StorePropertyStrictInst %13: any, %1: any, 1: number
+;; CHECK-NEXT:         StorePropertyStrictInst %12: any, %1: object, 0: number
+;; CHECK-NEXT:         StorePropertyStrictInst %13: any, %1: object, 1: number
 ;; CHECK-NEXT:         ReturnInst 0: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_1(retbuf_I: any, retbuf_F: any): any 
+;; CHECK-NEXT: function wasm_func_1(retbuf_I: object, retbuf_F: object): any 
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
-;; CHECK-NEXT:   %1 = LoadParamInst (:any) %retbuf_I: any
-;; CHECK-NEXT:   %2 = LoadParamInst (:any) %retbuf_F: any
-;; CHECK-NEXT:   %3 = AllocStackInst (:any) $local_0_lo: any
-;; CHECK-NEXT:   %4 = AllocStackInst (:any) $local_0_hi: any
-;; CHECK-NEXT:        StoreStackInst 0: number, %3: any
-;; CHECK-NEXT:        StoreStackInst 0: number, %4: any
-;; CHECK-NEXT:        StoreStackInst 42: number, %3: any
-;; CHECK-NEXT:        StoreStackInst 0: number, %4: any
-;; CHECK-NEXT:   %9 = LoadStackInst (:any) %3: any
-;; CHECK-NEXT:   %10 = LoadStackInst (:any) %4: any
+;; CHECK-NEXT:   %1 = LoadParamInst (:object) %retbuf_I: object
+;; CHECK-NEXT:   %2 = LoadParamInst (:object) %retbuf_F: object
+;; CHECK-NEXT:   %3 = AllocStackInst (:number) $local_0_lo: any
+;; CHECK-NEXT:   %4 = AllocStackInst (:number) $local_0_hi: any
+;; CHECK-NEXT:        StoreStackInst 0: number, %3: number
+;; CHECK-NEXT:        StoreStackInst 0: number, %4: number
+;; CHECK-NEXT:        StoreStackInst 42: number, %3: number
+;; CHECK-NEXT:        StoreStackInst 0: number, %4: number
+;; CHECK-NEXT:   %9 = LoadStackInst (:number) %3: number
+;; CHECK-NEXT:   %10 = LoadStackInst (:number) %4: number
 ;; CHECK-NEXT:         BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %12 = PhiInst (:any) %9: any, %BB0
-;; CHECK-NEXT:   %13 = PhiInst (:any) %10: any, %BB0
-;; CHECK-NEXT:         StorePropertyStrictInst %12: any, %1: any, 0: number
-;; CHECK-NEXT:         StorePropertyStrictInst %13: any, %1: any, 1: number
+;; CHECK-NEXT:   %12 = PhiInst (:number) %9: number, %BB0
+;; CHECK-NEXT:   %13 = PhiInst (:number) %10: number, %BB0
+;; CHECK-NEXT:         StorePropertyStrictInst %12: number, %1: object, 0: number
+;; CHECK-NEXT:         StorePropertyStrictInst %13: number, %1: object, 1: number
 ;; CHECK-NEXT:         ReturnInst 0: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_2(retbuf_I: any, retbuf_F: any, p0: any, p1_lo: any, p1_hi: any, p2: any): any 
+;; CHECK-NEXT: function wasm_func_2(retbuf_I: object, retbuf_F: object, p0: any, p1_lo: any, p1_hi: any, p2: any): any
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
-;; CHECK-NEXT:   %1 = LoadParamInst (:any) %retbuf_I: any
-;; CHECK-NEXT:   %2 = LoadParamInst (:any) %retbuf_F: any
+;; CHECK-NEXT:   %1 = LoadParamInst (:object) %retbuf_I: object
+;; CHECK-NEXT:   %2 = LoadParamInst (:object) %retbuf_F: object
 ;; CHECK-NEXT:   %3 = AllocStackInst (:any) $local_0: any
 ;; CHECK-NEXT:   %4 = LoadParamInst (:any) %p0: any
 ;; CHECK-NEXT:        StoreStackInst %4: any, %3: any
@@ -131,12 +131,12 @@
 ;; CHECK-NEXT: %BB1:
 ;; CHECK-NEXT:   %18 = PhiInst (:any) %15: any, %BB0
 ;; CHECK-NEXT:   %19 = PhiInst (:any) %16: any, %BB0
-;; CHECK-NEXT:         StorePropertyStrictInst %18: any, %1: any, 0: number
-;; CHECK-NEXT:         StorePropertyStrictInst %19: any, %1: any, 1: number
+;; CHECK-NEXT:         StorePropertyStrictInst %18: any, %1: object, 0: number
+;; CHECK-NEXT:         StorePropertyStrictInst %19: any, %1: object, 1: number
 ;; CHECK-NEXT:         ReturnInst 0: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function __wasm_instantiate__(): any 
+;; CHECK-NEXT: function __wasm_instantiate__(): object
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = CreateScopeInst (:environment) %VS0: any, empty: any
 ;; CHECK-NEXT:   %1 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_func_0(): functionCode

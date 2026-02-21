@@ -20,11 +20,11 @@
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
 ;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any)
 ;; CHECK-NEXT: %[[CMP:.*]] = BinaryStrictlyEqualInst (:any) %[[A]]: any, %[[B]]: any
-;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:any) %[[CMP]]: any, 0: number
+;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:number) %[[CMP]]: any, 0: number
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[R]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 1: f64.ne
@@ -37,11 +37,11 @@
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
 ;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any)
 ;; CHECK-NEXT: %[[CMP:.*]] = BinaryStrictlyNotEqualInst (:any) %[[A]]: any, %[[B]]: any
-;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:any) %[[CMP]]: any, 0: number
+;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:number) %[[CMP]]: any, 0: number
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[R]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 2: f64.lt
@@ -54,11 +54,11 @@
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
 ;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any)
 ;; CHECK-NEXT: %[[CMP:.*]] = BinaryLessThanInst (:any) %[[A]]: any, %[[B]]: any
-;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:any) %[[CMP]]: any, 0: number
+;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:number) %[[CMP]]: any, 0: number
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[R]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 3: f64.gt
@@ -71,11 +71,11 @@
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
 ;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any)
 ;; CHECK-NEXT: %[[CMP:.*]] = BinaryGreaterThanInst (:any) %[[A]]: any, %[[B]]: any
-;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:any) %[[CMP]]: any, 0: number
+;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:number) %[[CMP]]: any, 0: number
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[R]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 4: f64.le
@@ -88,11 +88,11 @@
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
 ;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any)
 ;; CHECK-NEXT: %[[CMP:.*]] = BinaryLessThanOrEqualInst (:any) %[[A]]: any, %[[B]]: any
-;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:any) %[[CMP]]: any, 0: number
+;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:number) %[[CMP]]: any, 0: number
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[R]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 5: f64.ge
@@ -105,9 +105,9 @@
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
 ;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any)
 ;; CHECK-NEXT: %[[CMP:.*]] = BinaryGreaterThanOrEqualInst (:any) %[[A]]: any, %[[B]]: any
-;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:any) %[[CMP]]: any, 0: number
+;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:number) %[[CMP]]: any, 0: number
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[R]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end

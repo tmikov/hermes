@@ -14,7 +14,7 @@
     f64.copysign
   )
 ;; CHECK-LABEL: function wasm_func_0(p0: any, p1: any): any
-;; CHECK:   {{.*}} = CallBuiltinInst (:any) [HermesBuiltin.wasmF64Copysign]
+;; CHECK:   {{.*}} = CallBuiltinInst (:number) [HermesBuiltin.wasmF64Copysign]
 
   ;; f32.copysign
   (func $f32_copysign (param f32 f32) (result f32)
@@ -23,7 +23,7 @@
     f32.copysign
   )
 ;; CHECK-LABEL: function wasm_func_1(p0: any, p1: any): any
-;; CHECK:   {{.*}} = CallBuiltinInst (:any) [HermesBuiltin.wasmF32Copysign]
+;; CHECK:   {{.*}} = CallBuiltinInst (:number) [HermesBuiltin.wasmF32Copysign]
 
   ;; f64.copysign with constants
   (func $f64_copysign_const (result f64)
@@ -32,7 +32,7 @@
     f64.copysign
   )
 ;; CHECK-LABEL: function wasm_func_2(): any
-;; CHECK:   {{.*}} = CallBuiltinInst (:any) [HermesBuiltin.wasmF64Copysign]
+;; CHECK:   {{.*}} = CallBuiltinInst (:number) [HermesBuiltin.wasmF64Copysign]
 
   ;; f32.copysign with constants
   (func $f32_copysign_const (result f32)
@@ -41,5 +41,5 @@
     f32.copysign
   )
 ;; CHECK-LABEL: function wasm_func_3(): any
-;; CHECK:   {{.*}} = CallBuiltinInst (:any) [HermesBuiltin.wasmF32Copysign]
+;; CHECK:   {{.*}} = CallBuiltinInst (:number) [HermesBuiltin.wasmF32Copysign]
 )

@@ -29,7 +29,7 @@
 
 ;; The global function builds the module info object with descriptor arrays
 ;; and the instantiate closure, then returns it.
-;; CHECK-LABEL: function global(): any
+;; CHECK-LABEL: function global(): object
 ;; CHECK:   CreateScopeInst
 ;; CHECK:   CreateFunctionInst {{.*}}__wasm_instantiate__
 ;; CHECK:   StorePropertyStrictInst {{.*}}, {{.*}}, "instantiate"
