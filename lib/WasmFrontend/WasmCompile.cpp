@@ -46,6 +46,13 @@ bool compileWasmModule(
     return false;
   }
 
+  // Append all data segment bytes to the binary data storage blob on the
+  // IR Module. generateBytecodeModule() will transfer this to the
+  // BytecodeModule.
+  for (const auto &seg : moduleInfo.dataSegments) {
+    M.appendBinaryData(llvh::ArrayRef<uint8_t>(seg.data));
+  }
+
   return true;
 }
 
@@ -103,6 +110,14 @@ std::unique_ptr<WasmModuleData> compileWasmToModuleData(
 
   // Run the optimization pipeline.
   runFullOptimizationPasses(*M);
+
+  // Append all data segment bytes to the binary data storage blob on the
+  // IR Module. generateBytecodeModule() will transfer this to the
+  // BytecodeModule. The segments are appended in order, matching the offsets
+  // computed during IR generation in WasmIRGen::finalizeModule().
+  for (const auto &seg : moduleInfo.dataSegments) {
+    M->appendBinaryData(llvh::ArrayRef<uint8_t>(seg.data));
+  }
 
   // Generate bytecode.
   BytecodeGenerationOptions genOptions{OutputFormatKind::Execute};

@@ -249,6 +249,10 @@ PRIVATE_BUILTIN(wasmMemoryInit)
 // wasmDataDrop(dataSegs, segIdx): mark a data segment as dropped.
 PRIVATE_BUILTIN(wasmDataDrop)
 
+// wasmDataSegmentInit(heapu8, blobOffset, length, dest): bulk-copy from
+// binary data storage into linear memory.
+PRIVATE_BUILTIN(wasmDataSegmentInit)
+
 // BigInt ↔ i64 conversion helpers for export/import wrappers.
 // wasmBigIntToI64(retBufI, bigint): extracts i64 from BigInt, writes lo/hi
 // to retBufI[0]/[1], returns 0.

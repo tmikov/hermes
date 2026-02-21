@@ -20,6 +20,8 @@ namespace hermes {
 class Module;
 
 /// Compile a Wasm binary module to Hermes IR.
+/// Parses the Wasm binary, generates Hermes IR, and appends data segment
+/// bytes to the Module's binary data storage.
 /// \param buffer The raw .wasm bytes.
 /// \param size Size in bytes.
 /// \param M The Hermes IR module to populate.

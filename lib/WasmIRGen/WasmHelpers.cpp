@@ -468,5 +468,15 @@ Instruction *WasmHelpers::emitLinkError(Value *message) {
       BuiltinMethod::HermesBuiltin_wasmLinkError, {message});
 }
 
+Instruction *WasmHelpers::emitDataSegmentInit(
+    Value *heapu8,
+    Value *blobOffset,
+    Value *length,
+    Value *dest) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmDataSegmentInit,
+      {heapu8, blobOffset, length, dest});
+}
+
 } // namespace wasm
 } // namespace hermes

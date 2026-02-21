@@ -1160,6 +1160,11 @@ void WasmIRGen::finalizeModule() {
   // Ensure insertion is at the instantiate function's entry block.
   builder_.setInsertionBlock(tlEntry_);
 
+  // Running offset into the binary data storage blob. Each data segment's
+  // bytes are appended in order (by WasmCompile.cpp), so we compute each
+  // segment's blob offset by accumulating sizes.
+  uint32_t binaryDataOffset = 0;
+
   // Initialize the data segments array (for memory.init/data.drop).
   // Each element is a Uint8Array containing the segment's data bytes,
   // or null for segments that have been dropped.
@@ -1180,30 +1185,42 @@ void WasmIRGen::finalizeModule() {
             builder_.getLiteralNull(),
             segsArr,
             builder_.getLiteralNumber(static_cast<double>(si)));
+        // Still advance binaryDataOffset for consistency with the blob.
+        binaryDataOffset += seg.data.size();
         continue;
       }
 
-      // Create a Uint8Array and fill it with segment data.
+      // Create a Uint8Array and bulk-fill it from the binary data blob.
       auto *segArr = emitNew(
           Uint8ArrayCtor,
           {builder_.getLiteralNumber(
               static_cast<double>(seg.data.size()))});
-      for (uint32_t bi = 0; bi < seg.data.size(); ++bi) {
-        builder_.createStorePropertyStrictInst(
-            builder_.getLiteralNumber(
-                static_cast<double>(seg.data[bi])),
-            segArr,
-            builder_.getLiteralNumber(static_cast<double>(bi)));
-      }
+      helpers_.emitDataSegmentInit(
+          segArr,
+          builder_.getLiteralNumber(
+              static_cast<double>(binaryDataOffset)),
+          builder_.getLiteralNumber(
+              static_cast<double>(seg.data.size())),
+          builder_.getLiteralNumber(0));
+      binaryDataOffset += seg.data.size();
       builder_.createStorePropertyStrictInst(
           segArr,
           segsArr,
           builder_.getLiteralNumber(static_cast<double>(si)));
     }
+  } else {
+    // Even when dataSegVar_ is not set, we still need to advance
+    // binaryDataOffset for all segments.
+    for (const auto &seg : moduleInfo_.dataSegments) {
+      binaryDataOffset += seg.data.size();
+    }
   }
 
   // Apply active data segments: copy bytes into linear memory.
   if (hasMemory) {
+    // Reset binaryDataOffset — the active loop iterates the same segments
+    // array and computes its own offsets.
+    binaryDataOffset = 0;
     // Compute initial memory size for data segment bounds checking.
     // For locally-defined memories, the initial size is known exactly.
     // For imported memories, use the declared minimum as the actual size
@@ -1234,8 +1251,10 @@ void WasmIRGen::finalizeModule() {
 
     for (uint32_t si = 0; si < moduleInfo_.dataSegments.size(); ++si) {
       const auto &seg = moduleInfo_.dataSegments[si];
-      if (seg.mode != WasmDataSegment::Mode::Active)
+      if (seg.mode != WasmDataSegment::Mode::Active) {
+        binaryDataOffset += seg.data.size();
         continue;
+      }
 
       // Step 1: Compute offset as an IR Value.
       Value *offset = nullptr;
@@ -1251,6 +1270,7 @@ void WasmIRGen::finalizeModule() {
         } else {
           llvh::errs()
               << "warning: unsupported data segment offset expression\n";
+          binaryDataOffset += seg.data.size();
           continue;
         }
       } else {
@@ -1371,29 +1391,23 @@ void WasmIRGen::finalizeModule() {
         tlEntry_ = okBlock;
       }
 
-      if (seg.data.empty())
+      if (seg.data.empty()) {
+        binaryDataOffset += seg.data.size();
         continue;
+      }
 
-      // Load HEAPU8 view for byte-level writes.
+      // Load HEAPU8 view and bulk-copy from the binary data blob.
       auto *heapu8 = builder_.createLoadFrameInst(
           tlScope, memViewVars_[static_cast<uint8_t>(MemView::HEAPU8)]);
 
-      // Store each byte of the data segment.
-      for (uint32_t i = 0; i < seg.data.size(); ++i) {
-        Value *idx;
-        if (i == 0) {
-          idx = offset;
-        } else {
-          idx = builder_.createBinaryOperatorInst(
-              offset,
-              builder_.getLiteralNumber(static_cast<double>(i)),
-              ValueKind::BinaryAddInstKind);
-        }
-        builder_.createStorePropertyStrictInst(
-            builder_.getLiteralNumber(static_cast<double>(seg.data[i])),
-            heapu8,
-            idx);
-      }
+      helpers_.emitDataSegmentInit(
+          heapu8,
+          builder_.getLiteralNumber(
+              static_cast<double>(binaryDataOffset)),
+          builder_.getLiteralNumber(
+              static_cast<double>(seg.data.size())),
+          offset);
+      binaryDataOffset += seg.data.size();
 
       // After applying an active data segment, mark it as dropped.
       if (dataSegVar_) {

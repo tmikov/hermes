@@ -295,6 +295,10 @@ llvh::ArrayRef<uint8_t> RuntimeModule::getRegExpBytecodeFromRegExpID(
   return bcProvider_->getRegExpStorage().slice(entry.offset, entry.length);
 }
 
+llvh::ArrayRef<uint8_t> RuntimeModule::getBinaryDataStorage() const {
+  return bcProvider_->getBinaryDataStorage();
+}
+
 template <typename T>
 SymbolID RuntimeModule::mapStringMayAllocate(
     llvh::ArrayRef<T> str,

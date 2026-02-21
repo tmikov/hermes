@@ -95,12 +95,13 @@ struct BytecodeFileHeader {
   uint32_t segmentID; // The ID of this segment.
   uint32_t cjsModuleCount; // Number of modules.
   uint32_t functionSourceCount; // Number of function sources preserved.
+  uint32_t binaryDataStorageSize;
   uint32_t debugInfoOffset;
   BytecodeOptions options;
 
   // Insert any padding to make function headers that follow this file header
   // less likely to cross cache lines.
-  uint8_t padding[15];
+  uint8_t padding[11];
 
   BytecodeFileHeader(
       uint64_t magic,
@@ -125,6 +126,7 @@ struct BytecodeFileHeader {
       uint32_t segmentID,
       uint32_t cjsModuleCount,
       uint32_t functionSourceCount,
+      uint32_t binaryDataStorageSize,
       uint32_t debugInfoOffset,
       BytecodeOptions options)
       : magic(magic),
@@ -149,6 +151,7 @@ struct BytecodeFileHeader {
         segmentID(segmentID),
         cjsModuleCount(cjsModuleCount),
         functionSourceCount(functionSourceCount),
+        binaryDataStorageSize(binaryDataStorageSize),
         debugInfoOffset(debugInfoOffset),
         options(options) {
     std::copy(sourceHash.begin(), sourceHash.end(), this->sourceHash);
@@ -466,6 +469,7 @@ void visitBytecodeSegmentsInOrder(Visitor &visitor) {
   visitor.visitRegExpStorage();
   visitor.visitCJSModuleTable();
   visitor.visitFunctionSourceTable();
+  visitor.visitBinaryDataStorage();
 }
 
 /// BytecodeFileFields represents direct byte-level access to the structured
@@ -534,6 +538,9 @@ struct BytecodeFileFields {
 
   /// List of function source table entries.
   Array<std::pair<uint32_t, uint32_t>> functionSourceTable;
+
+  /// Binary data storage blob (e.g. Wasm data segments).
+  Array<uint8_t> binaryDataStorage;
 
   /// Populate bytecode file fields from a buffer. The fields will point
   /// directly into the buffer and it is the caller's responsibility to ensure

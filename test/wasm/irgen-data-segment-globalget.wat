@@ -35,9 +35,9 @@
 ;; Trap block
 ;; CHECK:       CallBuiltinInst {{.*}}[HermesBuiltin.wasmTrap]
 ;; CHECK-NEXT:  UnreachableInst
-;; OK block: stores data bytes ('a' = 97, 'b' = 98)
-;; CHECK:       StorePropertyStrictInst 97
-;; CHECK:       StorePropertyStrictInst 98
+;; OK block: bulk-copy data segment via wasmDataSegmentInit(heapu8, 0, 2, offset)
+;; CHECK:       LoadFrameInst {{.*}}[%VS0.HEAPU8]
+;; CHECK:       CallBuiltinInst {{.*}}[HermesBuiltin.wasmDataSegmentInit]
 
 ;; --- Segment 1: extended const expr (i32.add) ---
 ;; CHECK:       BinaryAddInst {{.*}} 10: number, 5: number
@@ -50,6 +50,6 @@
 ;; CHECK:       BinaryAddInst {{.*}} 2
 ;; CHECK:       BinaryGreaterThanInst
 ;; CHECK:       CondBranchInst
-;; Stores data bytes ('c' = 99, 'd' = 100)
-;; CHECK:       StorePropertyStrictInst 99
-;; CHECK:       StorePropertyStrictInst 100
+;; Bulk-copy data segment via wasmDataSegmentInit(heapu8, 2, 2, offset)
+;; CHECK:       LoadFrameInst {{.*}}[%VS0.HEAPU8]
+;; CHECK:       CallBuiltinInst {{.*}}[HermesBuiltin.wasmDataSegmentInit]

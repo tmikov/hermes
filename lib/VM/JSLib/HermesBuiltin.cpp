@@ -1160,6 +1160,58 @@ CallResult<HermesValue> wasmDataDrop(void *, Runtime &runtime) {
   return HermesValue::encodeUndefinedValue();
 }
 
+/// Wasm binary data segment init: bulk-copy from binary data storage blob
+/// into linear memory (a typed array).
+/// Args: (heapu8, blobOffset, length, dest).
+/// Walks the stack to find the caller's RuntimeModule, then copies
+/// binaryDataStorage[blobOffset..blobOffset+length] to heapu8[dest..dest+length].
+CallResult<HermesValue> wasmDataSegmentInit(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  auto *heapu8 = vmcast<JSTypedArrayBase>(args.getArg(0));
+  uint32_t blobOffset =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(1).getNumber()));
+  uint32_t length =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(2).getNumber()));
+  uint32_t dest =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(3).getNumber()));
+
+  if (length == 0)
+    return HermesValue::encodeUndefinedValue();
+
+  // Walk stack to get caller's CodeBlock → RuntimeModule.
+  auto frames = runtime.getStackFrames();
+  auto it = frames.begin();
+  if (LLVM_UNLIKELY(++it == frames.end()))
+    return runtime.raiseTypeError("Cannot be called directly");
+  auto *callerCB = it->getCalleeCodeBlock();
+  if (LLVM_UNLIKELY(!callerCB))
+    return runtime.raiseTypeError("Cannot be called from native code");
+  RuntimeModule *runtimeModule = callerCB->getRuntimeModule();
+
+  auto storage = runtimeModule->getBinaryDataStorage();
+
+  // Bounds check against binary data storage.
+  if (LLVM_UNLIKELY(
+          static_cast<uint64_t>(blobOffset) + length > storage.size())) {
+    return runtime.raiseError(
+        "wasmDataSegmentInit: out of bounds binary data access");
+  }
+
+  // Bounds check against linear memory.
+  uint32_t memSize = static_cast<uint32_t>(heapu8->getLength());
+  if (LLVM_UNLIKELY(static_cast<uint64_t>(dest) + length > memSize)) {
+    return runtime.raiseError(
+        "wasmDataSegmentInit: out of bounds memory access");
+  }
+
+  // Perform the bulk copy.
+  JSArrayBuffer *memBuf = heapu8->getBuffer(runtime);
+  uint8_t *memData = memBuf->getDataBlock(runtime);
+  std::memcpy(memData + dest, storage.data() + blobOffset, length);
+
+  return HermesValue::encodeUndefinedValue();
+}
+
 /// Wasm table.fill: fill \p count entries at \p idx with \p val.
 /// Args: (funcsArr, idx, val, count).
 /// Traps on out-of-bounds.
@@ -2471,6 +2523,11 @@ void createHermesBuiltins(Runtime &runtime) {
       P::wasmDataDrop,
       wasmDataDrop,
       2);
+  defineInternMethod(
+      B::HermesBuiltin_wasmDataSegmentInit,
+      P::wasmDataSegmentInit,
+      wasmDataSegmentInit,
+      4);
 
   // BigInt ↔ i64 conversion helpers.
   defineInternMethod(

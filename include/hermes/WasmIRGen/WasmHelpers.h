@@ -293,6 +293,14 @@ class WasmHelpers {
   /// type validation at instantiation time.
   Instruction *emitLinkError(Value *message);
 
+  /// Emit wasmDataSegmentInit: bulk-copy from binary data storage blob
+  /// into linear memory. Args: (heapu8, blobOffset, length, dest).
+  Instruction *emitDataSegmentInit(
+      Value *heapu8,
+      Value *blobOffset,
+      Value *length,
+      Value *dest);
+
  private:
   IRBuilder &builder_;
 };
