@@ -76,11 +76,11 @@
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.retBufI]: any
 ;; CHECK-NEXT:   %2 = LoadFrameInst (:any) %0: environment, [%VS0.closure_0]: any
-;; CHECK-NEXT:   %3 = CallInst (:any) %2: any, %wasm_func_0(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined
+;; CHECK-NEXT:   %3 = CallInst (:number) %2: any, %wasm_func_0(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined
 ;; CHECK-NEXT:        BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %5 = PhiInst (:any) %3: any, %BB0
-;; CHECK-NEXT:        ReturnInst %5: any
+;; CHECK-NEXT:   %5 = PhiInst (:number) %3: number, %BB0
+;; CHECK-NEXT:        ReturnInst %5: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
 ;; CHECK-NEXT: function wasm_func_2(p0: number, p1: number): number 
@@ -108,11 +108,11 @@
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.retBufI]: any
 ;; CHECK-NEXT:   %2 = LoadFrameInst (:any) %0: environment, [%VS0.closure_2]: any
-;; CHECK-NEXT:   %3 = CallInst (:any) %2: any, %wasm_func_2(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined, 10: number, 20: number
+;; CHECK-NEXT:   %3 = CallInst (:number) %2: any, %wasm_func_2(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined, 10: number, 20: number
 ;; CHECK-NEXT:        BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %5 = PhiInst (:any) %3: any, %BB0
-;; CHECK-NEXT:        ReturnInst %5: any
+;; CHECK-NEXT:   %5 = PhiInst (:number) %3: number, %BB0
+;; CHECK-NEXT:        ReturnInst %5: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
 ;; CHECK-NEXT: function wasm_func_4(): undefined 
@@ -129,7 +129,7 @@
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.retBufI]: any
 ;; CHECK-NEXT:   %2 = LoadFrameInst (:any) %0: environment, [%VS0.closure_4]: any
-;; CHECK-NEXT:   %3 = CallInst (:any) %2: any, %wasm_func_4(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined
+;; CHECK-NEXT:   %3 = CallInst (:undefined) %2: any, %wasm_func_4(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined
 ;; CHECK-NEXT:        BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
 ;; CHECK-NEXT:        ReturnInst undefined: undefined

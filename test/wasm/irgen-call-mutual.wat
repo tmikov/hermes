@@ -73,8 +73,8 @@
 ;; CHECK-NEXT:   %7 = BinaryOrInst (:number) %6: boolean, 0: number
 ;; CHECK-NEXT:        CondBranchInst %7: number, %BB2, %BB3
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %9 = PhiInst (:any) %18: any, %BB4
-;; CHECK-NEXT:         ReturnInst %9: any
+;; CHECK-NEXT:   %9 = PhiInst (:number) %18: number, %BB4
+;; CHECK-NEXT:         ReturnInst %9: number
 ;; CHECK-NEXT: %BB2:
 ;; CHECK-NEXT:         BranchInst %BB4
 ;; CHECK-NEXT: %BB3:
@@ -82,10 +82,10 @@
 ;; CHECK-NEXT:   %13 = FSubtractInst (:number) %12: number, 1: number
 ;; CHECK-NEXT:   %14 = AsInt32Inst (:number) %13: number
 ;; CHECK-NEXT:   %15 = LoadFrameInst (:any) %0: environment, [%VS0.closure_1]: any
-;; CHECK-NEXT:   %16 = CallInst (:any) %15: any, %wasm_func_1(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined, %14: number
+;; CHECK-NEXT:   %16 = CallInst (:number) %15: any, %wasm_func_1(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined, %14: number
 ;; CHECK-NEXT:         BranchInst %BB4
 ;; CHECK-NEXT: %BB4:
-;; CHECK-NEXT:   %18 = PhiInst (:any) 1: number, %BB2, %16: any, %BB3
+;; CHECK-NEXT:   %18 = PhiInst (:number) 1: number, %BB2, %16: number, %BB3
 ;; CHECK-NEXT:         BranchInst %BB1
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
@@ -101,8 +101,8 @@
 ;; CHECK-NEXT:   %7 = BinaryOrInst (:number) %6: boolean, 0: number
 ;; CHECK-NEXT:        CondBranchInst %7: number, %BB2, %BB3
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %9 = PhiInst (:any) %18: any, %BB4
-;; CHECK-NEXT:         ReturnInst %9: any
+;; CHECK-NEXT:   %9 = PhiInst (:number) %18: number, %BB4
+;; CHECK-NEXT:         ReturnInst %9: number
 ;; CHECK-NEXT: %BB2:
 ;; CHECK-NEXT:         BranchInst %BB4
 ;; CHECK-NEXT: %BB3:
@@ -110,10 +110,10 @@
 ;; CHECK-NEXT:   %13 = FSubtractInst (:number) %12: number, 1: number
 ;; CHECK-NEXT:   %14 = AsInt32Inst (:number) %13: number
 ;; CHECK-NEXT:   %15 = LoadFrameInst (:any) %0: environment, [%VS0.closure_0]: any
-;; CHECK-NEXT:   %16 = CallInst (:any) %15: any, %wasm_func_0(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined, %14: number
+;; CHECK-NEXT:   %16 = CallInst (:number) %15: any, %wasm_func_0(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined, %14: number
 ;; CHECK-NEXT:         BranchInst %BB4
 ;; CHECK-NEXT: %BB4:
-;; CHECK-NEXT:   %18 = PhiInst (:any) 0: number, %BB2, %16: any, %BB3
+;; CHECK-NEXT:   %18 = PhiInst (:number) 0: number, %BB2, %16: number, %BB3
 ;; CHECK-NEXT:         BranchInst %BB1
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:

@@ -211,7 +211,7 @@
 
 ;; CHECK-LABEL: function wasm_func_10(): number 
 ;; CHECK:   LoadFrameInst (:any) {{.*}}[%VS0.closure_0]: any
-;; CHECK:   CallInst (:any)
+;; CHECK:   CallInst (:number)
 ;; CHECK:   BranchInst %BB1
 ;; CHECK:   function_end
 

@@ -70,8 +70,8 @@
 ;; CHECK-NEXT:   %14 = FSubtractInst (:number) %13: number, 1: number
 ;; CHECK-NEXT:   %15 = AsInt32Inst (:number) %14: number
 ;; CHECK-NEXT:   %16 = LoadFrameInst (:any) %0: environment, [%VS0.closure_0]: any
-;; CHECK-NEXT:   %17 = CallInst (:any) %16: any, %wasm_func_0(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined, %15: number
-;; CHECK-NEXT:   %18 = CallBuiltinInst (:number) [Math.imul]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %12: number, %17: any
+;; CHECK-NEXT:   %17 = CallInst (:number) %16: any, %wasm_func_0(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined, %15: number
+;; CHECK-NEXT:   %18 = CallBuiltinInst (:number) [Math.imul]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %12: number, %17: number
 ;; CHECK-NEXT:         BranchInst %BB4
 ;; CHECK-NEXT: %BB4:
 ;; CHECK-NEXT:   %20 = PhiInst (:number) 1: number, %BB2, %18: number, %BB3

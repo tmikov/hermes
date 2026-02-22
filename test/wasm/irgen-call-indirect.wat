@@ -39,7 +39,7 @@
 ;; CHECK-NEXT: %[[FUNCS:.*]] = LoadFrameInst (:any) %[[SCOPE]]: environment, [%VS0.table_0_funcs]: any
 ;; CHECK-NEXT: %[[TYPES:.*]] = LoadFrameInst (:any) %[[SCOPE]]: environment, [%VS0.table_0_types]: any
 ;; CHECK-NEXT: %[[CLOSURE:.*]] = CallBuiltinInst (:any) [HermesBuiltin.wasmCallIndirect]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %[[FUNCS]]: any, %[[TYPES]]: any, %[[IDX]]: number, 0: number
-;; CHECK-NEXT: %[[RESULT:.*]] = CallInst (:any) %[[CLOSURE]]: any, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined
+;; CHECK-NEXT: %[[RESULT:.*]] = CallInst (:number) %[[CLOSURE]]: any, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined
 ;; CHECK-NEXT:                  BranchInst %BB1
 
   ;; Test 2: call_indirect with args (type $i32_to_i32).
@@ -56,7 +56,7 @@
 ;; CHECK-NEXT: %[[FUNCS2:.*]] = LoadFrameInst (:any) %[[SCOPE2]]: environment, [%VS0.table_0_funcs]: any
 ;; CHECK-NEXT: %[[TYPES2:.*]] = LoadFrameInst (:any) %[[SCOPE2]]: environment, [%VS0.table_0_types]: any
 ;; CHECK-NEXT: %[[CLOSURE2:.*]] = CallBuiltinInst (:any) [HermesBuiltin.wasmCallIndirect]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %[[FUNCS2]]: any, %[[TYPES2]]: any, %[[IDX2]]: number, 1: number
-;; CHECK-NEXT: %[[RESULT2:.*]] = CallInst (:any) %[[CLOSURE2]]: any, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %[[ARG]]: number
+;; CHECK-NEXT: %[[RESULT2:.*]] = CallInst (:number) %[[CLOSURE2]]: any, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %[[ARG]]: number
 ;; CHECK-NEXT:                   BranchInst %BB1
 
   ;; Test 3: Void call_indirect (no result).
@@ -66,5 +66,5 @@
     drop)
 ;; CHECK-LABEL: function wasm_func_5(p0: number): undefined 
 ;; CHECK:   %[[CLOSURE3:.*]] = CallBuiltinInst (:any) [HermesBuiltin.wasmCallIndirect]
-;; CHECK-NEXT: %{{.*}} = CallInst (:any) %[[CLOSURE3]]: any
+;; CHECK-NEXT: %{{.*}} = CallInst (:number) %[[CLOSURE3]]: any
 )

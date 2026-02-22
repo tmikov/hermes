@@ -50,10 +50,10 @@
 ;; CHECK-NEXT: %[[FUNCS:.*]] = LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_funcs]: any
 ;; CHECK-NEXT: %[[TYPES:.*]] = LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_types]: any
 ;; CHECK-NEXT: %[[CLOSURE:.*]] = CallBuiltinInst (:any) [HermesBuiltin.wasmCallIndirect]
-;; CHECK-NEXT: %[[RES:.*]] = CallInst (:any) %[[CLOSURE]]: any
+;; CHECK-NEXT: %[[RES:.*]] = CallInst (:number) %[[CLOSURE]]: any
 ;; CHECK-NEXT:               BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %{{.*}} = PhiInst (:any) %[[RES]]: any, %BB0
+;; CHECK-NEXT: %{{.*}} = PhiInst (:number) %[[RES]]: number, %BB0
 ;; CHECK-NEXT:           ReturnInst
 ;; CHECK-NEXT: function_end
 )

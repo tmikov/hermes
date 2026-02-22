@@ -3570,6 +3570,14 @@ void WasmIRGen::onCall(uint32_t funcIndex) {
       /* thisValue */ builder_.getLiteralUndefined(),
       args);
 
+  // Set the return type on the CallInst based on the known callee signature.
+  if (funcType.results.empty())
+    call->setType(Type::createUndefined());
+  else if (!needsReturnBuffer(funcType))
+    call->setType(wasmValTypeToIRType(funcType.results[0]));
+  else
+    call->setType(Type::createNumber());
+
   // Push return values onto the stack.
   if (needsReturnBuffer(funcType)) {
     // All results are in the return buffer. Read them out.
@@ -3643,6 +3651,14 @@ void WasmIRGen::onCallIndirect(uint32_t sigIndex, uint32_t tableIndex) {
       /* newTarget */ builder_.getLiteralUndefined(),
       /* thisValue */ builder_.getLiteralUndefined(),
       args);
+
+  // Set the return type based on the call_indirect signature.
+  if (funcType.results.empty())
+    call->setType(Type::createUndefined());
+  else if (!needsReturnBuffer(funcType))
+    call->setType(wasmValTypeToIRType(funcType.results[0]));
+  else
+    call->setType(Type::createNumber());
 
   // Push return values onto the stack.
   if (needsReturnBuffer(funcType)) {
