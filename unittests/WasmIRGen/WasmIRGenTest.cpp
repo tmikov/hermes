@@ -631,17 +631,17 @@ TEST(WasmIRGenTest, I32EqNe) {
   auto *func = irgen.getIRFunctions()[0];
   auto &bb = func->getBasicBlockList().front();
 
-  // Should have BinaryStrictlyEqualInst followed by BinaryOrInst.
+  // Should have FEqualInst followed by AsInt32Inst (bool→i32).
   bool foundStrictlyEqual = false;
-  bool foundBitOr = false;
+  bool foundAsInt32 = false;
   for (auto &inst : bb) {
     if (inst.getKind() == ValueKind::FEqualInstKind)
       foundStrictlyEqual = true;
-    if (inst.getKind() == ValueKind::BinaryOrInstKind)
-      foundBitOr = true;
+    if (llvh::isa<AsInt32Inst>(&inst))
+      foundAsInt32 = true;
   }
   EXPECT_TRUE(foundStrictlyEqual);
-  EXPECT_TRUE(foundBitOr);
+  EXPECT_TRUE(foundAsInt32);
 }
 
 TEST(WasmIRGenTest, I32SignedComparisons) {
@@ -662,21 +662,17 @@ TEST(WasmIRGenTest, I32SignedComparisons) {
   auto *func = irgen.getIRFunctions()[0];
   auto &bb = func->getBasicBlockList().front();
 
-  // Should have AsInt32Inst (x2), BinaryLessThanInst, BinaryOrInst.
+  // Should have AsInt32Inst (x2 for operands + x1 for bool→i32), FLessThanInst.
   unsigned asInt32Count = 0;
   bool foundLessThan = false;
-  bool foundBitOr = false;
   for (auto &inst : bb) {
     if (llvh::isa<AsInt32Inst>(&inst))
       ++asInt32Count;
     if (inst.getKind() == ValueKind::FLessThanInstKind)
       foundLessThan = true;
-    if (inst.getKind() == ValueKind::BinaryOrInstKind)
-      foundBitOr = true;
   }
-  EXPECT_EQ(asInt32Count, 2u);
+  EXPECT_EQ(asInt32Count, 3u);
   EXPECT_TRUE(foundLessThan);
-  EXPECT_TRUE(foundBitOr);
 }
 
 TEST(WasmIRGenTest, I32UnsignedComparisons) {
@@ -697,21 +693,21 @@ TEST(WasmIRGenTest, I32UnsignedComparisons) {
   auto *func = irgen.getIRFunctions()[0];
   auto &bb = func->getBasicBlockList().front();
 
-  // Should have AsUint32Inst (x2), BinaryLessThanInst, BinaryOrInst.
+  // Should have AsUint32Inst (x2), FLessThanInst, AsInt32Inst (bool→i32).
   unsigned asUint32Count = 0;
   bool foundLessThan = false;
-  bool foundBitOr = false;
+  bool foundAsInt32 = false;
   for (auto &inst : bb) {
     if (llvh::isa<AsUint32Inst>(&inst))
       ++asUint32Count;
     if (inst.getKind() == ValueKind::FLessThanInstKind)
       foundLessThan = true;
-    if (inst.getKind() == ValueKind::BinaryOrInstKind)
-      foundBitOr = true;
+    if (llvh::isa<AsInt32Inst>(&inst))
+      foundAsInt32 = true;
   }
   EXPECT_EQ(asUint32Count, 2u);
   EXPECT_TRUE(foundLessThan);
-  EXPECT_TRUE(foundBitOr);
+  EXPECT_TRUE(foundAsInt32);
 }
 
 TEST(WasmIRGenTest, I32Eqz) {
@@ -731,17 +727,17 @@ TEST(WasmIRGenTest, I32Eqz) {
   auto *func = irgen.getIRFunctions()[0];
   auto &bb = func->getBasicBlockList().front();
 
-  // Should have BinaryStrictlyEqualInst(val, 0) and BinaryOrInst.
+  // Should have FEqualInst(val, 0) and AsInt32Inst (bool→i32).
   bool foundStrictlyEqual = false;
-  bool foundBitOr = false;
+  bool foundAsInt32 = false;
   for (auto &inst : bb) {
     if (inst.getKind() == ValueKind::FEqualInstKind)
       foundStrictlyEqual = true;
-    if (inst.getKind() == ValueKind::BinaryOrInstKind)
-      foundBitOr = true;
+    if (llvh::isa<AsInt32Inst>(&inst))
+      foundAsInt32 = true;
   }
   EXPECT_TRUE(foundStrictlyEqual);
-  EXPECT_TRUE(foundBitOr);
+  EXPECT_TRUE(foundAsInt32);
 }
 
 // --- Return and drop tests (D.5) ---
@@ -2154,19 +2150,19 @@ TEST(WasmIRGenTest, F64Comparisons) {
 
   bool foundStrictEq = false;
   bool foundLt = false;
-  unsigned orCount = 0;
+  unsigned asInt32Count = 0;
   for (auto &inst : bb) {
     if (inst.getKind() == ValueKind::FEqualInstKind)
       foundStrictEq = true;
     if (inst.getKind() == ValueKind::FLessThanInstKind)
       foundLt = true;
-    if (inst.getKind() == ValueKind::BinaryOrInstKind)
-      ++orCount;
+    if (llvh::isa<AsInt32Inst>(&inst))
+      ++asInt32Count;
   }
   EXPECT_TRUE(foundStrictEq);
   EXPECT_TRUE(foundLt);
-  // Two comparisons, each followed by BinaryOr → 2 BinaryOrInsts
-  EXPECT_EQ(orCount, 2u);
+  // Two comparisons, each followed by AsInt32Inst → 2 AsInt32Insts
+  EXPECT_EQ(asInt32Count, 2u);
 }
 
 TEST(WasmIRGenTest, F64PromoteF32) {
@@ -2436,7 +2432,7 @@ TEST(WasmIRGenTest, F32Comparisons) {
   bool foundStrictEq = false, foundStrictNe = false;
   bool foundLt = false, foundGt = false;
   bool foundLe = false, foundGe = false;
-  unsigned orCount = 0;
+  unsigned asInt32Count = 0;
   for (auto &inst : bb) {
     if (inst.getKind() == ValueKind::FEqualInstKind)
       foundStrictEq = true;
@@ -2450,8 +2446,8 @@ TEST(WasmIRGenTest, F32Comparisons) {
       foundLe = true;
     if (inst.getKind() == ValueKind::FGreaterThanOrEqualInstKind)
       foundGe = true;
-    if (inst.getKind() == ValueKind::BinaryOrInstKind)
-      ++orCount;
+    if (llvh::isa<AsInt32Inst>(&inst))
+      ++asInt32Count;
   }
   EXPECT_TRUE(foundStrictEq);
   EXPECT_TRUE(foundStrictNe);
@@ -2459,8 +2455,8 @@ TEST(WasmIRGenTest, F32Comparisons) {
   EXPECT_TRUE(foundGt);
   EXPECT_TRUE(foundLe);
   EXPECT_TRUE(foundGe);
-  // 6 comparisons, each with BinaryOr → 6 BinaryOrInsts
-  EXPECT_EQ(orCount, 6u);
+  // 6 comparisons, each with AsInt32Inst → 6 AsInt32Insts
+  EXPECT_EQ(asInt32Count, 6u);
 }
 
 TEST(WasmIRGenTest, F32DemoteF64) {

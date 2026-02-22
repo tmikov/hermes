@@ -71,7 +71,7 @@
 
 ;; CHECK-LABEL: function wasm_func_1(p0: number, p1: number): number 
 ;; CHECK:   FLessThanInst
-;; CHECK-NEXT:   BinaryOrInst
+;; CHECK-NEXT:   AsInt32Inst
 
 ;; CHECK-LABEL: function wasm_func_2(p0: number): number 
 ;; CHECK:   FNegate

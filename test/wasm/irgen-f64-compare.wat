@@ -4,13 +4,13 @@
 ;; LICENSE file in the root directory of this source tree.
 
 ;; Test IR generation for f64 comparison operations.
-;; Verifies that each comparison produces a compare + BinaryOrInst (bool->i32).
+;; Verifies that each comparison produces a compare + AsInt32Inst (bool->i32).
 
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s
 
 (module
-  ;; func 0: f64.eq -> BinaryStrictlyEqualInst + BinaryOrInst (boolean to i32)
+  ;; func 0: f64.eq -> FEqualInst + AsInt32Inst (boolean to i32)
   (func (param f64 f64) (result i32)
     local.get 0
     local.get 1
@@ -20,7 +20,7 @@
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:number)
 ;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:number)
 ;; CHECK-NEXT: %[[CMP:.*]] = FEqualInst (:boolean) %[[A]]: number, %[[B]]: number
-;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:number) %[[CMP]]: boolean, 0: number
+;; CHECK-NEXT: %[[R:.*]] = AsInt32Inst (:number) %[[CMP]]: boolean
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
 ;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0
@@ -37,7 +37,7 @@
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:number)
 ;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:number)
 ;; CHECK-NEXT: %[[CMP:.*]] = FNotEqualInst (:boolean) %[[A]]: number, %[[B]]: number
-;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:number) %[[CMP]]: boolean, 0: number
+;; CHECK-NEXT: %[[R:.*]] = AsInt32Inst (:number) %[[CMP]]: boolean
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
 ;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0
@@ -54,7 +54,7 @@
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:number)
 ;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:number)
 ;; CHECK-NEXT: %[[CMP:.*]] = FLessThanInst (:boolean) %[[A]]: number, %[[B]]: number
-;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:number) %[[CMP]]: boolean, 0: number
+;; CHECK-NEXT: %[[R:.*]] = AsInt32Inst (:number) %[[CMP]]: boolean
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
 ;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0
@@ -71,7 +71,7 @@
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:number)
 ;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:number)
 ;; CHECK-NEXT: %[[CMP:.*]] = FGreaterThanInst (:boolean) %[[A]]: number, %[[B]]: number
-;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:number) %[[CMP]]: boolean, 0: number
+;; CHECK-NEXT: %[[R:.*]] = AsInt32Inst (:number) %[[CMP]]: boolean
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
 ;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0
@@ -88,7 +88,7 @@
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:number)
 ;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:number)
 ;; CHECK-NEXT: %[[CMP:.*]] = FLessThanOrEqualInst (:boolean) %[[A]]: number, %[[B]]: number
-;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:number) %[[CMP]]: boolean, 0: number
+;; CHECK-NEXT: %[[R:.*]] = AsInt32Inst (:number) %[[CMP]]: boolean
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
 ;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0
@@ -105,7 +105,7 @@
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:number)
 ;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:number)
 ;; CHECK-NEXT: %[[CMP:.*]] = FGreaterThanOrEqualInst (:boolean) %[[A]]: number, %[[B]]: number
-;; CHECK-NEXT: %[[R:.*]] = BinaryOrInst (:number) %[[CMP]]: boolean, 0: number
+;; CHECK-NEXT: %[[R:.*]] = AsInt32Inst (:number) %[[CMP]]: boolean
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
 ;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0

@@ -111,11 +111,11 @@
 
 ;; CHECK-LABEL: function wasm_func_4(p0: number, p1: number): number 
 ;; CHECK:   FEqualInst
-;; CHECK:   BinaryOrInst {{.*}} 0: number
+;; CHECK:   AsInt32Inst (:number) {{.*}}: boolean
 ;; CHECK:   AsInt32Inst
 ;; CHECK:   AsInt32Inst
 ;; CHECK:   FLessThanInst
-;; CHECK:   BinaryOrInst {{.*}} 0: number
+;; CHECK:   AsInt32Inst (:number) {{.*}}: boolean
 ;; CHECK:   BranchInst %BB1
 ;; CHECK:   function_end
 
@@ -127,7 +127,7 @@
 
 ;; CHECK-LABEL: function wasm_func_5(p0: number): number 
 ;; CHECK:   FEqualInst {{.*}} 0: number
-;; CHECK:   BinaryOrInst {{.*}} 0: number
+;; CHECK:   AsInt32Inst (:number) {{.*}}: boolean
 ;; CHECK:   BranchInst %BB1
 ;; CHECK:   function_end
 

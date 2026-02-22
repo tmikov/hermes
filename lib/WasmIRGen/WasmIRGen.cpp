@@ -2741,10 +2741,8 @@ void WasmIRGen::onI32Eq() {
   Value *lhs = asNumber(pop());
   auto *cmp = builder_.createFCompareInst(
       ValueKind::FEqualInstKind, lhs, rhs);
-  // Convert boolean to i32 (true→1, false→0) via BitOr with 0.
-  auto *asI32 = builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
-  asI32->setType(Type::createNumber());
+  // Convert boolean to i32 (true→1, false→0).
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
   push(asI32);
 }
 
@@ -2753,9 +2751,7 @@ void WasmIRGen::onI32Ne() {
   Value *lhs = asNumber(pop());
   auto *cmp = builder_.createFCompareInst(
       ValueKind::FNotEqualInstKind, lhs, rhs);
-  auto *asI32 = builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
-  asI32->setType(Type::createNumber());
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
   push(asI32);
 }
 
@@ -2767,9 +2763,7 @@ void WasmIRGen::onI32LtS() {
   auto *rhsI32 = builder_.createAsInt32Inst(rhs);
   auto *cmp = builder_.createFCompareInst(
       ValueKind::FLessThanInstKind, lhsI32, rhsI32);
-  auto *asI32 = builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
-  asI32->setType(Type::createNumber());
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
   push(asI32);
 }
 
@@ -2780,9 +2774,7 @@ void WasmIRGen::onI32GtS() {
   auto *rhsI32 = builder_.createAsInt32Inst(rhs);
   auto *cmp = builder_.createFCompareInst(
       ValueKind::FGreaterThanInstKind, lhsI32, rhsI32);
-  auto *asI32 = builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
-  asI32->setType(Type::createNumber());
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
   push(asI32);
 }
 
@@ -2793,9 +2785,7 @@ void WasmIRGen::onI32LeS() {
   auto *rhsI32 = builder_.createAsInt32Inst(rhs);
   auto *cmp = builder_.createFCompareInst(
       ValueKind::FLessThanOrEqualInstKind, lhsI32, rhsI32);
-  auto *asI32 = builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
-  asI32->setType(Type::createNumber());
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
   push(asI32);
 }
 
@@ -2806,9 +2796,7 @@ void WasmIRGen::onI32GeS() {
   auto *rhsI32 = builder_.createAsInt32Inst(rhs);
   auto *cmp = builder_.createFCompareInst(
       ValueKind::FGreaterThanOrEqualInstKind, lhsI32, rhsI32);
-  auto *asI32 = builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
-  asI32->setType(Type::createNumber());
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
   push(asI32);
 }
 
@@ -2820,9 +2808,7 @@ void WasmIRGen::onI32LtU() {
   auto *rhsU32 = builder_.createAsUint32Inst(rhs);
   auto *cmp = builder_.createFCompareInst(
       ValueKind::FLessThanInstKind, lhsU32, rhsU32);
-  auto *asI32 = builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
-  asI32->setType(Type::createNumber());
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
   push(asI32);
 }
 
@@ -2833,9 +2819,7 @@ void WasmIRGen::onI32GtU() {
   auto *rhsU32 = builder_.createAsUint32Inst(rhs);
   auto *cmp = builder_.createFCompareInst(
       ValueKind::FGreaterThanInstKind, lhsU32, rhsU32);
-  auto *asI32 = builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
-  asI32->setType(Type::createNumber());
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
   push(asI32);
 }
 
@@ -2846,9 +2830,7 @@ void WasmIRGen::onI32LeU() {
   auto *rhsU32 = builder_.createAsUint32Inst(rhs);
   auto *cmp = builder_.createFCompareInst(
       ValueKind::FLessThanOrEqualInstKind, lhsU32, rhsU32);
-  auto *asI32 = builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
-  asI32->setType(Type::createNumber());
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
   push(asI32);
 }
 
@@ -2859,9 +2841,7 @@ void WasmIRGen::onI32GeU() {
   auto *rhsU32 = builder_.createAsUint32Inst(rhs);
   auto *cmp = builder_.createFCompareInst(
       ValueKind::FGreaterThanOrEqualInstKind, lhsU32, rhsU32);
-  auto *asI32 = builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
-  asI32->setType(Type::createNumber());
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
   push(asI32);
 }
 
@@ -2872,9 +2852,7 @@ void WasmIRGen::onI32Eqz() {
       ValueKind::FEqualInstKind,
       val,
       builder_.getLiteralNumber(0));
-  auto *asI32 = builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
-  asI32->setType(Type::createNumber());
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
   push(asI32);
 }
 
@@ -4134,9 +4112,7 @@ void WasmIRGen::onF64Eq() {
   Value *lhs = asNumber(pop());
   auto *cmp = builder_.createFCompareInst(
       ValueKind::FEqualInstKind, lhs, rhs);
-  auto *asI32 = builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
-  asI32->setType(Type::createNumber());
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
   push(asI32);
 }
 
@@ -4145,9 +4121,7 @@ void WasmIRGen::onF64Ne() {
   Value *lhs = asNumber(pop());
   auto *cmp = builder_.createFCompareInst(
       ValueKind::FNotEqualInstKind, lhs, rhs);
-  auto *asI32 = builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
-  asI32->setType(Type::createNumber());
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
   push(asI32);
 }
 
@@ -4156,9 +4130,7 @@ void WasmIRGen::onF64Lt() {
   Value *lhs = asNumber(pop());
   auto *cmp = builder_.createFCompareInst(
       ValueKind::FLessThanInstKind, lhs, rhs);
-  auto *asI32 = builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
-  asI32->setType(Type::createNumber());
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
   push(asI32);
 }
 
@@ -4167,9 +4139,7 @@ void WasmIRGen::onF64Gt() {
   Value *lhs = asNumber(pop());
   auto *cmp = builder_.createFCompareInst(
       ValueKind::FGreaterThanInstKind, lhs, rhs);
-  auto *asI32 = builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
-  asI32->setType(Type::createNumber());
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
   push(asI32);
 }
 
@@ -4178,9 +4148,7 @@ void WasmIRGen::onF64Le() {
   Value *lhs = asNumber(pop());
   auto *cmp = builder_.createFCompareInst(
       ValueKind::FLessThanOrEqualInstKind, lhs, rhs);
-  auto *asI32 = builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
-  asI32->setType(Type::createNumber());
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
   push(asI32);
 }
 
@@ -4189,9 +4157,7 @@ void WasmIRGen::onF64Ge() {
   Value *lhs = asNumber(pop());
   auto *cmp = builder_.createFCompareInst(
       ValueKind::FGreaterThanOrEqualInstKind, lhs, rhs);
-  auto *asI32 = builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
-  asI32->setType(Type::createNumber());
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
   push(asI32);
 }
 
@@ -4291,9 +4257,7 @@ void WasmIRGen::onF32Eq() {
   Value *lhs = asNumber(pop());
   auto *cmp = builder_.createFCompareInst(
       ValueKind::FEqualInstKind, lhs, rhs);
-  auto *asI32 = builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
-  asI32->setType(Type::createNumber());
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
   push(asI32);
 }
 
@@ -4302,9 +4266,7 @@ void WasmIRGen::onF32Ne() {
   Value *lhs = asNumber(pop());
   auto *cmp = builder_.createFCompareInst(
       ValueKind::FNotEqualInstKind, lhs, rhs);
-  auto *asI32 = builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
-  asI32->setType(Type::createNumber());
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
   push(asI32);
 }
 
@@ -4313,9 +4275,7 @@ void WasmIRGen::onF32Lt() {
   Value *lhs = asNumber(pop());
   auto *cmp = builder_.createFCompareInst(
       ValueKind::FLessThanInstKind, lhs, rhs);
-  auto *asI32 = builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
-  asI32->setType(Type::createNumber());
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
   push(asI32);
 }
 
@@ -4324,9 +4284,7 @@ void WasmIRGen::onF32Gt() {
   Value *lhs = asNumber(pop());
   auto *cmp = builder_.createFCompareInst(
       ValueKind::FGreaterThanInstKind, lhs, rhs);
-  auto *asI32 = builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
-  asI32->setType(Type::createNumber());
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
   push(asI32);
 }
 
@@ -4335,9 +4293,7 @@ void WasmIRGen::onF32Le() {
   Value *lhs = asNumber(pop());
   auto *cmp = builder_.createFCompareInst(
       ValueKind::FLessThanOrEqualInstKind, lhs, rhs);
-  auto *asI32 = builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
-  asI32->setType(Type::createNumber());
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
   push(asI32);
 }
 
@@ -4346,9 +4302,7 @@ void WasmIRGen::onF32Ge() {
   Value *lhs = asNumber(pop());
   auto *cmp = builder_.createFCompareInst(
       ValueKind::FGreaterThanOrEqualInstKind, lhs, rhs);
-  auto *asI32 = builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
-  asI32->setType(Type::createNumber());
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
   push(asI32);
 }
 
