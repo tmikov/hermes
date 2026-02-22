@@ -53,11 +53,11 @@
   (start 1)
 )
 
-;; CHECK-LABEL: function wasm_func_0(p0: any): any
+;; CHECK-LABEL: function wasm_func_0(p0: number): number 
 ;; CHECK:   AllocStackInst
 ;; CHECK:   CondBranchInst
-;; CHECK:   BinaryAddInst
+;; CHECK:   FAddInst
 
-;; CHECK-LABEL: function wasm_func_1(): any
+;; CHECK-LABEL: function wasm_func_1(): undefined 
 ;; CHECK:   LoadFrameInst
 ;; CHECK:   CallInst

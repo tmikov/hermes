@@ -16,7 +16,7 @@
   (start $trap_func))
 
 ;; Verify IR: unreachable emits CallBuiltinInst(wasmTrap) + UnreachableInst.
-;; IRCHECK-LABEL: function wasm_func_0(): any
+;; IRCHECK-LABEL: function wasm_func_0(): undefined
 ;; IRCHECK:        CallBuiltinInst {{.*}}[HermesBuiltin.wasmTrap]
 ;; IRCHECK-NEXT:   UnreachableInst
 

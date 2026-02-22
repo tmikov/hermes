@@ -43,7 +43,7 @@
 ;; CHECK:   ReturnInst
 
 ;; Check the i32 store/load function (wasm_func_0).
-;; CHECK-LABEL: function wasm_func_0(p0: any): any
+;; CHECK-LABEL: function wasm_func_0(p0: number): number 
 ;; CHECK: LoadFrameInst {{.*}}[%VS0.HEAP32]
 ;; CHECK: StorePropertyStrictInst
 ;; CHECK: LoadFrameInst {{.*}}[%VS0.HEAP32]
@@ -52,14 +52,14 @@
 ;; CHECK: CondBranchInst
 
 ;; Check the f64 store/load function (wasm_func_1).
-;; CHECK-LABEL: function wasm_func_1(p0: any): any
+;; CHECK-LABEL: function wasm_func_1(p0: number): number 
 ;; CHECK: LoadFrameInst {{.*}}[%VS0.HEAPF64]
 ;; CHECK: StorePropertyStrictInst
 ;; CHECK: LoadFrameInst {{.*}}[%VS0.HEAPF64]
 ;; CHECK: LoadPropertyInst
 
 ;; Check the load with offset function (wasm_func_2).
-;; CHECK-LABEL: function wasm_func_2(p0: any): any
+;; CHECK-LABEL: function wasm_func_2(p0: number): number 
 ;; CHECK: BinaryAddInst
 ;; CHECK: BinaryUnsignedRightShiftInst
 ;; CHECK: LoadFrameInst {{.*}}[%VS0.HEAP32]

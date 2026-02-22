@@ -354,7 +354,7 @@ TEST(WasmIRGenTest, I32Add) {
   bool foundAdd = false;
   bool foundAsInt32 = false;
   for (auto &inst : bb) {
-    if (inst.getKind() == ValueKind::BinaryAddInstKind)
+    if (inst.getKind() == ValueKind::FAddInstKind)
       foundAdd = true;
     if (llvh::isa<AsInt32Inst>(&inst))
       foundAsInt32 = true;
@@ -635,7 +635,7 @@ TEST(WasmIRGenTest, I32EqNe) {
   bool foundStrictlyEqual = false;
   bool foundBitOr = false;
   for (auto &inst : bb) {
-    if (inst.getKind() == ValueKind::BinaryStrictlyEqualInstKind)
+    if (inst.getKind() == ValueKind::FEqualInstKind)
       foundStrictlyEqual = true;
     if (inst.getKind() == ValueKind::BinaryOrInstKind)
       foundBitOr = true;
@@ -669,7 +669,7 @@ TEST(WasmIRGenTest, I32SignedComparisons) {
   for (auto &inst : bb) {
     if (llvh::isa<AsInt32Inst>(&inst))
       ++asInt32Count;
-    if (inst.getKind() == ValueKind::BinaryLessThanInstKind)
+    if (inst.getKind() == ValueKind::FLessThanInstKind)
       foundLessThan = true;
     if (inst.getKind() == ValueKind::BinaryOrInstKind)
       foundBitOr = true;
@@ -704,7 +704,7 @@ TEST(WasmIRGenTest, I32UnsignedComparisons) {
   for (auto &inst : bb) {
     if (llvh::isa<AsUint32Inst>(&inst))
       ++asUint32Count;
-    if (inst.getKind() == ValueKind::BinaryLessThanInstKind)
+    if (inst.getKind() == ValueKind::FLessThanInstKind)
       foundLessThan = true;
     if (inst.getKind() == ValueKind::BinaryOrInstKind)
       foundBitOr = true;
@@ -735,7 +735,7 @@ TEST(WasmIRGenTest, I32Eqz) {
   bool foundStrictlyEqual = false;
   bool foundBitOr = false;
   for (auto &inst : bb) {
-    if (inst.getKind() == ValueKind::BinaryStrictlyEqualInstKind)
+    if (inst.getKind() == ValueKind::FEqualInstKind)
       foundStrictlyEqual = true;
     if (inst.getKind() == ValueKind::BinaryOrInstKind)
       foundBitOr = true;
@@ -1991,13 +1991,13 @@ TEST(WasmIRGenTest, F64AddSubMulDiv) {
   bool foundAdd = false, foundSub = false;
   bool foundMul = false, foundDiv = false;
   for (auto &inst : bb) {
-    if (inst.getKind() == ValueKind::BinaryAddInstKind)
+    if (inst.getKind() == ValueKind::FAddInstKind)
       foundAdd = true;
-    if (inst.getKind() == ValueKind::BinarySubtractInstKind)
+    if (inst.getKind() == ValueKind::FSubtractInstKind)
       foundSub = true;
-    if (inst.getKind() == ValueKind::BinaryMultiplyInstKind)
+    if (inst.getKind() == ValueKind::FMultiplyInstKind)
       foundMul = true;
-    if (inst.getKind() == ValueKind::BinaryDivideInstKind)
+    if (inst.getKind() == ValueKind::FDivideInstKind)
       foundDiv = true;
   }
   EXPECT_TRUE(foundAdd);
@@ -2039,7 +2039,7 @@ TEST(WasmIRGenTest, F64NegAbsSqrt) {
   bool foundNeg = false;
   unsigned builtinCount = 0;
   for (auto &inst : bb) {
-    if (inst.getKind() == ValueKind::UnaryMinusInstKind)
+    if (inst.getKind() == ValueKind::FNegateKind)
       foundNeg = true;
     if (llvh::isa<CallBuiltinInst>(&inst))
       ++builtinCount;
@@ -2156,9 +2156,9 @@ TEST(WasmIRGenTest, F64Comparisons) {
   bool foundLt = false;
   unsigned orCount = 0;
   for (auto &inst : bb) {
-    if (inst.getKind() == ValueKind::BinaryStrictlyEqualInstKind)
+    if (inst.getKind() == ValueKind::FEqualInstKind)
       foundStrictEq = true;
-    if (inst.getKind() == ValueKind::BinaryLessThanInstKind)
+    if (inst.getKind() == ValueKind::FLessThanInstKind)
       foundLt = true;
     if (inst.getKind() == ValueKind::BinaryOrInstKind)
       ++orCount;
@@ -2245,13 +2245,13 @@ TEST(WasmIRGenTest, F32AddSubMulDiv) {
   bool foundAdd = false, foundSub = false;
   bool foundMul = false, foundDiv = false;
   for (auto &inst : bb) {
-    if (inst.getKind() == ValueKind::BinaryAddInstKind)
+    if (inst.getKind() == ValueKind::FAddInstKind)
       foundAdd = true;
-    if (inst.getKind() == ValueKind::BinarySubtractInstKind)
+    if (inst.getKind() == ValueKind::FSubtractInstKind)
       foundSub = true;
-    if (inst.getKind() == ValueKind::BinaryMultiplyInstKind)
+    if (inst.getKind() == ValueKind::FMultiplyInstKind)
       foundMul = true;
-    if (inst.getKind() == ValueKind::BinaryDivideInstKind)
+    if (inst.getKind() == ValueKind::FDivideInstKind)
       foundDiv = true;
   }
   EXPECT_TRUE(foundAdd);
@@ -2293,7 +2293,7 @@ TEST(WasmIRGenTest, F32NegAbsSqrt) {
   bool foundNeg = false;
   unsigned builtinCount = 0;
   for (auto &inst : bb) {
-    if (inst.getKind() == ValueKind::UnaryMinusInstKind)
+    if (inst.getKind() == ValueKind::FNegateKind)
       foundNeg = true;
     if (llvh::isa<CallBuiltinInst>(&inst))
       ++builtinCount;
@@ -2438,17 +2438,17 @@ TEST(WasmIRGenTest, F32Comparisons) {
   bool foundLe = false, foundGe = false;
   unsigned orCount = 0;
   for (auto &inst : bb) {
-    if (inst.getKind() == ValueKind::BinaryStrictlyEqualInstKind)
+    if (inst.getKind() == ValueKind::FEqualInstKind)
       foundStrictEq = true;
-    if (inst.getKind() == ValueKind::BinaryStrictlyNotEqualInstKind)
+    if (inst.getKind() == ValueKind::FNotEqualInstKind)
       foundStrictNe = true;
-    if (inst.getKind() == ValueKind::BinaryLessThanInstKind)
+    if (inst.getKind() == ValueKind::FLessThanInstKind)
       foundLt = true;
-    if (inst.getKind() == ValueKind::BinaryGreaterThanInstKind)
+    if (inst.getKind() == ValueKind::FGreaterThanInstKind)
       foundGt = true;
-    if (inst.getKind() == ValueKind::BinaryLessThanOrEqualInstKind)
+    if (inst.getKind() == ValueKind::FLessThanOrEqualInstKind)
       foundLe = true;
-    if (inst.getKind() == ValueKind::BinaryGreaterThanOrEqualInstKind)
+    if (inst.getKind() == ValueKind::FGreaterThanOrEqualInstKind)
       foundGe = true;
     if (inst.getKind() == ValueKind::BinaryOrInstKind)
       ++orCount;

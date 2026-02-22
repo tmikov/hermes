@@ -490,10 +490,12 @@ void WasmIRGen::createFunctions() {
         true /* strictMode */);
 
     // Set the return type based on the Wasm function type.
-    // NOTE: We do NOT set the return type on wasm functions because after
-    // inlining into export wrappers, the return type annotation can cause
-    // verifier failures when the wrapper's return type is `:any`.
-    // func->setReturnType(wasmReturnTypeToIRType(funcType));
+    if (funcType.results.empty())
+      func->setReturnType(Type::createUndefined());
+    else if (!needsReturnBuffer(funcType))
+      func->setReturnType(wasmValTypeToIRType(funcType.results[0]));
+    else
+      func->setReturnType(Type::createNumber());
 
     // Create a variable in the top-level scope to hold the pre-created closure.
     closureVars_[i] = builder_.createVariable(
@@ -518,22 +520,19 @@ void WasmIRGen::createFunctions() {
 
     // Add JSDynamicParams per Wasm parameter. i64 params need two slots
     // (lo32, hi32) for the split representation.
-    // NOTE: We do NOT set types on JSDynamicParam. While the types are known,
-    // setting them causes LoadParamInst to carry `:number` types, which makes
-    // InstSimplify promote BinaryOperatorInst to FBinaryMathInst. After
-    // inlining into export wrappers (where arguments are `:any`), the
-    // FBinaryMathInst operand type assertions fail. Instead, types propagate
-    // safely through the typed AllocStackInst locals.
     for (uint32_t p = 0; p < funcType.params.size(); ++p) {
       if (funcType.params[p] == WasmValType::I64) {
-        builder_.createJSDynamicParam(
+        auto *lo = builder_.createJSDynamicParam(
             func, ("p" + llvh::Twine(p) + "_lo").str());
-        builder_.createJSDynamicParam(
+        lo->setType(Type::createNumber());
+        auto *hi = builder_.createJSDynamicParam(
             func, ("p" + llvh::Twine(p) + "_hi").str());
+        hi->setType(Type::createNumber());
         jsParamCount += 2;
       } else {
-        builder_.createJSDynamicParam(
+        auto *param = builder_.createJSDynamicParam(
             func, ("p" + llvh::Twine(p)).str());
+        param->setType(wasmValTypeToIRType(funcType.params[p]));
         jsParamCount += 1;
       }
     }
@@ -1953,8 +1952,8 @@ Function *WasmIRGen::createExportWrapper(
       }
       case WasmValType::F32:
       case WasmValType::F64:
-        // Float/double: pass through (already a JS Number).
-        callArgs.push_back(paramVal);
+        // Coerce to number (ensures :number type for inlining correctness).
+        callArgs.push_back(builder_.createAsNumberInst(paramVal));
         break;
       default:
         // FuncRef, ExternRef, etc: pass through for now.
@@ -2254,15 +2253,6 @@ void WasmIRGen::beginFunction(
   // Create AllocStackInst for each parameter. i64 params use 2 slots.
   // JSDynamicParam index tracks the expanding JS param list.
   // Skip retBuf params (indices 1,2) if this function has them.
-  //
-  // NOTE: Parameter locals are typed as `:any` rather than their Wasm type.
-  // While we know the types, typing them causes a pipeline issue:
-  // InstSimplify runs before Mem2Reg and sees `:number` operands from
-  // LoadStackInst, promoting BinaryAddInst → FAddInst. Mem2Reg then
-  // replaces the LoadStackInst with LoadParamInst (`:any`), leaving
-  // FAddInst with `:any` operands, which fails verification. Declared
-  // locals (below) are safe to type because their values always come from
-  // typed wasm operations.
   uint32_t jsParamIdx = needsReturnBuffer(funcType) ? 3 : 1; // 0 = "this"
   for (uint32_t i = 0; i < numParams; ++i) {
     localSlotIndex_.push_back(locals_.size());
@@ -2270,10 +2260,10 @@ void WasmIRGen::beginFunction(
       // i64 param: allocate lo and hi stack slots.
       auto *allocLo = builder_.createAllocStackInst(
           ("local_" + llvh::Twine(i) + "_lo").str(),
-          Type::createAnyType());
+          Type::createNumber());
       auto *allocHi = builder_.createAllocStackInst(
           ("local_" + llvh::Twine(i) + "_hi").str(),
-          Type::createAnyType());
+          Type::createNumber());
       locals_.push_back(allocLo);
       locals_.push_back(allocHi);
 
@@ -2287,7 +2277,7 @@ void WasmIRGen::beginFunction(
     } else {
       auto *alloc = builder_.createAllocStackInst(
           ("local_" + llvh::Twine(i)).str(),
-          Type::createAnyType());
+          wasmValTypeToIRType(funcType.params[i]));
       locals_.push_back(alloc);
 
       auto *param = currentFunc_->getJSDynamicParam(jsParamIdx);
@@ -2560,21 +2550,18 @@ void WasmIRGen::onDrop() {
 // --- i32 arithmetic (D.3) ---
 
 void WasmIRGen::onI32Add() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *add = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryAddInstKind);
-  add->setType(Type::createNumber());
-  push(builder_.createAsInt32Inst(add));
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  push(builder_.createAsInt32Inst(
+      builder_.createFBinaryMathInst(ValueKind::FAddInstKind, lhs, rhs)));
 }
 
 void WasmIRGen::onI32Sub() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *sub = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinarySubtractInstKind);
-  sub->setType(Type::createNumber());
-  push(builder_.createAsInt32Inst(sub));
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  push(builder_.createAsInt32Inst(
+      builder_.createFBinaryMathInst(
+          ValueKind::FSubtractInstKind, lhs, rhs)));
 }
 
 void WasmIRGen::onI32Mul() {
@@ -2750,10 +2737,10 @@ void WasmIRGen::onI32Extend16S() {
 // --- i32 comparisons (D.4) ---
 
 void WasmIRGen::onI32Eq() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryStrictlyEqualInstKind);
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FEqualInstKind, lhs, rhs);
   // Convert boolean to i32 (true→1, false→0) via BitOr with 0.
   auto *asI32 = builder_.createBinaryOperatorInst(
       cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
@@ -2762,10 +2749,10 @@ void WasmIRGen::onI32Eq() {
 }
 
 void WasmIRGen::onI32Ne() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryStrictlyNotEqualInstKind);
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FNotEqualInstKind, lhs, rhs);
   auto *asI32 = builder_.createBinaryOperatorInst(
       cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
   asI32->setType(Type::createNumber());
@@ -2778,8 +2765,8 @@ void WasmIRGen::onI32LtS() {
   // Signed: cast both operands to int32 before comparing.
   auto *lhsI32 = builder_.createAsInt32Inst(lhs);
   auto *rhsI32 = builder_.createAsInt32Inst(rhs);
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhsI32, rhsI32, ValueKind::BinaryLessThanInstKind);
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FLessThanInstKind, lhsI32, rhsI32);
   auto *asI32 = builder_.createBinaryOperatorInst(
       cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
   asI32->setType(Type::createNumber());
@@ -2791,8 +2778,8 @@ void WasmIRGen::onI32GtS() {
   Value *lhs = pop();
   auto *lhsI32 = builder_.createAsInt32Inst(lhs);
   auto *rhsI32 = builder_.createAsInt32Inst(rhs);
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhsI32, rhsI32, ValueKind::BinaryGreaterThanInstKind);
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FGreaterThanInstKind, lhsI32, rhsI32);
   auto *asI32 = builder_.createBinaryOperatorInst(
       cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
   asI32->setType(Type::createNumber());
@@ -2804,8 +2791,8 @@ void WasmIRGen::onI32LeS() {
   Value *lhs = pop();
   auto *lhsI32 = builder_.createAsInt32Inst(lhs);
   auto *rhsI32 = builder_.createAsInt32Inst(rhs);
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhsI32, rhsI32, ValueKind::BinaryLessThanOrEqualInstKind);
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FLessThanOrEqualInstKind, lhsI32, rhsI32);
   auto *asI32 = builder_.createBinaryOperatorInst(
       cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
   asI32->setType(Type::createNumber());
@@ -2817,8 +2804,8 @@ void WasmIRGen::onI32GeS() {
   Value *lhs = pop();
   auto *lhsI32 = builder_.createAsInt32Inst(lhs);
   auto *rhsI32 = builder_.createAsInt32Inst(rhs);
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhsI32, rhsI32, ValueKind::BinaryGreaterThanOrEqualInstKind);
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FGreaterThanOrEqualInstKind, lhsI32, rhsI32);
   auto *asI32 = builder_.createBinaryOperatorInst(
       cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
   asI32->setType(Type::createNumber());
@@ -2831,8 +2818,8 @@ void WasmIRGen::onI32LtU() {
   // Unsigned: cast both operands to uint32 before comparing.
   auto *lhsU32 = builder_.createAsUint32Inst(lhs);
   auto *rhsU32 = builder_.createAsUint32Inst(rhs);
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhsU32, rhsU32, ValueKind::BinaryLessThanInstKind);
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FLessThanInstKind, lhsU32, rhsU32);
   auto *asI32 = builder_.createBinaryOperatorInst(
       cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
   asI32->setType(Type::createNumber());
@@ -2844,8 +2831,8 @@ void WasmIRGen::onI32GtU() {
   Value *lhs = pop();
   auto *lhsU32 = builder_.createAsUint32Inst(lhs);
   auto *rhsU32 = builder_.createAsUint32Inst(rhs);
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhsU32, rhsU32, ValueKind::BinaryGreaterThanInstKind);
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FGreaterThanInstKind, lhsU32, rhsU32);
   auto *asI32 = builder_.createBinaryOperatorInst(
       cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
   asI32->setType(Type::createNumber());
@@ -2857,8 +2844,8 @@ void WasmIRGen::onI32LeU() {
   Value *lhs = pop();
   auto *lhsU32 = builder_.createAsUint32Inst(lhs);
   auto *rhsU32 = builder_.createAsUint32Inst(rhs);
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhsU32, rhsU32, ValueKind::BinaryLessThanOrEqualInstKind);
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FLessThanOrEqualInstKind, lhsU32, rhsU32);
   auto *asI32 = builder_.createBinaryOperatorInst(
       cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
   asI32->setType(Type::createNumber());
@@ -2870,8 +2857,8 @@ void WasmIRGen::onI32GeU() {
   Value *lhs = pop();
   auto *lhsU32 = builder_.createAsUint32Inst(lhs);
   auto *rhsU32 = builder_.createAsUint32Inst(rhs);
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhsU32, rhsU32, ValueKind::BinaryGreaterThanOrEqualInstKind);
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FGreaterThanOrEqualInstKind, lhsU32, rhsU32);
   auto *asI32 = builder_.createBinaryOperatorInst(
       cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
   asI32->setType(Type::createNumber());
@@ -2879,12 +2866,12 @@ void WasmIRGen::onI32GeU() {
 }
 
 void WasmIRGen::onI32Eqz() {
-  Value *val = pop();
+  Value *val = asNumber(pop());
   // eqz(x) == (x === 0) → boolean → i32.
-  auto *cmp = builder_.createBinaryOperatorInst(
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FEqualInstKind,
       val,
-      builder_.getLiteralNumber(0),
-      ValueKind::BinaryStrictlyEqualInstKind);
+      builder_.getLiteralNumber(0));
   auto *asI32 = builder_.createBinaryOperatorInst(
       cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
   asI32->setType(Type::createNumber());
@@ -4042,51 +4029,42 @@ void WasmIRGen::onI64Extend32S() {
 // --- f64 arithmetic (E.1) ---
 // We use BinaryOperatorInst (not FBinaryMathInst) because the F-prefixed
 // instructions require number-typed inputs, but our values are loaded from
-// AllocStackInst with :any type. The regular BinaryOperatorInst works
-// correctly on number values and can be optimized to F-instructions later.
+// Wasm operands are statically typed as :number, so we emit typed
+// F-instructions directly (FAddInst, FCompareInst, FNegate, etc.).
+// Values popped from the Wasm stack are wrapped in asNumber() to ensure
+// they are typed as :number, since some IR instructions (calls, loads)
+// produce :any even though the Wasm type system guarantees number.
 
 void WasmIRGen::onF64Add() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *inst = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryAddInstKind);
-  inst->setType(Type::createNumber());
-  push(inst);
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  push(builder_.createFBinaryMathInst(ValueKind::FAddInstKind, lhs, rhs));
 }
 
 void WasmIRGen::onF64Sub() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *inst = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinarySubtractInstKind);
-  inst->setType(Type::createNumber());
-  push(inst);
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  push(builder_.createFBinaryMathInst(
+      ValueKind::FSubtractInstKind, lhs, rhs));
 }
 
 void WasmIRGen::onF64Mul() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *inst = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryMultiplyInstKind);
-  inst->setType(Type::createNumber());
-  push(inst);
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  push(builder_.createFBinaryMathInst(
+      ValueKind::FMultiplyInstKind, lhs, rhs));
 }
 
 void WasmIRGen::onF64Div() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *inst = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryDivideInstKind);
-  inst->setType(Type::createNumber());
-  push(inst);
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  push(builder_.createFBinaryMathInst(
+      ValueKind::FDivideInstKind, lhs, rhs));
 }
 
 void WasmIRGen::onF64Neg() {
-  Value *val = pop();
-  auto *inst = builder_.createUnaryOperatorInst(
-      val, ValueKind::UnaryMinusInstKind);
-  inst->setType(Type::createNumber());
-  push(inst);
+  Value *val = asNumber(pop());
+  push(builder_.createFUnaryMathInst(ValueKind::FNegateKind, val));
 }
 
 void WasmIRGen::onF64Abs() {
@@ -4132,17 +4110,14 @@ void WasmIRGen::onF64Max() {
 }
 
 // --- f64 comparisons (E.1) ---
-// Use BinaryStrictlyEqualInst/etc. (same pattern as i32 comparisons in D.4).
-// For float comparisons, strict equality works correctly: NaN !== NaN,
-// and the ordering comparisons follow IEEE 754 semantics (NaN comparisons
-// return false, which is correct for Wasm).
+// Use FCompareInst since both operands are :number. The result is :boolean,
+// converted to i32 (0/1) via |0.
 
 void WasmIRGen::onF64Eq() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryStrictlyEqualInstKind);
-  // Convert boolean to i32 (true→1, false→0) via BitOr with 0.
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FEqualInstKind, lhs, rhs);
   auto *asI32 = builder_.createBinaryOperatorInst(
       cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
   asI32->setType(Type::createNumber());
@@ -4150,10 +4125,10 @@ void WasmIRGen::onF64Eq() {
 }
 
 void WasmIRGen::onF64Ne() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryStrictlyNotEqualInstKind);
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FNotEqualInstKind, lhs, rhs);
   auto *asI32 = builder_.createBinaryOperatorInst(
       cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
   asI32->setType(Type::createNumber());
@@ -4161,10 +4136,10 @@ void WasmIRGen::onF64Ne() {
 }
 
 void WasmIRGen::onF64Lt() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryLessThanInstKind);
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FLessThanInstKind, lhs, rhs);
   auto *asI32 = builder_.createBinaryOperatorInst(
       cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
   asI32->setType(Type::createNumber());
@@ -4172,10 +4147,10 @@ void WasmIRGen::onF64Lt() {
 }
 
 void WasmIRGen::onF64Gt() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryGreaterThanInstKind);
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FGreaterThanInstKind, lhs, rhs);
   auto *asI32 = builder_.createBinaryOperatorInst(
       cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
   asI32->setType(Type::createNumber());
@@ -4183,10 +4158,10 @@ void WasmIRGen::onF64Gt() {
 }
 
 void WasmIRGen::onF64Le() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryLessThanOrEqualInstKind);
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FLessThanOrEqualInstKind, lhs, rhs);
   auto *asI32 = builder_.createBinaryOperatorInst(
       cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
   asI32->setType(Type::createNumber());
@@ -4194,10 +4169,10 @@ void WasmIRGen::onF64Le() {
 }
 
 void WasmIRGen::onF64Ge() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryGreaterThanOrEqualInstKind);
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FGreaterThanOrEqualInstKind, lhs, rhs);
   auto *asI32 = builder_.createBinaryOperatorInst(
       cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
   asI32->setType(Type::createNumber());
@@ -4210,37 +4185,37 @@ void WasmIRGen::onF64Ge() {
 // onF32Const, so they don't need fround.
 
 void WasmIRGen::onF32Add() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  push(emitFround(builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryAddInstKind)));
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  push(emitFround(builder_.createFBinaryMathInst(
+      ValueKind::FAddInstKind, lhs, rhs)));
 }
 
 void WasmIRGen::onF32Sub() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  push(emitFround(builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinarySubtractInstKind)));
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  push(emitFround(builder_.createFBinaryMathInst(
+      ValueKind::FSubtractInstKind, lhs, rhs)));
 }
 
 void WasmIRGen::onF32Mul() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  push(emitFround(builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryMultiplyInstKind)));
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  push(emitFround(builder_.createFBinaryMathInst(
+      ValueKind::FMultiplyInstKind, lhs, rhs)));
 }
 
 void WasmIRGen::onF32Div() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  push(emitFround(builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryDivideInstKind)));
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  push(emitFround(builder_.createFBinaryMathInst(
+      ValueKind::FDivideInstKind, lhs, rhs)));
 }
 
 void WasmIRGen::onF32Neg() {
-  Value *val = pop();
-  push(emitFround(builder_.createUnaryOperatorInst(
-      val, ValueKind::UnaryMinusInstKind)));
+  Value *val = asNumber(pop());
+  push(emitFround(builder_.createFUnaryMathInst(
+      ValueKind::FNegateKind, val)));
 }
 
 void WasmIRGen::onF32Abs() {
@@ -4293,15 +4268,13 @@ void WasmIRGen::onF32Max() {
 }
 
 // --- f32 comparisons (E.3) ---
-// Same pattern as f64 comparisons. f32 values are represented as doubles
-// that are already f32-precise, so comparisons work correctly including
-// NaN handling (IEEE 754).
+// Same pattern as f64 comparisons. Use FCompareInst since operands are :number.
 
 void WasmIRGen::onF32Eq() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryStrictlyEqualInstKind);
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FEqualInstKind, lhs, rhs);
   auto *asI32 = builder_.createBinaryOperatorInst(
       cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
   asI32->setType(Type::createNumber());
@@ -4309,10 +4282,10 @@ void WasmIRGen::onF32Eq() {
 }
 
 void WasmIRGen::onF32Ne() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryStrictlyNotEqualInstKind);
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FNotEqualInstKind, lhs, rhs);
   auto *asI32 = builder_.createBinaryOperatorInst(
       cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
   asI32->setType(Type::createNumber());
@@ -4320,10 +4293,10 @@ void WasmIRGen::onF32Ne() {
 }
 
 void WasmIRGen::onF32Lt() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryLessThanInstKind);
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FLessThanInstKind, lhs, rhs);
   auto *asI32 = builder_.createBinaryOperatorInst(
       cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
   asI32->setType(Type::createNumber());
@@ -4331,10 +4304,10 @@ void WasmIRGen::onF32Lt() {
 }
 
 void WasmIRGen::onF32Gt() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryGreaterThanInstKind);
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FGreaterThanInstKind, lhs, rhs);
   auto *asI32 = builder_.createBinaryOperatorInst(
       cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
   asI32->setType(Type::createNumber());
@@ -4342,10 +4315,10 @@ void WasmIRGen::onF32Gt() {
 }
 
 void WasmIRGen::onF32Le() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryLessThanOrEqualInstKind);
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FLessThanOrEqualInstKind, lhs, rhs);
   auto *asI32 = builder_.createBinaryOperatorInst(
       cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
   asI32->setType(Type::createNumber());
@@ -4353,10 +4326,10 @@ void WasmIRGen::onF32Le() {
 }
 
 void WasmIRGen::onF32Ge() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryGreaterThanOrEqualInstKind);
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FGreaterThanOrEqualInstKind, lhs, rhs);
   auto *asI32 = builder_.createBinaryOperatorInst(
       cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind);
   asI32->setType(Type::createNumber());
@@ -4991,6 +4964,12 @@ Value *WasmIRGen::emitFround(Value *val) {
       BuiltinMethod::Math_fround, {val});
   inst->setType(Type::createNumber());
   return inst;
+}
+
+Value *WasmIRGen::asNumber(Value *val) {
+  if (val->getType().isNumberType())
+    return val;
+  return builder_.createUnionNarrowTrustedInst(val, Type::createNumber());
 }
 
 void WasmIRGen::pushI64(Value *lo, Value *hi) {

@@ -37,7 +37,7 @@
 ;; CHECK-NEXT:         ReturnInst %10: object
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_0(retbuf_I: object, retbuf_F: object): any
+;; CHECK-NEXT: function wasm_func_0(retbuf_I: object, retbuf_F: object): number 
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadParamInst (:object) %retbuf_I: object

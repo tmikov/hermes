@@ -31,14 +31,14 @@
   )
 )
 
-;; CHECK-LABEL: function wasm_func_0(p0: any, p1: any, p2: any): any
+;; CHECK-LABEL: function wasm_func_0(p0: number, p1: number, p2: number): undefined 
 ;; CHECK: CallBuiltinInst {{.*}}[HermesBuiltin.wasmMemoryFill]
 
-;; CHECK-LABEL: function wasm_func_1(p0: any, p1: any, p2: any): any
+;; CHECK-LABEL: function wasm_func_1(p0: number, p1: number, p2: number): undefined 
 ;; CHECK: CallBuiltinInst {{.*}}[HermesBuiltin.wasmMemoryCopy]
 
-;; CHECK-LABEL: function wasm_func_2(p0: any, p1: any, p2: any): any
+;; CHECK-LABEL: function wasm_func_2(p0: number, p1: number, p2: number): undefined 
 ;; CHECK: CallBuiltinInst {{.*}}[HermesBuiltin.wasmMemoryInit]
 
-;; CHECK-LABEL: function wasm_func_3(): any
+;; CHECK-LABEL: function wasm_func_3(): undefined 
 ;; CHECK: CallBuiltinInst {{.*}}[HermesBuiltin.wasmDataDrop]

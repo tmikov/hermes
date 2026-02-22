@@ -22,7 +22,7 @@
   (func $get_imm (result i32)
     global.get $g_imm)
 
-;; CHECK-LABEL: function wasm_func_0(): any
+;; CHECK-LABEL: function wasm_func_0(): number 
 ;; CHECK: %BB0:
 ;; CHECK:   %[[PARENT:.*]] = GetParentScopeInst
 ;; CHECK:   %[[VAL:.*]] = LoadFrameInst (:any) %[[PARENT]]{{.*}}, [%VS0.global_0]: any
@@ -37,11 +37,11 @@
     global.set $g_mut
     global.get $g_mut)
 
-;; CHECK-LABEL: function wasm_func_1(p0: any): any
+;; CHECK-LABEL: function wasm_func_1(p0: number): number 
 ;; CHECK: %BB0:
 ;; CHECK:   %[[PARENT:.*]] = GetParentScopeInst
-;; CHECK:   %[[P0:.*]] = LoadStackInst (:any)
-;; CHECK:   StoreFrameInst %[[PARENT]]{{.*}}, %[[P0]]: any, [%VS0.global_1]: any
+;; CHECK:   %[[P0:.*]] = LoadStackInst (:number)
+;; CHECK:   StoreFrameInst %[[PARENT]]{{.*}}, %[[P0]]: number, [%VS0.global_1]: any
 ;; CHECK:   %[[LOADED:.*]] = LoadFrameInst (:any) %[[PARENT]]{{.*}}, [%VS0.global_1]: any
 ;; CHECK:   BranchInst %BB1
 ;; CHECK: %BB1:
@@ -54,7 +54,7 @@
     global.set $g_f64
     global.get $g_f64)
 
-;; CHECK-LABEL: function wasm_func_2(): any
+;; CHECK-LABEL: function wasm_func_2(): number 
 ;; CHECK: %BB0:
 ;; CHECK:   %[[PARENT:.*]] = GetParentScopeInst
 ;; CHECK:   StoreFrameInst %[[PARENT]]{{.*}}, 6.28{{.*}}: number, [%VS0.global_2]: any

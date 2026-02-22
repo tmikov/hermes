@@ -35,10 +35,10 @@
 ;; CHECK:   CreateFunctionInst {{.*}}__wasm_instantiate__
 ;; CHECK:   ReturnInst
 
-;; CHECK-LABEL: function wasm_func_0(p0: any, p1: any): any
-;; CHECK:   BinaryAddInst
+;; CHECK-LABEL: function wasm_func_0(p0: number, p1: number): number 
+;; CHECK:   FAddInst
 ;; CHECK-NEXT:   AsInt32Inst
 
-;; CHECK-LABEL: function wasm_func_1(): any
+;; CHECK-LABEL: function wasm_func_1(): undefined 
 ;; CHECK:   LoadFrameInst
 ;; CHECK:   CallInst

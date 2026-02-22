@@ -16,7 +16,7 @@
   (func
     unreachable)
 
-;; CHECK-LABEL: function wasm_func_0(): any
+;; CHECK-LABEL: function wasm_func_0(): undefined 
 ;; CHECK-NEXT: %BB0:
 ;; CHECK:        CallBuiltinInst {{.*}}[HermesBuiltin.wasmTrap]
 ;; CHECK-NEXT:   UnreachableInst
@@ -29,7 +29,7 @@
   (func
     nop)
 
-;; CHECK-LABEL: function wasm_func_1(): any
+;; CHECK-LABEL: function wasm_func_1(): undefined 
 ;; CHECK-NEXT: %BB0:
 ;; CHECK:              BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
@@ -42,7 +42,7 @@
     nop
     i32.const 99)
 
-;; CHECK-LABEL: function wasm_func_2(): any
+;; CHECK-LABEL: function wasm_func_2(): number 
 ;; CHECK-NEXT: %BB0:
 ;; CHECK:              BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
@@ -57,7 +57,7 @@
     i32.const 42
     unreachable))
 
-;; CHECK-LABEL: function wasm_func_3(): any
+;; CHECK-LABEL: function wasm_func_3(): number 
 ;; CHECK-NEXT: %BB0:
 ;; CHECK:        CallBuiltinInst {{.*}}[HermesBuiltin.wasmTrap]
 ;; CHECK-NEXT:   UnreachableInst

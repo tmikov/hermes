@@ -16,7 +16,7 @@
     i64.const 0x1FFFFFFFF  ;; lo=0xFFFFFFFF, hi=1
     i32.wrap_i64)
 
-;; CHECK-LABEL: function wasm_func_0(): any
+;; CHECK-LABEL: function wasm_func_0(): number 
 ;; CHECK: PhiInst (:number) -1: number
 ;; CHECK-NEXT: ReturnInst %{{.*}}: number
 

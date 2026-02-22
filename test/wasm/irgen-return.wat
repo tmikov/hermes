@@ -17,7 +17,7 @@
     i32.const 42
     return)
 
-;; CHECK-LABEL: function wasm_func_0(): any
+;; CHECK-LABEL: function wasm_func_0(): number 
 ;; CHECK-NEXT: %BB0:
 ;; CHECK:              ReturnInst 42: number
 ;; CHECK-NEXT: %BB1:
@@ -29,7 +29,7 @@
   (func (result i32)
     i32.const 42)
 
-;; CHECK-LABEL: function wasm_func_1(): any
+;; CHECK-LABEL: function wasm_func_1(): number 
 ;; CHECK-NEXT: %BB0:
 ;; CHECK:              BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
@@ -42,7 +42,7 @@
     i32.const 42
     drop))
 
-;; CHECK-LABEL: function wasm_func_2(): any
+;; CHECK-LABEL: function wasm_func_2(): undefined 
 ;; CHECK-NEXT: %BB0:
 ;; CHECK:              BranchInst %BB1
 ;; CHECK-NEXT: %BB1:

@@ -21,7 +21,7 @@
 
 ;; The i64.const pushes 2 values (lo=100, hi=0). drop should consume both.
 ;; The function should return the i32 42 via the phi node.
-;; CHECK-LABEL: function wasm_func_0(): any
+;; CHECK-LABEL: function wasm_func_0(): number 
 ;; CHECK:              BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
 ;; CHECK-NEXT:   %[[PHI:.*]] = PhiInst (:number) 42: number, %BB0

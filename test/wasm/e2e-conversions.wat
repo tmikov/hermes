@@ -112,44 +112,44 @@
   (start $start)
 )
 
-;; CHECK-LABEL: function wasm_func_0(p0: any): any
+;; CHECK-LABEL: function wasm_func_0(p0: number): number 
 ;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32TruncF64S]
 
-;; CHECK-LABEL: function wasm_func_1(p0: any): any
+;; CHECK-LABEL: function wasm_func_1(p0: number): number 
 ;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32TruncF64U]
 
-;; CHECK-LABEL: function wasm_func_2(p0: any): any
+;; CHECK-LABEL: function wasm_func_2(p0: number): number 
 ;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32TruncF64S]
 
-;; CHECK-LABEL: function wasm_func_3(p0: any): any
+;; CHECK-LABEL: function wasm_func_3(p0: number): number 
 ;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32TruncF64U]
 
-;; CHECK-LABEL: function wasm_func_4(p0: any): any
+;; CHECK-LABEL: function wasm_func_4(p0: number): number 
 ;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32TruncSatF64S]
 
-;; CHECK-LABEL: function wasm_func_5(p0: any): any
+;; CHECK-LABEL: function wasm_func_5(p0: number): number 
 ;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32TruncSatF64U]
 
-;; CHECK-LABEL: function wasm_func_6(p0: any): any
+;; CHECK-LABEL: function wasm_func_6(p0: number): number 
 ;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32TruncSatF64S]
 
-;; CHECK-LABEL: function wasm_func_7(p0: any): any
+;; CHECK-LABEL: function wasm_func_7(p0: number): number 
 ;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32TruncSatF64U]
 
-;; CHECK-LABEL: function wasm_func_8(p0: any): any
+;; CHECK-LABEL: function wasm_func_8(p0: number): number 
 ;; CHECK:   AsInt32Inst
 
-;; CHECK-LABEL: function wasm_func_9(p0: any): any
+;; CHECK-LABEL: function wasm_func_9(p0: number): number 
 ;; CHECK:   AsUint32Inst
 
-;; CHECK-LABEL: function wasm_func_10(p0: any): any
+;; CHECK-LABEL: function wasm_func_10(p0: number): number 
 ;; CHECK:   AsInt32Inst
 
-;; CHECK-LABEL: function wasm_func_11(p0: any): any
+;; CHECK-LABEL: function wasm_func_11(p0: number): number 
 ;; CHECK:   AsUint32Inst
 
-;; CHECK-LABEL: function wasm_func_12(p0: any): any
+;; CHECK-LABEL: function wasm_func_12(p0: number): number 
 ;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32ReinterpretF32]
 
-;; CHECK-LABEL: function wasm_func_13(p0: any): any
+;; CHECK-LABEL: function wasm_func_13(p0: number): number 
 ;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmF32ReinterpretI32]

@@ -15,7 +15,7 @@
   (func (export "empty_loop")
     (loop))
 
-;; CHECK-LABEL: function wasm_func_0(): any
+;; CHECK-LABEL: function wasm_func_0(): undefined 
 ;; CHECK: %BB0:
 ;; CHECK:              BranchInst %BB2
 ;; CHECK: %BB1:
@@ -33,7 +33,7 @@
     (loop
       (br 0)))
 
-;; CHECK-LABEL: function wasm_func_1(): any
+;; CHECK-LABEL: function wasm_func_1(): undefined 
 ;; CHECK: %BB0:
 ;; CHECK:              BranchInst %BB2
 ;; CHECK: %BB1:
@@ -54,7 +54,7 @@
       (br_if 0))
     (local.get 0))
 
-;; CHECK-LABEL: function wasm_func_2(p0: any): any
+;; CHECK-LABEL: function wasm_func_2(p0: number): number 
 ;; CHECK: %BB0:
 ;; CHECK:        BranchInst %BB2
 ;; CHECK: %BB2:
@@ -73,7 +73,7 @@
     (loop (result i32)
       (i32.const 99)))
 
-;; CHECK-LABEL: function wasm_func_3(): any
+;; CHECK-LABEL: function wasm_func_3(): number 
 ;; CHECK: %BB0:
 ;; CHECK:              BranchInst %BB2
 ;; CHECK: %BB1:
@@ -96,7 +96,7 @@
         (br 1))
       (i32.const 0))))
 
-;; CHECK-LABEL: function wasm_func_4(): any
+;; CHECK-LABEL: function wasm_func_4(): number 
 ;; CHECK: %BB0:
 ;; CHECK:              BranchInst %BB3
 ;; CHECK: %BB1:

@@ -48,16 +48,16 @@
 ;; CHECK-NEXT:         ReturnInst %10: object
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_0(p0: any): any 
+;; CHECK-NEXT: function wasm_func_0(p0: number): number 
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.retBufI]: any
-;; CHECK-NEXT:   %2 = AllocStackInst (:any) $local_0: any
-;; CHECK-NEXT:   %3 = LoadParamInst (:any) %p0: any
-;; CHECK-NEXT:        StoreStackInst %3: any, %2: any
-;; CHECK-NEXT:   %5 = LoadStackInst (:any) %2: any
-;; CHECK-NEXT:   %6 = BinaryStrictlyEqualInst (:any) %5: any, 0: number
-;; CHECK-NEXT:   %7 = BinaryOrInst (:number) %6: any, 0: number
+;; CHECK-NEXT:   %2 = AllocStackInst (:number) $local_0: any
+;; CHECK-NEXT:   %3 = LoadParamInst (:number) %p0: number
+;; CHECK-NEXT:        StoreStackInst %3: number, %2: number
+;; CHECK-NEXT:   %5 = LoadStackInst (:number) %2: number
+;; CHECK-NEXT:   %6 = FEqualInst (:boolean) %5: number, 0: number
+;; CHECK-NEXT:   %7 = BinaryOrInst (:number) %6: boolean, 0: number
 ;; CHECK-NEXT:        CondBranchInst %7: number, %BB2, %BB3
 ;; CHECK-NEXT: %BB1:
 ;; CHECK-NEXT:   %9 = PhiInst (:number) %20: number, %BB4
@@ -65,13 +65,13 @@
 ;; CHECK-NEXT: %BB2:
 ;; CHECK-NEXT:         BranchInst %BB4
 ;; CHECK-NEXT: %BB3:
-;; CHECK-NEXT:   %12 = LoadStackInst (:any) %2: any
-;; CHECK-NEXT:   %13 = LoadStackInst (:any) %2: any
-;; CHECK-NEXT:   %14 = BinarySubtractInst (:number) %13: any, 1: number
+;; CHECK-NEXT:   %12 = LoadStackInst (:number) %2: number
+;; CHECK-NEXT:   %13 = LoadStackInst (:number) %2: number
+;; CHECK-NEXT:   %14 = FSubtractInst (:number) %13: number, 1: number
 ;; CHECK-NEXT:   %15 = AsInt32Inst (:number) %14: number
 ;; CHECK-NEXT:   %16 = LoadFrameInst (:any) %0: environment, [%VS0.closure_0]: any
 ;; CHECK-NEXT:   %17 = CallInst (:any) %16: any, %wasm_func_0(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined, %15: number
-;; CHECK-NEXT:   %18 = CallBuiltinInst (:number) [Math.imul]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %12: any, %17: any
+;; CHECK-NEXT:   %18 = CallBuiltinInst (:number) [Math.imul]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %12: number, %17: any
 ;; CHECK-NEXT:         BranchInst %BB4
 ;; CHECK-NEXT: %BB4:
 ;; CHECK-NEXT:   %20 = PhiInst (:number) 1: number, %BB2, %18: number, %BB3

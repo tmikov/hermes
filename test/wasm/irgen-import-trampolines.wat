@@ -115,27 +115,27 @@
 ;; CHECK-NEXT:         ReturnInst %39: object
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_0(p0: any): any 
+;; CHECK-NEXT: function wasm_func_0(p0: number): undefined 
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.import_func_0]: any
-;; CHECK-NEXT:   %2 = LoadParamInst (:any) %p0: any
-;; CHECK-NEXT:   %3 = CallInst (:any) %1: any, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %2: any
+;; CHECK-NEXT:   %2 = LoadParamInst (:number) %p0: number
+;; CHECK-NEXT:   %3 = CallInst (:any) %1: any, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %2: number
 ;; CHECK-NEXT:        ReturnInst undefined: undefined
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_1(p0: any, p1: any): any 
+;; CHECK-NEXT: function wasm_func_1(p0: number, p1: number): number 
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.import_func_1]: any
-;; CHECK-NEXT:   %2 = LoadParamInst (:any) %p0: any
-;; CHECK-NEXT:   %3 = LoadParamInst (:any) %p1: any
-;; CHECK-NEXT:   %4 = CallInst (:any) %1: any, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %2: any, %3: any
+;; CHECK-NEXT:   %2 = LoadParamInst (:number) %p0: number
+;; CHECK-NEXT:   %3 = LoadParamInst (:number) %p1: number
+;; CHECK-NEXT:   %4 = CallInst (:any) %1: any, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %2: number, %3: number
 ;; CHECK-NEXT:   %5 = AsInt32Inst (:number) %4: any
 ;; CHECK-NEXT:        ReturnInst %5: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_2(): any 
+;; CHECK-NEXT: function wasm_func_2(): undefined 
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.import_func_2]: any
@@ -143,31 +143,31 @@
 ;; CHECK-NEXT:        ReturnInst undefined: undefined
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_3(p0: any, p1: any): any 
+;; CHECK-NEXT: function wasm_func_3(p0: number, p1: number): number 
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.import_func_3]: any
-;; CHECK-NEXT:   %2 = LoadParamInst (:any) %p0: any
-;; CHECK-NEXT:   %3 = LoadParamInst (:any) %p1: any
-;; CHECK-NEXT:   %4 = CallInst (:any) %1: any, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %2: any, %3: any
+;; CHECK-NEXT:   %2 = LoadParamInst (:number) %p0: number
+;; CHECK-NEXT:   %3 = LoadParamInst (:number) %p1: number
+;; CHECK-NEXT:   %4 = CallInst (:any) %1: any, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %2: number, %3: number
 ;; CHECK-NEXT:        ReturnInst %4: any
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_4(retbuf_I: object, retbuf_F: object, p0_lo: any, p0_hi: any): any 
+;; CHECK-NEXT: function wasm_func_4(retbuf_I: object, retbuf_F: object, p0_lo: number, p0_hi: number): number 
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.import_func_4]: any
 ;; CHECK-NEXT:   %2 = LoadParamInst (:object) %retbuf_I: object
 ;; CHECK-NEXT:   %3 = LoadParamInst (:object) %retbuf_F: object
-;; CHECK-NEXT:   %4 = LoadParamInst (:any) %p0_lo: any
-;; CHECK-NEXT:   %5 = LoadParamInst (:any) %p0_hi: any
-;; CHECK-NEXT:   %6 = CallBuiltinInst (:bigint) [HermesBuiltin.wasmI64ToBigInt]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %4: any, %5: any
+;; CHECK-NEXT:   %4 = LoadParamInst (:number) %p0_lo: number
+;; CHECK-NEXT:   %5 = LoadParamInst (:number) %p0_hi: number
+;; CHECK-NEXT:   %6 = CallBuiltinInst (:bigint) [HermesBuiltin.wasmI64ToBigInt]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %4: number, %5: number
 ;; CHECK-NEXT:   %7 = CallInst (:any) %1: any, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %6: bigint
 ;; CHECK-NEXT:   %8 = CallBuiltinInst (:any) [HermesBuiltin.wasmBigIntToI64]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %2: object, %7: any
 ;; CHECK-NEXT:        ReturnInst 0: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_5(): any 
+;; CHECK-NEXT: function wasm_func_5(): undefined 
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.retBufI]: any

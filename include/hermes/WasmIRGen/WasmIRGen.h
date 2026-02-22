@@ -688,6 +688,11 @@ class WasmIRGen {
   /// Wrap a value in Math.fround to produce f32 precision.
   Value *emitFround(Value *val);
 
+  /// Ensure \p val has type :number. If it already does, return it unchanged.
+  /// Otherwise insert a zero-cost UnionNarrowTrustedInst to narrow from :any
+  /// to :number. This is safe because Wasm values are statically typed.
+  Value *asNumber(Value *val);
+
   /// Check if the top of the value stack is the hi32 part of an i64.
   bool isTopI64() const;
 

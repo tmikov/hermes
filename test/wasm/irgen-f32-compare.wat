@@ -17,18 +17,18 @@
     local.get 0
     local.get 1
     f32.eq)
-;; CHECK-LABEL: function wasm_func_0(p0: any, p1: any): any
+;; CHECK-LABEL: function wasm_func_0(p0: number, p1: number): number 
 ;; CHECK: %BB0:
-;; CHECK:   %[[L0_0:.*]] = AllocStackInst (:any)
-;; CHECK:   %[[P0_0:.*]] = LoadParamInst (:any) %p0: any
-;; CHECK-NEXT:              StoreStackInst %[[P0_0]]: any, %[[L0_0]]: any
-;; CHECK:   %[[L1_0:.*]] = AllocStackInst (:any)
-;; CHECK:   %[[P1_0:.*]] = LoadParamInst (:any) %p1: any
-;; CHECK-NEXT:              StoreStackInst %[[P1_0]]: any, %[[L1_0]]: any
-;; CHECK:   %[[A:.*]] = LoadStackInst (:any) %[[L0_0]]: any
-;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any) %[[L1_0]]: any
-;; CHECK-NEXT: %[[CMP:.*]] = BinaryStrictlyEqualInst (:any) %[[A]]: any, %[[B]]: any
-;; CHECK-NEXT: %[[OR:.*]] = BinaryOrInst (:number) %[[CMP]]: any, 0: number
+;; CHECK:   %[[L0_0:.*]] = AllocStackInst (:number)
+;; CHECK:   %[[P0_0:.*]] = LoadParamInst (:number) %p0: number
+;; CHECK-NEXT:              StoreStackInst %[[P0_0]]: number, %[[L0_0]]: number
+;; CHECK:   %[[L1_0:.*]] = AllocStackInst (:number)
+;; CHECK:   %[[P1_0:.*]] = LoadParamInst (:number) %p1: number
+;; CHECK-NEXT:              StoreStackInst %[[P1_0]]: number, %[[L1_0]]: number
+;; CHECK:   %[[A:.*]] = LoadStackInst (:number) %[[L0_0]]: number
+;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:number) %[[L1_0]]: number
+;; CHECK-NEXT: %[[CMP:.*]] = FEqualInst (:boolean) %[[A]]: number, %[[B]]: number
+;; CHECK-NEXT: %[[OR:.*]] = BinaryOrInst (:number) %[[CMP]]: boolean, 0: number
 ;; CHECK-NEXT:              BranchInst %BB1
 ;; CHECK: %BB1:
 ;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[OR]]: number, %BB0
@@ -40,11 +40,11 @@
     local.get 0
     local.get 1
     f32.ne)
-;; CHECK-LABEL: function wasm_func_1(p0: any, p1: any): any
-;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[CMP:.*]] = BinaryStrictlyNotEqualInst (:any) %[[A]]: any, %[[B]]: any
-;; CHECK-NEXT: %[[OR:.*]] = BinaryOrInst (:number) %[[CMP]]: any, 0: number
+;; CHECK-LABEL: function wasm_func_1(p0: number, p1: number): number 
+;; CHECK:   %[[A:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[CMP:.*]] = FNotEqualInst (:boolean) %[[A]]: number, %[[B]]: number
+;; CHECK-NEXT: %[[OR:.*]] = BinaryOrInst (:number) %[[CMP]]: boolean, 0: number
 ;; CHECK-NEXT:              BranchInst %BB1
 ;; CHECK: %BB1:
 ;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[OR]]: number, %BB0
@@ -56,11 +56,11 @@
     local.get 0
     local.get 1
     f32.lt)
-;; CHECK-LABEL: function wasm_func_2(p0: any, p1: any): any
-;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[CMP:.*]] = BinaryLessThanInst (:any) %[[A]]: any, %[[B]]: any
-;; CHECK-NEXT: %[[OR:.*]] = BinaryOrInst (:number) %[[CMP]]: any, 0: number
+;; CHECK-LABEL: function wasm_func_2(p0: number, p1: number): number 
+;; CHECK:   %[[A:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[CMP:.*]] = FLessThanInst (:boolean) %[[A]]: number, %[[B]]: number
+;; CHECK-NEXT: %[[OR:.*]] = BinaryOrInst (:number) %[[CMP]]: boolean, 0: number
 ;; CHECK-NEXT:              BranchInst %BB1
 ;; CHECK: %BB1:
 ;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[OR]]: number, %BB0
@@ -72,11 +72,11 @@
     local.get 0
     local.get 1
     f32.gt)
-;; CHECK-LABEL: function wasm_func_3(p0: any, p1: any): any
-;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[CMP:.*]] = BinaryGreaterThanInst (:any) %[[A]]: any, %[[B]]: any
-;; CHECK-NEXT: %[[OR:.*]] = BinaryOrInst (:number) %[[CMP]]: any, 0: number
+;; CHECK-LABEL: function wasm_func_3(p0: number, p1: number): number 
+;; CHECK:   %[[A:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[CMP:.*]] = FGreaterThanInst (:boolean) %[[A]]: number, %[[B]]: number
+;; CHECK-NEXT: %[[OR:.*]] = BinaryOrInst (:number) %[[CMP]]: boolean, 0: number
 ;; CHECK-NEXT:              BranchInst %BB1
 ;; CHECK: %BB1:
 ;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[OR]]: number, %BB0
@@ -88,11 +88,11 @@
     local.get 0
     local.get 1
     f32.le)
-;; CHECK-LABEL: function wasm_func_4(p0: any, p1: any): any
-;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[CMP:.*]] = BinaryLessThanOrEqualInst (:any) %[[A]]: any, %[[B]]: any
-;; CHECK-NEXT: %[[OR:.*]] = BinaryOrInst (:number) %[[CMP]]: any, 0: number
+;; CHECK-LABEL: function wasm_func_4(p0: number, p1: number): number 
+;; CHECK:   %[[A:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[CMP:.*]] = FLessThanOrEqualInst (:boolean) %[[A]]: number, %[[B]]: number
+;; CHECK-NEXT: %[[OR:.*]] = BinaryOrInst (:number) %[[CMP]]: boolean, 0: number
 ;; CHECK-NEXT:              BranchInst %BB1
 ;; CHECK: %BB1:
 ;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[OR]]: number, %BB0
@@ -105,11 +105,11 @@
     local.get 1
     f32.ge)
 )
-;; CHECK-LABEL: function wasm_func_5(p0: any, p1: any): any
-;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[CMP:.*]] = BinaryGreaterThanOrEqualInst (:any) %[[A]]: any, %[[B]]: any
-;; CHECK-NEXT: %[[OR:.*]] = BinaryOrInst (:number) %[[CMP]]: any, 0: number
+;; CHECK-LABEL: function wasm_func_5(p0: number, p1: number): number 
+;; CHECK:   %[[A:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[CMP:.*]] = FGreaterThanOrEqualInst (:boolean) %[[A]]: number, %[[B]]: number
+;; CHECK-NEXT: %[[OR:.*]] = BinaryOrInst (:number) %[[CMP]]: boolean, 0: number
 ;; CHECK-NEXT:              BranchInst %BB1
 ;; CHECK: %BB1:
 ;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[OR]]: number, %BB0

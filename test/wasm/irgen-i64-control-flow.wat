@@ -50,7 +50,7 @@
 ;; CHECK-NEXT:         ReturnInst %10: object
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_0(retbuf_I: object, retbuf_F: object): any 
+;; CHECK-NEXT: function wasm_func_0(retbuf_I: object, retbuf_F: object): number 
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadParamInst (:object) %retbuf_I: object
@@ -68,16 +68,16 @@
 ;; CHECK-NEXT:         BranchInst %BB1
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_1(retbuf_I: object, retbuf_F: object, p0: any): any 
+;; CHECK-NEXT: function wasm_func_1(retbuf_I: object, retbuf_F: object, p0: number): number 
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadParamInst (:object) %retbuf_I: object
 ;; CHECK-NEXT:   %2 = LoadParamInst (:object) %retbuf_F: object
-;; CHECK-NEXT:   %3 = AllocStackInst (:any) $local_0: any
-;; CHECK-NEXT:   %4 = LoadParamInst (:any) %p0: any
-;; CHECK-NEXT:        StoreStackInst %4: any, %3: any
-;; CHECK-NEXT:   %6 = LoadStackInst (:any) %3: any
-;; CHECK-NEXT:        CondBranchInst %6: any, %BB2, %BB3
+;; CHECK-NEXT:   %3 = AllocStackInst (:number) $local_0: any
+;; CHECK-NEXT:   %4 = LoadParamInst (:number) %p0: number
+;; CHECK-NEXT:        StoreStackInst %4: number, %3: number
+;; CHECK-NEXT:   %6 = LoadStackInst (:number) %3: number
+;; CHECK-NEXT:        CondBranchInst %6: number, %BB2, %BB3
 ;; CHECK-NEXT: %BB1:
 ;; CHECK-NEXT:   %8 = PhiInst (:number) %15: number, %BB4
 ;; CHECK-NEXT:   %9 = PhiInst (:number) %16: number, %BB4

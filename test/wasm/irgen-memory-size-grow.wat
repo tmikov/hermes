@@ -14,7 +14,7 @@
     memory.size
   )
 
-;; CHECK-LABEL: function wasm_func_0(): any
+;; CHECK-LABEL: function wasm_func_0(): number 
 ;; CHECK:   LoadFrameInst (:any) %{{.*}}, [%VS0.HEAPU8]: any
 ;; CHECK:   LoadPropertyInst (:any) %{{.*}}, "length": string
 ;; CHECK:   BinaryUnsignedRightShiftInst (:number) %{{.*}}, 16: number
@@ -26,7 +26,7 @@
     memory.grow
   )
 
-;; CHECK-LABEL: function wasm_func_1(p0: any): any
+;; CHECK-LABEL: function wasm_func_1(p0: number): number 
 ;; Load HEAPU8 and compute old page count.
 ;; CHECK:   LoadFrameInst (:any) %{{.*}}, [%VS0.HEAPU8]: any
 ;; CHECK:   LoadPropertyInst (:any) %{{.*}}, "length": string

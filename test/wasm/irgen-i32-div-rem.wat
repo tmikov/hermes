@@ -15,10 +15,10 @@
     local.get 1
     i32.div_s)
 
-;; CHECK-LABEL: function wasm_func_0(p0: any, p1: any): any
-;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[R:.*]] = CallBuiltinInst (:number) [HermesBuiltin.wasmI32DivS]{{.*}}, %[[A]]: any, %[[B]]: any
+;; CHECK-LABEL: function wasm_func_0(p0: number, p1: number): number 
+;; CHECK:   %[[A:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[R:.*]] = CallBuiltinInst (:number) [HermesBuiltin.wasmI32DivS]{{.*}}, %[[A]]: number, %[[B]]: number
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
 ;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0
@@ -31,10 +31,10 @@
     local.get 1
     i32.div_u)
 
-;; CHECK-LABEL: function wasm_func_1(p0: any, p1: any): any
-;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[R:.*]] = CallBuiltinInst (:number) [HermesBuiltin.wasmI32DivU]{{.*}}, %[[A]]: any, %[[B]]: any
+;; CHECK-LABEL: function wasm_func_1(p0: number, p1: number): number 
+;; CHECK:   %[[A:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[R:.*]] = CallBuiltinInst (:number) [HermesBuiltin.wasmI32DivU]{{.*}}, %[[A]]: number, %[[B]]: number
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
 ;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0
@@ -47,10 +47,10 @@
     local.get 1
     i32.rem_s)
 
-;; CHECK-LABEL: function wasm_func_2(p0: any, p1: any): any
-;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[R:.*]] = CallBuiltinInst (:number) [HermesBuiltin.wasmI32RemS]{{.*}}, %[[A]]: any, %[[B]]: any
+;; CHECK-LABEL: function wasm_func_2(p0: number, p1: number): number 
+;; CHECK:   %[[A:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[R:.*]] = CallBuiltinInst (:number) [HermesBuiltin.wasmI32RemS]{{.*}}, %[[A]]: number, %[[B]]: number
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
 ;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0
@@ -63,10 +63,10 @@
     local.get 1
     i32.rem_u))
 
-;; CHECK-LABEL: function wasm_func_3(p0: any, p1: any): any
-;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[R:.*]] = CallBuiltinInst (:number) [HermesBuiltin.wasmI32RemU]{{.*}}, %[[A]]: any, %[[B]]: any
+;; CHECK-LABEL: function wasm_func_3(p0: number, p1: number): number 
+;; CHECK:   %[[A:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[R:.*]] = CallBuiltinInst (:number) [HermesBuiltin.wasmI32RemU]{{.*}}, %[[A]]: number, %[[B]]: number
 ;; CHECK-NEXT:             BranchInst %BB1
 ;; CHECK: %BB1:
 ;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[R]]: number, %BB0
