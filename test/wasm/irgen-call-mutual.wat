@@ -71,7 +71,7 @@
 ;; CHECK-NEXT:   %5 = LoadStackInst (:number) %2: number
 ;; CHECK-NEXT:   %6 = FEqualInst (:boolean) %5: number, 0: number
 ;; CHECK-NEXT:   %7 = AsInt32Inst (:number) %6: boolean
-;; CHECK-NEXT:        CondBranchInst %7: number, %BB2, %BB3
+;; CHECK-NEXT:        CondBranchInst %6: boolean, %BB2, %BB3
 ;; CHECK-NEXT: %BB1:
 ;; CHECK-NEXT:   %9 = PhiInst (:number) %18: number, %BB4
 ;; CHECK-NEXT:         ReturnInst %9: number
@@ -99,7 +99,7 @@
 ;; CHECK-NEXT:   %5 = LoadStackInst (:number) %2: number
 ;; CHECK-NEXT:   %6 = FEqualInst (:boolean) %5: number, 0: number
 ;; CHECK-NEXT:   %7 = AsInt32Inst (:number) %6: boolean
-;; CHECK-NEXT:        CondBranchInst %7: number, %BB2, %BB3
+;; CHECK-NEXT:        CondBranchInst %6: boolean, %BB2, %BB3
 ;; CHECK-NEXT: %BB1:
 ;; CHECK-NEXT:   %9 = PhiInst (:number) %18: number, %BB4
 ;; CHECK-NEXT:         ReturnInst %9: number

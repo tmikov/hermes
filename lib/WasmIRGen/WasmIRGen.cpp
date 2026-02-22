@@ -80,6 +80,18 @@ static std::string buildTableTypeString(const WasmTableType &tt) {
 }
 
 /// Map a WasmValType to an IR Type.
+/// If \p val is an AsInt32Inst whose operand is boolean, return the boolean
+/// operand directly (suitable for use as a CondBranchInst condition).
+/// Otherwise return \p val unchanged.
+static Value *peekThroughAsInt32(Value *val) {
+  if (auto *ai = llvh::dyn_cast<AsInt32Inst>(val)) {
+    if (ai->getSingleOperand()->getType().isBooleanType())
+      return ai->getSingleOperand();
+  }
+  return val;
+}
+
+/// Map a WasmValType to an IR Type.
 static Type wasmValTypeToIRType(WasmValType vt) {
   switch (vt) {
     case WasmValType::I32:
@@ -3004,7 +3016,7 @@ void WasmIRGen::onIf(
   }
 
   // Pop the condition.
-  Value *cond = pop();
+  Value *cond = peekThroughAsInt32(pop());
 
   // Create thenBlock, elseBlock, mergeBlock.
   auto *thenBlock = builder_.createBasicBlock(currentFunc_);
@@ -3312,7 +3324,7 @@ void WasmIRGen::onBrIf(uint32_t depth) {
   entry.branchTargeted = true;
 
   // Pop the condition.
-  Value *cond = pop();
+  Value *cond = peekThroughAsInt32(pop());
 
   // Create a fallthrough block for when the condition is false.
   auto *fallthroughBlock = builder_.createBasicBlock(currentFunc_);
