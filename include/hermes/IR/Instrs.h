@@ -206,6 +206,10 @@ class AddEmptyStringInst : public SingleOperandInst {
   }
 
   SideEffect getSideEffectImpl() const {
+    // When the operand is a primitive, no user code can execute (no
+    // valueOf/toString on objects), so the conversion is side-effect free.
+    if (getSingleOperand()->getType().isPrimitive())
+      return SideEffect{}.setIdempotent();
     return SideEffect::createExecute();
   }
 
@@ -237,6 +241,10 @@ class ToPropertyKeyInst : public SingleOperandInst {
   }
 
   SideEffect getSideEffectImpl() const {
+    // When the operand is a primitive, no user code can execute (no
+    // valueOf/toString on objects), so the conversion is side-effect free.
+    if (getSingleOperand()->getType().isPrimitive())
+      return SideEffect{}.setIdempotent();
     return SideEffect::createExecute();
   }
 
@@ -310,6 +318,10 @@ class AsNumberInst : public SingleOperandInst {
   }
 
   SideEffect getSideEffectImpl() const {
+    // When the operand is a primitive, no user code can execute (no
+    // valueOf/toString on objects), so the conversion is side-effect free.
+    if (getSingleOperand()->getType().isPrimitive())
+      return SideEffect{}.setIdempotent();
     return SideEffect::createExecute();
   }
 
@@ -347,6 +359,10 @@ class AsNumericInst : public SingleOperandInst {
   }
 
   SideEffect getSideEffectImpl() const {
+    // When the operand is a primitive, no user code can execute (no
+    // valueOf/toString on objects), so the conversion is side-effect free.
+    if (getSingleOperand()->getType().isPrimitive())
+      return SideEffect{}.setIdempotent();
     return SideEffect::createExecute();
   }
 
@@ -380,6 +396,10 @@ class AsInt32Inst : public SingleOperandInst {
   }
 
   SideEffect getSideEffectImpl() const {
+    // When the operand is a primitive, no user code can execute (no
+    // valueOf/toString on objects), so the conversion is side-effect free.
+    if (getSingleOperand()->getType().isPrimitive())
+      return SideEffect{}.setIdempotent();
     return SideEffect::createExecute();
   }
 
@@ -415,6 +435,10 @@ class AsUint32Inst : public SingleOperandInst {
   }
 
   SideEffect getSideEffectImpl() const {
+    // When the operand is a primitive, no user code can execute (no
+    // valueOf/toString on objects), so the conversion is side-effect free.
+    if (getSingleOperand()->getType().isPrimitive())
+      return SideEffect{}.setIdempotent();
     return SideEffect::createExecute();
   }
 
