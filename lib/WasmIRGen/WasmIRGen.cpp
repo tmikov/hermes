@@ -3743,8 +3743,10 @@ void WasmIRGen::onI64And() {
   auto [loA, hiA] = popI64();
   auto *lo = builder_.createBinaryOperatorInst(
       loA, loB, ValueKind::BinaryAndInstKind);
+  lo->setType(Type::createNumber());
   auto *hi = builder_.createBinaryOperatorInst(
       hiA, hiB, ValueKind::BinaryAndInstKind);
+  hi->setType(Type::createNumber());
   pushI64(lo, hi);
 }
 
@@ -3755,8 +3757,10 @@ void WasmIRGen::onI64Or() {
   auto [loA, hiA] = popI64();
   auto *lo = builder_.createBinaryOperatorInst(
       loA, loB, ValueKind::BinaryOrInstKind);
+  lo->setType(Type::createNumber());
   auto *hi = builder_.createBinaryOperatorInst(
       hiA, hiB, ValueKind::BinaryOrInstKind);
+  hi->setType(Type::createNumber());
   pushI64(lo, hi);
 }
 
@@ -3767,8 +3771,10 @@ void WasmIRGen::onI64Xor() {
   auto [loA, hiA] = popI64();
   auto *lo = builder_.createBinaryOperatorInst(
       loA, loB, ValueKind::BinaryXorInstKind);
+  lo->setType(Type::createNumber());
   auto *hi = builder_.createBinaryOperatorInst(
       hiA, hiB, ValueKind::BinaryXorInstKind);
+  hi->setType(Type::createNumber());
   pushI64(lo, hi);
 }
 
@@ -3854,12 +3860,23 @@ void WasmIRGen::onI64Popcnt() {
 // --- i64 comparisons (G.3) ---
 // These take i64 operands and return i32 (0 or 1). The result is pushed
 // as a single i32 value (not an i64 pair).
+// Inlined as IR rather than calling builtins, enabling subsequent
+// optimization passes (constant folding, DCE, compare-and-branch fusion).
 
 void WasmIRGen::onI64Eqz() {
   if (unreachable_)
     return;
   auto [lo, hi] = popI64();
-  push(helpers_.emitI64Eqz(lo, hi));
+  // Coerce to consistent encoding before comparing.
+  auto *loI = ensureInt32(lo);
+  auto *hiI = ensureInt32(hi);
+  // (lo | hi) == 0: non-zero if either half is non-zero.
+  auto *combined = builder_.createBinaryOperatorInst(
+      loI, hiI, ValueKind::BinaryOrInstKind);
+  combined->setType(Type::createNumber());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FEqualInstKind, combined, builder_.getLiteralNumber(0));
+  push(builder_.createAsInt32Inst(cmp));
 }
 
 void WasmIRGen::onI64Eq() {
@@ -3867,7 +3884,25 @@ void WasmIRGen::onI64Eq() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  push(helpers_.emitI64Eq(loA, hiA, loB, hiB));
+  // Coerce all halves to consistent encoding (signed int32) before XOR.
+  // Raw stack values may be signed or unsigned doubles for the same bits.
+  auto *loA_i = ensureInt32(loA);
+  auto *loB_i = ensureInt32(loB);
+  auto *hiA_i = ensureInt32(hiA);
+  auto *hiB_i = ensureInt32(hiB);
+  // XOR each half: 0 if equal. OR the results: 0 iff both halves equal.
+  auto *xorLo = builder_.createBinaryOperatorInst(
+      loA_i, loB_i, ValueKind::BinaryXorInstKind);
+  xorLo->setType(Type::createNumber());
+  auto *xorHi = builder_.createBinaryOperatorInst(
+      hiA_i, hiB_i, ValueKind::BinaryXorInstKind);
+  xorHi->setType(Type::createNumber());
+  auto *combined = builder_.createBinaryOperatorInst(
+      xorLo, xorHi, ValueKind::BinaryOrInstKind);
+  combined->setType(Type::createNumber());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FEqualInstKind, combined, builder_.getLiteralNumber(0));
+  push(builder_.createAsInt32Inst(cmp));
 }
 
 void WasmIRGen::onI64Ne() {
@@ -3875,7 +3910,87 @@ void WasmIRGen::onI64Ne() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  push(helpers_.emitI64Ne(loA, hiA, loB, hiB));
+  // Coerce all halves to consistent encoding before XOR.
+  auto *loA_i = ensureInt32(loA);
+  auto *loB_i = ensureInt32(loB);
+  auto *hiA_i = ensureInt32(hiA);
+  auto *hiB_i = ensureInt32(hiB);
+  // XOR each half, OR: non-zero iff any half differs.
+  auto *xorLo = builder_.createBinaryOperatorInst(
+      loA_i, loB_i, ValueKind::BinaryXorInstKind);
+  xorLo->setType(Type::createNumber());
+  auto *xorHi = builder_.createBinaryOperatorInst(
+      hiA_i, hiB_i, ValueKind::BinaryXorInstKind);
+  xorHi->setType(Type::createNumber());
+  auto *combined = builder_.createBinaryOperatorInst(
+      xorLo, xorHi, ValueKind::BinaryOrInstKind);
+  combined->setType(Type::createNumber());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FNotEqualInstKind, combined, builder_.getLiteralNumber(0));
+  push(builder_.createAsInt32Inst(cmp));
+}
+
+Value *WasmIRGen::ensureInt32(Value *val) {
+  switch (val->getKind()) {
+    case ValueKind::AsInt32InstKind:
+    case ValueKind::BinaryAndInstKind:
+    case ValueKind::BinaryOrInstKind:
+    case ValueKind::BinaryXorInstKind:
+    case ValueKind::BinaryLeftShiftInstKind:
+    case ValueKind::BinaryRightShiftInstKind:
+      return val;
+    default:
+      return builder_.createAsInt32Inst(val);
+  }
+}
+
+Value *WasmIRGen::ensureUint32(Value *val) {
+  switch (val->getKind()) {
+    case ValueKind::AsUint32InstKind:
+    case ValueKind::BinaryUnsignedRightShiftInstKind:
+      return val;
+    default:
+      return builder_.createAsUint32Inst(val);
+  }
+}
+
+Value *WasmIRGen::emitI64OrderedCmp(
+    Value *loA,
+    Value *hiA,
+    Value *loB,
+    Value *hiB,
+    ValueKind hiOp,
+    ValueKind loOp,
+    bool hiSigned) {
+  // Coerce hi words: signed (ensureInt32) or unsigned (ensureUint32).
+  Value *hiA_c = hiSigned ? ensureInt32(hiA) : ensureUint32(hiA);
+  Value *hiB_c = hiSigned ? ensureInt32(hiB) : ensureUint32(hiB);
+  // Lo words always use unsigned interpretation for ordering.
+  auto *loA_u = ensureUint32(loA);
+  auto *loB_u = ensureUint32(loB);
+
+  // hiOp on coerced hi words. FCompareInst auto-sets type to boolean.
+  auto *hiCmp = builder_.createFCompareInst(hiOp, hiA_c, hiB_c);
+  // Equality on coerced hi words. We reuse the same coerced values
+  // because raw stack values may have inconsistent encodings (signed
+  // vs unsigned doubles for the same 32-bit value).
+  auto *hiEq = builder_.createFCompareInst(
+      ValueKind::FEqualInstKind, hiA_c, hiB_c);
+  // loOp on unsigned lo words.
+  auto *loCmp = builder_.createFCompareInst(loOp, loA_u, loB_u);
+
+  // Combine: hiCmp || (hiEq && loCmp)
+  // AsInt32Inst converts boolean to i32 (auto-sets type).
+  auto *hiCmpI = builder_.createAsInt32Inst(hiCmp);
+  auto *hiEqI = builder_.createAsInt32Inst(hiEq);
+  auto *loCmpI = builder_.createAsInt32Inst(loCmp);
+  auto *eqAndLo = builder_.createBinaryOperatorInst(
+      hiEqI, loCmpI, ValueKind::BinaryAndInstKind);
+  eqAndLo->setType(Type::createNumber());
+  auto *result = builder_.createBinaryOperatorInst(
+      hiCmpI, eqAndLo, ValueKind::BinaryOrInstKind);
+  result->setType(Type::createNumber());
+  return result;
 }
 
 void WasmIRGen::onI64LtS() {
@@ -3883,7 +3998,9 @@ void WasmIRGen::onI64LtS() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  push(helpers_.emitI64LtS(loA, hiA, loB, hiB));
+  push(emitI64OrderedCmp(
+      loA, hiA, loB, hiB, ValueKind::FLessThanInstKind,
+      ValueKind::FLessThanInstKind, /*hiSigned=*/true));
 }
 
 void WasmIRGen::onI64GtS() {
@@ -3891,7 +4008,9 @@ void WasmIRGen::onI64GtS() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  push(helpers_.emitI64GtS(loA, hiA, loB, hiB));
+  push(emitI64OrderedCmp(
+      loA, hiA, loB, hiB, ValueKind::FGreaterThanInstKind,
+      ValueKind::FGreaterThanInstKind, /*hiSigned=*/true));
 }
 
 void WasmIRGen::onI64LeS() {
@@ -3899,7 +4018,9 @@ void WasmIRGen::onI64LeS() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  push(helpers_.emitI64LeS(loA, hiA, loB, hiB));
+  push(emitI64OrderedCmp(
+      loA, hiA, loB, hiB, ValueKind::FLessThanInstKind,
+      ValueKind::FLessThanOrEqualInstKind, /*hiSigned=*/true));
 }
 
 void WasmIRGen::onI64GeS() {
@@ -3907,7 +4028,9 @@ void WasmIRGen::onI64GeS() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  push(helpers_.emitI64GeS(loA, hiA, loB, hiB));
+  push(emitI64OrderedCmp(
+      loA, hiA, loB, hiB, ValueKind::FGreaterThanInstKind,
+      ValueKind::FGreaterThanOrEqualInstKind, /*hiSigned=*/true));
 }
 
 void WasmIRGen::onI64LtU() {
@@ -3915,7 +4038,9 @@ void WasmIRGen::onI64LtU() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  push(helpers_.emitI64LtU(loA, hiA, loB, hiB));
+  push(emitI64OrderedCmp(
+      loA, hiA, loB, hiB, ValueKind::FLessThanInstKind,
+      ValueKind::FLessThanInstKind, /*hiSigned=*/false));
 }
 
 void WasmIRGen::onI64GtU() {
@@ -3923,7 +4048,9 @@ void WasmIRGen::onI64GtU() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  push(helpers_.emitI64GtU(loA, hiA, loB, hiB));
+  push(emitI64OrderedCmp(
+      loA, hiA, loB, hiB, ValueKind::FGreaterThanInstKind,
+      ValueKind::FGreaterThanInstKind, /*hiSigned=*/false));
 }
 
 void WasmIRGen::onI64LeU() {
@@ -3931,7 +4058,9 @@ void WasmIRGen::onI64LeU() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  push(helpers_.emitI64LeU(loA, hiA, loB, hiB));
+  push(emitI64OrderedCmp(
+      loA, hiA, loB, hiB, ValueKind::FLessThanInstKind,
+      ValueKind::FLessThanOrEqualInstKind, /*hiSigned=*/false));
 }
 
 void WasmIRGen::onI64GeU() {
@@ -3939,7 +4068,9 @@ void WasmIRGen::onI64GeU() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  push(helpers_.emitI64GeU(loA, hiA, loB, hiB));
+  push(emitI64OrderedCmp(
+      loA, hiA, loB, hiB, ValueKind::FGreaterThanInstKind,
+      ValueKind::FGreaterThanOrEqualInstKind, /*hiSigned=*/false));
 }
 
 // --- i64 conversions: inline IR (G.4a) ---

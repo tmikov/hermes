@@ -126,19 +126,6 @@ class WasmHelpers {
   Instruction *emitI64Ctz(Value *lo, Value *hi);
   Instruction *emitI64Popcnt(Value *lo, Value *hi);
 
-  /// i64 comparison ops. Take split args, return i32 (0 or 1).
-  Instruction *emitI64Eqz(Value *lo, Value *hi);
-  Instruction *emitI64Eq(Value *loA, Value *hiA, Value *loB, Value *hiB);
-  Instruction *emitI64Ne(Value *loA, Value *hiA, Value *loB, Value *hiB);
-  Instruction *emitI64LtS(Value *loA, Value *hiA, Value *loB, Value *hiB);
-  Instruction *emitI64GtS(Value *loA, Value *hiA, Value *loB, Value *hiB);
-  Instruction *emitI64LeS(Value *loA, Value *hiA, Value *loB, Value *hiB);
-  Instruction *emitI64GeS(Value *loA, Value *hiA, Value *loB, Value *hiB);
-  Instruction *emitI64LtU(Value *loA, Value *hiA, Value *loB, Value *hiB);
-  Instruction *emitI64GtU(Value *loA, Value *hiA, Value *loB, Value *hiB);
-  Instruction *emitI64LeU(Value *loA, Value *hiA, Value *loB, Value *hiB);
-  Instruction *emitI64GeU(Value *loA, Value *hiA, Value *loB, Value *hiB);
-
   // --- i64 conversion helpers (G.4b) ---
   // Take (retBufI, f64_arg), write lo/hi result to retBufI[0]/[1].
 

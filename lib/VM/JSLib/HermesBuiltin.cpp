@@ -649,93 +649,6 @@ CallResult<HermesValue> wasmI64Popcnt(void *, Runtime &runtime) {
       static_cast<double>(__builtin_popcountll(a)));
 }
 
-/// i64.eqz: test if zero. Returns i32 (0 or 1).
-CallResult<HermesValue> wasmI64Eqz(void *, Runtime &runtime) {
-  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  int64_t a = argsToI64(args, 0, 1);
-  return HermesValue::encodeTrustedNumberValue(a == 0 ? 1 : 0);
-}
-
-/// i64.eq: Returns i32 (0 or 1).
-CallResult<HermesValue> wasmI64Eq(void *, Runtime &runtime) {
-  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  int64_t a = argsToI64(args, 0, 1);
-  int64_t b = argsToI64(args, 2, 3);
-  return HermesValue::encodeTrustedNumberValue(a == b ? 1 : 0);
-}
-
-/// i64.ne: Returns i32 (0 or 1).
-CallResult<HermesValue> wasmI64Ne(void *, Runtime &runtime) {
-  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  int64_t a = argsToI64(args, 0, 1);
-  int64_t b = argsToI64(args, 2, 3);
-  return HermesValue::encodeTrustedNumberValue(a != b ? 1 : 0);
-}
-
-/// i64.lt_s: signed less than. Returns i32.
-CallResult<HermesValue> wasmI64LtS(void *, Runtime &runtime) {
-  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  int64_t a = argsToI64(args, 0, 1);
-  int64_t b = argsToI64(args, 2, 3);
-  return HermesValue::encodeTrustedNumberValue(a < b ? 1 : 0);
-}
-
-/// i64.gt_s: signed greater than. Returns i32.
-CallResult<HermesValue> wasmI64GtS(void *, Runtime &runtime) {
-  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  int64_t a = argsToI64(args, 0, 1);
-  int64_t b = argsToI64(args, 2, 3);
-  return HermesValue::encodeTrustedNumberValue(a > b ? 1 : 0);
-}
-
-/// i64.le_s: signed less or equal. Returns i32.
-CallResult<HermesValue> wasmI64LeS(void *, Runtime &runtime) {
-  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  int64_t a = argsToI64(args, 0, 1);
-  int64_t b = argsToI64(args, 2, 3);
-  return HermesValue::encodeTrustedNumberValue(a <= b ? 1 : 0);
-}
-
-/// i64.ge_s: signed greater or equal. Returns i32.
-CallResult<HermesValue> wasmI64GeS(void *, Runtime &runtime) {
-  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  int64_t a = argsToI64(args, 0, 1);
-  int64_t b = argsToI64(args, 2, 3);
-  return HermesValue::encodeTrustedNumberValue(a >= b ? 1 : 0);
-}
-
-/// i64.lt_u: unsigned less than. Returns i32.
-CallResult<HermesValue> wasmI64LtU(void *, Runtime &runtime) {
-  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  uint64_t a = static_cast<uint64_t>(argsToI64(args, 0, 1));
-  uint64_t b = static_cast<uint64_t>(argsToI64(args, 2, 3));
-  return HermesValue::encodeTrustedNumberValue(a < b ? 1 : 0);
-}
-
-/// i64.gt_u: unsigned greater than. Returns i32.
-CallResult<HermesValue> wasmI64GtU(void *, Runtime &runtime) {
-  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  uint64_t a = static_cast<uint64_t>(argsToI64(args, 0, 1));
-  uint64_t b = static_cast<uint64_t>(argsToI64(args, 2, 3));
-  return HermesValue::encodeTrustedNumberValue(a > b ? 1 : 0);
-}
-
-/// i64.le_u: unsigned less or equal. Returns i32.
-CallResult<HermesValue> wasmI64LeU(void *, Runtime &runtime) {
-  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  uint64_t a = static_cast<uint64_t>(argsToI64(args, 0, 1));
-  uint64_t b = static_cast<uint64_t>(argsToI64(args, 2, 3));
-  return HermesValue::encodeTrustedNumberValue(a <= b ? 1 : 0);
-}
-
-/// i64.ge_u: unsigned greater or equal. Returns i32.
-CallResult<HermesValue> wasmI64GeU(void *, Runtime &runtime) {
-  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  uint64_t a = static_cast<uint64_t>(argsToI64(args, 0, 1));
-  uint64_t b = static_cast<uint64_t>(argsToI64(args, 2, 3));
-  return HermesValue::encodeTrustedNumberValue(a >= b ? 1 : 0);
-}
-
 /// i64.trunc_f64_s (also used for i64.trunc_f32_s):
 /// Truncate double to signed i64, trapping on NaN or out-of-range.
 /// Writes lo/hi to retBufI[0]/[1], returns 0.
@@ -2402,28 +2315,6 @@ void createHermesBuiltins(Runtime &runtime) {
       P::wasmI64Popcnt,
       wasmI64Popcnt,
       2);
-  defineInternMethod(
-      B::HermesBuiltin_wasmI64Eqz, P::wasmI64Eqz, wasmI64Eqz, 2);
-  defineInternMethod(
-      B::HermesBuiltin_wasmI64Eq, P::wasmI64Eq, wasmI64Eq, 4);
-  defineInternMethod(
-      B::HermesBuiltin_wasmI64Ne, P::wasmI64Ne, wasmI64Ne, 4);
-  defineInternMethod(
-      B::HermesBuiltin_wasmI64LtS, P::wasmI64LtS, wasmI64LtS, 4);
-  defineInternMethod(
-      B::HermesBuiltin_wasmI64GtS, P::wasmI64GtS, wasmI64GtS, 4);
-  defineInternMethod(
-      B::HermesBuiltin_wasmI64LeS, P::wasmI64LeS, wasmI64LeS, 4);
-  defineInternMethod(
-      B::HermesBuiltin_wasmI64GeS, P::wasmI64GeS, wasmI64GeS, 4);
-  defineInternMethod(
-      B::HermesBuiltin_wasmI64LtU, P::wasmI64LtU, wasmI64LtU, 4);
-  defineInternMethod(
-      B::HermesBuiltin_wasmI64GtU, P::wasmI64GtU, wasmI64GtU, 4);
-  defineInternMethod(
-      B::HermesBuiltin_wasmI64LeU, P::wasmI64LeU, wasmI64LeU, 4);
-  defineInternMethod(
-      B::HermesBuiltin_wasmI64GeU, P::wasmI64GeU, wasmI64GeU, 4);
   // i64 conversion helpers (G.4b).
   defineInternMethod(
       B::HermesBuiltin_wasmI64TruncF64S,

@@ -829,18 +829,6 @@ class TypeInferenceImpl {
       case BuiltinMethod::HermesBuiltin_wasmI64Clz:
       case BuiltinMethod::HermesBuiltin_wasmI64Ctz:
       case BuiltinMethod::HermesBuiltin_wasmI64Popcnt:
-      // i64 comparisons (return 0/1):
-      case BuiltinMethod::HermesBuiltin_wasmI64Eqz:
-      case BuiltinMethod::HermesBuiltin_wasmI64Eq:
-      case BuiltinMethod::HermesBuiltin_wasmI64Ne:
-      case BuiltinMethod::HermesBuiltin_wasmI64LtS:
-      case BuiltinMethod::HermesBuiltin_wasmI64GtS:
-      case BuiltinMethod::HermesBuiltin_wasmI64LeS:
-      case BuiltinMethod::HermesBuiltin_wasmI64GeS:
-      case BuiltinMethod::HermesBuiltin_wasmI64LtU:
-      case BuiltinMethod::HermesBuiltin_wasmI64GtU:
-      case BuiltinMethod::HermesBuiltin_wasmI64LeU:
-      case BuiltinMethod::HermesBuiltin_wasmI64GeU:
       // i64 conversions (write to retBuf, return lo32):
       case BuiltinMethod::HermesBuiltin_wasmI64TruncF64S:
       case BuiltinMethod::HermesBuiltin_wasmI64TruncF64U:

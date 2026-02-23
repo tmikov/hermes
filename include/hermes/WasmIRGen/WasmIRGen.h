@@ -832,6 +832,27 @@ class WasmIRGen {
   static std::pair<std::vector<uint32_t>, uint32_t> computeRetBufLayout(
       const std::vector<WasmValType> &results);
 
+  /// Emit inline i64 ordered comparison: hiOp on the high words,
+  /// loOp on the low words. hiSigned selects AsInt32 vs AsUint32
+  /// interpretation of the high words.
+  /// \return the i32 result (0 or 1).
+  Value *emitI64OrderedCmp(
+      Value *loA,
+      Value *hiA,
+      Value *loB,
+      Value *hiB,
+      ValueKind hiOp,
+      ValueKind loOp,
+      bool hiSigned);
+
+  /// Return \p val as-is if it already produces a signed int32 value
+  /// (e.g., AsInt32Inst, bitwise ops), otherwise wrap in AsInt32Inst.
+  Value *ensureInt32(Value *val);
+
+  /// Return \p val as-is if it already produces an unsigned uint32 value
+  /// (e.g., AsUint32Inst, >>>), otherwise wrap in AsUint32Inst.
+  Value *ensureUint32(Value *val);
+
   /// Callee: pop results, store to buffer, return 0. Called from onReturn()
   /// and endFunction() when the function uses a return buffer.
   void emitRetBufStores(const WasmFuncType &funcType);
