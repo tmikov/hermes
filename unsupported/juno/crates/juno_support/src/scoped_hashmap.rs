@@ -64,45 +64,36 @@
 use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::collections::hash_map::Entry;
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use std::hash::Hash;
-use std::ptr::null_mut;
 
-/// A heap allocated node representing a value inserted in a scope.
+/// Index of a node in the node storage vec. `None` represents null.
+type NodeIdx = Option<usize>;
+
+/// A node representing a value inserted in a scope.
+#[derive(Debug)]
 struct Node<K, V> {
     key: K,
     value: V,
-    /// A node with the same key in a previous scope, or null if no previous.
-    prev_shadowed: *mut Node<K, V>,
-    /// The previous node in the same scope, or null if this is the first one.
-    prev_in_scope: *mut Node<K, V>,
+    /// A node with the same key in a previous scope, or None if no previous.
+    prev_shadowed: NodeIdx,
+    /// The previous node in the same scope, or None if this is the first one.
+    prev_in_scope: NodeIdx,
     /// Level of the scope this node belongs to.
     depth: usize,
 }
 
 /// The scope is the head of a singly linked list of nodes belonging to the
-/// scope, chained through the [Node::prev_in_scope] pointer.
-struct Scope<K, V> {
-    /// The last node inserted into the scope, null initially.
-    last: *mut Node<K, V>,
+/// scope, chained through the [Node::prev_in_scope] index.
+struct Scope {
+    /// The last node inserted into the scope, None initially.
+    last: NodeIdx,
 }
 
-impl<K, V> Debug for Scope<K, V>
-where
-    K: Debug,
-    V: Debug,
-{
+impl Debug for Scope {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let mut dm = f.debug_map();
-        let mut cur_node = self.last;
-        while !cur_node.is_null() {
-            let n = unsafe { &*cur_node };
-            dm.entry(&n.key, &n.value);
-            cur_node = n.prev_in_scope;
-        }
-        dm.finish()
+        f.debug_struct("Scope").field("last", &self.last).finish()
     }
 }
 
@@ -111,14 +102,17 @@ pub struct ScopedHashMap<K, V>
 where
     K: Eq + Hash + Clone,
 {
-    /// Maps from keys to most current definition. All Nodes are owned by this.
-    /// They are allocated by insertIntoScope and deleted by clearCurrentScope
-    /// The pointers will never be null, since we remove the map entry if we
-    /// pop the last node.
-    map: HashMap<K, *mut Node<K, V>>,
+    /// Maps from keys to the index of the most current node.
+    map: HashMap<K, usize>,
+
+    /// All nodes, indexed by position.
+    nodes: Vec<Node<K, V>>,
+
+    /// Indices of freed nodes available for reuse.
+    free_list: Vec<usize>,
 
     /// Stack of scopes.
-    scopes: Vec<Scope<K, V>>,
+    scopes: Vec<Scope>,
 }
 
 impl<K, V> Default for ScopedHashMap<K, V>
@@ -128,6 +122,8 @@ where
     fn default() -> Self {
         let mut res = ScopedHashMap {
             map: Default::default(),
+            nodes: Default::default(),
+            free_list: Default::default(),
             scopes: Default::default(),
         };
         res.push_scope();
@@ -143,6 +139,23 @@ where
         Default::default()
     }
 
+    /// Allocate a node, reusing a free slot if available.
+    fn alloc_node(&mut self, node: Node<K, V>) -> usize {
+        if let Some(idx) = self.free_list.pop() {
+            self.nodes[idx] = node;
+            idx
+        } else {
+            let idx = self.nodes.len();
+            self.nodes.push(node);
+            idx
+        }
+    }
+
+    /// Free a node by adding its index to the free list.
+    fn free_node(&mut self, idx: usize) {
+        self.free_list.push(idx);
+    }
+
     /// Insert a key/value pair into the scope at the specified depth if
     /// possible, return an error otherwise.
     /// If the depth is smaller than the current depth, it is not guaranteed to
@@ -155,38 +168,34 @@ where
         key: K,
         value: V,
     ) -> Result<(), &'static str> {
-        let scope = unsafe {
-            assert!(scope_depth < self.scopes.len(), "scope_index out of range");
-            self.scopes.get_unchecked_mut(scope_depth)
-        };
-        let mut entry = self.map.entry(key.clone());
-        let next_shadowed = if let Entry::Occupied(o) = &mut entry {
-            let node = unsafe { &mut **o.get() };
+        assert!(scope_depth < self.scopes.len(), "scope_index out of range");
+
+        // Check if the key already exists.
+        let prev_shadowed = if let Some(&node_idx) = self.map.get(&key) {
+            let node = &mut self.nodes[node_idx];
             match node.depth.cmp(&scope_depth) {
                 Ordering::Greater => return Err("Value to be inserted is already shadowed"),
                 Ordering::Equal => {
                     node.value = value;
                     return Ok(());
                 }
-                Ordering::Less => node,
+                Ordering::Less => Some(node_idx),
             }
         } else {
-            null_mut()
+            None
         };
 
-        // All Nodes allocated here.
-        let node = Box::new(Node {
-            key,
+        let scope_last = self.scopes[scope_depth].last;
+        let new_idx = self.alloc_node(Node {
+            key: key.clone(),
             value,
-            prev_shadowed: next_shadowed,
-            prev_in_scope: scope.last,
+            prev_shadowed,
+            prev_in_scope: scope_last,
             depth: scope_depth,
         });
 
-        let vref = entry.or_insert(null_mut());
-        let ptr = Box::into_raw(node);
-        *vref = ptr;
-        scope.last = ptr;
+        self.map.insert(key, new_idx);
+        self.scopes[scope_depth].last = Some(new_idx);
         Ok(())
     }
 
@@ -210,7 +219,7 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq,
     {
-        self.map.get(k).map(|n| unsafe { &(**n).value })
+        self.map.get(k).map(|&idx| &self.nodes[idx].value)
     }
 
     pub fn get_mut<Q: ?Sized>(&mut self, k: &Q) -> Option<&mut V>
@@ -218,7 +227,10 @@ where
         K: Borrow<Q>,
         Q: Hash + Eq,
     {
-        self.map.get_mut(k).map(|n| unsafe { &mut (**n).value })
+        self.map
+            .get(k)
+            .copied()
+            .map(move |idx| &mut self.nodes[idx].value)
     }
 
     pub fn value(&self, k: K) -> Option<&V> {
@@ -245,7 +257,7 @@ where
     }
 
     pub fn push_scope(&mut self) {
-        self.scopes.push(Scope { last: null_mut() });
+        self.scopes.push(Scope { last: None });
     }
 
     pub fn pop_scope(&mut self) {
@@ -256,42 +268,23 @@ where
     fn pop_scope_impl(&mut self) {
         assert!(!self.scopes.is_empty(), "No current scope to clear");
         let cur_depth = self.scopes.len() - 1;
-        unsafe {
-            let mut current = self.scopes.pop().unwrap().last;
-            while !current.is_null() {
-                debug_assert!((*current).depth == cur_depth, "Bad scope link");
-                let popped = self.pop_node(&(*current).key);
-                debug_assert!(current == popped, "Unexpected innermost value for key");
-                current = (*current).prev_in_scope;
-                // All nodes deallocated here.
-                std::mem::drop(Box::from_raw(popped));
-            }
+        let mut current = self.scopes.pop().unwrap().last;
+        while let Some(idx) = current {
+            debug_assert!(self.nodes[idx].depth == cur_depth, "Bad scope link");
+            current = self.nodes[idx].prev_in_scope;
+            self.pop_node(&self.nodes[idx].key.clone());
+            self.free_node(idx);
         }
     }
 
-    /// Unlinks the innermost Node for a key and returns it.
-    fn pop_node(&mut self, key: &K) -> *mut Node<K, V> {
-        unsafe {
-            let entry = self.map.get_mut(key).unwrap();
-            let ptr = *entry;
-            let next_shadowed = (*ptr).prev_shadowed;
-            if !next_shadowed.is_null() {
-                *entry = next_shadowed;
-            } else {
-                self.map.remove(key);
-            }
-            ptr
-        }
-    }
-}
-
-impl<K, V> Drop for ScopedHashMap<K, V>
-where
-    K: Eq + Hash + Clone,
-{
-    fn drop(&mut self) {
-        while !self.scopes.is_empty() {
-            self.pop_scope_impl();
+    /// Unlinks the innermost node for a key from the map.
+    fn pop_node(&mut self, key: &K) {
+        let entry = self.map.get_mut(key).unwrap();
+        let idx = *entry;
+        if let Some(prev) = self.nodes[idx].prev_shadowed {
+            *entry = prev;
+        } else {
+            self.map.remove(key);
         }
     }
 }
