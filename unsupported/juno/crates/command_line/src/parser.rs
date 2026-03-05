@@ -27,7 +27,7 @@ pub(crate) struct Parser<'a> {
 }
 
 impl Parser<'_> {
-    pub fn new(opts: CommandLine, args: &[String]) -> Parser {
+    pub fn new(opts: CommandLine, args: &[String]) -> Parser<'_> {
         // Extract the name from the first arg.
         let name = args
             .first()

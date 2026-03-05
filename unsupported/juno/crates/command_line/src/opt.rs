@@ -6,7 +6,8 @@
  */
 
 use std::cell::Cell;
-use std::cell::UnsafeCell;
+use std::cell::OnceCell;
+use std::cell::RefCell;
 use std::collections::HashSet;
 use std::ops::Deref;
 use std::rc::Rc;
@@ -36,18 +37,17 @@ pub enum Hidden {
 /// Stores the value of a single option.
 #[derive(Debug)]
 pub struct OptValue<T> {
-    value: UnsafeCell<Vec<T>>,
-    /// This flag controls whether the parser is done with [`value`], meaning
-    /// that it can no longer change, so we can give references to it.
-    finished_parsing: Cell<bool>,
+    /// Mutable storage used during the parsing phase.
+    mutable: RefCell<Vec<T>>,
+    /// Frozen storage set at `finish()` time; used for borrowing after parsing.
+    frozen: OnceCell<Vec<T>>,
 }
 
 impl<T> Default for OptValue<T> {
     fn default() -> Self {
-        // Self{value: RefCell::new(Vec::new())}
         Self {
-            value: UnsafeCell::new(Default::default()),
-            finished_parsing: Cell::new(false),
+            mutable: RefCell::new(Default::default()),
+            frozen: OnceCell::new(),
         }
     }
 }
@@ -55,34 +55,32 @@ impl<T> Default for OptValue<T> {
 impl<T> OptValue<T> {
     /// Set the only value in the vector, or push a new value into the vector
     /// depending on `push`.
-    /// This method may only be called before parsing has finished.
     fn update_value(&self, push: bool, value: T) {
         assert!(
-            !self.finished_parsing.get(),
+            self.frozen.get().is_none(),
             "value cannot be modified after parsing"
         );
-        let v = unsafe { &mut *self.value.get() };
+        let mut v = self.mutable.borrow_mut();
         if push || v.is_empty() {
             v.push(value);
         } else {
-            // We know this is in range, since we just checked that it isn't empty.
-            unsafe {
-                *v.get_unchecked_mut(0) = value;
-            }
+            v[0] = value;
         }
     }
 
-    /// Mark the value is no longer changeable, which enables borrowing.
+    /// Move the values into frozen storage, making them available for borrowing.
     fn finish(&self) {
-        self.finished_parsing.set(true);
+        let values = self.mutable.take();
+        assert!(
+            self.frozen.set(values).is_ok(),
+            "finish() must not be called twice"
+        );
     }
 
     fn borrow_vec(&self) -> &Vec<T> {
-        assert!(
-            self.finished_parsing.get(),
-            "value cannot be borrowed during parsing"
-        );
-        unsafe { &*self.value.get() }
+        self.frozen
+            .get()
+            .expect("value cannot be borrowed during parsing")
     }
     fn borrow_value(&self) -> &T {
         self.borrow_vec()
@@ -292,7 +290,7 @@ pub(crate) trait CLOption {
     fn eq_name(&self, name: &str, long: bool) -> EqName;
     /// Return which ever name exist prefixed with '-' or '--'.
     fn name(&self) -> String;
-    fn info(&self) -> OptInfo;
+    fn info(&self) -> OptInfo<'_>;
 }
 
 impl<T: Clone> OptHolder<T> {
@@ -438,7 +436,7 @@ impl<T: 'static + Clone> CLOption for OptHolder<T> {
         }
     }
 
-    fn info(&self) -> OptInfo {
+    fn info(&self) -> OptInfo<'_> {
         OptInfo {
             long: self.long.as_deref(),
             short: self.short.as_deref(),
