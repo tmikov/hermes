@@ -101,6 +101,10 @@ These remain `static constexpr` — no context needed to create primitive types.
 | `AnyType` | `15` | `{kind: Union, arms: [all JS-observable types]}` |
 | `bits32` | `14` | `{kind: Bits32}` |
 
+**Note on `bits32`**: `bits32` is not yet used in the current codebase. It is
+reserved for future use (physical 32-bit integer, signless). Its well-known
+ID and `TypeKind` enum value are defined from the start so they are stable.
+
 ---
 
 ## 2. Type Table Entries
@@ -597,28 +601,21 @@ class Type {
   bool isObjectType() const;
   bool isAnyEmptyUninitType() const;
 
-  // Replacements for bitmask-era methods:
-  // countTypes() → IRTypeContext::countKinds(Type)
-  // getFirstTypeKind() → IRTypeContext::getKind(Type) for single-kind types,
-  //                       or IRTypeContext::getUnionArms(Type) for unions.
+  // Reimplemented on top of the new representation (delegate to
+  // IRTypeContext::current()):
+  //
+  // countTypes(): returns 0 for NoType, arm count for Union, 1 otherwise.
+  // getFirstTypeKind(): returns the TypeKind from the table entry
+  //   (or first arm's kind for Union).
+  // Type::iterator: iterates over union arms (or yields the single kind
+  //   for non-union types). Delegates to IRTypeContext::getUnionArms()
+  //   for unions.
 
   void print(llvh::raw_ostream &OS) const;
   void Profile(llvh::FoldingSetNodeID &ID) const { ID.AddInteger(id_); }
 
   friend class IRTypeContext;
 };
-```
-
-### Removed: Type::iterator
-
-The current `Type` class has an `iterator` (`IR.h:403–408`) that iterates
-over the set bits in the bitmask. This has no direct equivalent in the new
-design. The replacement is:
-
-- For union types: `IRTypeContext::getUnionArms(Type)` returns the arm list.
-- For non-union types: there is nothing to iterate (the type is a single kind).
-- Callers that enumerate possible kinds should use `canBeX()` queries or
-  switch on `IRTypeContext::getKind(Type)`.
 ```
 
 ### Phase 1: Delegation to Thread-Local
