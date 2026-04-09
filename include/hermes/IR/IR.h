@@ -15,6 +15,7 @@
 #include "hermes/AST/NativeContext.h"
 #include "hermes/FrontEndDefs/Builtins.h"
 #include "hermes/FrontEndDefs/Typeof.h"
+#include "hermes/IR/IRTypeContext.h"
 #include "hermes/Sema/SemContext.h"
 #include "hermes/Support/Conversions.h"
 #include "hermes/Support/ScopeChain.h"
@@ -2553,6 +2554,8 @@ class Module : public Value {
 
  private:
   std::shared_ptr<Context> Ctx;
+  /// Type context for the IR type system.
+  IRTypeContext typeContext_;
   /// Optionally specify the top level function, if it isn't the first one.
   Function *topLevelFunction_{};
 
@@ -2669,6 +2672,11 @@ class Module : public Value {
 
   Context &getContext() const {
     return *Ctx;
+  }
+
+  /// Return the IR type context for this module.
+  IRTypeContext &getTypeContext() {
+    return typeContext_;
   }
 
   std::shared_ptr<Context> shareContext() const {

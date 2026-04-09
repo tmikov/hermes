@@ -34,6 +34,11 @@ Non-obvious gotchas and patterns.
 - `IRTypeContextRAII` is a friend of `IRTypeContext` to access `current_`. It saves/restores the pointer, supporting nesting.
 - The test target name for IR unit tests is `HermesIRTests` (not `IRTypeContextTest`).
 
+## Module Integration
+- `IRTypeContext.h` included in `IR.h` at the top (no dependency on `Type`).
+- `Module` has `IRTypeContext typeContext_` member, default-constructed. Access via `getTypeContext()`.
+- `Module` class starts at ~line 2538 in IR.h (after many other classes: SideEffect, Value, Instruction, etc.).
+
 ## Formatting
 - `format` uses "any" shorthand when `isSubsetOf(kAnyTypeId, id)` — matching old `Type::print()` which checks `canBeAny()`.
 - Kind names match old `getKindStr()`: "privateName", "functionCode" (camelCase for multi-word).

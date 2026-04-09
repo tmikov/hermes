@@ -49,7 +49,7 @@ be omitted):
 | P1-S3 | Type operations with interning | P1-S2 | done | |
 | P1-S4 | Utility methods | P1-S3 | done | |
 | P1-S5 | Thread-local context and RAII guard | P1-S1 | done | |
-| P1-S6 | Wire IRTypeContext into Module | P1-S1 | | |
+| P1-S6 | Wire IRTypeContext into Module | P1-S1 | done | |
 | P1-S7 | Install RAII guards at compilation entry points | P1-S5, P1-S6 | | |
 | P1-S7.5 | Add RAII guards to unit tests | P1-S7 | | |
 | P1-S8 | Rewrite Type class | P1-S4, P1-S7.5 | | |
@@ -98,4 +98,10 @@ be omitted):
   - Reserved IDs 19-31 padded with NoType placeholders.
   - Union arm arrays stored in sorted order by ID for AnyType and AnyEmptyUninit.
 - **What was done**: Created IRTypeContext with TypeKind enum (all kinds including deferred refined types), TypeEntry tagged-union struct, well-known ID constants, constructor that pre-allocates 15 leaf types and 4 well-known unions, getKind() and getUnionArms() accessors. Added to hermesFrontend build target. 6 unit tests.
+
+### P1-S6: Wire IRTypeContext into Module
+- **Files**: modified `include/hermes/IR/IR.h`.
+- **What was done**: Added `#include "hermes/IR/IRTypeContext.h"` to IR.h. Added `IRTypeContext typeContext_` private member and `getTypeContext()` public accessor to `Module`. The context is default-constructed when `Module` is constructed. No semantic change — nothing uses `typeContext_` yet.
+- **Decisions**:
+  - Included `IRTypeContext.h` at the top with other hermes includes (alphabetically after `hermes/FrontEndDefs/Typeof.h`) rather than mid-file, since IRTypeContext.h has no dependency on `Type` or other IR.h definitions.
 
