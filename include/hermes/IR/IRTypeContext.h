@@ -9,6 +9,9 @@
 #define HERMES_IR_IRTYPECONTEXT_H
 
 #include "llvh/ADT/ArrayRef.h"
+#include "llvh/ADT/DenseMap.h"
+#include "llvh/ADT/Hashing.h"
+#include "llvh/ADT/SmallVector.h"
 
 #include <cassert>
 #include <cstdint>
@@ -38,6 +41,7 @@ enum class TypeKind : uint8_t {
   // --- Number subtypes (still fp64, value constrained) ---
   Int32, ///< Integer in [-2^31, 2^31 - 1].
   Uint32, ///< Integer in [0, 2^32 - 1].
+  Int31, ///< Integer in [0, 2^31 - 1] (Int32 ∩ Uint32).
 
   // --- Refined object types ---
   ClassInstance, ///< Nominal class instance.
@@ -144,16 +148,49 @@ static constexpr uint32_t kPrivateNameId = 11;
 static constexpr uint32_t kFunctionCodeId = 12;
 static constexpr uint32_t kObjectId = 13;
 static constexpr uint32_t kBits32Id = 14;
+static constexpr uint32_t kInt32Id = 15;
+static constexpr uint32_t kUint32Id = 16;
+/// Int32 ∩ Uint32: integer in [0, 2^31 - 1].
+static constexpr uint32_t kInt31Id = 17;
 /// Union of all JS-observable types.
-static constexpr uint32_t kAnyTypeId = 15;
+static constexpr uint32_t kAnyTypeId = 18;
 /// Number | BigInt.
-static constexpr uint32_t kNumericId = 16;
+static constexpr uint32_t kNumericId = 19;
 /// any | Empty | Uninit.
-static constexpr uint32_t kAnyEmptyUninitId = 17;
+static constexpr uint32_t kAnyEmptyUninitId = 20;
 /// Null | Undefined.
-static constexpr uint32_t kNullOrUndefId = 18;
+static constexpr uint32_t kNullOrUndefId = 21;
 /// IDs below this are reserved for well-known types.
 static constexpr uint32_t kFirstDynamicId = 32;
+
+/// Hashable key for interning union types. Contains sorted arm IDs.
+struct UnionInternKey {
+  llvh::SmallVector<uint32_t, 8> arms;
+
+  UnionInternKey() = default;
+  explicit UnionInternKey(llvh::ArrayRef<uint32_t> a)
+      : arms(a.begin(), a.end()) {}
+};
+
+/// DenseMap info for UnionInternKey.
+struct UnionInternKeyInfo {
+  static UnionInternKey getEmptyKey() {
+    UnionInternKey k;
+    k.arms.push_back(UINT32_MAX);
+    return k;
+  }
+  static UnionInternKey getTombstoneKey() {
+    UnionInternKey k;
+    k.arms.push_back(UINT32_MAX - 1);
+    return k;
+  }
+  static unsigned getHashValue(const UnionInternKey &k) {
+    return llvh::hash_combine_range(k.arms.begin(), k.arms.end());
+  }
+  static bool isEqual(const UnionInternKey &a, const UnionInternKey &b) {
+    return a.arms == b.arms;
+  }
+};
 
 /// Owns the type table for a Module and provides type operations.
 ///
@@ -221,6 +258,22 @@ class IRTypeContext {
   /// (Number, Boolean, Null, Undefined only). Returns false for NoType.
   bool isNonPtr(uint32_t id) const;
 
+  /// \return true if all values of type \p a are also values of type \p b.
+  bool isSubsetOf(uint32_t a, uint32_t b) const;
+
+  /// \return true if types \p a and \p b have no values in common.
+  bool areDisjoint(uint32_t a, uint32_t b) const;
+
+  /// \return the union of types \p a and \p b. May create and intern a new
+  /// union type.
+  uint32_t unionTy(uint32_t a, uint32_t b);
+
+  /// \return the intersection of types \p a and \p b.
+  uint32_t intersectTy(uint32_t a, uint32_t b);
+
+  /// \return type \p a minus type \p b (conservative approximation).
+  uint32_t subtractTy(uint32_t a, uint32_t b);
+
  private:
   /// Type table. Index 0 = NoType. Pre-allocated entries for primitives.
   std::vector<TypeEntry> entries_;
@@ -267,6 +320,13 @@ class IRTypeContext {
 
   /// Helper to append arms to typeArrays_ and create a union entry.
   uint32_t addUnionEntry(llvh::ArrayRef<uint32_t> arms);
+
+  /// Intern table mapping sorted arm sets to existing union type IDs.
+  llvh::DenseMap<UnionInternKey, uint32_t, UnionInternKeyInfo> internTable_;
+
+  /// Create a union from two operands with full canonicalization and interning.
+  /// Flattens, deduplicates, removes subsumed arms, sorts, and interns.
+  uint32_t createUnionImpl(uint32_t a, uint32_t b);
 };
 
 } // namespace hermes

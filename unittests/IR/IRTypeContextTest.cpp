@@ -281,4 +281,225 @@ TEST(IRTypeContextTest, IsNonPtr) {
   EXPECT_FALSE(ctx.isNonPtr(kNumericId));
 }
 
+TEST(IRTypeContextTest, IsSubsetOf) {
+  IRTypeContext ctx;
+
+  // Reflexive.
+  EXPECT_TRUE(ctx.isSubsetOf(kNumberId, kNumberId));
+  // NoType is subset of everything.
+  EXPECT_TRUE(ctx.isSubsetOf(kNoTypeId, kNumberId));
+  EXPECT_TRUE(ctx.isSubsetOf(kNoTypeId, kAnyTypeId));
+  EXPECT_TRUE(ctx.isSubsetOf(kNoTypeId, kNoTypeId));
+  // Nothing (except NoType) is subset of NoType.
+  EXPECT_FALSE(ctx.isSubsetOf(kNumberId, kNoTypeId));
+  // Leaf is subset of union containing it.
+  EXPECT_TRUE(ctx.isSubsetOf(kNumberId, kAnyTypeId));
+  EXPECT_TRUE(ctx.isSubsetOf(kNumberId, kNumericId));
+  EXPECT_TRUE(ctx.isSubsetOf(kBigIntId, kNumericId));
+  // Union is not subset of its member.
+  EXPECT_FALSE(ctx.isSubsetOf(kAnyTypeId, kNumberId));
+  EXPECT_FALSE(ctx.isSubsetOf(kNumericId, kNumberId));
+  // Sub-union is subset of super-union.
+  EXPECT_TRUE(ctx.isSubsetOf(kNumericId, kAnyTypeId));
+  EXPECT_TRUE(ctx.isSubsetOf(kNullOrUndefId, kAnyTypeId));
+  // Disjoint types.
+  EXPECT_FALSE(ctx.isSubsetOf(kNumberId, kStringId));
+  EXPECT_FALSE(ctx.isSubsetOf(kStringId, kNumberId));
+}
+
+TEST(IRTypeContextTest, AreDisjoint) {
+  IRTypeContext ctx;
+
+  // Same type is not disjoint with itself.
+  EXPECT_FALSE(ctx.areDisjoint(kNumberId, kNumberId));
+  // NoType is disjoint from everything (including itself).
+  EXPECT_TRUE(ctx.areDisjoint(kNoTypeId, kNumberId));
+  EXPECT_TRUE(ctx.areDisjoint(kNumberId, kNoTypeId));
+  EXPECT_TRUE(ctx.areDisjoint(kNoTypeId, kNoTypeId));
+  // Different leaf types are disjoint.
+  EXPECT_TRUE(ctx.areDisjoint(kNumberId, kStringId));
+  EXPECT_TRUE(ctx.areDisjoint(kBooleanId, kObjectId));
+  // Union overlaps with its members.
+  EXPECT_FALSE(ctx.areDisjoint(kNumberId, kNumericId));
+  EXPECT_FALSE(ctx.areDisjoint(kNumberId, kAnyTypeId));
+  // Disjoint unions.
+  EXPECT_TRUE(ctx.areDisjoint(kNullOrUndefId, kNumericId));
+  // Overlapping unions.
+  EXPECT_FALSE(ctx.areDisjoint(kAnyTypeId, kNumericId));
+}
+
+TEST(IRTypeContextTest, UnionTyIdentity) {
+  IRTypeContext ctx;
+
+  EXPECT_EQ(ctx.unionTy(kNumberId, kNumberId), kNumberId);
+  EXPECT_EQ(ctx.unionTy(kAnyTypeId, kAnyTypeId), kAnyTypeId);
+}
+
+TEST(IRTypeContextTest, UnionTyNoType) {
+  IRTypeContext ctx;
+
+  EXPECT_EQ(ctx.unionTy(kNoTypeId, kStringId), kStringId);
+  EXPECT_EQ(ctx.unionTy(kStringId, kNoTypeId), kStringId);
+  EXPECT_EQ(ctx.unionTy(kNoTypeId, kNoTypeId), kNoTypeId);
+}
+
+TEST(IRTypeContextTest, UnionTySubset) {
+  IRTypeContext ctx;
+
+  // Number is subset of AnyType.
+  EXPECT_EQ(ctx.unionTy(kNumberId, kAnyTypeId), kAnyTypeId);
+  EXPECT_EQ(ctx.unionTy(kAnyTypeId, kNumberId), kAnyTypeId);
+  // Numeric is subset of AnyType.
+  EXPECT_EQ(ctx.unionTy(kNumericId, kAnyTypeId), kAnyTypeId);
+}
+
+TEST(IRTypeContextTest, UnionTyCreatesDynamic) {
+  IRTypeContext ctx;
+
+  uint32_t numStr = ctx.unionTy(kNumberId, kStringId);
+  EXPECT_EQ(ctx.getKind(numStr), TypeKind::Union);
+  auto arms = ctx.getUnionArms(numStr);
+  EXPECT_EQ(arms.size(), 2u);
+  // Arms sorted by ID: kStringId(6), kNumberId(7).
+  EXPECT_EQ(arms[0], kStringId);
+  EXPECT_EQ(arms[1], kNumberId);
+}
+
+TEST(IRTypeContextTest, UnionTyInterning) {
+  IRTypeContext ctx;
+
+  uint32_t a = ctx.unionTy(kNumberId, kStringId);
+  uint32_t b = ctx.unionTy(kNumberId, kStringId);
+  EXPECT_EQ(a, b);
+
+  // Reverse order produces same result.
+  uint32_t c = ctx.unionTy(kStringId, kNumberId);
+  EXPECT_EQ(a, c);
+}
+
+TEST(IRTypeContextTest, UnionTyReturnsWellKnown) {
+  IRTypeContext ctx;
+
+  // unionTy(Number, BigInt) should return the well-known Numeric.
+  EXPECT_EQ(ctx.unionTy(kNumberId, kBigIntId), kNumericId);
+  // unionTy(Null, Undefined) should return well-known NullOrUndef.
+  EXPECT_EQ(ctx.unionTy(kNullId, kUndefinedId), kNullOrUndefId);
+}
+
+TEST(IRTypeContextTest, IntersectTy) {
+  IRTypeContext ctx;
+
+  // Disjoint types.
+  EXPECT_EQ(ctx.intersectTy(kNumberId, kStringId), kNoTypeId);
+  // Subset: Number intersect AnyType = Number.
+  EXPECT_EQ(ctx.intersectTy(kNumberId, kAnyTypeId), kNumberId);
+  EXPECT_EQ(ctx.intersectTy(kAnyTypeId, kNumberId), kNumberId);
+  // Same type.
+  EXPECT_EQ(ctx.intersectTy(kNumberId, kNumberId), kNumberId);
+  // NoType.
+  EXPECT_EQ(ctx.intersectTy(kNoTypeId, kNumberId), kNoTypeId);
+  EXPECT_EQ(ctx.intersectTy(kNumberId, kNoTypeId), kNoTypeId);
+  // Union intersect Union: Numeric subset of AnyType.
+  EXPECT_EQ(ctx.intersectTy(kNumericId, kAnyTypeId), kNumericId);
+  // NullOrUndef intersect Numeric: disjoint → NoType.
+  EXPECT_EQ(ctx.intersectTy(kNullOrUndefId, kNumericId), kNoTypeId);
+}
+
+TEST(IRTypeContextTest, SubtractTy) {
+  IRTypeContext ctx;
+
+  // Subtract member from union: AnyType - Number.
+  uint32_t result = ctx.subtractTy(kAnyTypeId, kNumberId);
+  EXPECT_EQ(ctx.getKind(result), TypeKind::Union);
+  auto arms = ctx.getUnionArms(result);
+  EXPECT_EQ(arms.size(), 7u);
+  EXPECT_FALSE(ctx.canBeNumber(result));
+  EXPECT_TRUE(ctx.canBeString(result));
+  EXPECT_TRUE(ctx.canBeObject(result));
+  EXPECT_TRUE(ctx.canBeBigInt(result));
+
+  // Subset subtraction → NoType.
+  EXPECT_EQ(ctx.subtractTy(kNumberId, kAnyTypeId), kNoTypeId);
+  // Disjoint subtraction → unchanged.
+  EXPECT_EQ(ctx.subtractTy(kNumberId, kStringId), kNumberId);
+  // NoType cases.
+  EXPECT_EQ(ctx.subtractTy(kNoTypeId, kNumberId), kNoTypeId);
+  EXPECT_EQ(ctx.subtractTy(kNumberId, kNoTypeId), kNumberId);
+  // Subtract union from union: AnyType - NullOrUndef.
+  uint32_t r2 = ctx.subtractTy(kAnyTypeId, kNullOrUndefId);
+  EXPECT_FALSE(ctx.canBeNull(r2));
+  EXPECT_FALSE(ctx.canBeUndefined(r2));
+  EXPECT_TRUE(ctx.canBeNumber(r2));
+  EXPECT_TRUE(ctx.canBeString(r2));
+}
+
+TEST(IRTypeContextTest, Int31WellKnownId) {
+  IRTypeContext ctx;
+
+  // Int31 is pre-allocated with its own well-known ID.
+  EXPECT_EQ(ctx.getKind(kInt31Id), TypeKind::Int31);
+  EXPECT_EQ(ctx.getKind(kInt32Id), TypeKind::Int32);
+  EXPECT_EQ(ctx.getKind(kUint32Id), TypeKind::Uint32);
+}
+
+TEST(IRTypeContextTest, Int31SubtypeRelationships) {
+  IRTypeContext ctx;
+
+  // Int31 <: Int32, Uint32, Number.
+  EXPECT_TRUE(ctx.isSubsetOf(kInt31Id, kInt32Id));
+  EXPECT_TRUE(ctx.isSubsetOf(kInt31Id, kUint32Id));
+  EXPECT_TRUE(ctx.isSubsetOf(kInt31Id, kNumberId));
+  // Not the reverse.
+  EXPECT_FALSE(ctx.isSubsetOf(kInt32Id, kInt31Id));
+  EXPECT_FALSE(ctx.isSubsetOf(kUint32Id, kInt31Id));
+  EXPECT_FALSE(ctx.isSubsetOf(kNumberId, kInt31Id));
+  // Int32/Uint32 are not subsets of each other.
+  EXPECT_FALSE(ctx.isSubsetOf(kInt32Id, kUint32Id));
+  EXPECT_FALSE(ctx.isSubsetOf(kUint32Id, kInt32Id));
+  // But both are subsets of Number.
+  EXPECT_TRUE(ctx.isSubsetOf(kInt32Id, kNumberId));
+  EXPECT_TRUE(ctx.isSubsetOf(kUint32Id, kNumberId));
+}
+
+TEST(IRTypeContextTest, Int31Disjointness) {
+  IRTypeContext ctx;
+
+  // Int31 is not disjoint from its supertypes.
+  EXPECT_FALSE(ctx.areDisjoint(kInt31Id, kInt32Id));
+  EXPECT_FALSE(ctx.areDisjoint(kInt31Id, kUint32Id));
+  EXPECT_FALSE(ctx.areDisjoint(kInt31Id, kNumberId));
+  // Int32 and Uint32 overlap (via Int31).
+  EXPECT_FALSE(ctx.areDisjoint(kInt32Id, kUint32Id));
+  // Int31 is disjoint from non-number types.
+  EXPECT_TRUE(ctx.areDisjoint(kInt31Id, kStringId));
+  EXPECT_TRUE(ctx.areDisjoint(kInt31Id, kObjectId));
+  EXPECT_TRUE(ctx.areDisjoint(kInt31Id, kBooleanId));
+}
+
+TEST(IRTypeContextTest, IntersectInt32Uint32) {
+  IRTypeContext ctx;
+
+  // Int32 ∩ Uint32 = Int31.
+  EXPECT_EQ(ctx.intersectTy(kInt32Id, kUint32Id), kInt31Id);
+  EXPECT_EQ(ctx.intersectTy(kUint32Id, kInt32Id), kInt31Id);
+  // Number ∩ Int32 = Int32 (subset).
+  EXPECT_EQ(ctx.intersectTy(kNumberId, kInt32Id), kInt32Id);
+  // Number ∩ Uint32 = Uint32 (subset).
+  EXPECT_EQ(ctx.intersectTy(kNumberId, kUint32Id), kUint32Id);
+  // Int31 ∩ Int32 = Int31 (subset).
+  EXPECT_EQ(ctx.intersectTy(kInt31Id, kInt32Id), kInt31Id);
+  // Int31 ∩ String = NoType (disjoint).
+  EXPECT_EQ(ctx.intersectTy(kInt31Id, kStringId), kNoTypeId);
+}
+
+TEST(IRTypeContextTest, Int31Predicates) {
+  IRTypeContext ctx;
+
+  EXPECT_TRUE(ctx.canBeNumber(kInt31Id));
+  EXPECT_TRUE(ctx.isPrimitive(kInt31Id));
+  EXPECT_TRUE(ctx.isNonPtr(kInt31Id));
+  EXPECT_FALSE(ctx.canBeString(kInt31Id));
+  EXPECT_FALSE(ctx.canBeObject(kInt31Id));
+}
+
 } // anonymous namespace
