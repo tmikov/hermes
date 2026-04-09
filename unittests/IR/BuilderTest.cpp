@@ -26,6 +26,7 @@ TEST(BuilderTest, SimpleSmokeTest) {
 
   auto Ctx = std::make_shared<Context>();
   Module M{Ctx};
+  IRTypeContextRAII typeContextGuard(M.getTypeContext());
   IRBuilder Builder(&M);
   Builder.createTopLevelFunction("global", true);
   auto F = Builder.createFunction(
@@ -53,6 +54,7 @@ TEST(BuilderTest, SimpleSmokeTest) {
 TEST(BuilderTest, BuildCFG) {
   auto Ctx = std::make_shared<Context>();
   Module M{Ctx};
+  IRTypeContextRAII typeContextGuard(M.getTypeContext());
   IRBuilder Builder(&M);
   auto F = Builder.createFunction(
       "forEach", Function::DefinitionKind::ES5Function, true);
@@ -80,6 +82,7 @@ TEST(BuilderTest, BuildCFG) {
 TEST(BuilderTest, ReplaceAllUsesWith) {
   auto Ctx = std::make_shared<Context>();
   Module M{Ctx};
+  IRTypeContextRAII typeContextGuard(M.getTypeContext());
   IRBuilder Builder(&M);
   auto F = Builder.createFunction(
       "testRAUW", Function::DefinitionKind::ES5Function, true);
@@ -165,6 +168,7 @@ TEST(BuilderTest, Identifiers) {
 TEST(BuilderTest, TestValueTypes) {
   auto Ctx = std::make_shared<Context>();
   Module M{Ctx};
+  IRTypeContextRAII typeContextGuard(M.getTypeContext());
   IRBuilder Builder(&M);
   auto F = Builder.createFunction(
       "a_function_with_tests", Function::DefinitionKind::ES5Function, true);
@@ -202,6 +206,8 @@ TEST(BuilderTest, TestValueTypes) {
 }
 
 TEST(BuilderTest, Types) {
+  IRTypeContext typeContext;
+  IRTypeContextRAII typeContextGuard(typeContext);
   Type T = Type::createAnyEmptyUninit();
   EXPECT_FALSE(T.isNoType());
   EXPECT_TRUE(T.isAnyEmptyUninitType());
@@ -234,6 +240,7 @@ TEST(BuilderTest, Types) {
 TEST(BuilderTest, CreateAndManipulateFrameTest) {
   auto Ctx = std::make_shared<Context>();
   Module M{Ctx};
+  IRTypeContextRAII typeContextGuard(M.getTypeContext());
   IRBuilder Builder(&M);
   auto F = Builder.createFunction(
       "a_function_with_a_scope", Function::DefinitionKind::ES5Function, true);
@@ -261,6 +268,7 @@ TEST(BuilderTest, CreateAndManipulateFrameTest) {
 TEST(BuilderTest, NestedFunctionFrameTest) {
   auto Ctx = std::make_shared<Context>();
   Module M{Ctx};
+  IRTypeContextRAII typeContextGuard(M.getTypeContext());
   IRBuilder Builder(&M);
   auto Caller = Builder.createFunction(
       "caller", Function::DefinitionKind::ES5Function, true);

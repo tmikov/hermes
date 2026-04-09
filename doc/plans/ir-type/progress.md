@@ -51,7 +51,7 @@ be omitted):
 | P1-S5 | Thread-local context and RAII guard | P1-S1 | done | |
 | P1-S6 | Wire IRTypeContext into Module | P1-S1 | done | |
 | P1-S7 | Install RAII guards at compilation entry points | P1-S5, P1-S6 | done | |
-| P1-S7.5 | Add RAII guards to unit tests | P1-S7 | | |
+| P1-S7.5 | Add RAII guards to unit tests | P1-S7 | done | |
 | P1-S8 | Rewrite Type class | P1-S4, P1-S7.5 | | |
 
 ## Context Notes
@@ -111,4 +111,11 @@ be omitted):
 - **Decisions**:
   - Test files that create `Module` (BasicBlockTest, LoopAnalysisTest, BCGen/TestHelpers, BCGen/HBC, VMRuntime/TestHelpers1, API/SegmentTestCompile) are deferred to P1-S7.5.
   - No additional production `Module` creation sites found beyond the three in the plan.
+
+### P1-S7.5: Add RAII guards to unit tests
+- **Files**: modified `unittests/IR/BuilderTest.cpp`, `unittests/IR/VariableTest.cpp`, `unittests/IR/IRUtilsTest.cpp`, `unittests/IR/IRVerifierTest.cpp`.
+- **What was done**: Added `IRTypeContextRAII typeContextGuard(M.getTypeContext())` after Module creation in every test that uses `Type::` operations. For `BuilderTest::Types` (which uses `Type::unionTy` without a Module), added a standalone `IRTypeContext` + RAII guard.
+- **Decisions**:
+  - Only added guards to tests that directly use `Type::` operations (grep-verified). Test files that create Module but don't use `Type::` (BasicBlockTest, LoopAnalysisTest, etc.) were not modified — they don't need guards since P1-S8's static constructors (`createAnyType()`, etc.) remain constexpr and don't require the thread-local context.
+  - No new includes needed — all four files already include `IR.h` which includes `IRTypeContext.h`.
 

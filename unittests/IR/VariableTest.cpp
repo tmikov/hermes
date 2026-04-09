@@ -41,6 +41,7 @@ static bool isSorted(VariableScope *vs) {
 TEST(VariableTest, ReorderHidden) {
   auto Ctx = std::make_shared<Context>();
   Module M{Ctx};
+  IRTypeContextRAII typeContextGuard(M.getTypeContext());
   IRBuilder Builder(&M);
 
   {

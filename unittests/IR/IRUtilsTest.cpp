@@ -23,6 +23,7 @@ namespace {
 TEST(IRUtilsTest, Dominators1) {
   auto Ctx = std::make_shared<Context>();
   Module M{Ctx};
+  IRTypeContextRAII typeContextGuard(M.getTypeContext());
   IRBuilder Builder(&M);
   auto F = Builder.createFunction(
       "testDominators1", Function::DefinitionKind::ES5Function, true);
@@ -59,6 +60,7 @@ TEST(IRUtilsTest, Dominators1) {
 TEST(IRUtilsTest, Dominators2) {
   auto Ctx = std::make_shared<Context>();
   Module M{Ctx};
+  IRTypeContextRAII typeContextGuard(M.getTypeContext());
   IRBuilder Builder(&M);
   auto F = Builder.createFunction(
       "testDominators1", Function::DefinitionKind::ES5Function, true);

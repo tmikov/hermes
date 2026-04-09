@@ -44,6 +44,11 @@ Non-obvious gotchas and patterns.
 - Test Module creation sites (for P1-S7.5): `BasicBlockTest.cpp:25`, `LoopAnalysisTest.cpp` (10 tests), `BCGen/TestHelpers.cpp:46`, `BCGen/HBC.cpp:173,215`, `VMRuntime/TestHelpers1.cpp:52`, `API/SegmentTestCompile.cpp:41`.
 - No explicit include of `IRTypeContext.h` needed — `IR.h` already includes it (from P1-S6).
 
+## Test RAII Guards
+- 4 test files need RAII guards for P1-S8: `BuilderTest.cpp`, `VariableTest.cpp`, `IRUtilsTest.cpp`, `IRVerifierTest.cpp`.
+- `BuilderTest::Types` is the only test using `Type::unionTy` without a Module — needs standalone `IRTypeContext` + guard.
+- Other test files creating Module (BasicBlockTest, LoopAnalysis tests, BCGen tests) don't use `Type::` directly so don't need guards.
+
 ## Formatting
 - `format` uses "any" shorthand when `isSubsetOf(kAnyTypeId, id)` — matching old `Type::print()` which checks `canBeAny()`.
 - Kind names match old `getKindStr()`: "privateName", "functionCode" (camelCase for multi-word).
