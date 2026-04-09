@@ -50,7 +50,7 @@ be omitted):
 | P1-S4 | Utility methods | P1-S3 | done | |
 | P1-S5 | Thread-local context and RAII guard | P1-S1 | done | |
 | P1-S6 | Wire IRTypeContext into Module | P1-S1 | done | |
-| P1-S7 | Install RAII guards at compilation entry points | P1-S5, P1-S6 | | |
+| P1-S7 | Install RAII guards at compilation entry points | P1-S5, P1-S6 | done | |
 | P1-S7.5 | Add RAII guards to unit tests | P1-S7 | | |
 | P1-S8 | Rewrite Type class | P1-S4, P1-S7.5 | | |
 
@@ -104,4 +104,11 @@ be omitted):
 - **What was done**: Added `#include "hermes/IR/IRTypeContext.h"` to IR.h. Added `IRTypeContext typeContext_` private member and `getTypeContext()` public accessor to `Module`. The context is default-constructed when `Module` is constructed. No semantic change — nothing uses `typeContext_` yet.
 - **Decisions**:
   - Included `IRTypeContext.h` at the top with other hermes includes (alphabetically after `hermes/FrontEndDefs/Typeof.h`) rather than mid-file, since IRTypeContext.h has no dependency on `Type` or other IR.h definitions.
+
+### P1-S7: Install RAII guards at compilation entry points
+- **Files**: modified `lib/BCGen/HBC/BCProviderFromSrc.cpp`, `lib/CompilerDriver/CompilerDriver.cpp`, `tools/shermes/shermes.cpp`.
+- **What was done**: Added `IRTypeContextRAII typeContextGuard(M->getTypeContext())` (or `M.getTypeContext()` for stack-allocated Module) immediately after Module creation in all three production compilation entry points. No new includes needed — all files already include `IR.h` which includes `IRTypeContext.h`.
+- **Decisions**:
+  - Test files that create `Module` (BasicBlockTest, LoopAnalysisTest, BCGen/TestHelpers, BCGen/HBC, VMRuntime/TestHelpers1, API/SegmentTestCompile) are deferred to P1-S7.5.
+  - No additional production `Module` creation sites found beyond the three in the plan.
 

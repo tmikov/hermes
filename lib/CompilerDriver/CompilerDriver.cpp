@@ -2010,6 +2010,7 @@ CompileResult processSourceFiles(
   }
 
   auto M = std::make_shared<Module>(context);
+  IRTypeContextRAII typeContextGuard(M->getTypeContext());
   auto semCtx = std::make_shared<sema::SemContext>(*context);
 
   if (context->getUseCJSModules()) {

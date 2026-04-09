@@ -938,6 +938,7 @@ bool compileFromCommandLineOptions() {
   }
 
   Module M(context);
+  IRTypeContextRAII typeContextGuard(M.getTypeContext());
   sema::SemContext semCtx(*context);
   flow::FlowContext flowContext{};
   std::vector<std::unique_ptr<llvh::MemoryBuffer>> fileBufs{};

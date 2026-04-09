@@ -231,6 +231,7 @@ BCProviderFromSrc::create(
   }
 
   auto M = std::make_shared<Module>(context);
+  IRTypeContextRAII typeContextGuard(M->getTypeContext());
   hermes::generateIRFromESTree(
       M.get(), *semCtx, parsed.getValue(), topLevelFunctionName);
   if (context->getSourceErrorManager().getErrorCount() > 0) {

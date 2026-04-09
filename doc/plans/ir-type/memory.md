@@ -39,6 +39,11 @@ Non-obvious gotchas and patterns.
 - `Module` has `IRTypeContext typeContext_` member, default-constructed. Access via `getTypeContext()`.
 - `Module` class starts at ~line 2538 in IR.h (after many other classes: SideEffect, Value, Instruction, etc.).
 
+## RAII Guard Sites
+- Production Module creation sites: `BCProviderFromSrc.cpp:233`, `CompilerDriver.cpp:1983`, `shermes.cpp:911`.
+- Test Module creation sites (for P1-S7.5): `BasicBlockTest.cpp:25`, `LoopAnalysisTest.cpp` (10 tests), `BCGen/TestHelpers.cpp:46`, `BCGen/HBC.cpp:173,215`, `VMRuntime/TestHelpers1.cpp:52`, `API/SegmentTestCompile.cpp:41`.
+- No explicit include of `IRTypeContext.h` needed — `IR.h` already includes it (from P1-S6).
+
 ## Formatting
 - `format` uses "any" shorthand when `isSubsetOf(kAnyTypeId, id)` — matching old `Type::print()` which checks `canBeAny()`.
 - Kind names match old `getKindStr()`: "privateName", "functionCode" (camelCase for multi-word).
