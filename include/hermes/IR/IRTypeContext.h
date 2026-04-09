@@ -17,6 +17,10 @@
 #include <cstdint>
 #include <vector>
 
+namespace llvh {
+class raw_ostream;
+} // namespace llvh
+
 namespace hermes {
 
 /// Kinds of types in the IR type system.
@@ -273,6 +277,19 @@ class IRTypeContext {
 
   /// \return type \p a minus type \p b (conservative approximation).
   uint32_t subtractTy(uint32_t a, uint32_t b);
+
+  /// \return the number of kinds in the type: 0 for NoType, arm count for
+  /// unions, 1 for leaf types.
+  unsigned countKinds(uint32_t id) const;
+
+  /// \return the TypeKind of the type. For unions, returns the kind of the
+  /// first arm. For NoType, returns TypeKind::NoType.
+  TypeKind getFirstKind(uint32_t id) const;
+
+  /// Print the human-readable type name to \p OS. Leaf kinds print their name
+  /// (e.g. "number"). Unions print pipe-separated arms (e.g. "number|string").
+  /// NoType prints "notype". AnyType prints "any".
+  void format(llvh::raw_ostream &OS, uint32_t id) const;
 
  private:
   /// Type table. Index 0 = NoType. Pre-allocated entries for primitives.

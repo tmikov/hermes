@@ -8,6 +8,8 @@
 #include "hermes/IR/IRTypeContext.h"
 #include "hermes/Support/ErrorHandling.h"
 
+#include "llvh/Support/raw_ostream.h"
+
 #include <algorithm>
 #include <cassert>
 
@@ -116,7 +118,123 @@ bool areLeafKindsDisjoint(TypeKind a, TypeKind b) {
   return true;
 }
 
+/// \return the display name of a leaf kind. Matches the strings used by
+/// the old Type::print().
+llvh::StringRef kindName(TypeKind k) {
+  switch (k) {
+    case TypeKind::NoType:
+      return "notype";
+    case TypeKind::Empty:
+      return "empty";
+    case TypeKind::Uninit:
+      return "uninit";
+    case TypeKind::Undefined:
+      return "undefined";
+    case TypeKind::Null:
+      return "null";
+    case TypeKind::Boolean:
+      return "boolean";
+    case TypeKind::Number:
+      return "number";
+    case TypeKind::BigInt:
+      return "bigint";
+    case TypeKind::String:
+      return "string";
+    case TypeKind::Symbol:
+      return "symbol";
+    case TypeKind::Environment:
+      return "environment";
+    case TypeKind::PrivateName:
+      return "privateName";
+    case TypeKind::FunctionCode:
+      return "functionCode";
+    case TypeKind::Object:
+      return "object";
+    case TypeKind::Bits32:
+      return "bits32";
+    case TypeKind::Int32:
+      return "int32";
+    case TypeKind::Uint32:
+      return "uint32";
+    case TypeKind::Int31:
+      return "int31";
+    case TypeKind::ClassInstance:
+      return "classInstance";
+    case TypeKind::Array:
+      return "array";
+    case TypeKind::Tuple:
+      return "tuple";
+    case TypeKind::Function:
+      return "function";
+    case TypeKind::ExactObject:
+      return "exactObject";
+    case TypeKind::Union:
+      return "union";
+  }
+  llvm_unreachable("unknown TypeKind");
+}
+
 } // anonymous namespace
+
+unsigned IRTypeContext::countKinds(uint32_t id) const {
+  assert(id < entries_.size() && "Type ID out of range");
+  const auto &entry = entries_[id];
+  if (entry.kind == TypeKind::NoType)
+    return 0;
+  if (entry.kind == TypeKind::Union)
+    return entry.union_.armCount;
+  return 1;
+}
+
+TypeKind IRTypeContext::getFirstKind(uint32_t id) const {
+  assert(id < entries_.size() && "Type ID out of range");
+  const auto &entry = entries_[id];
+  if (entry.kind != TypeKind::Union)
+    return entry.kind;
+  // For unions, return the kind of the first arm.
+  auto arms = getUnionArms(id);
+  assert(!arms.empty() && "Union with no arms");
+  return entries_[arms[0]].kind;
+}
+
+void IRTypeContext::format(llvh::raw_ostream &OS, uint32_t id) const {
+  assert(id < entries_.size() && "Type ID out of range");
+  const auto &entry = entries_[id];
+
+  if (entry.kind == TypeKind::NoType) {
+    OS << "notype";
+    return;
+  }
+
+  if (entry.kind != TypeKind::Union) {
+    OS << kindName(entry.kind);
+    return;
+  }
+
+  // Union: check for the "any" shorthand. If this union is a superset of
+  // AnyType, print "any" plus any extra arms (empty, uninit).
+  if (isSubsetOf(kAnyTypeId, id)) {
+    OS << "any";
+    auto arms = getUnionArms(id);
+    for (uint32_t armId : arms) {
+      TypeKind k = entries_[armId].kind;
+      // Skip kinds that are part of AnyType.
+      if (containsMatchingKind(
+              kAnyTypeId, [k](TypeKind ak) { return ak == k; }))
+        continue;
+      OS << '|' << kindName(k);
+    }
+    return;
+  }
+
+  // General union: pipe-separated arms.
+  auto arms = getUnionArms(id);
+  for (size_t i = 0; i < arms.size(); ++i) {
+    if (i != 0)
+      OS << '|';
+    OS << kindName(entries_[arms[i]].kind);
+  }
+}
 
 bool IRTypeContext::canBeNumber(uint32_t id) const {
   // Fast path: well-known IDs.

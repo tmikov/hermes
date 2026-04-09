@@ -7,6 +7,8 @@
 
 #include "hermes/IR/IRTypeContext.h"
 
+#include "llvh/Support/raw_ostream.h"
+
 #include "gtest/gtest.h"
 
 using namespace hermes;
@@ -500,6 +502,101 @@ TEST(IRTypeContextTest, Int31Predicates) {
   EXPECT_TRUE(ctx.isNonPtr(kInt31Id));
   EXPECT_FALSE(ctx.canBeString(kInt31Id));
   EXPECT_FALSE(ctx.canBeObject(kInt31Id));
+}
+
+TEST(IRTypeContextTest, CountKinds) {
+  IRTypeContext ctx;
+
+  EXPECT_EQ(ctx.countKinds(kNoTypeId), 0u);
+  EXPECT_EQ(ctx.countKinds(kNumberId), 1u);
+  EXPECT_EQ(ctx.countKinds(kStringId), 1u);
+  EXPECT_EQ(ctx.countKinds(kObjectId), 1u);
+  // AnyType has 8 arms.
+  EXPECT_EQ(ctx.countKinds(kAnyTypeId), 8u);
+  // Numeric = Number | BigInt.
+  EXPECT_EQ(ctx.countKinds(kNumericId), 2u);
+  // NullOrUndef = Null | Undefined.
+  EXPECT_EQ(ctx.countKinds(kNullOrUndefId), 2u);
+  // AnyEmptyUninit = 10 arms.
+  EXPECT_EQ(ctx.countKinds(kAnyEmptyUninitId), 10u);
+  // Dynamic union.
+  uint32_t numStr = ctx.unionTy(kNumberId, kStringId);
+  EXPECT_EQ(ctx.countKinds(numStr), 2u);
+}
+
+TEST(IRTypeContextTest, GetFirstKind) {
+  IRTypeContext ctx;
+
+  EXPECT_EQ(ctx.getFirstKind(kNoTypeId), TypeKind::NoType);
+  EXPECT_EQ(ctx.getFirstKind(kNumberId), TypeKind::Number);
+  EXPECT_EQ(ctx.getFirstKind(kStringId), TypeKind::String);
+  EXPECT_EQ(ctx.getFirstKind(kObjectId), TypeKind::Object);
+  EXPECT_EQ(ctx.getFirstKind(kEmptyId), TypeKind::Empty);
+  // AnyType first arm is Undefined (lowest ID arm).
+  EXPECT_EQ(ctx.getFirstKind(kAnyTypeId), TypeKind::Undefined);
+  // Numeric first arm is Number (ID 7 < ID 8).
+  EXPECT_EQ(ctx.getFirstKind(kNumericId), TypeKind::Number);
+  // NullOrUndef first arm is Undefined (ID 3 < ID 4).
+  EXPECT_EQ(ctx.getFirstKind(kNullOrUndefId), TypeKind::Undefined);
+}
+
+TEST(IRTypeContextTest, FormatLeafTypes) {
+  IRTypeContext ctx;
+  auto fmt = [&](uint32_t id) -> std::string {
+    std::string s;
+    llvh::raw_string_ostream os(s);
+    ctx.format(os, id);
+    return s;
+  };
+
+  EXPECT_EQ(fmt(kNoTypeId), "notype");
+  EXPECT_EQ(fmt(kNumberId), "number");
+  EXPECT_EQ(fmt(kStringId), "string");
+  EXPECT_EQ(fmt(kObjectId), "object");
+  EXPECT_EQ(fmt(kBooleanId), "boolean");
+  EXPECT_EQ(fmt(kNullId), "null");
+  EXPECT_EQ(fmt(kUndefinedId), "undefined");
+  EXPECT_EQ(fmt(kBigIntId), "bigint");
+  EXPECT_EQ(fmt(kSymbolId), "symbol");
+  EXPECT_EQ(fmt(kEmptyId), "empty");
+  EXPECT_EQ(fmt(kUninitId), "uninit");
+  EXPECT_EQ(fmt(kEnvironmentId), "environment");
+  EXPECT_EQ(fmt(kPrivateNameId), "privateName");
+  EXPECT_EQ(fmt(kFunctionCodeId), "functionCode");
+  EXPECT_EQ(fmt(kBits32Id), "bits32");
+}
+
+TEST(IRTypeContextTest, FormatWellKnownUnions) {
+  IRTypeContext ctx;
+  auto fmt = [&](uint32_t id) -> std::string {
+    std::string s;
+    llvh::raw_string_ostream os(s);
+    ctx.format(os, id);
+    return s;
+  };
+
+  // AnyType prints as "any".
+  EXPECT_EQ(fmt(kAnyTypeId), "any");
+  // AnyEmptyUninit prints as "any|empty|uninit".
+  EXPECT_EQ(fmt(kAnyEmptyUninitId), "any|empty|uninit");
+  // Numeric = Number | BigInt.
+  EXPECT_EQ(fmt(kNumericId), "number|bigint");
+  // NullOrUndef = Undefined | Null (sorted by ID).
+  EXPECT_EQ(fmt(kNullOrUndefId), "undefined|null");
+}
+
+TEST(IRTypeContextTest, FormatDynamicUnion) {
+  IRTypeContext ctx;
+  auto fmt = [&](uint32_t id) -> std::string {
+    std::string s;
+    llvh::raw_string_ostream os(s);
+    ctx.format(os, id);
+    return s;
+  };
+
+  uint32_t numStr = ctx.unionTy(kNumberId, kStringId);
+  // Arms sorted by ID: String(6), Number(7).
+  EXPECT_EQ(fmt(numStr), "string|number");
 }
 
 } // anonymous namespace

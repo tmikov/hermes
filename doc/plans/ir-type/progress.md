@@ -47,7 +47,7 @@ be omitted):
 | P1-S1 | IRTypeContext skeleton with well-known types | — | done | |
 | P1-S2 | Type queries on IRTypeContext | P1-S1 | done | |
 | P1-S3 | Type operations with interning | P1-S2 | done | |
-| P1-S4 | Utility methods | P1-S3 | | |
+| P1-S4 | Utility methods | P1-S3 | done | |
 | P1-S5 | Thread-local context and RAII guard | P1-S1 | | |
 | P1-S6 | Wire IRTypeContext into Module | P1-S1 | | |
 | P1-S7 | Install RAII guards at compilation entry points | P1-S5, P1-S6 | | |
@@ -74,6 +74,14 @@ be omitted):
   - `subtractTy` returns conservative approximation (returns `a` unchanged) when a is a leaf that's not subset of b and not disjoint from b.
   - `intersectTy` distributes over unions recursively; base case for two non-subset number-family leafs returns `kInt31Id` (the only such overlap); other non-subset leafs return NoType.
   - Added `TypeKind::Int31` (Int32 ∩ Uint32, integers in [0, 2^31-1]) to close the lattice gap. Int31 <: Int32, Int31 <: Uint32, Int31 <: Number. Pre-allocated as well-known IDs: kInt32Id=15, kUint32Id=16, kInt31Id=17 (shifted union IDs up by 3). 5 new unit tests (28 total).
+
+### P1-S4: Utility methods
+- **Files**: modified `include/hermes/IR/IRTypeContext.h`, `lib/IR/IRTypeContext.cpp`, `unittests/IR/IRTypeContextTest.cpp`.
+- **What was done**: Added `countKinds`, `getFirstKind`, `format` methods. Added `kindName` file-scoped helper for TypeKind→string mapping. Forward-declared `llvh::raw_ostream` in header. 5 new unit tests (28 total).
+- **Decisions**:
+  - `format` uses "any" shorthand when the union is a superset of AnyType (matching old `Type::print()`). Extra arms beyond AnyType (e.g. empty, uninit) are appended with `|`.
+  - `kindName` covers all TypeKind values including deferred refined types and Bits32, for completeness.
+  - `getFirstKind` returns `TypeKind::NoType` for NoType (matching old behavior where `getFirstTypeKind` returns `LAST_TYPE` for empty bitmask — callers check `isNoType()` first).
 
 ### P1-S1: IRTypeContext skeleton with well-known types
 - **Files**: created `include/hermes/IR/IRTypeContext.h`, `lib/IR/IRTypeContext.cpp`, `unittests/IR/IRTypeContextTest.cpp`; modified `lib/CMakeLists.txt`, `unittests/IR/CMakeLists.txt`.
