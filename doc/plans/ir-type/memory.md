@@ -29,6 +29,11 @@ Non-obvious gotchas and patterns.
 - `intersectTy` leaf-leaf case: returns `kInt31Id` for overlapping number-family types (Int32 ∩ Uint32), NoType for all other non-subset pairs. This closes the lattice so `intersectTy` and `areDisjoint` are consistent.
 - `Int31` (integers in [0, 2^31-1]) is the intersection of Int32 and Uint32. Subtype rules: Int31 <: Int32, Int31 <: Uint32, Int31 <: Number. Pre-allocated at kInt32Id=15, kUint32Id=16, kInt31Id=17.
 
+## Thread-Local Context
+- `IRTypeContext::current_` is `static thread_local`, defined in `IRTypeContext.cpp`, initialized to `nullptr`.
+- `IRTypeContextRAII` is a friend of `IRTypeContext` to access `current_`. It saves/restores the pointer, supporting nesting.
+- The test target name for IR unit tests is `HermesIRTests` (not `IRTypeContextTest`).
+
 ## Formatting
 - `format` uses "any" shorthand when `isSubsetOf(kAnyTypeId, id)` — matching old `Type::print()` which checks `canBeAny()`.
 - Kind names match old `getKindStr()`: "privateName", "functionCode" (camelCase for multi-word).

@@ -48,7 +48,7 @@ be omitted):
 | P1-S2 | Type queries on IRTypeContext | P1-S1 | done | |
 | P1-S3 | Type operations with interning | P1-S2 | done | |
 | P1-S4 | Utility methods | P1-S3 | done | |
-| P1-S5 | Thread-local context and RAII guard | P1-S1 | | |
+| P1-S5 | Thread-local context and RAII guard | P1-S1 | done | |
 | P1-S6 | Wire IRTypeContext into Module | P1-S1 | | |
 | P1-S7 | Install RAII guards at compilation entry points | P1-S5, P1-S6 | | |
 | P1-S7.5 | Add RAII guards to unit tests | P1-S7 | | |
@@ -82,6 +82,13 @@ be omitted):
   - `format` uses "any" shorthand when the union is a superset of AnyType (matching old `Type::print()`). Extra arms beyond AnyType (e.g. empty, uninit) are appended with `|`.
   - `kindName` covers all TypeKind values including deferred refined types and Bits32, for completeness.
   - `getFirstKind` returns `TypeKind::NoType` for NoType (matching old behavior where `getFirstTypeKind` returns `LAST_TYPE` for empty bitmask — callers check `isNoType()` first).
+
+### P1-S5: Thread-local context and RAII guard
+- **Files**: modified `include/hermes/IR/IRTypeContext.h`, `lib/IR/IRTypeContext.cpp`, `unittests/IR/IRTypeContextTest.cpp`.
+- **What was done**: Added `static thread_local IRTypeContext *current_` and `static IRTypeContext &current()` to `IRTypeContext`. Added `IRTypeContextRAII` class with save/restore semantics. 2 new unit tests (35 total).
+- **Decisions**:
+  - `IRTypeContextRAII` is a friend of `IRTypeContext` to access `current_` directly, keeping the static member private.
+  - `current()` returns a reference (not pointer) and asserts non-null — callers never need to check.
 
 ### P1-S1: IRTypeContext skeleton with well-known types
 - **Files**: created `include/hermes/IR/IRTypeContext.h`, `lib/IR/IRTypeContext.cpp`, `unittests/IR/IRTypeContextTest.cpp`; modified `lib/CMakeLists.txt`, `unittests/IR/CMakeLists.txt`.

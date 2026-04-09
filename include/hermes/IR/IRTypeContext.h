@@ -196,6 +196,8 @@ struct UnionInternKeyInfo {
   }
 };
 
+class IRTypeContextRAII;
+
 /// Owns the type table for a Module and provides type operations.
 ///
 /// The constructor pre-allocates entries for all well-known types (primitives
@@ -204,6 +206,13 @@ struct UnionInternKeyInfo {
 class IRTypeContext {
  public:
   IRTypeContext();
+
+  /// \return the current thread-local IRTypeContext. Asserts that one has been
+  /// installed via IRTypeContextRAII.
+  static IRTypeContext &current() {
+    assert(current_ && "No IRTypeContext installed on this thread");
+    return *current_;
+  }
 
   /// Return the kind of the type entry at \p id.
   TypeKind getKind(uint32_t id) const {
@@ -292,6 +301,11 @@ class IRTypeContext {
   void format(llvh::raw_ostream &OS, uint32_t id) const;
 
  private:
+  friend class IRTypeContextRAII;
+
+  /// Thread-local pointer to the current context.
+  static thread_local IRTypeContext *current_;
+
   /// Type table. Index 0 = NoType. Pre-allocated entries for primitives.
   std::vector<TypeEntry> entries_;
 
@@ -344,6 +358,29 @@ class IRTypeContext {
   /// Create a union from two operands with full canonicalization and interning.
   /// Flattens, deduplicates, removes subsumed arms, sorts, and interns.
   uint32_t createUnionImpl(uint32_t a, uint32_t b);
+};
+
+/// RAII guard that installs an IRTypeContext as the current thread-local
+/// context. The previous context (if any) is restored on destruction.
+/// Non-copyable, non-movable.
+class IRTypeContextRAII {
+ public:
+  explicit IRTypeContextRAII(IRTypeContext &ctx)
+      : saved_(IRTypeContext::current_) {
+    IRTypeContext::current_ = &ctx;
+  }
+
+  ~IRTypeContextRAII() {
+    IRTypeContext::current_ = saved_;
+  }
+
+  IRTypeContextRAII(const IRTypeContextRAII &) = delete;
+  IRTypeContextRAII &operator=(const IRTypeContextRAII &) = delete;
+  IRTypeContextRAII(IRTypeContextRAII &&) = delete;
+  IRTypeContextRAII &operator=(IRTypeContextRAII &&) = delete;
+
+ private:
+  IRTypeContext *saved_;
 };
 
 } // namespace hermes

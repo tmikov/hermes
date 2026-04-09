@@ -599,4 +599,26 @@ TEST(IRTypeContextTest, FormatDynamicUnion) {
   EXPECT_EQ(fmt(numStr), "string|number");
 }
 
+TEST(IRTypeContextTest, CurrentWithGuard) {
+  IRTypeContext ctx;
+  IRTypeContextRAII guard(ctx);
+  EXPECT_EQ(&IRTypeContext::current(), &ctx);
+}
+
+TEST(IRTypeContextTest, NestedGuards) {
+  IRTypeContext outer;
+  IRTypeContext inner;
+
+  IRTypeContextRAII outerGuard(outer);
+  EXPECT_EQ(&IRTypeContext::current(), &outer);
+
+  {
+    IRTypeContextRAII innerGuard(inner);
+    EXPECT_EQ(&IRTypeContext::current(), &inner);
+  }
+
+  // Outer context restored after inner guard destruction.
+  EXPECT_EQ(&IRTypeContext::current(), &outer);
+}
+
 } // anonymous namespace
