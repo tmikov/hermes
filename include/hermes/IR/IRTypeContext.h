@@ -183,6 +183,44 @@ class IRTypeContext {
         typeArrays_.data() + entry.union_.armOffset, entry.union_.armCount);
   }
 
+  /// \return true if the type at \p id is NoType (empty set).
+  bool isNoType(uint32_t id) const {
+    return getKind(id) == TypeKind::NoType;
+  }
+
+  /// \return true if the type at \p id can represent a Number value.
+  bool canBeNumber(uint32_t id) const;
+  /// \return true if the type at \p id can represent a String value.
+  bool canBeString(uint32_t id) const;
+  /// \return true if the type at \p id can represent an Object value.
+  bool canBeObject(uint32_t id) const;
+  /// \return true if the type at \p id can represent a Null value.
+  bool canBeNull(uint32_t id) const;
+  /// \return true if the type at \p id can represent an Undefined value.
+  bool canBeUndefined(uint32_t id) const;
+  /// \return true if the type at \p id can represent an Empty value.
+  bool canBeEmpty(uint32_t id) const;
+  /// \return true if the type at \p id can represent an Uninit value.
+  bool canBeUninit(uint32_t id) const;
+  /// \return true if the type at \p id can represent a BigInt value.
+  bool canBeBigInt(uint32_t id) const;
+  /// \return true if the type at \p id can represent a Boolean value.
+  bool canBeBoolean(uint32_t id) const;
+  /// \return true if the type at \p id can represent a Symbol value.
+  bool canBeSymbol(uint32_t id) const;
+
+  /// \return true if the type at \p id represents only primitive types
+  /// (Number, String, BigInt, Null, Undefined, Boolean, Symbol).
+  /// Returns false for NoType.
+  bool isPrimitive(uint32_t id) const;
+
+  /// \return true if any of the types at \p id are primitive.
+  bool canBePrimitive(uint32_t id) const;
+
+  /// \return true if the type at \p id is not referenced by a pointer
+  /// (Number, Boolean, Null, Undefined only). Returns false for NoType.
+  bool isNonPtr(uint32_t id) const;
+
  private:
   /// Type table. Index 0 = NoType. Pre-allocated entries for primitives.
   std::vector<TypeEntry> entries_;
@@ -191,6 +229,41 @@ class IRTypeContext {
   /// Uses raw uint32_t since Type is still a bitmask at this point; changed
   /// to Type in P1-S8.
   std::vector<uint32_t> typeArrays_;
+
+  /// Return true if any component of the type at \p id satisfies \p pred.
+  /// For leaf types, tests the kind directly. For unions, tests any arm.
+  template <typename Pred>
+  bool containsMatchingKind(uint32_t id, Pred pred) const {
+    assert(id < entries_.size() && "Type ID out of range");
+    const auto &entry = entries_[id];
+    if (entry.kind != TypeKind::Union)
+      return pred(entry.kind);
+    auto arms = getUnionArms(id);
+    for (uint32_t armId : arms) {
+      assert(entries_[armId].kind != TypeKind::Union && "Nested unions");
+      if (pred(entries_[armId].kind))
+        return true;
+    }
+    return false;
+  }
+
+  /// Return true if all components of the type at \p id satisfy \p pred.
+  /// Returns false for NoType.
+  template <typename Pred>
+  bool allMatchKind(uint32_t id, Pred pred) const {
+    assert(id < entries_.size() && "Type ID out of range");
+    const auto &entry = entries_[id];
+    if (entry.kind == TypeKind::NoType)
+      return false;
+    if (entry.kind != TypeKind::Union)
+      return pred(entry.kind);
+    auto arms = getUnionArms(id);
+    for (uint32_t armId : arms) {
+      if (!pred(entries_[armId].kind))
+        return false;
+    }
+    return true;
+  }
 
   /// Helper to append arms to typeArrays_ and create a union entry.
   uint32_t addUnionEntry(llvh::ArrayRef<uint32_t> arms);

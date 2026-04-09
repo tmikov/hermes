@@ -139,4 +139,146 @@ TEST(IRTypeContextTest, ReservedSlots) {
   }
 }
 
+TEST(IRTypeContextTest, CanBeNumberLeaf) {
+  IRTypeContext ctx;
+
+  EXPECT_TRUE(ctx.canBeNumber(kNumberId));
+  EXPECT_FALSE(ctx.canBeNumber(kStringId));
+  EXPECT_FALSE(ctx.canBeNumber(kObjectId));
+  EXPECT_FALSE(ctx.canBeNumber(kNoTypeId));
+  EXPECT_FALSE(ctx.canBeNumber(kBooleanId));
+}
+
+TEST(IRTypeContextTest, CanBeNumberUnion) {
+  IRTypeContext ctx;
+
+  // AnyType is a union containing Number.
+  EXPECT_TRUE(ctx.canBeNumber(kAnyTypeId));
+  // Numeric = Number | BigInt.
+  EXPECT_TRUE(ctx.canBeNumber(kNumericId));
+  // AnyEmptyUninit contains Number.
+  EXPECT_TRUE(ctx.canBeNumber(kAnyEmptyUninitId));
+  // NullOrUndef does not contain Number.
+  EXPECT_FALSE(ctx.canBeNumber(kNullOrUndefId));
+}
+
+TEST(IRTypeContextTest, CanBeOtherKinds) {
+  IRTypeContext ctx;
+
+  EXPECT_TRUE(ctx.canBeString(kStringId));
+  EXPECT_FALSE(ctx.canBeString(kNumberId));
+  EXPECT_TRUE(ctx.canBeString(kAnyTypeId));
+
+  EXPECT_TRUE(ctx.canBeObject(kObjectId));
+  EXPECT_FALSE(ctx.canBeObject(kNumberId));
+  EXPECT_TRUE(ctx.canBeObject(kAnyTypeId));
+
+  EXPECT_TRUE(ctx.canBeNull(kNullId));
+  EXPECT_FALSE(ctx.canBeNull(kNumberId));
+  EXPECT_TRUE(ctx.canBeNull(kAnyTypeId));
+  EXPECT_TRUE(ctx.canBeNull(kNullOrUndefId));
+
+  EXPECT_TRUE(ctx.canBeUndefined(kUndefinedId));
+  EXPECT_FALSE(ctx.canBeUndefined(kNumberId));
+  EXPECT_TRUE(ctx.canBeUndefined(kAnyTypeId));
+  EXPECT_TRUE(ctx.canBeUndefined(kNullOrUndefId));
+
+  EXPECT_TRUE(ctx.canBeEmpty(kEmptyId));
+  EXPECT_FALSE(ctx.canBeEmpty(kNumberId));
+  EXPECT_FALSE(ctx.canBeEmpty(kAnyTypeId));
+  EXPECT_TRUE(ctx.canBeEmpty(kAnyEmptyUninitId));
+
+  EXPECT_TRUE(ctx.canBeUninit(kUninitId));
+  EXPECT_FALSE(ctx.canBeUninit(kNumberId));
+  EXPECT_FALSE(ctx.canBeUninit(kAnyTypeId));
+  EXPECT_TRUE(ctx.canBeUninit(kAnyEmptyUninitId));
+
+  EXPECT_TRUE(ctx.canBeBigInt(kBigIntId));
+  EXPECT_FALSE(ctx.canBeBigInt(kStringId));
+  EXPECT_TRUE(ctx.canBeBigInt(kNumericId));
+  EXPECT_TRUE(ctx.canBeBigInt(kAnyTypeId));
+
+  EXPECT_TRUE(ctx.canBeBoolean(kBooleanId));
+  EXPECT_FALSE(ctx.canBeBoolean(kStringId));
+  EXPECT_TRUE(ctx.canBeBoolean(kAnyTypeId));
+
+  EXPECT_TRUE(ctx.canBeSymbol(kSymbolId));
+  EXPECT_FALSE(ctx.canBeSymbol(kStringId));
+  EXPECT_TRUE(ctx.canBeSymbol(kAnyTypeId));
+}
+
+TEST(IRTypeContextTest, IsNoType) {
+  IRTypeContext ctx;
+
+  EXPECT_TRUE(ctx.isNoType(kNoTypeId));
+  EXPECT_FALSE(ctx.isNoType(kNumberId));
+  EXPECT_FALSE(ctx.isNoType(kAnyTypeId));
+}
+
+TEST(IRTypeContextTest, IsPrimitive) {
+  IRTypeContext ctx;
+
+  // Primitive kinds: Number, String, BigInt, Null, Undefined, Boolean, Symbol.
+  EXPECT_TRUE(ctx.isPrimitive(kNumberId));
+  EXPECT_TRUE(ctx.isPrimitive(kStringId));
+  EXPECT_TRUE(ctx.isPrimitive(kBigIntId));
+  EXPECT_TRUE(ctx.isPrimitive(kNullId));
+  EXPECT_TRUE(ctx.isPrimitive(kUndefinedId));
+  EXPECT_TRUE(ctx.isPrimitive(kBooleanId));
+  EXPECT_TRUE(ctx.isPrimitive(kSymbolId));
+
+  // Object is NOT primitive.
+  EXPECT_FALSE(ctx.isPrimitive(kObjectId));
+  // Internal types are not primitive.
+  EXPECT_FALSE(ctx.isPrimitive(kEmptyId));
+  EXPECT_FALSE(ctx.isPrimitive(kUninitId));
+  EXPECT_FALSE(ctx.isPrimitive(kEnvironmentId));
+  EXPECT_FALSE(ctx.isPrimitive(kBits32Id));
+  // NoType is not primitive.
+  EXPECT_FALSE(ctx.isPrimitive(kNoTypeId));
+
+  // AnyType contains Object, so it's not all-primitive.
+  EXPECT_FALSE(ctx.isPrimitive(kAnyTypeId));
+  // Numeric = Number | BigInt — both primitive.
+  EXPECT_TRUE(ctx.isPrimitive(kNumericId));
+  // NullOrUndef = Null | Undefined — both primitive.
+  EXPECT_TRUE(ctx.isPrimitive(kNullOrUndefId));
+}
+
+TEST(IRTypeContextTest, CanBePrimitive) {
+  IRTypeContext ctx;
+
+  EXPECT_TRUE(ctx.canBePrimitive(kNumberId));
+  EXPECT_FALSE(ctx.canBePrimitive(kObjectId));
+  EXPECT_FALSE(ctx.canBePrimitive(kNoTypeId));
+  // AnyType contains primitives (and Object).
+  EXPECT_TRUE(ctx.canBePrimitive(kAnyTypeId));
+  // AnyEmptyUninit contains primitives.
+  EXPECT_TRUE(ctx.canBePrimitive(kAnyEmptyUninitId));
+}
+
+TEST(IRTypeContextTest, IsNonPtr) {
+  IRTypeContext ctx;
+
+  // NonPtr kinds: Number, Boolean, Null, Undefined.
+  EXPECT_TRUE(ctx.isNonPtr(kNumberId));
+  EXPECT_TRUE(ctx.isNonPtr(kBooleanId));
+  EXPECT_TRUE(ctx.isNonPtr(kNullId));
+  EXPECT_TRUE(ctx.isNonPtr(kUndefinedId));
+
+  // String is a pointer type.
+  EXPECT_FALSE(ctx.isNonPtr(kStringId));
+  // Object is a pointer type.
+  EXPECT_FALSE(ctx.isNonPtr(kObjectId));
+  // NoType is not nonPtr.
+  EXPECT_FALSE(ctx.isNonPtr(kNoTypeId));
+
+  // NullOrUndef = Null | Undefined — both non-ptr.
+  EXPECT_TRUE(ctx.isNonPtr(kNullOrUndefId));
+  // AnyType contains String/Object, so not all non-ptr.
+  EXPECT_FALSE(ctx.isNonPtr(kAnyTypeId));
+  // Numeric contains BigInt, which is a pointer type.
+  EXPECT_FALSE(ctx.isNonPtr(kNumericId));
+}
+
 } // anonymous namespace

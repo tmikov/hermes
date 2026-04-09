@@ -45,7 +45,7 @@ be omitted):
 | Step | Description | Depends On | Status | Brief Note (optional) |
 |------|-------------|------------|--------|-----------------------|
 | P1-S1 | IRTypeContext skeleton with well-known types | — | done | |
-| P1-S2 | Type queries on IRTypeContext | P1-S1 | | |
+| P1-S2 | Type queries on IRTypeContext | P1-S1 | done | |
 | P1-S3 | Type operations with interning | P1-S2 | | |
 | P1-S4 | Utility methods | P1-S3 | | |
 | P1-S5 | Thread-local context and RAII guard | P1-S1 | | |
@@ -55,6 +55,14 @@ be omitted):
 | P1-S8 | Rewrite Type class | P1-S4, P1-S7.5 | | |
 
 ## Context Notes
+
+### P1-S2: Type queries on IRTypeContext
+- **Files**: modified `include/hermes/IR/IRTypeContext.h`, `lib/IR/IRTypeContext.cpp`, `unittests/IR/IRTypeContextTest.cpp`.
+- **What was done**: Added `canBeNumber`, `canBeString`, `canBeObject`, `canBeNull`, `canBeUndefined`, `canBeEmpty`, `canBeUninit`, `canBeBigInt`, `canBeBoolean`, `canBeSymbol`, `isNoType`, `isPrimitive`, `canBePrimitive`, `isNonPtr`. Private helpers `containsMatchingKind` and `allMatchKind` take predicate functions for leaf/union dispatch. File-scoped kind helpers (`isNumberKind`, `isObjectKind`, `isPrimitiveKind`, `isNonPtrKind`) encode subtype relationships. 7 new unit tests (13 total).
+- **Decisions**:
+  - Well-known ID fast paths in each `canBeX` method, per the plan spec. Avoids table lookups for common types.
+  - Kind helpers are subtype-aware: `isNumberKind` includes Int32/Uint32, `isObjectKind` includes ClassInstance/Array/Tuple/Function/ExactObject, `isPrimitiveKind` and `isNonPtrKind` include number subtypes. Refined kinds are dead code in Phase 1 but the predicates are correct when they activate.
+  - `isPrimitive`/`isNonPtr` return false for NoType, matching the old bitmask semantics (`bitmask_ && !(bitmask_ & ~BITS)`).
 
 ### P1-S1: IRTypeContext skeleton with well-known types
 - **Files**: created `include/hermes/IR/IRTypeContext.h`, `lib/IR/IRTypeContext.cpp`, `unittests/IR/IRTypeContextTest.cpp`; modified `lib/CMakeLists.txt`, `unittests/IR/CMakeLists.txt`.
