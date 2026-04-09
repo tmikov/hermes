@@ -44,7 +44,7 @@ be omitted):
 
 | Step | Description | Depends On | Status | Brief Note (optional) |
 |------|-------------|------------|--------|-----------------------|
-| P1-S1 | IRTypeContext skeleton with well-known types | — | | |
+| P1-S1 | IRTypeContext skeleton with well-known types | — | done | |
 | P1-S2 | Type queries on IRTypeContext | P1-S1 | | |
 | P1-S3 | Type operations with interning | P1-S2 | | |
 | P1-S4 | Utility methods | P1-S3 | | |
@@ -55,4 +55,13 @@ be omitted):
 | P1-S8 | Rewrite Type class | P1-S4, P1-S7.5 | | |
 
 ## Context Notes
+
+### P1-S1: IRTypeContext skeleton with well-known types
+- **Files**: created `include/hermes/IR/IRTypeContext.h`, `lib/IR/IRTypeContext.cpp`, `unittests/IR/IRTypeContextTest.cpp`; modified `lib/CMakeLists.txt`, `unittests/IR/CMakeLists.txt`.
+- **Decisions**:
+  - TypeEntry uses raw `uint32_t` for all type references (not `Type`) since `Type` is still a bitmask. Changed to `Type` in P1-S8.
+  - Added `kNullOrUndefId` (id=18) as a well-known union, needed for InstSimplify.cpp migration in P1-S8.
+  - Reserved IDs 19-31 padded with NoType placeholders.
+  - Union arm arrays stored in sorted order by ID for AnyType and AnyEmptyUninit.
+- **What was done**: Created IRTypeContext with TypeKind enum (all kinds including deferred refined types), TypeEntry tagged-union struct, well-known ID constants, constructor that pre-allocates 15 leaf types and 4 well-known unions, getKind() and getUnionArms() accessors. Added to hermesFrontend build target. 6 unit tests.
 

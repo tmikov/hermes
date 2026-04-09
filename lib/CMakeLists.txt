@@ -49,6 +49,7 @@ add_hermes_library(hermesFrontend
   IRGen/ESTreeIRGen-legacy-class.cpp
   IR/Analysis.cpp
   IR/IR.cpp
+  IR/IRTypeContext.cpp
   IR/IREval.cpp
   IR/IRHash.cpp
   IR/CFG.cpp

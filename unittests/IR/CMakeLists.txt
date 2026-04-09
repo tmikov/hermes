@@ -9,6 +9,7 @@ set(IRSources
   BuilderTest.cpp
   InstrTest.cpp
   IRHashTest.cpp
+  IRTypeContextTest.cpp
   IRUtilsTest.cpp
   IRVerifierTest.cpp
   LoopAnalysisTest.cpp
