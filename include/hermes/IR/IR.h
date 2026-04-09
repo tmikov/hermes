@@ -52,350 +52,224 @@ class Context;
 class TerminatorInst;
 class LazyCompilationDataInst;
 class EvalCompilationDataInst;
+class IRTypeContextTest;
 
-/// Representation of a type in the IR. This roughly corresponds for JavaScript
-/// types, but represents lower level concepts like "empty" type for TDZ and
-/// integers.
+/// Representation of a type in the IR. A Type is an opaque 4-byte handle
+/// (index) into the type table owned by IRTypeContext. All type operations
+/// delegate to IRTypeContext::current().
 class Type {
- public:
-  // Encodes the JavaScript type hierarchy.
-  enum TypeKind {
-    /// An TDZ variable before its declaration.
-    Empty,
-    /// A typed variable after its declaration, but before initialization.
-    /// At runtime this maps to undefined.
-    Uninit,
-    Undefined,
-    Null,
-    Boolean,
-    String,
-    Number,
-    BigInt,
-    // ES2024 4.4.32 Symbol type (not the symbol object)
-    Symbol,
-    Environment,
-    // ES2024 6.2.12 Private Names. We currently happen to use symbols at
-    // runtime to represent private names, but conceptually private names are a
-    // different entity, and for example certain private operations can only
-    // operate on this type.
-    PrivateName,
-    /// Function code (IR Function value), not a closure.
-    FunctionCode,
-    Object,
+  friend class IRTypeContext;
+  /// Test fixture is a friend so it can construct Type from a raw
+  /// well-known ID for refined-kind tests that have no public factory.
+  friend class IRTypeContextTest;
 
-    LAST_TYPE
-  };
+  /// Index into IRTypeContext's type table.
+  uint32_t id_{kNoTypeId};
 
- private:
-  static_assert(LAST_TYPE <= 16, "Type tag must fit in 16 bits");
-
-  /// Return the string representation of the type at index \p idx.
-  llvh::StringRef getKindStr(TypeKind idx) const {
-    // The strings below match the values in TypeKind.
-    static const char *const names[] = {
-        "empty",
-        "uninit",
-        "undefined",
-        "null",
-        "boolean",
-        "string",
-        "number",
-        "bigint",
-        "symbol",
-        "environment",
-        "privateName",
-        "functionCode",
-        "object"};
-    static_assert(
-        LAST_TYPE == (sizeof(names) / sizeof(char *)),
-        "Not all types have a defined string representation");
-    return names[idx];
-  }
-
-#define BIT_TO_VAL(XX) (1 << TypeKind::XX)
-#define IS_VAL(XX) (bitmask_ == (1 << TypeKind::XX))
-
-#define NUM_BIT_TO_VAL(XX) (1 << NumTypeKind::XX)
-#define NUM_IS_VAL(XX) (numBitmask_ == (1 << NumTypeKind::XX))
-
-  // All possible types including "empty" and "uninit", but not including
-  // special internal types that are never mixed with other types.
-  static constexpr uint16_t TYPE_ANY_EMPTY_UNINIT_MASK =
-      ((1u << TypeKind::LAST_TYPE) - 1) & ~BIT_TO_VAL(Environment) &
-      ~BIT_TO_VAL(PrivateName) & ~BIT_TO_VAL(FunctionCode);
-  // All of the above types except "empty" and "uninit".
-  static constexpr uint16_t TYPE_ANY_MASK =
-      TYPE_ANY_EMPTY_UNINIT_MASK & ~BIT_TO_VAL(Empty) & ~BIT_TO_VAL(Uninit);
-
-  static constexpr uint16_t PRIMITIVE_BITS = BIT_TO_VAL(Number) |
-      BIT_TO_VAL(String) | BIT_TO_VAL(BigInt) | BIT_TO_VAL(Null) |
-      BIT_TO_VAL(Undefined) | BIT_TO_VAL(Boolean) | BIT_TO_VAL(Symbol);
-
-  static constexpr uint16_t NONPTR_BITS = BIT_TO_VAL(Number) |
-      BIT_TO_VAL(Boolean) | BIT_TO_VAL(Null) | BIT_TO_VAL(Undefined);
-
-  /// Each bit represent the possibility of the type being the type that's
-  /// represented in the enum entry.
-  uint16_t bitmask_{0};
-
-  /// The constructor is only accessible by static builder methods.
-  constexpr explicit Type(uint16_t mask) : bitmask_(mask) {}
+  /// Private constructor from a type ID.
+  constexpr explicit Type(uint32_t id) : id_(id) {}
 
  public:
-  static constexpr Type unionTy(Type A, Type B) {
-    return Type(A.bitmask_ | B.bitmask_);
-  }
+  /// \name Static operations (delegate to IRTypeContext::current()).
+  /// @{
+  static Type unionTy(Type A, Type B);
+  static Type intersectTy(Type A, Type B);
+  static Type subtractTy(Type A, Type B);
+  /// @}
 
-  static constexpr Type intersectTy(Type A, Type B) {
-    // This is sound but not complete, but this is only used for disjointness
-    // check.
-    return Type(A.bitmask_ & B.bitmask_);
-  }
-
-  static constexpr Type subtractTy(Type A, Type B) {
-    return Type(A.bitmask_ & ~B.bitmask_);
-  }
-
+  /// \name Static well-known constructors (constexpr, no context needed).
+  /// @{
   static constexpr Type createNoType() {
-    return Type(0);
+    return Type(kNoTypeId);
   }
   static constexpr Type createAnyEmptyUninit() {
-    return Type(TYPE_ANY_EMPTY_UNINIT_MASK);
+    return Type(kAnyEmptyUninitId);
   }
   static constexpr Type createAnyType() {
-    return Type(TYPE_ANY_MASK);
+    return Type(kAnyTypeId);
   }
   /// Create an uninitialized TDZ type.
   static constexpr Type createEmpty() {
-    return Type(BIT_TO_VAL(Empty));
+    return Type(kEmptyId);
   }
   static constexpr Type createUninit() {
-    return Type(BIT_TO_VAL(Uninit));
+    return Type(kUninitId);
   }
   static constexpr Type createUndefined() {
-    return Type(BIT_TO_VAL(Undefined));
+    return Type(kUndefinedId);
   }
   static constexpr Type createNull() {
-    return Type(BIT_TO_VAL(Null));
+    return Type(kNullId);
   }
   static constexpr Type createBoolean() {
-    return Type(BIT_TO_VAL(Boolean));
+    return Type(kBooleanId);
   }
   static constexpr Type createString() {
-    return Type(BIT_TO_VAL(String));
+    return Type(kStringId);
   }
   static constexpr Type createSymbol() {
-    return Type(BIT_TO_VAL(Symbol));
+    return Type(kSymbolId);
   }
   static constexpr Type createObject() {
-    return Type(BIT_TO_VAL(Object));
+    return Type(kObjectId);
   }
   static constexpr Type createNumber() {
-    return Type(BIT_TO_VAL(Number));
+    return Type(kNumberId);
   }
-  /// This is just an alias of createNumber(). We used to track whether a
-  /// number was known to be an integer, but we don't anymore. Still, we don't
-  /// want to lose the callsite information, so we keep this alias.
+  /// Alias for createNumber().
   static constexpr Type createInt32() {
     return createNumber();
   }
-  /// This is just an alias of createNumber(). We used to track whether a
-  /// number was known to be an integer, but we don't anymore. Still, we don't
-  /// want to lose the callsite information, so we keep this alias.
+  /// Alias for createNumber().
   static constexpr Type createUint32() {
     return createNumber();
   }
   static constexpr Type createBigInt() {
-    return Type(BIT_TO_VAL(BigInt));
+    return Type(kBigIntId);
   }
   static constexpr Type createNumeric() {
-    return unionTy(createNumber(), createBigInt());
+    return Type(kNumericId);
   }
   static constexpr Type createEnvironment() {
-    return Type(BIT_TO_VAL(Environment));
+    return Type(kEnvironmentId);
   }
   static constexpr Type createPrivateName() {
-    return Type(BIT_TO_VAL(PrivateName));
+    return Type(kPrivateNameId);
   }
   static constexpr Type createFunctionCode() {
-    return Type(BIT_TO_VAL(FunctionCode));
+    return Type(kFunctionCodeId);
   }
+  static constexpr Type createNullOrUndef() {
+    return Type(kNullOrUndefId);
+  }
+  /// @}
 
+  /// \name Instance type checks (compare against well-known IDs, no context).
+  /// @{
   constexpr bool isNoType() const {
-    return bitmask_ == 0;
+    return id_ == kNoTypeId;
   }
-
   constexpr bool isAnyEmptyUninitType() const {
-    return bitmask_ == TYPE_ANY_EMPTY_UNINIT_MASK;
+    return id_ == kAnyEmptyUninitId;
   }
   constexpr bool isAnyType() const {
-    return bitmask_ == TYPE_ANY_MASK;
+    return id_ == kAnyTypeId;
   }
-
   constexpr bool isEmptyType() const {
-    return IS_VAL(Empty);
+    return id_ == kEmptyId;
   }
   constexpr bool isUninitType() const {
-    return IS_VAL(Uninit);
+    return id_ == kUninitId;
   }
   constexpr bool isUndefinedType() const {
-    return IS_VAL(Undefined);
+    return id_ == kUndefinedId;
   }
   constexpr bool isNullType() const {
-    return IS_VAL(Null);
+    return id_ == kNullId;
   }
   constexpr bool isBooleanType() const {
-    return IS_VAL(Boolean);
+    return id_ == kBooleanId;
   }
   constexpr bool isStringType() const {
-    return IS_VAL(String);
+    return id_ == kStringId;
   }
   constexpr bool isObjectType() const {
-    return IS_VAL(Object);
+    return id_ == kObjectId;
   }
   constexpr bool isNumberType() const {
-    return IS_VAL(Number);
+    return id_ == kNumberId;
   }
   constexpr bool isBigIntType() const {
-    return IS_VAL(BigInt);
+    return id_ == kBigIntId;
   }
   constexpr bool isSymbolType() const {
-    return IS_VAL(Symbol);
+    return id_ == kSymbolId;
   }
   constexpr bool isEnvironmentType() const {
-    return IS_VAL(Environment);
+    return id_ == kEnvironmentId;
   }
   constexpr bool isPrivateNameType() const {
-    return IS_VAL(PrivateName);
+    return id_ == kPrivateNameId;
   }
   constexpr bool isFunctionCodeType() const {
-    return IS_VAL(FunctionCode);
+    return id_ == kFunctionCodeId;
   }
+  /// @}
 
-  /// \return the TypeKind of the first set bit. This is intended to be used
-  /// when there is single type set. If there are no types, it returns
-  /// LAST_TYPE.
-  TypeKind getFirstTypeKind() const {
-    auto res = LLVM_LIKELY(bitmask_)
-        ? (TypeKind)llvh::countTrailingZeros(bitmask_, llvh::ZB_Undefined)
-        : TypeKind::LAST_TYPE;
-    assert(res <= LAST_TYPE && "Invalid bitmask");
-    return res;
-  }
+  /// \name Instance predicates (delegate to IRTypeContext::current()).
+  /// @{
+
+  /// \return the TypeKind of the first type in this Type. For unions,
+  /// returns the kind of the first arm. For NoType, returns
+  /// TypeKind::NoType.
+  TypeKind getFirstTypeKind() const;
 
   /// \return how many valid types are represented by this (union) type.
-  unsigned countTypes() const {
-    return llvh::countPopulation(bitmask_);
-  }
+  unsigned countTypes() const;
 
   /// \return true if the type is one of the known javascript primitive types:
   /// Number, BigInt, Null, Boolean, String, Undefined.
-  constexpr bool isKnownPrimitiveType() const {
+  bool isKnownPrimitiveType() const {
     return isPrimitive() && 1 == countTypes();
   }
 
-  constexpr bool isPrimitive() const {
-    // Check if any bit except the primitive bits is on.
-    return bitmask_ && !(bitmask_ & ~PRIMITIVE_BITS);
-  }
+  bool isPrimitive() const;
 
   /// \return true if any of the types are primitive.
-  constexpr bool canBePrimitive() const {
-    return (bitmask_ & PRIMITIVE_BITS) != 0;
-  }
+  bool canBePrimitive() const;
 
   /// \return true if the type is not referenced by a pointer in javascript.
-  constexpr bool isNonPtr() const {
-    // One or more of NONPTR_BITS must be set, and no other bit must be set.
-    return bitmask_ && !(bitmask_ & ~NONPTR_BITS);
-  }
-#undef BIT_TO_VAL
-#undef IS_VAL
-#undef NUM_BIT_TO_VAL
-#undef NUM_IS_VAL
+  bool isNonPtr() const;
 
   /// \returns true if this type is a subset of \p t.
-  constexpr bool isSubsetOf(Type t) const {
-    return !(bitmask_ & ~t.bitmask_);
-  }
+  bool isSubsetOf(Type t) const;
 
   /// \returns true if the type \p t can be any of the types that this type
   /// represents. For example, if this type is "string|number" and \p t is
   /// a string the result is true because this type can represent strings.
-  constexpr bool canBeType(Type t) const {
+  bool canBeType(Type t) const {
     return t.isSubsetOf(*this);
   }
 
   /// \returns true if this type can represent a string value.
-  constexpr bool canBeString() const {
-    return canBeType(Type::createString());
-  }
-
+  bool canBeString() const;
   /// \returns true if this type can represent a bigint value.
-  constexpr bool canBeBigInt() const {
-    return canBeType(Type::createBigInt());
-  }
-
+  bool canBeBigInt() const;
   /// \returns true if this type can represent a symbol value.
-  constexpr bool canBeSymbol() const {
-    return canBeType(Type::createSymbol());
-  }
-
+  bool canBeSymbol() const;
   /// \returns true if this type can represent a number value.
-  constexpr bool canBeNumber() const {
-    return canBeType(Type::createNumber());
-  }
-
+  bool canBeNumber() const;
   /// \returns true if this type can represent an object.
-  constexpr bool canBeObject() const {
-    return canBeType(Type::createObject());
-  }
-
+  bool canBeObject() const;
   /// \returns true if this type can represent a boolean value.
-  constexpr bool canBeBoolean() const {
-    return canBeType(Type::createBoolean());
-  }
-
+  bool canBeBoolean() const;
   /// \returns true if this type can represent an "empty" value.
-  constexpr bool canBeEmpty() const {
-    return canBeType(Type::createEmpty());
-  }
-
+  bool canBeEmpty() const;
   /// \returns true if this type can represent an "uninit" value.
-  constexpr bool canBeUninit() const {
-    return canBeType(Type::createUninit());
-  }
-
+  bool canBeUninit() const;
   /// \returns true if this type can represent an undefined value.
-  constexpr bool canBeUndefined() const {
-    return canBeType(Type::createUndefined());
-  }
-
+  bool canBeUndefined() const;
   /// \returns true if this type can represent a null value.
-  constexpr bool canBeNull() const {
-    return canBeType(Type::createNull());
-  }
-
+  bool canBeNull() const;
   /// \returns true if this type can represent an "any" type value.
-  constexpr bool canBeAny() const {
-    return canBeType(Type::createAnyType());
-  }
+  bool canBeAny() const;
 
   /// Return true if this type is a proper subset of \p t. A "proper subset"
-  /// means that it is a subset bit is not equal.
-  constexpr bool isProperSubsetOf(Type t) const {
-    return bitmask_ != t.bitmask_ && !(bitmask_ & ~t.bitmask_);
+  /// means that it is a subset but is not equal.
+  bool isProperSubsetOf(Type t) const {
+    return id_ != t.id_ && isSubsetOf(t);
   }
+  /// @}
 
   void print(llvh::raw_ostream &OS) const;
 
   /// The hash of a Type is the hash of its opaque value.
   llvh::hash_code hash() const {
-    return llvh::hash_value(bitmask_);
+    return llvh::hash_value(id_);
   }
 
   constexpr bool operator==(Type RHS) const {
-    return bitmask_ == RHS.bitmask_;
+    return id_ == RHS.id_;
   }
   constexpr bool operator!=(Type RHS) const {
     return !(*this == RHS);
@@ -410,42 +284,39 @@ class Type {
 
   /// Allow Type to be used as a llvh::FoldingSet.
   void Profile(llvh::FoldingSetNodeID &ID) const {
-    ID.AddInteger(bitmask_);
+    ID.AddInteger(id_);
   }
 };
 
-static_assert(sizeof(Type) == 2, "Type must not be too big");
+static_assert(sizeof(Type) == 4, "Type must be 4 bytes");
 
-/// An iterator over the types in a Type.
+/// An iterator over the types in a Type. For non-union types, yields
+/// the type itself as the single element. For unions, iterates arms via
+/// IRTypeContext::current().getUnionArms(), wrapping each arm ID as a Type.
 class Type::iterator {
   friend class Type;
+
+  /// For non-union types: arms_ is empty and index_ 0 means "this element",
+  /// index_ 1 means "end". For union types: arms_ points to the arm array
+  /// and index_ iterates through it.
+  llvh::ArrayRef<Type> arms_;
+  /// The type being iterated (used for non-union single-element iteration).
   Type type_;
   unsigned index_;
 
-  iterator(Type type, unsigned index) : type_(type), index_(index) {
-    skip();
-  }
-
-  /// Skip to the first set bit in the bitmask.
-  void skip() {
-    while (index_ < sizeof(type_.bitmask_) * CHAR_BIT &&
-           !(type_.bitmask_ & (1 << index_))) {
-      ++index_;
-    }
-  }
+  iterator(Type type, llvh::ArrayRef<Type> arms, unsigned index)
+      : arms_(arms), type_(type), index_(index) {}
 
  public:
   bool operator==(const iterator &RHS) const {
-    return type_ == RHS.type_ && index_ == RHS.index_;
+    return index_ == RHS.index_;
   }
   bool operator!=(const iterator &RHS) const {
     return !(*this == RHS);
   }
 
   iterator &operator++() {
-    assert(index_ < sizeof(type_.bitmask_) * CHAR_BIT && "Out of bounds");
     ++index_;
-    skip();
     return *this;
   }
   iterator operator++(int) {
@@ -454,18 +325,8 @@ class Type::iterator {
     return copy;
   }
 
-  Type operator*() const {
-    assert(index_ < sizeof(type_.bitmask_) * CHAR_BIT && "Out of bounds");
-    return Type(1 << index_);
-  }
+  Type operator*() const;
 };
-
-inline Type::iterator Type::begin() const {
-  return iterator(*this, 0);
-}
-inline Type::iterator Type::end() const {
-  return iterator(*this, sizeof(bitmask_) * CHAR_BIT);
-}
 } // namespace hermes
 
 namespace llvh {
@@ -2985,6 +2846,13 @@ inline Module *Instruction::getModule() const {
 }
 
 } // end namespace hermes
+
+// Pull in inline IRTypeContext::*(Type) forwarders. This must come after
+// both class Type and class IRTypeContext are complete (the latter from
+// the include of IRTypeContext.h above). The header guard cycle through
+// IR.h is harmless: when this file is the entry point, the inline
+// header's #include of IR.h is a no-op.
+#include "hermes/IR/IRTypeContext-inline.h"
 
 namespace llvh {
 

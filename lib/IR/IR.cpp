@@ -1037,31 +1037,8 @@ LiteralNativeExtern *Module::getLiteralNativeExtern(NativeExtern *data) {
   return nativeExterns_.getOrEmplace(data).first;
 }
 
-void Type::print(llvh::raw_ostream &OS) const {
-  bool first = true;
-  if (isNoType()) {
-    OS << "notype";
-    return;
-  }
-  if (canBeAny()) {
-    OS << "any";
-    if (canBeEmpty())
-      OS << "|empty";
-    if (canBeUninit())
-      OS << "|uninit";
-    return;
-  }
-  for (unsigned i = 0; i < (unsigned)Type::TypeKind::LAST_TYPE; i++) {
-    if (bitmask_ & (1 << i)) {
-      if (!first) {
-        OS << "|";
-      }
-
-      OS << getKindStr((Type::TypeKind)i);
-      first = false;
-    }
-  }
-}
+// Type::print() is defined in IRTypeContext.cpp (delegates to
+// IRTypeContext::current().format()).
 
 VariableScope *getLexicalScopeCustomData(sema::LexicalScope *lexScope) {
   return static_cast<VariableScope *>(lexScope->customData);

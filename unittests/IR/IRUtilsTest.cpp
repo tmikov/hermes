@@ -86,6 +86,7 @@ TEST(IRUtilsTest, Dominators2) {
 TEST(Numerics, IntegerConversion) {
   auto Ctx = std::make_shared<Context>();
   Module M{Ctx};
+  IRTypeContextRAII typeContextGuard(M.getTypeContext());
   IRBuilder Builder(&M);
 
   double mx = std::numeric_limits<double>::max();

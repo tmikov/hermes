@@ -52,7 +52,7 @@ be omitted):
 | P1-S6 | Wire IRTypeContext into Module | P1-S1 | done | |
 | P1-S7 | Install RAII guards at compilation entry points | P1-S5, P1-S6 | done | |
 | P1-S7.5 | Add RAII guards to unit tests | P1-S7 | done | |
-| P1-S8 | Rewrite Type class | P1-S4, P1-S7.5 | | |
+| P1-S8 | Rewrite Type class | P1-S4, P1-S7.5 | done | |
 
 ## Context Notes
 
@@ -116,6 +116,18 @@ be omitted):
 - **Files**: modified `unittests/IR/BuilderTest.cpp`, `unittests/IR/VariableTest.cpp`, `unittests/IR/IRUtilsTest.cpp`, `unittests/IR/IRVerifierTest.cpp`.
 - **What was done**: Added `IRTypeContextRAII typeContextGuard(M.getTypeContext())` after Module creation in every test that uses `Type::` operations. For `BuilderTest::Types` (which uses `Type::unionTy` without a Module), added a standalone `IRTypeContext` + RAII guard.
 - **Decisions**:
-  - Only added guards to tests that directly use `Type::` operations (grep-verified). Test files that create Module but don't use `Type::` (BasicBlockTest, LoopAnalysisTest, etc.) were not modified — they don't need guards since P1-S8's static constructors (`createAnyType()`, etc.) remain constexpr and don't require the thread-local context.
+  - Only added guards to tests that directly use `Type::` operations (grep-verified). Test files that create Module but don't use `Type::` (BasicBlockTest, LoopAnalysisTest, etc.) were not modified — they don't need guards since P1-S8's static constructors (`createAnyType()`, etc.) remain constexpr and don't require the thread-local context. **(P1-S8 retroactively required guards in ALL Module-creating tests.)**
   - No new includes needed — all four files already include `IR.h` which includes `IRTypeContext.h`.
+
+### P1-S8: Rewrite Type class
+- **Files**: modified `include/hermes/IR/IR.h`, `include/hermes/IR/IRTypeContext.h`, `lib/IR/IRTypeContext.cpp`, `lib/IR/IR.cpp`, `lib/BCGen/SH/SH.cpp`, `lib/Optimizer/Scalar/InstSimplify.cpp`, `lib/BCGen/HBC/HBC.cpp`, and many test files (BasicBlockTest, LoopAnalysisTest, IRHashTest, BuilderTest, IRVerifierTest, IRUtilsTest, BCGen/TestHelpers, BCGen/HBC, VMRuntime/TestHelpers1, API/SegmentTestCompile, Optimizer/InstructionEscapeAnalysisTest, Optimizer/PassManagerTest).
+- **What was done**: Replaced `Type`'s `uint16_t bitmask_` with `uint32_t id_` (index into IRTypeContext). Removed old nested `enum TypeKind` and bitmask infrastructure. All type operations (`unionTy`, `intersectTy`, `subtractTy`, predicates, `print`, `iterator`) delegate to `IRTypeContext::current()`. Well-known constructors and identity checks remain `constexpr`. Changed `IRTypeContext::typeArrays_` from `vector<uint32_t>` to `vector<Type>`. Moved `getUnionArms` out-of-line to resolve incomplete-type issue. Fixed SH.cpp to use `TypeKind::Empty` etc. instead of `Type::Empty`. Replaced `constexpr Type kNullOrUndef` in InstSimplify.cpp with `Type::createNullOrUndef()`. Added RAII guards at lazy compilation (`compileLazyFunctionWorker`) and eval compilation (`compileEvalWorker`) entry points in HBC.cpp. Added RAII guards to all remaining Module-creating test files.
+- **Decisions**:
+  - `Type` methods that need the context (queries, operations, `print`, `iterator`) are defined out-of-line in `IRTypeContext.cpp` to avoid include-order coupling. Only `constexpr` methods (identity checks, constructors, `operator==`) remain inline in `IR.h`.
+  - `IRTypeContext::getUnionArms` moved out-of-line because `ArrayRef<Type>` pointer arithmetic requires `Type` to be complete, but `Type` is defined after `IRTypeContext.h` is included.
+  - Fixed latent iterator-invalidation bug in `intersectTy`/`subtractTy`: arms are now copied to a `SmallVector` before calling `unionTy` which may reallocate `typeArrays_`.
+  - Added `createNullOrUndef()` static constructor to Type (returns well-known `kNullOrUndefId`).
+  - `sizeof(Type)` changed from 2 to 4 bytes. Updated `static_assert`.
+  - `Type::iterator` reimplemented: for non-union types yields the type itself; for unions iterates arms via `getUnionArms`.
+- **Issues**: P1-S7/P1-S7.5 missed two production compilation paths (`compileLazyFunctionWorker`, `compileEvalWorker` in HBC.cpp) and many test files that create Module but don't directly use `Type::`. These all needed RAII guards once Type methods became non-trivial.
 

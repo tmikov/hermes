@@ -38,8 +38,7 @@ STATISTIC(NumSimp, "Number of instructions simplified");
 
 namespace {
 
-constexpr Type kNullOrUndef =
-    Type::unionTy(Type::createUndefined(), Type::createNull());
+const Type kNullOrUndef = Type::createNullOrUndef();
 
 /// \return true if the value is known to not be NaN. Note that it may still
 ///    be convertible to NaN.

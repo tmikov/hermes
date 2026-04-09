@@ -8,8 +8,7 @@ Non-obvious gotchas and patterns.
 - Unit tests link `hermesFrontend` (see `unittests/IR/CMakeLists.txt`).
 
 ## API Design
-- All IRTypeContext public methods use `uint32_t` IDs (not `Type`). Will change to `Type` in P1-S8.
-- TypeEntry union payloads also use `uint32_t` for type refs (not `Type`), since `Type` is still a 2-byte bitmask.
+- IRTypeContext public methods still use `uint32_t` IDs internally. `Type` wraps a `uint32_t id_` and delegates to `IRTypeContext::current()`.
 - Well-known IDs 0-21 assigned (0-17 leaves, 18-21 unions), 22-31 reserved (NoType padding), kFirstDynamicId=32.
 - The `TypeKind` enum is `enum class` (scoped), while the old `Type::TypeKind` is a plain enum inside the `Type` class. They coexist until P1-S8.
 - Primitive kinds: Number, Int32, Uint32, Int31, String, BigInt, Null, Undefined, Boolean, Symbol. Matches old `PRIMITIVE_BITS` plus number subtypes.
@@ -28,6 +27,7 @@ Non-obvious gotchas and patterns.
 - `intersectTy` and `subtractTy` distribute over unions via recursive calls + `unionTy` to reassemble results.
 - `intersectTy` leaf-leaf case: returns `kInt31Id` for overlapping number-family types (Int32 ∩ Uint32), NoType for all other non-subset pairs. This closes the lattice so `intersectTy` and `areDisjoint` are consistent.
 - `Int31` (integers in [0, 2^31-1]) is the intersection of Int32 and Uint32. Subtype rules: Int31 <: Int32, Int31 <: Uint32, Int31 <: Number. Pre-allocated at kInt32Id=15, kUint32Id=16, kInt31Id=17.
+- **Iterator invalidation**: `intersectTy` and `subtractTy` must copy union arms to a `SmallVector` before calling `unionTy`, because `unionTy` may reallocate `typeArrays_` and invalidate the `ArrayRef` from `getUnionArms`.
 
 ## Thread-Local Context
 - `IRTypeContext::current_` is `static thread_local`, defined in `IRTypeContext.cpp`, initialized to `nullptr`.
@@ -40,17 +40,20 @@ Non-obvious gotchas and patterns.
 - `Module` class starts at ~line 2538 in IR.h (after many other classes: SideEffect, Value, Instruction, etc.).
 
 ## RAII Guard Sites
-- Production Module creation sites: `BCProviderFromSrc.cpp:233`, `CompilerDriver.cpp:1983`, `shermes.cpp:911`.
-- Test Module creation sites (for P1-S7.5): `BasicBlockTest.cpp:25`, `LoopAnalysisTest.cpp` (10 tests), `BCGen/TestHelpers.cpp:46`, `BCGen/HBC.cpp:173,215`, `VMRuntime/TestHelpers1.cpp:52`, `API/SegmentTestCompile.cpp:41`.
+- Production: `BCProviderFromSrc.cpp:233`, `CompilerDriver.cpp:1983`, `shermes.cpp:911`, `HBC.cpp` (lazy: `compileLazyFunctionWorker`, eval: `compileEvalWorker`).
+- ALL test files creating Module need guards — not just those using `Type::` directly.
 - No explicit include of `IRTypeContext.h` needed — `IR.h` already includes it (from P1-S6).
 
-## Test RAII Guards
-- 4 test files need RAII guards for P1-S8: `BuilderTest.cpp`, `VariableTest.cpp`, `IRUtilsTest.cpp`, `IRVerifierTest.cpp`.
-- `BuilderTest::Types` is the only test using `Type::unionTy` without a Module — needs standalone `IRTypeContext` + guard.
-- Other test files creating Module (BasicBlockTest, LoopAnalysis tests, BCGen tests) don't use `Type::` directly so don't need guards.
+## Type Class (after P1-S8 rewrite)
+- `Type` is now 4 bytes (`uint32_t id_`), not 2 bytes. `IRTypeContext` is a `friend` of `Type`.
+- All non-trivial `Type` methods defined in `IRTypeContext.cpp` (not `IR.h`) to avoid include-order coupling.
+- `getUnionArms` is out-of-line (needs complete `Type` definition for pointer arithmetic).
+- `typeArrays_` is `vector<Type>` (not `vector<uint32_t>`). Layout-compatible since `sizeof(Type) == sizeof(uint32_t)`.
+- Old nested `Type::TypeKind` enum removed. Callers use `TypeKind::` (the `enum class` from `IRTypeContext.h`).
+- `Type::LAST_TYPE` removed. SH.cpp uses `default:` instead.
+- `constexpr` operations (`createNoType`, `createAnyType`, etc.) use well-known IDs directly. Non-constexpr operations (`unionTy`, etc.) delegate to `IRTypeContext::current()`.
 
 ## Formatting
-- `format` uses "any" shorthand when `isSubsetOf(kAnyTypeId, id)` — matching old `Type::print()` which checks `canBeAny()`.
-- Kind names match old `getKindStr()`: "privateName", "functionCode" (camelCase for multi-word).
+- `format` uses "any" shorthand when `isSubsetOf(kAnyTypeId, id)`.
 - `kindName()` helper is file-scoped in `IRTypeContext.cpp`, covers all `TypeKind` values.
-- `llvh::raw_ostream` forward-declared in `IRTypeContext.h` (no need to include heavy LLVM header).
+- `llvh::raw_ostream` forward-declared in `IRTypeContext.h`.

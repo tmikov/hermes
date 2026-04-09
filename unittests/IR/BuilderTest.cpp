@@ -295,6 +295,7 @@ TEST(BuilderTest, NestedFunctionFrameTest) {
 TEST(BuilderTest, LiteralsTest) {
   auto Ctx = std::make_shared<Context>();
   Module M{Ctx};
+  IRTypeContextRAII typeContextGuard(M.getTypeContext());
   IRBuilder Builder(&M);
   auto F = Builder.createFunction(
       "testRAUW", Function::DefinitionKind::ES5Function, true);
@@ -329,6 +330,7 @@ TEST(BuilderTest, LiteralsTest) {
 TEST(BuilderTest, LiteralConstructionTest) {
   auto Ctx = std::make_shared<Context>();
   Module M{Ctx};
+  IRTypeContextRAII typeContextGuard(M.getTypeContext());
   IRBuilder Builder(&M);
 
   auto First = Builder.getLiteralString("first");
@@ -368,6 +370,7 @@ TEST(BuilderTest, LiteralConstructionTest) {
 TEST(BuilderTest, PropertyTest) {
   auto Ctx = std::make_shared<Context>();
   Module M{Ctx};
+  IRTypeContextRAII typeContextGuard(M.getTypeContext());
   IRBuilder Builder(&M);
 
   auto *F = Builder.createFunction(

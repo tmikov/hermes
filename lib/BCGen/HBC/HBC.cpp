@@ -130,10 +130,13 @@ static void compileLazyFunctionWorker(void *argPtr) {
   Function *F = lazyFunc.getFunctionIR();
   assert(F && "no lazy IR for lazy function");
 
+  Module *lazyModule = F->getParent();
+  IRTypeContextRAII typeContextGuard(lazyModule->getTypeContext());
+
   SourceErrorManager &manager =
-      F->getParent()->getContext().getSourceErrorManager();
+      lazyModule->getContext().getSourceErrorManager();
   SimpleDiagHandlerRAII outputManager{manager};
-  Context &context = F->getParent()->getContext();
+  Context &context = lazyModule->getContext();
 
   const LazyCompilationDataInst *lazyDataInst = F->getLazyCompilationDataInst();
   assert(lazyDataInst && "function must be lazy");
@@ -264,10 +267,13 @@ static void compileEvalWorker(void *argPtr) {
     return;
   }
 
+  Module *evalModule = F->getParent();
+  IRTypeContextRAII typeContextGuard(evalModule->getTypeContext());
+
   SourceErrorManager &manager =
-      F->getParent()->getContext().getSourceErrorManager();
+      evalModule->getContext().getSourceErrorManager();
   SimpleDiagHandlerRAII outputManager{manager};
-  Context &context = F->getParent()->getContext();
+  Context &context = evalModule->getContext();
 
   context.setEmitAsyncBreakCheck(data->compileFlags.emitAsyncBreakCheck);
   context.setEnableES6BlockScoping(data->compileFlags.enableES6BlockScoping);

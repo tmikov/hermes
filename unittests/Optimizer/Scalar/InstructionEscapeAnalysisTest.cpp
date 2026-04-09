@@ -51,6 +51,7 @@ class InstructionEscapeAnalysisTest : public ::testing::Test {
  private:
   std::shared_ptr<Context> context_;
   Module module_;
+  IRTypeContextRAII typeContextGuard_{module_.getTypeContext()};
   IRBuilder builder_;
   Function *function_;
   BasicBlock *block_;

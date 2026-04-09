@@ -39,6 +39,7 @@ std::pair<std::string, std::string> genSplitCode(
   context->setUseCJSModules(true);
 
   hermes::Module M(context);
+  IRTypeContextRAII typeContextGuard(M.getTypeContext());
   hermes::sema::SemContext semCtx{};
 
   auto parseJS = [&](std::unique_ptr<llvh::MemoryBuffer> fileBuf,

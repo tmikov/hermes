@@ -2278,32 +2278,32 @@ class InstrGen {
   static llvh::StringLiteral nameOfFunctionCheckingForType(Type type) {
     assert(!type.isNoType() && "type must be non-zero");
     switch (type.getFirstTypeKind()) {
-      case Type::Empty:
+      case TypeKind::Empty:
         return "_sh_ljs_is_empty";
-      case Type::Uninit:
-      case Type::Undefined:
+      case TypeKind::Uninit:
+      case TypeKind::Undefined:
         return "_sh_ljs_is_undefined";
-      case Type::Null:
+      case TypeKind::Null:
         return "_sh_ljs_is_null";
-      case Type::Boolean:
+      case TypeKind::Boolean:
         return "_sh_ljs_is_bool";
-      case Type::String:
+      case TypeKind::String:
         return "_sh_ljs_is_string";
-      case Type::Number:
+      case TypeKind::Number:
         return "_sh_ljs_is_double";
-      case Type::BigInt:
+      case TypeKind::BigInt:
         return "_sh_ljs_is_bigint";
-      case Type::Symbol:
+      case TypeKind::Symbol:
         return "_sh_ljs_is_symbol";
-      case Type::Environment:
+      case TypeKind::Environment:
         hermes_fatal("cannot check for environment type");
-      case Type::PrivateName:
+      case TypeKind::PrivateName:
         hermes_fatal("cannot check for PrivateName type");
-      case Type::FunctionCode:
+      case TypeKind::FunctionCode:
         hermes_fatal("cannot check for functionCode type");
-      case Type::Object:
+      case TypeKind::Object:
         return "_sh_ljs_is_object";
-      case Type::LAST_TYPE:
+      default:
         break;
     }
     hermes_fatal("invalid type for checking");

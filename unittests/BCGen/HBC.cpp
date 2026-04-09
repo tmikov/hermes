@@ -171,6 +171,7 @@ var s = obj1.a + obj2.a;
 TEST(SpillRegisterTest, SpillsParameters) {
   auto Ctx = std::make_shared<Context>();
   Module M(Ctx);
+  IRTypeContextRAII typeContextGuard(M.getTypeContext());
   IRBuilder builder(&M);
 
   auto *F = builder.createTopLevelFunction("global", true);
@@ -213,6 +214,7 @@ TEST(SpillRegisterTest, SpillsParameters) {
 TEST(SpillRegisterTest, NoStoreUnspilling) {
   auto Ctx = std::make_shared<Context>();
   Module M(Ctx);
+  IRTypeContextRAII typeContextGuard(M.getTypeContext());
   IRBuilder builder(&M);
 
   auto *F = builder.createTopLevelFunction("global", true);

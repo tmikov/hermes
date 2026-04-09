@@ -7,411 +7,468 @@
 
 #include "hermes/IR/IRTypeContext.h"
 
+#include "hermes/IR/IR.h"
+
 #include "llvh/Support/raw_ostream.h"
 
 #include "gtest/gtest.h"
+
+namespace hermes {
+
+/// Test fixture for IRTypeContext unit tests. Provides an asType()
+/// helper that constructs a Type from a raw well-known ID. This is
+/// needed for tests of refined kinds (Int31, Int32, Uint32, Bits32)
+/// that have no public Type::createXxx() factory in Phase 1. The
+/// fixture is declared friend of Type in IR.h, so the call to the
+/// private Type(uint32_t) constructor is legal here.
+class IRTypeContextTest : public ::testing::Test {
+ protected:
+  static Type asType(uint32_t id) {
+    return Type(id);
+  }
+};
+
+} // namespace hermes
 
 using namespace hermes;
 
 namespace {
 
-TEST(IRTypeContextTest, LeafKinds) {
+TEST_F(IRTypeContextTest, LeafKinds) {
   IRTypeContext ctx;
 
-  EXPECT_EQ(ctx.getKind(kNoTypeId), TypeKind::NoType);
-  EXPECT_EQ(ctx.getKind(kEmptyId), TypeKind::Empty);
-  EXPECT_EQ(ctx.getKind(kUninitId), TypeKind::Uninit);
-  EXPECT_EQ(ctx.getKind(kUndefinedId), TypeKind::Undefined);
-  EXPECT_EQ(ctx.getKind(kNullId), TypeKind::Null);
-  EXPECT_EQ(ctx.getKind(kBooleanId), TypeKind::Boolean);
-  EXPECT_EQ(ctx.getKind(kStringId), TypeKind::String);
-  EXPECT_EQ(ctx.getKind(kNumberId), TypeKind::Number);
-  EXPECT_EQ(ctx.getKind(kBigIntId), TypeKind::BigInt);
-  EXPECT_EQ(ctx.getKind(kSymbolId), TypeKind::Symbol);
-  EXPECT_EQ(ctx.getKind(kEnvironmentId), TypeKind::Environment);
-  EXPECT_EQ(ctx.getKind(kPrivateNameId), TypeKind::PrivateName);
-  EXPECT_EQ(ctx.getKind(kFunctionCodeId), TypeKind::FunctionCode);
-  EXPECT_EQ(ctx.getKind(kObjectId), TypeKind::Object);
-  EXPECT_EQ(ctx.getKind(kBits32Id), TypeKind::Bits32);
+  EXPECT_EQ(ctx.getKind(Type::createNoType()), TypeKind::NoType);
+  EXPECT_EQ(ctx.getKind(Type::createEmpty()), TypeKind::Empty);
+  EXPECT_EQ(ctx.getKind(Type::createUninit()), TypeKind::Uninit);
+  EXPECT_EQ(ctx.getKind(Type::createUndefined()), TypeKind::Undefined);
+  EXPECT_EQ(ctx.getKind(Type::createNull()), TypeKind::Null);
+  EXPECT_EQ(ctx.getKind(Type::createBoolean()), TypeKind::Boolean);
+  EXPECT_EQ(ctx.getKind(Type::createString()), TypeKind::String);
+  EXPECT_EQ(ctx.getKind(Type::createNumber()), TypeKind::Number);
+  EXPECT_EQ(ctx.getKind(Type::createBigInt()), TypeKind::BigInt);
+  EXPECT_EQ(ctx.getKind(Type::createSymbol()), TypeKind::Symbol);
+  EXPECT_EQ(ctx.getKind(Type::createEnvironment()), TypeKind::Environment);
+  EXPECT_EQ(ctx.getKind(Type::createPrivateName()), TypeKind::PrivateName);
+  EXPECT_EQ(ctx.getKind(Type::createFunctionCode()), TypeKind::FunctionCode);
+  EXPECT_EQ(ctx.getKind(Type::createObject()), TypeKind::Object);
+  EXPECT_EQ(ctx.getKind(asType(kBits32Id)), TypeKind::Bits32);
 }
 
-TEST(IRTypeContextTest, AnyTypeIsUnion) {
+TEST_F(IRTypeContextTest, AnyTypeIsUnion) {
   IRTypeContext ctx;
 
-  EXPECT_EQ(ctx.getKind(kAnyTypeId), TypeKind::Union);
-  auto arms = ctx.getUnionArms(kAnyTypeId);
+  EXPECT_EQ(ctx.getKind(Type::createAnyType()), TypeKind::Union);
+  auto arms = ctx.getUnionArms(Type::createAnyType());
   // AnyType = Undefined | Null | Boolean | String | Number | BigInt | Symbol |
   // Object.
   EXPECT_EQ(arms.size(), 8u);
 
   // Verify all expected arms are present.
-  auto contains = [&](uint32_t id) {
+  auto contains = [&](Type t) {
     for (auto arm : arms)
-      if (arm == id)
+      if (arm == t)
         return true;
     return false;
   };
-  EXPECT_TRUE(contains(kUndefinedId));
-  EXPECT_TRUE(contains(kNullId));
-  EXPECT_TRUE(contains(kBooleanId));
-  EXPECT_TRUE(contains(kStringId));
-  EXPECT_TRUE(contains(kNumberId));
-  EXPECT_TRUE(contains(kBigIntId));
-  EXPECT_TRUE(contains(kSymbolId));
-  EXPECT_TRUE(contains(kObjectId));
+  EXPECT_TRUE(contains(Type::createUndefined()));
+  EXPECT_TRUE(contains(Type::createNull()));
+  EXPECT_TRUE(contains(Type::createBoolean()));
+  EXPECT_TRUE(contains(Type::createString()));
+  EXPECT_TRUE(contains(Type::createNumber()));
+  EXPECT_TRUE(contains(Type::createBigInt()));
+  EXPECT_TRUE(contains(Type::createSymbol()));
+  EXPECT_TRUE(contains(Type::createObject()));
 
   // Should NOT contain internal types.
-  EXPECT_FALSE(contains(kEmptyId));
-  EXPECT_FALSE(contains(kUninitId));
-  EXPECT_FALSE(contains(kEnvironmentId));
-  EXPECT_FALSE(contains(kPrivateNameId));
-  EXPECT_FALSE(contains(kFunctionCodeId));
-  EXPECT_FALSE(contains(kBits32Id));
+  EXPECT_FALSE(contains(Type::createEmpty()));
+  EXPECT_FALSE(contains(Type::createUninit()));
+  EXPECT_FALSE(contains(Type::createEnvironment()));
+  EXPECT_FALSE(contains(Type::createPrivateName()));
+  EXPECT_FALSE(contains(Type::createFunctionCode()));
 }
 
-TEST(IRTypeContextTest, NumericIsUnion) {
+TEST_F(IRTypeContextTest, NumericIsUnion) {
   IRTypeContext ctx;
 
-  EXPECT_EQ(ctx.getKind(kNumericId), TypeKind::Union);
-  auto arms = ctx.getUnionArms(kNumericId);
+  EXPECT_EQ(ctx.getKind(Type::createNumeric()), TypeKind::Union);
+  auto arms = ctx.getUnionArms(Type::createNumeric());
   EXPECT_EQ(arms.size(), 2u);
 
   bool hasNumber = false, hasBigInt = false;
   for (auto arm : arms) {
-    if (arm == kNumberId)
+    if (arm == Type::createNumber())
       hasNumber = true;
-    if (arm == kBigIntId)
+    if (arm == Type::createBigInt())
       hasBigInt = true;
   }
   EXPECT_TRUE(hasNumber);
   EXPECT_TRUE(hasBigInt);
 }
 
-TEST(IRTypeContextTest, AnyEmptyUninitIsUnion) {
+TEST_F(IRTypeContextTest, AnyEmptyUninitIsUnion) {
   IRTypeContext ctx;
 
-  EXPECT_EQ(ctx.getKind(kAnyEmptyUninitId), TypeKind::Union);
-  auto arms = ctx.getUnionArms(kAnyEmptyUninitId);
+  EXPECT_EQ(ctx.getKind(Type::createAnyEmptyUninit()), TypeKind::Union);
+  auto arms = ctx.getUnionArms(Type::createAnyEmptyUninit());
   // All AnyType arms + Empty + Uninit = 10.
   EXPECT_EQ(arms.size(), 10u);
 
-  auto contains = [&](uint32_t id) {
+  auto contains = [&](Type t) {
     for (auto arm : arms)
-      if (arm == id)
+      if (arm == t)
         return true;
     return false;
   };
-  EXPECT_TRUE(contains(kEmptyId));
-  EXPECT_TRUE(contains(kUninitId));
-  EXPECT_TRUE(contains(kUndefinedId));
-  EXPECT_TRUE(contains(kNullId));
-  EXPECT_TRUE(contains(kBooleanId));
-  EXPECT_TRUE(contains(kStringId));
-  EXPECT_TRUE(contains(kNumberId));
-  EXPECT_TRUE(contains(kBigIntId));
-  EXPECT_TRUE(contains(kSymbolId));
-  EXPECT_TRUE(contains(kObjectId));
+  EXPECT_TRUE(contains(Type::createEmpty()));
+  EXPECT_TRUE(contains(Type::createUninit()));
+  EXPECT_TRUE(contains(Type::createUndefined()));
+  EXPECT_TRUE(contains(Type::createNull()));
+  EXPECT_TRUE(contains(Type::createBoolean()));
+  EXPECT_TRUE(contains(Type::createString()));
+  EXPECT_TRUE(contains(Type::createNumber()));
+  EXPECT_TRUE(contains(Type::createBigInt()));
+  EXPECT_TRUE(contains(Type::createSymbol()));
+  EXPECT_TRUE(contains(Type::createObject()));
 }
 
-TEST(IRTypeContextTest, NullOrUndefIsUnion) {
+TEST_F(IRTypeContextTest, NullOrUndefIsUnion) {
   IRTypeContext ctx;
 
-  EXPECT_EQ(ctx.getKind(kNullOrUndefId), TypeKind::Union);
-  auto arms = ctx.getUnionArms(kNullOrUndefId);
+  EXPECT_EQ(ctx.getKind(Type::createNullOrUndef()), TypeKind::Union);
+  auto arms = ctx.getUnionArms(Type::createNullOrUndef());
   EXPECT_EQ(arms.size(), 2u);
 
   bool hasUndefined = false, hasNull = false;
   for (auto arm : arms) {
-    if (arm == kUndefinedId)
+    if (arm == Type::createUndefined())
       hasUndefined = true;
-    if (arm == kNullId)
+    if (arm == Type::createNull())
       hasNull = true;
   }
   EXPECT_TRUE(hasUndefined);
   EXPECT_TRUE(hasNull);
 }
 
-TEST(IRTypeContextTest, ReservedSlots) {
+TEST_F(IRTypeContextTest, ReservedSlots) {
   IRTypeContext ctx;
   // Padding slots between the last well-known union and kFirstDynamicId
   // should be NoType placeholders.
   for (uint32_t i = kNullOrUndefId + 1; i < kFirstDynamicId; ++i) {
-    EXPECT_EQ(ctx.getKind(i), TypeKind::NoType)
+    EXPECT_EQ(ctx.getKind(asType(i)), TypeKind::NoType)
         << "Reserved slot " << i << " should be NoType";
   }
 }
 
-TEST(IRTypeContextTest, CanBeNumberLeaf) {
+TEST_F(IRTypeContextTest, CanBeNumberLeaf) {
   IRTypeContext ctx;
 
-  EXPECT_TRUE(ctx.canBeNumber(kNumberId));
-  EXPECT_FALSE(ctx.canBeNumber(kStringId));
-  EXPECT_FALSE(ctx.canBeNumber(kObjectId));
-  EXPECT_FALSE(ctx.canBeNumber(kNoTypeId));
-  EXPECT_FALSE(ctx.canBeNumber(kBooleanId));
+  EXPECT_TRUE(ctx.canBeNumber(Type::createNumber()));
+  EXPECT_FALSE(ctx.canBeNumber(Type::createString()));
+  EXPECT_FALSE(ctx.canBeNumber(Type::createObject()));
+  EXPECT_FALSE(ctx.canBeNumber(Type::createNoType()));
+  EXPECT_FALSE(ctx.canBeNumber(Type::createBoolean()));
 }
 
-TEST(IRTypeContextTest, CanBeNumberUnion) {
+TEST_F(IRTypeContextTest, CanBeNumberUnion) {
   IRTypeContext ctx;
 
   // AnyType is a union containing Number.
-  EXPECT_TRUE(ctx.canBeNumber(kAnyTypeId));
+  EXPECT_TRUE(ctx.canBeNumber(Type::createAnyType()));
   // Numeric = Number | BigInt.
-  EXPECT_TRUE(ctx.canBeNumber(kNumericId));
+  EXPECT_TRUE(ctx.canBeNumber(Type::createNumeric()));
   // AnyEmptyUninit contains Number.
-  EXPECT_TRUE(ctx.canBeNumber(kAnyEmptyUninitId));
+  EXPECT_TRUE(ctx.canBeNumber(Type::createAnyEmptyUninit()));
   // NullOrUndef does not contain Number.
-  EXPECT_FALSE(ctx.canBeNumber(kNullOrUndefId));
+  EXPECT_FALSE(ctx.canBeNumber(Type::createNullOrUndef()));
 }
 
-TEST(IRTypeContextTest, CanBeOtherKinds) {
+TEST_F(IRTypeContextTest, CanBeOtherKinds) {
   IRTypeContext ctx;
 
-  EXPECT_TRUE(ctx.canBeString(kStringId));
-  EXPECT_FALSE(ctx.canBeString(kNumberId));
-  EXPECT_TRUE(ctx.canBeString(kAnyTypeId));
+  EXPECT_TRUE(ctx.canBeString(Type::createString()));
+  EXPECT_FALSE(ctx.canBeString(Type::createNumber()));
+  EXPECT_TRUE(ctx.canBeString(Type::createAnyType()));
 
-  EXPECT_TRUE(ctx.canBeObject(kObjectId));
-  EXPECT_FALSE(ctx.canBeObject(kNumberId));
-  EXPECT_TRUE(ctx.canBeObject(kAnyTypeId));
+  EXPECT_TRUE(ctx.canBeObject(Type::createObject()));
+  EXPECT_FALSE(ctx.canBeObject(Type::createNumber()));
+  EXPECT_TRUE(ctx.canBeObject(Type::createAnyType()));
 
-  EXPECT_TRUE(ctx.canBeNull(kNullId));
-  EXPECT_FALSE(ctx.canBeNull(kNumberId));
-  EXPECT_TRUE(ctx.canBeNull(kAnyTypeId));
-  EXPECT_TRUE(ctx.canBeNull(kNullOrUndefId));
+  EXPECT_TRUE(ctx.canBeNull(Type::createNull()));
+  EXPECT_FALSE(ctx.canBeNull(Type::createNumber()));
+  EXPECT_TRUE(ctx.canBeNull(Type::createAnyType()));
+  EXPECT_TRUE(ctx.canBeNull(Type::createNullOrUndef()));
 
-  EXPECT_TRUE(ctx.canBeUndefined(kUndefinedId));
-  EXPECT_FALSE(ctx.canBeUndefined(kNumberId));
-  EXPECT_TRUE(ctx.canBeUndefined(kAnyTypeId));
-  EXPECT_TRUE(ctx.canBeUndefined(kNullOrUndefId));
+  EXPECT_TRUE(ctx.canBeUndefined(Type::createUndefined()));
+  EXPECT_FALSE(ctx.canBeUndefined(Type::createNumber()));
+  EXPECT_TRUE(ctx.canBeUndefined(Type::createAnyType()));
+  EXPECT_TRUE(ctx.canBeUndefined(Type::createNullOrUndef()));
 
-  EXPECT_TRUE(ctx.canBeEmpty(kEmptyId));
-  EXPECT_FALSE(ctx.canBeEmpty(kNumberId));
-  EXPECT_FALSE(ctx.canBeEmpty(kAnyTypeId));
-  EXPECT_TRUE(ctx.canBeEmpty(kAnyEmptyUninitId));
+  EXPECT_TRUE(ctx.canBeEmpty(Type::createEmpty()));
+  EXPECT_FALSE(ctx.canBeEmpty(Type::createNumber()));
+  EXPECT_FALSE(ctx.canBeEmpty(Type::createAnyType()));
+  EXPECT_TRUE(ctx.canBeEmpty(Type::createAnyEmptyUninit()));
 
-  EXPECT_TRUE(ctx.canBeUninit(kUninitId));
-  EXPECT_FALSE(ctx.canBeUninit(kNumberId));
-  EXPECT_FALSE(ctx.canBeUninit(kAnyTypeId));
-  EXPECT_TRUE(ctx.canBeUninit(kAnyEmptyUninitId));
+  EXPECT_TRUE(ctx.canBeUninit(Type::createUninit()));
+  EXPECT_FALSE(ctx.canBeUninit(Type::createNumber()));
+  EXPECT_FALSE(ctx.canBeUninit(Type::createAnyType()));
+  EXPECT_TRUE(ctx.canBeUninit(Type::createAnyEmptyUninit()));
 
-  EXPECT_TRUE(ctx.canBeBigInt(kBigIntId));
-  EXPECT_FALSE(ctx.canBeBigInt(kStringId));
-  EXPECT_TRUE(ctx.canBeBigInt(kNumericId));
-  EXPECT_TRUE(ctx.canBeBigInt(kAnyTypeId));
+  EXPECT_TRUE(ctx.canBeBigInt(Type::createBigInt()));
+  EXPECT_FALSE(ctx.canBeBigInt(Type::createString()));
+  EXPECT_TRUE(ctx.canBeBigInt(Type::createNumeric()));
+  EXPECT_TRUE(ctx.canBeBigInt(Type::createAnyType()));
 
-  EXPECT_TRUE(ctx.canBeBoolean(kBooleanId));
-  EXPECT_FALSE(ctx.canBeBoolean(kStringId));
-  EXPECT_TRUE(ctx.canBeBoolean(kAnyTypeId));
+  EXPECT_TRUE(ctx.canBeBoolean(Type::createBoolean()));
+  EXPECT_FALSE(ctx.canBeBoolean(Type::createString()));
+  EXPECT_TRUE(ctx.canBeBoolean(Type::createAnyType()));
 
-  EXPECT_TRUE(ctx.canBeSymbol(kSymbolId));
-  EXPECT_FALSE(ctx.canBeSymbol(kStringId));
-  EXPECT_TRUE(ctx.canBeSymbol(kAnyTypeId));
+  EXPECT_TRUE(ctx.canBeSymbol(Type::createSymbol()));
+  EXPECT_FALSE(ctx.canBeSymbol(Type::createString()));
+  EXPECT_TRUE(ctx.canBeSymbol(Type::createAnyType()));
 }
 
-TEST(IRTypeContextTest, IsNoType) {
+TEST_F(IRTypeContextTest, IsNoType) {
   IRTypeContext ctx;
 
-  EXPECT_TRUE(ctx.isNoType(kNoTypeId));
-  EXPECT_FALSE(ctx.isNoType(kNumberId));
-  EXPECT_FALSE(ctx.isNoType(kAnyTypeId));
+  EXPECT_TRUE(ctx.isNoType(Type::createNoType()));
+  EXPECT_FALSE(ctx.isNoType(Type::createNumber()));
+  EXPECT_FALSE(ctx.isNoType(Type::createAnyType()));
 }
 
-TEST(IRTypeContextTest, IsPrimitive) {
+TEST_F(IRTypeContextTest, IsPrimitive) {
   IRTypeContext ctx;
 
   // Primitive kinds: Number, String, BigInt, Null, Undefined, Boolean, Symbol.
-  EXPECT_TRUE(ctx.isPrimitive(kNumberId));
-  EXPECT_TRUE(ctx.isPrimitive(kStringId));
-  EXPECT_TRUE(ctx.isPrimitive(kBigIntId));
-  EXPECT_TRUE(ctx.isPrimitive(kNullId));
-  EXPECT_TRUE(ctx.isPrimitive(kUndefinedId));
-  EXPECT_TRUE(ctx.isPrimitive(kBooleanId));
-  EXPECT_TRUE(ctx.isPrimitive(kSymbolId));
+  EXPECT_TRUE(ctx.isPrimitive(Type::createNumber()));
+  EXPECT_TRUE(ctx.isPrimitive(Type::createString()));
+  EXPECT_TRUE(ctx.isPrimitive(Type::createBigInt()));
+  EXPECT_TRUE(ctx.isPrimitive(Type::createNull()));
+  EXPECT_TRUE(ctx.isPrimitive(Type::createUndefined()));
+  EXPECT_TRUE(ctx.isPrimitive(Type::createBoolean()));
+  EXPECT_TRUE(ctx.isPrimitive(Type::createSymbol()));
 
   // Object is NOT primitive.
-  EXPECT_FALSE(ctx.isPrimitive(kObjectId));
+  EXPECT_FALSE(ctx.isPrimitive(Type::createObject()));
   // Internal types are not primitive.
-  EXPECT_FALSE(ctx.isPrimitive(kEmptyId));
-  EXPECT_FALSE(ctx.isPrimitive(kUninitId));
-  EXPECT_FALSE(ctx.isPrimitive(kEnvironmentId));
-  EXPECT_FALSE(ctx.isPrimitive(kBits32Id));
+  EXPECT_FALSE(ctx.isPrimitive(Type::createEmpty()));
+  EXPECT_FALSE(ctx.isPrimitive(Type::createUninit()));
+  EXPECT_FALSE(ctx.isPrimitive(Type::createEnvironment()));
+  EXPECT_FALSE(ctx.isPrimitive(asType(kBits32Id)));
   // NoType is not primitive.
-  EXPECT_FALSE(ctx.isPrimitive(kNoTypeId));
+  EXPECT_FALSE(ctx.isPrimitive(Type::createNoType()));
 
   // AnyType contains Object, so it's not all-primitive.
-  EXPECT_FALSE(ctx.isPrimitive(kAnyTypeId));
+  EXPECT_FALSE(ctx.isPrimitive(Type::createAnyType()));
   // Numeric = Number | BigInt — both primitive.
-  EXPECT_TRUE(ctx.isPrimitive(kNumericId));
+  EXPECT_TRUE(ctx.isPrimitive(Type::createNumeric()));
   // NullOrUndef = Null | Undefined — both primitive.
-  EXPECT_TRUE(ctx.isPrimitive(kNullOrUndefId));
+  EXPECT_TRUE(ctx.isPrimitive(Type::createNullOrUndef()));
 }
 
-TEST(IRTypeContextTest, CanBePrimitive) {
+TEST_F(IRTypeContextTest, CanBePrimitive) {
   IRTypeContext ctx;
 
-  EXPECT_TRUE(ctx.canBePrimitive(kNumberId));
-  EXPECT_FALSE(ctx.canBePrimitive(kObjectId));
-  EXPECT_FALSE(ctx.canBePrimitive(kNoTypeId));
+  EXPECT_TRUE(ctx.canBePrimitive(Type::createNumber()));
+  EXPECT_FALSE(ctx.canBePrimitive(Type::createObject()));
+  EXPECT_FALSE(ctx.canBePrimitive(Type::createNoType()));
   // AnyType contains primitives (and Object).
-  EXPECT_TRUE(ctx.canBePrimitive(kAnyTypeId));
+  EXPECT_TRUE(ctx.canBePrimitive(Type::createAnyType()));
   // AnyEmptyUninit contains primitives.
-  EXPECT_TRUE(ctx.canBePrimitive(kAnyEmptyUninitId));
+  EXPECT_TRUE(ctx.canBePrimitive(Type::createAnyEmptyUninit()));
 }
 
-TEST(IRTypeContextTest, IsNonPtr) {
+TEST_F(IRTypeContextTest, IsNonPtr) {
   IRTypeContext ctx;
 
   // NonPtr kinds: Number, Boolean, Null, Undefined.
-  EXPECT_TRUE(ctx.isNonPtr(kNumberId));
-  EXPECT_TRUE(ctx.isNonPtr(kBooleanId));
-  EXPECT_TRUE(ctx.isNonPtr(kNullId));
-  EXPECT_TRUE(ctx.isNonPtr(kUndefinedId));
+  EXPECT_TRUE(ctx.isNonPtr(Type::createNumber()));
+  EXPECT_TRUE(ctx.isNonPtr(Type::createBoolean()));
+  EXPECT_TRUE(ctx.isNonPtr(Type::createNull()));
+  EXPECT_TRUE(ctx.isNonPtr(Type::createUndefined()));
 
   // String is a pointer type.
-  EXPECT_FALSE(ctx.isNonPtr(kStringId));
+  EXPECT_FALSE(ctx.isNonPtr(Type::createString()));
   // Object is a pointer type.
-  EXPECT_FALSE(ctx.isNonPtr(kObjectId));
+  EXPECT_FALSE(ctx.isNonPtr(Type::createObject()));
   // NoType is not nonPtr.
-  EXPECT_FALSE(ctx.isNonPtr(kNoTypeId));
+  EXPECT_FALSE(ctx.isNonPtr(Type::createNoType()));
 
   // NullOrUndef = Null | Undefined — both non-ptr.
-  EXPECT_TRUE(ctx.isNonPtr(kNullOrUndefId));
+  EXPECT_TRUE(ctx.isNonPtr(Type::createNullOrUndef()));
   // AnyType contains String/Object, so not all non-ptr.
-  EXPECT_FALSE(ctx.isNonPtr(kAnyTypeId));
+  EXPECT_FALSE(ctx.isNonPtr(Type::createAnyType()));
   // Numeric contains BigInt, which is a pointer type.
-  EXPECT_FALSE(ctx.isNonPtr(kNumericId));
+  EXPECT_FALSE(ctx.isNonPtr(Type::createNumeric()));
 }
 
-TEST(IRTypeContextTest, IsSubsetOf) {
+TEST_F(IRTypeContextTest, IsSubsetOf) {
   IRTypeContext ctx;
 
   // Reflexive.
-  EXPECT_TRUE(ctx.isSubsetOf(kNumberId, kNumberId));
+  EXPECT_TRUE(ctx.isSubsetOf(Type::createNumber(), Type::createNumber()));
   // NoType is subset of everything.
-  EXPECT_TRUE(ctx.isSubsetOf(kNoTypeId, kNumberId));
-  EXPECT_TRUE(ctx.isSubsetOf(kNoTypeId, kAnyTypeId));
-  EXPECT_TRUE(ctx.isSubsetOf(kNoTypeId, kNoTypeId));
+  EXPECT_TRUE(ctx.isSubsetOf(Type::createNoType(), Type::createNumber()));
+  EXPECT_TRUE(ctx.isSubsetOf(Type::createNoType(), Type::createAnyType()));
+  EXPECT_TRUE(ctx.isSubsetOf(Type::createNoType(), Type::createNoType()));
   // Nothing (except NoType) is subset of NoType.
-  EXPECT_FALSE(ctx.isSubsetOf(kNumberId, kNoTypeId));
+  EXPECT_FALSE(ctx.isSubsetOf(Type::createNumber(), Type::createNoType()));
   // Leaf is subset of union containing it.
-  EXPECT_TRUE(ctx.isSubsetOf(kNumberId, kAnyTypeId));
-  EXPECT_TRUE(ctx.isSubsetOf(kNumberId, kNumericId));
-  EXPECT_TRUE(ctx.isSubsetOf(kBigIntId, kNumericId));
+  EXPECT_TRUE(ctx.isSubsetOf(Type::createNumber(), Type::createAnyType()));
+  EXPECT_TRUE(ctx.isSubsetOf(Type::createNumber(), Type::createNumeric()));
+  EXPECT_TRUE(ctx.isSubsetOf(Type::createBigInt(), Type::createNumeric()));
   // Union is not subset of its member.
-  EXPECT_FALSE(ctx.isSubsetOf(kAnyTypeId, kNumberId));
-  EXPECT_FALSE(ctx.isSubsetOf(kNumericId, kNumberId));
+  EXPECT_FALSE(ctx.isSubsetOf(Type::createAnyType(), Type::createNumber()));
+  EXPECT_FALSE(ctx.isSubsetOf(Type::createNumeric(), Type::createNumber()));
   // Sub-union is subset of super-union.
-  EXPECT_TRUE(ctx.isSubsetOf(kNumericId, kAnyTypeId));
-  EXPECT_TRUE(ctx.isSubsetOf(kNullOrUndefId, kAnyTypeId));
+  EXPECT_TRUE(ctx.isSubsetOf(Type::createNumeric(), Type::createAnyType()));
+  EXPECT_TRUE(
+      ctx.isSubsetOf(Type::createNullOrUndef(), Type::createAnyType()));
   // Disjoint types.
-  EXPECT_FALSE(ctx.isSubsetOf(kNumberId, kStringId));
-  EXPECT_FALSE(ctx.isSubsetOf(kStringId, kNumberId));
+  EXPECT_FALSE(ctx.isSubsetOf(Type::createNumber(), Type::createString()));
+  EXPECT_FALSE(ctx.isSubsetOf(Type::createString(), Type::createNumber()));
 }
 
-TEST(IRTypeContextTest, AreDisjoint) {
+TEST_F(IRTypeContextTest, AreDisjoint) {
   IRTypeContext ctx;
 
   // Same type is not disjoint with itself.
-  EXPECT_FALSE(ctx.areDisjoint(kNumberId, kNumberId));
+  EXPECT_FALSE(ctx.areDisjoint(Type::createNumber(), Type::createNumber()));
   // NoType is disjoint from everything (including itself).
-  EXPECT_TRUE(ctx.areDisjoint(kNoTypeId, kNumberId));
-  EXPECT_TRUE(ctx.areDisjoint(kNumberId, kNoTypeId));
-  EXPECT_TRUE(ctx.areDisjoint(kNoTypeId, kNoTypeId));
+  EXPECT_TRUE(ctx.areDisjoint(Type::createNoType(), Type::createNumber()));
+  EXPECT_TRUE(ctx.areDisjoint(Type::createNumber(), Type::createNoType()));
+  EXPECT_TRUE(ctx.areDisjoint(Type::createNoType(), Type::createNoType()));
   // Different leaf types are disjoint.
-  EXPECT_TRUE(ctx.areDisjoint(kNumberId, kStringId));
-  EXPECT_TRUE(ctx.areDisjoint(kBooleanId, kObjectId));
+  EXPECT_TRUE(ctx.areDisjoint(Type::createNumber(), Type::createString()));
+  EXPECT_TRUE(ctx.areDisjoint(Type::createBoolean(), Type::createObject()));
   // Union overlaps with its members.
-  EXPECT_FALSE(ctx.areDisjoint(kNumberId, kNumericId));
-  EXPECT_FALSE(ctx.areDisjoint(kNumberId, kAnyTypeId));
+  EXPECT_FALSE(ctx.areDisjoint(Type::createNumber(), Type::createNumeric()));
+  EXPECT_FALSE(ctx.areDisjoint(Type::createNumber(), Type::createAnyType()));
   // Disjoint unions.
-  EXPECT_TRUE(ctx.areDisjoint(kNullOrUndefId, kNumericId));
+  EXPECT_TRUE(
+      ctx.areDisjoint(Type::createNullOrUndef(), Type::createNumeric()));
   // Overlapping unions.
-  EXPECT_FALSE(ctx.areDisjoint(kAnyTypeId, kNumericId));
+  EXPECT_FALSE(
+      ctx.areDisjoint(Type::createAnyType(), Type::createNumeric()));
 }
 
-TEST(IRTypeContextTest, UnionTyIdentity) {
+TEST_F(IRTypeContextTest, UnionTyIdentity) {
   IRTypeContext ctx;
 
-  EXPECT_EQ(ctx.unionTy(kNumberId, kNumberId), kNumberId);
-  EXPECT_EQ(ctx.unionTy(kAnyTypeId, kAnyTypeId), kAnyTypeId);
+  EXPECT_EQ(
+      ctx.unionTy(Type::createNumber(), Type::createNumber()),
+      Type::createNumber());
+  EXPECT_EQ(
+      ctx.unionTy(Type::createAnyType(), Type::createAnyType()),
+      Type::createAnyType());
 }
 
-TEST(IRTypeContextTest, UnionTyNoType) {
+TEST_F(IRTypeContextTest, UnionTyNoType) {
   IRTypeContext ctx;
 
-  EXPECT_EQ(ctx.unionTy(kNoTypeId, kStringId), kStringId);
-  EXPECT_EQ(ctx.unionTy(kStringId, kNoTypeId), kStringId);
-  EXPECT_EQ(ctx.unionTy(kNoTypeId, kNoTypeId), kNoTypeId);
+  EXPECT_EQ(
+      ctx.unionTy(Type::createNoType(), Type::createString()),
+      Type::createString());
+  EXPECT_EQ(
+      ctx.unionTy(Type::createString(), Type::createNoType()),
+      Type::createString());
+  EXPECT_EQ(
+      ctx.unionTy(Type::createNoType(), Type::createNoType()),
+      Type::createNoType());
 }
 
-TEST(IRTypeContextTest, UnionTySubset) {
+TEST_F(IRTypeContextTest, UnionTySubset) {
   IRTypeContext ctx;
 
   // Number is subset of AnyType.
-  EXPECT_EQ(ctx.unionTy(kNumberId, kAnyTypeId), kAnyTypeId);
-  EXPECT_EQ(ctx.unionTy(kAnyTypeId, kNumberId), kAnyTypeId);
+  EXPECT_EQ(
+      ctx.unionTy(Type::createNumber(), Type::createAnyType()),
+      Type::createAnyType());
+  EXPECT_EQ(
+      ctx.unionTy(Type::createAnyType(), Type::createNumber()),
+      Type::createAnyType());
   // Numeric is subset of AnyType.
-  EXPECT_EQ(ctx.unionTy(kNumericId, kAnyTypeId), kAnyTypeId);
+  EXPECT_EQ(
+      ctx.unionTy(Type::createNumeric(), Type::createAnyType()),
+      Type::createAnyType());
 }
 
-TEST(IRTypeContextTest, UnionTyCreatesDynamic) {
+TEST_F(IRTypeContextTest, UnionTyCreatesDynamic) {
   IRTypeContext ctx;
 
-  uint32_t numStr = ctx.unionTy(kNumberId, kStringId);
+  Type numStr = ctx.unionTy(Type::createNumber(), Type::createString());
   EXPECT_EQ(ctx.getKind(numStr), TypeKind::Union);
   auto arms = ctx.getUnionArms(numStr);
   EXPECT_EQ(arms.size(), 2u);
-  // Arms sorted by ID: kStringId(6), kNumberId(7).
-  EXPECT_EQ(arms[0], kStringId);
-  EXPECT_EQ(arms[1], kNumberId);
+  // Arms sorted by ID: String(6), Number(7).
+  EXPECT_EQ(arms[0], Type::createString());
+  EXPECT_EQ(arms[1], Type::createNumber());
 }
 
-TEST(IRTypeContextTest, UnionTyInterning) {
+TEST_F(IRTypeContextTest, UnionTyInterning) {
   IRTypeContext ctx;
 
-  uint32_t a = ctx.unionTy(kNumberId, kStringId);
-  uint32_t b = ctx.unionTy(kNumberId, kStringId);
+  Type a = ctx.unionTy(Type::createNumber(), Type::createString());
+  Type b = ctx.unionTy(Type::createNumber(), Type::createString());
   EXPECT_EQ(a, b);
 
   // Reverse order produces same result.
-  uint32_t c = ctx.unionTy(kStringId, kNumberId);
+  Type c = ctx.unionTy(Type::createString(), Type::createNumber());
   EXPECT_EQ(a, c);
 }
 
-TEST(IRTypeContextTest, UnionTyReturnsWellKnown) {
+TEST_F(IRTypeContextTest, UnionTyReturnsWellKnown) {
   IRTypeContext ctx;
 
   // unionTy(Number, BigInt) should return the well-known Numeric.
-  EXPECT_EQ(ctx.unionTy(kNumberId, kBigIntId), kNumericId);
+  EXPECT_EQ(
+      ctx.unionTy(Type::createNumber(), Type::createBigInt()),
+      Type::createNumeric());
   // unionTy(Null, Undefined) should return well-known NullOrUndef.
-  EXPECT_EQ(ctx.unionTy(kNullId, kUndefinedId), kNullOrUndefId);
+  EXPECT_EQ(
+      ctx.unionTy(Type::createNull(), Type::createUndefined()),
+      Type::createNullOrUndef());
 }
 
-TEST(IRTypeContextTest, IntersectTy) {
+TEST_F(IRTypeContextTest, IntersectTy) {
   IRTypeContext ctx;
 
   // Disjoint types.
-  EXPECT_EQ(ctx.intersectTy(kNumberId, kStringId), kNoTypeId);
+  EXPECT_EQ(
+      ctx.intersectTy(Type::createNumber(), Type::createString()),
+      Type::createNoType());
   // Subset: Number intersect AnyType = Number.
-  EXPECT_EQ(ctx.intersectTy(kNumberId, kAnyTypeId), kNumberId);
-  EXPECT_EQ(ctx.intersectTy(kAnyTypeId, kNumberId), kNumberId);
+  EXPECT_EQ(
+      ctx.intersectTy(Type::createNumber(), Type::createAnyType()),
+      Type::createNumber());
+  EXPECT_EQ(
+      ctx.intersectTy(Type::createAnyType(), Type::createNumber()),
+      Type::createNumber());
   // Same type.
-  EXPECT_EQ(ctx.intersectTy(kNumberId, kNumberId), kNumberId);
+  EXPECT_EQ(
+      ctx.intersectTy(Type::createNumber(), Type::createNumber()),
+      Type::createNumber());
   // NoType.
-  EXPECT_EQ(ctx.intersectTy(kNoTypeId, kNumberId), kNoTypeId);
-  EXPECT_EQ(ctx.intersectTy(kNumberId, kNoTypeId), kNoTypeId);
+  EXPECT_EQ(
+      ctx.intersectTy(Type::createNoType(), Type::createNumber()),
+      Type::createNoType());
+  EXPECT_EQ(
+      ctx.intersectTy(Type::createNumber(), Type::createNoType()),
+      Type::createNoType());
   // Union intersect Union: Numeric subset of AnyType.
-  EXPECT_EQ(ctx.intersectTy(kNumericId, kAnyTypeId), kNumericId);
+  EXPECT_EQ(
+      ctx.intersectTy(Type::createNumeric(), Type::createAnyType()),
+      Type::createNumeric());
   // NullOrUndef intersect Numeric: disjoint → NoType.
-  EXPECT_EQ(ctx.intersectTy(kNullOrUndefId, kNumericId), kNoTypeId);
+  EXPECT_EQ(
+      ctx.intersectTy(Type::createNullOrUndef(), Type::createNumeric()),
+      Type::createNoType());
 }
 
-TEST(IRTypeContextTest, SubtractTy) {
+TEST_F(IRTypeContextTest, SubtractTy) {
   IRTypeContext ctx;
 
   // Subtract member from union: AnyType - Number.
-  uint32_t result = ctx.subtractTy(kAnyTypeId, kNumberId);
+  Type result = ctx.subtractTy(Type::createAnyType(), Type::createNumber());
   EXPECT_EQ(ctx.getKind(result), TypeKind::Union);
   auto arms = ctx.getUnionArms(result);
   EXPECT_EQ(arms.size(), 7u);
@@ -421,191 +478,211 @@ TEST(IRTypeContextTest, SubtractTy) {
   EXPECT_TRUE(ctx.canBeBigInt(result));
 
   // Subset subtraction → NoType.
-  EXPECT_EQ(ctx.subtractTy(kNumberId, kAnyTypeId), kNoTypeId);
+  EXPECT_EQ(
+      ctx.subtractTy(Type::createNumber(), Type::createAnyType()),
+      Type::createNoType());
   // Disjoint subtraction → unchanged.
-  EXPECT_EQ(ctx.subtractTy(kNumberId, kStringId), kNumberId);
+  EXPECT_EQ(
+      ctx.subtractTy(Type::createNumber(), Type::createString()),
+      Type::createNumber());
   // NoType cases.
-  EXPECT_EQ(ctx.subtractTy(kNoTypeId, kNumberId), kNoTypeId);
-  EXPECT_EQ(ctx.subtractTy(kNumberId, kNoTypeId), kNumberId);
+  EXPECT_EQ(
+      ctx.subtractTy(Type::createNoType(), Type::createNumber()),
+      Type::createNoType());
+  EXPECT_EQ(
+      ctx.subtractTy(Type::createNumber(), Type::createNoType()),
+      Type::createNumber());
   // Subtract union from union: AnyType - NullOrUndef.
-  uint32_t r2 = ctx.subtractTy(kAnyTypeId, kNullOrUndefId);
+  Type r2 = ctx.subtractTy(Type::createAnyType(), Type::createNullOrUndef());
   EXPECT_FALSE(ctx.canBeNull(r2));
   EXPECT_FALSE(ctx.canBeUndefined(r2));
   EXPECT_TRUE(ctx.canBeNumber(r2));
   EXPECT_TRUE(ctx.canBeString(r2));
 }
 
-TEST(IRTypeContextTest, Int31WellKnownId) {
+TEST_F(IRTypeContextTest, Int31WellKnownId) {
   IRTypeContext ctx;
 
   // Int31 is pre-allocated with its own well-known ID.
-  EXPECT_EQ(ctx.getKind(kInt31Id), TypeKind::Int31);
-  EXPECT_EQ(ctx.getKind(kInt32Id), TypeKind::Int32);
-  EXPECT_EQ(ctx.getKind(kUint32Id), TypeKind::Uint32);
+  EXPECT_EQ(ctx.getKind(asType(kInt31Id)), TypeKind::Int31);
+  EXPECT_EQ(ctx.getKind(asType(kInt32Id)), TypeKind::Int32);
+  EXPECT_EQ(ctx.getKind(asType(kUint32Id)), TypeKind::Uint32);
 }
 
-TEST(IRTypeContextTest, Int31SubtypeRelationships) {
+TEST_F(IRTypeContextTest, Int31SubtypeRelationships) {
   IRTypeContext ctx;
 
   // Int31 <: Int32, Uint32, Number.
-  EXPECT_TRUE(ctx.isSubsetOf(kInt31Id, kInt32Id));
-  EXPECT_TRUE(ctx.isSubsetOf(kInt31Id, kUint32Id));
-  EXPECT_TRUE(ctx.isSubsetOf(kInt31Id, kNumberId));
+  EXPECT_TRUE(ctx.isSubsetOf(asType(kInt31Id), asType(kInt32Id)));
+  EXPECT_TRUE(ctx.isSubsetOf(asType(kInt31Id), asType(kUint32Id)));
+  EXPECT_TRUE(ctx.isSubsetOf(asType(kInt31Id), Type::createNumber()));
   // Not the reverse.
-  EXPECT_FALSE(ctx.isSubsetOf(kInt32Id, kInt31Id));
-  EXPECT_FALSE(ctx.isSubsetOf(kUint32Id, kInt31Id));
-  EXPECT_FALSE(ctx.isSubsetOf(kNumberId, kInt31Id));
+  EXPECT_FALSE(ctx.isSubsetOf(asType(kInt32Id), asType(kInt31Id)));
+  EXPECT_FALSE(ctx.isSubsetOf(asType(kUint32Id), asType(kInt31Id)));
+  EXPECT_FALSE(ctx.isSubsetOf(Type::createNumber(), asType(kInt31Id)));
   // Int32/Uint32 are not subsets of each other.
-  EXPECT_FALSE(ctx.isSubsetOf(kInt32Id, kUint32Id));
-  EXPECT_FALSE(ctx.isSubsetOf(kUint32Id, kInt32Id));
+  EXPECT_FALSE(ctx.isSubsetOf(asType(kInt32Id), asType(kUint32Id)));
+  EXPECT_FALSE(ctx.isSubsetOf(asType(kUint32Id), asType(kInt32Id)));
   // But both are subsets of Number.
-  EXPECT_TRUE(ctx.isSubsetOf(kInt32Id, kNumberId));
-  EXPECT_TRUE(ctx.isSubsetOf(kUint32Id, kNumberId));
+  EXPECT_TRUE(ctx.isSubsetOf(asType(kInt32Id), Type::createNumber()));
+  EXPECT_TRUE(ctx.isSubsetOf(asType(kUint32Id), Type::createNumber()));
 }
 
-TEST(IRTypeContextTest, Int31Disjointness) {
+TEST_F(IRTypeContextTest, Int31Disjointness) {
   IRTypeContext ctx;
 
   // Int31 is not disjoint from its supertypes.
-  EXPECT_FALSE(ctx.areDisjoint(kInt31Id, kInt32Id));
-  EXPECT_FALSE(ctx.areDisjoint(kInt31Id, kUint32Id));
-  EXPECT_FALSE(ctx.areDisjoint(kInt31Id, kNumberId));
+  EXPECT_FALSE(ctx.areDisjoint(asType(kInt31Id), asType(kInt32Id)));
+  EXPECT_FALSE(ctx.areDisjoint(asType(kInt31Id), asType(kUint32Id)));
+  EXPECT_FALSE(ctx.areDisjoint(asType(kInt31Id), Type::createNumber()));
   // Int32 and Uint32 overlap (via Int31).
-  EXPECT_FALSE(ctx.areDisjoint(kInt32Id, kUint32Id));
+  EXPECT_FALSE(ctx.areDisjoint(asType(kInt32Id), asType(kUint32Id)));
   // Int31 is disjoint from non-number types.
-  EXPECT_TRUE(ctx.areDisjoint(kInt31Id, kStringId));
-  EXPECT_TRUE(ctx.areDisjoint(kInt31Id, kObjectId));
-  EXPECT_TRUE(ctx.areDisjoint(kInt31Id, kBooleanId));
+  EXPECT_TRUE(ctx.areDisjoint(asType(kInt31Id), Type::createString()));
+  EXPECT_TRUE(ctx.areDisjoint(asType(kInt31Id), Type::createObject()));
+  EXPECT_TRUE(ctx.areDisjoint(asType(kInt31Id), Type::createBoolean()));
 }
 
-TEST(IRTypeContextTest, IntersectInt32Uint32) {
+TEST_F(IRTypeContextTest, IntersectInt32Uint32) {
   IRTypeContext ctx;
 
   // Int32 ∩ Uint32 = Int31.
-  EXPECT_EQ(ctx.intersectTy(kInt32Id, kUint32Id), kInt31Id);
-  EXPECT_EQ(ctx.intersectTy(kUint32Id, kInt32Id), kInt31Id);
+  EXPECT_EQ(
+      ctx.intersectTy(asType(kInt32Id), asType(kUint32Id)),
+      asType(kInt31Id));
+  EXPECT_EQ(
+      ctx.intersectTy(asType(kUint32Id), asType(kInt32Id)),
+      asType(kInt31Id));
   // Number ∩ Int32 = Int32 (subset).
-  EXPECT_EQ(ctx.intersectTy(kNumberId, kInt32Id), kInt32Id);
+  EXPECT_EQ(
+      ctx.intersectTy(Type::createNumber(), asType(kInt32Id)),
+      asType(kInt32Id));
   // Number ∩ Uint32 = Uint32 (subset).
-  EXPECT_EQ(ctx.intersectTy(kNumberId, kUint32Id), kUint32Id);
+  EXPECT_EQ(
+      ctx.intersectTy(Type::createNumber(), asType(kUint32Id)),
+      asType(kUint32Id));
   // Int31 ∩ Int32 = Int31 (subset).
-  EXPECT_EQ(ctx.intersectTy(kInt31Id, kInt32Id), kInt31Id);
+  EXPECT_EQ(
+      ctx.intersectTy(asType(kInt31Id), asType(kInt32Id)),
+      asType(kInt31Id));
   // Int31 ∩ String = NoType (disjoint).
-  EXPECT_EQ(ctx.intersectTy(kInt31Id, kStringId), kNoTypeId);
+  EXPECT_EQ(
+      ctx.intersectTy(asType(kInt31Id), Type::createString()),
+      Type::createNoType());
 }
 
-TEST(IRTypeContextTest, Int31Predicates) {
+TEST_F(IRTypeContextTest, Int31Predicates) {
   IRTypeContext ctx;
 
-  EXPECT_TRUE(ctx.canBeNumber(kInt31Id));
-  EXPECT_TRUE(ctx.isPrimitive(kInt31Id));
-  EXPECT_TRUE(ctx.isNonPtr(kInt31Id));
-  EXPECT_FALSE(ctx.canBeString(kInt31Id));
-  EXPECT_FALSE(ctx.canBeObject(kInt31Id));
+  EXPECT_TRUE(ctx.canBeNumber(asType(kInt31Id)));
+  EXPECT_TRUE(ctx.isPrimitive(asType(kInt31Id)));
+  EXPECT_TRUE(ctx.isNonPtr(asType(kInt31Id)));
+  EXPECT_FALSE(ctx.canBeString(asType(kInt31Id)));
+  EXPECT_FALSE(ctx.canBeObject(asType(kInt31Id)));
 }
 
-TEST(IRTypeContextTest, CountKinds) {
+TEST_F(IRTypeContextTest, CountKinds) {
   IRTypeContext ctx;
 
-  EXPECT_EQ(ctx.countKinds(kNoTypeId), 0u);
-  EXPECT_EQ(ctx.countKinds(kNumberId), 1u);
-  EXPECT_EQ(ctx.countKinds(kStringId), 1u);
-  EXPECT_EQ(ctx.countKinds(kObjectId), 1u);
+  EXPECT_EQ(ctx.countKinds(Type::createNoType()), 0u);
+  EXPECT_EQ(ctx.countKinds(Type::createNumber()), 1u);
+  EXPECT_EQ(ctx.countKinds(Type::createString()), 1u);
+  EXPECT_EQ(ctx.countKinds(Type::createObject()), 1u);
   // AnyType has 8 arms.
-  EXPECT_EQ(ctx.countKinds(kAnyTypeId), 8u);
+  EXPECT_EQ(ctx.countKinds(Type::createAnyType()), 8u);
   // Numeric = Number | BigInt.
-  EXPECT_EQ(ctx.countKinds(kNumericId), 2u);
+  EXPECT_EQ(ctx.countKinds(Type::createNumeric()), 2u);
   // NullOrUndef = Null | Undefined.
-  EXPECT_EQ(ctx.countKinds(kNullOrUndefId), 2u);
+  EXPECT_EQ(ctx.countKinds(Type::createNullOrUndef()), 2u);
   // AnyEmptyUninit = 10 arms.
-  EXPECT_EQ(ctx.countKinds(kAnyEmptyUninitId), 10u);
+  EXPECT_EQ(ctx.countKinds(Type::createAnyEmptyUninit()), 10u);
   // Dynamic union.
-  uint32_t numStr = ctx.unionTy(kNumberId, kStringId);
+  Type numStr = ctx.unionTy(Type::createNumber(), Type::createString());
   EXPECT_EQ(ctx.countKinds(numStr), 2u);
 }
 
-TEST(IRTypeContextTest, GetFirstKind) {
+TEST_F(IRTypeContextTest, GetFirstKind) {
   IRTypeContext ctx;
 
-  EXPECT_EQ(ctx.getFirstKind(kNoTypeId), TypeKind::NoType);
-  EXPECT_EQ(ctx.getFirstKind(kNumberId), TypeKind::Number);
-  EXPECT_EQ(ctx.getFirstKind(kStringId), TypeKind::String);
-  EXPECT_EQ(ctx.getFirstKind(kObjectId), TypeKind::Object);
-  EXPECT_EQ(ctx.getFirstKind(kEmptyId), TypeKind::Empty);
+  EXPECT_EQ(ctx.getFirstKind(Type::createNoType()), TypeKind::NoType);
+  EXPECT_EQ(ctx.getFirstKind(Type::createNumber()), TypeKind::Number);
+  EXPECT_EQ(ctx.getFirstKind(Type::createString()), TypeKind::String);
+  EXPECT_EQ(ctx.getFirstKind(Type::createObject()), TypeKind::Object);
+  EXPECT_EQ(ctx.getFirstKind(Type::createEmpty()), TypeKind::Empty);
   // AnyType first arm is Undefined (lowest ID arm).
-  EXPECT_EQ(ctx.getFirstKind(kAnyTypeId), TypeKind::Undefined);
+  EXPECT_EQ(ctx.getFirstKind(Type::createAnyType()), TypeKind::Undefined);
   // Numeric first arm is Number (ID 7 < ID 8).
-  EXPECT_EQ(ctx.getFirstKind(kNumericId), TypeKind::Number);
+  EXPECT_EQ(ctx.getFirstKind(Type::createNumeric()), TypeKind::Number);
   // NullOrUndef first arm is Undefined (ID 3 < ID 4).
-  EXPECT_EQ(ctx.getFirstKind(kNullOrUndefId), TypeKind::Undefined);
+  EXPECT_EQ(ctx.getFirstKind(Type::createNullOrUndef()), TypeKind::Undefined);
 }
 
-TEST(IRTypeContextTest, FormatLeafTypes) {
+TEST_F(IRTypeContextTest, FormatLeafTypes) {
   IRTypeContext ctx;
-  auto fmt = [&](uint32_t id) -> std::string {
+  auto fmt = [&](Type t) -> std::string {
     std::string s;
     llvh::raw_string_ostream os(s);
-    ctx.format(os, id);
+    ctx.format(os, t);
     return s;
   };
 
-  EXPECT_EQ(fmt(kNoTypeId), "notype");
-  EXPECT_EQ(fmt(kNumberId), "number");
-  EXPECT_EQ(fmt(kStringId), "string");
-  EXPECT_EQ(fmt(kObjectId), "object");
-  EXPECT_EQ(fmt(kBooleanId), "boolean");
-  EXPECT_EQ(fmt(kNullId), "null");
-  EXPECT_EQ(fmt(kUndefinedId), "undefined");
-  EXPECT_EQ(fmt(kBigIntId), "bigint");
-  EXPECT_EQ(fmt(kSymbolId), "symbol");
-  EXPECT_EQ(fmt(kEmptyId), "empty");
-  EXPECT_EQ(fmt(kUninitId), "uninit");
-  EXPECT_EQ(fmt(kEnvironmentId), "environment");
-  EXPECT_EQ(fmt(kPrivateNameId), "privateName");
-  EXPECT_EQ(fmt(kFunctionCodeId), "functionCode");
-  EXPECT_EQ(fmt(kBits32Id), "bits32");
+  EXPECT_EQ(fmt(Type::createNoType()), "notype");
+  EXPECT_EQ(fmt(Type::createNumber()), "number");
+  EXPECT_EQ(fmt(Type::createString()), "string");
+  EXPECT_EQ(fmt(Type::createObject()), "object");
+  EXPECT_EQ(fmt(Type::createBoolean()), "boolean");
+  EXPECT_EQ(fmt(Type::createNull()), "null");
+  EXPECT_EQ(fmt(Type::createUndefined()), "undefined");
+  EXPECT_EQ(fmt(Type::createBigInt()), "bigint");
+  EXPECT_EQ(fmt(Type::createSymbol()), "symbol");
+  EXPECT_EQ(fmt(Type::createEmpty()), "empty");
+  EXPECT_EQ(fmt(Type::createUninit()), "uninit");
+  EXPECT_EQ(fmt(Type::createEnvironment()), "environment");
+  EXPECT_EQ(fmt(Type::createPrivateName()), "privateName");
+  EXPECT_EQ(fmt(Type::createFunctionCode()), "functionCode");
+  EXPECT_EQ(fmt(asType(kBits32Id)), "bits32");
 }
 
-TEST(IRTypeContextTest, FormatWellKnownUnions) {
+TEST_F(IRTypeContextTest, FormatWellKnownUnions) {
   IRTypeContext ctx;
-  auto fmt = [&](uint32_t id) -> std::string {
+  auto fmt = [&](Type t) -> std::string {
     std::string s;
     llvh::raw_string_ostream os(s);
-    ctx.format(os, id);
+    ctx.format(os, t);
     return s;
   };
 
   // AnyType prints as "any".
-  EXPECT_EQ(fmt(kAnyTypeId), "any");
+  EXPECT_EQ(fmt(Type::createAnyType()), "any");
   // AnyEmptyUninit prints as "any|empty|uninit".
-  EXPECT_EQ(fmt(kAnyEmptyUninitId), "any|empty|uninit");
+  EXPECT_EQ(fmt(Type::createAnyEmptyUninit()), "any|empty|uninit");
   // Numeric = Number | BigInt.
-  EXPECT_EQ(fmt(kNumericId), "number|bigint");
+  EXPECT_EQ(fmt(Type::createNumeric()), "number|bigint");
   // NullOrUndef = Undefined | Null (sorted by ID).
-  EXPECT_EQ(fmt(kNullOrUndefId), "undefined|null");
+  EXPECT_EQ(fmt(Type::createNullOrUndef()), "undefined|null");
 }
 
-TEST(IRTypeContextTest, FormatDynamicUnion) {
+TEST_F(IRTypeContextTest, FormatDynamicUnion) {
   IRTypeContext ctx;
-  auto fmt = [&](uint32_t id) -> std::string {
+  auto fmt = [&](Type t) -> std::string {
     std::string s;
     llvh::raw_string_ostream os(s);
-    ctx.format(os, id);
+    ctx.format(os, t);
     return s;
   };
 
-  uint32_t numStr = ctx.unionTy(kNumberId, kStringId);
+  Type numStr = ctx.unionTy(Type::createNumber(), Type::createString());
   // Arms sorted by ID: String(6), Number(7).
   EXPECT_EQ(fmt(numStr), "string|number");
 }
 
-TEST(IRTypeContextTest, CurrentWithGuard) {
+TEST_F(IRTypeContextTest, CurrentWithGuard) {
   IRTypeContext ctx;
   IRTypeContextRAII guard(ctx);
   EXPECT_EQ(&IRTypeContext::current(), &ctx);
 }
 
-TEST(IRTypeContextTest, NestedGuards) {
+TEST_F(IRTypeContextTest, NestedGuards) {
   IRTypeContext outer;
   IRTypeContext inner;
 

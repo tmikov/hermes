@@ -8,6 +8,8 @@
 #include "hermes/IR/IRTypeContext.h"
 #include "hermes/Support/ErrorHandling.h"
 
+#include "hermes/IR/IR.h"
+
 #include "llvh/Support/raw_ostream.h"
 
 #include <algorithm>
@@ -178,6 +180,47 @@ llvh::StringRef kindName(TypeKind k) {
 
 } // anonymous namespace
 
+llvh::ArrayRef<Type> IRTypeContext::getUnionArms(uint32_t id) const {
+  assert(id < entries_.size() && "Type ID out of range");
+  const auto &entry = entries_[id];
+  assert(entry.kind == TypeKind::Union && "Not a union type");
+  return llvh::ArrayRef<Type>(
+      typeArrays_.data() + entry.union_.armOffset, entry.union_.armCount);
+}
+
+bool IRTypeContext::containsMatchingKind(
+    uint32_t id,
+    bool (*pred)(TypeKind)) const {
+  assert(id < entries_.size() && "Type ID out of range");
+  const auto &entry = entries_[id];
+  if (entry.kind != TypeKind::Union)
+    return pred(entry.kind);
+  auto arms = getUnionArms(id);
+  for (Type arm : arms) {
+    assert(entries_[arm.id_].kind != TypeKind::Union && "Nested unions");
+    if (pred(entries_[arm.id_].kind))
+      return true;
+  }
+  return false;
+}
+
+bool IRTypeContext::allMatchKind(
+    uint32_t id,
+    bool (*pred)(TypeKind)) const {
+  assert(id < entries_.size() && "Type ID out of range");
+  const auto &entry = entries_[id];
+  if (entry.kind == TypeKind::NoType)
+    return false;
+  if (entry.kind != TypeKind::Union)
+    return pred(entry.kind);
+  auto arms = getUnionArms(id);
+  for (Type arm : arms) {
+    if (!pred(entries_[arm.id_].kind))
+      return false;
+  }
+  return true;
+}
+
 unsigned IRTypeContext::countKinds(uint32_t id) const {
   assert(id < entries_.size() && "Type ID out of range");
   const auto &entry = entries_[id];
@@ -196,7 +239,7 @@ TypeKind IRTypeContext::getFirstKind(uint32_t id) const {
   // For unions, return the kind of the first arm.
   auto arms = getUnionArms(id);
   assert(!arms.empty() && "Union with no arms");
-  return entries_[arms[0]].kind;
+  return entries_[arms[0].id_].kind;
 }
 
 void IRTypeContext::format(llvh::raw_ostream &OS, uint32_t id) const {
@@ -218,11 +261,10 @@ void IRTypeContext::format(llvh::raw_ostream &OS, uint32_t id) const {
   if (isSubsetOf(kAnyTypeId, id)) {
     OS << "any";
     auto arms = getUnionArms(id);
-    for (uint32_t armId : arms) {
-      TypeKind k = entries_[armId].kind;
+    for (Type arm : arms) {
+      TypeKind k = entries_[arm.id_].kind;
       // Skip kinds that are part of AnyType.
-      if (containsMatchingKind(
-              kAnyTypeId, [k](TypeKind ak) { return ak == k; }))
+      if (isSubsetOf(arm.id_, kAnyTypeId))
         continue;
       OS << '|' << kindName(k);
     }
@@ -234,7 +276,7 @@ void IRTypeContext::format(llvh::raw_ostream &OS, uint32_t id) const {
   for (size_t i = 0; i < arms.size(); ++i) {
     if (i != 0)
       OS << '|';
-    OS << kindName(entries_[arms[i]].kind);
+    OS << kindName(entries_[arms[i].id_].kind);
   }
 }
 
@@ -338,8 +380,8 @@ bool IRTypeContext::isSubsetOf(uint32_t a, uint32_t b) const {
 
   // Union on left: all arms must be subsets of b.
   if (aKind == TypeKind::Union) {
-    for (uint32_t arm : getUnionArms(a)) {
-      if (!isSubsetOf(arm, b))
+    for (Type arm : getUnionArms(a)) {
+      if (!isSubsetOf(arm.id_, b))
         return false;
     }
     return true;
@@ -347,8 +389,8 @@ bool IRTypeContext::isSubsetOf(uint32_t a, uint32_t b) const {
 
   // Leaf on left, union on right: a must be subset of some arm.
   if (bKind == TypeKind::Union) {
-    for (uint32_t arm : getUnionArms(b)) {
-      if (isSubsetOf(a, arm))
+    for (Type arm : getUnionArms(b)) {
+      if (isSubsetOf(a, arm.id_))
         return true;
     }
     return false;
@@ -369,8 +411,8 @@ bool IRTypeContext::areDisjoint(uint32_t a, uint32_t b) const {
 
   // Union on left: disjoint iff all arms are disjoint from b.
   if (aKind == TypeKind::Union) {
-    for (uint32_t arm : getUnionArms(a)) {
-      if (!areDisjoint(arm, b))
+    for (Type arm : getUnionArms(a)) {
+      if (!areDisjoint(arm.id_, b))
         return false;
     }
     return true;
@@ -378,8 +420,8 @@ bool IRTypeContext::areDisjoint(uint32_t a, uint32_t b) const {
 
   // Union on right: disjoint iff a is disjoint from all arms.
   if (bKind == TypeKind::Union) {
-    for (uint32_t arm : getUnionArms(b)) {
-      if (!areDisjoint(a, arm))
+    for (Type arm : getUnionArms(b)) {
+      if (!areDisjoint(a, arm.id_))
         return false;
     }
     return true;
@@ -392,11 +434,11 @@ bool IRTypeContext::areDisjoint(uint32_t a, uint32_t b) const {
 uint32_t IRTypeContext::createUnionImpl(uint32_t a, uint32_t b) {
   llvh::SmallVector<uint32_t, 16> arms;
 
-  // Flatten: collect leaf arms from both operands.
+  // Flatten: collect leaf arm IDs from both operands.
   auto collect = [&](uint32_t id) {
     if (getKind(id) == TypeKind::Union) {
-      auto ua = getUnionArms(id);
-      arms.append(ua.begin(), ua.end());
+      for (Type arm : getUnionArms(id))
+        arms.push_back(arm.id_);
     } else if (id != kNoTypeId) {
       arms.push_back(id);
     }
@@ -465,17 +507,24 @@ uint32_t IRTypeContext::intersectTy(uint32_t a, uint32_t b) {
   if (isSubsetOf(b, a))
     return b;
 
-  // Distribute over unions.
+  // Distribute over unions. Copy arms first because unionTy may reallocate
+  // typeArrays_, invalidating the ArrayRef from getUnionArms.
   if (getKind(a) == TypeKind::Union) {
+    llvh::SmallVector<uint32_t, 16> arms;
+    for (Type arm : getUnionArms(a))
+      arms.push_back(arm.id_);
     uint32_t result = kNoTypeId;
-    for (uint32_t arm : getUnionArms(a))
-      result = unionTy(result, intersectTy(arm, b));
+    for (uint32_t armId : arms)
+      result = unionTy(result, intersectTy(armId, b));
     return result;
   }
   if (getKind(b) == TypeKind::Union) {
+    llvh::SmallVector<uint32_t, 16> arms;
+    for (Type arm : getUnionArms(b))
+      arms.push_back(arm.id_);
     uint32_t result = kNoTypeId;
-    for (uint32_t arm : getUnionArms(b))
-      result = unionTy(result, intersectTy(a, arm));
+    for (uint32_t armId : arms)
+      result = unionTy(result, intersectTy(a, armId));
     return result;
   }
 
@@ -497,11 +546,15 @@ uint32_t IRTypeContext::subtractTy(uint32_t a, uint32_t b) {
   if (areDisjoint(a, b))
     return a;
 
-  // Distribute over unions in a.
+  // Distribute over unions in a. Copy arms first because unionTy may
+  // reallocate typeArrays_, invalidating the ArrayRef from getUnionArms.
   if (getKind(a) == TypeKind::Union) {
+    llvh::SmallVector<uint32_t, 16> arms;
+    for (Type arm : getUnionArms(a))
+      arms.push_back(arm.id_);
     uint32_t result = kNoTypeId;
-    for (uint32_t arm : getUnionArms(a))
-      result = unionTy(result, subtractTy(arm, b));
+    for (uint32_t armId : arms)
+      result = unionTy(result, subtractTy(armId, b));
     return result;
   }
 
@@ -514,7 +567,8 @@ uint32_t IRTypeContext::addUnionEntry(llvh::ArrayRef<uint32_t> arms) {
   assert(arms.size() >= 2 && "Union must have at least 2 arms");
   uint32_t offset = hermes_narrow_cast<uint32_t>(
       typeArrays_.size(), "type array offset overflow");
-  typeArrays_.insert(typeArrays_.end(), arms.begin(), arms.end());
+  for (uint32_t armId : arms)
+    typeArrays_.push_back(Type(armId));
   uint32_t id = entries_.size();
   entries_.push_back(TypeEntry::createUnion(
       offset,
@@ -655,9 +709,15 @@ IRTypeContext::IRTypeContext() {
   }
 
   // Pre-populate intern table with well-known unions.
+  // IRTypeContext is a friend of Type, so we can access Type::id_.
   for (uint32_t id :
        {kAnyTypeId, kNumericId, kAnyEmptyUninitId, kNullOrUndefId}) {
-    internTable_[UnionInternKey(getUnionArms(id))] = id;
+    auto arms = getUnionArms(id);
+    UnionInternKey key;
+    key.arms.reserve(arms.size());
+    for (Type t : arms)
+      key.arms.push_back(t.id_);
+    internTable_[std::move(key)] = id;
   }
 
   // Pad remaining entries up to kFirstDynamicId with NoType placeholders.
@@ -665,6 +725,125 @@ IRTypeContext::IRTypeContext() {
     entries_.push_back(TypeEntry::createLeaf(TypeKind::NoType));
   }
   assert(entries_.size() == kFirstDynamicId);
+}
+
+// --- Type delegation methods (out-of-line, require IRTypeContext::current()) --
+// These thunks pass *this / Type arguments directly to the public Type
+// overloads of IRTypeContext (defined inline in IRTypeContext-inline.h).
+// No manual id_ unwrapping is needed here.
+
+Type Type::unionTy(Type A, Type B) {
+  return IRTypeContext::current().unionTy(A, B);
+}
+
+Type Type::intersectTy(Type A, Type B) {
+  return IRTypeContext::current().intersectTy(A, B);
+}
+
+Type Type::subtractTy(Type A, Type B) {
+  return IRTypeContext::current().subtractTy(A, B);
+}
+
+TypeKind Type::getFirstTypeKind() const {
+  return IRTypeContext::current().getFirstKind(*this);
+}
+
+unsigned Type::countTypes() const {
+  return IRTypeContext::current().countKinds(*this);
+}
+
+bool Type::isPrimitive() const {
+  return IRTypeContext::current().isPrimitive(*this);
+}
+
+bool Type::canBePrimitive() const {
+  return IRTypeContext::current().canBePrimitive(*this);
+}
+
+bool Type::isNonPtr() const {
+  return IRTypeContext::current().isNonPtr(*this);
+}
+
+bool Type::isSubsetOf(Type t) const {
+  return IRTypeContext::current().isSubsetOf(*this, t);
+}
+
+bool Type::canBeString() const {
+  return IRTypeContext::current().canBeString(*this);
+}
+
+bool Type::canBeBigInt() const {
+  return IRTypeContext::current().canBeBigInt(*this);
+}
+
+bool Type::canBeSymbol() const {
+  return IRTypeContext::current().canBeSymbol(*this);
+}
+
+bool Type::canBeNumber() const {
+  return IRTypeContext::current().canBeNumber(*this);
+}
+
+bool Type::canBeObject() const {
+  return IRTypeContext::current().canBeObject(*this);
+}
+
+bool Type::canBeBoolean() const {
+  return IRTypeContext::current().canBeBoolean(*this);
+}
+
+bool Type::canBeEmpty() const {
+  return IRTypeContext::current().canBeEmpty(*this);
+}
+
+bool Type::canBeUninit() const {
+  return IRTypeContext::current().canBeUninit(*this);
+}
+
+bool Type::canBeUndefined() const {
+  return IRTypeContext::current().canBeUndefined(*this);
+}
+
+bool Type::canBeNull() const {
+  return IRTypeContext::current().canBeNull(*this);
+}
+
+bool Type::canBeAny() const {
+  return IRTypeContext::current().isSubsetOf(Type::createAnyType(), *this);
+}
+
+void Type::print(llvh::raw_ostream &OS) const {
+  IRTypeContext::current().format(OS, *this);
+}
+
+Type Type::iterator::operator*() const {
+  if (arms_.empty()) {
+    // Non-union: yield the type itself.
+    return type_;
+  }
+  return arms_[index_];
+}
+
+Type::iterator Type::begin() const {
+  if (isNoType())
+    return end();
+  auto &ctx = IRTypeContext::current();
+  if (ctx.getKind(*this) == TypeKind::Union) {
+    auto arms = ctx.getUnionArms(*this);
+    return iterator(*this, arms, 0);
+  }
+  // Non-union: single element iteration.
+  return iterator(*this, {}, 0);
+}
+
+Type::iterator Type::end() const {
+  auto &ctx = IRTypeContext::current();
+  if (ctx.getKind(*this) == TypeKind::Union) {
+    auto arms = ctx.getUnionArms(*this);
+    return iterator(*this, arms, arms.size());
+  }
+  // Non-union: end is index 1 for non-NoType, 0 for NoType.
+  return iterator(*this, {}, isNoType() ? 0 : 1);
 }
 
 } // namespace hermes

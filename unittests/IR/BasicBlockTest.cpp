@@ -23,6 +23,7 @@ namespace {
 TEST(IRBasicBlockTest, BasicBlockConnectionTest) {
   auto Ctx = std::make_shared<Context>();
   Module M(Ctx);
+  IRTypeContextRAII typeContextGuard(M.getTypeContext());
   IRBuilder Builder(&M);
   auto F = Builder.createFunction(
       "main", Function::DefinitionKind::ES5Function, true);

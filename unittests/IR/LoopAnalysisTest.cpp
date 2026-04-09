@@ -33,6 +33,7 @@ namespace {
 TEST(IRVerifierTest, LoopAnalysisTestSimple) {
   auto Ctx = std::make_shared<Context>();
   Module M(Ctx);
+  IRTypeContextRAII typeContextGuard(M.getTypeContext());
   IRBuilder Builder(&M);
   auto F = Builder.createFunction(
       "main", Function::DefinitionKind::ES5Function, true);
@@ -86,6 +87,7 @@ TEST(IRVerifierTest, LoopAnalysisTestSimple) {
 TEST(IRVerifierTest, LoopAnalysisTestBranch) {
   auto Ctx = std::make_shared<Context>();
   Module M(Ctx);
+  IRTypeContextRAII typeContextGuard(M.getTypeContext());
   IRBuilder Builder(&M);
   auto F = Builder.createFunction(
       "main", Function::DefinitionKind::ES5Function, true);
@@ -171,6 +173,7 @@ TEST(IRVerifierTest, LoopAnalysisTestBranch) {
 TEST(IRVerifierTest, LoopAnalysisTestInnerLoops) {
   auto Ctx = std::make_shared<Context>();
   Module M(Ctx);
+  IRTypeContextRAII typeContextGuard(M.getTypeContext());
   IRBuilder Builder(&M);
   auto F = Builder.createFunction(
       "main", Function::DefinitionKind::ES5Function, true);
@@ -222,6 +225,7 @@ TEST(IRVerifierTest, LoopAnalysisTestInnerLoops) {
 TEST(IRVerifierTest, LoopAnalysisTestCompleteGraph) {
   auto Ctx = std::make_shared<Context>();
   Module M(Ctx);
+  IRTypeContextRAII typeContextGuard(M.getTypeContext());
   IRBuilder Builder(&M);
   auto F = Builder.createFunction(
       "main", Function::DefinitionKind::ES5Function, true);
@@ -288,6 +292,7 @@ TEST(IRVerifierTest, LoopAnalysisTestCompleteGraph) {
 TEST(IRVerifierTest, LoopAnalysisTestTwoInARow) {
   auto Ctx = std::make_shared<Context>();
   Module M(Ctx);
+  IRTypeContextRAII typeContextGuard(M.getTypeContext());
   IRBuilder Builder(&M);
   auto F = Builder.createFunction(
       "main", Function::DefinitionKind::ES5Function, true);
@@ -371,6 +376,7 @@ TEST(IRVerifierTest, LoopAnalysisTestTwoInARow) {
 TEST(IRVerifierTest, LoopAnalysisTestInterleaving) {
   auto Ctx = std::make_shared<Context>();
   Module M(Ctx);
+  IRTypeContextRAII typeContextGuard(M.getTypeContext());
   IRBuilder Builder(&M);
   auto F = Builder.createFunction(
       "main", Function::DefinitionKind::ES5Function, true);
@@ -435,6 +441,7 @@ TEST(IRVerifierTest, LoopAnalysisTestInterleaving) {
 TEST(IRVerifierTest, LoopAnalysisTestExitFromHeader) {
   auto Ctx = std::make_shared<Context>();
   Module M(Ctx);
+  IRTypeContextRAII typeContextGuard(M.getTypeContext());
   IRBuilder Builder(&M);
   auto F = Builder.createFunction(
       "main", Function::DefinitionKind::ES5Function, true);
@@ -489,6 +496,7 @@ TEST(IRVerifierTest, LoopAnalysisTestExitFromHeader) {
 TEST(IRVerifierTest, LoopAnalysisTestNoUniqueHeader) {
   auto Ctx = std::make_shared<Context>();
   Module M(Ctx);
+  IRTypeContextRAII typeContextGuard(M.getTypeContext());
   IRBuilder Builder(&M);
   auto F = Builder.createFunction(
       "main", Function::DefinitionKind::ES5Function, true);
@@ -550,6 +558,7 @@ TEST(IRVerifierTest, LoopAnalysisTestNoUniqueHeader) {
 TEST(IRVerifierTest, LoopAnalysisTestNoUniquePreheader) {
   auto Ctx = std::make_shared<Context>();
   Module M(Ctx);
+  IRTypeContextRAII typeContextGuard(M.getTypeContext());
   IRBuilder Builder(&M);
   auto F = Builder.createFunction(
       "main", Function::DefinitionKind::ES5Function, true);
@@ -614,6 +623,7 @@ TEST(IRVerifierTest, LoopAnalysisTestFinishingTime) {
   // (like this one), the headers are null anyway because they aren't unique.
   auto Ctx = std::make_shared<Context>();
   Module M(Ctx);
+  IRTypeContextRAII typeContextGuard(M.getTypeContext());
   IRBuilder Builder(&M);
   auto F = Builder.createFunction(
       "main", Function::DefinitionKind::ES5Function, true);
@@ -675,6 +685,7 @@ TEST(IRVerifierTest, LoopAnalysisTestFinishingTime) {
 TEST(IRVerifierTest, LoopAnalysisTestDirectlyIntoInner) {
   auto Ctx = std::make_shared<Context>();
   Module M(Ctx);
+  IRTypeContextRAII typeContextGuard(M.getTypeContext());
   IRBuilder Builder(&M);
   auto F = Builder.createFunction(
       "main", Function::DefinitionKind::ES5Function, true);
