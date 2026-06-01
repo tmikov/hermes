@@ -41,16 +41,28 @@ One responsibility per file; `manager.rs` is the only stateful façade and ties 
 
 **Files:**
 - Create: `rust/Cargo.toml`
+- Create: `rust/rust-toolchain.toml`
+- Create: `rust/.gitignore` (contents: `/target`)
 - Create: `rust/crates/support/Cargo.toml`
 - Create: `rust/crates/support/src/lib.rs`
 
-- [ ] **Step 1: Create the workspace manifest**
+> Create `rust/.gitignore` with `/target` **before** the first `git add rust/`, so build
+> artifacts are never committed.
+
+- [ ] **Step 1: Create the workspace manifest and toolchain pin**
 
 `rust/Cargo.toml`:
 ```toml
 [workspace]
 resolver = "2"
 members = ["crates/support"]
+```
+
+`rust/rust-toolchain.toml` (pins the toolchain for reproducible builds):
+```toml
+[toolchain]
+channel = "1.96.0"
+components = ["rustfmt", "clippy"]
 ```
 
 - [ ] **Step 2: Create the support crate manifest**
