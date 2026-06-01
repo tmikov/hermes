@@ -290,39 +290,65 @@ impl SourceErrorManager {
 
     /// Emit an error at `loc`.
     pub fn error(&mut self, loc: SMLoc, msg: impl Into<String>) {
-        self.emit(DiagKind::Error, Warning::NoWarning, Some(loc), msg.into());
+        self.emit(
+            DiagKind::Error,
+            Warning::NoWarning,
+            Some(loc),
+            None,
+            msg.into(),
+        );
     }
 
-    /// Emit an error at the start of `range`.
+    /// Emit an error at the start of `range`, underscoring the full range.
     pub fn error_range(&mut self, range: SMRange, msg: impl Into<String>) {
         self.emit(
             DiagKind::Error,
             Warning::NoWarning,
             Some(range.start),
+            Some(range),
             msg.into(),
         );
     }
 
     /// Emit a note at `loc`.
     pub fn note(&mut self, loc: SMLoc, msg: impl Into<String>) {
-        self.emit(DiagKind::Note, Warning::NoWarning, Some(loc), msg.into());
+        self.emit(
+            DiagKind::Note,
+            Warning::NoWarning,
+            Some(loc),
+            None,
+            msg.into(),
+        );
     }
 
     /// Emit a warning of the given category at `loc`.
     pub fn warning(&mut self, w: Warning, loc: SMLoc, msg: impl Into<String>) {
-        self.emit(DiagKind::Warning, w, Some(loc), msg.into());
+        self.emit(DiagKind::Warning, w, Some(loc), None, msg.into());
     }
 
     /// Emit a `Misc` warning at `loc` (the most common case).
     pub fn warning_misc(&mut self, loc: SMLoc, msg: impl Into<String>) {
-        self.emit(DiagKind::Warning, Warning::Misc, Some(loc), msg.into());
+        self.emit(
+            DiagKind::Warning,
+            Warning::Misc,
+            Some(loc),
+            None,
+            msg.into(),
+        );
     }
 
     // ---- Central dispatch ---------------------------------------------------
 
     /// Central dispatch. Port of `SourceErrorManager::message` +
     /// `countAndGenMessage` (buffering/subsystem deferred).
-    fn emit(&mut self, mut dk: DiagKind, w: Warning, loc: Option<SMLoc>, msg: String) {
+    fn emit(
+        &mut self,
+        mut dk: DiagKind,
+        w: Warning,
+        loc: Option<SMLoc>,
+        range: Option<SMRange>,
+        msg: String,
+    ) {
         // Suppress all messages once the error limit has been reached.
         if self.error_limit_reached {
             return;
@@ -340,25 +366,42 @@ impl SourceErrorManager {
         if dk == DiagKind::Warning && self.is_warning_an_error(w) {
             dk = DiagKind::Error;
         }
-        self.count_and_gen(dk, loc, msg);
+        self.count_and_gen(dk, loc, range, msg);
     }
 
     /// Port of `countAndGenMessage`.
-    fn count_and_gen(&mut self, dk: DiagKind, loc: Option<SMLoc>, msg: String) {
+    fn count_and_gen(
+        &mut self,
+        dk: DiagKind,
+        loc: Option<SMLoc>,
+        range: Option<SMRange>,
+        msg: String,
+    ) {
         self.message_count[dk as usize] += 1;
-        self.gen_message(dk, loc, msg);
+        self.gen_message(dk, loc, range, msg);
         // Check after calling gen_message so the original message is emitted
         // first, then the "too many errors" sentinel.  Matches C++ behavior.
         if dk == DiagKind::Error && self.message_count[DiagKind::Error as usize] == self.error_limit
         {
             self.error_limit_reached = true;
-            self.gen_message(DiagKind::Error, None, "too many errors emitted".to_string());
+            self.gen_message(
+                DiagKind::Error,
+                None,
+                None,
+                "too many errors emitted".to_string(),
+            );
         }
     }
 
     /// Resolve the location and hand a `ResolvedDiagnostic` to the handler.
     /// Port of `doGenMessage` → `doPrintMessage`.
-    fn gen_message(&mut self, dk: DiagKind, loc: Option<SMLoc>, msg: String) {
+    fn gen_message(
+        &mut self,
+        dk: DiagKind,
+        loc: Option<SMLoc>,
+        range: Option<SMRange>,
+        msg: String,
+    ) {
         // Build the resolved struct first (immutable borrows of self.entries
         // and self.translator complete and produce owned data), then hand it
         // to self.handler (mutable borrow).  This ordering satisfies the
@@ -375,6 +418,24 @@ impl SourceErrorManager {
                     let trimmed = strip_eol(raw);
                     String::from_utf8_lossy(trimmed).into_owned()
                 });
+                // Compute range columns relative to the source line, if the
+                // range is in the same buffer as the location.
+                // Port of SourceErrorManager.cpp:157-170 (caret/tilde fill).
+                let range_cols = range.filter(|r| r.start.source == loc.source).map(|r| {
+                    // Byte offset of the first character of this line.
+                    let line_start = loc.offset - (coords.col - 1);
+                    // Byte length of the EOL-stripped source line.
+                    let source_line_byte_len = source_line.len() as u32;
+                    let line_end = line_start + source_line_byte_len;
+                    // Clamp both endpoints to the line so multi-line ranges
+                    // stop at the line end, matching the C++ behavior
+                    // (`min(range.second, caretLine.size())`).
+                    let start = r.start.offset.saturating_sub(line_start);
+                    // saturating_sub guards against an inverted/foreign range
+                    // whose end precedes the line start.
+                    let end = r.end.offset.min(line_end).saturating_sub(line_start);
+                    (start, end)
+                });
                 ResolvedDiagnostic {
                     kind: dk,
                     file_name,
@@ -382,6 +443,7 @@ impl SourceErrorManager {
                     col: coords.col,
                     message: msg,
                     source_line: Some(source_line),
+                    range_cols,
                 }
             }
             None => ResolvedDiagnostic {
@@ -391,6 +453,7 @@ impl SourceErrorManager {
                 col: 0,
                 message: msg,
                 source_line: None,
+                range_cols: None,
             },
         };
         if let Some(h) = self.handler.as_mut() {
@@ -578,6 +641,31 @@ mod tests {
                 .len(),
             0
         );
+    }
+
+    #[test]
+    fn error_range_threads_range() {
+        use crate::diag::CollectingHandler;
+        use crate::location::{SMLoc, SMRange};
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("t.js", "let x = 1;");
+        sm.set_handler(Box::new(CollectingHandler::new()));
+        sm.error_range(
+            SMRange {
+                start: SMLoc {
+                    source: id,
+                    offset: 4,
+                },
+                end: SMLoc {
+                    source: id,
+                    offset: 9,
+                },
+            },
+            "m",
+        );
+        let h = sm.handler_as::<CollectingHandler>().unwrap();
+        assert_eq!(h.messages().len(), 1);
+        assert_eq!(h.messages()[0].range_cols, Some((4, 9)));
     }
 
     #[test]

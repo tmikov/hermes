@@ -136,6 +136,49 @@ pub fn build_source_and_caret_line(
     (narrow_source_line, caret_string)
 }
 
+/// Render a `ResolvedDiagnostic` to a `String`. The returned string ends with
+/// a newline. Produces:
+/// - `file:line:col: kind: message\n`
+/// - the source line + `\n` (if available)
+/// - the caret/underline line + `\n` (only for all-ASCII source lines)
+///
+/// Port of `printDiagnosticHelper`.
+pub fn render_diagnostic(diag: &ResolvedDiagnostic, opts: &OutputOptions) -> String {
+    let kind_str = match diag.kind {
+        DiagKind::Error => "error",
+        DiagKind::Warning => "warning",
+        DiagKind::Note => "note",
+    };
+    let mut out = format!(
+        "{}:{}:{}: {}: {}\n",
+        diag.file_name, diag.line, diag.col, kind_str, diag.message
+    );
+    if let Some(src) = &diag.source_line {
+        // Convert Option<(u32,u32)> to a one-element or empty slice of
+        // (usize, usize) so we can pass it to build_source_and_caret_line.
+        let range_arr: [(usize, usize); 1];
+        let ranges: &[(usize, usize)] = match diag.range_cols {
+            Some((s, e)) => {
+                range_arr = [(s as usize, e as usize)];
+                &range_arr
+            }
+            None => &[],
+        };
+        // Like C++ printDiagnosticHelper, always print the tab-expanded source
+        // line returned by build_source_and_caret_line (not the raw line), so the
+        // source and caret columns stay aligned. The caret line itself is only
+        // shown for all-ASCII source lines.
+        let (src_expanded, caret) = build_source_and_caret_line(src, diag.col, ranges, opts);
+        out.push_str(&src_expanded);
+        out.push('\n');
+        if src.is_ascii() {
+            out.push_str(&caret);
+            out.push('\n');
+        }
+    }
+    out
+}
+
 /// Default handler: prints `file:line:col: kind: message`, the source line, and
 /// (for all-ASCII lines) a caret/underline. Port of `printDiagnosticHelper`.
 pub struct StderrHandler {
@@ -154,30 +197,64 @@ impl DiagHandler for StderrHandler {
     }
 
     fn handle(&mut self, diag: &ResolvedDiagnostic) {
-        let kind = match diag.kind {
-            DiagKind::Error => "error",
-            DiagKind::Warning => "warning",
-            DiagKind::Note => "note",
-        };
-        eprintln!(
-            "{}:{}:{}: {}: {}",
-            diag.file_name, diag.line, diag.col, kind, diag.message
-        );
-        if let Some(src) = &diag.source_line {
-            let (line, caret) = build_source_and_caret_line(src, diag.col, &[], &self.opts);
-            eprintln!("{}", line);
-            // Hermes shows the caret line only for all-ASCII source lines.
-            if src.is_ascii() {
-                eprintln!("{}", caret);
-            }
-        }
+        let s = render_diagnostic(diag, &self.opts);
+        // The string already ends with '\n'; use eprint! to avoid a double newline.
+        eprint!("{}", s);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diag::OutputOptions;
+    use crate::diag::{DiagKind, OutputOptions};
+
+    #[test]
+    fn ranged_caret_underline() {
+        use crate::diag::ResolvedDiagnostic;
+        let d = ResolvedDiagnostic {
+            kind: DiagKind::Error,
+            file_name: "t".into(),
+            line: 1,
+            col: 5,
+            message: "m".into(),
+            source_line: Some("let x = 1;".into()),
+            range_cols: Some((4, 9)),
+        };
+        let s = render_diagnostic(&d, &OutputOptions::default());
+        assert!(
+            s.contains("t:1:5: error: m"),
+            "header not found in: {:?}",
+            s
+        );
+        assert!(
+            s.contains("    ^~~~~"),
+            "caret underline not found in: {:?}",
+            s
+        );
+    }
+
+    #[test]
+    fn render_expands_tabs_in_source_line() {
+        use crate::diag::ResolvedDiagnostic;
+        // Like C++, the printed source line is tab-expanded so it stays aligned
+        // with the caret line. "\tx" with the caret on 'x' (col 2) -> 8 spaces.
+        let d = ResolvedDiagnostic {
+            kind: DiagKind::Error,
+            file_name: "t".into(),
+            line: 1,
+            col: 2,
+            message: "m".into(),
+            source_line: Some("\tx".into()),
+            range_cols: None,
+        };
+        let s = render_diagnostic(&d, &OutputOptions::default());
+        assert!(
+            s.contains("        x\n"),
+            "source not tab-expanded: {:?}",
+            s
+        );
+        assert!(s.contains("        ^\n"), "caret misaligned: {:?}", s);
+    }
 
     #[test]
     fn caret_under_single_column() {

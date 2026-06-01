@@ -59,6 +59,10 @@ pub struct ResolvedDiagnostic {
     pub message: String,
     /// The source line text (without buffer access), if available.
     pub source_line: Option<String>,
+    /// 0-based byte `[start, end)` columns of the highlighted range within the
+    /// source line, if a range was provided and the location is known.
+    /// `None` when no range is present or no source line is available.
+    pub range_cols: Option<(u32, u32)>,
 }
 
 /// Sink for resolved diagnostics. Default impls print; the collecting impl
@@ -152,6 +156,7 @@ mod tests {
             file_name: "a.js".into(),
             message: "boom".into(),
             source_line: Some("  let x".into()),
+            range_cols: None,
         });
         assert_eq!(h.messages().len(), 1);
         assert_eq!(h.messages()[0].kind, DiagKind::Error);
