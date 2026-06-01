@@ -665,6 +665,7 @@ git commit -m "rust(support): manager buffer registration, names, urls, virtual 
 - Modify: `rust/crates/support/src/manager.rs`
 - Modify: `rust/crates/support/src/buffer.rs` (expose a `with_line_index` helper that lazily builds and caches the index)
 - Reference: `lib/Support/SourceErrorManager.cpp:288-355` (`findUntranslatedBufferLineAndLoc`, `findBufferLineAndLoc`, `findBufferIdForLoc`).
+- **Byte-compat note (carried from Task 3):** `SourceErrorManager.cpp:255-272` `adjustSourceLocation` backs the location pointer off a `\r` and off UTF-8 continuation bytes *before* computing the column (`col = ptr - lineStart + 1`). For token-start locations this is a no-op, but for exact byte-compatibility, resolution here should apply the same adjustment: before computing the column, move the offset back while it points at a `\r` immediately preceding `\n`, or at a UTF-8 continuation byte (`0b10xxxxxx`). Add a test for an offset landing on a `\r` and on a mid-UTF-8 byte.
 
 - [ ] **Step 1: Write the failing test**
 
