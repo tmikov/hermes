@@ -16,7 +16,9 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::buffer::SourceBuffer;
-use crate::diag::{CoordTranslator, DiagHandler, DiagKind, ResolvedDiagnostic, Subsystem, Warning};
+use crate::diag::{
+    CoordTranslator, DiagHandler, DiagKind, OutputOptions, ResolvedDiagnostic, Subsystem, Warning,
+};
 use crate::location::{SMLoc, SMRange, SourceCoords, SourceId};
 
 /// A single diagnostic payload awaiting flush while buffering is active, or
@@ -52,6 +54,11 @@ struct Entry {
 pub struct SourceErrorManager {
     entries: Vec<Entry>,
     by_name: HashMap<String, SourceId>,
+    /// Advisory output options for the installed diagnostic renderer.
+    /// The `DiagHandler` owns the actual rendering; this is the manager's copy
+    /// for callers that need to inspect or pass it along.
+    /// Port of `outputOptions_` in the C++ class.
+    output_options: OutputOptions,
     /// Optional hook to translate (e.g. source-map) coordinates before display.
     /// Port of `ICoordTranslator *translator_` in the C++ class.
     translator: Option<Rc<dyn CoordTranslator>>,
@@ -121,6 +128,7 @@ impl SourceErrorManager {
         SourceErrorManager {
             entries: Vec::new(),
             by_name: HashMap::new(),
+            output_options: OutputOptions::default(),
             translator: None,
             handler: None,
             message_count: [0; 3],
@@ -241,6 +249,134 @@ impl SourceErrorManager {
         coords
     }
 
+    /// Return the 1-based line span `[start, end)` for `line` in buffer `buf`
+    /// as an `SMRange`, after LF and CR trimming. Matches the line-span branch of
+    /// `findForCoordsImpl` (cpp:356-397). Returns `None` if `line` is out of range.
+    pub fn find_smrange_for_line(&self, buf: SourceId, line: u32) -> Option<SMRange> {
+        let entry = &self.entries[buf.index() as usize];
+        entry.buffer.with_line_index(|idx, bytes| {
+            if line < 1 || line > idx.line_count() {
+                return None;
+            }
+            let ls = idx.line_start(line);
+            let raw = idx.line_ref(bytes, line);
+            // `raw` may include a trailing '\n'; strip it.
+            let lf_trimmed = raw.len() as u32 - if raw.ends_with(b"\n") { 1 } else { 0 };
+            let mut start = ls;
+            let mut end = ls + lf_trimmed;
+            // Trim lone CR at start/end to handle \r, \r\n, \n\r line endings.
+            // Port of cpp:391-394.
+            if start < end && bytes[start as usize] == b'\r' {
+                start += 1;
+            }
+            if start < end && bytes[(end - 1) as usize] == b'\r' {
+                end -= 1;
+            }
+            Some(SMRange {
+                start: SMLoc {
+                    source: buf,
+                    offset: start,
+                },
+                end: SMLoc {
+                    source: buf,
+                    offset: end,
+                },
+            })
+        })
+    }
+
+    /// Resolve a `SourceCoords` (buffer + 1-based line + 1-based col) to an
+    /// `SMLoc`. Port of `findSMLocFromCoords` / `findForCoordsImpl` (cpp:396-438).
+    /// Returns `None` if the line is out of range or the column is past the line.
+    pub fn find_smloc_from_coords(&self, coords: SourceCoords) -> Option<SMLoc> {
+        let buf = coords.buf;
+        let line = coords.line;
+        let col = coords.col;
+        let entry = &self.entries[buf.index() as usize];
+        entry.buffer.with_line_index(|idx, bytes| {
+            if line < 1 || line > idx.line_count() {
+                return None;
+            }
+            let ls = idx.line_start(line);
+            let raw = idx.line_ref(bytes, line);
+            // Strip trailing '\n' (the LF itself is not part of the line content).
+            let lf_trimmed = raw.len() as u32 - if raw.ends_with(b"\n") { 1 } else { 0 };
+            let mut start = ls;
+            let mut end = ls + lf_trimmed;
+            // CR trim — port of cpp:391-394.
+            if start < end && bytes[start as usize] == b'\r' {
+                start += 1;
+            }
+            if start < end && bytes[(end - 1) as usize] == b'\r' {
+                end -= 1;
+            }
+            // Special case: empty line — port of cpp:401-406.
+            if start == end {
+                if col <= 1 {
+                    return Some(SMLoc {
+                        source: buf,
+                        offset: start,
+                    });
+                }
+                return None;
+            }
+            // Detect presence of any non-ASCII byte — port of cpp:408-415.
+            let has_non_ascii = bytes[start as usize..end as usize]
+                .iter()
+                .any(|&b| b & 0x80 != 0);
+            if !has_non_ascii {
+                // ASCII fast path — port of cpp:418-425.
+                if col > end - start {
+                    return None;
+                }
+                return Some(SMLoc {
+                    source: buf,
+                    offset: start + col - 1,
+                });
+            }
+            // UTF-8 path: scan code points, skipping continuation bytes.
+            // Port of cpp:428-436.
+            let mut column: u32 = 0;
+            let mut offset = start;
+            while offset < end {
+                let b = bytes[offset as usize];
+                // Skip UTF-8 continuation bytes (0b10xx_xxxx).
+                if (b & 0b1100_0000) != 0b1000_0000 {
+                    column += 1;
+                    if column == col {
+                        return Some(SMLoc {
+                            source: buf,
+                            offset,
+                        });
+                    }
+                }
+                offset += 1;
+            }
+            None
+        })
+    }
+
+    /// Return `(buf, 1-based-line, byte-range-of-line)` for the line containing
+    /// `loc`. Equivalent to `findBufferAndLine` (C++ header:428).
+    ///
+    /// # Lifetime note
+    /// The C++ returns a `LineCoord` with a borrow into the buffer's bytes.
+    /// Because `with_line_index` scopes the borrow to a closure, we cannot
+    /// return a `LineCoord<'_>` without lifetime gymnastics. Instead we return
+    /// the byte range as a `std::ops::Range<u32>` (owned, zero-copy). Callers
+    /// can retrieve the actual slice via `source_buffer(buf).bytes()[range]`.
+    pub fn find_buffer_and_line(&self, loc: SMLoc) -> (SourceId, u32, std::ops::Range<u32>) {
+        let entry = &self.entries[loc.source.index() as usize];
+        entry.buffer.with_line_index(|idx, bytes| {
+            let (line, _col) = idx.line_col(loc.offset);
+            let start = idx.line_start(line);
+            // end = start of next line (includes the '\n'), or end of bytes.
+            let line_ref = idx.line_ref(bytes, line);
+            let end = start + line_ref.len() as u32;
+            (loc.source, line, start..end)
+        })
+    }
+
     /// Decode `loc` without applying the translator, including the
     /// `adjustSourceLocation` correction for '\r'/UTF-8 continuation bytes.
     /// Port of `findUntranslatedBufferLineAndLoc`.
@@ -259,6 +395,90 @@ impl SourceErrorManager {
             line,
             col,
         }
+    }
+
+    // ---- Small helpers --------------------------------------------------------
+
+    /// Build the smallest `SMRange` covering both `a` and `b` (both must be in
+    /// the same buffer). Delegates to `SMRange::combine`.
+    /// Port of `combineIntoRange` (C++ header:601-607).
+    pub fn combine_into_range(&self, a: SMLoc, b: SMLoc) -> SMRange {
+        SMRange::combine(a, b)
+    }
+
+    /// Convert the exclusive end of `range` to an inclusive location by
+    /// subtracting one. If the range is empty (start == end), returns the start
+    /// unchanged. Port of `convertEndToLocation` (cpp:669-675).
+    pub fn convert_end_to_location(range: SMRange) -> SMLoc {
+        if range.start == range.end {
+            range.start
+        } else {
+            SMLoc {
+                source: range.end.source,
+                offset: range.end.offset - 1,
+            }
+        }
+    }
+
+    /// The display name of a buffer: its source URL if one was set (e.g. from a
+    /// `//# sourceURL=` comment or a source map), otherwise its file name.
+    /// Port of `getSourceUrl` (C++ header:415-421).
+    fn source_url_or_name(&self, id: SourceId) -> &str {
+        self.source_url(id)
+            .unwrap_or_else(|| self.buffer_file_name(id))
+    }
+
+    /// Format `coords` as `"name:line:col"`, where `name` prefers the buffer's
+    /// source URL over its file name (matching C++ `dumpCoords`, which uses
+    /// `getSourceUrl`). Port of `dumpCoords(OS, SourceCoords)` (cpp:108-116).
+    pub fn dump_coords(&self, coords: SourceCoords) -> String {
+        format!(
+            "{}:{}:{}",
+            self.source_url_or_name(coords.buf),
+            coords.line,
+            coords.col
+        )
+    }
+
+    /// Resolve `loc` to coordinates and format as `"filename:line:col"`.
+    /// Port of `dumpCoords(OS, SMLoc)` (cpp:118-122).
+    pub fn dump_coords_loc(&self, loc: SMLoc) -> String {
+        let coords = self.find_coords(loc);
+        self.dump_coords(coords)
+    }
+
+    // ---- Output options and translator accessors --------------------------------
+
+    /// Return the current advisory output options.
+    /// Port of `getOutputOptions` (C++ header:331).
+    pub fn output_options(&self) -> OutputOptions {
+        self.output_options
+    }
+
+    /// Replace the current advisory output options.
+    /// Port of `setOutputOptions` (C++ header:335).
+    pub fn set_output_options(&mut self, o: OutputOptions) {
+        self.output_options = o;
+    }
+
+    /// Clone the installed translator, if any.
+    /// Port of `getTranslator` (C++ header:355).
+    pub fn translator(&self) -> Option<Rc<dyn CoordTranslator>> {
+        self.translator.as_ref().map(Rc::clone)
+    }
+
+    // ---- Additional count accessors -------------------------------------------
+
+    /// Number of messages of kind `dk` emitted so far.
+    /// Port of `getMessageCount` (C++ header:586).
+    pub fn get_message_count(&self, dk: DiagKind) -> u32 {
+        self.message_count[dk as usize]
+    }
+
+    /// Convenience: number of notes emitted.
+    /// Port of `getNoteCount` (C++ header:597).
+    pub fn note_count(&self) -> u32 {
+        self.message_count[DiagKind::Note as usize]
     }
 }
 
@@ -1216,6 +1436,107 @@ mod tests {
                 .messages()
                 .len(),
             0
+        );
+    }
+
+    // ---- Phase 5: find/convert/dump helpers ---------------------------------
+
+    #[test]
+    fn smloc_from_coords_roundtrip() {
+        use crate::location::SourceCoords;
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("a.js", "ab\ncde\nf");
+        // 'd' is line 2 col 2 -> offset 4.
+        let loc = sm
+            .find_smloc_from_coords(SourceCoords {
+                buf: id,
+                line: 2,
+                col: 2,
+            })
+            .unwrap();
+        assert_eq!(loc.offset, 4);
+        // round-trips with find_coords
+        let c = sm.find_coords(loc);
+        assert_eq!((c.line, c.col), (2, 2));
+    }
+
+    #[test]
+    fn smloc_from_coords_utf8() {
+        use crate::location::SourceCoords;
+        let mut sm = SourceErrorManager::new();
+        // "aé" : a(0), é=0xC3 0xA9 (1,2). col 2 is 'é' -> offset 1 (lead byte).
+        let id = sm.add_buffer("a.js", "aé");
+        let loc = sm
+            .find_smloc_from_coords(SourceCoords {
+                buf: id,
+                line: 1,
+                col: 2,
+            })
+            .unwrap();
+        assert_eq!(loc.offset, 1);
+    }
+
+    #[test]
+    fn smrange_for_line_spans_content() {
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("a.js", "ab\r\ncde");
+        // Line 1 is "ab" (CR + LF trimmed): offsets [0,2).
+        let r = sm.find_smrange_for_line(id, 1).unwrap();
+        assert_eq!((r.start.offset, r.end.offset), (0, 2));
+    }
+
+    #[test]
+    fn convert_end_to_location_subtracts_one() {
+        use crate::location::{SMLoc, SMRange};
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("a.js", "abcdef");
+        let r = SMRange {
+            start: SMLoc {
+                source: id,
+                offset: 1,
+            },
+            end: SMLoc {
+                source: id,
+                offset: 4,
+            },
+        };
+        assert_eq!(SourceErrorManager::convert_end_to_location(r).offset, 3);
+        let empty = SMRange {
+            start: SMLoc {
+                source: id,
+                offset: 2,
+            },
+            end: SMLoc {
+                source: id,
+                offset: 2,
+            },
+        };
+        assert_eq!(SourceErrorManager::convert_end_to_location(empty).offset, 2);
+    }
+
+    #[test]
+    fn dump_coords_prefers_source_url() {
+        use crate::location::SourceCoords;
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("a.js", "abc");
+        // Without a source URL, the file name is used.
+        assert_eq!(
+            sm.dump_coords(SourceCoords {
+                buf: id,
+                line: 1,
+                col: 1
+            }),
+            "a.js:1:1"
+        );
+        // With a source URL set, it is preferred (matches C++ getSourceUrl).
+        sm.set_source_url(id, "orig.ts");
+        assert_eq!(
+            sm.dump_coords(SourceCoords {
+                buf: id,
+                line: 1,
+                col: 1
+            }),
+            "orig.ts:1:1"
         );
     }
 }

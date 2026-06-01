@@ -52,6 +52,12 @@ impl LineIndex {
     pub fn line_count(&self) -> u32 {
         self.line_starts.len() as u32
     }
+
+    /// Byte offset where 1-based `line` starts (= `line_starts[line - 1]`).
+    /// Panics if `line` is out of range; callers should guard with `line_count()`.
+    pub fn line_start(&self, line: u32) -> u32 {
+        self.line_starts[(line - 1) as usize]
+    }
 }
 
 #[cfg(test)]
