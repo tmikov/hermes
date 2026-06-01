@@ -1,8 +1,16 @@
 # SourceErrorManager Rust Port — Implementation Plan
 
+> **STATUS: COMPLETE (all tasks done).** Tasks T0–T10 below were implemented, plus a
+> follow-on pass that finished the *entire* component — message buffering/coalescing,
+> ranged diagnostics, subsystem suppression, external message collection, the remaining
+> find/convert/dump helpers — and a live **byte-for-byte differential against `hermesc` 1.96.0**
+> (`rust/crates/support/tests/golden.rs`). The follow-on plan lived in a transient session
+> file; its design rationale is captured in `doc/superpowers/RustPortRoadmap.md`. Nothing in
+> `SourceErrorManager` remains deferred. This plan is the historical record of the build.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Port Hermes's `SourceErrorManager` and its buffer/source-location machinery to a zero-`unsafe` Rust crate, functionally complete except for message buffering/coalescing.
+**Goal:** Port Hermes's `SourceErrorManager` and its buffer/source-location machinery to a zero-`unsafe` Rust crate. The full public surface is implemented (the original plan staged message buffering/coalescing after the T0–T10 core; it and the other follow-on features are now done — see the status note above).
 
 **Architecture:** A new `support` crate under a `rust/` cargo workspace. Locations are offset-based `(SourceId, u32)` with explicit buffer identity. The manager owns buffers as `Rc<SourceBuffer>`, resolves offsets to line/col via a cached per-buffer line index, and dispatches resolved diagnostics to a pluggable `DiagHandler` (default handler is byte-compatible with LLVH `SMDiagnostic` rendering). No `unsafe` anywhere in this crate.
 

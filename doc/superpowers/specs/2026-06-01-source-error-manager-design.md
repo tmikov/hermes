@@ -3,6 +3,13 @@
 Design for porting Hermes's `SourceErrorManager` (and the buffer / source-location
 machinery it sits on) to Rust as the first component of the Rust port.
 
+> **STATUS: COMPLETE.** The entire `SourceErrorManager` is implemented in
+> `rust/crates/support/` and validated **byte-for-byte against `hermesc` 1.96.0**
+> (`tests/golden.rs`). Everything once marked "deferred" below — message
+> buffering/coalescing, ranged diagnostics, external message collection, and the
+> remaining find/convert/dump helpers — is **done**. This document is the original
+> design; for current project state see `doc/superpowers/RustPortRoadmap.md`.
+
 ## Context & goals
 
 `SourceErrorManager` is the foundation of the compiler front-end's diagnostics and
@@ -10,9 +17,9 @@ source-location handling. It is the natural first port target: it is depended on
 the lexer (the intended next port) and by everything above it, and it can be built
 and tested in complete isolation.
 
-The port must be **functionally complete** — it is ported first, and we do not want
-to revisit it. The one exception is message buffering/coalescing, which is
-explicitly staged immediately after the core lands (see "Deferred").
+The port is **functionally complete** — its entire public surface is implemented
+(originally the core landed first and message buffering/coalescing followed; both are
+now done).
 
 ### Project conventions
 
@@ -130,14 +137,20 @@ Consequences of decision (3):
   `Option<Rc<dyn CoordTranslator>>`, applied during resolution before the handler runs.
 - `Subsystem` enum (`Unspecified` / `Lexer` / `Parser`) carried on each message.
 
-## 7. Deferred (staged right after core)
+## 7. Message buffering/coalescing (DONE — was staged right after core)
 
-- **Message buffering/coalescing** (`enableBuffering` / `disableBuffering`): sort
-  messages by location, attach notes to their parent message, dedup duplicates.
-  Carved out behind the `message()` entry point — the core path resolves and dispatches
-  to the handler immediately; the buffering version will instead enqueue `Diagnostic`s
-  and flush-sort on `disableBuffering`. Adding it requires **no type changes**, which is
-  the proof the boundary is drawn in the right place.
+- **Message buffering/coalescing** (`enable_buffering` / `disable_buffering`): ref-counted;
+  while active, generated messages are buffered; on the final disable they are stable-sorted
+  by source order (the "too many errors" sentinel last), notes attached to and emitted right
+  after their parent message, then flushed. No dedup (matches C++). It was carved out behind
+  the central dispatch and required no type changes — as predicted. **Implemented.**
+- Also completed in the same pass: **ranged diagnostics** (`SMRange` → `^~~~~` underline),
+  **subsystem suppression** (`SaveAndSuppressMessages` equivalent), **external message
+  collection** (`CollectMessagesRAII` equivalent), and the remaining helpers
+  (`find_smloc_from_coords`/`find_smrange_for_line`/`combine_into_range`/
+  `convert_end_to_location`/`dump_coords`). The C++ RAII guards are implemented as explicit
+  enable-disable / begin-end / set-restore methods (safe-Rust + the crate's `forbid(unsafe)`
+  make a `&mut`-holding guard impossible). See `RustPortRoadmap.md`.
 
 ## 8. Testing
 
