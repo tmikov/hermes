@@ -68,6 +68,20 @@
 using namespace hermes;
 using namespace hermes::parser;
 
+/// \return the variant name string for \p kind as it appears in TokenKinds.def.
+static const char *tokenVariantName(TokenKind kind) {
+  switch (kind) {
+#define TOK(name, str)  \
+  case TokenKind::name: \
+    return #name;
+#include "hermes/Parser/TokenKinds.def"
+  }
+  return "<unknown>";
+}
+
+/// Stub — per-kind field emission (filled in later tasks).
+static void emitFields(llvh::raw_ostream &, JSLexer &, const Token &) {}
+
 static void usage(const char *argv0) {
   llvh::errs() << "Usage: " << argv0 << " <file|->\n"
                << "  Dump tokens from the JS lexer to stdout.\n"
@@ -83,11 +97,38 @@ int main(int argc, char **argv) {
   const char *filePath = argv[argc - 1];
 
   // Read input.
-  auto fileBufOrErr = llvh::MemoryBuffer::getFileOrSTDIN(llvh::StringRef(filePath));
+  auto fileBufOrErr =
+      llvh::MemoryBuffer::getFileOrSTDIN(llvh::StringRef(filePath));
   if (!fileBufOrErr) {
     llvh::errs() << argv[0] << ": error reading '" << filePath
                  << "': " << fileBufOrErr.getError().message() << "\n";
     return 1;
+  }
+
+  // Set up the lexer.
+  JSLexer::Allocator alloc;
+  SourceErrorManager sm;
+  JSLexer lex(std::move(fileBufOrErr.get()), sm, alloc);
+  const char *base = lex.getBufferStart();
+
+  // Default grammar context — allow regexp literals.
+  JSLexer::GrammarContext grammarContext = JSLexer::AllowRegExp;
+
+  llvh::raw_ostream &os = llvh::outs();
+
+  // Token loop: advance to load the first token, then continue.
+  for (;;) {
+    const Token *tok = lex.advance(grammarContext);
+    size_t start = (size_t)(tok->getStartLoc().getPointer() - base);
+    size_t end = (size_t)(tok->getEndLoc().getPointer() - base);
+    const char *nl = lex.isNewLineBeforeCurrentToken() ? "nl" : "--";
+    os << start << ' ' << end << ' ' << nl << ' '
+       << tokenVariantName(tok->getKind());
+    emitFields(os, lex, *tok);
+    os << '\n';
+    if (tok->getKind() == TokenKind::eof) {
+      break;
+    }
   }
 
   return 0;
