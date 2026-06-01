@@ -81,8 +81,16 @@ part of SourceErrorManager; in build order):
 | 2 | C++ token-dump harness | links `JSLexer` | ✅ **Done** — `tools/js-lexer-dump/` (`add_hermes_tool`, build `cmake --build cmake-build-asan --target js-lexer-dump`). Emits `<start> <end> <nl> <KIND>[ fields]`; KINDs are `.def` variant names; numbers as f64 bits; byte-exact `\xHH` quoting (WTF-8 round-trips); `--context=regexp\|div`. Plan: `plans/2026-06-01-js-lexer-dump-harness.md`. **Known oracle limits** (documented in-tool, revisit when porting those paths): `template_middle`/`template_tail` and IDENT_OP (`as_operator`) need parser-driven rescans so a plain `advance()` loop never emits them; JSX/Flow contexts not yet wired. |
 | 3 | String interning (`StringTable`/`UniqueString`) | `Support/StringTable.h` | ✅ **Done** — `rust/crates/atom_table/` (juno `atom_table` verbatim minus HeapSize + `AtomBytes`/`atom_bytes` WTF-8 path; 4 tests, ill-formed-UTF-8 round-trips). Encapsulated `unsafe` confined here. Plan: `plans/2026-06-01-js-lexer-string-interner.md`. |
 | 4 | Unicode char properties | `Platform/Unicode/CharacterProperties.{h,cpp}`, `UnicodeData.inc` | ✅ **Done** — `rust/crates/unicode/` (zero-unsafe). 8 ID/letter/space range tables generated from `UnicodeData.inc` (Unicode **17.0.0**) by committed `gen_tables.py`; ported `lookup` + predicates + constants/helpers; 8 tests (idempotent generation verified). RegExp canonicalization excluded. Plan: `plans/2026-06-01-js-lexer-unicode.md`. |
-| 5 | Number parsing | `Support/Conversions.h`, `FastStrToDouble.cpp` (`fast_float`) | pure Rust per the locked decision above. |
+| 5 | Number parsing | `Support/Conversions.h`, `FastStrToDouble.cpp` (`fast_float`) | ✅ **Done** — `rust/crates/parser/src/number.rs` (zero-unsafe). Faithful `parseIntWithRadix*` port incl. the power-of-2 rounding path (validated vs a `u128`→f64 correctly-rounded oracle); `str_to_double` is pure-Rust `str::parse::<f64>()` (C++-confirmed bit patterns). Plan: `plans/2026-06-01-js-lexer-number-parsing.md`. |
 |   | Bump `Allocator` | `Support/Allocator.h` | **droppable** — Rust owns the decoded strings. |
+
+> **✅ MILESTONE (all 5 support-layer prerequisites complete).** Token tables, the C++
+> token-dump differential oracle, the WTF-8 string interner, Unicode CharacterProperties,
+> and number parsing are all done, reviewed (spec + code-quality), and committed on `rust`.
+> Workspace: **80 Rust tests passing, zero warnings**; `js-lexer-dump` builds. **Next: the
+> lexer proper** — `cursor.rs` (encapsulated `*const u8`), `token.rs`, then
+> `advance`/identifiers/literals/templates/regexp/JSX+Flow/savepoint+lookahead — validated
+> live against `js-lexer-dump`.
 
 ## Key cross-cutting design decisions
 
