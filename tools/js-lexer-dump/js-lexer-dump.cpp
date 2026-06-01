@@ -79,8 +79,60 @@ static const char *tokenVariantName(TokenKind kind) {
   return "<unknown>";
 }
 
-/// Stub — per-kind field emission (filled in later tasks).
-static void emitFields(llvh::raw_ostream &, JSLexer &, const Token &) {}
+/// Emit \p s quoted per the Q() spec into \p os.
+static void quoteBytes(llvh::raw_ostream &os, llvh::StringRef s) {
+  os << '"';
+  for (unsigned char c : s) {
+    if (c == '"') {
+      os << "\\\"";
+    } else if (c == '\\') {
+      os << "\\\\";
+    } else if (c == '\n') {
+      os << "\\n";
+    } else if (c == '\t') {
+      os << "\\t";
+    } else if (c == '\r') {
+      os << "\\r";
+    } else if (c >= 0x20 && c <= 0x7e) {
+      os << (char)c;
+    } else {
+      // Non-printable or non-ASCII: emit \xHH.
+      const char *hex = "0123456789abcdef";
+      os << "\\x";
+      os << hex[(c >> 4) & 0xf];
+      os << hex[c & 0xf];
+    }
+  }
+  os << '"';
+}
+
+/// Emit kind-specific fields for \p tok into \p os.
+static void emitFields(
+    llvh::raw_ostream &os,
+    JSLexer &lex,
+    const Token &tok) {
+  (void)lex;
+  switch (tok.getKind()) {
+    case TokenKind::identifier:
+      os << " ident=";
+      quoteBytes(os, tok.getIdentifier()->str());
+      break;
+
+    case TokenKind::private_identifier:
+      os << " ident=";
+      quoteBytes(os, tok.getPrivateIdentifier()->str());
+      break;
+
+    default:
+      // Reserved words: emit the identifier string.
+      if (tok.isResWord()) {
+        os << " ident=";
+        quoteBytes(os, tok.getResWordIdentifier()->str());
+      }
+      // Punctuators and eof: no extra fields.
+      break;
+  }
+}
 
 static void usage(const char *argv0) {
   llvh::errs() << "Usage: " << argv0 << " <file|->\n"
