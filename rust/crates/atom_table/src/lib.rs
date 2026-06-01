@@ -231,7 +231,7 @@ impl Inner {
     fn add_bytes(&mut self, owned: Vec<u8>) -> AtomBytes {
         // Remember the index of the new element.
         let index = self.strings_bytes.len();
-        assert!(index < INVALID_ATOM.0 as usize, "More than 4GB atoms?");
+        assert!(index < INVALID_ATOM_BYTES.0 as usize, "More than 4GB atoms?");
 
         // Obtain a reference to the existing bytes on the heap. That reference
         // is valid while `self` is valid. Pushing an owned Vec into the outer
