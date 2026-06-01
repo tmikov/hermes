@@ -21,7 +21,8 @@
 /// - Per-kind fields (none for punctuators/eof):
 ///   - identifier / private_identifier / any reserved word:
 ///       ` ident=Q(name)`
-///     (identifier->getIdentifier(), private_identifier->getPrivateIdentifier,
+///     (identifier->getIdentifier(),
+///      private_identifier->getPrivateIdentifier(),
 ///      resword->getResWordIdentifier(); respect the header's kind asserts)
 ///   - numeric_literal: ` bits=0xHHHHHHHHHHHHHHHH`
 ///     = llvh::DoubleToBits(tok.getNumericLiteral()), lowercase, zero-padded
@@ -39,6 +40,9 @@
 ///     (emit unquoted token `null` when getTemplateValue() is nullptr)
 ///   - jsx_text:
 ///       ` value=Q(getJSXTextValue) raw=Q(getJSXTextRaw)`
+///   - IDENT_OP tokens (currently only `as_operator`): no fields; these are
+///     only produced when the parser calls convertCurTokenToIdentOp() —
+///     a plain advance() loop will never emit them.
 /// - Always emit a trailing eof line.
 ///
 /// Q(s) quoting (byte-exact, operates on raw bytes of UniqueString->str(),
@@ -56,6 +60,8 @@
 /// Grammar context: --context=regexp (default) -> AllowRegExp
 ///                  --context=div             -> AllowDiv
 /// JSX/Flow contexts are not supported by this tool.
+/// Strict-mode note: the lexer is constructed with strictMode=true (default),
+/// so strict-mode reserved words are lexed as rw_* tokens.
 
 #include "hermes/Parser/JSLexer.h"
 #include "hermes/Support/SourceErrorManager.h"
@@ -109,11 +115,7 @@ static void quoteBytes(llvh::raw_ostream &os, llvh::StringRef s) {
 }
 
 /// Emit kind-specific fields for \p tok into \p os.
-static void emitFields(
-    llvh::raw_ostream &os,
-    JSLexer &lex,
-    const Token &tok) {
-  (void)lex;
+static void emitFields(llvh::raw_ostream &os, const Token &tok) {
   switch (tok.getKind()) {
     case TokenKind::identifier:
       os << " ident=";
@@ -154,6 +156,9 @@ static void emitFields(
       quoteBytes(os, tok.getRegExpLiteral()->getFlags()->str());
       break;
 
+    // NOTE: template_middle and template_tail are produced only when the parser
+    // calls JSLexer::rescanRBraceInTemplateLiteral(); a plain advance() loop
+    // like this tool's will never emit them (it yields template_head…r_brace).
     case TokenKind::no_substitution_template:
     case TokenKind::template_head:
     case TokenKind::template_middle:
@@ -190,7 +195,7 @@ static void usage(const char *argv0) {
   llvh::errs() << "Usage: " << argv0
                << " [--context=regexp|div] <file|->\n"
                << "  Dump tokens from the JS lexer to stdout.\n"
-               << "  --context=regexp  Allow regexp literals after / (default)\n"
+               << "  --context=regexp  Allow regexp literals after /\n"
                << "  --context=div     Allow division operator after /\n"
                << "  Use - to read from stdin.\n";
 }
@@ -242,6 +247,11 @@ int main(int argc, char **argv) {
   }
 
   // Set up the lexer.
+  // NOTE: JSLexer is constructed with strictMode=true (the default). This
+  // means strict-mode future reserved words (implements, interface, package,
+  // private, protected, public, static, yield) are lexed as rw_* tokens, not
+  // identifiers. The Rust lexer under differential test must be configured
+  // identically.
   JSLexer::Allocator alloc;
   SourceErrorManager sm;
   JSLexer lex(std::move(fileBufOrErr.get()), sm, alloc);
@@ -257,7 +267,7 @@ int main(int argc, char **argv) {
     const char *nl = lex.isNewLineBeforeCurrentToken() ? "nl" : "--";
     os << start << ' ' << end << ' ' << nl << ' '
        << tokenVariantName(tok->getKind());
-    emitFields(os, lex, *tok);
+    emitFields(os, *tok);
     os << '\n';
     if (tok->getKind() == TokenKind::eof) {
       break;
