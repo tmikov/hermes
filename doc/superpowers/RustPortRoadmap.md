@@ -77,7 +77,7 @@ part of SourceErrorManager; in build order):
 
 | # | Dep | Hermes source | Note |
 |---|-----|---------------|------|
-| 1 | Token tables | `Parser/TokenKinds.def`, `HTMLEntities.def` | mechanical `.def`→Rust; defines the vocabulary everything references. |
+| 1 | Token tables | `Parser/TokenKinds.def`, `HTMLEntities.def` | ✅ **Done** — `rust/crates/parser/src/token_kinds.rs` (`TokenKind`, `token_kind_str`, `binop_precedence`, `is_res_word`/`is_punctuator`, `match_reserved_word`; 6 tests). `HTMLEntities.def` deferred to JSX. Plan: `plans/2026-06-01-js-lexer-token-tables.md`. |
 | 2 | C++ token-dump harness | links `JSLexer` | the differential oracle; stood up before validating the first slice. |
 | 3 | String interning (`StringTable`/`UniqueString`) | `Support/StringTable.h` | copy juno `atom_table` + WTF-8 byte path (lone surrogates from `appendUnicodeToStorage` can't live in a Rust `String`). Unblocks the first slice with token tables. |
 | 4 | Unicode char properties | `Platform/Unicode/CharacterProperties.{h,cpp}`, `UnicodeData.inc` | port the generated range tables verbatim (binary search); pin to Hermes's Unicode version — do NOT use a Rust unicode crate. |
