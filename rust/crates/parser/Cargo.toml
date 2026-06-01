@@ -8,3 +8,6 @@ publish = false
 unsafe_code = "deny"   # the cursor module (later) gets a scoped #[allow]; token tables are unsafe-free
 
 [dependencies]
+support = { path = "../support" }
+atom_table = { path = "../atom_table" }
+unicode = { path = "../unicode" }

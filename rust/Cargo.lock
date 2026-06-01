@@ -9,7 +9,16 @@ version = "0.0.0"
 [[package]]
 name = "parser"
 version = "0.0.0"
+dependencies = [
+ "atom_table",
+ "support",
+ "unicode",
+]
 
 [[package]]
 name = "support"
+version = "0.0.0"
+
+[[package]]
+name = "unicode"
 version = "0.0.0"
