@@ -540,6 +540,143 @@ const TOKEN_NAMES: [&str; NUM_JS_TOKENS] = [
     "<_last_token>",
 ];
 
+/// The `.def` variant name for each token kind, in `.def` order. This is the
+/// `#name` string the C++ `tokenVariantName` switch returns (e.g. `l_brace`,
+/// `starstar`, `rw_function`, `eof`), as used by the `js-lexer-dump` oracle —
+/// distinct from `TOKEN_NAMES` (the human-readable spelling, e.g. "{").
+const TOKEN_VARIANT_NAMES: [&str; NUM_JS_TOKENS] = [
+    "none",
+    "identifier",
+    "private_identifier",
+    "_first_resword",
+    "rw_function",
+    "rw_for",
+    "rw_if",
+    "rw_in",
+    "rw_var",
+    "rw_break",
+    "rw_continue",
+    "rw_return",
+    "rw_switch",
+    "rw_this",
+    "rw_true",
+    "rw_false",
+    "rw_null",
+    "rw_case",
+    "rw_catch",
+    "rw_const",
+    "rw_debugger",
+    "rw_default",
+    "rw_delete",
+    "rw_do",
+    "rw_else",
+    "rw_finally",
+    "rw_instanceof",
+    "rw_new",
+    "rw_throw",
+    "rw_try",
+    "rw_typeof",
+    "rw_void",
+    "rw_while",
+    "rw_with",
+    "rw_export",
+    "rw_import",
+    "rw_class",
+    "rw_static",
+    "rw_extends",
+    "rw_super",
+    "rw_enum",
+    "rw_implements",
+    "rw_interface",
+    "rw_package",
+    "rw_private",
+    "rw_protected",
+    "rw_public",
+    "rw_yield",
+    "_last_resword",
+    "l_brace",
+    "l_bracepipe",
+    "r_brace",
+    "piper_brace",
+    "l_paren",
+    "r_paren",
+    "l_square",
+    "r_square",
+    "period",
+    "questiondot",
+    "dotdotdot",
+    "semi",
+    "comma",
+    "plusplus",
+    "minusminus",
+    "_first_binary",
+    "starstar",
+    "star",
+    "percent",
+    "slash",
+    "plus",
+    "minus",
+    "lessless",
+    "greatergreater",
+    "greatergreatergreater",
+    "less",
+    "greater",
+    "lessequal",
+    "greaterequal",
+    "equalequal",
+    "exclaimequal",
+    "equalequalequal",
+    "exclaimequalequal",
+    "amp",
+    "caret",
+    "pipe",
+    "ampamp",
+    "pipepipe",
+    "questionquestion",
+    "_last_binary",
+    "exclaim",
+    "tilde",
+    "question",
+    "colon",
+    "equal",
+    "plusequal",
+    "minusequal",
+    "starequal",
+    "starstarequal",
+    "percentequal",
+    "slashequal",
+    "lesslessequal",
+    "greatergreaterequal",
+    "greatergreatergreaterequal",
+    "ampequal",
+    "pipeequal",
+    "ampampequal",
+    "pipepipeequal",
+    "questionquestionequal",
+    "caretequal",
+    "equalgreater",
+    "at",
+    "as_operator",
+    "numeric_literal",
+    "string_literal",
+    "regexp_literal",
+    "jsx_text",
+    "bigint_literal",
+    "no_substitution_template",
+    "template_head",
+    "template_middle",
+    "template_tail",
+    "eof",
+    "_last_token",
+];
+
+/// \return the `.def` variant name of `kind` (e.g. `l_brace`, `eof`), matching
+/// the C++ `tokenVariantName` switch used by `js-lexer-dump`.
+#[inline]
+pub fn variant_name(kind: TokenKind) -> &'static str {
+    TOKEN_VARIANT_NAMES[kind as usize]
+}
+
 /// Binary-operator precedences in `.def` order (0 = not a binary operator).
 /// Mirrors C++ `BINOP` precedence field.
 ///
@@ -806,6 +943,17 @@ mod tests {
         assert_eq!(token_kind_str(TokenKind::as_operator), "as");
         assert_eq!(token_kind_str(TokenKind::eof), "<eof>");
         assert_eq!(token_kind_str(TokenKind::_first_resword), "<_first_resword>");
+    }
+
+    #[test]
+    fn variant_names_match_def() {
+        assert_eq!(variant_name(TokenKind::none), "none");
+        assert_eq!(variant_name(TokenKind::l_brace), "l_brace");
+        assert_eq!(variant_name(TokenKind::starstar), "starstar");
+        assert_eq!(variant_name(TokenKind::rw_function), "rw_function");
+        assert_eq!(variant_name(TokenKind::questionquestionequal), "questionquestionequal");
+        assert_eq!(variant_name(TokenKind::eof), "eof");
+        assert_eq!(variant_name(TokenKind::_last_token), "_last_token");
     }
 
     #[test]
