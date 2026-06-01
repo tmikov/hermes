@@ -149,6 +149,10 @@ impl StderrHandler {
 }
 
 impl DiagHandler for StderrHandler {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn handle(&mut self, diag: &ResolvedDiagnostic) {
         let kind = match diag.kind {
             DiagKind::Error => "error",

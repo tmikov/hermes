@@ -65,6 +65,8 @@ pub struct ResolvedDiagnostic {
 /// captures for tests. Replaces the hardcoded-stderr model.
 pub trait DiagHandler {
     fn handle(&mut self, diag: &ResolvedDiagnostic);
+    /// Return `self` as `&dyn Any` to allow downcasting to a concrete type.
+    fn as_any(&self) -> &dyn std::any::Any;
 }
 
 /// Hook to translate coordinates (e.g. via a source map) before display.
@@ -99,6 +101,10 @@ impl Default for CollectingHandler {
 impl DiagHandler for CollectingHandler {
     fn handle(&mut self, diag: &ResolvedDiagnostic) {
         self.messages.push(diag.clone());
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 
