@@ -1,0 +1,11 @@
+[package]
+name = "atom_table"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# This crate intentionally carries encapsulated `unsafe` (interior mutability +
+# an append-only self-referential string map copied from juno). It is the one
+# interner crate permitted to use unsafe; the invariants are documented inline.
+
+[dependencies]
