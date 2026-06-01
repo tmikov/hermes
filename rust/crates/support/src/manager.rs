@@ -19,9 +19,10 @@ use crate::buffer::SourceBuffer;
 use crate::diag::{CoordTranslator, DiagHandler, DiagKind, ResolvedDiagnostic, Subsystem, Warning};
 use crate::location::{SMLoc, SMRange, SourceCoords, SourceId};
 
-/// A single diagnostic payload awaiting flush while buffering is active.
-/// Port of the `MessageData` inner struct in `SourceErrorManager.cpp`.
-struct MessageData {
+/// A single diagnostic payload awaiting flush while buffering is active, or
+/// held by an active collector. Port of the `MessageData` inner struct in
+/// `SourceErrorManager.cpp`.
+pub struct MessageData {
     dk: DiagKind,
     loc: Option<SMLoc>,
     range: Option<SMRange>,
@@ -103,6 +104,16 @@ pub struct SourceErrorManager {
     /// Notes attached to buffered messages, stored in a single flat Vec;
     /// each `BufferedMessage` indexes into this Vec via `first_note`/`note_count`.
     buffered_notes: Vec<MessageData>,
+    /// Active message collector. While `Some`, filtered messages are captured
+    /// here instead of being counted or dispatched. Port of
+    /// `externalMessageBuffer_` in `SourceErrorManager.h`.
+    ///
+    /// # Rust vs C++ design note
+    /// The C++ uses an RAII guard (`CollectMessagesRAII`) that holds a pointer
+    /// to the manager and restores the previous collector on drop. For the
+    /// same borrow-checker reasons as `suppressed_messages`, callers use
+    /// explicit `begin_collecting` / `end_collecting` instead.
+    message_collector: Option<Vec<MessageData>>,
 }
 
 impl SourceErrorManager {
@@ -122,6 +133,7 @@ impl SourceErrorManager {
             buffering_enabled: 0,
             buffered_messages: Vec::new(),
             buffered_notes: Vec::new(),
+            message_collector: None,
         }
     }
 
@@ -512,6 +524,19 @@ impl SourceErrorManager {
         if dk == DiagKind::Warning && self.is_warning_an_error(w) {
             dk = DiagKind::Error;
         }
+        // If a collector is active, capture the (already-filtered) message
+        // instead of generating it. Port of the externalMessageBuffer_ check
+        // (cpp:206-209). Collected messages are NOT counted at collect time;
+        // they are replayed through count_and_gen in end_collecting.
+        if let Some(collector) = self.message_collector.as_mut() {
+            collector.push(MessageData {
+                dk,
+                loc,
+                range,
+                msg,
+            });
+            return;
+        }
         self.count_and_gen(dk, loc, range, msg);
     }
 
@@ -631,6 +656,38 @@ impl SourceErrorManager {
             }
         }
         // Both vecs were moved out; nothing to clear.
+    }
+
+    // ---- External message collection (Phase 4) --------------------------------
+
+    /// Begin collecting messages. Returns the previous collector (if nested) to
+    /// be passed back to `end_collecting`. While active, filtered messages are
+    /// captured (not counted or dispatched). Also enables buffering so the
+    /// replayed messages are source-sorted on flush.
+    /// Port of `CollectMessagesRAII` constructor.
+    pub fn begin_collecting(&mut self) -> Option<Vec<MessageData>> {
+        self.enable_buffering();
+        self.message_collector.replace(Vec::new())
+    }
+
+    /// End collection. If `discard` is false, replay the collected messages
+    /// through the normal count+buffer path (counting them and flushing
+    /// source-sorted); otherwise drop them. Restores the previous collector.
+    /// Port of the `CollectMessagesRAII` destructor.
+    ///
+    /// Order matches C++: replay (counts + buffers) → disable_buffering
+    /// (flushes) → restore previous collector. During replay `message_collector`
+    /// is `None` (taken), so `count_and_gen` → `do_gen_message` buffers them
+    /// rather than re-collecting.
+    pub fn end_collecting(&mut self, previous: Option<Vec<MessageData>>, discard: bool) {
+        let collected = self.message_collector.take().unwrap_or_default();
+        if !discard {
+            for m in collected {
+                self.count_and_gen(m.dk, m.loc, m.range, m.msg);
+            }
+        }
+        self.disable_buffering();
+        self.message_collector = previous;
     }
 
     /// Resolve the location and hand a `ResolvedDiagnostic` to the handler.
@@ -1091,6 +1148,74 @@ mod tests {
                 .messages()
                 .len(),
             1
+        );
+    }
+
+    // ---- External message collection tests ----------------------------------
+
+    #[test]
+    fn collect_then_replay() {
+        use crate::diag::CollectingHandler;
+        use crate::location::SMLoc;
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("a.js", "abcdef");
+        sm.set_handler(Box::new(CollectingHandler::new()));
+        let prev = sm.begin_collecting();
+        sm.error(
+            SMLoc {
+                source: id,
+                offset: 4,
+            },
+            "second",
+        );
+        sm.error(
+            SMLoc {
+                source: id,
+                offset: 1,
+            },
+            "first",
+        );
+        // Collected, not counted, not dispatched.
+        assert_eq!(sm.error_count(), 0);
+        assert_eq!(
+            sm.handler_as::<CollectingHandler>()
+                .unwrap()
+                .messages()
+                .len(),
+            0
+        );
+        sm.end_collecting(prev, false);
+        // Replayed: counted and dispatched in source order.
+        assert_eq!(sm.error_count(), 2);
+        let h = sm.handler_as::<CollectingHandler>().unwrap();
+        assert_eq!(h.messages().len(), 2);
+        assert_eq!(h.messages()[0].message, "first");
+        assert_eq!(h.messages()[1].message, "second");
+    }
+
+    #[test]
+    fn collect_then_discard() {
+        use crate::diag::CollectingHandler;
+        use crate::location::SMLoc;
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("a.js", "abc");
+        sm.set_handler(Box::new(CollectingHandler::new()));
+        let prev = sm.begin_collecting();
+        sm.error(
+            SMLoc {
+                source: id,
+                offset: 0,
+            },
+            "x",
+        );
+        sm.end_collecting(prev, true);
+        assert_eq!(sm.error_count(), 0);
+        assert_eq!(
+            sm.handler_as::<CollectingHandler>()
+                .unwrap()
+                .messages()
+                .len(),
+            0
         );
     }
 }
