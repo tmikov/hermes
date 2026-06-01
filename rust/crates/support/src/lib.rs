@@ -2,3 +2,4 @@
 
 pub mod buffer;
 pub mod line_index;
+pub mod location;
