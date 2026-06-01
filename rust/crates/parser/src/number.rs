@@ -2,6 +2,11 @@
 //! include/hermes/Support/Conversions.h. The decimal/real path uses Rust std's
 //! correctly-rounded `str::parse::<f64>()` (the same fast_float algorithm the
 //! C++ lexer uses) — no FFI, no third-party crate.
+//!
+//! Public API:
+//! - [`parse_int_with_radix_digits`] — digit-by-digit radix parser (callback style).
+//! - [`parse_int_with_radix`] — full integer-radix parse with power-of-2 rounding path.
+//! - [`str_to_double`] — decimal/real path: pure-Rust, bit-identical to `fastStrToDouble`.
 
 /// Takes a letter (a-z or A-Z) and makes it lowercase.
 /// Port of `charLetterToLower` (Conversions.h:160).
