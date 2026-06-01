@@ -187,18 +187,50 @@ static void emitFields(
 }
 
 static void usage(const char *argv0) {
-  llvh::errs() << "Usage: " << argv0 << " <file|->\n"
+  llvh::errs() << "Usage: " << argv0
+               << " [--context=regexp|div] <file|->\n"
                << "  Dump tokens from the JS lexer to stdout.\n"
+               << "  --context=regexp  Allow regexp literals after / (default)\n"
+               << "  --context=div     Allow division operator after /\n"
                << "  Use - to read from stdin.\n";
 }
 
 int main(int argc, char **argv) {
-  if (argc < 2) {
+  // Parse arguments.
+  JSLexer::GrammarContext grammarContext = JSLexer::AllowRegExp;
+  const char *filePath = nullptr;
+
+  for (int i = 1; i < argc; ++i) {
+    const char *arg = argv[i];
+    if (std::strncmp(arg, "--context=", 10) == 0) {
+      const char *val = arg + 10;
+      if (std::strcmp(val, "regexp") == 0) {
+        grammarContext = JSLexer::AllowRegExp;
+      } else if (std::strcmp(val, "div") == 0) {
+        grammarContext = JSLexer::AllowDiv;
+      } else {
+        llvh::errs() << argv[0] << ": unknown context value '" << val << "'\n";
+        usage(argv[0]);
+        return 1;
+      }
+    } else if (arg[0] == '-' && arg[1] == '-') {
+      llvh::errs() << argv[0] << ": unknown flag '" << arg << "'\n";
+      usage(argv[0]);
+      return 1;
+    } else {
+      if (filePath != nullptr) {
+        llvh::errs() << argv[0] << ": too many positional arguments\n";
+        usage(argv[0]);
+        return 1;
+      }
+      filePath = arg;
+    }
+  }
+
+  if (filePath == nullptr) {
     usage(argv[0]);
     return 1;
   }
-
-  const char *filePath = argv[argc - 1];
 
   // Read input.
   auto fileBufOrErr =
@@ -214,9 +246,6 @@ int main(int argc, char **argv) {
   SourceErrorManager sm;
   JSLexer lex(std::move(fileBufOrErr.get()), sm, alloc);
   const char *base = lex.getBufferStart();
-
-  // Default grammar context — allow regexp literals.
-  JSLexer::GrammarContext grammarContext = JSLexer::AllowRegExp;
 
   llvh::raw_ostream &os = llvh::outs();
 
