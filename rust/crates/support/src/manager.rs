@@ -8,8 +8,9 @@
 //! `SourceErrorManager`: owns source buffers, resolves locations, and
 //! dispatches diagnostics. This module covers buffer registration, names,
 //! virtual buffers, source-URL storage, and the central diagnostic emit
-//! pipeline: handler storage, message counts, error limit, and warning
-//! categories. Port of `hermes::SourceErrorManager`.
+//! pipeline: handler storage, message counts, error limit, warning
+//! categories, and message buffering/coalescing.
+//! Port of `hermes::SourceErrorManager`.
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -17,6 +18,26 @@ use std::rc::Rc;
 use crate::buffer::SourceBuffer;
 use crate::diag::{CoordTranslator, DiagHandler, DiagKind, ResolvedDiagnostic, Subsystem, Warning};
 use crate::location::{SMLoc, SMRange, SourceCoords, SourceId};
+
+/// A single diagnostic payload awaiting flush while buffering is active.
+/// Port of the `MessageData` inner struct in `SourceErrorManager.cpp`.
+struct MessageData {
+    dk: DiagKind,
+    loc: Option<SMLoc>,
+    range: Option<SMRange>,
+    msg: String,
+}
+
+/// A buffered top-level message (non-note) plus the contiguous slice of its
+/// attached notes stored in `buffered_notes`.
+/// Port of `BufferedMessage` in `SourceErrorManager.cpp:26-83`.
+struct BufferedMessage {
+    data: MessageData,
+    /// Index into `buffered_notes` where this message's notes begin.
+    first_note: usize,
+    /// Number of notes attached to this message.
+    note_count: usize,
+}
 
 struct Entry {
     buffer: Rc<SourceBuffer>,
@@ -66,6 +87,22 @@ pub struct SourceErrorManager {
     /// save the old value, set the new one, and restore it when done — an
     /// explicit save/restore that is equivalent but borrow-checker-friendly.
     suppressed_messages: Option<Subsystem>,
+    /// Reference count for buffering. While > 0, generated messages are stored
+    /// instead of dispatched; `disable_buffering` decrements and flushes when
+    /// it reaches 0. Port of `bufferingEnabled_` and the `enableBuffering` /
+    /// `disableBuffering` pair in `SourceErrorManager.cpp:26-83`.
+    ///
+    /// # Rust vs C++ design note
+    /// The C++ uses an RAII guard (`SaveAndBufferMessages`) for the same
+    /// reason as `SaveAndSuppressMessages` above: a `&mut`-holding guard
+    /// cannot coexist with emitting through the manager in safe Rust.
+    /// Callers use explicit `enable_buffering` / `disable_buffering` instead.
+    buffering_enabled: u32,
+    /// Top-level buffered messages (non-notes) in insertion order.
+    buffered_messages: Vec<BufferedMessage>,
+    /// Notes attached to buffered messages, stored in a single flat Vec;
+    /// each `BufferedMessage` indexes into this Vec via `first_note`/`note_count`.
+    buffered_notes: Vec<MessageData>,
 }
 
 impl SourceErrorManager {
@@ -82,6 +119,9 @@ impl SourceErrorManager {
             warning_enabled: vec![true; Warning::COUNT],
             warning_as_error: vec![false; Warning::COUNT],
             suppressed_messages: None,
+            buffering_enabled: 0,
+            buffered_messages: Vec::new(),
+            buffered_notes: Vec::new(),
         }
     }
 
@@ -484,19 +524,113 @@ impl SourceErrorManager {
         msg: String,
     ) {
         self.message_count[dk as usize] += 1;
-        self.gen_message(dk, loc, range, msg);
-        // Check after calling gen_message so the original message is emitted
-        // first, then the "too many errors" sentinel.  Matches C++ behavior.
+        self.do_gen_message(dk, loc, range, msg);
+        // Check after calling do_gen_message so the original message is emitted
+        // (or buffered) first, then the "too many errors" sentinel.  Matches
+        // C++ behavior.
         if dk == DiagKind::Error && self.message_count[DiagKind::Error as usize] == self.error_limit
         {
             self.error_limit_reached = true;
-            self.gen_message(
+            self.do_gen_message(
                 DiagKind::Error,
                 None,
                 None,
                 "too many errors emitted".to_string(),
             );
         }
+    }
+
+    /// Route a message either to the buffer (if buffering is active) or
+    /// directly to the handler.  Notes are attached to the last buffered
+    /// non-note message; if no such message exists yet, the note becomes a
+    /// standalone buffered message (edge case, matches C++).
+    /// Port of `doGenMessage` in `SourceErrorManager.cpp:124-155`.
+    fn do_gen_message(
+        &mut self,
+        dk: DiagKind,
+        loc: Option<SMLoc>,
+        range: Option<SMRange>,
+        msg: String,
+    ) {
+        if self.buffering_enabled > 0 {
+            if dk == DiagKind::Note && !self.buffered_messages.is_empty() {
+                // Attach note to the last buffered non-note message.
+                let note = MessageData {
+                    dk,
+                    loc,
+                    range,
+                    msg,
+                };
+                let first = self.buffered_notes.len();
+                self.buffered_notes.push(note);
+                let last = self.buffered_messages.last_mut().unwrap();
+                if last.note_count == 0 {
+                    last.first_note = first;
+                }
+                last.note_count += 1;
+            } else {
+                // Buffer as a standalone top-level message (includes the edge
+                // case of a Note when no top-level message is buffered yet).
+                self.buffered_messages.push(BufferedMessage {
+                    data: MessageData {
+                        dk,
+                        loc,
+                        range,
+                        msg,
+                    },
+                    first_note: 0,
+                    note_count: 0,
+                });
+            }
+        } else {
+            self.gen_message(dk, loc, range, msg);
+        }
+    }
+
+    // ---- Message buffering / coalescing (Phase 3) ---------------------------
+
+    /// Increment the buffering reference count.  While the count is > 0,
+    /// messages are queued rather than dispatched to the handler.
+    /// Port of `enableBuffering` in `SourceErrorManager.cpp`.
+    pub fn enable_buffering(&mut self) {
+        self.buffering_enabled += 1;
+    }
+
+    /// Decrement the buffering reference count.  When it reaches zero, flush
+    /// all buffered messages — stable-sorted by source position — to the
+    /// handler.  Port of `disableBuffering` in `SourceErrorManager.cpp`.
+    ///
+    /// # Flush ordering
+    /// Messages with a source location are emitted in (buffer-index, offset)
+    /// order.  The "too many errors emitted" sentinel (Error with no location)
+    /// is forced last.  No deduplication — matches C++ behavior.
+    /// Each top-level message is immediately followed by its attached notes in
+    /// insertion order.
+    pub fn disable_buffering(&mut self) {
+        debug_assert!(self.buffering_enabled > 0);
+        self.buffering_enabled -= 1;
+        if self.buffering_enabled > 0 {
+            return;
+        }
+        // Take ownership of both vecs so we can borrow `self` mutably for
+        // gen_message while iterating.
+        let msgs = std::mem::take(&mut self.buffered_messages);
+        let notes = std::mem::take(&mut self.buffered_notes);
+        // Build a sorted index.  Located messages sort by (source-index, offset);
+        // the sentinel (loc == None) sorts last via the leading 0/1 discriminant.
+        let mut order: Vec<usize> = (0..msgs.len()).collect();
+        order.sort_by_key(|&i| match msgs[i].data.loc {
+            Some(l) => (0u8, l.source.index(), l.offset),
+            None => (1u8, u32::MAX, u32::MAX),
+        });
+        for &i in &order {
+            let m = &msgs[i];
+            self.gen_message(m.data.dk, m.data.loc, m.data.range, m.data.msg.clone());
+            for n in &notes[m.first_note..m.first_note + m.note_count] {
+                self.gen_message(n.dk, n.loc, n.range, n.msg.clone());
+            }
+        }
+        // Both vecs were moved out; nothing to clear.
     }
 
     /// Resolve the location and hand a `ResolvedDiagnostic` to the handler.
@@ -854,5 +988,109 @@ mod tests {
             Subsystem::Parser,
         );
         assert_eq!(sm.error_count(), 0);
+    }
+
+    // ---- Message buffering / coalescing tests --------------------------------
+
+    #[test]
+    fn buffering_sorts_by_source_order() {
+        use crate::diag::CollectingHandler;
+        use crate::location::SMLoc;
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("a.js", "abcdef");
+        sm.set_handler(Box::new(CollectingHandler::new()));
+        sm.enable_buffering();
+        sm.error(
+            SMLoc {
+                source: id,
+                offset: 4,
+            },
+            "second",
+        ); // later in source
+        sm.error(
+            SMLoc {
+                source: id,
+                offset: 1,
+            },
+            "first",
+        ); // earlier
+           // Nothing emitted yet while buffering.
+        assert_eq!(
+            sm.handler_as::<CollectingHandler>()
+                .unwrap()
+                .messages()
+                .len(),
+            0
+        );
+        sm.disable_buffering();
+        let h = sm.handler_as::<CollectingHandler>().unwrap();
+        assert_eq!(h.messages().len(), 2);
+        assert_eq!(h.messages()[0].message, "first"); // source order
+        assert_eq!(h.messages()[1].message, "second");
+        assert_eq!(sm.error_count(), 2); // counted when emitted, not at flush
+    }
+
+    #[test]
+    fn buffered_note_follows_its_message() {
+        use crate::diag::{CollectingHandler, DiagKind};
+        use crate::location::SMLoc;
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("a.js", "abcdef");
+        sm.set_handler(Box::new(CollectingHandler::new()));
+        sm.enable_buffering();
+        sm.error(
+            SMLoc {
+                source: id,
+                offset: 0,
+            },
+            "err",
+        );
+        sm.note(
+            SMLoc {
+                source: id,
+                offset: 2,
+            },
+            "a note",
+        );
+        sm.disable_buffering();
+        let h = sm.handler_as::<CollectingHandler>().unwrap();
+        assert_eq!(h.messages().len(), 2);
+        assert_eq!(h.messages()[0].kind, DiagKind::Error);
+        assert_eq!(h.messages()[1].kind, DiagKind::Note);
+        assert_eq!(h.messages()[1].message, "a note");
+    }
+
+    #[test]
+    fn nested_buffering_flushes_only_at_zero() {
+        use crate::diag::CollectingHandler;
+        use crate::location::SMLoc;
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("a.js", "abc");
+        sm.set_handler(Box::new(CollectingHandler::new()));
+        sm.enable_buffering();
+        sm.enable_buffering();
+        sm.error(
+            SMLoc {
+                source: id,
+                offset: 0,
+            },
+            "x",
+        );
+        sm.disable_buffering(); // still buffering (count 1)
+        assert_eq!(
+            sm.handler_as::<CollectingHandler>()
+                .unwrap()
+                .messages()
+                .len(),
+            0
+        );
+        sm.disable_buffering(); // now flush
+        assert_eq!(
+            sm.handler_as::<CollectingHandler>()
+                .unwrap()
+                .messages()
+                .len(),
+            1
+        );
     }
 }
