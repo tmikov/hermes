@@ -41,6 +41,15 @@ struct Inner {
     /// Since strings are never removed or modified, the lifetime of the key
     /// is effectively static.
     map_u16: HashMap<&'static [u16], NumIndex>,
+
+    /// Byte strings are added here and never removed or mutated.
+    /// The bytes need not be valid UTF-8 (they may be WTF-8 or arbitrary byte
+    /// sequences, e.g. JS string literals containing lone surrogates).
+    strings_bytes: Vec<Vec<u8>>,
+    /// Maps from a reference inside [`Inner::strings_bytes`] to the index in
+    /// [`Inner::strings_bytes`]. Since strings are never removed or modified,
+    /// the lifetime of the key is effectively static.
+    map_bytes: HashMap<&'static [u8], NumIndex>,
 }
 
 /// This represents a unique string index in the table.
@@ -50,6 +59,11 @@ pub struct Atom(NumIndex);
 /// This represents a unique string index in the table.
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct AtomU16(NumIndex);
+
+/// This represents a unique byte-string index in the table.
+/// The bytes need not be valid UTF-8.
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+pub struct AtomBytes(NumIndex);
 
 thread_local! {
     /// Stores the active table used for debug formatting.
@@ -96,8 +110,31 @@ impl std::fmt::Debug for AtomU16 {
     }
 }
 
+// An implementation of Debug which optionally obtains the AtomBytes value from
+// the active debug map.
+impl std::fmt::Debug for AtomBytes {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut t = f.debug_tuple("AtomBytes");
+        t.field(&self.0);
+
+        // If the debug table is set and the atom is valid in it, add the value
+        DEBUG_TABLE.with(|debug_table| {
+            let p = debug_table.get();
+            if let Some(r) = unsafe { p.as_ref() } {
+                if let Some(value) = r.try_bytes(*self) {
+                    t.field(&value);
+                }
+            }
+        });
+        t.finish()
+    }
+}
+
 /// A special value reserved for the invalid atom.
 pub const INVALID_ATOM: Atom = Atom(NumIndex::MAX);
+
+/// A special value reserved for the invalid atom bytes.
+pub const INVALID_ATOM_BYTES: AtomBytes = AtomBytes(NumIndex::MAX);
 
 impl Inner {
     /// Add a string to the table and return its atom index. The same
@@ -179,6 +216,50 @@ impl Inner {
             None
         }
     }
+
+    /// Add a byte string to the table and return its atom index. The same
+    /// byte sequence always returns the same index. The bytes need not be
+    /// valid UTF-8.
+    fn add_atom_bytes<V: Into<Vec<u8>> + AsRef<[u8]>>(&mut self, value: V) -> AtomBytes {
+        if let Some(index) = self.map_bytes.get(value.as_ref()) {
+            return AtomBytes(*index);
+        }
+        self.add_bytes(value.into())
+    }
+
+    /// Perform the actual addition of the owned byte string.
+    fn add_bytes(&mut self, owned: Vec<u8>) -> AtomBytes {
+        // Remember the index of the new element.
+        let index = self.strings_bytes.len();
+        assert!(index < INVALID_ATOM.0 as usize, "More than 4GB atoms?");
+
+        // Obtain a reference to the existing bytes on the heap. That reference
+        // is valid while `self` is valid. Pushing an owned Vec into the outer
+        // Vec moves only the Vec struct, never its heap buffer — so a
+        // *const [u8] captured from owned.as_slice() before the push stays
+        // valid.
+        let key: *const [u8] = owned.as_slice();
+
+        // Push the new byte string.
+        self.strings_bytes.push(owned);
+
+        self.map_bytes.insert(unsafe { &*key }, index as NumIndex);
+        AtomBytes(index as NumIndex)
+    }
+
+    /// Return the contents of the specified atom bytes.
+    #[inline]
+    fn bytes(&self, ident: AtomBytes) -> &[u8] {
+        self.strings_bytes[ident.0 as usize].as_slice()
+    }
+
+    fn try_bytes(&self, ident: AtomBytes) -> Option<&[u8]> {
+        if (ident.0 as usize) < self.strings_bytes.len() {
+            Some(self.bytes(ident))
+        } else {
+            None
+        }
+    }
 }
 
 impl AtomTable {
@@ -219,6 +300,25 @@ impl AtomTable {
     #[inline]
     pub fn try_str_u16(&self, ident: AtomU16) -> Option<&[u16]> {
         unsafe { &*self.0.get() }.try_str_u16(ident)
+    }
+
+    /// Add a byte string to the table and return its atom index. The same
+    /// byte sequence always returns the same index. The bytes need not be
+    /// valid UTF-8 (e.g., WTF-8 sequences encoding lone surrogates are
+    /// accepted).
+    pub fn atom_bytes<V: Into<Vec<u8>> + AsRef<[u8]>>(&self, value: V) -> AtomBytes {
+        unsafe { &mut *self.0.get() }.add_atom_bytes(value)
+    }
+
+    /// Return the contents of the specified atom bytes.
+    #[inline]
+    pub fn bytes(&self, ident: AtomBytes) -> &[u8] {
+        unsafe { &*self.0.get() }.bytes(ident)
+    }
+
+    #[inline]
+    pub fn try_bytes(&self, ident: AtomBytes) -> Option<&[u8]> {
+        unsafe { &*self.0.get() }.try_bytes(ident)
     }
 
     /// Execute the callback in a context where this table is used for debug
@@ -262,6 +362,14 @@ impl std::ops::Index<AtomU16> for AtomTable {
     }
 }
 
+impl std::ops::Index<AtomBytes> for AtomTable {
+    type Output = [u8];
+
+    fn index(&self, index: AtomBytes) -> &Self::Output {
+        self.bytes(index)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -285,5 +393,41 @@ mod tests {
         assert_eq!(idtab.str(id_bar), "bar");
 
         assert_eq!(idtab.str(id_foo) as *const str, p_foo);
+    }
+
+    #[test]
+    fn test_bytes() {
+        let tab = AtomTable::new();
+        let foo = tab.atom_bytes(b"foo".as_slice());
+        let bar = tab.atom_bytes(b"bar".as_slice());
+        assert_ne!(foo, bar);
+        assert_eq!(tab.atom_bytes(b"foo".as_slice()), foo);
+        assert_eq!(tab.atom_bytes(Vec::from(*b"bar")), bar);
+        assert_eq!(tab.bytes(foo), b"foo");
+        assert_eq!(&tab[bar], b"bar");
+        let p_foo: *const [u8] = tab.bytes(foo);
+        let _ = tab.atom_bytes(b"baz".as_slice());
+        assert_eq!(tab.bytes(foo) as *const [u8], p_foo);
+    }
+
+    #[test]
+    fn test_bytes_ill_formed_utf8() {
+        let tab = AtomTable::new();
+        let lone_surrogate: &[u8] = &[0xed, 0xa0, 0x80];
+        let a = tab.atom_bytes(lone_surrogate);
+        assert_eq!(tab.bytes(a), lone_surrogate);
+        assert_eq!(tab.atom_bytes(lone_surrogate), a);
+        let s = tab.atom("foo");
+        let b = tab.atom_bytes(b"foo".as_slice());
+        assert_eq!(tab.str(s), "foo");
+        assert_eq!(tab.bytes(b), b"foo");
+    }
+
+    #[test]
+    fn test_bytes_try_and_invalid() {
+        let tab = AtomTable::new();
+        let a = tab.atom_bytes(b"x".as_slice());
+        assert_eq!(tab.try_bytes(a), Some(b"x".as_slice()));
+        assert_eq!(tab.try_bytes(INVALID_ATOM_BYTES), None);
     }
 }
