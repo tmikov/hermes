@@ -8,7 +8,7 @@
 
 **Tech Stack:** Rust (edition 2021), cargo workspace, std only (`Rc`, `RefCell`, `NonZeroU32`); no external deps for the core.
 
-**Reference spec:** `doc/SourceErrorManagerRustDesign.md`. **C++ source of truth:** `include/hermes/Support/SourceErrorManager.h`, `lib/Support/SourceErrorManager.cpp`, `unsupported/juno/crates/juno_support/src/nullbuf.rs`.
+**Reference spec:** `doc/superpowers/specs/2026-06-01-source-error-manager-design.md`. **C++ source of truth:** `include/hermes/Support/SourceErrorManager.h`, `lib/Support/SourceErrorManager.cpp`, `unsupported/juno/crates/juno_support/src/nullbuf.rs`.
 
 **Porting rule (applies to every task):** keep the Rust structure close to the C++ original where it makes sense, and **copy the comments** (or keep them close). When a step says "port `file.cpp:N-M`", read that range and translate it faithfully, including its comments.
 
