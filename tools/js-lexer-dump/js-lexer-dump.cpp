@@ -141,6 +141,40 @@ static void emitFields(
       quoteBytes(os, tok.getBigIntLiteralRawValue()->str());
       break;
 
+    case TokenKind::string_literal:
+      os << " escapes=" << (tok.getStringLiteralContainsEscapes() ? 1 : 0);
+      os << " value=";
+      quoteBytes(os, tok.getStringLiteral()->str());
+      break;
+
+    case TokenKind::regexp_literal:
+      os << " body=";
+      quoteBytes(os, tok.getRegExpLiteral()->getBody()->str());
+      os << " flags=";
+      quoteBytes(os, tok.getRegExpLiteral()->getFlags()->str());
+      break;
+
+    case TokenKind::no_substitution_template:
+    case TokenKind::template_head:
+    case TokenKind::template_middle:
+    case TokenKind::template_tail:
+      os << " cooked=";
+      if (tok.getTemplateValue() != nullptr) {
+        quoteBytes(os, tok.getTemplateValue()->str());
+      } else {
+        os << "null";
+      }
+      os << " raw=";
+      quoteBytes(os, tok.getTemplateRawValue()->str());
+      break;
+
+    case TokenKind::jsx_text:
+      os << " value=";
+      quoteBytes(os, tok.getJSXTextValue()->str());
+      os << " raw=";
+      quoteBytes(os, tok.getJSXTextRaw()->str());
+      break;
+
     default:
       // Reserved words: emit the identifier string.
       if (tok.isResWord()) {
