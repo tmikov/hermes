@@ -11,15 +11,110 @@
 //!      caret line of 8 spaces and `^`, and range underlines of the form
 //!      `^~~~~~~`).
 //!
-//! NOTE: A full byte-for-byte differential against a live `hermes` binary is
-//! deferred until a C++ build is available; the caret geometry asserted here
-//! was independently verified against the `buildSourceAndCaretLine` algorithm
-//! in `lib/Support/SourceErrorManager.cpp`.
+//! The `hermesc_*` tests below are a true byte-for-byte differential: the
+//! expected strings were captured from a real C++ Hermes `hermesc` build
+//! (cmake-build-asan, hermesc 1.96.0) via
+//! `(! cmake-build-asan/bin/hermesc -dump-ast FILE 2>&1)` with the file path
+//! normalized to `FILE`. The Rust port must reproduce that stderr exactly.
 
 use support::diag::{CollectingHandler, DiagKind, OutputOptions};
-use support::location::SMLoc;
+use support::location::{SMLoc, SMRange};
 use support::manager::SourceErrorManager;
-use support::render::build_source_and_caret_line;
+use support::render::{build_source_and_caret_line, render_diagnostic};
+
+/// Render the single diagnostic emitted into a fresh manager with `FILE` as the
+/// buffer name, using default (color-off) options — matching how `hermesc`
+/// prints to a non-TTY stderr.
+fn render_one(
+    source: &str,
+    emit: impl FnOnce(&mut SourceErrorManager, support::location::SourceId),
+) -> String {
+    let mut sm = SourceErrorManager::new();
+    let id = sm.add_buffer("FILE", source);
+    sm.set_handler(Box::new(CollectingHandler::new()));
+    emit(&mut sm, id);
+    let h = sm.handler_as::<CollectingHandler>().unwrap();
+    assert_eq!(h.messages().len(), 1, "expected exactly one diagnostic");
+    render_diagnostic(&h.messages()[0], &OutputOptions::default())
+}
+
+/// Differential vs hermesc: single caret, no range.
+#[test]
+fn hermesc_single_caret() {
+    let out = render_one("let x = ;", |sm, id| {
+        sm.error(
+            SMLoc {
+                source: id,
+                offset: 8,
+            },
+            "invalid expression",
+        );
+    });
+    assert_eq!(
+        out,
+        "FILE:1:9: error: invalid expression\nlet x = ;\n        ^\n"
+    );
+}
+
+/// Differential vs hermesc: ranged underline `^~~~~` over `await` (5 chars).
+#[test]
+fn hermesc_ranged_underline() {
+    let out = render_one("(async await => 3);", |sm, id| {
+        sm.error_range(
+            SMRange {
+                start: SMLoc {
+                    source: id,
+                    offset: 7,
+                },
+                end: SMLoc {
+                    source: id,
+                    offset: 12,
+                },
+            },
+            "Unexpected usage of 'await' as an identifier",
+        );
+    });
+    assert_eq!(
+        out,
+        "FILE:1:8: error: Unexpected usage of 'await' as an identifier\n\
+         (async await => 3);\n       ^~~~~\n"
+    );
+}
+
+/// Differential vs hermesc: a source line with tabs is tab-expanded (TabStop 8)
+/// in both the source and caret lines.
+#[test]
+fn hermesc_tab_expansion() {
+    let out = render_one("\tlet y =\t;", |sm, id| {
+        sm.error(
+            SMLoc {
+                source: id,
+                offset: 9,
+            },
+            "invalid expression",
+        );
+    });
+    assert_eq!(
+        out,
+        "FILE:1:10: error: invalid expression\n        let y = ;\n                ^\n"
+    );
+}
+
+/// Differential vs hermesc: a non-ASCII source line prints the source but NO
+/// caret line (Hermes punts on caret widths for non-ASCII).
+#[test]
+fn hermesc_non_ascii_no_caret() {
+    let out = render_one("var héllo = ;", |sm, id| {
+        sm.error(
+            SMLoc {
+                source: id,
+                offset: 13,
+            },
+            "invalid expression",
+        );
+    });
+    assert_eq!(out, "FILE:1:14: error: invalid expression\nvar héllo = ;\n");
+}
 
 /// End-to-end: an error at a known offset resolves to 1-based (line, col) with
 /// the message/kind/file/source-line delivered to the handler — mirroring how
