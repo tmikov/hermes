@@ -98,7 +98,9 @@ pub fn parse_int_with_radix(bytes: &[u8], radix: u32, allow_sep: bool) -> Option
         let mut lowest_exponent_bit = false;
 
         let mut cur_mode = Mode::LeadingZero;
-        let mut itr = bytes.iter().peekable();
+        // Plain iterator (matches the C++ `auto itr = str.begin()`); we only ever
+        // advance with `next()`.
+        let mut itr = bytes.iter();
         let mut bit_mask: u32 = 0;
         loop {
             if bit_mask == 0 {
@@ -245,6 +247,9 @@ mod int_tests {
             (b"123456789abcdef0123", 16), // > 2^64, still < 2^128
             (b"777777777777777777777", 8), // large octal
             (b"1111111111111111111111111111111111111111111111111111111", 2),
+            (b"20000000000000", 16),        // exactly 2^53 (>= boundary triggers the path)
+            (b"33333333333333333333333333333", 4), // large radix-4
+            (b"vvvvvvvvvvvv", 32),          // large radix-32 (v = 31)
         ];
         for &(s, radix) in cases {
             let txt = std::str::from_utf8(s).unwrap();
@@ -257,9 +262,10 @@ mod int_tests {
         }
     }
 
-    // Non-power-of-2 large values use the plain f64 accumulation (no special path);
-    // for moderately large decimals that still round-trip, confirm equality with the
-    // naive accumulation result.
+    // Radix 10 is NOT a power of two, so even above 2^53 it uses the plain f64
+    // accumulation (no bit-by-bit precision path). This is a sanity check that the
+    // accumulation agrees with the u128->f64 cast for such a value (both round to
+    // 2^53), not a test of the precision path.
     #[test]
     fn large_decimal() {
         assert_eq!(
