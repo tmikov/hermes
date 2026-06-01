@@ -542,6 +542,10 @@ const TOKEN_NAMES: [&str; NUM_JS_TOKENS] = [
 
 /// Binary-operator precedences in `.def` order (0 = not a binary operator).
 /// Mirrors C++ `BINOP` precedence field.
+///
+/// IDENT_OP precedences (e.g. `as_operator`) are stored here for completeness
+/// but are not exposed by `binop_precedence`, which is gated to the binary
+/// marker range; the parser layer will read them directly from this table.
 const TOKEN_PREC: [u8; NUM_JS_TOKENS] = [
     // none
     0,
@@ -554,8 +558,8 @@ const TOKEN_PREC: [u8; NUM_JS_TOKENS] = [
     0,
     // rw_function .. rw_yield (44 entries)
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // function..this
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // true..else
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // finally..with
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // true..do
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // else..with
     0, 0, // export, import
     0, 0, 0, 0, // class, static, extends, super
     0,          // enum
@@ -820,6 +824,10 @@ mod tests {
         assert_eq!(binop_precedence(TokenKind::questionquestion), Some(1));
         assert_eq!(binop_precedence(TokenKind::l_brace), None);
         assert_eq!(binop_precedence(TokenKind::eof), None);
+        // Range markers inside the binary span and the IDENT_OP `as` have no binop precedence.
+        assert_eq!(binop_precedence(TokenKind::_first_binary), None);
+        assert_eq!(binop_precedence(TokenKind::_last_binary), None);
+        assert_eq!(binop_precedence(TokenKind::as_operator), None);
     }
 
     #[test]
@@ -834,6 +842,10 @@ mod tests {
         // Range markers that fall inside the punctuator span must NOT be punctuators.
         assert!(!TokenKind::_first_binary.is_punctuator());
         assert!(!TokenKind::_last_binary.is_punctuator());
+        // PUNCTUATOR_FLOW tokens are treated as punctuators here (C++ isPunctuatorDbg
+        // returns false for them because it only defines PUNCTUATOR).
+        assert!(TokenKind::l_bracepipe.is_punctuator());
+        assert!(TokenKind::piper_brace.is_punctuator());
     }
 
     #[test]
