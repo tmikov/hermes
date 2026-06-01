@@ -5,3 +5,4 @@ pub mod diag;
 pub mod line_index;
 pub mod location;
 pub mod manager;
+pub mod render;
