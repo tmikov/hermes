@@ -60,9 +60,11 @@
 #include "hermes/Parser/JSLexer.h"
 #include "hermes/Support/SourceErrorManager.h"
 
+#include "llvh/Support/MathExtras.h"
 #include "llvh/Support/MemoryBuffer.h"
 #include "llvh/Support/raw_ostream.h"
 
+#include <cstdio>
 #include <cstring>
 
 using namespace hermes;
@@ -121,6 +123,22 @@ static void emitFields(
     case TokenKind::private_identifier:
       os << " ident=";
       quoteBytes(os, tok.getPrivateIdentifier()->str());
+      break;
+
+    case TokenKind::numeric_literal: {
+      uint64_t bits = llvh::DoubleToBits(tok.getNumericLiteral());
+      char buf[32];
+      std::snprintf(
+          buf, sizeof(buf), " bits=0x%016llx", (unsigned long long)bits);
+      os << buf;
+      break;
+    }
+
+    case TokenKind::bigint_literal:
+      os << " value=";
+      quoteBytes(os, tok.getBigIntLiteral()->str());
+      os << " raw=";
+      quoteBytes(os, tok.getBigIntLiteralRawValue()->str());
       break;
 
     default:
