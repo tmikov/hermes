@@ -91,7 +91,6 @@ pub struct SourceBuffer {
     buf: NullTerminatedBuf,
     /// Lazily built on first line/col resolution. Interior mutability so that
     /// resolution can happen through a shared `&SourceBuffer`.
-    #[allow(dead_code)]
     line_index: RefCell<Option<LineIndex>>,
 }
 
@@ -125,6 +124,18 @@ impl SourceBuffer {
     /// The raw bytes, including the trailing NUL terminator.
     pub fn raw(&self) -> &[u8] {
         self.buf.as_bytes()
+    }
+
+    /// Run `f` with this buffer's line index, building and caching it on first use.
+    pub fn with_line_index<R>(&self, f: impl FnOnce(&LineIndex, &[u8]) -> R) -> R {
+        {
+            let mut slot = self.line_index.borrow_mut();
+            if slot.is_none() {
+                *slot = Some(LineIndex::build(self.bytes()));
+            }
+        }
+        let slot = self.line_index.borrow();
+        f(slot.as_ref().unwrap(), self.bytes())
     }
 }
 
