@@ -36,7 +36,7 @@ The front-end stratifies (see the dependency analysis below). We port bottom-up.
 | Component | Crate / location | Status |
 |-----------|------------------|--------|
 | **SourceErrorManager** (+ buffer, locations, line index, diagnostics) | `rust/crates/support/` | ✅ **Complete** — entire public surface; **byte-for-byte validated vs `hermesc` 1.96.0** |
-| **JS lexer** | (next) | ⏭ **Next** — see deps below |
+| **JS lexer** | `rust/crates/{atom_table,unicode,parser}/` (planned) | 🚧 **In progress** — design spec done; see deps below |
 | Parser | — | future |
 | Sema (scope resolution + FlowChecker) | — | future |
 | IR / IRGen | — | future |
@@ -57,16 +57,32 @@ plan: `plans/2026-06-01-source-error-manager.md`.
 ### Next: JS lexer
 
 Port `include/hermes/Parser/JSLexer.h` + `lib/Parser/JSLexer.cpp` (~3,700 LOC). What it
-needs from `SourceErrorManager` is **done**. Its remaining *support-layer* prerequisites
-(the first tasks of the lexer port — NOT part of SourceErrorManager):
+needs from `SourceErrorManager` is **done**. Full design: `specs/2026-06-01-js-lexer-design.md`.
+Per-subsystem implementation plans land under `plans/` just-in-time as each is built.
 
-| Dep | Hermes source | Status / note |
-|-----|---------------|---------------|
-| String interning (`StringTable`/`UniqueString`) | `Support/StringTable.h` | juno `atom_table` is the base, but needs a **byte/WTF-8 intern path** — JS string literals can hold lone surrogates encoded as ill-formed UTF-8 (`JSLexer.cpp` `appendUnicodeToStorage`), which a Rust `String` cannot hold. |
-| Unicode char properties | `Platform/Unicode/CharacterProperties.h` | port generated tables or pin a crate to Hermes's Unicode version. |
-| Number parsing | `Support/Conversions.h`, `FastStrToDouble`, `external/dtoa/` | bit-exact; FFI `dtoa` (small standalone C lib) or a vetted Rust crate. |
-| Token tables | `Parser/TokenKinds.def`, `HTMLEntities.def` | mechanical `.def`→Rust. |
-| Bump `Allocator` | `Support/Allocator.h` | **droppable** — Rust owns the decoded strings. |
+**Locked decisions (this design pass):**
+- **Scan cursor:** raw `*const u8` (option "B"), confined to the cursor module, offset
+  at every boundary; `Rc<SourceBuffer>` backing, `NullTerminatedBuf` NUL makes lookahead
+  in-bounds.
+- **String interner:** copy juno `atom_table` **verbatim** (keep its encapsulated unsafe)
+  and add a byte/WTF-8 intern path.
+- **Number parsing:** **pure Rust, no FFI.** The lexer's decimal path uses `fast_float`
+  (NOT `dtoa`), and Rust std's `str::parse::<f64>()` *is* that algorithm (correctly-rounded
+  → bit-identical). Integer radix paths port `parseIntWithRadix*` directly.
+- **Validation:** a small C++ token-dump harness (`tools/js-lexer-dump/`) linking the real
+  `JSLexer` is the byte-for-byte oracle.
+
+**Support-layer prerequisites** (separate ports, sequenced before the lexer proper — NOT
+part of SourceErrorManager; in build order):
+
+| # | Dep | Hermes source | Note |
+|---|-----|---------------|------|
+| 1 | Token tables | `Parser/TokenKinds.def`, `HTMLEntities.def` | mechanical `.def`→Rust; defines the vocabulary everything references. |
+| 2 | C++ token-dump harness | links `JSLexer` | the differential oracle; stood up before validating the first slice. |
+| 3 | String interning (`StringTable`/`UniqueString`) | `Support/StringTable.h` | copy juno `atom_table` + WTF-8 byte path (lone surrogates from `appendUnicodeToStorage` can't live in a Rust `String`). Unblocks the first slice with token tables. |
+| 4 | Unicode char properties | `Platform/Unicode/CharacterProperties.{h,cpp}`, `UnicodeData.inc` | port the generated range tables verbatim (binary search); pin to Hermes's Unicode version — do NOT use a Rust unicode crate. |
+| 5 | Number parsing | `Support/Conversions.h`, `FastStrToDouble.cpp` (`fast_float`) | pure Rust per the locked decision above. |
+|   | Bump `Allocator` | `Support/Allocator.h` | **droppable** — Rust owns the decoded strings. |
 
 ## Key cross-cutting design decisions
 
