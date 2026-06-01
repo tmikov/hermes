@@ -12,11 +12,13 @@ use std::cmp::Ordering;
 // Constants (from CharacterProperties.h)
 // ---------------------------------------------------------------------------
 
+/// The maximum valid Unicode code point.
 pub const UNICODE_MAX_VALUE: u32 = 0x10FFFF;
 /// The start of the surrogate range.
 pub const UNICODE_SURROGATE_FIRST: u32 = 0xD800;
 /// The last character of the surrogate range (inclusive).
 pub const UNICODE_SURROGATE_LAST: u32 = 0xDFFF;
+/// The start of the UTF-16 high-surrogate range.
 pub const UTF16_HIGH_SURROGATE: u32 = 0xD800;
 pub const UTF16_LOW_SURROGATE: u32 = 0xDC00;
 pub const UNICODE_REPLACEMENT_CHARACTER: u32 = 0xFFFD;
@@ -33,6 +35,7 @@ pub const UNICODE_ZWJ: u32 = 0x200D;
 // Inline helpers (from CharacterProperties.h)
 // ---------------------------------------------------------------------------
 
+/// \return true if \p cp is a valid Unicode code point (not a surrogate, <= U+10FFFF).
 #[inline]
 pub fn is_valid_code_point(cp: u32) -> bool {
     !((cp >= UNICODE_SURROGATE_FIRST && cp <= UNICODE_SURROGATE_LAST) || cp > UNICODE_MAX_VALUE)
@@ -147,6 +150,7 @@ pub fn is_unicode_only_letter(cp: u32) -> bool {
 ///   + Other_ID_Start
 ///   - Pattern_Syntax
 ///   - Pattern_White_Space
+///
 /// So check this by checking all UNICODE_LETTERS that aren't
 /// UNICODE_PATTERN_LETTER, and then check for Other_ID_Start.
 ///
@@ -223,6 +227,7 @@ pub fn is_unicode_digit(cp: u32) -> bool {
 /// \return true if the codepoint is in the Connector Punctuation category.
 /// _ is the common case.
 pub fn is_unicode_connector_punctuation(cp: u32) -> bool {
+    // '_' (U+005F) is also in the table, but the fast path avoids the binary search.
     cp == b'_' as u32 || lookup(&UNICODE_CONNECTOR_PUNCTUATION, cp)
 }
 
@@ -308,6 +313,11 @@ mod tests {
         // Non-ID start.
         assert!(!is_unicode_id_start(0x00A0)); // no-break space
         assert!(!is_unicode_id_start(0x0660)); // Arabic-Indic digit zero (Nd, not start)
+        // U+2E2F (VERTICAL TILDE) is in UNICODE_LETTERS AND UNICODE_PATTERN_LETTER,
+        // so it is a letter but NOT an ID_Start (exercises the PATTERN_LETTER subtraction).
+        assert!(is_unicode_only_letter(0x2E2F));      // a Unicode letter
+        assert!(!is_unicode_only_id_start(0x2E2F));   // but excluded by PATTERN_LETTER
+        assert!(!is_unicode_id_start(0x2E2F));
     }
 
     #[test]
@@ -321,12 +331,13 @@ mod tests {
         assert!(is_unicode_id_continue(0x200C)); // ZWNJ (Other_ID_Continue)
         assert!(is_unicode_id_continue(0x200D)); // ZWJ  (Other_ID_Continue)
         assert!(!is_unicode_id_continue(0x0020)); // space
+        assert!(is_unicode_id_continue(0x203F)); // Pc -> ID_Continue
     }
 
     #[test]
     fn only_space() {
         assert!(is_unicode_only_space(0x00A0));
-        assert!(is_unicode_only_space(0x2028) == false); // line sep is NOT Zs
+        assert!(!is_unicode_only_space(0x2028)); // line separator is Zl, not Zs
         assert!(is_unicode_only_space(0x3000));
         assert!(!is_unicode_only_space(0x0020)); // ASCII excluded
         assert!(!is_unicode_only_space(b'a' as u32));
@@ -340,5 +351,6 @@ mod tests {
         assert!(is_unicode_digit(b'5' as u32));
         assert!(is_unicode_digit(0x0660));
         assert!(is_unicode_connector_punctuation(b'_' as u32));
+        assert!(is_unicode_connector_punctuation(0x203F)); // ‿ UNDERTIE (Pc)
     }
 }

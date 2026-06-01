@@ -43,6 +43,8 @@ def extract(src, name):
     return pairs
 
 def main():
+    if not INC.exists():
+        sys.exit(f"error: {INC} not found — run from a full hermes checkout")
     src = INC.read_text()
     # Pull the Unicode version line from the .inc header for provenance.
     ver = re.search(r"for Unicode version ([0-9.]+)", src)
