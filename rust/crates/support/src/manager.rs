@@ -189,6 +189,12 @@ impl SourceErrorManager {
         Rc::clone(&self.entries[id.index() as usize].buffer)
     }
 
+    /// Obtain the buffer containing `loc` (cloning the `Rc`). The location
+    /// carries its buffer, so this is a direct lookup. Port of `findBufferForLoc`.
+    pub fn find_buffer_for_loc(&self, loc: SMLoc) -> Rc<SourceBuffer> {
+        self.source_buffer(loc.source)
+    }
+
     pub fn lookup_name(&self, name: &str) -> Option<SourceId> {
         self.by_name.get(name).copied()
     }
@@ -489,9 +495,9 @@ impl Default for SourceErrorManager {
 }
 
 // ---------------------------------------------------------------------------
-// Diagnostic dispatch (Tasks 8 + 9).  Port of SourceErrorManager::message,
-// countAndGenMessage, doGenMessage / doPrintMessage in SourceErrorManager.cpp.
-// Buffering and subsystem-suppression are deferred (out of scope here).
+// Diagnostic dispatch. Port of SourceErrorManager::message, countAndGenMessage,
+// doGenMessage / doPrintMessage in SourceErrorManager.cpp. Includes subsystem
+// suppression, message buffering/coalescing, and external message collection.
 // ---------------------------------------------------------------------------
 impl SourceErrorManager {
     /// Install the diagnostic sink. Replaces any previously installed handler.
@@ -509,19 +515,22 @@ impl SourceErrorManager {
         self.error_limit = limit;
     }
 
+    /// Return the current error limit. Port of `getErrorLimit` (C++ header:285).
+    pub fn get_error_limit(&self) -> u32 {
+        self.error_limit
+    }
+
     /// Return `true` if the error limit has been reached.
     pub fn is_error_limit_reached(&self) -> bool {
         self.error_limit_reached
     }
 
-    /// Clear the error-limit-reached flag (e.g. to resume after recovery).
+    /// Clear the error-limit-reached flag AND reset the error counter, so a
+    /// fresh batch of errors can be emitted (e.g. to resume after recovery).
+    /// Port of `clearErrorLimitReached` (C++ header:295-298), which resets both.
     pub fn clear_error_limit_reached(&mut self) {
         self.error_limit_reached = false;
-    }
-
-    /// Number of messages of kind `dk` emitted so far.
-    pub fn message_count(&self, dk: DiagKind) -> u32 {
-        self.message_count[dk as usize]
+        self.message_count[DiagKind::Error as usize] = 0;
     }
 
     /// Convenience: number of errors emitted.
@@ -643,6 +652,36 @@ impl SourceErrorManager {
             Subsystem::Unspecified,
             Some(loc),
             None,
+            msg.into(),
+        );
+    }
+
+    /// Emit a note over `range` (the caret sits at `range.start`).
+    pub fn note_range(&mut self, range: SMRange, msg: impl Into<String>, subsystem: Subsystem) {
+        self.emit(
+            DiagKind::Note,
+            Warning::NoWarning,
+            subsystem,
+            Some(range.start),
+            Some(range),
+            msg.into(),
+        );
+    }
+
+    /// Emit a note at `loc`, optionally underlining `range`, in `subsystem`.
+    pub fn note_at(
+        &mut self,
+        loc: SMLoc,
+        range: Option<SMRange>,
+        msg: impl Into<String>,
+        subsystem: Subsystem,
+    ) {
+        self.emit(
+            DiagKind::Note,
+            Warning::NoWarning,
+            subsystem,
+            Some(loc),
+            range,
             msg.into(),
         );
     }
@@ -925,7 +964,14 @@ impl SourceErrorManager {
         // borrow checker without any unsafe.
         let resolved = match loc {
             Some(loc) => {
-                let coords = self.find_coords(loc);
+                // Use UNtranslated coordinates here: the rendered diagnostic and
+                // its source-line / caret-column lookups must be resolved against
+                // the original buffer, exactly as the C++ primary diagnostic does
+                // (`doPrintMessage` passes the original loc to PrintMessage; the
+                // translator only affects a separate annotation we don't render).
+                // Using translated coords would fetch the wrong source line and
+                // miscompute the caret column when a CoordTranslator is installed.
+                let coords = self.find_untranslated_coords(loc);
                 let file_name = self.buffer_file_name(loc.source).to_string();
                 // Clone the Rc so the immutable borrow on self.entries ends here.
                 let buf = self.source_buffer(loc.source);
@@ -1112,6 +1158,20 @@ mod tests {
             "second",
         );
         assert_eq!(sm.error_count(), 1);
+        // clear_error_limit_reached resets BOTH the flag and the error count
+        // (matching C++), so a fresh error can be emitted afterwards.
+        sm.clear_error_limit_reached();
+        assert!(!sm.is_error_limit_reached());
+        assert_eq!(sm.error_count(), 0);
+        sm.error(
+            SMLoc {
+                source: id,
+                offset: 2,
+            },
+            "third",
+        );
+        assert_eq!(sm.error_count(), 1);
+        assert!(sm.is_error_limit_reached());
     }
 
     #[test]
