@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::buffer::SourceBuffer;
-use crate::diag::{CoordTranslator, DiagHandler, DiagKind, ResolvedDiagnostic, Warning};
+use crate::diag::{CoordTranslator, DiagHandler, DiagKind, ResolvedDiagnostic, Subsystem, Warning};
 use crate::location::{SMLoc, SMRange, SourceCoords, SourceId};
 
 struct Entry {
@@ -53,6 +53,19 @@ pub struct SourceErrorManager {
     /// Per-category error-promotion flag. Indexed by `Warning::index()`.
     /// Port of the `warningStatuses_` bitset (is-error side).
     warning_as_error: Vec<bool>,
+    /// If `Some(s)`, messages from subsystem `s` are silently dropped.
+    /// If `Some(Subsystem::Unspecified)`, ALL messages are dropped.
+    /// Port of `SaveAndSuppressMessages` in C++.
+    ///
+    /// # Rust vs C++ design note
+    /// The C++ uses an RAII guard (`SaveAndSuppressMessages`) that holds a
+    /// pointer to the manager and restores the previous value on drop.  In safe
+    /// Rust that pattern would require the guard to hold a `&mut
+    /// SourceErrorManager`, which prevents the manager from also being borrowed
+    /// for emitting through the same scope.  Instead, callers (e.g. the lexer)
+    /// save the old value, set the new one, and restore it when done — an
+    /// explicit save/restore that is equivalent but borrow-checker-friendly.
+    suppressed_messages: Option<Subsystem>,
 }
 
 impl SourceErrorManager {
@@ -68,6 +81,7 @@ impl SourceErrorManager {
             last_message_suppressed: false,
             warning_enabled: vec![true; Warning::COUNT],
             warning_as_error: vec![false; Warning::COUNT],
+            suppressed_messages: None,
         }
     }
 
@@ -286,69 +300,161 @@ impl SourceErrorManager {
         self.warning_as_error[w.index()]
     }
 
+    // ---- Subsystem suppression ----------------------------------------------
+
+    /// Set (or clear) the subsystem whose messages are suppressed.
+    /// Pass `Some(Subsystem::Unspecified)` to suppress all messages.
+    /// Pass `None` to lift suppression.
+    ///
+    /// See the `suppressed_messages` field comment for the Rust vs C++ design
+    /// rationale.
+    pub fn set_suppressed_messages(&mut self, s: Option<Subsystem>) {
+        self.suppressed_messages = s;
+    }
+
+    /// Return the currently suppressed subsystem, if any.
+    pub fn suppressed_messages(&self) -> Option<Subsystem> {
+        self.suppressed_messages
+    }
+
     // ---- Public reporting overloads -----------------------------------------
 
-    /// Emit an error at `loc`.
+    /// Emit an error at `loc` (subsystem: `Unspecified`).
     pub fn error(&mut self, loc: SMLoc, msg: impl Into<String>) {
         self.emit(
             DiagKind::Error,
             Warning::NoWarning,
+            Subsystem::Unspecified,
             Some(loc),
             None,
             msg.into(),
         );
     }
 
-    /// Emit an error at the start of `range`, underscoring the full range.
+    /// Emit an error at the start of `range`, underscoring the full range
+    /// (subsystem: `Unspecified`).
     pub fn error_range(&mut self, range: SMRange, msg: impl Into<String>) {
         self.emit(
             DiagKind::Error,
             Warning::NoWarning,
+            Subsystem::Unspecified,
             Some(range.start),
             Some(range),
             msg.into(),
         );
     }
 
-    /// Emit a note at `loc`.
+    /// Emit an error at `loc` with an optional `range` and explicit `subsystem`.
+    /// The lexer calls this form to allow per-subsystem suppression.
+    pub fn error_at(
+        &mut self,
+        loc: SMLoc,
+        range: Option<SMRange>,
+        msg: impl Into<String>,
+        subsystem: Subsystem,
+    ) {
+        self.emit(
+            DiagKind::Error,
+            Warning::NoWarning,
+            subsystem,
+            Some(loc),
+            range,
+            msg.into(),
+        );
+    }
+
+    /// Emit a note at `loc` (subsystem: `Unspecified`).
     pub fn note(&mut self, loc: SMLoc, msg: impl Into<String>) {
         self.emit(
             DiagKind::Note,
             Warning::NoWarning,
+            Subsystem::Unspecified,
             Some(loc),
             None,
             msg.into(),
         );
     }
 
-    /// Emit a warning of the given category at `loc`.
+    /// Emit a warning of the given category at `loc` (subsystem: `Unspecified`).
     pub fn warning(&mut self, w: Warning, loc: SMLoc, msg: impl Into<String>) {
-        self.emit(DiagKind::Warning, w, Some(loc), None, msg.into());
+        self.emit(
+            DiagKind::Warning,
+            w,
+            Subsystem::Unspecified,
+            Some(loc),
+            None,
+            msg.into(),
+        );
     }
 
-    /// Emit a `Misc` warning at `loc` (the most common case).
+    /// Emit a `Misc` warning at `loc` (subsystem: `Unspecified`).
     pub fn warning_misc(&mut self, loc: SMLoc, msg: impl Into<String>) {
         self.emit(
             DiagKind::Warning,
             Warning::Misc,
+            Subsystem::Unspecified,
             Some(loc),
             None,
             msg.into(),
         );
+    }
+
+    /// Emit a warning of the given category at the start of `range`,
+    /// underscoring the full range, with an explicit `subsystem`.
+    pub fn warning_range(
+        &mut self,
+        w: Warning,
+        range: SMRange,
+        msg: impl Into<String>,
+        subsystem: Subsystem,
+    ) {
+        self.emit(
+            DiagKind::Warning,
+            w,
+            subsystem,
+            Some(range.start),
+            Some(range),
+            msg.into(),
+        );
+    }
+
+    /// General-purpose overload: caller supplies all parameters.
+    /// Port of the `message(DiagKind, Warning, Subsystem, ...)` C++ overloads.
+    pub fn message(
+        &mut self,
+        dk: DiagKind,
+        w: Warning,
+        subsystem: Subsystem,
+        loc: Option<SMLoc>,
+        range: Option<SMRange>,
+        msg: impl Into<String>,
+    ) {
+        self.emit(dk, w, subsystem, loc, range, msg.into());
     }
 
     // ---- Central dispatch ---------------------------------------------------
 
     /// Central dispatch. Port of `SourceErrorManager::message` +
-    /// `countAndGenMessage` (buffering/subsystem deferred).
+    /// `countAndGenMessage`. Subsystem suppression is checked first (port of
+    /// `cpp:180-187`), before the error-limit check, matching C++ ordering.
     fn emit(
         &mut self,
         mut dk: DiagKind,
         w: Warning,
+        subsystem: Subsystem,
         loc: Option<SMLoc>,
         range: Option<SMRange>,
         msg: String,
     ) {
+        // Suppress messages from the suppressed subsystem (or all, if
+        // Unspecified). Port of SourceErrorManager.cpp:180-187.
+        // Note: suppressed messages do NOT update `last_message_suppressed`,
+        // matching C++ behavior — they just return.
+        if let Some(s) = self.suppressed_messages {
+            if s == Subsystem::Unspecified || subsystem == s {
+                return;
+            }
+        }
         // Suppress all messages once the error limit has been reached.
         if self.error_limit_reached {
             return;
@@ -689,5 +795,64 @@ mod tests {
             sm.handler_as::<CollectingHandler>().unwrap().messages()[0].kind,
             DiagKind::Error
         );
+    }
+
+    #[test]
+    fn suppresses_matching_subsystem() {
+        use crate::diag::{CollectingHandler, Subsystem};
+        use crate::location::SMLoc;
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("a.js", "abc");
+        sm.set_handler(Box::new(CollectingHandler::new()));
+        sm.set_suppressed_messages(Some(Subsystem::Lexer));
+        // A Lexer-subsystem error is dropped (no count, no handler message).
+        sm.error_at(
+            SMLoc {
+                source: id,
+                offset: 0,
+            },
+            None,
+            "x",
+            Subsystem::Lexer,
+        );
+        assert_eq!(sm.error_count(), 0);
+        assert_eq!(
+            sm.handler_as::<CollectingHandler>()
+                .unwrap()
+                .messages()
+                .len(),
+            0
+        );
+        // A Parser-subsystem error still passes when only Lexer is suppressed.
+        sm.error_at(
+            SMLoc {
+                source: id,
+                offset: 1,
+            },
+            None,
+            "y",
+            Subsystem::Parser,
+        );
+        assert_eq!(sm.error_count(), 1);
+    }
+
+    #[test]
+    fn suppress_unspecified_drops_everything() {
+        use crate::diag::{CollectingHandler, Subsystem};
+        use crate::location::SMLoc;
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("a.js", "abc");
+        sm.set_handler(Box::new(CollectingHandler::new()));
+        sm.set_suppressed_messages(Some(Subsystem::Unspecified));
+        sm.error_at(
+            SMLoc {
+                source: id,
+                offset: 0,
+            },
+            None,
+            "x",
+            Subsystem::Parser,
+        );
+        assert_eq!(sm.error_count(), 0);
     }
 }
