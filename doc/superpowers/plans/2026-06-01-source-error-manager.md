@@ -932,26 +932,56 @@ git commit -m "rust(support): diagnostic types, handler trait, collecting handle
 
 - [ ] **Step 1: Write the failing test (caret geometry)**
 
+**Signature:** `build_source_and_caret_line(source_line: &str, col: u32, ranges: &[(u32, u32)], opts: &OutputOptions) -> (String, String)`. `col` is the **1-based** caret column (= C++ `columnNo + 1`); `ranges` are **0-based** byte `[start, end)` column pairs within the line (empty for the no-range case).
+
+**Faithful semantics (from `SourceErrorManager.cpp:441-544`), which the tests below encode:**
+- Columns are measured in **Unicode code points**: decode the line to chars, building a byte→column map; widen `col-1` and the range endpoints through it. (For all-ASCII lines this is the identity.)
+- caret line = `numColumns+1` spaces; fill each range `[first,last)` with `~`; place `^` at `min(widened_col, numColumns)`; then **erase trailing spaces**.
+- **Tabs are expanded to spaces** (TabStop=8) in BOTH source and caret: at each tab, `expandCount = 8 - (pos % 8)`; in the caret line, replicate the existing caret char (so a tab under `~` becomes more `~`).
+- Width-trim to `max(preferred_max_error_width, focusLength + MINIMUM_SOURCE_CONTEXT)`, focusing on the caret/intersecting range, inserting `...` on trimmed sides.
+
 `rust/crates/support/src/render.rs` test module:
 ```rust
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diag::OutputOptions;
 
     #[test]
     fn caret_under_single_column() {
-        // No range: a single caret under the given column.
-        let (src, caret) = build_source_and_caret_line("let x = 1;", 5, None, &Default::default());
+        // 1-based col 5 ('x' in "let x = 1;") -> 4 spaces then '^', trailing trimmed.
+        let (src, caret) =
+            build_source_and_caret_line("let x = 1;", 5, &[], &OutputOptions::default());
         assert_eq!(src, "let x = 1;");
         assert_eq!(caret, "    ^");
     }
 
     #[test]
-    fn tabs_expand_to_tab_stop_in_caret() {
-        // A leading tab must be mirrored as a tab in the caret line so columns
-        // align in a terminal (port of the TabStop handling).
-        let (_src, caret) = build_source_and_caret_line("\tx", 2, None, &Default::default());
-        assert_eq!(caret, "\t^");
+    fn tabs_expand_to_spaces_tabstop_8() {
+        // Tabs are expanded to spaces (TabStop=8) in BOTH lines, matching LLVH.
+        // "\tx" with caret on 'x' (col 2) -> 8 spaces + 'x' / 8 spaces + '^'.
+        let (src, caret) =
+            build_source_and_caret_line("\tx", 2, &[], &OutputOptions::default());
+        assert_eq!(src, "        x");
+        assert_eq!(caret, "        ^");
+    }
+
+    #[test]
+    fn range_underlined_with_tildes() {
+        // Range [4,9) underlines "x = 1" with '~', caret '^' at col 5 sits within it.
+        let (_src, caret) =
+            build_source_and_caret_line("let x = 1;", 5, &[(4, 9)], &OutputOptions::default());
+        assert_eq!(caret, "    ^~~~");
+    }
+
+    #[test]
+    fn non_ascii_columns_are_codepoints() {
+        // "é" is 2 bytes but 1 column. Caret on the char after it lands at column 2.
+        // (col is 1-based code-point column here; resolution supplies code-point col
+        // for callers that need caret display — see the handler's ASCII gate.)
+        let (_src, caret) =
+            build_source_and_caret_line("éx", 2, &[], &OutputOptions::default());
+        assert_eq!(caret, " ^");
     }
 }
 ```
@@ -963,19 +993,21 @@ Expected: FAIL — `build_source_and_caret_line` not found.
 
 - [ ] **Step 3: Port `buildSourceAndCaretLine` and `StderrHandler`**
 
-Implement `build_source_and_caret_line(source_line, col, range, opts) -> (String, String)` as a faithful port of `SourceErrorManager.cpp:441-548`, copying its comments (column clamping, tab handling against `TAB_STOP`, range underlining with `~`, width trimming against `preferred_max_error_width` and `MINIMUM_SOURCE_CONTEXT`). Then implement:
+Implement `build_source_and_caret_line` as a faithful port of `SourceErrorManager.cpp:441-544`, copying its comments. Then the handler — note the **caret is only shown when the source line is all-ASCII** (`printDiagnosticHelper:624`; Hermes punts on non-ASCII caret widths), and the header column is the byte-based 1-based `diag.col`:
 
 ```rust
 use crate::diag::{DiagHandler, DiagKind, OutputOptions, ResolvedDiagnostic};
 
 /// Default handler: prints `file:line:col: kind: message`, the source line, and
-/// a caret/underline, byte-compatible with LLVH `SMDiagnostic` rendering.
-/// Port of `SourceErrorManager::printDiagnostic` + `printDiagnosticHelper`.
+/// (for all-ASCII lines) a caret/underline. Byte-compatible with LLVH
+/// `printDiagnosticHelper`. Color (`opts.show_colors`) is honored.
 pub struct StderrHandler {
     opts: OutputOptions,
 }
 impl StderrHandler {
-    pub fn new(opts: OutputOptions) -> StderrHandler { StderrHandler { opts } }
+    pub fn new(opts: OutputOptions) -> StderrHandler {
+        StderrHandler { opts }
+    }
 }
 impl DiagHandler for StderrHandler {
     fn handle(&mut self, diag: &ResolvedDiagnostic) {
@@ -986,16 +1018,18 @@ impl DiagHandler for StderrHandler {
         };
         eprintln!("{}:{}:{}: {}: {}", diag.file_name, diag.line, diag.col, kind, diag.message);
         if let Some(src) = &diag.source_line {
-            let (line, caret) =
-                build_source_and_caret_line(src, diag.col, None, &self.opts);
+            let (line, caret) = build_source_and_caret_line(src, diag.col, &[], &self.opts);
             eprintln!("{}", line);
-            eprintln!("{}", caret);
+            // Hermes only shows the caret line for all-ASCII source lines.
+            if src.is_ascii() {
+                eprintln!("{}", caret);
+            }
         }
     }
 }
 ```
 
-Note: color output (`show_colors`) and range underlining are part of the faithful port; the test above only pins caret geometry. Add range-underline and color tests if you extend `ResolvedDiagnostic` to carry the range (recommended: add `range_cols: Option<(u32, u32)>` to `ResolvedDiagnostic` and thread it through, matching Hermes which underlines ranges).
+Note: ranges are not yet carried on `ResolvedDiagnostic` (the handler passes `&[]`); Task 8 threads SMRange columns through. Color output and the exact ANSI sequences are validated in Task 10's golden tests; for now honor `show_colors` by gating any escape sequences. Do NOT add a `Remark` kind (Hermes has it, but our `DiagKind` is Error/Warning/Note — out of scope).
 
 - [ ] **Step 4: Run tests to verify they pass**
 
