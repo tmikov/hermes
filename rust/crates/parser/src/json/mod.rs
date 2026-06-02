@@ -12,7 +12,7 @@
 pub mod factory;
 pub mod parser;
 
-pub use factory::JSONFactory;
+pub use factory::{JSONFactory, Prop};
 
 use atom_table::AtomBytes;
 
@@ -174,6 +174,40 @@ impl<'a> ObjectView<'a> {
     /// Returns the hidden class descriptor shared among same-shape objects.
     pub fn get_hidden_class(&self) -> &'a JSONHiddenClass<'a> {
         self.class
+    }
+
+    /// JSONParser.h:286 — value for `name`, or None.
+    pub fn get(&self, name: &str, atoms: &atom_table::AtomTable) -> Option<&'a JSONValue<'a>> {
+        self.class.find(name.as_bytes(), atoms).map(|i| self.values[i])
+    }
+
+    /// JSONParser.h:295 — value for `name`; panics if absent (C++ asserts).
+    pub fn at(&self, name: &str, atoms: &atom_table::AtomTable) -> &'a JSONValue<'a> {
+        self.get(name, atoms).expect("name not found")
+    }
+
+    /// JSONParser.h:323 — 1 if present else 0.
+    pub fn count(&self, name: &str, atoms: &atom_table::AtomTable) -> usize {
+        if self.class.find(name.as_bytes(), atoms).is_some() {
+            1
+        } else {
+            0
+        }
+    }
+
+    /// Value by position (0..size).
+    pub fn value_at(&self, index: usize) -> &'a JSONValue<'a> {
+        self.values[index]
+    }
+
+    /// Key (interned handle) by position.
+    pub fn key_at(&self, index: usize) -> atom_table::AtomBytes {
+        self.class.keys[index]
+    }
+
+    /// JSONParser.h:330 — (key, value) pairs, in the hidden class's sorted order.
+    pub fn iter(&self) -> impl Iterator<Item = (atom_table::AtomBytes, &'a JSONValue<'a>)> + '_ {
+        self.class.keys.iter().copied().zip(self.values.iter().copied())
     }
 }
 
