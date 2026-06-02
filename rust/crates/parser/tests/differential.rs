@@ -11,6 +11,13 @@
 //! corpus lexes the Flow type grammar (`{|`/`|}`, `%checks`, `@`-prefixed
 //! identifiers, individual `<`/`>`, no `??`) (Rust: `GrammarContext::Type`). Both
 //! sides are driven with the matching context so the dumps compare byte-for-byte.
+//!
+//! The harness is also parameterized by strict mode. The default corpora run in
+//! strict mode (the lexer default); the `differential_nonstrict` corpus drives
+//! both sides in non-strict mode (Rust: `set_strict_mode(false)`; C++:
+//! `--non-strict`), exercising the future-reserved-word downgrade
+//! (`static`/`yield`/… → `identifier`) and the legacy octal / leading-zero
+//! numeric and octal-escape paths that strict mode rejects.
 
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -31,12 +38,17 @@ fn context_flag(ctx: GrammarContext) -> &'static str {
 }
 
 /// Produce the Rust lexer dump for `src` under `ctx` (one `dump_token` line per
-/// token, including the final `eof`, each terminated by '\n').
-fn rust_dump(src: &str, ctx: GrammarContext) -> String {
+/// token, including the final `eof`, each terminated by '\n'). When `strict` is
+/// false the lexer is switched to non-strict mode before the first token,
+/// matching the C++ oracle's `--non-strict` flag.
+fn rust_dump(src: &str, ctx: GrammarContext, strict: bool) -> String {
     let mut sm = SourceErrorManager::new();
     let id = sm.add_buffer("t", src);
     let tab = AtomTable::new();
     let mut lex = JSLexer::new(id, &mut sm, &tab, ctx);
+    if !strict {
+        lex.set_strict_mode(false);
+    }
     let mut out = String::new();
     loop {
         let k = lex.advance(ctx).kind();
@@ -60,15 +72,10 @@ fn js_lexer_dump_bin() -> std::path::PathBuf {
         .join("../../../cmake-build-asan/bin/js-lexer-dump")
 }
 
-/// Run the C++ `js-lexer-dump --context=<ctx> -` oracle on `src` via stdin and
-/// return its stdout. The caller is responsible for checking the binary exists
-/// (see `js_lexer_dump_bin`); this always attempts to run it.
-fn cpp_dump(bin: &std::path::Path, src: &str, ctx: GrammarContext) -> Option<String> {
-    cpp_dump_flags(bin, src, &[context_flag(ctx)])
-}
-
-/// Like `cpp_dump`, but with an explicit list of flags (before the trailing
-/// `-`). Used by the JSX-child differential, which adds `--jsx-child`.
+/// Run the C++ `js-lexer-dump` oracle on `src` via stdin with an explicit list
+/// of flags (before the trailing `-`) and return its stdout. The caller is
+/// responsible for checking the binary exists (see `js_lexer_dump_bin`); this
+/// always attempts to run it.
 fn cpp_dump_flags(bin: &std::path::Path, src: &str, flags: &[&str]) -> Option<String> {
     let mut child = Command::new(bin)
         .args(flags)
@@ -216,7 +223,7 @@ fn differential_punctuators_and_trivia() {
         // raw unicode -> WTF-8 in cooked+raw (incl. a supplementary-plane char).
         "`uni\u{4e2d}` `astral\u{1f600}`",
     ];
-    run_differential("div", &corpus, GrammarContext::AllowDiv);
+    run_differential("div", &corpus, GrammarContext::AllowDiv, true);
 }
 
 #[test]
@@ -229,7 +236,7 @@ fn differential_regexp() {
         "/\u{4e2d}/u",          // unicode in body -> WTF-8
         "x = /re/g",            // div context would differ; here regexp follows '='
     ];
-    run_differential("regexp", &corpus, GrammarContext::AllowRegExp);
+    run_differential("regexp", &corpus, GrammarContext::AllowRegExp, true);
 }
 
 #[test]
@@ -249,7 +256,7 @@ fn differential_type() {
         // plain punctuators still work in Type context.
         "{ a: 1 } [1, 2]",
     ];
-    run_differential("type", &corpus, GrammarContext::Type);
+    run_differential("type", &corpus, GrammarContext::Type, true);
 }
 
 #[test]
@@ -263,7 +270,36 @@ fn differential_jsx() {
         // `<`/`>` punctuation around JSX-flavored identifiers.
         "< a-b > < /c-d >",
     ];
-    run_differential("jsx", &corpus, GrammarContext::AllowJSXIdentifier);
+    run_differential("jsx", &corpus, GrammarContext::AllowJSXIdentifier, true);
+}
+
+#[test]
+fn differential_nonstrict() {
+    let corpus = [
+        // The eight future reserved words: in non-strict mode each lexes as a
+        // plain `identifier` rather than `rw_*` (the meaningful stdout
+        // divergence from strict mode).
+        "implements interface package private protected public static yield",
+        // `yield` on its own (the most common one), plus a mix with words that
+        // stay reserved in BOTH modes (`function`/`for`/`return`/`var`) to
+        // confirm only the future-reserved set downgrades.
+        "function yield for static return var public",
+        // Future reserved words used as ordinary identifiers in real code.
+        "let static = 1; var private = yield;",
+        // ---- legacy octal / leading-zero numerics (strict mode errors on
+        // these to stderr; non-strict accepts them silently). stdout already
+        // matches in strict mode, but this locks in the non-strict path too. --
+        "0123 010 07 0o17",
+        // leading-zero decimals (`08`/`09`): NOT octal (contain 8/9), parsed as
+        // decimal; rejected in strict mode, accepted in non-strict.
+        "08 09 00 019",
+        // ---- legacy octal string escapes (`\07`): error in strict, accepted
+        // in non-strict; the cooked value is identical either way. -----------
+        "'\\07' '\\101' '\\0'",
+        // a mix exercising several non-strict paths in one buffer.
+        "static 0123 '\\77' yield",
+    ];
+    run_differential("nonstrict", &corpus, GrammarContext::AllowDiv, false);
 }
 
 /// Produce the Rust lexer dump for `src` driven through `advance_in_jsx_child`
@@ -324,12 +360,12 @@ fn differential_jsx_child() {
     eprintln!("differential[jsx-child] compared {compared} corpus entries");
 }
 
-/// Run the differential over `corpus` under `ctx`. The skip is all-or-nothing:
-/// if the binary is absent we skip cleanly; if it is present we MUST run every
-/// corpus assertion (no early return can bypass an assertion). Set
-/// `REQUIRE_DIFFERENTIAL=1` to turn a missing binary into a hard failure, so CI
-/// can be configured to require the differential to actually run.
-fn run_differential(label: &str, corpus: &[&str], ctx: GrammarContext) {
+/// Run the differential over `corpus` under `ctx`, in strict or non-strict mode.
+/// The skip is all-or-nothing: if the binary is absent we skip cleanly; if it is
+/// present we MUST run every corpus assertion (no early return can bypass an
+/// assertion). Set `REQUIRE_DIFFERENTIAL=1` to turn a missing binary into a hard
+/// failure, so CI can be configured to require the differential to actually run.
+fn run_differential(label: &str, corpus: &[&str], ctx: GrammarContext, strict: bool) {
     let bin = js_lexer_dump_bin();
     if !bin.exists() {
         if std::env::var_os("REQUIRE_DIFFERENTIAL").is_some() {
@@ -339,10 +375,17 @@ fn run_differential(label: &str, corpus: &[&str], ctx: GrammarContext) {
         return;
     }
 
+    // Build the C++ flag list: the grammar context, plus `--non-strict` when the
+    // Rust side is driven non-strict, so both lexers are configured identically.
+    let mut flags = vec![context_flag(ctx)];
+    if !strict {
+        flags.push("--non-strict");
+    }
+
     let mut compared = 0usize;
     for &src in corpus {
-        let cpp = cpp_dump(&bin, src, ctx).expect("js-lexer-dump exists but failed to run");
-        assert_eq!(rust_dump(src, ctx), cpp, "mismatch for {src:?}");
+        let cpp = cpp_dump_flags(&bin, src, &flags).expect("js-lexer-dump exists but failed to run");
+        assert_eq!(rust_dump(src, ctx, strict), cpp, "mismatch for {src:?}");
         compared += 1;
     }
     eprintln!("differential[{label}] compared {compared} corpus entries");

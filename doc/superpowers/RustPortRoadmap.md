@@ -77,9 +77,10 @@ Sole deviation: `getAllocator` has no Rust analog (no bump allocator). Design sp
 (`0xc2`/`0xe2`/`0xef` non-special lead bytes errored instead of falling into the default arm) and
 a few missing accessors — both fixed and tested before declaring complete.**
 
-> **Next component: the Parser** (`lib/Parser/JSParserImpl*`), which consumes this lexer. Optional
-> lexer follow-up (tracked, non-blocking): a `--non-strict` flag for `js-lexer-dump` to widen the
-> strict-mode differential corpus.
+> **Next component: the Parser** (`lib/Parser/JSParserImpl*`), which consumes this lexer. The
+> previously-tracked optional lexer follow-up — a `--non-strict` flag for `js-lexer-dump` — is now
+> **DONE** (`differential_nonstrict`, 7 corpus entries, exercises the future-reserved-word downgrade
+> + legacy octal / leading-zero / octal-escape paths). The lexer has no remaining open items.
 
 ### Historical: JS lexer build log
 
@@ -193,8 +194,8 @@ part of SourceErrorManager; in build order):
 > **✅ JS LEXER COMPLETE.** The full `JSLexer` public surface is ported and validated: token lexing,
 > trivia, identifiers, keywords, all numeric/string/template/regexp/bigint literals, Flow `Type` context,
 > JSX, storage, magic comments, `SavePoint`/`seek`/`force_eof`, lookahead, directives,
-> `rescanRBraceInTemplateLiteral`, and `convertSurrogates`. **Remaining tracked items:** the `--non-strict`
-> harness flag (optional test convenience).
+> `rescanRBraceInTemplateLiteral`, and `convertSurrogates`. **No remaining tracked items** — the
+> optional `--non-strict` harness flag is now done (`differential_nonstrict`).
 
 ## Key cross-cutting design decisions
 

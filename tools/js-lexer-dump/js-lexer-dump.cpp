@@ -65,7 +65,13 @@
 ///                  lex.advance(ctx); it accumulates JSX text and emits
 ///                  l_brace/less for {/< (used for the jsx_text differential).
 /// Strict-mode note: the lexer is constructed with strictMode=true (default),
-/// so strict-mode reserved words are lexed as rw_* tokens.
+/// so strict-mode reserved words are lexed as rw_* tokens. Pass --non-strict
+/// to call setStrictMode(false): future reserved words (implements, interface,
+/// package, private, protected, public, static, yield) then lex as plain
+/// identifiers, legacy octal numbers / leading-zero decimals / legacy octal
+/// string escapes are accepted without an error, and no strict-mode diagnostic
+/// is emitted. The Rust lexer under differential test must be configured
+/// identically.
 
 #include "hermes/Parser/JSLexer.h"
 #include "hermes/Support/SourceErrorManager.h"
@@ -197,13 +203,16 @@ static void emitFields(llvh::raw_ostream &os, const Token &tok) {
 
 static void usage(const char *argv0) {
   llvh::errs() << "Usage: " << argv0
-               << " [--context=regexp|div|type|jsx] [--jsx-child] <file|->\n"
+               << " [--context=regexp|div|type|jsx] [--jsx-child] "
+                  "[--non-strict] <file|->\n"
                << "  Dump tokens from the JS lexer to stdout.\n"
                << "  --context=regexp  Allow regexp literals after /\n"
                << "  --context=div     Allow division operator after /\n"
                << "  --context=type    Flow type grammar context\n"
                << "  --context=jsx     Allow JSX identifiers (`-`)\n"
                << "  --jsx-child       Drive advanceInJSXChild() (JSX text)\n"
+               << "  --non-strict      Lex in non-strict mode "
+                  "(setStrictMode(false))\n"
                << "  Use - to read from stdin.\n";
 }
 
@@ -211,6 +220,7 @@ int main(int argc, char **argv) {
   // Parse arguments.
   JSLexer::GrammarContext grammarContext = JSLexer::AllowRegExp;
   bool jsxChild = false;
+  bool strictMode = true;
   const char *filePath = nullptr;
 
   for (int i = 1; i < argc; ++i) {
@@ -232,6 +242,8 @@ int main(int argc, char **argv) {
       }
     } else if (std::strcmp(arg, "--jsx-child") == 0) {
       jsxChild = true;
+    } else if (std::strcmp(arg, "--non-strict") == 0) {
+      strictMode = false;
     } else if (arg[0] == '-' && arg[1] == '-') {
       llvh::errs() << argv[0] << ": unknown flag '" << arg << "'\n";
       usage(argv[0]);
@@ -264,11 +276,14 @@ int main(int argc, char **argv) {
   // NOTE: JSLexer is constructed with strictMode=true (the default). This
   // means strict-mode future reserved words (implements, interface, package,
   // private, protected, public, static, yield) are lexed as rw_* tokens, not
-  // identifiers. The Rust lexer under differential test must be configured
-  // identically.
+  // identifiers. Passing --non-strict calls setStrictMode(false) so they lex
+  // as identifiers (and legacy octal / leading-zero numbers and legacy octal
+  // string escapes are accepted silently). The Rust lexer under differential
+  // test must be configured identically.
   JSLexer::Allocator alloc;
   SourceErrorManager sm;
   JSLexer lex(std::move(fileBufOrErr.get()), sm, alloc);
+  lex.setStrictMode(strictMode);
   const char *base = lex.getBufferStart();
 
   llvh::raw_ostream &os = llvh::outs();

@@ -58,7 +58,8 @@ toolchain pinned `rust/rust-toolchain.toml` (1.96.0).
 **The differential oracle:** `tools/js-lexer-dump/js-lexer-dump.cpp` — a C++ tool linking the real
 `JSLexer`, registered via `add_hermes_tool` in `tools/CMakeLists.txt`. The Rust lexer dumps tokens
 in the identical format and `rust/crates/parser/tests/differential.rs` asserts byte-for-byte
-equality across 5 contexts (`--context=div/regexp/type/jsx` + `--jsx-child`).
+equality across 5 contexts (`--context=div/regexp/type/jsx` + `--jsx-child`) plus a non-strict
+corpus (`--non-strict`, exercising the future-reserved-word downgrade + legacy octal paths).
 
 **C++ source of truth for the lexer:** `include/hermes/Parser/JSLexer.h` + `lib/Parser/JSLexer.cpp`,
 plus `include/hermes/Support/UTF8.h`, `Support/Conversions.h`/`FastStrToDouble.cpp`,
@@ -83,7 +84,7 @@ cargo clippy --manifest-path rust/Cargo.toml -p parser # only pre-existing faith
 cmake --build cmake-build-asan --target js-lexer-dump
 # The differential test resolves the binary via CARGO_MANIFEST_DIR; force it to run (not skip):
 REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml -p parser --test differential -- --nocapture
-# Expect: differential[div] 58, [regexp] 5, [type] 6, [jsx] 4, [jsx-child] 10 — all pass.
+# Expect: differential[div] 58, [regexp] 5, [type] 6, [jsx] 4, [jsx-child] 10, [nonstrict] 7 — all pass.
 ```
 
 If `cmake-build-asan/` is missing, configure it (it's git-ignored):
@@ -142,7 +143,7 @@ Commit directly to `rust`; **never** open a PR or merge (project rule).
   `JSParserImpl.h`, `include/hermes/Parser/JSParser.h`) — consumes the completed lexer. It needs the
   **AST** (`lib/AST/`, `include/hermes/AST/`) and `Context`. This is a large component; scope it
   (juno has an AST + parser to crib from: `unsupported/juno/crates/juno_ast/`, `juno/src/hparser/`).
-- **Optional tracked lexer follow-up** (non-blocking): a `--non-strict` flag for `js-lexer-dump` to
-  widen the strict-mode differential corpus.
+- The previously-tracked optional lexer follow-up (a `--non-strict` flag for `js-lexer-dump`) is
+  **DONE** — see `differential_nonstrict` (7 entries). The lexer now has no open items.
 
 The lexer is done, reviewed, and self-validating — start the Parser fresh from §1's reading.
