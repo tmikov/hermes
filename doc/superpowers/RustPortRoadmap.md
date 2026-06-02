@@ -87,10 +87,22 @@ part of SourceErrorManager; in build order):
 > **✅ MILESTONE (all 5 support-layer prerequisites complete).** Token tables, the C++
 > token-dump differential oracle, the WTF-8 string interner, Unicode CharacterProperties,
 > and number parsing are all done, reviewed (spec + code-quality), and committed on `rust`.
-> Workspace: **80 Rust tests passing, zero warnings**; `js-lexer-dump` builds. **Next: the
-> lexer proper** — `cursor.rs` (encapsulated `*const u8`), `token.rs`, then
-> `advance`/identifiers/literals/templates/regexp/JSX+Flow/savepoint+lookahead — validated
-> live against `js-lexer-dump`.
+>
+> **🚧 Lexer proper — phase 1a DONE.** The lexer skeleton is up in the `parser` crate:
+> `utf8` (decode side of `Support/UTF8.h`), `cursor` (the encapsulated `*const u8`,
+> decision B — the *only* `unsafe`, scoped + sound), `token` (`Token`/`RegExpLiteral`/
+> `StoredComment`/`StoredToken`), and `lexer` (`JSLexer` + `advance` for
+> **punctuators/whitespace/comments/EOF**). Validated **byte-for-byte live against
+> `js-lexer-dump`** (`tests/differential.rs`, `--context=div`). Plan:
+> `plans/2026-06-01-js-lexer-proper-1a.md`. Workspace: **~106 Rust tests passing, zero
+> warnings**.
+>
+> **Next — lexer phase 1b:** identifiers (fast path + Unicode + `\u` escapes) + reserved
+> words (pre-intern via `atom_table`) + numbers (wire `parser::number` into `scanNumber`) +
+> the `AllowRegExp` `/` slash-vs-regex decision (regex body itself in phase 2). Then phase 2
+> (string/template/regexp/bigint literals + `encodeUTF8`/WTF-8), phase 3 (JSX/Flow + extend
+> the oracle), phase 4 (`SavePoint`/`lookahead1`/`lookahead2`/directive/`rescanRBrace`).
+> Each phase extends the live differential corpus.
 
 ## Key cross-cutting design decisions
 
