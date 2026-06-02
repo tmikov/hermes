@@ -37,6 +37,7 @@ The front-end stratifies (see the dependency analysis below). We port bottom-up.
 |-----------|------------------|--------|
 | **SourceErrorManager** (+ buffer, locations, line index, diagnostics) | `rust/crates/support/` | ✅ **Complete** — entire public surface; **byte-for-byte validated vs `hermesc` 1.96.0** |
 | **JS lexer** | `rust/crates/{atom_table,unicode,parser}/` | ✅ **Complete** — entire `JSLexer` public surface; self-validating byte-for-byte vs `js-lexer-dump` (5 differentials); see deps below |
+| **JSONParser** (+ `JSONEmitter`, value model, factory, `JSONSharedValue`) | `rust/crates/{parser,support}/` | ✅ **Complete** — first `JSLexer` consumer; entire public surface; self-validating byte-for-byte vs `json-parse-dump` (16-file corpus) + 5 ported `JSONParserTest` + 13 ported `JSONEmitterTest`; **benchmarked within ~1.5% of C++ Release** |
 | Parser | — | future |
 | Sema (scope resolution + FlowChecker) | — | future |
 | IR / IRGen | — | future |
@@ -196,6 +197,45 @@ part of SourceErrorManager; in build order):
 > JSX, storage, magic comments, `SavePoint`/`seek`/`force_eof`, lookahead, directives,
 > `rescanRBraceInTemplateLiteral`, and `convertSurrogates`. **No remaining tracked items** — the
 > optional `--non-strict` harness flag is now done (`differential_nonstrict`).
+
+### ✅ JSONParser — COMPLETE
+
+The entire `JSONParser` component (`include/hermes/Parser/JSONParser.h` + `lib/Parser/JSONParser.cpp`,
+plus `Support/JSONEmitter.{h,cpp}` and `numberToString` from `Conversions.cpp`) is ported — the **first
+consumer of the completed `JSLexer`**. Spec: `specs/2026-06-02-json-parser-design.md`; plan:
+`plans/2026-06-02-json-parser.md`.
+
+Code map:
+- **`rust/crates/support/src/json_emitter.rs`** — `JSONEmitter` (full surface: state stack, dict/array,
+  `emit_key`/`emit_key_u16`, all value overloads, escaping, pretty, JSONL) + `number_to_string`
+  (ECMAScript `Number::toString`, shortest-decimal via Rust `{:e}`). Zero `unsafe` (support `forbid`s it).
+- **`rust/crates/parser/src/json/`** — `mod.rs` (value model `JSONValue`/`JSONHiddenClass`, RTTI→enum,
+  `ArrayView`/`ObjectView` accessors, `emit_into`, `JSONSharedValue`), `factory.rs` (`JSONFactory`:
+  string/number uniquing + shared hidden classes via `bumpalo` arena), `parser.rs` (recursive descent
+  over `JSLexer`).
+
+Representation: `&'a JSONValue<'a>` == the C++ `JSONValue*`, nodes in a `bumpalo` arena; uniquing via
+`HashMap` (not `FoldingSet`); hidden classes shared by sorted-key set. New dep: `bumpalo` (first
+third-party crate). The **sole hand-written `unsafe`** in the component is the `JSONSharedValue::get`
+deref (`Rc<Bump>` + lifetime-erased pointer, the `shared_ptr<Allocator>`+`JSONValue*` analog).
+
+Validation (two-pronged, like the lexer): the **byte-for-byte differential** — a C++ `json-parse-dump`
+oracle (`tools/json-parse-dump/`) vs the Rust `json-parse-dump` bin, over a 16-file corpus
+(`tests/json_differential.rs`, incl. astral/lone-surrogate/hidden-class-shape/number-edge cases + 6
+error cases; force-runs under `REQUIRE_DIFFERENTIAL=1`) — **and** the ported unittests (all **5
+`JSONParserTest`** cases in `tests/json_parser_ported.rs` + all **13 `JSONEmitterTest`** cases inline).
+The differential caught a real bug the per-phase reviews missed: `emit_into` panicked on WTF-8 strings
+(non-BMP / lone surrogates) via `from_utf8().expect()` — fixed to route keys/values through
+`convert_utf8_with_surrogates_to_utf16` + `emit_u16`/`emit_key_u16`, matching C++ `primitiveEmitString`.
+A capstone review confirmed the full public surface, branch-for-branch control/error fidelity, and the
+sole-sound `unsafe`. Sole deviations (per the design doc): fat-enum node layout (uniform 32-byte nodes +
+separate value slices vs C++ inline `Pack`), `getAllocator`/`getStringTable` → `arena()`/`atoms()`.
+
+Benchmark (first datapoint, see "Benchmark" section below): on an 11.6 MB JSON file × 50, **Rust
+`--release` ≈ 69.5 MB/s vs C++ Release ≈ 70.6 MB/s — within ~1.5%**. (The default ASan+`-O1` C++ build
+is ~12× slower and is not a fair speed baseline.)
+
+> **Next component: the Parser** (`lib/Parser/JSParserImpl*`) — needs the AST + `Context`.
 
 ## Key cross-cutting design decisions
 
