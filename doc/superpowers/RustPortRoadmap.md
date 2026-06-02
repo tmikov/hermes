@@ -133,13 +133,17 @@ part of SourceErrorManager; in build order):
 > keywords, numbers, strings, templates, regexp, private identifiers — self-validating byte-for-byte
 > vs `js-lexer-dump`.
 >
-> **Next — lexer phase 3 (JSX/Flow):** 3a Flow (`Type` grammar context — the `{|`/`|}`/`%checks`/
-> `@`-ident/Type-context punctuator arms are already ported but unreached; extend the harness with
-> `--context=type` and drive a Type differential); 3b JSX (`advanceInJSXChild`, `consumeHTMLEntityOptional`
-> + `HTMLEntities.def`, JSX identifier mode (`-`), JSX string `&`-entities, JSX newline-in-string; extend
-> the harness with `--context=jsx` + a JSX-child mode). Then phase 4 (savepoint/lookahead/directive/
-> rescanRBrace/magic comments/comment storage/convertSurrogates). **Remaining tracked items:**
-> `convertSurrogates` re-encoding, the `--non-strict` harness flag.
+> **🚧 Lexer phase 3a DONE.** Flow `Type` grammar context — `{|`→`l_bracepipe`, `|}`→`piper_brace`,
+> `%checks`, `@`-Flow-identifiers, Type-context `<`/`>`/`?` (no `??`). Harness `--context=type`;
+> `--context=type` differential (6 entries). Crate is now `int_plus_one`-clean. Plan:
+> `plans/2026-06-02-js-lexer-proper-3a.md`.
+>
+> **Next — lexer phase 3b (JSX):** `HTMLEntities.def` table (254 entries) + `consumeHTMLEntityOptional`,
+> the JSX `scanString<true>` branches (`&`-entities + JSX-newline-in-string), `advanceInJSXChild` (JSX
+> text + entities), JSX identifier mode (`-`); extend the harness with `--context=jsx` + a `--jsx-child`
+> mode + `jsx_text value=/raw=` dump. Then phase 4 (savepoint/lookahead/directive/rescanRBrace/magic
+> comments/comment storage/convertSurrogates). **Remaining tracked items:** `convertSurrogates`
+> re-encoding, the `--non-strict` harness flag.
 
 ## Key cross-cutting design decisions
 
