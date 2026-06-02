@@ -87,6 +87,12 @@ impl<'a> JSLexer<'a> {
                 out.push_str(" raw=");
                 quote_bytes(out, self.strtab.bytes(self.token.get_template_raw_value()));
             }
+            TokenKind::jsx_text => {
+                out.push_str(" value=");
+                quote_bytes(out, self.strtab.bytes(self.token.get_jsx_text_value()));
+                out.push_str(" raw=");
+                quote_bytes(out, self.strtab.bytes(self.token.get_jsx_text_raw()));
+            }
             _ => {
                 // Reserved words: emit the identifier string.
                 if kind.is_res_word() {

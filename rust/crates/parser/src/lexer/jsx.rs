@@ -7,6 +7,9 @@
 use unicode::UNICODE_MAX_VALUE;
 
 use crate::html_entities;
+use crate::token::Token;
+use crate::token_kinds::TokenKind;
+use crate::utf8::{append_unicode_to_storage, is_utf8_start};
 
 use super::{is_ascii_digit, JSLexer};
 
@@ -114,6 +117,74 @@ impl<'a> JSLexer<'a> {
         self.cursor.seek(start);
         None
     }
+
+    /// Advance to the next token while scanning a JSX child. Port of
+    /// `JSLexer::advanceInJSXChild` (JSLexer.cpp:749-809). Emits `l_brace` /
+    /// `less` for `{` / `<`, `eof` at end of input, and otherwise accumulates a
+    /// single `jsx_text` token (with HTML entities decoded into the value and
+    /// kept verbatim in the raw) up to the next `{` / `<` / EOF.
+    pub fn advance_in_jsx_child(&mut self) -> &Token {
+        self.token.set_start(self.cur_loc());
+        loop {
+            debug_assert!(
+                (self.cursor.offset() as usize) <= self.cursor.raw().len(),
+                "lexing past end of input"
+            );
+            match self.cursor.peek() {
+                b'{' => {
+                    self.punc_l1_1(TokenKind::l_brace);
+                }
+                b'<' => {
+                    self.punc_l1_1(TokenKind::less);
+                }
+
+                0 if self.cursor.at_end() => {
+                    self.token.set_eof();
+                }
+
+                // Fall-through to start scanning text.
+                _ => {
+                    let start = self.cur_loc();
+                    self.token.set_start(start);
+
+                    // Build up cooked value using XHTML entities.
+                    self.tmp_storage.clear();
+                    self.raw_storage.clear();
+                    loop {
+                        let c = self.cursor.peek();
+
+                        if is_utf8_start(c) {
+                            let codepoint = self.decode_utf8_advance();
+                            append_unicode_to_storage(&mut self.tmp_storage, codepoint);
+                            append_unicode_to_storage(&mut self.raw_storage, codepoint);
+                            continue;
+                        } else if c == b'&' {
+                            let html_start = self.cursor.offset();
+                            if let Some(code_point) = self.consume_html_entity_optional() {
+                                append_unicode_to_storage(&mut self.tmp_storage, code_point);
+                                let consumed = self.cursor.slice(html_start, self.cursor.offset());
+                                self.raw_storage.extend_from_slice(consumed);
+                                continue;
+                            }
+                        } else if (c == 0 && self.cursor.at_end()) || c == b'{' || c == b'<' {
+                            let value = self.strtab.atom_bytes(self.tmp_storage.as_slice());
+                            let raw = self.strtab.atom_bytes(self.raw_storage.as_slice());
+                            self.token.set_jsx_text(value, raw);
+                            break;
+                        }
+                        self.tmp_storage.push(c);
+                        self.raw_storage.push(c);
+                        self.cursor.advance(1);
+                    }
+                }
+            }
+
+            // Always terminate the loop unless "continue" was used.
+            break;
+        }
+        self.finish_token();
+        &self.token
+    }
 }
 
 #[cfg(test)]
@@ -122,6 +193,7 @@ mod tests {
     use support::manager::SourceErrorManager;
 
     use super::super::{GrammarContext, JSLexer};
+    use crate::token_kinds::TokenKind;
 
     /// Build a lexer over `src` with the cursor on the leading `&` and run
     /// `consume_html_entity_optional`, returning its result.
@@ -140,5 +212,49 @@ mod tests {
         assert_eq!(entity("&#x41;"), Some(0x41)); // hex
         assert_eq!(entity("&nope;"), None); // unknown name -> None, cursor reset
         assert_eq!(entity("&amp"), None); // no semicolon -> None
+    }
+
+    /// Run the `advance_in_jsx_child` loop to EOF and collect token kinds.
+    fn advance_jsx(src: &str) -> Vec<TokenKind> {
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("t", src);
+        let tab = AtomTable::new();
+        let mut lex = JSLexer::new(id, &mut sm, &tab, GrammarContext::AllowJSXIdentifier);
+        let mut kinds = Vec::new();
+        loop {
+            let k = lex.advance_in_jsx_child().kind();
+            kinds.push(k);
+            if k == TokenKind::eof {
+                break;
+            }
+        }
+        kinds
+    }
+
+    /// Lex the first `jsx_text` token of `src` and return `(value, raw)`.
+    fn jsx_text_value(src: &str) -> (Vec<u8>, Vec<u8>) {
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("t", src);
+        let tab = AtomTable::new();
+        let mut lex = JSLexer::new(id, &mut sm, &tab, GrammarContext::AllowJSXIdentifier);
+        let tok = lex.advance_in_jsx_child();
+        assert_eq!(tok.kind(), TokenKind::jsx_text);
+        let value = tab.bytes(tok.get_jsx_text_value()).to_vec();
+        let raw = tab.bytes(tok.get_jsx_text_raw()).to_vec();
+        (value, raw)
+    }
+
+    #[test]
+    fn jsx_child() {
+        use TokenKind::*;
+        // advance_in_jsx_child emits l_brace/less and accumulates everything
+        // else as one jsx_text until {/</EOF.
+        assert_eq!(advance_jsx("hello{x"), vec![jsx_text, l_brace, jsx_text, eof]);
+        assert_eq!(advance_jsx("a<b"), vec![jsx_text, less, jsx_text, eof]);
+        // jsx text value decodes entities; raw keeps them.
+        assert_eq!(
+            jsx_text_value("a&amp;b{"),
+            (b"a&b".to_vec(), b"a&amp;b".to_vec())
+        );
     }
 }
