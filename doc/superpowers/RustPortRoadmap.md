@@ -65,7 +65,11 @@ strings, templates, regexp, private identifiers), **JSX** (`advanceInJSXChild`, 
 and **Flow** (`Type` context), all literals + escapes (incl. WTF-8 / `convertSurrogates`), and
 the stateful/parser-facing APIs (comment+token storage, magic comments, `SavePoint`, `lookahead1/2`,
 `isCurrentTokenADirective`, `rescanRBraceInTemplateLiteral`, `isLet/isUsing/isAwaitUsing`, the
-`Token`/`StoredComment` accessors). **136 workspace tests, zero warnings.** Real `unsafe` only in
+`Token`/`StoredComment` accessors). **178 workspace tests, zero warnings.** Validation is two-pronged:
+the byte-for-byte differential (token streams) **and** all **39 `unittests/Parser/JSLexerTest.cpp`
+cases ported** to `rust/crates/parser/tests/jslexer_ported.rs` (faithfully — error/warning counts,
+message text via a `CollectingHandler`, recovery streams, concrete values; porting them surfaced **no
+lexer bugs**, closing the earlier error-path / `prevTokenEndLoc` coverage gaps). Real `unsafe` only in
 `atom_table` (the interner) and `parser/cursor.rs` (the scoped `*const u8` cursor, decision B).
 Sole deviation: `getAllocator` has no Rust analog (no bump allocator). Design spec:
 `specs/2026-06-01-js-lexer-design.md`; the per-subsystem/per-phase plans are under `plans/`
