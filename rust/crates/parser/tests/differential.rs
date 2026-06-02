@@ -2,10 +2,10 @@
 //! oracle over a punctuator/whitespace/comment corpus and assert the dumps are
 //! byte-for-byte equal.
 //!
-//! Phase 1a lexes ONLY punctuators, whitespace, and comments — identifiers,
-//! numbers, strings, templates, regexp and private identifiers are stubbed — so
-//! the corpus below contains no such tokens. The oracle is driven with
-//! `--context=div`, so `/` lexes as `slash`/`slashequal` (regexp is a later
+//! The lexer covers punctuators, whitespace, comments, identifiers, numbers,
+//! string literals and private identifiers; templates and regexp are still
+//! stubbed, so the corpus below contains no such tokens. The oracle is driven
+//! with `--context=div`, so `/` lexes as `slash`/`slashequal` (regexp is a later
 //! phase); the Rust lexer is driven with `GrammarContext::AllowDiv` to match.
 
 use std::io::Write;
@@ -145,6 +145,22 @@ fn differential_punctuators_and_trivia() {
         "123456789 1234567890 999999999",
         // trailing dot and leading dot, incl. `0.`, and a dot+exponent form.
         "5. .5 0. 1.e3",
+        // ---- string literals --------------------------------------------------
+        // plain strings, both quote styles.
+        "'a' \"b\" 'hello world'",
+        // escapes -> escapes=1 (tab, newline, CR, backslash, escaped quote).
+        "'a\\tb' \"x\\ny\" '\\r\\\\\\''",
+        // hex (\xHH) + unicode (\uHHHH) escapes.
+        "'\\x41\\x7e' '\\u00e9\\u4e2d'",
+        // raw unicode inside strings -> re-encoded as WTF-8 \xHH in the dump.
+        "'caf\u{00e9}' \"\u{4e2d}\u{6587}\"",
+        // escaped line continuations (LF and CRLF) -> skipped, escapes=1.
+        "'a\\\nb' 'line\\\r\ncont'",
+        // ---- private identifiers ----------------------------------------------
+        // private ids (incl. a member-like `x.#priv`).
+        "#foo #_bar x.#priv",
+        // mixed: string, private id, number, punctuator.
+        "'a' #b 5 ;",
     ];
     // Resolve the oracle once. The skip is all-or-nothing: if the binary is
     // absent we skip the whole test cleanly; if it is present we MUST run every

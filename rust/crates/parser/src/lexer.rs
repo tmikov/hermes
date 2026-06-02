@@ -2099,6 +2099,20 @@ impl<'a> JSLexer<'a> {
                 out.push_str(" ident=");
                 quote_bytes(out, self.strtab.bytes(self.token.get_private_identifier()));
             }
+            TokenKind::string_literal => {
+                use std::fmt::Write;
+                let _ = write!(
+                    out,
+                    " escapes={}",
+                    if self.token.get_string_literal_contains_escapes() {
+                        1
+                    } else {
+                        0
+                    }
+                );
+                out.push_str(" value=");
+                quote_bytes(out, self.strtab.bytes(self.token.get_string_literal()));
+            }
             TokenKind::numeric_literal => {
                 use std::fmt::Write;
                 // Match the harness `snprintf(" bits=0x%016llx", DoubleToBits)`:
