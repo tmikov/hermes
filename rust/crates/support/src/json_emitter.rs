@@ -8,8 +8,6 @@
 //! Port of `hermes::JSONEmitter` (include/hermes/Support/JSONEmitter.{h,cpp})
 //! plus the `numberToString` helper it relies on (lib/Support/Conversions.cpp).
 
-use std::fmt::Write;
-
 /// Port of `hermes::numberToString` (lib/Support/Conversions.cpp:211) — the
 /// ECMAScript Number::toString algorithm. Produces the shortest round-tripping
 /// decimal. The C++ obtains the shortest (significand, exponent) via
@@ -34,6 +32,7 @@ pub fn number_to_string(m: f64) -> String {
     }
 
     let mut out = String::new();
+    // 3. Negative: prepend '-' and operate on the absolute value.
     if m < 0.0 {
         out.push('-');
     }
@@ -92,7 +91,7 @@ pub fn number_to_string(m: f64) -> String {
         }
         out.push('e');
         out.push(exponent_sign);
-        let _ = write!(out, "{exp_val}");
+        out.push_str(&exp_val.to_string());
     }
     out
 }
@@ -113,6 +112,7 @@ mod tests {
             (100.0, "100"),
             (0.1, "0.1"),
             (0.0001, "0.0001"),     // n=-3, fixed
+            (1e-6, "0.000001"),     // n=-5, fixed boundary
             (1e-7, "1e-7"),         // n=-6, scientific
             (1e20, "100000000000000000000"), // n=21, fixed
             (1e21, "1e+21"),        // n=22, scientific
