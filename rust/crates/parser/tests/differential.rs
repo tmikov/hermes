@@ -3,10 +3,12 @@
 //! byte-for-byte equal.
 //!
 //! The lexer covers punctuators, whitespace, comments, identifiers, numbers,
-//! string literals, private identifiers and template literals (no-substitution
-//! and head forms); regexp is still stubbed. The oracle is driven
-//! with `--context=div`, so `/` lexes as `slash`/`slashequal` (regexp is a later
-//! phase); the Rust lexer is driven with `GrammarContext::AllowDiv` to match.
+//! string literals, private identifiers, template literals (no-substitution and
+//! head forms) and regular-expression literals. The harness is parameterized by
+//! grammar context: the `--context=div` corpus lexes `/` as `slash`/`slashequal`
+//! (Rust: `GrammarContext::AllowDiv`); the `--context=regexp` corpus lexes `/` as
+//! a regexp literal (Rust: `GrammarContext::AllowRegExp`). Both sides are driven
+//! with the matching context so the dumps compare byte-for-byte.
 
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -16,16 +18,25 @@ use parser::lexer::{GrammarContext, JSLexer};
 use parser::token_kinds::TokenKind;
 use support::manager::SourceErrorManager;
 
-/// Produce the Rust lexer dump for `src` (one `dump_token` line per token,
-/// including the final `eof`, each terminated by '\n').
-fn rust_dump(src: &str) -> String {
+/// The C++ `--context=` flag value matching a Rust `GrammarContext`.
+fn context_flag(ctx: GrammarContext) -> &'static str {
+    match ctx {
+        GrammarContext::AllowDiv => "--context=div",
+        GrammarContext::AllowRegExp => "--context=regexp",
+        other => panic!("unsupported differential context {other:?}"),
+    }
+}
+
+/// Produce the Rust lexer dump for `src` under `ctx` (one `dump_token` line per
+/// token, including the final `eof`, each terminated by '\n').
+fn rust_dump(src: &str, ctx: GrammarContext) -> String {
     let mut sm = SourceErrorManager::new();
     let id = sm.add_buffer("t", src);
     let tab = AtomTable::new();
-    let mut lex = JSLexer::new(id, &mut sm, &tab, GrammarContext::AllowDiv);
+    let mut lex = JSLexer::new(id, &mut sm, &tab, ctx);
     let mut out = String::new();
     loop {
-        let k = lex.advance(GrammarContext::AllowDiv).kind();
+        let k = lex.advance(ctx).kind();
         lex.dump_token(&mut out);
         out.push('\n');
         if k == TokenKind::eof {
@@ -46,12 +57,12 @@ fn js_lexer_dump_bin() -> std::path::PathBuf {
         .join("../../../cmake-build-asan/bin/js-lexer-dump")
 }
 
-/// Run the C++ `js-lexer-dump --context=div -` oracle on `src` via stdin and
+/// Run the C++ `js-lexer-dump --context=<ctx> -` oracle on `src` via stdin and
 /// return its stdout. The caller is responsible for checking the binary exists
 /// (see `js_lexer_dump_bin`); this always attempts to run it.
-fn cpp_dump(bin: &std::path::Path, src: &str) -> Option<String> {
+fn cpp_dump(bin: &std::path::Path, src: &str, ctx: GrammarContext) -> Option<String> {
     let mut child = Command::new(bin)
-        .arg("--context=div")
+        .arg(context_flag(ctx))
         .arg("-")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -185,11 +196,28 @@ fn differential_punctuators_and_trivia() {
         // raw unicode -> WTF-8 in cooked+raw (incl. a supplementary-plane char).
         "`uni\u{4e2d}` `astral\u{1f600}`",
     ];
-    // Resolve the oracle once. The skip is all-or-nothing: if the binary is
-    // absent we skip the whole test cleanly; if it is present we MUST run every
-    // corpus assertion (no early return can bypass an assertion). Set
-    // `REQUIRE_DIFFERENTIAL=1` to turn a missing binary into a hard failure, so
-    // CI can be configured to require the differential to actually run.
+    run_differential("div", &corpus, GrammarContext::AllowDiv);
+}
+
+#[test]
+fn differential_regexp() {
+    let corpus = [
+        // regexp corpus (driven with --context=regexp on both sides).
+        "/abc/g /x/ /[a-z]+/gi",
+        "/[/]/ /a\\/b/ /\\d+/", // '/' in class, escaped '/', escape
+        "/foo/gimsuy",          // all flags
+        "/\u{4e2d}/u",          // unicode in body -> WTF-8
+        "x = /re/g",            // div context would differ; here regexp follows '='
+    ];
+    run_differential("regexp", &corpus, GrammarContext::AllowRegExp);
+}
+
+/// Run the differential over `corpus` under `ctx`. The skip is all-or-nothing:
+/// if the binary is absent we skip cleanly; if it is present we MUST run every
+/// corpus assertion (no early return can bypass an assertion). Set
+/// `REQUIRE_DIFFERENTIAL=1` to turn a missing binary into a hard failure, so CI
+/// can be configured to require the differential to actually run.
+fn run_differential(label: &str, corpus: &[&str], ctx: GrammarContext) {
     let bin = js_lexer_dump_bin();
     if !bin.exists() {
         if std::env::var_os("REQUIRE_DIFFERENTIAL").is_some() {
@@ -200,10 +228,10 @@ fn differential_punctuators_and_trivia() {
     }
 
     let mut compared = 0usize;
-    for src in corpus {
-        let cpp = cpp_dump(&bin, src).expect("js-lexer-dump exists but failed to run");
-        assert_eq!(rust_dump(src), cpp, "mismatch for {src:?}");
+    for &src in corpus {
+        let cpp = cpp_dump(&bin, src, ctx).expect("js-lexer-dump exists but failed to run");
+        assert_eq!(rust_dump(src, ctx), cpp, "mismatch for {src:?}");
         compared += 1;
     }
-    eprintln!("differential compared {compared} corpus entries");
+    eprintln!("differential[{label}] compared {compared} corpus entries");
 }

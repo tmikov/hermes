@@ -68,6 +68,13 @@ impl<'a> JSLexer<'a> {
                     self.strtab.bytes(self.token.get_bigint_literal_raw_value()),
                 );
             }
+            TokenKind::regexp_literal => {
+                let re = self.token.get_regexp_literal();
+                out.push_str(" body=");
+                quote_bytes(out, self.strtab.bytes(re.body()));
+                out.push_str(" flags=");
+                quote_bytes(out, self.strtab.bytes(re.flags()));
+            }
             TokenKind::no_substitution_template
             | TokenKind::template_head
             | TokenKind::template_middle
