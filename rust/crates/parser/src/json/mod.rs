@@ -129,6 +129,42 @@ impl<'a> JSONValue<'a> {
             _ => None,
         }
     }
+
+    /// Port of `JSONValue::emitInto` (JSONParser.cpp:39). `atoms` resolves
+    /// interned string handles to bytes. Strings must be valid UTF-8.
+    pub fn emit_into(
+        &self,
+        emitter: &mut support::json_emitter::JSONEmitter,
+        atoms: &atom_table::AtomTable,
+    ) {
+        match self {
+            JSONValue::Object(class, values) => {
+                emitter.open_dict();
+                for (k, v) in class.keys.iter().copied().zip(values.iter().copied()) {
+                    let key =
+                        std::str::from_utf8(atoms.bytes(k)).expect("valid UTF-8 key");
+                    emitter.emit_key(key);
+                    v.emit_into(emitter, atoms);
+                }
+                emitter.close_dict();
+            }
+            JSONValue::Array(values) => {
+                emitter.open_array();
+                for v in values.iter().copied() {
+                    v.emit_into(emitter, atoms);
+                }
+                emitter.close_array();
+            }
+            JSONValue::String(a) => {
+                let s =
+                    std::str::from_utf8(atoms.bytes(*a)).expect("valid UTF-8 string");
+                emitter.emit_str(s);
+            }
+            JSONValue::Number(n) => emitter.emit_f64(*n),
+            JSONValue::Boolean(b) => emitter.emit_bool(*b),
+            JSONValue::Null => emitter.emit_null_value(),
+        }
+    }
 }
 
 /// Borrowed view over an array (JSONParser.h:458 `JSONArray`).
@@ -257,6 +293,39 @@ mod model_tests {
         for (k, s) in pairs {
             assert_eq!(kind_to_string(k), s);
         }
+    }
+
+    #[test]
+    fn emit_into_round_trip() {
+        use super::JSONFactory;
+        use atom_table::AtomTable;
+        use bumpalo::Bump;
+        use support::json_emitter::JSONEmitter;
+
+        let arena = Bump::new();
+        let atoms = AtomTable::new();
+        let f = JSONFactory::new(&arena, &atoms);
+
+        // {'key1':1,'key2':'value2','key3':{'nested1':true},'key4':[false,null,'value2']}
+        let nested = {
+            let p = (f.get_string_str("nested1"), f.get_boolean(true));
+            f.new_object(&mut [p]).unwrap()
+        };
+        let arr = f.new_array(&[f.get_boolean(false), f.get_null(), f.get_string_str("value2")]);
+        let obj = f.new_object(&mut [
+            (f.get_string_str("key1"), f.get_number(1.0)),
+            (f.get_string_str("key2"), f.get_string_str("value2")),
+            (f.get_string_str("key3"), nested),
+            (f.get_string_str("key4"), arr),
+        ]).unwrap();
+
+        let mut s = String::new();
+        {
+            let mut e = JSONEmitter::new(&mut s, false);
+            obj.emit_into(&mut e, &atoms);
+        }
+        // sorted-key order: key1,key2,key3,key4
+        assert_eq!(s, r#"{"key1":1,"key2":"value2","key3":{"nested1":true},"key4":[false,null,"value2"]}"#);
     }
 
     #[test]
