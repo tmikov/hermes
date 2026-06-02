@@ -136,6 +136,15 @@ fn differential_punctuators_and_trivia() {
         "0 .5 .25",
         // number immediately followed by a punctuator.
         "1+2 3*4 5;6",
+        // legacy octal. In strict mode (the harness default) these report an
+        // error to stderr, but the lexer still recovers and emits the octal
+        // numeric_literal value on stdout, so the dumps match byte-for-byte.
+        "0123 010 07",
+        // the <=9-digit decimal fast-path boundary (9 digits, 10 digits, and
+        // all-nines at the boundary).
+        "123456789 1234567890 999999999",
+        // trailing dot and leading dot, incl. `0.`, and a dot+exponent form.
+        "5. .5 0. 1.e3",
     ];
     // Resolve the oracle once. The skip is all-or-nothing: if the binary is
     // absent we skip the whole test cleanly; if it is present we MUST run every

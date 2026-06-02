@@ -991,6 +991,12 @@ impl<'a> JSLexer<'a> {
 
         let cur = self.cursor.offset();
         let start_loc = self.token.start_loc();
+        // Every arm of the chain below assigns `val`; we call
+        // `set_numeric_literal(val)` exactly once at the single exit point at
+        // the end, mirroring the C++ `done:` label. The C++ `goto done` early
+        // exits (the error-limit cases that set `val = NaN`) are reproduced
+        // with labeled-block breaks (`'done`) that short-circuit the rest of
+        // their arm but still fall through to the final single set.
         let val: f64;
 
         if !ok {
@@ -1002,8 +1008,6 @@ impl<'a> JSLexer<'a> {
                 "invalid numeric literal",
             );
             val = f64::NAN;
-            self.token.set_numeric_literal(val);
-            return;
         } else if !real
             && radix == 10
             && (cur - start) <= 9
@@ -1020,9 +1024,10 @@ impl<'a> JSLexer<'a> {
                 idx += 1;
             }
             val = ival as f64;
-            self.token.set_numeric_literal(val);
-            return;
         } else if real || radix == 10 {
+            // Labeled block: the C++ `goto done` error-limit early exits set
+            // `val = NaN` and break straight to the final single set.
+            val = 'done: {
             if legacy_octal {
                 if self.strict_mode || grammar_context == GrammarContext::Type {
                     if !self.error_range(
@@ -1032,8 +1037,7 @@ impl<'a> JSLexer<'a> {
                         },
                         "Decimals with leading zeros are not allowed in strict mode",
                     ) {
-                        self.token.set_numeric_literal(f64::NAN);
-                        return;
+                        break 'done f64::NAN;
                     }
                 } else {
                     // Check to see if we can actually scan this as radix 10.
@@ -1047,8 +1051,7 @@ impl<'a> JSLexer<'a> {
                             },
                             "Octal numeric literals must be integers",
                         ) {
-                            self.token.set_numeric_literal(f64::NAN);
-                            return;
+                            break 'done f64::NAN;
                         }
                     }
                 }
@@ -1108,9 +1111,7 @@ impl<'a> JSLexer<'a> {
                 buf.extend_from_slice(&bytes[0..(cur - start) as usize]);
             }
             match number::str_to_double(&buf) {
-                Some(v) => {
-                    val = v;
-                }
+                Some(v) => v,
                 None => {
                     self.error_range(
                         SMRange {
@@ -1119,12 +1120,14 @@ impl<'a> JSLexer<'a> {
                         },
                         "invalid numeric literal",
                     );
-                    val = f64::NAN;
+                    f64::NAN
                 }
             }
-            self.token.set_numeric_literal(val);
-            return;
+            };
         } else {
+            // Labeled block: the C++ `goto done` error-limit early exit sets
+            // `val = NaN` and breaks straight to the final single set.
+            val = 'done: {
             if legacy_octal
                 && (self.strict_mode || grammar_context == GrammarContext::Type)
                 && (cur - start) > 1
@@ -1136,8 +1139,7 @@ impl<'a> JSLexer<'a> {
                     },
                     "Octal literals must use '0o' in strict mode",
                 ) {
-                    self.token.set_numeric_literal(f64::NAN);
-                    return;
+                    break 'done f64::NAN;
                 }
             }
 
@@ -1155,7 +1157,7 @@ impl<'a> JSLexer<'a> {
                         String::from_utf8_lossy(&prefix)
                     ),
                 );
-                val = f64::NAN;
+                f64::NAN
             } else {
                 // Parse the rest of the number:
                 if legacy_octal {
@@ -1174,7 +1176,7 @@ impl<'a> JSLexer<'a> {
                 }
                 let digits = self.cursor.raw()[start as usize..cur as usize].to_vec();
                 match number::parse_int_with_radix(&digits, radix, /* allow_sep */ true) {
-                    Some(v) => val = v,
+                    Some(v) => v,
                     None => {
                         self.error_range(
                             SMRange {
@@ -1183,12 +1185,15 @@ impl<'a> JSLexer<'a> {
                             },
                             "invalid integer literal",
                         );
-                        val = f64::NAN;
+                        f64::NAN
                     }
                 }
             }
-            self.token.set_numeric_literal(val);
+            };
         }
+
+        // Single exit (C++ `done:`): set the numeric literal value exactly once.
+        self.token.set_numeric_literal(val);
     }
 
     /// ES6.0 B.1.1: if we encounter a "legacy" octal number (starting with a
