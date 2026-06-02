@@ -347,6 +347,13 @@ impl<'a> JSLexer<'a> {
         self.sm
     }
 
+    /// \return a mutable reference to the SourceErrorManager so the parser can
+    /// report errors through the lexer. Mirrors the non-const `getSourceMgr()`
+    /// overload in `JSLexer.h:516` (C++ returns a non-const reference).
+    pub fn get_source_mgr_mut(&mut self) -> &mut SourceErrorManager {
+        self.sm
+    }
+
     /// \return the string interner. Port of `getStringTable` (JSLexer.h:523).
     /// (The C++ `getAllocator` has no Rust analog — the port uses the global
     /// allocator and `AtomTable`'s own interning, so there is no bump allocator.)
@@ -1917,5 +1924,19 @@ mod tests {
         assert_eq!(lex.buffer_bytes(), b"abc");
         assert_eq!(lex.get_buffer_start(), 0);
         assert_eq!(lex.get_buffer_end(), 3);
+    }
+
+    #[test]
+    fn source_mgr_mut_reports_errors() {
+        // Mirror the exact setup pattern used by other tests in this module:
+        // SourceErrorManager::new(), sm.add_buffer, AtomTable::new(), JSLexer::new.
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("t", "x");
+        let tab = AtomTable::new();
+        let mut lex = JSLexer::new(id, &mut sm, &tab, GrammarContext::AllowDiv);
+        let loc = lex.token().start_loc();
+        lex.get_source_mgr_mut()
+            .error_at(loc, None, "boom", Subsystem::Parser);
+        assert_eq!(lex.get_source_mgr().error_count(), 1);
     }
 }
