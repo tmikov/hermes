@@ -1429,6 +1429,40 @@ impl<'a> JSLexer<'a> {
         self.token.set_string_literal(atom, escapes);
     }
 
+    // ---- Private identifier scanner -----------------------------------------
+
+    /// Scan a private identifier (the cursor is on `#`). Port of
+    /// `scanPrivateIdentifier` (JSLexer.cpp:1951-1975). Returns false (and emits
+    /// an "empty private identifier" error) if `#` is not followed by an
+    /// identifier.
+    fn scan_private_identifier(&mut self) -> bool {
+        debug_assert!(self.cursor.peek() == b'#');
+
+        // Skip the '#'.
+        let start = self.cur_loc();
+        self.cursor.advance(1);
+
+        // Scan the actual identifier.
+        if is_ascii_identifier_start(self.cursor.peek()) {
+            let here = self.cursor.offset();
+            self.scan_identifier_fast_path(here, IdentifierMode::JS);
+        } else if self.consume_identifier_start() {
+            // The cursor has been updated by consume_identifier_start.
+            self.scan_identifier_parts(IdentifierMode::JS);
+        } else {
+            self.error(start, "empty private identifier");
+            return false;
+        }
+
+        // Parsed a resword or identifier.
+        // Convert the TokenKind to private_identifier after the fact.
+        // This avoids adding another Mode to IdentifierMode.
+        let ident = self.token.get_res_word_or_identifier();
+        self.token.set_private_identifier(ident);
+
+        true
+    }
+
     // ---- The phase-1b stubs -------------------------------------------------
 
     /// Stub for the not-yet-implemented scanners (identifiers, numbers, strings,
@@ -1715,8 +1749,7 @@ impl<'a> JSLexer<'a> {
                     }
                 }
 
-                // # : hashbang (only at buffer start) or private identifier
-                // (deferred to phase 1b).
+                // # : hashbang (only at buffer start) or private identifier.
                 b'#' => {
                     if self.cursor.offset() == 0 && self.cursor.peek_at(1) == b'!' {
                         // #! (hashbang) at the very start of the buffer.
@@ -1724,8 +1757,9 @@ impl<'a> JSLexer<'a> {
                         continue;
                     }
                     self.set_token_start();
-                    // scanPrivateIdentifier is deferred to phase 1b.
-                    self.scan_not_implemented();
+                    if !self.scan_private_identifier() {
+                        continue;
+                    }
                 }
 
                 // < <= << <<=
@@ -2124,6 +2158,13 @@ fn is_ascii_digit(ch: u8) -> bool {
     ch.is_ascii_digit()
 }
 
+/// \return true if `ch` has the ID_Start property and is ASCII. Port of
+/// `isASCIIIdentifierStart` (CharacterProperties.h:100-102).
+#[inline]
+fn is_ascii_identifier_start(ch: u8) -> bool {
+    ch == b'_' || ch == b'$' || ((ch | 32) >= b'a' && (ch | 32) <= b'z')
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2313,6 +2354,30 @@ mod tests {
         assert_eq!(str_cooked("'\\u00e9'"), (b"\xc3\xa9".to_vec(), true)); // é (WTF-8)
         assert_eq!(str_cooked("'a\\\nb'"), (b"ab".to_vec(), true)); // escaped newline continuation
         assert_eq!(str_cooked("'caf\u{00e9}'"), (b"caf\xc3\xa9".to_vec(), false)); // raw unicode, no escape
+    }
+
+    /// Lex `src` as a single private identifier and return its interned bytes.
+    fn private_ident_bytes(src: &str) -> Vec<u8> {
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("t", src);
+        let tab = AtomTable::new();
+        let mut lex = JSLexer::new(id, &mut sm, &tab, GrammarContext::AllowDiv);
+        let tok = lex.advance(GrammarContext::AllowDiv);
+        assert_eq!(tok.kind(), TokenKind::private_identifier);
+        tab.bytes(tok.get_private_identifier()).to_vec()
+    }
+
+    #[test]
+    fn private_identifiers() {
+        use TokenKind::*;
+        assert_eq!(
+            kinds("#foo #bar"),
+            vec![private_identifier, private_identifier, eof]
+        );
+        assert_eq!(private_ident_bytes("#x"), b"x"); // the interned name excludes '#'
+                                                     // '#' followed by no identifier -> "empty private identifier"
+                                                     // error; scan_private_identifier returns false -> no token.
+        assert_eq!(kinds("#"), vec![eof]);
     }
 
     #[test]
