@@ -16,7 +16,7 @@
 //! - C++ `lex.advance()` defaults to `AllowRegExp`; `lex.advance(AllowDiv)` is
 //!   explicit. The Rust `advance` takes the grammar context explicitly.
 //! - C++ `lookahead1(llvh::None)` uses the parser default
-//!   `RequireNoNewLine=true`, so the Rust call is `lookahead1(true, None)`.
+//!   `RequireNoNewLine=true`, so the Rust call is `lookahead1::<true>(None)`.
 //! - Interned values are `AtomBytes`; `tab.bytes(atom)` yields the bytes the
 //!   C++ `->str()` / `->c_str()` returns. Comparisons are against byte strings.
 //! - Tests whose source contains raw (non-UTF-8 / control) bytes use
@@ -1218,7 +1218,7 @@ fn lookahead_newline_test() {
     assert_eq!(lex.advance(GrammarContext::AllowRegExp).kind(), TokenKind::rw_function);
 
     // No expected token; newline before next token -> None, state reverted.
-    let opt_next = lex.lookahead1(true, None);
+    let opt_next = lex.lookahead1::<true>(None);
     assert_eq!(opt_next, None);
 
     assert_eq!(lex.token().kind(), TokenKind::rw_function);
@@ -1236,7 +1236,7 @@ fn lookahead_test() {
     assert_eq!(lex.advance(GrammarContext::AllowRegExp).kind(), TokenKind::rw_function);
 
     // Without an expected token, always revert.
-    let opt_next = lex.lookahead1(true, None);
+    let opt_next = lex.lookahead1::<true>(None);
     assert_eq!(opt_next, Some(TokenKind::l_paren));
 
     assert_eq!(lex.token().kind(), TokenKind::rw_function);
@@ -1246,12 +1246,12 @@ fn lookahead_test() {
     assert_eq!(lex.advance(GrammarContext::AllowRegExp).kind(), TokenKind::identifier);
 
     // Expect plus, see comma -> revert to identifier.
-    let opt_next = lex.lookahead1(true, Some(TokenKind::plus));
+    let opt_next = lex.lookahead1::<true>(Some(TokenKind::plus));
     assert_eq!(opt_next, Some(TokenKind::comma));
     assert_eq!(lex.token().kind(), TokenKind::identifier);
 
     // Expect comma, see comma -> keep the lookahead token.
-    let opt_next = lex.lookahead1(true, Some(TokenKind::comma));
+    let opt_next = lex.lookahead1::<true>(Some(TokenKind::comma));
     assert_eq!(opt_next, Some(TokenKind::comma));
     assert_eq!(lex.token().kind(), TokenKind::comma);
 
@@ -1468,7 +1468,7 @@ fn store_comments_test() {
         }
 
         // Lookahead should not add the `/*two*/` comment.
-        lex.lookahead1(true, Some(TokenKind::semi));
+        lex.lookahead1::<true>(Some(TokenKind::semi));
         {
             let buf = lex.get_source_mgr().source_buffer(id);
             let raw = buf.raw();

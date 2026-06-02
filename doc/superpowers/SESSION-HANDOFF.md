@@ -125,8 +125,10 @@ If `cmake-build-asan/` is missing, configure it (it's git-ignored):
   `Token::checkFollowingCharacter`/`inputStr` became `JSLexer` methods; `StoredComment::getString`
   takes the buffer bytes).
 - **C++ RAII guards → explicit methods** (SavePoint is a value struct + `restore`; suppress is
-  save/restore; lookahead's `make_scope_exit` is explicit). **`template<bool>` → runtime bool.**
-  **Parser `Keywords&` → pass the needed atom.**
+  save/restore; lookahead's `make_scope_exit` is explicit). **C++ `template`s stay generics**
+  (monomorphized like the original — `template<bool>` → `const` generic; `template <IdentifierMode>`
+  → the `IdMode` marker trait + `JsMode`/`JsxMode`/`FlowMode` ZSTs; `scanString<JSX>` → `const JSX`).
+  Do NOT flatten a template to a runtime param. **Parser `Keywords&` → pass the needed atom.**
 - **Diagnostics byte-compatible** with `hermesc` (inherited from `support`).
 - We keep C-idiom comparisons (`>= '0' && <= '9'`) faithful to the C++ over clippy style lints, but
   fix genuine new lints (`int_plus_one`, `never_loop`, `approx_constant`, `needless_return`) with

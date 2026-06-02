@@ -13,7 +13,9 @@ use unicode::{
 use crate::token_kinds::{match_reserved_word, TokenKind};
 use crate::utf8::{append_unicode_to_storage, is_utf8_start};
 
-use super::{GrammarContext, IdentifierMode, JSLexer};
+use super::{
+    FlowMode, GrammarContext, IdMode, IdentifierMode, JSLexer, JsMode, JsxMode,
+};
 
 impl<'a> JSLexer<'a> {
     /// Try to consume the start of an identifier into `tmp_storage`. Port of
@@ -65,17 +67,16 @@ impl<'a> JSLexer<'a> {
     /// Try to consume one non-escaped identifier part into `tmp_storage`. Port
     /// of `consumeOneIdentifierPartNoEscape<Mode>` (JSLexer.cpp:1269-1290).
     #[inline]
-    pub(crate) fn consume_one_identifier_part_no_escape(
+    pub(crate) fn consume_one_identifier_part_no_escape<M: IdMode>(
         &mut self,
-        mode: IdentifierMode,
     ) -> bool {
         let ch = self.cursor.peek();
         if ch == b'_'
             || ch == b'$'
             || ((ch | 32) >= b'a' && (ch | 32) <= b'z')
             || ch.is_ascii_digit()
-            || (mode == IdentifierMode::JSX && ch == b'-')
-            || (mode == IdentifierMode::Flow && ch == b'@')
+            || (M::MODE == IdentifierMode::JSX && ch == b'-')
+            || (M::MODE == IdentifierMode::Flow && ch == b'@')
         {
             self.tmp_storage.push(ch);
             self.cursor.advance(1);
@@ -96,11 +97,11 @@ impl<'a> JSLexer<'a> {
 
     /// Consume identifier parts into `tmp_storage`. Port of
     /// `consumeIdentifierParts<Mode>` (JSLexer.cpp:1292-1309).
-    pub(crate) fn consume_identifier_parts(&mut self, mode: IdentifierMode) {
+    pub(crate) fn consume_identifier_parts<M: IdMode>(&mut self) {
         loop {
             // Try consuming a non-escaped identifier part. Failing that, check
             // for an escape.
-            if self.consume_one_identifier_part_no_escape(mode) {
+            if self.consume_one_identifier_part_no_escape::<M>() {
                 continue;
             } else if self.cursor.peek() == b'\\' {
                 // Decode the escape.
@@ -160,14 +161,13 @@ impl<'a> JSLexer<'a> {
         start: u32,
         grammar_context: GrammarContext,
     ) {
-        let mode = if grammar_context == GrammarContext::AllowJSXIdentifier {
-            IdentifierMode::JSX
+        if grammar_context == GrammarContext::AllowJSXIdentifier {
+            self.scan_identifier_fast_path::<JsxMode>(start);
         } else if grammar_context == GrammarContext::Type {
-            IdentifierMode::Flow
+            self.scan_identifier_fast_path::<FlowMode>(start);
         } else {
-            IdentifierMode::JS
-        };
-        self.scan_identifier_fast_path(start, mode);
+            self.scan_identifier_fast_path::<JsMode>(start);
+        }
     }
 
     /// Dispatch `scan_identifier_parts` with the right `IdentifierMode` for the
@@ -176,21 +176,20 @@ impl<'a> JSLexer<'a> {
         &mut self,
         grammar_context: GrammarContext,
     ) {
-        let mode = if grammar_context == GrammarContext::AllowJSXIdentifier {
-            IdentifierMode::JSX
+        if grammar_context == GrammarContext::AllowJSXIdentifier {
+            self.scan_identifier_parts::<JsxMode>();
         } else if grammar_context == GrammarContext::Type {
-            IdentifierMode::Flow
+            self.scan_identifier_parts::<FlowMode>();
         } else {
-            IdentifierMode::JS
-        };
-        self.scan_identifier_parts(mode);
+            self.scan_identifier_parts::<JsMode>();
+        }
     }
 
     /// Scan an identifier assuming no Unicode escapes / UTF-8 (the common case),
     /// falling back to the slow path on the first escape or UTF-8 byte. Port of
     /// `scanIdentifierFastPath<Mode>` (JSLexer.cpp:1889-1933). `start` is the
     /// byte offset of the first identifier character (the cursor is there).
-    pub(crate) fn scan_identifier_fast_path(&mut self, start: u32, mode: IdentifierMode) {
+    pub(crate) fn scan_identifier_fast_path<M: IdMode>(&mut self, start: u32) {
         // Quickly consume the ASCII identifier part.
         let mut end = start;
         let raw = self.cursor.raw();
@@ -201,8 +200,8 @@ impl<'a> JSLexer<'a> {
                 || ch == b'$'
                 || ((ch | 32) >= b'a' && (ch | 32) <= b'z')
                 || ch.is_ascii_digit()
-                || (mode == IdentifierMode::JSX && ch == b'-')
-                || (mode == IdentifierMode::Flow && ch == b'@'))
+                || (M::MODE == IdentifierMode::JSX && ch == b'-')
+                || (M::MODE == IdentifierMode::Flow && ch == b'@'))
             {
                 break ch;
             }
@@ -215,7 +214,7 @@ impl<'a> JSLexer<'a> {
             self.tmp_storage
                 .extend_from_slice(&self.cursor.raw()[start as usize..end as usize]);
             self.cursor.seek(end);
-            self.scan_identifier_parts(mode);
+            self.scan_identifier_parts::<M>();
             return;
         } else if is_utf8_start(ch) {
             // If we have encountered a Unicode character, we try to decode it. If
@@ -229,7 +228,7 @@ impl<'a> JSLexer<'a> {
                     .extend_from_slice(&self.cursor.raw()[start as usize..end as usize]);
                 append_unicode_to_storage(&mut self.tmp_storage, cp);
                 self.cursor.seek(next);
-                self.scan_identifier_parts(mode);
+                self.scan_identifier_parts::<M>();
                 return;
             }
             // Not an id-continue: the identifier ends at `end`; cursor already
@@ -253,8 +252,8 @@ impl<'a> JSLexer<'a> {
     /// already holds the prefix). Port of `scanIdentifierParts<Mode>`
     /// (JSLexer.cpp:1935-1949). A reserved word reached through a unicode escape
     /// ALSO emits a warning.
-    pub(crate) fn scan_identifier_parts(&mut self, mode: IdentifierMode) {
-        self.consume_identifier_parts(mode);
+    pub(crate) fn scan_identifier_parts<M: IdMode>(&mut self) {
+        self.consume_identifier_parts::<M>();
         let rw = self.scan_reserved_word(&self.tmp_storage);
         if rw != TokenKind::identifier {
             let ident = self.res_word_ident(rw);
@@ -289,10 +288,10 @@ impl<'a> JSLexer<'a> {
         // Scan the actual identifier.
         if is_ascii_identifier_start(self.cursor.peek() as u32) {
             let here = self.cursor.offset();
-            self.scan_identifier_fast_path(here, IdentifierMode::JS);
+            self.scan_identifier_fast_path::<JsMode>(here);
         } else if self.consume_identifier_start() {
             // The cursor has been updated by consume_identifier_start.
-            self.scan_identifier_parts(IdentifierMode::JS);
+            self.scan_identifier_parts::<JsMode>();
         } else {
             self.error(start, "empty private identifier");
             return false;

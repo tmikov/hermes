@@ -16,14 +16,21 @@ impl<'a> JSLexer<'a> {
     /// strings (`AllowJSXIdentifier`) decode `&`-HTML-entities, allow raw
     /// newlines, and treat `\` as a literal character.
     pub(crate) fn scan_string_in_context(&mut self, grammar_context: GrammarContext) {
-        self.scan_string(grammar_context == GrammarContext::AllowJSXIdentifier);
+        if grammar_context == GrammarContext::AllowJSXIdentifier {
+            self.scan_string::<true>();
+        } else {
+            self.scan_string::<false>();
+        }
     }
 
     /// Scan a string literal (the cursor is on the opening quote). Port of
-    /// `JSLexer::scanString<JSX>` (JSLexer.cpp:1977-2126). When `jsx`, a raw
+    /// `JSLexer::scanString<JSX>` (JSLexer.cpp:1977-2126). When `JSX`, a raw
     /// `\n`/`\r` is pushed to storage (not a non-terminated error), a `&` is
     /// decoded as an HTML entity, and `\` is a literal character (no escape).
-    pub(crate) fn scan_string(&mut self, jsx: bool) {
+    ///
+    /// The C++ `template <bool JSX>` is preserved as the const generic `JSX`, so
+    /// each specialization folds the `JSX` checks away at compile time.
+    pub(crate) fn scan_string<const JSX: bool>(&mut self) {
         debug_assert!(self.cursor.peek() == b'\'' || self.cursor.peek() == b'"');
         let quote_ch = self.cursor.peek();
         self.cursor.advance(1);
@@ -39,7 +46,7 @@ impl<'a> JSLexer<'a> {
             if c == quote_ch {
                 self.cursor.advance(1);
                 break;
-            } else if !jsx && c == b'\\' {
+            } else if !JSX && c == b'\\' {
                 escapes = true;
                 self.cursor.advance(1);
                 let e = self.cursor.peek();
@@ -154,7 +161,7 @@ impl<'a> JSLexer<'a> {
                     }
                 }
             } else if c == b'\n' || c == b'\r' {
-                if jsx {
+                if JSX {
                     // A raw new line is allowed in a JSX string.
                     self.tmp_storage.push(c);
                     self.cursor.advance(1);
@@ -166,7 +173,7 @@ impl<'a> JSLexer<'a> {
                     self.sm.note(start, "string started here");
                     break;
                 }
-            } else if jsx && c == b'&' {
+            } else if JSX && c == b'&' {
                 if let Some(code_point) = self.consume_html_entity_optional() {
                     append_unicode_to_storage(&mut self.tmp_storage, code_point);
                 } else {

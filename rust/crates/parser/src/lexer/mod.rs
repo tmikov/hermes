@@ -70,6 +70,31 @@ pub enum IdentifierMode {
     Flow,
 }
 
+/// Type-level marker for the identifier-scanning mode: the Rust analog of the
+/// C++ `template <IdentifierMode Mode>` non-type template parameter. Each impl
+/// pins `MODE` to a compile-time constant, so the per-character mode checks in
+/// the identifier scan loops (`M::MODE == IdentifierMode::JSX`, etc.) fold away
+/// in every monomorphization — matching the C++ template specializations rather
+/// than testing a runtime `mode` argument inside the inner loop.
+pub(crate) trait IdMode {
+    const MODE: IdentifierMode;
+}
+/// Standard JavaScript identifiers only.
+pub(crate) struct JsMode;
+impl IdMode for JsMode {
+    const MODE: IdentifierMode = IdentifierMode::JS;
+}
+/// JavaScript identifiers and '-'.
+pub(crate) struct JsxMode;
+impl IdMode for JsxMode {
+    const MODE: IdentifierMode = IdentifierMode::JSX;
+}
+/// JavaScript identifiers and identifiers which begin with '@'.
+pub(crate) struct FlowMode;
+impl IdMode for FlowMode {
+    const MODE: IdentifierMode = IdentifierMode::Flow;
+}
+
 /// The Hermes JavaScript lexer. Port of `hermes::parser::JSLexer`.
 ///
 /// The lexer borrows the `SourceErrorManager` (for diagnostics) and the

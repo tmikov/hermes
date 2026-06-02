@@ -8,7 +8,7 @@ use support::location::{SMLoc, SMRange};
 
 use crate::number;
 
-use super::{is_ascii_digit, GrammarContext, IdentifierMode, JSLexer};
+use super::{is_ascii_digit, GrammarContext, JSLexer, JsMode};
 
 impl<'a> JSLexer<'a> {
     /// Scan a numeric literal (or BigInt). Port of `JSLexer::scanNumber`
@@ -148,7 +148,7 @@ impl<'a> JSLexer<'a> {
         // as per the spec, we consume a sequence of identifier characters if they
         // follow directly, which means the number is invalid if it's not BigInt.
         if self.consume_identifier_start() {
-            self.consume_identifier_parts(IdentifierMode::JS);
+            self.consume_identifier_parts::<JsMode>();
 
             // raw == the full literal source [rawStart, curCharPtr_).
             let cur = self.cursor.offset();

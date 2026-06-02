@@ -11,11 +11,11 @@
 //! - `isUsingFollowedByIdentifier` (`:178-204`)
 //! - `isAwaitUsingFollowedByIdentifier` (`:206-253`)
 //!
-//! The C++ `template <bool RequireNoNewLine>` becomes a runtime
-//! `require_no_newline: bool` parameter; the parser `Keywords` dependency is
-//! replaced by passing the needed pre-interned atom (`ident_using`). The C++
-//! `make_scope_exit` restore + `SaveAndSuppressMessages` become explicit
-//! save/restore.
+//! The C++ `template <bool RequireNoNewLine>` is preserved as the const generic
+//! `REQUIRE_NO_NEWLINE` (so each specialization monomorphizes like the C++
+//! template); the parser `Keywords` dependency is replaced by passing the needed
+//! pre-interned atom (`ident_using`). The C++ `make_scope_exit` restore +
+//! `SaveAndSuppressMessages` become explicit save/restore.
 
 use atom_table::AtomBytes;
 use support::diag::Subsystem;
@@ -50,10 +50,10 @@ impl<'a> JSLexer<'a> {
     /// next token matches `expected`, in which case the lookahead is consumed).
     /// Port of `lookahead1` (JSLexer.cpp:1038-1095).
     ///
-    /// The C++ `template <bool RequireNoNewLine>` becomes `require_no_newline`.
-    pub fn lookahead1(
+    /// The C++ `template <bool RequireNoNewLine>` is the const generic
+    /// `REQUIRE_NO_NEWLINE`.
+    pub fn lookahead1<const REQUIRE_NO_NEWLINE: bool>(
         &mut self,
-        require_no_newline: bool,
         expected: Option<TokenKind>,
     ) -> Option<TokenKind> {
         // We support TokenKind::question here because of Flow's render types.
@@ -89,7 +89,7 @@ impl<'a> JSLexer<'a> {
 
         self.advance(GrammarContext::AllowRegExp);
         let mut kind = Some(self.token.kind());
-        if require_no_newline && self.is_new_line_before_current_token() {
+        if REQUIRE_NO_NEWLINE && self.is_new_line_before_current_token() {
             // Disregard anything after LineTerminator.
             kind = None;
         } else if expected == kind {
@@ -131,12 +131,11 @@ impl<'a> JSLexer<'a> {
     /// kind of the token after it; otherwise `None`. ALWAYS restores the lexer
     /// state. Port of `lookahead2` (JSLexer.cpp:1100-1154).
     ///
-    /// The C++ `template <bool RequireNoNewLine>` becomes `require_no_newline`;
-    /// the C++ single `make_scope_exit` that always restores becomes a computed
-    /// result followed by an unconditional restore.
-    pub fn lookahead2(
+    /// The C++ `template <bool RequireNoNewLine>` is the const generic
+    /// `REQUIRE_NO_NEWLINE`; the C++ single `make_scope_exit` that always
+    /// restores becomes a computed result followed by an unconditional restore.
+    pub fn lookahead2<const REQUIRE_NO_NEWLINE: bool>(
         &mut self,
-        require_no_newline: bool,
         expected_ident: AtomBytes,
     ) -> Option<TokenKind> {
         debug_assert!(
@@ -159,7 +158,7 @@ impl<'a> JSLexer<'a> {
 
         // Compute the result; the C++ scope_exit restores unconditionally, so
         // we capture the result and restore at the end of the function.
-        let result = self.lookahead2_impl(require_no_newline, expected_ident);
+        let result = self.lookahead2_impl::<REQUIRE_NO_NEWLINE>(expected_ident);
 
         // Restore (mirror of the C++ `make_scope_exit`).
         if self.store_comments {
@@ -185,13 +184,12 @@ impl<'a> JSLexer<'a> {
 
     /// The body of `lookahead2` that advances past two tokens and computes the
     /// result; the surrounding `lookahead2` performs the unconditional restore.
-    fn lookahead2_impl(
+    fn lookahead2_impl<const REQUIRE_NO_NEWLINE: bool>(
         &mut self,
-        require_no_newline: bool,
         expected_ident: AtomBytes,
     ) -> Option<TokenKind> {
         self.advance(GrammarContext::AllowRegExp);
-        if require_no_newline && self.is_new_line_before_current_token() {
+        if REQUIRE_NO_NEWLINE && self.is_new_line_before_current_token() {
             return None;
         }
 
@@ -204,7 +202,7 @@ impl<'a> JSLexer<'a> {
 
         // Advance to the token we're looking ahead to.
         self.advance(GrammarContext::AllowRegExp);
-        if require_no_newline && self.is_new_line_before_current_token() {
+        if REQUIRE_NO_NEWLINE && self.is_new_line_before_current_token() {
             return None;
         }
 
@@ -255,7 +253,7 @@ impl<'a> JSLexer<'a> {
         //   x = 3;
         // is supposed to parse as a let declaration of x, no ASI here.
         // https://262.ecma-international.org/14.0/#prod-LexicalBinding
-        let next_token_kind = self.lookahead1(false, None);
+        let next_token_kind = self.lookahead1::<false>(None);
         matches!(
             next_token_kind,
             Some(TokenKind::identifier)
@@ -296,7 +294,7 @@ impl<'a> JSLexer<'a> {
         }
 
         // Slow path: use lookahead with RequireNoNewLine=true.
-        let next_token_kind = self.lookahead1(true, None);
+        let next_token_kind = self.lookahead1::<true>(None);
         next_token_kind == Some(TokenKind::identifier)
     }
 
@@ -359,7 +357,7 @@ impl<'a> JSLexer<'a> {
         // Slow path.
         // There might be comments, newlines, UTF-8 identifiers, etc.
         self.cursor.seek(saved_ptr);
-        let opt_next = self.lookahead2(true, ident_using);
+        let opt_next = self.lookahead2::<true>(ident_using);
         opt_next == Some(TokenKind::identifier)
     }
 }
@@ -380,7 +378,7 @@ mod tests {
         let mut lex = JSLexer::new(id, &mut sm, &tab, GrammarContext::AllowDiv);
         lex.advance(GrammarContext::AllowDiv); // 'async' (identifier)
                                                // peek: next is 'function' (rw_function), no newline.
-        assert_eq!(lex.lookahead1(true, None), Some(TokenKind::rw_function));
+        assert_eq!(lex.lookahead1::<true>(None), Some(TokenKind::rw_function));
         // state restored: current token still 'async', next advance is 'function'
         assert_eq!(lex.token().kind(), TokenKind::identifier);
         assert_eq!(
@@ -403,7 +401,7 @@ mod tests {
         assert_eq!(lex.get_stored_comments().len(), 0);
         // Consume the lookahead (next token 'b' is an identifier, which matches).
         assert_eq!(
-            lex.lookahead1(true, Some(TokenKind::identifier)),
+            lex.lookahead1::<true>(Some(TokenKind::identifier)),
             Some(TokenKind::identifier)
         );
         // The block comment scanned during the consumed lookahead is rolled back.
@@ -418,7 +416,7 @@ mod tests {
         let mut lex = JSLexer::new(id, &mut sm, &tab, GrammarContext::AllowDiv);
         lex.advance(GrammarContext::AllowDiv); // 'async'
                                                // RequireNoNewLine=true and there IS a newline -> None
-        assert_eq!(lex.lookahead1(true, None), None);
+        assert_eq!(lex.lookahead1::<true>(None), None);
 
         // when expectedToken matches, the cursor is NOT moved back (consumes
         // the lookahead):
@@ -429,7 +427,7 @@ mod tests {
             JSLexer::new(id2, &mut sm2, &tab2, GrammarContext::AllowDiv);
         lex2.advance(GrammarContext::AllowDiv); // 'a'
         assert_eq!(
-            lex2.lookahead1(true, Some(TokenKind::identifier)),
+            lex2.lookahead1::<true>(Some(TokenKind::identifier)),
             Some(TokenKind::identifier)
         );
         assert_eq!(lex2.token().kind(), TokenKind::identifier); // now 'b' (consumed)
@@ -447,7 +445,7 @@ mod tests {
         lex.advance(GrammarContext::AllowDiv); // 'await'
         let using = tab.atom_bytes(b"using");
         // next is 'using' (matches), the one after is 'x' (identifier).
-        assert_eq!(lex.lookahead2(true, using), Some(TokenKind::identifier));
+        assert_eq!(lex.lookahead2::<true>(using), Some(TokenKind::identifier));
         // state restored to 'await'
         assert_eq!(lex.token().kind(), TokenKind::identifier);
         assert_eq!(

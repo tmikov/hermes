@@ -180,9 +180,13 @@ part of SourceErrorManager; in build order):
 > `template_tail`). Unit-tested; the 5 differentials still pass. Plan: `plans/2026-06-02-js-lexer-proper-4a.md`.
 >
 > **🚧 Lexer phase 4b DONE.** Parser-lookahead: `optimisticSkipWhitespace`, `lookahead1`/`lookahead2`
-> (save/advance/restore + message suppression; the `template<bool>`→runtime-bool and `Keywords`→atom-param
+> (save/advance/restore + message suppression; the `template<bool>`→`const`-generic and `Keywords`→atom-param
 > adaptations), `isLetFollowedByDeclStart`, `isUsing/AwaitUsingFollowedByIdentifier`. Unit-tested
 > (incl. a comment-rollback regression found in review). Plan: `plans/2026-06-02-js-lexer-proper-4b.md`.
+> **(Correction, post-lexer:** these and the `IdentifierMode`/`scanString<JSX>` scanners were initially
+> flattened to runtime params; they are now restored to Rust generics — `const` generics for `bool`,
+> the `IdMode` marker trait + `JsMode`/`JsxMode`/`FlowMode` ZSTs for `IdentifierMode` — to preserve the
+> C++ template monomorphization. Faithful-port rule: keep C++ templates as generics, never flatten.**
 >
 > **🚧 Lexer phase 4c DONE — `convertSurrogates`, the LAST `JSLexer` feature.** `getStringLiteral` now
 > branches on the flag: when set it re-encodes the WTF-8 internal form to valid UTF-8 via

@@ -12,7 +12,7 @@ use crate::utf8::{
     match_unicode_line_terminator_offset1, UTF8_LINE_TERMINATOR_CHAR0,
 };
 
-use super::{IdentifierMode, JSLexer};
+use super::{JSLexer, JsMode};
 
 impl<'a> JSLexer<'a> {
     /// Scan a regular-expression literal `/body/flags`, with the cursor on the
@@ -117,7 +117,7 @@ impl<'a> JSLexer<'a> {
         self.tmp_storage.clear();
         let mut escaping_backslash = false;
         loop {
-            if self.consume_one_identifier_part_no_escape(IdentifierMode::JS) {
+            if self.consume_one_identifier_part_no_escape::<JsMode>() {
                 escaping_backslash = false;
                 continue;
             } else if self.cursor.peek() == b'\\' {
