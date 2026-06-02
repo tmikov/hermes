@@ -226,6 +226,16 @@ Two-pronged, mirroring the lexer:
   equality semantics are preserved via arena identity + uniquing.
 - **Pointers → arena refs.** `JSONValue*` → `&'a JSONValue<'a>` in a `bumpalo` arena. Hidden-class
   flexible-array-member → an arena slice.
+- **Uniform 32-byte enum nodes + separate value slices (deliberate).** A Rust enum is sized to its
+  largest variant (the `Object` variant: thin ptr + slice fat ptr) + tag = **32 bytes per node**,
+  regardless of variant. And object/array values live in a *separate* arena slice (`&'a [..]`) rather
+  than inline as in C++'s `Pack`/flexible-array layout — i.e. two allocations + one extra indirection
+  per object/array. We **deliberately accept** this over the more faithful inline-DST layout (which
+  would need encapsulated `unsafe` in `new_object`/`new_array` via `alloc_layout` + manual construction)
+  for simplicity. Impact is small: scalar nodes are uniqued/singletons so the fat-node overhead does not
+  multiply, total bytes are ~equal to C++ (the N value pointers exist either way), and the extra cost is
+  allocation count + one pointer-chase, which is minor for a bump-allocated parse benchmark. Revisit
+  only if the benchmark shows this layer matters.
 - **`FoldingSet` → `HashMap`.** Uniquing uses `HashMap` (strings/numbers/classes) instead of LLVM's
   `FoldingSet`; semantics (dedup by content) identical.
 - **`shared_ptr<Allocator>` → `Rc<Bump>`** with one encapsulated `unsafe` (§6).
