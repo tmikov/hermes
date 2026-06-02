@@ -15,6 +15,7 @@
 mod dump;
 mod escape;
 mod identifier;
+mod jsx;
 mod number;
 mod regexp;
 mod string;
