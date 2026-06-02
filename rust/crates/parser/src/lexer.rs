@@ -379,6 +379,34 @@ impl<'a> JSLexer<'a> {
         Some(cp)
     }
 
+    /// Consume up to `max_len` octal digits (the cursor is on the first octal
+    /// digit), accumulating them into a byte. Port of `consumeOctal`
+    /// (JSLexer.cpp:1311-1327), including the strict-mode error.
+    fn consume_octal(&mut self, mut max_len: u32) -> u8 {
+        debug_assert!(self.cursor.peek() >= b'0' && self.cursor.peek() <= b'7');
+
+        if self.strict_mode {
+            let loc = SMLoc {
+                source: self.buf_id,
+                offset: self.cursor.offset() - 1,
+            };
+            if !self.error(loc, "octals not allowed in strict mode") {
+                return 0;
+            }
+        }
+
+        let mut res: u8 = self.cursor.peek() - b'0';
+        self.cursor.advance(1);
+        max_len -= 1;
+        while max_len != 0 && self.cursor.peek() >= b'0' && self.cursor.peek() <= b'7' {
+            res = (res << 3) + (self.cursor.peek() - b'0');
+            self.cursor.advance(1);
+            max_len -= 1;
+        }
+
+        res
+    }
+
     /// Consume a braced code point escape `{HHHH}` (the cursor is on `{`).
     /// Port of `consumeBracedCodePoint` (JSLexer.cpp:1355-1428). Reproduces the
     /// empty / invalid-character / too-large / non-terminated error paths and
@@ -1232,6 +1260,175 @@ impl<'a> JSLexer<'a> {
         }
     }
 
+    // ---- String literal scanner ---------------------------------------------
+
+    /// Scan a string literal (the cursor is on the opening quote). Port of
+    /// `JSLexer::scanString<false>` (JSLexer.cpp:1977-2126), i.e. the non-JSX
+    /// path; the JSX `&`-HTML-entity arm and the JSX newline-in-string arm are
+    /// phase 3 and omitted here.
+    fn scan_string(&mut self) {
+        debug_assert!(self.cursor.peek() == b'\'' || self.cursor.peek() == b'"');
+        // NOTE: `convert_surrogates` is off by default and the differential never
+        // enables it. The `convertSurrogatesInString` re-encoding path is
+        // DEFERRED (needs UTF-16 conversion utilities), so we intern
+        // `tmp_storage` directly.
+        debug_assert!(!self.convert_surrogates);
+        let quote_ch = self.cursor.peek();
+        self.cursor.advance(1);
+
+        // Track whether we encounter any escapes or new line continuations. We
+        // need that information in order to detect directives.
+        let mut escapes = false;
+
+        self.tmp_storage.clear();
+
+        loop {
+            let c = self.cursor.peek();
+            if c == quote_ch {
+                self.cursor.advance(1);
+                break;
+            } else if c == b'\\' {
+                escapes = true;
+                self.cursor.advance(1);
+                let e = self.cursor.peek();
+                match e {
+                    b'\'' | b'"' | b'\\' => {
+                        self.tmp_storage.push(e);
+                        self.cursor.advance(1);
+                    }
+
+                    b'b' => {
+                        self.cursor.advance(1);
+                        self.tmp_storage.push(8);
+                    }
+                    b'f' => {
+                        self.cursor.advance(1);
+                        self.tmp_storage.push(12);
+                    }
+                    b'n' => {
+                        self.cursor.advance(1);
+                        self.tmp_storage.push(10);
+                    }
+                    b'r' => {
+                        self.cursor.advance(1);
+                        self.tmp_storage.push(13);
+                    }
+                    b't' => {
+                        self.cursor.advance(1);
+                        self.tmp_storage.push(9);
+                    }
+                    b'v' => {
+                        self.cursor.advance(1);
+                        self.tmp_storage.push(11);
+                    }
+
+                    0 => {
+                        // EOF?
+                        if self.cursor.at_end() {
+                            // eof?
+                            let loc = self.cur_loc();
+                            self.error(loc, "non-terminated string");
+                            let start = self.token.start_loc();
+                            self.sm.note(start, "string started here");
+                            break;
+                        } else {
+                            self.tmp_storage.push(e);
+                            self.cursor.advance(1);
+                        }
+                    }
+
+                    b'0' => {
+                        // '\0' is not an octal so handle it separately.
+                        if !(self.cursor.peek_at(1) >= b'0' && self.cursor.peek_at(1) <= b'7') {
+                            self.cursor.advance(1);
+                            append_unicode_to_storage(&mut self.tmp_storage, 0);
+                        } else {
+                            let v = self.consume_octal(3) as u32;
+                            append_unicode_to_storage(&mut self.tmp_storage, v);
+                        }
+                    }
+                    b'1' | b'2' | b'3' => {
+                        let v = self.consume_octal(3) as u32;
+                        append_unicode_to_storage(&mut self.tmp_storage, v);
+                    }
+                    b'4' | b'5' | b'6' | b'7' => {
+                        let v = self.consume_octal(2) as u32;
+                        append_unicode_to_storage(&mut self.tmp_storage, v);
+                    }
+
+                    b'x' => {
+                        self.cursor.advance(1);
+                        let v = self.consume_hex(2, true);
+                        append_unicode_to_storage(&mut self.tmp_storage, v.unwrap_or(0));
+                    }
+
+                    b'u' => {
+                        // Back up one so the cursor is on the '\\'.
+                        self.cursor.seek(self.cursor.offset() - 1);
+                        let cp = self.consume_unicode_escape();
+                        append_unicode_to_storage(&mut self.tmp_storage, cp);
+                    }
+
+                    // Escaped line terminator. We just need to skip it.
+                    b'\n' => {
+                        self.cursor.advance(1);
+                    }
+                    b'\r' => {
+                        self.cursor.advance(1);
+                        if self.cursor.peek() == b'\n' {
+                            // skip CR LF
+                            self.cursor.advance(1);
+                        }
+                    }
+                    UTF8_LINE_TERMINATOR_CHAR0 => {
+                        if match_unicode_line_terminator_offset1(
+                            &self.cursor.raw()[self.cursor.offset() as usize..],
+                        ) {
+                            self.cursor.advance(3);
+                        } else {
+                            let cp = self.decode_utf8_advance();
+                            append_unicode_to_storage(&mut self.tmp_storage, cp);
+                        }
+                    }
+
+                    _ => {
+                        if is_utf8_start(e) {
+                            let cp = self.decode_utf8_advance();
+                            append_unicode_to_storage(&mut self.tmp_storage, cp);
+                        } else {
+                            self.tmp_storage.push(e);
+                            self.cursor.advance(1);
+                        }
+                    }
+                }
+            } else if c == b'\n' || c == b'\r' {
+                // A raw new line in a (non-JSX) string is not allowed.
+                let loc = self.cur_loc();
+                self.error(loc, "non-terminated string");
+                let start = self.token.start_loc();
+                self.sm.note(start, "string started here");
+                break;
+            } else if c == 0 && self.cursor.at_end() {
+                let loc = self.cur_loc();
+                self.error(loc, "non-terminated string");
+                let start = self.token.start_loc();
+                self.sm.note(start, "string started here");
+                break;
+            } else if is_utf8_start(c) {
+                // Decode and re-encode the character and append it to the string
+                // storage.
+                let cp = self.decode_utf8_advance();
+                append_unicode_to_storage(&mut self.tmp_storage, cp);
+            } else {
+                self.tmp_storage.push(c);
+                self.cursor.advance(1);
+            }
+        }
+
+        let atom = self.strtab.atom_bytes(self.tmp_storage.as_slice());
+        self.token.set_string_literal(atom, escapes);
+    }
+
     // ---- The phase-1b stubs -------------------------------------------------
 
     /// Stub for the not-yet-implemented scanners (identifiers, numbers, strings,
@@ -1643,10 +1840,10 @@ impl<'a> JSLexer<'a> {
                     self.scan_identifier_parts_in_context(grammar_context);
                 }
 
-                // ' " : string literals (deferred to phase 1b).
+                // ' " : string literals.
                 b'\'' | b'"' => {
                     self.set_token_start();
-                    self.scan_not_implemented();
+                    self.scan_string();
                 }
 
                 // ` : template literal (deferred to phase 1b).
@@ -2089,6 +2286,33 @@ mod tests {
             bigint_bytes("1_000n"),
             (b"1000".to_vec(), b"1_000n".to_vec())
         );
+    }
+
+    /// Lex `src` as a single string literal and return its (cooked bytes,
+    /// contains_escapes) pair.
+    fn str_cooked(src: &str) -> (Vec<u8>, bool) {
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("t", src);
+        let tab = AtomTable::new();
+        let mut lex = JSLexer::new(id, &mut sm, &tab, GrammarContext::AllowDiv);
+        let tok = lex.advance(GrammarContext::AllowDiv);
+        assert_eq!(tok.kind(), TokenKind::string_literal, "src={src:?}");
+        let cooked = tab.bytes(tok.get_string_literal()).to_vec();
+        let escapes = tok.get_string_literal_contains_escapes();
+        (cooked, escapes)
+    }
+
+    #[test]
+    fn strings_basic() {
+        use TokenKind::*;
+        assert_eq!(kinds("'a' \"b\""), vec![string_literal, string_literal, eof]);
+        assert_eq!(str_cooked("'hello'"), (b"hello".to_vec(), false));
+        assert_eq!(str_cooked("\"a\\tb\""), (b"a\tb".to_vec(), true)); // \t -> tab, escapes=true
+        assert_eq!(str_cooked("'\\n\\r\\\\'"), (vec![10, 13, b'\\'], true));
+        assert_eq!(str_cooked("'\\x41'"), (b"A".to_vec(), true)); // \x41 -> 'A'
+        assert_eq!(str_cooked("'\\u00e9'"), (b"\xc3\xa9".to_vec(), true)); // é (WTF-8)
+        assert_eq!(str_cooked("'a\\\nb'"), (b"ab".to_vec(), true)); // escaped newline continuation
+        assert_eq!(str_cooked("'caf\u{00e9}'"), (b"caf\xc3\xa9".to_vec(), false)); // raw unicode, no escape
     }
 
     #[test]
