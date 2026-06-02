@@ -6,10 +6,13 @@
 //! Ported from `lib/Parser/JSLexer.cpp`:
 //! - `optimisticSkipWhitespace` (`:117-132`)
 //! - `lookahead1` (`:1038-1095`)
+//! - `lookahead2` (`:1100-1154`)
 //!
 //! The C++ `template <bool RequireNoNewLine>` becomes a runtime
-//! `require_no_newline: bool` parameter. The C++ `make_scope_exit` restore +
-//! `SaveAndSuppressMessages` become explicit save/restore.
+//! `require_no_newline: bool` parameter; the parser `Keywords` dependency is
+//! replaced by passing the needed pre-interned atom (`ident_using`). The C++
+//! `make_scope_exit` restore + `SaveAndSuppressMessages` become explicit
+//! save/restore.
 
 use atom_table::AtomBytes;
 use support::diag::Subsystem;
@@ -114,6 +117,90 @@ impl<'a> JSLexer<'a> {
         self.sm.set_suppressed_messages(saved_suppressed);
         kind
     }
+
+    /// Look ahead two tokens: if the next token is `expected_ident`, return the
+    /// kind of the token after it; otherwise `None`. ALWAYS restores the lexer
+    /// state. Port of `lookahead2` (JSLexer.cpp:1100-1154).
+    ///
+    /// The C++ `template <bool RequireNoNewLine>` becomes `require_no_newline`;
+    /// the C++ single `make_scope_exit` that always restores becomes a computed
+    /// result followed by an unconditional restore.
+    pub fn lookahead2(
+        &mut self,
+        require_no_newline: bool,
+        expected_ident: AtomBytes,
+    ) -> Option<TokenKind> {
+        debug_assert!(
+            self.token.kind() == TokenKind::identifier
+                || self.token.is_res_word(),
+            "unsupported current token"
+        );
+        let saved_ident = self.token.get_res_word_or_identifier();
+        let saved_kind = self.token.kind();
+        let start = self.token.start_loc();
+        let end = self.token.end_loc();
+        let cur = self.cur_loc();
+        let saved_suppressed = self.sm.suppressed_messages();
+        self.sm.set_suppressed_messages(Some(Subsystem::Unspecified));
+
+        // Remove any comments/tokens that were stored during the lookahead.
+        let saved_comment_storage_size = self.comment_storage.len();
+        let saved_token_storage_size =
+            if self.store_tokens { self.token_storage.len() } else { 0 };
+
+        // Compute the result; the C++ scope_exit restores unconditionally, so
+        // we capture the result and restore at the end of the function.
+        let result = self.lookahead2_impl(require_no_newline, expected_ident);
+
+        // Restore (mirror of the C++ `make_scope_exit`).
+        if self.store_comments {
+            self.comment_storage.truncate(saved_comment_storage_size);
+        }
+        // Undo the storage for the tokens we advanced to.
+        if self.store_tokens {
+            self.token_storage.truncate(saved_token_storage_size);
+        }
+        // Restore the original token.
+        self.token.set_start(start);
+        self.token.set_end(end);
+        if saved_kind == TokenKind::identifier {
+            self.token.set_identifier(saved_ident);
+        } else {
+            self.token.set_res_word(saved_kind, saved_ident);
+        }
+        self.seek(cur);
+
+        self.sm.set_suppressed_messages(saved_suppressed);
+        result
+    }
+
+    /// The body of `lookahead2` that advances past two tokens and computes the
+    /// result; the surrounding `lookahead2` performs the unconditional restore.
+    fn lookahead2_impl(
+        &mut self,
+        require_no_newline: bool,
+        expected_ident: AtomBytes,
+    ) -> Option<TokenKind> {
+        self.advance(GrammarContext::AllowRegExp);
+        if require_no_newline && self.is_new_line_before_current_token() {
+            return None;
+        }
+
+        // If the next token isn't the expected identifier, bail.
+        if self.token.kind() != TokenKind::identifier
+            || self.token.get_identifier() != expected_ident
+        {
+            return None;
+        }
+
+        // Advance to the token we're looking ahead to.
+        self.advance(GrammarContext::AllowRegExp);
+        if require_no_newline && self.is_new_line_before_current_token() {
+            return None;
+        }
+
+        Some(self.token.kind())
+    }
 }
 
 #[cfg(test)]
@@ -164,5 +251,26 @@ mod tests {
             Some(TokenKind::identifier)
         );
         assert_eq!(lex2.token().kind(), TokenKind::identifier); // now 'b' (consumed)
+    }
+
+    #[test]
+    fn lookahead2_basic() {
+        // lookahead2(expected_ident): skip the next token IF it's
+        // `expected_ident`, return the kind of the token after it. Always
+        // restores state.
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("t", "await using x");
+        let tab = AtomTable::new();
+        let mut lex = JSLexer::new(id, &mut sm, &tab, GrammarContext::AllowDiv);
+        lex.advance(GrammarContext::AllowDiv); // 'await'
+        let using = tab.atom_bytes(b"using");
+        // next is 'using' (matches), the one after is 'x' (identifier).
+        assert_eq!(lex.lookahead2(true, using), Some(TokenKind::identifier));
+        // state restored to 'await'
+        assert_eq!(lex.token().kind(), TokenKind::identifier);
+        assert_eq!(
+            lex.token().get_res_word_or_identifier(),
+            tab.atom_bytes(b"await")
+        );
     }
 }
