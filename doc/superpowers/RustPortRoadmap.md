@@ -54,11 +54,34 @@ Modules under `rust/crates/support/src/`: `buffer` (copied `NullTerminatedBuf` +
 differential. **Zero `unsafe`, zero warnings.** Spec: `specs/2026-06-01-source-error-manager-design.md`;
 plan: `plans/2026-06-01-source-error-manager.md`.
 
-### Next: JS lexer
+### ✅ JS lexer — COMPLETE
 
-Port `include/hermes/Parser/JSLexer.h` + `lib/Parser/JSLexer.cpp` (~3,700 LOC). What it
-needs from `SourceErrorManager` is **done**. Full design: `specs/2026-06-01-js-lexer-design.md`.
-Per-subsystem implementation plans land under `plans/` just-in-time as each is built.
+The entire `JSLexer` (`include/hermes/Parser/JSLexer.h` + `lib/Parser/JSLexer.cpp`, ~3,700 LOC)
+is ported to `rust/crates/{atom_table,unicode,parser}/` and **self-validates byte-for-byte
+against the real `JSLexer`** via the `js-lexer-dump` oracle (`rust/crates/parser/tests/
+differential.rs`, 5 grammar contexts: `div` 58 / `regexp` 5 / `type` 6 / `jsx` 4 / `jsx-child` 10).
+Full public surface: all token lexing (punctuators, trivia, identifiers, keywords, numbers,
+strings, templates, regexp, private identifiers), **JSX** (`advanceInJSXChild`, HTML entities)
+and **Flow** (`Type` context), all literals + escapes (incl. WTF-8 / `convertSurrogates`), and
+the stateful/parser-facing APIs (comment+token storage, magic comments, `SavePoint`, `lookahead1/2`,
+`isCurrentTokenADirective`, `rescanRBraceInTemplateLiteral`, `isLet/isUsing/isAwaitUsing`, the
+`Token`/`StoredComment` accessors). **136 workspace tests, zero warnings.** Real `unsafe` only in
+`atom_table` (the interner) and `parser/cursor.rs` (the scoped `*const u8` cursor, decision B).
+Sole deviation: `getAllocator` has no Rust analog (no bump allocator). Design spec:
+`specs/2026-06-01-js-lexer-design.md`; the per-subsystem/per-phase plans are under `plans/`
+(`js-lexer-*` and `js-lexer-proper-*`). **A capstone review caught a stubbed `advance` fallthrough
+(`0xc2`/`0xe2`/`0xef` non-special lead bytes errored instead of falling into the default arm) and
+a few missing accessors — both fixed and tested before declaring complete.**
+
+> **Next component: the Parser** (`lib/Parser/JSParserImpl*`), which consumes this lexer. Optional
+> lexer follow-up (tracked, non-blocking): a `--non-strict` flag for `js-lexer-dump` to widen the
+> strict-mode differential corpus.
+
+### Historical: JS lexer build log
+
+Port plan/progress as it was built (kept for traceability). What it needed from
+`SourceErrorManager` was **done** first. Full design: `specs/2026-06-01-js-lexer-design.md`.
+Per-subsystem implementation plans landed under `plans/` just-in-time as each was built.
 
 **Locked decisions (this design pass):**
 - **Scan cursor:** raw `*const u8` (option "B"), confined to the cursor module, offset
