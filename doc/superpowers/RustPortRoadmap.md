@@ -114,12 +114,17 @@ part of SourceErrorManager; in build order):
 > **The lexer now lexes punctuators, trivia, identifiers, keywords, and all numeric literals,
 > self-validating byte-for-byte vs `js-lexer-dump`.**
 >
-> **Next — lexer phase 2 (literals):** 2a strings (`scanString` — octal/hex/unicode escapes, line
-> continuations, `convertSurrogates`, `containsEscapes`) + private identifiers (`scanPrivateIdentifier`,
-> `#` arm); 2b templates (`scanTemplateLiteral`; `no_substitution_template`/`template_head` — middle/
-> tail need `rescanRBrace`, phase 4); 2c regexp (`scanRegExp` + the `AllowRegExp` `/` arm, enabling
-> `--context=regexp` differential cases). Then phase 3 (JSX/Flow), phase 4 (savepoint/lookahead/
-> directive/rescanRBrace/magic comments/comment storage).
+> **🚧 Lexer phase 2a DONE.** String literals (`scanString` non-JSX — `\b\f\n\r\t\v`, octal/`\x`/
+> `\u`/`\u{}` escapes, line continuations, `containsEscapes`) + private identifiers
+> (`scanPrivateIdentifier`). `string_literal escapes=/value=` dump field; differential at 48 entries
+> (verified vs 14 independent oracle checks incl. NUL/octal/WTF-8). Plan: `plans/2026-06-02-js-lexer-proper-2a.md`.
+> Deferred: `convertSurrogates` re-encoding (needs UTF-16 conversion utils — tracked).
+>
+> **Next — lexer phase 2b/2c:** 2b templates (`scanTemplateLiteral`; `no_substitution_template`/
+> `template_head` — middle/tail need `rescanRBrace`, phase 4); 2c regexp (`scanRegExp` + the
+> `AllowRegExp` `/` arm, enabling `--context=regexp` differential cases). Then phase 3 (JSX/Flow),
+> phase 4 (savepoint/lookahead/directive/rescanRBrace/magic comments/comment storage). **Remaining
+> tracked items:** `convertSurrogates` re-encoding, the `--non-strict` harness flag.
 
 ## Key cross-cutting design decisions
 
