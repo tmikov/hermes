@@ -1403,8 +1403,9 @@ impl<'a> JSLexer<'a> {
     }
 
     /// Format the current token like the C++ `js-lexer-dump` line (without the
-    /// trailing newline): `"<start> <end> <nl> <KIND>"`. Phase-1a tokens are
-    /// fieldless (punctuators / eof), so no per-kind fields are emitted.
+    /// trailing newline): `"<start> <end> <nl> <KIND>[ <field> ...]"`. Phase-1b-i
+    /// emits the `ident=` field for identifiers / private identifiers / reserved
+    /// words; the other literal fields land in later phases.
     pub fn dump_token(&self, out: &mut String) {
         use std::fmt::Write;
         let start = self.token.start_loc().offset;
@@ -1414,8 +1415,58 @@ impl<'a> JSLexer<'a> {
         } else {
             "--"
         };
-        let _ = write!(out, "{} {} {} {}", start, end, nl, variant_name(self.token.kind()));
+        let kind = self.token.kind();
+        let _ = write!(out, "{} {} {} {}", start, end, nl, variant_name(kind));
+        self.emit_fields(out, kind);
     }
+
+    /// Emit the per-kind dump fields. Port of `js-lexer-dump.cpp:emitFields`
+    /// (the identifier/reserved-word cases; other cases land in later phases).
+    fn emit_fields(&self, out: &mut String, kind: TokenKind) {
+        match kind {
+            TokenKind::identifier => {
+                out.push_str(" ident=");
+                quote_bytes(out, self.strtab.bytes(self.token.get_identifier()));
+            }
+            TokenKind::private_identifier => {
+                out.push_str(" ident=");
+                quote_bytes(out, self.strtab.bytes(self.token.get_private_identifier()));
+            }
+            _ => {
+                // Reserved words: emit the identifier string.
+                if kind.is_res_word() {
+                    out.push_str(" ident=");
+                    quote_bytes(out, self.strtab.bytes(self.token.get_res_word_identifier()));
+                }
+                // Punctuators and eof: no extra fields.
+            }
+        }
+    }
+}
+
+/// Emit `bytes` quoted per the `js-lexer-dump` `Q()` spec into `out`. Port of
+/// `quoteBytes` (js-lexer-dump.cpp:91-115): wrap in double quotes; `"`->`\"`,
+/// `\`->`\\`, `\n`->`\n`, `\t`->`\t`, `\r`->`\r`; printable ASCII
+/// `0x20..=0x7e` literal; every other byte as lowercase `\xHH`.
+fn quote_bytes(out: &mut String, bytes: &[u8]) {
+    out.push('"');
+    for &c in bytes {
+        match c {
+            b'"' => out.push_str("\\\""),
+            b'\\' => out.push_str("\\\\"),
+            b'\n' => out.push_str("\\n"),
+            b'\t' => out.push_str("\\t"),
+            b'\r' => out.push_str("\\r"),
+            0x20..=0x7e => out.push(c as char),
+            _ => {
+                const HEX: &[u8; 16] = b"0123456789abcdef";
+                out.push_str("\\x");
+                out.push(HEX[(c >> 4) as usize & 0xf] as char);
+                out.push(HEX[c as usize & 0xf] as char);
+            }
+        }
+    }
+    out.push('"');
 }
 
 /// \return true if `ch` is an ASCII decimal digit.

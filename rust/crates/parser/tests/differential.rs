@@ -93,6 +93,28 @@ fn differential_punctuators_and_trivia() {
         "; // tail",
         // Hashbang at the very start of the buffer.
         "#!/usr/bin/env hermes\n;",
+        // Identifiers and reserved words (harness default = strict mode).
+        "foo bar baz",
+        "_x $y a1 Z9",
+        // strict-mode reswords
+        "function for while return yield static implements",
+        // a sampling of the rest of the reserved words
+        "if in var break continue switch this true false null case catch const",
+        "debugger default delete do else finally instanceof new throw try typeof",
+        "void with export import class extends super enum interface package",
+        "private protected public",
+        // not reserved words: lex as identifiers
+        "let async await of as from get set",
+        // unicode identifiers
+        "caf\u{00e9} \u{4e2d}\u{6587} na\u{00ef}ve",
+        // unicode-only identifier start via the non-ASCII default arm
+        "\u{00e9}tude \u{03b1}\u{03b2}\u{03b3}",
+        // escaped identifiers (start + part)
+        "\\u0041\\u0042 ab\\u0063",
+        // braced unicode escape inside an identifier
+        "x\\u{1F600}y",
+        // newline flag between idents
+        "x;y\nz",
     ];
     for src in corpus {
         let Some(cpp) = cpp_dump(src) else {
