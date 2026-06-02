@@ -9,7 +9,7 @@
 
 use std::rc::Rc;
 
-use atom_table::AtomTable;
+use atom_table::{AtomBytes, AtomTable};
 use support::buffer::SourceBuffer;
 use support::diag::Subsystem;
 use support::location::{SMLoc, SMRange, SourceId};
@@ -41,6 +41,18 @@ pub enum GrammarContext {
     Type,
 }
 
+/// The identifier-scanning mode, port of `JSLexer::IdentifierMode`. Affects
+/// which extra characters are accepted as identifier parts: JSX accepts `-`,
+/// Flow accepts `@`. Only `JS` is exercised in phase 1b-i; the JSX/Flow arms are
+/// carried for forward-compatibility but never reached (the differential drives
+/// `--context=div`).
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub enum IdentifierMode {
+    JS,
+    JSX,
+    Flow,
+}
+
 /// The Hermes JavaScript lexer. Port of `hermes::parser::JSLexer`.
 ///
 /// The lexer borrows the `SourceErrorManager` (for diagnostics) and the
@@ -52,8 +64,11 @@ pub struct JSLexer<'a> {
     /// The scan cursor over the (NUL-terminated) source buffer.
     cursor: Cursor,
     /// Interner shared with the rest of the front end.
-    #[allow(dead_code)]
     strtab: &'a AtomTable,
+
+    /// Pre-interned reserved-word identifiers, indexed by
+    /// `ord(kind) - ord(_first_resword)`. Port of `resWordIdent_`.
+    res_word_idents: Vec<AtomBytes>,
 
     /// The current token.
     token: Token,
@@ -115,11 +130,12 @@ impl<'a> JSLexer<'a> {
             source: buf_id,
             offset: 0,
         };
-        JSLexer {
+        let mut lexer = JSLexer {
             sm,
             buf_id,
             cursor,
             strtab,
+            res_word_idents: Vec::new(),
             token: Token::new(buf_id),
             prev_token_end: start,
             new_line_before_current_token: false,
@@ -132,12 +148,57 @@ impl<'a> JSLexer<'a> {
             comment_storage: Vec::new(),
             store_tokens: false,
             token_storage: Vec::new(),
+        };
+        lexer.initialize_reserved_identifiers();
+        lexer
+    }
+
+    /// Pre-intern all reserved words so that `res_word_ident` is a cheap lookup.
+    /// Port of `initializeReservedIdentifiers` (JSLexer.cpp:111-115).
+    fn initialize_reserved_identifiers(&mut self) {
+        use crate::token_kinds::{ord, token_kind_str_by_ord, TokenKind};
+        let first = ord(TokenKind::_first_resword);
+        let last = ord(TokenKind::_last_resword);
+        // Index by `ord(kind) - ord(_first_resword)`. We allocate one slot per
+        // ordinal in the inclusive marker range so `res_word_ident` can index
+        // directly; the two marker slots are never read.
+        let count = (last - first + 1) as usize;
+        self.res_word_idents = Vec::with_capacity(count);
+        for v in first..=last {
+            // The marker slots (`_first_resword`/`_last_resword`) get an empty
+            // placeholder; every real reserved word interns its name.
+            let name = if v > first && v < last {
+                token_kind_str_by_ord(v)
+            } else {
+                ""
+            };
+            self.res_word_idents
+                .push(self.strtab.atom_bytes(name.as_bytes()));
         }
+    }
+
+    /// \return the pre-interned identifier for reserved word `kind`. Port of
+    /// `resWordIdent` (JSLexer.h:445-449).
+    fn res_word_ident(&self, kind: TokenKind) -> AtomBytes {
+        use crate::token_kinds::{ord, TokenKind as TK};
+        debug_assert!(kind.is_res_word());
+        self.res_word_idents[(ord(kind) - ord(TK::_first_resword)) as usize]
     }
 
     /// \return the current token.
     pub fn token(&self) -> &Token {
         &self.token
+    }
+
+    /// \return whether the lexer is in strict mode. Port of `isStrictMode`.
+    pub fn is_strict_mode(&self) -> bool {
+        self.strict_mode
+    }
+
+    /// Set strict mode (affects future-reserved-word recognition). Port of
+    /// `setStrictMode`.
+    pub fn set_strict_mode(&mut self, strict_mode: bool) {
+        self.strict_mode = strict_mode;
     }
 
     /// \return whether a line terminator preceded the current token.
@@ -476,6 +537,261 @@ impl<'a> JSLexer<'a> {
                 }
                 Some(cp) => Some(cp),
             }
+        }
+    }
+
+    // ---- Identifier scanners ------------------------------------------------
+
+    /// Try to consume the start of an identifier into `tmp_storage`. Port of
+    /// `consumeIdentifierStart` (JSLexer.cpp:1228-1267). Returns true if an
+    /// identifier start was consumed (used by the private-identifier scanner,
+    /// which is deferred — hence currently unexercised).
+    #[allow(dead_code)]
+    fn consume_identifier_start(&mut self) -> bool {
+        let c = self.cursor.peek();
+        if c == b'_' || c == b'$' || ((c | 32) >= b'a' && (c | 32) <= b'z') {
+            self.tmp_storage.clear();
+            self.tmp_storage.push(c);
+            self.cursor.advance(1);
+            return true;
+        }
+
+        if c == b'\\' {
+            let start_loc = self.cur_loc();
+            self.tmp_storage.clear();
+            let cp = self.consume_unicode_escape();
+            if !is_unicode_id_start(cp) {
+                self.error_range(
+                    SMRange {
+                        start: start_loc,
+                        end: self.cur_loc(),
+                    },
+                    format!("Unicode escape \\u{:X}is not a valid identifier start", cp),
+                );
+            } else {
+                append_unicode_to_storage(&mut self.tmp_storage, cp);
+            }
+            return true;
+        }
+
+        if !is_utf8_start(c) {
+            return false;
+        }
+
+        let (cp, next) = self.cursor.peek_utf8();
+        if is_unicode_id_start(cp) {
+            self.tmp_storage.clear();
+            append_unicode_to_storage(&mut self.tmp_storage, cp);
+            self.cursor.seek(next);
+            return true;
+        }
+
+        false
+    }
+
+    /// Try to consume one non-escaped identifier part into `tmp_storage`. Port
+    /// of `consumeOneIdentifierPartNoEscape<Mode>` (JSLexer.cpp:1269-1290).
+    fn consume_one_identifier_part_no_escape(&mut self, mode: IdentifierMode) -> bool {
+        let ch = self.cursor.peek();
+        if ch == b'_'
+            || ch == b'$'
+            || ((ch | 32) >= b'a' && (ch | 32) <= b'z')
+            || ch.is_ascii_digit()
+            || (mode == IdentifierMode::JSX && ch == b'-')
+            || (mode == IdentifierMode::Flow && ch == b'@')
+        {
+            self.tmp_storage.push(ch);
+            self.cursor.advance(1);
+            return true;
+        } else if is_utf8_start(ch) {
+            // If we have encountered a Unicode character, we try to decode it. If
+            // it can be a part of the identifier, we consume it, otherwise we
+            // leave it alone.
+            let (cp, next) = self.cursor.peek_utf8();
+            if is_unicode_id_continue(cp) {
+                append_unicode_to_storage(&mut self.tmp_storage, cp);
+                self.cursor.seek(next);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Consume identifier parts into `tmp_storage`. Port of
+    /// `consumeIdentifierParts<Mode>` (JSLexer.cpp:1292-1309).
+    fn consume_identifier_parts(&mut self, mode: IdentifierMode) {
+        loop {
+            // Try consuming a non-escaped identifier part. Failing that, check
+            // for an escape.
+            if self.consume_one_identifier_part_no_escape(mode) {
+                continue;
+            } else if self.cursor.peek() == b'\\' {
+                // Decode the escape.
+                let start_loc = self.cur_loc();
+                let cp = self.consume_unicode_escape();
+                if !is_unicode_id_continue(cp) {
+                    self.error_range(
+                        SMRange {
+                            start: start_loc,
+                            end: self.cur_loc(),
+                        },
+                        format!(
+                            "Unicode escape \\u{:X} is not a valid identifier codepoint",
+                            cp
+                        ),
+                    );
+                } else {
+                    append_unicode_to_storage(&mut self.tmp_storage, cp);
+                }
+            } else {
+                break;
+            }
+        }
+    }
+
+    /// Recognise a reserved word from `bytes`, applying the non-strict-mode
+    /// future-reserved-word filter. Port of `scanReservedWord`
+    /// (JSLexer.cpp:1865-1887).
+    fn scan_reserved_word(&self, bytes: &[u8]) -> TokenKind {
+        let mut rw = match_reserved_word(bytes);
+
+        // Check for "Future reserved words" which should not be recognised in
+        // non-strict mode.
+        if !self.strict_mode && rw != TokenKind::identifier {
+            match rw {
+                TokenKind::rw_implements
+                | TokenKind::rw_interface
+                | TokenKind::rw_package
+                | TokenKind::rw_private
+                | TokenKind::rw_protected
+                | TokenKind::rw_public
+                | TokenKind::rw_static
+                | TokenKind::rw_yield => {
+                    rw = TokenKind::identifier;
+                }
+                _ => {}
+            }
+        }
+        rw
+    }
+
+    /// Dispatch `scan_identifier_fast_path` with the right `IdentifierMode` for
+    /// the grammar context. Port of `scanIdentifierFastPathInContext`
+    /// (JSLexer.h:992-1006). Only JS mode is exercised in 1b-i.
+    fn scan_identifier_fast_path_in_context(
+        &mut self,
+        start: u32,
+        grammar_context: GrammarContext,
+    ) {
+        let mode = if grammar_context == GrammarContext::AllowJSXIdentifier {
+            IdentifierMode::JSX
+        } else if grammar_context == GrammarContext::Type {
+            IdentifierMode::Flow
+        } else {
+            IdentifierMode::JS
+        };
+        self.scan_identifier_fast_path(start, mode);
+    }
+
+    /// Dispatch `scan_identifier_parts` with the right `IdentifierMode` for the
+    /// grammar context. Port of `scanIdentifierPartsInContext` (JSLexer.h).
+    fn scan_identifier_parts_in_context(&mut self, grammar_context: GrammarContext) {
+        let mode = if grammar_context == GrammarContext::AllowJSXIdentifier {
+            IdentifierMode::JSX
+        } else if grammar_context == GrammarContext::Type {
+            IdentifierMode::Flow
+        } else {
+            IdentifierMode::JS
+        };
+        self.scan_identifier_parts(mode);
+    }
+
+    /// Scan an identifier assuming no Unicode escapes / UTF-8 (the common case),
+    /// falling back to the slow path on the first escape or UTF-8 byte. Port of
+    /// `scanIdentifierFastPath<Mode>` (JSLexer.cpp:1889-1933). `start` is the
+    /// byte offset of the first identifier character (the cursor is there).
+    fn scan_identifier_fast_path(&mut self, start: u32, mode: IdentifierMode) {
+        // Quickly consume the ASCII identifier part.
+        let mut end = start;
+        let raw = self.cursor.raw();
+        let ch = loop {
+            end += 1;
+            let ch = raw[end as usize];
+            if !(ch == b'_'
+                || ch == b'$'
+                || ((ch | 32) >= b'a' && (ch | 32) <= b'z')
+                || ch.is_ascii_digit()
+                || (mode == IdentifierMode::JSX && ch == b'-')
+                || (mode == IdentifierMode::Flow && ch == b'@'))
+            {
+                break ch;
+            }
+        };
+
+        // Check whether a slow part of the identifier follows.
+        if ch == b'\\' {
+            // An escape. Pass the baton to the slow path.
+            self.tmp_storage.clear();
+            self.tmp_storage
+                .extend_from_slice(&self.cursor.raw()[start as usize..end as usize]);
+            self.cursor.seek(end);
+            self.scan_identifier_parts(mode);
+            return;
+        } else if is_utf8_start(ch) {
+            // If we have encountered a Unicode character, we try to decode it. If
+            // it can be a part of the identifier, we consume it, otherwise we
+            // leave it alone.
+            self.cursor.seek(end);
+            let (cp, next) = self.cursor.peek_utf8();
+            if is_unicode_id_continue(cp) {
+                self.tmp_storage.clear();
+                self.tmp_storage
+                    .extend_from_slice(&self.cursor.raw()[start as usize..end as usize]);
+                append_unicode_to_storage(&mut self.tmp_storage, cp);
+                self.cursor.seek(next);
+                self.scan_identifier_parts(mode);
+                return;
+            }
+            // Not an id-continue: the identifier ends at `end`; cursor already
+            // seeked there.
+        } else {
+            self.cursor.seek(end);
+        }
+
+        let slice = &self.cursor.raw()[start as usize..end as usize];
+        let rw = self.scan_reserved_word(slice);
+        if rw != TokenKind::identifier {
+            let ident = self.res_word_ident(rw);
+            self.token.set_res_word(rw, ident);
+        } else {
+            let ident = self.strtab.atom_bytes(slice);
+            self.token.set_identifier(ident);
+        }
+    }
+
+    /// Scan the remaining identifier parts via the slow path (`tmp_storage`
+    /// already holds the prefix). Port of `scanIdentifierParts<Mode>`
+    /// (JSLexer.cpp:1935-1949). A reserved word reached through a unicode escape
+    /// ALSO emits a warning.
+    fn scan_identifier_parts(&mut self, mode: IdentifierMode) {
+        self.consume_identifier_parts(mode);
+        let rw = self.scan_reserved_word(&self.tmp_storage);
+        if rw != TokenKind::identifier {
+            let ident = self.res_word_ident(rw);
+            self.token.set_res_word(rw, ident);
+            let range = SMRange {
+                start: self.token.start_loc(),
+                end: self.cur_loc(),
+            };
+            self.sm.warning_range(
+                support::diag::Warning::Misc,
+                range,
+                "scanning identifier with unicode escape as reserved word",
+                Subsystem::Lexer,
+            );
+        } else {
+            let ident = self.strtab.atom_bytes(self.tmp_storage.as_slice());
+            self.token.set_identifier(ident);
         }
     }
 
@@ -853,10 +1169,11 @@ impl<'a> JSLexer<'a> {
                     self.scan_not_implemented();
                 }
 
-                // Identifier fast path (deferred to phase 1b).
+                // Identifier fast path.
                 b'_' | b'$' | b'a'..=b'z' | b'A'..=b'Z' => {
                     self.set_token_start();
-                    self.scan_not_implemented();
+                    let start = self.cursor.offset();
+                    self.scan_identifier_fast_path_in_context(start, grammar_context);
                 }
 
                 // @ : decorator punctuator (non-Type context).
@@ -866,10 +1183,28 @@ impl<'a> JSLexer<'a> {
                     self.cursor.advance(1);
                 }
 
-                // \ : identifier with a leading unicode escape (deferred).
+                // \ : identifier with a leading unicode escape.
+                // Port of JSLexer.cpp:683-698.
                 b'\\' => {
                     self.set_token_start();
-                    self.scan_not_implemented();
+                    self.tmp_storage.clear();
+                    let cp = self.consume_unicode_escape();
+                    if !is_unicode_id_start(cp) {
+                        self.error_range(
+                            SMRange {
+                                start: self.token.start_loc(),
+                                end: self.cur_loc(),
+                            },
+                            format!(
+                                "Unicode escape \\u{:X} is not a valid identifier start",
+                                cp
+                            ),
+                        );
+                        continue;
+                    } else {
+                        append_unicode_to_storage(&mut self.tmp_storage, cp);
+                    }
+                    self.scan_identifier_parts_in_context(grammar_context);
                 }
 
                 // ' " : string literals (deferred to phase 1b).
@@ -885,10 +1220,35 @@ impl<'a> JSLexer<'a> {
                 }
 
                 // Default: non-ASCII identifier-start / unicode-only space /
-                // unrecognized character. Deferred to phase 1b.
+                // unrecognized character. Port of JSLexer.cpp:711-735.
                 _ => {
                     self.set_token_start();
-                    self.scan_not_implemented();
+                    let ch = self.decode_utf8_advance();
+
+                    if is_unicode_only_id_start(ch) {
+                        self.tmp_storage.clear();
+                        append_unicode_to_storage(&mut self.tmp_storage, ch);
+                        self.scan_identifier_parts_in_context(grammar_context);
+                    } else if is_unicode_only_space(ch) {
+                        continue;
+                    } else {
+                        let range = SMRange {
+                            start: self.token.start_loc(),
+                            end: self.cur_loc(),
+                        };
+                        if ch > 31 && ch < 127 {
+                            self.error_range(
+                                range,
+                                format!("unrecognized character '{}'", ch as u8 as char),
+                            );
+                        } else {
+                            self.error_range(
+                                range,
+                                format!("unrecognized Unicode character \\u{:X}", ch),
+                            );
+                        }
+                        continue;
+                    }
                 }
             }
 
@@ -1008,6 +1368,27 @@ impl<'a> JSLexer<'a> {
         }
     }
 
+    /// Decode the UTF-8 sequence at the cursor, advance past it, and report any
+    /// decode error at the start of the sequence. Port of the member
+    /// `decodeUTF8` (JSLexer.h:1145-1151), which uses `decodeUTF8<false>`.
+    fn decode_utf8_advance(&mut self) -> u32 {
+        let save_start = self.cur_loc();
+        let raw = self.cursor.raw();
+        let mut i = self.cursor.offset() as usize;
+        let mut err_msg: Option<String> = None;
+        let cp = decode_utf8::<false>(raw, &mut i, |m| {
+            if err_msg.is_none() {
+                err_msg = Some(m.to_string());
+            }
+        });
+        let consumed = (i - self.cursor.offset() as usize).max(1);
+        self.cursor.advance(consumed);
+        if let Some(msg) = err_msg {
+            self.error(save_start, msg);
+        }
+        cp
+    }
+
     /// Decode the UTF-8 sequence at the cursor and advance past it, swallowing
     /// any decode errors. Mirrors the member `_decodeUTF8SlowPath(cur)` used
     /// inside the comment scanners (which advances the pointer; errors are
@@ -1087,6 +1468,64 @@ mod tests {
             }
         }
         out
+    }
+
+    /// Like `kinds`, but the lexer is switched to non-strict mode.
+    fn kinds_nonstrict(src: &str) -> Vec<TokenKind> {
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("t", src);
+        let tab = AtomTable::new();
+        let mut lex = JSLexer::new(id, &mut sm, &tab, GrammarContext::AllowDiv);
+        lex.set_strict_mode(false);
+        let mut out = vec![];
+        loop {
+            let k = lex.advance(GrammarContext::AllowDiv).kind();
+            out.push(k);
+            if k == TokenKind::eof {
+                break;
+            }
+        }
+        out
+    }
+
+    /// Lex `src` as a single identifier and return its interned bytes.
+    fn ident_bytes(src: &str) -> Vec<u8> {
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("t", src);
+        let tab = AtomTable::new();
+        let mut lex = JSLexer::new(id, &mut sm, &tab, GrammarContext::AllowDiv);
+        let tok = lex.advance(GrammarContext::AllowDiv);
+        assert_eq!(tok.kind(), TokenKind::identifier);
+        let ab = tok.get_identifier();
+        tab.bytes(ab).to_vec()
+    }
+
+    #[test]
+    fn identifiers_and_reswords() {
+        use TokenKind::*;
+        assert_eq!(kinds("foo _bar $x9"), vec![identifier, identifier, identifier, eof]);
+        assert_eq!(
+            kinds("function for yield"),
+            vec![rw_function, rw_for, rw_yield, eof]
+        ); // strict mode default
+           // non-strict: yield is an identifier
+        assert_eq!(kinds_nonstrict("yield"), vec![identifier, eof]);
+        // non-strict downgrade for the other future reserved words
+        assert_eq!(
+            kinds_nonstrict("implements interface package private protected public static"),
+            vec![
+                identifier, identifier, identifier, identifier, identifier, identifier,
+                identifier, eof
+            ]
+        );
+        // unicode identifier
+        assert_eq!(kinds("\u{00e9}tude"), vec![identifier, eof]); // étude
+                                                                  // escaped identifier start
+        assert_eq!(kinds("\\u0041bc"), vec![identifier, eof]); // 'Abc'
+                                                               // ident value round-trips through the interner
+        assert_eq!(ident_bytes("caf\u{00e9}"), b"caf\xc3\xa9");
+        // escaped identifier interns the decoded bytes
+        assert_eq!(ident_bytes("\\u0041bc"), b"Abc");
     }
 
     #[test]

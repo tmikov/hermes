@@ -762,6 +762,14 @@ pub fn token_kind_str(kind: TokenKind) -> &'static str {
     TOKEN_NAMES[kind as usize]
 }
 
+/// \return the human-readable name for the token kind with the given ordinal.
+/// Used by the lexer to pre-intern reserved words by ordinal without needing to
+/// reconstruct a `TokenKind` value (which would require an unsafe transmute).
+#[inline]
+pub fn token_kind_str_by_ord(ord: i32) -> &'static str {
+    TOKEN_NAMES[ord as usize]
+}
+
 /// \return the binary-operator precedence of `kind`, or None if not a binary op.
 #[inline]
 pub fn binop_precedence(kind: TokenKind) -> Option<u8> {
