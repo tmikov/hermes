@@ -1863,6 +1863,22 @@ impl<'a> JSLexer<'a> {
                 out.push_str(" ident=");
                 quote_bytes(out, self.strtab.bytes(self.token.get_private_identifier()));
             }
+            TokenKind::numeric_literal => {
+                use std::fmt::Write;
+                // Match the harness `snprintf(" bits=0x%016llx", DoubleToBits)`:
+                // 16-digit, zero-padded, lowercase hex of the f64 bit pattern.
+                let bits = self.token.get_numeric_literal().to_bits();
+                let _ = write!(out, " bits=0x{:016x}", bits);
+            }
+            TokenKind::bigint_literal => {
+                out.push_str(" value=");
+                quote_bytes(out, self.strtab.bytes(self.token.get_bigint_literal()));
+                out.push_str(" raw=");
+                quote_bytes(
+                    out,
+                    self.strtab.bytes(self.token.get_bigint_literal_raw_value()),
+                );
+            }
             _ => {
                 // Reserved words: emit the identifier string.
                 if kind.is_res_word() {

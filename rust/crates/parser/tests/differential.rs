@@ -122,6 +122,20 @@ fn differential_punctuators_and_trivia() {
         "x\\u{1F600}y",
         // newline flag between idents
         "x;y\nz",
+        // ---- numeric literals (valid forms only; error/NaN literals would go
+        // to stderr and a NaN bit pattern could differ, so they are kept out) --
+        // decimal integers, incl. the >9-digit / >2^53 paths.
+        "0 1 42 1000000000 9007199254740993",
+        // fractions, exponents, separators.
+        "0.1 .5 3.14159 1e10 2E-3 6.022e23 1_000_000",
+        // hex / octal / binary, mixed case + separators.
+        "0xff 0xDEAD_BEEF 0o17 0b1010 0XAB 0O7 0B11",
+        // BigInt: decimal + hex.
+        "10n 0xffn 255n 0n",
+        // '.' number vs. period: `0 .5` is numeric `.5`, not a member access.
+        "0 .5 .25",
+        // number immediately followed by a punctuator.
+        "1+2 3*4 5;6",
     ];
     // Resolve the oracle once. The skip is all-or-nothing: if the binary is
     // absent we skip the whole test cleanly; if it is present we MUST run every
