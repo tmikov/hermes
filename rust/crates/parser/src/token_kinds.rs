@@ -954,6 +954,16 @@ mod tests {
     }
 
     #[test]
+    fn token_kind_str_by_ord_keywords() {
+        assert_eq!(token_kind_str_by_ord(ord(TokenKind::rw_function)), "function");
+        assert_eq!(token_kind_str_by_ord(ord(TokenKind::rw_yield)), "yield");
+        assert_eq!(
+            token_kind_str_by_ord(ord(TokenKind::identifier)),
+            "identifier"
+        );
+    }
+
+    #[test]
     fn variant_names_match_def() {
         assert_eq!(variant_name(TokenKind::none), "none");
         assert_eq!(variant_name(TokenKind::l_brace), "l_brace");

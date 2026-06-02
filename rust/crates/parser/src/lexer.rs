@@ -566,7 +566,7 @@ impl<'a> JSLexer<'a> {
                         start: start_loc,
                         end: self.cur_loc(),
                     },
-                    format!("Unicode escape \\u{:X}is not a valid identifier start", cp),
+                    format!("Unicode escape \\u{:x}is not a valid identifier start", cp),
                 );
             } else {
                 append_unicode_to_storage(&mut self.tmp_storage, cp);
@@ -591,6 +591,7 @@ impl<'a> JSLexer<'a> {
 
     /// Try to consume one non-escaped identifier part into `tmp_storage`. Port
     /// of `consumeOneIdentifierPartNoEscape<Mode>` (JSLexer.cpp:1269-1290).
+    #[inline]
     fn consume_one_identifier_part_no_escape(&mut self, mode: IdentifierMode) -> bool {
         let ch = self.cursor.peek();
         if ch == b'_'
@@ -636,7 +637,7 @@ impl<'a> JSLexer<'a> {
                             end: self.cur_loc(),
                         },
                         format!(
-                            "Unicode escape \\u{:X} is not a valid identifier codepoint",
+                            "Unicode escape \\u{:x} is not a valid identifier codepoint",
                             cp
                         ),
                     );
@@ -1196,7 +1197,7 @@ impl<'a> JSLexer<'a> {
                                 end: self.cur_loc(),
                             },
                             format!(
-                                "Unicode escape \\u{:X} is not a valid identifier start",
+                                "Unicode escape \\u{:x} is not a valid identifier start",
                                 cp
                             ),
                         );
@@ -1244,7 +1245,7 @@ impl<'a> JSLexer<'a> {
                         } else {
                             self.error_range(
                                 range,
-                                format!("unrecognized Unicode character \\u{:X}", ch),
+                                format!("unrecognized Unicode character \\u{:x}", ch),
                             );
                         }
                         continue;

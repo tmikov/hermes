@@ -175,6 +175,7 @@ pub fn decode_utf8<const ALLOW_SURROGATES: bool>(
 
 /// Encode a Unicode code point as UTF-8 (up to the legacy 6-byte form, matching
 /// `encodeUTF8`), appending the bytes to `out`. Port of `UTF8.cpp:encodeUTF8`.
+#[inline]
 pub fn encode_utf8(out: &mut Vec<u8>, cp: u32) {
     if cp <= 0x7F {
         out.push(cp as u8);
@@ -211,6 +212,7 @@ pub fn encode_utf8(out: &mut Vec<u8>, cp: u32) {
 /// UTF-16 surrogate pair, and each surrogate is encoded individually into UTF-8
 /// (technically invalid UTF-8 / WTF-8, which JS string & identifier storage
 /// allows).
+#[inline]
 pub fn append_unicode_to_storage(storage: &mut Vec<u8>, cp: u32) {
     // We need to normalize code points which would be encoded with a surrogate
     // pair. Note that this produces technically invalid UTF-8.
