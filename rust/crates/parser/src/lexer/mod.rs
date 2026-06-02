@@ -104,12 +104,9 @@ pub struct JSLexer<'a> {
     /// literals. Port of `rawStorage_`.
     raw_storage: Vec<u8>,
 
-    /// `//# sourceURL=` value, if seen (port of `sourceURL_`). Magic-comment
-    /// parsing is wired in the next task.
-    #[allow(dead_code)]
+    /// `//# sourceURL=` value, if seen (port of `sourceURL_`).
     source_url: Option<String>,
     /// `//# sourceMappingURL=` value, if seen (port of `sourceMappingURL_`).
-    #[allow(dead_code)]
     source_mapping_url: Option<String>,
 
     /// Whether to store comments encountered while lexing instead of skipping
@@ -264,6 +261,18 @@ impl<'a> JSLexer<'a> {
     /// \return any stored tokens to this point. Port of `getStoredTokens`.
     pub fn get_stored_tokens(&self) -> &[StoredToken] {
         &self.token_storage
+    }
+
+    /// \return the source URL from the magic comment, or `None` if there was no
+    /// magic comment. Port of `getSourceURL`.
+    pub fn get_source_url(&self) -> Option<&str> {
+        self.source_url.as_deref()
+    }
+
+    /// \return the source mapping URL from the magic comment, or `None` if there
+    /// was no magic comment. Port of `getSourceMappingURL`.
+    pub fn get_source_mapping_url(&self) -> Option<&str> {
+        self.source_mapping_url.as_deref()
     }
 
     /// \return the end location of the previous token.
@@ -995,9 +1004,27 @@ impl<'a> JSLexer<'a> {
             ));
         }
 
-        // Magic-comment parsing (`//# sourceURL=` / `sourceMappingURL=`) is
-        // implemented in the next task.
-        let _ = (comment_start, comment_end);
+        // Check for magic comments, which excludes #!.
+        // Syntax is //# name=value
+        let comment = self
+            .cursor
+            .slice(comment_start, comment_end)
+            .to_vec();
+        let Some(rest) = comment.strip_prefix(b"//# ") else {
+            return;
+        };
+
+        if let Some(value) = rest.strip_prefix(b"sourceURL=") {
+            // The comment bytes point into the source buffer (ASCII-ish); store
+            // them as a String for the lexer's own accessor and the manager.
+            let value = String::from_utf8_lossy(value).into_owned();
+            self.sm.set_source_url(self.buf_id, &value);
+            self.source_url = Some(value);
+        } else if let Some(value) = rest.strip_prefix(b"sourceMappingURL=") {
+            let value = String::from_utf8_lossy(value).into_owned();
+            self.sm.set_source_mapping_url(self.buf_id, &value);
+            self.source_mapping_url = Some(value);
+        }
     }
 
     /// Skip a block comment (`/* ... */`), tracking the newline flag.
@@ -1487,6 +1514,20 @@ mod tests {
         let raw = buf.raw();
         assert_eq!(&raw[cs[0].1 as usize..cs[0].2 as usize], b"/*c*/");
         assert_eq!(&raw[cs[1].1 as usize..cs[1].2 as usize], b"// line");
+    }
+
+    #[test]
+    fn magic_comments() {
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer(
+            "t",
+            "a\n//# sourceURL=http://x/y.js\n//# sourceMappingURL=z.map\nb",
+        );
+        let tab = AtomTable::new();
+        let mut lex = JSLexer::new(id, &mut sm, &tab, GrammarContext::AllowDiv);
+        while lex.advance(GrammarContext::AllowDiv).kind() != TokenKind::eof {}
+        assert_eq!(lex.get_source_url(), Some("http://x/y.js"));
+        assert_eq!(lex.get_source_mapping_url(), Some("z.map"));
     }
 
     #[test]
