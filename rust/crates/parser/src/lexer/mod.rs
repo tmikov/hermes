@@ -1575,6 +1575,81 @@ mod tests {
     }
 
     #[test]
+    fn is_directive() {
+        fn directive(src: &str) -> bool {
+            let mut sm = SourceErrorManager::new();
+            let id = sm.add_buffer("t", src);
+            let tab = AtomTable::new();
+            let mut lex = JSLexer::new(id, &mut sm, &tab, GrammarContext::AllowDiv);
+            lex.advance(GrammarContext::AllowDiv); // the string literal
+            lex.is_current_token_a_directive()
+        }
+        assert!(directive("\"use strict\";"));
+        assert!(directive("\"use strict\"\n"));
+        assert!(directive("\"x\" /*c*/ ;"));
+        assert!(directive("\"x\"")); // eof
+        assert!(directive("\"x\" // line")); // line comment implies newline
+        assert!(directive("\"x\" }")); // right brace
+        assert!(!directive("\"x\" + y")); // followed by an operator
+        assert!(!directive("foo")); // not a string literal
+    }
+
+    #[test]
+    fn is_directive_does_not_corrupt() {
+        // After is_current_token_a_directive, the next advance is unaffected.
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("t", "\"x\" /*c*/ + y");
+        let tab = AtomTable::new();
+        let mut lex = JSLexer::new(id, &mut sm, &tab, GrammarContext::AllowDiv);
+        assert_eq!(
+            lex.advance(GrammarContext::AllowDiv).kind(),
+            TokenKind::string_literal
+        );
+        assert!(!lex.is_current_token_a_directive());
+        // The block comment is normally skipped; the next token is '+'.
+        assert_eq!(lex.advance(GrammarContext::AllowDiv).kind(), TokenKind::plus);
+        assert_eq!(
+            lex.advance(GrammarContext::AllowDiv).kind(),
+            TokenKind::identifier
+        );
+    }
+
+    #[test]
+    fn rescan_rbrace_template() {
+        use TokenKind::*;
+        // `a${b}c` : template_head, identifier(b), r_brace, then rescan ->
+        // template_tail cooked="c".
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("t", "`a${b}c`");
+        let tab = AtomTable::new();
+        let mut lex = JSLexer::new(id, &mut sm, &tab, GrammarContext::AllowDiv);
+        assert_eq!(lex.advance(GrammarContext::AllowDiv).kind(), template_head);
+        assert_eq!(lex.advance(GrammarContext::AllowDiv).kind(), identifier);
+        assert_eq!(lex.advance(GrammarContext::AllowDiv).kind(), r_brace);
+        let tok = lex.rescan_rbrace_in_template_literal();
+        assert_eq!(tok.kind(), template_tail);
+        let cooked = tok.get_template_value().map(|a| tab.bytes(a).to_vec());
+        assert_eq!(cooked, Some(b"c".to_vec()));
+    }
+
+    #[test]
+    fn rescan_rbrace_template_middle() {
+        use TokenKind::*;
+        // `a${b}c${d}e` : the first rescan yields template_middle.
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("t", "`a${b}c${d}e`");
+        let tab = AtomTable::new();
+        let mut lex = JSLexer::new(id, &mut sm, &tab, GrammarContext::AllowDiv);
+        assert_eq!(lex.advance(GrammarContext::AllowDiv).kind(), template_head);
+        assert_eq!(lex.advance(GrammarContext::AllowDiv).kind(), identifier);
+        assert_eq!(lex.advance(GrammarContext::AllowDiv).kind(), r_brace);
+        assert_eq!(
+            lex.rescan_rbrace_in_template_literal().kind(),
+            template_middle
+        );
+    }
+
+    #[test]
     fn newline_flag_tracks_line_terminators() {
         let mut sm = SourceErrorManager::new();
         let id = sm.add_buffer("t", ";\n;");
