@@ -137,10 +137,29 @@ impl<'a> JSONParser<'a> {
         Some(res)
     }
 
-    // Stub — filled in C2.
+    /// JSONParser.cpp:249 — parse `[ ... ]` (the `[` already consumed).
     fn parse_array(&mut self) -> Option<&'a JSONValue<'a>> {
-        self.error("expected ']'");
-        None
+        let mut storage: Vec<&'a JSONValue<'a>> = Vec::new();
+        if self.cur().kind() != TokenKind::r_square {
+            loop {
+                let val = self.parse_value()?;
+                storage.push(val);
+                if self.cur().kind() == TokenKind::comma {
+                    self.advance();
+                    if self.cur().kind() == TokenKind::r_square {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+            if self.cur().kind() != TokenKind::r_square {
+                self.error("expected ']'");
+                return None;
+            }
+        }
+        self.advance(); // consume ']'
+        Some(self.factory.new_array(&storage))
     }
 
     // Stub — filled in C3.
@@ -202,6 +221,34 @@ mod parser_tests {
             .as_string()
             .unwrap();
         assert_eq!(atoms.bytes(s), b"hi");
+    }
+
+    /// Parse `src` in a self-contained scope and run `f` on the result + atom
+    /// table while everything is still alive. Returns whatever `f` returns.
+    fn with_parse<R>(src: &str, f: impl FnOnce(Option<&JSONValue<'_>>, &AtomTable) -> R) -> R {
+        let arena = Bump::new();
+        let atoms = AtomTable::new();
+        let factory = arena.alloc(JSONFactory::new(&arena, &atoms));
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("json", src);
+        let mut parser = JSONParser::new(factory, id, &mut sm, &atoms, false);
+        let result = parser.parse();
+        f(result, &atoms)
+    }
+
+    #[test]
+    fn arrays() {
+        with_parse("[-1.0, -1, -0]", |r, _| {
+            let v = r.unwrap().as_array().unwrap();
+            assert_eq!(v.len(), 3);
+            assert_eq!(v.at(0).as_number(), Some(-1.0));
+            assert_eq!(v.at(2).as_number(), Some(-0.0));
+        });
+        with_parse("[]", |r, _| assert!(r.unwrap().as_array().unwrap().is_empty()));
+        // trailing comma is accepted (mirror C++: after a comma, ']' breaks the loop).
+        with_parse("[1,2,3,]", |r, _| assert!(r.is_some()));
+        // unterminated -> failure.
+        with_parse("[1,2", |r, _| assert!(r.is_none()));
     }
 
     #[test]
