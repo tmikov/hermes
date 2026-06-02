@@ -145,13 +145,16 @@ part of SourceErrorManager; in build order):
 > `plans/2026-06-02-js-lexer-proper-3b.md`. **The lexer now lexes the full JSLexer surface bar the
 > stateful/parser-facing APIs.**
 >
-> **Next — lexer phase 4 (stateful/parser-facing APIs):** 4a self-contained state (`SavePoint`,
-> `seek`/`forceEOF`, comment+token storage, magic comments `//# sourceURL=`/`sourceMappingURL=`,
-> `isCurrentTokenADirective`, `rescanRBraceInTemplateLiteral` → enables `template_middle`/`template_tail`);
-> 4b parser-lookahead (`lookahead1`/`lookahead2`, `isLetFollowedByDeclStart`,
-> `isUsing/AwaitUsingFollowedByIdentifier` — pass the needed atoms instead of the parser `Keywords`);
-> 4c `convertSurrogates` re-encoding (needs UTF-8↔UTF-16 conversion utils). **Remaining tracked items:**
-> the `--non-strict` harness flag.
+> **🚧 Lexer phase 4a DONE.** Self-contained lexer state: comment + token storage, magic comments
+> (`//# sourceURL=`/`sourceMappingURL=`), `SavePoint` (value struct + `restore`), `seek`/`force_eof`,
+> `isCurrentTokenADirective` (non-corrupting), `rescanRBraceInTemplateLiteral` (→ `template_middle`/
+> `template_tail`). Unit-tested; the 5 differentials still pass. Plan: `plans/2026-06-02-js-lexer-proper-4a.md`.
+>
+> **Next — lexer phase 4b (parser-lookahead):** `lookahead1`/`lookahead2` (save/advance/restore +
+> suppress), `optimisticSkipWhitespace`, `isLetFollowedByDeclStart`, `isUsing/AwaitUsingFollowedByIdentifier`
+> (pass the needed atoms, not the parser `Keywords`). Then 4c `convertSurrogates` re-encoding (needs
+> UTF-8↔UTF-16 conversion utils) — the last piece. **Remaining tracked items:** the `--non-strict`
+> harness flag.
 
 ## Key cross-cutting design decisions
 
