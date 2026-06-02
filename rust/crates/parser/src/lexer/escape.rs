@@ -198,9 +198,7 @@ impl<'a> JSLexer<'a> {
 
     /// Optionally consume a `\u`/`\u{}` escape: on ANY failure, reset the cursor
     /// to the start and return `None`. Port of `consumeUnicodeEscapeOptional`
-    /// (JSLexer.cpp:1192-1226). Used by regexp/templates (ported now for
-    /// completeness).
-    #[allow(dead_code)]
+    /// (JSLexer.cpp:1192-1226). Used by `scan_template_literal`.
     pub(crate) fn consume_unicode_escape_optional(&mut self) -> Option<u32> {
         let start = self.cursor.offset();
         debug_assert!(self.cursor.peek() == b'\\');

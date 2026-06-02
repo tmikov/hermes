@@ -10,10 +10,9 @@
 //!
 //! The full set of value getters/setters
 //! (numeric/identifier/string/template/regexp/bigint/jsx) is part of the
-//! faithful `Token` surface. Some accessors are not exercised by every consumer
-//! of the lexer, so we allow `dead_code` for the whole module rather than drop
-//! the surface.
-#![allow(dead_code)]
+//! faithful `Token` surface; the public accessors are part of the lexer's API
+//! (consumed by the parser), and the `pub(crate)` setters are all used by the
+//! scanners or exercised by tests.
 
 use atom_table::AtomBytes;
 use support::location::{SMLoc, SMRange, SourceId};
@@ -230,6 +229,11 @@ impl Token {
         self.string_literal = Some(literal);
         self.string_literal_contains_escapes = contains_escapes;
     }
+    /// Port of C++ `Token::setJSXStringLiteral`. The lexer's JSX string path
+    /// uses `set_string_literal` (matching the C++ `scanString`), so this is not
+    /// called by the lexer itself; it is kept for faithful `Token` surface
+    /// completeness and exercised by a unit test.
+    #[allow(dead_code)]
     pub(crate) fn set_jsx_string_literal(&mut self, literal: AtomBytes, raw: AtomBytes) {
         self.kind = TokenKind::string_literal;
         self.string_literal = Some(literal);
@@ -371,6 +375,36 @@ mod tests {
         assert_eq!(t.kind(), TokenKind::l_brace);
         assert_eq!(t.start_loc().offset, 0);
         assert_eq!(t.end_loc().offset, 1);
+    }
+
+    #[test]
+    fn jsx_string_literal_value_and_raw() {
+        // set_jsx_string_literal sets value + raw + escapes=false. Exercises
+        // set_jsx_string_literal and get_string_literal_raw_value (a faithful
+        // Token surface the parser consumes; otherwise unexercised in-crate).
+        let tab = atom_table::AtomTable::new();
+        let value = tab.atom_bytes(b"a<b");
+        let raw = tab.atom_bytes(b"a&lt;b");
+        let mut t = Token::new(SourceId::from_index(0));
+        t.set_jsx_string_literal(value, raw);
+        assert_eq!(t.kind(), TokenKind::string_literal);
+        assert_eq!(t.get_string_literal(), value);
+        assert_eq!(t.get_string_literal_raw_value(), raw);
+        assert!(!t.get_string_literal_contains_escapes());
+    }
+
+    #[test]
+    fn template_literal_contains_not_escapes() {
+        // get_template_literal_contains_not_escapes() == (cooked is None).
+        let tab = atom_table::AtomTable::new();
+        let raw = tab.atom_bytes(b"\\9");
+        let mut t = Token::new(SourceId::from_index(0));
+        t.set_template_literal(TokenKind::no_substitution_template, None, raw);
+        assert!(t.get_template_literal_contains_not_escapes());
+        let cooked = tab.atom_bytes(b"ok");
+        t.set_template_literal(TokenKind::template_head, Some(cooked), raw);
+        assert!(!t.get_template_literal_contains_not_escapes());
+        assert_eq!(t.get_template_value(), Some(cooked));
     }
 
     #[test]

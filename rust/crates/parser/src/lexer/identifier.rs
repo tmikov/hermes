@@ -18,9 +18,8 @@ use super::{GrammarContext, IdentifierMode, JSLexer};
 impl<'a> JSLexer<'a> {
     /// Try to consume the start of an identifier into `tmp_storage`. Port of
     /// `consumeIdentifierStart` (JSLexer.cpp:1228-1267). Returns true if an
-    /// identifier start was consumed (used by the private-identifier scanner,
-    /// which is deferred — hence currently unexercised).
-    #[allow(dead_code)]
+    /// identifier start was consumed. Used by `scan_number` (the trailing
+    /// identifier / BigInt check) and `scan_private_identifier`.
     pub(crate) fn consume_identifier_start(&mut self) -> bool {
         let c = self.cursor.peek();
         if c == b'_' || c == b'$' || ((c | 32) >= b'a' && (c | 32) <= b'z') {
