@@ -811,7 +811,7 @@ impl<'a> JSLexer<'a> {
                 // ' " : string literals.
                 b'\'' | b'"' => {
                     self.set_token_start();
-                    self.scan_string();
+                    self.scan_string_in_context(grammar_context);
                 }
 
                 // ` : template literal.

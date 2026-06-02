@@ -16,9 +16,6 @@ impl<'a> JSLexer<'a> {
     ///
     /// Recognizes `&#xHEX;` (hex), `&#NUMBER;` (decimal) and `&NAME;` (named).
     /// On any failure the cursor is reset to the `&` and `None` is returned.
-    ///
-    /// (Wired into `scan_string` and `advance_in_jsx_child` in the next tasks.)
-    #[allow(dead_code)]
     pub(crate) fn consume_html_entity_optional(&mut self) -> Option<u32> {
         debug_assert!(self.cursor.peek() == b'&');
         let start = self.cursor.offset();
