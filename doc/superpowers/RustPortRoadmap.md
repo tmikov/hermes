@@ -97,12 +97,22 @@ part of SourceErrorManager; in build order):
 > `plans/2026-06-01-js-lexer-proper-1a.md`. Workspace: **~106 Rust tests passing, zero
 > warnings**.
 >
-> **Next — lexer phase 1b:** identifiers (fast path + Unicode + `\u` escapes) + reserved
-> words (pre-intern via `atom_table`) + numbers (wire `parser::number` into `scanNumber`) +
-> the `AllowRegExp` `/` slash-vs-regex decision (regex body itself in phase 2). Then phase 2
-> (string/template/regexp/bigint literals + `encodeUTF8`/WTF-8), phase 3 (JSX/Flow + extend
-> the oracle), phase 4 (`SavePoint`/`lookahead1`/`lookahead2`/directive/`rescanRBrace`).
-> Each phase extends the live differential corpus.
+> **🚧 Lexer phase 1b-i DONE.** Identifiers (ASCII fast path + Unicode + `\u`/`\u{}` escapes),
+> reserved words (pre-interned via `atom_table` + strict-mode future-reserved-word filter), the
+> UTF-8 **encode** side + `appendUnicodeToStorage` WTF-8 surrogate split, and the `ident=` dump
+> field. The differential corpus now covers identifiers/reswords/Unicode/escapes (31 entries).
+> Plan: `plans/2026-06-02-js-lexer-proper-1b-i.md`. **NOTE:** review caught that the differential
+> test was *silently skipping* (oracle binary resolved relative to the crate dir, not the repo
+> root) — fixed to resolve via `CARGO_MANIFEST_DIR`, assert every entry when the binary is
+> present, and honor `REQUIRE_DIFFERENTIAL=1` to force a hard failure if absent. It now genuinely
+> runs for phases 1a+1b-i.
+>
+> **Next — lexer phase 1b-ii:** numbers — port `scanNumber` (`JSLexer.cpp:1573–1856`) wiring
+> `parser::number` (`str_to_double` + `parse_int_with_radix`), with `bits=`/bigint dump fields and
+> a numeric differential corpus. Then phase 2 (string/template/regexp/bigint literals + the
+> `AllowRegExp` `/` regex path), phase 3 (JSX/Flow + extend the oracle), phase 4
+> (`SavePoint`/`lookahead1`/`lookahead2`/directive/`rescanRBrace`). Each phase extends the live
+> differential corpus.
 
 ## Key cross-cutting design decisions
 
