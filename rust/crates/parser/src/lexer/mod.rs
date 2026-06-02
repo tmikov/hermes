@@ -34,7 +34,7 @@ use unicode::{
 };
 
 use crate::cursor::Cursor;
-use crate::token::{StoredComment, StoredToken, Token};
+use crate::token::{CommentKind, StoredComment, StoredToken, Token};
 use crate::token_kinds::TokenKind;
 use crate::utf8::{
     append_unicode_to_storage, decode_utf8,
@@ -104,27 +104,25 @@ pub struct JSLexer<'a> {
     /// literals. Port of `rawStorage_`.
     raw_storage: Vec<u8>,
 
-    /// `//# sourceURL=` value, if seen. NOTE: magic-comment URL parsing is
-    /// deferred to a later phase; this field carries the faithful shape.
+    /// `//# sourceURL=` value, if seen (port of `sourceURL_`). Magic-comment
+    /// parsing is wired in the next task.
     #[allow(dead_code)]
     source_url: Option<String>,
-    /// `//# sourceMappingURL=` value, if seen. See `source_url`.
+    /// `//# sourceMappingURL=` value, if seen (port of `sourceMappingURL_`).
     #[allow(dead_code)]
     source_mapping_url: Option<String>,
 
-    /// Whether to store comments encountered while lexing. The flag is wired
-    /// but comment STORAGE itself is deferred to a later phase, so it is not yet
-    /// read.
-    #[allow(dead_code)]
+    /// Whether to store comments encountered while lexing instead of skipping
+    /// them. Port of `storeComments_`.
     store_comments: bool,
-    /// Stored comments (only populated when `store_comments`). NOTE: comment
-    /// STORAGE is deferred — the flag is wired but the storage stays empty in 1a.
-    #[allow(dead_code)]
+    /// Stored comments (only populated when `store_comments`). Port of
+    /// `commentStorage_`.
     comment_storage: Vec<StoredComment>,
-    /// Whether to store every token encountered while lexing.
+    /// Whether to store every token encountered while lexing. Port of
+    /// `storeTokens_`.
     store_tokens: bool,
-    /// Stored tokens (only populated when `store_tokens`).
-    #[allow(dead_code)]
+    /// Stored tokens (only populated when `store_tokens`). Port of
+    /// `tokenStorage_`.
     token_storage: Vec<StoredToken>,
 }
 
@@ -222,6 +220,52 @@ impl<'a> JSLexer<'a> {
         self.new_line_before_current_token
     }
 
+    /// Set whether comments should be stored instead of skipped. Port of
+    /// `setStoreComments`.
+    pub fn set_store_comments(&mut self, store_comments: bool) {
+        self.store_comments = store_comments;
+    }
+
+    /// \return whether tokens are being stored. Port of `getStoreTokens`.
+    pub fn get_store_tokens(&self) -> bool {
+        self.store_tokens
+    }
+
+    /// Set whether every token should be stored as it is lexed. Port of
+    /// `setStoreTokens`.
+    pub fn set_store_tokens(&mut self, store_tokens: bool) {
+        self.store_tokens = store_tokens;
+    }
+
+    /// Unconditionally store the current token in the token storage. Port of
+    /// `storeCurrentToken` (JSLexer.h:548-551).
+    pub fn store_current_token(&mut self) {
+        debug_assert!(
+            self.store_tokens,
+            "Tokens shouldn't be stored unless the flag is set"
+        );
+        self.token_storage.push(StoredToken::new(
+            self.token.kind(),
+            self.token.source_range(),
+        ));
+    }
+
+    /// \return any stored comments to this point. Port of `getStoredComments`.
+    pub fn get_stored_comments(&self) -> &[StoredComment] {
+        &self.comment_storage
+    }
+
+    /// \return any stored comments to this point, moving them out of storage in
+    /// the lexer and clearing the storage. Port of `moveStoredComments`.
+    pub fn move_stored_comments(&mut self) -> Vec<StoredComment> {
+        std::mem::take(&mut self.comment_storage)
+    }
+
+    /// \return any stored tokens to this point. Port of `getStoredTokens`.
+    pub fn get_stored_tokens(&self) -> &[StoredToken] {
+        &self.token_storage
+    }
+
     /// \return the end location of the previous token.
     pub fn prev_token_end(&self) -> SMLoc {
         self.prev_token_end
@@ -243,10 +287,18 @@ impl<'a> JSLexer<'a> {
         self.token.set_start(loc);
     }
 
-    /// Move the cursor to EOF. Port of `forceEOF`.
+    /// Force an EOF at the next token. Port of `forceEOF`.
     #[inline]
-    fn force_eof(&mut self) {
+    pub fn force_eof(&mut self) {
         self.cursor.seek_end();
+    }
+
+    /// Move the lexer to the specified spot. Any future `advance` calls will
+    /// start from this position (the current token is not updated until such a
+    /// call). Port of `seek` (JSLexer.h:699-701).
+    #[inline]
+    pub fn seek(&mut self, loc: SMLoc) {
+        self.cursor.seek(loc.offset);
     }
 
     /// Emit an error at `loc` (Lexer subsystem). If the error limit was reached,
@@ -283,13 +335,6 @@ impl<'a> JSLexer<'a> {
         if self.store_tokens {
             self.store_current_token();
         }
-    }
-
-    fn store_current_token(&mut self) {
-        self.token_storage.push(StoredToken::new(
-            self.token.kind(),
-            self.token.source_range(),
-        ));
     }
 
     // ---- Punctuator helpers (port of the PUNC_* macros) ---------------------
@@ -863,17 +908,18 @@ impl<'a> JSLexer<'a> {
 
     // ---- Comment scanners ---------------------------------------------------
 
-    /// Skip a line comment (or `#!` hashbang), tracking the newline flag.
-    /// Port of `lineCommentHelper` + `scanLineComment` (JSLexer.cpp:1430-1510).
-    ///
-    /// NOTE: comment STORAGE and magic-comment URL parsing (`//# sourceURL=` /
-    /// `//# sourceMappingURL=`) are deferred to a later phase; here we only skip
-    /// the comment correctly and track the newline flag.
-    fn scan_line_comment(&mut self) {
+    /// Consume a line comment starting from the cursor (which is on `//` or
+    /// `#!`) and return the comment offsets `(start, end)` EXCLUDING the line
+    /// terminator. Update the cursor to point after the line terminator. Port of
+    /// `lineCommentHelper` (JSLexer.cpp:1430-1480).
+    fn line_comment_helper(&mut self) -> (u32, u32) {
         debug_assert!(
             (self.cursor.peek() == b'/' && self.cursor.peek_at(1) == b'/')
                 || (self.cursor.peek() == b'#' && self.cursor.peek_at(1) == b'!')
         );
+        let start = self.cursor.offset();
+        // The end of the comment, excluding the line terminator.
+        let line_comment_end;
         // Skip the two-character opening delimiter.
         self.cursor.advance(2);
 
@@ -882,12 +928,14 @@ impl<'a> JSLexer<'a> {
             match c {
                 0 => {
                     if self.cursor.at_end() {
+                        line_comment_end = self.cursor.offset();
                         break;
                     } else {
                         self.cursor.advance(1);
                     }
                 }
                 b'\r' | b'\n' => {
+                    line_comment_end = self.cursor.offset();
                     self.cursor.advance(1);
                     self.new_line_before_current_token = true;
                     break;
@@ -896,6 +944,7 @@ impl<'a> JSLexer<'a> {
                     if match_unicode_line_terminator_offset1(
                         &self.cursor.raw()[self.cursor.offset() as usize..],
                     ) {
+                        line_comment_end = self.cursor.offset();
                         self.cursor.advance(3);
                         self.new_line_before_current_token = true;
                         break;
@@ -912,12 +961,49 @@ impl<'a> JSLexer<'a> {
                 }
             }
         }
+
+        (start, line_comment_end)
+    }
+
+    /// Consume a line comment starting from the cursor (which is on `//` or
+    /// `#!`). Optionally store the comment in comment storage. Update the cursor
+    /// to point after the line terminator. Process magic comments. Port of
+    /// `scanLineComment` (JSLexer.cpp:1482-1510).
+    fn scan_line_comment(&mut self) {
+        let first = self.cursor.peek();
+        let (comment_start, comment_end) = self.line_comment_helper();
+
+        if self.store_comments {
+            // `first == '/'` means a `//` line comment; otherwise `#!` hashbang.
+            let kind = if first == b'/' {
+                CommentKind::Line
+            } else {
+                CommentKind::Hashbang
+            };
+            self.comment_storage.push(StoredComment::new(
+                kind,
+                SMRange {
+                    start: SMLoc {
+                        source: self.buf_id,
+                        offset: comment_start,
+                    },
+                    end: SMLoc {
+                        source: self.buf_id,
+                        offset: comment_end,
+                    },
+                },
+            ));
+        }
+
+        // Magic-comment parsing (`//# sourceURL=` / `sourceMappingURL=`) is
+        // implemented in the next task.
+        let _ = (comment_start, comment_end);
     }
 
     /// Skip a block comment (`/* ... */`), tracking the newline flag.
-    /// Port of `skipBlockComment` (JSLexer.cpp:1512-1571). Comment STORAGE is
-    /// deferred. A non-terminated block comment reports an error + a "comment
-    /// started here" note, matching the C++.
+    /// Optionally store the comment in comment storage. Port of
+    /// `skipBlockComment` (JSLexer.cpp:1512-1571). A non-terminated block comment
+    /// reports an error + a "comment started here" note, matching the C++.
     fn skip_block_comment(&mut self) {
         debug_assert!(self.cursor.peek() == b'/' && self.cursor.peek_at(1) == b'*');
         let block_comment_start = self.cur_loc();
@@ -966,6 +1052,16 @@ impl<'a> JSLexer<'a> {
                     }
                 }
             }
+        }
+
+        if self.store_comments {
+            self.comment_storage.push(StoredComment::new(
+                CommentKind::Block,
+                SMRange {
+                    start: block_comment_start,
+                    end: self.cur_loc(),
+                },
+            ));
         }
     }
 
@@ -1338,6 +1434,59 @@ mod tests {
         // Comments and whitespace are skipped; only the `;` punctuators remain.
         assert_eq!(kinds("; /* c */ ;"), vec![semi, semi, eof]);
         assert_eq!(kinds("; // line\n;"), vec![semi, semi, eof]);
+    }
+
+    #[test]
+    fn token_storage() {
+        // With store_tokens on, every advanced token (kind+range) is recorded.
+        // finishToken stores the token it just finished, including the final
+        // `eof` (advance scans eof, then finishToken records it). This matches
+        // the C++ faithfully.
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("t", "a + b");
+        let tab = AtomTable::new();
+        let mut lex = JSLexer::new(id, &mut sm, &tab, GrammarContext::AllowDiv);
+        lex.set_store_tokens(true);
+        assert!(lex.get_store_tokens());
+        while lex.advance(GrammarContext::AllowDiv).kind() != TokenKind::eof {}
+        let toks: Vec<TokenKind> =
+            lex.get_stored_tokens().iter().map(|t| t.kind()).collect();
+        assert_eq!(
+            toks,
+            vec![
+                TokenKind::identifier,
+                TokenKind::plus,
+                TokenKind::identifier,
+                TokenKind::eof
+            ]
+        );
+    }
+
+    #[test]
+    fn comment_storage() {
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("t", "a /*c*/ // line\nb");
+        let tab = AtomTable::new();
+        let mut lex = JSLexer::new(id, &mut sm, &tab, GrammarContext::AllowDiv);
+        lex.set_store_comments(true);
+        while lex.advance(GrammarContext::AllowDiv).kind() != TokenKind::eof {}
+        // Capture the comment ranges before re-borrowing the buffer for slicing.
+        let cs: Vec<(CommentKind, u32, u32)> = lex
+            .get_stored_comments()
+            .iter()
+            .map(|c| {
+                let r = c.source_range();
+                (c.kind(), r.start.offset, r.end.offset)
+            })
+            .collect();
+        assert_eq!(cs.len(), 2);
+        assert_eq!(cs[0].0, CommentKind::Block);
+        assert_eq!(cs[1].0, CommentKind::Line);
+        // The stored range includes the delimiters (getString strips them).
+        let buf = sm.source_buffer(id);
+        let raw = buf.raw();
+        assert_eq!(&raw[cs[0].1 as usize..cs[0].2 as usize], b"/*c*/");
+        assert_eq!(&raw[cs[1].1 as usize..cs[1].2 as usize], b"// line");
     }
 
     #[test]
