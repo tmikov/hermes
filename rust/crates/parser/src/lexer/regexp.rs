@@ -28,11 +28,10 @@ impl<'a> JSLexer<'a> {
         let mut in_class = false;
 
         // The body loop. `goto unterminated` / `goto exit_loop` in the C++ are
-        // modelled with these two flags + `break`s; the body interning after the
-        // loop happens regardless of which exit was taken.
+        // modelled with an `unterminated` flag + `break`s; the body interning
+        // after the loop happens regardless of which exit was taken.
         loop {
             let mut unterminated = false;
-            let mut exit = false;
             match self.cursor.peek() {
                 b'/' => {
                     if !in_class {
@@ -51,7 +50,7 @@ impl<'a> JSLexer<'a> {
 
                 b'\\' => {
                     // an escape
-                    self.tmp_storage.push(self.cursor.peek());
+                    self.tmp_storage.push(b'\\');
                     self.cursor.advance(1);
                     match self.cursor.peek() {
                         b'\0' => {
@@ -97,10 +96,6 @@ impl<'a> JSLexer<'a> {
                 let loc = self.cur_loc();
                 self.error(loc, "non-terminated regular expression literal");
                 self.sm.note(start_loc, "regular expression started here");
-                exit = true;
-            }
-
-            if exit {
                 break; // goto exitLoop
             }
 
@@ -126,7 +121,7 @@ impl<'a> JSLexer<'a> {
                 escaping_backslash = false;
                 continue;
             } else if self.cursor.peek() == b'\\' {
-                self.tmp_storage.push(self.cursor.peek());
+                self.tmp_storage.push(b'\\');
                 self.cursor.advance(1);
 
                 // ES6 11.8.5.1: It is a Syntax Error if IdentifierPart contains a
