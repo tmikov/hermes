@@ -147,13 +147,23 @@ phase at a time:
 2. Dispatch a **general-purpose implementer subagent** with the full plan embedded + the conventions
    above. It does TDD and commits per task.
 3. **Spec-compliance review** subagent (independent: build, run, read code vs the C++ — do NOT trust
-   the implementer's report; the differential test is the byte-for-byte gate).
+   the implementer's report; the differential test is the byte-for-byte gate). **Structural-fidelity
+   check (the differential CANNOT catch this):** for every C++ `template`/specialization in the ported
+   range, confirm it stayed a Rust generic (`const` generic / marker-trait type param) and was NOT
+   flattened to a runtime `bool`/enum param — runtime dispatch is behaviorally identical (so the
+   differential passes) but changes codegen and is an unauthorized deviation. Grep the C++ source range
+   for `template <` and check each one. Likewise flag any other silent structure change (template↔runtime,
+   layout, RAII→explicit beyond the agreed list).
 4. **Code-quality review** subagent (after spec passes).
 5. Apply fixes (small ones directly; larger via a fix subagent), re-verify, commit.
 6. Update the roadmap; move to the next phase.
 7. **At component end: a capstone review of the WHOLE component** — it caught real bugs the
    per-phase reviews missed (a silently-skipping differential test; a `lookahead1` rollback bug; a
-   stubbed `advance` fallthrough). Always do this.
+   stubbed `advance` fallthrough). Always do this. **Re-run the structural-fidelity check from step 3
+   over the whole component** — the lexer's `template`→runtime-param flattening (`lookahead1/2`,
+   `scanIdentifierFastPath/Parts<IdentifierMode>`, `scanString<JSX>`) slipped past every per-phase
+   review AND the capstone because the differential is byte-identical either way; it was only caught
+   later by eye. Grep the component's C++ for `template <` and verify each survived as a generic.
 
 Commit messages end with `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`.
 Commit directly to `rust`; **never** open a PR or merge (project rule).
