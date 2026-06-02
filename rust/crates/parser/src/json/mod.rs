@@ -12,6 +12,8 @@
 pub mod factory;
 pub mod parser;
 
+pub use factory::JSONFactory;
+
 use atom_table::AtomBytes;
 
 /// Port of `JSONKind` (JSONParser.h:36).
