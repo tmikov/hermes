@@ -113,28 +113,28 @@ impl<'a> JSONValue<'a> {
     }
 
     /// Returns an `ArrayView` if this is an `Array`, else `None`.
-    pub fn as_array(&self) -> Option<ArrayView<'a, '_>> {
+    pub fn as_array(&self) -> Option<ArrayView<'a>> {
         match self {
-            JSONValue::Array(v) => Some(ArrayView { values: v }),
+            JSONValue::Array(v) => Some(ArrayView { values: *v }),
             _ => None,
         }
     }
 
     /// Returns an `ObjectView` if this is an `Object`, else `None`.
-    pub fn as_object(&self) -> Option<ObjectView<'a, '_>> {
+    pub fn as_object(&self) -> Option<ObjectView<'a>> {
         match self {
-            JSONValue::Object(c, v) => Some(ObjectView { class: c, values: v }),
+            JSONValue::Object(c, v) => Some(ObjectView { class: *c, values: *v }),
             _ => None,
         }
     }
 }
 
 /// Borrowed view over an array (JSONParser.h:458 `JSONArray`).
-pub struct ArrayView<'a, 'v> {
-    values: &'v &'a [&'a JSONValue<'a>],
+pub struct ArrayView<'a> {
+    values: &'a [&'a JSONValue<'a>],
 }
 
-impl<'a, 'v> ArrayView<'a, 'v> {
+impl<'a> ArrayView<'a> {
     /// Returns the number of elements in the array.
     pub fn len(&self) -> usize {
         self.values.len()
@@ -145,7 +145,7 @@ impl<'a, 'v> ArrayView<'a, 'v> {
         self.values.is_empty()
     }
 
-    /// Returns the element at position `pos`.
+    /// Element at `pos`; panics if out of bounds (faithful to C++ `JSONArray::at`).
     pub fn at(&self, pos: usize) -> &'a JSONValue<'a> {
         self.values[pos]
     }
@@ -158,13 +158,13 @@ impl<'a, 'v> ArrayView<'a, 'v> {
 
 /// Borrowed view over an object (JSONParser.h:239 `JSONObject`). Grown in B3
 /// with name lookups + iteration.
-pub struct ObjectView<'a, 'v> {
-    pub(crate) class: &'v &'a JSONHiddenClass<'a>,
-    pub(crate) values: &'v &'a [&'a JSONValue<'a>],
+pub struct ObjectView<'a> {
+    pub(crate) class: &'a JSONHiddenClass<'a>,
+    pub(crate) values: &'a [&'a JSONValue<'a>],
 }
 
-impl<'a, 'v> ObjectView<'a, 'v> {
-    /// Returns the number of properties in the object.
+impl<'a> ObjectView<'a> {
+    /// Number of members (faithful to C++ `JSONObject::size`).
     pub fn size(&self) -> usize {
         self.values.len()
     }
@@ -205,5 +205,43 @@ mod model_tests {
         assert_eq!(view.len(), 2);
         assert_eq!(view.at(0).as_number(), Some(10.0));
         assert_eq!(view.iter().count(), 2);
+    }
+
+    #[test]
+    fn kind_to_string_all_variants() {
+        use JSONKind::*;
+        let pairs = [
+            (Object, "Object"),
+            (Array, "Array"),
+            (String, "String"),
+            (Number, "Number"),
+            (Boolean, "Boolean"),
+            (Null, "Null"),
+        ];
+        for (k, s) in pairs {
+            assert_eq!(kind_to_string(k), s);
+        }
+    }
+
+    #[test]
+    fn string_accessor_and_hidden_class_find() {
+        use atom_table::AtomTable;
+        let arena = Bump::new();
+        let atoms = AtomTable::new();
+        let a = atoms.atom_bytes("foo");
+        let s = arena.alloc(JSONValue::String(a));
+        assert_eq!(s.as_string(), Some(a));
+        assert_eq!(s.as_number(), None);
+
+        // sorted keys: "a","b","c" -> find by bytes
+        let ka = atoms.atom_bytes("a");
+        let kb = atoms.atom_bytes("b");
+        let kc = atoms.atom_bytes("c");
+        let keys: &[atom_table::AtomBytes] = arena.alloc_slice_copy(&[ka, kb, kc]);
+        let hc = JSONHiddenClass { keys };
+        assert_eq!(hc.find(b"a", &atoms), Some(0));
+        assert_eq!(hc.find(b"b", &atoms), Some(1));
+        assert_eq!(hc.find(b"c", &atoms), Some(2));
+        assert_eq!(hc.find(b"z", &atoms), None);
     }
 }
