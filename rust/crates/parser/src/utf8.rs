@@ -8,8 +8,8 @@
 //! correctly rejected; we also guard indexes against `bytes.len()` defensively.
 
 use unicode::{
-    UNICODE_REPLACEMENT_CHARACTER, UNICODE_SURROGATE_FIRST, UNICODE_SURROGATE_LAST,
-    UNICODE_MAX_VALUE,
+    UNICODE_MAX_VALUE, UNICODE_REPLACEMENT_CHARACTER, UNICODE_SURROGATE_FIRST,
+    UNICODE_SURROGATE_LAST, UTF16_HIGH_SURROGATE, UTF16_LOW_SURROGATE,
 };
 
 /// First byte of the UTF-8 encoding of U+2028/U+2029 (e2 80 a8/a9).
@@ -173,6 +173,57 @@ pub fn decode_utf8<const ALLOW_SURROGATES: bool>(
     decode_utf8_slow_path::<ALLOW_SURROGATES>(bytes, i, error)
 }
 
+/// Encode a Unicode code point as UTF-8 (up to the legacy 6-byte form, matching
+/// `encodeUTF8`), appending the bytes to `out`. Port of `UTF8.cpp:encodeUTF8`.
+pub fn encode_utf8(out: &mut Vec<u8>, cp: u32) {
+    if cp <= 0x7F {
+        out.push(cp as u8);
+    } else if cp <= 0x7FF {
+        out.push(((cp >> 6) & 0x1F) as u8 | 0xC0);
+        out.push((cp & 0x3F) as u8 | 0x80);
+    } else if cp <= 0xFFFF {
+        out.push(((cp >> 12) & 0x0F) as u8 | 0xE0);
+        out.push(((cp >> 6) & 0x3F) as u8 | 0x80);
+        out.push((cp & 0x3F) as u8 | 0x80);
+    } else if cp <= 0x1FFFFF {
+        out.push(((cp >> 18) & 0x07) as u8 | 0xF0);
+        out.push(((cp >> 12) & 0x3F) as u8 | 0x80);
+        out.push(((cp >> 6) & 0x3F) as u8 | 0x80);
+        out.push((cp & 0x3F) as u8 | 0x80);
+    } else if cp <= 0x3FFFFFF {
+        out.push(((cp >> 24) & 0x03) as u8 | 0xF8);
+        out.push(((cp >> 18) & 0x3F) as u8 | 0x80);
+        out.push(((cp >> 12) & 0x3F) as u8 | 0x80);
+        out.push(((cp >> 6) & 0x3F) as u8 | 0x80);
+        out.push((cp & 0x3F) as u8 | 0x80);
+    } else {
+        out.push(((cp >> 30) & 0x01) as u8 | 0xFC);
+        out.push(((cp >> 24) & 0x3F) as u8 | 0x80);
+        out.push(((cp >> 18) & 0x3F) as u8 | 0x80);
+        out.push(((cp >> 12) & 0x3F) as u8 | 0x80);
+        out.push(((cp >> 6) & 0x3F) as u8 | 0x80);
+        out.push((cp & 0x3F) as u8 | 0x80);
+    }
+}
+
+/// Encode `cp` into `storage` like the lexer's `appendUnicodeToStorage`
+/// (JSLexer.h:1125-1143): code points above 0xFFFF are first split into a
+/// UTF-16 surrogate pair, and each surrogate is encoded individually into UTF-8
+/// (technically invalid UTF-8 / WTF-8, which JS string & identifier storage
+/// allows).
+pub fn append_unicode_to_storage(storage: &mut Vec<u8>, cp: u32) {
+    // We need to normalize code points which would be encoded with a surrogate
+    // pair. Note that this produces technically invalid UTF-8.
+    if cp < 0x10000 {
+        encode_utf8(storage, cp);
+    } else {
+        debug_assert!(cp <= UNICODE_MAX_VALUE, "invalid Unicode value");
+        let cp = cp - 0x10000;
+        encode_utf8(storage, UTF16_HIGH_SURROGATE + ((cp >> 10) & 0x3FF));
+        encode_utf8(storage, UTF16_LOW_SURROGATE + (cp & 0x3FF));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -208,6 +259,32 @@ mod tests {
         assert!(match_unicode_line_terminator_offset1(b"\xe2\x80\xa9")); // U+2029
         assert!(!match_unicode_line_terminator_offset1(b"\xe2\x80\xaa"));
     }
+    #[test]
+    fn encode_basic() {
+        let mut v = vec![];
+        encode_utf8(&mut v, 'a' as u32);
+        assert_eq!(v, b"a");
+        let mut v = vec![];
+        encode_utf8(&mut v, 0x00E9);
+        assert_eq!(v, b"\xc3\xa9"); // é
+        let mut v = vec![];
+        encode_utf8(&mut v, 0x4E2D);
+        assert_eq!(v, b"\xe4\xb8\xad"); // 中
+    }
+
+    #[test]
+    fn append_storage_surrogate_pair() {
+        // BMP: plain UTF-8.
+        let mut v = vec![];
+        append_unicode_to_storage(&mut v, 0x00E9);
+        assert_eq!(v, b"\xc3\xa9");
+        // Astral U+1F600: split into surrogate pair, each encoded as 3-byte
+        // WTF-8. high = 0xD83D, low = 0xDE00 -> ed a0 bd  ed b8 80
+        let mut v = vec![];
+        append_unicode_to_storage(&mut v, 0x1F600);
+        assert_eq!(v, b"\xed\xa0\xbd\xed\xb8\x80");
+    }
+
     #[test]
     fn invalid_reports_error_and_replacement() {
         let buf = b"\xc3\x20"; // 0x20 is not a continuation byte
