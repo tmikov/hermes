@@ -35,14 +35,21 @@ fn rust_dump(src: &str) -> String {
     out
 }
 
+/// Absolute path to the C++ `js-lexer-dump` oracle, resolved relative to the
+/// repo root. `CARGO_MANIFEST_DIR` is `<repo>/rust/crates/parser`, so three `..`
+/// hops reach the repo root. Resolving relative to the manifest dir (rather than
+/// the cwd) is essential: `cargo test` runs integration-test binaries with cwd =
+/// the crate manifest dir, not the repo root, so a relative path here would
+/// silently never exist and the differential would skip every assertion.
+fn js_lexer_dump_bin() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../cmake-build-asan/bin/js-lexer-dump")
+}
+
 /// Run the C++ `js-lexer-dump --context=div -` oracle on `src` via stdin and
-/// return its stdout. Returns `None` if the binary is not built (so CI without
-/// a build can skip), mirroring how the support crate's golden tests skip.
-fn cpp_dump(src: &str) -> Option<String> {
-    let bin = "cmake-build-asan/bin/js-lexer-dump";
-    if !std::path::Path::new(bin).exists() {
-        return None;
-    }
+/// return its stdout. The caller is responsible for checking the binary exists
+/// (see `js_lexer_dump_bin`); this always attempts to run it.
+fn cpp_dump(bin: &std::path::Path, src: &str) -> Option<String> {
     let mut child = Command::new(bin)
         .arg("--context=div")
         .arg("-")
@@ -116,11 +123,25 @@ fn differential_punctuators_and_trivia() {
         // newline flag between idents
         "x;y\nz",
     ];
-    for src in corpus {
-        let Some(cpp) = cpp_dump(src) else {
-            eprintln!("skip: js-lexer-dump not built");
-            return;
-        };
-        assert_eq!(rust_dump(src), cpp, "mismatch for {src:?}");
+    // Resolve the oracle once. The skip is all-or-nothing: if the binary is
+    // absent we skip the whole test cleanly; if it is present we MUST run every
+    // corpus assertion (no early return can bypass an assertion). Set
+    // `REQUIRE_DIFFERENTIAL=1` to turn a missing binary into a hard failure, so
+    // CI can be configured to require the differential to actually run.
+    let bin = js_lexer_dump_bin();
+    if !bin.exists() {
+        if std::env::var_os("REQUIRE_DIFFERENTIAL").is_some() {
+            panic!("REQUIRE_DIFFERENTIAL=1 but js-lexer-dump not built at {bin:?}");
+        }
+        eprintln!("skip: js-lexer-dump not built at {bin:?}");
+        return;
     }
+
+    let mut compared = 0usize;
+    for src in corpus {
+        let cpp = cpp_dump(&bin, src).expect("js-lexer-dump exists but failed to run");
+        assert_eq!(rust_dump(src), cpp, "mismatch for {src:?}");
+        compared += 1;
+    }
+    eprintln!("differential compared {compared} corpus entries");
 }
