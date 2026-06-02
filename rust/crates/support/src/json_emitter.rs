@@ -100,17 +100,23 @@ pub fn number_to_string(m: f64) -> String {
 
 /// A single object (Dictionary or Array) being emitted.
 /// Port of `JSONEmitter::State` (JSONEmitter.h:170).
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum StateType {
     Dict,
     Array,
 }
 
+#[derive(Debug)]
 struct State {
+    /// Whether this is a dictionary or array.
     ty: StateType,
+    /// Whether a comma is needed before the next value.
     needs_comma: bool,
+    /// Whether we are a dictionary expecting a key next.
     needs_key: bool,
+    /// Whether we expect a value (after a key in a dict).
     needs_value: bool,
+    /// Whether the dict/array is still empty.
     is_empty: bool,
 }
 
@@ -235,6 +241,8 @@ impl<'w> JSONEmitter<'w> {
             state.needs_key = false;
             state.needs_value = true;
         }
+        // Note: the state fields are set before pretty_new_line() (which reads only
+        // `pretty`/`indent`, not `states`); this reordering vs the C++ is output-identical.
         self.pretty_new_line();
         self.primitive_emit_string(key);
         self.out.push(':');
@@ -470,6 +478,11 @@ mod tests {
             j.close_array();
         });
         assert_eq!(s, "[null,null,null]");
+    }
+
+    #[test]
+    fn null_value() {
+        assert_eq!(emit(|j| j.emit_null_value()), "null");
     }
 
     #[test]
