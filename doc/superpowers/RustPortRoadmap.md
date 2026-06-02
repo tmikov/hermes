@@ -120,11 +120,16 @@ part of SourceErrorManager; in build order):
 > (verified vs 14 independent oracle checks incl. NUL/octal/WTF-8). Plan: `plans/2026-06-02-js-lexer-proper-2a.md`.
 > Deferred: `convertSurrogates` re-encoding (needs UTF-16 conversion utils — tracked).
 >
-> **Next — lexer phase 2b/2c:** 2b templates (`scanTemplateLiteral`; `no_substitution_template`/
-> `template_head` — middle/tail need `rescanRBrace`, phase 4); 2c regexp (`scanRegExp` + the
-> `AllowRegExp` `/` arm, enabling `--context=regexp` differential cases). Then phase 3 (JSX/Flow),
-> phase 4 (savepoint/lookahead/directive/rescanRBrace/magic comments/comment storage). **Remaining
-> tracked items:** `convertSurrogates` re-encoding, the `--non-strict` harness flag.
+> **🚧 Lexer phase 2b DONE.** Template literals (`scanTemplateLiteral` — `no_substitution_template`/
+> `template_head`, TV/TRV dual buffers, `NotEscapeSequence`→null cooked, CR→LF). `cooked=`/`raw=` dump;
+> differential at 55 entries. Plan: `plans/2026-06-02-js-lexer-proper-2b.md`. **`lexer.rs` was split**
+> into `lexer/{mod,escape,identifier,number,string,template,dump}.rs` (pure-move refactor, differential
+> unchanged).
+>
+> **Next — lexer phase 2c:** regexp (`scanRegExp` + the `AllowRegExp` `/` arm, enabling `--context=regexp`
+> differential cases). Then phase 3 (JSX/Flow), phase 4 (savepoint/lookahead/directive/rescanRBrace/magic
+> comments/comment storage). **Remaining tracked items:** `convertSurrogates` re-encoding, the
+> `--non-strict` harness flag.
 
 ## Key cross-cutting design decisions
 
