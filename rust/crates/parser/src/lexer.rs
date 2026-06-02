@@ -2415,6 +2415,18 @@ impl<'a> JSLexer<'a> {
                     self.strtab.bytes(self.token.get_bigint_literal_raw_value()),
                 );
             }
+            TokenKind::no_substitution_template
+            | TokenKind::template_head
+            | TokenKind::template_middle
+            | TokenKind::template_tail => {
+                out.push_str(" cooked=");
+                match self.token.get_template_value() {
+                    Some(cooked) => quote_bytes(out, self.strtab.bytes(cooked)),
+                    None => out.push_str("null"),
+                }
+                out.push_str(" raw=");
+                quote_bytes(out, self.strtab.bytes(self.token.get_template_raw_value()));
+            }
             _ => {
                 // Reserved words: emit the identifier string.
                 if kind.is_res_word() {

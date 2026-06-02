@@ -3,8 +3,8 @@
 //! byte-for-byte equal.
 //!
 //! The lexer covers punctuators, whitespace, comments, identifiers, numbers,
-//! string literals and private identifiers; templates and regexp are still
-//! stubbed, so the corpus below contains no such tokens. The oracle is driven
+//! string literals, private identifiers and template literals (no-substitution
+//! and head forms); regexp is still stubbed. The oracle is driven
 //! with `--context=div`, so `/` lexes as `slash`/`slashequal` (regexp is a later
 //! phase); the Rust lexer is driven with `GrammarContext::AllowDiv` to match.
 
@@ -165,6 +165,25 @@ fn differential_punctuators_and_trivia() {
         "#foo #_bar x.#priv",
         // mixed: string, private id, number, punctuator.
         "'a' #b 5 ;",
+        // ---- template literals ------------------------------------------------
+        // The corpus is restricted to forms a plain `advance` loop lexes cleanly:
+        // no_substitution_template (ends in `` ` ``) and template_head (ends in
+        // `${`). A `}`-continuation would start a new template scan in a plain
+        // loop (the parser drives `rescanRBraceInTemplateLiteral`), so it is out.
+        // no_substitution_template.
+        "`hello` `a b c`",
+        // template_head (then EOF).
+        "`a${",
+        // multiple heads + a no-substitution at the end.
+        "`x${ `y${ `done`",
+        // escapes: cooked vs raw differ.
+        "`tab\\tnl\\n` `raw\\u00e9`",
+        // NotEscapeSequence -> cooked=null.
+        "`not\\9esc`",
+        // CR -> LF in cooked+raw.
+        "`cr\rlf`",
+        // raw unicode -> WTF-8 in cooked+raw (incl. a supplementary-plane char).
+        "`uni\u{4e2d}` `astral\u{1f600}`",
     ];
     // Resolve the oracle once. The skip is all-or-nothing: if the binary is
     // absent we skip the whole test cleanly; if it is present we MUST run every
