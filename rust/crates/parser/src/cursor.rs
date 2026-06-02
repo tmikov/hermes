@@ -14,6 +14,8 @@
 //! - `start` is the first byte, `end` points at the trailing NUL (index
 //!   `bytes().len()`), so `[start, end]` is in-bounds and `end` itself is a
 //!   valid, readable byte (the NUL).
+//! - Byte offsets are `u32` (matching the front end's `SMLoc`), so source
+//!   buffers are assumed to be smaller than 4 GiB.
 //! - `cur` is always kept within `[start, end]` by the public methods. The C++
 //!   lexer dereferences `*curCharPtr_` at `end` (reading the NUL) and uses
 //!   bounded lookahead (`curCharPtr_[1]`, ...) only after seeing a non-NUL byte,

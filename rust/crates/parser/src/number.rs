@@ -292,7 +292,7 @@ mod double_tests {
         // (5, 0.1, 255 bit patterns were confirmed against the real C++ js-lexer-dump.)
         // These two cross-check delegation to the std parser:
         assert_eq!(str_to_double(b"1e10").map(bits), Some(1e10f64.to_bits()));
-        assert_eq!(str_to_double(b"3.14159").map(bits), Some(3.14159f64.to_bits()));
+        assert_eq!(str_to_double(b"12.5").map(bits), Some(12.5f64.to_bits()));
     }
 
     #[test]

@@ -303,6 +303,9 @@ impl<'a> JSLexer<'a> {
             match c {
                 0 => {
                     self.set_token_start();
+                    // Faithful to JSLexer.cpp case 0: both the at-EOF branch and the
+                    // post-error branch set EOF (clippy flags the duplicate arms).
+                    #[allow(clippy::if_same_then_else)]
                     if self.cursor.at_end() {
                         self.token.set_eof();
                     } else if !self.error(self.token.start_loc(), "unrecognized Unicode character \\u0000")
