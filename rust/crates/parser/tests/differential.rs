@@ -7,8 +7,10 @@
 //! head forms) and regular-expression literals. The harness is parameterized by
 //! grammar context: the `--context=div` corpus lexes `/` as `slash`/`slashequal`
 //! (Rust: `GrammarContext::AllowDiv`); the `--context=regexp` corpus lexes `/` as
-//! a regexp literal (Rust: `GrammarContext::AllowRegExp`). Both sides are driven
-//! with the matching context so the dumps compare byte-for-byte.
+//! a regexp literal (Rust: `GrammarContext::AllowRegExp`); the `--context=type`
+//! corpus lexes the Flow type grammar (`{|`/`|}`, `%checks`, `@`-prefixed
+//! identifiers, individual `<`/`>`, no `??`) (Rust: `GrammarContext::Type`). Both
+//! sides are driven with the matching context so the dumps compare byte-for-byte.
 
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -23,6 +25,7 @@ fn context_flag(ctx: GrammarContext) -> &'static str {
     match ctx {
         GrammarContext::AllowDiv => "--context=div",
         GrammarContext::AllowRegExp => "--context=regexp",
+        GrammarContext::Type => "--context=type",
         other => panic!("unsupported differential context {other:?}"),
     }
 }
@@ -210,6 +213,26 @@ fn differential_regexp() {
         "x = /re/g",            // div context would differ; here regexp follows '='
     ];
     run_differential("regexp", &corpus, GrammarContext::AllowRegExp);
+}
+
+#[test]
+fn differential_type() {
+    let corpus = [
+        // Flow type corpus (driven with --context=type on both sides).
+        // object-type braces `{| |}` and a union `|`.
+        "{| a: number |} | string",
+        // individual `<`/`>`, `>>`/`<<` as separate tokens, no `??`, %checks.
+        "<T> >> << ?? %checks",
+        // `@`-prefixed Flow identifiers.
+        "@flow @decorator a b",
+        // generics: `<`/`>` as individual tokens.
+        "Array<string> Map<K, V>",
+        // unions / intersections.
+        "x | y & z",
+        // plain punctuators still work in Type context.
+        "{ a: 1 } [1, 2]",
+    ];
+    run_differential("type", &corpus, GrammarContext::Type);
 }
 
 /// Run the differential over `corpus` under `ctx`. The skip is all-or-nothing:
