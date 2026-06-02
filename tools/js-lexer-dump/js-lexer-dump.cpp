@@ -60,7 +60,10 @@
 /// Grammar context: --context=regexp (default) -> AllowRegExp
 ///                  --context=div             -> AllowDiv
 ///                  --context=type            -> Type (Flow type grammar)
-/// JSX context is not supported by this tool.
+///                  --context=jsx             -> AllowJSXIdentifier
+/// JSX child mode: --jsx-child drives lex.advanceInJSXChild() instead of
+///                  lex.advance(ctx); it accumulates JSX text and emits
+///                  l_brace/less for {/< (used for the jsx_text differential).
 /// Strict-mode note: the lexer is constructed with strictMode=true (default),
 /// so strict-mode reserved words are lexed as rw_* tokens.
 
@@ -194,17 +197,20 @@ static void emitFields(llvh::raw_ostream &os, const Token &tok) {
 
 static void usage(const char *argv0) {
   llvh::errs() << "Usage: " << argv0
-               << " [--context=regexp|div|type] <file|->\n"
+               << " [--context=regexp|div|type|jsx] [--jsx-child] <file|->\n"
                << "  Dump tokens from the JS lexer to stdout.\n"
                << "  --context=regexp  Allow regexp literals after /\n"
                << "  --context=div     Allow division operator after /\n"
                << "  --context=type    Flow type grammar context\n"
+               << "  --context=jsx     Allow JSX identifiers (`-`)\n"
+               << "  --jsx-child       Drive advanceInJSXChild() (JSX text)\n"
                << "  Use - to read from stdin.\n";
 }
 
 int main(int argc, char **argv) {
   // Parse arguments.
   JSLexer::GrammarContext grammarContext = JSLexer::AllowRegExp;
+  bool jsxChild = false;
   const char *filePath = nullptr;
 
   for (int i = 1; i < argc; ++i) {
@@ -217,11 +223,15 @@ int main(int argc, char **argv) {
         grammarContext = JSLexer::AllowDiv;
       } else if (std::strcmp(val, "type") == 0) {
         grammarContext = JSLexer::Type;
+      } else if (std::strcmp(val, "jsx") == 0) {
+        grammarContext = JSLexer::AllowJSXIdentifier;
       } else {
         llvh::errs() << argv[0] << ": unknown context value '" << val << "'\n";
         usage(argv[0]);
         return 1;
       }
+    } else if (std::strcmp(arg, "--jsx-child") == 0) {
+      jsxChild = true;
     } else if (arg[0] == '-' && arg[1] == '-') {
       llvh::errs() << argv[0] << ": unknown flag '" << arg << "'\n";
       usage(argv[0]);
@@ -263,9 +273,12 @@ int main(int argc, char **argv) {
 
   llvh::raw_ostream &os = llvh::outs();
 
-  // Token loop: advance to load the first token, then continue.
+  // Token loop: advance to load the first token, then continue. In --jsx-child
+  // mode, drive advanceInJSXChild() (which accumulates JSX text and emits
+  // l_brace/less for {/<) instead of the regular advance().
   for (;;) {
-    const Token *tok = lex.advance(grammarContext);
+    const Token *tok =
+        jsxChild ? lex.advanceInJSXChild() : lex.advance(grammarContext);
     size_t start = (size_t)(tok->getStartLoc().getPointer() - base);
     size_t end = (size_t)(tok->getEndLoc().getPointer() - base);
     const char *nl = lex.isNewLineBeforeCurrentToken() ? "nl" : "--";

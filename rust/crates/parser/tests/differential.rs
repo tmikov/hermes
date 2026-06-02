@@ -26,7 +26,7 @@ fn context_flag(ctx: GrammarContext) -> &'static str {
         GrammarContext::AllowDiv => "--context=div",
         GrammarContext::AllowRegExp => "--context=regexp",
         GrammarContext::Type => "--context=type",
-        other => panic!("unsupported differential context {other:?}"),
+        GrammarContext::AllowJSXIdentifier => "--context=jsx",
     }
 }
 
@@ -64,8 +64,14 @@ fn js_lexer_dump_bin() -> std::path::PathBuf {
 /// return its stdout. The caller is responsible for checking the binary exists
 /// (see `js_lexer_dump_bin`); this always attempts to run it.
 fn cpp_dump(bin: &std::path::Path, src: &str, ctx: GrammarContext) -> Option<String> {
+    cpp_dump_flags(bin, src, &[context_flag(ctx)])
+}
+
+/// Like `cpp_dump`, but with an explicit list of flags (before the trailing
+/// `-`). Used by the JSX-child differential, which adds `--jsx-child`.
+fn cpp_dump_flags(bin: &std::path::Path, src: &str, flags: &[&str]) -> Option<String> {
     let mut child = Command::new(bin)
-        .arg(context_flag(ctx))
+        .args(flags)
         .arg("-")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -233,6 +239,78 @@ fn differential_type() {
         "{ a: 1 } [1, 2]",
     ];
     run_differential("type", &corpus, GrammarContext::Type);
+}
+
+#[test]
+fn differential_jsx() {
+    let corpus = [
+        // JSX-identifier corpus (regular `advance` under --context=jsx). The
+        // `-` is an identifier part and `>` lexes as `greater`.
+        "<div-foo a-b>",
+        "<my-element data-x>",
+        "x-y-z foo-bar",
+        // `<`/`>` punctuation around JSX-flavored identifiers.
+        "< a-b > < /c-d >",
+    ];
+    run_differential("jsx", &corpus, GrammarContext::AllowJSXIdentifier);
+}
+
+/// Produce the Rust lexer dump for `src` driven through `advance_in_jsx_child`
+/// (one `dump_token` line per token, including the final `eof`).
+fn rust_dump_jsx_child(src: &str) -> String {
+    let mut sm = SourceErrorManager::new();
+    let id = sm.add_buffer("t", src);
+    let tab = AtomTable::new();
+    let mut lex = JSLexer::new(id, &mut sm, &tab, GrammarContext::AllowJSXIdentifier);
+    let mut out = String::new();
+    loop {
+        let k = lex.advance_in_jsx_child().kind();
+        lex.dump_token(&mut out);
+        out.push('\n');
+        if k == TokenKind::eof {
+            break;
+        }
+    }
+    out
+}
+
+#[test]
+fn differential_jsx_child() {
+    let corpus = [
+        // jsx-child corpus (driven with --jsx-child on both sides).
+        "hello world{",
+        "a&amp;b&lt;c{",          // named entities
+        "x&#65;&#x42;y<",         // decimal + hex entities
+        "text\u{4e2d}more{",      // unicode jsx text -> WTF-8
+        "line1\nline2<",          // newlines in jsx text
+        // a bare `&` that is not a valid entity stays literal.
+        "a&notanentity b{",
+        // delimiters back-to-back and at the very start.
+        "{<",
+        "<{",
+        // entity immediately followed by a delimiter.
+        "&amp;<",
+        // plain text to EOF (no delimiter).
+        "just text",
+    ];
+
+    let bin = js_lexer_dump_bin();
+    if !bin.exists() {
+        if std::env::var_os("REQUIRE_DIFFERENTIAL").is_some() {
+            panic!("REQUIRE_DIFFERENTIAL=1 but js-lexer-dump not built at {bin:?}");
+        }
+        eprintln!("skip: js-lexer-dump not built at {bin:?}");
+        return;
+    }
+
+    let mut compared = 0usize;
+    for &src in &corpus {
+        let cpp = cpp_dump_flags(&bin, src, &["--context=jsx", "--jsx-child"])
+            .expect("js-lexer-dump exists but failed to run");
+        assert_eq!(rust_dump_jsx_child(src), cpp, "mismatch for {src:?}");
+        compared += 1;
+    }
+    eprintln!("differential[jsx-child] compared {compared} corpus entries");
 }
 
 /// Run the differential over `corpus` under `ctx`. The skip is all-or-nothing:
