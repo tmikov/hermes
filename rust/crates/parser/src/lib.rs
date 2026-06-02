@@ -1,6 +1,7 @@
 //! Hermes JavaScript parser (Rust port) — currently the token vocabulary.
 
 pub mod cursor;
+pub mod html_entities;
 pub mod lexer;
 pub mod number;
 pub mod token;
