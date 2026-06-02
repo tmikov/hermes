@@ -486,6 +486,64 @@ mod tests {
     }
 
     #[test]
+    fn jsonl() {
+        let mut s = String::new();
+        {
+            let mut j = JSONEmitter::new(&mut s, false);
+            j.open_dict(); j.close_dict(); j.end_jsonl();
+            j.open_dict(); j.close_dict(); j.end_jsonl();
+        }
+        assert_eq!(s, "{}\n{}\n");
+    }
+
+    #[test]
+    fn emit_utf16() {
+        // EmitUTF16: u"hi\xd83d\xdc4b" -> each surrogate unit escaped as \uXXXX
+        let units: Vec<u16> = vec![b'h' as u16, b'i' as u16, 0xd83d, 0xdc4b];
+        let mut s = String::new();
+        {
+            let mut j = JSONEmitter::new(&mut s, false);
+            j.open_dict();
+            j.emit_key("str"); j.emit_u16(&units);
+            j.close_dict();
+        }
+        assert_eq!(s, r#"{"str":"hi\ud83d\udc4b"}"#);
+    }
+
+    #[test]
+    fn pretty_print() {
+        // unittests/Support/JSONEmitterTest.cpp: PrettyPrint
+        let mut s = String::new();
+        {
+            let mut j = JSONEmitter::new(&mut s, true);
+            j.open_dict();
+            j.emit_key("artist"); j.emit_str("prince");
+            j.emit_key("instruments");
+            j.open_array();
+            j.emit_str("piano");
+            j.open_dict();
+            j.emit_key("guitars");
+            j.open_array();
+            j.emit_str("cloud"); j.emit_str("love symbol"); j.emit_str("telecaster");
+            j.close_array();
+            j.close_dict();
+            j.emit_str("drums");
+            j.close_array();
+            j.emit_key("songs");
+            j.open_dict();
+            j.emit_key("purple rain"); j.emit_i64(1984);
+            j.emit_key("1999"); j.emit_i64(1982);
+            j.close_dict();
+            j.emit_key("color"); j.emit_str("purple");
+            j.emit_key("emptyDict"); j.open_dict(); j.close_dict();
+            j.emit_key("emptyArray"); j.open_array(); j.close_array();
+            j.close_dict();
+        }
+        let expected = "{\n  \"artist\": \"prince\",\n  \"instruments\": [\n    \"piano\",\n    {\n      \"guitars\": [\n        \"cloud\",\n        \"love symbol\",\n        \"telecaster\"\n      ]\n    },\n    \"drums\"\n  ],\n  \"songs\": {\n    \"purple rain\": 1984,\n    \"1999\": 1982\n  },\n  \"color\": \"purple\",\n  \"emptyDict\": {},\n  \"emptyArray\": []\n}";
+        assert_eq!(s, expected);
+    }
+
+    #[test]
     fn number_to_string_matches_ecmascript() {
         // Port-of-numberToString spot checks (lib/Support/Conversions.cpp:211).
         let cases: &[(f64, &str)] = &[
