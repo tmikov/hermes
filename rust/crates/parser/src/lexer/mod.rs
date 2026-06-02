@@ -1,14 +1,17 @@
-//! JSLexer, ported from lib/Parser/JSLexer.cpp.
+//! JSLexer, a faithful port of `lib/Parser/JSLexer.cpp`.
 //!
-//! Phase 1a implements the lexer skeleton and `advance()` for punctuators,
-//! whitespace, line/block comments, and EOF. Identifiers, numbers, strings,
-//! templates, regexp, private identifiers and the `\` identifier-escape arm are
-//! stubbed: they report a "not yet implemented (phase 1b)" error and force EOF,
-//! so the lexer is well-defined for those inputs but they are not part of the
-//! phase-1a corpus.
+//! `JSLexer` lexes the full JavaScript token surface: punctuators, trivia
+//! (whitespace and line/block comments), identifiers and keywords, numeric
+//! literals, string literals, template literals, regular-expression literals,
+//! private identifiers, JSX, and the Flow type context. It also exposes the
+//! stateful lexer APIs: optional comment/token storage, magic comment
+//! (`sourceURL`/`sourceMappingURL`) extraction, `SavePoint` for backtracking,
+//! the directive (`"use strict"`) check, and `rescanRBrace` for template
+//! continuations. The `impl<'a> JSLexer<'a>` methods are split across the child
+//! modules below by concern (escape, identifier, number, string, template,
+//! regexp, jsx, dump, state).
 
-// The `impl<'a> JSLexer<'a>` methods are split across these child modules. Each
-// child module can see the private fields of `JSLexer` (privacy in Rust is
+// Each child module can see the private fields of `JSLexer` (privacy in Rust is
 // "visible to the declaring module and its descendants"), so no field needs to
 // be made more public to support the split. Methods called across module
 // boundaries are `pub(crate)`.
@@ -57,9 +60,7 @@ pub enum GrammarContext {
 
 /// The identifier-scanning mode, port of `JSLexer::IdentifierMode`. Affects
 /// which extra characters are accepted as identifier parts: JSX accepts `-`,
-/// Flow accepts `@`. Only `JS` is exercised in phase 1b-i; the JSX/Flow arms are
-/// carried for forward-compatibility but never reached (the differential drives
-/// `--context=div`).
+/// Flow accepts `@`.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum IdentifierMode {
     JS,
@@ -91,16 +92,16 @@ pub struct JSLexer<'a> {
     /// True if there was a line terminator before the current token.
     new_line_before_current_token: bool,
 
-    /// Whether the lexer is in strict mode (affects reserved-word recognition;
-    /// used by the identifier scanner in phase 1b).
-    #[allow(dead_code)]
+    /// Whether the lexer is in strict mode (affects reserved-word recognition
+    /// in the identifier scanner and octal handling in the number/escape
+    /// scanners). Port of `strictMode_`.
     strict_mode: bool,
-    /// Whether to convert surrogate pairs while decoding (phase 1b+).
-    #[allow(dead_code)]
+    /// Whether to convert surrogate pairs while decoding. Port of
+    /// `convertSurrogates_`.
     convert_surrogates: bool,
 
-    /// Scratch storage for assembling identifier/string values (phase 1b+).
-    #[allow(dead_code)]
+    /// Scratch storage for assembling identifier/string/regexp values. Port of
+    /// `tmpStorage_`.
     tmp_storage: Vec<u8>,
 
     /// Scratch storage for assembling the Template Raw Value (TRV) of template

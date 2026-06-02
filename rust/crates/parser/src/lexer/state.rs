@@ -343,6 +343,8 @@ impl SavePoint {
 
         lexer.prev_token_end = self.prev_token_end;
 
+        // Deliberately mirror C++: tokens are gated on `getStoreTokens()`
+        // while comments are gated on the `storeComments_` field directly.
         if lexer.store_comments
             && self.comment_storage_size < lexer.comment_storage.len()
         {
