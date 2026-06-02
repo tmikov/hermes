@@ -11,3 +11,4 @@ unsafe_code = "deny"   # the cursor module (later) gets a scoped #[allow]; token
 support = { path = "../support" }
 atom_table = { path = "../atom_table" }
 unicode = { path = "../unicode" }
+bumpalo = "3.16"

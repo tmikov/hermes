@@ -2,6 +2,7 @@
 
 pub mod cursor;
 pub mod html_entities;
+pub mod json;
 pub mod lexer;
 pub mod number;
 pub mod token;
