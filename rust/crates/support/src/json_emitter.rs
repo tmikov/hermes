@@ -8,6 +8,8 @@
 //! Port of `hermes::JSONEmitter` (include/hermes/Support/JSONEmitter.{h,cpp})
 //! plus the `numberToString` helper it relies on (lib/Support/Conversions.cpp).
 
+use std::fmt::Write;
+
 /// Port of `hermes::numberToString` (lib/Support/Conversions.cpp:211) — the
 /// ECMAScript Number::toString algorithm. Produces the shortest round-tripping
 /// decimal. The C++ obtains the shortest (significand, exponent) via
@@ -96,9 +98,379 @@ pub fn number_to_string(m: f64) -> String {
     out
 }
 
+/// A single object (Dictionary or Array) being emitted.
+/// Port of `JSONEmitter::State` (JSONEmitter.h:170).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StateType {
+    Dict,
+    Array,
+}
+
+struct State {
+    ty: StateType,
+    needs_comma: bool,
+    needs_key: bool,
+    needs_value: bool,
+    is_empty: bool,
+}
+
+impl State {
+    fn new(ty: StateType) -> State {
+        State {
+            ty,
+            needs_comma: false,
+            needs_key: ty == StateType::Dict,
+            needs_value: false,
+            is_empty: true,
+        }
+    }
+}
+
+/// Port of `hermes::JSONEmitter` (include/hermes/Support/JSONEmitter.h). Emits
+/// JSON to a `String`. `pretty` adds newlines + indentation. Unbalanced
+/// dict/array use is caught via `debug_assert!` (C++ `assert`).
+///
+/// Strings must be valid UTF-8 (C++ takes `StringRef` and treats invalid UTF-8
+/// as fatal). Non-ASCII code points are emitted as escaped UTF-16 code units.
+pub struct JSONEmitter<'w> {
+    out: &'w mut String,
+    pretty: bool,
+    indent: u32,
+    states: Vec<State>,
+}
+
+impl<'w> JSONEmitter<'w> {
+    pub fn new(out: &'w mut String, pretty: bool) -> JSONEmitter<'w> {
+        JSONEmitter { out, pretty, indent: 0, states: Vec::new() }
+    }
+
+    fn in_dict(&self) -> bool {
+        matches!(self.states.last(), Some(s) if s.ty == StateType::Dict)
+    }
+    fn in_array(&self) -> bool {
+        matches!(self.states.last(), Some(s) if s.ty == StateType::Array)
+    }
+
+    /// JSONEmitter.cpp:239 — housekeeping before emitting any value (not a key).
+    fn will_emit_value(&mut self) {
+        if self.states.is_empty() {
+            return;
+        }
+        let is_array;
+        {
+            let state = self.states.last_mut().unwrap();
+            debug_assert!(!state.needs_key, "Expected a key");
+            if state.needs_comma {
+                self.out.push(',');
+            }
+            state.needs_key = state.ty == StateType::Dict;
+            state.needs_comma = true;
+            state.needs_value = false;
+            state.is_empty = false;
+            is_array = state.ty == StateType::Array;
+        }
+        if is_array {
+            self.pretty_new_line();
+        }
+    }
+
+    pub fn emit_bool(&mut self, val: bool) {
+        self.will_emit_value();
+        self.out.push_str(if val { "true" } else { "false" });
+    }
+
+    /// Covers the C++ integer overloads (short/int/long/...).
+    pub fn emit_i64(&mut self, val: i64) {
+        self.will_emit_value();
+        let _ = write!(self.out, "{val}");
+    }
+    pub fn emit_u64(&mut self, val: u64) {
+        self.will_emit_value();
+        let _ = write!(self.out, "{val}");
+    }
+
+    /// JSONEmitter.cpp:67 — finite via numberToString, non-finite -> "null".
+    pub fn emit_f64(&mut self, val: f64) {
+        self.will_emit_value();
+        if val.is_finite() {
+            self.out.push_str(&number_to_string(val));
+        } else {
+            self.out.push_str("null");
+        }
+    }
+
+    /// JSONEmitter.cpp:78 — emit a UTF-8 string value (not a dict key).
+    pub fn emit_str(&mut self, val: &str) {
+        self.will_emit_value();
+        self.primitive_emit_string(val);
+    }
+
+    /// JSONEmitter.cpp:193 — emit a value from UTF-16 code units. Each unit is
+    /// emitted independently (no surrogate combination).
+    pub fn emit_u16(&mut self, val: &[u16]) {
+        self.will_emit_value();
+        self.out.push('"');
+        for &curr in val {
+            self.emit_one_escaped_unit(curr);
+        }
+        self.out.push('"');
+    }
+
+    pub fn emit_null_value(&mut self) {
+        self.will_emit_value();
+        self.out.push_str("null");
+    }
+
+    /// JSONEmitter.cpp:88 — emit a dict key.
+    pub fn emit_key(&mut self, key: &str) {
+        debug_assert!(self.in_dict(), "Not emitting a dictionary");
+        {
+            let state = self.states.last_mut().unwrap();
+            debug_assert!(state.needs_key, "Not expecting a key");
+            debug_assert!(!state.needs_value, "Missing a value for a key.");
+            if state.needs_comma {
+                self.out.push(',');
+            }
+            state.needs_comma = false;
+            state.needs_key = false;
+            state.needs_value = true;
+        }
+        self.pretty_new_line();
+        self.primitive_emit_string(key);
+        self.out.push(':');
+        if self.pretty {
+            self.out.push(' ');
+        }
+    }
+
+    pub fn open_dict(&mut self) {
+        self.will_emit_value();
+        self.out.push('{');
+        self.indent_more();
+        self.states.push(State::new(StateType::Dict));
+    }
+    pub fn close_dict(&mut self) {
+        debug_assert!(self.in_dict(), "Not currently emitting a dictionary");
+        debug_assert!(!self.states.last().unwrap().needs_value, "Missing a value for a key.");
+        self.indent_less();
+        if !self.states.last().unwrap().is_empty {
+            self.pretty_new_line();
+        }
+        self.out.push('}');
+        self.states.pop();
+    }
+    pub fn open_array(&mut self) {
+        self.will_emit_value();
+        self.indent_more();
+        self.out.push('[');
+        self.states.push(State::new(StateType::Array));
+    }
+    pub fn close_array(&mut self) {
+        debug_assert!(self.in_array(), "Not currently emitting an array");
+        self.indent_less();
+        if !self.states.last().unwrap().is_empty {
+            self.pretty_new_line();
+        }
+        self.out.push(']');
+        self.states.pop();
+    }
+
+    /// JSONEmitter.cpp:234 — terminate a JSON Lines record.
+    pub fn end_jsonl(&mut self) {
+        debug_assert!(self.states.is_empty(), "Previous object was not terminated.");
+        self.out.push('\n');
+    }
+
+    /// JSONEmitter.cpp:141 — escape + emit a UTF-8 string (key or value).
+    fn primitive_emit_string(&mut self, s: &str) {
+        self.out.push('"');
+        for ch in s.chars() {
+            let cp = ch as u32;
+            if cp > 0x7F {
+                // encodeUTF16(cp) -> 1 or 2 units, each as \uXXXX.
+                if cp <= 0xFFFF {
+                    self.write_u_escape(cp as u16);
+                } else {
+                    let c = cp - 0x10000;
+                    self.write_u_escape(0xD800 + (c >> 10) as u16);
+                    self.write_u_escape(0xDC00 + (c & 0x3FF) as u16);
+                }
+                continue;
+            }
+            if cp == 0x22 || cp == 0x5C || cp == 0x2F {
+                // escape " \ /
+                self.out.push('\\');
+            }
+            if cp >= 0x20 {
+                self.out.push(cp as u8 as char);
+                continue;
+            }
+            match cp {
+                0x08 => self.out.push_str("\\b"),
+                0x0C => self.out.push_str("\\f"),
+                0x0A => self.out.push_str("\\n"),
+                0x0D => self.out.push_str("\\r"),
+                0x09 => self.out.push_str("\\t"),
+                _ => self.write_u_escape(cp as u16),
+            }
+        }
+        self.out.push('"');
+    }
+
+    /// One UTF-16 code unit, escaped per JSONEmitter.cpp:193 (the char16 path).
+    fn emit_one_escaped_unit(&mut self, curr: u16) {
+        let c = curr as u32;
+        if c > 0x7F {
+            self.write_u_escape(curr);
+            return;
+        }
+        if c >= 0x20 {
+            if c == 0x22 || c == 0x5C || c == 0x2F {
+                self.out.push('\\');
+            }
+            self.out.push(c as u8 as char);
+            return;
+        }
+        match c {
+            0x08 => self.out.push_str("\\b"),
+            0x0C => self.out.push_str("\\f"),
+            0x0A => self.out.push_str("\\n"),
+            0x0D => self.out.push_str("\\r"),
+            0x09 => self.out.push_str("\\t"),
+            _ => self.write_u_escape(curr),
+        }
+    }
+
+    fn write_u_escape(&mut self, u: u16) {
+        let _ = write!(self.out, "\\u{u:04x}");
+    }
+
+    fn pretty_new_line(&mut self) {
+        if !self.pretty {
+            return;
+        }
+        self.out.push('\n');
+        for _ in 0..self.indent {
+            self.out.push(' ');
+        }
+    }
+    fn indent_more(&mut self) {
+        if self.pretty {
+            self.indent += 2;
+        }
+    }
+    fn indent_less(&mut self) {
+        if self.pretty {
+            debug_assert!(self.indent >= 2, "Unbalanced indentation.");
+            self.indent -= 2;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn emit<F: FnOnce(&mut JSONEmitter)>(f: F) -> String {
+        let mut s = String::new();
+        {
+            let mut j = JSONEmitter::new(&mut s, false);
+            f(&mut j);
+        }
+        s
+    }
+
+    #[test]
+    fn empty_array() {
+        assert_eq!(emit(|j| { j.open_array(); j.close_array(); }), "[]");
+    }
+
+    #[test]
+    fn empty_dict() {
+        assert_eq!(emit(|j| { j.open_dict(); j.close_dict(); }), "{}");
+    }
+
+    #[test]
+    fn sample() {
+        // unittests/Support/JSONEmitterTest.cpp: Sample
+        let s = emit(|j| {
+            j.open_dict();
+            j.emit_key("name"); j.emit_str("hermes");
+            j.emit_key("age"); j.emit_i64(2);
+            j.emit_key("hot"); j.emit_bool(true);
+            j.emit_key("cold"); j.emit_bool(false);
+            j.emit_key("tags");
+            j.open_array();
+            j.emit_str("small"); j.emit_str("light");
+            j.close_array();
+            j.close_dict();
+        });
+        assert_eq!(s, r#"{"name":"hermes","age":2,"hot":true,"cold":false,"tags":["small","light"]}"#);
+    }
+
+    #[test]
+    fn smoke_with_double_and_escapes() {
+        // unittests/Support/JSONEmitterTest.cpp: SmokeTest
+        let s = emit(|j| {
+            j.open_dict();
+            j.emit_key("a"); j.emit_i64(123);
+            j.emit_key("b"); j.emit_f64(456.7);
+            j.emit_key("dict1");
+            j.open_dict();
+            j.emit_key("dict1_arr1");
+            j.open_array();
+            j.emit_str("val1"); j.emit_str("val2"); j.emit_str("val3");
+            j.close_array();
+            j.emit_key("dict1_empty"); j.open_dict(); j.close_dict();
+            j.emit_key("dict1_empty2"); j.open_array(); j.close_array();
+            j.emit_key("str1"); j.emit_str("\"ABC\u{8}DEF\\");
+            j.close_dict();
+            j.close_dict();
+        });
+        assert_eq!(s, r#"{"a":123,"b":456.7,"dict1":{"dict1_arr1":["val1","val2","val3"],"dict1_empty":{},"dict1_empty2":[],"str1":"\"ABC\bDEF\\"}}"#);
+    }
+
+    #[test]
+    fn escapes() {
+        // unittests/Support/JSONEmitterTest.cpp: Escapes
+        let s = emit(|j| j.emit_str("x\"\\/\u{8}\u{c}\n\r\tx"));
+        assert_eq!(s, r#""x\"\\\/\b\f\n\r\tx""#);
+    }
+
+    #[test]
+    fn forward_slashes() {
+        // EmitGroupsOfForwardSlashes
+        let s = emit(|j| {
+            j.open_dict();
+            j.emit_key("url"); j.emit_str("http://www.example.com");
+            j.close_dict();
+        });
+        assert_eq!(s, r#"{"url":"http:\/\/www.example.com"}"#);
+    }
+
+    #[test]
+    fn non_ascii_and_astral() {
+        // NonAsciiEscapes + EmitUTF8
+        let s = emit(|j| {
+            j.open_dict();
+            j.emit_key("ha"); j.emit_str("\u{54C8}");
+            j.emit_key("gClef"); j.emit_str("\u{1D11E}");
+            j.emit_key("wave"); j.emit_str("hi\u{1F44B}");
+            j.close_dict();
+        });
+        assert_eq!(s, r#"{"ha":"\u54c8","gClef":"\ud834\udd1e","wave":"hi\ud83d\udc4b"}"#);
+    }
+
+    #[test]
+    fn non_finite_is_null() {
+        // NonFinite — the emitter (not number_to_string) maps non-finite to null.
+        let s = emit(|j| {
+            j.open_array();
+            j.emit_f64(f64::INFINITY); j.emit_f64(f64::NEG_INFINITY); j.emit_f64(f64::NAN);
+            j.close_array();
+        });
+        assert_eq!(s, "[null,null,null]");
+    }
 
     #[test]
     fn number_to_string_matches_ecmascript() {
