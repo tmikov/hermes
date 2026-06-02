@@ -4,6 +4,10 @@ version = "0.0.0"
 edition = "2021"
 publish = false
 
+[[bin]]
+name = "json-parse-dump"
+path = "src/bin/json_parse_dump.rs"
+
 [lints.rust]
 unsafe_code = "deny"   # the cursor module (later) gets a scoped #[allow]; token tables are unsafe-free
 
