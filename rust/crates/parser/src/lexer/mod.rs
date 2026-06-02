@@ -677,7 +677,9 @@ impl<'a> JSLexer<'a> {
                         && off + 7 < raw.len()
                         && &raw[off..off + 7] == b"%checks"
                     {
-                        let ident = self.strtab.atom_bytes(b"%checks");
+                        // C++ routes this through getStringLiteral (faithful, though
+                        // `%checks` is pure ASCII so convertSurrogates is a no-op).
+                        let ident = self.get_string_literal(b"%checks");
                         self.token.set_identifier(ident);
                         self.cursor.advance(7);
                     } else if self.cursor.peek_at(1) == b'=' {
