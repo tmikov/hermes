@@ -232,6 +232,44 @@ differential-testable (bytes in → tokens out), so it is the natural first real
 the diagnostics foundation. Full analysis was done conversationally; `doc/JunoRustCrates.md`
 covers what juno already provides.
 
+## Benchmark (first datapoint) — 2026-06-02
+
+**Generator:** `rust/crates/parser/src/bin/gen_json.rs` (`gen-json` binary in the `parser` crate).
+Deterministic (index-derived, no RNG); record shape:
+`{"id":<i>,"name":"item-<i>","price":<f>,"active":<bool>,"tags":["a","b","c"],"nested":{"x":<i>,"y":<i*2>}}`
+where `price = i / 7.0` (2 decimal places), `active = i % 2 == 0`.
+
+**File:** 100,000 records → **11.6 MB** (`/tmp/big.json`; not committed).
+
+**N = 50** iterations (each with a fresh arena/atom-table/parser factory).
+
+| Build | Total (ms) | Throughput (MB/s) |
+|-------|-----------|-------------------|
+| **Rust `--release`** (`cargo build --release`) | **8,329.5** | **69.53** |
+| **C++ Release** (`cmake -DCMAKE_BUILD_TYPE=Release`) | **8,205.6** | **70.58** |
+| C++ ASan+Debug+-O1 (default dev build) | 98,167.2 | 5.90 |
+
+**Interpretation:** Rust release and C++ release are essentially the same speed (~70 MB/s,
+within 1.5% of each other) on this workload — a strong result for the port.  The
+ASan+Debug+-O1 number (5.90 MB/s) is ~12x slower due to AddressSanitizer instrumentation
+plus no optimisation; it is **not** a fair baseline and is included only for completeness.
+
+To reproduce:
+```bash
+# Build tools
+cargo build --manifest-path rust/Cargo.toml -p parser --release --bin gen-json
+cargo build --manifest-path rust/Cargo.toml -p parser --release --bin json-parse-dump
+cmake -B cmake-build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build cmake-build-release --target json-parse-dump
+
+# Generate corpus (outside repo; not committed)
+./rust/target/release/gen-json 100000 > /tmp/big.json
+
+# Benchmark
+./rust/target/release/json-parse-dump --bench=50 /tmp/big.json
+cmake-build-release/bin/json-parse-dump --bench=50 /tmp/big.json
+```
+
 ## How to validate
 
 - Tests: `cargo test --manifest-path rust/Cargo.toml -p support`.

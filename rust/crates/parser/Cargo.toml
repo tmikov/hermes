@@ -8,6 +8,10 @@ publish = false
 name = "json-parse-dump"
 path = "src/bin/json_parse_dump.rs"
 
+[[bin]]
+name = "gen-json"
+path = "src/bin/gen_json.rs"
+
 [lints.rust]
 unsafe_code = "deny"   # the cursor module (later) gets a scoped #[allow]; token tables are unsafe-free
 
