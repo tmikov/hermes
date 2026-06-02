@@ -126,10 +126,20 @@ part of SourceErrorManager; in build order):
 > into `lexer/{mod,escape,identifier,number,string,template,dump}.rs` (pure-move refactor, differential
 > unchanged).
 >
-> **Next — lexer phase 2c:** regexp (`scanRegExp` + the `AllowRegExp` `/` arm, enabling `--context=regexp`
-> differential cases). Then phase 3 (JSX/Flow), phase 4 (savepoint/lookahead/directive/rescanRBrace/magic
-> comments/comment storage). **Remaining tracked items:** `convertSurrogates` re-encoding, the
-> `--non-strict` harness flag.
+> **🚧 Lexer phase 2c DONE — all standard-JS token lexing complete.** Regexp literals (`scanRegExp` +
+> the `AllowRegExp` `/` arm). The differential harness is now parameterized by `GrammarContext`
+> (`--context=div` 55 entries + `--context=regexp` 5). Plan: `plans/2026-06-02-js-lexer-proper-2c.md`.
+> **The Rust lexer now lexes every standard ECMAScript token** — punctuators, trivia, identifiers,
+> keywords, numbers, strings, templates, regexp, private identifiers — self-validating byte-for-byte
+> vs `js-lexer-dump`.
+>
+> **Next — lexer phase 3 (JSX/Flow):** 3a Flow (`Type` grammar context — the `{|`/`|}`/`%checks`/
+> `@`-ident/Type-context punctuator arms are already ported but unreached; extend the harness with
+> `--context=type` and drive a Type differential); 3b JSX (`advanceInJSXChild`, `consumeHTMLEntityOptional`
+> + `HTMLEntities.def`, JSX identifier mode (`-`), JSX string `&`-entities, JSX newline-in-string; extend
+> the harness with `--context=jsx` + a JSX-child mode). Then phase 4 (savepoint/lookahead/directive/
+> rescanRBrace/magic comments/comment storage/convertSurrogates). **Remaining tracked items:**
+> `convertSurrogates` re-encoding, the `--non-strict` harness flag.
 
 ## Key cross-cutting design decisions
 
