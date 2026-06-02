@@ -244,6 +244,13 @@ impl<'a> ObjectView<'a> {
         self.class.keys[index]
     }
 
+    /// JSONParser.h:440 — index of `name` in the (sorted) members, or None.
+    /// (C++ returns an iterator; we return the positional index for use with
+    /// `value_at`/`key_at`.)
+    pub fn find(&self, name: &str, atoms: &atom_table::AtomTable) -> Option<usize> {
+        self.class.find(name.as_bytes(), atoms)
+    }
+
     /// JSONParser.h:330 — (key, value) pairs, in the hidden class's sorted order.
     pub fn iter(&self) -> impl Iterator<Item = (atom_table::AtomBytes, &'a JSONValue<'a>)> + '_ {
         self.class.keys.iter().copied().zip(self.values.iter().copied())
@@ -424,5 +431,28 @@ mod model_tests {
         assert_eq!(hc.find(b"b", &atoms), Some(1));
         assert_eq!(hc.find(b"c", &atoms), Some(2));
         assert_eq!(hc.find(b"z", &atoms), None);
+    }
+
+    #[test]
+    fn object_find_index() {
+        use super::JSONFactory;
+        use atom_table::AtomTable;
+        use bumpalo::Bump;
+        let arena = Bump::new();
+        let atoms = AtomTable::new();
+        let f = JSONFactory::new(&arena, &atoms);
+        let obj = f
+            .new_object(&mut [
+                (f.get_string_str("b"), f.get_number(2.0)),
+                (f.get_string_str("a"), f.get_number(1.0)),
+            ])
+            .unwrap();
+        let o = obj.as_object().unwrap();
+        // sorted order: a=0, b=1
+        assert_eq!(o.find("a", &atoms), Some(0));
+        assert_eq!(o.find("b", &atoms), Some(1));
+        assert_eq!(o.find("zzz", &atoms), None);
+        // find composes with value_at
+        assert_eq!(o.value_at(o.find("a", &atoms).unwrap()).as_number(), Some(1.0));
     }
 }
