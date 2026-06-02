@@ -16,6 +16,7 @@ mod dump;
 mod escape;
 mod identifier;
 mod number;
+mod regexp;
 mod string;
 mod template;
 
@@ -631,12 +632,9 @@ impl<'a> JSLexer<'a> {
                         continue;
                     } else {
                         self.set_token_start();
-                        // NOTE: regexp scanning is deferred to a later phase. The
-                        // differential only drives AllowDiv, so we treat
-                        // AllowRegExp identically to AllowDiv here (slash /
-                        // slashequal) with this TODO. When regexp lands,
-                        // AllowRegExp must call scanRegExp() instead.
-                        if self.cursor.peek_at(1) == b'=' {
+                        if grammar_context == GrammarContext::AllowRegExp {
+                            self.scan_regexp();
+                        } else if self.cursor.peek_at(1) == b'=' {
                             self.token.set_punctuator(TokenKind::slashequal);
                             self.cursor.advance(2);
                         } else {

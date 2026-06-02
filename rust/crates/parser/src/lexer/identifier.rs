@@ -66,7 +66,10 @@ impl<'a> JSLexer<'a> {
     /// Try to consume one non-escaped identifier part into `tmp_storage`. Port
     /// of `consumeOneIdentifierPartNoEscape<Mode>` (JSLexer.cpp:1269-1290).
     #[inline]
-    fn consume_one_identifier_part_no_escape(&mut self, mode: IdentifierMode) -> bool {
+    pub(crate) fn consume_one_identifier_part_no_escape(
+        &mut self,
+        mode: IdentifierMode,
+    ) -> bool {
         let ch = self.cursor.peek();
         if ch == b'_'
             || ch == b'$'
