@@ -94,6 +94,22 @@ Notes:
   `AtomTable`).
 - `emit_into(&self, emitter: &mut JSONEmitter)` — see §4.
 
+### What lives where (memory ownership)
+
+The arena holds only the parsed value tree; string bytes and uniquing bookkeeping live elsewhere —
+mirroring the C++ split (`BumpPtrAllocator` ← nodes; `StringTable` ← bytes; `FoldingSet`/`std::map` ←
+uniquing).
+
+| Lives in… | Holds |
+|-----------|-------|
+| **`bumpalo` arena** (`&'a Bump`) | `JSONValue` nodes (32 B each: distinct numbers, distinct strings, each array, each object, the 3 singletons); the `&'a [&'a JSONValue]` child slices (N×8 B); `JSONHiddenClass` descriptors; the `&'a [AtomBytes]` class key arrays (N×4 B) |
+| **`AtomTable`** (`&'a AtomTable`) | the actual string **bytes** (the arena's `String(AtomBytes)` holds only a `u32` handle) |
+| **`JSONFactory` heap fields** | the uniquing `HashMap`s (`strings`/`numbers`/`classes`) — keys are handles, values are `&'a` refs into the arena; no payload |
+| transient (heap/stack) | parser scratch `Vec` of pending elements/props (copied into an arena slice via `alloc_slice_copy`), lexer scratch, the input `Rc<SourceBuffer>` |
+
+Child slices are built by collecting a temporary `Vec<&JSONValue>` during `parse_array`/`parse_object`,
+then `arena.alloc_slice_copy(&vec)` (both `&'a JSONValue` and `AtomBytes` are `Copy`).
+
 ## 2. JSONFactory — append-only interner with interior mutability
 
 ```rust
