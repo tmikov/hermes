@@ -150,11 +150,16 @@ part of SourceErrorManager; in build order):
 > `isCurrentTokenADirective` (non-corrupting), `rescanRBraceInTemplateLiteral` (→ `template_middle`/
 > `template_tail`). Unit-tested; the 5 differentials still pass. Plan: `plans/2026-06-02-js-lexer-proper-4a.md`.
 >
-> **Next — lexer phase 4b (parser-lookahead):** `lookahead1`/`lookahead2` (save/advance/restore +
-> suppress), `optimisticSkipWhitespace`, `isLetFollowedByDeclStart`, `isUsing/AwaitUsingFollowedByIdentifier`
-> (pass the needed atoms, not the parser `Keywords`). Then 4c `convertSurrogates` re-encoding (needs
-> UTF-8↔UTF-16 conversion utils) — the last piece. **Remaining tracked items:** the `--non-strict`
-> harness flag.
+> **🚧 Lexer phase 4b DONE.** Parser-lookahead: `optimisticSkipWhitespace`, `lookahead1`/`lookahead2`
+> (save/advance/restore + message suppression; the `template<bool>`→runtime-bool and `Keywords`→atom-param
+> adaptations), `isLetFollowedByDeclStart`, `isUsing/AwaitUsingFollowedByIdentifier`. Unit-tested
+> (incl. a comment-rollback regression found in review). Plan: `plans/2026-06-02-js-lexer-proper-4b.md`.
+>
+> **Next — lexer phase 4c (`convertSurrogates`) — the LAST `JSLexer` feature:** `getStringLiteral` when
+> the flag is set re-encodes the WTF-8 internal form to valid UTF-8 via `convertSurrogatesInString`
+> (port `convertUTF8WithSurrogatesToUTF16` + `convertToCodePointAt` + `convertUTF16ToUTF8WithReplacements`
+> + `encodeUTF16`). After 4c the JSLexer port is complete. **Remaining tracked items:** the `--non-strict`
+> harness flag (optional test convenience).
 
 ## Key cross-cutting design decisions
 
