@@ -29,7 +29,9 @@
 //!   MB/s = (sourceBytes * N) / seconds / 1e6 (two decimals).
 //!
 //! Args: [--bench=N] [--convert-surrogates] <file|->
+//!
 //!   -  means read from stdin.
+//!
 //!   --convert-surrogates  passes convert_surrogates=true to JSONParser.
 
 use std::io::{self, Read, Write};
@@ -155,10 +157,10 @@ fn main() {
                 // NO trailing newline — matches C++ contract.
                 print!("{s}");
             } else {
-                print!("ERROR {errors}\n");
+                println!("ERROR {errors}");
             }
         } else {
-            print!("ERROR {errors}\n");
+            println!("ERROR {errors}");
         }
     }
 

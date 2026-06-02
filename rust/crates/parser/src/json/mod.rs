@@ -132,7 +132,11 @@ impl<'a> JSONValue<'a> {
     }
 
     /// Port of `JSONValue::emitInto` (JSONParser.cpp:39). `atoms` resolves
-    /// interned string handles to bytes. Strings must be valid UTF-8.
+    /// interned string handles to bytes. String handles store WTF-8 bytes
+    /// (surrogate-encoded astral chars / lone surrogates are valid), which are
+    /// decoded to UTF-16 for emission, matching C++ `primitiveEmitString` via
+    /// `decodeUTF8<true>` (surrogate-tolerant). Plain valid UTF-8 input also
+    /// works correctly via the same path.
     pub fn emit_into(
         &self,
         emitter: &mut support::json_emitter::JSONEmitter,
@@ -142,9 +146,8 @@ impl<'a> JSONValue<'a> {
             JSONValue::Object(class, values) => {
                 emitter.open_dict();
                 for (k, v) in class.keys.iter().copied().zip(values.iter().copied()) {
-                    let key =
-                        std::str::from_utf8(atoms.bytes(k)).expect("valid UTF-8 key");
-                    emitter.emit_key(key);
+                    let ku = crate::utf8::convert_utf8_with_surrogates_to_utf16(atoms.bytes(k));
+                    emitter.emit_key_u16(&ku);
                     v.emit_into(emitter, atoms);
                 }
                 emitter.close_dict();
@@ -157,9 +160,8 @@ impl<'a> JSONValue<'a> {
                 emitter.close_array();
             }
             JSONValue::String(a) => {
-                let s =
-                    std::str::from_utf8(atoms.bytes(*a)).expect("valid UTF-8 string");
-                emitter.emit_str(s);
+                let vu = crate::utf8::convert_utf8_with_surrogates_to_utf16(atoms.bytes(*a));
+                emitter.emit_u16(&vu);
             }
             JSONValue::Number(n) => emitter.emit_f64(*n),
             JSONValue::Boolean(b) => emitter.emit_bool(*b),
@@ -327,6 +329,25 @@ mod model_tests {
         }
         // sorted-key order: key1,key2,key3,key4
         assert_eq!(s, r#"{"key1":1,"key2":"value2","key3":{"nested1":true},"key4":[false,null,"value2"]}"#);
+    }
+
+    #[test]
+    fn emit_into_astral_string() {
+        use super::JSONFactory;
+        use atom_table::AtomTable;
+        use bumpalo::Bump;
+        use support::json_emitter::JSONEmitter;
+        let arena = Bump::new();
+        let atoms = AtomTable::new();
+        let f = JSONFactory::new(&arena, &atoms);
+        // A string node whose interned bytes are the valid UTF-8 of U+10000 ("𐀀").
+        // convert_utf8_with_surrogates_to_utf16 decodes f0 90 80 80 to U+10000
+        // and then encode_utf16 splits it to surrogate pair [0xD800,0xDC00].
+        // emit_u16 escapes each unit as \uXXXX, matching C++ primitiveEmitString.
+        let s = f.get_string_str("\u{10000}");
+        let mut out = String::new();
+        { let mut e = JSONEmitter::new(&mut out, false); s.emit_into(&mut e, &atoms); }
+        assert_eq!(out, "\"\\ud800\\udc00\"");
     }
 
     #[test]

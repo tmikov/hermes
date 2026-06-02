@@ -227,6 +227,34 @@ impl<'w> JSONEmitter<'w> {
         self.out.push_str("null");
     }
 
+    /// Like `emit_key` but takes UTF-16 code units (for WTF-8 keys that are not
+    /// valid UTF-8). Port-compatible with C++ `emitKey` -> `primitiveEmitString`
+    /// which decodes WTF-8 and escapes per code unit.
+    pub fn emit_key_u16(&mut self, key: &[u16]) {
+        debug_assert!(self.in_dict(), "Not emitting a dictionary");
+        {
+            let state = self.states.last_mut().unwrap();
+            debug_assert!(state.needs_key, "Not expecting a key");
+            debug_assert!(!state.needs_value, "Missing a value for a key.");
+            if state.needs_comma {
+                self.out.push(',');
+            }
+            state.needs_comma = false;
+            state.needs_key = false;
+            state.needs_value = true;
+        }
+        self.pretty_new_line();
+        self.out.push('"');
+        for &unit in key {
+            self.emit_one_escaped_unit(unit);
+        }
+        self.out.push('"');
+        self.out.push(':');
+        if self.pretty {
+            self.out.push(' ');
+        }
+    }
+
     /// JSONEmitter.cpp:88 — emit a dict key.
     pub fn emit_key(&mut self, key: &str) {
         debug_assert!(self.in_dict(), "Not emitting a dictionary");
@@ -541,6 +569,22 @@ mod tests {
         }
         let expected = "{\n  \"artist\": \"prince\",\n  \"instruments\": [\n    \"piano\",\n    {\n      \"guitars\": [\n        \"cloud\",\n        \"love symbol\",\n        \"telecaster\"\n      ]\n    },\n    \"drums\"\n  ],\n  \"songs\": {\n    \"purple rain\": 1984,\n    \"1999\": 1982\n  },\n  \"color\": \"purple\",\n  \"emptyDict\": {},\n  \"emptyArray\": []\n}";
         assert_eq!(s, expected);
+    }
+
+    #[test]
+    fn emit_u16_astral_and_lone_surrogate() {
+        // astral U+10000 encoded as surrogate pair [0xD800,0xDC00]: each unit
+        // is > 0x7F so emit_one_escaped_unit emits each as \uXXXX ->
+        // key "\ud800\udc00"; lone surrogate 0xD800 value -> "\ud800".
+        let mut s = String::new();
+        {
+            let mut j = JSONEmitter::new(&mut s, false);
+            j.open_dict();
+            j.emit_key_u16(&[0xD800, 0xDC00]); // key = surrogate pair for U+10000
+            j.emit_u16(&[0xD800]);             // lone surrogate value
+            j.close_dict();
+        }
+        assert_eq!(s, "{\"\\ud800\\udc00\":\"\\ud800\"}");
     }
 
     #[test]
