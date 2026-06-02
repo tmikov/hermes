@@ -138,12 +138,20 @@ part of SourceErrorManager; in build order):
 > `--context=type` differential (6 entries). Crate is now `int_plus_one`-clean. Plan:
 > `plans/2026-06-02-js-lexer-proper-3a.md`.
 >
-> **Next — lexer phase 3b (JSX):** `HTMLEntities.def` table (254 entries) + `consumeHTMLEntityOptional`,
-> the JSX `scanString<true>` branches (`&`-entities + JSX-newline-in-string), `advanceInJSXChild` (JSX
-> text + entities), JSX identifier mode (`-`); extend the harness with `--context=jsx` + a `--jsx-child`
-> mode + `jsx_text value=/raw=` dump. Then phase 4 (savepoint/lookahead/directive/rescanRBrace/magic
-> comments/comment storage/convertSurrogates). **Remaining tracked items:** `convertSurrogates`
-> re-encoding, the `--non-strict` harness flag.
+> **🚧 Lexer phase 3b DONE — JSX complete.** `HTMLEntities.def` table (253 entries, generated +
+> binary-search lookup) + `consumeHTMLEntityOptional`, the JSX `scanString<true>` branches, `advanceInJSXChild`,
+> JSX identifier mode (`-`). Harness `--context=jsx` + `--jsx-child`; `jsx_text value=/raw=` dump. Five
+> differentials now run: div 55 / regexp 5 / type 6 / jsx 4 / jsx-child 10. Plan:
+> `plans/2026-06-02-js-lexer-proper-3b.md`. **The lexer now lexes the full JSLexer surface bar the
+> stateful/parser-facing APIs.**
+>
+> **Next — lexer phase 4 (stateful/parser-facing APIs):** 4a self-contained state (`SavePoint`,
+> `seek`/`forceEOF`, comment+token storage, magic comments `//# sourceURL=`/`sourceMappingURL=`,
+> `isCurrentTokenADirective`, `rescanRBraceInTemplateLiteral` → enables `template_middle`/`template_tail`);
+> 4b parser-lookahead (`lookahead1`/`lookahead2`, `isLetFollowedByDeclStart`,
+> `isUsing/AwaitUsingFollowedByIdentifier` — pass the needed atoms instead of the parser `Keywords`);
+> 4c `convertSurrogates` re-encoding (needs UTF-8↔UTF-16 conversion utils). **Remaining tracked items:**
+> the `--non-strict` harness flag.
 
 ## Key cross-cutting design decisions
 
