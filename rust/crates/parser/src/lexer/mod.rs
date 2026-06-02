@@ -381,7 +381,8 @@ impl<'a> JSLexer<'a> {
         self.new_line_before_current_token = false;
 
         loop {
-            debug_assert!(self.cursor.offset() <= self.cursor.raw().len() as u32 - 1);
+            // The cursor stays within the buffer (raw() includes the trailing NUL).
+            debug_assert!((self.cursor.offset() as usize) < self.cursor.raw().len());
             let c = self.cursor.peek();
             match c {
                 0 => {
