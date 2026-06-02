@@ -411,11 +411,18 @@ impl<'a> JSLexer<'a> {
                 b'~' => self.punc_l1_1(TokenKind::tilde),
                 b':' => self.punc_l1_1(TokenKind::colon),
 
-                // { {|  (the `{|` form is Flow-only Type context; not exercised)
+                // { {|  (the `{|` form is Flow-only Type context)
                 b'{' => {
                     self.set_token_start();
-                    self.token.set_punctuator(TokenKind::l_brace);
-                    self.cursor.advance(1);
+                    if grammar_context == GrammarContext::Type
+                        && self.cursor.peek_at(1) == b'|'
+                    {
+                        self.token.set_punctuator(TokenKind::l_bracepipe);
+                        self.cursor.advance(2);
+                    } else {
+                        self.token.set_punctuator(TokenKind::l_brace);
+                        self.cursor.advance(1);
+                    }
                 }
 
                 // = => == ===
@@ -485,7 +492,12 @@ impl<'a> JSLexer<'a> {
                 // | || |= ||=  (the `|}` form is Flow-only Type context)
                 b'|' => {
                     self.set_token_start();
-                    if self.cursor.peek_at(1) == b'|' {
+                    if grammar_context == GrammarContext::Type
+                        && self.cursor.peek_at(1) == b'}'
+                    {
+                        self.token.set_punctuator(TokenKind::piper_brace);
+                        self.cursor.advance(2);
+                    } else if self.cursor.peek_at(1) == b'|' {
                         if self.cursor.peek_at(2) == b'=' {
                             self.token.set_punctuator(TokenKind::pipepipeequal);
                             self.cursor.advance(3);
@@ -549,10 +561,19 @@ impl<'a> JSLexer<'a> {
                 // ^ ^=
                 b'^' => self.punc_l2_2(b'=', TokenKind::caret, TokenKind::caretequal),
 
-                // % %=
+                // % %=  (the `%checks` form is Flow-only Type context)
                 b'%' => {
                     self.set_token_start();
-                    if self.cursor.peek_at(1) == b'=' {
+                    let off = self.cursor.offset() as usize;
+                    let raw = self.cursor.raw();
+                    if grammar_context == GrammarContext::Type
+                        && off + 7 <= raw.len() - 1
+                        && &raw[off..off + 7] == b"%checks"
+                    {
+                        let ident = self.strtab.atom_bytes(b"%checks");
+                        self.token.set_identifier(ident);
+                        self.cursor.advance(7);
+                    } else if self.cursor.peek_at(1) == b'=' {
                         self.token.set_punctuator(TokenKind::percentequal);
                         self.cursor.advance(2);
                     } else {
@@ -657,10 +678,13 @@ impl<'a> JSLexer<'a> {
                     }
                 }
 
-                // < <= << <<=
+                // < <= << <<=  (in Type context, always `less`)
                 b'<' => {
                     self.set_token_start();
-                    if self.cursor.peek_at(1) == b'=' {
+                    if grammar_context == GrammarContext::Type {
+                        self.token.set_punctuator(TokenKind::less);
+                        self.cursor.advance(1);
+                    } else if self.cursor.peek_at(1) == b'=' {
                         self.token.set_punctuator(TokenKind::lessequal);
                         self.cursor.advance(2);
                     } else if self.cursor.peek_at(1) == b'<' {
@@ -677,10 +701,15 @@ impl<'a> JSLexer<'a> {
                     }
                 }
 
-                // > >= >> >>> >>= >>>=
+                // > >= >> >>> >>= >>>=  (in Type/JSX context, always `greater`)
                 b'>' => {
                     self.set_token_start();
-                    if self.cursor.peek_at(1) == b'=' {
+                    if grammar_context == GrammarContext::Type
+                        || grammar_context == GrammarContext::AllowJSXIdentifier
+                    {
+                        self.token.set_punctuator(TokenKind::greater);
+                        self.cursor.advance(1);
+                    } else if self.cursor.peek_at(1) == b'=' {
                         // >=
                         self.token.set_punctuator(TokenKind::greaterequal);
                         self.cursor.advance(2);
@@ -738,11 +767,17 @@ impl<'a> JSLexer<'a> {
                     self.scan_identifier_fast_path_in_context(start, grammar_context);
                 }
 
-                // @ : decorator punctuator (non-Type context).
+                // @ : decorator punctuator, or (in Flow Type context) the start
+                // of an `@`-prefixed Flow identifier.
                 b'@' => {
                     self.set_token_start();
-                    self.token.set_punctuator(TokenKind::at);
-                    self.cursor.advance(1);
+                    if grammar_context == GrammarContext::Type {
+                        let start = self.cursor.offset();
+                        self.scan_identifier_fast_path_in_context(start, grammar_context);
+                    } else {
+                        self.token.set_punctuator(TokenKind::at);
+                        self.cursor.advance(1);
+                    }
                 }
 
                 // \ : identifier with a leading unicode escape.
@@ -1015,6 +1050,61 @@ mod tests {
             }
         }
         out
+    }
+
+    /// Like `kinds`, but lexes under an explicit grammar context (used for the
+    /// Flow `Type`-context arms).
+    fn kinds_ctx(src: &str, ctx: GrammarContext) -> Vec<TokenKind> {
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("t", src);
+        let tab = AtomTable::new();
+        let mut lex = JSLexer::new(id, &mut sm, &tab, ctx);
+        let mut out = vec![];
+        loop {
+            let k = lex.advance(ctx).kind();
+            out.push(k);
+            if k == TokenKind::eof {
+                break;
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn flow_type_context() {
+        use TokenKind::*;
+        assert_eq!(kinds_ctx("{|", GrammarContext::Type), vec![l_bracepipe, eof]);
+        assert_eq!(kinds_ctx("|}", GrammarContext::Type), vec![piper_brace, eof]);
+        // plain `{ }` still works in Type context.
+        assert_eq!(
+            kinds_ctx("{ }", GrammarContext::Type),
+            vec![l_brace, r_brace, eof]
+        );
+        // `<` is `less` (not lessless etc.) in Type context.
+        assert_eq!(kinds_ctx("<", GrammarContext::Type), vec![less, eof]);
+        // `>>` lexes as two individual `>` in Type context.
+        assert_eq!(
+            kinds_ctx(">>", GrammarContext::Type),
+            vec![greater, greater, eof]
+        );
+        // `??` is not formed in Type context (`?` is its own token).
+        assert_eq!(
+            kinds_ctx("??", GrammarContext::Type),
+            vec![question, question, eof]
+        );
+        // `%checks` is an identifier in Type context.
+        assert_eq!(kinds_ctx("%checks", GrammarContext::Type), vec![identifier, eof]);
+        // `@`-prefixed Flow identifier.
+        assert_eq!(kinds_ctx("@foo", GrammarContext::Type), vec![identifier, eof]);
+        // Outside Type, these behave normally:
+        assert_eq!(
+            kinds_ctx("{|", GrammarContext::AllowDiv),
+            vec![l_brace, pipe, eof]
+        );
+        assert_eq!(
+            kinds_ctx("@foo", GrammarContext::AllowDiv),
+            vec![at, identifier, eof]
+        );
     }
 
     /// Like `kinds`, but the lexer is switched to non-strict mode.
