@@ -6,3 +6,214 @@
  */
 
 //! JSONParser: recursive-descent parser driving JSLexer.
+
+use atom_table::AtomTable;
+use support::diag::Subsystem;
+use support::location::{SMRange, SourceId};
+use support::manager::SourceErrorManager;
+
+use crate::lexer::{GrammarContext, JSLexer};
+use crate::token::Token;
+use crate::token_kinds::TokenKind;
+
+use super::{JSONFactory, JSONValue};
+
+/// JSON grammar uses `/` as division (never regexp).
+const CTX: GrammarContext = GrammarContext::AllowDiv;
+
+/// Port of `JSONParser` (JSONParser.h:630). Drives `JSLexer`; errors go through
+/// the lexer's single `&mut SourceErrorManager`.
+pub struct JSONParser<'a> {
+    factory: &'a JSONFactory<'a>,
+    lexer: JSLexer<'a>,
+}
+
+impl<'a> JSONParser<'a> {
+    /// Construct a `JSONParser` over the source buffer identified by `buf_id` in
+    /// `sm`. Port of `JSONParser::JSONParser` (JSONParser.h:641-653).
+    pub fn new(
+        factory: &'a JSONFactory<'a>,
+        buf_id: SourceId,
+        sm: &'a mut SourceErrorManager,
+        atoms: &'a AtomTable,
+        convert_surrogates: bool,
+    ) -> JSONParser<'a> {
+        let lexer =
+            JSLexer::new_with_convert_surrogates(buf_id, sm, atoms, CTX, convert_surrogates);
+        JSONParser { factory, lexer }
+    }
+
+    /// Returns the number of errors reported so far (via the shared
+    /// `SourceErrorManager`).
+    pub fn error_count(&self) -> u32 {
+        self.lexer.get_source_mgr().error_count()
+    }
+
+    /// Report an error at the current token's range. Port of JSONParser.h:666.
+    fn error(&mut self, msg: impl Into<String>) {
+        let range: SMRange = self.lexer.token().source_range();
+        self.lexer.get_source_mgr_mut().error_at(
+            range.start,
+            Some(range),
+            msg.into(),
+            Subsystem::Parser,
+        );
+    }
+
+    /// Return a reference to the current token (immutable borrow of lexer).
+    fn cur(&self) -> &Token {
+        self.lexer.token()
+    }
+
+    /// Advance the lexer and return the new current token.
+    fn advance(&mut self) -> &Token {
+        self.lexer.advance(CTX)
+    }
+
+    /// Parse the whole JSON input. Port of JSONParser.cpp:192.
+    pub fn parse(&mut self) -> Option<&'a JSONValue<'a>> {
+        self.advance();
+        let res = self.parse_value()?;
+        if self.lexer.get_source_mgr().error_count() != 0 {
+            return None;
+        }
+        Some(res)
+    }
+
+    /// Parse a single JSON value. Port of JSONParser.cpp:202.
+    fn parse_value(&mut self) -> Option<&'a JSONValue<'a>> {
+        let mut needs_negation = false;
+        match self.cur().kind() {
+            TokenKind::string_literal => {
+                // Read the interned atom before advancing (borrow-checker: avoid
+                // holding &Token across the mutable advance() call).
+                let lit = self.cur().get_string_literal();
+                self.advance();
+                Some(self.factory.get_string(lit))
+            }
+            TokenKind::minus => {
+                needs_negation = true;
+                self.advance();
+                if self.cur().kind() != TokenKind::numeric_literal {
+                    self.error("No numeric literal following minus (-) token in value");
+                    return None;
+                }
+                self.parse_number(needs_negation)
+            }
+            TokenKind::numeric_literal => self.parse_number(needs_negation),
+            TokenKind::l_brace => {
+                self.advance();
+                self.parse_object()
+            }
+            TokenKind::l_square => {
+                self.advance();
+                self.parse_array()
+            }
+            TokenKind::rw_true => {
+                self.advance();
+                Some(self.factory.get_boolean(true))
+            }
+            TokenKind::rw_false => {
+                self.advance();
+                Some(self.factory.get_boolean(false))
+            }
+            TokenKind::rw_null => {
+                self.advance();
+                Some(self.factory.get_null())
+            }
+            _ => {
+                self.error("JSON object or array expected");
+                None
+            }
+        }
+    }
+
+    /// Parse a numeric literal (with optional leading negation).
+    /// Reads the f64 value before advancing to satisfy the borrow checker.
+    fn parse_number(&mut self, needs_negation: bool) -> Option<&'a JSONValue<'a>> {
+        let v = self.cur().get_numeric_literal();
+        let res = self.factory.get_number(if needs_negation { -v } else { v });
+        self.advance();
+        Some(res)
+    }
+
+    // Stub — filled in C2.
+    fn parse_array(&mut self) -> Option<&'a JSONValue<'a>> {
+        self.error("expected ']'");
+        None
+    }
+
+    // Stub — filled in C3.
+    fn parse_object(&mut self) -> Option<&'a JSONValue<'a>> {
+        self.error("expected '}'");
+        None
+    }
+}
+
+#[cfg(test)]
+mod parser_tests {
+    use super::super::*;
+    use atom_table::AtomTable;
+    use bumpalo::Bump;
+    use support::manager::SourceErrorManager;
+
+    /// Helper: parse `src` and return the JSON value (if successful).
+    /// `sm` must outlive the call so the returned `&'a JSONValue<'a>` is valid.
+    fn parse_ok<'a>(
+        arena: &'a Bump,
+        atoms: &'a AtomTable,
+        sm: &'a mut SourceErrorManager,
+        src: &str,
+    ) -> Option<&'a JSONValue<'a>> {
+        // Mirrors `JSONParser parser(factory, src, sm); parser.parse()`.
+        let f = arena.alloc(JSONFactory::new(arena, atoms));
+        let id = sm.add_buffer("json", src);
+        let mut p = JSONParser::new(f, id, sm, atoms, false);
+        p.parse()
+    }
+
+    #[test]
+    fn scalars() {
+        let arena = Bump::new();
+        let atoms = AtomTable::new();
+        let mut sm = SourceErrorManager::new();
+        assert_eq!(
+            parse_ok(&arena, &atoms, &mut sm, "true").and_then(|v| v.as_boolean()),
+            Some(true)
+        );
+        assert_eq!(
+            parse_ok(&arena, &atoms, &mut sm, "false").and_then(|v| v.as_boolean()),
+            Some(false)
+        );
+        assert_eq!(
+            parse_ok(&arena, &atoms, &mut sm, "null").map(|v| v.kind()),
+            Some(JSONKind::Null)
+        );
+        assert_eq!(
+            parse_ok(&arena, &atoms, &mut sm, "42").and_then(|v| v.as_number()),
+            Some(42.0)
+        );
+        assert_eq!(
+            parse_ok(&arena, &atoms, &mut sm, "-1.5").and_then(|v| v.as_number()),
+            Some(-1.5)
+        );
+        let s = parse_ok(&arena, &atoms, &mut sm, "'hi'")
+            .unwrap()
+            .as_string()
+            .unwrap();
+        assert_eq!(atoms.bytes(s), b"hi");
+    }
+
+    #[test]
+    fn lone_minus_errors() {
+        // NegativeNumbers: "-" -> failure, error count 1.
+        let arena = Bump::new();
+        let atoms = AtomTable::new();
+        let f = arena.alloc(JSONFactory::new(&arena, &atoms));
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("json", "-");
+        let mut p = JSONParser::new(f, id, &mut sm, &atoms, false);
+        assert!(p.parse().is_none());
+        assert_eq!(p.error_count(), 1);
+    }
+}

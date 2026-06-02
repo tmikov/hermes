@@ -13,6 +13,7 @@ pub mod factory;
 pub mod parser;
 
 pub use factory::{JSONFactory, Prop};
+pub use parser::JSONParser;
 
 use atom_table::AtomBytes;
 
