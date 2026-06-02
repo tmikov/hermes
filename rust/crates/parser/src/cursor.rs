@@ -133,6 +133,22 @@ impl Cursor {
         self.buffer.raw()
     }
 
+    /// Decode the (non-ASCII) UTF-8 char at the cursor WITHOUT advancing.
+    /// Port of `JSLexer::_peekUTF8` (JSLexer.h:1159-1167): it decodes with
+    /// surrogates disallowed and swallows any errors. Returns
+    /// `(code_point, offset_after)`, where `offset_after` is the byte offset of
+    /// the next character.
+    ///
+    /// This stays in `cursor.rs` to keep the raw-pointer parity confined here,
+    /// but it actually drives the safe `utf8::decode_utf8` over `raw()` at a
+    /// copied byte offset (no new `unsafe`).
+    pub fn peek_utf8(&self) -> (u32, u32) {
+        let bytes = self.raw();
+        let mut i = self.offset() as usize;
+        let cp = crate::utf8::decode_utf8::<false>(bytes, &mut i, |_| {});
+        (cp, i as u32)
+    }
+
     /// The underlying buffer (cloning the `Rc` is cheap).
     pub fn buffer(&self) -> &Rc<SourceBuffer> {
         &self.buffer
@@ -163,6 +179,15 @@ mod tests {
         c.advance(1);
         assert_eq!(c.peek(), 0);
         assert!(c.at_end());
+    }
+
+    #[test]
+    fn peek_utf8_no_advance() {
+        let c = cur("\u{4e2d}x"); // 中 = e4 b8 ad
+        let (cp, next) = c.peek_utf8();
+        assert_eq!(cp, 0x4E2D);
+        assert_eq!(next, 3); // offset of 'x'
+        assert_eq!(c.offset(), 0); // cursor did not move
     }
 
     #[test]
