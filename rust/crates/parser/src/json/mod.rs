@@ -117,7 +117,7 @@ impl<'a> JSONValue<'a> {
     /// Returns an `ArrayView` if this is an `Array`, else `None`.
     pub fn as_array(&self) -> Option<ArrayView<'a>> {
         match self {
-            JSONValue::Array(v) => Some(ArrayView { values: *v }),
+            JSONValue::Array(v) => Some(ArrayView { values: v }),
             _ => None,
         }
     }
@@ -125,7 +125,7 @@ impl<'a> JSONValue<'a> {
     /// Returns an `ObjectView` if this is an `Object`, else `None`.
     pub fn as_object(&self) -> Option<ObjectView<'a>> {
         match self {
-            JSONValue::Object(c, v) => Some(ObjectView { class: *c, values: *v }),
+            JSONValue::Object(c, v) => Some(ObjectView { class: c, values: v }),
             _ => None,
         }
     }
@@ -195,12 +195,12 @@ impl<'a> ObjectView<'a> {
         }
     }
 
-    /// Value by position (0..size).
+    /// Value by position (0..size). Panics if out of range.
     pub fn value_at(&self, index: usize) -> &'a JSONValue<'a> {
         self.values[index]
     }
 
-    /// Key (interned handle) by position.
+    /// Key (interned handle) by position. Panics if out of range.
     pub fn key_at(&self, index: usize) -> atom_table::AtomBytes {
         self.class.keys[index]
     }

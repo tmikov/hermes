@@ -201,6 +201,38 @@ mod factory_tests {
     }
 
     #[test]
+    fn object_positional_accessors_and_iter_sorted_order() {
+        use super::super::JSONFactory;
+        let arena = Bump::new();
+        let atoms = AtomTable::new();
+        let f = JSONFactory::new(&arena, &atoms);
+        // Insert keys out of order; hidden class / iteration is SORTED order.
+        let obj = f
+            .new_object(&mut [
+                (f.get_string_str("b"), f.get_number(2.0)),
+                (f.get_string_str("a"), f.get_number(1.0)),
+                (f.get_string_str("c"), f.get_number(3.0)),
+            ])
+            .unwrap();
+        let o = obj.as_object().unwrap();
+        assert_eq!(o.size(), 3);
+        // value_at / key_at follow sorted key order: a,b,c
+        assert_eq!(atoms.bytes(o.key_at(0)), b"a");
+        assert_eq!(o.value_at(0).as_number(), Some(1.0));
+        assert_eq!(atoms.bytes(o.key_at(2)), b"c");
+        assert_eq!(o.value_at(2).as_number(), Some(3.0));
+        // iter yields (key, value) pairs in sorted order.
+        let collected: Vec<(Vec<u8>, f64)> = o
+            .iter()
+            .map(|(k, v)| (atoms.bytes(k).to_vec(), v.as_number().unwrap()))
+            .collect();
+        assert_eq!(
+            collected,
+            vec![(b"a".to_vec(), 1.0), (b"b".to_vec(), 2.0), (b"c".to_vec(), 3.0)]
+        );
+    }
+
+    #[test]
     fn uniquing_and_singletons() {
         let arena = Bump::new();
         let atoms = AtomTable::new();
