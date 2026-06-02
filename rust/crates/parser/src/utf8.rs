@@ -8,6 +8,7 @@
 //! correctly rejected; we also guard indexes against `bytes.len()` defensively.
 
 use unicode::{
+    is_high_surrogate, is_low_surrogate, utf16_surrogate_pair_to_code_point,
     UNICODE_MAX_VALUE, UNICODE_REPLACEMENT_CHARACTER, UNICODE_SURROGATE_FIRST,
     UNICODE_SURROGATE_LAST, UTF16_HIGH_SURROGATE, UTF16_LOW_SURROGATE,
 };
@@ -226,6 +227,91 @@ pub fn append_unicode_to_storage(storage: &mut Vec<u8>, cp: u32) {
     }
 }
 
+/// Encode a 32-bit value into UTF-16, appending to `out`. If the value is a
+/// part of a surrogate pair, it is encoded without any conversion. Port of
+/// `encodeUTF16` (UTF8.h:197-210).
+#[inline]
+pub fn encode_utf16(out: &mut Vec<u16>, cp: u32) {
+    if cp < 0x10000 {
+        out.push(cp as u16);
+    } else {
+        debug_assert!(cp <= UNICODE_MAX_VALUE, "invalid Unicode value");
+        let cp = cp - 0x10000;
+        out.push((UTF16_HIGH_SURROGATE + ((cp >> 10) & 0x3FF)) as u16);
+        out.push((UTF16_LOW_SURROGATE + (cp & 0x3FF)) as u16);
+    }
+}
+
+/// Decode a UTF-8 sequence, which is assumed to be valid, but may possibly
+/// contain explicitly encoded surrogate pairs, into a UTF-16 sequence. Port of
+/// `convertUTF8WithSurrogatesToUTF16` (UTF8.h:216-225).
+pub fn convert_utf8_with_surrogates_to_utf16(bytes: &[u8]) -> Vec<u16> {
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0usize;
+    while i < bytes.len() {
+        // Surrogates are ALLOWED; the input is assumed valid, so the error
+        // callback is unreachable (a no-op here).
+        let cp = decode_utf8::<true>(bytes, &mut i, |_| {});
+        encode_utf16(&mut out, cp);
+    }
+    out
+}
+
+/// Inspect the code unit at `u16s[i]`. If it is a high surrogate followed by a
+/// low surrogate, decode the surrogate pair into a single code point. If it is
+/// an unpaired surrogate, replace the value with `UNICODE_REPLACEMENT_CHARACTER`
+/// (U+FFFD). Port of `convertToCodePointAt` (UTF8.cpp:77-96).
+///
+/// \return a pair with the first element being the Unicode code point, and the
+///         second being how many code units were consumed.
+#[inline]
+fn convert_to_code_point_at(u16s: &[u16], i: usize) -> (u32, usize) {
+    let c = u16s[i] as u32;
+    if is_low_surrogate(c) {
+        // Unpaired low surrogate.
+        (UNICODE_REPLACEMENT_CHARACTER, 1)
+    } else if is_high_surrogate(c) {
+        // Leading high surrogate. See if the next character is a low surrogate.
+        if i + 1 >= u16s.len() || !is_low_surrogate(u16s[i + 1] as u32) {
+            // Trailing or unpaired high surrogate.
+            (UNICODE_REPLACEMENT_CHARACTER, 1)
+        } else {
+            // Decode surrogate pair and consume two chars.
+            (utf16_surrogate_pair_to_code_point(c, u16s[i + 1] as u32), 2)
+        }
+    } else {
+        // Not a surrogate.
+        (c, 1)
+    }
+}
+
+/// Convert a UTF-16 encoded string `u16s` to valid UTF-8, combining surrogate
+/// pairs into supplementary-plane characters and replacing unpaired surrogates
+/// with U+FFFD. Port of `convertUTF16ToUTF8WithReplacements` (UTF8.cpp:99-133),
+/// dropping the `maxCharacters` parameter (the lexer always passes 0/unbounded).
+pub fn convert_utf16_to_utf8_with_replacements(u16s: &[u16]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(u16s.len());
+    let mut cur = 0usize;
+    while cur < u16s.len() {
+        let c = u16s[cur] as u32;
+        // ASCII fast-path.
+        if c <= 0x7F {
+            out.push(c as u8);
+            cur += 1;
+            continue;
+        }
+
+        let (c32, input_consumed) = convert_to_code_point_at(u16s, cur);
+        cur += input_consumed;
+
+        // The code point to be encoded here is guaranteed to be a valid unicode
+        // code point and not a surrogate. Because of the
+        // convert_to_code_point_at() process.
+        encode_utf8(&mut out, c32);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -285,6 +371,42 @@ mod tests {
         let mut v = vec![];
         append_unicode_to_storage(&mut v, 0x1F600);
         assert_eq!(v, b"\xed\xa0\xbd\xed\xb8\x80");
+    }
+
+    #[test]
+    fn utf16_roundtrip_and_replacement() {
+        // encode_utf16: BMP -> 1 u16, astral -> surrogate pair.
+        let mut v = vec![];
+        encode_utf16(&mut v, 0x41);
+        assert_eq!(v, [0x41]);
+        let mut v = vec![];
+        encode_utf16(&mut v, 0x1F600);
+        assert_eq!(v, [0xD83D, 0xDE00]);
+
+        // convert_utf8_with_surrogates_to_utf16: WTF-8 astral (surrogate pair,
+        // 3 bytes each) -> 2 u16.
+        let wtf8: &[u8] = b"\xed\xa0\xbd\xed\xb8\x80"; // U+1F600 as a surrogate pair (WTF-8)
+        let u16s = convert_utf8_with_surrogates_to_utf16(wtf8);
+        assert_eq!(u16s, [0xD83D, 0xDE00]);
+
+        // convert_utf16_to_utf8_with_replacements: surrogate pair -> 4-byte
+        // UTF-8; lone surrogate -> U+FFFD.
+        assert_eq!(
+            convert_utf16_to_utf8_with_replacements(&[0xD83D, 0xDE00]),
+            b"\xf0\x9f\x98\x80".to_vec()
+        );
+        assert_eq!(
+            convert_utf16_to_utf8_with_replacements(&[0xD800]),
+            "\u{FFFD}".as_bytes().to_vec()
+        ); // lone high
+        assert_eq!(
+            convert_utf16_to_utf8_with_replacements(&[0xDC00]),
+            "\u{FFFD}".as_bytes().to_vec()
+        ); // lone low
+        assert_eq!(
+            convert_utf16_to_utf8_with_replacements(&[0x41, 0x42]),
+            b"AB".to_vec()
+        );
     }
 
     #[test]
