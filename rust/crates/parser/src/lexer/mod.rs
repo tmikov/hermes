@@ -18,8 +18,11 @@ mod identifier;
 mod jsx;
 mod number;
 mod regexp;
+mod state;
 mod string;
 mod template;
+
+pub use state::SavePoint;
 
 use std::rc::Rc;
 
@@ -1528,6 +1531,47 @@ mod tests {
         while lex.advance(GrammarContext::AllowDiv).kind() != TokenKind::eof {}
         assert_eq!(lex.get_source_url(), Some("http://x/y.js"));
         assert_eq!(lex.get_source_mapping_url(), Some("z.map"));
+    }
+
+    #[test]
+    fn save_point_restore() {
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("t", "a . b");
+        let tab = AtomTable::new();
+        let mut lex = JSLexer::new(id, &mut sm, &tab, GrammarContext::AllowDiv);
+        lex.advance(GrammarContext::AllowDiv); // 'a' (identifier)
+        let sp = lex.save_point();
+        lex.advance(GrammarContext::AllowDiv); // '.'
+        lex.advance(GrammarContext::AllowDiv); // 'b'
+        sp.restore(&mut lex);
+        // Current token is back to 'a'; next advance gives '.'.
+        assert_eq!(lex.token().kind(), TokenKind::identifier);
+        assert_eq!(
+            lex.advance(GrammarContext::AllowDiv).kind(),
+            TokenKind::period
+        );
+    }
+
+    #[test]
+    fn save_point_truncates_storage() {
+        // SavePoint restore truncates comment + token storage to the saved size.
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("t", "a /*c*/ . b");
+        let tab = AtomTable::new();
+        let mut lex = JSLexer::new(id, &mut sm, &tab, GrammarContext::AllowDiv);
+        lex.set_store_tokens(true);
+        lex.set_store_comments(true);
+        lex.advance(GrammarContext::AllowDiv); // 'a'
+        let toks_before = lex.get_stored_tokens().len();
+        let comments_before = lex.get_stored_comments().len();
+        let sp = lex.save_point();
+        lex.advance(GrammarContext::AllowDiv); // '.', skips the /*c*/ comment
+        lex.advance(GrammarContext::AllowDiv); // 'b'
+        assert!(lex.get_stored_tokens().len() > toks_before);
+        assert!(lex.get_stored_comments().len() > comments_before);
+        sp.restore(&mut lex);
+        assert_eq!(lex.get_stored_tokens().len(), toks_before);
+        assert_eq!(lex.get_stored_comments().len(), comments_before);
     }
 
     #[test]
