@@ -566,8 +566,10 @@ impl<'a> JSLexer<'a> {
                     self.set_token_start();
                     let off = self.cursor.offset() as usize;
                     let raw = self.cursor.raw();
+                    // `off + 7 < raw.len()` == C++ `curCharPtr_ + 7 <= bufferEnd_`
+                    // (raw includes the trailing NUL, so raw.len() - 1 is the NUL).
                     if grammar_context == GrammarContext::Type
-                        && off + 7 <= raw.len() - 1
+                        && off + 7 < raw.len()
                         && &raw[off..off + 7] == b"%checks"
                     {
                         let ident = self.strtab.atom_bytes(b"%checks");
