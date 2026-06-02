@@ -94,8 +94,12 @@ impl<'a> JSLexer<'a> {
             kind = None;
         } else if expected == kind {
             // Do not move the cursor back.
-            // NOTE: the C++ returns here, leaving messages suppressed via the
-            // RAII guard; we restore the suppression state before returning.
+            // NOTE: the C++ `make_scope_exit` still fires on this early return, so
+            // it truncates comment storage here too (and we restore the suppression
+            // state the RAII guard would have restored).
+            if self.store_comments {
+                self.comment_storage.truncate(saved_comment_storage_size);
+            }
             self.sm.set_suppressed_messages(saved_suppressed);
             return kind;
         }
@@ -380,6 +384,27 @@ mod tests {
             lex.advance(GrammarContext::AllowDiv).kind(),
             TokenKind::rw_function
         );
+    }
+
+    #[test]
+    fn lookahead1_consume_truncates_comments() {
+        // With store_comments on, a comment collected during a CONSUMED lookahead
+        // (expected matched) must be rolled back from comment storage, matching the
+        // C++ make_scope_exit which fires on the early return too.
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("t", "a /*c*/ b");
+        let tab = AtomTable::new();
+        let mut lex = JSLexer::new(id, &mut sm, &tab, GrammarContext::AllowDiv);
+        lex.set_store_comments(true);
+        lex.advance(GrammarContext::AllowDiv); // 'a'
+        assert_eq!(lex.get_stored_comments().len(), 0);
+        // Consume the lookahead (next token 'b' is an identifier, which matches).
+        assert_eq!(
+            lex.lookahead1(true, Some(TokenKind::identifier)),
+            Some(TokenKind::identifier)
+        );
+        // The block comment scanned during the consumed lookahead is rolled back.
+        assert_eq!(lex.get_stored_comments().len(), 0);
     }
 
     #[test]
