@@ -150,7 +150,7 @@ impl<'a> JSONValue<'a> {
             }
             JSONValue::Array(values) => {
                 emitter.open_array();
-                for v in values.iter().copied() {
+                for &v in values.iter() {
                     v.emit_into(emitter, atoms);
                 }
                 emitter.close_array();
