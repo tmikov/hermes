@@ -342,6 +342,18 @@ impl<'a> JSLexer<'a> {
         self.buf_id
     }
 
+    /// \return the SourceErrorManager. Port of `getSourceMgr` (JSLexer.h:516).
+    pub fn get_source_mgr(&self) -> &SourceErrorManager {
+        self.sm
+    }
+
+    /// \return the string interner. Port of `getStringTable` (JSLexer.h:523).
+    /// (The C++ `getAllocator` has no Rust analog — the port uses the global
+    /// allocator and `AtomTable`'s own interning, so there is no bump allocator.)
+    pub fn get_string_table(&self) -> &AtomTable {
+        self.strtab
+    }
+
     /// \return the logical bytes of the buffer (the source text without the
     /// trailing NUL sentinel). Pointer->offset adaptation of `getBufferStart`/
     /// `getBufferEnd` (JSLexer.h:709-716): C++ returns `bufferStart_`/
