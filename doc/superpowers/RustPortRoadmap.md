@@ -107,12 +107,19 @@ part of SourceErrorManager; in build order):
 > present, and honor `REQUIRE_DIFFERENTIAL=1` to force a hard failure if absent. It now genuinely
 > runs for phases 1a+1b-i.
 >
-> **Next — lexer phase 1b-ii:** numbers — port `scanNumber` (`JSLexer.cpp:1573–1856`) wiring
-> `parser::number` (`str_to_double` + `parse_int_with_radix`), with `bits=`/bigint dump fields and
-> a numeric differential corpus. Then phase 2 (string/template/regexp/bigint literals + the
-> `AllowRegExp` `/` regex path), phase 3 (JSX/Flow + extend the oracle), phase 4
-> (`SavePoint`/`lookahead1`/`lookahead2`/directive/`rescanRBrace`). Each phase extends the live
-> differential corpus.
+> **🚧 Lexer phase 1b-ii DONE.** Numbers — `scanNumber` ported branch-for-branch (decimal/hex/
+> octal/binary/legacy-octal/fractions/exponents/separators/BigInt), wiring `parser::number`
+> (`str_to_double` == fast_float; `parse_int_with_radix` incl. the >2^53 rounding path). `bits=`/
+> bigint dump fields; numeric differential at 40 entries. Plan: `plans/2026-06-02-js-lexer-proper-1b-ii.md`.
+> **The lexer now lexes punctuators, trivia, identifiers, keywords, and all numeric literals,
+> self-validating byte-for-byte vs `js-lexer-dump`.**
+>
+> **Next — lexer phase 2 (literals):** 2a strings (`scanString` — octal/hex/unicode escapes, line
+> continuations, `convertSurrogates`, `containsEscapes`) + private identifiers (`scanPrivateIdentifier`,
+> `#` arm); 2b templates (`scanTemplateLiteral`; `no_substitution_template`/`template_head` — middle/
+> tail need `rescanRBrace`, phase 4); 2c regexp (`scanRegExp` + the `AllowRegExp` `/` arm, enabling
+> `--context=regexp` differential cases). Then phase 3 (JSX/Flow), phase 4 (savepoint/lookahead/
+> directive/rescanRBrace/magic comments/comment storage).
 
 ## Key cross-cutting design decisions
 
