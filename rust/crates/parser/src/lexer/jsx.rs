@@ -125,6 +125,10 @@ impl<'a> JSLexer<'a> {
     /// kept verbatim in the raw) up to the next `{` / `<` / EOF.
     pub fn advance_in_jsx_child(&mut self) -> &Token {
         self.token.set_start(self.cur_loc());
+        // Structural `for(;;){ switch …; break; }` mirroring the C++ (and `advance()`):
+        // the outer loop never actually iterates here (unlike `advance()`, the JSX-child
+        // variant has no outer `continue`), but the shape is kept faithful to the C++.
+        #[allow(clippy::never_loop)]
         loop {
             debug_assert!(
                 (self.cursor.offset() as usize) <= self.cursor.raw().len(),
