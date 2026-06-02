@@ -250,6 +250,47 @@ impl<'a> ObjectView<'a> {
     }
 }
 
+/// Port of `JSONSharedValue` (JSONParser.h:676-698). Pairs a JSON value
+/// reference with the `Rc<Bump>` arena that backs it so the caller can own
+/// both without worrying about arena lifetime. C++ uses `const JSONValue*` +
+/// `shared_ptr<const Allocator>`; here the raw pointer is lifetime-erased to
+/// `'static` and re-tied in `get()` via one encapsulated `unsafe` deref.
+///
+/// # Invariant
+/// `value` is allocated in `allocator`. The `Rc<Bump>` keeps the arena alive
+/// for at least as long as this holder, so the pointer is always valid.
+pub struct JSONSharedValue {
+    /// Points into `*allocator`. Lifetime-erased to `'static`; never used at
+    /// that lifetime — `get` re-ties it to `&self`.
+    value: *const JSONValue<'static>,
+    /// Keeps the arena (and therefore `*value`) alive.
+    #[allow(dead_code)] // kept to hold the arena alive via its Drop
+    allocator: std::rc::Rc<bumpalo::Bump>,
+}
+
+impl JSONSharedValue {
+    /// `value` MUST be allocated in `allocator`. The `Rc` keeps the arena alive
+    /// for as long as this holder, so the pointer stays valid.
+    pub fn new(value: &JSONValue<'_>, allocator: std::rc::Rc<bumpalo::Bump>) -> JSONSharedValue {
+        // Erase the lifetime: cast to raw pointer, then transmute-via-cast to
+        // `'static`. Transmute would be cleaner but can't change unsized
+        // lifetimes in fat pointers; the double-cast is the idiomatic pattern.
+        let value: *const JSONValue<'static> =
+            (value as *const JSONValue<'_>).cast::<JSONValue<'static>>();
+        JSONSharedValue { value, allocator }
+    }
+
+    /// The held value, re-tied to `&self`'s lifetime.
+    pub fn get(&self) -> &JSONValue<'_> {
+        // SAFETY: `self.allocator` (an `Rc<Bump>`) keeps the arena alive for at
+        // least `&self`, and `self.value` was allocated in it (constructor
+        // contract), so the pointer is valid and the returned reference cannot
+        // outlive the arena.
+        #[allow(unsafe_code)] // mirror cursor.rs; the sole JSON-component unsafe
+        unsafe { &*self.value }
+    }
+}
+
 #[cfg(test)]
 mod model_tests {
     use super::*;
@@ -348,6 +389,19 @@ mod model_tests {
         let mut out = String::new();
         { let mut e = JSONEmitter::new(&mut out, false); s.emit_into(&mut e, &atoms); }
         assert_eq!(out, "\"\\ud800\\udc00\"");
+    }
+
+    #[test]
+    fn shared_value_outlives_parse() {
+        use std::rc::Rc;
+        use bumpalo::Bump;
+        // Build a value in an Rc<Bump>, wrap it, drop the local Rc, still read.
+        let shared: JSONSharedValue = {
+            let arena = Rc::new(Bump::new());
+            let v: &JSONValue = arena.alloc(JSONValue::Number(3.5));
+            JSONSharedValue::new(v, arena.clone())
+        };
+        assert_eq!(shared.get().as_number(), Some(3.5));
     }
 
     #[test]
