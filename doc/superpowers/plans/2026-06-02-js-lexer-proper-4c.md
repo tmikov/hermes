@@ -20,7 +20,7 @@
 
 **Files:** `rust/crates/parser/src/utf8.rs`.
 
-- [ ] **Step 1: failing tests:**
+- [x] **Step 1: failing tests:**
 
 ```rust
 #[test]
@@ -42,7 +42,7 @@ fn utf16_roundtrip_and_replacement() {
 }
 ```
 
-- [ ] **Step 2:** FAIL. **Step 3: implement** (port the C++):
+- [x] **Step 2:** FAIL. **Step 3: implement** (port the C++):
   - `encode_utf16(out: &mut Vec<u16>, cp: u32)` — port `UTF8.h:197-210`.
   - `convert_utf8_with_surrogates_to_utf16(bytes: &[u8]) -> Vec<u16>` — port `:216-225`: loop
     `decode_utf8::<true>` (surrogates allowed, no-op error) then `encode_utf16`.
@@ -51,7 +51,7 @@ fn utf16_roundtrip_and_replacement() {
   - `convert_utf16_to_utf8_with_replacements(u16s: &[u16]) -> Vec<u8>` — port the `convertUTF16ToUTF8WithReplacements`
     loop (ASCII fast path; else `convert_to_code_point_at` + `encode_utf8`). (Skip the `maxCharacters`
     param — the lexer always passes 0/unbounded.)
-- [ ] **Step 4:** PASS. **Step 5:** commit `rust(parser): UTF-8<->UTF-16 conversion utils (surrogate handling)`.
+- [x] **Step 4:** PASS. **Step 5:** commit `rust(parser): UTF-8<->UTF-16 conversion utils (surrogate handling)`.
 
 ---
 
@@ -59,7 +59,7 @@ fn utf16_roundtrip_and_replacement() {
 
 **Files:** `rust/crates/parser/src/lexer/` (a `string`/`state` module + `mod.rs`).
 
-- [ ] **Step 1: failing test:**
+- [x] **Step 1: failing test:**
 
 ```rust
 #[test]
@@ -85,7 +85,7 @@ fn convert_surrogates() {
 }
 ```
 
-- [ ] **Step 2:** FAIL. **Step 3: implement:**
+- [x] **Step 2:** FAIL. **Step 3: implement:**
   - `convert_surrogates_in_string(&self, bytes: &[u8]) -> AtomBytes` (port `JSLexer.cpp:2486-2495`):
     `convert_utf8_with_surrogates_to_utf16(bytes)` → `convert_utf16_to_utf8_with_replacements(&u16s)` →
     `strtab.atom_bytes(&out)`.
@@ -98,7 +98,7 @@ fn convert_surrogates() {
     `set_jsx_text` also uses `getStringLiteral` in the C++ — wire it too.)
   - Add `new_with_convert_surrogates(buf_id, sm, strtab, grammar_context, convert_surrogates)` (or a
     `set_convert_surrogates`); the existing `new` keeps `convert_surrogates = false`.
-- [ ] **Step 4:** PASS. **Step 5:** Run the FULL suite incl. the 5 differentials (they use the default
+- [x] **Step 4:** PASS. **Step 5:** Run the FULL suite incl. the 5 differentials (they use the default
   `convert_surrogates=false`, so they must be UNCHANGED). Commit
   `rust(parser): convertSurrogates re-encoding (getStringLiteral)`.
 
@@ -106,14 +106,14 @@ fn convert_surrogates() {
 
 ## Self-review checklist
 
-- [ ] The UTF-16 utils match the C++ (`encodeUTF16`, `convertToCodePointAt` replacement rules,
+- [x] The UTF-16 utils match the C++ (`encodeUTF16`, `convertToCodePointAt` replacement rules,
   `convertUTF16ToUTF8WithReplacements`).
-- [ ] `convert_surrogates_in_string` produces valid UTF-8 (astral pairs combined; lone surrogates →
+- [x] `convert_surrogates_in_string` produces valid UTF-8 (astral pairs combined; lone surrogates →
   U+FFFD); `get_string_literal` branches on the flag.
-- [ ] All string/template/regexp/jsx-text value interning goes through `get_string_literal` (matching
+- [x] All string/template/regexp/jsx-text value interning goes through `get_string_literal` (matching
   the C++), so the flag affects them all; with the flag OFF the behavior is byte-identical to before
   (the 5 differentials still pass unchanged).
-- [ ] `unsafe` only in `cursor.rs`; zero warnings; all tests pass.
+- [x] `unsafe` only in `cursor.rs`; zero warnings; all tests pass.
 
 ## Done
 After 4c the `JSLexer` port is complete: the full public surface (token lexing, JSX, Flow, all

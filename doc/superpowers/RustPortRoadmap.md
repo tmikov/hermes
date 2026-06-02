@@ -36,7 +36,7 @@ The front-end stratifies (see the dependency analysis below). We port bottom-up.
 | Component | Crate / location | Status |
 |-----------|------------------|--------|
 | **SourceErrorManager** (+ buffer, locations, line index, diagnostics) | `rust/crates/support/` | ✅ **Complete** — entire public surface; **byte-for-byte validated vs `hermesc` 1.96.0** |
-| **JS lexer** | `rust/crates/{atom_table,unicode,parser}/` (planned) | 🚧 **In progress** — design spec done; see deps below |
+| **JS lexer** | `rust/crates/{atom_table,unicode,parser}/` | ✅ **Complete** — entire `JSLexer` public surface; self-validating byte-for-byte vs `js-lexer-dump` (5 differentials); see deps below |
 | Parser | — | future |
 | Sema (scope resolution + FlowChecker) | — | future |
 | IR / IRGen | — | future |
@@ -155,10 +155,18 @@ part of SourceErrorManager; in build order):
 > adaptations), `isLetFollowedByDeclStart`, `isUsing/AwaitUsingFollowedByIdentifier`. Unit-tested
 > (incl. a comment-rollback regression found in review). Plan: `plans/2026-06-02-js-lexer-proper-4b.md`.
 >
-> **Next — lexer phase 4c (`convertSurrogates`) — the LAST `JSLexer` feature:** `getStringLiteral` when
-> the flag is set re-encodes the WTF-8 internal form to valid UTF-8 via `convertSurrogatesInString`
-> (port `convertUTF8WithSurrogatesToUTF16` + `convertToCodePointAt` + `convertUTF16ToUTF8WithReplacements`
-> + `encodeUTF16`). After 4c the JSLexer port is complete. **Remaining tracked items:** the `--non-strict`
+> **🚧 Lexer phase 4c DONE — `convertSurrogates`, the LAST `JSLexer` feature.** `getStringLiteral` now
+> branches on the flag: when set it re-encodes the WTF-8 internal form to valid UTF-8 via
+> `convertSurrogatesInString` (ported `encodeUTF16` + `convertUTF8WithSurrogatesToUTF16` +
+> `convertToCodePointAt` + `convertUTF16ToUTF8WithReplacements` into `parser::utf8`). All string/template/
+> regexp/jsx-text/bigint value interning routes through `get_string_literal` (matching the C++), so with
+> the flag OFF behavior is byte-identical (the 5 differentials still pass unchanged). Plan:
+> `plans/2026-06-02-js-lexer-proper-4c.md`.
+>
+> **✅ JS LEXER COMPLETE.** The full `JSLexer` public surface is ported and validated: token lexing,
+> trivia, identifiers, keywords, all numeric/string/template/regexp/bigint literals, Flow `Type` context,
+> JSX, storage, magic comments, `SavePoint`/`seek`/`force_eof`, lookahead, directives,
+> `rescanRBraceInTemplateLiteral`, and `convertSurrogates`. **Remaining tracked items:** the `--non-strict`
 > harness flag (optional test convenience).
 
 ## Key cross-cutting design decisions
