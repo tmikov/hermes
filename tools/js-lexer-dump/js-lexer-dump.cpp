@@ -59,7 +59,8 @@
 ///
 /// Grammar context: --context=regexp (default) -> AllowRegExp
 ///                  --context=div             -> AllowDiv
-/// JSX/Flow contexts are not supported by this tool.
+///                  --context=type            -> Type (Flow type grammar)
+/// JSX context is not supported by this tool.
 /// Strict-mode note: the lexer is constructed with strictMode=true (default),
 /// so strict-mode reserved words are lexed as rw_* tokens.
 
@@ -193,10 +194,11 @@ static void emitFields(llvh::raw_ostream &os, const Token &tok) {
 
 static void usage(const char *argv0) {
   llvh::errs() << "Usage: " << argv0
-               << " [--context=regexp|div] <file|->\n"
+               << " [--context=regexp|div|type] <file|->\n"
                << "  Dump tokens from the JS lexer to stdout.\n"
                << "  --context=regexp  Allow regexp literals after /\n"
                << "  --context=div     Allow division operator after /\n"
+               << "  --context=type    Flow type grammar context\n"
                << "  Use - to read from stdin.\n";
 }
 
@@ -213,6 +215,8 @@ int main(int argc, char **argv) {
         grammarContext = JSLexer::AllowRegExp;
       } else if (std::strcmp(val, "div") == 0) {
         grammarContext = JSLexer::AllowDiv;
+      } else if (std::strcmp(val, "type") == 0) {
+        grammarContext = JSLexer::Type;
       } else {
         llvh::errs() << argv[0] << ": unknown context value '" << val << "'\n";
         usage(argv[0]);
