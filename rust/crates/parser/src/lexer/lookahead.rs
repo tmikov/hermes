@@ -221,6 +221,9 @@ impl<'a> JSLexer<'a> {
             "current token must be the `let` identifier"
         );
 
+        // Unlike `is_using_*`, this does NOT save/restore the cursor around the
+        // whitespace skip (matching the C++): the fast paths only peek, and the
+        // slow path delegates to `lookahead1`, which restores the cursor itself.
         let cur_char = self.optimistic_skip_whitespace();
 
         // Fast path.
