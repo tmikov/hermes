@@ -2,6 +2,7 @@
 
 pub mod buffer;
 pub mod diag;
+pub mod json_emitter;
 pub mod line_index;
 pub mod location;
 pub mod manager;
