@@ -16,8 +16,9 @@ use support::location::{SMLoc, SMRange, SourceId};
 use support::manager::SourceErrorManager;
 
 use unicode::{
-    is_unicode_id_continue, is_unicode_id_start, is_unicode_only_id_start,
-    is_unicode_only_space, UNICODE_MAX_VALUE, UNICODE_REPLACEMENT_CHARACTER,
+    is_ascii_identifier_start, is_unicode_id_continue, is_unicode_id_start,
+    is_unicode_only_id_start, is_unicode_only_space, UNICODE_MAX_VALUE,
+    UNICODE_REPLACEMENT_CHARACTER,
 };
 
 use crate::cursor::Cursor;
@@ -1443,7 +1444,7 @@ impl<'a> JSLexer<'a> {
         self.cursor.advance(1);
 
         // Scan the actual identifier.
-        if is_ascii_identifier_start(self.cursor.peek()) {
+        if is_ascii_identifier_start(self.cursor.peek() as u32) {
             let here = self.cursor.offset();
             self.scan_identifier_fast_path(here, IdentifierMode::JS);
         } else if self.consume_identifier_start() {
@@ -2170,13 +2171,6 @@ fn quote_bytes(out: &mut String, bytes: &[u8]) {
 #[inline]
 fn is_ascii_digit(ch: u8) -> bool {
     ch.is_ascii_digit()
-}
-
-/// \return true if `ch` has the ID_Start property and is ASCII. Port of
-/// `isASCIIIdentifierStart` (CharacterProperties.h:100-102).
-#[inline]
-fn is_ascii_identifier_start(ch: u8) -> bool {
-    ch == b'_' || ch == b'$' || ((ch | 32) >= b'a' && (ch | 32) <= b'z')
 }
 
 #[cfg(test)]

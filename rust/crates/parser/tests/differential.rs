@@ -154,6 +154,10 @@ fn differential_punctuators_and_trivia() {
         "'\\x41\\x7e' '\\u00e9\\u4e2d'",
         // raw unicode inside strings -> re-encoded as WTF-8 \xHH in the dump.
         "'caf\u{00e9}' \"\u{4e2d}\u{6587}\"",
+        // NUL escape, octal \101='A', embedded NUL. Octal escapes error in
+        // strict mode (the harness default), but the cooked value is still
+        // emitted, like legacy-octal numbers.
+        "'\\0' '\\101' '\\x00end'",
         // escaped line continuations (LF and CRLF) -> skipped, escapes=1.
         "'a\\\nb' 'line\\\r\ncont'",
         // ---- private identifiers ----------------------------------------------
