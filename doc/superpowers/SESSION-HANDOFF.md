@@ -5,7 +5,8 @@ Hand this to a new session to restore context. It **references** the authoritati
 validation commands, and workflow.
 
 > **Date of handoff:** 2026-06-02. **Branch:** `rust` (base is `static_h`, NOT `main`).
-> **Status:** the **JS lexer is COMPLETE**; the next component is the **Parser**.
+> **Status:** the **JS lexer is COMPLETE** and the **JSONParser is COMPLETE** (the first lexer
+> consumer); the next component is the **JS Parser** (`lib/Parser/JSParserImpl*`).
 
 ---
 
@@ -36,7 +37,7 @@ validation commands, and workflow.
 ## 2. What's done (✅) and the code map
 
 **Component status** (see the roadmap table): `SourceErrorManager` ✅ · **JS lexer ✅** ·
-Parser / Sema / IR / Optimizer / BCGen — future.
+**JSONParser ✅** · JS Parser / Sema / IR / Optimizer / BCGen — future.
 
 Rust workspace: **`rust/Cargo.toml`** (members: `support`, `parser`, `atom_table`, `unicode`),
 toolchain pinned `rust/rust-toolchain.toml` (1.96.0).
@@ -66,6 +67,19 @@ plus `include/hermes/Support/UTF8.h`, `Support/Conversions.h`/`FastStrToDouble.c
 `Platform/Unicode/CharacterProperties.{h,cpp}` + `UnicodeData.inc`, `Parser/TokenKinds.def` +
 `HTMLEntities.def`.
 
+**JSONParser (✅ COMPLETE)** — the first `JSLexer` consumer. Code: `rust/crates/parser/src/json/`
+(`mod.rs` value model + `emit_into` + `JSONSharedValue`, `factory.rs` uniquing/hidden-classes over a
+`bumpalo` arena, `parser.rs` recursive descent) + `rust/crates/support/src/json_emitter.rs`
+(`JSONEmitter` + `number_to_string`). New dep `bumpalo`; sole hand-written `unsafe` is
+`JSONSharedValue::get`. Differential oracle: C++ `tools/json-parse-dump/` vs the Rust
+`json-parse-dump` bin (`rust/crates/parser/src/bin/json_parse_dump.rs`), byte-for-byte over a 16-file
+corpus (`tests/json_differential.rs` + `tests/json_corpus/`); plus 5 ported `JSONParserTest`
+(`tests/json_parser_ported.rs`) + 13 ported `JSONEmitterTest` (inline). Benchmarked within ~1.5% of C++
+Release (`gen-json` bin + `--bench=N`). **C++ source of truth:** `include/hermes/Parser/JSONParser.h` +
+`lib/Parser/JSONParser.cpp`, `Support/JSONEmitter.{h,cpp}`, `Support/Conversions.cpp:211` (`numberToString`),
+`unittests/Parser/JSONParserTest.cpp`, `unittests/Support/JSONEmitterTest.cpp`. Spec/plan:
+`specs/2026-06-02-json-parser-design.md`, `plans/2026-06-02-json-parser.md`.
+
 **Per-phase plans** (build log) under `doc/superpowers/plans/`: `js-lexer-*` (the 5 prereqs) and
 `js-lexer-proper-{1a,1b-i,1b-ii,2a,2b,2c,3a,3b,4a,4b,4c}.md` (the lexer phases).
 
@@ -85,6 +99,13 @@ cmake --build cmake-build-asan --target js-lexer-dump
 # The differential test resolves the binary via CARGO_MANIFEST_DIR; force it to run (not skip):
 REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml -p parser --test differential -- --nocapture
 # Expect: differential[div] 58, [regexp] 5, [type] 6, [jsx] 4, [jsx-child] 10, [nonstrict] 7 — all pass.
+
+# JSONParser oracle + differential (same pattern):
+cmake --build cmake-build-asan --target json-parse-dump
+REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml -p parser --test json_differential -- --nocapture
+# Expect: "json differential: 16 corpus files matched" — pass. Benchmark (not committed):
+#   cargo run --manifest-path rust/Cargo.toml -p parser --release --bin gen-json -- 100000 > /tmp/big.json
+#   ./rust/target/release/json-parse-dump --bench=50 /tmp/big.json   (vs cmake-build-release/bin/json-parse-dump)
 ```
 
 If `cmake-build-asan/` is missing, configure it (it's git-ignored):
@@ -139,11 +160,15 @@ Commit directly to `rust`; **never** open a PR or merge (project rule).
 
 ## 6. What's next
 
-- **The Parser** (`lib/Parser/JSParserImpl.cpp` + `JSParserImpl-flow.cpp`/`-jsx.cpp`/`-ts.cpp`,
+- **The JS Parser** (`lib/Parser/JSParserImpl.cpp` + `JSParserImpl-flow.cpp`/`-jsx.cpp`/`-ts.cpp`,
   `JSParserImpl.h`, `include/hermes/Parser/JSParser.h`) — consumes the completed lexer. It needs the
   **AST** (`lib/AST/`, `include/hermes/AST/`) and `Context`. This is a large component; scope it
   (juno has an AST + parser to crib from: `unsupported/juno/crates/juno_ast/`, `juno/src/hparser/`).
-- The previously-tracked optional lexer follow-up (a `--non-strict` flag for `js-lexer-dump`) is
-  **DONE** — see `differential_nonstrict` (7 entries). The lexer now has no open items.
+- The **lexer** has no open items (the optional `--non-strict` follow-up is DONE — `differential_nonstrict`).
+- The **JSONParser** has no open items. Capstone passed; sole documented deviations are the fat-enum
+  node layout and `getAllocator`/`getStringTable` → `arena()`/`atoms()`. The differential caught one real
+  bug (an `emit_into` WTF-8 panic) which is fixed.
 
-The lexer is done, reviewed, and self-validating — start the Parser fresh from §1's reading.
+The lexer and JSONParser are done, reviewed, and self-validating — start the JS Parser fresh from §1's
+reading (note: it is a far larger effort than the JSONParser, which was a deliberately small first
+lexer-consumer to work out the integration pattern).
