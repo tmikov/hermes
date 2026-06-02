@@ -108,7 +108,7 @@ impl<'a> JSLexer<'a> {
             }
         }
         // exitLoop:
-        let body: AtomBytes = self.strtab.atom_bytes(self.tmp_storage.as_slice());
+        let body: AtomBytes = self.get_string_literal(self.tmp_storage.as_slice());
 
         // Scan the flags. We must not interpret escape sequences.
         // E6 5.1 7.8.5: "The Strings of characters comprising the
@@ -139,7 +139,7 @@ impl<'a> JSLexer<'a> {
             }
         }
 
-        let flags: AtomBytes = self.strtab.atom_bytes(self.tmp_storage.as_slice());
+        let flags: AtomBytes = self.get_string_literal(self.tmp_storage.as_slice());
 
         self.token
             .set_regexp_literal(RegExpLiteral::new(body, flags));

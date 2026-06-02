@@ -189,8 +189,8 @@ impl<'a> JSLexer<'a> {
                             self.tmp_storage.push(c);
                         }
                     }
-                    let value = self.strtab.atom_bytes(self.tmp_storage.as_slice());
-                    let raw_atom = self.strtab.atom_bytes(raw.as_slice());
+                    let value = self.get_string_literal(self.tmp_storage.as_slice());
+                    let raw_atom = self.get_string_literal(raw.as_slice());
                     self.token.set_bigint_literal(value, raw_atom);
                     return;
                 }

@@ -171,8 +171,8 @@ impl<'a> JSLexer<'a> {
                                 continue;
                             }
                         } else if (c == 0 && self.cursor.at_end()) || c == b'{' || c == b'<' {
-                            let value = self.strtab.atom_bytes(self.tmp_storage.as_slice());
-                            let raw = self.strtab.atom_bytes(self.raw_storage.as_slice());
+                            let value = self.get_string_literal(self.tmp_storage.as_slice());
+                            let raw = self.get_string_literal(self.raw_storage.as_slice());
                             self.token.set_jsx_text(value, raw);
                             break;
                         }

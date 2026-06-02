@@ -18,10 +18,6 @@ impl<'a> JSLexer<'a> {
     /// `` ` `` `advance` arm always starts at a backtick.
     pub(crate) fn scan_template_literal(&mut self) {
         debug_assert!(self.cursor.peek() == b'`' || self.cursor.peek() == b'}');
-        // NOTE: `convert_surrogates` is off by default and the differential never
-        // enables it. The `convertSurrogatesInString` re-encoding path is
-        // DEFERRED, so we intern the buffers directly.
-        debug_assert!(!self.convert_surrogates);
 
         // Whether the token will result in TemplateHead upon encountering ${.
         // If we end the literal with `, then the result is NoSubstitutionTemplate,
@@ -269,9 +265,9 @@ impl<'a> JSLexer<'a> {
         let cooked = if found_not_escape_sequence {
             None
         } else {
-            Some(self.strtab.atom_bytes(self.tmp_storage.as_slice()))
+            Some(self.get_string_literal(self.tmp_storage.as_slice()))
         };
-        let raw = self.strtab.atom_bytes(self.raw_storage.as_slice());
+        let raw = self.get_string_literal(self.raw_storage.as_slice());
         let kind = if is_head {
             if is_tail {
                 // ` characters `

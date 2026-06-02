@@ -25,11 +25,6 @@ impl<'a> JSLexer<'a> {
     /// decoded as an HTML entity, and `\` is a literal character (no escape).
     pub(crate) fn scan_string(&mut self, jsx: bool) {
         debug_assert!(self.cursor.peek() == b'\'' || self.cursor.peek() == b'"');
-        // NOTE: `convert_surrogates` is off by default and the differential never
-        // enables it. The `convertSurrogatesInString` re-encoding path is
-        // DEFERRED (needs UTF-16 conversion utilities), so we intern
-        // `tmp_storage` directly.
-        debug_assert!(!self.convert_surrogates);
         let quote_ch = self.cursor.peek();
         self.cursor.advance(1);
 
@@ -195,7 +190,7 @@ impl<'a> JSLexer<'a> {
             }
         }
 
-        let atom = self.strtab.atom_bytes(self.tmp_storage.as_slice());
+        let atom = self.get_string_literal(self.tmp_storage.as_slice());
         self.token.set_string_literal(atom, escapes);
     }
 }

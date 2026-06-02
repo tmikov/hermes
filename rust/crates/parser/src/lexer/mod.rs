@@ -44,7 +44,8 @@ use crate::cursor::Cursor;
 use crate::token::{CommentKind, StoredComment, StoredToken, Token};
 use crate::token_kinds::TokenKind;
 use crate::utf8::{
-    append_unicode_to_storage, decode_utf8,
+    append_unicode_to_storage, convert_utf16_to_utf8_with_replacements,
+    convert_utf8_with_surrogates_to_utf16, decode_utf8,
     match_unicode_line_terminator_offset1, UTF8_LINE_TERMINATOR_CHAR0,
 };
 
@@ -137,7 +138,28 @@ impl<'a> JSLexer<'a> {
         buf_id: SourceId,
         sm: &'a mut SourceErrorManager,
         strtab: &'a AtomTable,
+        grammar_context: GrammarContext,
+    ) -> JSLexer<'a> {
+        JSLexer::new_with_convert_surrogates(
+            buf_id,
+            sm,
+            strtab,
+            grammar_context,
+            false,
+        )
+    }
+
+    /// Like `new`, but with control over the `convert_surrogates` option. When
+    /// `convert_surrogates` is set, `get_string_literal` re-encodes the internal
+    /// WTF-8 string form into valid UTF-8 (combining surrogate pairs and
+    /// replacing unpaired surrogates with U+FFFD). Port of the `JSLexer`
+    /// constructor's `convertSurrogates` parameter.
+    pub fn new_with_convert_surrogates(
+        buf_id: SourceId,
+        sm: &'a mut SourceErrorManager,
+        strtab: &'a AtomTable,
         _grammar_context: GrammarContext,
+        convert_surrogates: bool,
     ) -> JSLexer<'a> {
         let buffer: Rc<SourceBuffer> = sm.source_buffer(buf_id);
         let cursor = Cursor::new(buffer);
@@ -155,7 +177,7 @@ impl<'a> JSLexer<'a> {
             prev_token_end: start,
             new_line_before_current_token: false,
             strict_mode: true,
-            convert_surrogates: false,
+            convert_surrogates,
             tmp_storage: Vec::new(),
             raw_storage: Vec::new(),
             source_url: None,
@@ -167,6 +189,28 @@ impl<'a> JSLexer<'a> {
         };
         lexer.initialize_reserved_identifiers();
         lexer
+    }
+
+    /// Re-encode the internal WTF-8 string `bytes` (which may contain lone
+    /// surrogates / surrogate-encoded astral characters) into *valid* UTF-8,
+    /// combining surrogate pairs into supplementary-plane characters and
+    /// replacing unpaired surrogates with U+FFFD, then intern the result. Port
+    /// of `convertSurrogatesInString` (JSLexer.cpp:2486-2495).
+    fn convert_surrogates_in_string(&self, bytes: &[u8]) -> AtomBytes {
+        let ustr = convert_utf8_with_surrogates_to_utf16(bytes);
+        let output = convert_utf16_to_utf8_with_replacements(&ustr);
+        self.strtab.atom_bytes(output)
+    }
+
+    /// Intern a string-literal value, applying the `convert_surrogates`
+    /// re-encoding when the option is set. Port of `getStringLiteral`
+    /// (JSLexer.h:689-694).
+    fn get_string_literal(&self, bytes: &[u8]) -> AtomBytes {
+        if self.convert_surrogates {
+            self.convert_surrogates_in_string(bytes)
+        } else {
+            self.strtab.atom_bytes(bytes)
+        }
     }
 
     /// Pre-intern all reserved words so that `res_word_ident` is a cheap lookup.
@@ -1143,6 +1187,39 @@ mod tests {
     use super::*;
     use atom_table::AtomTable;
     use support::manager::SourceErrorManager;
+
+    #[test]
+    fn convert_surrogates() {
+        // With convert_surrogates ON, an astral char in a string literal is
+        // re-encoded to VALID UTF-8 (not the WTF-8 surrogate-pair form).
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("t", "'\\u{1F600}' '\\uD800'");
+        let tab = AtomTable::new();
+        let mut lex = JSLexer::new_with_convert_surrogates(
+            id,
+            &mut sm,
+            &tab,
+            GrammarContext::AllowDiv,
+            true,
+        );
+        let t = lex.advance(GrammarContext::AllowDiv);
+        assert_eq!(tab.bytes(t.get_string_literal()), b"\xf0\x9f\x98\x80"); // valid 4-byte UTF-8 emoji
+        let t = lex.advance(GrammarContext::AllowDiv);
+        assert_eq!(tab.bytes(t.get_string_literal()), "\u{FFFD}".as_bytes()); // lone surrogate -> U+FFFD
+
+        // With it OFF (default), the WTF-8 form is preserved (the existing 2a
+        // behavior).
+        let mut sm2 = SourceErrorManager::new();
+        let id2 = sm2.add_buffer("t2", "'\\u{1F600}'");
+        let tab2 = AtomTable::new();
+        let mut lex2 =
+            JSLexer::new(id2, &mut sm2, &tab2, GrammarContext::AllowDiv);
+        let t = lex2.advance(GrammarContext::AllowDiv);
+        assert_eq!(
+            tab2.bytes(t.get_string_literal()),
+            b"\xed\xa0\xbd\xed\xb8\x80"
+        ); // WTF-8 surrogate pair
+    }
 
     /// Build a lexer over `src`, call `consume_unicode_escape` with the cursor
     /// on the leading `\`, and return the decoded code point unless an error was
