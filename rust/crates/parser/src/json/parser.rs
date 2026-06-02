@@ -16,6 +16,7 @@ use crate::lexer::{GrammarContext, JSLexer};
 use crate::token::Token;
 use crate::token_kinds::TokenKind;
 
+use super::factory::Prop;
 use super::{JSONFactory, JSONValue};
 
 /// JSON grammar uses `/` as division (never regexp).
@@ -162,10 +163,46 @@ impl<'a> JSONParser<'a> {
         Some(self.factory.new_array(&storage))
     }
 
-    // Stub — filled in C3.
+    /// JSONParser.cpp:278 — parse `{ ... }` (the `{` already consumed).
     fn parse_object(&mut self) -> Option<&'a JSONValue<'a>> {
-        self.error("expected '}'");
-        None
+        let mut pairs: Vec<Prop<'a>> = Vec::new();
+        if self.cur().kind() != TokenKind::r_brace {
+            loop {
+                if self.cur().kind() != TokenKind::string_literal {
+                    self.error("expected a string");
+                    return None;
+                }
+                let key = self.factory.get_string(self.cur().get_string_literal());
+                if self.advance().kind() != TokenKind::colon {
+                    self.error("expected ':'");
+                    return None;
+                }
+                self.advance();
+                let val = self.parse_value()?;
+                pairs.push((key, val));
+                if self.cur().kind() == TokenKind::comma {
+                    self.advance();
+                    if self.cur().kind() == TokenKind::r_brace {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+            if self.cur().kind() != TokenKind::r_brace {
+                self.error("expected '}'");
+                return None;
+            }
+        }
+        self.advance(); // consume '}'
+
+        if let Some(dup) = self.factory.sort_props(&mut pairs) {
+            let name = String::from_utf8_lossy(self.factory.atoms().bytes(dup)).into_owned();
+            self.error(format!("key '{name}' is already present"));
+            return None;
+        }
+        // Already sorted + dup-checked: build directly.
+        self.factory.new_object_sorted(&pairs)
     }
 }
 

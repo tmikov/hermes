@@ -149,6 +149,16 @@ impl<'a> JSONFactory<'a> {
         Some(self.arena.alloc(JSONValue::Object(cls, values)))
     }
 
+    /// JSONParser.cpp:138 with propsAreSorted=true — props already sorted and
+    /// dup-checked.
+    pub fn new_object_sorted(&self, props: &[Prop<'a>]) -> Option<&'a JSONValue<'a>> {
+        let keys: Vec<AtomBytes> = props.iter().map(|p| self.key_bytes(p.0)).collect();
+        let cls = self.get_hidden_class(&keys);
+        let values: Vec<&'a JSONValue<'a>> = props.iter().map(|p| p.1).collect();
+        let values: &'a [&'a JSONValue<'a>] = self.arena.alloc_slice_copy(&values);
+        Some(self.arena.alloc(JSONValue::Object(cls, values)))
+    }
+
     /// JSONParser.h:617 — create an array from values.
     pub fn new_array(&self, values: &[&'a JSONValue<'a>]) -> &'a JSONValue<'a> {
         let values: &'a [&'a JSONValue<'a>] = self.arena.alloc_slice_copy(values);
