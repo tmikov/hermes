@@ -136,6 +136,17 @@ fn differential_punctuators_and_trivia() {
         "caf\u{00e9} \u{4e2d}\u{6587} na\u{00ef}ve",
         // unicode-only identifier start via the non-ASCII default arm
         "\u{00e9}tude \u{03b1}\u{03b2}\u{03b3}",
+        // Lead-byte fall-through cases (the C++ `goto default_label` from the
+        // c2/e2/ef special-byte arms). `ª`(c2 aa) and `ﬀ`(ef ac 80) are
+        // Unicode-only id-starts -> identifiers; `«`(c2 ab)/`»`(c2 bb) are
+        // neither id-start nor space -> unrecognized-character errors (to
+        // stderr) that the lexer recovers from, so stdout still matches.
+        "\u{00aa} \u{00ab}\u{00bb} \u{fb00} x",
+        // e2-led byte that is NOT a line/paragraph separator (`…` U+2026) and
+        // is neither id-start nor space -> unrecognized error + recovery.
+        "a\u{2026} b",
+        // No-break space (c2 a0) immediately followed by a c2-led id-start.
+        "\u{00a0}\u{00aa}",
         // escaped identifiers (start + part)
         "\\u0041\\u0042 ab\\u0063",
         // braced unicode escape inside an identifier

@@ -4,14 +4,15 @@
 //! Unlike the C++, which holds `UniqueString *` pointers and `SMLoc` pointers
 //! into the buffer, the Rust port is offset-based: locations are `SMRange`
 //! (buffer id + byte offsets) and interned values are `AtomBytes` handles into
-//! the `AtomTable`. Phase 1a only sets kind + range + punctuator/eof; the value
-//! fields and accessors are carried with faithful shapes for later phases.
+//! the `AtomTable`. A `Token` carries its kind, source range, and (depending on
+//! the kind) a numeric value, an interned identifier/string-literal/raw value,
+//! or a `RegExpLiteral` — the complete `Token` surface, matching the C++.
 //!
-//! Many value getters/setters (numeric/identifier/string/template/regexp/bigint
-//! /jsx) are part of the faithful `Token` surface but are not yet exercised in
-//! phase 1a, which only lexes punctuators/trivia/eof. They are wired up by the
-//! lexer in phases 1b+, so we allow `dead_code` for the whole module rather than
-//! drop the surface.
+//! The full set of value getters/setters
+//! (numeric/identifier/string/template/regexp/bigint/jsx) is part of the
+//! faithful `Token` surface. Some accessors are not exercised by every consumer
+//! of the lexer, so we allow `dead_code` for the whole module rather than drop
+//! the surface.
 #![allow(dead_code)]
 
 use atom_table::AtomBytes;
@@ -296,6 +297,35 @@ impl StoredComment {
     pub fn source_range(&self) -> SMRange {
         self.range
     }
+
+    /// \return the comment with delimiters (//, /*, */, #!) stripped. Port of
+    /// `StoredComment::getString` (JSLexer.h:339-347).
+    ///
+    /// Unlike the C++, which dereferences pointers into the source buffer, our
+    /// offset-based comment can't deref a pointer, so the caller passes the
+    /// source `buffer` bytes and we slice into it.
+    pub fn get_string<'a>(&self, buffer: &'a [u8]) -> &'a [u8] {
+        // Ignore opening delimiter.
+        let start = self.range.start.offset as usize + 2;
+        // Conditionally ignore closing delimiter.
+        let end = if self.kind == CommentKind::Block {
+            self.range.end.offset as usize - 2
+        } else {
+            self.range.end.offset as usize
+        };
+        debug_assert!(end >= start, "invalid comment range");
+        &buffer[start..end]
+    }
+
+    /// \return the comment with delimiters (//, /*, */, #!) included. Port of
+    /// `StoredComment::getFullString` (JSLexer.h:349-355).
+    ///
+    /// Unlike the C++, which dereferences pointers into the source buffer, our
+    /// offset-based comment can't deref a pointer, so the caller passes the
+    /// source `buffer` bytes and we slice into it.
+    pub fn get_full_string<'a>(&self, buffer: &'a [u8]) -> &'a [u8] {
+        &buffer[self.range.start.offset as usize..self.range.end.offset as usize]
+    }
 }
 
 /// Stored token when lexing. Port of `StoredToken`.
@@ -341,5 +371,38 @@ mod tests {
         assert_eq!(t.kind(), TokenKind::l_brace);
         assert_eq!(t.start_loc().offset, 0);
         assert_eq!(t.end_loc().offset, 1);
+    }
+
+    #[test]
+    fn stored_comment_get_string() {
+        let id = SourceId::from_index(0);
+        let loc = |off| SMLoc {
+            source: id,
+            offset: off,
+        };
+        // Buffer: a line comment then a block comment.
+        //          0         1         2
+        //          0123456789012345678901234
+        let buffer = b"// hello /* world */ rest";
+        // Line comment "// hello" spans [0, 8).
+        let line = StoredComment::new(
+            CommentKind::Line,
+            SMRange {
+                start: loc(0),
+                end: loc(8),
+            },
+        );
+        assert_eq!(line.get_string(buffer), b" hello");
+        assert_eq!(line.get_full_string(buffer), b"// hello");
+        // Block comment "/* world */" spans [9, 20).
+        let block = StoredComment::new(
+            CommentKind::Block,
+            SMRange {
+                start: loc(9),
+                end: loc(20),
+            },
+        );
+        assert_eq!(block.get_string(buffer), b" world ");
+        assert_eq!(block.get_full_string(buffer), b"/* world */");
     }
 }

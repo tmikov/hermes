@@ -132,8 +132,8 @@ pub struct JSLexer<'a> {
 impl<'a> JSLexer<'a> {
     /// Construct a lexer over the buffer identified by `buf_id` in `sm`.
     /// Port of `JSLexer::JSLexer` + `initializeWithBufferId`. The reserved-word
-    /// pre-interning (`initializeReservedIdentifiers`) is deferred to phase 1b
-    /// along with identifier scanning.
+    /// pre-interning (`initializeReservedIdentifiers`) is performed here so that
+    /// `res_word_ident` is a cheap lookup during identifier scanning.
     pub fn new(
         buf_id: SourceId,
         sm: &'a mut SourceErrorManager,
@@ -205,7 +205,7 @@ impl<'a> JSLexer<'a> {
     /// Intern a string-literal value, applying the `convert_surrogates`
     /// re-encoding when the option is set. Port of `getStringLiteral`
     /// (JSLexer.h:689-694).
-    fn get_string_literal(&self, bytes: &[u8]) -> AtomBytes {
+    pub fn get_string_literal(&self, bytes: &[u8]) -> AtomBytes {
         if self.convert_surrogates {
             self.convert_surrogates_in_string(bytes)
         } else {
@@ -327,6 +327,89 @@ impl<'a> JSLexer<'a> {
     /// \return the end location of the previous token.
     pub fn prev_token_end(&self) -> SMLoc {
         self.prev_token_end
+    }
+
+    /// \return the current char pointer location. Port of `getCurLoc`
+    /// (JSLexer.h:567-569), which returns `SMLoc::getFromPointer(curCharPtr_)`;
+    /// the offset-based equivalent is the cursor's current location.
+    pub fn get_cur_loc(&self) -> SMLoc {
+        self.cur_loc()
+    }
+
+    /// \return the source buffer id we're currently parsing. Port of
+    /// `getBufferId` (JSLexer.h:704-706).
+    pub fn get_buffer_id(&self) -> SourceId {
+        self.buf_id
+    }
+
+    /// \return the logical bytes of the buffer (the source text without the
+    /// trailing NUL sentinel). Pointer->offset adaptation of `getBufferStart`/
+    /// `getBufferEnd` (JSLexer.h:709-716): C++ returns `bufferStart_`/
+    /// `bufferEnd_` pointers; the offset-based equivalent is the buffer byte
+    /// slice, with `get_buffer_start` == 0 and `get_buffer_end` == its length.
+    pub fn buffer_bytes(&self) -> &[u8] {
+        let raw = self.cursor.raw();
+        // `raw` includes the trailing NUL sentinel; drop it for the logical
+        // bytes (mirroring [bufferStart_, bufferEnd_)).
+        &raw[..raw.len() - 1]
+    }
+
+    /// \return the start offset of the buffer (always 0). Pointer->offset
+    /// adaptation of `getBufferStart` (JSLexer.h:708-711).
+    pub fn get_buffer_start(&self) -> u32 {
+        0
+    }
+
+    /// \return the end offset of the buffer (the logical byte length, excluding
+    /// the trailing NUL sentinel). Pointer->offset adaptation of `getBufferEnd`
+    /// (JSLexer.h:713-716).
+    pub fn get_buffer_end(&self) -> u32 {
+        self.buffer_bytes().len() as u32
+    }
+
+    /// For certain identifier-like syntactic forms, like Flow's
+    /// `renders? number`, we need to check that the `?` comes immediately after
+    /// `renders` with no whitespace. Port of `Token::checkFollowingCharacter`
+    /// (JSLexer.h:229-234), relocated from `Token` to `JSLexer`: our offset-based
+    /// `Token` has no buffer reference, so the check reads the buffer byte at the
+    /// current token's end offset.
+    ///
+    /// \return true iff the character directly after the current token matches
+    /// `c`. The next byte could be the EOF NUL or the start of a UTF-8 sequence,
+    /// but it is always present (the buffer is NUL-terminated, so the end offset
+    /// is always in-bounds).
+    pub fn check_following_character(&self, c: u8) -> bool {
+        debug_assert!(c < 128, "test character must be ASCII");
+        self.cursor.raw()[self.token.end_loc().offset as usize] == c
+    }
+
+    /// \return the source text `[start, end)` of the current token. Port of
+    /// `Token::inputStr` (JSLexer.h:136-140), relocated from `Token` to
+    /// `JSLexer`: our offset-based `Token` has no buffer reference, so the slice
+    /// is taken from the cursor's buffer.
+    pub fn token_input_str(&self) -> &[u8] {
+        self.cursor.slice(
+            self.token.start_loc().offset,
+            self.token.end_loc().offset,
+        )
+    }
+
+    /// Intern an identifier. Port of `getIdentifier(StringRef)`
+    /// (JSLexer.h:685-687).
+    pub fn get_identifier(&self, name: &[u8]) -> AtomBytes {
+        self.strtab.atom_bytes(name)
+    }
+
+    /// Convert the current token to an identifier-operator token. Port of
+    /// `convertCurTokenToIdentOp` (JSLexer.h:827-831).
+    /// \pre the current token is an identifier which is an IDENT_OP operator.
+    pub fn convert_cur_token_to_ident_op(&mut self, kind: TokenKind) {
+        debug_assert_eq!(self.token.kind(), TokenKind::identifier);
+        debug_assert_eq!(
+            self.strtab.bytes(self.token.get_identifier()),
+            crate::token_kinds::token_kind_str(kind).as_bytes()
+        );
+        self.token.set_ident_op(kind);
     }
 
     /// A location at the current cursor offset.
@@ -465,22 +548,53 @@ impl<'a> JSLexer<'a> {
         }
     }
 
-    // ---- The phase-1b stubs -------------------------------------------------
+    /// The non-ASCII `default:` arm of `advance` (JSLexer.cpp:711-735,
+    /// `default_label`). The cursor is on a non-ASCII byte. Decode the UTF-8
+    /// character and either scan a Unicode-only identifier, skip a Unicode-only
+    /// space, or report an unrecognized-character error.
+    ///
+    /// The C++ reaches this via `goto default_label` from the `c2`/`e2`/`ef`
+    /// lead-byte arms (when the bytes are not the recognized special sequence)
+    /// and from the `default:` case. We extract it into a helper so those arms
+    /// can call it (the faithful equivalent of the `goto`).
+    ///
+    /// \return `true` if the caller should `continue` the advance loop (the C++
+    ///   `continue` for a Unicode-only space or after an error), or `false` if
+    ///   the token is complete and the loop should `break` (the C++ `break`
+    ///   after scanning an identifier).
+    fn scan_default_non_ascii(&mut self, grammar_context: GrammarContext) -> bool {
+        self.set_token_start();
+        let ch = self.decode_utf8_advance();
 
-    /// Stub for the not-yet-implemented scanners (identifiers, numbers, strings,
-    /// templates, regexp, private identifiers, the `\` escape and the non-ASCII
-    /// default arm). Reports an error and forces EOF so the lexer is
-    /// well-defined; these inputs are not part of the phase-1a corpus.
-    fn scan_not_implemented(&mut self) {
-        let loc = self.token.start_loc();
-        self.error(loc, "not yet implemented (phase 1b)");
-        self.force_eof();
-        self.token.set_eof();
+        if is_unicode_only_id_start(ch) {
+            self.tmp_storage.clear();
+            append_unicode_to_storage(&mut self.tmp_storage, ch);
+            self.scan_identifier_parts_in_context(grammar_context);
+            false
+        } else if is_unicode_only_space(ch) {
+            true
+        } else {
+            let range = SMRange {
+                start: self.token.start_loc(),
+                end: self.cur_loc(),
+            };
+            if ch > 31 && ch < 127 {
+                self.error_range(
+                    range,
+                    format!("unrecognized character '{}'", ch as u8 as char),
+                );
+            } else {
+                self.error_range(
+                    range,
+                    format!("unrecognized Unicode character \\u{:x}", ch),
+                );
+            }
+            true
+        }
     }
 
     /// Advance to the next token and return it. Port of `JSLexer::advance`
-    /// (JSLexer.cpp:255-745). Only the punctuator/whitespace/comment/EOF arms
-    /// are implemented in phase 1a; the literal/identifier arms are stubbed.
+    /// (JSLexer.cpp:255-745).
     pub fn advance(&mut self, grammar_context: GrammarContext) -> &Token {
         self.new_line_before_current_token = false;
 
@@ -707,7 +821,10 @@ impl<'a> JSLexer<'a> {
                         self.new_line_before_current_token = true;
                         continue;
                     } else {
-                        self.scan_not_implemented();
+                        // C++: goto default_label.
+                        if self.scan_default_non_ascii(grammar_context) {
+                            continue;
+                        }
                     }
                 }
 
@@ -736,7 +853,10 @@ impl<'a> JSLexer<'a> {
                         self.cursor.advance(2);
                         continue;
                     } else {
-                        self.scan_not_implemented();
+                        // C++: goto default_label.
+                        if self.scan_default_non_ascii(grammar_context) {
+                            continue;
+                        }
                     }
                 }
 
@@ -746,7 +866,10 @@ impl<'a> JSLexer<'a> {
                         self.cursor.advance(3);
                         continue;
                     } else {
-                        self.scan_not_implemented();
+                        // C++: goto default_label.
+                        if self.scan_default_non_ascii(grammar_context) {
+                            continue;
+                        }
                     }
                 }
 
@@ -849,7 +972,7 @@ impl<'a> JSLexer<'a> {
                     }
                 }
 
-                // . ... or .NNN (a number — deferred to phase 1b).
+                // . ... or .NNN (a number).
                 b'.' => {
                     self.set_token_start();
                     if self.cursor.peek_at(1) >= b'0' && self.cursor.peek_at(1) <= b'9' {
@@ -928,31 +1051,7 @@ impl<'a> JSLexer<'a> {
                 // Default: non-ASCII identifier-start / unicode-only space /
                 // unrecognized character. Port of JSLexer.cpp:711-735.
                 _ => {
-                    self.set_token_start();
-                    let ch = self.decode_utf8_advance();
-
-                    if is_unicode_only_id_start(ch) {
-                        self.tmp_storage.clear();
-                        append_unicode_to_storage(&mut self.tmp_storage, ch);
-                        self.scan_identifier_parts_in_context(grammar_context);
-                    } else if is_unicode_only_space(ch) {
-                        continue;
-                    } else {
-                        let range = SMRange {
-                            start: self.token.start_loc(),
-                            end: self.cur_loc(),
-                        };
-                        if ch > 31 && ch < 127 {
-                            self.error_range(
-                                range,
-                                format!("unrecognized character '{}'", ch as u8 as char),
-                            );
-                        } else {
-                            self.error_range(
-                                range,
-                                format!("unrecognized Unicode character \\u{:x}", ch),
-                            );
-                        }
+                    if self.scan_default_non_ascii(grammar_context) {
                         continue;
                     }
                 }
@@ -1742,5 +1841,69 @@ mod tests {
         // Second `;` : preceded by a newline.
         assert_eq!(lex.advance(GrammarContext::AllowDiv).kind(), TokenKind::semi);
         assert!(lex.is_new_line_before_current_token());
+    }
+
+    /// Regression for the `scan_not_implemented` bug: a `c2`-led Unicode-only
+    /// id-start (`ª` U+00AA = `c2 aa`) used to be routed to a "not yet
+    /// implemented" stub that errored and forced EOF. It must now fall through
+    /// to the default non-ASCII arm and lex as an identifier.
+    #[test]
+    fn unicode_only_id_start_via_c2_arm() {
+        use TokenKind::*;
+        assert_eq!(kinds("\u{00aa}"), vec![identifier, eof]);
+    }
+
+    #[test]
+    fn check_following_character() {
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("t", "renders?");
+        let tab = AtomTable::new();
+        let mut lex = JSLexer::new(id, &mut sm, &tab, GrammarContext::AllowDiv);
+        // After scanning `renders`, the next character is `?`.
+        assert_eq!(lex.advance(GrammarContext::AllowDiv).kind(), TokenKind::identifier);
+        assert!(lex.check_following_character(b'?'));
+        assert!(!lex.check_following_character(b':'));
+    }
+
+    #[test]
+    fn token_input_str_returns_source_text() {
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("t", "  foobar  ");
+        let tab = AtomTable::new();
+        let mut lex = JSLexer::new(id, &mut sm, &tab, GrammarContext::AllowDiv);
+        assert_eq!(lex.advance(GrammarContext::AllowDiv).kind(), TokenKind::identifier);
+        assert_eq!(lex.token_input_str(), b"foobar");
+    }
+
+    #[test]
+    fn convert_cur_token_to_ident_op_for_as() {
+        use crate::token_kinds::token_kind_str;
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("t", "as");
+        let tab = AtomTable::new();
+        let mut lex = JSLexer::new(id, &mut sm, &tab, GrammarContext::AllowDiv);
+        // `as` lexes as a plain identifier.
+        assert_eq!(lex.advance(GrammarContext::AllowDiv).kind(), TokenKind::identifier);
+        // Make sure the IDENT_OP kind we convert to actually has str == "as".
+        assert_eq!(token_kind_str(TokenKind::as_operator), "as");
+        lex.convert_cur_token_to_ident_op(TokenKind::as_operator);
+        assert_eq!(lex.token().kind(), TokenKind::as_operator);
+    }
+
+    #[test]
+    fn get_identifier_and_buffer_id() {
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer("t", "abc");
+        let tab = AtomTable::new();
+        let lex = JSLexer::new(id, &mut sm, &tab, GrammarContext::AllowDiv);
+        // get_identifier interns into the shared table.
+        let a = lex.get_identifier(b"hello");
+        assert_eq!(tab.bytes(a), b"hello");
+        // get_buffer_id returns the buffer we're lexing.
+        assert_eq!(lex.get_buffer_id(), id);
+        // buffer bytes exclude the trailing NUL sentinel.
+        assert_eq!(lex.buffer_bytes(), b"abc");
+        assert_eq!(lex.get_buffer_start(), 0);
+        assert_eq!(lex.get_buffer_end(), 3);
     }
 }
