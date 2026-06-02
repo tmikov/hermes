@@ -7,6 +7,9 @@
 //! - `optimisticSkipWhitespace` (`:117-132`)
 //! - `lookahead1` (`:1038-1095`)
 //! - `lookahead2` (`:1100-1154`)
+//! - `isLetFollowedByDeclStart` (`:134-176`)
+//! - `isUsingFollowedByIdentifier` (`:178-204`)
+//! - `isAwaitUsingFollowedByIdentifier` (`:206-253`)
 //!
 //! The C++ `template <bool RequireNoNewLine>` becomes a runtime
 //! `require_no_newline: bool` parameter; the parser `Keywords` dependency is
@@ -16,6 +19,8 @@
 
 use atom_table::AtomBytes;
 use support::diag::Subsystem;
+
+use unicode::{is_ascii_identifier_continue, is_ascii_identifier_start};
 
 use crate::token_kinds::TokenKind;
 
@@ -201,6 +206,155 @@ impl<'a> JSLexer<'a> {
 
         Some(self.token.kind())
     }
+
+    /// \return true if the `let` keyword (the current token) is followed by the
+    /// start of a declaration. Port of `isLetFollowedByDeclStart`
+    /// (JSLexer.cpp:134-176).
+    pub fn is_let_followed_by_decl_start(&mut self) -> bool {
+        debug_assert!(
+            self.token.kind() == TokenKind::identifier
+                && self.strtab.bytes(self.token.get_identifier()) == b"let",
+            "current token must be the `let` identifier"
+        );
+
+        let cur_char = self.optimistic_skip_whitespace();
+
+        // Fast path.
+        // If the next character is a '{', then this is a let declaration.
+        // If the next character is a '[', then this is a let declaration.
+        if cur_char == b'{' || cur_char == b'[' {
+            return true;
+        }
+
+        // Fast path.
+        // If the next character starts an ASCII identifier,
+        // then this is a declaration.
+        // Don't check for UTF-8 here to avoid having to read a codepoint
+        // or determine Unicode letter value membership.
+        if is_ascii_identifier_start(cur_char as u32) {
+            // If the next characters are 'in', this may result in 'in' or
+            // 'instanceof'. So we'd actually have to run a lookahead.
+            if !(cur_char == b'i' && self.cursor.peek_at(1) == b'n') {
+                return true;
+            }
+        }
+
+        // Slow path.
+        // There might be comments, newlines, UTF-8 identifiers, etc.
+        // If there's a next token and it's an identifier, '[', '{', then this
+        // is a declaration. Otherwise, it's not.
+        // Pass RequireNoNewLine=false because
+        //   let
+        //   x = 3;
+        // is supposed to parse as a let declaration of x, no ASI here.
+        // https://262.ecma-international.org/14.0/#prod-LexicalBinding
+        let next_token_kind = self.lookahead1(false, None);
+        matches!(
+            next_token_kind,
+            Some(TokenKind::identifier)
+                | Some(TokenKind::l_brace)
+                | Some(TokenKind::l_square)
+        )
+    }
+
+    /// \return true if the `using` keyword (the current token) is followed by an
+    /// identifier with no intervening line terminator. Port of
+    /// `isUsingFollowedByIdentifier` (JSLexer.cpp:178-204).
+    ///
+    /// DEVIATION: the C++ takes the `Keywords &kw` and asserts the current token
+    /// is `kw.identUsing`; we keep that as a `debug_assert` against the interned
+    /// identifier bytes.
+    pub fn is_using_followed_by_identifier(&mut self) -> bool {
+        debug_assert!(
+            self.token.kind() == TokenKind::identifier
+                && self.strtab.bytes(self.token.get_identifier()) == b"using",
+            "current token must be the `using` identifier"
+        );
+        // Checking for:
+        // using [no LineTerminator here] Identifier
+        //      ^
+
+        let saved_ptr = self.cursor.offset();
+        let cur_char = self.optimistic_skip_whitespace();
+        self.cursor.seek(saved_ptr);
+
+        // Check for newline - if present, this is not a using declaration.
+        if cur_char == b'\r' || cur_char == b'\n' {
+            return false;
+        }
+
+        // Fast path: next char starts an ASCII identifier.
+        if is_ascii_identifier_start(cur_char as u32) {
+            return true;
+        }
+
+        // Slow path: use lookahead with RequireNoNewLine=true.
+        let next_token_kind = self.lookahead1(true, None);
+        next_token_kind == Some(TokenKind::identifier)
+    }
+
+    /// \return true if `await` (the current token) is followed by `using` and
+    /// then an identifier, with no intervening line terminators. Port of
+    /// `isAwaitUsingFollowedByIdentifier` (JSLexer.cpp:206-253).
+    ///
+    /// DEVIATION: the C++ takes `Keywords &kw`; the `kw.identUsing` atom is
+    /// passed in as `ident_using`.
+    pub fn is_await_using_followed_by_identifier(
+        &mut self,
+        ident_using: AtomBytes,
+    ) -> bool {
+        debug_assert!(
+            self.token.kind() == TokenKind::identifier
+                && self.strtab.bytes(self.token.get_identifier()) == b"await",
+            "current token must be the `await` identifier"
+        );
+        // Checking for:
+        // await [no LineTerminator here] using [no LineTerminator here] Identifier
+        //      ^
+
+        let saved_ptr = self.cursor.offset();
+
+        // Skip whitespace after 'await' (no newlines allowed).
+        let mut cur_char = self.optimistic_skip_whitespace();
+
+        // Check for newline.
+        if cur_char == b'\r' || cur_char == b'\n' {
+            self.cursor.seek(saved_ptr);
+            return false;
+        }
+
+        // Fast path: check if next chars are 'using' followed by whitespace
+        // and an ASCII identifier.
+        // Note that we can just check character by character because the buffer
+        // is null-terminated.
+        if cur_char == b'u'
+            && self.cursor.peek_at(1) == b's'
+            && self.cursor.peek_at(2) == b'i'
+            && self.cursor.peek_at(3) == b'n'
+            && self.cursor.peek_at(4) == b'g'
+            && !is_ascii_identifier_continue(self.cursor.peek_at(5) as u32)
+        {
+            self.cursor.advance(5);
+            cur_char = self.optimistic_skip_whitespace();
+
+            self.cursor.seek(saved_ptr);
+
+            // Check for newline between 'using' and identifier.
+            if cur_char == b'\r' || cur_char == b'\n' {
+                return false;
+            }
+
+            if is_ascii_identifier_start(cur_char as u32) {
+                return true;
+            }
+        }
+
+        // Slow path.
+        // There might be comments, newlines, UTF-8 identifiers, etc.
+        self.cursor.seek(saved_ptr);
+        let opt_next = self.lookahead2(true, ident_using);
+        opt_next == Some(TokenKind::identifier)
+    }
 }
 
 #[cfg(test)]
@@ -272,5 +426,54 @@ mod tests {
             lex.token().get_res_word_or_identifier(),
             tab.atom_bytes(b"await")
         );
+    }
+
+    #[test]
+    fn let_decl_start() {
+        fn islet(src: &str) -> bool {
+            let mut sm = SourceErrorManager::new();
+            let id = sm.add_buffer("t", src);
+            let tab = AtomTable::new();
+            let mut lex =
+                JSLexer::new(id, &mut sm, &tab, GrammarContext::AllowDiv);
+            lex.advance(GrammarContext::AllowDiv); // 'let'
+            lex.is_let_followed_by_decl_start()
+        }
+        assert!(islet("let x"));
+        assert!(islet("let {a}"));
+        assert!(islet("let [a]"));
+        assert!(islet("let\nx")); // no ASI: still a declaration
+        assert!(!islet("let in")); // 'let in ...' is not a decl ('in' operator)
+        assert!(!islet("let = 3")); // 'let' as identifier
+    }
+
+    #[test]
+    fn using_decls() {
+        fn isusing(src: &str) -> bool {
+            let mut sm = SourceErrorManager::new();
+            let id = sm.add_buffer("t", src);
+            let tab = AtomTable::new();
+            let mut lex =
+                JSLexer::new(id, &mut sm, &tab, GrammarContext::AllowDiv);
+            lex.advance(GrammarContext::AllowDiv); // 'using'
+            lex.is_using_followed_by_identifier()
+        }
+        assert!(isusing("using x"));
+        assert!(!isusing("using\nx")); // newline -> not a using decl
+        assert!(!isusing("using = 1")); // 'using' as identifier
+
+        fn isawait(src: &str) -> bool {
+            let mut sm = SourceErrorManager::new();
+            let id = sm.add_buffer("t", src);
+            let tab = AtomTable::new();
+            let mut lex =
+                JSLexer::new(id, &mut sm, &tab, GrammarContext::AllowDiv);
+            lex.advance(GrammarContext::AllowDiv); // 'await'
+            let using = tab.atom_bytes(b"using");
+            lex.is_await_using_followed_by_identifier(using)
+        }
+        assert!(isawait("await using x"));
+        assert!(!isawait("await using\nx"));
+        assert!(!isawait("await x"));
     }
 }
