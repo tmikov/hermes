@@ -47,6 +47,14 @@ fn smoke_test_2() {
     let f = arena.alloc(JSONFactory::new(&arena, &atoms));
     let mut sm = SourceErrorManager::new();
     let id = sm.add_buffer("json", src);
+    // Pre-parse factory sanity (C++ JSONParserTest.cpp:53-59).
+    assert_eq!(atoms.bytes(f.get_string_str("key4").as_string().unwrap()), b"key4");
+    assert_eq!(atoms.bytes(f.get_string_str("key3").as_string().unwrap()), b"key3");
+    assert_eq!(atoms.bytes(f.get_string_str("key2").as_string().unwrap()), b"key2");
+    assert_eq!(atoms.bytes(f.get_string_str("key1").as_string().unwrap()), b"key1");
+    assert_eq!(atoms.bytes(f.get_string_str("key0").as_string().unwrap()), b"key0");
+    assert_eq!(f.get_number(1.0).as_number(), Some(1.0));
+    assert!(std::ptr::eq(f.get_string_str("key2"), f.get_string_str("key2"))); // uniquing
     // End p's borrow of sm before using f for pointer comparisons.
     let t1 = {
         let mut p = JSONParser::new(f, id, &mut sm, &atoms, false);
@@ -55,6 +63,7 @@ fn smoke_test_2() {
     let o1 = t1.as_object().unwrap();
     assert_eq!(o1.size(), 4);
     assert_eq!(o1.count("key0", &atoms), 0);
+    assert!(o1.get("key0", &atoms).is_none());
     assert_eq!(o1.count("key1", &atoms), 1);
     assert!(std::ptr::eq(o1.get("key1", &atoms).unwrap(), f.get_number(1.0)));
     let value2 = o1.get("key2", &atoms).unwrap();
@@ -62,6 +71,19 @@ fn smoke_test_2() {
     // nested object
     let o2 = o1.get("key3", &atoms).unwrap().as_object().unwrap();
     assert!(std::ptr::eq(o2.get("nested1", &atoms).unwrap(), f.get_boolean(true)));
+    assert_eq!(o1.count("key3", &atoms), 1);
+    assert_eq!(o1.count("key4", &atoms), 1);
+    // Keys iterate in (sorted) order key1,key2,key3,key4 (C++ lines 91-105).
+    let keys: Vec<Vec<u8>> = o1.iter().map(|(k, _)| atoms.bytes(k).to_vec()).collect();
+    assert_eq!(
+        keys,
+        vec![
+            b"key1".to_vec(),
+            b"key2".to_vec(),
+            b"key3".to_vec(),
+            b"key4".to_vec()
+        ]
+    );
     // array, incl. shared 'value2' node
     let a1 = o1.get("key4", &atoms).unwrap().as_array().unwrap();
     assert_eq!(a1.len(), 3);
