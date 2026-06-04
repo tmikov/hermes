@@ -25,11 +25,11 @@ use std::sync::atomic::Ordering;
 use atom_table::AtomBytes;
 use atom_table::AtomTable;
 
-use crate::deque::Deque;
+use support::deque::Deque;
 use crate::node::Node;
 use crate::node_child::NodeList;
 use crate::visitor::Visitor;
-use crate::HeapSize;
+use support::HeapSize;
 
 /// ID which indicates a `StorageEntry` is free.
 const FREE_ENTRY: u32 = 0;

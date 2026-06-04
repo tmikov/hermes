@@ -115,21 +115,22 @@ mod tests {
         assert_eq!(d.iter().count(), 2);
     }
 
-    #[allow(unsafe_code)]
-    // test-only: verifies chunk addresses are stable
     #[test]
     fn multi_chunks() {
         let mut d = Deque::<usize>::new();
         let count = MIN_CHUNK_CAPACITY * 2;
-        let mut ptr = std::ptr::null();
+        let mut addr = 0usize;
         for i in 0..count {
             let elem = d.push(i);
             if i == 1000 {
-                ptr = elem as *const usize;
+                addr = elem as *const usize as usize;
             }
         }
         assert_eq!(d.iter().count(), count);
-        // Make sure nothing in the first chunk moved around.
-        assert_eq!(unsafe { *ptr }, 1000);
+        // The element at index 1000 must not have moved (stable addresses):
+        // re-fetch it through the iterator and confirm address + value are unchanged.
+        let again = d.iter().nth(1000).unwrap();
+        assert_eq!(again as *const usize as usize, addr);
+        assert_eq!(*again, 1000);
     }
 }

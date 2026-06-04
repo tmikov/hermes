@@ -2,13 +2,11 @@
 //! See doc/superpowers/specs/2026-06-03-ast-design.md.
 
 pub mod context;
-pub mod deque;
-mod heap_size;
 pub mod node;
 pub mod node_child;
 pub mod visitor;
 
-pub use heap_size::HeapSize;
+pub use support::HeapSize;
 
 /// Placeholder for a resolved Sema entity (scope / decl / function info).
 /// The real representation is pinned when Sema is ported; the AST only needs
