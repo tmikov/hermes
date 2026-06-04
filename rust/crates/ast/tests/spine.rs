@@ -10,8 +10,9 @@
 //!   2. GC traces decoration NodeList (gc_traces_decoration_lists)
 
 use ast::context::{Context, GCLock, NodeRc};
-use ast::node::{BinaryExpression, Node, NumericLiteral, Program};
+use ast::node::{BinaryExpression, Identifier, Node, NumericLiteral, Program};
 use ast::node_child::{NodeList, NodeMetadata};
+use ast::SemaId;
 use std::cell::Cell;
 
 /// Build a dummy source range (no `SMRange::invalid()` on this API).
@@ -54,6 +55,39 @@ fn double<'gc>(gc: &'gc GCLock, n: &'gc Node<'gc>) -> &'gc Node<'gc> {
         }
         other => other,
     }
+}
+
+/// Allocate an `Identifier` node with the given name.
+fn ident<'gc>(gc: &'gc GCLock, name: &str) -> &'gc Node<'gc> {
+    gc.alloc(Node::Identifier(Identifier {
+        metadata: NodeMetadata::new(dummy_range()),
+        name: Cell::new(gc.atom_bytes(name.as_bytes())),
+        decl: Cell::new(None::<SemaId>),
+    }))
+}
+
+/// Prove that `double` returns pointer-identical nodes for subtrees that
+/// contain no `NumericLiteral`s.  The sharing branch (`std::ptr::eq` guard in
+/// `double`) must fire when both children are `Identifier`s.
+#[test]
+fn double_shares_unchanged_subtrees() {
+    let mut ctx = Context::new();
+    let gc = GCLock::new(&mut ctx);
+
+    let op = gc.atom_bytes("+".as_bytes());
+    let bin = gc.alloc(Node::BinaryExpression(BinaryExpression {
+        metadata: NodeMetadata::new(dummy_range()),
+        left: ident(&gc, "a"),
+        right: ident(&gc, "b"),
+        operator: Cell::new(op),
+    }));
+
+    let out = double(&gc, bin);
+
+    assert!(
+        std::ptr::eq(out, bin),
+        "unchanged subtree must be shared (pointer-identical), not rebuilt"
+    );
 }
 
 /// Prove that after rooting only the new tree and calling `gc()`, the three
@@ -172,6 +206,16 @@ fn gc_traces_decoration_lists() {
 
     // Trigger a full GC between lock scopes.
     ctx.gc();
+
+    // Non-vacuous check: prog + its decoration-list element + the decorated node are
+    // ALL reachable, so a correct marker collects NOTHING. If the marker failed to
+    // walk Program.decorations, `dec` (and/or its list element) would be freed and
+    // this would be >= 1. This is what actually proves decoration-list tracing.
+    assert_eq!(
+        ctx.num_free_nodes(),
+        0,
+        "nothing is unreachable; a nonzero free count means the marker didn't trace the decoration list"
+    );
 
     {
         let gc2 = GCLock::new(&mut ctx);
