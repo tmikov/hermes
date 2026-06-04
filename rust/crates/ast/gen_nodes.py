@@ -424,8 +424,8 @@ HEADER = """\
 #![allow(clippy::large_enum_variant)] // one enum over all nodes — boxing would defeat deep-match
 
 use std::cell::Cell;
-use crate::node_child::{NodeLabel, NodeList, NodeMetadata, NodeString, Strictness, INVALID_LABEL};
-use crate::visitor::Visitor;
+use crate::node_child::{NodeChild, NodeLabel, NodeList, NodeMetadata, NodeString, Strictness, INVALID_LABEL};
+use crate::visitor::{Path, TransformResult, Visitor, VisitorMut};
 use crate::SemaId;
 """
 
@@ -541,6 +541,9 @@ def emit_accessors(items, nodes, out):
     # visit_children.
     emit_visit_children(nodes, out)
     out.append("")
+    # visit_children_mut.
+    emit_visit_children_mut(nodes, out)
+    out.append("")
     # mark_lists.
     emit_mark_lists(nodes, out)
     out.append("}")
@@ -632,6 +635,130 @@ def emit_node_field(nodes, out):
     out.append("")
 
 
+def structural_fields(fields):
+    """Structural-child fields (get a builder setter; threaded by
+    visit_children_mut), in declared order."""
+    return [fd for fd in fields if fd["child_kind"] in ("single", "opt", "list")]
+
+
+def emit_visit_children_mut(nodes, out):
+    """Emit Node::visit_children_mut — functional rebuild via the per-kind
+    builder. Threads only structural-child fields (single/opt/list)."""
+    out.append("    /// Transform this node's children with `visitor`, rebuilding it only if")
+    out.append("    /// a child changed. `self` is the original parent.")
+    out.append("    pub fn visit_children_mut<V: VisitorMut<'gc>>(")
+    out.append("        &'gc self,")
+    out.append("        ctx: &'gc crate::context::GCLock<'_, '_>,")
+    out.append("        visitor: &mut V,")
+    out.append("    ) -> TransformResult<&'gc Node<'gc>> {")
+    out.append("        let builder = builder::Builder::from_node(self);")
+    out.append("        #[allow(unused_mut)]")
+    out.append("        match builder {")
+    for name, fields in nodes:
+        sf = structural_fields(fields)
+        if not sf:
+            out.append(
+                f"            builder::Builder::{name}(mut b) => b.build(ctx),")
+            continue
+        out.append(f"            builder::Builder::{name}(mut b) => {{")
+        for fd in sf:
+            rf = fd["rust_field"]
+            out.append("                if let TransformResult::Changed(v) =")
+            out.append(
+                f"                    b.inner.{rf}.visit_child_mut("
+                f"ctx, visitor, Path::new(self, NodeField::{rf})) {{")
+            out.append(f"                    b.{rf}(v);")
+            out.append("                }")
+        out.append("                b.build(ctx)")
+        out.append("            }")
+    out.append("        }")
+    out.append("    }")
+
+
+def emit_builders(nodes, out):
+    """Emit the module-level `pub mod builder` — the Builder enum + one
+    clone-with-one-field-changed builder struct per node."""
+    out.append("/// Per-kind node builders: clone a node with (optionally) one")
+    out.append("/// structural-child field changed. The rebuild primitive used by")
+    out.append("/// `Node::visit_children_mut`.")
+    out.append("pub mod builder {")
+    out.append("    use std::cell::Cell;")
+    out.append("    use super::*;")
+    out.append("    use crate::node_child::NodeChild;")
+    out.append("    use crate::visitor::TransformResult;")
+    out.append("")
+    out.append("    /// One builder per node kind; clone-with-one-field-changed.")
+    out.append("    #[derive(Debug)]")
+    out.append("    pub enum Builder<'gc> {")
+    for name, _fields in nodes:
+        out.append(f"        {name}(self::{name}<'gc>),")
+    out.append("    }")
+    out.append("")
+    out.append("    impl<'gc> Builder<'gc> {")
+    out.append("        pub fn from_node(node: &'gc Node<'gc>) -> Self {")
+    out.append("            match node {")
+    for name, _fields in nodes:
+        out.append(
+            f"                Node::{name}(n) => "
+            f"Builder::{name}(self::{name}::from_node(n)),")
+    out.append("            }")
+    out.append("        }")
+    out.append("    }")
+    out.append("")
+    for name, fields in nodes:
+        emit_builder_struct(name, fields, out)
+    out.append("}")
+    out.append("")
+
+
+def emit_builder_struct(name, fields, out):
+    """Emit one builder struct + impl (from_node/build/build_forced/setters)."""
+    out.append("    #[derive(Debug)]")
+    out.append(f"    pub struct {name}<'gc> {{")
+    out.append("        is_changed: bool,")
+    out.append(f"        pub(super) inner: super::{name}<'gc>,")
+    out.append("    }")
+    out.append(f"    impl<'gc> {name}<'gc> {{")
+    out.append(
+        f"        pub fn from_node(node: &'gc super::{name}<'gc>) -> Self {{")
+    out.append("            Self {")
+    out.append("                is_changed: false,")
+    out.append(f"                inner: super::{name} {{")
+    for fd in fields:
+        rf = fd["rust_field"]
+        kind = fd["child_kind"]
+        if kind == "meta":
+            out.append("                    metadata: node.metadata.duplicate(),")
+        elif kind in ("single", "opt", "list"):
+            out.append(f"                    {rf}: node.{rf}.duplicate(),")
+        else:  # declist or value cell
+            out.append(f"                    {rf}: Cell::new(node.{rf}.get()),")
+    out.append("                },")
+    out.append("            }")
+    out.append("        }")
+    out.append(
+        "        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>)"
+        " -> TransformResult<&'gc Node<'gc>> {")
+    out.append("            if self.is_changed {")
+    out.append("                TransformResult::Changed(self.build_forced(gc))")
+    out.append("            } else {")
+    out.append("                TransformResult::Unchanged")
+    out.append("            }")
+    out.append("        }")
+    out.append(
+        "        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>)"
+        " -> &'gc Node<'gc> {")
+    out.append(f"            gc.alloc(Node::{name}(self.inner))")
+    out.append("        }")
+    for fd in structural_fields(fields):
+        rf = fd["rust_field"]
+        ty = fd["rust_type"]
+        out.append(
+            f"        pub fn {rf}(&mut self, {rf}: {ty}) {{ "
+            f"self.is_changed = true; self.inner.{rf} = {rf}; }}")
+    out.append("    }")
+
+
 # --------------------------------------------------------------------------
 # -- CLI + validation + driver --
 # --------------------------------------------------------------------------
@@ -681,6 +808,7 @@ def generate():
         emit_struct(name, fields, out)
     emit_node_enum(nodes, out)
     emit_accessors(items, nodes, out)
+    emit_builders(nodes, out)
 
     text = "\n".join(out)
     if not text.endswith("\n"):

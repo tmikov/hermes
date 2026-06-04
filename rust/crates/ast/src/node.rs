@@ -12,8 +12,8 @@
 #![allow(clippy::large_enum_variant)] // one enum over all nodes — boxing would defeat deep-match
 
 use std::cell::Cell;
-use crate::node_child::{NodeLabel, NodeList, NodeMetadata, NodeString, Strictness, INVALID_LABEL};
-use crate::visitor::Visitor;
+use crate::node_child::{NodeChild, NodeLabel, NodeList, NodeMetadata, NodeString, Strictness, INVALID_LABEL};
+use crate::visitor::{Path, TransformResult, Visitor, VisitorMut};
 use crate::SemaId;
 
 #[repr(u32)]
@@ -9284,6 +9284,2548 @@ impl<'gc> Node<'gc> {
         }
     }
 
+    /// Transform this node's children with `visitor`, rebuilding it only if
+    /// a child changed. `self` is the original parent.
+    pub fn visit_children_mut<V: VisitorMut<'gc>>(
+        &'gc self,
+        ctx: &'gc crate::context::GCLock<'_, '_>,
+        visitor: &mut V,
+    ) -> TransformResult<&'gc Node<'gc>> {
+        let builder = builder::Builder::from_node(self);
+        #[allow(unused_mut)]
+        match builder {
+            builder::Builder::Empty(mut b) => b.build(ctx),
+            builder::Builder::Metadata(mut b) => b.build(ctx),
+            builder::Builder::Program(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::FunctionExpression(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.params.visit_child_mut(ctx, visitor, Path::new(self, NodeField::params)) {
+                    b.params(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_parameters.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_parameters)) {
+                    b.type_parameters(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.return_type.visit_child_mut(ctx, visitor, Path::new(self, NodeField::return_type)) {
+                    b.return_type(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.predicate.visit_child_mut(ctx, visitor, Path::new(self, NodeField::predicate)) {
+                    b.predicate(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ArrowFunctionExpression(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.params.visit_child_mut(ctx, visitor, Path::new(self, NodeField::params)) {
+                    b.params(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_parameters.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_parameters)) {
+                    b.type_parameters(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.return_type.visit_child_mut(ctx, visitor, Path::new(self, NodeField::return_type)) {
+                    b.return_type(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.predicate.visit_child_mut(ctx, visitor, Path::new(self, NodeField::predicate)) {
+                    b.predicate(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::FunctionDeclaration(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.params.visit_child_mut(ctx, visitor, Path::new(self, NodeField::params)) {
+                    b.params(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_parameters.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_parameters)) {
+                    b.type_parameters(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.return_type.visit_child_mut(ctx, visitor, Path::new(self, NodeField::return_type)) {
+                    b.return_type(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.predicate.visit_child_mut(ctx, visitor, Path::new(self, NodeField::predicate)) {
+                    b.predicate(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ComponentDeclaration(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.params.visit_child_mut(ctx, visitor, Path::new(self, NodeField::params)) {
+                    b.params(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_parameters.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_parameters)) {
+                    b.type_parameters(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.renders_type.visit_child_mut(ctx, visitor, Path::new(self, NodeField::renders_type)) {
+                    b.renders_type(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::HookDeclaration(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.params.visit_child_mut(ctx, visitor, Path::new(self, NodeField::params)) {
+                    b.params(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_parameters.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_parameters)) {
+                    b.type_parameters(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.return_type.visit_child_mut(ctx, visitor, Path::new(self, NodeField::return_type)) {
+                    b.return_type(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::MatchStatement(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.argument.visit_child_mut(ctx, visitor, Path::new(self, NodeField::argument)) {
+                    b.argument(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.cases.visit_child_mut(ctx, visitor, Path::new(self, NodeField::cases)) {
+                    b.cases(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::WhileStatement(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.test.visit_child_mut(ctx, visitor, Path::new(self, NodeField::test)) {
+                    b.test(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::DoWhileStatement(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.test.visit_child_mut(ctx, visitor, Path::new(self, NodeField::test)) {
+                    b.test(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ForInStatement(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.left.visit_child_mut(ctx, visitor, Path::new(self, NodeField::left)) {
+                    b.left(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.right.visit_child_mut(ctx, visitor, Path::new(self, NodeField::right)) {
+                    b.right(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ForOfStatement(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.left.visit_child_mut(ctx, visitor, Path::new(self, NodeField::left)) {
+                    b.left(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.right.visit_child_mut(ctx, visitor, Path::new(self, NodeField::right)) {
+                    b.right(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ForStatement(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.init.visit_child_mut(ctx, visitor, Path::new(self, NodeField::init)) {
+                    b.init(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.test.visit_child_mut(ctx, visitor, Path::new(self, NodeField::test)) {
+                    b.test(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.update.visit_child_mut(ctx, visitor, Path::new(self, NodeField::update)) {
+                    b.update(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::DebuggerStatement(mut b) => b.build(ctx),
+            builder::Builder::EmptyStatement(mut b) => b.build(ctx),
+            builder::Builder::BlockStatement(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::StaticBlock(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::BreakStatement(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.label.visit_child_mut(ctx, visitor, Path::new(self, NodeField::label)) {
+                    b.label(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ContinueStatement(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.label.visit_child_mut(ctx, visitor, Path::new(self, NodeField::label)) {
+                    b.label(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ThrowStatement(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.argument.visit_child_mut(ctx, visitor, Path::new(self, NodeField::argument)) {
+                    b.argument(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ReturnStatement(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.argument.visit_child_mut(ctx, visitor, Path::new(self, NodeField::argument)) {
+                    b.argument(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::WithStatement(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.object.visit_child_mut(ctx, visitor, Path::new(self, NodeField::object)) {
+                    b.object(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::SwitchStatement(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.discriminant.visit_child_mut(ctx, visitor, Path::new(self, NodeField::discriminant)) {
+                    b.discriminant(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.cases.visit_child_mut(ctx, visitor, Path::new(self, NodeField::cases)) {
+                    b.cases(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::LabeledStatement(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.label.visit_child_mut(ctx, visitor, Path::new(self, NodeField::label)) {
+                    b.label(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ExpressionStatement(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.expression.visit_child_mut(ctx, visitor, Path::new(self, NodeField::expression)) {
+                    b.expression(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TryStatement(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.block.visit_child_mut(ctx, visitor, Path::new(self, NodeField::block)) {
+                    b.block(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.handler.visit_child_mut(ctx, visitor, Path::new(self, NodeField::handler)) {
+                    b.handler(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.finalizer.visit_child_mut(ctx, visitor, Path::new(self, NodeField::finalizer)) {
+                    b.finalizer(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::IfStatement(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.test.visit_child_mut(ctx, visitor, Path::new(self, NodeField::test)) {
+                    b.test(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.consequent.visit_child_mut(ctx, visitor, Path::new(self, NodeField::consequent)) {
+                    b.consequent(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.alternate.visit_child_mut(ctx, visitor, Path::new(self, NodeField::alternate)) {
+                    b.alternate(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::NullLiteral(mut b) => b.build(ctx),
+            builder::Builder::BooleanLiteral(mut b) => b.build(ctx),
+            builder::Builder::StringLiteral(mut b) => b.build(ctx),
+            builder::Builder::NumericLiteral(mut b) => b.build(ctx),
+            builder::Builder::RegExpLiteral(mut b) => b.build(ctx),
+            builder::Builder::BigIntLiteral(mut b) => b.build(ctx),
+            builder::Builder::ThisExpression(mut b) => b.build(ctx),
+            builder::Builder::Super(mut b) => b.build(ctx),
+            builder::Builder::SequenceExpression(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.expressions.visit_child_mut(ctx, visitor, Path::new(self, NodeField::expressions)) {
+                    b.expressions(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ObjectExpression(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.properties.visit_child_mut(ctx, visitor, Path::new(self, NodeField::properties)) {
+                    b.properties(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ArrayExpression(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.elements.visit_child_mut(ctx, visitor, Path::new(self, NodeField::elements)) {
+                    b.elements(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::SpreadElement(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.argument.visit_child_mut(ctx, visitor, Path::new(self, NodeField::argument)) {
+                    b.argument(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::NewExpression(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.callee.visit_child_mut(ctx, visitor, Path::new(self, NodeField::callee)) {
+                    b.callee(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_arguments.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_arguments)) {
+                    b.type_arguments(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.arguments.visit_child_mut(ctx, visitor, Path::new(self, NodeField::arguments)) {
+                    b.arguments(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::YieldExpression(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.argument.visit_child_mut(ctx, visitor, Path::new(self, NodeField::argument)) {
+                    b.argument(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::AwaitExpression(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.argument.visit_child_mut(ctx, visitor, Path::new(self, NodeField::argument)) {
+                    b.argument(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ImportExpression(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.source.visit_child_mut(ctx, visitor, Path::new(self, NodeField::source)) {
+                    b.source(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.options.visit_child_mut(ctx, visitor, Path::new(self, NodeField::options)) {
+                    b.options(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::CallExpression(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.callee.visit_child_mut(ctx, visitor, Path::new(self, NodeField::callee)) {
+                    b.callee(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_arguments.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_arguments)) {
+                    b.type_arguments(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.arguments.visit_child_mut(ctx, visitor, Path::new(self, NodeField::arguments)) {
+                    b.arguments(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::OptionalCallExpression(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.callee.visit_child_mut(ctx, visitor, Path::new(self, NodeField::callee)) {
+                    b.callee(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_arguments.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_arguments)) {
+                    b.type_arguments(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.arguments.visit_child_mut(ctx, visitor, Path::new(self, NodeField::arguments)) {
+                    b.arguments(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::AssignmentExpression(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.left.visit_child_mut(ctx, visitor, Path::new(self, NodeField::left)) {
+                    b.left(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.right.visit_child_mut(ctx, visitor, Path::new(self, NodeField::right)) {
+                    b.right(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::UnaryExpression(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.argument.visit_child_mut(ctx, visitor, Path::new(self, NodeField::argument)) {
+                    b.argument(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::UpdateExpression(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.argument.visit_child_mut(ctx, visitor, Path::new(self, NodeField::argument)) {
+                    b.argument(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::MemberExpression(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.object.visit_child_mut(ctx, visitor, Path::new(self, NodeField::object)) {
+                    b.object(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.property.visit_child_mut(ctx, visitor, Path::new(self, NodeField::property)) {
+                    b.property(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::OptionalMemberExpression(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.object.visit_child_mut(ctx, visitor, Path::new(self, NodeField::object)) {
+                    b.object(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.property.visit_child_mut(ctx, visitor, Path::new(self, NodeField::property)) {
+                    b.property(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::LogicalExpression(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.left.visit_child_mut(ctx, visitor, Path::new(self, NodeField::left)) {
+                    b.left(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.right.visit_child_mut(ctx, visitor, Path::new(self, NodeField::right)) {
+                    b.right(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ConditionalExpression(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.test.visit_child_mut(ctx, visitor, Path::new(self, NodeField::test)) {
+                    b.test(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.alternate.visit_child_mut(ctx, visitor, Path::new(self, NodeField::alternate)) {
+                    b.alternate(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.consequent.visit_child_mut(ctx, visitor, Path::new(self, NodeField::consequent)) {
+                    b.consequent(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::BinaryExpression(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.left.visit_child_mut(ctx, visitor, Path::new(self, NodeField::left)) {
+                    b.left(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.right.visit_child_mut(ctx, visitor, Path::new(self, NodeField::right)) {
+                    b.right(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::Directive(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.value.visit_child_mut(ctx, visitor, Path::new(self, NodeField::value)) {
+                    b.value(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::DirectiveLiteral(mut b) => b.build(ctx),
+            builder::Builder::Identifier(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.type_annotation.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_annotation)) {
+                    b.type_annotation(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::PrivateName(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::MetaProperty(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.meta.visit_child_mut(ctx, visitor, Path::new(self, NodeField::meta)) {
+                    b.meta(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.property.visit_child_mut(ctx, visitor, Path::new(self, NodeField::property)) {
+                    b.property(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::SwitchCase(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.test.visit_child_mut(ctx, visitor, Path::new(self, NodeField::test)) {
+                    b.test(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.consequent.visit_child_mut(ctx, visitor, Path::new(self, NodeField::consequent)) {
+                    b.consequent(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::CatchClause(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.param.visit_child_mut(ctx, visitor, Path::new(self, NodeField::param)) {
+                    b.param(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::VariableDeclarator(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.init.visit_child_mut(ctx, visitor, Path::new(self, NodeField::init)) {
+                    b.init(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::VariableDeclaration(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.declarations.visit_child_mut(ctx, visitor, Path::new(self, NodeField::declarations)) {
+                    b.declarations(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TemplateLiteral(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.quasis.visit_child_mut(ctx, visitor, Path::new(self, NodeField::quasis)) {
+                    b.quasis(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.expressions.visit_child_mut(ctx, visitor, Path::new(self, NodeField::expressions)) {
+                    b.expressions(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TaggedTemplateExpression(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.tag.visit_child_mut(ctx, visitor, Path::new(self, NodeField::tag)) {
+                    b.tag(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.quasi.visit_child_mut(ctx, visitor, Path::new(self, NodeField::quasi)) {
+                    b.quasi(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TemplateElement(mut b) => b.build(ctx),
+            builder::Builder::Property(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.key.visit_child_mut(ctx, visitor, Path::new(self, NodeField::key)) {
+                    b.key(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.value.visit_child_mut(ctx, visitor, Path::new(self, NodeField::value)) {
+                    b.value(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::Decorator(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.expression.visit_child_mut(ctx, visitor, Path::new(self, NodeField::expression)) {
+                    b.expression(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ClassDeclaration(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_parameters.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_parameters)) {
+                    b.type_parameters(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.super_class.visit_child_mut(ctx, visitor, Path::new(self, NodeField::super_class)) {
+                    b.super_class(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.super_type_arguments.visit_child_mut(ctx, visitor, Path::new(self, NodeField::super_type_arguments)) {
+                    b.super_type_arguments(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.implements.visit_child_mut(ctx, visitor, Path::new(self, NodeField::implements)) {
+                    b.implements(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.decorators.visit_child_mut(ctx, visitor, Path::new(self, NodeField::decorators)) {
+                    b.decorators(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ClassExpression(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_parameters.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_parameters)) {
+                    b.type_parameters(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.super_class.visit_child_mut(ctx, visitor, Path::new(self, NodeField::super_class)) {
+                    b.super_class(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.super_type_arguments.visit_child_mut(ctx, visitor, Path::new(self, NodeField::super_type_arguments)) {
+                    b.super_type_arguments(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.implements.visit_child_mut(ctx, visitor, Path::new(self, NodeField::implements)) {
+                    b.implements(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.decorators.visit_child_mut(ctx, visitor, Path::new(self, NodeField::decorators)) {
+                    b.decorators(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ClassBody(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ClassProperty(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.key.visit_child_mut(ctx, visitor, Path::new(self, NodeField::key)) {
+                    b.key(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.value.visit_child_mut(ctx, visitor, Path::new(self, NodeField::value)) {
+                    b.value(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.decorators.visit_child_mut(ctx, visitor, Path::new(self, NodeField::decorators)) {
+                    b.decorators(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.variance.visit_child_mut(ctx, visitor, Path::new(self, NodeField::variance)) {
+                    b.variance(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_annotation.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_annotation)) {
+                    b.type_annotation(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.ts_modifiers.visit_child_mut(ctx, visitor, Path::new(self, NodeField::ts_modifiers)) {
+                    b.ts_modifiers(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ClassPrivateProperty(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.key.visit_child_mut(ctx, visitor, Path::new(self, NodeField::key)) {
+                    b.key(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.value.visit_child_mut(ctx, visitor, Path::new(self, NodeField::value)) {
+                    b.value(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.decorators.visit_child_mut(ctx, visitor, Path::new(self, NodeField::decorators)) {
+                    b.decorators(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.variance.visit_child_mut(ctx, visitor, Path::new(self, NodeField::variance)) {
+                    b.variance(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_annotation.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_annotation)) {
+                    b.type_annotation(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.ts_modifiers.visit_child_mut(ctx, visitor, Path::new(self, NodeField::ts_modifiers)) {
+                    b.ts_modifiers(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::MethodDefinition(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.key.visit_child_mut(ctx, visitor, Path::new(self, NodeField::key)) {
+                    b.key(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.value.visit_child_mut(ctx, visitor, Path::new(self, NodeField::value)) {
+                    b.value(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.decorators.visit_child_mut(ctx, visitor, Path::new(self, NodeField::decorators)) {
+                    b.decorators(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ImportDeclaration(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.specifiers.visit_child_mut(ctx, visitor, Path::new(self, NodeField::specifiers)) {
+                    b.specifiers(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.source.visit_child_mut(ctx, visitor, Path::new(self, NodeField::source)) {
+                    b.source(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.attributes.visit_child_mut(ctx, visitor, Path::new(self, NodeField::attributes)) {
+                    b.attributes(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ImportSpecifier(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.imported.visit_child_mut(ctx, visitor, Path::new(self, NodeField::imported)) {
+                    b.imported(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.local.visit_child_mut(ctx, visitor, Path::new(self, NodeField::local)) {
+                    b.local(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ImportDefaultSpecifier(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.local.visit_child_mut(ctx, visitor, Path::new(self, NodeField::local)) {
+                    b.local(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ImportNamespaceSpecifier(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.local.visit_child_mut(ctx, visitor, Path::new(self, NodeField::local)) {
+                    b.local(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ImportAttribute(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.key.visit_child_mut(ctx, visitor, Path::new(self, NodeField::key)) {
+                    b.key(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.value.visit_child_mut(ctx, visitor, Path::new(self, NodeField::value)) {
+                    b.value(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ExportNamedDeclaration(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.declaration.visit_child_mut(ctx, visitor, Path::new(self, NodeField::declaration)) {
+                    b.declaration(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.specifiers.visit_child_mut(ctx, visitor, Path::new(self, NodeField::specifiers)) {
+                    b.specifiers(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.source.visit_child_mut(ctx, visitor, Path::new(self, NodeField::source)) {
+                    b.source(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ExportSpecifier(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.exported.visit_child_mut(ctx, visitor, Path::new(self, NodeField::exported)) {
+                    b.exported(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.local.visit_child_mut(ctx, visitor, Path::new(self, NodeField::local)) {
+                    b.local(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ExportNamespaceSpecifier(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.exported.visit_child_mut(ctx, visitor, Path::new(self, NodeField::exported)) {
+                    b.exported(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ExportDefaultDeclaration(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.declaration.visit_child_mut(ctx, visitor, Path::new(self, NodeField::declaration)) {
+                    b.declaration(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ExportAllDeclaration(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.source.visit_child_mut(ctx, visitor, Path::new(self, NodeField::source)) {
+                    b.source(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ObjectPattern(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.properties.visit_child_mut(ctx, visitor, Path::new(self, NodeField::properties)) {
+                    b.properties(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_annotation.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_annotation)) {
+                    b.type_annotation(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ArrayPattern(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.elements.visit_child_mut(ctx, visitor, Path::new(self, NodeField::elements)) {
+                    b.elements(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_annotation.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_annotation)) {
+                    b.type_annotation(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::RestElement(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.argument.visit_child_mut(ctx, visitor, Path::new(self, NodeField::argument)) {
+                    b.argument(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::AssignmentPattern(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.left.visit_child_mut(ctx, visitor, Path::new(self, NodeField::left)) {
+                    b.left(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.right.visit_child_mut(ctx, visitor, Path::new(self, NodeField::right)) {
+                    b.right(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::MatchStatementCase(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.pattern.visit_child_mut(ctx, visitor, Path::new(self, NodeField::pattern)) {
+                    b.pattern(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.guard.visit_child_mut(ctx, visitor, Path::new(self, NodeField::guard)) {
+                    b.guard(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::MatchExpression(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.argument.visit_child_mut(ctx, visitor, Path::new(self, NodeField::argument)) {
+                    b.argument(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.cases.visit_child_mut(ctx, visitor, Path::new(self, NodeField::cases)) {
+                    b.cases(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::MatchExpressionCase(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.pattern.visit_child_mut(ctx, visitor, Path::new(self, NodeField::pattern)) {
+                    b.pattern(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.guard.visit_child_mut(ctx, visitor, Path::new(self, NodeField::guard)) {
+                    b.guard(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::MatchWildcardPattern(mut b) => b.build(ctx),
+            builder::Builder::MatchLiteralPattern(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.literal.visit_child_mut(ctx, visitor, Path::new(self, NodeField::literal)) {
+                    b.literal(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::MatchUnaryPattern(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.argument.visit_child_mut(ctx, visitor, Path::new(self, NodeField::argument)) {
+                    b.argument(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::MatchIdentifierPattern(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::MatchBindingPattern(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::MatchObjectPattern(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.properties.visit_child_mut(ctx, visitor, Path::new(self, NodeField::properties)) {
+                    b.properties(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.rest.visit_child_mut(ctx, visitor, Path::new(self, NodeField::rest)) {
+                    b.rest(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::MatchArrayPattern(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.elements.visit_child_mut(ctx, visitor, Path::new(self, NodeField::elements)) {
+                    b.elements(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.rest.visit_child_mut(ctx, visitor, Path::new(self, NodeField::rest)) {
+                    b.rest(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::MatchOrPattern(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.patterns.visit_child_mut(ctx, visitor, Path::new(self, NodeField::patterns)) {
+                    b.patterns(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::MatchAsPattern(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.pattern.visit_child_mut(ctx, visitor, Path::new(self, NodeField::pattern)) {
+                    b.pattern(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.target.visit_child_mut(ctx, visitor, Path::new(self, NodeField::target)) {
+                    b.target(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::MatchMemberPattern(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.base.visit_child_mut(ctx, visitor, Path::new(self, NodeField::base)) {
+                    b.base(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.property.visit_child_mut(ctx, visitor, Path::new(self, NodeField::property)) {
+                    b.property(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::MatchInstancePattern(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.target_constructor.visit_child_mut(ctx, visitor, Path::new(self, NodeField::target_constructor)) {
+                    b.target_constructor(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.properties.visit_child_mut(ctx, visitor, Path::new(self, NodeField::properties)) {
+                    b.properties(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::MatchObjectPatternProperty(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.key.visit_child_mut(ctx, visitor, Path::new(self, NodeField::key)) {
+                    b.key(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.pattern.visit_child_mut(ctx, visitor, Path::new(self, NodeField::pattern)) {
+                    b.pattern(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::MatchInstanceObjectPattern(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.properties.visit_child_mut(ctx, visitor, Path::new(self, NodeField::properties)) {
+                    b.properties(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.rest.visit_child_mut(ctx, visitor, Path::new(self, NodeField::rest)) {
+                    b.rest(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::MatchRestPattern(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.argument.visit_child_mut(ctx, visitor, Path::new(self, NodeField::argument)) {
+                    b.argument(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::JSXIdentifier(mut b) => b.build(ctx),
+            builder::Builder::JSXMemberExpression(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.object.visit_child_mut(ctx, visitor, Path::new(self, NodeField::object)) {
+                    b.object(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.property.visit_child_mut(ctx, visitor, Path::new(self, NodeField::property)) {
+                    b.property(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::JSXNamespacedName(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.namespace.visit_child_mut(ctx, visitor, Path::new(self, NodeField::namespace)) {
+                    b.namespace(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.name.visit_child_mut(ctx, visitor, Path::new(self, NodeField::name)) {
+                    b.name(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::JSXEmptyExpression(mut b) => b.build(ctx),
+            builder::Builder::JSXExpressionContainer(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.expression.visit_child_mut(ctx, visitor, Path::new(self, NodeField::expression)) {
+                    b.expression(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::JSXSpreadChild(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.expression.visit_child_mut(ctx, visitor, Path::new(self, NodeField::expression)) {
+                    b.expression(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::JSXOpeningElement(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.name.visit_child_mut(ctx, visitor, Path::new(self, NodeField::name)) {
+                    b.name(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.attributes.visit_child_mut(ctx, visitor, Path::new(self, NodeField::attributes)) {
+                    b.attributes(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_arguments.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_arguments)) {
+                    b.type_arguments(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::JSXClosingElement(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.name.visit_child_mut(ctx, visitor, Path::new(self, NodeField::name)) {
+                    b.name(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::JSXAttribute(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.name.visit_child_mut(ctx, visitor, Path::new(self, NodeField::name)) {
+                    b.name(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.value.visit_child_mut(ctx, visitor, Path::new(self, NodeField::value)) {
+                    b.value(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::JSXSpreadAttribute(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.argument.visit_child_mut(ctx, visitor, Path::new(self, NodeField::argument)) {
+                    b.argument(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::JSXStringLiteral(mut b) => b.build(ctx),
+            builder::Builder::JSXText(mut b) => b.build(ctx),
+            builder::Builder::JSXElement(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.opening_element.visit_child_mut(ctx, visitor, Path::new(self, NodeField::opening_element)) {
+                    b.opening_element(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.children.visit_child_mut(ctx, visitor, Path::new(self, NodeField::children)) {
+                    b.children(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.closing_element.visit_child_mut(ctx, visitor, Path::new(self, NodeField::closing_element)) {
+                    b.closing_element(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::JSXFragment(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.opening_fragment.visit_child_mut(ctx, visitor, Path::new(self, NodeField::opening_fragment)) {
+                    b.opening_fragment(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.children.visit_child_mut(ctx, visitor, Path::new(self, NodeField::children)) {
+                    b.children(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.closing_fragment.visit_child_mut(ctx, visitor, Path::new(self, NodeField::closing_fragment)) {
+                    b.closing_fragment(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::JSXOpeningFragment(mut b) => b.build(ctx),
+            builder::Builder::JSXClosingFragment(mut b) => b.build(ctx),
+            builder::Builder::ExistsTypeAnnotation(mut b) => b.build(ctx),
+            builder::Builder::EmptyTypeAnnotation(mut b) => b.build(ctx),
+            builder::Builder::StringTypeAnnotation(mut b) => b.build(ctx),
+            builder::Builder::NumberTypeAnnotation(mut b) => b.build(ctx),
+            builder::Builder::StringLiteralTypeAnnotation(mut b) => b.build(ctx),
+            builder::Builder::NumberLiteralTypeAnnotation(mut b) => b.build(ctx),
+            builder::Builder::BigIntLiteralTypeAnnotation(mut b) => b.build(ctx),
+            builder::Builder::BooleanTypeAnnotation(mut b) => b.build(ctx),
+            builder::Builder::BooleanLiteralTypeAnnotation(mut b) => b.build(ctx),
+            builder::Builder::NullLiteralTypeAnnotation(mut b) => b.build(ctx),
+            builder::Builder::SymbolTypeAnnotation(mut b) => b.build(ctx),
+            builder::Builder::AnyTypeAnnotation(mut b) => b.build(ctx),
+            builder::Builder::MixedTypeAnnotation(mut b) => b.build(ctx),
+            builder::Builder::BigIntTypeAnnotation(mut b) => b.build(ctx),
+            builder::Builder::VoidTypeAnnotation(mut b) => b.build(ctx),
+            builder::Builder::NeverTypeAnnotation(mut b) => b.build(ctx),
+            builder::Builder::UnknownTypeAnnotation(mut b) => b.build(ctx),
+            builder::Builder::UndefinedTypeAnnotation(mut b) => b.build(ctx),
+            builder::Builder::FunctionTypeAnnotation(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.params.visit_child_mut(ctx, visitor, Path::new(self, NodeField::params)) {
+                    b.params(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.this.visit_child_mut(ctx, visitor, Path::new(self, NodeField::this)) {
+                    b.this(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.return_type.visit_child_mut(ctx, visitor, Path::new(self, NodeField::return_type)) {
+                    b.return_type(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.rest.visit_child_mut(ctx, visitor, Path::new(self, NodeField::rest)) {
+                    b.rest(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_parameters.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_parameters)) {
+                    b.type_parameters(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::HookTypeAnnotation(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.params.visit_child_mut(ctx, visitor, Path::new(self, NodeField::params)) {
+                    b.params(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.return_type.visit_child_mut(ctx, visitor, Path::new(self, NodeField::return_type)) {
+                    b.return_type(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.rest.visit_child_mut(ctx, visitor, Path::new(self, NodeField::rest)) {
+                    b.rest(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_parameters.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_parameters)) {
+                    b.type_parameters(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::FunctionTypeParam(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.name.visit_child_mut(ctx, visitor, Path::new(self, NodeField::name)) {
+                    b.name(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_annotation.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_annotation)) {
+                    b.type_annotation(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ComponentTypeAnnotation(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.params.visit_child_mut(ctx, visitor, Path::new(self, NodeField::params)) {
+                    b.params(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.rest.visit_child_mut(ctx, visitor, Path::new(self, NodeField::rest)) {
+                    b.rest(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_parameters.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_parameters)) {
+                    b.type_parameters(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.renders_type.visit_child_mut(ctx, visitor, Path::new(self, NodeField::renders_type)) {
+                    b.renders_type(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ComponentTypeParameter(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.name.visit_child_mut(ctx, visitor, Path::new(self, NodeField::name)) {
+                    b.name(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_annotation.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_annotation)) {
+                    b.type_annotation(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::NullableTypeAnnotation(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.type_annotation.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_annotation)) {
+                    b.type_annotation(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::QualifiedTypeIdentifier(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.qualification.visit_child_mut(ctx, visitor, Path::new(self, NodeField::qualification)) {
+                    b.qualification(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TypeofTypeAnnotation(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.argument.visit_child_mut(ctx, visitor, Path::new(self, NodeField::argument)) {
+                    b.argument(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_arguments.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_arguments)) {
+                    b.type_arguments(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::KeyofTypeAnnotation(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.argument.visit_child_mut(ctx, visitor, Path::new(self, NodeField::argument)) {
+                    b.argument(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TypeOperator(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.type_annotation.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_annotation)) {
+                    b.type_annotation(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::QualifiedTypeofIdentifier(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.qualification.visit_child_mut(ctx, visitor, Path::new(self, NodeField::qualification)) {
+                    b.qualification(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TupleTypeAnnotation(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.element_types.visit_child_mut(ctx, visitor, Path::new(self, NodeField::element_types)) {
+                    b.element_types(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TupleTypeSpreadElement(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.label.visit_child_mut(ctx, visitor, Path::new(self, NodeField::label)) {
+                    b.label(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_annotation.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_annotation)) {
+                    b.type_annotation(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TupleTypeLabeledElement(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.label.visit_child_mut(ctx, visitor, Path::new(self, NodeField::label)) {
+                    b.label(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.element_type.visit_child_mut(ctx, visitor, Path::new(self, NodeField::element_type)) {
+                    b.element_type(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.variance.visit_child_mut(ctx, visitor, Path::new(self, NodeField::variance)) {
+                    b.variance(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ArrayTypeAnnotation(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.element_type.visit_child_mut(ctx, visitor, Path::new(self, NodeField::element_type)) {
+                    b.element_type(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::InferTypeAnnotation(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.type_parameter.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_parameter)) {
+                    b.type_parameter(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::UnionTypeAnnotation(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.types.visit_child_mut(ctx, visitor, Path::new(self, NodeField::types)) {
+                    b.types(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::IntersectionTypeAnnotation(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.types.visit_child_mut(ctx, visitor, Path::new(self, NodeField::types)) {
+                    b.types(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::GenericTypeAnnotation(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_parameters.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_parameters)) {
+                    b.type_parameters(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::IndexedAccessType(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.object_type.visit_child_mut(ctx, visitor, Path::new(self, NodeField::object_type)) {
+                    b.object_type(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.index_type.visit_child_mut(ctx, visitor, Path::new(self, NodeField::index_type)) {
+                    b.index_type(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::OptionalIndexedAccessType(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.object_type.visit_child_mut(ctx, visitor, Path::new(self, NodeField::object_type)) {
+                    b.object_type(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.index_type.visit_child_mut(ctx, visitor, Path::new(self, NodeField::index_type)) {
+                    b.index_type(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ConditionalTypeAnnotation(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.check_type.visit_child_mut(ctx, visitor, Path::new(self, NodeField::check_type)) {
+                    b.check_type(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.extends_type.visit_child_mut(ctx, visitor, Path::new(self, NodeField::extends_type)) {
+                    b.extends_type(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.true_type.visit_child_mut(ctx, visitor, Path::new(self, NodeField::true_type)) {
+                    b.true_type(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.false_type.visit_child_mut(ctx, visitor, Path::new(self, NodeField::false_type)) {
+                    b.false_type(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TypePredicate(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.parameter_name.visit_child_mut(ctx, visitor, Path::new(self, NodeField::parameter_name)) {
+                    b.parameter_name(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_annotation.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_annotation)) {
+                    b.type_annotation(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::InterfaceTypeAnnotation(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.extends.visit_child_mut(ctx, visitor, Path::new(self, NodeField::extends)) {
+                    b.extends(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TypeAlias(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_parameters.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_parameters)) {
+                    b.type_parameters(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.right.visit_child_mut(ctx, visitor, Path::new(self, NodeField::right)) {
+                    b.right(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::OpaqueType(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_parameters.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_parameters)) {
+                    b.type_parameters(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.impltype.visit_child_mut(ctx, visitor, Path::new(self, NodeField::impltype)) {
+                    b.impltype(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.lower_bound.visit_child_mut(ctx, visitor, Path::new(self, NodeField::lower_bound)) {
+                    b.lower_bound(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.upper_bound.visit_child_mut(ctx, visitor, Path::new(self, NodeField::upper_bound)) {
+                    b.upper_bound(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.supertype.visit_child_mut(ctx, visitor, Path::new(self, NodeField::supertype)) {
+                    b.supertype(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::InterfaceDeclaration(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_parameters.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_parameters)) {
+                    b.type_parameters(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.extends.visit_child_mut(ctx, visitor, Path::new(self, NodeField::extends)) {
+                    b.extends(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::DeclareTypeAlias(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_parameters.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_parameters)) {
+                    b.type_parameters(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.right.visit_child_mut(ctx, visitor, Path::new(self, NodeField::right)) {
+                    b.right(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::DeclareOpaqueType(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_parameters.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_parameters)) {
+                    b.type_parameters(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.impltype.visit_child_mut(ctx, visitor, Path::new(self, NodeField::impltype)) {
+                    b.impltype(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.lower_bound.visit_child_mut(ctx, visitor, Path::new(self, NodeField::lower_bound)) {
+                    b.lower_bound(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.upper_bound.visit_child_mut(ctx, visitor, Path::new(self, NodeField::upper_bound)) {
+                    b.upper_bound(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.supertype.visit_child_mut(ctx, visitor, Path::new(self, NodeField::supertype)) {
+                    b.supertype(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::DeclareInterface(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_parameters.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_parameters)) {
+                    b.type_parameters(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.extends.visit_child_mut(ctx, visitor, Path::new(self, NodeField::extends)) {
+                    b.extends(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::DeclareClass(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_parameters.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_parameters)) {
+                    b.type_parameters(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.extends.visit_child_mut(ctx, visitor, Path::new(self, NodeField::extends)) {
+                    b.extends(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.implements.visit_child_mut(ctx, visitor, Path::new(self, NodeField::implements)) {
+                    b.implements(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.mixins.visit_child_mut(ctx, visitor, Path::new(self, NodeField::mixins)) {
+                    b.mixins(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::DeclareFunction(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.predicate.visit_child_mut(ctx, visitor, Path::new(self, NodeField::predicate)) {
+                    b.predicate(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::DeclareHook(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::DeclareComponent(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.params.visit_child_mut(ctx, visitor, Path::new(self, NodeField::params)) {
+                    b.params(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.rest.visit_child_mut(ctx, visitor, Path::new(self, NodeField::rest)) {
+                    b.rest(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_parameters.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_parameters)) {
+                    b.type_parameters(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.renders_type.visit_child_mut(ctx, visitor, Path::new(self, NodeField::renders_type)) {
+                    b.renders_type(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::DeclareVariable(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::DeclareEnum(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::DeclareExportDeclaration(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.declaration.visit_child_mut(ctx, visitor, Path::new(self, NodeField::declaration)) {
+                    b.declaration(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.specifiers.visit_child_mut(ctx, visitor, Path::new(self, NodeField::specifiers)) {
+                    b.specifiers(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.source.visit_child_mut(ctx, visitor, Path::new(self, NodeField::source)) {
+                    b.source(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::DeclareExportAllDeclaration(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.source.visit_child_mut(ctx, visitor, Path::new(self, NodeField::source)) {
+                    b.source(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::DeclareModule(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::DeclareNamespace(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::DeclareModuleExports(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.type_annotation.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_annotation)) {
+                    b.type_annotation(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::InterfaceExtends(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_parameters.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_parameters)) {
+                    b.type_parameters(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ClassImplements(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_parameters.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_parameters)) {
+                    b.type_parameters(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TypeAnnotation(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.type_annotation.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_annotation)) {
+                    b.type_annotation(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ObjectTypeAnnotation(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.properties.visit_child_mut(ctx, visitor, Path::new(self, NodeField::properties)) {
+                    b.properties(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.indexers.visit_child_mut(ctx, visitor, Path::new(self, NodeField::indexers)) {
+                    b.indexers(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.call_properties.visit_child_mut(ctx, visitor, Path::new(self, NodeField::call_properties)) {
+                    b.call_properties(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.internal_slots.visit_child_mut(ctx, visitor, Path::new(self, NodeField::internal_slots)) {
+                    b.internal_slots(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ObjectTypeProperty(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.key.visit_child_mut(ctx, visitor, Path::new(self, NodeField::key)) {
+                    b.key(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.value.visit_child_mut(ctx, visitor, Path::new(self, NodeField::value)) {
+                    b.value(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.variance.visit_child_mut(ctx, visitor, Path::new(self, NodeField::variance)) {
+                    b.variance(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ObjectTypeSpreadProperty(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.argument.visit_child_mut(ctx, visitor, Path::new(self, NodeField::argument)) {
+                    b.argument(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ObjectTypeInternalSlot(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.value.visit_child_mut(ctx, visitor, Path::new(self, NodeField::value)) {
+                    b.value(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ObjectTypeCallProperty(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.value.visit_child_mut(ctx, visitor, Path::new(self, NodeField::value)) {
+                    b.value(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ObjectTypeIndexer(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.key.visit_child_mut(ctx, visitor, Path::new(self, NodeField::key)) {
+                    b.key(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.value.visit_child_mut(ctx, visitor, Path::new(self, NodeField::value)) {
+                    b.value(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.variance.visit_child_mut(ctx, visitor, Path::new(self, NodeField::variance)) {
+                    b.variance(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ObjectTypeMappedTypeProperty(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.key_tparam.visit_child_mut(ctx, visitor, Path::new(self, NodeField::key_tparam)) {
+                    b.key_tparam(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.prop_type.visit_child_mut(ctx, visitor, Path::new(self, NodeField::prop_type)) {
+                    b.prop_type(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.source_type.visit_child_mut(ctx, visitor, Path::new(self, NodeField::source_type)) {
+                    b.source_type(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.variance.visit_child_mut(ctx, visitor, Path::new(self, NodeField::variance)) {
+                    b.variance(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::Variance(mut b) => b.build(ctx),
+            builder::Builder::TypeParameterDeclaration(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.params.visit_child_mut(ctx, visitor, Path::new(self, NodeField::params)) {
+                    b.params(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TypeParameter(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.bound.visit_child_mut(ctx, visitor, Path::new(self, NodeField::bound)) {
+                    b.bound(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.variance.visit_child_mut(ctx, visitor, Path::new(self, NodeField::variance)) {
+                    b.variance(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.default.visit_child_mut(ctx, visitor, Path::new(self, NodeField::default)) {
+                    b.default(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TypeParameterInstantiation(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.params.visit_child_mut(ctx, visitor, Path::new(self, NodeField::params)) {
+                    b.params(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TypeCastExpression(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.expression.visit_child_mut(ctx, visitor, Path::new(self, NodeField::expression)) {
+                    b.expression(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_annotation.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_annotation)) {
+                    b.type_annotation(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::AsExpression(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.expression.visit_child_mut(ctx, visitor, Path::new(self, NodeField::expression)) {
+                    b.expression(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_annotation.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_annotation)) {
+                    b.type_annotation(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::AsConstExpression(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.expression.visit_child_mut(ctx, visitor, Path::new(self, NodeField::expression)) {
+                    b.expression(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::InferredPredicate(mut b) => b.build(ctx),
+            builder::Builder::DeclaredPredicate(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.value.visit_child_mut(ctx, visitor, Path::new(self, NodeField::value)) {
+                    b.value(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::EnumDeclaration(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::EnumStringBody(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.members.visit_child_mut(ctx, visitor, Path::new(self, NodeField::members)) {
+                    b.members(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::EnumNumberBody(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.members.visit_child_mut(ctx, visitor, Path::new(self, NodeField::members)) {
+                    b.members(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::EnumBigIntBody(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.members.visit_child_mut(ctx, visitor, Path::new(self, NodeField::members)) {
+                    b.members(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::EnumBooleanBody(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.members.visit_child_mut(ctx, visitor, Path::new(self, NodeField::members)) {
+                    b.members(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::EnumSymbolBody(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.members.visit_child_mut(ctx, visitor, Path::new(self, NodeField::members)) {
+                    b.members(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::EnumDefaultedMember(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::EnumStringMember(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.init.visit_child_mut(ctx, visitor, Path::new(self, NodeField::init)) {
+                    b.init(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::EnumNumberMember(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.init.visit_child_mut(ctx, visitor, Path::new(self, NodeField::init)) {
+                    b.init(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::EnumBigIntMember(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.init.visit_child_mut(ctx, visitor, Path::new(self, NodeField::init)) {
+                    b.init(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::EnumBooleanMember(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.init.visit_child_mut(ctx, visitor, Path::new(self, NodeField::init)) {
+                    b.init(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::ComponentParameter(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.name.visit_child_mut(ctx, visitor, Path::new(self, NodeField::name)) {
+                    b.name(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.local.visit_child_mut(ctx, visitor, Path::new(self, NodeField::local)) {
+                    b.local(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::RecordDeclaration(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_parameters.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_parameters)) {
+                    b.type_parameters(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.implements.visit_child_mut(ctx, visitor, Path::new(self, NodeField::implements)) {
+                    b.implements(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::RecordDeclarationImplements(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_arguments.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_arguments)) {
+                    b.type_arguments(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::RecordDeclarationBody(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.elements.visit_child_mut(ctx, visitor, Path::new(self, NodeField::elements)) {
+                    b.elements(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::RecordDeclarationProperty(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.key.visit_child_mut(ctx, visitor, Path::new(self, NodeField::key)) {
+                    b.key(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_annotation.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_annotation)) {
+                    b.type_annotation(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.default_value.visit_child_mut(ctx, visitor, Path::new(self, NodeField::default_value)) {
+                    b.default_value(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::RecordDeclarationStaticProperty(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.key.visit_child_mut(ctx, visitor, Path::new(self, NodeField::key)) {
+                    b.key(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_annotation.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_annotation)) {
+                    b.type_annotation(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.value.visit_child_mut(ctx, visitor, Path::new(self, NodeField::value)) {
+                    b.value(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::RecordExpression(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.record_constructor.visit_child_mut(ctx, visitor, Path::new(self, NodeField::record_constructor)) {
+                    b.record_constructor(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_arguments.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_arguments)) {
+                    b.type_arguments(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.properties.visit_child_mut(ctx, visitor, Path::new(self, NodeField::properties)) {
+                    b.properties(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::RecordExpressionProperties(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.properties.visit_child_mut(ctx, visitor, Path::new(self, NodeField::properties)) {
+                    b.properties(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSTypeAnnotation(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.type_annotation.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_annotation)) {
+                    b.type_annotation(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSAnyKeyword(mut b) => b.build(ctx),
+            builder::Builder::TSNumberKeyword(mut b) => b.build(ctx),
+            builder::Builder::TSBooleanKeyword(mut b) => b.build(ctx),
+            builder::Builder::TSStringKeyword(mut b) => b.build(ctx),
+            builder::Builder::TSSymbolKeyword(mut b) => b.build(ctx),
+            builder::Builder::TSVoidKeyword(mut b) => b.build(ctx),
+            builder::Builder::TSUndefinedKeyword(mut b) => b.build(ctx),
+            builder::Builder::TSUnknownKeyword(mut b) => b.build(ctx),
+            builder::Builder::TSNeverKeyword(mut b) => b.build(ctx),
+            builder::Builder::TSBigIntKeyword(mut b) => b.build(ctx),
+            builder::Builder::TSThisType(mut b) => b.build(ctx),
+            builder::Builder::TSLiteralType(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.literal.visit_child_mut(ctx, visitor, Path::new(self, NodeField::literal)) {
+                    b.literal(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSIndexedAccessType(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.object_type.visit_child_mut(ctx, visitor, Path::new(self, NodeField::object_type)) {
+                    b.object_type(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.index_type.visit_child_mut(ctx, visitor, Path::new(self, NodeField::index_type)) {
+                    b.index_type(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSArrayType(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.element_type.visit_child_mut(ctx, visitor, Path::new(self, NodeField::element_type)) {
+                    b.element_type(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSTypeReference(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.type_name.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_name)) {
+                    b.type_name(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_parameters.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_parameters)) {
+                    b.type_parameters(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSQualifiedName(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.left.visit_child_mut(ctx, visitor, Path::new(self, NodeField::left)) {
+                    b.left(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.right.visit_child_mut(ctx, visitor, Path::new(self, NodeField::right)) {
+                    b.right(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSFunctionType(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.params.visit_child_mut(ctx, visitor, Path::new(self, NodeField::params)) {
+                    b.params(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.return_type.visit_child_mut(ctx, visitor, Path::new(self, NodeField::return_type)) {
+                    b.return_type(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_parameters.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_parameters)) {
+                    b.type_parameters(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSConstructorType(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.params.visit_child_mut(ctx, visitor, Path::new(self, NodeField::params)) {
+                    b.params(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.return_type.visit_child_mut(ctx, visitor, Path::new(self, NodeField::return_type)) {
+                    b.return_type(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_parameters.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_parameters)) {
+                    b.type_parameters(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSTypePredicate(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.parameter_name.visit_child_mut(ctx, visitor, Path::new(self, NodeField::parameter_name)) {
+                    b.parameter_name(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_annotation.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_annotation)) {
+                    b.type_annotation(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSTupleType(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.element_types.visit_child_mut(ctx, visitor, Path::new(self, NodeField::element_types)) {
+                    b.element_types(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSTypeAssertion(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.type_annotation.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_annotation)) {
+                    b.type_annotation(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.expression.visit_child_mut(ctx, visitor, Path::new(self, NodeField::expression)) {
+                    b.expression(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSAsExpression(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.expression.visit_child_mut(ctx, visitor, Path::new(self, NodeField::expression)) {
+                    b.expression(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_annotation.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_annotation)) {
+                    b.type_annotation(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSParameterProperty(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.parameter.visit_child_mut(ctx, visitor, Path::new(self, NodeField::parameter)) {
+                    b.parameter(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSTypeAliasDeclaration(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_parameters.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_parameters)) {
+                    b.type_parameters(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_annotation.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_annotation)) {
+                    b.type_annotation(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSInterfaceDeclaration(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.extends.visit_child_mut(ctx, visitor, Path::new(self, NodeField::extends)) {
+                    b.extends(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_parameters.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_parameters)) {
+                    b.type_parameters(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSInterfaceHeritage(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.expression.visit_child_mut(ctx, visitor, Path::new(self, NodeField::expression)) {
+                    b.expression(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_parameters.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_parameters)) {
+                    b.type_parameters(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSInterfaceBody(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSEnumDeclaration(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.members.visit_child_mut(ctx, visitor, Path::new(self, NodeField::members)) {
+                    b.members(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSEnumMember(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.initializer.visit_child_mut(ctx, visitor, Path::new(self, NodeField::initializer)) {
+                    b.initializer(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSModuleDeclaration(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSModuleBlock(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.body.visit_child_mut(ctx, visitor, Path::new(self, NodeField::body)) {
+                    b.body(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSModuleMember(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.id.visit_child_mut(ctx, visitor, Path::new(self, NodeField::id)) {
+                    b.id(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.initializer.visit_child_mut(ctx, visitor, Path::new(self, NodeField::initializer)) {
+                    b.initializer(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSTypeParameterDeclaration(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.params.visit_child_mut(ctx, visitor, Path::new(self, NodeField::params)) {
+                    b.params(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSTypeParameter(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.name.visit_child_mut(ctx, visitor, Path::new(self, NodeField::name)) {
+                    b.name(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.constraint.visit_child_mut(ctx, visitor, Path::new(self, NodeField::constraint)) {
+                    b.constraint(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.default.visit_child_mut(ctx, visitor, Path::new(self, NodeField::default)) {
+                    b.default(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSTypeParameterInstantiation(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.params.visit_child_mut(ctx, visitor, Path::new(self, NodeField::params)) {
+                    b.params(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSUnionType(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.types.visit_child_mut(ctx, visitor, Path::new(self, NodeField::types)) {
+                    b.types(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSIntersectionType(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.types.visit_child_mut(ctx, visitor, Path::new(self, NodeField::types)) {
+                    b.types(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSTypeQuery(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.expr_name.visit_child_mut(ctx, visitor, Path::new(self, NodeField::expr_name)) {
+                    b.expr_name(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSConditionalType(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.check_type.visit_child_mut(ctx, visitor, Path::new(self, NodeField::check_type)) {
+                    b.check_type(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.extends_type.visit_child_mut(ctx, visitor, Path::new(self, NodeField::extends_type)) {
+                    b.extends_type(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.true_type.visit_child_mut(ctx, visitor, Path::new(self, NodeField::true_type)) {
+                    b.true_type(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.false_type.visit_child_mut(ctx, visitor, Path::new(self, NodeField::false_type)) {
+                    b.false_type(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSTypeLiteral(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.members.visit_child_mut(ctx, visitor, Path::new(self, NodeField::members)) {
+                    b.members(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSPropertySignature(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.key.visit_child_mut(ctx, visitor, Path::new(self, NodeField::key)) {
+                    b.key(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_annotation.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_annotation)) {
+                    b.type_annotation(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.initializer.visit_child_mut(ctx, visitor, Path::new(self, NodeField::initializer)) {
+                    b.initializer(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSMethodSignature(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.key.visit_child_mut(ctx, visitor, Path::new(self, NodeField::key)) {
+                    b.key(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.params.visit_child_mut(ctx, visitor, Path::new(self, NodeField::params)) {
+                    b.params(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.return_type.visit_child_mut(ctx, visitor, Path::new(self, NodeField::return_type)) {
+                    b.return_type(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSIndexSignature(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.parameters.visit_child_mut(ctx, visitor, Path::new(self, NodeField::parameters)) {
+                    b.parameters(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.type_annotation.visit_child_mut(ctx, visitor, Path::new(self, NodeField::type_annotation)) {
+                    b.type_annotation(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSCallSignatureDeclaration(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.params.visit_child_mut(ctx, visitor, Path::new(self, NodeField::params)) {
+                    b.params(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.return_type.visit_child_mut(ctx, visitor, Path::new(self, NodeField::return_type)) {
+                    b.return_type(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::TSModifiers(mut b) => b.build(ctx),
+            builder::Builder::CoverEmptyArgs(mut b) => b.build(ctx),
+            builder::Builder::CoverTrailingComma(mut b) => b.build(ctx),
+            builder::Builder::CoverInitializer(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.init.visit_child_mut(ctx, visitor, Path::new(self, NodeField::init)) {
+                    b.init(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::CoverRestElement(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.rest.visit_child_mut(ctx, visitor, Path::new(self, NodeField::rest)) {
+                    b.rest(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::CoverTypedIdentifier(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.left.visit_child_mut(ctx, visitor, Path::new(self, NodeField::left)) {
+                    b.left(v);
+                }
+                if let TransformResult::Changed(v) =
+                    b.inner.right.visit_child_mut(ctx, visitor, Path::new(self, NodeField::right)) {
+                    b.right(v);
+                }
+                b.build(ctx)
+            }
+            builder::Builder::SHBuiltin(mut b) => b.build(ctx),
+            builder::Builder::ImplicitCheckedCast(mut b) => {
+                if let TransformResult::Changed(v) =
+                    b.inner.argument.visit_child_mut(ctx, visitor, Path::new(self, NodeField::argument)) {
+                    b.argument(v);
+                }
+                b.build(ctx)
+            }
+        }
+    }
+
     pub fn mark_lists<F: FnMut(&NodeList<'gc>)>(&'gc self, cb: &mut F) {
         match self {
             Node::Program(n) => { cb(&n.body); cb(&n.decorations.get()); cb(&n.dummy_param_list.get()); }
@@ -9363,5 +11905,8444 @@ impl<'gc> Node<'gc> {
             Node::TSCallSignatureDeclaration(n) => { cb(&n.params); }
             _ => {}
         }
+    }
+}
+
+/// Per-kind node builders: clone a node with (optionally) one
+/// structural-child field changed. The rebuild primitive used by
+/// `Node::visit_children_mut`.
+pub mod builder {
+    use std::cell::Cell;
+    use super::*;
+    use crate::node_child::NodeChild;
+    use crate::visitor::TransformResult;
+
+    /// One builder per node kind; clone-with-one-field-changed.
+    #[derive(Debug)]
+    pub enum Builder<'gc> {
+        Empty(self::Empty<'gc>),
+        Metadata(self::Metadata<'gc>),
+        Program(self::Program<'gc>),
+        FunctionExpression(self::FunctionExpression<'gc>),
+        ArrowFunctionExpression(self::ArrowFunctionExpression<'gc>),
+        FunctionDeclaration(self::FunctionDeclaration<'gc>),
+        ComponentDeclaration(self::ComponentDeclaration<'gc>),
+        HookDeclaration(self::HookDeclaration<'gc>),
+        MatchStatement(self::MatchStatement<'gc>),
+        WhileStatement(self::WhileStatement<'gc>),
+        DoWhileStatement(self::DoWhileStatement<'gc>),
+        ForInStatement(self::ForInStatement<'gc>),
+        ForOfStatement(self::ForOfStatement<'gc>),
+        ForStatement(self::ForStatement<'gc>),
+        DebuggerStatement(self::DebuggerStatement<'gc>),
+        EmptyStatement(self::EmptyStatement<'gc>),
+        BlockStatement(self::BlockStatement<'gc>),
+        StaticBlock(self::StaticBlock<'gc>),
+        BreakStatement(self::BreakStatement<'gc>),
+        ContinueStatement(self::ContinueStatement<'gc>),
+        ThrowStatement(self::ThrowStatement<'gc>),
+        ReturnStatement(self::ReturnStatement<'gc>),
+        WithStatement(self::WithStatement<'gc>),
+        SwitchStatement(self::SwitchStatement<'gc>),
+        LabeledStatement(self::LabeledStatement<'gc>),
+        ExpressionStatement(self::ExpressionStatement<'gc>),
+        TryStatement(self::TryStatement<'gc>),
+        IfStatement(self::IfStatement<'gc>),
+        NullLiteral(self::NullLiteral<'gc>),
+        BooleanLiteral(self::BooleanLiteral<'gc>),
+        StringLiteral(self::StringLiteral<'gc>),
+        NumericLiteral(self::NumericLiteral<'gc>),
+        RegExpLiteral(self::RegExpLiteral<'gc>),
+        BigIntLiteral(self::BigIntLiteral<'gc>),
+        ThisExpression(self::ThisExpression<'gc>),
+        Super(self::Super<'gc>),
+        SequenceExpression(self::SequenceExpression<'gc>),
+        ObjectExpression(self::ObjectExpression<'gc>),
+        ArrayExpression(self::ArrayExpression<'gc>),
+        SpreadElement(self::SpreadElement<'gc>),
+        NewExpression(self::NewExpression<'gc>),
+        YieldExpression(self::YieldExpression<'gc>),
+        AwaitExpression(self::AwaitExpression<'gc>),
+        ImportExpression(self::ImportExpression<'gc>),
+        CallExpression(self::CallExpression<'gc>),
+        OptionalCallExpression(self::OptionalCallExpression<'gc>),
+        AssignmentExpression(self::AssignmentExpression<'gc>),
+        UnaryExpression(self::UnaryExpression<'gc>),
+        UpdateExpression(self::UpdateExpression<'gc>),
+        MemberExpression(self::MemberExpression<'gc>),
+        OptionalMemberExpression(self::OptionalMemberExpression<'gc>),
+        LogicalExpression(self::LogicalExpression<'gc>),
+        ConditionalExpression(self::ConditionalExpression<'gc>),
+        BinaryExpression(self::BinaryExpression<'gc>),
+        Directive(self::Directive<'gc>),
+        DirectiveLiteral(self::DirectiveLiteral<'gc>),
+        Identifier(self::Identifier<'gc>),
+        PrivateName(self::PrivateName<'gc>),
+        MetaProperty(self::MetaProperty<'gc>),
+        SwitchCase(self::SwitchCase<'gc>),
+        CatchClause(self::CatchClause<'gc>),
+        VariableDeclarator(self::VariableDeclarator<'gc>),
+        VariableDeclaration(self::VariableDeclaration<'gc>),
+        TemplateLiteral(self::TemplateLiteral<'gc>),
+        TaggedTemplateExpression(self::TaggedTemplateExpression<'gc>),
+        TemplateElement(self::TemplateElement<'gc>),
+        Property(self::Property<'gc>),
+        Decorator(self::Decorator<'gc>),
+        ClassDeclaration(self::ClassDeclaration<'gc>),
+        ClassExpression(self::ClassExpression<'gc>),
+        ClassBody(self::ClassBody<'gc>),
+        ClassProperty(self::ClassProperty<'gc>),
+        ClassPrivateProperty(self::ClassPrivateProperty<'gc>),
+        MethodDefinition(self::MethodDefinition<'gc>),
+        ImportDeclaration(self::ImportDeclaration<'gc>),
+        ImportSpecifier(self::ImportSpecifier<'gc>),
+        ImportDefaultSpecifier(self::ImportDefaultSpecifier<'gc>),
+        ImportNamespaceSpecifier(self::ImportNamespaceSpecifier<'gc>),
+        ImportAttribute(self::ImportAttribute<'gc>),
+        ExportNamedDeclaration(self::ExportNamedDeclaration<'gc>),
+        ExportSpecifier(self::ExportSpecifier<'gc>),
+        ExportNamespaceSpecifier(self::ExportNamespaceSpecifier<'gc>),
+        ExportDefaultDeclaration(self::ExportDefaultDeclaration<'gc>),
+        ExportAllDeclaration(self::ExportAllDeclaration<'gc>),
+        ObjectPattern(self::ObjectPattern<'gc>),
+        ArrayPattern(self::ArrayPattern<'gc>),
+        RestElement(self::RestElement<'gc>),
+        AssignmentPattern(self::AssignmentPattern<'gc>),
+        MatchStatementCase(self::MatchStatementCase<'gc>),
+        MatchExpression(self::MatchExpression<'gc>),
+        MatchExpressionCase(self::MatchExpressionCase<'gc>),
+        MatchWildcardPattern(self::MatchWildcardPattern<'gc>),
+        MatchLiteralPattern(self::MatchLiteralPattern<'gc>),
+        MatchUnaryPattern(self::MatchUnaryPattern<'gc>),
+        MatchIdentifierPattern(self::MatchIdentifierPattern<'gc>),
+        MatchBindingPattern(self::MatchBindingPattern<'gc>),
+        MatchObjectPattern(self::MatchObjectPattern<'gc>),
+        MatchArrayPattern(self::MatchArrayPattern<'gc>),
+        MatchOrPattern(self::MatchOrPattern<'gc>),
+        MatchAsPattern(self::MatchAsPattern<'gc>),
+        MatchMemberPattern(self::MatchMemberPattern<'gc>),
+        MatchInstancePattern(self::MatchInstancePattern<'gc>),
+        MatchObjectPatternProperty(self::MatchObjectPatternProperty<'gc>),
+        MatchInstanceObjectPattern(self::MatchInstanceObjectPattern<'gc>),
+        MatchRestPattern(self::MatchRestPattern<'gc>),
+        JSXIdentifier(self::JSXIdentifier<'gc>),
+        JSXMemberExpression(self::JSXMemberExpression<'gc>),
+        JSXNamespacedName(self::JSXNamespacedName<'gc>),
+        JSXEmptyExpression(self::JSXEmptyExpression<'gc>),
+        JSXExpressionContainer(self::JSXExpressionContainer<'gc>),
+        JSXSpreadChild(self::JSXSpreadChild<'gc>),
+        JSXOpeningElement(self::JSXOpeningElement<'gc>),
+        JSXClosingElement(self::JSXClosingElement<'gc>),
+        JSXAttribute(self::JSXAttribute<'gc>),
+        JSXSpreadAttribute(self::JSXSpreadAttribute<'gc>),
+        JSXStringLiteral(self::JSXStringLiteral<'gc>),
+        JSXText(self::JSXText<'gc>),
+        JSXElement(self::JSXElement<'gc>),
+        JSXFragment(self::JSXFragment<'gc>),
+        JSXOpeningFragment(self::JSXOpeningFragment<'gc>),
+        JSXClosingFragment(self::JSXClosingFragment<'gc>),
+        ExistsTypeAnnotation(self::ExistsTypeAnnotation<'gc>),
+        EmptyTypeAnnotation(self::EmptyTypeAnnotation<'gc>),
+        StringTypeAnnotation(self::StringTypeAnnotation<'gc>),
+        NumberTypeAnnotation(self::NumberTypeAnnotation<'gc>),
+        StringLiteralTypeAnnotation(self::StringLiteralTypeAnnotation<'gc>),
+        NumberLiteralTypeAnnotation(self::NumberLiteralTypeAnnotation<'gc>),
+        BigIntLiteralTypeAnnotation(self::BigIntLiteralTypeAnnotation<'gc>),
+        BooleanTypeAnnotation(self::BooleanTypeAnnotation<'gc>),
+        BooleanLiteralTypeAnnotation(self::BooleanLiteralTypeAnnotation<'gc>),
+        NullLiteralTypeAnnotation(self::NullLiteralTypeAnnotation<'gc>),
+        SymbolTypeAnnotation(self::SymbolTypeAnnotation<'gc>),
+        AnyTypeAnnotation(self::AnyTypeAnnotation<'gc>),
+        MixedTypeAnnotation(self::MixedTypeAnnotation<'gc>),
+        BigIntTypeAnnotation(self::BigIntTypeAnnotation<'gc>),
+        VoidTypeAnnotation(self::VoidTypeAnnotation<'gc>),
+        NeverTypeAnnotation(self::NeverTypeAnnotation<'gc>),
+        UnknownTypeAnnotation(self::UnknownTypeAnnotation<'gc>),
+        UndefinedTypeAnnotation(self::UndefinedTypeAnnotation<'gc>),
+        FunctionTypeAnnotation(self::FunctionTypeAnnotation<'gc>),
+        HookTypeAnnotation(self::HookTypeAnnotation<'gc>),
+        FunctionTypeParam(self::FunctionTypeParam<'gc>),
+        ComponentTypeAnnotation(self::ComponentTypeAnnotation<'gc>),
+        ComponentTypeParameter(self::ComponentTypeParameter<'gc>),
+        NullableTypeAnnotation(self::NullableTypeAnnotation<'gc>),
+        QualifiedTypeIdentifier(self::QualifiedTypeIdentifier<'gc>),
+        TypeofTypeAnnotation(self::TypeofTypeAnnotation<'gc>),
+        KeyofTypeAnnotation(self::KeyofTypeAnnotation<'gc>),
+        TypeOperator(self::TypeOperator<'gc>),
+        QualifiedTypeofIdentifier(self::QualifiedTypeofIdentifier<'gc>),
+        TupleTypeAnnotation(self::TupleTypeAnnotation<'gc>),
+        TupleTypeSpreadElement(self::TupleTypeSpreadElement<'gc>),
+        TupleTypeLabeledElement(self::TupleTypeLabeledElement<'gc>),
+        ArrayTypeAnnotation(self::ArrayTypeAnnotation<'gc>),
+        InferTypeAnnotation(self::InferTypeAnnotation<'gc>),
+        UnionTypeAnnotation(self::UnionTypeAnnotation<'gc>),
+        IntersectionTypeAnnotation(self::IntersectionTypeAnnotation<'gc>),
+        GenericTypeAnnotation(self::GenericTypeAnnotation<'gc>),
+        IndexedAccessType(self::IndexedAccessType<'gc>),
+        OptionalIndexedAccessType(self::OptionalIndexedAccessType<'gc>),
+        ConditionalTypeAnnotation(self::ConditionalTypeAnnotation<'gc>),
+        TypePredicate(self::TypePredicate<'gc>),
+        InterfaceTypeAnnotation(self::InterfaceTypeAnnotation<'gc>),
+        TypeAlias(self::TypeAlias<'gc>),
+        OpaqueType(self::OpaqueType<'gc>),
+        InterfaceDeclaration(self::InterfaceDeclaration<'gc>),
+        DeclareTypeAlias(self::DeclareTypeAlias<'gc>),
+        DeclareOpaqueType(self::DeclareOpaqueType<'gc>),
+        DeclareInterface(self::DeclareInterface<'gc>),
+        DeclareClass(self::DeclareClass<'gc>),
+        DeclareFunction(self::DeclareFunction<'gc>),
+        DeclareHook(self::DeclareHook<'gc>),
+        DeclareComponent(self::DeclareComponent<'gc>),
+        DeclareVariable(self::DeclareVariable<'gc>),
+        DeclareEnum(self::DeclareEnum<'gc>),
+        DeclareExportDeclaration(self::DeclareExportDeclaration<'gc>),
+        DeclareExportAllDeclaration(self::DeclareExportAllDeclaration<'gc>),
+        DeclareModule(self::DeclareModule<'gc>),
+        DeclareNamespace(self::DeclareNamespace<'gc>),
+        DeclareModuleExports(self::DeclareModuleExports<'gc>),
+        InterfaceExtends(self::InterfaceExtends<'gc>),
+        ClassImplements(self::ClassImplements<'gc>),
+        TypeAnnotation(self::TypeAnnotation<'gc>),
+        ObjectTypeAnnotation(self::ObjectTypeAnnotation<'gc>),
+        ObjectTypeProperty(self::ObjectTypeProperty<'gc>),
+        ObjectTypeSpreadProperty(self::ObjectTypeSpreadProperty<'gc>),
+        ObjectTypeInternalSlot(self::ObjectTypeInternalSlot<'gc>),
+        ObjectTypeCallProperty(self::ObjectTypeCallProperty<'gc>),
+        ObjectTypeIndexer(self::ObjectTypeIndexer<'gc>),
+        ObjectTypeMappedTypeProperty(self::ObjectTypeMappedTypeProperty<'gc>),
+        Variance(self::Variance<'gc>),
+        TypeParameterDeclaration(self::TypeParameterDeclaration<'gc>),
+        TypeParameter(self::TypeParameter<'gc>),
+        TypeParameterInstantiation(self::TypeParameterInstantiation<'gc>),
+        TypeCastExpression(self::TypeCastExpression<'gc>),
+        AsExpression(self::AsExpression<'gc>),
+        AsConstExpression(self::AsConstExpression<'gc>),
+        InferredPredicate(self::InferredPredicate<'gc>),
+        DeclaredPredicate(self::DeclaredPredicate<'gc>),
+        EnumDeclaration(self::EnumDeclaration<'gc>),
+        EnumStringBody(self::EnumStringBody<'gc>),
+        EnumNumberBody(self::EnumNumberBody<'gc>),
+        EnumBigIntBody(self::EnumBigIntBody<'gc>),
+        EnumBooleanBody(self::EnumBooleanBody<'gc>),
+        EnumSymbolBody(self::EnumSymbolBody<'gc>),
+        EnumDefaultedMember(self::EnumDefaultedMember<'gc>),
+        EnumStringMember(self::EnumStringMember<'gc>),
+        EnumNumberMember(self::EnumNumberMember<'gc>),
+        EnumBigIntMember(self::EnumBigIntMember<'gc>),
+        EnumBooleanMember(self::EnumBooleanMember<'gc>),
+        ComponentParameter(self::ComponentParameter<'gc>),
+        RecordDeclaration(self::RecordDeclaration<'gc>),
+        RecordDeclarationImplements(self::RecordDeclarationImplements<'gc>),
+        RecordDeclarationBody(self::RecordDeclarationBody<'gc>),
+        RecordDeclarationProperty(self::RecordDeclarationProperty<'gc>),
+        RecordDeclarationStaticProperty(self::RecordDeclarationStaticProperty<'gc>),
+        RecordExpression(self::RecordExpression<'gc>),
+        RecordExpressionProperties(self::RecordExpressionProperties<'gc>),
+        TSTypeAnnotation(self::TSTypeAnnotation<'gc>),
+        TSAnyKeyword(self::TSAnyKeyword<'gc>),
+        TSNumberKeyword(self::TSNumberKeyword<'gc>),
+        TSBooleanKeyword(self::TSBooleanKeyword<'gc>),
+        TSStringKeyword(self::TSStringKeyword<'gc>),
+        TSSymbolKeyword(self::TSSymbolKeyword<'gc>),
+        TSVoidKeyword(self::TSVoidKeyword<'gc>),
+        TSUndefinedKeyword(self::TSUndefinedKeyword<'gc>),
+        TSUnknownKeyword(self::TSUnknownKeyword<'gc>),
+        TSNeverKeyword(self::TSNeverKeyword<'gc>),
+        TSBigIntKeyword(self::TSBigIntKeyword<'gc>),
+        TSThisType(self::TSThisType<'gc>),
+        TSLiteralType(self::TSLiteralType<'gc>),
+        TSIndexedAccessType(self::TSIndexedAccessType<'gc>),
+        TSArrayType(self::TSArrayType<'gc>),
+        TSTypeReference(self::TSTypeReference<'gc>),
+        TSQualifiedName(self::TSQualifiedName<'gc>),
+        TSFunctionType(self::TSFunctionType<'gc>),
+        TSConstructorType(self::TSConstructorType<'gc>),
+        TSTypePredicate(self::TSTypePredicate<'gc>),
+        TSTupleType(self::TSTupleType<'gc>),
+        TSTypeAssertion(self::TSTypeAssertion<'gc>),
+        TSAsExpression(self::TSAsExpression<'gc>),
+        TSParameterProperty(self::TSParameterProperty<'gc>),
+        TSTypeAliasDeclaration(self::TSTypeAliasDeclaration<'gc>),
+        TSInterfaceDeclaration(self::TSInterfaceDeclaration<'gc>),
+        TSInterfaceHeritage(self::TSInterfaceHeritage<'gc>),
+        TSInterfaceBody(self::TSInterfaceBody<'gc>),
+        TSEnumDeclaration(self::TSEnumDeclaration<'gc>),
+        TSEnumMember(self::TSEnumMember<'gc>),
+        TSModuleDeclaration(self::TSModuleDeclaration<'gc>),
+        TSModuleBlock(self::TSModuleBlock<'gc>),
+        TSModuleMember(self::TSModuleMember<'gc>),
+        TSTypeParameterDeclaration(self::TSTypeParameterDeclaration<'gc>),
+        TSTypeParameter(self::TSTypeParameter<'gc>),
+        TSTypeParameterInstantiation(self::TSTypeParameterInstantiation<'gc>),
+        TSUnionType(self::TSUnionType<'gc>),
+        TSIntersectionType(self::TSIntersectionType<'gc>),
+        TSTypeQuery(self::TSTypeQuery<'gc>),
+        TSConditionalType(self::TSConditionalType<'gc>),
+        TSTypeLiteral(self::TSTypeLiteral<'gc>),
+        TSPropertySignature(self::TSPropertySignature<'gc>),
+        TSMethodSignature(self::TSMethodSignature<'gc>),
+        TSIndexSignature(self::TSIndexSignature<'gc>),
+        TSCallSignatureDeclaration(self::TSCallSignatureDeclaration<'gc>),
+        TSModifiers(self::TSModifiers<'gc>),
+        CoverEmptyArgs(self::CoverEmptyArgs<'gc>),
+        CoverTrailingComma(self::CoverTrailingComma<'gc>),
+        CoverInitializer(self::CoverInitializer<'gc>),
+        CoverRestElement(self::CoverRestElement<'gc>),
+        CoverTypedIdentifier(self::CoverTypedIdentifier<'gc>),
+        SHBuiltin(self::SHBuiltin<'gc>),
+        ImplicitCheckedCast(self::ImplicitCheckedCast<'gc>),
+    }
+
+    impl<'gc> Builder<'gc> {
+        pub fn from_node(node: &'gc Node<'gc>) -> Self {
+            match node {
+                Node::Empty(n) => Builder::Empty(self::Empty::from_node(n)),
+                Node::Metadata(n) => Builder::Metadata(self::Metadata::from_node(n)),
+                Node::Program(n) => Builder::Program(self::Program::from_node(n)),
+                Node::FunctionExpression(n) => Builder::FunctionExpression(self::FunctionExpression::from_node(n)),
+                Node::ArrowFunctionExpression(n) => Builder::ArrowFunctionExpression(self::ArrowFunctionExpression::from_node(n)),
+                Node::FunctionDeclaration(n) => Builder::FunctionDeclaration(self::FunctionDeclaration::from_node(n)),
+                Node::ComponentDeclaration(n) => Builder::ComponentDeclaration(self::ComponentDeclaration::from_node(n)),
+                Node::HookDeclaration(n) => Builder::HookDeclaration(self::HookDeclaration::from_node(n)),
+                Node::MatchStatement(n) => Builder::MatchStatement(self::MatchStatement::from_node(n)),
+                Node::WhileStatement(n) => Builder::WhileStatement(self::WhileStatement::from_node(n)),
+                Node::DoWhileStatement(n) => Builder::DoWhileStatement(self::DoWhileStatement::from_node(n)),
+                Node::ForInStatement(n) => Builder::ForInStatement(self::ForInStatement::from_node(n)),
+                Node::ForOfStatement(n) => Builder::ForOfStatement(self::ForOfStatement::from_node(n)),
+                Node::ForStatement(n) => Builder::ForStatement(self::ForStatement::from_node(n)),
+                Node::DebuggerStatement(n) => Builder::DebuggerStatement(self::DebuggerStatement::from_node(n)),
+                Node::EmptyStatement(n) => Builder::EmptyStatement(self::EmptyStatement::from_node(n)),
+                Node::BlockStatement(n) => Builder::BlockStatement(self::BlockStatement::from_node(n)),
+                Node::StaticBlock(n) => Builder::StaticBlock(self::StaticBlock::from_node(n)),
+                Node::BreakStatement(n) => Builder::BreakStatement(self::BreakStatement::from_node(n)),
+                Node::ContinueStatement(n) => Builder::ContinueStatement(self::ContinueStatement::from_node(n)),
+                Node::ThrowStatement(n) => Builder::ThrowStatement(self::ThrowStatement::from_node(n)),
+                Node::ReturnStatement(n) => Builder::ReturnStatement(self::ReturnStatement::from_node(n)),
+                Node::WithStatement(n) => Builder::WithStatement(self::WithStatement::from_node(n)),
+                Node::SwitchStatement(n) => Builder::SwitchStatement(self::SwitchStatement::from_node(n)),
+                Node::LabeledStatement(n) => Builder::LabeledStatement(self::LabeledStatement::from_node(n)),
+                Node::ExpressionStatement(n) => Builder::ExpressionStatement(self::ExpressionStatement::from_node(n)),
+                Node::TryStatement(n) => Builder::TryStatement(self::TryStatement::from_node(n)),
+                Node::IfStatement(n) => Builder::IfStatement(self::IfStatement::from_node(n)),
+                Node::NullLiteral(n) => Builder::NullLiteral(self::NullLiteral::from_node(n)),
+                Node::BooleanLiteral(n) => Builder::BooleanLiteral(self::BooleanLiteral::from_node(n)),
+                Node::StringLiteral(n) => Builder::StringLiteral(self::StringLiteral::from_node(n)),
+                Node::NumericLiteral(n) => Builder::NumericLiteral(self::NumericLiteral::from_node(n)),
+                Node::RegExpLiteral(n) => Builder::RegExpLiteral(self::RegExpLiteral::from_node(n)),
+                Node::BigIntLiteral(n) => Builder::BigIntLiteral(self::BigIntLiteral::from_node(n)),
+                Node::ThisExpression(n) => Builder::ThisExpression(self::ThisExpression::from_node(n)),
+                Node::Super(n) => Builder::Super(self::Super::from_node(n)),
+                Node::SequenceExpression(n) => Builder::SequenceExpression(self::SequenceExpression::from_node(n)),
+                Node::ObjectExpression(n) => Builder::ObjectExpression(self::ObjectExpression::from_node(n)),
+                Node::ArrayExpression(n) => Builder::ArrayExpression(self::ArrayExpression::from_node(n)),
+                Node::SpreadElement(n) => Builder::SpreadElement(self::SpreadElement::from_node(n)),
+                Node::NewExpression(n) => Builder::NewExpression(self::NewExpression::from_node(n)),
+                Node::YieldExpression(n) => Builder::YieldExpression(self::YieldExpression::from_node(n)),
+                Node::AwaitExpression(n) => Builder::AwaitExpression(self::AwaitExpression::from_node(n)),
+                Node::ImportExpression(n) => Builder::ImportExpression(self::ImportExpression::from_node(n)),
+                Node::CallExpression(n) => Builder::CallExpression(self::CallExpression::from_node(n)),
+                Node::OptionalCallExpression(n) => Builder::OptionalCallExpression(self::OptionalCallExpression::from_node(n)),
+                Node::AssignmentExpression(n) => Builder::AssignmentExpression(self::AssignmentExpression::from_node(n)),
+                Node::UnaryExpression(n) => Builder::UnaryExpression(self::UnaryExpression::from_node(n)),
+                Node::UpdateExpression(n) => Builder::UpdateExpression(self::UpdateExpression::from_node(n)),
+                Node::MemberExpression(n) => Builder::MemberExpression(self::MemberExpression::from_node(n)),
+                Node::OptionalMemberExpression(n) => Builder::OptionalMemberExpression(self::OptionalMemberExpression::from_node(n)),
+                Node::LogicalExpression(n) => Builder::LogicalExpression(self::LogicalExpression::from_node(n)),
+                Node::ConditionalExpression(n) => Builder::ConditionalExpression(self::ConditionalExpression::from_node(n)),
+                Node::BinaryExpression(n) => Builder::BinaryExpression(self::BinaryExpression::from_node(n)),
+                Node::Directive(n) => Builder::Directive(self::Directive::from_node(n)),
+                Node::DirectiveLiteral(n) => Builder::DirectiveLiteral(self::DirectiveLiteral::from_node(n)),
+                Node::Identifier(n) => Builder::Identifier(self::Identifier::from_node(n)),
+                Node::PrivateName(n) => Builder::PrivateName(self::PrivateName::from_node(n)),
+                Node::MetaProperty(n) => Builder::MetaProperty(self::MetaProperty::from_node(n)),
+                Node::SwitchCase(n) => Builder::SwitchCase(self::SwitchCase::from_node(n)),
+                Node::CatchClause(n) => Builder::CatchClause(self::CatchClause::from_node(n)),
+                Node::VariableDeclarator(n) => Builder::VariableDeclarator(self::VariableDeclarator::from_node(n)),
+                Node::VariableDeclaration(n) => Builder::VariableDeclaration(self::VariableDeclaration::from_node(n)),
+                Node::TemplateLiteral(n) => Builder::TemplateLiteral(self::TemplateLiteral::from_node(n)),
+                Node::TaggedTemplateExpression(n) => Builder::TaggedTemplateExpression(self::TaggedTemplateExpression::from_node(n)),
+                Node::TemplateElement(n) => Builder::TemplateElement(self::TemplateElement::from_node(n)),
+                Node::Property(n) => Builder::Property(self::Property::from_node(n)),
+                Node::Decorator(n) => Builder::Decorator(self::Decorator::from_node(n)),
+                Node::ClassDeclaration(n) => Builder::ClassDeclaration(self::ClassDeclaration::from_node(n)),
+                Node::ClassExpression(n) => Builder::ClassExpression(self::ClassExpression::from_node(n)),
+                Node::ClassBody(n) => Builder::ClassBody(self::ClassBody::from_node(n)),
+                Node::ClassProperty(n) => Builder::ClassProperty(self::ClassProperty::from_node(n)),
+                Node::ClassPrivateProperty(n) => Builder::ClassPrivateProperty(self::ClassPrivateProperty::from_node(n)),
+                Node::MethodDefinition(n) => Builder::MethodDefinition(self::MethodDefinition::from_node(n)),
+                Node::ImportDeclaration(n) => Builder::ImportDeclaration(self::ImportDeclaration::from_node(n)),
+                Node::ImportSpecifier(n) => Builder::ImportSpecifier(self::ImportSpecifier::from_node(n)),
+                Node::ImportDefaultSpecifier(n) => Builder::ImportDefaultSpecifier(self::ImportDefaultSpecifier::from_node(n)),
+                Node::ImportNamespaceSpecifier(n) => Builder::ImportNamespaceSpecifier(self::ImportNamespaceSpecifier::from_node(n)),
+                Node::ImportAttribute(n) => Builder::ImportAttribute(self::ImportAttribute::from_node(n)),
+                Node::ExportNamedDeclaration(n) => Builder::ExportNamedDeclaration(self::ExportNamedDeclaration::from_node(n)),
+                Node::ExportSpecifier(n) => Builder::ExportSpecifier(self::ExportSpecifier::from_node(n)),
+                Node::ExportNamespaceSpecifier(n) => Builder::ExportNamespaceSpecifier(self::ExportNamespaceSpecifier::from_node(n)),
+                Node::ExportDefaultDeclaration(n) => Builder::ExportDefaultDeclaration(self::ExportDefaultDeclaration::from_node(n)),
+                Node::ExportAllDeclaration(n) => Builder::ExportAllDeclaration(self::ExportAllDeclaration::from_node(n)),
+                Node::ObjectPattern(n) => Builder::ObjectPattern(self::ObjectPattern::from_node(n)),
+                Node::ArrayPattern(n) => Builder::ArrayPattern(self::ArrayPattern::from_node(n)),
+                Node::RestElement(n) => Builder::RestElement(self::RestElement::from_node(n)),
+                Node::AssignmentPattern(n) => Builder::AssignmentPattern(self::AssignmentPattern::from_node(n)),
+                Node::MatchStatementCase(n) => Builder::MatchStatementCase(self::MatchStatementCase::from_node(n)),
+                Node::MatchExpression(n) => Builder::MatchExpression(self::MatchExpression::from_node(n)),
+                Node::MatchExpressionCase(n) => Builder::MatchExpressionCase(self::MatchExpressionCase::from_node(n)),
+                Node::MatchWildcardPattern(n) => Builder::MatchWildcardPattern(self::MatchWildcardPattern::from_node(n)),
+                Node::MatchLiteralPattern(n) => Builder::MatchLiteralPattern(self::MatchLiteralPattern::from_node(n)),
+                Node::MatchUnaryPattern(n) => Builder::MatchUnaryPattern(self::MatchUnaryPattern::from_node(n)),
+                Node::MatchIdentifierPattern(n) => Builder::MatchIdentifierPattern(self::MatchIdentifierPattern::from_node(n)),
+                Node::MatchBindingPattern(n) => Builder::MatchBindingPattern(self::MatchBindingPattern::from_node(n)),
+                Node::MatchObjectPattern(n) => Builder::MatchObjectPattern(self::MatchObjectPattern::from_node(n)),
+                Node::MatchArrayPattern(n) => Builder::MatchArrayPattern(self::MatchArrayPattern::from_node(n)),
+                Node::MatchOrPattern(n) => Builder::MatchOrPattern(self::MatchOrPattern::from_node(n)),
+                Node::MatchAsPattern(n) => Builder::MatchAsPattern(self::MatchAsPattern::from_node(n)),
+                Node::MatchMemberPattern(n) => Builder::MatchMemberPattern(self::MatchMemberPattern::from_node(n)),
+                Node::MatchInstancePattern(n) => Builder::MatchInstancePattern(self::MatchInstancePattern::from_node(n)),
+                Node::MatchObjectPatternProperty(n) => Builder::MatchObjectPatternProperty(self::MatchObjectPatternProperty::from_node(n)),
+                Node::MatchInstanceObjectPattern(n) => Builder::MatchInstanceObjectPattern(self::MatchInstanceObjectPattern::from_node(n)),
+                Node::MatchRestPattern(n) => Builder::MatchRestPattern(self::MatchRestPattern::from_node(n)),
+                Node::JSXIdentifier(n) => Builder::JSXIdentifier(self::JSXIdentifier::from_node(n)),
+                Node::JSXMemberExpression(n) => Builder::JSXMemberExpression(self::JSXMemberExpression::from_node(n)),
+                Node::JSXNamespacedName(n) => Builder::JSXNamespacedName(self::JSXNamespacedName::from_node(n)),
+                Node::JSXEmptyExpression(n) => Builder::JSXEmptyExpression(self::JSXEmptyExpression::from_node(n)),
+                Node::JSXExpressionContainer(n) => Builder::JSXExpressionContainer(self::JSXExpressionContainer::from_node(n)),
+                Node::JSXSpreadChild(n) => Builder::JSXSpreadChild(self::JSXSpreadChild::from_node(n)),
+                Node::JSXOpeningElement(n) => Builder::JSXOpeningElement(self::JSXOpeningElement::from_node(n)),
+                Node::JSXClosingElement(n) => Builder::JSXClosingElement(self::JSXClosingElement::from_node(n)),
+                Node::JSXAttribute(n) => Builder::JSXAttribute(self::JSXAttribute::from_node(n)),
+                Node::JSXSpreadAttribute(n) => Builder::JSXSpreadAttribute(self::JSXSpreadAttribute::from_node(n)),
+                Node::JSXStringLiteral(n) => Builder::JSXStringLiteral(self::JSXStringLiteral::from_node(n)),
+                Node::JSXText(n) => Builder::JSXText(self::JSXText::from_node(n)),
+                Node::JSXElement(n) => Builder::JSXElement(self::JSXElement::from_node(n)),
+                Node::JSXFragment(n) => Builder::JSXFragment(self::JSXFragment::from_node(n)),
+                Node::JSXOpeningFragment(n) => Builder::JSXOpeningFragment(self::JSXOpeningFragment::from_node(n)),
+                Node::JSXClosingFragment(n) => Builder::JSXClosingFragment(self::JSXClosingFragment::from_node(n)),
+                Node::ExistsTypeAnnotation(n) => Builder::ExistsTypeAnnotation(self::ExistsTypeAnnotation::from_node(n)),
+                Node::EmptyTypeAnnotation(n) => Builder::EmptyTypeAnnotation(self::EmptyTypeAnnotation::from_node(n)),
+                Node::StringTypeAnnotation(n) => Builder::StringTypeAnnotation(self::StringTypeAnnotation::from_node(n)),
+                Node::NumberTypeAnnotation(n) => Builder::NumberTypeAnnotation(self::NumberTypeAnnotation::from_node(n)),
+                Node::StringLiteralTypeAnnotation(n) => Builder::StringLiteralTypeAnnotation(self::StringLiteralTypeAnnotation::from_node(n)),
+                Node::NumberLiteralTypeAnnotation(n) => Builder::NumberLiteralTypeAnnotation(self::NumberLiteralTypeAnnotation::from_node(n)),
+                Node::BigIntLiteralTypeAnnotation(n) => Builder::BigIntLiteralTypeAnnotation(self::BigIntLiteralTypeAnnotation::from_node(n)),
+                Node::BooleanTypeAnnotation(n) => Builder::BooleanTypeAnnotation(self::BooleanTypeAnnotation::from_node(n)),
+                Node::BooleanLiteralTypeAnnotation(n) => Builder::BooleanLiteralTypeAnnotation(self::BooleanLiteralTypeAnnotation::from_node(n)),
+                Node::NullLiteralTypeAnnotation(n) => Builder::NullLiteralTypeAnnotation(self::NullLiteralTypeAnnotation::from_node(n)),
+                Node::SymbolTypeAnnotation(n) => Builder::SymbolTypeAnnotation(self::SymbolTypeAnnotation::from_node(n)),
+                Node::AnyTypeAnnotation(n) => Builder::AnyTypeAnnotation(self::AnyTypeAnnotation::from_node(n)),
+                Node::MixedTypeAnnotation(n) => Builder::MixedTypeAnnotation(self::MixedTypeAnnotation::from_node(n)),
+                Node::BigIntTypeAnnotation(n) => Builder::BigIntTypeAnnotation(self::BigIntTypeAnnotation::from_node(n)),
+                Node::VoidTypeAnnotation(n) => Builder::VoidTypeAnnotation(self::VoidTypeAnnotation::from_node(n)),
+                Node::NeverTypeAnnotation(n) => Builder::NeverTypeAnnotation(self::NeverTypeAnnotation::from_node(n)),
+                Node::UnknownTypeAnnotation(n) => Builder::UnknownTypeAnnotation(self::UnknownTypeAnnotation::from_node(n)),
+                Node::UndefinedTypeAnnotation(n) => Builder::UndefinedTypeAnnotation(self::UndefinedTypeAnnotation::from_node(n)),
+                Node::FunctionTypeAnnotation(n) => Builder::FunctionTypeAnnotation(self::FunctionTypeAnnotation::from_node(n)),
+                Node::HookTypeAnnotation(n) => Builder::HookTypeAnnotation(self::HookTypeAnnotation::from_node(n)),
+                Node::FunctionTypeParam(n) => Builder::FunctionTypeParam(self::FunctionTypeParam::from_node(n)),
+                Node::ComponentTypeAnnotation(n) => Builder::ComponentTypeAnnotation(self::ComponentTypeAnnotation::from_node(n)),
+                Node::ComponentTypeParameter(n) => Builder::ComponentTypeParameter(self::ComponentTypeParameter::from_node(n)),
+                Node::NullableTypeAnnotation(n) => Builder::NullableTypeAnnotation(self::NullableTypeAnnotation::from_node(n)),
+                Node::QualifiedTypeIdentifier(n) => Builder::QualifiedTypeIdentifier(self::QualifiedTypeIdentifier::from_node(n)),
+                Node::TypeofTypeAnnotation(n) => Builder::TypeofTypeAnnotation(self::TypeofTypeAnnotation::from_node(n)),
+                Node::KeyofTypeAnnotation(n) => Builder::KeyofTypeAnnotation(self::KeyofTypeAnnotation::from_node(n)),
+                Node::TypeOperator(n) => Builder::TypeOperator(self::TypeOperator::from_node(n)),
+                Node::QualifiedTypeofIdentifier(n) => Builder::QualifiedTypeofIdentifier(self::QualifiedTypeofIdentifier::from_node(n)),
+                Node::TupleTypeAnnotation(n) => Builder::TupleTypeAnnotation(self::TupleTypeAnnotation::from_node(n)),
+                Node::TupleTypeSpreadElement(n) => Builder::TupleTypeSpreadElement(self::TupleTypeSpreadElement::from_node(n)),
+                Node::TupleTypeLabeledElement(n) => Builder::TupleTypeLabeledElement(self::TupleTypeLabeledElement::from_node(n)),
+                Node::ArrayTypeAnnotation(n) => Builder::ArrayTypeAnnotation(self::ArrayTypeAnnotation::from_node(n)),
+                Node::InferTypeAnnotation(n) => Builder::InferTypeAnnotation(self::InferTypeAnnotation::from_node(n)),
+                Node::UnionTypeAnnotation(n) => Builder::UnionTypeAnnotation(self::UnionTypeAnnotation::from_node(n)),
+                Node::IntersectionTypeAnnotation(n) => Builder::IntersectionTypeAnnotation(self::IntersectionTypeAnnotation::from_node(n)),
+                Node::GenericTypeAnnotation(n) => Builder::GenericTypeAnnotation(self::GenericTypeAnnotation::from_node(n)),
+                Node::IndexedAccessType(n) => Builder::IndexedAccessType(self::IndexedAccessType::from_node(n)),
+                Node::OptionalIndexedAccessType(n) => Builder::OptionalIndexedAccessType(self::OptionalIndexedAccessType::from_node(n)),
+                Node::ConditionalTypeAnnotation(n) => Builder::ConditionalTypeAnnotation(self::ConditionalTypeAnnotation::from_node(n)),
+                Node::TypePredicate(n) => Builder::TypePredicate(self::TypePredicate::from_node(n)),
+                Node::InterfaceTypeAnnotation(n) => Builder::InterfaceTypeAnnotation(self::InterfaceTypeAnnotation::from_node(n)),
+                Node::TypeAlias(n) => Builder::TypeAlias(self::TypeAlias::from_node(n)),
+                Node::OpaqueType(n) => Builder::OpaqueType(self::OpaqueType::from_node(n)),
+                Node::InterfaceDeclaration(n) => Builder::InterfaceDeclaration(self::InterfaceDeclaration::from_node(n)),
+                Node::DeclareTypeAlias(n) => Builder::DeclareTypeAlias(self::DeclareTypeAlias::from_node(n)),
+                Node::DeclareOpaqueType(n) => Builder::DeclareOpaqueType(self::DeclareOpaqueType::from_node(n)),
+                Node::DeclareInterface(n) => Builder::DeclareInterface(self::DeclareInterface::from_node(n)),
+                Node::DeclareClass(n) => Builder::DeclareClass(self::DeclareClass::from_node(n)),
+                Node::DeclareFunction(n) => Builder::DeclareFunction(self::DeclareFunction::from_node(n)),
+                Node::DeclareHook(n) => Builder::DeclareHook(self::DeclareHook::from_node(n)),
+                Node::DeclareComponent(n) => Builder::DeclareComponent(self::DeclareComponent::from_node(n)),
+                Node::DeclareVariable(n) => Builder::DeclareVariable(self::DeclareVariable::from_node(n)),
+                Node::DeclareEnum(n) => Builder::DeclareEnum(self::DeclareEnum::from_node(n)),
+                Node::DeclareExportDeclaration(n) => Builder::DeclareExportDeclaration(self::DeclareExportDeclaration::from_node(n)),
+                Node::DeclareExportAllDeclaration(n) => Builder::DeclareExportAllDeclaration(self::DeclareExportAllDeclaration::from_node(n)),
+                Node::DeclareModule(n) => Builder::DeclareModule(self::DeclareModule::from_node(n)),
+                Node::DeclareNamespace(n) => Builder::DeclareNamespace(self::DeclareNamespace::from_node(n)),
+                Node::DeclareModuleExports(n) => Builder::DeclareModuleExports(self::DeclareModuleExports::from_node(n)),
+                Node::InterfaceExtends(n) => Builder::InterfaceExtends(self::InterfaceExtends::from_node(n)),
+                Node::ClassImplements(n) => Builder::ClassImplements(self::ClassImplements::from_node(n)),
+                Node::TypeAnnotation(n) => Builder::TypeAnnotation(self::TypeAnnotation::from_node(n)),
+                Node::ObjectTypeAnnotation(n) => Builder::ObjectTypeAnnotation(self::ObjectTypeAnnotation::from_node(n)),
+                Node::ObjectTypeProperty(n) => Builder::ObjectTypeProperty(self::ObjectTypeProperty::from_node(n)),
+                Node::ObjectTypeSpreadProperty(n) => Builder::ObjectTypeSpreadProperty(self::ObjectTypeSpreadProperty::from_node(n)),
+                Node::ObjectTypeInternalSlot(n) => Builder::ObjectTypeInternalSlot(self::ObjectTypeInternalSlot::from_node(n)),
+                Node::ObjectTypeCallProperty(n) => Builder::ObjectTypeCallProperty(self::ObjectTypeCallProperty::from_node(n)),
+                Node::ObjectTypeIndexer(n) => Builder::ObjectTypeIndexer(self::ObjectTypeIndexer::from_node(n)),
+                Node::ObjectTypeMappedTypeProperty(n) => Builder::ObjectTypeMappedTypeProperty(self::ObjectTypeMappedTypeProperty::from_node(n)),
+                Node::Variance(n) => Builder::Variance(self::Variance::from_node(n)),
+                Node::TypeParameterDeclaration(n) => Builder::TypeParameterDeclaration(self::TypeParameterDeclaration::from_node(n)),
+                Node::TypeParameter(n) => Builder::TypeParameter(self::TypeParameter::from_node(n)),
+                Node::TypeParameterInstantiation(n) => Builder::TypeParameterInstantiation(self::TypeParameterInstantiation::from_node(n)),
+                Node::TypeCastExpression(n) => Builder::TypeCastExpression(self::TypeCastExpression::from_node(n)),
+                Node::AsExpression(n) => Builder::AsExpression(self::AsExpression::from_node(n)),
+                Node::AsConstExpression(n) => Builder::AsConstExpression(self::AsConstExpression::from_node(n)),
+                Node::InferredPredicate(n) => Builder::InferredPredicate(self::InferredPredicate::from_node(n)),
+                Node::DeclaredPredicate(n) => Builder::DeclaredPredicate(self::DeclaredPredicate::from_node(n)),
+                Node::EnumDeclaration(n) => Builder::EnumDeclaration(self::EnumDeclaration::from_node(n)),
+                Node::EnumStringBody(n) => Builder::EnumStringBody(self::EnumStringBody::from_node(n)),
+                Node::EnumNumberBody(n) => Builder::EnumNumberBody(self::EnumNumberBody::from_node(n)),
+                Node::EnumBigIntBody(n) => Builder::EnumBigIntBody(self::EnumBigIntBody::from_node(n)),
+                Node::EnumBooleanBody(n) => Builder::EnumBooleanBody(self::EnumBooleanBody::from_node(n)),
+                Node::EnumSymbolBody(n) => Builder::EnumSymbolBody(self::EnumSymbolBody::from_node(n)),
+                Node::EnumDefaultedMember(n) => Builder::EnumDefaultedMember(self::EnumDefaultedMember::from_node(n)),
+                Node::EnumStringMember(n) => Builder::EnumStringMember(self::EnumStringMember::from_node(n)),
+                Node::EnumNumberMember(n) => Builder::EnumNumberMember(self::EnumNumberMember::from_node(n)),
+                Node::EnumBigIntMember(n) => Builder::EnumBigIntMember(self::EnumBigIntMember::from_node(n)),
+                Node::EnumBooleanMember(n) => Builder::EnumBooleanMember(self::EnumBooleanMember::from_node(n)),
+                Node::ComponentParameter(n) => Builder::ComponentParameter(self::ComponentParameter::from_node(n)),
+                Node::RecordDeclaration(n) => Builder::RecordDeclaration(self::RecordDeclaration::from_node(n)),
+                Node::RecordDeclarationImplements(n) => Builder::RecordDeclarationImplements(self::RecordDeclarationImplements::from_node(n)),
+                Node::RecordDeclarationBody(n) => Builder::RecordDeclarationBody(self::RecordDeclarationBody::from_node(n)),
+                Node::RecordDeclarationProperty(n) => Builder::RecordDeclarationProperty(self::RecordDeclarationProperty::from_node(n)),
+                Node::RecordDeclarationStaticProperty(n) => Builder::RecordDeclarationStaticProperty(self::RecordDeclarationStaticProperty::from_node(n)),
+                Node::RecordExpression(n) => Builder::RecordExpression(self::RecordExpression::from_node(n)),
+                Node::RecordExpressionProperties(n) => Builder::RecordExpressionProperties(self::RecordExpressionProperties::from_node(n)),
+                Node::TSTypeAnnotation(n) => Builder::TSTypeAnnotation(self::TSTypeAnnotation::from_node(n)),
+                Node::TSAnyKeyword(n) => Builder::TSAnyKeyword(self::TSAnyKeyword::from_node(n)),
+                Node::TSNumberKeyword(n) => Builder::TSNumberKeyword(self::TSNumberKeyword::from_node(n)),
+                Node::TSBooleanKeyword(n) => Builder::TSBooleanKeyword(self::TSBooleanKeyword::from_node(n)),
+                Node::TSStringKeyword(n) => Builder::TSStringKeyword(self::TSStringKeyword::from_node(n)),
+                Node::TSSymbolKeyword(n) => Builder::TSSymbolKeyword(self::TSSymbolKeyword::from_node(n)),
+                Node::TSVoidKeyword(n) => Builder::TSVoidKeyword(self::TSVoidKeyword::from_node(n)),
+                Node::TSUndefinedKeyword(n) => Builder::TSUndefinedKeyword(self::TSUndefinedKeyword::from_node(n)),
+                Node::TSUnknownKeyword(n) => Builder::TSUnknownKeyword(self::TSUnknownKeyword::from_node(n)),
+                Node::TSNeverKeyword(n) => Builder::TSNeverKeyword(self::TSNeverKeyword::from_node(n)),
+                Node::TSBigIntKeyword(n) => Builder::TSBigIntKeyword(self::TSBigIntKeyword::from_node(n)),
+                Node::TSThisType(n) => Builder::TSThisType(self::TSThisType::from_node(n)),
+                Node::TSLiteralType(n) => Builder::TSLiteralType(self::TSLiteralType::from_node(n)),
+                Node::TSIndexedAccessType(n) => Builder::TSIndexedAccessType(self::TSIndexedAccessType::from_node(n)),
+                Node::TSArrayType(n) => Builder::TSArrayType(self::TSArrayType::from_node(n)),
+                Node::TSTypeReference(n) => Builder::TSTypeReference(self::TSTypeReference::from_node(n)),
+                Node::TSQualifiedName(n) => Builder::TSQualifiedName(self::TSQualifiedName::from_node(n)),
+                Node::TSFunctionType(n) => Builder::TSFunctionType(self::TSFunctionType::from_node(n)),
+                Node::TSConstructorType(n) => Builder::TSConstructorType(self::TSConstructorType::from_node(n)),
+                Node::TSTypePredicate(n) => Builder::TSTypePredicate(self::TSTypePredicate::from_node(n)),
+                Node::TSTupleType(n) => Builder::TSTupleType(self::TSTupleType::from_node(n)),
+                Node::TSTypeAssertion(n) => Builder::TSTypeAssertion(self::TSTypeAssertion::from_node(n)),
+                Node::TSAsExpression(n) => Builder::TSAsExpression(self::TSAsExpression::from_node(n)),
+                Node::TSParameterProperty(n) => Builder::TSParameterProperty(self::TSParameterProperty::from_node(n)),
+                Node::TSTypeAliasDeclaration(n) => Builder::TSTypeAliasDeclaration(self::TSTypeAliasDeclaration::from_node(n)),
+                Node::TSInterfaceDeclaration(n) => Builder::TSInterfaceDeclaration(self::TSInterfaceDeclaration::from_node(n)),
+                Node::TSInterfaceHeritage(n) => Builder::TSInterfaceHeritage(self::TSInterfaceHeritage::from_node(n)),
+                Node::TSInterfaceBody(n) => Builder::TSInterfaceBody(self::TSInterfaceBody::from_node(n)),
+                Node::TSEnumDeclaration(n) => Builder::TSEnumDeclaration(self::TSEnumDeclaration::from_node(n)),
+                Node::TSEnumMember(n) => Builder::TSEnumMember(self::TSEnumMember::from_node(n)),
+                Node::TSModuleDeclaration(n) => Builder::TSModuleDeclaration(self::TSModuleDeclaration::from_node(n)),
+                Node::TSModuleBlock(n) => Builder::TSModuleBlock(self::TSModuleBlock::from_node(n)),
+                Node::TSModuleMember(n) => Builder::TSModuleMember(self::TSModuleMember::from_node(n)),
+                Node::TSTypeParameterDeclaration(n) => Builder::TSTypeParameterDeclaration(self::TSTypeParameterDeclaration::from_node(n)),
+                Node::TSTypeParameter(n) => Builder::TSTypeParameter(self::TSTypeParameter::from_node(n)),
+                Node::TSTypeParameterInstantiation(n) => Builder::TSTypeParameterInstantiation(self::TSTypeParameterInstantiation::from_node(n)),
+                Node::TSUnionType(n) => Builder::TSUnionType(self::TSUnionType::from_node(n)),
+                Node::TSIntersectionType(n) => Builder::TSIntersectionType(self::TSIntersectionType::from_node(n)),
+                Node::TSTypeQuery(n) => Builder::TSTypeQuery(self::TSTypeQuery::from_node(n)),
+                Node::TSConditionalType(n) => Builder::TSConditionalType(self::TSConditionalType::from_node(n)),
+                Node::TSTypeLiteral(n) => Builder::TSTypeLiteral(self::TSTypeLiteral::from_node(n)),
+                Node::TSPropertySignature(n) => Builder::TSPropertySignature(self::TSPropertySignature::from_node(n)),
+                Node::TSMethodSignature(n) => Builder::TSMethodSignature(self::TSMethodSignature::from_node(n)),
+                Node::TSIndexSignature(n) => Builder::TSIndexSignature(self::TSIndexSignature::from_node(n)),
+                Node::TSCallSignatureDeclaration(n) => Builder::TSCallSignatureDeclaration(self::TSCallSignatureDeclaration::from_node(n)),
+                Node::TSModifiers(n) => Builder::TSModifiers(self::TSModifiers::from_node(n)),
+                Node::CoverEmptyArgs(n) => Builder::CoverEmptyArgs(self::CoverEmptyArgs::from_node(n)),
+                Node::CoverTrailingComma(n) => Builder::CoverTrailingComma(self::CoverTrailingComma::from_node(n)),
+                Node::CoverInitializer(n) => Builder::CoverInitializer(self::CoverInitializer::from_node(n)),
+                Node::CoverRestElement(n) => Builder::CoverRestElement(self::CoverRestElement::from_node(n)),
+                Node::CoverTypedIdentifier(n) => Builder::CoverTypedIdentifier(self::CoverTypedIdentifier::from_node(n)),
+                Node::SHBuiltin(n) => Builder::SHBuiltin(self::SHBuiltin::from_node(n)),
+                Node::ImplicitCheckedCast(n) => Builder::ImplicitCheckedCast(self::ImplicitCheckedCast::from_node(n)),
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    pub struct Empty<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::Empty<'gc>,
+    }
+    impl<'gc> Empty<'gc> {
+        pub fn from_node(node: &'gc super::Empty<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::Empty {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::Empty(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct Metadata<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::Metadata<'gc>,
+    }
+    impl<'gc> Metadata<'gc> {
+        pub fn from_node(node: &'gc super::Metadata<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::Metadata {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::Metadata(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct Program<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::Program<'gc>,
+    }
+    impl<'gc> Program<'gc> {
+        pub fn from_node(node: &'gc super::Program<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::Program {
+                    metadata: node.metadata.duplicate(),
+                    body: node.body.duplicate(),
+                    scope: Cell::new(node.scope.get()),
+                    sem_info: Cell::new(node.sem_info.get()),
+                    strictness: Cell::new(node.strictness.get()),
+                    is_method_definition: Cell::new(node.is_method_definition.get()),
+                    decorations: Cell::new(node.decorations.get()),
+                    dummy_param_list: Cell::new(node.dummy_param_list.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::Program(self.inner))
+        }
+        pub fn body(&mut self, body: NodeList<'gc>) { self.is_changed = true; self.inner.body = body; }
+    }
+    #[derive(Debug)]
+    pub struct FunctionExpression<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::FunctionExpression<'gc>,
+    }
+    impl<'gc> FunctionExpression<'gc> {
+        pub fn from_node(node: &'gc super::FunctionExpression<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::FunctionExpression {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    params: node.params.duplicate(),
+                    body: node.body.duplicate(),
+                    type_parameters: node.type_parameters.duplicate(),
+                    return_type: node.return_type.duplicate(),
+                    predicate: node.predicate.duplicate(),
+                    generator: Cell::new(node.generator.get()),
+                    r#async: Cell::new(node.r#async.get()),
+                    scope: Cell::new(node.scope.get()),
+                    sem_info: Cell::new(node.sem_info.get()),
+                    strictness: Cell::new(node.strictness.get()),
+                    is_method_definition: Cell::new(node.is_method_definition.get()),
+                    decorations: Cell::new(node.decorations.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::FunctionExpression(self.inner))
+        }
+        pub fn id(&mut self, id: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.id = id; }
+        pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
+        pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+        pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        pub fn return_type(&mut self, return_type: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.return_type = return_type; }
+        pub fn predicate(&mut self, predicate: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.predicate = predicate; }
+    }
+    #[derive(Debug)]
+    pub struct ArrowFunctionExpression<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ArrowFunctionExpression<'gc>,
+    }
+    impl<'gc> ArrowFunctionExpression<'gc> {
+        pub fn from_node(node: &'gc super::ArrowFunctionExpression<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ArrowFunctionExpression {
+                    metadata: node.metadata.duplicate(),
+                    params: node.params.duplicate(),
+                    body: node.body.duplicate(),
+                    type_parameters: node.type_parameters.duplicate(),
+                    return_type: node.return_type.duplicate(),
+                    predicate: node.predicate.duplicate(),
+                    expression: Cell::new(node.expression.get()),
+                    r#async: Cell::new(node.r#async.get()),
+                    scope: Cell::new(node.scope.get()),
+                    sem_info: Cell::new(node.sem_info.get()),
+                    strictness: Cell::new(node.strictness.get()),
+                    is_method_definition: Cell::new(node.is_method_definition.get()),
+                    decorations: Cell::new(node.decorations.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ArrowFunctionExpression(self.inner))
+        }
+        pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
+        pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+        pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        pub fn return_type(&mut self, return_type: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.return_type = return_type; }
+        pub fn predicate(&mut self, predicate: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.predicate = predicate; }
+    }
+    #[derive(Debug)]
+    pub struct FunctionDeclaration<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::FunctionDeclaration<'gc>,
+    }
+    impl<'gc> FunctionDeclaration<'gc> {
+        pub fn from_node(node: &'gc super::FunctionDeclaration<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::FunctionDeclaration {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    params: node.params.duplicate(),
+                    body: node.body.duplicate(),
+                    type_parameters: node.type_parameters.duplicate(),
+                    return_type: node.return_type.duplicate(),
+                    predicate: node.predicate.duplicate(),
+                    generator: Cell::new(node.generator.get()),
+                    r#async: Cell::new(node.r#async.get()),
+                    scope: Cell::new(node.scope.get()),
+                    sem_info: Cell::new(node.sem_info.get()),
+                    strictness: Cell::new(node.strictness.get()),
+                    is_method_definition: Cell::new(node.is_method_definition.get()),
+                    decorations: Cell::new(node.decorations.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::FunctionDeclaration(self.inner))
+        }
+        pub fn id(&mut self, id: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.id = id; }
+        pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
+        pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+        pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        pub fn return_type(&mut self, return_type: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.return_type = return_type; }
+        pub fn predicate(&mut self, predicate: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.predicate = predicate; }
+    }
+    #[derive(Debug)]
+    pub struct ComponentDeclaration<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ComponentDeclaration<'gc>,
+    }
+    impl<'gc> ComponentDeclaration<'gc> {
+        pub fn from_node(node: &'gc super::ComponentDeclaration<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ComponentDeclaration {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    params: node.params.duplicate(),
+                    body: node.body.duplicate(),
+                    type_parameters: node.type_parameters.duplicate(),
+                    renders_type: node.renders_type.duplicate(),
+                    r#async: Cell::new(node.r#async.get()),
+                    scope: Cell::new(node.scope.get()),
+                    sem_info: Cell::new(node.sem_info.get()),
+                    strictness: Cell::new(node.strictness.get()),
+                    is_method_definition: Cell::new(node.is_method_definition.get()),
+                    decorations: Cell::new(node.decorations.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ComponentDeclaration(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
+        pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+        pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        pub fn renders_type(&mut self, renders_type: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.renders_type = renders_type; }
+    }
+    #[derive(Debug)]
+    pub struct HookDeclaration<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::HookDeclaration<'gc>,
+    }
+    impl<'gc> HookDeclaration<'gc> {
+        pub fn from_node(node: &'gc super::HookDeclaration<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::HookDeclaration {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    params: node.params.duplicate(),
+                    body: node.body.duplicate(),
+                    type_parameters: node.type_parameters.duplicate(),
+                    return_type: node.return_type.duplicate(),
+                    r#async: Cell::new(node.r#async.get()),
+                    scope: Cell::new(node.scope.get()),
+                    sem_info: Cell::new(node.sem_info.get()),
+                    strictness: Cell::new(node.strictness.get()),
+                    is_method_definition: Cell::new(node.is_method_definition.get()),
+                    decorations: Cell::new(node.decorations.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::HookDeclaration(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
+        pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+        pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        pub fn return_type(&mut self, return_type: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.return_type = return_type; }
+    }
+    #[derive(Debug)]
+    pub struct MatchStatement<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::MatchStatement<'gc>,
+    }
+    impl<'gc> MatchStatement<'gc> {
+        pub fn from_node(node: &'gc super::MatchStatement<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::MatchStatement {
+                    metadata: node.metadata.duplicate(),
+                    argument: node.argument.duplicate(),
+                    cases: node.cases.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::MatchStatement(self.inner))
+        }
+        pub fn argument(&mut self, argument: &'gc Node<'gc>) { self.is_changed = true; self.inner.argument = argument; }
+        pub fn cases(&mut self, cases: NodeList<'gc>) { self.is_changed = true; self.inner.cases = cases; }
+    }
+    #[derive(Debug)]
+    pub struct WhileStatement<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::WhileStatement<'gc>,
+    }
+    impl<'gc> WhileStatement<'gc> {
+        pub fn from_node(node: &'gc super::WhileStatement<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::WhileStatement {
+                    metadata: node.metadata.duplicate(),
+                    body: node.body.duplicate(),
+                    test: node.test.duplicate(),
+                    label_index: Cell::new(node.label_index.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::WhileStatement(self.inner))
+        }
+        pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+        pub fn test(&mut self, test: &'gc Node<'gc>) { self.is_changed = true; self.inner.test = test; }
+    }
+    #[derive(Debug)]
+    pub struct DoWhileStatement<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::DoWhileStatement<'gc>,
+    }
+    impl<'gc> DoWhileStatement<'gc> {
+        pub fn from_node(node: &'gc super::DoWhileStatement<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::DoWhileStatement {
+                    metadata: node.metadata.duplicate(),
+                    body: node.body.duplicate(),
+                    test: node.test.duplicate(),
+                    label_index: Cell::new(node.label_index.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::DoWhileStatement(self.inner))
+        }
+        pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+        pub fn test(&mut self, test: &'gc Node<'gc>) { self.is_changed = true; self.inner.test = test; }
+    }
+    #[derive(Debug)]
+    pub struct ForInStatement<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ForInStatement<'gc>,
+    }
+    impl<'gc> ForInStatement<'gc> {
+        pub fn from_node(node: &'gc super::ForInStatement<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ForInStatement {
+                    metadata: node.metadata.duplicate(),
+                    left: node.left.duplicate(),
+                    right: node.right.duplicate(),
+                    body: node.body.duplicate(),
+                    label_index: Cell::new(node.label_index.get()),
+                    scope: Cell::new(node.scope.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ForInStatement(self.inner))
+        }
+        pub fn left(&mut self, left: &'gc Node<'gc>) { self.is_changed = true; self.inner.left = left; }
+        pub fn right(&mut self, right: &'gc Node<'gc>) { self.is_changed = true; self.inner.right = right; }
+        pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+    }
+    #[derive(Debug)]
+    pub struct ForOfStatement<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ForOfStatement<'gc>,
+    }
+    impl<'gc> ForOfStatement<'gc> {
+        pub fn from_node(node: &'gc super::ForOfStatement<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ForOfStatement {
+                    metadata: node.metadata.duplicate(),
+                    left: node.left.duplicate(),
+                    right: node.right.duplicate(),
+                    body: node.body.duplicate(),
+                    r#await: Cell::new(node.r#await.get()),
+                    label_index: Cell::new(node.label_index.get()),
+                    scope: Cell::new(node.scope.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ForOfStatement(self.inner))
+        }
+        pub fn left(&mut self, left: &'gc Node<'gc>) { self.is_changed = true; self.inner.left = left; }
+        pub fn right(&mut self, right: &'gc Node<'gc>) { self.is_changed = true; self.inner.right = right; }
+        pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+    }
+    #[derive(Debug)]
+    pub struct ForStatement<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ForStatement<'gc>,
+    }
+    impl<'gc> ForStatement<'gc> {
+        pub fn from_node(node: &'gc super::ForStatement<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ForStatement {
+                    metadata: node.metadata.duplicate(),
+                    init: node.init.duplicate(),
+                    test: node.test.duplicate(),
+                    update: node.update.duplicate(),
+                    body: node.body.duplicate(),
+                    label_index: Cell::new(node.label_index.get()),
+                    scope: Cell::new(node.scope.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ForStatement(self.inner))
+        }
+        pub fn init(&mut self, init: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.init = init; }
+        pub fn test(&mut self, test: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.test = test; }
+        pub fn update(&mut self, update: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.update = update; }
+        pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+    }
+    #[derive(Debug)]
+    pub struct DebuggerStatement<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::DebuggerStatement<'gc>,
+    }
+    impl<'gc> DebuggerStatement<'gc> {
+        pub fn from_node(node: &'gc super::DebuggerStatement<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::DebuggerStatement {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::DebuggerStatement(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct EmptyStatement<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::EmptyStatement<'gc>,
+    }
+    impl<'gc> EmptyStatement<'gc> {
+        pub fn from_node(node: &'gc super::EmptyStatement<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::EmptyStatement {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::EmptyStatement(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct BlockStatement<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::BlockStatement<'gc>,
+    }
+    impl<'gc> BlockStatement<'gc> {
+        pub fn from_node(node: &'gc super::BlockStatement<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::BlockStatement {
+                    metadata: node.metadata.duplicate(),
+                    body: node.body.duplicate(),
+                    implicit: Cell::new(node.implicit.get()),
+                    scope: Cell::new(node.scope.get()),
+                    buffer_id: Cell::new(node.buffer_id.get()),
+                    is_lazy_function_body: Cell::new(node.is_lazy_function_body.get()),
+                    param_yield: Cell::new(node.param_yield.get()),
+                    param_await: Cell::new(node.param_await.get()),
+                    contains_arrow_functions: Cell::new(node.contains_arrow_functions.get()),
+                    may_contain_arrow_functions_using_arguments: Cell::new(node.may_contain_arrow_functions_using_arguments.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::BlockStatement(self.inner))
+        }
+        pub fn body(&mut self, body: NodeList<'gc>) { self.is_changed = true; self.inner.body = body; }
+    }
+    #[derive(Debug)]
+    pub struct StaticBlock<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::StaticBlock<'gc>,
+    }
+    impl<'gc> StaticBlock<'gc> {
+        pub fn from_node(node: &'gc super::StaticBlock<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::StaticBlock {
+                    metadata: node.metadata.duplicate(),
+                    body: node.body.duplicate(),
+                    scope: Cell::new(node.scope.get()),
+                    function_info: Cell::new(node.function_info.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::StaticBlock(self.inner))
+        }
+        pub fn body(&mut self, body: NodeList<'gc>) { self.is_changed = true; self.inner.body = body; }
+    }
+    #[derive(Debug)]
+    pub struct BreakStatement<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::BreakStatement<'gc>,
+    }
+    impl<'gc> BreakStatement<'gc> {
+        pub fn from_node(node: &'gc super::BreakStatement<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::BreakStatement {
+                    metadata: node.metadata.duplicate(),
+                    label: node.label.duplicate(),
+                    label_index: Cell::new(node.label_index.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::BreakStatement(self.inner))
+        }
+        pub fn label(&mut self, label: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.label = label; }
+    }
+    #[derive(Debug)]
+    pub struct ContinueStatement<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ContinueStatement<'gc>,
+    }
+    impl<'gc> ContinueStatement<'gc> {
+        pub fn from_node(node: &'gc super::ContinueStatement<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ContinueStatement {
+                    metadata: node.metadata.duplicate(),
+                    label: node.label.duplicate(),
+                    label_index: Cell::new(node.label_index.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ContinueStatement(self.inner))
+        }
+        pub fn label(&mut self, label: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.label = label; }
+    }
+    #[derive(Debug)]
+    pub struct ThrowStatement<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ThrowStatement<'gc>,
+    }
+    impl<'gc> ThrowStatement<'gc> {
+        pub fn from_node(node: &'gc super::ThrowStatement<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ThrowStatement {
+                    metadata: node.metadata.duplicate(),
+                    argument: node.argument.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ThrowStatement(self.inner))
+        }
+        pub fn argument(&mut self, argument: &'gc Node<'gc>) { self.is_changed = true; self.inner.argument = argument; }
+    }
+    #[derive(Debug)]
+    pub struct ReturnStatement<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ReturnStatement<'gc>,
+    }
+    impl<'gc> ReturnStatement<'gc> {
+        pub fn from_node(node: &'gc super::ReturnStatement<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ReturnStatement {
+                    metadata: node.metadata.duplicate(),
+                    argument: node.argument.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ReturnStatement(self.inner))
+        }
+        pub fn argument(&mut self, argument: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.argument = argument; }
+    }
+    #[derive(Debug)]
+    pub struct WithStatement<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::WithStatement<'gc>,
+    }
+    impl<'gc> WithStatement<'gc> {
+        pub fn from_node(node: &'gc super::WithStatement<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::WithStatement {
+                    metadata: node.metadata.duplicate(),
+                    object: node.object.duplicate(),
+                    body: node.body.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::WithStatement(self.inner))
+        }
+        pub fn object(&mut self, object: &'gc Node<'gc>) { self.is_changed = true; self.inner.object = object; }
+        pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+    }
+    #[derive(Debug)]
+    pub struct SwitchStatement<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::SwitchStatement<'gc>,
+    }
+    impl<'gc> SwitchStatement<'gc> {
+        pub fn from_node(node: &'gc super::SwitchStatement<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::SwitchStatement {
+                    metadata: node.metadata.duplicate(),
+                    discriminant: node.discriminant.duplicate(),
+                    cases: node.cases.duplicate(),
+                    label_index: Cell::new(node.label_index.get()),
+                    scope: Cell::new(node.scope.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::SwitchStatement(self.inner))
+        }
+        pub fn discriminant(&mut self, discriminant: &'gc Node<'gc>) { self.is_changed = true; self.inner.discriminant = discriminant; }
+        pub fn cases(&mut self, cases: NodeList<'gc>) { self.is_changed = true; self.inner.cases = cases; }
+    }
+    #[derive(Debug)]
+    pub struct LabeledStatement<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::LabeledStatement<'gc>,
+    }
+    impl<'gc> LabeledStatement<'gc> {
+        pub fn from_node(node: &'gc super::LabeledStatement<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::LabeledStatement {
+                    metadata: node.metadata.duplicate(),
+                    label: node.label.duplicate(),
+                    body: node.body.duplicate(),
+                    label_index: Cell::new(node.label_index.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::LabeledStatement(self.inner))
+        }
+        pub fn label(&mut self, label: &'gc Node<'gc>) { self.is_changed = true; self.inner.label = label; }
+        pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+    }
+    #[derive(Debug)]
+    pub struct ExpressionStatement<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ExpressionStatement<'gc>,
+    }
+    impl<'gc> ExpressionStatement<'gc> {
+        pub fn from_node(node: &'gc super::ExpressionStatement<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ExpressionStatement {
+                    metadata: node.metadata.duplicate(),
+                    expression: node.expression.duplicate(),
+                    directive: Cell::new(node.directive.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ExpressionStatement(self.inner))
+        }
+        pub fn expression(&mut self, expression: &'gc Node<'gc>) { self.is_changed = true; self.inner.expression = expression; }
+    }
+    #[derive(Debug)]
+    pub struct TryStatement<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TryStatement<'gc>,
+    }
+    impl<'gc> TryStatement<'gc> {
+        pub fn from_node(node: &'gc super::TryStatement<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TryStatement {
+                    metadata: node.metadata.duplicate(),
+                    block: node.block.duplicate(),
+                    handler: node.handler.duplicate(),
+                    finalizer: node.finalizer.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TryStatement(self.inner))
+        }
+        pub fn block(&mut self, block: &'gc Node<'gc>) { self.is_changed = true; self.inner.block = block; }
+        pub fn handler(&mut self, handler: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.handler = handler; }
+        pub fn finalizer(&mut self, finalizer: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.finalizer = finalizer; }
+    }
+    #[derive(Debug)]
+    pub struct IfStatement<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::IfStatement<'gc>,
+    }
+    impl<'gc> IfStatement<'gc> {
+        pub fn from_node(node: &'gc super::IfStatement<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::IfStatement {
+                    metadata: node.metadata.duplicate(),
+                    test: node.test.duplicate(),
+                    consequent: node.consequent.duplicate(),
+                    alternate: node.alternate.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::IfStatement(self.inner))
+        }
+        pub fn test(&mut self, test: &'gc Node<'gc>) { self.is_changed = true; self.inner.test = test; }
+        pub fn consequent(&mut self, consequent: &'gc Node<'gc>) { self.is_changed = true; self.inner.consequent = consequent; }
+        pub fn alternate(&mut self, alternate: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.alternate = alternate; }
+    }
+    #[derive(Debug)]
+    pub struct NullLiteral<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::NullLiteral<'gc>,
+    }
+    impl<'gc> NullLiteral<'gc> {
+        pub fn from_node(node: &'gc super::NullLiteral<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::NullLiteral {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::NullLiteral(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct BooleanLiteral<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::BooleanLiteral<'gc>,
+    }
+    impl<'gc> BooleanLiteral<'gc> {
+        pub fn from_node(node: &'gc super::BooleanLiteral<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::BooleanLiteral {
+                    metadata: node.metadata.duplicate(),
+                    value: Cell::new(node.value.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::BooleanLiteral(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct StringLiteral<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::StringLiteral<'gc>,
+    }
+    impl<'gc> StringLiteral<'gc> {
+        pub fn from_node(node: &'gc super::StringLiteral<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::StringLiteral {
+                    metadata: node.metadata.duplicate(),
+                    value: Cell::new(node.value.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::StringLiteral(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct NumericLiteral<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::NumericLiteral<'gc>,
+    }
+    impl<'gc> NumericLiteral<'gc> {
+        pub fn from_node(node: &'gc super::NumericLiteral<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::NumericLiteral {
+                    metadata: node.metadata.duplicate(),
+                    value: Cell::new(node.value.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::NumericLiteral(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct RegExpLiteral<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::RegExpLiteral<'gc>,
+    }
+    impl<'gc> RegExpLiteral<'gc> {
+        pub fn from_node(node: &'gc super::RegExpLiteral<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::RegExpLiteral {
+                    metadata: node.metadata.duplicate(),
+                    pattern: Cell::new(node.pattern.get()),
+                    flags: Cell::new(node.flags.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::RegExpLiteral(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct BigIntLiteral<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::BigIntLiteral<'gc>,
+    }
+    impl<'gc> BigIntLiteral<'gc> {
+        pub fn from_node(node: &'gc super::BigIntLiteral<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::BigIntLiteral {
+                    metadata: node.metadata.duplicate(),
+                    bigint: Cell::new(node.bigint.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::BigIntLiteral(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct ThisExpression<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ThisExpression<'gc>,
+    }
+    impl<'gc> ThisExpression<'gc> {
+        pub fn from_node(node: &'gc super::ThisExpression<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ThisExpression {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ThisExpression(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct Super<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::Super<'gc>,
+    }
+    impl<'gc> Super<'gc> {
+        pub fn from_node(node: &'gc super::Super<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::Super {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::Super(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct SequenceExpression<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::SequenceExpression<'gc>,
+    }
+    impl<'gc> SequenceExpression<'gc> {
+        pub fn from_node(node: &'gc super::SequenceExpression<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::SequenceExpression {
+                    metadata: node.metadata.duplicate(),
+                    expressions: node.expressions.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::SequenceExpression(self.inner))
+        }
+        pub fn expressions(&mut self, expressions: NodeList<'gc>) { self.is_changed = true; self.inner.expressions = expressions; }
+    }
+    #[derive(Debug)]
+    pub struct ObjectExpression<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ObjectExpression<'gc>,
+    }
+    impl<'gc> ObjectExpression<'gc> {
+        pub fn from_node(node: &'gc super::ObjectExpression<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ObjectExpression {
+                    metadata: node.metadata.duplicate(),
+                    properties: node.properties.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ObjectExpression(self.inner))
+        }
+        pub fn properties(&mut self, properties: NodeList<'gc>) { self.is_changed = true; self.inner.properties = properties; }
+    }
+    #[derive(Debug)]
+    pub struct ArrayExpression<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ArrayExpression<'gc>,
+    }
+    impl<'gc> ArrayExpression<'gc> {
+        pub fn from_node(node: &'gc super::ArrayExpression<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ArrayExpression {
+                    metadata: node.metadata.duplicate(),
+                    elements: node.elements.duplicate(),
+                    trailing_comma: Cell::new(node.trailing_comma.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ArrayExpression(self.inner))
+        }
+        pub fn elements(&mut self, elements: NodeList<'gc>) { self.is_changed = true; self.inner.elements = elements; }
+    }
+    #[derive(Debug)]
+    pub struct SpreadElement<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::SpreadElement<'gc>,
+    }
+    impl<'gc> SpreadElement<'gc> {
+        pub fn from_node(node: &'gc super::SpreadElement<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::SpreadElement {
+                    metadata: node.metadata.duplicate(),
+                    argument: node.argument.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::SpreadElement(self.inner))
+        }
+        pub fn argument(&mut self, argument: &'gc Node<'gc>) { self.is_changed = true; self.inner.argument = argument; }
+    }
+    #[derive(Debug)]
+    pub struct NewExpression<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::NewExpression<'gc>,
+    }
+    impl<'gc> NewExpression<'gc> {
+        pub fn from_node(node: &'gc super::NewExpression<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::NewExpression {
+                    metadata: node.metadata.duplicate(),
+                    callee: node.callee.duplicate(),
+                    type_arguments: node.type_arguments.duplicate(),
+                    arguments: node.arguments.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::NewExpression(self.inner))
+        }
+        pub fn callee(&mut self, callee: &'gc Node<'gc>) { self.is_changed = true; self.inner.callee = callee; }
+        pub fn type_arguments(&mut self, type_arguments: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_arguments = type_arguments; }
+        pub fn arguments(&mut self, arguments: NodeList<'gc>) { self.is_changed = true; self.inner.arguments = arguments; }
+    }
+    #[derive(Debug)]
+    pub struct YieldExpression<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::YieldExpression<'gc>,
+    }
+    impl<'gc> YieldExpression<'gc> {
+        pub fn from_node(node: &'gc super::YieldExpression<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::YieldExpression {
+                    metadata: node.metadata.duplicate(),
+                    argument: node.argument.duplicate(),
+                    delegate: Cell::new(node.delegate.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::YieldExpression(self.inner))
+        }
+        pub fn argument(&mut self, argument: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.argument = argument; }
+    }
+    #[derive(Debug)]
+    pub struct AwaitExpression<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::AwaitExpression<'gc>,
+    }
+    impl<'gc> AwaitExpression<'gc> {
+        pub fn from_node(node: &'gc super::AwaitExpression<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::AwaitExpression {
+                    metadata: node.metadata.duplicate(),
+                    argument: node.argument.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::AwaitExpression(self.inner))
+        }
+        pub fn argument(&mut self, argument: &'gc Node<'gc>) { self.is_changed = true; self.inner.argument = argument; }
+    }
+    #[derive(Debug)]
+    pub struct ImportExpression<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ImportExpression<'gc>,
+    }
+    impl<'gc> ImportExpression<'gc> {
+        pub fn from_node(node: &'gc super::ImportExpression<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ImportExpression {
+                    metadata: node.metadata.duplicate(),
+                    source: node.source.duplicate(),
+                    options: node.options.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ImportExpression(self.inner))
+        }
+        pub fn source(&mut self, source: &'gc Node<'gc>) { self.is_changed = true; self.inner.source = source; }
+        pub fn options(&mut self, options: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.options = options; }
+    }
+    #[derive(Debug)]
+    pub struct CallExpression<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::CallExpression<'gc>,
+    }
+    impl<'gc> CallExpression<'gc> {
+        pub fn from_node(node: &'gc super::CallExpression<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::CallExpression {
+                    metadata: node.metadata.duplicate(),
+                    callee: node.callee.duplicate(),
+                    type_arguments: node.type_arguments.duplicate(),
+                    arguments: node.arguments.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::CallExpression(self.inner))
+        }
+        pub fn callee(&mut self, callee: &'gc Node<'gc>) { self.is_changed = true; self.inner.callee = callee; }
+        pub fn type_arguments(&mut self, type_arguments: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_arguments = type_arguments; }
+        pub fn arguments(&mut self, arguments: NodeList<'gc>) { self.is_changed = true; self.inner.arguments = arguments; }
+    }
+    #[derive(Debug)]
+    pub struct OptionalCallExpression<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::OptionalCallExpression<'gc>,
+    }
+    impl<'gc> OptionalCallExpression<'gc> {
+        pub fn from_node(node: &'gc super::OptionalCallExpression<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::OptionalCallExpression {
+                    metadata: node.metadata.duplicate(),
+                    callee: node.callee.duplicate(),
+                    type_arguments: node.type_arguments.duplicate(),
+                    arguments: node.arguments.duplicate(),
+                    optional: Cell::new(node.optional.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::OptionalCallExpression(self.inner))
+        }
+        pub fn callee(&mut self, callee: &'gc Node<'gc>) { self.is_changed = true; self.inner.callee = callee; }
+        pub fn type_arguments(&mut self, type_arguments: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_arguments = type_arguments; }
+        pub fn arguments(&mut self, arguments: NodeList<'gc>) { self.is_changed = true; self.inner.arguments = arguments; }
+    }
+    #[derive(Debug)]
+    pub struct AssignmentExpression<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::AssignmentExpression<'gc>,
+    }
+    impl<'gc> AssignmentExpression<'gc> {
+        pub fn from_node(node: &'gc super::AssignmentExpression<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::AssignmentExpression {
+                    metadata: node.metadata.duplicate(),
+                    operator: Cell::new(node.operator.get()),
+                    left: node.left.duplicate(),
+                    right: node.right.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::AssignmentExpression(self.inner))
+        }
+        pub fn left(&mut self, left: &'gc Node<'gc>) { self.is_changed = true; self.inner.left = left; }
+        pub fn right(&mut self, right: &'gc Node<'gc>) { self.is_changed = true; self.inner.right = right; }
+    }
+    #[derive(Debug)]
+    pub struct UnaryExpression<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::UnaryExpression<'gc>,
+    }
+    impl<'gc> UnaryExpression<'gc> {
+        pub fn from_node(node: &'gc super::UnaryExpression<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::UnaryExpression {
+                    metadata: node.metadata.duplicate(),
+                    operator: Cell::new(node.operator.get()),
+                    argument: node.argument.duplicate(),
+                    prefix: Cell::new(node.prefix.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::UnaryExpression(self.inner))
+        }
+        pub fn argument(&mut self, argument: &'gc Node<'gc>) { self.is_changed = true; self.inner.argument = argument; }
+    }
+    #[derive(Debug)]
+    pub struct UpdateExpression<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::UpdateExpression<'gc>,
+    }
+    impl<'gc> UpdateExpression<'gc> {
+        pub fn from_node(node: &'gc super::UpdateExpression<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::UpdateExpression {
+                    metadata: node.metadata.duplicate(),
+                    operator: Cell::new(node.operator.get()),
+                    argument: node.argument.duplicate(),
+                    prefix: Cell::new(node.prefix.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::UpdateExpression(self.inner))
+        }
+        pub fn argument(&mut self, argument: &'gc Node<'gc>) { self.is_changed = true; self.inner.argument = argument; }
+    }
+    #[derive(Debug)]
+    pub struct MemberExpression<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::MemberExpression<'gc>,
+    }
+    impl<'gc> MemberExpression<'gc> {
+        pub fn from_node(node: &'gc super::MemberExpression<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::MemberExpression {
+                    metadata: node.metadata.duplicate(),
+                    object: node.object.duplicate(),
+                    property: node.property.duplicate(),
+                    computed: Cell::new(node.computed.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::MemberExpression(self.inner))
+        }
+        pub fn object(&mut self, object: &'gc Node<'gc>) { self.is_changed = true; self.inner.object = object; }
+        pub fn property(&mut self, property: &'gc Node<'gc>) { self.is_changed = true; self.inner.property = property; }
+    }
+    #[derive(Debug)]
+    pub struct OptionalMemberExpression<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::OptionalMemberExpression<'gc>,
+    }
+    impl<'gc> OptionalMemberExpression<'gc> {
+        pub fn from_node(node: &'gc super::OptionalMemberExpression<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::OptionalMemberExpression {
+                    metadata: node.metadata.duplicate(),
+                    object: node.object.duplicate(),
+                    property: node.property.duplicate(),
+                    computed: Cell::new(node.computed.get()),
+                    optional: Cell::new(node.optional.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::OptionalMemberExpression(self.inner))
+        }
+        pub fn object(&mut self, object: &'gc Node<'gc>) { self.is_changed = true; self.inner.object = object; }
+        pub fn property(&mut self, property: &'gc Node<'gc>) { self.is_changed = true; self.inner.property = property; }
+    }
+    #[derive(Debug)]
+    pub struct LogicalExpression<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::LogicalExpression<'gc>,
+    }
+    impl<'gc> LogicalExpression<'gc> {
+        pub fn from_node(node: &'gc super::LogicalExpression<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::LogicalExpression {
+                    metadata: node.metadata.duplicate(),
+                    left: node.left.duplicate(),
+                    right: node.right.duplicate(),
+                    operator: Cell::new(node.operator.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::LogicalExpression(self.inner))
+        }
+        pub fn left(&mut self, left: &'gc Node<'gc>) { self.is_changed = true; self.inner.left = left; }
+        pub fn right(&mut self, right: &'gc Node<'gc>) { self.is_changed = true; self.inner.right = right; }
+    }
+    #[derive(Debug)]
+    pub struct ConditionalExpression<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ConditionalExpression<'gc>,
+    }
+    impl<'gc> ConditionalExpression<'gc> {
+        pub fn from_node(node: &'gc super::ConditionalExpression<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ConditionalExpression {
+                    metadata: node.metadata.duplicate(),
+                    test: node.test.duplicate(),
+                    alternate: node.alternate.duplicate(),
+                    consequent: node.consequent.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ConditionalExpression(self.inner))
+        }
+        pub fn test(&mut self, test: &'gc Node<'gc>) { self.is_changed = true; self.inner.test = test; }
+        pub fn alternate(&mut self, alternate: &'gc Node<'gc>) { self.is_changed = true; self.inner.alternate = alternate; }
+        pub fn consequent(&mut self, consequent: &'gc Node<'gc>) { self.is_changed = true; self.inner.consequent = consequent; }
+    }
+    #[derive(Debug)]
+    pub struct BinaryExpression<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::BinaryExpression<'gc>,
+    }
+    impl<'gc> BinaryExpression<'gc> {
+        pub fn from_node(node: &'gc super::BinaryExpression<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::BinaryExpression {
+                    metadata: node.metadata.duplicate(),
+                    left: node.left.duplicate(),
+                    right: node.right.duplicate(),
+                    operator: Cell::new(node.operator.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::BinaryExpression(self.inner))
+        }
+        pub fn left(&mut self, left: &'gc Node<'gc>) { self.is_changed = true; self.inner.left = left; }
+        pub fn right(&mut self, right: &'gc Node<'gc>) { self.is_changed = true; self.inner.right = right; }
+    }
+    #[derive(Debug)]
+    pub struct Directive<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::Directive<'gc>,
+    }
+    impl<'gc> Directive<'gc> {
+        pub fn from_node(node: &'gc super::Directive<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::Directive {
+                    metadata: node.metadata.duplicate(),
+                    value: node.value.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::Directive(self.inner))
+        }
+        pub fn value(&mut self, value: &'gc Node<'gc>) { self.is_changed = true; self.inner.value = value; }
+    }
+    #[derive(Debug)]
+    pub struct DirectiveLiteral<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::DirectiveLiteral<'gc>,
+    }
+    impl<'gc> DirectiveLiteral<'gc> {
+        pub fn from_node(node: &'gc super::DirectiveLiteral<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::DirectiveLiteral {
+                    metadata: node.metadata.duplicate(),
+                    value: Cell::new(node.value.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::DirectiveLiteral(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct Identifier<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::Identifier<'gc>,
+    }
+    impl<'gc> Identifier<'gc> {
+        pub fn from_node(node: &'gc super::Identifier<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::Identifier {
+                    metadata: node.metadata.duplicate(),
+                    name: Cell::new(node.name.get()),
+                    type_annotation: node.type_annotation.duplicate(),
+                    optional: Cell::new(node.optional.get()),
+                    unresolvable: Cell::new(node.unresolvable.get()),
+                    decl_state: Cell::new(node.decl_state.get()),
+                    decl: Cell::new(node.decl.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::Identifier(self.inner))
+        }
+        pub fn type_annotation(&mut self, type_annotation: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
+    }
+    #[derive(Debug)]
+    pub struct PrivateName<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::PrivateName<'gc>,
+    }
+    impl<'gc> PrivateName<'gc> {
+        pub fn from_node(node: &'gc super::PrivateName<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::PrivateName {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::PrivateName(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+    }
+    #[derive(Debug)]
+    pub struct MetaProperty<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::MetaProperty<'gc>,
+    }
+    impl<'gc> MetaProperty<'gc> {
+        pub fn from_node(node: &'gc super::MetaProperty<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::MetaProperty {
+                    metadata: node.metadata.duplicate(),
+                    meta: node.meta.duplicate(),
+                    property: node.property.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::MetaProperty(self.inner))
+        }
+        pub fn meta(&mut self, meta: &'gc Node<'gc>) { self.is_changed = true; self.inner.meta = meta; }
+        pub fn property(&mut self, property: &'gc Node<'gc>) { self.is_changed = true; self.inner.property = property; }
+    }
+    #[derive(Debug)]
+    pub struct SwitchCase<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::SwitchCase<'gc>,
+    }
+    impl<'gc> SwitchCase<'gc> {
+        pub fn from_node(node: &'gc super::SwitchCase<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::SwitchCase {
+                    metadata: node.metadata.duplicate(),
+                    test: node.test.duplicate(),
+                    consequent: node.consequent.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::SwitchCase(self.inner))
+        }
+        pub fn test(&mut self, test: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.test = test; }
+        pub fn consequent(&mut self, consequent: NodeList<'gc>) { self.is_changed = true; self.inner.consequent = consequent; }
+    }
+    #[derive(Debug)]
+    pub struct CatchClause<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::CatchClause<'gc>,
+    }
+    impl<'gc> CatchClause<'gc> {
+        pub fn from_node(node: &'gc super::CatchClause<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::CatchClause {
+                    metadata: node.metadata.duplicate(),
+                    param: node.param.duplicate(),
+                    body: node.body.duplicate(),
+                    scope: Cell::new(node.scope.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::CatchClause(self.inner))
+        }
+        pub fn param(&mut self, param: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.param = param; }
+        pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+    }
+    #[derive(Debug)]
+    pub struct VariableDeclarator<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::VariableDeclarator<'gc>,
+    }
+    impl<'gc> VariableDeclarator<'gc> {
+        pub fn from_node(node: &'gc super::VariableDeclarator<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::VariableDeclarator {
+                    metadata: node.metadata.duplicate(),
+                    init: node.init.duplicate(),
+                    id: node.id.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::VariableDeclarator(self.inner))
+        }
+        pub fn init(&mut self, init: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.init = init; }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+    }
+    #[derive(Debug)]
+    pub struct VariableDeclaration<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::VariableDeclaration<'gc>,
+    }
+    impl<'gc> VariableDeclaration<'gc> {
+        pub fn from_node(node: &'gc super::VariableDeclaration<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::VariableDeclaration {
+                    metadata: node.metadata.duplicate(),
+                    kind: Cell::new(node.kind.get()),
+                    declarations: node.declarations.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::VariableDeclaration(self.inner))
+        }
+        pub fn declarations(&mut self, declarations: NodeList<'gc>) { self.is_changed = true; self.inner.declarations = declarations; }
+    }
+    #[derive(Debug)]
+    pub struct TemplateLiteral<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TemplateLiteral<'gc>,
+    }
+    impl<'gc> TemplateLiteral<'gc> {
+        pub fn from_node(node: &'gc super::TemplateLiteral<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TemplateLiteral {
+                    metadata: node.metadata.duplicate(),
+                    quasis: node.quasis.duplicate(),
+                    expressions: node.expressions.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TemplateLiteral(self.inner))
+        }
+        pub fn quasis(&mut self, quasis: NodeList<'gc>) { self.is_changed = true; self.inner.quasis = quasis; }
+        pub fn expressions(&mut self, expressions: NodeList<'gc>) { self.is_changed = true; self.inner.expressions = expressions; }
+    }
+    #[derive(Debug)]
+    pub struct TaggedTemplateExpression<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TaggedTemplateExpression<'gc>,
+    }
+    impl<'gc> TaggedTemplateExpression<'gc> {
+        pub fn from_node(node: &'gc super::TaggedTemplateExpression<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TaggedTemplateExpression {
+                    metadata: node.metadata.duplicate(),
+                    tag: node.tag.duplicate(),
+                    quasi: node.quasi.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TaggedTemplateExpression(self.inner))
+        }
+        pub fn tag(&mut self, tag: &'gc Node<'gc>) { self.is_changed = true; self.inner.tag = tag; }
+        pub fn quasi(&mut self, quasi: &'gc Node<'gc>) { self.is_changed = true; self.inner.quasi = quasi; }
+    }
+    #[derive(Debug)]
+    pub struct TemplateElement<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TemplateElement<'gc>,
+    }
+    impl<'gc> TemplateElement<'gc> {
+        pub fn from_node(node: &'gc super::TemplateElement<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TemplateElement {
+                    metadata: node.metadata.duplicate(),
+                    tail: Cell::new(node.tail.get()),
+                    cooked: Cell::new(node.cooked.get()),
+                    raw: Cell::new(node.raw.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TemplateElement(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct Property<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::Property<'gc>,
+    }
+    impl<'gc> Property<'gc> {
+        pub fn from_node(node: &'gc super::Property<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::Property {
+                    metadata: node.metadata.duplicate(),
+                    key: node.key.duplicate(),
+                    value: node.value.duplicate(),
+                    kind: Cell::new(node.kind.get()),
+                    computed: Cell::new(node.computed.get()),
+                    method: Cell::new(node.method.get()),
+                    shorthand: Cell::new(node.shorthand.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::Property(self.inner))
+        }
+        pub fn key(&mut self, key: &'gc Node<'gc>) { self.is_changed = true; self.inner.key = key; }
+        pub fn value(&mut self, value: &'gc Node<'gc>) { self.is_changed = true; self.inner.value = value; }
+    }
+    #[derive(Debug)]
+    pub struct Decorator<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::Decorator<'gc>,
+    }
+    impl<'gc> Decorator<'gc> {
+        pub fn from_node(node: &'gc super::Decorator<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::Decorator {
+                    metadata: node.metadata.duplicate(),
+                    expression: node.expression.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::Decorator(self.inner))
+        }
+        pub fn expression(&mut self, expression: &'gc Node<'gc>) { self.is_changed = true; self.inner.expression = expression; }
+    }
+    #[derive(Debug)]
+    pub struct ClassDeclaration<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ClassDeclaration<'gc>,
+    }
+    impl<'gc> ClassDeclaration<'gc> {
+        pub fn from_node(node: &'gc super::ClassDeclaration<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ClassDeclaration {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    type_parameters: node.type_parameters.duplicate(),
+                    super_class: node.super_class.duplicate(),
+                    super_type_arguments: node.super_type_arguments.duplicate(),
+                    implements: node.implements.duplicate(),
+                    decorators: node.decorators.duplicate(),
+                    body: node.body.duplicate(),
+                    scope: Cell::new(node.scope.get()),
+                    implicit_ctor_function_info: Cell::new(node.implicit_ctor_function_info.get()),
+                    instance_elements_init_function_info: Cell::new(node.instance_elements_init_function_info.get()),
+                    static_elements_init_function_info: Cell::new(node.static_elements_init_function_info.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ClassDeclaration(self.inner))
+        }
+        pub fn id(&mut self, id: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.id = id; }
+        pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        pub fn super_class(&mut self, super_class: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.super_class = super_class; }
+        pub fn super_type_arguments(&mut self, super_type_arguments: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.super_type_arguments = super_type_arguments; }
+        pub fn implements(&mut self, implements: NodeList<'gc>) { self.is_changed = true; self.inner.implements = implements; }
+        pub fn decorators(&mut self, decorators: NodeList<'gc>) { self.is_changed = true; self.inner.decorators = decorators; }
+        pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+    }
+    #[derive(Debug)]
+    pub struct ClassExpression<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ClassExpression<'gc>,
+    }
+    impl<'gc> ClassExpression<'gc> {
+        pub fn from_node(node: &'gc super::ClassExpression<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ClassExpression {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    type_parameters: node.type_parameters.duplicate(),
+                    super_class: node.super_class.duplicate(),
+                    super_type_arguments: node.super_type_arguments.duplicate(),
+                    implements: node.implements.duplicate(),
+                    decorators: node.decorators.duplicate(),
+                    body: node.body.duplicate(),
+                    scope: Cell::new(node.scope.get()),
+                    implicit_ctor_function_info: Cell::new(node.implicit_ctor_function_info.get()),
+                    instance_elements_init_function_info: Cell::new(node.instance_elements_init_function_info.get()),
+                    static_elements_init_function_info: Cell::new(node.static_elements_init_function_info.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ClassExpression(self.inner))
+        }
+        pub fn id(&mut self, id: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.id = id; }
+        pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        pub fn super_class(&mut self, super_class: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.super_class = super_class; }
+        pub fn super_type_arguments(&mut self, super_type_arguments: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.super_type_arguments = super_type_arguments; }
+        pub fn implements(&mut self, implements: NodeList<'gc>) { self.is_changed = true; self.inner.implements = implements; }
+        pub fn decorators(&mut self, decorators: NodeList<'gc>) { self.is_changed = true; self.inner.decorators = decorators; }
+        pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+    }
+    #[derive(Debug)]
+    pub struct ClassBody<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ClassBody<'gc>,
+    }
+    impl<'gc> ClassBody<'gc> {
+        pub fn from_node(node: &'gc super::ClassBody<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ClassBody {
+                    metadata: node.metadata.duplicate(),
+                    body: node.body.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ClassBody(self.inner))
+        }
+        pub fn body(&mut self, body: NodeList<'gc>) { self.is_changed = true; self.inner.body = body; }
+    }
+    #[derive(Debug)]
+    pub struct ClassProperty<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ClassProperty<'gc>,
+    }
+    impl<'gc> ClassProperty<'gc> {
+        pub fn from_node(node: &'gc super::ClassProperty<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ClassProperty {
+                    metadata: node.metadata.duplicate(),
+                    key: node.key.duplicate(),
+                    value: node.value.duplicate(),
+                    computed: Cell::new(node.computed.get()),
+                    r#static: Cell::new(node.r#static.get()),
+                    decorators: node.decorators.duplicate(),
+                    declare: Cell::new(node.declare.get()),
+                    optional: Cell::new(node.optional.get()),
+                    variance: node.variance.duplicate(),
+                    type_annotation: node.type_annotation.duplicate(),
+                    ts_modifiers: node.ts_modifiers.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ClassProperty(self.inner))
+        }
+        pub fn key(&mut self, key: &'gc Node<'gc>) { self.is_changed = true; self.inner.key = key; }
+        pub fn value(&mut self, value: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.value = value; }
+        pub fn decorators(&mut self, decorators: NodeList<'gc>) { self.is_changed = true; self.inner.decorators = decorators; }
+        pub fn variance(&mut self, variance: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.variance = variance; }
+        pub fn type_annotation(&mut self, type_annotation: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
+        pub fn ts_modifiers(&mut self, ts_modifiers: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.ts_modifiers = ts_modifiers; }
+    }
+    #[derive(Debug)]
+    pub struct ClassPrivateProperty<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ClassPrivateProperty<'gc>,
+    }
+    impl<'gc> ClassPrivateProperty<'gc> {
+        pub fn from_node(node: &'gc super::ClassPrivateProperty<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ClassPrivateProperty {
+                    metadata: node.metadata.duplicate(),
+                    key: node.key.duplicate(),
+                    value: node.value.duplicate(),
+                    r#static: Cell::new(node.r#static.get()),
+                    decorators: node.decorators.duplicate(),
+                    declare: Cell::new(node.declare.get()),
+                    optional: Cell::new(node.optional.get()),
+                    variance: node.variance.duplicate(),
+                    type_annotation: node.type_annotation.duplicate(),
+                    ts_modifiers: node.ts_modifiers.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ClassPrivateProperty(self.inner))
+        }
+        pub fn key(&mut self, key: &'gc Node<'gc>) { self.is_changed = true; self.inner.key = key; }
+        pub fn value(&mut self, value: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.value = value; }
+        pub fn decorators(&mut self, decorators: NodeList<'gc>) { self.is_changed = true; self.inner.decorators = decorators; }
+        pub fn variance(&mut self, variance: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.variance = variance; }
+        pub fn type_annotation(&mut self, type_annotation: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
+        pub fn ts_modifiers(&mut self, ts_modifiers: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.ts_modifiers = ts_modifiers; }
+    }
+    #[derive(Debug)]
+    pub struct MethodDefinition<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::MethodDefinition<'gc>,
+    }
+    impl<'gc> MethodDefinition<'gc> {
+        pub fn from_node(node: &'gc super::MethodDefinition<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::MethodDefinition {
+                    metadata: node.metadata.duplicate(),
+                    key: node.key.duplicate(),
+                    value: node.value.duplicate(),
+                    kind: Cell::new(node.kind.get()),
+                    computed: Cell::new(node.computed.get()),
+                    r#static: Cell::new(node.r#static.get()),
+                    decorators: node.decorators.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::MethodDefinition(self.inner))
+        }
+        pub fn key(&mut self, key: &'gc Node<'gc>) { self.is_changed = true; self.inner.key = key; }
+        pub fn value(&mut self, value: &'gc Node<'gc>) { self.is_changed = true; self.inner.value = value; }
+        pub fn decorators(&mut self, decorators: NodeList<'gc>) { self.is_changed = true; self.inner.decorators = decorators; }
+    }
+    #[derive(Debug)]
+    pub struct ImportDeclaration<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ImportDeclaration<'gc>,
+    }
+    impl<'gc> ImportDeclaration<'gc> {
+        pub fn from_node(node: &'gc super::ImportDeclaration<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ImportDeclaration {
+                    metadata: node.metadata.duplicate(),
+                    specifiers: node.specifiers.duplicate(),
+                    source: node.source.duplicate(),
+                    attributes: node.attributes.duplicate(),
+                    import_kind: Cell::new(node.import_kind.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ImportDeclaration(self.inner))
+        }
+        pub fn specifiers(&mut self, specifiers: NodeList<'gc>) { self.is_changed = true; self.inner.specifiers = specifiers; }
+        pub fn source(&mut self, source: &'gc Node<'gc>) { self.is_changed = true; self.inner.source = source; }
+        pub fn attributes(&mut self, attributes: NodeList<'gc>) { self.is_changed = true; self.inner.attributes = attributes; }
+    }
+    #[derive(Debug)]
+    pub struct ImportSpecifier<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ImportSpecifier<'gc>,
+    }
+    impl<'gc> ImportSpecifier<'gc> {
+        pub fn from_node(node: &'gc super::ImportSpecifier<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ImportSpecifier {
+                    metadata: node.metadata.duplicate(),
+                    imported: node.imported.duplicate(),
+                    local: node.local.duplicate(),
+                    import_kind: Cell::new(node.import_kind.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ImportSpecifier(self.inner))
+        }
+        pub fn imported(&mut self, imported: &'gc Node<'gc>) { self.is_changed = true; self.inner.imported = imported; }
+        pub fn local(&mut self, local: &'gc Node<'gc>) { self.is_changed = true; self.inner.local = local; }
+    }
+    #[derive(Debug)]
+    pub struct ImportDefaultSpecifier<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ImportDefaultSpecifier<'gc>,
+    }
+    impl<'gc> ImportDefaultSpecifier<'gc> {
+        pub fn from_node(node: &'gc super::ImportDefaultSpecifier<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ImportDefaultSpecifier {
+                    metadata: node.metadata.duplicate(),
+                    local: node.local.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ImportDefaultSpecifier(self.inner))
+        }
+        pub fn local(&mut self, local: &'gc Node<'gc>) { self.is_changed = true; self.inner.local = local; }
+    }
+    #[derive(Debug)]
+    pub struct ImportNamespaceSpecifier<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ImportNamespaceSpecifier<'gc>,
+    }
+    impl<'gc> ImportNamespaceSpecifier<'gc> {
+        pub fn from_node(node: &'gc super::ImportNamespaceSpecifier<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ImportNamespaceSpecifier {
+                    metadata: node.metadata.duplicate(),
+                    local: node.local.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ImportNamespaceSpecifier(self.inner))
+        }
+        pub fn local(&mut self, local: &'gc Node<'gc>) { self.is_changed = true; self.inner.local = local; }
+    }
+    #[derive(Debug)]
+    pub struct ImportAttribute<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ImportAttribute<'gc>,
+    }
+    impl<'gc> ImportAttribute<'gc> {
+        pub fn from_node(node: &'gc super::ImportAttribute<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ImportAttribute {
+                    metadata: node.metadata.duplicate(),
+                    key: node.key.duplicate(),
+                    value: node.value.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ImportAttribute(self.inner))
+        }
+        pub fn key(&mut self, key: &'gc Node<'gc>) { self.is_changed = true; self.inner.key = key; }
+        pub fn value(&mut self, value: &'gc Node<'gc>) { self.is_changed = true; self.inner.value = value; }
+    }
+    #[derive(Debug)]
+    pub struct ExportNamedDeclaration<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ExportNamedDeclaration<'gc>,
+    }
+    impl<'gc> ExportNamedDeclaration<'gc> {
+        pub fn from_node(node: &'gc super::ExportNamedDeclaration<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ExportNamedDeclaration {
+                    metadata: node.metadata.duplicate(),
+                    declaration: node.declaration.duplicate(),
+                    specifiers: node.specifiers.duplicate(),
+                    source: node.source.duplicate(),
+                    export_kind: Cell::new(node.export_kind.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ExportNamedDeclaration(self.inner))
+        }
+        pub fn declaration(&mut self, declaration: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.declaration = declaration; }
+        pub fn specifiers(&mut self, specifiers: NodeList<'gc>) { self.is_changed = true; self.inner.specifiers = specifiers; }
+        pub fn source(&mut self, source: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.source = source; }
+    }
+    #[derive(Debug)]
+    pub struct ExportSpecifier<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ExportSpecifier<'gc>,
+    }
+    impl<'gc> ExportSpecifier<'gc> {
+        pub fn from_node(node: &'gc super::ExportSpecifier<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ExportSpecifier {
+                    metadata: node.metadata.duplicate(),
+                    exported: node.exported.duplicate(),
+                    local: node.local.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ExportSpecifier(self.inner))
+        }
+        pub fn exported(&mut self, exported: &'gc Node<'gc>) { self.is_changed = true; self.inner.exported = exported; }
+        pub fn local(&mut self, local: &'gc Node<'gc>) { self.is_changed = true; self.inner.local = local; }
+    }
+    #[derive(Debug)]
+    pub struct ExportNamespaceSpecifier<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ExportNamespaceSpecifier<'gc>,
+    }
+    impl<'gc> ExportNamespaceSpecifier<'gc> {
+        pub fn from_node(node: &'gc super::ExportNamespaceSpecifier<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ExportNamespaceSpecifier {
+                    metadata: node.metadata.duplicate(),
+                    exported: node.exported.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ExportNamespaceSpecifier(self.inner))
+        }
+        pub fn exported(&mut self, exported: &'gc Node<'gc>) { self.is_changed = true; self.inner.exported = exported; }
+    }
+    #[derive(Debug)]
+    pub struct ExportDefaultDeclaration<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ExportDefaultDeclaration<'gc>,
+    }
+    impl<'gc> ExportDefaultDeclaration<'gc> {
+        pub fn from_node(node: &'gc super::ExportDefaultDeclaration<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ExportDefaultDeclaration {
+                    metadata: node.metadata.duplicate(),
+                    declaration: node.declaration.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ExportDefaultDeclaration(self.inner))
+        }
+        pub fn declaration(&mut self, declaration: &'gc Node<'gc>) { self.is_changed = true; self.inner.declaration = declaration; }
+    }
+    #[derive(Debug)]
+    pub struct ExportAllDeclaration<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ExportAllDeclaration<'gc>,
+    }
+    impl<'gc> ExportAllDeclaration<'gc> {
+        pub fn from_node(node: &'gc super::ExportAllDeclaration<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ExportAllDeclaration {
+                    metadata: node.metadata.duplicate(),
+                    source: node.source.duplicate(),
+                    export_kind: Cell::new(node.export_kind.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ExportAllDeclaration(self.inner))
+        }
+        pub fn source(&mut self, source: &'gc Node<'gc>) { self.is_changed = true; self.inner.source = source; }
+    }
+    #[derive(Debug)]
+    pub struct ObjectPattern<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ObjectPattern<'gc>,
+    }
+    impl<'gc> ObjectPattern<'gc> {
+        pub fn from_node(node: &'gc super::ObjectPattern<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ObjectPattern {
+                    metadata: node.metadata.duplicate(),
+                    properties: node.properties.duplicate(),
+                    type_annotation: node.type_annotation.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ObjectPattern(self.inner))
+        }
+        pub fn properties(&mut self, properties: NodeList<'gc>) { self.is_changed = true; self.inner.properties = properties; }
+        pub fn type_annotation(&mut self, type_annotation: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
+    }
+    #[derive(Debug)]
+    pub struct ArrayPattern<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ArrayPattern<'gc>,
+    }
+    impl<'gc> ArrayPattern<'gc> {
+        pub fn from_node(node: &'gc super::ArrayPattern<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ArrayPattern {
+                    metadata: node.metadata.duplicate(),
+                    elements: node.elements.duplicate(),
+                    type_annotation: node.type_annotation.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ArrayPattern(self.inner))
+        }
+        pub fn elements(&mut self, elements: NodeList<'gc>) { self.is_changed = true; self.inner.elements = elements; }
+        pub fn type_annotation(&mut self, type_annotation: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
+    }
+    #[derive(Debug)]
+    pub struct RestElement<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::RestElement<'gc>,
+    }
+    impl<'gc> RestElement<'gc> {
+        pub fn from_node(node: &'gc super::RestElement<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::RestElement {
+                    metadata: node.metadata.duplicate(),
+                    argument: node.argument.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::RestElement(self.inner))
+        }
+        pub fn argument(&mut self, argument: &'gc Node<'gc>) { self.is_changed = true; self.inner.argument = argument; }
+    }
+    #[derive(Debug)]
+    pub struct AssignmentPattern<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::AssignmentPattern<'gc>,
+    }
+    impl<'gc> AssignmentPattern<'gc> {
+        pub fn from_node(node: &'gc super::AssignmentPattern<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::AssignmentPattern {
+                    metadata: node.metadata.duplicate(),
+                    left: node.left.duplicate(),
+                    right: node.right.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::AssignmentPattern(self.inner))
+        }
+        pub fn left(&mut self, left: &'gc Node<'gc>) { self.is_changed = true; self.inner.left = left; }
+        pub fn right(&mut self, right: &'gc Node<'gc>) { self.is_changed = true; self.inner.right = right; }
+    }
+    #[derive(Debug)]
+    pub struct MatchStatementCase<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::MatchStatementCase<'gc>,
+    }
+    impl<'gc> MatchStatementCase<'gc> {
+        pub fn from_node(node: &'gc super::MatchStatementCase<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::MatchStatementCase {
+                    metadata: node.metadata.duplicate(),
+                    pattern: node.pattern.duplicate(),
+                    body: node.body.duplicate(),
+                    guard: node.guard.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::MatchStatementCase(self.inner))
+        }
+        pub fn pattern(&mut self, pattern: &'gc Node<'gc>) { self.is_changed = true; self.inner.pattern = pattern; }
+        pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+        pub fn guard(&mut self, guard: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.guard = guard; }
+    }
+    #[derive(Debug)]
+    pub struct MatchExpression<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::MatchExpression<'gc>,
+    }
+    impl<'gc> MatchExpression<'gc> {
+        pub fn from_node(node: &'gc super::MatchExpression<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::MatchExpression {
+                    metadata: node.metadata.duplicate(),
+                    argument: node.argument.duplicate(),
+                    cases: node.cases.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::MatchExpression(self.inner))
+        }
+        pub fn argument(&mut self, argument: &'gc Node<'gc>) { self.is_changed = true; self.inner.argument = argument; }
+        pub fn cases(&mut self, cases: NodeList<'gc>) { self.is_changed = true; self.inner.cases = cases; }
+    }
+    #[derive(Debug)]
+    pub struct MatchExpressionCase<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::MatchExpressionCase<'gc>,
+    }
+    impl<'gc> MatchExpressionCase<'gc> {
+        pub fn from_node(node: &'gc super::MatchExpressionCase<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::MatchExpressionCase {
+                    metadata: node.metadata.duplicate(),
+                    pattern: node.pattern.duplicate(),
+                    body: node.body.duplicate(),
+                    guard: node.guard.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::MatchExpressionCase(self.inner))
+        }
+        pub fn pattern(&mut self, pattern: &'gc Node<'gc>) { self.is_changed = true; self.inner.pattern = pattern; }
+        pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+        pub fn guard(&mut self, guard: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.guard = guard; }
+    }
+    #[derive(Debug)]
+    pub struct MatchWildcardPattern<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::MatchWildcardPattern<'gc>,
+    }
+    impl<'gc> MatchWildcardPattern<'gc> {
+        pub fn from_node(node: &'gc super::MatchWildcardPattern<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::MatchWildcardPattern {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::MatchWildcardPattern(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct MatchLiteralPattern<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::MatchLiteralPattern<'gc>,
+    }
+    impl<'gc> MatchLiteralPattern<'gc> {
+        pub fn from_node(node: &'gc super::MatchLiteralPattern<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::MatchLiteralPattern {
+                    metadata: node.metadata.duplicate(),
+                    literal: node.literal.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::MatchLiteralPattern(self.inner))
+        }
+        pub fn literal(&mut self, literal: &'gc Node<'gc>) { self.is_changed = true; self.inner.literal = literal; }
+    }
+    #[derive(Debug)]
+    pub struct MatchUnaryPattern<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::MatchUnaryPattern<'gc>,
+    }
+    impl<'gc> MatchUnaryPattern<'gc> {
+        pub fn from_node(node: &'gc super::MatchUnaryPattern<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::MatchUnaryPattern {
+                    metadata: node.metadata.duplicate(),
+                    argument: node.argument.duplicate(),
+                    operator: Cell::new(node.operator.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::MatchUnaryPattern(self.inner))
+        }
+        pub fn argument(&mut self, argument: &'gc Node<'gc>) { self.is_changed = true; self.inner.argument = argument; }
+    }
+    #[derive(Debug)]
+    pub struct MatchIdentifierPattern<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::MatchIdentifierPattern<'gc>,
+    }
+    impl<'gc> MatchIdentifierPattern<'gc> {
+        pub fn from_node(node: &'gc super::MatchIdentifierPattern<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::MatchIdentifierPattern {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::MatchIdentifierPattern(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+    }
+    #[derive(Debug)]
+    pub struct MatchBindingPattern<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::MatchBindingPattern<'gc>,
+    }
+    impl<'gc> MatchBindingPattern<'gc> {
+        pub fn from_node(node: &'gc super::MatchBindingPattern<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::MatchBindingPattern {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    kind: Cell::new(node.kind.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::MatchBindingPattern(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+    }
+    #[derive(Debug)]
+    pub struct MatchObjectPattern<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::MatchObjectPattern<'gc>,
+    }
+    impl<'gc> MatchObjectPattern<'gc> {
+        pub fn from_node(node: &'gc super::MatchObjectPattern<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::MatchObjectPattern {
+                    metadata: node.metadata.duplicate(),
+                    properties: node.properties.duplicate(),
+                    rest: node.rest.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::MatchObjectPattern(self.inner))
+        }
+        pub fn properties(&mut self, properties: NodeList<'gc>) { self.is_changed = true; self.inner.properties = properties; }
+        pub fn rest(&mut self, rest: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.rest = rest; }
+    }
+    #[derive(Debug)]
+    pub struct MatchArrayPattern<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::MatchArrayPattern<'gc>,
+    }
+    impl<'gc> MatchArrayPattern<'gc> {
+        pub fn from_node(node: &'gc super::MatchArrayPattern<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::MatchArrayPattern {
+                    metadata: node.metadata.duplicate(),
+                    elements: node.elements.duplicate(),
+                    rest: node.rest.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::MatchArrayPattern(self.inner))
+        }
+        pub fn elements(&mut self, elements: NodeList<'gc>) { self.is_changed = true; self.inner.elements = elements; }
+        pub fn rest(&mut self, rest: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.rest = rest; }
+    }
+    #[derive(Debug)]
+    pub struct MatchOrPattern<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::MatchOrPattern<'gc>,
+    }
+    impl<'gc> MatchOrPattern<'gc> {
+        pub fn from_node(node: &'gc super::MatchOrPattern<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::MatchOrPattern {
+                    metadata: node.metadata.duplicate(),
+                    patterns: node.patterns.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::MatchOrPattern(self.inner))
+        }
+        pub fn patterns(&mut self, patterns: NodeList<'gc>) { self.is_changed = true; self.inner.patterns = patterns; }
+    }
+    #[derive(Debug)]
+    pub struct MatchAsPattern<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::MatchAsPattern<'gc>,
+    }
+    impl<'gc> MatchAsPattern<'gc> {
+        pub fn from_node(node: &'gc super::MatchAsPattern<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::MatchAsPattern {
+                    metadata: node.metadata.duplicate(),
+                    pattern: node.pattern.duplicate(),
+                    target: node.target.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::MatchAsPattern(self.inner))
+        }
+        pub fn pattern(&mut self, pattern: &'gc Node<'gc>) { self.is_changed = true; self.inner.pattern = pattern; }
+        pub fn target(&mut self, target: &'gc Node<'gc>) { self.is_changed = true; self.inner.target = target; }
+    }
+    #[derive(Debug)]
+    pub struct MatchMemberPattern<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::MatchMemberPattern<'gc>,
+    }
+    impl<'gc> MatchMemberPattern<'gc> {
+        pub fn from_node(node: &'gc super::MatchMemberPattern<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::MatchMemberPattern {
+                    metadata: node.metadata.duplicate(),
+                    base: node.base.duplicate(),
+                    property: node.property.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::MatchMemberPattern(self.inner))
+        }
+        pub fn base(&mut self, base: &'gc Node<'gc>) { self.is_changed = true; self.inner.base = base; }
+        pub fn property(&mut self, property: &'gc Node<'gc>) { self.is_changed = true; self.inner.property = property; }
+    }
+    #[derive(Debug)]
+    pub struct MatchInstancePattern<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::MatchInstancePattern<'gc>,
+    }
+    impl<'gc> MatchInstancePattern<'gc> {
+        pub fn from_node(node: &'gc super::MatchInstancePattern<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::MatchInstancePattern {
+                    metadata: node.metadata.duplicate(),
+                    target_constructor: node.target_constructor.duplicate(),
+                    properties: node.properties.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::MatchInstancePattern(self.inner))
+        }
+        pub fn target_constructor(&mut self, target_constructor: &'gc Node<'gc>) { self.is_changed = true; self.inner.target_constructor = target_constructor; }
+        pub fn properties(&mut self, properties: &'gc Node<'gc>) { self.is_changed = true; self.inner.properties = properties; }
+    }
+    #[derive(Debug)]
+    pub struct MatchObjectPatternProperty<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::MatchObjectPatternProperty<'gc>,
+    }
+    impl<'gc> MatchObjectPatternProperty<'gc> {
+        pub fn from_node(node: &'gc super::MatchObjectPatternProperty<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::MatchObjectPatternProperty {
+                    metadata: node.metadata.duplicate(),
+                    key: node.key.duplicate(),
+                    pattern: node.pattern.duplicate(),
+                    shorthand: Cell::new(node.shorthand.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::MatchObjectPatternProperty(self.inner))
+        }
+        pub fn key(&mut self, key: &'gc Node<'gc>) { self.is_changed = true; self.inner.key = key; }
+        pub fn pattern(&mut self, pattern: &'gc Node<'gc>) { self.is_changed = true; self.inner.pattern = pattern; }
+    }
+    #[derive(Debug)]
+    pub struct MatchInstanceObjectPattern<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::MatchInstanceObjectPattern<'gc>,
+    }
+    impl<'gc> MatchInstanceObjectPattern<'gc> {
+        pub fn from_node(node: &'gc super::MatchInstanceObjectPattern<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::MatchInstanceObjectPattern {
+                    metadata: node.metadata.duplicate(),
+                    properties: node.properties.duplicate(),
+                    rest: node.rest.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::MatchInstanceObjectPattern(self.inner))
+        }
+        pub fn properties(&mut self, properties: NodeList<'gc>) { self.is_changed = true; self.inner.properties = properties; }
+        pub fn rest(&mut self, rest: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.rest = rest; }
+    }
+    #[derive(Debug)]
+    pub struct MatchRestPattern<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::MatchRestPattern<'gc>,
+    }
+    impl<'gc> MatchRestPattern<'gc> {
+        pub fn from_node(node: &'gc super::MatchRestPattern<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::MatchRestPattern {
+                    metadata: node.metadata.duplicate(),
+                    argument: node.argument.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::MatchRestPattern(self.inner))
+        }
+        pub fn argument(&mut self, argument: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.argument = argument; }
+    }
+    #[derive(Debug)]
+    pub struct JSXIdentifier<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::JSXIdentifier<'gc>,
+    }
+    impl<'gc> JSXIdentifier<'gc> {
+        pub fn from_node(node: &'gc super::JSXIdentifier<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::JSXIdentifier {
+                    metadata: node.metadata.duplicate(),
+                    name: Cell::new(node.name.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::JSXIdentifier(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct JSXMemberExpression<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::JSXMemberExpression<'gc>,
+    }
+    impl<'gc> JSXMemberExpression<'gc> {
+        pub fn from_node(node: &'gc super::JSXMemberExpression<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::JSXMemberExpression {
+                    metadata: node.metadata.duplicate(),
+                    object: node.object.duplicate(),
+                    property: node.property.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::JSXMemberExpression(self.inner))
+        }
+        pub fn object(&mut self, object: &'gc Node<'gc>) { self.is_changed = true; self.inner.object = object; }
+        pub fn property(&mut self, property: &'gc Node<'gc>) { self.is_changed = true; self.inner.property = property; }
+    }
+    #[derive(Debug)]
+    pub struct JSXNamespacedName<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::JSXNamespacedName<'gc>,
+    }
+    impl<'gc> JSXNamespacedName<'gc> {
+        pub fn from_node(node: &'gc super::JSXNamespacedName<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::JSXNamespacedName {
+                    metadata: node.metadata.duplicate(),
+                    namespace: node.namespace.duplicate(),
+                    name: node.name.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::JSXNamespacedName(self.inner))
+        }
+        pub fn namespace(&mut self, namespace: &'gc Node<'gc>) { self.is_changed = true; self.inner.namespace = namespace; }
+        pub fn name(&mut self, name: &'gc Node<'gc>) { self.is_changed = true; self.inner.name = name; }
+    }
+    #[derive(Debug)]
+    pub struct JSXEmptyExpression<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::JSXEmptyExpression<'gc>,
+    }
+    impl<'gc> JSXEmptyExpression<'gc> {
+        pub fn from_node(node: &'gc super::JSXEmptyExpression<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::JSXEmptyExpression {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::JSXEmptyExpression(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct JSXExpressionContainer<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::JSXExpressionContainer<'gc>,
+    }
+    impl<'gc> JSXExpressionContainer<'gc> {
+        pub fn from_node(node: &'gc super::JSXExpressionContainer<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::JSXExpressionContainer {
+                    metadata: node.metadata.duplicate(),
+                    expression: node.expression.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::JSXExpressionContainer(self.inner))
+        }
+        pub fn expression(&mut self, expression: &'gc Node<'gc>) { self.is_changed = true; self.inner.expression = expression; }
+    }
+    #[derive(Debug)]
+    pub struct JSXSpreadChild<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::JSXSpreadChild<'gc>,
+    }
+    impl<'gc> JSXSpreadChild<'gc> {
+        pub fn from_node(node: &'gc super::JSXSpreadChild<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::JSXSpreadChild {
+                    metadata: node.metadata.duplicate(),
+                    expression: node.expression.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::JSXSpreadChild(self.inner))
+        }
+        pub fn expression(&mut self, expression: &'gc Node<'gc>) { self.is_changed = true; self.inner.expression = expression; }
+    }
+    #[derive(Debug)]
+    pub struct JSXOpeningElement<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::JSXOpeningElement<'gc>,
+    }
+    impl<'gc> JSXOpeningElement<'gc> {
+        pub fn from_node(node: &'gc super::JSXOpeningElement<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::JSXOpeningElement {
+                    metadata: node.metadata.duplicate(),
+                    name: node.name.duplicate(),
+                    attributes: node.attributes.duplicate(),
+                    self_closing: Cell::new(node.self_closing.get()),
+                    type_arguments: node.type_arguments.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::JSXOpeningElement(self.inner))
+        }
+        pub fn name(&mut self, name: &'gc Node<'gc>) { self.is_changed = true; self.inner.name = name; }
+        pub fn attributes(&mut self, attributes: NodeList<'gc>) { self.is_changed = true; self.inner.attributes = attributes; }
+        pub fn type_arguments(&mut self, type_arguments: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_arguments = type_arguments; }
+    }
+    #[derive(Debug)]
+    pub struct JSXClosingElement<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::JSXClosingElement<'gc>,
+    }
+    impl<'gc> JSXClosingElement<'gc> {
+        pub fn from_node(node: &'gc super::JSXClosingElement<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::JSXClosingElement {
+                    metadata: node.metadata.duplicate(),
+                    name: node.name.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::JSXClosingElement(self.inner))
+        }
+        pub fn name(&mut self, name: &'gc Node<'gc>) { self.is_changed = true; self.inner.name = name; }
+    }
+    #[derive(Debug)]
+    pub struct JSXAttribute<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::JSXAttribute<'gc>,
+    }
+    impl<'gc> JSXAttribute<'gc> {
+        pub fn from_node(node: &'gc super::JSXAttribute<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::JSXAttribute {
+                    metadata: node.metadata.duplicate(),
+                    name: node.name.duplicate(),
+                    value: node.value.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::JSXAttribute(self.inner))
+        }
+        pub fn name(&mut self, name: &'gc Node<'gc>) { self.is_changed = true; self.inner.name = name; }
+        pub fn value(&mut self, value: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.value = value; }
+    }
+    #[derive(Debug)]
+    pub struct JSXSpreadAttribute<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::JSXSpreadAttribute<'gc>,
+    }
+    impl<'gc> JSXSpreadAttribute<'gc> {
+        pub fn from_node(node: &'gc super::JSXSpreadAttribute<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::JSXSpreadAttribute {
+                    metadata: node.metadata.duplicate(),
+                    argument: node.argument.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::JSXSpreadAttribute(self.inner))
+        }
+        pub fn argument(&mut self, argument: &'gc Node<'gc>) { self.is_changed = true; self.inner.argument = argument; }
+    }
+    #[derive(Debug)]
+    pub struct JSXStringLiteral<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::JSXStringLiteral<'gc>,
+    }
+    impl<'gc> JSXStringLiteral<'gc> {
+        pub fn from_node(node: &'gc super::JSXStringLiteral<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::JSXStringLiteral {
+                    metadata: node.metadata.duplicate(),
+                    value: Cell::new(node.value.get()),
+                    raw: Cell::new(node.raw.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::JSXStringLiteral(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct JSXText<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::JSXText<'gc>,
+    }
+    impl<'gc> JSXText<'gc> {
+        pub fn from_node(node: &'gc super::JSXText<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::JSXText {
+                    metadata: node.metadata.duplicate(),
+                    value: Cell::new(node.value.get()),
+                    raw: Cell::new(node.raw.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::JSXText(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct JSXElement<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::JSXElement<'gc>,
+    }
+    impl<'gc> JSXElement<'gc> {
+        pub fn from_node(node: &'gc super::JSXElement<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::JSXElement {
+                    metadata: node.metadata.duplicate(),
+                    opening_element: node.opening_element.duplicate(),
+                    children: node.children.duplicate(),
+                    closing_element: node.closing_element.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::JSXElement(self.inner))
+        }
+        pub fn opening_element(&mut self, opening_element: &'gc Node<'gc>) { self.is_changed = true; self.inner.opening_element = opening_element; }
+        pub fn children(&mut self, children: NodeList<'gc>) { self.is_changed = true; self.inner.children = children; }
+        pub fn closing_element(&mut self, closing_element: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.closing_element = closing_element; }
+    }
+    #[derive(Debug)]
+    pub struct JSXFragment<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::JSXFragment<'gc>,
+    }
+    impl<'gc> JSXFragment<'gc> {
+        pub fn from_node(node: &'gc super::JSXFragment<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::JSXFragment {
+                    metadata: node.metadata.duplicate(),
+                    opening_fragment: node.opening_fragment.duplicate(),
+                    children: node.children.duplicate(),
+                    closing_fragment: node.closing_fragment.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::JSXFragment(self.inner))
+        }
+        pub fn opening_fragment(&mut self, opening_fragment: &'gc Node<'gc>) { self.is_changed = true; self.inner.opening_fragment = opening_fragment; }
+        pub fn children(&mut self, children: NodeList<'gc>) { self.is_changed = true; self.inner.children = children; }
+        pub fn closing_fragment(&mut self, closing_fragment: &'gc Node<'gc>) { self.is_changed = true; self.inner.closing_fragment = closing_fragment; }
+    }
+    #[derive(Debug)]
+    pub struct JSXOpeningFragment<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::JSXOpeningFragment<'gc>,
+    }
+    impl<'gc> JSXOpeningFragment<'gc> {
+        pub fn from_node(node: &'gc super::JSXOpeningFragment<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::JSXOpeningFragment {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::JSXOpeningFragment(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct JSXClosingFragment<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::JSXClosingFragment<'gc>,
+    }
+    impl<'gc> JSXClosingFragment<'gc> {
+        pub fn from_node(node: &'gc super::JSXClosingFragment<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::JSXClosingFragment {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::JSXClosingFragment(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct ExistsTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ExistsTypeAnnotation<'gc>,
+    }
+    impl<'gc> ExistsTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::ExistsTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ExistsTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ExistsTypeAnnotation(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct EmptyTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::EmptyTypeAnnotation<'gc>,
+    }
+    impl<'gc> EmptyTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::EmptyTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::EmptyTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::EmptyTypeAnnotation(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct StringTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::StringTypeAnnotation<'gc>,
+    }
+    impl<'gc> StringTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::StringTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::StringTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::StringTypeAnnotation(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct NumberTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::NumberTypeAnnotation<'gc>,
+    }
+    impl<'gc> NumberTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::NumberTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::NumberTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::NumberTypeAnnotation(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct StringLiteralTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::StringLiteralTypeAnnotation<'gc>,
+    }
+    impl<'gc> StringLiteralTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::StringLiteralTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::StringLiteralTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                    value: Cell::new(node.value.get()),
+                    raw: Cell::new(node.raw.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::StringLiteralTypeAnnotation(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct NumberLiteralTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::NumberLiteralTypeAnnotation<'gc>,
+    }
+    impl<'gc> NumberLiteralTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::NumberLiteralTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::NumberLiteralTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                    value: Cell::new(node.value.get()),
+                    raw: Cell::new(node.raw.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::NumberLiteralTypeAnnotation(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct BigIntLiteralTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::BigIntLiteralTypeAnnotation<'gc>,
+    }
+    impl<'gc> BigIntLiteralTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::BigIntLiteralTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::BigIntLiteralTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                    raw: Cell::new(node.raw.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::BigIntLiteralTypeAnnotation(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct BooleanTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::BooleanTypeAnnotation<'gc>,
+    }
+    impl<'gc> BooleanTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::BooleanTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::BooleanTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::BooleanTypeAnnotation(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct BooleanLiteralTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::BooleanLiteralTypeAnnotation<'gc>,
+    }
+    impl<'gc> BooleanLiteralTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::BooleanLiteralTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::BooleanLiteralTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                    value: Cell::new(node.value.get()),
+                    raw: Cell::new(node.raw.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::BooleanLiteralTypeAnnotation(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct NullLiteralTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::NullLiteralTypeAnnotation<'gc>,
+    }
+    impl<'gc> NullLiteralTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::NullLiteralTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::NullLiteralTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::NullLiteralTypeAnnotation(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct SymbolTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::SymbolTypeAnnotation<'gc>,
+    }
+    impl<'gc> SymbolTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::SymbolTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::SymbolTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::SymbolTypeAnnotation(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct AnyTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::AnyTypeAnnotation<'gc>,
+    }
+    impl<'gc> AnyTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::AnyTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::AnyTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::AnyTypeAnnotation(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct MixedTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::MixedTypeAnnotation<'gc>,
+    }
+    impl<'gc> MixedTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::MixedTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::MixedTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::MixedTypeAnnotation(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct BigIntTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::BigIntTypeAnnotation<'gc>,
+    }
+    impl<'gc> BigIntTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::BigIntTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::BigIntTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::BigIntTypeAnnotation(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct VoidTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::VoidTypeAnnotation<'gc>,
+    }
+    impl<'gc> VoidTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::VoidTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::VoidTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::VoidTypeAnnotation(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct NeverTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::NeverTypeAnnotation<'gc>,
+    }
+    impl<'gc> NeverTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::NeverTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::NeverTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::NeverTypeAnnotation(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct UnknownTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::UnknownTypeAnnotation<'gc>,
+    }
+    impl<'gc> UnknownTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::UnknownTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::UnknownTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::UnknownTypeAnnotation(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct UndefinedTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::UndefinedTypeAnnotation<'gc>,
+    }
+    impl<'gc> UndefinedTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::UndefinedTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::UndefinedTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::UndefinedTypeAnnotation(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct FunctionTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::FunctionTypeAnnotation<'gc>,
+    }
+    impl<'gc> FunctionTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::FunctionTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::FunctionTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                    params: node.params.duplicate(),
+                    this: node.this.duplicate(),
+                    return_type: node.return_type.duplicate(),
+                    rest: node.rest.duplicate(),
+                    type_parameters: node.type_parameters.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::FunctionTypeAnnotation(self.inner))
+        }
+        pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
+        pub fn this(&mut self, this: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.this = this; }
+        pub fn return_type(&mut self, return_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.return_type = return_type; }
+        pub fn rest(&mut self, rest: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.rest = rest; }
+        pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+    }
+    #[derive(Debug)]
+    pub struct HookTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::HookTypeAnnotation<'gc>,
+    }
+    impl<'gc> HookTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::HookTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::HookTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                    params: node.params.duplicate(),
+                    return_type: node.return_type.duplicate(),
+                    rest: node.rest.duplicate(),
+                    type_parameters: node.type_parameters.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::HookTypeAnnotation(self.inner))
+        }
+        pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
+        pub fn return_type(&mut self, return_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.return_type = return_type; }
+        pub fn rest(&mut self, rest: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.rest = rest; }
+        pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+    }
+    #[derive(Debug)]
+    pub struct FunctionTypeParam<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::FunctionTypeParam<'gc>,
+    }
+    impl<'gc> FunctionTypeParam<'gc> {
+        pub fn from_node(node: &'gc super::FunctionTypeParam<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::FunctionTypeParam {
+                    metadata: node.metadata.duplicate(),
+                    name: node.name.duplicate(),
+                    type_annotation: node.type_annotation.duplicate(),
+                    optional: Cell::new(node.optional.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::FunctionTypeParam(self.inner))
+        }
+        pub fn name(&mut self, name: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.name = name; }
+        pub fn type_annotation(&mut self, type_annotation: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
+    }
+    #[derive(Debug)]
+    pub struct ComponentTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ComponentTypeAnnotation<'gc>,
+    }
+    impl<'gc> ComponentTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::ComponentTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ComponentTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                    params: node.params.duplicate(),
+                    rest: node.rest.duplicate(),
+                    type_parameters: node.type_parameters.duplicate(),
+                    renders_type: node.renders_type.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ComponentTypeAnnotation(self.inner))
+        }
+        pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
+        pub fn rest(&mut self, rest: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.rest = rest; }
+        pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        pub fn renders_type(&mut self, renders_type: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.renders_type = renders_type; }
+    }
+    #[derive(Debug)]
+    pub struct ComponentTypeParameter<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ComponentTypeParameter<'gc>,
+    }
+    impl<'gc> ComponentTypeParameter<'gc> {
+        pub fn from_node(node: &'gc super::ComponentTypeParameter<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ComponentTypeParameter {
+                    metadata: node.metadata.duplicate(),
+                    name: node.name.duplicate(),
+                    type_annotation: node.type_annotation.duplicate(),
+                    optional: Cell::new(node.optional.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ComponentTypeParameter(self.inner))
+        }
+        pub fn name(&mut self, name: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.name = name; }
+        pub fn type_annotation(&mut self, type_annotation: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
+    }
+    #[derive(Debug)]
+    pub struct NullableTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::NullableTypeAnnotation<'gc>,
+    }
+    impl<'gc> NullableTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::NullableTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::NullableTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                    type_annotation: node.type_annotation.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::NullableTypeAnnotation(self.inner))
+        }
+        pub fn type_annotation(&mut self, type_annotation: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
+    }
+    #[derive(Debug)]
+    pub struct QualifiedTypeIdentifier<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::QualifiedTypeIdentifier<'gc>,
+    }
+    impl<'gc> QualifiedTypeIdentifier<'gc> {
+        pub fn from_node(node: &'gc super::QualifiedTypeIdentifier<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::QualifiedTypeIdentifier {
+                    metadata: node.metadata.duplicate(),
+                    qualification: node.qualification.duplicate(),
+                    id: node.id.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::QualifiedTypeIdentifier(self.inner))
+        }
+        pub fn qualification(&mut self, qualification: &'gc Node<'gc>) { self.is_changed = true; self.inner.qualification = qualification; }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+    }
+    #[derive(Debug)]
+    pub struct TypeofTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TypeofTypeAnnotation<'gc>,
+    }
+    impl<'gc> TypeofTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::TypeofTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TypeofTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                    argument: node.argument.duplicate(),
+                    type_arguments: node.type_arguments.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TypeofTypeAnnotation(self.inner))
+        }
+        pub fn argument(&mut self, argument: &'gc Node<'gc>) { self.is_changed = true; self.inner.argument = argument; }
+        pub fn type_arguments(&mut self, type_arguments: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_arguments = type_arguments; }
+    }
+    #[derive(Debug)]
+    pub struct KeyofTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::KeyofTypeAnnotation<'gc>,
+    }
+    impl<'gc> KeyofTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::KeyofTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::KeyofTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                    argument: node.argument.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::KeyofTypeAnnotation(self.inner))
+        }
+        pub fn argument(&mut self, argument: &'gc Node<'gc>) { self.is_changed = true; self.inner.argument = argument; }
+    }
+    #[derive(Debug)]
+    pub struct TypeOperator<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TypeOperator<'gc>,
+    }
+    impl<'gc> TypeOperator<'gc> {
+        pub fn from_node(node: &'gc super::TypeOperator<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TypeOperator {
+                    metadata: node.metadata.duplicate(),
+                    operator: Cell::new(node.operator.get()),
+                    type_annotation: node.type_annotation.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TypeOperator(self.inner))
+        }
+        pub fn type_annotation(&mut self, type_annotation: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
+    }
+    #[derive(Debug)]
+    pub struct QualifiedTypeofIdentifier<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::QualifiedTypeofIdentifier<'gc>,
+    }
+    impl<'gc> QualifiedTypeofIdentifier<'gc> {
+        pub fn from_node(node: &'gc super::QualifiedTypeofIdentifier<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::QualifiedTypeofIdentifier {
+                    metadata: node.metadata.duplicate(),
+                    qualification: node.qualification.duplicate(),
+                    id: node.id.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::QualifiedTypeofIdentifier(self.inner))
+        }
+        pub fn qualification(&mut self, qualification: &'gc Node<'gc>) { self.is_changed = true; self.inner.qualification = qualification; }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+    }
+    #[derive(Debug)]
+    pub struct TupleTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TupleTypeAnnotation<'gc>,
+    }
+    impl<'gc> TupleTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::TupleTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TupleTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                    element_types: node.element_types.duplicate(),
+                    inexact: Cell::new(node.inexact.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TupleTypeAnnotation(self.inner))
+        }
+        pub fn element_types(&mut self, element_types: NodeList<'gc>) { self.is_changed = true; self.inner.element_types = element_types; }
+    }
+    #[derive(Debug)]
+    pub struct TupleTypeSpreadElement<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TupleTypeSpreadElement<'gc>,
+    }
+    impl<'gc> TupleTypeSpreadElement<'gc> {
+        pub fn from_node(node: &'gc super::TupleTypeSpreadElement<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TupleTypeSpreadElement {
+                    metadata: node.metadata.duplicate(),
+                    label: node.label.duplicate(),
+                    type_annotation: node.type_annotation.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TupleTypeSpreadElement(self.inner))
+        }
+        pub fn label(&mut self, label: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.label = label; }
+        pub fn type_annotation(&mut self, type_annotation: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
+    }
+    #[derive(Debug)]
+    pub struct TupleTypeLabeledElement<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TupleTypeLabeledElement<'gc>,
+    }
+    impl<'gc> TupleTypeLabeledElement<'gc> {
+        pub fn from_node(node: &'gc super::TupleTypeLabeledElement<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TupleTypeLabeledElement {
+                    metadata: node.metadata.duplicate(),
+                    label: node.label.duplicate(),
+                    element_type: node.element_type.duplicate(),
+                    optional: Cell::new(node.optional.get()),
+                    variance: node.variance.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TupleTypeLabeledElement(self.inner))
+        }
+        pub fn label(&mut self, label: &'gc Node<'gc>) { self.is_changed = true; self.inner.label = label; }
+        pub fn element_type(&mut self, element_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.element_type = element_type; }
+        pub fn variance(&mut self, variance: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.variance = variance; }
+    }
+    #[derive(Debug)]
+    pub struct ArrayTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ArrayTypeAnnotation<'gc>,
+    }
+    impl<'gc> ArrayTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::ArrayTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ArrayTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                    element_type: node.element_type.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ArrayTypeAnnotation(self.inner))
+        }
+        pub fn element_type(&mut self, element_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.element_type = element_type; }
+    }
+    #[derive(Debug)]
+    pub struct InferTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::InferTypeAnnotation<'gc>,
+    }
+    impl<'gc> InferTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::InferTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::InferTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                    type_parameter: node.type_parameter.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::InferTypeAnnotation(self.inner))
+        }
+        pub fn type_parameter(&mut self, type_parameter: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_parameter = type_parameter; }
+    }
+    #[derive(Debug)]
+    pub struct UnionTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::UnionTypeAnnotation<'gc>,
+    }
+    impl<'gc> UnionTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::UnionTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::UnionTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                    types: node.types.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::UnionTypeAnnotation(self.inner))
+        }
+        pub fn types(&mut self, types: NodeList<'gc>) { self.is_changed = true; self.inner.types = types; }
+    }
+    #[derive(Debug)]
+    pub struct IntersectionTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::IntersectionTypeAnnotation<'gc>,
+    }
+    impl<'gc> IntersectionTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::IntersectionTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::IntersectionTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                    types: node.types.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::IntersectionTypeAnnotation(self.inner))
+        }
+        pub fn types(&mut self, types: NodeList<'gc>) { self.is_changed = true; self.inner.types = types; }
+    }
+    #[derive(Debug)]
+    pub struct GenericTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::GenericTypeAnnotation<'gc>,
+    }
+    impl<'gc> GenericTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::GenericTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::GenericTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    type_parameters: node.type_parameters.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::GenericTypeAnnotation(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+    }
+    #[derive(Debug)]
+    pub struct IndexedAccessType<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::IndexedAccessType<'gc>,
+    }
+    impl<'gc> IndexedAccessType<'gc> {
+        pub fn from_node(node: &'gc super::IndexedAccessType<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::IndexedAccessType {
+                    metadata: node.metadata.duplicate(),
+                    object_type: node.object_type.duplicate(),
+                    index_type: node.index_type.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::IndexedAccessType(self.inner))
+        }
+        pub fn object_type(&mut self, object_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.object_type = object_type; }
+        pub fn index_type(&mut self, index_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.index_type = index_type; }
+    }
+    #[derive(Debug)]
+    pub struct OptionalIndexedAccessType<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::OptionalIndexedAccessType<'gc>,
+    }
+    impl<'gc> OptionalIndexedAccessType<'gc> {
+        pub fn from_node(node: &'gc super::OptionalIndexedAccessType<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::OptionalIndexedAccessType {
+                    metadata: node.metadata.duplicate(),
+                    object_type: node.object_type.duplicate(),
+                    index_type: node.index_type.duplicate(),
+                    optional: Cell::new(node.optional.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::OptionalIndexedAccessType(self.inner))
+        }
+        pub fn object_type(&mut self, object_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.object_type = object_type; }
+        pub fn index_type(&mut self, index_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.index_type = index_type; }
+    }
+    #[derive(Debug)]
+    pub struct ConditionalTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ConditionalTypeAnnotation<'gc>,
+    }
+    impl<'gc> ConditionalTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::ConditionalTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ConditionalTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                    check_type: node.check_type.duplicate(),
+                    extends_type: node.extends_type.duplicate(),
+                    true_type: node.true_type.duplicate(),
+                    false_type: node.false_type.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ConditionalTypeAnnotation(self.inner))
+        }
+        pub fn check_type(&mut self, check_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.check_type = check_type; }
+        pub fn extends_type(&mut self, extends_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.extends_type = extends_type; }
+        pub fn true_type(&mut self, true_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.true_type = true_type; }
+        pub fn false_type(&mut self, false_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.false_type = false_type; }
+    }
+    #[derive(Debug)]
+    pub struct TypePredicate<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TypePredicate<'gc>,
+    }
+    impl<'gc> TypePredicate<'gc> {
+        pub fn from_node(node: &'gc super::TypePredicate<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TypePredicate {
+                    metadata: node.metadata.duplicate(),
+                    parameter_name: node.parameter_name.duplicate(),
+                    type_annotation: node.type_annotation.duplicate(),
+                    kind: Cell::new(node.kind.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TypePredicate(self.inner))
+        }
+        pub fn parameter_name(&mut self, parameter_name: &'gc Node<'gc>) { self.is_changed = true; self.inner.parameter_name = parameter_name; }
+        pub fn type_annotation(&mut self, type_annotation: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
+    }
+    #[derive(Debug)]
+    pub struct InterfaceTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::InterfaceTypeAnnotation<'gc>,
+    }
+    impl<'gc> InterfaceTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::InterfaceTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::InterfaceTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                    extends: node.extends.duplicate(),
+                    body: node.body.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::InterfaceTypeAnnotation(self.inner))
+        }
+        pub fn extends(&mut self, extends: NodeList<'gc>) { self.is_changed = true; self.inner.extends = extends; }
+        pub fn body(&mut self, body: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.body = body; }
+    }
+    #[derive(Debug)]
+    pub struct TypeAlias<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TypeAlias<'gc>,
+    }
+    impl<'gc> TypeAlias<'gc> {
+        pub fn from_node(node: &'gc super::TypeAlias<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TypeAlias {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    type_parameters: node.type_parameters.duplicate(),
+                    right: node.right.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TypeAlias(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        pub fn right(&mut self, right: &'gc Node<'gc>) { self.is_changed = true; self.inner.right = right; }
+    }
+    #[derive(Debug)]
+    pub struct OpaqueType<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::OpaqueType<'gc>,
+    }
+    impl<'gc> OpaqueType<'gc> {
+        pub fn from_node(node: &'gc super::OpaqueType<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::OpaqueType {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    type_parameters: node.type_parameters.duplicate(),
+                    impltype: node.impltype.duplicate(),
+                    lower_bound: node.lower_bound.duplicate(),
+                    upper_bound: node.upper_bound.duplicate(),
+                    supertype: node.supertype.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::OpaqueType(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        pub fn impltype(&mut self, impltype: &'gc Node<'gc>) { self.is_changed = true; self.inner.impltype = impltype; }
+        pub fn lower_bound(&mut self, lower_bound: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.lower_bound = lower_bound; }
+        pub fn upper_bound(&mut self, upper_bound: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.upper_bound = upper_bound; }
+        pub fn supertype(&mut self, supertype: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.supertype = supertype; }
+    }
+    #[derive(Debug)]
+    pub struct InterfaceDeclaration<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::InterfaceDeclaration<'gc>,
+    }
+    impl<'gc> InterfaceDeclaration<'gc> {
+        pub fn from_node(node: &'gc super::InterfaceDeclaration<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::InterfaceDeclaration {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    type_parameters: node.type_parameters.duplicate(),
+                    extends: node.extends.duplicate(),
+                    body: node.body.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::InterfaceDeclaration(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        pub fn extends(&mut self, extends: NodeList<'gc>) { self.is_changed = true; self.inner.extends = extends; }
+        pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+    }
+    #[derive(Debug)]
+    pub struct DeclareTypeAlias<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::DeclareTypeAlias<'gc>,
+    }
+    impl<'gc> DeclareTypeAlias<'gc> {
+        pub fn from_node(node: &'gc super::DeclareTypeAlias<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::DeclareTypeAlias {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    type_parameters: node.type_parameters.duplicate(),
+                    right: node.right.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::DeclareTypeAlias(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        pub fn right(&mut self, right: &'gc Node<'gc>) { self.is_changed = true; self.inner.right = right; }
+    }
+    #[derive(Debug)]
+    pub struct DeclareOpaqueType<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::DeclareOpaqueType<'gc>,
+    }
+    impl<'gc> DeclareOpaqueType<'gc> {
+        pub fn from_node(node: &'gc super::DeclareOpaqueType<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::DeclareOpaqueType {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    type_parameters: node.type_parameters.duplicate(),
+                    impltype: node.impltype.duplicate(),
+                    lower_bound: node.lower_bound.duplicate(),
+                    upper_bound: node.upper_bound.duplicate(),
+                    supertype: node.supertype.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::DeclareOpaqueType(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        pub fn impltype(&mut self, impltype: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.impltype = impltype; }
+        pub fn lower_bound(&mut self, lower_bound: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.lower_bound = lower_bound; }
+        pub fn upper_bound(&mut self, upper_bound: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.upper_bound = upper_bound; }
+        pub fn supertype(&mut self, supertype: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.supertype = supertype; }
+    }
+    #[derive(Debug)]
+    pub struct DeclareInterface<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::DeclareInterface<'gc>,
+    }
+    impl<'gc> DeclareInterface<'gc> {
+        pub fn from_node(node: &'gc super::DeclareInterface<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::DeclareInterface {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    type_parameters: node.type_parameters.duplicate(),
+                    extends: node.extends.duplicate(),
+                    body: node.body.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::DeclareInterface(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        pub fn extends(&mut self, extends: NodeList<'gc>) { self.is_changed = true; self.inner.extends = extends; }
+        pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+    }
+    #[derive(Debug)]
+    pub struct DeclareClass<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::DeclareClass<'gc>,
+    }
+    impl<'gc> DeclareClass<'gc> {
+        pub fn from_node(node: &'gc super::DeclareClass<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::DeclareClass {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    type_parameters: node.type_parameters.duplicate(),
+                    extends: node.extends.duplicate(),
+                    implements: node.implements.duplicate(),
+                    mixins: node.mixins.duplicate(),
+                    body: node.body.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::DeclareClass(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        pub fn extends(&mut self, extends: NodeList<'gc>) { self.is_changed = true; self.inner.extends = extends; }
+        pub fn implements(&mut self, implements: NodeList<'gc>) { self.is_changed = true; self.inner.implements = implements; }
+        pub fn mixins(&mut self, mixins: NodeList<'gc>) { self.is_changed = true; self.inner.mixins = mixins; }
+        pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+    }
+    #[derive(Debug)]
+    pub struct DeclareFunction<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::DeclareFunction<'gc>,
+    }
+    impl<'gc> DeclareFunction<'gc> {
+        pub fn from_node(node: &'gc super::DeclareFunction<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::DeclareFunction {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    predicate: node.predicate.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::DeclareFunction(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        pub fn predicate(&mut self, predicate: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.predicate = predicate; }
+    }
+    #[derive(Debug)]
+    pub struct DeclareHook<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::DeclareHook<'gc>,
+    }
+    impl<'gc> DeclareHook<'gc> {
+        pub fn from_node(node: &'gc super::DeclareHook<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::DeclareHook {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::DeclareHook(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+    }
+    #[derive(Debug)]
+    pub struct DeclareComponent<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::DeclareComponent<'gc>,
+    }
+    impl<'gc> DeclareComponent<'gc> {
+        pub fn from_node(node: &'gc super::DeclareComponent<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::DeclareComponent {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    params: node.params.duplicate(),
+                    rest: node.rest.duplicate(),
+                    type_parameters: node.type_parameters.duplicate(),
+                    renders_type: node.renders_type.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::DeclareComponent(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
+        pub fn rest(&mut self, rest: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.rest = rest; }
+        pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        pub fn renders_type(&mut self, renders_type: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.renders_type = renders_type; }
+    }
+    #[derive(Debug)]
+    pub struct DeclareVariable<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::DeclareVariable<'gc>,
+    }
+    impl<'gc> DeclareVariable<'gc> {
+        pub fn from_node(node: &'gc super::DeclareVariable<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::DeclareVariable {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    kind: Cell::new(node.kind.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::DeclareVariable(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+    }
+    #[derive(Debug)]
+    pub struct DeclareEnum<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::DeclareEnum<'gc>,
+    }
+    impl<'gc> DeclareEnum<'gc> {
+        pub fn from_node(node: &'gc super::DeclareEnum<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::DeclareEnum {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    body: node.body.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::DeclareEnum(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+    }
+    #[derive(Debug)]
+    pub struct DeclareExportDeclaration<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::DeclareExportDeclaration<'gc>,
+    }
+    impl<'gc> DeclareExportDeclaration<'gc> {
+        pub fn from_node(node: &'gc super::DeclareExportDeclaration<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::DeclareExportDeclaration {
+                    metadata: node.metadata.duplicate(),
+                    declaration: node.declaration.duplicate(),
+                    specifiers: node.specifiers.duplicate(),
+                    source: node.source.duplicate(),
+                    default: Cell::new(node.default.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::DeclareExportDeclaration(self.inner))
+        }
+        pub fn declaration(&mut self, declaration: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.declaration = declaration; }
+        pub fn specifiers(&mut self, specifiers: NodeList<'gc>) { self.is_changed = true; self.inner.specifiers = specifiers; }
+        pub fn source(&mut self, source: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.source = source; }
+    }
+    #[derive(Debug)]
+    pub struct DeclareExportAllDeclaration<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::DeclareExportAllDeclaration<'gc>,
+    }
+    impl<'gc> DeclareExportAllDeclaration<'gc> {
+        pub fn from_node(node: &'gc super::DeclareExportAllDeclaration<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::DeclareExportAllDeclaration {
+                    metadata: node.metadata.duplicate(),
+                    source: node.source.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::DeclareExportAllDeclaration(self.inner))
+        }
+        pub fn source(&mut self, source: &'gc Node<'gc>) { self.is_changed = true; self.inner.source = source; }
+    }
+    #[derive(Debug)]
+    pub struct DeclareModule<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::DeclareModule<'gc>,
+    }
+    impl<'gc> DeclareModule<'gc> {
+        pub fn from_node(node: &'gc super::DeclareModule<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::DeclareModule {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    body: node.body.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::DeclareModule(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+    }
+    #[derive(Debug)]
+    pub struct DeclareNamespace<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::DeclareNamespace<'gc>,
+    }
+    impl<'gc> DeclareNamespace<'gc> {
+        pub fn from_node(node: &'gc super::DeclareNamespace<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::DeclareNamespace {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    body: node.body.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::DeclareNamespace(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+    }
+    #[derive(Debug)]
+    pub struct DeclareModuleExports<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::DeclareModuleExports<'gc>,
+    }
+    impl<'gc> DeclareModuleExports<'gc> {
+        pub fn from_node(node: &'gc super::DeclareModuleExports<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::DeclareModuleExports {
+                    metadata: node.metadata.duplicate(),
+                    type_annotation: node.type_annotation.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::DeclareModuleExports(self.inner))
+        }
+        pub fn type_annotation(&mut self, type_annotation: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
+    }
+    #[derive(Debug)]
+    pub struct InterfaceExtends<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::InterfaceExtends<'gc>,
+    }
+    impl<'gc> InterfaceExtends<'gc> {
+        pub fn from_node(node: &'gc super::InterfaceExtends<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::InterfaceExtends {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    type_parameters: node.type_parameters.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::InterfaceExtends(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+    }
+    #[derive(Debug)]
+    pub struct ClassImplements<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ClassImplements<'gc>,
+    }
+    impl<'gc> ClassImplements<'gc> {
+        pub fn from_node(node: &'gc super::ClassImplements<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ClassImplements {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    type_parameters: node.type_parameters.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ClassImplements(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+    }
+    #[derive(Debug)]
+    pub struct TypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TypeAnnotation<'gc>,
+    }
+    impl<'gc> TypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::TypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                    type_annotation: node.type_annotation.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TypeAnnotation(self.inner))
+        }
+        pub fn type_annotation(&mut self, type_annotation: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
+    }
+    #[derive(Debug)]
+    pub struct ObjectTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ObjectTypeAnnotation<'gc>,
+    }
+    impl<'gc> ObjectTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::ObjectTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ObjectTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                    properties: node.properties.duplicate(),
+                    indexers: node.indexers.duplicate(),
+                    call_properties: node.call_properties.duplicate(),
+                    internal_slots: node.internal_slots.duplicate(),
+                    inexact: Cell::new(node.inexact.get()),
+                    exact: Cell::new(node.exact.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ObjectTypeAnnotation(self.inner))
+        }
+        pub fn properties(&mut self, properties: NodeList<'gc>) { self.is_changed = true; self.inner.properties = properties; }
+        pub fn indexers(&mut self, indexers: NodeList<'gc>) { self.is_changed = true; self.inner.indexers = indexers; }
+        pub fn call_properties(&mut self, call_properties: NodeList<'gc>) { self.is_changed = true; self.inner.call_properties = call_properties; }
+        pub fn internal_slots(&mut self, internal_slots: NodeList<'gc>) { self.is_changed = true; self.inner.internal_slots = internal_slots; }
+    }
+    #[derive(Debug)]
+    pub struct ObjectTypeProperty<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ObjectTypeProperty<'gc>,
+    }
+    impl<'gc> ObjectTypeProperty<'gc> {
+        pub fn from_node(node: &'gc super::ObjectTypeProperty<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ObjectTypeProperty {
+                    metadata: node.metadata.duplicate(),
+                    key: node.key.duplicate(),
+                    value: node.value.duplicate(),
+                    method: Cell::new(node.method.get()),
+                    optional: Cell::new(node.optional.get()),
+                    r#static: Cell::new(node.r#static.get()),
+                    proto: Cell::new(node.proto.get()),
+                    variance: node.variance.duplicate(),
+                    kind: Cell::new(node.kind.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ObjectTypeProperty(self.inner))
+        }
+        pub fn key(&mut self, key: &'gc Node<'gc>) { self.is_changed = true; self.inner.key = key; }
+        pub fn value(&mut self, value: &'gc Node<'gc>) { self.is_changed = true; self.inner.value = value; }
+        pub fn variance(&mut self, variance: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.variance = variance; }
+    }
+    #[derive(Debug)]
+    pub struct ObjectTypeSpreadProperty<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ObjectTypeSpreadProperty<'gc>,
+    }
+    impl<'gc> ObjectTypeSpreadProperty<'gc> {
+        pub fn from_node(node: &'gc super::ObjectTypeSpreadProperty<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ObjectTypeSpreadProperty {
+                    metadata: node.metadata.duplicate(),
+                    argument: node.argument.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ObjectTypeSpreadProperty(self.inner))
+        }
+        pub fn argument(&mut self, argument: &'gc Node<'gc>) { self.is_changed = true; self.inner.argument = argument; }
+    }
+    #[derive(Debug)]
+    pub struct ObjectTypeInternalSlot<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ObjectTypeInternalSlot<'gc>,
+    }
+    impl<'gc> ObjectTypeInternalSlot<'gc> {
+        pub fn from_node(node: &'gc super::ObjectTypeInternalSlot<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ObjectTypeInternalSlot {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    value: node.value.duplicate(),
+                    optional: Cell::new(node.optional.get()),
+                    r#static: Cell::new(node.r#static.get()),
+                    method: Cell::new(node.method.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ObjectTypeInternalSlot(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        pub fn value(&mut self, value: &'gc Node<'gc>) { self.is_changed = true; self.inner.value = value; }
+    }
+    #[derive(Debug)]
+    pub struct ObjectTypeCallProperty<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ObjectTypeCallProperty<'gc>,
+    }
+    impl<'gc> ObjectTypeCallProperty<'gc> {
+        pub fn from_node(node: &'gc super::ObjectTypeCallProperty<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ObjectTypeCallProperty {
+                    metadata: node.metadata.duplicate(),
+                    value: node.value.duplicate(),
+                    r#static: Cell::new(node.r#static.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ObjectTypeCallProperty(self.inner))
+        }
+        pub fn value(&mut self, value: &'gc Node<'gc>) { self.is_changed = true; self.inner.value = value; }
+    }
+    #[derive(Debug)]
+    pub struct ObjectTypeIndexer<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ObjectTypeIndexer<'gc>,
+    }
+    impl<'gc> ObjectTypeIndexer<'gc> {
+        pub fn from_node(node: &'gc super::ObjectTypeIndexer<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ObjectTypeIndexer {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    key: node.key.duplicate(),
+                    value: node.value.duplicate(),
+                    r#static: Cell::new(node.r#static.get()),
+                    variance: node.variance.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ObjectTypeIndexer(self.inner))
+        }
+        pub fn id(&mut self, id: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.id = id; }
+        pub fn key(&mut self, key: &'gc Node<'gc>) { self.is_changed = true; self.inner.key = key; }
+        pub fn value(&mut self, value: &'gc Node<'gc>) { self.is_changed = true; self.inner.value = value; }
+        pub fn variance(&mut self, variance: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.variance = variance; }
+    }
+    #[derive(Debug)]
+    pub struct ObjectTypeMappedTypeProperty<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ObjectTypeMappedTypeProperty<'gc>,
+    }
+    impl<'gc> ObjectTypeMappedTypeProperty<'gc> {
+        pub fn from_node(node: &'gc super::ObjectTypeMappedTypeProperty<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ObjectTypeMappedTypeProperty {
+                    metadata: node.metadata.duplicate(),
+                    key_tparam: node.key_tparam.duplicate(),
+                    prop_type: node.prop_type.duplicate(),
+                    source_type: node.source_type.duplicate(),
+                    variance: node.variance.duplicate(),
+                    optional: Cell::new(node.optional.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ObjectTypeMappedTypeProperty(self.inner))
+        }
+        pub fn key_tparam(&mut self, key_tparam: &'gc Node<'gc>) { self.is_changed = true; self.inner.key_tparam = key_tparam; }
+        pub fn prop_type(&mut self, prop_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.prop_type = prop_type; }
+        pub fn source_type(&mut self, source_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.source_type = source_type; }
+        pub fn variance(&mut self, variance: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.variance = variance; }
+    }
+    #[derive(Debug)]
+    pub struct Variance<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::Variance<'gc>,
+    }
+    impl<'gc> Variance<'gc> {
+        pub fn from_node(node: &'gc super::Variance<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::Variance {
+                    metadata: node.metadata.duplicate(),
+                    kind: Cell::new(node.kind.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::Variance(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct TypeParameterDeclaration<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TypeParameterDeclaration<'gc>,
+    }
+    impl<'gc> TypeParameterDeclaration<'gc> {
+        pub fn from_node(node: &'gc super::TypeParameterDeclaration<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TypeParameterDeclaration {
+                    metadata: node.metadata.duplicate(),
+                    params: node.params.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TypeParameterDeclaration(self.inner))
+        }
+        pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
+    }
+    #[derive(Debug)]
+    pub struct TypeParameter<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TypeParameter<'gc>,
+    }
+    impl<'gc> TypeParameter<'gc> {
+        pub fn from_node(node: &'gc super::TypeParameter<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TypeParameter {
+                    metadata: node.metadata.duplicate(),
+                    name: Cell::new(node.name.get()),
+                    r#const: Cell::new(node.r#const.get()),
+                    bound: node.bound.duplicate(),
+                    variance: node.variance.duplicate(),
+                    default: node.default.duplicate(),
+                    uses_extends_bound: Cell::new(node.uses_extends_bound.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TypeParameter(self.inner))
+        }
+        pub fn bound(&mut self, bound: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.bound = bound; }
+        pub fn variance(&mut self, variance: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.variance = variance; }
+        pub fn default(&mut self, default: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.default = default; }
+    }
+    #[derive(Debug)]
+    pub struct TypeParameterInstantiation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TypeParameterInstantiation<'gc>,
+    }
+    impl<'gc> TypeParameterInstantiation<'gc> {
+        pub fn from_node(node: &'gc super::TypeParameterInstantiation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TypeParameterInstantiation {
+                    metadata: node.metadata.duplicate(),
+                    params: node.params.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TypeParameterInstantiation(self.inner))
+        }
+        pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
+    }
+    #[derive(Debug)]
+    pub struct TypeCastExpression<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TypeCastExpression<'gc>,
+    }
+    impl<'gc> TypeCastExpression<'gc> {
+        pub fn from_node(node: &'gc super::TypeCastExpression<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TypeCastExpression {
+                    metadata: node.metadata.duplicate(),
+                    expression: node.expression.duplicate(),
+                    type_annotation: node.type_annotation.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TypeCastExpression(self.inner))
+        }
+        pub fn expression(&mut self, expression: &'gc Node<'gc>) { self.is_changed = true; self.inner.expression = expression; }
+        pub fn type_annotation(&mut self, type_annotation: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
+    }
+    #[derive(Debug)]
+    pub struct AsExpression<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::AsExpression<'gc>,
+    }
+    impl<'gc> AsExpression<'gc> {
+        pub fn from_node(node: &'gc super::AsExpression<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::AsExpression {
+                    metadata: node.metadata.duplicate(),
+                    expression: node.expression.duplicate(),
+                    type_annotation: node.type_annotation.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::AsExpression(self.inner))
+        }
+        pub fn expression(&mut self, expression: &'gc Node<'gc>) { self.is_changed = true; self.inner.expression = expression; }
+        pub fn type_annotation(&mut self, type_annotation: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
+    }
+    #[derive(Debug)]
+    pub struct AsConstExpression<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::AsConstExpression<'gc>,
+    }
+    impl<'gc> AsConstExpression<'gc> {
+        pub fn from_node(node: &'gc super::AsConstExpression<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::AsConstExpression {
+                    metadata: node.metadata.duplicate(),
+                    expression: node.expression.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::AsConstExpression(self.inner))
+        }
+        pub fn expression(&mut self, expression: &'gc Node<'gc>) { self.is_changed = true; self.inner.expression = expression; }
+    }
+    #[derive(Debug)]
+    pub struct InferredPredicate<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::InferredPredicate<'gc>,
+    }
+    impl<'gc> InferredPredicate<'gc> {
+        pub fn from_node(node: &'gc super::InferredPredicate<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::InferredPredicate {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::InferredPredicate(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct DeclaredPredicate<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::DeclaredPredicate<'gc>,
+    }
+    impl<'gc> DeclaredPredicate<'gc> {
+        pub fn from_node(node: &'gc super::DeclaredPredicate<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::DeclaredPredicate {
+                    metadata: node.metadata.duplicate(),
+                    value: node.value.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::DeclaredPredicate(self.inner))
+        }
+        pub fn value(&mut self, value: &'gc Node<'gc>) { self.is_changed = true; self.inner.value = value; }
+    }
+    #[derive(Debug)]
+    pub struct EnumDeclaration<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::EnumDeclaration<'gc>,
+    }
+    impl<'gc> EnumDeclaration<'gc> {
+        pub fn from_node(node: &'gc super::EnumDeclaration<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::EnumDeclaration {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    body: node.body.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::EnumDeclaration(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+    }
+    #[derive(Debug)]
+    pub struct EnumStringBody<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::EnumStringBody<'gc>,
+    }
+    impl<'gc> EnumStringBody<'gc> {
+        pub fn from_node(node: &'gc super::EnumStringBody<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::EnumStringBody {
+                    metadata: node.metadata.duplicate(),
+                    members: node.members.duplicate(),
+                    explicit_type: Cell::new(node.explicit_type.get()),
+                    has_unknown_members: Cell::new(node.has_unknown_members.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::EnumStringBody(self.inner))
+        }
+        pub fn members(&mut self, members: NodeList<'gc>) { self.is_changed = true; self.inner.members = members; }
+    }
+    #[derive(Debug)]
+    pub struct EnumNumberBody<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::EnumNumberBody<'gc>,
+    }
+    impl<'gc> EnumNumberBody<'gc> {
+        pub fn from_node(node: &'gc super::EnumNumberBody<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::EnumNumberBody {
+                    metadata: node.metadata.duplicate(),
+                    members: node.members.duplicate(),
+                    explicit_type: Cell::new(node.explicit_type.get()),
+                    has_unknown_members: Cell::new(node.has_unknown_members.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::EnumNumberBody(self.inner))
+        }
+        pub fn members(&mut self, members: NodeList<'gc>) { self.is_changed = true; self.inner.members = members; }
+    }
+    #[derive(Debug)]
+    pub struct EnumBigIntBody<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::EnumBigIntBody<'gc>,
+    }
+    impl<'gc> EnumBigIntBody<'gc> {
+        pub fn from_node(node: &'gc super::EnumBigIntBody<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::EnumBigIntBody {
+                    metadata: node.metadata.duplicate(),
+                    members: node.members.duplicate(),
+                    explicit_type: Cell::new(node.explicit_type.get()),
+                    has_unknown_members: Cell::new(node.has_unknown_members.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::EnumBigIntBody(self.inner))
+        }
+        pub fn members(&mut self, members: NodeList<'gc>) { self.is_changed = true; self.inner.members = members; }
+    }
+    #[derive(Debug)]
+    pub struct EnumBooleanBody<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::EnumBooleanBody<'gc>,
+    }
+    impl<'gc> EnumBooleanBody<'gc> {
+        pub fn from_node(node: &'gc super::EnumBooleanBody<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::EnumBooleanBody {
+                    metadata: node.metadata.duplicate(),
+                    members: node.members.duplicate(),
+                    explicit_type: Cell::new(node.explicit_type.get()),
+                    has_unknown_members: Cell::new(node.has_unknown_members.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::EnumBooleanBody(self.inner))
+        }
+        pub fn members(&mut self, members: NodeList<'gc>) { self.is_changed = true; self.inner.members = members; }
+    }
+    #[derive(Debug)]
+    pub struct EnumSymbolBody<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::EnumSymbolBody<'gc>,
+    }
+    impl<'gc> EnumSymbolBody<'gc> {
+        pub fn from_node(node: &'gc super::EnumSymbolBody<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::EnumSymbolBody {
+                    metadata: node.metadata.duplicate(),
+                    members: node.members.duplicate(),
+                    has_unknown_members: Cell::new(node.has_unknown_members.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::EnumSymbolBody(self.inner))
+        }
+        pub fn members(&mut self, members: NodeList<'gc>) { self.is_changed = true; self.inner.members = members; }
+    }
+    #[derive(Debug)]
+    pub struct EnumDefaultedMember<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::EnumDefaultedMember<'gc>,
+    }
+    impl<'gc> EnumDefaultedMember<'gc> {
+        pub fn from_node(node: &'gc super::EnumDefaultedMember<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::EnumDefaultedMember {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::EnumDefaultedMember(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+    }
+    #[derive(Debug)]
+    pub struct EnumStringMember<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::EnumStringMember<'gc>,
+    }
+    impl<'gc> EnumStringMember<'gc> {
+        pub fn from_node(node: &'gc super::EnumStringMember<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::EnumStringMember {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    init: node.init.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::EnumStringMember(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        pub fn init(&mut self, init: &'gc Node<'gc>) { self.is_changed = true; self.inner.init = init; }
+    }
+    #[derive(Debug)]
+    pub struct EnumNumberMember<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::EnumNumberMember<'gc>,
+    }
+    impl<'gc> EnumNumberMember<'gc> {
+        pub fn from_node(node: &'gc super::EnumNumberMember<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::EnumNumberMember {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    init: node.init.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::EnumNumberMember(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        pub fn init(&mut self, init: &'gc Node<'gc>) { self.is_changed = true; self.inner.init = init; }
+    }
+    #[derive(Debug)]
+    pub struct EnumBigIntMember<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::EnumBigIntMember<'gc>,
+    }
+    impl<'gc> EnumBigIntMember<'gc> {
+        pub fn from_node(node: &'gc super::EnumBigIntMember<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::EnumBigIntMember {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    init: node.init.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::EnumBigIntMember(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        pub fn init(&mut self, init: &'gc Node<'gc>) { self.is_changed = true; self.inner.init = init; }
+    }
+    #[derive(Debug)]
+    pub struct EnumBooleanMember<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::EnumBooleanMember<'gc>,
+    }
+    impl<'gc> EnumBooleanMember<'gc> {
+        pub fn from_node(node: &'gc super::EnumBooleanMember<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::EnumBooleanMember {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    init: node.init.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::EnumBooleanMember(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        pub fn init(&mut self, init: &'gc Node<'gc>) { self.is_changed = true; self.inner.init = init; }
+    }
+    #[derive(Debug)]
+    pub struct ComponentParameter<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ComponentParameter<'gc>,
+    }
+    impl<'gc> ComponentParameter<'gc> {
+        pub fn from_node(node: &'gc super::ComponentParameter<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ComponentParameter {
+                    metadata: node.metadata.duplicate(),
+                    name: node.name.duplicate(),
+                    local: node.local.duplicate(),
+                    shorthand: Cell::new(node.shorthand.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ComponentParameter(self.inner))
+        }
+        pub fn name(&mut self, name: &'gc Node<'gc>) { self.is_changed = true; self.inner.name = name; }
+        pub fn local(&mut self, local: &'gc Node<'gc>) { self.is_changed = true; self.inner.local = local; }
+    }
+    #[derive(Debug)]
+    pub struct RecordDeclaration<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::RecordDeclaration<'gc>,
+    }
+    impl<'gc> RecordDeclaration<'gc> {
+        pub fn from_node(node: &'gc super::RecordDeclaration<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::RecordDeclaration {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    type_parameters: node.type_parameters.duplicate(),
+                    implements: node.implements.duplicate(),
+                    body: node.body.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::RecordDeclaration(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        pub fn implements(&mut self, implements: NodeList<'gc>) { self.is_changed = true; self.inner.implements = implements; }
+        pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+    }
+    #[derive(Debug)]
+    pub struct RecordDeclarationImplements<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::RecordDeclarationImplements<'gc>,
+    }
+    impl<'gc> RecordDeclarationImplements<'gc> {
+        pub fn from_node(node: &'gc super::RecordDeclarationImplements<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::RecordDeclarationImplements {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    type_arguments: node.type_arguments.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::RecordDeclarationImplements(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        pub fn type_arguments(&mut self, type_arguments: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_arguments = type_arguments; }
+    }
+    #[derive(Debug)]
+    pub struct RecordDeclarationBody<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::RecordDeclarationBody<'gc>,
+    }
+    impl<'gc> RecordDeclarationBody<'gc> {
+        pub fn from_node(node: &'gc super::RecordDeclarationBody<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::RecordDeclarationBody {
+                    metadata: node.metadata.duplicate(),
+                    elements: node.elements.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::RecordDeclarationBody(self.inner))
+        }
+        pub fn elements(&mut self, elements: NodeList<'gc>) { self.is_changed = true; self.inner.elements = elements; }
+    }
+    #[derive(Debug)]
+    pub struct RecordDeclarationProperty<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::RecordDeclarationProperty<'gc>,
+    }
+    impl<'gc> RecordDeclarationProperty<'gc> {
+        pub fn from_node(node: &'gc super::RecordDeclarationProperty<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::RecordDeclarationProperty {
+                    metadata: node.metadata.duplicate(),
+                    key: node.key.duplicate(),
+                    type_annotation: node.type_annotation.duplicate(),
+                    default_value: node.default_value.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::RecordDeclarationProperty(self.inner))
+        }
+        pub fn key(&mut self, key: &'gc Node<'gc>) { self.is_changed = true; self.inner.key = key; }
+        pub fn type_annotation(&mut self, type_annotation: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
+        pub fn default_value(&mut self, default_value: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.default_value = default_value; }
+    }
+    #[derive(Debug)]
+    pub struct RecordDeclarationStaticProperty<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::RecordDeclarationStaticProperty<'gc>,
+    }
+    impl<'gc> RecordDeclarationStaticProperty<'gc> {
+        pub fn from_node(node: &'gc super::RecordDeclarationStaticProperty<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::RecordDeclarationStaticProperty {
+                    metadata: node.metadata.duplicate(),
+                    key: node.key.duplicate(),
+                    type_annotation: node.type_annotation.duplicate(),
+                    value: node.value.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::RecordDeclarationStaticProperty(self.inner))
+        }
+        pub fn key(&mut self, key: &'gc Node<'gc>) { self.is_changed = true; self.inner.key = key; }
+        pub fn type_annotation(&mut self, type_annotation: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
+        pub fn value(&mut self, value: &'gc Node<'gc>) { self.is_changed = true; self.inner.value = value; }
+    }
+    #[derive(Debug)]
+    pub struct RecordExpression<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::RecordExpression<'gc>,
+    }
+    impl<'gc> RecordExpression<'gc> {
+        pub fn from_node(node: &'gc super::RecordExpression<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::RecordExpression {
+                    metadata: node.metadata.duplicate(),
+                    record_constructor: node.record_constructor.duplicate(),
+                    type_arguments: node.type_arguments.duplicate(),
+                    properties: node.properties.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::RecordExpression(self.inner))
+        }
+        pub fn record_constructor(&mut self, record_constructor: &'gc Node<'gc>) { self.is_changed = true; self.inner.record_constructor = record_constructor; }
+        pub fn type_arguments(&mut self, type_arguments: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_arguments = type_arguments; }
+        pub fn properties(&mut self, properties: &'gc Node<'gc>) { self.is_changed = true; self.inner.properties = properties; }
+    }
+    #[derive(Debug)]
+    pub struct RecordExpressionProperties<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::RecordExpressionProperties<'gc>,
+    }
+    impl<'gc> RecordExpressionProperties<'gc> {
+        pub fn from_node(node: &'gc super::RecordExpressionProperties<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::RecordExpressionProperties {
+                    metadata: node.metadata.duplicate(),
+                    properties: node.properties.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::RecordExpressionProperties(self.inner))
+        }
+        pub fn properties(&mut self, properties: NodeList<'gc>) { self.is_changed = true; self.inner.properties = properties; }
+    }
+    #[derive(Debug)]
+    pub struct TSTypeAnnotation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSTypeAnnotation<'gc>,
+    }
+    impl<'gc> TSTypeAnnotation<'gc> {
+        pub fn from_node(node: &'gc super::TSTypeAnnotation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSTypeAnnotation {
+                    metadata: node.metadata.duplicate(),
+                    type_annotation: node.type_annotation.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSTypeAnnotation(self.inner))
+        }
+        pub fn type_annotation(&mut self, type_annotation: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
+    }
+    #[derive(Debug)]
+    pub struct TSAnyKeyword<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSAnyKeyword<'gc>,
+    }
+    impl<'gc> TSAnyKeyword<'gc> {
+        pub fn from_node(node: &'gc super::TSAnyKeyword<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSAnyKeyword {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSAnyKeyword(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct TSNumberKeyword<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSNumberKeyword<'gc>,
+    }
+    impl<'gc> TSNumberKeyword<'gc> {
+        pub fn from_node(node: &'gc super::TSNumberKeyword<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSNumberKeyword {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSNumberKeyword(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct TSBooleanKeyword<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSBooleanKeyword<'gc>,
+    }
+    impl<'gc> TSBooleanKeyword<'gc> {
+        pub fn from_node(node: &'gc super::TSBooleanKeyword<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSBooleanKeyword {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSBooleanKeyword(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct TSStringKeyword<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSStringKeyword<'gc>,
+    }
+    impl<'gc> TSStringKeyword<'gc> {
+        pub fn from_node(node: &'gc super::TSStringKeyword<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSStringKeyword {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSStringKeyword(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct TSSymbolKeyword<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSSymbolKeyword<'gc>,
+    }
+    impl<'gc> TSSymbolKeyword<'gc> {
+        pub fn from_node(node: &'gc super::TSSymbolKeyword<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSSymbolKeyword {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSSymbolKeyword(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct TSVoidKeyword<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSVoidKeyword<'gc>,
+    }
+    impl<'gc> TSVoidKeyword<'gc> {
+        pub fn from_node(node: &'gc super::TSVoidKeyword<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSVoidKeyword {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSVoidKeyword(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct TSUndefinedKeyword<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSUndefinedKeyword<'gc>,
+    }
+    impl<'gc> TSUndefinedKeyword<'gc> {
+        pub fn from_node(node: &'gc super::TSUndefinedKeyword<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSUndefinedKeyword {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSUndefinedKeyword(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct TSUnknownKeyword<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSUnknownKeyword<'gc>,
+    }
+    impl<'gc> TSUnknownKeyword<'gc> {
+        pub fn from_node(node: &'gc super::TSUnknownKeyword<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSUnknownKeyword {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSUnknownKeyword(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct TSNeverKeyword<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSNeverKeyword<'gc>,
+    }
+    impl<'gc> TSNeverKeyword<'gc> {
+        pub fn from_node(node: &'gc super::TSNeverKeyword<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSNeverKeyword {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSNeverKeyword(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct TSBigIntKeyword<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSBigIntKeyword<'gc>,
+    }
+    impl<'gc> TSBigIntKeyword<'gc> {
+        pub fn from_node(node: &'gc super::TSBigIntKeyword<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSBigIntKeyword {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSBigIntKeyword(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct TSThisType<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSThisType<'gc>,
+    }
+    impl<'gc> TSThisType<'gc> {
+        pub fn from_node(node: &'gc super::TSThisType<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSThisType {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSThisType(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct TSLiteralType<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSLiteralType<'gc>,
+    }
+    impl<'gc> TSLiteralType<'gc> {
+        pub fn from_node(node: &'gc super::TSLiteralType<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSLiteralType {
+                    metadata: node.metadata.duplicate(),
+                    literal: node.literal.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSLiteralType(self.inner))
+        }
+        pub fn literal(&mut self, literal: &'gc Node<'gc>) { self.is_changed = true; self.inner.literal = literal; }
+    }
+    #[derive(Debug)]
+    pub struct TSIndexedAccessType<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSIndexedAccessType<'gc>,
+    }
+    impl<'gc> TSIndexedAccessType<'gc> {
+        pub fn from_node(node: &'gc super::TSIndexedAccessType<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSIndexedAccessType {
+                    metadata: node.metadata.duplicate(),
+                    object_type: node.object_type.duplicate(),
+                    index_type: node.index_type.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSIndexedAccessType(self.inner))
+        }
+        pub fn object_type(&mut self, object_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.object_type = object_type; }
+        pub fn index_type(&mut self, index_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.index_type = index_type; }
+    }
+    #[derive(Debug)]
+    pub struct TSArrayType<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSArrayType<'gc>,
+    }
+    impl<'gc> TSArrayType<'gc> {
+        pub fn from_node(node: &'gc super::TSArrayType<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSArrayType {
+                    metadata: node.metadata.duplicate(),
+                    element_type: node.element_type.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSArrayType(self.inner))
+        }
+        pub fn element_type(&mut self, element_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.element_type = element_type; }
+    }
+    #[derive(Debug)]
+    pub struct TSTypeReference<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSTypeReference<'gc>,
+    }
+    impl<'gc> TSTypeReference<'gc> {
+        pub fn from_node(node: &'gc super::TSTypeReference<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSTypeReference {
+                    metadata: node.metadata.duplicate(),
+                    type_name: node.type_name.duplicate(),
+                    type_parameters: node.type_parameters.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSTypeReference(self.inner))
+        }
+        pub fn type_name(&mut self, type_name: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_name = type_name; }
+        pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+    }
+    #[derive(Debug)]
+    pub struct TSQualifiedName<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSQualifiedName<'gc>,
+    }
+    impl<'gc> TSQualifiedName<'gc> {
+        pub fn from_node(node: &'gc super::TSQualifiedName<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSQualifiedName {
+                    metadata: node.metadata.duplicate(),
+                    left: node.left.duplicate(),
+                    right: node.right.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSQualifiedName(self.inner))
+        }
+        pub fn left(&mut self, left: &'gc Node<'gc>) { self.is_changed = true; self.inner.left = left; }
+        pub fn right(&mut self, right: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.right = right; }
+    }
+    #[derive(Debug)]
+    pub struct TSFunctionType<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSFunctionType<'gc>,
+    }
+    impl<'gc> TSFunctionType<'gc> {
+        pub fn from_node(node: &'gc super::TSFunctionType<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSFunctionType {
+                    metadata: node.metadata.duplicate(),
+                    params: node.params.duplicate(),
+                    return_type: node.return_type.duplicate(),
+                    type_parameters: node.type_parameters.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSFunctionType(self.inner))
+        }
+        pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
+        pub fn return_type(&mut self, return_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.return_type = return_type; }
+        pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+    }
+    #[derive(Debug)]
+    pub struct TSConstructorType<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSConstructorType<'gc>,
+    }
+    impl<'gc> TSConstructorType<'gc> {
+        pub fn from_node(node: &'gc super::TSConstructorType<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSConstructorType {
+                    metadata: node.metadata.duplicate(),
+                    params: node.params.duplicate(),
+                    return_type: node.return_type.duplicate(),
+                    type_parameters: node.type_parameters.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSConstructorType(self.inner))
+        }
+        pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
+        pub fn return_type(&mut self, return_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.return_type = return_type; }
+        pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+    }
+    #[derive(Debug)]
+    pub struct TSTypePredicate<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSTypePredicate<'gc>,
+    }
+    impl<'gc> TSTypePredicate<'gc> {
+        pub fn from_node(node: &'gc super::TSTypePredicate<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSTypePredicate {
+                    metadata: node.metadata.duplicate(),
+                    parameter_name: node.parameter_name.duplicate(),
+                    type_annotation: node.type_annotation.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSTypePredicate(self.inner))
+        }
+        pub fn parameter_name(&mut self, parameter_name: &'gc Node<'gc>) { self.is_changed = true; self.inner.parameter_name = parameter_name; }
+        pub fn type_annotation(&mut self, type_annotation: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
+    }
+    #[derive(Debug)]
+    pub struct TSTupleType<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSTupleType<'gc>,
+    }
+    impl<'gc> TSTupleType<'gc> {
+        pub fn from_node(node: &'gc super::TSTupleType<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSTupleType {
+                    metadata: node.metadata.duplicate(),
+                    element_types: node.element_types.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSTupleType(self.inner))
+        }
+        pub fn element_types(&mut self, element_types: NodeList<'gc>) { self.is_changed = true; self.inner.element_types = element_types; }
+    }
+    #[derive(Debug)]
+    pub struct TSTypeAssertion<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSTypeAssertion<'gc>,
+    }
+    impl<'gc> TSTypeAssertion<'gc> {
+        pub fn from_node(node: &'gc super::TSTypeAssertion<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSTypeAssertion {
+                    metadata: node.metadata.duplicate(),
+                    type_annotation: node.type_annotation.duplicate(),
+                    expression: node.expression.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSTypeAssertion(self.inner))
+        }
+        pub fn type_annotation(&mut self, type_annotation: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
+        pub fn expression(&mut self, expression: &'gc Node<'gc>) { self.is_changed = true; self.inner.expression = expression; }
+    }
+    #[derive(Debug)]
+    pub struct TSAsExpression<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSAsExpression<'gc>,
+    }
+    impl<'gc> TSAsExpression<'gc> {
+        pub fn from_node(node: &'gc super::TSAsExpression<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSAsExpression {
+                    metadata: node.metadata.duplicate(),
+                    expression: node.expression.duplicate(),
+                    type_annotation: node.type_annotation.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSAsExpression(self.inner))
+        }
+        pub fn expression(&mut self, expression: &'gc Node<'gc>) { self.is_changed = true; self.inner.expression = expression; }
+        pub fn type_annotation(&mut self, type_annotation: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
+    }
+    #[derive(Debug)]
+    pub struct TSParameterProperty<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSParameterProperty<'gc>,
+    }
+    impl<'gc> TSParameterProperty<'gc> {
+        pub fn from_node(node: &'gc super::TSParameterProperty<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSParameterProperty {
+                    metadata: node.metadata.duplicate(),
+                    parameter: node.parameter.duplicate(),
+                    accessibility: Cell::new(node.accessibility.get()),
+                    readonly: Cell::new(node.readonly.get()),
+                    r#static: Cell::new(node.r#static.get()),
+                    export: Cell::new(node.export.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSParameterProperty(self.inner))
+        }
+        pub fn parameter(&mut self, parameter: &'gc Node<'gc>) { self.is_changed = true; self.inner.parameter = parameter; }
+    }
+    #[derive(Debug)]
+    pub struct TSTypeAliasDeclaration<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSTypeAliasDeclaration<'gc>,
+    }
+    impl<'gc> TSTypeAliasDeclaration<'gc> {
+        pub fn from_node(node: &'gc super::TSTypeAliasDeclaration<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSTypeAliasDeclaration {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    type_parameters: node.type_parameters.duplicate(),
+                    type_annotation: node.type_annotation.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSTypeAliasDeclaration(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        pub fn type_annotation(&mut self, type_annotation: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
+    }
+    #[derive(Debug)]
+    pub struct TSInterfaceDeclaration<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSInterfaceDeclaration<'gc>,
+    }
+    impl<'gc> TSInterfaceDeclaration<'gc> {
+        pub fn from_node(node: &'gc super::TSInterfaceDeclaration<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSInterfaceDeclaration {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    body: node.body.duplicate(),
+                    extends: node.extends.duplicate(),
+                    type_parameters: node.type_parameters.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSInterfaceDeclaration(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+        pub fn extends(&mut self, extends: NodeList<'gc>) { self.is_changed = true; self.inner.extends = extends; }
+        pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+    }
+    #[derive(Debug)]
+    pub struct TSInterfaceHeritage<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSInterfaceHeritage<'gc>,
+    }
+    impl<'gc> TSInterfaceHeritage<'gc> {
+        pub fn from_node(node: &'gc super::TSInterfaceHeritage<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSInterfaceHeritage {
+                    metadata: node.metadata.duplicate(),
+                    expression: node.expression.duplicate(),
+                    type_parameters: node.type_parameters.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSInterfaceHeritage(self.inner))
+        }
+        pub fn expression(&mut self, expression: &'gc Node<'gc>) { self.is_changed = true; self.inner.expression = expression; }
+        pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+    }
+    #[derive(Debug)]
+    pub struct TSInterfaceBody<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSInterfaceBody<'gc>,
+    }
+    impl<'gc> TSInterfaceBody<'gc> {
+        pub fn from_node(node: &'gc super::TSInterfaceBody<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSInterfaceBody {
+                    metadata: node.metadata.duplicate(),
+                    body: node.body.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSInterfaceBody(self.inner))
+        }
+        pub fn body(&mut self, body: NodeList<'gc>) { self.is_changed = true; self.inner.body = body; }
+    }
+    #[derive(Debug)]
+    pub struct TSEnumDeclaration<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSEnumDeclaration<'gc>,
+    }
+    impl<'gc> TSEnumDeclaration<'gc> {
+        pub fn from_node(node: &'gc super::TSEnumDeclaration<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSEnumDeclaration {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    members: node.members.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSEnumDeclaration(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        pub fn members(&mut self, members: NodeList<'gc>) { self.is_changed = true; self.inner.members = members; }
+    }
+    #[derive(Debug)]
+    pub struct TSEnumMember<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSEnumMember<'gc>,
+    }
+    impl<'gc> TSEnumMember<'gc> {
+        pub fn from_node(node: &'gc super::TSEnumMember<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSEnumMember {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    initializer: node.initializer.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSEnumMember(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        pub fn initializer(&mut self, initializer: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.initializer = initializer; }
+    }
+    #[derive(Debug)]
+    pub struct TSModuleDeclaration<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSModuleDeclaration<'gc>,
+    }
+    impl<'gc> TSModuleDeclaration<'gc> {
+        pub fn from_node(node: &'gc super::TSModuleDeclaration<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSModuleDeclaration {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    body: node.body.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSModuleDeclaration(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+    }
+    #[derive(Debug)]
+    pub struct TSModuleBlock<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSModuleBlock<'gc>,
+    }
+    impl<'gc> TSModuleBlock<'gc> {
+        pub fn from_node(node: &'gc super::TSModuleBlock<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSModuleBlock {
+                    metadata: node.metadata.duplicate(),
+                    body: node.body.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSModuleBlock(self.inner))
+        }
+        pub fn body(&mut self, body: NodeList<'gc>) { self.is_changed = true; self.inner.body = body; }
+    }
+    #[derive(Debug)]
+    pub struct TSModuleMember<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSModuleMember<'gc>,
+    }
+    impl<'gc> TSModuleMember<'gc> {
+        pub fn from_node(node: &'gc super::TSModuleMember<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSModuleMember {
+                    metadata: node.metadata.duplicate(),
+                    id: node.id.duplicate(),
+                    initializer: node.initializer.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSModuleMember(self.inner))
+        }
+        pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        pub fn initializer(&mut self, initializer: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.initializer = initializer; }
+    }
+    #[derive(Debug)]
+    pub struct TSTypeParameterDeclaration<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSTypeParameterDeclaration<'gc>,
+    }
+    impl<'gc> TSTypeParameterDeclaration<'gc> {
+        pub fn from_node(node: &'gc super::TSTypeParameterDeclaration<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSTypeParameterDeclaration {
+                    metadata: node.metadata.duplicate(),
+                    params: node.params.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSTypeParameterDeclaration(self.inner))
+        }
+        pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
+    }
+    #[derive(Debug)]
+    pub struct TSTypeParameter<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSTypeParameter<'gc>,
+    }
+    impl<'gc> TSTypeParameter<'gc> {
+        pub fn from_node(node: &'gc super::TSTypeParameter<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSTypeParameter {
+                    metadata: node.metadata.duplicate(),
+                    name: node.name.duplicate(),
+                    constraint: node.constraint.duplicate(),
+                    default: node.default.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSTypeParameter(self.inner))
+        }
+        pub fn name(&mut self, name: &'gc Node<'gc>) { self.is_changed = true; self.inner.name = name; }
+        pub fn constraint(&mut self, constraint: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.constraint = constraint; }
+        pub fn default(&mut self, default: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.default = default; }
+    }
+    #[derive(Debug)]
+    pub struct TSTypeParameterInstantiation<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSTypeParameterInstantiation<'gc>,
+    }
+    impl<'gc> TSTypeParameterInstantiation<'gc> {
+        pub fn from_node(node: &'gc super::TSTypeParameterInstantiation<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSTypeParameterInstantiation {
+                    metadata: node.metadata.duplicate(),
+                    params: node.params.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSTypeParameterInstantiation(self.inner))
+        }
+        pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
+    }
+    #[derive(Debug)]
+    pub struct TSUnionType<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSUnionType<'gc>,
+    }
+    impl<'gc> TSUnionType<'gc> {
+        pub fn from_node(node: &'gc super::TSUnionType<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSUnionType {
+                    metadata: node.metadata.duplicate(),
+                    types: node.types.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSUnionType(self.inner))
+        }
+        pub fn types(&mut self, types: NodeList<'gc>) { self.is_changed = true; self.inner.types = types; }
+    }
+    #[derive(Debug)]
+    pub struct TSIntersectionType<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSIntersectionType<'gc>,
+    }
+    impl<'gc> TSIntersectionType<'gc> {
+        pub fn from_node(node: &'gc super::TSIntersectionType<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSIntersectionType {
+                    metadata: node.metadata.duplicate(),
+                    types: node.types.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSIntersectionType(self.inner))
+        }
+        pub fn types(&mut self, types: NodeList<'gc>) { self.is_changed = true; self.inner.types = types; }
+    }
+    #[derive(Debug)]
+    pub struct TSTypeQuery<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSTypeQuery<'gc>,
+    }
+    impl<'gc> TSTypeQuery<'gc> {
+        pub fn from_node(node: &'gc super::TSTypeQuery<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSTypeQuery {
+                    metadata: node.metadata.duplicate(),
+                    expr_name: node.expr_name.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSTypeQuery(self.inner))
+        }
+        pub fn expr_name(&mut self, expr_name: &'gc Node<'gc>) { self.is_changed = true; self.inner.expr_name = expr_name; }
+    }
+    #[derive(Debug)]
+    pub struct TSConditionalType<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSConditionalType<'gc>,
+    }
+    impl<'gc> TSConditionalType<'gc> {
+        pub fn from_node(node: &'gc super::TSConditionalType<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSConditionalType {
+                    metadata: node.metadata.duplicate(),
+                    check_type: node.check_type.duplicate(),
+                    extends_type: node.extends_type.duplicate(),
+                    true_type: node.true_type.duplicate(),
+                    false_type: node.false_type.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSConditionalType(self.inner))
+        }
+        pub fn check_type(&mut self, check_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.check_type = check_type; }
+        pub fn extends_type(&mut self, extends_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.extends_type = extends_type; }
+        pub fn true_type(&mut self, true_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.true_type = true_type; }
+        pub fn false_type(&mut self, false_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.false_type = false_type; }
+    }
+    #[derive(Debug)]
+    pub struct TSTypeLiteral<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSTypeLiteral<'gc>,
+    }
+    impl<'gc> TSTypeLiteral<'gc> {
+        pub fn from_node(node: &'gc super::TSTypeLiteral<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSTypeLiteral {
+                    metadata: node.metadata.duplicate(),
+                    members: node.members.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSTypeLiteral(self.inner))
+        }
+        pub fn members(&mut self, members: NodeList<'gc>) { self.is_changed = true; self.inner.members = members; }
+    }
+    #[derive(Debug)]
+    pub struct TSPropertySignature<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSPropertySignature<'gc>,
+    }
+    impl<'gc> TSPropertySignature<'gc> {
+        pub fn from_node(node: &'gc super::TSPropertySignature<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSPropertySignature {
+                    metadata: node.metadata.duplicate(),
+                    key: node.key.duplicate(),
+                    type_annotation: node.type_annotation.duplicate(),
+                    initializer: node.initializer.duplicate(),
+                    optional: Cell::new(node.optional.get()),
+                    computed: Cell::new(node.computed.get()),
+                    readonly: Cell::new(node.readonly.get()),
+                    r#static: Cell::new(node.r#static.get()),
+                    export: Cell::new(node.export.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSPropertySignature(self.inner))
+        }
+        pub fn key(&mut self, key: &'gc Node<'gc>) { self.is_changed = true; self.inner.key = key; }
+        pub fn type_annotation(&mut self, type_annotation: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
+        pub fn initializer(&mut self, initializer: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.initializer = initializer; }
+    }
+    #[derive(Debug)]
+    pub struct TSMethodSignature<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSMethodSignature<'gc>,
+    }
+    impl<'gc> TSMethodSignature<'gc> {
+        pub fn from_node(node: &'gc super::TSMethodSignature<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSMethodSignature {
+                    metadata: node.metadata.duplicate(),
+                    key: node.key.duplicate(),
+                    params: node.params.duplicate(),
+                    return_type: node.return_type.duplicate(),
+                    computed: Cell::new(node.computed.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSMethodSignature(self.inner))
+        }
+        pub fn key(&mut self, key: &'gc Node<'gc>) { self.is_changed = true; self.inner.key = key; }
+        pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
+        pub fn return_type(&mut self, return_type: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.return_type = return_type; }
+    }
+    #[derive(Debug)]
+    pub struct TSIndexSignature<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSIndexSignature<'gc>,
+    }
+    impl<'gc> TSIndexSignature<'gc> {
+        pub fn from_node(node: &'gc super::TSIndexSignature<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSIndexSignature {
+                    metadata: node.metadata.duplicate(),
+                    parameters: node.parameters.duplicate(),
+                    type_annotation: node.type_annotation.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSIndexSignature(self.inner))
+        }
+        pub fn parameters(&mut self, parameters: NodeList<'gc>) { self.is_changed = true; self.inner.parameters = parameters; }
+        pub fn type_annotation(&mut self, type_annotation: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
+    }
+    #[derive(Debug)]
+    pub struct TSCallSignatureDeclaration<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSCallSignatureDeclaration<'gc>,
+    }
+    impl<'gc> TSCallSignatureDeclaration<'gc> {
+        pub fn from_node(node: &'gc super::TSCallSignatureDeclaration<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSCallSignatureDeclaration {
+                    metadata: node.metadata.duplicate(),
+                    params: node.params.duplicate(),
+                    return_type: node.return_type.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSCallSignatureDeclaration(self.inner))
+        }
+        pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
+        pub fn return_type(&mut self, return_type: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.return_type = return_type; }
+    }
+    #[derive(Debug)]
+    pub struct TSModifiers<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::TSModifiers<'gc>,
+    }
+    impl<'gc> TSModifiers<'gc> {
+        pub fn from_node(node: &'gc super::TSModifiers<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::TSModifiers {
+                    metadata: node.metadata.duplicate(),
+                    accessibility: Cell::new(node.accessibility.get()),
+                    readonly: Cell::new(node.readonly.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::TSModifiers(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct CoverEmptyArgs<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::CoverEmptyArgs<'gc>,
+    }
+    impl<'gc> CoverEmptyArgs<'gc> {
+        pub fn from_node(node: &'gc super::CoverEmptyArgs<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::CoverEmptyArgs {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::CoverEmptyArgs(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct CoverTrailingComma<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::CoverTrailingComma<'gc>,
+    }
+    impl<'gc> CoverTrailingComma<'gc> {
+        pub fn from_node(node: &'gc super::CoverTrailingComma<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::CoverTrailingComma {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::CoverTrailingComma(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct CoverInitializer<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::CoverInitializer<'gc>,
+    }
+    impl<'gc> CoverInitializer<'gc> {
+        pub fn from_node(node: &'gc super::CoverInitializer<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::CoverInitializer {
+                    metadata: node.metadata.duplicate(),
+                    init: node.init.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::CoverInitializer(self.inner))
+        }
+        pub fn init(&mut self, init: &'gc Node<'gc>) { self.is_changed = true; self.inner.init = init; }
+    }
+    #[derive(Debug)]
+    pub struct CoverRestElement<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::CoverRestElement<'gc>,
+    }
+    impl<'gc> CoverRestElement<'gc> {
+        pub fn from_node(node: &'gc super::CoverRestElement<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::CoverRestElement {
+                    metadata: node.metadata.duplicate(),
+                    rest: node.rest.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::CoverRestElement(self.inner))
+        }
+        pub fn rest(&mut self, rest: &'gc Node<'gc>) { self.is_changed = true; self.inner.rest = rest; }
+    }
+    #[derive(Debug)]
+    pub struct CoverTypedIdentifier<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::CoverTypedIdentifier<'gc>,
+    }
+    impl<'gc> CoverTypedIdentifier<'gc> {
+        pub fn from_node(node: &'gc super::CoverTypedIdentifier<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::CoverTypedIdentifier {
+                    metadata: node.metadata.duplicate(),
+                    left: node.left.duplicate(),
+                    right: node.right.duplicate(),
+                    optional: Cell::new(node.optional.get()),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::CoverTypedIdentifier(self.inner))
+        }
+        pub fn left(&mut self, left: &'gc Node<'gc>) { self.is_changed = true; self.inner.left = left; }
+        pub fn right(&mut self, right: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.right = right; }
+    }
+    #[derive(Debug)]
+    pub struct SHBuiltin<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::SHBuiltin<'gc>,
+    }
+    impl<'gc> SHBuiltin<'gc> {
+        pub fn from_node(node: &'gc super::SHBuiltin<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::SHBuiltin {
+                    metadata: node.metadata.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::SHBuiltin(self.inner))
+        }
+    }
+    #[derive(Debug)]
+    pub struct ImplicitCheckedCast<'gc> {
+        is_changed: bool,
+        pub(super) inner: super::ImplicitCheckedCast<'gc>,
+    }
+    impl<'gc> ImplicitCheckedCast<'gc> {
+        pub fn from_node(node: &'gc super::ImplicitCheckedCast<'gc>) -> Self {
+            Self {
+                is_changed: false,
+                inner: super::ImplicitCheckedCast {
+                    metadata: node.metadata.duplicate(),
+                    argument: node.argument.duplicate(),
+                },
+            }
+        }
+        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
+            if self.is_changed {
+                TransformResult::Changed(self.build_forced(gc))
+            } else {
+                TransformResult::Unchanged
+            }
+        }
+        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
+            gc.alloc(Node::ImplicitCheckedCast(self.inner))
+        }
+        pub fn argument(&mut self, argument: &'gc Node<'gc>) { self.is_changed = true; self.inner.argument = argument; }
     }
 }

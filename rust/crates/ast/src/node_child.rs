@@ -48,7 +48,6 @@ impl<'gc> NodeMetadata<'gc> {
 
     /// Deep-copy the metadata, copying `Cell` values into fresh `Cell`s.
     /// Used by builders when cloning a node.
-    #[allow(dead_code)] // used by generated builder::Builder::from_node (Task 4)
     pub(crate) fn duplicate(&self) -> NodeMetadata<'gc> {
         NodeMetadata {
             phantom: self.phantom,
@@ -164,7 +163,6 @@ impl<'gc> Iterator for NodeListIter<'gc> {
 
 /// Build a zero-width `EmptyStatement` at the start of `at`'s range, used to
 /// replace a required single child that a `VisitorMut` asked to remove.
-#[allow(dead_code)] // used by generated visit_children_mut (Task 4)
 fn empty_statement<'gc>(gc: &'gc GCLock<'_, '_>, at: SMRange) -> &'gc Node<'gc> {
     let range = SMRange {
         start: at.start,
@@ -177,7 +175,6 @@ fn empty_statement<'gc>(gc: &'gc GCLock<'_, '_>, at: SMRange) -> &'gc Node<'gc> 
 /// child field types. `visit_child_mut` transforms a child (recursing via
 /// `visitor.call`); `duplicate` clones a child field without `Clone` (so callers
 /// can't fabricate `Node` refs).
-#[allow(dead_code)] // used by generated visit_children_mut (Task 4)
 pub(crate) trait NodeChild<'gc>: Sized {
     type Out;
     fn visit_child_mut<V: VisitorMut<'gc>>(
