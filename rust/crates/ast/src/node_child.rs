@@ -10,6 +10,20 @@ use crate::node::Node;
 /// JS identifier / operator / keyword bytes, interned in the AtomTable.
 pub type NodeLabel = atom_table::AtomBytes;
 
+/// JS string-literal bytes, interned in the AtomTable (C++ `NodeString = UniqueString*`).
+pub type NodeString = atom_table::AtomBytes;
+
+/// Function strictness state (mirrors `ESTree.h` `enum class Strictness`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Strictness {
+    NotSet,
+    NonStrictMode,
+    StrictMode,
+}
+
+/// Sentinel for an unset label index (mirrors `LabelDecorationBase::INVALID_LABEL`, `~0u`).
+pub const INVALID_LABEL: u32 = u32::MAX;
+
 /// Metadata common to all AST nodes.
 ///
 /// Stored inside [`Node`] and must not be constructed directly by users.
@@ -133,5 +147,17 @@ impl<'gc> Iterator for NodeListIter<'gc> {
             self.ptr = next;
             Some(node)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn strictness_and_constants() {
+        assert_eq!(INVALID_LABEL, u32::MAX);
+        assert_ne!(Strictness::StrictMode, Strictness::NotSet);
+        // NodeString and NodeLabel are the same interned-bytes handle type.
+        fn _same(_a: NodeString, b: NodeLabel) -> NodeString { b }
     }
 }
