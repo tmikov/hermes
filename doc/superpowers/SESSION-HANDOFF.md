@@ -99,11 +99,16 @@ Release (`gen-json` bin + `--bench=N`). **C++ source of truth:** `include/hermes
 
 ```bash
 # Rust workspace (do NOT cd; use --manifest-path). Build/test:
-cargo test  --manifest-path rust/Cargo.toml            # whole workspace (≈225 tests)
+cargo test  --manifest-path rust/Cargo.toml            # whole workspace (≈229 tests)
 cargo test  --manifest-path rust/Cargo.toml -p parser  # lexer + JSONParser crate
-cargo test  --manifest-path rust/Cargo.toml -p ast     # AST: GC arena + node model spine
+cargo test  --manifest-path rust/Cargo.toml -p ast     # AST: GC arena + generated 271-node model + spine/structural tests
 cargo build --manifest-path rust/Cargo.toml            # expect ZERO warnings
 cargo clippy --manifest-path rust/Cargo.toml -p parser # only pre-existing faithful-C-idiom lints
+
+# Regenerate the AST node set from ESTree.def (committed output; idempotent):
+python3 rust/crates/ast/gen_nodes.py                   # writes src/node.rs (271 nodes); re-run = no diff
+# Guard that committed src/node.rs matches the generator (force-run, don't skip):
+REQUIRE_GEN=1 cargo test --manifest-path rust/Cargo.toml -p ast --test generated_idempotent
 
 # The C++ differential oracle (build once; ASan+Debug+-O1 tree per CLAUDE.md):
 cmake --build cmake-build-asan --target js-lexer-dump
