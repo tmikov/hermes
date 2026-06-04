@@ -447,12 +447,12 @@ pub mod builder {
             Self {
                 is_changed: false,
                 inner: super::ForStatement {
-                    metadata: node.metadata.duplicate(),
-                    init: node.init,            // single/opt/list children: copy ref/head
-                    test: node.test,
-                    update: node.update,
-                    body: node.body,
-                    label_index: Cell::new(node.label_index.get()),  // Cell attrs: copy value
+                    metadata: node.metadata.duplicate(),            // NodeMetadata::duplicate
+                    init: node.init.duplicate(),                    // single/opt/list children: NodeChild::duplicate
+                    test: node.test.duplicate(),
+                    update: node.update.duplicate(),
+                    body: node.body.duplicate(),
+                    label_index: Cell::new(node.label_index.get()), // Cell attrs: copy value
                     scope: Cell::new(node.scope.get()),
                 },
             }
@@ -476,7 +476,7 @@ pub mod builder {
     // ... one struct + impl per node ...
 }
 ```
-`from_node` per field: `meta`→`node.metadata.duplicate()`; `single`/`opt`/`list`→`node.FIELD`; `declist`/value `cell`→`Cell::new(node.FIELD.get())`. Setters only for `single`/`opt`/`list` (arg type = the field's `rust_type`). For a node with NO fields beyond metadata (e.g. `Empty`, `EmptyStatement`), `from_node` sets only `metadata`, and there are no setters. The `GCLock` path inside the `builder` submodule is `super::super::context::GCLock` (builder is `node::builder`, so `super` = `node`, `super::super` = crate root → `crate::context::GCLock`; prefer emitting `crate::context::GCLock` for clarity). Use `crate::context::GCLock<'_, '_>` in the emitted code.
+`from_node` per field: `meta`→`node.metadata.duplicate()` (the `NodeMetadata::duplicate` method); `single`/`opt`/`list`→`node.FIELD.duplicate()` (the `NodeChild::duplicate` trait method — this is what makes that trait method live, so the Task-3 `#[allow(dead_code)]` can be removed in Step 5b); `declist`/value `cell`→`Cell::new(node.FIELD.get())`. Setters only for `single`/`opt`/`list` (arg type = the field's `rust_type`). For a node with NO fields beyond metadata (e.g. `Empty`, `EmptyStatement`), `from_node` sets only `metadata`, and there are no setters. The `GCLock` path inside the `builder` submodule is `super::super::context::GCLock` (builder is `node::builder`, so `super` = `node`, `super::super` = crate root → `crate::context::GCLock`; prefer emitting `crate::context::GCLock` for clarity). Use `crate::context::GCLock<'_, '_>` in the emitted code.
 
 - [ ] **Step 4: wire `generate()`** to call `emit_visit_children_mut` (inside the `impl Node` emission, alongside `visit_children`/`mark_lists`) and `emit_builders` (after the `impl Node` block, at module level). Keep `EXPECTED_NODES = 271`.
 
@@ -488,6 +488,8 @@ cargo test --manifest-path rust/Cargo.toml -p ast 2>&1 | grep -E 'test result|wa
 ```
 Expected: clean build (zero warnings), existing tests still pass. If the generated code fails to compile, fix `gen_nodes.py` (NOT `node.rs`) and regenerate. Likely fix points: the `GCLock` path; the `builder` module's `use super::{…all node names…}` (emit `use super::*;` to import every node struct + `Node` simply); setter arg types matching `rust_type`.
 
+- [ ] **Step 5b: remove the now-unused-no-more `#[allow(dead_code)]` from `node_child.rs`.** Task 3 added three `#[allow(dead_code)]` (on the `NodeChild` trait, `NodeMetadata::duplicate`, and the `empty_statement` fn) because nothing used them yet. After this task's generated `builder`/`visit_children_mut` land, all three are live (`from_node` calls `.duplicate()`; `visit_children_mut` calls `visit_child_mut`; the `&Node` impl calls `empty_statement`). Delete those three `#[allow(dead_code)]` lines and rebuild — it must stay **zero warnings** without them (proving they're genuinely used now). If any is still flagged unused, that's a real signal the generated code isn't exercising it — investigate rather than re-adding the allow.
+
 - [ ] **Step 6: idempotency + drift guard.**
 ```bash
 python3 rust/crates/ast/gen_nodes.py    # run twice
@@ -497,7 +499,7 @@ Expected: committed `node.rs` byte-identical to fresh output; test passes.
 
 - [ ] **Step 7: commit.**
 ```bash
-git add rust/crates/ast/gen_nodes.py rust/crates/ast/src/node.rs
+git add rust/crates/ast/gen_nodes.py rust/crates/ast/src/node.rs rust/crates/ast/src/node_child.rs
 git commit -m "rust(ast): generate builder module + Node::visit_children_mut (functional rebuild)
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
