@@ -4,9 +4,11 @@ Hand this to a new session to restore context. It **references** the authoritati
 (read them; don't trust this summary over them) and records the conventions, file map,
 validation commands, and workflow.
 
-> **Date of handoff:** 2026-06-02. **Branch:** `rust` (base is `static_h`, NOT `main`).
-> **Status:** the **JS lexer is COMPLETE** and the **JSONParser is COMPLETE** (the first lexer
-> consumer); the next component is the **JS Parser** (`lib/Parser/JSParserImpl*`).
+> **Date of handoff:** 2026-06-04. **Branch:** `rust` (base is `static_h`, NOT `main`).
+> **Status:** the **JS lexer** and **JSONParser** are COMPLETE; the **AST is now IN PROGRESS** —
+> **phase 1 (storage/GC arena spine) is COMPLETE.** The AST is being built in phases (2 = node-set
+> codegen from `ESTree.def`, 3 = builders/visitors, 4 = `ESTreeJSONDumper`); the **JS Parser**
+> (`lib/Parser/JSParserImpl*`), which consumes the AST, follows it.
 
 ---
 
@@ -20,7 +22,9 @@ validation commands, and workflow.
    dir → Meta; else GitHub — this is the GitHub env).
 3. **The auto-memories** at `/home/tmikov/.claude/projects/-home-tmikov-work-hermes/memory/`
    (loaded each session via `MEMORY.md`):
-   - `rust-port-roadmap-pointer.md` — resume pointer (lexer COMPLETE, next = Parser).
+   - `rust-port-roadmap-pointer.md` — resume pointer (AST phase 1 done; next = AST phase 2 codegen).
+   - `dont-pronounce-on-hermes-internals.md` — don't state guesses about Hermes internals as
+     conclusions; verify against the C++ or defer (the user is a Hermes author; overconfidence annoys).
    - `rust_port_conventions.md` — `rust/` layout, copy juno, keep close to Hermes + comments,
      docs under `doc/` not `docs/`, branch is `rust` (stays there, no PRs/merges), base `static_h`.
    - `implement-components-completely.md` — implement a component's WHOLE public surface in one
@@ -31,23 +35,29 @@ validation commands, and workflow.
 4. **`doc/superpowers/specs/2026-06-01-js-lexer-design.md`** — the lexer design (decisions, seams,
    scope, crate layout). **`doc/superpowers/specs/2026-06-01-source-error-manager-design.md`** —
    the diagnostics foundation.
+5. **`doc/superpowers/specs/2026-06-03-ast-design.md`** — the AST design (juno GC arena; immutable
+   children + `Cell` attributes; **references not index handles**; the verified no-`Cell<&Node>`
+   finding; the `ESTree.def` codegen approach) and the executed phase-1 plan
+   **`doc/superpowers/plans/2026-06-04-ast-1-storage-and-spine.md`**.
 
 ---
 
 ## 2. What's done (✅) and the code map
 
 **Component status** (see the roadmap table): `SourceErrorManager` ✅ · **JS lexer ✅** ·
-**JSONParser ✅** · JS Parser / Sema / IR / Optimizer / BCGen — future.
+**JSONParser ✅** · **AST 🚧 (phase 1 storage/GC spine done; phases 2–4 next)** · JS Parser / Sema /
+IR / Optimizer / BCGen — future.
 
 Rust workspace: **`rust/Cargo.toml`** (members: `support`, `parser`, `atom_table`, `unicode`),
 toolchain pinned `rust/rust-toolchain.toml` (1.96.0).
 
 | Crate | What | `unsafe`? |
 |-------|------|-----------|
-| `rust/crates/support/` | `SourceErrorManager` + buffer/locations/line-index/diagnostics. Byte-for-byte vs `hermesc` (`tests/golden.rs`). | zero (`forbid`) |
+| `rust/crates/support/` | `SourceErrorManager` + buffer/locations/line-index/diagnostics; **+ `Deque`/`HeapSize`** (shared utilities, moved from juno). Byte-for-byte vs `hermesc` (`tests/golden.rs`). | zero (`forbid`) |
 | `rust/crates/atom_table/` | juno `atom_table` verbatim + `AtomBytes`/`atom_bytes` WTF-8 path (the interner). | **encapsulated** (sanctioned) |
 | `rust/crates/unicode/` | `CharacterProperties` predicates + tables generated from `UnicodeData.inc` (17.0.0) by `gen_tables.py`. | zero (`forbid`) |
-| `rust/crates/parser/` | **the lexer** + token tables + number parsing + UTF codec. | only in `cursor.rs` (scoped) |
+| `rust/crates/parser/` | **the lexer** + token tables + number parsing + UTF codec + the JSONParser. | only in `cursor.rs` (scoped) |
+| `rust/crates/ast/` | **the AST** — juno **GC arena** (`Context`/`GCLock`/`NodeRc` + mark-sweep) copied+adapted; immutable children + `Cell` attributes; minimal 4-kind node model (phase 1; full node set generated from `ESTree.def` in phase 2). | only in `context.rs` (scoped) |
 
 **Lexer modules** (`rust/crates/parser/src/`): `token_kinds.rs` (TokenKind from `TokenKinds.def`),
 `number.rs` (scanNumber primitives), `html_entities.rs` (generated), `utf8.rs` (UTF-8↔16 codec),
@@ -89,8 +99,9 @@ Release (`gen-json` bin + `--bench=N`). **C++ source of truth:** `include/hermes
 
 ```bash
 # Rust workspace (do NOT cd; use --manifest-path). Build/test:
-cargo test  --manifest-path rust/Cargo.toml            # whole workspace (≈136 tests)
-cargo test  --manifest-path rust/Cargo.toml -p parser  # lexer crate
+cargo test  --manifest-path rust/Cargo.toml            # whole workspace (≈225 tests)
+cargo test  --manifest-path rust/Cargo.toml -p parser  # lexer + JSONParser crate
+cargo test  --manifest-path rust/Cargo.toml -p ast     # AST: GC arena + node model spine
 cargo build --manifest-path rust/Cargo.toml            # expect ZERO warnings
 cargo clippy --manifest-path rust/Cargo.toml -p parser # only pre-existing faithful-C-idiom lints
 
@@ -172,15 +183,21 @@ Commit directly to `rust`; **never** open a PR or merge (project rule).
 
 ## 6. What's next
 
-- **The JS Parser** (`lib/Parser/JSParserImpl.cpp` + `JSParserImpl-flow.cpp`/`-jsx.cpp`/`-ts.cpp`,
-  `JSParserImpl.h`, `include/hermes/Parser/JSParser.h`) — consumes the completed lexer. It needs the
-  **AST** (`lib/AST/`, `include/hermes/AST/`) and `Context`. This is a large component; scope it
-  (juno has an AST + parser to crib from: `unsupported/juno/crates/juno_ast/`, `juno/src/hparser/`).
-- The **lexer** has no open items (the optional `--non-strict` follow-up is DONE — `differential_nonstrict`).
-- The **JSONParser** has no open items. Capstone passed; sole documented deviations are the fat-enum
-  node layout and `getAllocator`/`getStringTable` → `arena()`/`atoms()`. The differential caught one real
-  bug (an `emit_into` WTF-8 panic) which is fixed.
-
-The lexer and JSONParser are done, reviewed, and self-validating — start the JS Parser fresh from §1's
-reading (note: it is a far larger effort than the JSONParser, which was a deliberately small first
-lexer-consumer to work out the integration pattern).
+- **AST phase 2 (immediate next): node-set codegen.** A committed generator that parses
+  `include/hermes/AST/ESTree.def` (all `#if FLOW/JSX/TS` families on) plus a **small committed decoration
+  table** (hand-transcribed from the `Decoration` classes in `ESTree.h` — we do NOT parse `ESTree.h`) →
+  a checked-in `nodes_generated.rs` with the full ~200-node set, replacing the hand-written 4-kind model.
+  It must emit the per-field child-vs-`Cell` classification and the GC child-walk **including the two
+  decoration `NodeList`s** (`FunctionLikeDecoration::decorations`, `ProgramDecoration::dummyParamList`).
+  Then **phase 3** (builders + `RecursiveVisitor`/`VisitorMut` over the full set) and **phase 4**
+  (`ESTreeJSONDumper` port + golden tests). See spec §2–§4. Write each phase plan just-in-time
+  (lexer-style) and execute subagent-driven.
+- **Then the JS Parser** (`lib/Parser/JSParserImpl.cpp` + `-flow.cpp`/`-jsx.cpp`/`-ts.cpp`,
+  `JSParserImpl.h`, `include/hermes/Parser/JSParser.h`) — consumes the lexer + AST + `Context`. Large;
+  juno has an AST + parser to crib from (`unsupported/juno/crates/juno_ast/`, `juno/src/hparser/`). The
+  byte-for-byte `-dump-ast` differential vs `hermesc` is the Parser's validation gate.
+- **No open items** on the lexer, the JSONParser, or **AST phase 1** (storage/GC spine): two-stage
+  reviewed per task, the GC adaptation reviewed sound (the marker rewrite is cleaner than juno's `GCLock`
+  re-entrancy), and the decoration-tracing test is mutation-verified. The lexer's optional `--non-strict`
+  follow-up is DONE; the JSONParser's sole deviations are the fat-enum layout + `getAllocator`/`getStringTable`
+  → `arena()`/`atoms()`.
