@@ -3,6 +3,14 @@
 version = 4
 
 [[package]]
+name = "ast"
+version = "0.1.0"
+dependencies = [
+ "atom_table",
+ "support",
+]
+
+[[package]]
 name = "atom_table"
 version = "0.0.0"
 
