@@ -5,10 +5,10 @@ Hand this to a new session to restore context. It **references** the authoritati
 validation commands, and workflow.
 
 > **Date of handoff:** 2026-06-04. **Branch:** `rust` (base is `static_h`, NOT `main`).
-> **Status:** the **JS lexer** and **JSONParser** are COMPLETE; the **AST is now IN PROGRESS** —
-> **phase 1 (storage/GC arena spine) is COMPLETE.** The AST is being built in phases (2 = node-set
-> codegen from `ESTree.def`, 3 = builders/visitors, 4 = `ESTreeJSONDumper`); the **JS Parser**
-> (`lib/Parser/JSParserImpl*`), which consumes the AST, follows it.
+> **Status:** the **JS lexer** and **JSONParser** are COMPLETE; the **AST is IN PROGRESS** —
+> **phases 1 (storage/GC arena spine) AND 2 (full 271-node set generated from `ESTree.def`) are COMPLETE.**
+> Remaining AST phases: 3 = builders + `VisitorMut`/`visit_children_mut` (functional rebuild), 4 = `ESTreeJSONDumper`;
+> then the **JS Parser** (`lib/Parser/JSParserImpl*`), which consumes the AST, follows it.
 
 ---
 
@@ -22,7 +22,7 @@ validation commands, and workflow.
    dir → Meta; else GitHub — this is the GitHub env).
 3. **The auto-memories** at `/home/tmikov/.claude/projects/-home-tmikov-work-hermes/memory/`
    (loaded each session via `MEMORY.md`):
-   - `rust-port-roadmap-pointer.md` — resume pointer (AST phase 1 done; next = AST phase 2 codegen).
+   - `rust-port-roadmap-pointer.md` — resume pointer (AST phases 1–2 done; next = AST phase 3 builders/visitors).
    - `dont-pronounce-on-hermes-internals.md` — don't state guesses about Hermes internals as
      conclusions; verify against the C++ or defer (the user is a Hermes author; overconfidence annoys).
    - `rust_port_conventions.md` — `rust/` layout, copy juno, keep close to Hermes + comments,
@@ -45,8 +45,8 @@ validation commands, and workflow.
 ## 2. What's done (✅) and the code map
 
 **Component status** (see the roadmap table): `SourceErrorManager` ✅ · **JS lexer ✅** ·
-**JSONParser ✅** · **AST 🚧 (phase 1 storage/GC spine done; phases 2–4 next)** · JS Parser / Sema /
-IR / Optimizer / BCGen — future.
+**JSONParser ✅** · **AST 🚧 (phases 1–2 done: GC spine + generated 271-node set; phases 3–4 next)** ·
+JS Parser / Sema / IR / Optimizer / BCGen — future.
 
 Rust workspace: **`rust/Cargo.toml`** (members: `support`, `parser`, `atom_table`, `unicode`),
 toolchain pinned `rust/rust-toolchain.toml` (1.96.0).
@@ -57,7 +57,7 @@ toolchain pinned `rust/rust-toolchain.toml` (1.96.0).
 | `rust/crates/atom_table/` | juno `atom_table` verbatim + `AtomBytes`/`atom_bytes` WTF-8 path (the interner). | **encapsulated** (sanctioned) |
 | `rust/crates/unicode/` | `CharacterProperties` predicates + tables generated from `UnicodeData.inc` (17.0.0) by `gen_tables.py`. | zero (`forbid`) |
 | `rust/crates/parser/` | **the lexer** + token tables + number parsing + UTF codec + the JSONParser. | only in `cursor.rs` (scoped) |
-| `rust/crates/ast/` | **the AST** — juno **GC arena** (`Context`/`GCLock`/`NodeRc` + mark-sweep) copied+adapted; immutable children + `Cell` attributes; minimal 4-kind node model (phase 1; full node set generated from `ESTree.def` in phase 2). | only in `context.rs` (scoped) |
+| `rust/crates/ast/` | **the AST** — juno **GC arena** (`Context`/`GCLock`/`NodeRc` + mark-sweep) copied+adapted; immutable children + `Cell` attributes; **full 271-node set generated from `ESTree.def`** by `gen_nodes.py` → `// @generated src/node.rs` (phase 2; replaced the 4-kind model). `NodeKind`+ranges, `is_*`/`as_*`, generated `visit_children`/`mark_lists`, minimal `new`. | only in `context.rs` (scoped) |
 
 **Lexer modules** (`rust/crates/parser/src/`): `token_kinds.rs` (TokenKind from `TokenKinds.def`),
 `number.rs` (scanNumber primitives), `html_entities.rs` (generated), `utf8.rs` (UTF-8↔16 codec),
@@ -183,21 +183,23 @@ Commit directly to `rust`; **never** open a PR or merge (project rule).
 
 ## 6. What's next
 
-- **AST phase 2 (immediate next): node-set codegen.** A committed generator that parses
-  `include/hermes/AST/ESTree.def` (all `#if FLOW/JSX/TS` families on) plus a **small committed decoration
-  table** (hand-transcribed from the `Decoration` classes in `ESTree.h` — we do NOT parse `ESTree.h`) →
-  a checked-in `nodes_generated.rs` with the full ~200-node set, replacing the hand-written 4-kind model.
-  It must emit the per-field child-vs-`Cell` classification and the GC child-walk **including the two
-  decoration `NodeList`s** (`FunctionLikeDecoration::decorations`, `ProgramDecoration::dummyParamList`).
-  Then **phase 3** (builders + `RecursiveVisitor`/`VisitorMut` over the full set) and **phase 4**
-  (`ESTreeJSONDumper` port + golden tests). See spec §2–§4. Write each phase plan just-in-time
-  (lexer-style) and execute subagent-driven.
+- **AST phase 3 (immediate next): builders + transforming visitor.** Generated builders (GC-allocating
+  construction + clone-with-one-field-changed — the rebuild primitive) and `RecursiveVisitor`/`VisitorMut`
+  (`TransformResult`/`Path`) + the generated `visit_children_mut` over the full 271-node set. The phase-2
+  `new` constructors are plain field-init (decorations defaulted) — phase 3's Builder wraps them with GC
+  allocation + the functional-rebuild threading (juno's model; ported from `RecursiveVisitor.h`). Extend
+  `gen_nodes.py` to emit the builder + `visit_children_mut` arms; keep the idempotency guard green. Then
+  **phase 4** (`ESTreeJSONDumper` port — the generator bakes the retained camelCase `.def` names as literal
+  JSON keys and honors the parsed `ESTREE_IGNORE_IF_EMPTY` set — + golden tests). See spec §3–§4. Write each
+  phase plan just-in-time (lexer-style) and execute subagent-driven.
 - **Then the JS Parser** (`lib/Parser/JSParserImpl.cpp` + `-flow.cpp`/`-jsx.cpp`/`-ts.cpp`,
   `JSParserImpl.h`, `include/hermes/Parser/JSParser.h`) — consumes the lexer + AST + `Context`. Large;
   juno has an AST + parser to crib from (`unsupported/juno/crates/juno_ast/`, `juno/src/hparser/`). The
   byte-for-byte `-dump-ast` differential vs `hermesc` is the Parser's validation gate.
-- **No open items** on the lexer, the JSONParser, or **AST phase 1** (storage/GC spine): two-stage
-  reviewed per task, the GC adaptation reviewed sound (the marker rewrite is cleaner than juno's `GCLock`
-  re-entrancy), and the decoration-tracing test is mutation-verified. The lexer's optional `--non-strict`
-  follow-up is DONE; the JSONParser's sole deviations are the fat-enum layout + `getAllocator`/`getStringTable`
-  → `arena()`/`atoms()`.
+- **No open items** on the lexer, the JSONParser, or **AST phases 1–2**: two-stage reviewed per task +
+  a whole-component capstone review (zero issues — it re-derived the 271-node count, `NodeKind` ordering,
+  and decoration composition independently, and verified all 91 `NodeList` fields are traced in BOTH
+  `visit_children` and `mark_lists`). Phase 2 deliberate scope: `node.rs` fully generated; snake_case fields
+  with camelCase names retained for the dumper; `new` ≠ Builder; `visit_children_mut` deferred to phase 3;
+  `IGNORE_IF_EMPTY` parsed but emitted in phase 4. The lexer's `--non-strict` follow-up is DONE; the
+  JSONParser's sole deviations are the fat-enum layout + `getAllocator`/`getStringTable` → `arena()`/`atoms()`.
