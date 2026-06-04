@@ -38,7 +38,8 @@ The front-end stratifies (see the dependency analysis below). We port bottom-up.
 | **SourceErrorManager** (+ buffer, locations, line index, diagnostics) | `rust/crates/support/` | ✅ **Complete** — entire public surface; **byte-for-byte validated vs `hermesc` 1.96.0** |
 | **JS lexer** | `rust/crates/{atom_table,unicode,parser}/` | ✅ **Complete** — entire `JSLexer` public surface; self-validating byte-for-byte vs `js-lexer-dump` (5 differentials); see deps below |
 | **JSONParser** (+ `JSONEmitter`, value model, factory, `JSONSharedValue`) | `rust/crates/{parser,support}/` | ✅ **Complete** — first `JSLexer` consumer; entire public surface; self-validating byte-for-byte vs `json-parse-dump` (16-file corpus) + 5 ported `JSONParserTest` + 13 ported `JSONEmitterTest`; **benchmarked within ~1.5% of C++ Release** |
-| Parser | — | future |
+| **AST** (ESTree nodes + GC arena) | `rust/crates/ast/` (+ `support`) | 🚧 **In progress — phase 1 (storage/GC spine) complete.** juno GC arena copied+adapted; immutable children + `Cell` attributes; minimal 4-kind node model proving deep `match` / rebuild / GC reclamation / decoration-list tracing (mutation-verified). Phases 2–4 next: node-set codegen from `ESTree.def`, builders, `ESTreeJSONDumper`. Spec: `specs/2026-06-03-ast-design.md` |
+| Parser | — | future (consumes the AST) |
 | Sema (scope resolution + FlowChecker) | — | future |
 | IR / IRGen | — | future |
 | Optimizer | — | future |
@@ -239,7 +240,34 @@ Benchmark (first datapoint, see "Benchmark" section below): on an 11.6 MB JSON f
 `--release` ≈ 69.5 MB/s vs C++ Release ≈ 70.6 MB/s — within ~1.5%**. (The default ASan+`-O1` C++ build
 is ~12× slower and is not a fair speed baseline.)
 
-> **Next component: the Parser** (`lib/Parser/JSParserImpl*`) — needs the AST + `Context`.
+> **Next component: the Parser** (`lib/Parser/JSParserImpl*`) — needs the AST + `Context`, now under way.
+
+### 🚧 AST — phase 1 (storage/GC spine) COMPLETE
+
+The `ast` crate (`rust/crates/ast/`) is up, with the storage spine ported and proven. Design spec:
+`specs/2026-06-03-ast-design.md`; per-phase plan: `plans/2026-06-04-ast-1-storage-and-spine.md`.
+
+**Model (locked):** copy **juno's GC arena** (`Context`/`GCLock`/`NodeRc` + mark-sweep), `#[repr(C)]`
+enum `Node<'gc>` for deep `match`. **Child fields are immutable** (`&'gc Node`, `Option`, `NodeList`) and
+**rebuilt on change** via a functional recursive walk; **all other attributes are `Cell<…>`** (mutated in
+place). The split falls out of `ESTree.def`'s type tags. Verified there are **no `Cell<&Node>` cross-edges**
+in `ESTree.h` (only two decoration `NodeList`s), so the GC marker traces decoration lists explicitly and the
+invariance landmine juno hit is avoided. Rationale recorded in the spec, incl. why **references, not index
+handles** (in a never-freed arena both are equally UB-free; references are *more* logically robust and read
+close to the C++ `node->field`).
+
+**Phase 1 delivered:** the GC arena copied + adapted to our crates (`support::location`, our `atom_table`,
+`core::mem::offset_of!`, no `source_mgr` in `Context`; the marker rewrite was reviewed **sound** — cleaner than
+juno's `GCLock` re-entrancy); a minimal hand-written 4-kind node model (`NumericLiteral`/`Identifier`/
+`BinaryExpression`/`Program`) exercising deep `match`, `Cell` in-place mutation, immutable children, a decoration
+`NodeList`, functional rebuild, GC orphan reclamation, and decoration-list tracing. **`unsafe` is confined to
+`context.rs`** (the crate `deny`s it). `Deque`/`HeapSize` were moved into **`support`** (shared utilities; the
+deque test rewritten `unsafe`-free to keep `support`'s `forbid`). The decoration-tracing test was **mutation-verified**
+(disabling the marker's decoration walk makes it fail). Two-stage reviewed per task; whole workspace green, zero warnings.
+
+**Phases 2–4 next:** (2) a committed generator parsing `ESTree.def` (+ a small committed decoration table) → the full
+~200-node set, replacing the hand-written model; (3) builders + `RecursiveVisitor`/`VisitorMut` over the full set; (4)
+`ESTreeJSONDumper` port + golden tests. The byte-for-byte `-dump-ast` differential vs `hermesc` lands as the Parser's gate.
 
 ## Key cross-cutting design decisions
 
