@@ -5,7 +5,8 @@ use std::marker::PhantomData;
 use support::location::SMRange;
 
 use crate::context::{GCLock, NodeListElement};
-use crate::node::Node;
+use crate::node::{EmptyStatement, Node};
+use crate::visitor::{Path, TransformResult, VisitorMut};
 
 /// JS identifier / operator / keyword bytes, interned in the AtomTable.
 pub type NodeLabel = atom_table::AtomBytes;
@@ -42,6 +43,17 @@ impl<'gc> NodeMetadata<'gc> {
             phantom: PhantomData,
             range: Cell::new(range),
             parens: Cell::new(0),
+        }
+    }
+
+    /// Deep-copy the metadata, copying `Cell` values into fresh `Cell`s.
+    /// Used by builders when cloning a node.
+    #[allow(dead_code)] // used by generated builder::Builder::from_node (Task 4)
+    pub(crate) fn duplicate(&self) -> NodeMetadata<'gc> {
+        NodeMetadata {
+            phantom: self.phantom,
+            range: Cell::new(self.range.get()),
+            parens: Cell::new(self.parens.get()),
         }
     }
 }
@@ -146,6 +158,147 @@ impl<'gc> Iterator for NodeListIter<'gc> {
             let (node, next) = crate::context::list_elem_parts(self.ptr);
             self.ptr = next;
             Some(node)
+        }
+    }
+}
+
+/// Build a zero-width `EmptyStatement` at the start of `at`'s range, used to
+/// replace a required single child that a `VisitorMut` asked to remove.
+#[allow(dead_code)] // used by generated visit_children_mut (Task 4)
+fn empty_statement<'gc>(gc: &'gc GCLock<'_, '_>, at: SMRange) -> &'gc Node<'gc> {
+    let range = SMRange {
+        start: at.start,
+        end: at.start,
+    };
+    gc.alloc(Node::EmptyStatement(EmptyStatement::new(NodeMetadata::new(range))))
+}
+
+/// The mutating field-transform trait. Implemented for the three structural
+/// child field types. `visit_child_mut` transforms a child (recursing via
+/// `visitor.call`); `duplicate` clones a child field without `Clone` (so callers
+/// can't fabricate `Node` refs).
+#[allow(dead_code)] // used by generated visit_children_mut (Task 4)
+pub(crate) trait NodeChild<'gc>: Sized {
+    type Out;
+    fn visit_child_mut<V: VisitorMut<'gc>>(
+        self,
+        ctx: &'gc GCLock<'_, '_>,
+        visitor: &mut V,
+        path: Path<'gc>,
+    ) -> TransformResult<Self::Out>;
+    fn duplicate(self) -> Self::Out;
+}
+
+impl<'gc> NodeChild<'gc> for &'gc Node<'gc> {
+    type Out = &'gc Node<'gc>;
+    fn visit_child_mut<V: VisitorMut<'gc>>(
+        self,
+        ctx: &'gc GCLock<'_, '_>,
+        visitor: &mut V,
+        path: Path<'gc>,
+    ) -> TransformResult<Self::Out> {
+        match visitor.call(ctx, self, Some(path)) {
+            // A required child cannot be null: removing it yields an EmptyStatement.
+            TransformResult::Removed => {
+                TransformResult::Changed(empty_statement(ctx, self.range()))
+            }
+            TransformResult::Expanded(_) => {
+                panic!("cannot expand a single required child into multiple nodes")
+            }
+            other => other,
+        }
+    }
+    fn duplicate(self) -> Self::Out {
+        self
+    }
+}
+
+impl<'gc> NodeChild<'gc> for Option<&'gc Node<'gc>> {
+    type Out = Option<&'gc Node<'gc>>;
+    fn visit_child_mut<V: VisitorMut<'gc>>(
+        self,
+        ctx: &'gc GCLock<'_, '_>,
+        visitor: &mut V,
+        path: Path<'gc>,
+    ) -> TransformResult<Self::Out> {
+        use TransformResult::*;
+        match self {
+            None => Unchanged,
+            // Route through visitor.call directly (NOT the &Node impl) so that a
+            // Removed on an optional child becomes None, not an EmptyStatement.
+            Some(inner) => match visitor.call(ctx, inner, Some(path)) {
+                Unchanged => Unchanged,
+                Removed => Changed(None),
+                Changed(new_node) => Changed(Some(new_node)),
+                Expanded(_) => {
+                    panic!("cannot expand a single optional child into multiple nodes")
+                }
+            },
+        }
+    }
+    fn duplicate(self) -> Self::Out {
+        self
+    }
+}
+
+impl<'gc> NodeChild<'gc> for NodeList<'gc> {
+    type Out = NodeList<'gc>;
+    fn visit_child_mut<V: VisitorMut<'gc>>(
+        self,
+        ctx: &'gc GCLock<'_, '_>,
+        visitor: &mut V,
+        path: Path<'gc>,
+    ) -> TransformResult<Self::Out> {
+        use TransformResult::*;
+        let mut index = 0usize;
+        let mut it = self.iter();
+        // Fast path: assume no change until the first element that changes.
+        while let Some(elem) = it.next() {
+            let res = visitor.call(ctx, elem, Some(path));
+            if let Unchanged = res {
+                index += 1;
+                continue;
+            }
+            // First change found: copy the unchanged prefix, then this element,
+            // then the rest, and rebuild the list.
+            let mut result: Vec<&'gc Node<'gc>> = self.iter().take(index).collect();
+            match res {
+                Changed(new_node) => result.push(new_node),
+                Expanded(new_nodes) => result.extend(new_nodes),
+                Removed => {}
+                Unchanged => unreachable!("checked above"),
+            }
+            for elem in it.by_ref() {
+                match visitor.call(ctx, elem, Some(path)) {
+                    Unchanged => result.push(elem),
+                    Changed(new_node) => result.push(new_node),
+                    Expanded(new_nodes) => result.extend(new_nodes),
+                    Removed => {}
+                }
+            }
+            return Changed(NodeList::from_iter(ctx, result));
+        }
+        Unchanged
+    }
+    fn duplicate(self) -> Self::Out {
+        self
+    }
+}
+
+impl<'gc> Node<'gc> {
+    /// Top-level transforming entry point. Returns the (maybe-new) root, or
+    /// `None` if it was removed.
+    pub fn visit_mut<V: VisitorMut<'gc>>(
+        &'gc self,
+        ctx: &'gc GCLock<'_, '_>,
+        visitor: &mut V,
+        path: Option<Path<'gc>>,
+    ) -> Option<&'gc Node<'gc>> {
+        match visitor.call(ctx, self, path) {
+            TransformResult::Unchanged => Some(self),
+            TransformResult::Removed => None,
+            TransformResult::Changed(new_node) => Some(new_node),
+            TransformResult::Expanded(_) => panic!("cannot expand the root node into multiple"),
         }
     }
 }
