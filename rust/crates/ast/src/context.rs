@@ -222,7 +222,7 @@ impl<'ast> Context<'ast> {
     pub(crate) fn alloc<'s>(&'s self, n: Node<'_>) -> &'s Node<'s> {
         let free = unsafe { &mut *self.free_nodes.get() };
         let nodes: &mut Deque<StorageEntry<'ast>> = unsafe { &mut *self.nodes.get() };
-        let node = unsafe { std::mem::transmute(n) };
+        let node = unsafe { std::mem::transmute::<Node<'_>, Node<'_>>(n) };
         let entry: &StorageEntry<'ast> = if let Some(mut entry) = free.pop() {
             let entry: &mut StorageEntry<'ast> = unsafe { entry.as_mut() };
             debug_assert!(
@@ -346,7 +346,9 @@ impl<'ast> Context<'ast> {
                     // Transmuting the lifetime here because we have to store the roots from
                     // across accesses to `nodes`, meaning we must translate
                     // from `'ast` to the lifetime of this scope.
-                    roots.push(unsafe { std::mem::transmute(entry) });
+                    roots.push(unsafe {
+                        std::mem::transmute::<&StorageEntry<'_>, &StorageEntry<'_>>(entry)
+                    });
                 }
             }
 
@@ -455,6 +457,9 @@ impl<'ast> Context<'ast> {
 }
 
 impl HeapSize for Context<'_> {
+    /// Returns the heap size of the AST storages only.
+    /// Atom-table memory is intentionally excluded: the `AtomTable` is
+    /// externally owned and accounted for separately.
     fn heap_size(&self) -> usize {
         let nodes = unsafe { &*self.nodes.get() };
         let free_nodes = unsafe { &*self.free_nodes.get() };
@@ -782,5 +787,54 @@ mod tests {
         let mut b = Context::new();
         let _g1 = GCLock::new(&mut a);
         let _g2 = GCLock::new(&mut b); // must panic
+    }
+
+    #[test]
+    fn from_iter_roundtrip() {
+        let mut ctx = Context::new();
+        let gc = GCLock::new(&mut ctx);
+
+        // Empty list has zero elements.
+        let empty = NodeList::empty();
+        assert_eq!(empty.iter().count(), 0);
+
+        // Build three nodes and collect into a NodeList.
+        let a = num(&gc, 1.0);
+        let b = num(&gc, 2.0);
+        let c = num(&gc, 3.0);
+        let list = NodeList::from_iter(&gc, [a, b, c]);
+        assert_eq!(list.iter().count(), 3);
+
+        // Verify values come back in the original order.
+        let values: Vec<f64> = list
+            .iter()
+            .map(|n| {
+                if let Node::NumericLiteral(nl) = n {
+                    nl.value.get()
+                } else {
+                    panic!("expected NumericLiteral")
+                }
+            })
+            .collect();
+        assert_eq!(values, vec![1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn noderc_roundtrip() {
+        let mut ctx = Context::new();
+        let rc = {
+            // First GCLock scope: allocate a node and wrap it in a NodeRc.
+            let gc = GCLock::new(&mut ctx);
+            let n = num(&gc, 42.0);
+            NodeRc::from_node(&gc, n)
+            // `gc` drops here, releasing the GCLock.
+        };
+
+        // Re-acquire the lock and verify the node is still reachable.
+        let gc2 = GCLock::new(&mut ctx);
+        let node = rc.node(&gc2);
+        assert!(matches!(node, Node::NumericLiteral(nl) if nl.value.get() == 42.0));
+        // Drop rc while the lock is held so the Context doesn't panic on drop.
+        drop(rc);
     }
 }
