@@ -168,10 +168,12 @@ stays the *only* place node shapes are defined — the generator and the `hermes
 The generator:
 - Parses the `ESTREE_NODE_n_ARGS` / `ESTREE_FIRST` / `ESTREE_LAST` / `ESTREE_IGNORE_IF_EMPTY` macros,
   treating all `#if HERMES_PARSE_FLOW/JSX/TS` families as **on** (full-featured `hermesc`).
-- Reads the `Decoration` classes + `DecoratorTrait<…>` specializations from `ESTree.h` to attach each
-  node's decoration fields. (The decoration set changes rarely; the mapping of node→decoration and the
-  decoration field lists may be a small committed table the generator consumes, rather than a full C++
-  parser — the plan pins which.)
+- Attaches each node's decoration fields from a **small committed table** (node→decoration mapping +
+  each decoration's field list), hand-transcribed once from the `Decoration` classes / `DecoratorTrait<…>`
+  specializations in `ESTree.h`. We do **not** parse `ESTree.h` — it is not practical, and the decoration
+  set changes rarely, so a committed table the generator consumes is the right tradeoff. (`ESTree.def`
+  remains machine-parsed and the sole source of truth for node *shapes*; only the decoration overlay is a
+  table.)
 - Emits, per node: the `#[repr(C)]` struct (metadata-first; child fields as `&'gc`/`Option`/`NodeList`,
   value + decoration fields as `Cell<…>`), the `Node<'gc>` enum arm, the `NodeKind`/`NodeVariant`
   entry and the `_FIRST_`/`_LAST_` ranges for `classof`-style `isa`/`dyn_cast`, the `visit_children` /
@@ -216,12 +218,11 @@ The AST cannot be differentially tested on its own — it needs a producer. So:
 - **`getAllocator` has no analog** beyond the `Context`'s arena — consistent with the lexer/JSON ports'
   documented surface gap.
 
-## Open questions (to resolve in the plan, not blockers)
+## Decisions deferred to Sema / Parser (not blockers)
 
-- The exact placeholder representation for the sema id handles (newtype `u32`s vs `NodeRc`-style) —
-  pinned when Sema is scoped; the AST only needs the field present and `Cell`-mutable.
-- Whether the decoration field lists are parsed from `ESTree.h` or fed to the generator as a small
-  committed table.
+- **Sema id handles are a deliberate placeholder.** Their real representation cannot be predicted now
+  and will be pinned when Sema is scoped; the AST only needs the field present and `Cell`-mutable, so
+  we use an opaque placeholder newtype (e.g. `Cell<Option<SemaId>>`) until then.
 - `BlockStatementDecoration`'s lazy-reparse fields (`isLazyFunctionBody`, `paramYield/Await`,
   `bufferId`) — carried as `Cell` fields now; lazy parsing itself is a Parser concern.
 
