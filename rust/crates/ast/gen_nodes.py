@@ -607,6 +607,31 @@ def emit_mark_lists(nodes, out):
     out.append("    }")
 
 
+def emit_node_field(nodes, out):
+    """Emit the NodeField enum: one variant per distinct structural-child field name.
+
+    Structural children are fields with child_kind in {single, opt, list}.
+    Variants are sorted deterministically (so output is stable/idempotent).
+    The rust_field strings are used verbatim as variant names (including any
+    raw-identifier prefix like r#await).
+    """
+    seen = set()
+    for _name, fields in nodes:
+        for fd in fields:
+            if fd["child_kind"] in ("single", "opt", "list"):
+                seen.add(fd["rust_field"])
+    variants = sorted(seen)
+
+    out.append("/// The name of a structural child field of an AST node (used in `Path`).")
+    out.append("#[derive(Debug, Copy, Clone, PartialEq, Eq)]")
+    out.append("#[allow(non_camel_case_types)]")
+    out.append("pub enum NodeField {")
+    for v in variants:
+        out.append(f"    {v},")
+    out.append("}")
+    out.append("")
+
+
 # --------------------------------------------------------------------------
 # -- CLI + validation + driver --
 # --------------------------------------------------------------------------
@@ -651,6 +676,7 @@ def generate():
 
     out = [HEADER]
     emit_node_kind(items, out)
+    emit_node_field(nodes, out)
     for name, fields in nodes:
         emit_struct(name, fields, out)
     emit_node_enum(nodes, out)
