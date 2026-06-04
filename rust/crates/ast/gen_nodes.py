@@ -23,13 +23,13 @@ ROOT = Path(__file__).resolve().parents[3]
 DEF = ROOT / "include/hermes/AST/ESTree.def"
 OUT = Path(__file__).resolve().parent / "src/node.rs"
 
-# Total number of leaf nodes in ESTree.def (anti-drift guard). Set to the value
-# the generator computes on a complete run (locked in Task 2).
+# Total leaf nodes in ESTree.def — anti-drift guard. Update this when a node
+# is intentionally added or removed.
 EXPECTED_NODES = 271
 
 
 # --------------------------------------------------------------------------
-# Step 2: snake_case + Rust-keyword escaping helpers.
+# -- Helpers: snake_case + keyword escaping --
 # --------------------------------------------------------------------------
 RUST_KEYWORDS = {
     "as", "break", "const", "continue", "crate", "dyn", "else", "enum",
@@ -56,7 +56,7 @@ def rust_field(json_name):  # snake_case, then raw-escape reserved words
 
 
 # --------------------------------------------------------------------------
-# Step 1: .def tokenizer/parser.
+# -- .def tokenizer/parser --
 # --------------------------------------------------------------------------
 def strip_comments(src):
     # Strip /* */ block comments and // line comments. The .def has no string
@@ -82,7 +82,8 @@ def parse_def(src):
     # branches inside an ESTREE_ region. Assert that, then drop every
     # preprocessor line (the `#define ESTREE_FIRST(NAME, BASE)` stubs would
     # otherwise tokenize as bogus macro calls).
-    assert "#else" not in src, "unexpected #else inside ESTree.def"
+    if "#else" in src:
+        sys.exit("error: unexpected #else inside ESTree.def")
     src = "\n".join(
         line for line in src.splitlines() if not line.lstrip().startswith("#")
     )
@@ -111,7 +112,8 @@ def parse_def(src):
                 if depth == 0:
                     break
             j += 1
-        assert depth == 0, f"unbalanced parens for {macro}"
+        if depth != 0:
+            sys.exit(f"error: unbalanced parens for {macro}")
         arg_str = src[start_args:j]
         args = [a.strip() for a in arg_str.split(",")]
         args = [a for a in args if a != ""]
@@ -125,22 +127,26 @@ def parse_def(src):
             ignore_if_empty.setdefault(args[0], []).append(args[1])
         else:
             mn = re.match(r"NODE_(\d+)_ARGS$", m.group(1))
-            assert mn, f"unrecognized macro {macro}"
+            if not mn:
+                sys.exit(f"error: unrecognized macro {macro}")
             count = int(mn.group(1))
             name = args[0]
             base = args[1]
             rest = args[2:]
-            assert len(rest) == count * 3, (
-                f"{name}: expected {count*3} field tokens, got {len(rest)}"
-            )
+            if len(rest) != count * 3:
+                sys.exit(
+                    f"error: {name}: expected {count*3} field tokens, "
+                    f"got {len(rest)}"
+                )
             fields = []
             for k in range(count):
                 ftype = rest[k * 3]
                 fname = rest[k * 3 + 1]
                 fopt = rest[k * 3 + 2]
-                assert fopt in ("true", "false"), (
-                    f"{name}.{fname}: bad optional flag {fopt!r}"
-                )
+                if fopt not in ("true", "false"):
+                    sys.exit(
+                        f"error: {name}.{fname}: bad optional flag {fopt!r}"
+                    )
                 fields.append((ftype, fname, fopt == "true"))
             items.append(("node", name, base, fields))
 
@@ -180,17 +186,19 @@ def def_field_descriptor(ftype, fname, opt):
         "NodeString": "NodeString",
     }
     inner = value_map.get(ftype)
-    assert inner is not None, f"unknown .def field type {ftype!r}"
+    if inner is None:
+        sys.exit(f"error: unknown .def field type {ftype!r}")
     return dict(json_name=fname, rust_field=rf,
                 rust_type=f"Cell<{inner}>", child_kind="none",
                 new_arg_type=inner, cell=True, default_expr=None)
 
 
 # --------------------------------------------------------------------------
-# Step 3: Decoration tables B/C/D + composition.
+# -- Decoration tables (B/C/D) and field composition --
 # --------------------------------------------------------------------------
-# Reference B: decoration classes. Each own-field is (source_name, rust_type,
-# default_expr). The emitted field name is rust_field(source_name).
+# Reference B: decoration classes, hand-transcribed from ESTree.h:264-501.
+# Each own-field is (source_name, rust_type, default_expr). The emitted
+# field name is rust_field(source_name).
 DECORATIONS = {
     "ScopeDecorationBase": (
         [],
@@ -271,7 +279,11 @@ DECORATIONS = {
     "EmptyDecoration": ([], []),
 }
 
-# Reference D: leaf DecoratorTrait map (only leaves with a non-Empty trait).
+# Reference C: every ESTREE_FIRST range NAME implicitly carries NAMEDecoration
+# (applied in compose_fields). The validation below enforces this at generation time.
+
+# Reference D: leaf DecoratorTrait map, hand-transcribed from ESTree.h:530-581.
+# (only leaves with a non-Empty trait)
 LEAF_DECORATOR = {
     "BlockStatement": "BlockStatementDecoration",
     "StaticBlock": "StaticBlockDecoration",
@@ -308,7 +320,8 @@ def flatten_decoration(name, seen=None):
     """
     if seen is None:
         seen = set()
-    assert name in DECORATIONS, f"unknown decoration {name!r}"
+    if name not in DECORATIONS:
+        sys.exit(f"error: unknown decoration {name!r}")
     bases, own = DECORATIONS[name]
     out = []
 
@@ -346,7 +359,8 @@ def range_chain(base, range_parents):
     cur = base
     while cur != "Base":
         chain.append(cur)
-        assert cur in range_parents, f"range {cur!r} has no ESTREE_FIRST"
+        if cur not in range_parents:
+            sys.exit(f"error: range {cur!r} has no ESTREE_FIRST")
         cur = range_parents[cur]
     chain.reverse()  # outermost-first
     return chain
@@ -372,10 +386,15 @@ def compose_fields(node_name, base, def_fields, range_parents):
         add(def_field_descriptor(ftype, fname, opt))
 
     # 3+4. range-chain decorations (outermost-first), flattened base-first.
+    # `decos_seen` dedups across decoration classes only (a field introduced by
+    # an inner decoration class is not repeated by an outer one).  The outer
+    # `seen`/`add()` additionally dedups decoration fields against .def fields
+    # (first occurrence wins); no .def/decoration name collision exists today.
     decos_seen = set()
     for rng in range_chain(base, range_parents):
         deco = rng + "Decoration"
-        assert deco in DECORATIONS, f"missing decoration for range {rng!r}"
+        if deco not in DECORATIONS:
+            sys.exit(f"error: missing decoration for range {rng!r}")
         for fd in flatten_decoration(deco, decos_seen):
             add(fd)
 
@@ -388,7 +407,7 @@ def compose_fields(node_name, base, def_fields, range_parents):
 
 
 # --------------------------------------------------------------------------
-# Emitters.
+# -- Emitters --
 # --------------------------------------------------------------------------
 HEADER = """\
 /*
@@ -433,7 +452,7 @@ def emit_struct(node_name, fields, out):
     for fd in fields:
         out.append(f"    pub {fd['rust_field']}: {fd['rust_type']},")
     out.append("}")
-    # new constructor.
+    # new constructor — signature args one-per-line, struct-init fields one-per-line.
     new_args = ["metadata: NodeMetadata<'gc>"]
     for fd in fields:
         if fd["rust_field"] == "metadata":
@@ -442,22 +461,23 @@ def emit_struct(node_name, fields, out):
             continue  # decoration field: defaulted
         new_args.append(f"{fd['rust_field']}: {fd['new_arg_type']}")
     out.append(f"impl<'gc> {node_name}<'gc> {{")
-    out.append(f"    pub fn new({', '.join(new_args)}) -> Self {{")
+    out.append("    pub fn new(")
+    for arg in new_args:
+        out.append(f"        {arg},")
+    out.append("    ) -> Self {")
     out.append(f"        {node_name} {{")
-    # Build the field-init list.
-    inits = []
+    # Build the field-init list, one field per line.
     for fd in fields:
         rf = fd["rust_field"]
         if rf == "metadata":
-            inits.append("metadata")
+            out.append("            metadata,")
         elif fd["new_arg_type"] is None:
             # decoration field: default.
-            inits.append(f"{rf}: {fd['default_expr']}")
+            out.append(f"            {rf}: {fd['default_expr']},")
         elif fd["cell"]:
-            inits.append(f"{rf}: Cell::new({rf})")
+            out.append(f"            {rf}: Cell::new({rf}),")
         else:
-            inits.append(rf)
-    out.append("            " + ", ".join(inits) + ",")
+            out.append(f"            {rf},")
     out.append("        }")
     out.append("    }")
     out.append("}")
@@ -588,13 +608,13 @@ def emit_mark_lists(nodes, out):
 
 
 # --------------------------------------------------------------------------
-# Step 8: CLI + validation + driver.
+# -- CLI + validation + driver --
 # --------------------------------------------------------------------------
 def generate():
     if not DEF.exists():
         sys.exit(f"error: {DEF} not found — run from a full hermes checkout")
     src = DEF.read_text()
-    items, ignore_if_empty = parse_def(src)
+    items, _ignore_if_empty = parse_def(src)  # ignore_if_empty: used in phase 4 (ESTree JSON dumper)
     range_parents = build_range_parents(items)
 
     # Build the composed node list (name, fields), in .def order.
@@ -614,7 +634,9 @@ def generate():
             f"{EXPECTED_NODES} (update EXPECTED_NODES if intentional)"
         )
 
-    # Validate: every range has a decoration; every leaf resolved a decoration.
+    # Validate: every range has a decoration; every leaf resolved a decoration;
+    # every LEAF_DECORATOR key names a real node (catches silent node renames).
+    node_names = {name for name, _ in nodes}
     for rng in range_parents:
         deco = rng + "Decoration"
         if deco not in DECORATIONS:
@@ -623,6 +645,9 @@ def generate():
         leaf_deco = LEAF_DECORATOR.get(name, "EmptyDecoration")
         if leaf_deco not in DECORATIONS:
             sys.exit(f"error: leaf {name!r} -> unknown decoration {leaf_deco}")
+    for leaf in LEAF_DECORATOR:
+        if leaf not in node_names:
+            sys.exit(f"error: LEAF_DECORATOR key {leaf!r} is not a node in ESTree.def")
 
     out = [HEADER]
     emit_node_kind(items, out)
