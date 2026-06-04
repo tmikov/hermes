@@ -205,10 +205,13 @@ Commit directly to `rust`; **never** open a PR or merge (project rule).
   `JSParserImpl.h`, `include/hermes/Parser/JSParser.h`) — consumes the lexer + AST + `Context`. Large;
   juno has an AST + parser to crib from (`unsupported/juno/crates/juno_ast/`, `juno/src/hparser/`). The
   byte-for-byte `-dump-ast` differential vs `hermesc` is the Parser's validation gate.
-- **No open items** on the lexer, the JSONParser, or **AST phases 1–2**: two-stage reviewed per task +
-  a whole-component capstone review (zero issues — it re-derived the 271-node count, `NodeKind` ordering,
-  and decoration composition independently, and verified all 91 `NodeList` fields are traced in BOTH
-  `visit_children` and `mark_lists`). Phase 2 deliberate scope: `node.rs` fully generated; snake_case fields
-  with camelCase names retained for the dumper; `new` ≠ Builder; `visit_children_mut` deferred to phase 3;
-  `IGNORE_IF_EMPTY` parsed but emitted in phase 4. The lexer's `--non-strict` follow-up is DONE; the
-  JSONParser's sole deviations are the fat-enum layout + `getAllocator`/`getStringTable` → `arena()`/`atoms()`.
+- **No open items** on the lexer, the JSONParser, or **AST phases 1–3**: each two-stage reviewed per task +
+  a whole-component capstone review (phase 2 zero issues — re-derived the 271-node count, `NodeKind` ordering,
+  and decoration composition, verified all `NodeList` fields traced in BOTH `visit_children`/`mark_lists`; phase 3
+  zero issues — verified the `NodeChild` Removed/Expanded semantics, the list-rebuild off-by-one, the `Cell`-vs-ref
+  `from_node` copying, and that decoration `Cell<NodeList>`s are never threaded/no setter). Phase 2 deliberate scope:
+  `node.rs` fully generated; snake_case fields with camelCase names retained for the dumper; `new` ≠ Builder;
+  `IGNORE_IF_EMPTY` parsed but emitted in phase 4. Phase 3 deliberate scope: read `Visitor` unchanged (parent/`Path`
+  read traversal deferred to Sema); optional-child Removed→`None` (a correctness improvement over juno's delegation).
+  The lexer's `--non-strict` follow-up is DONE; the JSONParser's sole deviations are the fat-enum layout +
+  `getAllocator`/`getStringTable` → `arena()`/`atoms()`.
