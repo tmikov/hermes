@@ -38,7 +38,7 @@ The front-end stratifies (see the dependency analysis below). We port bottom-up.
 | **SourceErrorManager** (+ buffer, locations, line index, diagnostics) | `rust/crates/support/` | ✅ **Complete** — entire public surface; **byte-for-byte validated vs `hermesc` 1.96.0** |
 | **JS lexer** | `rust/crates/{atom_table,unicode,parser}/` | ✅ **Complete** — entire `JSLexer` public surface; self-validating byte-for-byte vs `js-lexer-dump` (5 differentials); see deps below |
 | **JSONParser** (+ `JSONEmitter`, value model, factory, `JSONSharedValue`) | `rust/crates/{parser,support}/` | ✅ **Complete** — first `JSLexer` consumer; entire public surface; self-validating byte-for-byte vs `json-parse-dump` (16-file corpus) + 5 ported `JSONParserTest` + 13 ported `JSONEmitterTest`; **benchmarked within ~1.5% of C++ Release** |
-| **AST** (ESTree nodes + GC arena) | `rust/crates/ast/` (+ `support`) | 🚧 **In progress — phase 1 (storage/GC spine) complete.** juno GC arena copied+adapted; immutable children + `Cell` attributes; minimal 4-kind node model proving deep `match` / rebuild / GC reclamation / decoration-list tracing (mutation-verified). Phases 2–4 next: node-set codegen from `ESTree.def`, builders, `ESTreeJSONDumper`. Spec: `specs/2026-06-03-ast-design.md` |
+| **AST** (ESTree nodes + GC arena) | `rust/crates/ast/` (+ `support`) | 🚧 **In progress — phases 1–2 complete.** Phase 1: juno GC arena copied+adapted; immutable children + `Cell` attributes. Phase 2: **full node set (271 nodes) generated from `ESTree.def`** by committed `gen_nodes.py` (+ hand-transcribed decoration table) → `src/node.rs`; `NodeKind` with `_FIRST_`/`_LAST_` ranges + `is_*`/`as_*` accessors; generated `visit_children`/`mark_lists` (both decoration lists, mutation-verified); minimal `new` constructors; byte-for-byte idempotency guard. Phases 3–4 next: builders + `VisitorMut`/rebuild, `ESTreeJSONDumper`. Spec: `specs/2026-06-03-ast-design.md`; plan: `plans/2026-06-04-ast-2-node-codegen.md` |
 | Parser | — | future (consumes the AST) |
 | Sema (scope resolution + FlowChecker) | — | future |
 | IR / IRGen | — | future |
@@ -242,10 +242,11 @@ is ~12× slower and is not a fair speed baseline.)
 
 > **Next component: the Parser** (`lib/Parser/JSParserImpl*`) — needs the AST + `Context`, now under way.
 
-### 🚧 AST — phase 1 (storage/GC spine) COMPLETE
+### 🚧 AST — phases 1–2 COMPLETE (storage/GC spine + generated node set)
 
-The `ast` crate (`rust/crates/ast/`) is up, with the storage spine ported and proven. Design spec:
-`specs/2026-06-03-ast-design.md`; per-phase plan: `plans/2026-06-04-ast-1-storage-and-spine.md`.
+The `ast` crate (`rust/crates/ast/`) has the storage spine **and the full generated node set**. Design spec:
+`specs/2026-06-03-ast-design.md`; per-phase plans: `plans/2026-06-04-ast-1-storage-and-spine.md` (phase 1),
+`plans/2026-06-04-ast-2-node-codegen.md` (phase 2).
 
 **Model (locked):** copy **juno's GC arena** (`Context`/`GCLock`/`NodeRc` + mark-sweep), `#[repr(C)]`
 enum `Node<'gc>` for deep `match`. **Child fields are immutable** (`&'gc Node`, `Option`, `NodeList`) and
@@ -265,9 +266,33 @@ juno's `GCLock` re-entrancy); a minimal hand-written 4-kind node model (`Numeric
 deque test rewritten `unsafe`-free to keep `support`'s `forbid`). The decoration-tracing test was **mutation-verified**
 (disabling the marker's decoration walk makes it fail). Two-stage reviewed per task; whole workspace green, zero warnings.
 
-**Phases 2–4 next:** (2) a committed generator parsing `ESTree.def` (+ a small committed decoration table) → the full
-~200-node set, replacing the hand-written model; (3) builders + `RecursiveVisitor`/`VisitorMut` over the full set; (4)
-`ESTreeJSONDumper` port + golden tests. The byte-for-byte `-dump-ast` differential vs `hermesc` lands as the Parser's gate.
+**Phase 2 delivered:** a committed Python generator (`rust/crates/ast/gen_nodes.py`) parses
+`include/hermes/AST/ESTree.def` (all FLOW/JSX/TS/Cover families ON) plus a hand-transcribed decoration table
+(from `ESTree.h`'s `Decoration` classes + `DecoratorTrait` map) and emits the committed, `// @generated`
+`src/node.rs` — the full **271-node** set (282 `ESTREE_NODE_*_ARGS` tokens − 11 `#undef` lines), replacing the
+hand-written 4-kind model. Per node: the `#[repr(C)]` struct (metadata-first; child fields `&'gc`/`Option`/`NodeList`,
+value + decoration fields `Cell<…>`), the `Node<'gc>` enum arm, the `NodeKind` entry, a minimal `new` constructor
+(defaults decorations), and the `visit_children`/`mark_lists` arms. `NodeKind` mirrors the C++ enum exactly
+(`#[repr(u32)]`, `.def` order, interleaved `_NAME_First`/`_NAME_Last` sentinels) so base-range `isa` is the same
+`_First < kind < _Last` check; generated `is_<range>()` predicates (12 ranges) + `as_<leaf>()` accessors give the
+`dyn_cast` surface. **Fields are idiomatic snake_case** (acronym-aware: `is_jsx`/`as_sh_builtin`), Rust-keyword fields
+`r#`-escaped (`r#await`/`r#async`); the original camelCase `.def` name is retained by the generator to bake as the
+literal JSON key when the phase-4 dumper is generated (so JSON stays byte-identical with no `non_snake_case` allow).
+The two decoration `NodeList`s (`decorations` on all 6 FunctionLike nodes, `dummy_param_list` on Program) are
+`Cell<NodeList>` and traced in **both** `visit_children` and `mark_lists`. **Validation (no differential until parser
+time):** anti-drift count guard (`EXPECTED_NODES = 271`) + every-leaf-resolves-a-decoration / every-range-has-a-decoration
+asserts; a **byte-for-byte regenerate-and-diff idempotency test** (`tests/generated_idempotent.rs`, `REQUIRE_GEN=1`);
+structural tests (`tests/node_model.rs` — range predicates, deep match, `visit_children` counts); and a
+**mutation-verified base-range decoration-tracing test** (`gc_traces_decorations_on_function_declaration` — proves the
+marker traces `decorations` where it attaches via the FunctionLike base range, not just on Program; disabling the
+generator's `declist` emission makes it fail). Two-stage reviewed; whole workspace green (229 tests), zero warnings.
+**Deliberate scope notes:** `node.rs` fully generated; snake_case fields with camelCase names retained for the dumper;
+the `new` constructors are plain field-init (NOT the phase-3 Builder); `visit_children_mut`/functional-rebuild is
+phase 3 (it needs the Builder to allocate); `ESTREE_IGNORE_IF_EMPTY` is parsed but emitted in phase 4.
+
+**Phases 3–4 next:** (3) generated builders + `RecursiveVisitor`/`VisitorMut` (functional rebuild) over the full set; (4)
+`ESTreeJSONDumper` port (baking the retained camelCase JSON keys + honoring `IGNORE_IF_EMPTY`) + golden tests. The
+byte-for-byte `-dump-ast` differential vs `hermesc` lands as the Parser's gate.
 
 ## Key cross-cutting design decisions
 
