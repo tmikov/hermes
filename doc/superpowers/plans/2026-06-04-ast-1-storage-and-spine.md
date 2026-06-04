@@ -18,6 +18,26 @@
 
 **Porting rule:** keep structure close to juno/Hermes, copy comments. **Do NOT `cd`** out of the project root; use `--manifest-path`.
 
+## Confirmed crate APIs (resolved — use these exact names)
+
+- **Locations** are **not** re-exported at the crate root: use `support::location::{SMRange, SMLoc, SourceId}`.
+  There is **no `invalid()`**. `SMLoc { source: SourceId, offset: u32 }`, `SMRange { start: SMLoc, end: SMLoc }`,
+  both `Copy`. `SourceId::from_index(0)` builds a valid id. Tests build a dummy range with a shared helper:
+  ```rust
+  fn dummy_range() -> support::location::SMRange {
+      let l = support::location::SMLoc { source: support::location::SourceId::from_index(0), offset: 0 };
+      support::location::SMRange { start: l, end: l }
+  }
+  ```
+- **Atoms:** `atom_table::AtomTable::atom_bytes(value: impl Into<Vec<u8>> + AsRef<[u8]>) -> AtomBytes`
+  and `.bytes(AtomBytes) -> &[u8]`. `AtomBytes` is `Copy` (so `Cell<NodeLabel>` is valid). Call with a
+  byte slice: `atom_bytes("+".as_bytes())`. The `Context`/`GCLock` exposes an `atom_bytes(&self, &[u8]) -> AtomBytes`
+  passthrough (Task 3).
+- **`core::mem::offset_of!`** is available on toolchain 1.96 — no `memoffset`/`libc` deps.
+
+> Wherever the task code below shows `support::SMRange::invalid()` / `support::SMRange` / `gc.atom_bytes(b"+")`,
+> use `dummy_range()` / `support::location::SMRange` / `gc.atom_bytes("+".as_bytes())` respectively.
+
 ---
 
 ## Phase roadmap (for context; only Phase 1 is in this plan)
@@ -130,7 +150,7 @@ The 4 kinds are chosen to cover every field category: a scalar leaf (`NumericLit
 //! Child/leaf field types and the NodeList for the AST.
 use std::cell::Cell;
 use std::marker::PhantomData;
-use support::SMRange;
+use support::location::SMRange;
 use crate::context::NodeListElement;
 use crate::node::Node;
 
@@ -266,7 +286,7 @@ impl<'gc> Node<'gc> {
         }
     }
 
-    pub fn range(&self) -> support::SMRange {
+    pub fn range(&self) -> support::location::SMRange {
         self.metadata().range.get()
     }
 
