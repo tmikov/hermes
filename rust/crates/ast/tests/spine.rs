@@ -12,7 +12,6 @@
 use ast::context::{Context, GCLock, NodeRc};
 use ast::node::{BinaryExpression, Identifier, Node, NumericLiteral, Program};
 use ast::node_child::{NodeList, NodeMetadata};
-use ast::SemaId;
 use std::cell::Cell;
 
 /// Build a dummy source range (no `SMRange::invalid()` on this API).
@@ -26,10 +25,10 @@ fn dummy_range() -> support::location::SMRange {
 
 /// Allocate a `NumericLiteral` node with the given value.
 fn num<'gc>(gc: &'gc GCLock, v: f64) -> &'gc Node<'gc> {
-    gc.alloc(Node::NumericLiteral(NumericLiteral {
-        metadata: NodeMetadata::new(dummy_range()),
-        value: Cell::new(v),
-    }))
+    gc.alloc(Node::NumericLiteral(NumericLiteral::new(
+        NodeMetadata::new(dummy_range()),
+        v,
+    )))
 }
 
 /// Functional transform: double every `NumericLiteral`, rebuilding ancestor
@@ -59,11 +58,12 @@ fn double<'gc>(gc: &'gc GCLock, n: &'gc Node<'gc>) -> &'gc Node<'gc> {
 
 /// Allocate an `Identifier` node with the given name.
 fn ident<'gc>(gc: &'gc GCLock, name: &str) -> &'gc Node<'gc> {
-    gc.alloc(Node::Identifier(Identifier {
-        metadata: NodeMetadata::new(dummy_range()),
-        name: Cell::new(gc.atom_bytes(name.as_bytes())),
-        decl: Cell::new(None::<SemaId>),
-    }))
+    gc.alloc(Node::Identifier(Identifier::new(
+        NodeMetadata::new(dummy_range()),
+        gc.atom_bytes(name.as_bytes()),
+        None,
+        false,
+    )))
 }
 
 /// Prove that `double` returns pointer-identical nodes for subtrees that
@@ -194,11 +194,11 @@ fn gc_traces_decoration_lists() {
         // The decorated node is reachable only via `decorations`, not via `body`.
         let dec = num(&gc, 42.0);
         let list = NodeList::from_iter(&gc, [dec]);
-        let prog = gc.alloc(Node::Program(Program {
-            metadata: NodeMetadata::new(dummy_range()),
-            body: NodeList::empty(),
-            decorations: Cell::new(list),
-        }));
+        // Build the Program with the generated constructor (defaults decorations to
+        // empty), then set the decoration list before rooting.
+        let prog_node = Program::new(NodeMetadata::new(dummy_range()), NodeList::empty());
+        prog_node.decorations.set(list);
+        let prog = gc.alloc(Node::Program(prog_node));
 
         keep = NodeRc::from_node(&gc, prog);
         // GCLock drops here.
