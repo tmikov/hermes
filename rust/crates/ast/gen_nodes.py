@@ -42,14 +42,12 @@ RUST_KEYWORDS = {
 
 
 def camel_to_snake(name):
-    # lowerCamelCase -> snake_case (field names only; node/type names stay
-    # PascalCase).
-    out = []
-    for i, ch in enumerate(name):
-        if ch.isupper() and i > 0:
-            out.append("_")
-        out.append(ch.lower())
-    return "".join(out)
+    # CamelCase/lowerCamelCase -> snake_case, acronym-aware so JSX/TS/SH runs stay
+    # together: JSXElement->jsx_element, TSTypeAliasDeclaration->ts_type_alias_declaration,
+    # SHBuiltin->sh_builtin, typeAnnotation->type_annotation.
+    s = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", name)   # split before Capitalized words
+    s = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s)      # split lower/digit -> Upper
+    return s.lower()
 
 
 def rust_field(json_name):  # snake_case, then raw-escape reserved words
