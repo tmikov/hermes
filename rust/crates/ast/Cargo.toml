@@ -1,0 +1,11 @@
+[package]
+name = "ast"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+support = { path = "../support" }
+atom_table = { path = "../atom_table" }
+
+[lints.rust]
+unsafe_code = "deny"
