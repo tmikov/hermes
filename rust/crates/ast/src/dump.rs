@@ -193,7 +193,13 @@ impl<'a, 'w> ESTreeJSONDumper<'a, 'w> {
             return;
         }
         let buf = sm.find_buffer_for_loc(r.start);
-        let bytes = &buf.bytes()[r.start.offset as usize..r.end.offset as usize];
+        // Skip `raw` rather than panic if the range is out of the buffer's
+        // bounds (only reachable with synthetic/malformed ranges; parser output
+        // is always in-buffer).
+        let bytes = match buf.bytes().get(r.start.offset as usize..r.end.offset as usize) {
+            Some(b) => b,
+            None => return,
+        };
         self.json.emit_key("raw");
         // Numeric-literal source text is ASCII; route through the WTF-8 codec
         // for uniformity with C++ primitiveEmitString.
@@ -216,6 +222,16 @@ impl<'a, 'w> ESTreeJSONDumper<'a, 'w> {
         };
         let r = node.range();
         if !range_is_valid(r) {
+            return;
+        }
+        // Mirror C++ `printSourceLocation`: if either endpoint fails to resolve
+        // (`findBufferLineAndLoc` returns false), skip the whole loc+range block.
+        // Our offset model can't fail to resolve an in-buffer offset, so the
+        // analog is an offset past the buffer's content length. Both endpoints
+        // share a buffer (guaranteed by `range_is_valid`).
+        let buf = sm.find_buffer_for_loc(r.start);
+        let buf_len = buf.bytes().len();
+        if r.start.offset as usize > buf_len || r.end.offset as usize > buf_len {
             return;
         }
         let start = sm.find_coords(r.start);

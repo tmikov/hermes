@@ -271,3 +271,32 @@ fn raw_excluded_and_no_sm() {
         "{\"type\":\"NumericLiteral\",\"value\":1.5}\n"
     );
 }
+
+/// A node whose range runs past the end of its buffer: mirror C++
+/// `printSourceLocation` skipping the whole loc+range block when an endpoint
+/// fails to resolve, and skip `raw` rather than panic on the out-of-bounds
+/// slice. Buffer "1.5" is 3 bytes; the range [0,10) is out of bounds.
+#[test]
+fn out_of_range_skips_loc_range_and_raw() {
+    let mut sm = SourceErrorManager::new();
+    let id = sm.add_buffer("test.js", "1.5");
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let num = gc.alloc(Node::NumericLiteral(NumericLiteral::new(
+        NodeMetadata::new(rng_id(id, 0, 10)),
+        1.5,
+    )));
+    let mut out = String::new();
+    dump_estree_json_with_sm(
+        &mut out,
+        num,
+        false,
+        ESTreeDumpMode::Compact,
+        &sm,
+        LocationDumpMode::LocAndRange,
+        ESTreeRawProp::Include,
+        gc.ctx().atom_table(),
+    );
+    // No "raw", no "loc", no "range" — only the in-bounds fields.
+    assert_eq!(out, "{\"type\":\"NumericLiteral\",\"value\":1.5}\n");
+}
