@@ -1,3 +1,10 @@
+/*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
 //! Golden tests for ESTreeJSONDumper (ast phase 4). Trees are hand-built in a
 //! Context/GCLock; output is asserted byte-for-byte.
 use ast::context::{Context, GCLock};
@@ -21,6 +28,20 @@ fn rng(a: u32, b: u32) -> SMRange {
         },
         end: SMLoc {
             source: src,
+            offset: b,
+        },
+    }
+}
+
+/// Build an `SMRange` over `[a, b)` in the given source buffer `id`.
+fn rng_id(id: SourceId, a: u32, b: u32) -> SMRange {
+    SMRange {
+        start: SMLoc {
+            source: id,
+            offset: a,
+        },
+        end: SMLoc {
+            source: id,
             offset: b,
         },
     }
@@ -63,10 +84,6 @@ fn identifier_modes() {
         /*optional=*/ false,
     )));
 
-    println!("identifier compact:  {}", dump(&gc, id, ESTreeDumpMode::Compact));
-    println!("identifier hide:     {}", dump(&gc, id, ESTreeDumpMode::HideEmpty));
-    println!("identifier dumpall:  {}", dump(&gc, id, ESTreeDumpMode::DumpAll));
-
     // Compact: empty typeAnnotation (null) and optional (false) both hidden.
     assert_eq!(
         dump(&gc, id, ESTreeDumpMode::Compact),
@@ -94,9 +111,6 @@ fn program_empty_body_modes() {
         NodeMetadata::new(rng(0, 0)),
         NodeList::empty(),
     )));
-
-    println!("program compact: {}", dump(&gc, prog, ESTreeDumpMode::Compact));
-    println!("program hide:    {}", dump(&gc, prog, ESTreeDumpMode::HideEmpty));
 
     // Compact hides the empty list; HideEmpty keeps it (body not IGNORE_IF_EMPTY).
     assert_eq!(
@@ -134,8 +148,6 @@ fn program_nested_children() {
     let gc = ctx.lock();
     let prog = build_nested_program(&gc);
 
-    println!("nested compact: {}", dump(&gc, prog, ESTreeDumpMode::Compact));
-
     // Program.body -> [ExpressionStatement{expression: NumericLiteral{value:1},
     //   directive: null}]. NumericLiteral is the leaf; directive is null because
     // the INVALID sentinel resolves to JSON null in dump_label.
@@ -162,7 +174,6 @@ fn program_nested_pretty() {
         ESTreeDumpMode::Compact,
         gc.ctx().atom_table(),
     );
-    println!("nested pretty:\n{}", out);
 
     assert_eq!(
         out,
@@ -184,8 +195,6 @@ fn wtf8_string_value() {
         s,
     )));
 
-    println!("wtf8: {}", dump(&gc, lit, ESTreeDumpMode::Compact));
-
     // a -> a; U+1F44B -> 👋 (surrogate pair); lone surrogate -> \ud800.
     assert_eq!(
         dump(&gc, lit, ESTreeDumpMode::Compact),
@@ -202,18 +211,8 @@ fn numeric_literal_loc_range_raw() {
     let mut ctx = Context::new();
     let gc = ctx.lock();
     // Range over offsets [0,3) in buffer `id`.
-    let r = SMRange {
-        start: SMLoc {
-            source: id,
-            offset: 0,
-        },
-        end: SMLoc {
-            source: id,
-            offset: 3,
-        },
-    };
     let num = gc.alloc(Node::NumericLiteral(NumericLiteral::new(
-        NodeMetadata::new(r),
+        NodeMetadata::new(rng_id(id, 0, 3)),
         1.5,
     )));
     let mut out = String::new();
@@ -227,10 +226,10 @@ fn numeric_literal_loc_range_raw() {
         ESTreeRawProp::Include,
         gc.ctx().atom_table(),
     );
-    println!("loc/range/raw: {}", out);
 
     // Emission order: type -> children(value) -> raw -> loc -> range.
-    // Column is 1-based: "1.5" at [0,3) -> start line 1 col 1, end line 1 col 4.
+    // Column is 1-based: "1.5" at [0,3) -> start line 1 col 1,
+    // end line 1 col 4 (find_coords is called on the exclusive end offset 3).
     assert_eq!(
         out,
         "{\"type\":\"NumericLiteral\",\"value\":1.5,\"raw\":\"1.5\",\
@@ -247,18 +246,8 @@ fn raw_excluded_and_no_sm() {
     let id = sm.add_buffer("test.js", "1.5");
     let mut ctx = Context::new();
     let gc = ctx.lock();
-    let r = SMRange {
-        start: SMLoc {
-            source: id,
-            offset: 0,
-        },
-        end: SMLoc {
-            source: id,
-            offset: 3,
-        },
-    };
     let num = gc.alloc(Node::NumericLiteral(NumericLiteral::new(
-        NodeMetadata::new(r),
+        NodeMetadata::new(rng_id(id, 0, 3)),
         1.5,
     )));
 
@@ -274,11 +263,9 @@ fn raw_excluded_and_no_sm() {
         ESTreeRawProp::Exclude,
         gc.ctx().atom_table(),
     );
-    println!("raw exclude (with sm): {}", out);
     assert_eq!(out, "{\"type\":\"NumericLiteral\",\"value\":1.5}\n");
 
     // No-sm overload: "raw" omitted because the buffer is unavailable.
-    println!("no-sm: {}", dump(&gc, num, ESTreeDumpMode::Compact));
     assert_eq!(
         dump(&gc, num, ESTreeDumpMode::Compact),
         "{\"type\":\"NumericLiteral\",\"value\":1.5}\n"
