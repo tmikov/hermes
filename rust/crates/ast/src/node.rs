@@ -17,7 +17,7 @@ use crate::visitor::{Path, TransformResult, Visitor, VisitorMut};
 use crate::SemaId;
 
 #[repr(u32)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NodeKind {
     Empty,
     Metadata,
@@ -11904,6 +11904,1372 @@ impl<'gc> Node<'gc> {
             Node::TSIndexSignature(n) => { cb(&n.parameters); }
             Node::TSCallSignatureDeclaration(n) => { cb(&n.params); }
             _ => {}
+        }
+    }
+
+    /// The ESTree node type name — the JSON `"type"` value.
+    pub fn node_type_str(&self) -> &'static str {
+        match self {
+            Node::Empty(_) => "Empty",
+            Node::Metadata(_) => "Metadata",
+            Node::Program(_) => "Program",
+            Node::FunctionExpression(_) => "FunctionExpression",
+            Node::ArrowFunctionExpression(_) => "ArrowFunctionExpression",
+            Node::FunctionDeclaration(_) => "FunctionDeclaration",
+            Node::ComponentDeclaration(_) => "ComponentDeclaration",
+            Node::HookDeclaration(_) => "HookDeclaration",
+            Node::MatchStatement(_) => "MatchStatement",
+            Node::WhileStatement(_) => "WhileStatement",
+            Node::DoWhileStatement(_) => "DoWhileStatement",
+            Node::ForInStatement(_) => "ForInStatement",
+            Node::ForOfStatement(_) => "ForOfStatement",
+            Node::ForStatement(_) => "ForStatement",
+            Node::DebuggerStatement(_) => "DebuggerStatement",
+            Node::EmptyStatement(_) => "EmptyStatement",
+            Node::BlockStatement(_) => "BlockStatement",
+            Node::StaticBlock(_) => "StaticBlock",
+            Node::BreakStatement(_) => "BreakStatement",
+            Node::ContinueStatement(_) => "ContinueStatement",
+            Node::ThrowStatement(_) => "ThrowStatement",
+            Node::ReturnStatement(_) => "ReturnStatement",
+            Node::WithStatement(_) => "WithStatement",
+            Node::SwitchStatement(_) => "SwitchStatement",
+            Node::LabeledStatement(_) => "LabeledStatement",
+            Node::ExpressionStatement(_) => "ExpressionStatement",
+            Node::TryStatement(_) => "TryStatement",
+            Node::IfStatement(_) => "IfStatement",
+            Node::NullLiteral(_) => "NullLiteral",
+            Node::BooleanLiteral(_) => "BooleanLiteral",
+            Node::StringLiteral(_) => "StringLiteral",
+            Node::NumericLiteral(_) => "NumericLiteral",
+            Node::RegExpLiteral(_) => "RegExpLiteral",
+            Node::BigIntLiteral(_) => "BigIntLiteral",
+            Node::ThisExpression(_) => "ThisExpression",
+            Node::Super(_) => "Super",
+            Node::SequenceExpression(_) => "SequenceExpression",
+            Node::ObjectExpression(_) => "ObjectExpression",
+            Node::ArrayExpression(_) => "ArrayExpression",
+            Node::SpreadElement(_) => "SpreadElement",
+            Node::NewExpression(_) => "NewExpression",
+            Node::YieldExpression(_) => "YieldExpression",
+            Node::AwaitExpression(_) => "AwaitExpression",
+            Node::ImportExpression(_) => "ImportExpression",
+            Node::CallExpression(_) => "CallExpression",
+            Node::OptionalCallExpression(_) => "OptionalCallExpression",
+            Node::AssignmentExpression(_) => "AssignmentExpression",
+            Node::UnaryExpression(_) => "UnaryExpression",
+            Node::UpdateExpression(_) => "UpdateExpression",
+            Node::MemberExpression(_) => "MemberExpression",
+            Node::OptionalMemberExpression(_) => "OptionalMemberExpression",
+            Node::LogicalExpression(_) => "LogicalExpression",
+            Node::ConditionalExpression(_) => "ConditionalExpression",
+            Node::BinaryExpression(_) => "BinaryExpression",
+            Node::Directive(_) => "Directive",
+            Node::DirectiveLiteral(_) => "DirectiveLiteral",
+            Node::Identifier(_) => "Identifier",
+            Node::PrivateName(_) => "PrivateName",
+            Node::MetaProperty(_) => "MetaProperty",
+            Node::SwitchCase(_) => "SwitchCase",
+            Node::CatchClause(_) => "CatchClause",
+            Node::VariableDeclarator(_) => "VariableDeclarator",
+            Node::VariableDeclaration(_) => "VariableDeclaration",
+            Node::TemplateLiteral(_) => "TemplateLiteral",
+            Node::TaggedTemplateExpression(_) => "TaggedTemplateExpression",
+            Node::TemplateElement(_) => "TemplateElement",
+            Node::Property(_) => "Property",
+            Node::Decorator(_) => "Decorator",
+            Node::ClassDeclaration(_) => "ClassDeclaration",
+            Node::ClassExpression(_) => "ClassExpression",
+            Node::ClassBody(_) => "ClassBody",
+            Node::ClassProperty(_) => "ClassProperty",
+            Node::ClassPrivateProperty(_) => "ClassPrivateProperty",
+            Node::MethodDefinition(_) => "MethodDefinition",
+            Node::ImportDeclaration(_) => "ImportDeclaration",
+            Node::ImportSpecifier(_) => "ImportSpecifier",
+            Node::ImportDefaultSpecifier(_) => "ImportDefaultSpecifier",
+            Node::ImportNamespaceSpecifier(_) => "ImportNamespaceSpecifier",
+            Node::ImportAttribute(_) => "ImportAttribute",
+            Node::ExportNamedDeclaration(_) => "ExportNamedDeclaration",
+            Node::ExportSpecifier(_) => "ExportSpecifier",
+            Node::ExportNamespaceSpecifier(_) => "ExportNamespaceSpecifier",
+            Node::ExportDefaultDeclaration(_) => "ExportDefaultDeclaration",
+            Node::ExportAllDeclaration(_) => "ExportAllDeclaration",
+            Node::ObjectPattern(_) => "ObjectPattern",
+            Node::ArrayPattern(_) => "ArrayPattern",
+            Node::RestElement(_) => "RestElement",
+            Node::AssignmentPattern(_) => "AssignmentPattern",
+            Node::MatchStatementCase(_) => "MatchStatementCase",
+            Node::MatchExpression(_) => "MatchExpression",
+            Node::MatchExpressionCase(_) => "MatchExpressionCase",
+            Node::MatchWildcardPattern(_) => "MatchWildcardPattern",
+            Node::MatchLiteralPattern(_) => "MatchLiteralPattern",
+            Node::MatchUnaryPattern(_) => "MatchUnaryPattern",
+            Node::MatchIdentifierPattern(_) => "MatchIdentifierPattern",
+            Node::MatchBindingPattern(_) => "MatchBindingPattern",
+            Node::MatchObjectPattern(_) => "MatchObjectPattern",
+            Node::MatchArrayPattern(_) => "MatchArrayPattern",
+            Node::MatchOrPattern(_) => "MatchOrPattern",
+            Node::MatchAsPattern(_) => "MatchAsPattern",
+            Node::MatchMemberPattern(_) => "MatchMemberPattern",
+            Node::MatchInstancePattern(_) => "MatchInstancePattern",
+            Node::MatchObjectPatternProperty(_) => "MatchObjectPatternProperty",
+            Node::MatchInstanceObjectPattern(_) => "MatchInstanceObjectPattern",
+            Node::MatchRestPattern(_) => "MatchRestPattern",
+            Node::JSXIdentifier(_) => "JSXIdentifier",
+            Node::JSXMemberExpression(_) => "JSXMemberExpression",
+            Node::JSXNamespacedName(_) => "JSXNamespacedName",
+            Node::JSXEmptyExpression(_) => "JSXEmptyExpression",
+            Node::JSXExpressionContainer(_) => "JSXExpressionContainer",
+            Node::JSXSpreadChild(_) => "JSXSpreadChild",
+            Node::JSXOpeningElement(_) => "JSXOpeningElement",
+            Node::JSXClosingElement(_) => "JSXClosingElement",
+            Node::JSXAttribute(_) => "JSXAttribute",
+            Node::JSXSpreadAttribute(_) => "JSXSpreadAttribute",
+            Node::JSXStringLiteral(_) => "JSXStringLiteral",
+            Node::JSXText(_) => "JSXText",
+            Node::JSXElement(_) => "JSXElement",
+            Node::JSXFragment(_) => "JSXFragment",
+            Node::JSXOpeningFragment(_) => "JSXOpeningFragment",
+            Node::JSXClosingFragment(_) => "JSXClosingFragment",
+            Node::ExistsTypeAnnotation(_) => "ExistsTypeAnnotation",
+            Node::EmptyTypeAnnotation(_) => "EmptyTypeAnnotation",
+            Node::StringTypeAnnotation(_) => "StringTypeAnnotation",
+            Node::NumberTypeAnnotation(_) => "NumberTypeAnnotation",
+            Node::StringLiteralTypeAnnotation(_) => "StringLiteralTypeAnnotation",
+            Node::NumberLiteralTypeAnnotation(_) => "NumberLiteralTypeAnnotation",
+            Node::BigIntLiteralTypeAnnotation(_) => "BigIntLiteralTypeAnnotation",
+            Node::BooleanTypeAnnotation(_) => "BooleanTypeAnnotation",
+            Node::BooleanLiteralTypeAnnotation(_) => "BooleanLiteralTypeAnnotation",
+            Node::NullLiteralTypeAnnotation(_) => "NullLiteralTypeAnnotation",
+            Node::SymbolTypeAnnotation(_) => "SymbolTypeAnnotation",
+            Node::AnyTypeAnnotation(_) => "AnyTypeAnnotation",
+            Node::MixedTypeAnnotation(_) => "MixedTypeAnnotation",
+            Node::BigIntTypeAnnotation(_) => "BigIntTypeAnnotation",
+            Node::VoidTypeAnnotation(_) => "VoidTypeAnnotation",
+            Node::NeverTypeAnnotation(_) => "NeverTypeAnnotation",
+            Node::UnknownTypeAnnotation(_) => "UnknownTypeAnnotation",
+            Node::UndefinedTypeAnnotation(_) => "UndefinedTypeAnnotation",
+            Node::FunctionTypeAnnotation(_) => "FunctionTypeAnnotation",
+            Node::HookTypeAnnotation(_) => "HookTypeAnnotation",
+            Node::FunctionTypeParam(_) => "FunctionTypeParam",
+            Node::ComponentTypeAnnotation(_) => "ComponentTypeAnnotation",
+            Node::ComponentTypeParameter(_) => "ComponentTypeParameter",
+            Node::NullableTypeAnnotation(_) => "NullableTypeAnnotation",
+            Node::QualifiedTypeIdentifier(_) => "QualifiedTypeIdentifier",
+            Node::TypeofTypeAnnotation(_) => "TypeofTypeAnnotation",
+            Node::KeyofTypeAnnotation(_) => "KeyofTypeAnnotation",
+            Node::TypeOperator(_) => "TypeOperator",
+            Node::QualifiedTypeofIdentifier(_) => "QualifiedTypeofIdentifier",
+            Node::TupleTypeAnnotation(_) => "TupleTypeAnnotation",
+            Node::TupleTypeSpreadElement(_) => "TupleTypeSpreadElement",
+            Node::TupleTypeLabeledElement(_) => "TupleTypeLabeledElement",
+            Node::ArrayTypeAnnotation(_) => "ArrayTypeAnnotation",
+            Node::InferTypeAnnotation(_) => "InferTypeAnnotation",
+            Node::UnionTypeAnnotation(_) => "UnionTypeAnnotation",
+            Node::IntersectionTypeAnnotation(_) => "IntersectionTypeAnnotation",
+            Node::GenericTypeAnnotation(_) => "GenericTypeAnnotation",
+            Node::IndexedAccessType(_) => "IndexedAccessType",
+            Node::OptionalIndexedAccessType(_) => "OptionalIndexedAccessType",
+            Node::ConditionalTypeAnnotation(_) => "ConditionalTypeAnnotation",
+            Node::TypePredicate(_) => "TypePredicate",
+            Node::InterfaceTypeAnnotation(_) => "InterfaceTypeAnnotation",
+            Node::TypeAlias(_) => "TypeAlias",
+            Node::OpaqueType(_) => "OpaqueType",
+            Node::InterfaceDeclaration(_) => "InterfaceDeclaration",
+            Node::DeclareTypeAlias(_) => "DeclareTypeAlias",
+            Node::DeclareOpaqueType(_) => "DeclareOpaqueType",
+            Node::DeclareInterface(_) => "DeclareInterface",
+            Node::DeclareClass(_) => "DeclareClass",
+            Node::DeclareFunction(_) => "DeclareFunction",
+            Node::DeclareHook(_) => "DeclareHook",
+            Node::DeclareComponent(_) => "DeclareComponent",
+            Node::DeclareVariable(_) => "DeclareVariable",
+            Node::DeclareEnum(_) => "DeclareEnum",
+            Node::DeclareExportDeclaration(_) => "DeclareExportDeclaration",
+            Node::DeclareExportAllDeclaration(_) => "DeclareExportAllDeclaration",
+            Node::DeclareModule(_) => "DeclareModule",
+            Node::DeclareNamespace(_) => "DeclareNamespace",
+            Node::DeclareModuleExports(_) => "DeclareModuleExports",
+            Node::InterfaceExtends(_) => "InterfaceExtends",
+            Node::ClassImplements(_) => "ClassImplements",
+            Node::TypeAnnotation(_) => "TypeAnnotation",
+            Node::ObjectTypeAnnotation(_) => "ObjectTypeAnnotation",
+            Node::ObjectTypeProperty(_) => "ObjectTypeProperty",
+            Node::ObjectTypeSpreadProperty(_) => "ObjectTypeSpreadProperty",
+            Node::ObjectTypeInternalSlot(_) => "ObjectTypeInternalSlot",
+            Node::ObjectTypeCallProperty(_) => "ObjectTypeCallProperty",
+            Node::ObjectTypeIndexer(_) => "ObjectTypeIndexer",
+            Node::ObjectTypeMappedTypeProperty(_) => "ObjectTypeMappedTypeProperty",
+            Node::Variance(_) => "Variance",
+            Node::TypeParameterDeclaration(_) => "TypeParameterDeclaration",
+            Node::TypeParameter(_) => "TypeParameter",
+            Node::TypeParameterInstantiation(_) => "TypeParameterInstantiation",
+            Node::TypeCastExpression(_) => "TypeCastExpression",
+            Node::AsExpression(_) => "AsExpression",
+            Node::AsConstExpression(_) => "AsConstExpression",
+            Node::InferredPredicate(_) => "InferredPredicate",
+            Node::DeclaredPredicate(_) => "DeclaredPredicate",
+            Node::EnumDeclaration(_) => "EnumDeclaration",
+            Node::EnumStringBody(_) => "EnumStringBody",
+            Node::EnumNumberBody(_) => "EnumNumberBody",
+            Node::EnumBigIntBody(_) => "EnumBigIntBody",
+            Node::EnumBooleanBody(_) => "EnumBooleanBody",
+            Node::EnumSymbolBody(_) => "EnumSymbolBody",
+            Node::EnumDefaultedMember(_) => "EnumDefaultedMember",
+            Node::EnumStringMember(_) => "EnumStringMember",
+            Node::EnumNumberMember(_) => "EnumNumberMember",
+            Node::EnumBigIntMember(_) => "EnumBigIntMember",
+            Node::EnumBooleanMember(_) => "EnumBooleanMember",
+            Node::ComponentParameter(_) => "ComponentParameter",
+            Node::RecordDeclaration(_) => "RecordDeclaration",
+            Node::RecordDeclarationImplements(_) => "RecordDeclarationImplements",
+            Node::RecordDeclarationBody(_) => "RecordDeclarationBody",
+            Node::RecordDeclarationProperty(_) => "RecordDeclarationProperty",
+            Node::RecordDeclarationStaticProperty(_) => "RecordDeclarationStaticProperty",
+            Node::RecordExpression(_) => "RecordExpression",
+            Node::RecordExpressionProperties(_) => "RecordExpressionProperties",
+            Node::TSTypeAnnotation(_) => "TSTypeAnnotation",
+            Node::TSAnyKeyword(_) => "TSAnyKeyword",
+            Node::TSNumberKeyword(_) => "TSNumberKeyword",
+            Node::TSBooleanKeyword(_) => "TSBooleanKeyword",
+            Node::TSStringKeyword(_) => "TSStringKeyword",
+            Node::TSSymbolKeyword(_) => "TSSymbolKeyword",
+            Node::TSVoidKeyword(_) => "TSVoidKeyword",
+            Node::TSUndefinedKeyword(_) => "TSUndefinedKeyword",
+            Node::TSUnknownKeyword(_) => "TSUnknownKeyword",
+            Node::TSNeverKeyword(_) => "TSNeverKeyword",
+            Node::TSBigIntKeyword(_) => "TSBigIntKeyword",
+            Node::TSThisType(_) => "TSThisType",
+            Node::TSLiteralType(_) => "TSLiteralType",
+            Node::TSIndexedAccessType(_) => "TSIndexedAccessType",
+            Node::TSArrayType(_) => "TSArrayType",
+            Node::TSTypeReference(_) => "TSTypeReference",
+            Node::TSQualifiedName(_) => "TSQualifiedName",
+            Node::TSFunctionType(_) => "TSFunctionType",
+            Node::TSConstructorType(_) => "TSConstructorType",
+            Node::TSTypePredicate(_) => "TSTypePredicate",
+            Node::TSTupleType(_) => "TSTupleType",
+            Node::TSTypeAssertion(_) => "TSTypeAssertion",
+            Node::TSAsExpression(_) => "TSAsExpression",
+            Node::TSParameterProperty(_) => "TSParameterProperty",
+            Node::TSTypeAliasDeclaration(_) => "TSTypeAliasDeclaration",
+            Node::TSInterfaceDeclaration(_) => "TSInterfaceDeclaration",
+            Node::TSInterfaceHeritage(_) => "TSInterfaceHeritage",
+            Node::TSInterfaceBody(_) => "TSInterfaceBody",
+            Node::TSEnumDeclaration(_) => "TSEnumDeclaration",
+            Node::TSEnumMember(_) => "TSEnumMember",
+            Node::TSModuleDeclaration(_) => "TSModuleDeclaration",
+            Node::TSModuleBlock(_) => "TSModuleBlock",
+            Node::TSModuleMember(_) => "TSModuleMember",
+            Node::TSTypeParameterDeclaration(_) => "TSTypeParameterDeclaration",
+            Node::TSTypeParameter(_) => "TSTypeParameter",
+            Node::TSTypeParameterInstantiation(_) => "TSTypeParameterInstantiation",
+            Node::TSUnionType(_) => "TSUnionType",
+            Node::TSIntersectionType(_) => "TSIntersectionType",
+            Node::TSTypeQuery(_) => "TSTypeQuery",
+            Node::TSConditionalType(_) => "TSConditionalType",
+            Node::TSTypeLiteral(_) => "TSTypeLiteral",
+            Node::TSPropertySignature(_) => "TSPropertySignature",
+            Node::TSMethodSignature(_) => "TSMethodSignature",
+            Node::TSIndexSignature(_) => "TSIndexSignature",
+            Node::TSCallSignatureDeclaration(_) => "TSCallSignatureDeclaration",
+            Node::TSModifiers(_) => "TSModifiers",
+            Node::CoverEmptyArgs(_) => "CoverEmptyArgs",
+            Node::CoverTrailingComma(_) => "CoverTrailingComma",
+            Node::CoverInitializer(_) => "CoverInitializer",
+            Node::CoverRestElement(_) => "CoverRestElement",
+            Node::CoverTypedIdentifier(_) => "CoverTypedIdentifier",
+            Node::SHBuiltin(_) => "SHBuiltin",
+            Node::ImplicitCheckedCast(_) => "ImplicitCheckedCast",
+        }
+    }
+
+    /// Emit this node's `.def` child fields as JSON key/values,
+    /// in declared order. Mirrors C++ `visitChildren`.
+    pub fn dump_children<'a, 'w>(
+        &'gc self,
+        d: &mut crate::dump::ESTreeJSONDumper<'a, 'w>,
+    ) {
+        match self {
+            Node::Empty(_) => {}
+            Node::Metadata(_) => {}
+            Node::Program(n) => {
+                d.field_list("body", n.body, false);
+            }
+            Node::FunctionExpression(n) => {
+                d.field_node("id", n.id, false);
+                d.field_list("params", n.params, false);
+                d.field_node("body", Some(n.body), false);
+                d.field_node("typeParameters", n.type_parameters, true);
+                d.field_node("returnType", n.return_type, true);
+                d.field_node("predicate", n.predicate, true);
+                d.field_bool("generator", n.generator.get(), false);
+                d.field_bool("async", n.r#async.get(), false);
+            }
+            Node::ArrowFunctionExpression(n) => {
+                d.field_list("params", n.params, false);
+                d.field_node("body", Some(n.body), false);
+                d.field_node("typeParameters", n.type_parameters, true);
+                d.field_node("returnType", n.return_type, true);
+                d.field_node("predicate", n.predicate, true);
+                d.field_bool("expression", n.expression.get(), false);
+                d.field_bool("async", n.r#async.get(), false);
+            }
+            Node::FunctionDeclaration(n) => {
+                d.field_node("id", n.id, false);
+                d.field_list("params", n.params, false);
+                d.field_node("body", Some(n.body), false);
+                d.field_node("typeParameters", n.type_parameters, true);
+                d.field_node("returnType", n.return_type, true);
+                d.field_node("predicate", n.predicate, true);
+                d.field_bool("generator", n.generator.get(), false);
+                d.field_bool("async", n.r#async.get(), false);
+            }
+            Node::ComponentDeclaration(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_list("params", n.params, false);
+                d.field_node("body", Some(n.body), false);
+                d.field_node("typeParameters", n.type_parameters, true);
+                d.field_node("rendersType", n.renders_type, true);
+                d.field_bool("async", n.r#async.get(), false);
+            }
+            Node::HookDeclaration(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_list("params", n.params, false);
+                d.field_node("body", Some(n.body), false);
+                d.field_node("typeParameters", n.type_parameters, true);
+                d.field_node("returnType", n.return_type, true);
+                d.field_bool("async", n.r#async.get(), false);
+            }
+            Node::MatchStatement(n) => {
+                d.field_node("argument", Some(n.argument), false);
+                d.field_list("cases", n.cases, false);
+            }
+            Node::WhileStatement(n) => {
+                d.field_node("body", Some(n.body), false);
+                d.field_node("test", Some(n.test), false);
+            }
+            Node::DoWhileStatement(n) => {
+                d.field_node("body", Some(n.body), false);
+                d.field_node("test", Some(n.test), false);
+            }
+            Node::ForInStatement(n) => {
+                d.field_node("left", Some(n.left), false);
+                d.field_node("right", Some(n.right), false);
+                d.field_node("body", Some(n.body), false);
+            }
+            Node::ForOfStatement(n) => {
+                d.field_node("left", Some(n.left), false);
+                d.field_node("right", Some(n.right), false);
+                d.field_node("body", Some(n.body), false);
+                d.field_bool("await", n.r#await.get(), false);
+            }
+            Node::ForStatement(n) => {
+                d.field_node("init", n.init, false);
+                d.field_node("test", n.test, false);
+                d.field_node("update", n.update, false);
+                d.field_node("body", Some(n.body), false);
+            }
+            Node::DebuggerStatement(_) => {}
+            Node::EmptyStatement(_) => {}
+            Node::BlockStatement(n) => {
+                d.field_list("body", n.body, false);
+                d.field_bool("implicit", n.implicit.get(), true);
+            }
+            Node::StaticBlock(n) => {
+                d.field_list("body", n.body, false);
+            }
+            Node::BreakStatement(n) => {
+                d.field_node("label", n.label, false);
+            }
+            Node::ContinueStatement(n) => {
+                d.field_node("label", n.label, false);
+            }
+            Node::ThrowStatement(n) => {
+                d.field_node("argument", Some(n.argument), false);
+            }
+            Node::ReturnStatement(n) => {
+                d.field_node("argument", n.argument, false);
+            }
+            Node::WithStatement(n) => {
+                d.field_node("object", Some(n.object), false);
+                d.field_node("body", Some(n.body), false);
+            }
+            Node::SwitchStatement(n) => {
+                d.field_node("discriminant", Some(n.discriminant), false);
+                d.field_list("cases", n.cases, false);
+            }
+            Node::LabeledStatement(n) => {
+                d.field_node("label", Some(n.label), false);
+                d.field_node("body", Some(n.body), false);
+            }
+            Node::ExpressionStatement(n) => {
+                d.field_node("expression", Some(n.expression), false);
+                d.field_label("directive", n.directive.get(), false);
+            }
+            Node::TryStatement(n) => {
+                d.field_node("block", Some(n.block), false);
+                d.field_node("handler", n.handler, false);
+                d.field_node("finalizer", n.finalizer, false);
+            }
+            Node::IfStatement(n) => {
+                d.field_node("test", Some(n.test), false);
+                d.field_node("consequent", Some(n.consequent), false);
+                d.field_node("alternate", n.alternate, false);
+            }
+            Node::NullLiteral(_) => {}
+            Node::BooleanLiteral(n) => {
+                d.field_bool("value", n.value.get(), false);
+            }
+            Node::StringLiteral(n) => {
+                d.field_label("value", n.value.get(), false);
+            }
+            Node::NumericLiteral(n) => {
+                d.field_number("value", n.value.get(), false);
+            }
+            Node::RegExpLiteral(n) => {
+                d.field_label("pattern", n.pattern.get(), false);
+                d.field_label("flags", n.flags.get(), false);
+            }
+            Node::BigIntLiteral(n) => {
+                d.field_label("bigint", n.bigint.get(), false);
+            }
+            Node::ThisExpression(_) => {}
+            Node::Super(_) => {}
+            Node::SequenceExpression(n) => {
+                d.field_list("expressions", n.expressions, false);
+            }
+            Node::ObjectExpression(n) => {
+                d.field_list("properties", n.properties, false);
+            }
+            Node::ArrayExpression(n) => {
+                d.field_list("elements", n.elements, false);
+                d.field_bool("trailingComma", n.trailing_comma.get(), false);
+            }
+            Node::SpreadElement(n) => {
+                d.field_node("argument", Some(n.argument), false);
+            }
+            Node::NewExpression(n) => {
+                d.field_node("callee", Some(n.callee), false);
+                d.field_node("typeArguments", n.type_arguments, true);
+                d.field_list("arguments", n.arguments, false);
+            }
+            Node::YieldExpression(n) => {
+                d.field_node("argument", n.argument, false);
+                d.field_bool("delegate", n.delegate.get(), false);
+            }
+            Node::AwaitExpression(n) => {
+                d.field_node("argument", Some(n.argument), false);
+            }
+            Node::ImportExpression(n) => {
+                d.field_node("source", Some(n.source), false);
+                d.field_node("options", n.options, false);
+            }
+            Node::CallExpression(n) => {
+                d.field_node("callee", Some(n.callee), false);
+                d.field_node("typeArguments", n.type_arguments, true);
+                d.field_list("arguments", n.arguments, false);
+            }
+            Node::OptionalCallExpression(n) => {
+                d.field_node("callee", Some(n.callee), false);
+                d.field_node("typeArguments", n.type_arguments, true);
+                d.field_list("arguments", n.arguments, false);
+                d.field_bool("optional", n.optional.get(), false);
+            }
+            Node::AssignmentExpression(n) => {
+                d.field_label("operator", n.operator.get(), false);
+                d.field_node("left", Some(n.left), false);
+                d.field_node("right", Some(n.right), false);
+            }
+            Node::UnaryExpression(n) => {
+                d.field_label("operator", n.operator.get(), false);
+                d.field_node("argument", Some(n.argument), false);
+                d.field_bool("prefix", n.prefix.get(), false);
+            }
+            Node::UpdateExpression(n) => {
+                d.field_label("operator", n.operator.get(), false);
+                d.field_node("argument", Some(n.argument), false);
+                d.field_bool("prefix", n.prefix.get(), false);
+            }
+            Node::MemberExpression(n) => {
+                d.field_node("object", Some(n.object), false);
+                d.field_node("property", Some(n.property), false);
+                d.field_bool("computed", n.computed.get(), false);
+            }
+            Node::OptionalMemberExpression(n) => {
+                d.field_node("object", Some(n.object), false);
+                d.field_node("property", Some(n.property), false);
+                d.field_bool("computed", n.computed.get(), false);
+                d.field_bool("optional", n.optional.get(), false);
+            }
+            Node::LogicalExpression(n) => {
+                d.field_node("left", Some(n.left), false);
+                d.field_node("right", Some(n.right), false);
+                d.field_label("operator", n.operator.get(), false);
+            }
+            Node::ConditionalExpression(n) => {
+                d.field_node("test", Some(n.test), false);
+                d.field_node("alternate", Some(n.alternate), false);
+                d.field_node("consequent", Some(n.consequent), false);
+            }
+            Node::BinaryExpression(n) => {
+                d.field_node("left", Some(n.left), false);
+                d.field_node("right", Some(n.right), false);
+                d.field_label("operator", n.operator.get(), false);
+            }
+            Node::Directive(n) => {
+                d.field_node("value", Some(n.value), false);
+            }
+            Node::DirectiveLiteral(n) => {
+                d.field_label("value", n.value.get(), false);
+            }
+            Node::Identifier(n) => {
+                d.field_label("name", n.name.get(), false);
+                d.field_node("typeAnnotation", n.type_annotation, true);
+                d.field_bool("optional", n.optional.get(), true);
+            }
+            Node::PrivateName(n) => {
+                d.field_node("id", Some(n.id), false);
+            }
+            Node::MetaProperty(n) => {
+                d.field_node("meta", Some(n.meta), false);
+                d.field_node("property", Some(n.property), false);
+            }
+            Node::SwitchCase(n) => {
+                d.field_node("test", n.test, false);
+                d.field_list("consequent", n.consequent, false);
+            }
+            Node::CatchClause(n) => {
+                d.field_node("param", n.param, false);
+                d.field_node("body", Some(n.body), false);
+            }
+            Node::VariableDeclarator(n) => {
+                d.field_node("init", n.init, false);
+                d.field_node("id", Some(n.id), false);
+            }
+            Node::VariableDeclaration(n) => {
+                d.field_label("kind", n.kind.get(), false);
+                d.field_list("declarations", n.declarations, false);
+            }
+            Node::TemplateLiteral(n) => {
+                d.field_list("quasis", n.quasis, false);
+                d.field_list("expressions", n.expressions, false);
+            }
+            Node::TaggedTemplateExpression(n) => {
+                d.field_node("tag", Some(n.tag), false);
+                d.field_node("quasi", Some(n.quasi), false);
+            }
+            Node::TemplateElement(n) => {
+                d.field_bool("tail", n.tail.get(), false);
+                d.field_label("cooked", n.cooked.get(), false);
+                d.field_label("raw", n.raw.get(), false);
+            }
+            Node::Property(n) => {
+                d.field_node("key", Some(n.key), false);
+                d.field_node("value", Some(n.value), false);
+                d.field_label("kind", n.kind.get(), false);
+                d.field_bool("computed", n.computed.get(), false);
+                d.field_bool("method", n.method.get(), false);
+                d.field_bool("shorthand", n.shorthand.get(), false);
+            }
+            Node::Decorator(n) => {
+                d.field_node("expression", Some(n.expression), false);
+            }
+            Node::ClassDeclaration(n) => {
+                d.field_node("id", n.id, false);
+                d.field_node("typeParameters", n.type_parameters, true);
+                d.field_node("superClass", n.super_class, false);
+                d.field_node("superTypeArguments", n.super_type_arguments, true);
+                d.field_list("implements", n.implements, true);
+                d.field_list("decorators", n.decorators, true);
+                d.field_node("body", Some(n.body), false);
+            }
+            Node::ClassExpression(n) => {
+                d.field_node("id", n.id, false);
+                d.field_node("typeParameters", n.type_parameters, true);
+                d.field_node("superClass", n.super_class, false);
+                d.field_node("superTypeArguments", n.super_type_arguments, true);
+                d.field_list("implements", n.implements, true);
+                d.field_list("decorators", n.decorators, true);
+                d.field_node("body", Some(n.body), false);
+            }
+            Node::ClassBody(n) => {
+                d.field_list("body", n.body, false);
+            }
+            Node::ClassProperty(n) => {
+                d.field_node("key", Some(n.key), false);
+                d.field_node("value", n.value, false);
+                d.field_bool("computed", n.computed.get(), false);
+                d.field_bool("static", n.r#static.get(), false);
+                d.field_list("decorators", n.decorators, true);
+                d.field_bool("declare", n.declare.get(), false);
+                d.field_bool("optional", n.optional.get(), true);
+                d.field_node("variance", n.variance, true);
+                d.field_node("typeAnnotation", n.type_annotation, true);
+                d.field_node("tsModifiers", n.ts_modifiers, true);
+            }
+            Node::ClassPrivateProperty(n) => {
+                d.field_node("key", Some(n.key), false);
+                d.field_node("value", n.value, false);
+                d.field_bool("static", n.r#static.get(), false);
+                d.field_list("decorators", n.decorators, true);
+                d.field_bool("declare", n.declare.get(), false);
+                d.field_bool("optional", n.optional.get(), true);
+                d.field_node("variance", n.variance, true);
+                d.field_node("typeAnnotation", n.type_annotation, true);
+                d.field_node("tsModifiers", n.ts_modifiers, true);
+            }
+            Node::MethodDefinition(n) => {
+                d.field_node("key", Some(n.key), false);
+                d.field_node("value", Some(n.value), false);
+                d.field_label("kind", n.kind.get(), false);
+                d.field_bool("computed", n.computed.get(), false);
+                d.field_bool("static", n.r#static.get(), false);
+                d.field_list("decorators", n.decorators, true);
+            }
+            Node::ImportDeclaration(n) => {
+                d.field_list("specifiers", n.specifiers, false);
+                d.field_node("source", Some(n.source), false);
+                d.field_list("attributes", n.attributes, false);
+                d.field_label("importKind", n.import_kind.get(), false);
+            }
+            Node::ImportSpecifier(n) => {
+                d.field_node("imported", Some(n.imported), false);
+                d.field_node("local", Some(n.local), false);
+                d.field_label("importKind", n.import_kind.get(), false);
+            }
+            Node::ImportDefaultSpecifier(n) => {
+                d.field_node("local", Some(n.local), false);
+            }
+            Node::ImportNamespaceSpecifier(n) => {
+                d.field_node("local", Some(n.local), false);
+            }
+            Node::ImportAttribute(n) => {
+                d.field_node("key", Some(n.key), false);
+                d.field_node("value", Some(n.value), false);
+            }
+            Node::ExportNamedDeclaration(n) => {
+                d.field_node("declaration", n.declaration, false);
+                d.field_list("specifiers", n.specifiers, false);
+                d.field_node("source", n.source, false);
+                d.field_label("exportKind", n.export_kind.get(), false);
+            }
+            Node::ExportSpecifier(n) => {
+                d.field_node("exported", Some(n.exported), false);
+                d.field_node("local", Some(n.local), false);
+            }
+            Node::ExportNamespaceSpecifier(n) => {
+                d.field_node("exported", Some(n.exported), false);
+            }
+            Node::ExportDefaultDeclaration(n) => {
+                d.field_node("declaration", Some(n.declaration), false);
+            }
+            Node::ExportAllDeclaration(n) => {
+                d.field_node("source", Some(n.source), false);
+                d.field_label("exportKind", n.export_kind.get(), false);
+            }
+            Node::ObjectPattern(n) => {
+                d.field_list("properties", n.properties, false);
+                d.field_node("typeAnnotation", n.type_annotation, true);
+            }
+            Node::ArrayPattern(n) => {
+                d.field_list("elements", n.elements, false);
+                d.field_node("typeAnnotation", n.type_annotation, true);
+            }
+            Node::RestElement(n) => {
+                d.field_node("argument", Some(n.argument), false);
+            }
+            Node::AssignmentPattern(n) => {
+                d.field_node("left", Some(n.left), false);
+                d.field_node("right", Some(n.right), false);
+            }
+            Node::MatchStatementCase(n) => {
+                d.field_node("pattern", Some(n.pattern), false);
+                d.field_node("body", Some(n.body), false);
+                d.field_node("guard", n.guard, false);
+            }
+            Node::MatchExpression(n) => {
+                d.field_node("argument", Some(n.argument), false);
+                d.field_list("cases", n.cases, false);
+            }
+            Node::MatchExpressionCase(n) => {
+                d.field_node("pattern", Some(n.pattern), false);
+                d.field_node("body", Some(n.body), false);
+                d.field_node("guard", n.guard, false);
+            }
+            Node::MatchWildcardPattern(_) => {}
+            Node::MatchLiteralPattern(n) => {
+                d.field_node("literal", Some(n.literal), false);
+            }
+            Node::MatchUnaryPattern(n) => {
+                d.field_node("argument", Some(n.argument), false);
+                d.field_label("operator", n.operator.get(), false);
+            }
+            Node::MatchIdentifierPattern(n) => {
+                d.field_node("id", Some(n.id), false);
+            }
+            Node::MatchBindingPattern(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_label("kind", n.kind.get(), false);
+            }
+            Node::MatchObjectPattern(n) => {
+                d.field_list("properties", n.properties, false);
+                d.field_node("rest", n.rest, false);
+            }
+            Node::MatchArrayPattern(n) => {
+                d.field_list("elements", n.elements, false);
+                d.field_node("rest", n.rest, false);
+            }
+            Node::MatchOrPattern(n) => {
+                d.field_list("patterns", n.patterns, false);
+            }
+            Node::MatchAsPattern(n) => {
+                d.field_node("pattern", Some(n.pattern), false);
+                d.field_node("target", Some(n.target), false);
+            }
+            Node::MatchMemberPattern(n) => {
+                d.field_node("base", Some(n.base), false);
+                d.field_node("property", Some(n.property), false);
+            }
+            Node::MatchInstancePattern(n) => {
+                d.field_node("targetConstructor", Some(n.target_constructor), false);
+                d.field_node("properties", Some(n.properties), false);
+            }
+            Node::MatchObjectPatternProperty(n) => {
+                d.field_node("key", Some(n.key), false);
+                d.field_node("pattern", Some(n.pattern), false);
+                d.field_bool("shorthand", n.shorthand.get(), false);
+            }
+            Node::MatchInstanceObjectPattern(n) => {
+                d.field_list("properties", n.properties, false);
+                d.field_node("rest", n.rest, false);
+            }
+            Node::MatchRestPattern(n) => {
+                d.field_node("argument", n.argument, false);
+            }
+            Node::JSXIdentifier(n) => {
+                d.field_label("name", n.name.get(), false);
+            }
+            Node::JSXMemberExpression(n) => {
+                d.field_node("object", Some(n.object), false);
+                d.field_node("property", Some(n.property), false);
+            }
+            Node::JSXNamespacedName(n) => {
+                d.field_node("namespace", Some(n.namespace), false);
+                d.field_node("name", Some(n.name), false);
+            }
+            Node::JSXEmptyExpression(_) => {}
+            Node::JSXExpressionContainer(n) => {
+                d.field_node("expression", Some(n.expression), false);
+            }
+            Node::JSXSpreadChild(n) => {
+                d.field_node("expression", Some(n.expression), false);
+            }
+            Node::JSXOpeningElement(n) => {
+                d.field_node("name", Some(n.name), false);
+                d.field_list("attributes", n.attributes, false);
+                d.field_bool("selfClosing", n.self_closing.get(), false);
+                d.field_node("typeArguments", n.type_arguments, true);
+            }
+            Node::JSXClosingElement(n) => {
+                d.field_node("name", Some(n.name), false);
+            }
+            Node::JSXAttribute(n) => {
+                d.field_node("name", Some(n.name), false);
+                d.field_node("value", n.value, false);
+            }
+            Node::JSXSpreadAttribute(n) => {
+                d.field_node("argument", Some(n.argument), false);
+            }
+            Node::JSXStringLiteral(n) => {
+                d.field_label("value", n.value.get(), false);
+                d.field_label("raw", n.raw.get(), false);
+            }
+            Node::JSXText(n) => {
+                d.field_label("value", n.value.get(), false);
+                d.field_label("raw", n.raw.get(), false);
+            }
+            Node::JSXElement(n) => {
+                d.field_node("openingElement", Some(n.opening_element), false);
+                d.field_list("children", n.children, false);
+                d.field_node("closingElement", n.closing_element, false);
+            }
+            Node::JSXFragment(n) => {
+                d.field_node("openingFragment", Some(n.opening_fragment), false);
+                d.field_list("children", n.children, false);
+                d.field_node("closingFragment", Some(n.closing_fragment), false);
+            }
+            Node::JSXOpeningFragment(_) => {}
+            Node::JSXClosingFragment(_) => {}
+            Node::ExistsTypeAnnotation(_) => {}
+            Node::EmptyTypeAnnotation(_) => {}
+            Node::StringTypeAnnotation(_) => {}
+            Node::NumberTypeAnnotation(_) => {}
+            Node::StringLiteralTypeAnnotation(n) => {
+                d.field_label("value", n.value.get(), false);
+                d.field_label("raw", n.raw.get(), false);
+            }
+            Node::NumberLiteralTypeAnnotation(n) => {
+                d.field_number("value", n.value.get(), false);
+                d.field_label("raw", n.raw.get(), false);
+            }
+            Node::BigIntLiteralTypeAnnotation(n) => {
+                d.field_label("raw", n.raw.get(), false);
+            }
+            Node::BooleanTypeAnnotation(_) => {}
+            Node::BooleanLiteralTypeAnnotation(n) => {
+                d.field_bool("value", n.value.get(), false);
+                d.field_label("raw", n.raw.get(), false);
+            }
+            Node::NullLiteralTypeAnnotation(_) => {}
+            Node::SymbolTypeAnnotation(_) => {}
+            Node::AnyTypeAnnotation(_) => {}
+            Node::MixedTypeAnnotation(_) => {}
+            Node::BigIntTypeAnnotation(_) => {}
+            Node::VoidTypeAnnotation(_) => {}
+            Node::NeverTypeAnnotation(_) => {}
+            Node::UnknownTypeAnnotation(_) => {}
+            Node::UndefinedTypeAnnotation(_) => {}
+            Node::FunctionTypeAnnotation(n) => {
+                d.field_list("params", n.params, false);
+                d.field_node("this", n.this, false);
+                d.field_node("returnType", Some(n.return_type), false);
+                d.field_node("rest", n.rest, false);
+                d.field_node("typeParameters", n.type_parameters, false);
+            }
+            Node::HookTypeAnnotation(n) => {
+                d.field_list("params", n.params, false);
+                d.field_node("returnType", Some(n.return_type), false);
+                d.field_node("rest", n.rest, false);
+                d.field_node("typeParameters", n.type_parameters, false);
+            }
+            Node::FunctionTypeParam(n) => {
+                d.field_node("name", n.name, false);
+                d.field_node("typeAnnotation", Some(n.type_annotation), false);
+                d.field_bool("optional", n.optional.get(), false);
+            }
+            Node::ComponentTypeAnnotation(n) => {
+                d.field_list("params", n.params, false);
+                d.field_node("rest", n.rest, false);
+                d.field_node("typeParameters", n.type_parameters, false);
+                d.field_node("rendersType", n.renders_type, false);
+            }
+            Node::ComponentTypeParameter(n) => {
+                d.field_node("name", n.name, false);
+                d.field_node("typeAnnotation", Some(n.type_annotation), false);
+                d.field_bool("optional", n.optional.get(), false);
+            }
+            Node::NullableTypeAnnotation(n) => {
+                d.field_node("typeAnnotation", Some(n.type_annotation), false);
+            }
+            Node::QualifiedTypeIdentifier(n) => {
+                d.field_node("qualification", Some(n.qualification), false);
+                d.field_node("id", Some(n.id), false);
+            }
+            Node::TypeofTypeAnnotation(n) => {
+                d.field_node("argument", Some(n.argument), false);
+                d.field_node("typeArguments", n.type_arguments, true);
+            }
+            Node::KeyofTypeAnnotation(n) => {
+                d.field_node("argument", Some(n.argument), false);
+            }
+            Node::TypeOperator(n) => {
+                d.field_label("operator", n.operator.get(), false);
+                d.field_node("typeAnnotation", Some(n.type_annotation), false);
+            }
+            Node::QualifiedTypeofIdentifier(n) => {
+                d.field_node("qualification", Some(n.qualification), false);
+                d.field_node("id", Some(n.id), false);
+            }
+            Node::TupleTypeAnnotation(n) => {
+                d.field_list("elementTypes", n.element_types, false);
+                d.field_bool("inexact", n.inexact.get(), false);
+            }
+            Node::TupleTypeSpreadElement(n) => {
+                d.field_node("label", n.label, false);
+                d.field_node("typeAnnotation", Some(n.type_annotation), false);
+            }
+            Node::TupleTypeLabeledElement(n) => {
+                d.field_node("label", Some(n.label), false);
+                d.field_node("elementType", Some(n.element_type), false);
+                d.field_bool("optional", n.optional.get(), false);
+                d.field_node("variance", n.variance, false);
+            }
+            Node::ArrayTypeAnnotation(n) => {
+                d.field_node("elementType", Some(n.element_type), false);
+            }
+            Node::InferTypeAnnotation(n) => {
+                d.field_node("typeParameter", Some(n.type_parameter), false);
+            }
+            Node::UnionTypeAnnotation(n) => {
+                d.field_list("types", n.types, false);
+            }
+            Node::IntersectionTypeAnnotation(n) => {
+                d.field_list("types", n.types, false);
+            }
+            Node::GenericTypeAnnotation(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_node("typeParameters", n.type_parameters, false);
+            }
+            Node::IndexedAccessType(n) => {
+                d.field_node("objectType", Some(n.object_type), false);
+                d.field_node("indexType", Some(n.index_type), false);
+            }
+            Node::OptionalIndexedAccessType(n) => {
+                d.field_node("objectType", Some(n.object_type), false);
+                d.field_node("indexType", Some(n.index_type), false);
+                d.field_bool("optional", n.optional.get(), false);
+            }
+            Node::ConditionalTypeAnnotation(n) => {
+                d.field_node("checkType", Some(n.check_type), false);
+                d.field_node("extendsType", Some(n.extends_type), false);
+                d.field_node("trueType", Some(n.true_type), false);
+                d.field_node("falseType", Some(n.false_type), false);
+            }
+            Node::TypePredicate(n) => {
+                d.field_node("parameterName", Some(n.parameter_name), false);
+                d.field_node("typeAnnotation", n.type_annotation, false);
+                d.field_label("kind", n.kind.get(), false);
+            }
+            Node::InterfaceTypeAnnotation(n) => {
+                d.field_list("extends", n.extends, false);
+                d.field_node("body", n.body, false);
+            }
+            Node::TypeAlias(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_node("typeParameters", n.type_parameters, false);
+                d.field_node("right", Some(n.right), false);
+            }
+            Node::OpaqueType(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_node("typeParameters", n.type_parameters, false);
+                d.field_node("impltype", Some(n.impltype), false);
+                d.field_node("lowerBound", n.lower_bound, false);
+                d.field_node("upperBound", n.upper_bound, false);
+                d.field_node("supertype", n.supertype, false);
+            }
+            Node::InterfaceDeclaration(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_node("typeParameters", n.type_parameters, false);
+                d.field_list("extends", n.extends, false);
+                d.field_node("body", Some(n.body), false);
+            }
+            Node::DeclareTypeAlias(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_node("typeParameters", n.type_parameters, false);
+                d.field_node("right", Some(n.right), false);
+            }
+            Node::DeclareOpaqueType(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_node("typeParameters", n.type_parameters, false);
+                d.field_node("impltype", n.impltype, false);
+                d.field_node("lowerBound", n.lower_bound, false);
+                d.field_node("upperBound", n.upper_bound, false);
+                d.field_node("supertype", n.supertype, false);
+            }
+            Node::DeclareInterface(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_node("typeParameters", n.type_parameters, false);
+                d.field_list("extends", n.extends, false);
+                d.field_node("body", Some(n.body), false);
+            }
+            Node::DeclareClass(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_node("typeParameters", n.type_parameters, false);
+                d.field_list("extends", n.extends, false);
+                d.field_list("implements", n.implements, false);
+                d.field_list("mixins", n.mixins, false);
+                d.field_node("body", Some(n.body), false);
+            }
+            Node::DeclareFunction(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_node("predicate", n.predicate, false);
+            }
+            Node::DeclareHook(n) => {
+                d.field_node("id", Some(n.id), false);
+            }
+            Node::DeclareComponent(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_list("params", n.params, false);
+                d.field_node("rest", n.rest, false);
+                d.field_node("typeParameters", n.type_parameters, false);
+                d.field_node("rendersType", n.renders_type, false);
+            }
+            Node::DeclareVariable(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_label("kind", n.kind.get(), false);
+            }
+            Node::DeclareEnum(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_node("body", Some(n.body), false);
+            }
+            Node::DeclareExportDeclaration(n) => {
+                d.field_node("declaration", n.declaration, false);
+                d.field_list("specifiers", n.specifiers, false);
+                d.field_node("source", n.source, false);
+                d.field_bool("default", n.default.get(), false);
+            }
+            Node::DeclareExportAllDeclaration(n) => {
+                d.field_node("source", Some(n.source), false);
+            }
+            Node::DeclareModule(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_node("body", Some(n.body), false);
+            }
+            Node::DeclareNamespace(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_node("body", Some(n.body), false);
+            }
+            Node::DeclareModuleExports(n) => {
+                d.field_node("typeAnnotation", Some(n.type_annotation), false);
+            }
+            Node::InterfaceExtends(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_node("typeParameters", n.type_parameters, false);
+            }
+            Node::ClassImplements(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_node("typeParameters", n.type_parameters, false);
+            }
+            Node::TypeAnnotation(n) => {
+                d.field_node("typeAnnotation", Some(n.type_annotation), false);
+            }
+            Node::ObjectTypeAnnotation(n) => {
+                d.field_list("properties", n.properties, false);
+                d.field_list("indexers", n.indexers, false);
+                d.field_list("callProperties", n.call_properties, false);
+                d.field_list("internalSlots", n.internal_slots, false);
+                d.field_bool("inexact", n.inexact.get(), false);
+                d.field_bool("exact", n.exact.get(), false);
+            }
+            Node::ObjectTypeProperty(n) => {
+                d.field_node("key", Some(n.key), false);
+                d.field_node("value", Some(n.value), false);
+                d.field_bool("method", n.method.get(), false);
+                d.field_bool("optional", n.optional.get(), false);
+                d.field_bool("static", n.r#static.get(), false);
+                d.field_bool("proto", n.proto.get(), false);
+                d.field_node("variance", n.variance, false);
+                d.field_label("kind", n.kind.get(), false);
+            }
+            Node::ObjectTypeSpreadProperty(n) => {
+                d.field_node("argument", Some(n.argument), false);
+            }
+            Node::ObjectTypeInternalSlot(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_node("value", Some(n.value), false);
+                d.field_bool("optional", n.optional.get(), false);
+                d.field_bool("static", n.r#static.get(), false);
+                d.field_bool("method", n.method.get(), false);
+            }
+            Node::ObjectTypeCallProperty(n) => {
+                d.field_node("value", Some(n.value), false);
+                d.field_bool("static", n.r#static.get(), false);
+            }
+            Node::ObjectTypeIndexer(n) => {
+                d.field_node("id", n.id, false);
+                d.field_node("key", Some(n.key), false);
+                d.field_node("value", Some(n.value), false);
+                d.field_bool("static", n.r#static.get(), false);
+                d.field_node("variance", n.variance, false);
+            }
+            Node::ObjectTypeMappedTypeProperty(n) => {
+                d.field_node("keyTparam", Some(n.key_tparam), false);
+                d.field_node("propType", Some(n.prop_type), false);
+                d.field_node("sourceType", Some(n.source_type), false);
+                d.field_node("variance", n.variance, false);
+                d.field_label("optional", n.optional.get(), false);
+            }
+            Node::Variance(n) => {
+                d.field_label("kind", n.kind.get(), false);
+            }
+            Node::TypeParameterDeclaration(n) => {
+                d.field_list("params", n.params, false);
+            }
+            Node::TypeParameter(n) => {
+                d.field_label("name", n.name.get(), false);
+                d.field_bool("const", n.r#const.get(), true);
+                d.field_node("bound", n.bound, false);
+                d.field_node("variance", n.variance, false);
+                d.field_node("default", n.default, false);
+                d.field_bool("usesExtendsBound", n.uses_extends_bound.get(), true);
+            }
+            Node::TypeParameterInstantiation(n) => {
+                d.field_list("params", n.params, false);
+            }
+            Node::TypeCastExpression(n) => {
+                d.field_node("expression", Some(n.expression), false);
+                d.field_node("typeAnnotation", Some(n.type_annotation), false);
+            }
+            Node::AsExpression(n) => {
+                d.field_node("expression", Some(n.expression), false);
+                d.field_node("typeAnnotation", Some(n.type_annotation), false);
+            }
+            Node::AsConstExpression(n) => {
+                d.field_node("expression", Some(n.expression), false);
+            }
+            Node::InferredPredicate(_) => {}
+            Node::DeclaredPredicate(n) => {
+                d.field_node("value", Some(n.value), false);
+            }
+            Node::EnumDeclaration(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_node("body", Some(n.body), false);
+            }
+            Node::EnumStringBody(n) => {
+                d.field_list("members", n.members, false);
+                d.field_bool("explicitType", n.explicit_type.get(), false);
+                d.field_bool("hasUnknownMembers", n.has_unknown_members.get(), false);
+            }
+            Node::EnumNumberBody(n) => {
+                d.field_list("members", n.members, false);
+                d.field_bool("explicitType", n.explicit_type.get(), false);
+                d.field_bool("hasUnknownMembers", n.has_unknown_members.get(), false);
+            }
+            Node::EnumBigIntBody(n) => {
+                d.field_list("members", n.members, false);
+                d.field_bool("explicitType", n.explicit_type.get(), false);
+                d.field_bool("hasUnknownMembers", n.has_unknown_members.get(), false);
+            }
+            Node::EnumBooleanBody(n) => {
+                d.field_list("members", n.members, false);
+                d.field_bool("explicitType", n.explicit_type.get(), false);
+                d.field_bool("hasUnknownMembers", n.has_unknown_members.get(), false);
+            }
+            Node::EnumSymbolBody(n) => {
+                d.field_list("members", n.members, false);
+                d.field_bool("hasUnknownMembers", n.has_unknown_members.get(), false);
+            }
+            Node::EnumDefaultedMember(n) => {
+                d.field_node("id", Some(n.id), false);
+            }
+            Node::EnumStringMember(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_node("init", Some(n.init), false);
+            }
+            Node::EnumNumberMember(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_node("init", Some(n.init), false);
+            }
+            Node::EnumBigIntMember(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_node("init", Some(n.init), false);
+            }
+            Node::EnumBooleanMember(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_node("init", Some(n.init), false);
+            }
+            Node::ComponentParameter(n) => {
+                d.field_node("name", Some(n.name), false);
+                d.field_node("local", Some(n.local), false);
+                d.field_bool("shorthand", n.shorthand.get(), false);
+            }
+            Node::RecordDeclaration(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_node("typeParameters", n.type_parameters, false);
+                d.field_list("implements", n.implements, false);
+                d.field_node("body", Some(n.body), false);
+            }
+            Node::RecordDeclarationImplements(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_node("typeArguments", n.type_arguments, false);
+            }
+            Node::RecordDeclarationBody(n) => {
+                d.field_list("elements", n.elements, false);
+            }
+            Node::RecordDeclarationProperty(n) => {
+                d.field_node("key", Some(n.key), false);
+                d.field_node("typeAnnotation", Some(n.type_annotation), false);
+                d.field_node("defaultValue", n.default_value, false);
+            }
+            Node::RecordDeclarationStaticProperty(n) => {
+                d.field_node("key", Some(n.key), false);
+                d.field_node("typeAnnotation", Some(n.type_annotation), false);
+                d.field_node("value", Some(n.value), false);
+            }
+            Node::RecordExpression(n) => {
+                d.field_node("recordConstructor", Some(n.record_constructor), false);
+                d.field_node("typeArguments", n.type_arguments, false);
+                d.field_node("properties", Some(n.properties), false);
+            }
+            Node::RecordExpressionProperties(n) => {
+                d.field_list("properties", n.properties, false);
+            }
+            Node::TSTypeAnnotation(n) => {
+                d.field_node("typeAnnotation", Some(n.type_annotation), false);
+            }
+            Node::TSAnyKeyword(_) => {}
+            Node::TSNumberKeyword(_) => {}
+            Node::TSBooleanKeyword(_) => {}
+            Node::TSStringKeyword(_) => {}
+            Node::TSSymbolKeyword(_) => {}
+            Node::TSVoidKeyword(_) => {}
+            Node::TSUndefinedKeyword(_) => {}
+            Node::TSUnknownKeyword(_) => {}
+            Node::TSNeverKeyword(_) => {}
+            Node::TSBigIntKeyword(_) => {}
+            Node::TSThisType(_) => {}
+            Node::TSLiteralType(n) => {
+                d.field_node("literal", Some(n.literal), false);
+            }
+            Node::TSIndexedAccessType(n) => {
+                d.field_node("objectType", Some(n.object_type), false);
+                d.field_node("indexType", Some(n.index_type), false);
+            }
+            Node::TSArrayType(n) => {
+                d.field_node("elementType", Some(n.element_type), false);
+            }
+            Node::TSTypeReference(n) => {
+                d.field_node("typeName", Some(n.type_name), false);
+                d.field_node("typeParameters", n.type_parameters, false);
+            }
+            Node::TSQualifiedName(n) => {
+                d.field_node("left", Some(n.left), false);
+                d.field_node("right", n.right, false);
+            }
+            Node::TSFunctionType(n) => {
+                d.field_list("params", n.params, false);
+                d.field_node("returnType", Some(n.return_type), false);
+                d.field_node("typeParameters", n.type_parameters, false);
+            }
+            Node::TSConstructorType(n) => {
+                d.field_list("params", n.params, false);
+                d.field_node("returnType", Some(n.return_type), false);
+                d.field_node("typeParameters", n.type_parameters, false);
+            }
+            Node::TSTypePredicate(n) => {
+                d.field_node("parameterName", Some(n.parameter_name), false);
+                d.field_node("typeAnnotation", Some(n.type_annotation), false);
+            }
+            Node::TSTupleType(n) => {
+                d.field_list("elementTypes", n.element_types, false);
+            }
+            Node::TSTypeAssertion(n) => {
+                d.field_node("typeAnnotation", Some(n.type_annotation), false);
+                d.field_node("expression", Some(n.expression), false);
+            }
+            Node::TSAsExpression(n) => {
+                d.field_node("expression", Some(n.expression), false);
+                d.field_node("typeAnnotation", Some(n.type_annotation), false);
+            }
+            Node::TSParameterProperty(n) => {
+                d.field_node("parameter", Some(n.parameter), false);
+                d.field_label("accessibility", n.accessibility.get(), false);
+                d.field_bool("readonly", n.readonly.get(), false);
+                d.field_bool("static", n.r#static.get(), false);
+                d.field_bool("export", n.export.get(), false);
+            }
+            Node::TSTypeAliasDeclaration(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_node("typeParameters", n.type_parameters, false);
+                d.field_node("typeAnnotation", Some(n.type_annotation), false);
+            }
+            Node::TSInterfaceDeclaration(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_node("body", Some(n.body), false);
+                d.field_list("extends", n.extends, false);
+                d.field_node("typeParameters", n.type_parameters, false);
+            }
+            Node::TSInterfaceHeritage(n) => {
+                d.field_node("expression", Some(n.expression), false);
+                d.field_node("typeParameters", n.type_parameters, false);
+            }
+            Node::TSInterfaceBody(n) => {
+                d.field_list("body", n.body, false);
+            }
+            Node::TSEnumDeclaration(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_list("members", n.members, false);
+            }
+            Node::TSEnumMember(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_node("initializer", n.initializer, false);
+            }
+            Node::TSModuleDeclaration(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_node("body", Some(n.body), false);
+            }
+            Node::TSModuleBlock(n) => {
+                d.field_list("body", n.body, false);
+            }
+            Node::TSModuleMember(n) => {
+                d.field_node("id", Some(n.id), false);
+                d.field_node("initializer", n.initializer, false);
+            }
+            Node::TSTypeParameterDeclaration(n) => {
+                d.field_list("params", n.params, false);
+            }
+            Node::TSTypeParameter(n) => {
+                d.field_node("name", Some(n.name), false);
+                d.field_node("constraint", n.constraint, false);
+                d.field_node("default", n.default, false);
+            }
+            Node::TSTypeParameterInstantiation(n) => {
+                d.field_list("params", n.params, false);
+            }
+            Node::TSUnionType(n) => {
+                d.field_list("types", n.types, false);
+            }
+            Node::TSIntersectionType(n) => {
+                d.field_list("types", n.types, false);
+            }
+            Node::TSTypeQuery(n) => {
+                d.field_node("exprName", Some(n.expr_name), false);
+            }
+            Node::TSConditionalType(n) => {
+                d.field_node("checkType", Some(n.check_type), false);
+                d.field_node("extendsType", Some(n.extends_type), false);
+                d.field_node("trueType", Some(n.true_type), false);
+                d.field_node("falseType", Some(n.false_type), false);
+            }
+            Node::TSTypeLiteral(n) => {
+                d.field_list("members", n.members, false);
+            }
+            Node::TSPropertySignature(n) => {
+                d.field_node("key", Some(n.key), false);
+                d.field_node("typeAnnotation", n.type_annotation, false);
+                d.field_node("initializer", n.initializer, false);
+                d.field_bool("optional", n.optional.get(), false);
+                d.field_bool("computed", n.computed.get(), false);
+                d.field_bool("readonly", n.readonly.get(), false);
+                d.field_bool("static", n.r#static.get(), false);
+                d.field_bool("export", n.export.get(), false);
+            }
+            Node::TSMethodSignature(n) => {
+                d.field_node("key", Some(n.key), false);
+                d.field_list("params", n.params, false);
+                d.field_node("returnType", n.return_type, false);
+                d.field_bool("computed", n.computed.get(), false);
+            }
+            Node::TSIndexSignature(n) => {
+                d.field_list("parameters", n.parameters, false);
+                d.field_node("typeAnnotation", n.type_annotation, false);
+            }
+            Node::TSCallSignatureDeclaration(n) => {
+                d.field_list("params", n.params, false);
+                d.field_node("returnType", n.return_type, false);
+            }
+            Node::TSModifiers(n) => {
+                d.field_label("accessibility", n.accessibility.get(), false);
+                d.field_bool("readonly", n.readonly.get(), false);
+            }
+            Node::CoverEmptyArgs(_) => {}
+            Node::CoverTrailingComma(_) => {}
+            Node::CoverInitializer(n) => {
+                d.field_node("init", Some(n.init), false);
+            }
+            Node::CoverRestElement(n) => {
+                d.field_node("rest", Some(n.rest), false);
+            }
+            Node::CoverTypedIdentifier(n) => {
+                d.field_node("left", Some(n.left), false);
+                d.field_node("right", n.right, false);
+                d.field_bool("optional", n.optional.get(), false);
+            }
+            Node::SHBuiltin(_) => {}
+            Node::ImplicitCheckedCast(n) => {
+                d.field_node("argument", Some(n.argument), false);
+            }
         }
     }
 }

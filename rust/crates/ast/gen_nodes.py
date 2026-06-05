@@ -169,15 +169,18 @@ def def_field_descriptor(ftype, fname, opt):
             rtype = "Option<&'gc Node<'gc>>"
             return dict(json_name=fname, rust_field=rf, rust_type=rtype,
                         child_kind="opt", new_arg_type=rtype,
-                        cell=False, default_expr=None)
+                        cell=False, default_expr=None,
+                        is_def_arg=True, dump_kind="node_opt")
         rtype = "&'gc Node<'gc>"
         return dict(json_name=fname, rust_field=rf, rust_type=rtype,
                     child_kind="single", new_arg_type=rtype,
-                    cell=False, default_expr=None)
+                    cell=False, default_expr=None,
+                    is_def_arg=True, dump_kind="node_single")
     if ftype == "NodeList":
         return dict(json_name=fname, rust_field=rf, rust_type="NodeList<'gc>",
                     child_kind="list", new_arg_type="NodeList<'gc>",
-                    cell=False, default_expr=None)
+                    cell=False, default_expr=None,
+                    is_def_arg=True, dump_kind="list")
     # Value types -> Cell<...>.
     value_map = {
         "NodeBoolean": "bool",
@@ -190,7 +193,10 @@ def def_field_descriptor(ftype, fname, opt):
         sys.exit(f"error: unknown .def field type {ftype!r}")
     return dict(json_name=fname, rust_field=rf,
                 rust_type=f"Cell<{inner}>", child_kind="none",
-                new_arg_type=inner, cell=True, default_expr=None)
+                new_arg_type=inner, cell=True, default_expr=None,
+                is_def_arg=True,
+                dump_kind={"NodeBoolean": "bool", "NodeNumber": "number",
+                           "NodeLabel": "label", "NodeString": "label"}[ftype])
 
 
 # --------------------------------------------------------------------------
@@ -309,7 +315,7 @@ def decoration_descriptor(source_name, rust_type, default_expr):
         child_kind = "none"
     return dict(json_name=source_name, rust_field=rf, rust_type=rust_type,
                 child_kind=child_kind, new_arg_type=None, cell=True,
-                default_expr=default_expr)
+                default_expr=default_expr, is_def_arg=False, dump_kind=None)
 
 
 def flatten_decoration(name, seen=None):
@@ -379,7 +385,8 @@ def compose_fields(node_name, base, def_fields, range_parents):
     # 1. metadata.
     add(dict(json_name=None, rust_field="metadata",
              rust_type="NodeMetadata<'gc>", child_kind="meta",
-             new_arg_type="NodeMetadata<'gc>", cell=False, default_expr=None))
+             new_arg_type="NodeMetadata<'gc>", cell=False, default_expr=None,
+             is_def_arg=False, dump_kind=None))
 
     # 2. .def arg fields.
     for (ftype, fname, opt) in def_fields:
@@ -432,7 +439,7 @@ use crate::SemaId;
 
 def emit_node_kind(items, out):
     out.append("#[repr(u32)]")
-    out.append("#[derive(Debug, Clone, Copy, PartialEq, Eq)]")
+    out.append("#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]")
     out.append("pub enum NodeKind {")
     for it in items:
         if it[0] == "first":
@@ -546,6 +553,11 @@ def emit_accessors(items, nodes, out):
     out.append("")
     # mark_lists.
     emit_mark_lists(nodes, out)
+    # node_type_str + dump_children (phase 4 — the JSON dumper walk).
+    out.append("")
+    emit_node_type_str(nodes, out)
+    out.append("")
+    emit_dump_children(nodes, out)
     out.append("}")
     out.append("")
 
@@ -606,6 +618,59 @@ def emit_mark_lists(nodes, out):
                 parts.append(f"cb(&n.{rf});")
         out.append(f"            Node::{name}(n) => {{ {' '.join(parts)} }}")
     out.append("            _ => {}")
+    out.append("        }")
+    out.append("    }")
+
+
+def emit_node_type_str(nodes, out):
+    out.append("    /// The ESTree node type name — the JSON `\"type\"` value.")
+    out.append("    pub fn node_type_str(&self) -> &'static str {")
+    out.append("        match self {")
+    for name, _ in nodes:
+        out.append(f"            Node::{name}(_) => {name!r},".replace("'", '"'))
+    out.append("        }")
+    out.append("    }")
+
+
+def dump_arg_fields(fields):
+    """The .def-arg fields, in declared order (the only fields the dumper emits)."""
+    return [fd for fd in fields if fd.get("is_def_arg")]
+
+
+def emit_dump_children(nodes, out):
+    out.append("    /// Emit this node's `.def` child fields as JSON key/values,")
+    out.append("    /// in declared order. Mirrors C++ `visitChildren`.")
+    out.append("    pub fn dump_children<'a, 'w>(")
+    out.append("        &'gc self,")
+    out.append("        d: &mut crate::dump::ESTreeJSONDumper<'a, 'w>,")
+    out.append("    ) {")
+    out.append("        match self {")
+    for name, fields in nodes:
+        af = dump_arg_fields(fields)
+        if not af:
+            out.append(f"            Node::{name}(_) => {{}}")
+            continue
+        out.append(f"            Node::{name}(n) => {{")
+        for fd in af:
+            key = fd["json_name"]
+            rf = fd["rust_field"]
+            ign = "true" if fd.get("_ignore") else "false"
+            dk = fd["dump_kind"]
+            if dk == "node_single":
+                out.append(f'                d.field_node("{key}", Some(n.{rf}), {ign});')
+            elif dk == "node_opt":
+                out.append(f'                d.field_node("{key}", n.{rf}, {ign});')
+            elif dk == "list":
+                out.append(f'                d.field_list("{key}", n.{rf}, {ign});')
+            elif dk == "bool":
+                out.append(f'                d.field_bool("{key}", n.{rf}.get(), {ign});')
+            elif dk == "number":
+                out.append(f'                d.field_number("{key}", n.{rf}.get(), {ign});')
+            elif dk == "label":
+                out.append(f'                d.field_label("{key}", n.{rf}.get(), {ign});')
+            else:
+                sys.exit(f"error: {name}.{rf}: bad dump_kind {dk!r}")
+        out.append("            }")
     out.append("        }")
     out.append("    }")
 
@@ -766,7 +831,7 @@ def generate():
     if not DEF.exists():
         sys.exit(f"error: {DEF} not found — run from a full hermes checkout")
     src = DEF.read_text()
-    items, _ignore_if_empty = parse_def(src)  # ignore_if_empty: used in phase 4 (ESTree JSON dumper)
+    items, ignore_if_empty = parse_def(src)
     range_parents = build_range_parents(items)
 
     # Build the composed node list (name, fields), in .def order.
@@ -777,6 +842,24 @@ def generate():
         _, name, base, def_fields = it
         fields = compose_fields(name, base, def_fields, range_parents)
         nodes.append((name, fields))
+
+    # Validate ESTREE_IGNORE_IF_EMPTY against the real nodes/fields (drift guard).
+    fields_by_node = {name: fields for name, fields in nodes}
+    for node_name, field_list in ignore_if_empty.items():
+        if node_name not in fields_by_node:
+            sys.exit(f"error: IGNORE_IF_EMPTY names unknown node {node_name!r}")
+        argnames = {fd["json_name"] for fd in fields_by_node[node_name]
+                    if fd.get("is_def_arg")}
+        for f in field_list:
+            if f not in argnames:
+                sys.exit(
+                    f"error: IGNORE_IF_EMPTY({node_name},{f}) is not a .def arg field")
+
+    # Stamp the per-field _ignore flag (used by the dump-children emission).
+    for name, fields in nodes:
+        ign = set(ignore_if_empty.get(name, ()))
+        for fd in fields:
+            fd["_ignore"] = fd.get("is_def_arg") and fd["json_name"] in ign
 
     # Anti-drift: node count.
     node_count = len(nodes)

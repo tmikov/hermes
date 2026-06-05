@@ -2,6 +2,7 @@
 //! See doc/superpowers/specs/2026-06-03-ast-design.md.
 
 pub mod context;
+pub mod dump;
 pub mod node;
 pub mod node_child;
 pub mod visitor;
