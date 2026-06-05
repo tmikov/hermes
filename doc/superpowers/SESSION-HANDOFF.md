@@ -4,11 +4,12 @@ Hand this to a new session to restore context. It **references** the authoritati
 (read them; don't trust this summary over them) and records the conventions, file map,
 validation commands, and workflow.
 
-> **Date of handoff:** 2026-06-04. **Branch:** `rust` (base is `static_h`, NOT `main`).
-> **Status:** the **JS lexer** and **JSONParser** are COMPLETE; the **AST is IN PROGRESS** —
-> **phases 1 (storage/GC arena spine), 2 (full 271-node set generated from `ESTree.def`), AND 3 (builders +
-> `VisitorMut`/`visit_children_mut` functional rebuild) are COMPLETE.** Remaining AST phase: 4 = `ESTreeJSONDumper` +
-> golden tests; then the **JS Parser** (`lib/Parser/JSParserImpl*`), which consumes the AST, follows it.
+> **Date of handoff:** 2026-06-05. **Branch:** `rust` (base is `static_h`, NOT `main`).
+> **Status:** the **JS lexer**, **JSONParser**, and the **AST are COMPLETE.** The AST's four phases —
+> 1 (storage/GC arena spine), 2 (full 271-node set generated from `ESTree.def`), 3 (builders +
+> `VisitorMut`/`visit_children_mut` functional rebuild), AND 4 (`ESTreeJSONDumper` + 9 golden tests) — are all done
+> and capstone-reviewed. **Next component: the JS Parser** (`lib/Parser/JSParserImpl*`), which consumes the lexer +
+> AST + `Context`; the byte-for-byte `-dump-ast` differential vs `hermesc` is the Parser's validation gate.
 
 ---
 
@@ -45,19 +46,19 @@ validation commands, and workflow.
 ## 2. What's done (✅) and the code map
 
 **Component status** (see the roadmap table): `SourceErrorManager` ✅ · **JS lexer ✅** ·
-**JSONParser ✅** · **AST 🚧 (phases 1–3 done: GC spine + generated 271-node set + transforming visitor; phase 4 next)** ·
-JS Parser / Sema / IR / Optimizer / BCGen — future.
+**JSONParser ✅** · **AST ✅ (all 4 phases: GC spine + generated 271-node set + transforming visitor + `ESTreeJSONDumper`)** ·
+JS Parser (next) / Sema / IR / Optimizer / BCGen — future.
 
 Rust workspace: **`rust/Cargo.toml`** (members: `support`, `parser`, `atom_table`, `unicode`),
 toolchain pinned `rust/rust-toolchain.toml` (1.96.0).
 
 | Crate | What | `unsafe`? |
 |-------|------|-----------|
-| `rust/crates/support/` | `SourceErrorManager` + buffer/locations/line-index/diagnostics; **+ `Deque`/`HeapSize`** (shared utilities, moved from juno). Byte-for-byte vs `hermesc` (`tests/golden.rs`). | zero (`forbid`) |
+| `rust/crates/support/` | `SourceErrorManager` + buffer/locations/line-index/diagnostics; `JSONEmitter`; **+ `Deque`/`HeapSize`** (shared utilities, moved from juno); **+ `utf8` WTF-8↔UTF-16 codec** (faithful copy of the subset of `parser::utf8` the JSON dumper needs; gained a `unicode` dep). Byte-for-byte vs `hermesc` (`tests/golden.rs`). | zero (`forbid`) |
 | `rust/crates/atom_table/` | juno `atom_table` verbatim + `AtomBytes`/`atom_bytes` WTF-8 path (the interner). | **encapsulated** (sanctioned) |
 | `rust/crates/unicode/` | `CharacterProperties` predicates + tables generated from `UnicodeData.inc` (17.0.0) by `gen_tables.py`. | zero (`forbid`) |
 | `rust/crates/parser/` | **the lexer** + token tables + number parsing + UTF codec + the JSONParser. | only in `cursor.rs` (scoped) |
-| `rust/crates/ast/` | **the AST** — juno **GC arena** (`Context`/`GCLock`/`NodeRc` + mark-sweep) copied+adapted; immutable children + `Cell` attributes; **full 271-node set generated from `ESTree.def`** by `gen_nodes.py` → `// @generated src/node.rs` (phase 2). `NodeKind`+ranges, `is_*`/`as_*`, `visit_children`/`mark_lists`, `new`. **Phase 3:** generated `builder` module + `VisitorMut`/`TransformResult`/`Path`/`NodeField` + `visit_children_mut` (functional rebuild); read `Visitor` unchanged. | only in `context.rs` (scoped) |
+| `rust/crates/ast/` | **the AST** — juno **GC arena** (`Context`/`GCLock`/`NodeRc` + mark-sweep) copied+adapted; immutable children + `Cell` attributes; **full 271-node set generated from `ESTree.def`** by `gen_nodes.py` → `// @generated src/node.rs` (phase 2). `NodeKind`+ranges, `is_*`/`as_*`, `visit_children`/`mark_lists`, `new`. **Phase 3:** generated `builder` module + `VisitorMut`/`TransformResult`/`Path`/`NodeField` + `visit_children_mut` (functional rebuild); read `Visitor` unchanged. **Phase 4:** generated `node_type_str` + `dump_children`, hand-written `src/dump.rs` (`ESTreeJSONDumper`); 9 `tests/dump_golden.rs`. | only in `context.rs` (scoped) |
 
 **Lexer modules** (`rust/crates/parser/src/`): `token_kinds.rs` (TokenKind from `TokenKinds.def`),
 `number.rs` (scanNumber primitives), `html_entities.rs` (generated), `utf8.rs` (UTF-8↔16 codec),
@@ -101,7 +102,7 @@ Release (`gen-json` bin + `--bench=N`). **C++ source of truth:** `include/hermes
 # Rust workspace (do NOT cd; use --manifest-path). Build/test:
 cargo test  --manifest-path rust/Cargo.toml            # whole workspace (≈236 tests)
 cargo test  --manifest-path rust/Cargo.toml -p parser  # lexer + JSONParser crate
-cargo test  --manifest-path rust/Cargo.toml -p ast     # AST: GC arena + generated 271-node model + spine/structural/transform tests
+cargo test  --manifest-path rust/Cargo.toml -p ast     # AST: GC arena + generated 271-node model + spine/structural/transform/dump_golden tests
 cargo build --manifest-path rust/Cargo.toml            # expect ZERO warnings
 cargo clippy --manifest-path rust/Cargo.toml -p parser # only pre-existing faithful-C-idiom lints
 
@@ -188,30 +189,35 @@ Commit directly to `rust`; **never** open a PR or merge (project rule).
 
 ## 6. What's next
 
-- **AST phase 4 (immediate next): `ESTreeJSONDumper` port + golden tests.** Extend `gen_nodes.py` to emit the
-  dumper, baking the **retained camelCase `.def` field names** as literal JSON keys (the snake_case Rust fields keep
-  the original name in the generator for exactly this) and honoring the parsed **`ESTREE_IGNORE_IF_EMPTY`** set
-  (skip empty/false fields). Golden tests over hand-built trees. C++ source of truth: `lib/AST/ESTreeJSONDumper.cpp`
-  (+ `include/hermes/AST/ESTreeJSONDumper.h`). The byte-for-byte `-dump-ast` differential vs `hermesc` lands as the
-  **Parser's** gate (the AST has no producer until the Parser). See spec §4. Write the phase plan just-in-time
-  (lexer-style) and execute subagent-driven.
-- **Phase 3 is DONE** (builders + transforming visitor): generated `builder` module (clone-with-one-field-changed;
-  `from_node` copies children by ref via `.duplicate()`, `Cell` attrs by value) + `VisitorMut`/`TransformResult{Unchanged,
-  Removed,Changed,Expanded}`/`Path`/generated `NodeField` + generated `Node::visit_children_mut` (functional rebuild:
-  required-child Removed→`EmptyStatement`, optional→`None`, list remove/expand/splice). Decoration `Cell<NodeList>`s are
-  in-place (never threaded/no setter). Read `Visitor` unchanged (parent/`Path`-aware read traversal deferred to when Sema
-  needs it). 7 `tests/transform.rs` cases; capstone review zero issues. Plan: `plans/2026-06-04-ast-3-builders-visitors.md`.
-- **Then the JS Parser** (`lib/Parser/JSParserImpl.cpp` + `-flow.cpp`/`-jsx.cpp`/`-ts.cpp`,
+- **The JS Parser (immediate next)** (`lib/Parser/JSParserImpl.cpp` + `-flow.cpp`/`-jsx.cpp`/`-ts.cpp`,
   `JSParserImpl.h`, `include/hermes/Parser/JSParser.h`) — consumes the lexer + AST + `Context`. Large;
   juno has an AST + parser to crib from (`unsupported/juno/crates/juno_ast/`, `juno/src/hparser/`). The
-  byte-for-byte `-dump-ast` differential vs `hermesc` is the Parser's validation gate.
-- **No open items** on the lexer, the JSONParser, or **AST phases 1–3**: each two-stage reviewed per task +
-  a whole-component capstone review (phase 2 zero issues — re-derived the 271-node count, `NodeKind` ordering,
-  and decoration composition, verified all `NodeList` fields traced in BOTH `visit_children`/`mark_lists`; phase 3
-  zero issues — verified the `NodeChild` Removed/Expanded semantics, the list-rebuild off-by-one, the `Cell`-vs-ref
-  `from_node` copying, and that decoration `Cell<NodeList>`s are never threaded/no setter). Phase 2 deliberate scope:
-  `node.rs` fully generated; snake_case fields with camelCase names retained for the dumper; `new` ≠ Builder;
-  `IGNORE_IF_EMPTY` parsed but emitted in phase 4. Phase 3 deliberate scope: read `Visitor` unchanged (parent/`Path`
-  read traversal deferred to Sema); optional-child Removed→`None` (a correctness improvement over juno's delegation).
-  The lexer's `--non-strict` follow-up is DONE; the JSONParser's sole deviations are the fat-enum layout +
+  byte-for-byte **`-dump-ast` differential vs `hermesc`** is the Parser's validation gate — and it is what finally
+  exercises the AST's `ESTreeJSONDumper` byte-for-byte (build a C++ `ast-dump`-style oracle + a Rust
+  `ast-dump` bin, same `CARGO_MANIFEST_DIR` + `REQUIRE_DIFFERENTIAL=1` pattern as the lexer/JSON ports).
+  Write the phase plan just-in-time (lexer-style) and execute subagent-driven.
+- **AST phase 4 is DONE** (`ESTreeJSONDumper`): the generator emits `Node::node_type_str` (JSON `"type"` == variant
+  name) + `Node::dump_children` (walks ONLY `.def`-arg fields in declaration order — no decorations — baking the
+  **retained camelCase `.def` names** as literal JSON keys + a per-field `ESTREE_IGNORE_IF_EMPTY` flag, validated against
+  real nodes/fields). `src/dump.rs` is the driver: `ESTreeDumpMode{Compact,HideEmpty,DumpAll}`/`LocationDumpMode`/
+  `ESTreeRawProp`, the `field_*`/`dump_*` helpers, `visit`, `print_source_location`, `dump_raw`, and public
+  `dump_estree_json` (no-sm) + `dump_estree_json_with_sm`. Labels/strings emit WTF-8→UTF-16 via the new
+  `support::utf8` codec + `emit_u16` (byte-matching C++ `primitiveEmitString`). 9 `tests/dump_golden.rs` cases +
+  idempotency guard; whole-component capstone **APPROVED**. **Deliberate deviations (2, model-driven):** (a) `"raw"`
+  needs the buffer (offset model has no location pointer) → omitted in the no-sm overload; (b) `StackOverflowGuard` →
+  a plain 128-depth counter. Plan: `plans/2026-06-05-ast-4-json-dumper.md`.
+  - **Tracked follow-up (not a blocker):** the C++ third overload (`dumpESTreeJSON(JSONEmitter&, …, includeSourceLocs,
+    …)` — caller-owned emitter, no `endJSONL`, `NodeKindSet` filter) is not exposed, and `include_source_locs`/the
+    depth limit have no public setter (both plumbed + tested internally). Add the thin wrapper when a consumer
+    (LSP/debugger) needs it. Also: the dumper uses the **translated** `find_coords` for `loc` (matching the existing
+    code), where C++ `printSourceLocation` uses `findBufferLineAndLoc` — confirm equivalence when the Parser
+    differential wires real source locations.
+- **No open items** on the lexer, the JSONParser, or the **AST** (all 4 phases): each two-stage reviewed per task +
+  whole-component capstone (phase 2 — re-derived the 271-node count, `NodeKind` ordering, decoration composition, all
+  `NodeList` fields traced in BOTH `visit_children`/`mark_lists`; phase 3 — `NodeChild` Removed/Expanded semantics,
+  list-rebuild off-by-one, `Cell`-vs-ref `from_node` copying, decoration `Cell<NodeList>`s never threaded; phase 4 —
+  `"type"`==`#NAME`, `.def`-order field walk with no decorations leaking, `isEmpty`/skip semantics per mode,
+  `IGNORE_IF_EMPTY` baked 1:1, WTF-8 label emission byte-faithful, structural-fidelity grep found no
+  template→runtime flattening, idempotency clean). Phase-4 deliberate scope: the two deviations above + the tracked
+  follow-up. The lexer's `--non-strict` follow-up is DONE; the JSONParser's sole deviations are the fat-enum layout +
   `getAllocator`/`getStringTable` → `arena()`/`atoms()`.

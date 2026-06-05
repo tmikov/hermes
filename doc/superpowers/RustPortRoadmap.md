@@ -38,8 +38,8 @@ The front-end stratifies (see the dependency analysis below). We port bottom-up.
 | **SourceErrorManager** (+ buffer, locations, line index, diagnostics) | `rust/crates/support/` | ✅ **Complete** — entire public surface; **byte-for-byte validated vs `hermesc` 1.96.0** |
 | **JS lexer** | `rust/crates/{atom_table,unicode,parser}/` | ✅ **Complete** — entire `JSLexer` public surface; self-validating byte-for-byte vs `js-lexer-dump` (5 differentials); see deps below |
 | **JSONParser** (+ `JSONEmitter`, value model, factory, `JSONSharedValue`) | `rust/crates/{parser,support}/` | ✅ **Complete** — first `JSLexer` consumer; entire public surface; self-validating byte-for-byte vs `json-parse-dump` (16-file corpus) + 5 ported `JSONParserTest` + 13 ported `JSONEmitterTest`; **benchmarked within ~1.5% of C++ Release** |
-| **AST** (ESTree nodes + GC arena) | `rust/crates/ast/` (+ `support`) | 🚧 **In progress — phases 1–3 complete.** Phase 1: juno GC arena copied+adapted; immutable children + `Cell` attributes. Phase 2: **full node set (271 nodes) generated from `ESTree.def`** by committed `gen_nodes.py` → `src/node.rs`; `NodeKind` ranges + `is_*`/`as_*`; generated `visit_children`/`mark_lists`; `new` constructors; idempotency guard. Phase 3: **transforming visitor** — generated `builder` module (clone-with-one-field-changed) + `VisitorMut`/`TransformResult{Unchanged,Removed,Changed,Expanded}` + `Path`/`NodeField` + generated `visit_children_mut` (functional rebuild); 7 transform tests; read `Visitor` unchanged. **Phase 4 next: `ESTreeJSONDumper` + golden tests.** Spec: `specs/2026-06-03-ast-design.md`; plans: `plans/2026-06-04-ast-{2-node-codegen,3-builders-visitors}.md` |
-| Parser | — | future (consumes the AST) |
+| **AST** (ESTree nodes + GC arena) | `rust/crates/ast/` (+ `support`) | ✅ **Complete — all 4 phases.** Phase 1: juno GC arena copied+adapted; immutable children + `Cell` attributes. Phase 2: **full node set (271 nodes) generated from `ESTree.def`** by committed `gen_nodes.py` → `src/node.rs`; `NodeKind` ranges + `is_*`/`as_*`; generated `visit_children`/`mark_lists`; `new` constructors; idempotency guard. Phase 3: **transforming visitor** — generated `builder` module (clone-with-one-field-changed) + `VisitorMut`/`TransformResult{Unchanged,Removed,Changed,Expanded}` + `Path`/`NodeField` + generated `visit_children_mut` (functional rebuild); 7 transform tests; read `Visitor` unchanged. Phase 4: **`ESTreeJSONDumper`** — generator emits `Node::node_type_str` + `dump_children` (camelCase JSON keys + baked `IGNORE_IF_EMPTY` flags); `src/dump.rs` driver (3 modes, loc/range/raw, WTF-8 label emission via `support::utf8`); 9 golden tests; capstone clean. Spec: `specs/2026-06-03-ast-design.md`; plans: `plans/2026-06-04-ast-{2-node-codegen,3-builders-visitors}.md`, `plans/2026-06-05-ast-4-json-dumper.md` |
+| Parser | — | **next** (consumes the AST; lands the byte-for-byte `-dump-ast` differential as its gate) |
 | Sema (scope resolution + FlowChecker) | — | future |
 | IR / IRGen | — | future |
 | Optimizer | — | future |
@@ -242,7 +242,7 @@ is ~12× slower and is not a fair speed baseline.)
 
 > **Next component: the Parser** (`lib/Parser/JSParserImpl*`) — needs the AST + `Context`, now under way.
 
-### 🚧 AST — phases 1–3 COMPLETE (storage/GC spine + generated node set + transforming visitor)
+### ✅ AST — COMPLETE (storage/GC spine + generated node set + transforming visitor + JSON dumper)
 
 The `ast` crate (`rust/crates/ast/`) has the storage spine **and the full generated node set**. Design spec:
 `specs/2026-06-03-ast-design.md`; per-phase plans: `plans/2026-06-04-ast-1-storage-and-spine.md` (phase 1),
@@ -305,9 +305,24 @@ parent/`Path`-aware read traversal is deferred to when a consumer (Sema) needs i
 reclamation, builder clone-with-one-field-changed) + the idempotency guard; whole-component capstone review found **zero issues**.
 The generator's shared field-classification makes the threading↔setter correspondence drift-proof.
 
-**Phase 4 next:** `ESTreeJSONDumper` port — extend `gen_nodes.py` to emit the dumper, baking the retained camelCase `.def` names as
-literal JSON keys and honoring the parsed `ESTREE_IGNORE_IF_EMPTY` set — + golden tests over hand-built trees. The byte-for-byte
-`-dump-ast` differential vs `hermesc` then lands as the **Parser's** gate (the AST has no producer until the Parser).
+**Phase 4 delivered:** `ESTreeJSONDumper` port. The generator (`gen_nodes.py`) now emits, into the `@generated` `node.rs`,
+`Node::node_type_str` (the JSON `"type"` == the variant name) and `Node::dump_children` — walking ONLY the `.def`-arg fields in
+declaration order (no decorations), baking the retained **camelCase `.def` names** as literal JSON keys and a per-field
+`ESTREE_IGNORE_IF_EMPTY` flag (validated against real nodes/fields). `src/dump.rs` is the hand-written driver:
+`ESTreeDumpMode{Compact,HideEmpty,DumpAll}`/`LocationDumpMode`/`ESTreeRawProp`, the `field_*`/`dump_*` helpers, `visit`,
+`print_source_location`, `dump_raw`, and the public `dump_estree_json` (no-sm) + `dump_estree_json_with_sm` entry points. Labels/strings
+resolve via the atom table and emit WTF-8→UTF-16 (`support::utf8::convert_utf8_with_surrogates_to_utf16` + `emit_u16`), byte-matching
+C++ `primitiveEmitString`. **Validation:** 9 `tests/dump_golden.rs` cases (3 modes, IGNORE_IF_EMPTY distinction, nested+lists, pretty,
+WTF-8/astral, loc/range/raw with a `SourceErrorManager`, raw-Exclude + no-sm omission, out-of-range skip) + the idempotency guard;
+whole-component capstone review **APPROVED**. **Deliberate deviations (2, model-driven):** (a) `"raw"` requires the buffer (offset
+model has no location pointer), so it is omitted in the no-sm overload; (b) the C++ `StackOverflowGuard` → a plain 128-depth counter.
+**Tracked follow-up (not a blocker):** the C++ third overload (caller-owned `JSONEmitter` + a public `includeSourceLocs`/`NodeKindSet`
+setter) is not exposed — `include_source_locs` is plumbed + tested internally; add the thin wrapper when a consumer (LSP/debugger) needs it.
+The byte-for-byte `-dump-ast` differential vs `hermesc` lands as the **Parser's** gate (the AST has no producer until the Parser).
+Plan: `plans/2026-06-05-ast-4-json-dumper.md`.
+
+> **Next component: the JS Parser** (`lib/Parser/JSParserImpl*`) — consumes the lexer + AST + `Context`; the `-dump-ast` differential
+> vs `hermesc` is its validation gate.
 
 ## Key cross-cutting design decisions
 

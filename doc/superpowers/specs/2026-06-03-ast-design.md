@@ -5,7 +5,10 @@ Port of Hermes' AST (`include/hermes/AST/ESTree.h` + `ESTree.def`, the `Decorati
 the schema that the Parser produces and that Sema / IRGen / the AST transform passes consume, so it
 is designed as its own component, independent of the Parser that will fill it.
 
-> **Status:** design approved 2026-06-03. Base branch `static_h`, work on `rust`.
+> **Status:** design approved 2026-06-03; **IMPLEMENTED 2026-06-05 (all 4 phases complete)** —
+> the AST component is done (GC spine + 271-node generated set + transforming visitor +
+> `ESTreeJSONDumper` with golden tests). The byte-for-byte `-dump-ast` differential lands as the
+> **Parser's** gate (the AST has no producer until the Parser). Base branch `static_h`, work on `rust`.
 > **Reading order context:** `doc/superpowers/RustPortRoadmap.md` (roadmap), this spec, then the
 > implementation plan(s) under `doc/superpowers/plans/`.
 
