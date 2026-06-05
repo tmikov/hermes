@@ -33,6 +33,9 @@ dependencies = [
 [[package]]
 name = "support"
 version = "0.0.0"
+dependencies = [
+ "unicode",
+]
 
 [[package]]
 name = "unicode"

@@ -9,5 +9,6 @@ pub mod line_index;
 pub mod location;
 pub mod manager;
 pub mod render;
+pub mod utf8;
 
 pub use heap_size::HeapSize;

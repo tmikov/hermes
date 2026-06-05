@@ -8,3 +8,4 @@ publish = false
 unsafe_code = "forbid"
 
 [dependencies]
+unicode = { path = "../unicode" }
