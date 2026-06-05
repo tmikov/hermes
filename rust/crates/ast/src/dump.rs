@@ -80,7 +80,7 @@ impl<'a, 'w> ESTreeJSONDumper<'a, 'w> {
 
     // --- field_* helpers, called from the generated Node::dump_children. ---
 
-    pub fn field_node<'n>(&mut self, key: &str, node: Option<&'n Node<'n>>, ignore: bool) {
+    pub(crate) fn field_node<'n>(&mut self, key: &str, node: Option<&'n Node<'n>>, ignore: bool) {
         if self.skip_empty(node.is_none(), ignore) {
             return;
         }
@@ -88,7 +88,7 @@ impl<'a, 'w> ESTreeJSONDumper<'a, 'w> {
         self.dump_node_ptr(node);
     }
 
-    pub fn field_list<'n>(&mut self, key: &str, list: NodeList<'n>, ignore: bool) {
+    pub(crate) fn field_list<'n>(&mut self, key: &str, list: NodeList<'n>, ignore: bool) {
         if self.skip_empty(list.is_empty(), ignore) {
             return;
         }
@@ -96,7 +96,7 @@ impl<'a, 'w> ESTreeJSONDumper<'a, 'w> {
         self.dump_node_list(list);
     }
 
-    pub fn field_bool(&mut self, key: &str, val: bool, ignore: bool) {
+    pub(crate) fn field_bool(&mut self, key: &str, val: bool, ignore: bool) {
         // isEmpty(NodeBoolean) == !val
         if self.skip_empty(!val, ignore) {
             return;
@@ -105,7 +105,7 @@ impl<'a, 'w> ESTreeJSONDumper<'a, 'w> {
         self.json.emit_bool(val);
     }
 
-    pub fn field_number(&mut self, key: &str, val: f64, ignore: bool) {
+    pub(crate) fn field_number(&mut self, key: &str, val: f64, ignore: bool) {
         // isEmpty(NodeNumber) == false (never empty).
         if self.skip_empty(false, ignore) {
             return;
@@ -114,7 +114,7 @@ impl<'a, 'w> ESTreeJSONDumper<'a, 'w> {
         self.json.emit_f64(val);
     }
 
-    pub fn field_label(&mut self, key: &str, label: NodeLabel, ignore: bool) {
+    pub(crate) fn field_label(&mut self, key: &str, label: NodeLabel, ignore: bool) {
         // isEmpty(NodeLabel) == false (never empty).
         if self.skip_empty(false, ignore) {
             return;
@@ -265,7 +265,8 @@ fn range_is_valid(r: SMRange) -> bool {
 
 /// Emit a range as the two buffer-relative offsets. Port of `dumpSMRangeJSON`
 /// (the caller wraps these in an array). In the offset model the offsets are the
-/// values directly.
+/// values directly. Kept `pub` to mirror the C++ public `dumpSMRangeJSON`
+/// (declared in `ESTreeJSONDumper.h`).
 pub fn dump_sm_range_json(json: &mut JSONEmitter, rng: SMRange) {
     json.emit_u64(rng.start.offset as u64);
     json.emit_u64(rng.end.offset as u64);
