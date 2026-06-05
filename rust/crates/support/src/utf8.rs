@@ -42,6 +42,9 @@ fn at(bytes: &[u8], i: usize) -> u32 {
 ///
 /// \tparam ALLOW_SURROGATES when false, values in the surrogate range are
 ///     reported as errors.
+// Keep the C++ `result >= FIRST && result <= LAST` surrogate-range check faithful
+// to UTF8.h rather than rewriting it as `(FIRST..=LAST).contains(..)`.
+#[allow(clippy::manual_range_contains)]
 pub fn decode_utf8_slow_path<const ALLOW_SURROGATES: bool>(
     bytes: &[u8],
     i: &mut usize,
