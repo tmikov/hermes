@@ -2,7 +2,7 @@
 use std::cell::Cell;
 use std::marker::PhantomData;
 
-use support::location::SMRange;
+use support::location::{SMLoc, SMRange};
 
 use crate::context::{GCLock, NodeListElement};
 use crate::node::{EmptyStatement, Node};
@@ -28,11 +28,14 @@ pub const INVALID_LABEL: u32 = u32::MAX;
 /// Metadata common to all AST nodes.
 ///
 /// Stored inside [`Node`] and must not be constructed directly by users.
-/// `range`/`parens` are attributes → `Cell`.
+/// `range`/`parens`/`debug_loc` are attributes → `Cell`.
 #[derive(Debug)]
 pub struct NodeMetadata<'gc> {
     pub(crate) phantom: PhantomData<&'gc Node<'gc>>,
     pub range: Cell<SMRange>,
+    /// Debug location, mirroring ESTree.h Node debug loc set by
+    /// JSParserImpl::setLocation. Defaults to range start.
+    pub debug_loc: Cell<SMLoc>,
     /// 0, 1, or 2 (meaning "2 or more"), mirroring ESTree.h Node::parens_.
     pub parens: Cell<u8>,
 }
@@ -42,6 +45,17 @@ impl<'gc> NodeMetadata<'gc> {
         NodeMetadata {
             phantom: PhantomData,
             range: Cell::new(range),
+            debug_loc: Cell::new(range.start),
+            parens: Cell::new(0),
+        }
+    }
+
+    /// Like `new`, but with an explicit debug location (C++ 4-arg setLocation).
+    pub fn new_with_debug(range: SMRange, debug_loc: SMLoc) -> Self {
+        NodeMetadata {
+            phantom: PhantomData,
+            range: Cell::new(range),
+            debug_loc: Cell::new(debug_loc),
             parens: Cell::new(0),
         }
     }
@@ -52,8 +66,16 @@ impl<'gc> NodeMetadata<'gc> {
         NodeMetadata {
             phantom: self.phantom,
             range: Cell::new(self.range.get()),
+            debug_loc: Cell::new(self.debug_loc.get()),
             parens: Cell::new(self.parens.get()),
         }
+    }
+
+    /// Expose `duplicate` for integration-test crates.
+    /// Not intended for production use.
+    #[doc(hidden)]
+    pub fn duplicate_pub_for_test(&self) -> NodeMetadata<'gc> {
+        self.duplicate()
     }
 }
 

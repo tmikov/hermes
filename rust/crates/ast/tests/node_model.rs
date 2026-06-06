@@ -149,3 +149,21 @@ fn gc_traces_decorations_on_function_declaration() {
         drop(keep);
     }
 }
+
+#[test]
+fn node_metadata_debug_loc_defaults_to_start() {
+    use ast::node_child::NodeMetadata;
+    use support::location::{SMLoc, SMRange, SourceId};
+
+    let start = SMLoc { source: SourceId::from_index(0), offset: 10 };
+    let end = SMLoc { source: SourceId::from_index(0), offset: 20 };
+    let md = NodeMetadata::new(SMRange { start, end });
+    assert_eq!(md.debug_loc.get(), start, "debug_loc must default to range start");
+
+    let dbg = SMLoc { source: SourceId::from_index(0), offset: 15 };
+    let md2 = NodeMetadata::new_with_debug(SMRange { start, end }, dbg);
+    assert_eq!(md2.debug_loc.get(), dbg);
+
+    let dup = md2.duplicate_pub_for_test();
+    assert_eq!(dup.debug_loc.get(), dbg);
+}
