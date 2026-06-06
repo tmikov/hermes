@@ -11,9 +11,10 @@
 use ast::context::GCLock;
 use ast::node::{
     AssignmentExpression, AwaitExpression, BigIntLiteral, BinaryExpression, BooleanLiteral,
-    ConditionalExpression, Identifier, LogicalExpression, Node, NullLiteral, NumericLiteral,
-    PrivateName, SequenceExpression, StringLiteral, ThisExpression, UnaryExpression,
-    UpdateExpression,
+    CallExpression, ConditionalExpression, Identifier, LogicalExpression, MemberExpression,
+    MetaProperty, NewExpression, Node, NullLiteral, NumericLiteral, OptionalCallExpression,
+    OptionalMemberExpression, PrivateName, SequenceExpression, SpreadElement, StringLiteral,
+    ThisExpression, UnaryExpression, UpdateExpression,
 };
 use ast::node_child::{NodeList, NodeMetadata};
 use support::location::SMLoc;
@@ -21,7 +22,7 @@ use support::location::SMLoc;
 use crate::lexer::GrammarContext;
 use crate::token_kinds::TokenKind;
 
-use super::{JSParserImpl, Param, PARAM_IN};
+use super::{IsClassHeritageArgument, IsConstructorCall, JSParserImpl, Param, PARAM_IN};
 
 // For AssignState.op field type (interned operator label).
 use atom_table;
@@ -996,7 +997,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         use crate::token_kinds::token_kind_str;
 
         let start_loc = self.cur_start();
-        let expr = self.parse_left_hand_side_expression()?;
+        let expr = self.parse_left_hand_side_expression(IsClassHeritageArgument::No)?;
 
         if self.check2(TokenKind::plusplus, TokenKind::minusminus)
             && !self.lexer.is_new_line_before_current_token()
@@ -1031,31 +1032,778 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Parse a left-hand-side expression. Port of
     /// `JSParserImpl::parseLeftHandSideExpression` (lines 4014-4024).
     ///
-    /// P1.6: member access / call / optional-chain tail — deferred.
-    /// For now just delegates to parseNewExpressionOrOptionalExpression which
-    /// in turn reaches parsePrimaryExpression.
+    /// Parses a NewExpression or OptionalExpression, then checks for a call
+    /// tail (optional chain `?.`, `(args)` or template-literal).
+    /// The `is_class_heritage_argument` flag is threaded for P3+ class-extends
+    /// parsing; P1 callers always pass `IsClassHeritageArgument::No`.
     pub(super) fn parse_left_hand_side_expression(
         &mut self,
+        is_class_heritage_argument: IsClassHeritageArgument,
     ) -> Option<&'gc Node<'gc>> {
-        // P1.6: member/call/optional tail (parseLeftHandSideExpressionTail)
-        self.parse_new_expression_or_optional_expression()
+        let start_loc = self.cur_start();
+        let expr =
+            self.parse_new_expression_or_optional_expression(IsConstructorCall::No)?;
+        self.parse_left_hand_side_expression_tail(start_loc, expr, is_class_heritage_argument)
+    }
+
+    /// Finish a left-hand-side expression after the base has been parsed.
+    /// Port of `JSParserImpl::parseLeftHandSideExpressionTail` (4026-4089).
+    ///
+    /// Handles the optional-chain `?.` prefix on a call expression, determines
+    /// `seenOptionalChain`, and dispatches to `parseCallExpression` when the
+    /// next token is `(` or a template literal.
+    ///
+    /// P6/P7: Flow/TS type-argument and record expression blocks are gated by
+    /// context flags that don't exist yet; they are omitted.
+    pub(super) fn parse_left_hand_side_expression_tail(
+        &mut self,
+        start_loc: support::location::SMLoc,
+        mut expr: &'gc Node<'gc>,
+        _is_class_heritage_argument: IsClassHeritageArgument,
+    ) -> Option<&'gc Node<'gc>> {
+        // Consume `?.` if present (4030-4034).
+        let optional =
+            self.check_and_eat(TokenKind::questiondot, GrammarContext::AllowRegExp);
+        // seenOptionalChain: true if we consumed `?.`, OR if the base expression
+        // is already an OptionalMember/OptionalCall at paren depth 0.
+        let seen_optional_chain = optional
+            || (expr.metadata().parens.get() == 0
+                && matches!(
+                    expr,
+                    Node::OptionalMemberExpression(_) | Node::OptionalCallExpression(_)
+                ));
+
+        // P6/P7: Flow/TS type-arguments block (4036-4062) — gated on
+        // context_.getParseFlow()/getParseTS() which don't exist yet. Skip.
+        // typeArgs stays None (null) in P1.
+        let type_args: Option<&'gc Node<'gc>> = None;
+
+        // Is this a CallExpression? (4065-4074)
+        if self.check2(
+            TokenKind::no_substitution_template,
+            TokenKind::template_head,
+        ) {
+            // Tagged template — P1.9 deferral.
+            self.error_cur(
+                "tagged template literals not yet supported (parser phase P1.9)",
+            );
+            return None;
+        }
+        if self.check(TokenKind::l_paren) {
+            expr = self.parse_call_expression(
+                start_loc,
+                expr,
+                type_args,
+                seen_optional_chain,
+                optional,
+            )?;
+        }
+
+        // P6: Flow record expression (4075-4086) — gated, skip.
+
+        Some(expr)
     }
 
     // -----------------------------------------------------------------------
-    // parseNewExpressionOrOptionalExpression — P1.6 placeholder
+    // parseNewExpressionOrOptionalExpression — P1.6
     // -----------------------------------------------------------------------
 
-    /// Minimal stub reaching parsePrimaryExpression. Port of
-    /// `JSParserImpl::parseNewExpressionOrOptionalExpression` (lines 3920-…).
+    /// Parse a `new`-expression or a plain optional expression. Port of
+    /// `JSParserImpl::parseNewExpressionOrOptionalExpression` (3920-4012).
     ///
-    /// P1.6: `new`, optional chaining (`?.`), call expressions, member
-    ///       select — all deferred.
+    /// If the current token is NOT `new`, delegates to
+    /// `parse_optional_expression_except_new`. Otherwise:
+    /// - `new.target` → `MetaProperty(meta=Identifier"new", prop=Identifier"target")`
+    ///   followed by the optional-expression tail.
+    /// - `new <callee> [(<args>)]` → `NewExpression`; if arguments follow, also
+    ///   handles trailing member selects.
+    ///
+    /// P6/P7: Flow/TS `typeArgs` block is gated and omitted; `type_arguments`
+    /// is always `None` in P1.
     pub(super) fn parse_new_expression_or_optional_expression(
         &mut self,
+        is_constructor_call: IsConstructorCall,
     ) -> Option<&'gc Node<'gc>> {
-        // P1.6: `new` expression, optional chaining
-        // Fall through to parsePrimaryExpression for P1.1.
-        self.parse_primary_expression()
+        if !self.check(TokenKind::rw_new) {
+            return self
+                .parse_optional_expression_except_new(is_constructor_call);
+        }
+
+        // Consume `new`; C++ `advance()` returns the OLD range (the `new` range).
+        let new_range = self.advance(GrammarContext::AllowRegExp);
+        let new_start = new_range.start;
+
+        // new . target (MetaProperty)?
+        if self.check_and_eat(TokenKind::period, GrammarContext::AllowDiv) {
+            // "new . target" — 3927-3948.
+            // After eating `.`, current token should be `target` identifier.
+            // We use `get_res_word_or_identifier` because `target` is a plain
+            // identifier (not a keyword), but defensively check.
+            let target_bytes = if self.cur_kind() == TokenKind::identifier {
+                Some(
+                    self.lexer
+                        .get_string_table()
+                        .bytes(self.lexer.token().get_identifier()),
+                )
+            } else {
+                None
+            };
+            if target_bytes.as_deref() != Some(b"target") {
+                self.error_cur("'target' expected in member expression");
+                self.lexer.get_source_mgr_mut().note_at(
+                    new_start,
+                    None,
+                    "start of member expression",
+                    support::diag::Subsystem::Parser,
+                );
+                return None;
+            }
+            // Build MetaProperty(Identifier"new", Identifier"target").
+            let new_ident = self
+                .gc
+                .ctx()
+                .atom_table
+                .atom_bytes(b"new");
+            let target_ident = self
+                .gc
+                .ctx()
+                .atom_table
+                .atom_bytes(b"target");
+            let meta = Node::Identifier(Identifier::new(
+                NodeMetadata::new(self.dummy_range()),
+                new_ident,
+                None,
+                false,
+            ));
+            let meta_ref = self.set_location(new_start, new_range.end, meta);
+            let prop = Node::Identifier(Identifier::new(
+                NodeMetadata::new(self.dummy_range()),
+                target_ident,
+                None,
+                false,
+            ));
+            let prop_tok_start = self.lexer.token().start_loc();
+            let prop_tok_end = self.lexer.token().end_loc();
+            let prop_ref = self.set_location(prop_tok_start, prop_tok_end, prop);
+            // Advance past "target".
+            self.advance(GrammarContext::AllowDiv);
+            let meta_prop = Node::MetaProperty(MetaProperty::new(
+                NodeMetadata::new(self.dummy_range()),
+                meta_ref,
+                prop_ref,
+            ));
+            let meta_prop_ref = self.set_location(new_start, prop_tok_end, meta_prop);
+            // Then continue with the optional-expression tail.
+            return self.parse_optional_expression_except_new_tail(
+                is_constructor_call,
+                new_start,
+                meta_prop_ref,
+            );
+        }
+
+        // CHECK_RECURSION (line 3950).
+        let _guard = self.check_recursion()?;
+
+        // Recurse with IsConstructorCall::Yes to parse the callee.
+        let expr = self
+            .parse_new_expression_or_optional_expression(IsConstructorCall::Yes)?;
+
+        // P6/P7: typeArgs block (3957-3975) — gated; skip. type_args = None.
+        let type_args: Option<&'gc Node<'gc>> = None;
+
+        // If there's no `(`, this is `new Foo` (no args) — a NewExpression.
+        if !self.check(TokenKind::l_paren) {
+            let end = self.lexer.prev_token_end();
+            let node = Node::NewExpression(NewExpression::new(
+                NodeMetadata::new(self.dummy_range()),
+                expr,
+                type_args,
+                NodeList::empty(),
+            ));
+            return Some(self.set_location(new_start, end, node));
+        }
+
+        // There IS a `(` — parse arguments.
+        let debug_loc = self.lexer.token().start_loc();
+        let (arg_list, end_loc) = self.parse_arguments()?;
+        let node = Node::NewExpression(NewExpression::new(
+            NodeMetadata::new(self.dummy_range()),
+            expr,
+            type_args,
+            NodeList::from_iter(self.gc, arg_list),
+        ));
+        let mut expr = self.set_location_d(new_start, end_loc, debug_loc, node);
+
+        // Handle trailing member selects after `new Foo(args)`:
+        // e.g. `new A().b` — the `.b` member-select comes here.
+        let mut object_loc = new_start;
+        while self.check_n3(
+            TokenKind::l_square,
+            TokenKind::period,
+            TokenKind::questiondot,
+        ) {
+            let next_object_loc = self.lexer.token().start_loc();
+            expr = self.parse_member_select(new_start, object_loc, expr, false)?;
+            object_loc = next_object_loc;
+        }
+
+        Some(expr)
+    }
+
+    // -----------------------------------------------------------------------
+    // parseOptionalExpressionExceptNew — P1.6
+    // -----------------------------------------------------------------------
+
+    /// Parse a primary/super/import expression and then continue with the
+    /// optional-expression tail. Port of
+    /// `JSParserImpl::parseOptionalExpressionExceptNew` (3424-3519).
+    ///
+    /// Deferrals:
+    /// - `rw_super` — P3: emit error and return `None`.
+    /// - `rw_import` — P4: emit error and return `None`.
+    fn parse_optional_expression_except_new(
+        &mut self,
+        is_constructor_call: IsConstructorCall,
+    ) -> Option<&'gc Node<'gc>> {
+        let start_loc = self.cur_start();
+
+        let expr: &'gc Node<'gc> = if self.check(TokenKind::rw_super) {
+            // P3: `super.prop` / `super(args)` / `super[expr]`.
+            self.error_cur("'super' not yet supported (parser phase P3)");
+            return None;
+        } else if self.check(TokenKind::rw_import) {
+            // P4: `import.meta` and `import(source)`.
+            self.error_cur(
+                "import expressions not yet supported (parser phase P4)",
+            );
+            return None;
+        } else {
+            self.parse_primary_expression()?
+        };
+
+        self.parse_optional_expression_except_new_tail(is_constructor_call, start_loc, expr)
+    }
+
+    /// Continue an optional-expression after the base expression by consuming
+    /// member-select suffixes (`[…]`, `.id`, `?.id`, `?.(args)`). Port of
+    /// `JSParserImpl::parseOptionalExpressionExceptNew_tail` (3521-3592).
+    ///
+    /// ### Recursion-depth accounting
+    ///
+    /// The C++ uses `SaveAndRestore<unsigned> savedRecursionDepth{recursionDepth_,
+    /// recursionDepth_}` (saves a copy, restores on return) and then
+    /// `++recursionDepth_; recursionDepthCheck()` on each loop iteration. The
+    /// intent is:
+    ///   - Each *call to the tail* starts from the current depth.
+    ///   - Each *iteration* of the loop increments the global counter by 1, so
+    ///     a very long chain (`a.b.c.d…`) can still hit the limit.
+    ///   - At the end of the tail (however it exits) the counter is restored to
+    ///     the value it had when the tail was entered (the `SaveAndRestore`).
+    ///
+    /// In Rust we replicate this with an explicit save/restore:
+    ///   1. Save `self.recursion_depth.get()` before the loop.
+    ///   2. Each iteration increments by 1 and calls `recursion_depth_check`.
+    ///   3. After the loop (or on early return from it) we restore the saved
+    ///      value.
+    ///
+    /// This matches the C++ semantics without a per-iteration RAII guard
+    /// (which would under-count, only tracking one level).
+    ///
+    /// ### Deferrals
+    /// - Template literal as tag (tagged template) — P1.9: error + `None`.
+    fn parse_optional_expression_except_new_tail(
+        &mut self,
+        is_constructor_call: IsConstructorCall,
+        start_loc: support::location::SMLoc,
+        mut expr: &'gc Node<'gc>,
+    ) -> Option<&'gc Node<'gc>> {
+        let mut object_loc = start_loc;
+        let mut seen_optional_chain = false;
+
+        // Save the recursion depth before the loop; restore on exit (mirrors
+        // C++ `SaveAndRestore<unsigned> savedRecursionDepth`).
+        let saved_depth = self.recursion_depth.get();
+
+        loop {
+            // checkN(l_square, period, questiondot) || checkTemplateLiteral()
+            let is_member = self.check_n3(
+                TokenKind::l_square,
+                TokenKind::period,
+                TokenKind::questiondot,
+            );
+            let is_template = self.check2(
+                TokenKind::no_substitution_template,
+                TokenKind::template_head,
+            );
+            if !is_member && !is_template {
+                break;
+            }
+
+            // ++recursionDepth_; if (LLVM_UNLIKELY(recursionDepthCheck())) return None;
+            let new_depth = self.recursion_depth.get() + 1;
+            self.recursion_depth.set(new_depth);
+            if new_depth > super::MAX_RECURSION_DEPTH {
+                let range = self.cur_range();
+                self.error_at(
+                    range,
+                    "Too many nested expressions/statements/declarations",
+                );
+                // Restore before returning.
+                self.recursion_depth.set(saved_depth);
+                return None;
+            }
+
+            let next_object_loc = self.lexer.token().start_loc();
+
+            if is_member {
+                if self.check(TokenKind::questiondot) {
+                    seen_optional_chain = true;
+                    if is_constructor_call == IsConstructorCall::Yes {
+                        // Report but continue — C++ does the same.
+                        let range = self.cur_range();
+                        self.error_at(
+                            range,
+                            "Constructor calls may not contain an optional chain",
+                        );
+                    }
+                }
+                // MemberExpression [ Expression ]
+                // MemberExpression . IdentifierName
+                // MemberExpression OptionalChain
+                let new_expr = self.parse_member_select(
+                    start_loc,
+                    object_loc,
+                    expr,
+                    seen_optional_chain,
+                );
+                object_loc = next_object_loc;
+                // Restore depth before potential early return.
+                self.recursion_depth.set(saved_depth);
+                expr = new_expr?;
+                // Re-save depth for the next iteration (the C++ restore only
+                // happens at the top of SaveAndRestore scope, i.e. on return).
+                // We mimic this by keeping saved_depth constant and restoring
+                // after each parse_member_select call, but since the loop
+                // continues, we must re-establish the invariant. The C++ counter
+                // STAYS incremented across iterations (SaveAndRestore only
+                // restores on function return, not per-iteration). So we must
+                // NOT reset saved_depth here — we let the depth accumulate.
+                // Re-set to the new (incremented) value.
+                self.recursion_depth.set(new_depth);
+            } else {
+                // Template literal branch — P1.9 deferral.
+                self.error_cur(
+                    "tagged template literals not yet supported (parser phase P1.9)",
+                );
+                self.recursion_depth.set(saved_depth);
+                return None;
+            }
+        }
+
+        // Restore the recursion depth to the value before this tail call.
+        self.recursion_depth.set(saved_depth);
+        Some(expr)
+    }
+
+    // -----------------------------------------------------------------------
+    // parse_arguments — P1.6
+    // -----------------------------------------------------------------------
+
+    /// Parse a function call's argument list: `( arg, ...arg, arg )`. Port of
+    /// `JSParserImpl::parseArguments` (3594-3647).
+    ///
+    /// Returns the argument node-list and the end location (the `)` end).
+    /// Each `...expr` becomes a `SpreadElement`; plain expressions are passed
+    /// through.
+    ///
+    /// Faithfully ports the trailing-comma + spread-before-arrow error check
+    /// (3628-3632): if there is a trailing comma after a spread and `=>` follows,
+    /// error "Rest parameter must be last formal parameter". In P1 arrow
+    /// functions are deferred, so this error is never triggered in practice,
+    /// but the check is present for correctness.
+    fn parse_arguments(
+        &mut self,
+    ) -> Option<(Vec<&'gc Node<'gc>>, support::location::SMLoc)> {
+        // Consume `(`.
+        let l_paren_range = self.advance(GrammarContext::AllowRegExp);
+        let l_paren_start = l_paren_range.start;
+
+        let mut arg_list: Vec<&'gc Node<'gc>> = Vec::new();
+
+        if !self.check(TokenKind::r_paren) {
+            let mut last_was_spread;
+            loop {
+                let arg_start = self.lexer.token().start_loc();
+                let is_spread =
+                    self.check_and_eat(TokenKind::dotdotdot, GrammarContext::AllowRegExp);
+
+                let arg = self.parse_assignment_expression(PARAM_IN)?;
+
+                if is_spread {
+                    let spread_end = self.lexer.prev_token_end();
+                    let node = Node::SpreadElement(SpreadElement::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        arg,
+                    ));
+                    let node_ref = self.set_location(arg_start, spread_end, node);
+                    arg_list.push(node_ref);
+                } else {
+                    arg_list.push(arg);
+                }
+                last_was_spread = is_spread;
+
+                if !self.check_and_eat(TokenKind::comma, GrammarContext::AllowRegExp) {
+                    break;
+                }
+
+                // Check for ",)" — trailing comma before ")".
+                if self.check(TokenKind::r_paren) {
+                    let end_loc = self.lexer.token().end_loc();
+                    self.advance(GrammarContext::AllowDiv);
+                    // If we saw a spread and `=>` follows, that's an async-arrow
+                    // rest-parameter error (C++ 3628-3632). Port faithfully even
+                    // though `=>` errors elsewhere in P1.
+                    if last_was_spread && self.check(TokenKind::equalgreater) {
+                        let err_loc = arg_list.last().unwrap().range().end;
+                        self.lexer.get_source_mgr_mut().error_at(
+                            err_loc,
+                            None,
+                            "Rest parameter must be last formal parameter",
+                            support::diag::Subsystem::Parser,
+                        );
+                    }
+                    return Some((arg_list, end_loc));
+                }
+            }
+        }
+
+        // Consume the closing `)`.
+        let end_loc = self.lexer.token().end_loc();
+        if !self.eat(
+            TokenKind::r_paren,
+            GrammarContext::AllowDiv,
+            "at end of function call",
+        ) {
+            // Emit a note pointing to the opening `(`.
+            self.lexer.get_source_mgr_mut().note_at(
+                l_paren_start,
+                None,
+                "location of '('",
+                support::diag::Subsystem::Parser,
+            );
+            return None;
+        }
+
+        Some((arg_list, end_loc))
+    }
+
+    // -----------------------------------------------------------------------
+    // parse_member_select — P1.6
+    // -----------------------------------------------------------------------
+
+    /// Parse one member-select suffix: `[expr]`, `.id`, `?.id`, or `?.(args)`.
+    /// Port of `JSParserImpl::parseMemberSelect` (3649-3793).
+    ///
+    /// `start_loc` is the start of the whole expression chain (not just this
+    /// suffix), matching C++ `setLocation(startLoc, …)`.
+    ///
+    /// `object_loc` is used only in the error-message note ("start of member
+    /// expression") — C++ passes it to `need(…, objectLoc)`.
+    ///
+    /// `seen_optional_chain` is the outer flag; `optional` is whether THIS
+    /// particular suffix started with `?.`.
+    ///
+    /// P6/P7: Flow/TS `typeArgs` blocks (3744-3777) are gated on parse-Flow /
+    /// parse-TS context flags that don't exist yet; omitted.  `type_args` is
+    /// always `None` in P1.
+    fn parse_member_select(
+        &mut self,
+        start_loc: support::location::SMLoc,
+        object_loc: support::location::SMLoc,
+        expr: &'gc Node<'gc>,
+        seen_optional_chain: bool,
+    ) -> Option<&'gc Node<'gc>> {
+        let punc_loc = self.lexer.token().start_loc();
+        // Consume `?.` if present.
+        let optional =
+            self.check_and_eat(TokenKind::questiondot, GrammarContext::AllowRegExp);
+
+        if self.check_and_eat(TokenKind::l_square, GrammarContext::AllowRegExp) {
+            // MemberExpression [ Expression ] — computed member access.
+            // Parsing an Expression directly without going through
+            // PrimaryExpression; can overflow, so check.
+            let _guard = self.check_recursion()?;
+            let prop_expr = self.parse_expression(PARAM_IN)?;
+            let end_loc = self.lexer.token().end_loc();
+            if !self.eat(
+                TokenKind::r_square,
+                GrammarContext::AllowDiv,
+                "at end of member expression '[...'",
+            ) {
+                self.lexer.get_source_mgr_mut().note_at(
+                    punc_loc,
+                    None,
+                    "location of '['",
+                    support::diag::Subsystem::Parser,
+                );
+                return None;
+            }
+            if optional || seen_optional_chain {
+                let node = Node::OptionalMemberExpression(OptionalMemberExpression::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    expr,
+                    prop_expr,
+                    true,
+                    optional,
+                ));
+                return Some(self.set_location_d(start_loc, end_loc, punc_loc, node));
+            }
+            let node = Node::MemberExpression(MemberExpression::new(
+                NodeMetadata::new(self.dummy_range()),
+                expr,
+                prop_expr,
+                true,
+            ));
+            return Some(self.set_location_d(start_loc, end_loc, punc_loc, node));
+        }
+
+        // `.id` or `?.id` path (also handles `?.` without `(` or `<`).
+        //
+        // The C++ condition is:
+        //   checkAndEat(period) ||
+        //   (optional && !(check(l_paren) || (getParseFlow() && check(less))))
+        //
+        // In P1, `getParseFlow()` is false, so the condition simplifies to:
+        //   checkAndEat(period) || (optional && !check(l_paren))
+        let ate_period =
+            self.check_and_eat(TokenKind::period, GrammarContext::AllowDiv);
+        if ate_period || (optional && !self.check(TokenKind::l_paren)) {
+            // The next token must be an identifier, a private identifier, or a
+            // reserved word used as a member name (e.g. `a.if`).
+            if !self.check2(TokenKind::identifier, TokenKind::private_identifier)
+                && !self.lexer.token().is_res_word()
+            {
+                if !self.need(
+                    TokenKind::identifier,
+                    "after '.' or '?.' in member expression",
+                ) {
+                    self.lexer.get_source_mgr_mut().note_at(
+                        object_loc,
+                        None,
+                        "start of member expression",
+                        support::diag::Subsystem::Parser,
+                    );
+                    return None;
+                }
+            }
+
+            let id: &'gc Node<'gc>;
+            if self.check(TokenKind::private_identifier) {
+                // Private name: `a.#x`
+                id = self.parse_private_name()?;
+            } else {
+                // Plain identifier OR reserved word used as property name.
+                let name = self.lexer.token().get_res_word_or_identifier();
+                let tok_start = self.lexer.token().start_loc();
+                let tok_end = self.lexer.token().end_loc();
+                let node = Node::Identifier(Identifier::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    name,
+                    None,
+                    false,
+                ));
+                let node_ref = self.set_location(tok_start, tok_end, node);
+                self.advance(GrammarContext::AllowDiv);
+                id = node_ref;
+            }
+
+            let id_end = id.range().end;
+            if optional || seen_optional_chain {
+                let node = Node::OptionalMemberExpression(OptionalMemberExpression::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    expr,
+                    id,
+                    false,
+                    optional,
+                ));
+                return Some(self.set_location_d(start_loc, id_end, punc_loc, node));
+            }
+            let node = Node::MemberExpression(MemberExpression::new(
+                NodeMetadata::new(self.dummy_range()),
+                expr,
+                id,
+                false,
+            ));
+            return Some(self.set_location_d(start_loc, id_end, punc_loc, node));
+        }
+
+        // The only remaining case is `?.(args)` — optional call on `?.`.
+        // C++ assert: `optional && check(l_paren)`.
+        debug_assert!(optional && self.check(TokenKind::l_paren));
+
+        // P6/P7: typeArgs block (3744-3777) — gated; skip.
+        let type_args: Option<&'gc Node<'gc>> = None;
+
+        let debug_loc = self.lexer.token().start_loc();
+        let (arg_list, end_loc) = self.parse_arguments()?;
+        let node = Node::OptionalCallExpression(OptionalCallExpression::new(
+            NodeMetadata::new(self.dummy_range()),
+            expr,
+            type_args,
+            NodeList::from_iter(self.gc, arg_list),
+            true,
+        ));
+        Some(self.set_location_d(start_loc, end_loc, debug_loc, node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parse_call_expression — P1.6
+    // -----------------------------------------------------------------------
+
+    /// Parse a call expression chain starting after the base expression has
+    /// already been parsed. Port of `JSParserImpl::parseCallExpression`
+    /// (3795-3893).
+    ///
+    /// On entry the current token is `(` (or a template literal head, which
+    /// is P1.9).  Each iteration of the loop handles one suffix:
+    ///
+    /// - `(args)` → `CallExpression` or `OptionalCallExpression` (if
+    ///   `seen_optional_chain`).
+    /// - `[expr]` / `.id` / `?.id` / `?.(args)` → `parseMemberSelect`.
+    /// - Template literal → P1.9 deferral error.
+    ///
+    /// `type_args` carries Flow/TS type arguments from the caller; always
+    /// `None` in P1. After each `(args)` call the type-args are consumed
+    /// (reset to `None`) to allow the next call in the chain to supply its own.
+    ///
+    /// P6/P7: Flow/TS type-argument parsing (3809-3828) — gated; omitted.
+    fn parse_call_expression(
+        &mut self,
+        start_loc: support::location::SMLoc,
+        mut expr: &'gc Node<'gc>,
+        mut type_args: Option<&'gc Node<'gc>>,
+        mut seen_optional_chain: bool,
+        mut optional: bool,
+    ) -> Option<&'gc Node<'gc>> {
+        let mut object_loc = start_loc;
+
+        loop {
+            // P6/P7: Flow/TS type-argument block (3809-3828) — gated; skip.
+
+            if self.check(TokenKind::l_paren) {
+                let debug_loc = self.lexer.token().start_loc();
+                // parseArguments can itself recurse into parseCallExpression
+                // without going through a primary or declaration → CHECK_RECURSION.
+                let _guard = self.check_recursion()?;
+                let (arg_list, end_loc) = self.parse_arguments()?;
+
+                if seen_optional_chain {
+                    let node = Node::OptionalCallExpression(OptionalCallExpression::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        expr,
+                        type_args,
+                        NodeList::from_iter(self.gc, arg_list),
+                        optional,
+                    ));
+                    expr = self.set_location_d(start_loc, end_loc, debug_loc, node);
+                } else {
+                    let node = Node::CallExpression(CallExpression::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        expr,
+                        type_args,
+                        NodeList::from_iter(self.gc, arg_list),
+                    ));
+                    expr = self.set_location_d(start_loc, end_loc, debug_loc, node);
+                }
+                // Consume the type-args (they have been used).
+                type_args = None;
+                // After a call, `optional` must NOT propagate (only the
+                // initial `?.` is `optional`; subsequent calls in the chain
+                // are not individually optional unless preceded by `?.`).
+                optional = false;
+            } else if self.check_n3(
+                TokenKind::l_square,
+                TokenKind::period,
+                TokenKind::questiondot,
+            ) {
+                if self.check(TokenKind::questiondot) {
+                    seen_optional_chain = true;
+                }
+                let next_object_loc = self.lexer.token().start_loc();
+                expr = self.parse_member_select(
+                    start_loc,
+                    object_loc,
+                    expr,
+                    seen_optional_chain,
+                )?;
+                object_loc = next_object_loc;
+                // A `?.(args)` inside parseMemberSelect will have consumed the
+                // `?.` and the args; `optional` resets to false for the next round.
+                optional = false;
+            } else if self.check2(
+                TokenKind::no_substitution_template,
+                TokenKind::template_head,
+            ) {
+                // Tagged template — P1.9 deferral.
+                self.error_cur(
+                    "tagged template literals not yet supported (parser phase P1.9)",
+                );
+                return None;
+            } else {
+                break;
+            }
+        }
+
+        Some(expr)
+    }
+
+    // -----------------------------------------------------------------------
+    // parse_private_name — P1.6
+    // -----------------------------------------------------------------------
+
+    /// Parse a `#identifier` private name. Port of
+    /// `JSParserImpl::parsePrivateName` (1182-1195).
+    ///
+    /// Precondition: current token is `private_identifier`.
+    /// Returns a `PrivateName` node wrapping an `Identifier` whose name is
+    /// the identifier part (without `#`).
+    ///
+    /// The C++ additionally errors if the private name is `#constructor`
+    /// (`privateIdent == constructorIdent_`). We port that check.
+    pub(super) fn parse_private_name(&mut self) -> Option<&'gc Node<'gc>> {
+        debug_assert!(self.check(TokenKind::private_identifier));
+        let private_ident_name = self.lexer.token().get_private_identifier();
+        let tok_start = self.lexer.token().start_loc();
+        let tok_end = self.lexer.token().end_loc();
+
+        // Build the inner Identifier node with the private identifier's name
+        // (the part after `#`).
+        let ident_node = Node::Identifier(Identifier::new(
+            NodeMetadata::new(self.dummy_range()),
+            private_ident_name,
+            None,
+            false,
+        ));
+        let ident_ref = self.set_location(tok_start, tok_end, ident_node);
+
+        // Error if the private name is `#constructor`.
+        let constructor_bytes = b"constructor";
+        let name_bytes = self.lexer.get_string_table().bytes(private_ident_name);
+        if name_bytes == constructor_bytes {
+            let ident_range = ident_ref.range();
+            self.error_at(ident_range, "Private names cannot be '#constructor'");
+        }
+
+        // Consume the private_identifier token.  `advance()` returns the old
+        // token's range; `advance().Start` == tok_start (same token).
+        self.advance(GrammarContext::AllowDiv);
+
+        // PrivateName node with the same source range as the private_identifier.
+        let priv_node = Node::PrivateName(PrivateName::new(
+            NodeMetadata::new(self.dummy_range()),
+            ident_ref,
+        ));
+        Some(self.set_location(tok_start, tok_end, priv_node))
     }
 
     // -----------------------------------------------------------------------

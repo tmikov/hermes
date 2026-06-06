@@ -30,6 +30,24 @@ pub(super) enum AllowImportExport {
     No,
 }
 
+/// Whether we are recursing into `new` expression parsing.
+/// Port of C++ `JSParserImpl::IsConstructorCall`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum IsConstructorCall {
+    No,
+    Yes,
+}
+
+/// Whether this LHS is being parsed as the `extends` clause of a class.
+/// Port of C++ `JSParserImpl::IsClassHeritageArgument`.
+/// P1 callers always pass `No`; P3+ (class parsing) will pass `Yes`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[allow(dead_code)]
+pub(super) enum IsClassHeritageArgument {
+    No,
+    Yes,
+}
+
 /// A bitmask of grammar parameters threaded between parse functions.
 /// Port of `JSParserImpl::Param`.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
@@ -172,6 +190,19 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let k = self.cur_kind();
         k == k1 || k == k2
     }
+    /// True if the current token is any of three kinds.
+    /// Port of `checkN(k1,k2,k3)`.
+    #[inline]
+    pub(super) fn check_n3(
+        &self,
+        k1: TokenKind,
+        k2: TokenKind,
+        k3: TokenKind,
+    ) -> bool {
+        let k = self.cur_kind();
+        k == k1 || k == k2 || k == k3
+    }
+
     /// True if the current token is any of four kinds.
     /// Port of `checkN(k1,k2,k3,k4)`.
     #[inline]
