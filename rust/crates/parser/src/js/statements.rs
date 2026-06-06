@@ -539,14 +539,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         let body = self.parse_statement(param.get(PARAM_RETURN))?;
 
-        let start = start_loc;
         let end = body.metadata().range.get().end;
         let node = Node::WithStatement(WithStatement::new(
             NodeMetadata::new(self.dummy_range()),
             object,
             body,
         ));
-        Some(self.set_location(start, end, node))
+        Some(self.set_location(start_loc, end, node))
     }
 
     // -----------------------------------------------------------------------
