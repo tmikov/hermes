@@ -578,8 +578,9 @@ mod tests {
         assert!(parser.error_count_pub() >= 1);
     }
 
+    /// Array literals are implemented in P1.7; `[1]` must now parse cleanly.
     #[test]
-    fn deferred_array_literal_errors() {
+    fn array_literal_parses() {
         use ast::context::Context;
         use support::manager::SourceErrorManager;
 
@@ -596,10 +597,10 @@ mod tests {
         );
         let mut parser = JSParserImpl::new(&gc, lexer);
         assert!(
-            parser.parse().is_none(),
-            "array literal should error in P1.1"
+            parser.parse().is_some(),
+            "array literal should parse successfully in P1.7"
         );
-        assert!(parser.error_count_pub() >= 1);
+        assert_eq!(parser.error_count_pub(), 0);
     }
 
     #[test]

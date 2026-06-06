@@ -10,11 +10,11 @@
 
 use ast::context::GCLock;
 use ast::node::{
-    AssignmentExpression, AwaitExpression, BigIntLiteral, BinaryExpression, BooleanLiteral,
-    CallExpression, ConditionalExpression, Identifier, LogicalExpression, MemberExpression,
-    MetaProperty, NewExpression, Node, NullLiteral, NumericLiteral, OptionalCallExpression,
-    OptionalMemberExpression, PrivateName, SequenceExpression, SpreadElement, StringLiteral,
-    ThisExpression, UnaryExpression, UpdateExpression,
+    ArrayExpression, AssignmentExpression, AwaitExpression, BigIntLiteral, BinaryExpression,
+    BooleanLiteral, CallExpression, ConditionalExpression, Empty, Identifier, LogicalExpression,
+    MemberExpression, MetaProperty, NewExpression, Node, NullLiteral, NumericLiteral,
+    OptionalCallExpression, OptionalMemberExpression, PrivateName, SequenceExpression,
+    SpreadElement, StringLiteral, ThisExpression, UnaryExpression, UpdateExpression,
 };
 use ast::node_child::{NodeList, NodeMetadata};
 use support::location::SMLoc;
@@ -1498,6 +1498,105 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
+    // parse_array_literal — P1.7
+    // -----------------------------------------------------------------------
+
+    /// Parse an array literal: `[ elem, , ...spread, ]`. Port of
+    /// `JSParserImpl::parseArrayLiteral` (2711-2763).
+    ///
+    /// Elements:
+    /// - Elision (bare `,`) → `EmptyNode` located at the comma token.
+    /// - `...expr` → `SpreadElement` via `parse_spread_element`.
+    /// - Otherwise → `parse_assignment_expression`.
+    ///
+    /// Trailing `,` before `]` sets `trailingComma = true`.
+    fn parse_array_literal(&mut self) -> Option<&'gc Node<'gc>> {
+        debug_assert!(self.check(TokenKind::l_square));
+
+        // Consume `[`; record its start for the final setLocation.
+        let start_loc = self.advance(GrammarContext::AllowRegExp).start;
+
+        let mut elem_list: Vec<&'gc Node<'gc>> = Vec::new();
+        let mut trailing_comma = false;
+
+        if !self.check(TokenKind::r_square) {
+            loop {
+                if self.check(TokenKind::comma) {
+                    // Elision: bare `,` → Empty node located at the comma.
+                    let comma_range = self.cur_range();
+                    let empty_node = Node::Empty(Empty::new(NodeMetadata::new(self.dummy_range())));
+                    let empty_ref =
+                        self.set_location(comma_range.start, comma_range.end, empty_node);
+                    elem_list.push(empty_ref);
+                } else if self.check(TokenKind::dotdotdot) {
+                    // Spread: `...assignmentExpr`.
+                    let spread_ref = self.parse_spread_element()?;
+                    elem_list.push(spread_ref);
+                } else {
+                    // Regular assignment expression.
+                    let _guard = self.check_recursion()?;
+                    let expr = self.parse_assignment_expression(PARAM_IN)?;
+                    elem_list.push(expr);
+                }
+
+                if !self.check_and_eat(TokenKind::comma, GrammarContext::AllowRegExp) {
+                    break;
+                }
+                if self.check(TokenKind::r_square) {
+                    // Trailing `,` before `]`.
+                    trailing_comma = true;
+                    break;
+                }
+            }
+        }
+
+        let end_loc = self.lexer.token().end_loc();
+        if !self.eat(
+            TokenKind::r_square,
+            GrammarContext::AllowDiv,
+            "at end of array literal '[...'",
+        ) {
+            self.lexer.get_source_mgr_mut().note_at(
+                start_loc,
+                None,
+                "location of '['",
+                support::diag::Subsystem::Parser,
+            );
+            return None;
+        }
+
+        let node = Node::ArrayExpression(ArrayExpression::new(
+            NodeMetadata::new(self.dummy_range()),
+            NodeList::from_iter(self.gc, elem_list),
+            trailing_comma,
+        ));
+        Some(self.set_location(start_loc, end_loc, node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parse_spread_element — P1.7
+    // -----------------------------------------------------------------------
+
+    /// Parse a spread element: `... assignmentExpr`. Port of
+    /// `JSParserImpl::parseSpreadElement` (2815-2827).
+    ///
+    /// Located from the `...` start to `prev_token_end()` (the end of the
+    /// argument expression).
+    fn parse_spread_element(&mut self) -> Option<&'gc Node<'gc>> {
+        debug_assert!(self.check(TokenKind::dotdotdot));
+
+        // Consume `...`; record its start.
+        let start_loc = self.advance(GrammarContext::AllowRegExp).start;
+
+        let _guard = self.check_recursion()?;
+        let arg = self.parse_assignment_expression(PARAM_IN)?;
+
+        let end_loc = self.lexer.prev_token_end();
+        let node = Node::SpreadElement(SpreadElement::new(NodeMetadata::new(self.dummy_range()), arg));
+        Some(self.set_location(start_loc, end_loc, node))
+    }
+
+    // -----------------------------------------------------------------------
     // parse_member_select — P1.6
     // -----------------------------------------------------------------------
 
@@ -1950,13 +2049,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 None
             }
 
-            // array literal — deferred (P1.7)
-            TokenKind::l_square => {
-                self.error_cur(
-                    "array literals not yet supported (parser phase P1.7)",
-                );
-                None
-            }
+            // array literal — P1.7
+            TokenKind::l_square => self.parse_array_literal(),
 
             // object literal — deferred (P1.8)
             TokenKind::l_brace => {
