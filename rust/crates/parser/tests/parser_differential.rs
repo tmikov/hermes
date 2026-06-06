@@ -13,6 +13,9 @@
 //!   is what the Rust side emits with `--dump-source-location` (LocAndRange).
 //! - hermesc pretty-prints by default (`-pretty` init(true)), so the Rust side
 //!   passes `--pretty`; no flag is needed on the hermesc side.
+//! - hermesc's `-Xinclude-raw-ast-prop` defaults to true, so it always emits the
+//!   `"raw"` field (e.g. on NumericLiteral); the Rust dumper omits it unless
+//!   `--include-raw-ast-prop` is passed, so the harness always passes it.
 //!
 //! The gate is deliberately trivia-only (empty/whitespace/comments) for phase
 //! P0; later parser phases extend the corpus with real JS. Skip cleanly when

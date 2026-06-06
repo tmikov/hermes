@@ -155,7 +155,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     ///       Every other keyword case emits an honest "not yet supported" error.
     pub(super) fn parse_statement(
         &mut self,
-        _param: Param,
+        param: Param,
     ) -> Option<&'gc Node<'gc>> {
         let _guard = self.check_recursion()?;
 
@@ -218,7 +218,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 None
             }
             // default: parseExpressionOrLabelledStatement
-            _ => self.parse_expression_or_labelled_statement(_param),
+            _ => self.parse_expression_or_labelled_statement(param),
         }
     }
 
@@ -403,15 +403,15 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Process a recognised directive string. Port of
     /// `JSParserImpl::processDirective` (lines 340-346).
     fn process_directive(&mut self, directive: atom_table::AtomBytes) {
-        let bytes = self
-            .lexer
-            .get_string_table()
-            .bytes(directive)
-            .to_vec();
-        if bytes == b"use strict" {
+        // Compare as slices and capture the booleans first so the immutable
+        // borrow of the atom table ends before the following `&mut self` calls.
+        let bytes = self.lexer.get_string_table().bytes(directive);
+        let is_use_strict = bytes == b"use strict";
+        let is_static_builtin = bytes == b"use static builtin";
+        if is_use_strict {
             self.lexer.set_strict_mode(true);
         }
-        if bytes == b"use static builtin" {
+        if is_static_builtin {
             self.use_static_builtin = true;
         }
     }

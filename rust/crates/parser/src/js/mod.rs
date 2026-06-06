@@ -8,6 +8,9 @@
 //! The JS parser (`JSParserImpl`). Port of `lib/Parser/JSParserImpl*`.
 //! Recursive-descent LL(1) over `JSLexer`, building the `ast` ESTree.
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use ast::context::GCLock;
 use ast::node::Node;
 use support::location::{SMLoc, SMRange};
@@ -73,22 +76,16 @@ const MAX_RECURSION_DEPTH: u32 = 1024;
 /// every `check_recursion` call site is balanced even on early return.
 ///
 /// Design note: the C++ uses a macro that increments on entry and decrements
-/// on scope exit via RAII. In Rust we can't hold `&mut self.recursion_depth`
-/// inside a guard while `self` is also borrowed by the parse methods.  We
-/// therefore store only a raw pointer to the counter — sound because the
-/// parser struct outlives every guard it creates, and guards are never moved
-/// off the stack.
-pub(super) struct RecursionGuard(*mut u32);
+/// on scope exit via RAII. A guard holding `&mut self.recursion_depth` can't
+/// coexist with the `&mut self` the parse methods need, so instead the counter
+/// lives in an `Rc<Cell<u32>>` and the guard owns its own `Rc` clone (no borrow
+/// into `self`, zero `unsafe`). The `Rc::clone` per recursive entry is a
+/// pointer copy + non-atomic refcount bump — negligible vs. lexing/allocation.
+pub(super) struct RecursionGuard(Rc<Cell<u32>>);
 
-#[allow(unsafe_code)] // single scoped allow; raw pointer confined to Drop
 impl Drop for RecursionGuard {
     fn drop(&mut self) {
-        // SAFETY: the pointer is to `JSParserImpl::recursion_depth`, which
-        // lives for the full lifetime of the parser.  No aliasing: Rust
-        // ensures at most one `&mut RecursionGuard` at a time, and the only
-        // mutation is this decrement (the increment happened in
-        // `check_recursion`).
-        unsafe { *self.0 -= 1 }
+        self.0.set(self.0.get() - 1);
     }
 }
 
@@ -117,8 +114,10 @@ pub struct JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     gc: &'gc GCLock<'ast, 'ctx>,
     /// The lexer driving the token stream. Owns `&'a mut SourceErrorManager`.
     pub(super) lexer: JSLexer<'a>,
-    /// Current parser recursion depth (stack-overflow guard).
-    recursion_depth: u32,
+    /// Current parser recursion depth (stack-overflow guard). In an
+    /// `Rc<Cell<u32>>` so `RecursionGuard` can own a handle without borrowing
+    /// `self` (see `RecursionGuard`).
+    recursion_depth: Rc<Cell<u32>>,
     /// Set when the parser is inside a generator function (`yield`).
     pub(super) param_yield: bool,
     /// Set when the parser is inside an async function (`await`).
@@ -136,7 +135,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         JSParserImpl {
             gc,
             lexer,
-            recursion_depth: 0,
+            recursion_depth: Rc::new(Cell::new(0)),
             param_yield: false,
             param_await: false,
             use_static_builtin: false,
@@ -259,23 +258,19 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Increment the recursion depth and return a guard that decrements it on
     /// drop. Returns `None` (and reports an error) if the limit is exceeded.
     ///
-    /// Port of the `CHECK_RECURSION` macro (JSParserImpl.h).
-    ///
-    /// Borrow-checker note: the guard holds a raw `*mut u32` into
-    /// `self.recursion_depth` so that the caller can use `&mut self` for parse
-    /// calls while the guard is alive. This is sound because:
-    ///   (a) the pointer is valid for the parser's lifetime, and
-    ///   (b) the only mutation through the raw pointer is the single decrement
-    ///       in `RecursionGuard::drop` — no aliasing.
+    /// Port of the `CHECK_RECURSION` macro (JSParserImpl.h). The returned guard
+    /// owns an `Rc<Cell<u32>>` clone and decrements on drop, so the caller can
+    /// freely use `&mut self` for parse calls while the guard is alive.
     pub(super) fn check_recursion(&mut self) -> Option<RecursionGuard> {
-        self.recursion_depth += 1;
-        if self.recursion_depth > MAX_RECURSION_DEPTH {
-            self.recursion_depth -= 1; // don't leave it incremented
+        let depth = self.recursion_depth.get() + 1;
+        if depth > MAX_RECURSION_DEPTH {
+            // Don't leave it incremented.
             let range = self.cur_range();
             self.error_at(range, "Too many nested expressions/statements/declarations");
             return None;
         }
-        Some(RecursionGuard(&mut self.recursion_depth))
+        self.recursion_depth.set(depth);
+        Some(RecursionGuard(Rc::clone(&self.recursion_depth)))
     }
 
     /// Return a placeholder `SMRange` (zero-width at current token start).

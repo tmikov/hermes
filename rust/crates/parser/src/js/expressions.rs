@@ -231,12 +231,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             TokenKind::identifier => {
                 // yield is only allowed as an IdentifierReference when
                 // ParamYield is false. C++ lines 2493-2501.
-                let ident_bytes = self
+                // Capture the boolean first so the atom-table borrow ends
+                // before the `&mut self` error_cur call.
+                let is_yield = self
                     .lexer
                     .get_string_table()
                     .bytes(self.lexer.token().get_identifier())
-                    .to_vec();
-                if self.param_yield && ident_bytes == b"yield" {
+                    == b"yield";
+                if self.param_yield && is_yield {
                     self.error_cur(
                         "Unexpected usage of 'yield' as an identifier reference",
                     );
@@ -388,14 +390,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     return None;
                 }
                 // Record the parentheses surrounding the expression.
-                // incParens caps at 2 (mirrors ESTree.h Node::incParens).
                 // NOTE: C++ returns the SAME inner node (just with parens
                 // incremented), it does NOT wrap in a new node.
                 // The outer ExpressionStatement will see startLoc = start of '('
                 // and set the statement range accordingly.
-                let md = expr.metadata();
-                let p = md.parens.get();
-                md.parens.set((p + 1).min(2));
+                inc_parens(expr);
                 Some(expr)
             }
 
@@ -446,12 +445,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 }
 
 // ---------------------------------------------------------------------------
-// incParens helper (free function so statements.rs can call it too)
+// incParens helper
 // ---------------------------------------------------------------------------
 
 /// Increment the paren count on a node, capping at 2. Port of
 /// `ESTree.h Node::incParens()`.
-#[allow(dead_code)]
 pub(super) fn inc_parens(n: &Node) {
     let md = n.metadata();
     let p = md.parens.get();
