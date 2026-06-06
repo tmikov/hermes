@@ -1533,8 +1533,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     let spread_ref = self.parse_spread_element()?;
                     elem_list.push(spread_ref);
                 } else {
-                    // Regular assignment expression.
-                    let _guard = self.check_recursion()?;
+                    // Regular assignment expression. (C++ parseArrayLiteral has
+                    // no CHECK_RECURSION here — the recursion guards live in the
+                    // expression chain it calls into.)
                     let expr = self.parse_assignment_expression(PARAM_IN)?;
                     elem_list.push(expr);
                 }
@@ -1588,7 +1589,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // Consume `...`; record its start.
         let start_loc = self.advance(GrammarContext::AllowRegExp).start;
 
-        let _guard = self.check_recursion()?;
+        // (C++ parseSpreadElement has no CHECK_RECURSION; the guard lives in the
+        // expression chain it calls into.)
         let arg = self.parse_assignment_expression(PARAM_IN)?;
 
         let end_loc = self.lexer.prev_token_end();
