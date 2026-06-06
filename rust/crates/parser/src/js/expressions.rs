@@ -1976,7 +1976,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// encodes `get` but its source form is 11 bytes wide, not 3. An unescaped
     /// identifier has source width == interned byte count.
     #[inline]
-    fn check_unescaped_name(&self, name: &[u8]) -> bool {
+    pub(super) fn check_unescaped_name(&self, name: &[u8]) -> bool {
         if self.cur_kind() != TokenKind::identifier {
             return false;
         }

@@ -8,10 +8,14 @@
 //! Statement parsing for the JS parser. Port of the statement-parsing section
 //! of `lib/Parser/JSParserImpl.cpp`.
 
-use ast::node::{EmptyStatement, ExpressionStatement, Node, StringLiteral};
+use ast::node::{
+    BreakStatement, ContinueStatement, DebuggerStatement, EmptyStatement,
+    ExpressionStatement, Identifier, LabeledStatement, Node, ReturnStatement,
+    StringLiteral, ThrowStatement, WithStatement,
+};
 use ast::node_child::NodeMetadata;
 use atom_table::INVALID_ATOM_BYTES;
-use support::location::SMLoc;
+use support::location::{SMLoc, SMRange};
 
 use crate::lexer::GrammarContext;
 use crate::token_kinds::TokenKind;
@@ -185,38 +189,30 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 self.error_cur("for statement not yet supported (parser phase P2)");
                 None
             }
-            TokenKind::rw_continue => {
-                self.error_cur("continue statement not yet supported (parser phase P2)");
-                None
-            }
-            TokenKind::rw_break => {
-                self.error_cur("break statement not yet supported (parser phase P2)");
-                None
-            }
+            TokenKind::rw_continue => self.parse_continue_statement(),
+            TokenKind::rw_break => self.parse_break_statement(),
             TokenKind::rw_return => {
-                self.error_cur("return statement not yet supported (parser phase P2)");
-                None
+                // Return guard. C++ lines 698-701.
+                // P-future: context_.allowReturnOutsideFunction().
+                const ALLOW_RETURN_OUTSIDE_FUNCTION: bool = false;
+                if !param.has(PARAM_RETURN) && !ALLOW_RETURN_OUTSIDE_FUNCTION {
+                    // Illegal location for a return statement, but we can keep
+                    // parsing.
+                    self.error_cur("'return' not in a function");
+                }
+                self.parse_return_statement()
             }
-            TokenKind::rw_with => {
-                self.error_cur("with statement not yet supported (parser phase P2)");
-                None
-            }
+            TokenKind::rw_with => self.parse_with_statement(param.get(PARAM_RETURN)),
             TokenKind::rw_switch => {
                 self.error_cur("switch statement not yet supported (parser phase P2)");
                 None
             }
-            TokenKind::rw_throw => {
-                self.error_cur("throw statement not yet supported (parser phase P2)");
-                None
-            }
+            TokenKind::rw_throw => self.parse_throw_statement(),
             TokenKind::rw_try => {
                 self.error_cur("try statement not yet supported (parser phase P2)");
                 None
             }
-            TokenKind::rw_debugger => {
-                self.error_cur("debugger statement not yet supported (parser phase P2)");
-                None
-            }
+            TokenKind::rw_debugger => self.parse_debugger_statement(),
             // default: parseExpressionOrLabelledStatement
             _ => self.parse_expression_or_labelled_statement(param),
         }
@@ -246,37 +242,86 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse an expression statement or labelled statement. Port of
     /// `JSParserImpl::parseExpressionOrLabelledStatement` (lines 1600-1677).
-    ///
-    /// P1.1: only the expression-statement path is implemented.
-    /// The labelled-statement path (identifier followed by `:`) emits an
-    /// honest "not yet supported" error.
     fn parse_expression_or_labelled_statement(
         &mut self,
-        _param: Param,
+        param: Param,
     ) -> Option<&'gc Node<'gc>> {
         let starts_with_identifier = self.check(TokenKind::identifier);
 
-        // C++ lines 1607-1615: warn about ambiguous declaration-as-expression.
-        // In P1.1 these are simply handled by parse_statement's early returns.
+        // ES9.0 13.5
+        // Lookahead cannot be any of: {, function, async function, class, let [
+        // Allow execution to continue because the expression may be parsed,
+        // but report an error because it will be ambiguous whether the parse was
+        // correct.
+        // C++ lines 1609-1615.
+        if self.check_n3(
+            TokenKind::l_brace,
+            TokenKind::rw_function,
+            TokenKind::rw_class,
+        ) {
+            // P3: async function — `(checkUnescaped(asyncIdent_) &&
+            // checkAsyncFunction())` is deferred to phase P3.
+            // There's no need to stop reporting errors.
+            self.error_cur("declaration not allowed as expression statement");
+        }
+
+        // `let` disambiguation. C++ lines 1617-1627.
+        if self.check_unescaped_name(b"let") {
+            let let_loc = self.advance(GrammarContext::AllowRegExp).start;
+            if self.check(TokenKind::l_square) {
+                // let [
+                self.error_at(
+                    SMRange {
+                        start: let_loc,
+                        end: self.lexer.token().end_loc(),
+                    },
+                    "ambiguous 'let [': either a 'let' binding or a member expression",
+                );
+            }
+            self.lexer.seek(let_loc);
+            self.advance(GrammarContext::AllowRegExp);
+        }
 
         let start_loc = self.cur_start();
         let opt_expr = self.parse_expression(PARAM_IN)?;
 
-        // Check for labelled statement: `identifier ":"`. C++ lines 1637-1666.
-        if starts_with_identifier {
-            if let Node::Identifier(_) = opt_expr {
-                if self.check(TokenKind::colon) {
-                    // P1.1: labelled statements not yet supported.
-                    self.error_cur(
-                        "labelled statements not yet supported (parser phase P2)",
-                    );
-                    return None;
-                }
-            }
+        // Check whether this is a label. The expression must have started with an
+        // identifier, be just an identifier and be followed by ':'.
+        // C++ lines 1637-1666.
+        let is_identifier = matches!(opt_expr, Node::Identifier(_));
+        if starts_with_identifier
+            && is_identifier
+            && self.check_and_eat(TokenKind::colon, GrammarContext::AllowRegExp)
+        {
+            let id = opt_expr;
+
+            let body: &'gc Node<'gc> = if self.check(TokenKind::rw_function) {
+                // ES9.0 13.13.1
+                // It is a Syntax Error if any source text matches this rule.
+                // LabelledItem : FunctionDeclaration
+                // P3: function declarations as labeled items are not yet
+                // supported.
+                self.error_cur(
+                    "function declaration as labeled statement not yet supported (parser phase P3)",
+                );
+                return None;
+            } else {
+                // Statement.
+                self.parse_statement(param.get(PARAM_RETURN))?
+            };
+
+            let label_start = id.metadata().range.get().start;
+            let body_end = body.metadata().range.get().end;
+            let node = Node::LabeledStatement(LabeledStatement::new(
+                NodeMetadata::new(self.dummy_range()),
+                id,
+                body,
+            ));
+            return Some(self.set_location(label_start, body_end, node));
         }
 
         // Expression statement path. C++ lines 1668-1676.
-        if !self.eat_semi() {
+        if !self.eat_semi(false) {
             return None;
         }
 
@@ -287,6 +332,221 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             INVALID_ATOM_BYTES, // directive = null for non-directives
         ));
         Some(self.set_location(start_loc, end_loc, node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseDebuggerStatement — 2467 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a `debugger` statement. Port of
+    /// `JSParserImpl::parseDebuggerStatement` (lines 2467-2479).
+    fn parse_debugger_statement(&mut self) -> Option<&'gc Node<'gc>> {
+        assert!(self.check(TokenKind::rw_debugger));
+        let start_loc = self.advance(GrammarContext::AllowRegExp).start;
+
+        if !self.eat_semi(false) {
+            return None;
+        }
+
+        let end_loc = self.lexer.prev_token_end();
+        let node = Node::DebuggerStatement(DebuggerStatement::new(
+            NodeMetadata::new(self.dummy_range()),
+        ));
+        Some(self.set_location(start_loc, end_loc, node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseThrowStatement — 2342 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a `throw` statement. Port of
+    /// `JSParserImpl::parseThrowStatement` (lines 2342-2364).
+    fn parse_throw_statement(&mut self) -> Option<&'gc Node<'gc>> {
+        assert!(self.check(TokenKind::rw_throw));
+        let start_loc = self.advance(GrammarContext::AllowRegExp).start;
+
+        if self.lexer.is_new_line_before_current_token() {
+            self.error_cur("'throw' argument must be on the same line");
+            // C++ also emits sm_.note(startLoc, "location of the 'throw'");
+            // message-note fidelity is a tracked carry-forward.
+            return None;
+        }
+
+        let argument = self.parse_expression(PARAM_IN)?;
+
+        if !self.eat_semi(false) {
+            return None;
+        }
+
+        let end_loc = self.lexer.prev_token_end();
+        let node = Node::ThrowStatement(ThrowStatement::new(
+            NodeMetadata::new(self.dummy_range()),
+            argument,
+        ));
+        Some(self.set_location(start_loc, end_loc, node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseReturnStatement — 2160 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a `return` statement. Port of
+    /// `JSParserImpl::parseReturnStatement` (lines 2160-2181).
+    fn parse_return_statement(&mut self) -> Option<&'gc Node<'gc>> {
+        assert!(self.check(TokenKind::rw_return));
+        let start_loc = self.advance(GrammarContext::AllowRegExp).start;
+
+        if self.eat_semi(true) {
+            let end_loc = self.lexer.prev_token_end();
+            let node = Node::ReturnStatement(ReturnStatement::new(
+                NodeMetadata::new(self.dummy_range()),
+                None,
+            ));
+            return Some(self.set_location(start_loc, end_loc, node));
+        }
+
+        let argument = self.parse_expression(PARAM_IN)?;
+
+        if !self.eat_semi(false) {
+            return None;
+        }
+
+        let end_loc = self.lexer.prev_token_end();
+        let node = Node::ReturnStatement(ReturnStatement::new(
+            NodeMetadata::new(self.dummy_range()),
+            Some(argument),
+        ));
+        Some(self.set_location(start_loc, end_loc, node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseBreakStatement — 2128 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a `break` statement. Port of
+    /// `JSParserImpl::parseBreakStatement` (lines 2128-2158).
+    fn parse_break_statement(&mut self) -> Option<&'gc Node<'gc>> {
+        assert!(self.check(TokenKind::rw_break));
+        let start_loc = self.advance(GrammarContext::AllowRegExp).start;
+
+        if self.eat_semi(true) {
+            let end_loc = self.lexer.prev_token_end();
+            let node = Node::BreakStatement(BreakStatement::new(
+                NodeMetadata::new(self.dummy_range()),
+                None,
+            ));
+            return Some(self.set_location(start_loc, end_loc, node));
+        }
+
+        if !self.need(TokenKind::identifier, " after 'break'") {
+            return None;
+        }
+        let id = self.make_label_identifier();
+        self.advance(GrammarContext::AllowRegExp);
+
+        if !self.eat_semi(false) {
+            return None;
+        }
+
+        let end_loc = self.lexer.prev_token_end();
+        let node = Node::BreakStatement(BreakStatement::new(
+            NodeMetadata::new(self.dummy_range()),
+            Some(id),
+        ));
+        Some(self.set_location(start_loc, end_loc, node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseContinueStatement — 2095 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a `continue` statement. Port of
+    /// `JSParserImpl::parseContinueStatement` (lines 2095-2126).
+    fn parse_continue_statement(&mut self) -> Option<&'gc Node<'gc>> {
+        assert!(self.check(TokenKind::rw_continue));
+        let start_loc = self.advance(GrammarContext::AllowRegExp).start;
+
+        if self.eat_semi(true) {
+            let end_loc = self.lexer.prev_token_end();
+            let node = Node::ContinueStatement(ContinueStatement::new(
+                NodeMetadata::new(self.dummy_range()),
+                None,
+            ));
+            return Some(self.set_location(start_loc, end_loc, node));
+        }
+
+        if !self.need(TokenKind::identifier, " after 'continue'") {
+            return None;
+        }
+        let id = self.make_label_identifier();
+        self.advance(GrammarContext::AllowRegExp);
+
+        if !self.eat_semi(false) {
+            return None;
+        }
+
+        let end_loc = self.lexer.prev_token_end();
+        let node = Node::ContinueStatement(ContinueStatement::new(
+            NodeMetadata::new(self.dummy_range()),
+            Some(id),
+        ));
+        Some(self.set_location(start_loc, end_loc, node))
+    }
+
+    /// Build an `Identifier` node from the current token, used as a `break` /
+    /// `continue` label. Mirrors the C++ `setLocation(tok_, tok_,
+    /// new IdentifierNode(tok_->getIdentifier(), nullptr, false))` idiom.
+    fn make_label_identifier(&self) -> &'gc Node<'gc> {
+        let tok_start = self.lexer.token().start_loc();
+        let tok_end = self.lexer.token().end_loc();
+        let name = self.lexer.token().get_identifier();
+        let node = Node::Identifier(Identifier::new(
+            NodeMetadata::new(self.dummy_range()),
+            name,
+            None,  // type = null
+            false, // optional = false
+        ));
+        self.set_location(tok_start, tok_end, node)
+    }
+
+    // -----------------------------------------------------------------------
+    // parseWithStatement — 2183 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a `with` statement. Port of
+    /// `JSParserImpl::parseWithStatement` (lines 2183-2218).
+    fn parse_with_statement(&mut self, param: Param) -> Option<&'gc Node<'gc>> {
+        assert!(self.check(TokenKind::rw_with));
+        let start_loc = self.advance(GrammarContext::AllowRegExp).start;
+
+        if !self.eat(
+            TokenKind::l_paren,
+            GrammarContext::AllowRegExp,
+            " after 'with'",
+        ) {
+            return None;
+        }
+
+        let object = self.parse_expression(PARAM_IN)?;
+
+        if !self.eat(
+            TokenKind::r_paren,
+            GrammarContext::AllowRegExp,
+            " after 'with (...'",
+        ) {
+            return None;
+        }
+
+        let body = self.parse_statement(param.get(PARAM_RETURN))?;
+
+        let start = start_loc;
+        let end = body.metadata().range.get().end;
+        let node = Node::WithStatement(WithStatement::new(
+            NodeMetadata::new(self.dummy_range()),
+            object,
+            body,
+        ));
+        Some(self.set_location(start, end, node))
     }
 
     // -----------------------------------------------------------------------
@@ -301,8 +561,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     ///   - current token is `}` or EOF
     ///   - a newline precedes the current token
     ///
-    /// Returns false and reports an error otherwise.
-    pub(super) fn eat_semi(&mut self) -> bool {
+    /// Returns false otherwise. When `optional` is false, an error is also
+    /// reported in that case; when `optional` is true no error is reported.
+    pub(super) fn eat_semi(&mut self, optional: bool) -> bool {
         if self.check(TokenKind::semi) {
             self.advance(GrammarContext::AllowRegExp);
             return true;
@@ -313,7 +574,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         {
             return true;
         }
-        self.error_cur("';' expected");
+        if !optional {
+            self.error_cur("';' expected");
+        }
         false
     }
 

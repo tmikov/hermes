@@ -1264,4 +1264,105 @@ mod tests {
             panic!("expected AssignmentExpression");
         }
     }
+
+    // P2.1: simple statements + labelled statements.
+
+    /// Top-level `return x;` is an illegal location for `return` (not in a
+    /// function), so it reports the "'return' not in a function" error, but
+    /// the parser still keeps parsing and produces a valid Program.
+    #[test]
+    fn return_outside_function_reports_error_but_parses() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let buf_id = sm.add_buffer_bytes("input", b"return x;\n");
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        let program = parser.parse().expect("return still parses");
+        assert!(
+            parser.error_count_pub() >= 1,
+            "top-level return reports an error"
+        );
+        if let Node::Program(p) = program {
+            let stmt = p.body.iter().next().expect("has statement");
+            assert!(
+                matches!(stmt, Node::ReturnStatement(_)),
+                "still produces a ReturnStatement"
+            );
+        } else {
+            panic!("expected Program");
+        }
+    }
+
+    /// `throw` with the argument on the next line is a syntax error
+    /// ("'throw' argument must be on the same line") and the parse fails.
+    #[test]
+    fn throw_newline_before_argument_fails() {
+        use ast::context::Context;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let buf_id = sm.add_buffer_bytes("input", b"throw\nx;\n");
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        assert!(
+            parser.parse().is_none(),
+            "throw with newline before argument fails"
+        );
+        assert!(parser.error_count_pub() >= 1);
+    }
+
+    /// `foo: x;` parses to a LabeledStatement whose label is `foo` and whose
+    /// body is the expression statement `x;`.
+    #[test]
+    fn labelled_statement_parses() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let buf_id = sm.add_buffer_bytes("input", b"foo: x;\n");
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        let program = parser.parse().expect("labelled statement parses");
+        assert_eq!(parser.error_count_pub(), 0, "zero errors");
+        if let Node::Program(p) = program {
+            let stmt = p.body.iter().next().expect("has statement");
+            if let Node::LabeledStatement(ls) = stmt {
+                if let Node::Identifier(id) = ls.label {
+                    assert_eq!(gc.ctx().atom_table.bytes(id.name.get()), b"foo");
+                } else {
+                    panic!("label must be an Identifier");
+                }
+                assert!(
+                    matches!(ls.body, Node::ExpressionStatement(_)),
+                    "body is an ExpressionStatement"
+                );
+            } else {
+                panic!("expected LabeledStatement");
+            }
+        } else {
+            panic!("expected Program");
+        }
+    }
 }
