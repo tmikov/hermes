@@ -186,10 +186,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// - P3: `yield` — emits error + returns `None`.
     /// - P3: `=>` arrow — emits error + returns `None`.
     /// - P1.8: destructuring reparse (ArrayExpression/ObjectExpression LHS) —
-    ///         unreachable in P1 (those parse forms error first in
-    ///         `parse_primary_expression`), but stubbed with an honest error.
+    ///   unreachable in P1 (those parse forms error first in
+    ///   `parse_primary_expression`), but stubbed with an honest error.
     /// - P6/P7: Flow/TS type parameters — skipped (gated by context flags that
-    ///          don't exist yet).
+    ///   don't exist yet).
     ///
     /// ## MAX_NESTED_ASSIGNMENTS
     /// `ESTree::MAX_NESTED_ASSIGNMENTS = 30000` (include/hermes/AST/ESTree.h:1407).
@@ -352,14 +352,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // the equivalent of AllowTypedArrowFunction::Yes / CoverTypedParameters::No
             // which in plain-JS collapses to just passing param through (the only
             // behaviorally different bit, PARAM_IN, is explicitly carried through
-            // in the recursive calls matching the C++ AllowTypedArrowFunction chain).
-            // C++ passes param on the first call and AllowTypedArrow/NoCoverParams
-            // on subsequent ones; in our plain-JS subset the difference is moot,
-            // so we pass `param` on the first call and on subsequent calls too
-            // (matching C++ behavior for plain JS where typed params don't exist).
-            let cur_param = if stack.is_empty() { param } else { param };
-
-            match run_level(self, &mut stack, cur_param) {
+            // C++ passes the outer `allowTypedArrowFunction`/`coverTypedParameters`/
+            // `typeParams` on the first level and `Yes`/`No`/`null` on subsequent
+            // levels (6499-6523). Those args are Flow/TS-only (deferred to P6/P7),
+            // so in the plain-JS subset every level just threads `param`.
+            match run_level(self, &mut stack, param) {
                 LevelResult::Error => return None,
                 LevelResult::Terminal(n) => break n,
                 LevelResult::Continue => {
