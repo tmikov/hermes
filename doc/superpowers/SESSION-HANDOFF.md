@@ -4,12 +4,19 @@ Hand this to a new session to restore context. It **references** the authoritati
 (read them; don't trust this summary over them) and records the conventions, file map,
 validation commands, and workflow.
 
-> **Date of handoff:** 2026-06-05. **Branch:** `rust` (base is `static_h`, NOT `main`).
-> **Status:** the **JS lexer**, **JSONParser**, and the **AST are COMPLETE.** The AST's four phases —
-> 1 (storage/GC arena spine), 2 (full 271-node set generated from `ESTree.def`), 3 (builders +
-> `VisitorMut`/`visit_children_mut` functional rebuild), AND 4 (`ESTreeJSONDumper` + 9 golden tests) — are all done
-> and capstone-reviewed. **Next component: the JS Parser** (`lib/Parser/JSParserImpl*`), which consumes the lexer +
-> AST + `Context`; the byte-for-byte `-dump-ast` differential vs `hermesc` is the Parser's validation gate.
+> **Date of handoff:** 2026-06-06. **Branch:** `rust` (base is `static_h`, NOT `main`).
+> **Status:** the **JS lexer**, **JSONParser**, and the **AST are COMPLETE**, and the **JS Parser is IN PROGRESS** —
+> **phases P0 (foundations + `parser_differential` gate) and P1 (full value-expression grammar) are DONE**, byte-for-byte vs
+> `hermesc -dump-ast` over a 27-file corpus, each sub-task two-stage reviewed + a whole-phase capstone (PASS), zero warnings.
+> **Read `doc/superpowers/RustPortRoadmap.md` (the "🚧 JS Parser" section) for the authoritative P0/P1 detail, the deferral set
+> (functions/classes/arrow/`super`/`yield`→P3, `import()`→P4, statements→P2, Flow/TS→P6/P7 — all honest errors with tests), and the
+> tracked non-blocking carry-forwards.** Specs/plans: `specs/2026-06-06-js-parser-design.md`,
+> `plans/2026-06-06-js-parser-{p0-foundations,p1-expressions}.md`.
+> **NEXT: Parser phase P2 — statements & declarations** (`lib/Parser/JSParserImpl.cpp`: parseStatement and the block/if/loops/
+> for-in-of/switch/try/return/break/continue/throw/with/debugger/labelled + var/let/const/using declarations; ExpressionStatement/
+> EmptyStatement/directives already done in P1). Write the P2 plan just-in-time (lexer/P1-style) and execute subagent-driven.
+> The parser proper lives in `rust/crates/parser/src/js/{mod,expressions,statements}.rs`; the gate is
+> `REQUIRE_DIFFERENTIAL=1 cargo test -p parser --test parser_differential` (build `ast-dump` first).
 
 ---
 
