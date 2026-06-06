@@ -152,7 +152,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         self.lexer.token().kind()
     }
     #[inline]
-    fn cur_range(&self) -> SMRange {
+    pub(super) fn cur_range(&self) -> SMRange {
         self.lexer.token().source_range()
     }
     #[inline]

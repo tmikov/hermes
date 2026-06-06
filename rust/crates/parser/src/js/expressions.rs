@@ -10,9 +10,9 @@
 
 use ast::context::GCLock;
 use ast::node::{
-    AwaitExpression, BigIntLiteral, BinaryExpression, BooleanLiteral, Identifier,
-    LogicalExpression, Node, NullLiteral, NumericLiteral, PrivateName, SequenceExpression,
-    StringLiteral, ThisExpression, UnaryExpression, UpdateExpression,
+    AwaitExpression, BigIntLiteral, BinaryExpression, BooleanLiteral, ConditionalExpression,
+    Identifier, LogicalExpression, Node, NullLiteral, NumericLiteral, PrivateName,
+    SequenceExpression, StringLiteral, ThisExpression, UnaryExpression, UpdateExpression,
 };
 use ast::node_child::{NodeList, NodeMetadata};
 use support::location::SMLoc;
@@ -101,20 +101,69 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseConditionalExpression — P1.4 placeholder
+    // parseConditionalExpression — P1.4
     // -----------------------------------------------------------------------
 
-    /// Parse a conditional expression. Port of
-    /// `JSParserImpl::parseConditionalExpression` (lines 4477-…).
+    /// Parse a conditional (ternary `?:`) expression. Port of
+    /// `JSParserImpl::parseConditionalExpression` (lines 4477-4615).
     ///
-    /// P1.4: the `? :` branches — deferred.
-    /// For now this is a pass-through to parseBinaryExpression.
+    /// Plain-JS path only. Type-gated branches are stubbed out:
+    ///   - P6/P7: cover typed identifier (4492-4501) — skipped.
+    ///   - P6/P7: typed arrow backtracking (4510-4572) — skipped.
     pub(super) fn parse_conditional_expression(
         &mut self,
         param: Param,
     ) -> Option<&'gc Node<'gc>> {
-        // P1.4: conditional (ternary) operator
-        self.parse_binary_expression(param)
+        let start_loc = self.cur_start();
+
+        let test = self.parse_binary_expression(param)?;
+
+        // P6/P7: cover typed identifier (CoverTypedParameters / tryParseCoverTypedIdentifierNode)
+        // Only reached when context_.getParseTypes() is true — skip in P1.
+
+        if !self.check(TokenKind::question) {
+            return Some(test);
+        }
+
+        let question_range = self.cur_range();
+
+        // P6/P7: typed arrow backtracking block (4510-4572):
+        // savePoint, AllowTypedArrowFunction::Yes, consequent-with-colon check.
+        // Only active when context_.getParseTypes() — skip in P1.
+        // `consequent` stays None; we fall through to the plain-JS path below.
+
+        // CHECK_RECURSION: mirrors C++ line 4576 (before the !consequent block).
+        let _guard = self.check_recursion()?;
+
+        // Consume the '?'.
+        self.advance(GrammarContext::AllowRegExp);
+
+        // Parse the consequent (true branch).
+        // C++ passes ParamIn | AllowTypedArrowFunction::No | CoverTypedParameters::No.
+        // In P1 the extra args don't exist; we pass PARAM_IN.
+        let consequent = self.parse_assignment_expression(PARAM_IN)?;
+
+        // Eat ':' — required after '... ? ...'.
+        if !self.eat(
+            TokenKind::colon,
+            GrammarContext::AllowRegExp,
+            "in conditional expression after '... ? ...'",
+        ) {
+            let _ = question_range; // referenced only for the C++ error note
+            return None;
+        }
+
+        // Parse the alternate (false branch).
+        let alternate = self.parse_assignment_expression(param)?;
+
+        let end_loc = self.lexer.prev_token_end();
+        let node = Node::ConditionalExpression(ConditionalExpression::new(
+            NodeMetadata::new(self.dummy_range()),
+            test,
+            alternate,
+            consequent,
+        ));
+        Some(self.set_location(start_loc, end_loc, node))
     }
 
     // -----------------------------------------------------------------------
