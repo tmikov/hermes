@@ -8,11 +8,13 @@
 //! Expression parsing for the JS parser. Port of the expression-parsing
 //! section of `lib/Parser/JSParserImpl.cpp`.
 
+use ast::context::GCLock;
 use ast::node::{
-    BigIntLiteral, BooleanLiteral, Identifier, Node, NullLiteral, NumericLiteral,
-    SequenceExpression, StringLiteral, ThisExpression,
+    BigIntLiteral, BinaryExpression, BooleanLiteral, Identifier, LogicalExpression, Node,
+    NullLiteral, NumericLiteral, PrivateName, SequenceExpression, StringLiteral, ThisExpression,
 };
 use ast::node_child::{NodeList, NodeMetadata};
+use support::location::SMLoc;
 
 use crate::lexer::GrammarContext;
 use crate::token_kinds::TokenKind;
@@ -115,20 +117,362 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseBinaryExpression — P1.2 placeholder
+    // parseBinaryExpression — P1.2
     // -----------------------------------------------------------------------
 
-    /// Parse a binary expression (operator precedence climbing). Port of
-    /// `JSParserImpl::parseBinaryExpression` (lines 4262-…).
+    /// Return the binary-operator precedence of `kind`, or 0 if `kind` is not
+    /// a binary operator.  Mirrors C++ anonymous `getPrecedence(TokenKind)`:
+    /// - The BINOP table entries are gated to the `_first_binary…_last_binary`
+    ///   range by `binop_precedence`.
+    /// - `rw_in` and `rw_instanceof` are reserved words (outside that range)
+    ///   but the C++ RESWORD macro gives them precedence 8; handle them
+    ///   explicitly here.
+    /// - `as_operator` (IDENT_OP, precedence 8) is only injected by
+    ///   `convertIdentOpIfPossible`, which is a no-op in P1 (TS/Flow gated).
+    ///   It is therefore unreachable here; we leave it unhandled.
+    #[inline]
+    fn get_precedence(kind: TokenKind) -> u32 {
+        use crate::token_kinds::binop_precedence;
+        match binop_precedence(kind) {
+            Some(p) => p as u32,
+            None => match kind {
+                TokenKind::rw_in | TokenKind::rw_instanceof => 8,
+                _ => 0,
+            },
+        }
+    }
+
+    /// Return `true` if `kind` is a left-associative binary operator.
+    /// Only `**` is right-associative.  Port of C++ anonymous `isLeftAssoc`.
+    #[inline]
+    fn is_left_assoc(kind: TokenKind) -> bool {
+        kind != TokenKind::starstar
+    }
+
+    /// Return the precedence of the current token unless it equals `except`,
+    /// in which case return 0.  Port of C++ anonymous `getPrecedenceExcept`.
+    #[inline]
+    fn get_precedence_except(kind: TokenKind, except: TokenKind) -> u32 {
+        if kind != except {
+            Self::get_precedence(kind)
+        } else {
+            0
+        }
+    }
+
+    /// Convert the current identifier token to `as_operator` if it spells "as"
+    /// and the parser context has TS/Flow type-parsing enabled.
     ///
-    /// P1.2: precedence-table binary operators — deferred.
-    /// For now this is a pass-through to parseUnaryExpression.
+    /// P6/P7 stub: TS/Flow 'as' operator (needs Context parse-types flag +
+    /// `lexer.convert_cur_token_to_ident_op`).  In P1 the body is compiled out
+    /// (mirroring C++ `#if HERMES_PARSE_TS || HERMES_PARSE_FLOW`), so this is
+    /// a pure no-op.
+    #[inline]
+    fn convert_ident_op_if_possible(&mut self) {
+        // P6/P7: TS/Flow 'as' operator (needs Context parse-types flag +
+        // lexer.convert_cur_token_to_ident_op).  No-op until then.
+    }
+
+    /// Parse a binary expression using a stack-based precedence-climbing
+    /// algorithm.  Port of `JSParserImpl::parseBinaryExpression`
+    /// (lib/Parser/JSParserImpl.cpp lines 4262-4475).
+    ///
+    /// Handles:
+    /// - All BINOP operators (`+`, `-`, `*`, `/`, `%`, `**`, `<<`, `>>`,
+    ///   `>>>`, `<`, `>`, `<=`, `>=`, `==`, `!=`, `===`, `!==`, `&`, `^`,
+    ///   `|`, `&&`, `||`, `??`).
+    /// - `instanceof` and `in` (when `PARAM_IN` is set).
+    /// - Private-name LHS for `#x in y`.
+    /// - `&&`/`||`/`??` → `LogicalExpression`; others → `BinaryExpression`.
+    /// - Nullish/boolean mixing error ("Mixing '??' with '&&' or '||' …").
+    /// - `as_operator` (TS/Flow): stubbed as unreachable in P1 (P6/P7).
     pub(super) fn parse_binary_expression(
         &mut self,
-        _param: Param,
+        param: Param,
     ) -> Option<&'gc Node<'gc>> {
-        // P1.2: binary operators (precedence table)
-        self.parse_unary_expression()
+        use support::location::SMRange;
+
+        // Stack entry: left-hand expression, operator, start location of LHS.
+        // The C++ uses a SmallVector; we use a Vec (plain heap; fine for P1).
+        struct StackEntry<'gc> {
+            expr: &'gc Node<'gc>,
+            op_kind: TokenKind,
+            expr_start: SMLoc,
+        }
+
+        let mut stack: Vec<StackEntry<'gc>> = Vec::with_capacity(16);
+
+        // Nullish/boolean mixing-error tracking.
+        // True after we have seen a '??' operator.
+        let mut has_nullish = false;
+        // True after we have seen a '&&' or '||' operator.
+        let mut has_boolean = false;
+
+        // ---------------------------------------------------------------
+        // new_bin_node — allocate BinaryExpression or LogicalExpression
+        // ---------------------------------------------------------------
+        // We can't capture `self` in a closure and also call `&mut self`
+        // methods, so this is an out-of-band helper that borrows the
+        // pieces it needs directly (gc + lexer for interning; the error
+        // manager for the mixing error).  We use a macro-like inline
+        // closure whose captures are the individual fields we need.
+        //
+        // The has_nullish/has_boolean flags are passed by &mut ref so the
+        // closure can mutate them, mirroring the C++ lambda captures.
+
+        // Helper: intern the operator spelling into a NodeLabel.
+        // C++ `getTokenIdent(opKind)` returns the pre-interned UniqueString.
+        // In Rust: `token_kind_str(opKind)` → &str → intern via atom_table.
+        let make_op_label = |gc: &'gc GCLock<'_, '_>, kind: TokenKind| {
+            let s = crate::token_kinds::token_kind_str(kind);
+            gc.ctx().atom_table.atom_bytes(s.as_bytes())
+        };
+
+        // Whether the current token is `in` (reserved word, so excluded from
+        // the main BINOP table).  When `PARAM_IN` is NOT set, `in` must NOT
+        // be treated as a binary operator — that is the "ForIn initialiser"
+        // restriction from the spec.
+        let except_kind = if !param.has(PARAM_IN) {
+            TokenKind::rw_in
+        } else {
+            TokenKind::none
+        };
+
+        // -----------------------------------------------------------------
+        // Parse first operand (private identifier or unary expression).
+        // -----------------------------------------------------------------
+        let mut top_expr_start = self.cur_start();
+        let mut top_expr: &'gc Node<'gc> = if self.check(TokenKind::private_identifier) {
+            // consumePrivateIdentifier closure (C++ lines 4361-4383).
+            let tok_start = self.lexer.token().start_loc();
+            let tok_end = self.lexer.token().end_loc();
+            let priv_ident_name = self.lexer.token().get_private_identifier();
+            // Build PrivateName(Identifier(...)).
+            let ident_node = Node::Identifier(Identifier::new(
+                NodeMetadata::new(self.dummy_range()),
+                priv_ident_name,
+                None,
+                false,
+            ));
+            let ident_ref = self.set_location(tok_start, tok_end, ident_node);
+            let priv_node = Node::PrivateName(PrivateName::new(
+                NodeMetadata::new(self.dummy_range()),
+                ident_ref,
+            ));
+            let priv_ref = self.set_location(tok_start, tok_end, priv_node);
+            self.advance(GrammarContext::AllowDiv);
+
+            // Validate: a PrivateName is only legal as the LHS of `in`, and
+            // only if `in`'s precedence is not beaten by the current stack top.
+            let prev_prec = stack
+                .last()
+                .map(|e| Self::get_precedence(e.op_kind))
+                .unwrap_or(0);
+            let in_prec = Self::get_precedence(TokenKind::rw_in);
+            if !self.check(TokenKind::rw_in) || prev_prec >= in_prec {
+                let priv_range = priv_ref.range();
+                self.error_at(
+                    priv_range,
+                    "Private name can only be used as left-hand side of `in` expression",
+                );
+            }
+            priv_ref
+        } else {
+            self.parse_unary_expression()?
+        };
+        let mut top_expr_end = self.lexer.prev_token_end();
+        self.convert_ident_op_if_possible();
+
+        // -----------------------------------------------------------------
+        // Main precedence-climbing loop.
+        // -----------------------------------------------------------------
+        loop {
+            let cur_kind = self.cur_kind();
+            let precedence = Self::get_precedence_except(cur_kind, except_kind);
+            if precedence == 0 {
+                break;
+            }
+
+            // Pop stack entries whose operator has >= precedence than the
+            // current one (left-associative) or strictly > (right-associative
+            // allows equal-precedence to stay on the stack so we can build
+            // the right-hand side fully before folding).
+            while let Some(top) = stack.last() {
+                let top_prec = Self::get_precedence(top.op_kind);
+                if precedence > top_prec {
+                    break;
+                }
+                if precedence == top_prec && !Self::is_left_assoc(top.op_kind) {
+                    // Right-associative: don't pop on equal precedence.
+                    break;
+                }
+                // Pop and fold: top.expr <op> top_expr.
+                let entry = stack.pop().unwrap();
+                let op_label = make_op_label(self.gc, entry.op_kind);
+                let new_start = entry.expr_start;
+                let new_end = top_expr_end;
+
+                // Decide LogicalExpression vs BinaryExpression and handle
+                // the nullish/boolean mixing-error (C++ newBinNode lambda).
+                top_expr = if entry.op_kind == TokenKind::ampamp
+                    || entry.op_kind == TokenKind::pipepipe
+                    || entry.op_kind == TokenKind::questionquestion
+                {
+                    // Mixing-error check.
+                    if (has_nullish && entry.op_kind != TokenKind::questionquestion)
+                        || (has_boolean && entry.op_kind == TokenKind::questionquestion)
+                    {
+                        let err_range = SMRange {
+                            start: entry.expr.range().start,
+                            end: top_expr.range().end,
+                        };
+                        self.error_at(
+                            err_range,
+                            "Mixing '??' with '&&' or '||' requires parentheses",
+                        );
+                    }
+                    if entry.op_kind == TokenKind::questionquestion {
+                        has_nullish = true;
+                    } else {
+                        has_boolean = true;
+                    }
+                    let node = Node::LogicalExpression(LogicalExpression::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        entry.expr,
+                        top_expr,
+                        op_label,
+                    ));
+                    self.set_location(new_start, new_end, node)
+                } else {
+                    // P6/P7: as_operator branch (TS AsExpression / Flow
+                    // AsExpression / AsConstExpression) — unreachable in P1
+                    // because convert_ident_op_if_possible is a no-op.
+                    debug_assert_ne!(
+                        entry.op_kind,
+                        TokenKind::as_operator,
+                        "as_operator is unreachable in P1 (no parse-types context)"
+                    );
+                    let node = Node::BinaryExpression(BinaryExpression::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        entry.expr,
+                        top_expr,
+                        op_label,
+                    ));
+                    self.set_location(new_start, new_end, node)
+                };
+                top_expr_start = top_expr.range().start;
+            }
+
+            // Push current top_expr and the incoming operator.
+            stack.push(StackEntry {
+                expr: top_expr,
+                op_kind: cur_kind,
+                expr_start: top_expr_start,
+            });
+
+            // Consume the operator token.
+            // P6/P7: as_operator uses GrammarContext::Type and then parses
+            // a type annotation instead of a unary expression — unreachable
+            // in P1.
+            self.advance(GrammarContext::AllowRegExp);
+            top_expr_start = self.cur_start();
+
+            // Parse the right-hand operand (private identifier or unary).
+            top_expr = if self.check(TokenKind::private_identifier) {
+                let tok_start = self.lexer.token().start_loc();
+                let tok_end = self.lexer.token().end_loc();
+                let priv_ident_name = self.lexer.token().get_private_identifier();
+                let ident_node = Node::Identifier(Identifier::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    priv_ident_name,
+                    None,
+                    false,
+                ));
+                let ident_ref = self.set_location(tok_start, tok_end, ident_node);
+                let priv_node = Node::PrivateName(PrivateName::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    ident_ref,
+                ));
+                let priv_ref = self.set_location(tok_start, tok_end, priv_node);
+                self.advance(GrammarContext::AllowDiv);
+
+                // Validate: PrivateName as RHS is only legal for `in`, and
+                // the current operator on the stack-top must be exactly `in`
+                // with no higher-precedence operator above it.
+                let prev_prec = stack
+                    .last()
+                    .map(|e| Self::get_precedence(e.op_kind))
+                    .unwrap_or(0);
+                let in_prec = Self::get_precedence(TokenKind::rw_in);
+                if !self.check(TokenKind::rw_in) || prev_prec >= in_prec {
+                    let priv_range = priv_ref.range();
+                    self.error_at(
+                        priv_range,
+                        "Private name can only be used as left-hand side of `in` expression",
+                    );
+                }
+                priv_ref
+            } else {
+                self.parse_unary_expression()?
+            };
+            top_expr_end = self.lexer.prev_token_end();
+            self.convert_ident_op_if_possible();
+        }
+
+        // -----------------------------------------------------------------
+        // Drain the remaining stack.
+        // -----------------------------------------------------------------
+        while let Some(entry) = stack.pop() {
+            let op_label = make_op_label(self.gc, entry.op_kind);
+            let new_start = entry.expr_start;
+            let new_end = top_expr_end;
+
+            top_expr = if entry.op_kind == TokenKind::ampamp
+                || entry.op_kind == TokenKind::pipepipe
+                || entry.op_kind == TokenKind::questionquestion
+            {
+                if (has_nullish && entry.op_kind != TokenKind::questionquestion)
+                    || (has_boolean && entry.op_kind == TokenKind::questionquestion)
+                {
+                    let err_range = SMRange {
+                        start: entry.expr.range().start,
+                        end: top_expr.range().end,
+                    };
+                    self.error_at(
+                        err_range,
+                        "Mixing '??' with '&&' or '||' requires parentheses",
+                    );
+                }
+                if entry.op_kind == TokenKind::questionquestion {
+                    has_nullish = true;
+                } else {
+                    has_boolean = true;
+                }
+                let node = Node::LogicalExpression(LogicalExpression::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    entry.expr,
+                    top_expr,
+                    op_label,
+                ));
+                self.set_location(new_start, new_end, node)
+            } else {
+                debug_assert_ne!(
+                    entry.op_kind,
+                    TokenKind::as_operator,
+                    "as_operator is unreachable in P1 (no parse-types context)"
+                );
+                let node = Node::BinaryExpression(BinaryExpression::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    entry.expr,
+                    top_expr,
+                    op_label,
+                ));
+                self.set_location(new_start, new_end, node)
+            };
+            // top_expr_end stays the same (right side doesn't change).
+        }
+
+        Some(top_expr)
     }
 
     // -----------------------------------------------------------------------
