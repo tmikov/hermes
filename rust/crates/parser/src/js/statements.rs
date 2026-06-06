@@ -1441,9 +1441,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
 
             // C++ 2003-2004: `parseExpression()` for in, `parseAssignment
-            // Expression(ParamIn)` for of.
+            // Expression(ParamIn)` for of. NB the bare C++ `parseExpression()`
+            // uses the header default `Param = ParamIn` (JSParserImpl.h:1141),
+            // so `in` is recognized as a binary operator in the right-hand side.
             let opt_right = if for_in_loop {
-                self.parse_expression(Param::default())
+                self.parse_expression(PARAM_IN)
             } else {
                 self.parse_assignment_expression(PARAM_IN)
             };
@@ -1510,11 +1512,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 self.ensure_destructuring_initialized(d);
             }
 
-            // C++ 2043-2049.
+            // C++ 2043-2049. Bare C++ `parseExpression()` → default `ParamIn`.
             let test = if self.check(TokenKind::semi) {
                 None
             } else {
-                Some(self.parse_expression(Param::default())?)
+                Some(self.parse_expression(PARAM_IN)?)
             };
 
             // C++ 2051-2057.
@@ -1526,11 +1528,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 return None;
             }
 
-            // C++ 2059-2065.
+            // C++ 2059-2065. Bare C++ `parseExpression()` → default `ParamIn`.
             let update = if self.check(TokenKind::r_paren) {
                 None
             } else {
-                Some(self.parse_expression(Param::default())?)
+                Some(self.parse_expression(PARAM_IN)?)
             };
 
             // C++ 2067-2073.
