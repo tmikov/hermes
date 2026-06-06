@@ -65,8 +65,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // we stop here; the trailing comma before ')' will be handled when
             // parsePrimaryExpression's l_paren branch is filled in (P3).
             if self.check(TokenKind::r_paren) {
-                // P3: CoverTrailingCommaNode deferred.
-                // For now just stop; the ')' will be consumed by the caller.
+                // P3: CoverTrailingCommaNode deferred. AST-shape deviation: for
+                // `(a,)` C++ produces SequenceExpression([a, CoverTrailingComma]);
+                // we currently return just `a` (the trailing comma is consumed by
+                // the caller's `)`-eat). Only meaningful inside arrow-param covers,
+                // which are P3; no P1 corpus exercises it.
                 break;
             }
 

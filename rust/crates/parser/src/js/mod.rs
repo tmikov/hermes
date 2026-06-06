@@ -226,7 +226,6 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     /// Consume the current token if it is `kind`; return whether it matched.
-    #[allow(dead_code)] // used in P1.6+ (member access, optional chaining)
     pub(super) fn check_and_eat(
         &mut self,
         kind: TokenKind,
