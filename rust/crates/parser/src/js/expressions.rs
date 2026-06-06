@@ -15,8 +15,8 @@ use ast::node::{
     CoverInitializer, Empty, Identifier, LogicalExpression, MemberExpression, MetaProperty,
     NewExpression, Node, NullLiteral, NumericLiteral, ObjectExpression, ObjectPattern,
     OptionalCallExpression, OptionalMemberExpression, PrivateName, Property, RestElement,
-    SequenceExpression, SpreadElement, StringLiteral, ThisExpression, UnaryExpression,
-    UpdateExpression,
+    SequenceExpression, SpreadElement, StringLiteral, TaggedTemplateExpression,
+    TemplateElement, TemplateLiteral, ThisExpression, UnaryExpression, UpdateExpression,
 };
 use ast::node_child::{NodeList, NodeMetadata};
 use support::location::SMLoc;
@@ -24,10 +24,11 @@ use support::location::SMLoc;
 use crate::lexer::GrammarContext;
 use crate::token_kinds::TokenKind;
 
-use super::{IsClassHeritageArgument, IsConstructorCall, JSParserImpl, Param, PARAM_IN};
+use super::{IsClassHeritageArgument, IsConstructorCall, JSParserImpl, Param, PARAM_IN, PARAM_TAGGED};
 
 // For AssignState.op field type (interned operator label).
 use atom_table;
+use atom_table::INVALID_ATOM_BYTES;
 
 impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     // -----------------------------------------------------------------------
@@ -1411,17 +1412,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let type_args: Option<&'gc Node<'gc>> = None;
 
         // Is this a CallExpression? (4065-4074)
-        if self.check2(
+        // C++ checks checkN(l_paren, no_substitution_template, template_head).
+        if self.check_n3(
+            TokenKind::l_paren,
             TokenKind::no_substitution_template,
             TokenKind::template_head,
         ) {
-            // Tagged template — P1.9 deferral.
-            self.error_cur(
-                "tagged template literals not yet supported (parser phase P1.9)",
-            );
-            return None;
-        }
-        if self.check(TokenKind::l_paren) {
             expr = self.parse_call_expression(
                 start_loc,
                 expr,
@@ -1723,12 +1719,41 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 // Re-set to the new (incremented) value.
                 self.recursion_depth.set(new_depth);
             } else {
-                // Template literal branch — P1.9 deferral.
-                self.error_cur(
-                    "tagged template literals not yet supported (parser phase P1.9)",
-                );
+                // Tagged template literal branch — P1.9.
+                // C++ 3559-3587: `super` as tag is an error (P3: unreachable here);
+                // optional chain + template is a static-semantics error.
+                debug_assert!(is_template);
+                if seen_optional_chain {
+                    let range = self.cur_range();
+                    self.error_at(
+                        range,
+                        "invalid use of tagged template literal in optional chain",
+                    );
+                    // Note the location of the optional chain.
+                    self.lexer.get_source_mgr_mut().note_at(
+                        expr.range().start,
+                        None,
+                        "location of optional chain",
+                        support::diag::Subsystem::Parser,
+                    );
+                    self.recursion_depth.set(saved_depth);
+                    return None;
+                }
+                let quasi = self.parse_template_literal(PARAM_TAGGED);
                 self.recursion_depth.set(saved_depth);
-                return None;
+                let quasi = quasi?;
+                let quasi_end = quasi.range().end;
+                let tagged = Node::TaggedTemplateExpression(TaggedTemplateExpression::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    expr,
+                    quasi,
+                ));
+                // C++ `setLocation(startLoc, optTemplate.getValue(), ...)` —
+                // 3-arg (debug = start).
+                expr = self.set_location(start_loc, quasi_end, tagged);
+                object_loc = next_object_loc;
+                // Re-save the depth for the next iteration.
+                self.recursion_depth.set(new_depth);
             }
         }
 
@@ -2742,11 +2767,17 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 TokenKind::no_substitution_template,
                 TokenKind::template_head,
             ) {
-                // Tagged template — P1.9 deferral.
-                self.error_cur(
-                    "tagged template literals not yet supported (parser phase P1.9)",
-                );
-                return None;
+                // Tagged template literal — P1.9.
+                // C++ 3874-3886: debugLoc = template start; setLocation 4-arg.
+                let debug_loc = self.lexer.token().start_loc();
+                let quasi = self.parse_template_literal(PARAM_TAGGED)?;
+                let quasi_end = quasi.range().end;
+                let tagged = Node::TaggedTemplateExpression(TaggedTemplateExpression::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    expr,
+                    quasi,
+                ));
+                expr = self.set_location_d(start_loc, quasi_end, debug_loc, tagged);
             } else {
                 break;
             }
@@ -2995,12 +3026,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 Some(expr)
             }
 
-            // template literal — deferred (P1.10)
+            // template literal — P1.9
             TokenKind::no_substitution_template | TokenKind::template_head => {
-                self.error_cur(
-                    "template literals not yet supported (parser phase P1.10)",
-                );
-                None
+                self.parse_template_literal(Param::default())
             }
 
             // function expression — deferred (P3)
@@ -3037,6 +3065,135 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 None
             }
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // parse_template_literal — P1.9
+    // -----------------------------------------------------------------------
+
+    /// Parse a template literal (tagged or untagged). Port of
+    /// `JSParserImpl::parseTemplateLiteral` (lines 3342-3414).
+    ///
+    /// Precondition: current token is `no_substitution_template` or
+    /// `template_head`.
+    ///
+    /// `param` carries `PARAM_TAGGED` for tagged template literals. When the
+    /// token contains a `NotEscapeSequence` (invalid escape) and `PARAM_TAGGED`
+    /// is NOT set, an error is emitted and the parse fails. When `PARAM_TAGGED`
+    /// IS set, `cooked` is `None` (→ `INVALID_ATOM_BYTES` → JSON `null`).
+    ///
+    /// Returns a `TemplateLiteral(quasis, expressions)` node.
+    pub(super) fn parse_template_literal(
+        &mut self,
+        param: Param,
+    ) -> Option<&'gc Node<'gc>> {
+        debug_assert!(
+            self.check2(TokenKind::no_substitution_template, TokenKind::template_head),
+            "parse_template_literal: expected template literal start"
+        );
+
+        let start_loc = self.cur_start();
+
+        let mut quasis: Vec<&'gc Node<'gc>> = Vec::new();
+        let mut expressions: Vec<&'gc Node<'gc>> = Vec::new();
+
+        // Push the current TemplateElement token onto `quasis` and advance.
+        // `tail` indicates whether this is the last quasi.
+        // Returns false on error (invalid escape in untagged template).
+        let mut push_template_element = |this: &mut Self, tail: bool| -> bool {
+            // Invalid escape check (only an error in untagged context).
+            if this.lexer.token().get_template_literal_contains_not_escapes()
+                && !param.has(PARAM_TAGGED)
+            {
+                let range = this.cur_range();
+                this.error_at(
+                    range,
+                    "untagged template literal contains invalid escape sequence",
+                );
+                return false;
+            }
+            // Build cooked: None → INVALID_ATOM_BYTES (dumps as JSON null).
+            let cooked = match this.lexer.token().get_template_value() {
+                Some(ab) => ab,
+                None => INVALID_ATOM_BYTES,
+            };
+            let raw = this.lexer.token().get_template_raw_value();
+            let tok_start = this.lexer.token().start_loc();
+            let tok_end = this.lexer.token().end_loc();
+            let quasi_node = Node::TemplateElement(TemplateElement::new(
+                NodeMetadata::new(this.dummy_range()),
+                tail,
+                cooked,
+                raw,
+            ));
+            let quasi_ref = this.set_location(tok_start, tok_end, quasi_node);
+            quasis.push(quasi_ref);
+            true
+        };
+
+        // TemplateSpans: loop while not at end of template.
+        // C++ loops while NOT (no_substitution_template | template_tail).
+        while !self.check2(
+            TokenKind::no_substitution_template,
+            TokenKind::template_tail,
+        ) {
+            // Must be template_head or template_middle.
+            if !self.check2(TokenKind::template_head, TokenKind::template_middle) {
+                let range = self.cur_range();
+                self.error_at(range, "expected template literal");
+                return None;
+            }
+
+            // Push the non-tail TemplateElement.
+            if !push_template_element(self, false) {
+                return None;
+            }
+            // Consume the template_head/template_middle token.
+            // C++ `subStart = advance().Start` (subStart is only used for the
+            // error note; we capture it but don't need it for a fatal-less path).
+            let sub_start = self.advance(GrammarContext::AllowRegExp).start;
+
+            // Parse the substitution expression.
+            let opt_expr = self.parse_expression(PARAM_IN);
+            let opt_expr = match opt_expr {
+                Some(e) => e,
+                None => return None,
+            };
+            expressions.push(opt_expr);
+
+            // The } terminating the expression must be present.
+            if !self.check(TokenKind::r_brace) {
+                if !self.need(TokenKind::r_brace, " at end of substitution in template literal") {
+                    self.lexer.get_source_mgr_mut().note_at(
+                        sub_start,
+                        None,
+                        "start of substitution",
+                        support::diag::Subsystem::Parser,
+                    );
+                }
+                return None;
+            }
+
+            // Rescan the `}` as template_middle or template_tail.
+            self.lexer.rescan_rbrace_in_template_literal();
+        }
+
+        // Push the tail TemplateElement (no_substitution_template or template_tail).
+        if !push_template_element(self, true) {
+            return None;
+        }
+
+        // Consume the tail token; C++ `advance().End` gives the end loc.
+        let end_loc = self.advance(GrammarContext::AllowDiv).end;
+
+        let quasis_list = NodeList::from_iter(self.gc, quasis);
+        let expr_list = NodeList::from_iter(self.gc, expressions);
+        let node = Node::TemplateLiteral(TemplateLiteral::new(
+            NodeMetadata::new(self.dummy_range()),
+            quasis_list,
+            expr_list,
+        ));
+        Some(self.set_location(start_loc, end_loc, node))
     }
 
 }
