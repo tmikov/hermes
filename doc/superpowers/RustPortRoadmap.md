@@ -39,7 +39,7 @@ The front-end stratifies (see the dependency analysis below). We port bottom-up.
 | **JS lexer** | `rust/crates/{atom_table,unicode,parser}/` | ✅ **Complete** — entire `JSLexer` public surface; self-validating byte-for-byte vs `js-lexer-dump` (5 differentials); see deps below |
 | **JSONParser** (+ `JSONEmitter`, value model, factory, `JSONSharedValue`) | `rust/crates/{parser,support}/` | ✅ **Complete** — first `JSLexer` consumer; entire public surface; self-validating byte-for-byte vs `json-parse-dump` (16-file corpus) + 5 ported `JSONParserTest` + 13 ported `JSONEmitterTest`; **benchmarked within ~1.5% of C++ Release** |
 | **AST** (ESTree nodes + GC arena) | `rust/crates/ast/` (+ `support`) | ✅ **Complete — all 4 phases.** Phase 1: juno GC arena copied+adapted; immutable children + `Cell` attributes. Phase 2: **full node set (271 nodes) generated from `ESTree.def`** by committed `gen_nodes.py` → `src/node.rs`; `NodeKind` ranges + `is_*`/`as_*`; generated `visit_children`/`mark_lists`; `new` constructors; idempotency guard. Phase 3: **transforming visitor** — generated `builder` module (clone-with-one-field-changed) + `VisitorMut`/`TransformResult{Unchanged,Removed,Changed,Expanded}` + `Path`/`NodeField` + generated `visit_children_mut` (functional rebuild); 7 transform tests; read `Visitor` unchanged. Phase 4: **`ESTreeJSONDumper`** — generator emits `Node::node_type_str` + `dump_children` (camelCase JSON keys + baked `IGNORE_IF_EMPTY` flags); `src/dump.rs` driver (3 modes, loc/range/raw, WTF-8 label emission via `support::utf8`); 9 golden tests; capstone clean. Spec: `specs/2026-06-03-ast-design.md`; plans: `plans/2026-06-04-ast-{2-node-codegen,3-builders-visitors}.md`, `plans/2026-06-05-ast-4-json-dumper.md` |
-| Parser | `rust/crates/parser/src/js/` | **in progress — P0 (foundations + gate) DONE.** Scaffold + driver helpers + minimal `parseProgram` + `ast-dump` bin + live byte-for-byte `parser_differential` vs `hermesc -dump-ast`. Next: P1 (core expressions). Spec: `specs/2026-06-06-js-parser-design.md`; plan: `plans/2026-06-06-js-parser-p0-foundations.md` |
+| Parser | `rust/crates/parser/src/js/` | **in progress — P0 + P1 DONE.** P0: scaffold + driver + minimal `parseProgram` + `ast-dump` bin + live byte-for-byte `parser_differential` vs `hermesc -dump-ast`. P1: full value-expression grammar (27-file corpus, byte-for-byte). Next: P2 (statements). Spec: `specs/2026-06-06-js-parser-design.md`; plans: `plans/2026-06-06-js-parser-p0-foundations.md`, `…-p1-expressions.md` |
 | Sema (scope resolution + FlowChecker) | — | future |
 | IR / IRGen | — | future |
 | Optimizer | — | future |
@@ -345,8 +345,21 @@ AST) — no dedicated C++ tool needed. A Rust `ast-dump` bin is diffed byte-for-
 > corpus files match byte-for-byte**. Each task two-stage reviewed (spec + quality); zero warnings. Plan:
 > `plans/2026-06-06-js-parser-p0-foundations.md`.
 >
-> **Next: P1 — core expressions** (primary/member/call/new/optional-chaining, unary/postfix, the precedence-table binary parser,
-> conditional/assignment/yield, arrow + reparse, array/object literals, templates, spread). Plan written just-in-time (lexer-style).
+> **🚧 P1 — core expressions DONE.** The full JS *value*-expression grammar, wrapped in expression statements, dumps byte-for-byte
+> vs `hermesc -dump-ast` over a **27-file corpus**. Sub-tasks (each two-stage reviewed + a whole-phase capstone, all green, zero
+> warnings): P1.1 expr-stmt spine + operator-chain skeleton + primary literals; P1.2 binary precedence parser; P1.3 unary/update;
+> P1.4 conditional; P1.5 assignment ops + right-assoc chain; P1.6 member/call/new/optional-chaining/new.target/private-member;
+> P1.7 array literals + spread/elision; P1.8 object literals (data) + P1.8b destructuring-assignment reparse (fresh-node, immutable
+> model); P1.9 templates (tagged+untagged); P1.10 regexp. Plan: `plans/2026-06-06-js-parser-p1-expressions.md`.
+> **Deferred to later phases (all HONEST errors with tests, no silent fallthrough):** functions/classes/arrow/async/generator/getters/
+> setters/object-methods/`super`/`yield` → P3; `import()`/`import.meta` → P4; statements (block/var/if/loops/switch/try/…)/labelled/
+> declarations/import-export → P2; Flow/TS branches → P6/P7 (context-gated). **Tracked carry-forwards (none blocking):** error-recovery
+> fidelity (a few spots `return None` where C++ continues after a non-fatal error — unobservable in `-dump-ast`; tied to the
+> `error`-limit/`force_eof` TODO); `parse_statement_list`'s single `until` token grows to 2–3 for switch-case in P2; `in_decl` threading
+> into reparse helpers in P2; the `let`-in-sloppy-mode over-eager error needs `isLetFollowedByDeclStart` lookahead in P2.
+>
+> **Next: P2 — statements & declarations** (block, if, while/do/for + for-in/of, switch, try, return/break/continue/throw/with/debugger,
+> labelled, var/let/const/using, directives already done). Plan written just-in-time.
 
 ## Key cross-cutting design decisions
 
