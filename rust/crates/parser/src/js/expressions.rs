@@ -1737,6 +1737,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                         support::diag::Subsystem::Parser,
                     );
                     self.recursion_depth.set(saved_depth);
+                    // Deviation: C++ (3566-3577) emits this diagnostic and
+                    // CONTINUES to build the TaggedTemplateExpression (error
+                    // recovery). We abort instead. Unobservable in -dump-ast
+                    // (errored input produces no AST either way); revisit with
+                    // the broader error-recovery fidelity work (see the
+                    // error-limit/force_eof TODO in mod.rs).
                     return None;
                 }
                 let quasi = self.parse_template_literal(PARAM_TAGGED);
