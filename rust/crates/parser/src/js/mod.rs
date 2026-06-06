@@ -609,6 +609,52 @@ mod tests {
         assert!(parser.error_count_pub() >= 1);
     }
 
+    /// Helper: parse `src` and assert it fails with at least one error
+    /// (used for the still-deferred declaration forms).
+    fn assert_parse_errors(src: &[u8], why: &str) {
+        use ast::context::Context;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let buf_id = sm.add_buffer_bytes("input", src);
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        assert!(parser.parse().is_none(), "{why}");
+        assert!(parser.error_count_pub() >= 1, "{why}: expected an error");
+    }
+
+    /// P2 capstone: top-level declaration forms that route into
+    /// `parseDeclaration`/`parseStatementListItem` must emit an HONEST deferral
+    /// error (not a silent misparse). Functions/classes are P3; import/export
+    /// are P4.
+    #[test]
+    fn deferred_function_declaration_errors() {
+        assert_parse_errors(b"function f(){}", "function declaration is P3");
+    }
+
+    #[test]
+    fn deferred_class_declaration_errors() {
+        assert_parse_errors(b"class C {}", "class declaration is P3");
+    }
+
+    #[test]
+    fn deferred_import_declaration_errors() {
+        assert_parse_errors(b"import x from 'm';", "import declaration is P4");
+    }
+
+    #[test]
+    fn deferred_export_declaration_errors() {
+        assert_parse_errors(b"export var x = 1;", "export declaration is P4");
+    }
+
     /// Array literals are implemented in P1.7; `[1]` must now parse cleanly.
     #[test]
     fn array_literal_parses() {

@@ -624,8 +624,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 self.parse_try_statement(param.get(PARAM_RETURN))
             }
             TokenKind::rw_debugger => self.parse_debugger_statement(),
-            // default: parseExpressionOrLabelledStatement
-            _ => self.parse_expression_or_labelled_statement(param),
+            // default: parseExpressionOrLabelledStatement. C++ 725.
+            _ => self.parse_expression_or_labelled_statement(param.get(PARAM_RETURN)),
         }
     }
 
