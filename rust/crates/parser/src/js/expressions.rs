@@ -14,8 +14,8 @@ use ast::node::{
     BigIntLiteral, BinaryExpression, BooleanLiteral, CallExpression, ConditionalExpression,
     CoverInitializer, Empty, Identifier, LogicalExpression, MemberExpression, MetaProperty,
     NewExpression, Node, NullLiteral, NumericLiteral, ObjectExpression, ObjectPattern,
-    OptionalCallExpression, OptionalMemberExpression, PrivateName, Property, RestElement,
-    SequenceExpression, SpreadElement, StringLiteral, TaggedTemplateExpression,
+    OptionalCallExpression, OptionalMemberExpression, PrivateName, Property, RegExpLiteral,
+    RestElement, SequenceExpression, SpreadElement, StringLiteral, TaggedTemplateExpression,
     TemplateElement, TemplateLiteral, ThisExpression, UnaryExpression, UpdateExpression,
 };
 use ast::node_child::{NodeList, NodeMetadata};
@@ -2848,13 +2848,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Parse a primary expression. Port of
     /// `JSParserImpl::parsePrimaryExpression` (lines 2481-2709).
     ///
-    /// Implemented for P1.1:
+    /// Implemented:
     ///   rw_this, identifier, rw_null, rw_true/false, numeric_literal,
-    ///   bigint_literal, string_literal, l_paren (plain grouping, no arrow cover).
+    ///   bigint_literal, string_literal, l_paren (plain grouping, no arrow cover),
+    ///   regexp_literal (P1.10), l_square (P1.7), l_brace (P1.8).
     ///
     /// Deferred with honest error messages:
-    ///   l_square / l_brace / no_substitution_template / template_head
-    ///   regexp_literal / rw_function / at / rw_class / less (JSX) / default.
+    ///   no_substitution_template / template_head / rw_function / at /
+    ///   rw_class / less (JSX) / default.
     pub(super) fn parse_primary_expression(&mut self) -> Option<&'gc Node<'gc>> {
         let _guard = self.check_recursion()?;
 
@@ -2977,12 +2978,19 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 Some(res)
             }
 
-            // regexp literal — deferred (P1.9)
+            // regexp literal — P1.10. Port of JSParserImpl.cpp 2573-2582.
             TokenKind::regexp_literal => {
-                self.error_cur(
-                    "regexp literals not yet supported (parser phase P1.9)",
-                );
-                None
+                let re = self.lexer.token().get_regexp_literal();
+                let tok_start = self.lexer.token().start_loc();
+                let tok_end = self.lexer.token().end_loc();
+                let node = Node::RegExpLiteral(RegExpLiteral::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    re.body(),
+                    re.flags(),
+                ));
+                let res = self.set_location(tok_start, tok_end, node);
+                self.advance(GrammarContext::AllowDiv);
+                Some(res)
             }
 
             // array literal — P1.7
