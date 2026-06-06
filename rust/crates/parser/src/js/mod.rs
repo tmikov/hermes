@@ -11,6 +11,9 @@
 // Items added here are used from P1+ parsing phases; suppress warnings so the
 // P0 scaffold stays warning-free even though only `new` and the first-token
 // test are exercised now.
+// TODO(parser-P1): once expression/statement parsing wires these up, drop this
+// module-level allow (or narrow it to whatever genuinely remains unused) so new
+// dead code is caught again.
 #![allow(dead_code)] // used from P1+
 
 use ast::context::GCLock;
@@ -22,7 +25,7 @@ use crate::token_kinds::TokenKind;
 
 /// A bitmask of grammar parameters threaded between parse functions.
 /// Port of `JSParserImpl::Param`.
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub struct Param(u32);
 
 /// `[In]` — "in" is recognized as a binary operator in RelationalExpression.
@@ -47,7 +50,13 @@ impl Param {
     pub fn has(self, p: Param) -> bool {
         (self.0 & p.0) != 0
     }
+    /// True if ALL flags in `p` are set (C++ `hasAll`).
+    pub fn has_all(self, p: Param) -> bool {
+        (self.0 & p.0) == p.0
+    }
     /// `p` if any of its bits are set here, else empty (C++ `get`).
+    /// (The C++ variadic `get(p, tail...)` is just `a.get(x).plus(a.get(y))`
+    /// in Rust — single-arg `get` + `plus` cover it.)
     pub fn get(self, p: Param) -> Param {
         Param(self.0 & p.0)
     }
@@ -158,6 +167,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Report an error at `range`. Routed through the lexer's SourceErrorManager.
     /// Uses `error_at(loc, range, msg, subsystem)` to attach a range underline
     /// and mark it as a Parser-subsystem diagnostic.
+    /// TODO(parser-P1): port the C++ `error(SMLoc, SMRange, msg)` error-limit
+    /// behavior (return false + `lexer.force_eof()` once the max error count is
+    /// reached) when statement parsing can emit error sequences.
     fn error_at(&mut self, range: SMRange, msg: &str) {
         self.lexer.get_source_mgr_mut().error_at(
             range.start,
@@ -226,17 +238,17 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         md.debug_loc.set(start);
         allocated
     }
+
+    /// Test-only accessor for the current token kind.
+    #[cfg(test)]
+    pub(crate) fn cur_kind_pub(&self) -> TokenKind {
+        self.cur_kind()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
-        pub(crate) fn cur_kind_pub(&self) -> TokenKind {
-            self.cur_kind()
-        }
-    }
 
     #[test]
     fn parser_constructs_and_sees_first_token() {
