@@ -39,7 +39,7 @@ The front-end stratifies (see the dependency analysis below). We port bottom-up.
 | **JS lexer** | `rust/crates/{atom_table,unicode,parser}/` | ✅ **Complete** — entire `JSLexer` public surface; self-validating byte-for-byte vs `js-lexer-dump` (5 differentials); see deps below |
 | **JSONParser** (+ `JSONEmitter`, value model, factory, `JSONSharedValue`) | `rust/crates/{parser,support}/` | ✅ **Complete** — first `JSLexer` consumer; entire public surface; self-validating byte-for-byte vs `json-parse-dump` (16-file corpus) + 5 ported `JSONParserTest` + 13 ported `JSONEmitterTest`; **benchmarked within ~1.5% of C++ Release** |
 | **AST** (ESTree nodes + GC arena) | `rust/crates/ast/` (+ `support`) | ✅ **Complete — all 4 phases.** Phase 1: juno GC arena copied+adapted; immutable children + `Cell` attributes. Phase 2: **full node set (271 nodes) generated from `ESTree.def`** by committed `gen_nodes.py` → `src/node.rs`; `NodeKind` ranges + `is_*`/`as_*`; generated `visit_children`/`mark_lists`; `new` constructors; idempotency guard. Phase 3: **transforming visitor** — generated `builder` module (clone-with-one-field-changed) + `VisitorMut`/`TransformResult{Unchanged,Removed,Changed,Expanded}` + `Path`/`NodeField` + generated `visit_children_mut` (functional rebuild); 7 transform tests; read `Visitor` unchanged. Phase 4: **`ESTreeJSONDumper`** — generator emits `Node::node_type_str` + `dump_children` (camelCase JSON keys + baked `IGNORE_IF_EMPTY` flags); `src/dump.rs` driver (3 modes, loc/range/raw, WTF-8 label emission via `support::utf8`); 9 golden tests; capstone clean. Spec: `specs/2026-06-03-ast-design.md`; plans: `plans/2026-06-04-ast-{2-node-codegen,3-builders-visitors}.md`, `plans/2026-06-05-ast-4-json-dumper.md` |
-| Parser | — | **next** (consumes the AST; lands the byte-for-byte `-dump-ast` differential as its gate) |
+| Parser | `rust/crates/parser/src/js/` | **in progress — P0 (foundations + gate) DONE.** Scaffold + driver helpers + minimal `parseProgram` + `ast-dump` bin + live byte-for-byte `parser_differential` vs `hermesc -dump-ast`. Next: P1 (core expressions). Spec: `specs/2026-06-06-js-parser-design.md`; plan: `plans/2026-06-06-js-parser-p0-foundations.md` |
 | Sema (scope resolution + FlowChecker) | — | future |
 | IR / IRGen | — | future |
 | Optimizer | — | future |
@@ -323,6 +323,30 @@ Plan: `plans/2026-06-05-ast-4-json-dumper.md`.
 
 > **Next component: the JS Parser** (`lib/Parser/JSParserImpl*`) — consumes the lexer + AST + `Context`; the `-dump-ast` differential
 > vs `hermesc` is its validation gate.
+
+### 🚧 JS Parser — IN PROGRESS
+
+The largest component (~16,900 lines of C++: core `JSParserImpl.cpp` 7,603 + `-flow` 5,438 + `-ts` 1,437 + `-jsx` 505 +
+headers). **No Rust parser to crib from** — juno's `hparser` is an FFI-to-C++ + AST converter, not a parser; we port the C++
+directly. Scope (locked in the design spec): all three passes (Full/Pre/Lazy) + all dialects (JSX/Flow/TS) + full public API.
+Design spec: `specs/2026-06-06-js-parser-design.md`. Built core-first, sliced into phases P0→P8 + capstone; each phase extends a
+byte-for-byte `-dump-ast` differential corpus.
+
+**Validation gate:** `hermesc -dump-ast` IS the oracle (verified pre-Sema in `CompilerDriver.cpp:867`, so it dumps the raw parse
+AST) — no dedicated C++ tool needed. A Rust `ast-dump` bin is diffed byte-for-byte against `hermesc -dump-ast -dump-source-location=both`
+(both pretty by default). This gate is also the deferred end-to-end exercise of the AST's `ESTreeJSONDumper`.
+
+> **🚧 P0 — Foundations + gate DONE.** (1) Added a `debug_loc` to AST `NodeMetadata` (set by the parser; dumper ignores it, golden
+> output unchanged). (2) `parser` crate now depends on `ast`. (3) `JSParserImpl<'gc,'ast,'ctx,'a>` scaffold
+> (`rust/crates/parser/src/js/mod.rs`): `Param` flags, `new` (advances to first token), `check`/`advance`/`eat`/`need`/error helpers,
+> recursion guard, `set_location`. The lexer + AST share one `AtomTable` via the `GCLock`; `Option<&'gc Node>` mirrors C++ `Optional`.
+> (4) Minimal `parseProgram` (trivia-only → empty `Program` covering `[start..EOF]`; non-EOF errors). (5) `ast-dump` bin
+> (`src/bin/ast_dump.rs`). (6) Live `parser_differential` (`tests/parser_differential.rs`, `REQUIRE_DIFFERENTIAL=1`) — **4 trivia-only
+> corpus files match byte-for-byte**. Each task two-stage reviewed (spec + quality); zero warnings. Plan:
+> `plans/2026-06-06-js-parser-p0-foundations.md`.
+>
+> **Next: P1 — core expressions** (primary/member/call/new/optional-chaining, unary/postfix, the precedence-table binary parser,
+> conditional/assignment/yield, arrow + reparse, array/object literals, templates, spread). Plan written just-in-time (lexer-style).
 
 ## Key cross-cutting design decisions
 
