@@ -5,9 +5,14 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-//! Byte-for-byte differential: parse each corpus file with the C++ hermesc
-//! (`-dump-ast -dump-source-location=both`, pretty-print on by default) and
-//! the Rust `ast-dump` (`--pretty --dump-source-location`), compare stdout.
+//! Byte-for-byte differential: parse each corpus file with the C++ hermesc and
+//! the Rust `ast-dump`, compare stdout.
+//!
+//! Flag pairing (must stay aligned or the bytes diverge for non-trivial input):
+//! - hermesc `-dump-source-location=both` = emit both `loc` and `range`, which
+//!   is what the Rust side emits with `--dump-source-location` (LocAndRange).
+//! - hermesc pretty-prints by default (`-pretty` init(true)), so the Rust side
+//!   passes `--pretty`; no flag is needed on the hermesc side.
 //!
 //! The gate is deliberately trivia-only (empty/whitespace/comments) for phase
 //! P0; later parser phases extend the corpus with real JS. Skip cleanly when
@@ -17,15 +22,11 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-/// Path to the C++ hermesc oracle.
-/// `CARGO_MANIFEST_DIR` is `<repo>/rust/crates/parser`; three ancestor hops
-/// reach the repo root (`nth(3)`).
+/// Path to the C++ hermesc oracle (sibling style: relative join from the crate
+/// manifest dir `<repo>/rust/crates/parser`).
 fn hermesc_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(3)
-        .unwrap()
-        .join("cmake-build-asan/bin/hermesc")
+        .join("../../../cmake-build-asan/bin/hermesc")
 }
 
 /// Directory that holds the parser differential corpus.
@@ -37,7 +38,7 @@ fn corpus_dir() -> PathBuf {
 fn parser_differential_p0() {
     let hermesc = hermesc_bin();
     if !hermesc.exists() {
-        if std::env::var("REQUIRE_DIFFERENTIAL").is_ok() {
+        if std::env::var_os("REQUIRE_DIFFERENTIAL").is_some() {
             panic!(
                 "REQUIRE_DIFFERENTIAL set but hermesc not found at {}; \
                  build: cmake --build cmake-build-asan --target hermesc",
@@ -70,13 +71,20 @@ fn parser_differential_p0() {
     files.sort();
     assert!(!files.is_empty(), "parser_corpus is empty");
 
-    let mut checked = 0usize;
     for f in &files {
         let c = Command::new(&hermesc)
             .args(["-dump-ast", "-dump-source-location=both"])
             .arg(f)
             .output()
             .expect("failed to run hermesc");
+        // Guard against a silent oracle failure (e.g. a future flag rename):
+        // a nonzero hermesc exit would otherwise just empty its stdout.
+        assert!(
+            c.status.success(),
+            "hermesc failed on {}:\n{}",
+            f.display(),
+            String::from_utf8_lossy(&c.stderr)
+        );
         let r = Command::new(&ast_dump)
             .args(["--pretty", "--dump-source-location"])
             .arg(f)
@@ -88,7 +96,6 @@ fn parser_differential_p0() {
             "AST dump mismatch for {}",
             f.display()
         );
-        checked += 1;
     }
-    eprintln!("parser differential: {checked} corpus files matched");
+    eprintln!("parser differential: {} corpus files matched", files.len());
 }
