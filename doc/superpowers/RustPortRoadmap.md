@@ -358,8 +358,25 @@ AST) — no dedicated C++ tool needed. A Rust `ast-dump` bin is diffed byte-for-
 > `error`-limit/`force_eof` TODO); `parse_statement_list`'s single `until` token grows to 2–3 for switch-case in P2; `in_decl` threading
 > into reparse helpers in P2; the `let`-in-sloppy-mode over-eager error needs `isLetFollowedByDeclStart` lookahead in P2.
 >
-> **Next: P2 — statements & declarations** (block, if, while/do/for + for-in/of, switch, try, return/break/continue/throw/with/debugger,
-> labelled, var/let/const/using, directives already done). Plan written just-in-time.
+> **🚧 P2 — statements & declarations DONE.** The full statement + declaration grammar dumps byte-for-byte vs `hermesc -dump-ast`
+> over a **47-file corpus**. Sub-tasks (each two-stage reviewed + a whole-component capstone, all green, zero warnings):
+> P2.1 simple statements (throw/return/break/continue/with/debugger) + labelled + `eatSemi(optional)`; P2.2 binding identifiers &
+> destructuring patterns (`validateBindingIdentifier`/`parseBinding{Identifier,Pattern,Element,RestElement,Initializer,Property,
+> RestProperty}`); P2.3 var/let/const/using declarations + `checkDeclaration`/`parseDeclaration`/`parseStatementListItem` dispatch;
+> P2.4 block/if/while/do-while/switch/try + the `parseStatementList` multi-`until` const-generic; P2.5 for / for-in / for-of (incl.
+> `using` heads + destructuring-pattern reparse). Plan: `plans/2026-06-06-js-parser-p2-statements.md`. **Bugs caught by review (fixed):**
+> (a) the parser ctor didn't forward `Context::isStrictMode()` to the lexer (C++ `JSParserImpl` ctor passes it) — sloppy-mode default
+> was wrong, breaking loose-`let`-as-identifier; (b) P2.5 dropped the `[In]` flag in the for-in right / C-style test+update (C++ bare
+> `parseExpression()` defaults to `ParamIn`), rejecting `in` as an operator there. **Deferred (all HONEST errors with tests):**
+> function/class declarations → P3; `import`/`export` declarations → P4 (the `import(`/`import.meta` lookahead routes to expression);
+> Flow/TS declaration + type-annotation branches → P6/P7 (context-gated off). **Carry-forwards RESOLVED in P2:** `parseStatementList`
+> single-`until` → multi-`until` const-generic; the `let`-in-sloppy approximation → real `lexer.is_let_followed_by_decl_start()`.
+> **Remaining carry-forwards (none blocking):** error-message-note fidelity (the simplified `need`/`eat`/`errorExpected` drop the
+> secondary "location of …" `sm_.note`, and some P1 `eat`/`need` `where_` strings lack a leading space — unobservable in `-dump-ast`,
+> tied to the `error`-limit/`force_eof` TODO); `in_decl` threading into reparse helpers (still `false` at the for-in/of reparse site).
+>
+> **Next: P3 — functions, classes, arrow functions, async/generators, `super`, `yield`, getters/setters/object-&-class methods, decorators.**
+> Write the P3 plan just-in-time. This unblocks most of the P1/P2 honest-error deferrals.
 
 ## Key cross-cutting design decisions
 
