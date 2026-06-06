@@ -185,7 +185,6 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
     /// True if the current token is `k1` or `k2`. Port of `check(k1, k2)`.
     #[inline]
-    #[allow(dead_code)] // used in P1.2+ (binary expression, postfix)
     pub(super) fn check2(&self, k1: TokenKind, k2: TokenKind) -> bool {
         let k = self.cur_kind();
         k == k1 || k == k2
