@@ -149,6 +149,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Construct the parser and lex the first token (C++ ctor does
     /// `tok_ = lexer_.advance()`).
     pub fn new(gc: &'gc GCLock<'ast, 'ctx>, mut lexer: JSLexer<'a>) -> Self {
+        // Initialize the lexer's strict mode from the context, mirroring the
+        // C++ JSParserImpl constructor which passes `context.isStrictMode()` to
+        // the JSLexer constructor. The JSLexer's own default is strict=true, but
+        // a default parse (script, no "use strict") must start in sloppy mode so
+        // that e.g. `let;` lexes/parses as a loose-mode identifier expression.
+        lexer.set_strict_mode(gc.ctx().strict_mode());
         lexer.advance(GrammarContext::AllowRegExp);
         JSParserImpl {
             gc,
@@ -1547,5 +1553,213 @@ mod tests {
             }
             other => panic!("prop3 should be RestElement, got {:?}", other.kind()),
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // P2.3: variable declarations (var/let/const/using).
+    // -----------------------------------------------------------------------
+
+    /// Parse `src`, returning the parser so the caller can inspect the program
+    /// and (via a `CollectingHandler`) the emitted diagnostics. The handler is
+    /// installed before parsing so error message text is captured.
+    fn parse_with_collector<'gc>(
+        gc: &'gc ast::context::GCLock<'_, '_>,
+        sm: &mut support::manager::SourceErrorManager,
+        atoms: &atom_table::AtomTable,
+        src: &[u8],
+    ) -> Option<&'gc ast::node::Node<'gc>> {
+        sm.set_handler(Box::new(support::diag::CollectingHandler::new()));
+        let buf_id = sm.add_buffer_bytes("input", src);
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(gc, lexer);
+        parser.parse()
+    }
+
+    /// `var [a] = b;` → a VariableDeclaration with kind "var" whose single
+    /// declarator's `id` is an ArrayPattern.
+    #[test]
+    fn var_array_pattern_declaration() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let buf_id = sm.add_buffer_bytes("input", b"var [a] = b;");
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        let program = parser.parse().expect("var [a] = b; parses");
+        assert_eq!(parser.error_count_pub(), 0);
+
+        let Node::Program(p) = program else {
+            panic!("expected Program")
+        };
+        let stmt = p.body.iter().next().expect("one statement");
+        let Node::VariableDeclaration(vd) = stmt else {
+            panic!("expected VariableDeclaration, got {:?}", stmt.kind())
+        };
+        assert_eq!(
+            gc.ctx().atom_table.bytes(vd.kind.get()),
+            b"var",
+            "kind should be 'var'"
+        );
+        let decl = vd.declarations.iter().next().expect("one declarator");
+        let Node::VariableDeclarator(d) = decl else {
+            panic!("expected VariableDeclarator")
+        };
+        assert!(
+            matches!(d.id, Node::ArrayPattern(_)),
+            "declarator id should be ArrayPattern, got {:?}",
+            d.id.kind()
+        );
+        assert!(d.init.is_some(), "declarator should have an initializer");
+    }
+
+    /// `const x;` → reports "missing initializer in const declaration".
+    #[test]
+    fn const_without_initializer_errors() {
+        use ast::context::Context;
+        use support::diag::{CollectingHandler, DiagKind};
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let _program = parse_with_collector(&gc, &mut sm, atoms, b"const x;");
+
+        let h = sm.handler_as::<CollectingHandler>().unwrap();
+        let errs: Vec<_> = h
+            .messages()
+            .iter()
+            .filter(|m| m.kind == DiagKind::Error)
+            .collect();
+        assert!(
+            errs.iter()
+                .any(|m| m.message == "missing initializer in const declaration"),
+            "expected 'missing initializer in const declaration', got {:?}",
+            errs.iter().map(|m| &m.message).collect::<Vec<_>>()
+        );
+    }
+
+    /// `var [a];` → reports "destucturing declaration must be initialized"
+    /// (the C++ typo "destucturing" is preserved).
+    #[test]
+    fn destructuring_without_initializer_errors() {
+        use ast::context::Context;
+        use support::diag::{CollectingHandler, DiagKind};
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let _program = parse_with_collector(&gc, &mut sm, atoms, b"var [a];");
+
+        let h = sm.handler_as::<CollectingHandler>().unwrap();
+        let errs: Vec<_> = h
+            .messages()
+            .iter()
+            .filter(|m| m.kind == DiagKind::Error)
+            .collect();
+        assert!(
+            errs.iter()
+                .any(|m| m.message == "destucturing declaration must be initialized"),
+            "expected 'destucturing declaration must be initialized', got {:?}",
+            errs.iter().map(|m| &m.message).collect::<Vec<_>>()
+        );
+    }
+
+    /// `let x = 1;` → VariableDeclaration with kind "let".
+    #[test]
+    fn let_declaration_kind() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let buf_id = sm.add_buffer_bytes("input", b"let x = 1;");
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        let program = parser.parse().expect("let x = 1; parses");
+        assert_eq!(parser.error_count_pub(), 0);
+
+        let Node::Program(p) = program else {
+            panic!("expected Program")
+        };
+        let stmt = p.body.iter().next().expect("one statement");
+        let Node::VariableDeclaration(vd) = stmt else {
+            panic!("expected VariableDeclaration, got {:?}", stmt.kind())
+        };
+        assert_eq!(
+            gc.ctx().atom_table.bytes(vd.kind.get()),
+            b"let",
+            "kind should be 'let'"
+        );
+    }
+
+    /// Sloppy-mode `let;` is a loose identifier expression, not a declaration:
+    /// it must parse as an ExpressionStatement. (Regression for the P1
+    /// always-flag-`let` approximation now replaced by the real
+    /// `is_let_followed_by_decl_start` lookahead.)
+    #[test]
+    fn loose_let_is_expression_statement() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let buf_id = sm.add_buffer_bytes("input", b"let;\nlet x;");
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        let program = parser.parse().expect("let;\\nlet x; parses");
+        assert_eq!(parser.error_count_pub(), 0);
+
+        let Node::Program(p) = program else {
+            panic!("expected Program")
+        };
+        let mut it = p.body.iter();
+        // First: `let;` → ExpressionStatement (loose-mode identifier `let`).
+        let first = it.next().expect("first statement");
+        assert!(
+            matches!(first, Node::ExpressionStatement(_)),
+            "`let;` should be an ExpressionStatement, got {:?}",
+            first.kind()
+        );
+        // Second: `let x;` → VariableDeclaration.
+        let second = it.next().expect("second statement");
+        assert!(
+            matches!(second, Node::VariableDeclaration(_)),
+            "`let x;` should be a VariableDeclaration, got {:?}",
+            second.kind()
+        );
     }
 }

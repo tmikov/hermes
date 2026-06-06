@@ -12,7 +12,8 @@ use ast::node::{
     ArrayPattern, AssignmentPattern, BreakStatement, ContinueStatement,
     DebuggerStatement, Empty, EmptyStatement, ExpressionStatement, Identifier,
     LabeledStatement, Node, ObjectPattern, Property, RestElement,
-    ReturnStatement, StringLiteral, ThrowStatement, WithStatement,
+    ReturnStatement, StringLiteral, ThrowStatement, VariableDeclaration,
+    VariableDeclarator, WithStatement,
 };
 use ast::node_child::{NodeList, NodeMetadata};
 use atom_table::INVALID_ATOM_BYTES;
@@ -22,6 +23,16 @@ use crate::lexer::GrammarContext;
 use crate::token_kinds::TokenKind;
 
 use super::{AllowImportExport, JSParserImpl, Param, PARAM_IN, PARAM_RETURN};
+
+/// Whether `parseVariableDeclaration`/`parseVariableDeclarationList` may parse
+/// a binding *pattern* (`[...]`/`{...}`) as the declaration target. Port of the
+/// C++ enum `JSParserImpl::VariableDeclAllowPattern`. `using` declarations pass
+/// `No`; everything else defaults to `Yes`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum VariableDeclAllowPattern {
+    Yes,
+    No,
+}
 
 impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     // -----------------------------------------------------------------------
@@ -71,82 +82,466 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     ///
     /// Port of `JSParserImpl::parseStatementListItem` (lines 879-946).
     ///
-    /// P1.1 deferral: declarations are not yet supported. The
-    /// `checkDeclaration()` path emits an honest error and returns false.
-    /// `import` / `export` statements are similarly deferred.
+    /// `function`/`async function`/`class`/`@decorator` declarations are
+    /// dispatched through `parse_declaration` which emits honest P3 errors;
+    /// `import`/`export` declarations emit honest P4 errors. The Flow `declare`
+    /// branch (890-897) is omitted.
     pub(super) fn parse_statement_list_item(
         &mut self,
         param: Param,
         _allow_import_export: AllowImportExport,
         stmt_list: &mut Vec<&'gc Node<'gc>>,
     ) -> bool {
-        // P1.1: checkDeclaration() deferred.
-        // The C++ would dispatch to parseDeclaration here if a declaration
-        // keyword is present. For P1.1 we check for the most common ones and
-        // emit an honest error.
-        if self.check_declaration_start() {
-            self.error_cur("declarations not yet supported (parser phase P2)");
-            return false;
-        }
-
-        // P1.1: import / export deferred.
-        if self.check(TokenKind::rw_import) || self.check(TokenKind::rw_export) {
-            self.error_cur("import/export declarations not yet supported (parser phase P2)");
-            return false;
-        }
-
-        // Fall through to parseStatement.
-        match self.parse_statement(param.get(PARAM_RETURN)) {
-            Some(stmt) => {
-                stmt_list.push(stmt);
-                true
+        if self.check_declaration() {
+            // C++ 883-888.
+            match self.parse_declaration(Param::default()) {
+                Some(decl) => {
+                    stmt_list.push(decl);
+                }
+                None => return false,
             }
-            None => false,
+        } else if self.check(TokenKind::rw_import) {
+            // 'import' can indicate an import declaration, but it's also
+            // possible a Statement begins with a call to `import()`, so do a
+            // lookahead to see if the next token is '('. It can also be
+            // import.meta, so check for '.'. C++ 898-923.
+            let opt_next = self.lexer.lookahead1::<false>(None);
+            if matches!(
+                opt_next,
+                Some(TokenKind::l_paren) | Some(TokenKind::period)
+            ) {
+                // import() / import.meta — parse as a Statement (which will
+                // itself emit the appropriate P4 error if unsupported).
+                match self.parse_statement(param.get(PARAM_RETURN)) {
+                    Some(stmt) => stmt_list.push(stmt),
+                    None => return false,
+                }
+            } else {
+                // P4: import declarations are deferred.
+                self.error_cur(
+                    "import declarations not yet supported (parser phase P4)",
+                );
+                return false;
+            }
+        } else if self.check(TokenKind::rw_export) {
+            // P4: export declarations are deferred. C++ 924-936.
+            self.error_cur(
+                "export declarations not yet supported (parser phase P4)",
+            );
+            return false;
+        } else {
+            // C++ 937-942.
+            match self.parse_statement(param.get(PARAM_RETURN)) {
+                Some(stmt) => stmt_list.push(stmt),
+                None => return false,
+            }
         }
+
+        true
     }
 
     // -----------------------------------------------------------------------
-    // checkDeclarationStart — helper (C++ checkDeclaration is in the header)
+    // checkDeclaration — JSParserImpl.h:565
     // -----------------------------------------------------------------------
 
-    /// Returns true if the current token begins a declaration that is not yet
-    /// supported in P1.1. Used by `parseStatementListItem` to emit an honest
-    /// "not yet supported" error instead of silently misparsing.
+    /// Returns true if the current token begins a declaration. Port of the
+    /// header method `JSParserImpl::checkDeclaration()` (JSParserImpl.h:565-645)
+    /// without the Flow/TS extension blocks (597-642).
     ///
-    /// Mirrors `JSParserImpl::checkDeclaration()` (JSParserImpl.h:565-645)
-    /// without the Flow/TS extensions (those are P3+ anyway).
-    fn check_declaration_start(&self) -> bool {
-        // rw_function, rw_const, rw_class, at (@decorator)
+    /// Needs `&mut self` because the `let`/`using`/`await using` disambiguation
+    /// performs a lexer lookahead.
+    pub(super) fn check_declaration(&mut self) -> bool {
+        // rw_function, rw_const, rw_class, at; or 'async [no LT] function'.
+        // C++ 566-573.
         if self.check_n4(
             TokenKind::rw_function,
             TokenKind::rw_const,
             TokenKind::rw_class,
             TokenKind::at,
-        ) {
+        ) || (self.check_unescaped_name(b"async") && self.check_async_function())
+        {
             return true;
         }
-        // 'let' — only a declaration when followed by a declaration start,
-        // or always in strict mode. We approximate: if the current token is
-        // the identifier `let`, treat it as a potential declaration and let
-        // the error message guide the user. In loose mode this may be a false
-        // positive for `let(...)` (extremely rare edge case acceptable for P1.1).
-        if self.check(TokenKind::identifier)
+
+        // 'let' — a declaration when in strict mode, otherwise only when
+        // followed by a declaration start ('let Identifier', 'let [', 'let {').
+        // In loose mode 'let' can also be an Identifier. C++ 575-586.
+        if self.check_unescaped_name(b"let") {
+            if self.lexer.is_strict_mode() {
+                return true;
+            }
+            return self.lexer.is_let_followed_by_decl_start();
+        }
+
+        // 'using' — a declaration when followed by an identifier on the same
+        // line. C++ 588-590.
+        if self.check_unescaped_name(b"using") {
+            return self.lexer.is_using_followed_by_identifier();
+        }
+
+        // 'await using' — only inside an await context. C++ 592-595.
+        // The lexer helper takes the interned `using` atom (C++ kw.identUsing).
+        let ident_using = self.gc.ctx().atom_table.atom_bytes(b"using");
+        if self.param_await
+            && self.check_unescaped_name(b"await")
             && self
                 .lexer
-                .get_string_table()
-                .bytes(self.lexer.token().get_identifier())
-                == b"let"
+                .is_await_using_followed_by_identifier(ident_using)
         {
-            // In strict mode always a declaration; in loose mode defer to the
-            // lexer's isLetFollowedByDeclStart (faithful C++ path). For P1.1
-            // we take the conservative approach: always flag it, since the
-            // next phase will implement it properly anyway.
             return true;
         }
-        // 'async function' — not yet supported.
-        // The async check (checkAsyncFunction) is a lookahead. We conservatively
-        // skip it for P1.1; async identifiers will parse as plain identifiers.
+
+        // Flow/TS blocks (597-642) omitted.
         false
+    }
+
+    // -----------------------------------------------------------------------
+    // checkAsyncFunction — 308 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Check for `async [no LineTerminator here] function`, with the cursor at
+    /// `async`. Port of `JSParserImpl::checkAsyncFunction` (lines 308-321).
+    ///
+    /// Idempotent: it restores the lexer state via `lookahead1`.
+    pub(super) fn check_async_function(&mut self) -> bool {
+        assert!(
+            self.check_unescaped_name(b"async"),
+            "check for async function must occur at 'async'"
+        );
+        // Avoid passing rw_function to lookahead1; parseFunctionHelper relies on
+        // seeing `async`. C++ 314-320.
+        self.lexer.lookahead1::<false>(None) == Some(TokenKind::rw_function)
+    }
+
+    // -----------------------------------------------------------------------
+    // parseDeclaration — 815 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a declaration. Port of `JSParserImpl::parseDeclaration`
+    /// (lines 815-877). Assumes `check_declaration()` is true.
+    ///
+    /// `function`/`async function` (820-827) and `@`/`class` (829-835)
+    /// declarations emit honest P3 errors; the Flow/TS blocks (857-873) are
+    /// omitted.
+    pub(super) fn parse_declaration(
+        &mut self,
+        param: Param,
+    ) -> Option<&'gc Node<'gc>> {
+        let _guard = self.check_recursion()?;
+
+        assert!(self.check_declaration(), "invalid start for declaration");
+
+        // C++ 820-827.
+        if self.check(TokenKind::rw_function)
+            || (self.check_unescaped_name(b"async") && self.check_async_function())
+        {
+            // P3: function declarations are deferred.
+            self.error_cur(
+                "function declarations not yet supported (parser phase P3)",
+            );
+            return None;
+        }
+
+        // C++ 829-835.
+        if self.check2(TokenKind::at, TokenKind::rw_class) {
+            // P3: class declarations are deferred.
+            self.error_cur(
+                "class declarations not yet supported (parser phase P3)",
+            );
+            return None;
+        }
+
+        // C++ 837-843.
+        if self.check(TokenKind::rw_const) || self.check_unescaped_name(b"let") {
+            return self.parse_lexical_declaration(PARAM_IN);
+        }
+
+        // using Identifier / await using Identifier. C++ 845-855.
+        if self.check_unescaped_name(b"using")
+            || self.check_unescaped_name(b"await")
+        {
+            return self.parse_using_declaration(param);
+        }
+
+        // Flow/TS blocks (857-873) omitted.
+        unreachable!("check_declaration() returned true without a declaration");
+    }
+
+    // -----------------------------------------------------------------------
+    // parseLexicalDeclaration — 1088 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a lexical (`var`/`let`/`const`) declaration. Port of
+    /// `JSParserImpl::parseLexicalDeclaration` (lines 1088-1133).
+    pub(super) fn parse_lexical_declaration(
+        &mut self,
+        param: Param,
+    ) -> Option<&'gc Node<'gc>> {
+        assert!(
+            self.check(TokenKind::rw_var)
+                || self.check(TokenKind::rw_const)
+                || self.check_unescaped_name(b"let"),
+            "parseLexicalDeclaration() expects var/const/let"
+        );
+        // C++ 1094-1095.
+        let is_const = self.check(TokenKind::rw_const);
+        let kind_ident = self.lexer.token().get_res_word_or_identifier();
+
+        let start_loc = self.advance(GrammarContext::AllowRegExp).start;
+
+        // C++ 1099-1101.
+        let mut decl_list: Vec<&'gc Node<'gc>> = Vec::new();
+        if !self.parse_variable_declaration_list(
+            param,
+            &mut decl_list,
+            start_loc,
+            VariableDeclAllowPattern::Yes,
+        ) {
+            return None;
+        }
+
+        if !self.eat_semi(false) {
+            return None;
+        }
+
+        // C++ 1106-1122: const bindings must have an initializer.
+        if is_const {
+            for decl in &decl_list {
+                let var_decl = decl
+                    .as_variable_declarator()
+                    .expect("declaration list element is a VariableDeclarator");
+                if var_decl.init.is_none() {
+                    // ES9.0 13.3.1.1: It is a Syntax Error if Initializer is not
+                    // present and IsConstantDeclaration is true. (Not done in the
+                    // SemanticValidator because `const` in `for` loops don't need
+                    // initializers.)
+                    self.error_at(
+                        decl.range(),
+                        "missing initializer in const declaration",
+                    );
+                }
+            }
+        }
+
+        // C++ 1124-1128.
+        let end_loc = self.lexer.prev_token_end();
+        let node = Node::VariableDeclaration(VariableDeclaration::new(
+            NodeMetadata::new(self.dummy_range()),
+            kind_ident,
+            NodeList::from_iter(self.gc, decl_list),
+        ));
+        let res = self.set_location(start_loc, end_loc, node);
+
+        // C++ 1130.
+        self.ensure_destructuring_initialized(res);
+
+        Some(res)
+    }
+
+    // -----------------------------------------------------------------------
+    // parseUsingDeclaration — 1135 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a `using` / `await using` declaration. Port of
+    /// `JSParserImpl::parseUsingDeclaration` (lines 1135-1175).
+    pub(super) fn parse_using_declaration(
+        &mut self,
+        param: Param,
+    ) -> Option<&'gc Node<'gc>> {
+        assert!(
+            self.check_unescaped_name(b"await")
+                || self.check_unescaped_name(b"using")
+        );
+
+        // Determine if this is 'using' or 'await using'. C++ 1140-1141.
+        let is_await_using = self.check_unescaped_name(b"await");
+        let start_loc = self.advance(GrammarContext::AllowRegExp).start;
+        let mut kind_ident = self.gc.ctx().atom_table.atom_bytes(b"using");
+
+        if is_await_using {
+            // await using Identifier
+            //       ^
+            // C++ 1144-1150.
+            assert!(self.check_unescaped_name(b"using"));
+            self.advance(GrammarContext::AllowRegExp);
+            kind_ident = self.gc.ctx().atom_table.atom_bytes(b"await using");
+        }
+
+        // C++ 1152-1155: 'using' declarations may not bind a pattern.
+        let mut decl_list: Vec<&'gc Node<'gc>> = Vec::new();
+        if !self.parse_variable_declaration_list(
+            param,
+            &mut decl_list,
+            start_loc,
+            VariableDeclAllowPattern::No,
+        ) {
+            return None;
+        }
+
+        if !self.eat_semi(false) {
+            return None;
+        }
+
+        // 'using' declarations require initializers. C++ 1160-1168.
+        for decl in &decl_list {
+            let var_decl = decl
+                .as_variable_declarator()
+                .expect("declaration list element is a VariableDeclarator");
+            if var_decl.init.is_none() {
+                self.error_at(
+                    decl.range(),
+                    "missing initializer in using declaration",
+                );
+            }
+        }
+
+        // C++ 1170-1174.
+        let end_loc = self.lexer.prev_token_end();
+        let node = Node::VariableDeclaration(VariableDeclaration::new(
+            NodeMetadata::new(self.dummy_range()),
+            kind_ident,
+            NodeList::from_iter(self.gc, decl_list),
+        ));
+        Some(self.set_location(start_loc, end_loc, node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseVariableStatement — 1177 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a `var` statement. Port of `JSParserImpl::parseVariableStatement`
+    /// (lines 1177-1180). (A `var` statement is a lexical declaration with
+    /// `[In]` always set.)
+    pub(super) fn parse_variable_statement(
+        &mut self,
+        _param: Param,
+    ) -> Option<&'gc Node<'gc>> {
+        self.parse_lexical_declaration(PARAM_IN)
+    }
+
+    // -----------------------------------------------------------------------
+    // parseVariableDeclarationList — 1197 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a comma-separated list of variable declarators into `decl_list`.
+    /// Port of `JSParserImpl::parseVariableDeclarationList` (lines 1197-1210).
+    /// Returns false on an unrecoverable error.
+    pub(super) fn parse_variable_declaration_list(
+        &mut self,
+        param: Param,
+        decl_list: &mut Vec<&'gc Node<'gc>>,
+        decl_loc: SMLoc,
+        allow_pattern: VariableDeclAllowPattern,
+    ) -> bool {
+        // do { ... } while (checkAndEat(comma)). C++ 1202-1207.
+        loop {
+            match self.parse_variable_declaration(param, decl_loc, allow_pattern) {
+                Some(decl) => decl_list.push(decl),
+                None => return false,
+            }
+            if !self.check_and_eat(TokenKind::comma, GrammarContext::AllowRegExp)
+            {
+                break;
+            }
+        }
+        true
+    }
+
+    // -----------------------------------------------------------------------
+    // ensureDestructuringInitialized — 1212 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Error if any declarator whose target is a destructuring pattern lacks an
+    /// initializer. Port of `JSParserImpl::ensureDestructuringInitialized`
+    /// (lines 1212-1224). (The "destucturing" typo is faithful to C++.)
+    fn ensure_destructuring_initialized(
+        &mut self,
+        decl_node: &'gc Node<'gc>,
+    ) {
+        let var_decl = decl_node
+            .as_variable_declaration()
+            .expect("ensure_destructuring_initialized expects VariableDeclaration");
+        for elem in var_decl.declarations.iter() {
+            let declarator = elem
+                .as_variable_declarator()
+                .expect("declaration list element is a VariableDeclarator");
+
+            // isa<PatternNode>(_id) — ArrayPattern/ObjectPattern.
+            let is_pattern = matches!(
+                declarator.id,
+                Node::ArrayPattern(_) | Node::ObjectPattern(_)
+            );
+            if !is_pattern || declarator.init.is_some() {
+                continue;
+            }
+
+            self.error_at(
+                declarator.id.range(),
+                "destucturing declaration must be initialized",
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // parseVariableDeclaration — 1226 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a single `VariableDeclarator` (a binding target with an optional
+    /// initializer). Port of `JSParserImpl::parseVariableDeclaration`
+    /// (lines 1226-1279).
+    pub(super) fn parse_variable_declaration(
+        &mut self,
+        param: Param,
+        decl_loc: SMLoc,
+        allow_pattern: VariableDeclAllowPattern,
+    ) -> Option<&'gc Node<'gc>> {
+        let start_loc = self.lexer.token().start_loc();
+
+        // C++ 1234-1253.
+        let target: &'gc Node<'gc> = if allow_pattern
+            == VariableDeclAllowPattern::Yes
+            && self.check2(TokenKind::l_square, TokenKind::l_brace)
+        {
+            self.parse_binding_pattern(param)?
+        } else {
+            match self.parse_binding_identifier(Param::default()) {
+                Some(ident) => ident,
+                None => {
+                    // C++ errorExpected(identifier, "in declaration",
+                    // "declaration started here", declLoc). The note arg is
+                    // dropped per house style; report at the declaration start.
+                    let _ = decl_loc;
+                    self.error_cur("'identifier' expected in declaration");
+                    return None;
+                }
+            }
+        };
+
+        // No initializer? C++ 1255-1261.
+        if !self.check(TokenKind::equal) {
+            let end_loc = self.lexer.prev_token_end();
+            let node = Node::VariableDeclarator(VariableDeclarator::new(
+                NodeMetadata::new(self.dummy_range()),
+                None,
+                target,
+            ));
+            return Some(self.set_location(start_loc, end_loc, node));
+        }
+
+        // Parse the initializer. C++ 1263-1278.
+        let debug_loc = self.advance(GrammarContext::AllowRegExp).start;
+
+        // C++ passes AllowTypedArrowFunction::Yes / CoverTypedParameters::No;
+        // P1's parse_assignment_expression takes only `param`.
+        let expr = self.parse_assignment_expression(param)?;
+
+        let end_loc = self.lexer.prev_token_end();
+        let node = Node::VariableDeclarator(VariableDeclarator::new(
+            NodeMetadata::new(self.dummy_range()),
+            Some(expr),
+            target,
+        ));
+        Some(self.set_location_d(start_loc, end_loc, debug_loc, node))
     }
 
     // -----------------------------------------------------------------------
@@ -170,8 +565,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 None
             }
             TokenKind::rw_var => {
-                self.error_cur("var statement not yet supported (parser phase P2)");
-                None
+                // C++ 678-684: parseVariableStatement(Param{}).
+                self.parse_variable_statement(Param::default())
             }
             TokenKind::semi => self.parse_empty_statement(),
             TokenKind::rw_if => {
@@ -694,7 +1089,6 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// `param_yield`/`param_await`/strict-mode state. The Flow/TS
     /// `getParseTypes()` block (`?`/`:` type annotation) is skipped (P6/P7);
     /// `type` is `None` and `optional` is `false`.
-    #[allow(dead_code)] // P2.2 leaf; reachable from decls/for/catch in P2.3+
     pub(super) fn parse_binding_identifier(
         &mut self,
         _param: Param,
@@ -740,7 +1134,6 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse a `BindingPattern` (`[...]` array or `{...}` object). Port of
     /// `JSParserImpl::parseBindingPattern` (lines 1281-1296).
-    #[allow(dead_code)] // P2.2 leaf; reachable from decls/for/catch in P2.3+
     pub(super) fn parse_binding_pattern(
         &mut self,
         param: Param,
@@ -762,7 +1155,6 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse an `ArrayBindingPattern`. Port of
     /// `JSParserImpl::parseArrayBindingPattern` (lines 1298-1360).
-    #[allow(dead_code)] // P2.2 leaf; reachable from decls/for/catch in P2.3+
     fn parse_array_binding_pattern(
         &mut self,
         param: Param,
@@ -831,7 +1223,6 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse a `BindingElement` (a binding target with optional initializer).
     /// Port of `JSParserImpl::parseBindingElement` (lines 1362-1390).
-    #[allow(dead_code)] // P2.2 leaf; reachable from decls/for/catch in P2.3+
     fn parse_binding_element(&mut self, param: Param) -> Option<&'gc Node<'gc>> {
         let _guard = self.check_recursion()?;
 
@@ -866,7 +1257,6 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse a `BindingRestElement` (`...target`). Port of
     /// `JSParserImpl::parseBindingRestElement` (lines 1392-1413).
-    #[allow(dead_code)] // P2.2 leaf; reachable from decls/for/catch in P2.3+
     fn parse_binding_rest_element(
         &mut self,
         param: Param,
@@ -902,7 +1292,6 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Parse a binding `Initializer` (`= AssignmentExpression`) and wrap the
     /// already-parsed `left` target in an `AssignmentPattern`. Port of
     /// `JSParserImpl::parseBindingInitializer` (lines 1415-1432).
-    #[allow(dead_code)] // P2.2 leaf; reachable from decls/for/catch in P2.3+
     fn parse_binding_initializer(
         &mut self,
         param: Param,
@@ -936,7 +1325,6 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse an `ObjectBindingPattern`. Port of
     /// `JSParserImpl::parseObjectBindingPattern` (lines 1434-1491).
-    #[allow(dead_code)] // P2.2 leaf; reachable from decls/for/catch in P2.3+
     fn parse_object_binding_pattern(
         &mut self,
         param: Param,
@@ -995,7 +1383,6 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse a `BindingProperty`. Port of
     /// `JSParserImpl::parseBindingProperty` (lines 1493-1561).
-    #[allow(dead_code)] // P2.2 leaf; reachable from decls/for/catch in P2.3+
     fn parse_binding_property(
         &mut self,
         param: Param,
@@ -1108,7 +1495,6 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse a `BindingRestProperty` (`...identifier`). Port of
     /// `JSParserImpl::parseBindingRestProperty` (lines 1563-1589).
-    #[allow(dead_code)] // P2.2 leaf; reachable from decls/for/catch in P2.3+
     fn parse_binding_rest_property(
         &mut self,
         param: Param,
