@@ -5,6 +5,10 @@ edition = "2021"
 publish = false
 
 [[bin]]
+name = "ast-dump"
+path = "src/bin/ast_dump.rs"
+
+[[bin]]
 name = "json-parse-dump"
 path = "src/bin/json_parse_dump.rs"
 
