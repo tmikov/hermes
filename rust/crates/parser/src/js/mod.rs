@@ -261,6 +261,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
         // EOF: zero-width range at end of input.
         let end = self.cur_start();
+        // `Program::new` requires metadata; pass start/end for consistency even
+        // though `set_location` below is the authoritative stamp (it overwrites
+        // range + debug_loc, matching C++ `setLocation`).
         let program = Node::Program(Program::new(
             NodeMetadata::new(SMRange { start, end }),
             NodeList::empty(),
@@ -335,5 +338,28 @@ mod tests {
             other => panic!("expected Program, got {:?}", other.kind()),
         }
         assert_eq!(parser.error_count_pub(), 0);
+    }
+
+    #[test]
+    fn non_eof_input_errors_in_p0() {
+        use ast::context::Context;
+        use support::manager::SourceErrorManager;
+
+        // A real statement is not yet parseable in P0: parse must report an
+        // error and return None (locks in the EOF guard).
+        let mut sm = SourceErrorManager::new();
+        let buf_id = sm.add_buffer_bytes("input", b"let x = 1;\n");
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        assert!(parser.parse().is_none(), "non-EOF input must not parse in P0");
+        assert!(parser.error_count_pub() >= 1, "an error must be reported");
     }
 }
