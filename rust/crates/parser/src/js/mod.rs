@@ -1051,7 +1051,6 @@ mod tests {
         sm: &mut support::manager::SourceErrorManager,
         src: &[u8],
     ) -> &'gc ast::node::Node<'gc> {
-        use ast::context::Context;
         let buf_id = sm.add_buffer_bytes("input", src);
         let atoms = &gc.ctx().atom_table;
         let lexer = crate::lexer::JSLexer::new(
