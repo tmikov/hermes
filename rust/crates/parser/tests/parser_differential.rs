@@ -86,7 +86,7 @@ fn parser_differential_p0() {
             String::from_utf8_lossy(&c.stderr)
         );
         let r = Command::new(&ast_dump)
-            .args(["--pretty", "--dump-source-location"])
+            .args(["--pretty", "--dump-source-location", "--include-raw-ast-prop"])
             .arg(f)
             .output()
             .expect("failed to run ast-dump");

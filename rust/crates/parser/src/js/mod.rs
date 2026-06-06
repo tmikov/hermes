@@ -8,20 +8,24 @@
 //! The JS parser (`JSParserImpl`). Port of `lib/Parser/JSParserImpl*`.
 //! Recursive-descent LL(1) over `JSLexer`, building the `ast` ESTree.
 
-// Items added here are used from P1+ parsing phases; suppress warnings so the
-// P0 scaffold stays warning-free even though only `new` and the first-token
-// test are exercised now.
-// TODO(parser-P1): once expression/statement parsing wires these up, drop this
-// module-level allow (or narrow it to whatever genuinely remains unused) so new
-// dead code is caught again.
-#![allow(dead_code)] // used from P1+
-
 use ast::context::GCLock;
 use ast::node::Node;
 use support::location::{SMLoc, SMRange};
 
 use crate::lexer::{GrammarContext, JSLexer};
 use crate::token_kinds::TokenKind;
+
+mod expressions;
+mod statements;
+
+/// Whether import/export declarations are allowed in this statement list.
+/// Port of `JSParserImpl::AllowImportExport`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[allow(dead_code)] // `No` variant used in P2+ (block-statement parsing)
+pub(super) enum AllowImportExport {
+    Yes,
+    No,
+}
 
 /// A bitmask of grammar parameters threaded between parse functions.
 /// Port of `JSParserImpl::Param`.
@@ -65,6 +69,29 @@ impl Param {
 /// Maximum recursion depth, mirroring the non-MSVC default in JSParserImpl.h.
 const MAX_RECURSION_DEPTH: u32 = 1024;
 
+/// RAII guard for the recursion depth counter. Decrements on Drop so that
+/// every `check_recursion` call site is balanced even on early return.
+///
+/// Design note: the C++ uses a macro that increments on entry and decrements
+/// on scope exit via RAII. In Rust we can't hold `&mut self.recursion_depth`
+/// inside a guard while `self` is also borrowed by the parse methods.  We
+/// therefore store only a raw pointer to the counter — sound because the
+/// parser struct outlives every guard it creates, and guards are never moved
+/// off the stack.
+pub(super) struct RecursionGuard(*mut u32);
+
+#[allow(unsafe_code)] // single scoped allow; raw pointer confined to Drop
+impl Drop for RecursionGuard {
+    fn drop(&mut self) {
+        // SAFETY: the pointer is to `JSParserImpl::recursion_depth`, which
+        // lives for the full lifetime of the parser.  No aliasing: Rust
+        // ensures at most one `&mut RecursionGuard` at a time, and the only
+        // mutation is this decrement (the increment happened in
+        // `check_recursion`).
+        unsafe { *self.0 -= 1 }
+    }
+}
+
 /// The JS parser.
 ///
 /// Four lifetime parameters:
@@ -89,15 +116,16 @@ pub struct JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// `gc.alloc(n: Node<'gc>) -> &'gc Node<'gc>` (borrow lifetime `'gc`).
     gc: &'gc GCLock<'ast, 'ctx>,
     /// The lexer driving the token stream. Owns `&'a mut SourceErrorManager`.
-    lexer: JSLexer<'a>,
+    pub(super) lexer: JSLexer<'a>,
     /// Current parser recursion depth (stack-overflow guard).
     recursion_depth: u32,
     /// Set when the parser is inside a generator function (`yield`).
-    param_yield: bool,
+    pub(super) param_yield: bool,
     /// Set when the parser is inside an async function (`await`).
-    param_await: bool,
+    /// Read in P1.3+ (await expression parsing in parseUnaryExpression).
+    pub(super) param_await: bool,
     /// Set on the `use static builtin` directive.
-    use_static_builtin: bool,
+    pub(super) use_static_builtin: bool,
 }
 
 impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
@@ -121,7 +149,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     #[inline]
-    fn cur_kind(&self) -> TokenKind {
+    pub(super) fn cur_kind(&self) -> TokenKind {
         self.lexer.token().kind()
     }
     #[inline]
@@ -129,33 +157,52 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         self.lexer.token().source_range()
     }
     #[inline]
-    fn cur_start(&self) -> SMLoc {
+    pub(super) fn cur_start(&self) -> SMLoc {
         self.lexer.token().start_loc()
     }
 
     /// True if the current token is `kind`. Port of `check(TokenKind)`.
     #[inline]
-    fn check(&self, kind: TokenKind) -> bool {
+    pub(super) fn check(&self, kind: TokenKind) -> bool {
         self.cur_kind() == kind
     }
     /// True if the current token is `k1` or `k2`. Port of `check(k1, k2)`.
     #[inline]
-    fn check2(&self, k1: TokenKind, k2: TokenKind) -> bool {
+    #[allow(dead_code)] // used in P1.2+ (binary expression, postfix)
+    pub(super) fn check2(&self, k1: TokenKind, k2: TokenKind) -> bool {
         let k = self.cur_kind();
         k == k1 || k == k2
+    }
+    /// True if the current token is any of four kinds.
+    /// Port of `checkN(k1,k2,k3,k4)`.
+    #[inline]
+    pub(super) fn check_n4(
+        &self,
+        k1: TokenKind,
+        k2: TokenKind,
+        k3: TokenKind,
+        k4: TokenKind,
+    ) -> bool {
+        let k = self.cur_kind();
+        k == k1 || k == k2 || k == k3 || k == k4
     }
 
     /// Consume the current token, advancing the lexer; return the consumed
     /// token's range. Port of `JSParserImpl::advance` (C++ returns the PREVIOUS
     /// token's range — we copy it out before advancing).
-    fn advance(&mut self, grammar_context: GrammarContext) -> SMRange {
+    pub(super) fn advance(&mut self, grammar_context: GrammarContext) -> SMRange {
         let prev = self.cur_range();
         self.lexer.advance(grammar_context);
         prev
     }
 
     /// Consume the current token if it is `kind`; return whether it matched.
-    fn check_and_eat(&mut self, kind: TokenKind, grammar_context: GrammarContext) -> bool {
+    #[allow(dead_code)] // used in P1.6+ (member access, optional chaining)
+    pub(super) fn check_and_eat(
+        &mut self,
+        kind: TokenKind,
+        grammar_context: GrammarContext,
+    ) -> bool {
         if self.check(kind) {
             self.advance(grammar_context);
             true
@@ -165,11 +212,6 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     /// Report an error at `range`. Routed through the lexer's SourceErrorManager.
-    /// Uses `error_at(loc, range, msg, subsystem)` to attach a range underline
-    /// and mark it as a Parser-subsystem diagnostic.
-    /// TODO(parser-P1): port the C++ `error(SMLoc, SMRange, msg)` error-limit
-    /// behavior (return false + `lexer.force_eof()` once the max error count is
-    /// reached) when statement parsing can emit error sequences.
     fn error_at(&mut self, range: SMRange, msg: &str) {
         self.lexer.get_source_mgr_mut().error_at(
             range.start,
@@ -179,14 +221,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         );
     }
     /// Report an error at the current token. Port of `error(Twine)`.
-    fn error_cur(&mut self, msg: &str) {
+    pub(super) fn error_cur(&mut self, msg: &str) {
         let range = self.cur_range();
         self.error_at(range, msg);
     }
 
     /// Check the current token is `kind`; if not, report an error and return
-    /// false. Port of `need` (P0 form; richer where/what plumbing arrives later).
-    fn need(&mut self, kind: TokenKind, where_: &str) -> bool {
+    /// false. Port of `need`.
+    pub(super) fn need(&mut self, kind: TokenKind, where_: &str) -> bool {
         if self.check(kind) {
             return true;
         }
@@ -200,7 +242,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
     /// Check the current token is `kind`; if so consume and return true, else
     /// report an error and return false. Port of `eat`.
-    fn eat(
+    pub(super) fn eat(
         &mut self,
         kind: TokenKind,
         grammar_context: GrammarContext,
@@ -214,24 +256,48 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
     }
 
-    /// Return true (and report an error) if the recursion limit is exceeded.
-    #[inline]
-    fn recursion_depth_check(&mut self) -> bool {
-        if self.recursion_depth < MAX_RECURSION_DEPTH {
-            return false;
+    /// Increment the recursion depth and return a guard that decrements it on
+    /// drop. Returns `None` (and reports an error) if the limit is exceeded.
+    ///
+    /// Port of the `CHECK_RECURSION` macro (JSParserImpl.h).
+    ///
+    /// Borrow-checker note: the guard holds a raw `*mut u32` into
+    /// `self.recursion_depth` so that the caller can use `&mut self` for parse
+    /// calls while the guard is alive. This is sound because:
+    ///   (a) the pointer is valid for the parser's lifetime, and
+    ///   (b) the only mutation through the raw pointer is the single decrement
+    ///       in `RecursionGuard::drop` — no aliasing.
+    pub(super) fn check_recursion(&mut self) -> Option<RecursionGuard> {
+        self.recursion_depth += 1;
+        if self.recursion_depth > MAX_RECURSION_DEPTH {
+            self.recursion_depth -= 1; // don't leave it incremented
+            let range = self.cur_range();
+            self.error_at(range, "Too many nested expressions/statements/declarations");
+            return None;
         }
-        let range = self.cur_range();
-        self.error_at(range, "Too many nested expressions/statements/declarations");
-        true
+        Some(RecursionGuard(&mut self.recursion_depth))
+    }
+
+    /// Return a placeholder `SMRange` (zero-width at current token start).
+    /// Used as the initial `NodeMetadata` before `set_location` stamps the
+    /// real range, mirroring the C++ pattern of constructing a node then
+    /// calling `setLocation`.
+    pub(super) fn dummy_range(&self) -> SMRange {
+        let loc = self.cur_start();
+        SMRange {
+            start: loc,
+            end: loc,
+        }
     }
 
     /// Allocate `node` with its source locations set. Port of the 3-arg
     /// `setLocation(start, end, node)`: debug loc defaults to start.
-    ///
-    /// Note: `gc.alloc` borrows `*self.gc` for `'gc`, which is the same
-    /// lifetime as the returned reference — safe because `self.gc` outlives
-    /// `self` (the caller holds both).
-    fn set_location(&self, start: SMLoc, end: SMLoc, node: Node<'gc>) -> &'gc Node<'gc> {
+    pub(super) fn set_location(
+        &self,
+        start: SMLoc,
+        end: SMLoc,
+        node: Node<'gc>,
+    ) -> &'gc Node<'gc> {
         let allocated = self.gc.alloc(node);
         let md = allocated.metadata();
         md.range.set(SMRange { start, end });
@@ -240,33 +306,41 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     /// Parse the whole program. Entry point for the parser.
-    /// Port of `JSParserImpl::parse` / `parseProgram`
-    /// (P0: trivia-only sources → empty Program; statement parsing is P1-P4).
+    /// Port of `JSParserImpl::parse` / `parseProgram` (lines 355-381).
     pub fn parse(&mut self) -> Option<&'gc Node<'gc>> {
         self.parse_program()
     }
 
-    /// Parse a `Program` node. The first significant token must be EOF
-    /// (statement-list parsing arrives in P1-P4).
+    /// Parse a `Program` node. Port of `JSParserImpl::parseProgram` (355-373).
+    ///
+    /// Parses directives + a statement list until EOF, then wraps in a Program.
     fn parse_program(&mut self) -> Option<&'gc Node<'gc>> {
         use ast::node::Program;
         use ast::node_child::{NodeList, NodeMetadata};
 
         let start = self.cur_start();
-        // P0 supports only trivia-only sources: the first significant token must
-        // be EOF.  (Statement-list parsing lands in P1-P4.)
-        if !self.check(TokenKind::eof) {
-            self.error_cur("statement parsing not yet implemented (parser phase P0)");
+
+        let mut stmts: Vec<&'gc Node<'gc>> = Vec::new();
+        if !self.parse_statement_list(
+            Param::default(),
+            TokenKind::eof,
+            /* parse_directives= */ true,
+            AllowImportExport::Yes,
+            &mut stmts,
+        ) {
             return None;
         }
-        // EOF: zero-width range at end of input.
-        let end = self.cur_start();
-        // `Program::new` requires metadata; pass start/end for consistency even
-        // though `set_location` below is the authoritative stamp (it overwrites
-        // range + debug_loc, matching C++ `setLocation`).
+
+        let end = if stmts.is_empty() {
+            start
+        } else {
+            stmts.last().unwrap().metadata().range.get().end
+        };
+
+        let body = NodeList::from_iter(self.gc, stmts);
         let program = Node::Program(Program::new(
             NodeMetadata::new(SMRange { start, end }),
-            NodeList::empty(),
+            body,
         ));
         Some(self.set_location(start, end, program))
     }
@@ -293,9 +367,6 @@ mod tests {
         use ast::context::Context;
         use support::manager::SourceErrorManager;
 
-        // `sm` must be declared before `ctx` so that it outlives `gc` and
-        // therefore `lexer` (which borrows `&'a mut sm`). Rust drops in
-        // reverse declaration order, so sm is dropped last.
         let mut sm = SourceErrorManager::new();
         let buf_id = sm.add_buffer_bytes("input", b"  /* hi */  ");
         let mut ctx = Context::new();
@@ -341,14 +412,13 @@ mod tests {
     }
 
     #[test]
-    fn non_eof_input_errors_in_p0() {
+    fn parses_numeric_literal_stmt() {
         use ast::context::Context;
+        use ast::node::Node;
         use support::manager::SourceErrorManager;
 
-        // A real statement is not yet parseable in P0: parse must report an
-        // error and return None (locks in the EOF guard).
         let mut sm = SourceErrorManager::new();
-        let buf_id = sm.add_buffer_bytes("input", b"let x = 1;\n");
+        let buf_id = sm.add_buffer_bytes("input", b"42;\n");
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let atoms = &gc.ctx().atom_table;
@@ -359,7 +429,192 @@ mod tests {
             crate::lexer::GrammarContext::AllowRegExp,
         );
         let mut parser = JSParserImpl::new(&gc, lexer);
-        assert!(parser.parse().is_none(), "non-EOF input must not parse in P0");
-        assert!(parser.error_count_pub() >= 1, "an error must be reported");
+        let program = parser.parse().expect("42; parses");
+        assert_eq!(parser.error_count_pub(), 0);
+        if let Node::Program(p) = program {
+            assert_eq!(p.body.iter().count(), 1);
+            let stmt = p.body.iter().next().unwrap();
+            if let Node::ExpressionStatement(es) = stmt {
+                if let Node::NumericLiteral(nl) = es.expression {
+                    assert_eq!(nl.value.get(), 42.0);
+                } else {
+                    panic!("expected NumericLiteral");
+                }
+            } else {
+                panic!("expected ExpressionStatement");
+            }
+        } else {
+            panic!("expected Program");
+        }
+    }
+
+    #[test]
+    fn parses_empty_statement() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let buf_id = sm.add_buffer_bytes("input", b";;;\n");
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        let program = parser.parse().expect(";;; parses");
+        assert_eq!(parser.error_count_pub(), 0);
+        if let Node::Program(p) = program {
+            assert_eq!(p.body.iter().count(), 3);
+            for stmt in p.body {
+                assert!(
+                    matches!(stmt, Node::EmptyStatement(_)),
+                    "expected EmptyStatement"
+                );
+            }
+        } else {
+            panic!("expected Program");
+        }
+    }
+
+    #[test]
+    fn deferred_if_statement_errors() {
+        use ast::context::Context;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let buf_id = sm.add_buffer_bytes("input", b"if(x);");
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        assert!(
+            parser.parse().is_none(),
+            "if statement should error in P1.1"
+        );
+        assert!(
+            parser.error_count_pub() >= 1,
+            "must report at least one error"
+        );
+    }
+
+    #[test]
+    fn deferred_function_expr_errors() {
+        use ast::context::Context;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let buf_id = sm.add_buffer_bytes("input", b"(function(){});");
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        assert!(
+            parser.parse().is_none(),
+            "function expr should error in P1.1"
+        );
+        assert!(parser.error_count_pub() >= 1);
+    }
+
+    #[test]
+    fn deferred_array_literal_errors() {
+        use ast::context::Context;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let buf_id = sm.add_buffer_bytes("input", b"[1];");
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        assert!(
+            parser.parse().is_none(),
+            "array literal should error in P1.1"
+        );
+        assert!(parser.error_count_pub() >= 1);
+    }
+
+    #[test]
+    fn parses_sequence_expression() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let buf_id = sm.add_buffer_bytes("input", b"1, 2, 3;");
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        let program = parser.parse().expect("1, 2, 3; parses");
+        assert_eq!(parser.error_count_pub(), 0);
+        if let Node::Program(p) = program {
+            assert_eq!(p.body.iter().count(), 1);
+            let stmt = p.body.iter().next().unwrap();
+            if let Node::ExpressionStatement(es) = stmt {
+                assert!(
+                    matches!(es.expression, Node::SequenceExpression(_)),
+                    "expected SequenceExpression"
+                );
+            } else {
+                panic!("expected ExpressionStatement");
+            }
+        }
+    }
+
+    #[test]
+    fn use_strict_directive_sets_strict_mode() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let buf_id = sm.add_buffer_bytes("input", b"\"use strict\"; 1;");
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        let program = parser.parse().expect("\"use strict\"; 1; parses");
+        assert_eq!(parser.error_count_pub(), 0);
+        if let Node::Program(p) = program {
+            // Body should have 2 statements: the directive + numeric stmt.
+            assert_eq!(p.body.iter().count(), 2);
+        }
+        // Strict mode is now set on the lexer.
+        assert!(parser.lexer.is_strict_mode());
     }
 }
