@@ -239,10 +239,45 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         allocated
     }
 
+    /// Parse the whole program. Entry point for the parser.
+    /// Port of `JSParserImpl::parse` / `parseProgram`
+    /// (P0: trivia-only sources → empty Program; statement parsing is P1-P4).
+    pub fn parse(&mut self) -> Option<&'gc Node<'gc>> {
+        self.parse_program()
+    }
+
+    /// Parse a `Program` node. The first significant token must be EOF
+    /// (statement-list parsing arrives in P1-P4).
+    fn parse_program(&mut self) -> Option<&'gc Node<'gc>> {
+        use ast::node::Program;
+        use ast::node_child::{NodeList, NodeMetadata};
+
+        let start = self.cur_start();
+        // P0 supports only trivia-only sources: the first significant token must
+        // be EOF.  (Statement-list parsing lands in P1-P4.)
+        if !self.check(TokenKind::eof) {
+            self.error_cur("statement parsing not yet implemented (parser phase P0)");
+            return None;
+        }
+        // EOF: zero-width range at end of input.
+        let end = self.cur_start();
+        let program = Node::Program(Program::new(
+            NodeMetadata::new(SMRange { start, end }),
+            NodeList::empty(),
+        ));
+        Some(self.set_location(start, end, program))
+    }
+
     /// Test-only accessor for the current token kind.
     #[cfg(test)]
     pub(crate) fn cur_kind_pub(&self) -> TokenKind {
         self.cur_kind()
+    }
+
+    /// Test-only accessor for the error count.
+    #[cfg(test)]
+    pub(crate) fn error_count_pub(&self) -> u32 {
+        self.lexer.get_source_mgr().error_count()
     }
 }
 
@@ -274,5 +309,31 @@ mod tests {
             parser.cur_kind_pub(),
             crate::token_kinds::TokenKind::eof
         );
+    }
+
+    #[test]
+    fn parses_empty_program() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let buf_id = sm.add_buffer_bytes("input", b"/* only trivia */\n");
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        let program = parser.parse().expect("empty program parses");
+        match program {
+            Node::Program(p) => assert!(p.body.is_empty(), "empty source -> empty body"),
+            other => panic!("expected Program, got {:?}", other.kind()),
+        }
+        assert_eq!(parser.error_count_pub(), 0);
     }
 }
