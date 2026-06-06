@@ -10,9 +10,10 @@
 
 use ast::context::GCLock;
 use ast::node::{
-    AwaitExpression, BigIntLiteral, BinaryExpression, BooleanLiteral, ConditionalExpression,
-    Identifier, LogicalExpression, Node, NullLiteral, NumericLiteral, PrivateName,
-    SequenceExpression, StringLiteral, ThisExpression, UnaryExpression, UpdateExpression,
+    AssignmentExpression, AwaitExpression, BigIntLiteral, BinaryExpression, BooleanLiteral,
+    ConditionalExpression, Identifier, LogicalExpression, Node, NullLiteral, NumericLiteral,
+    PrivateName, SequenceExpression, StringLiteral, ThisExpression, UnaryExpression,
+    UpdateExpression,
 };
 use ast::node_child::{NodeList, NodeMetadata};
 use support::location::SMLoc;
@@ -21,6 +22,9 @@ use crate::lexer::GrammarContext;
 use crate::token_kinds::TokenKind;
 
 use super::{JSParserImpl, Param, PARAM_IN};
+
+// For AssignState.op field type (interned operator label).
+use atom_table;
 
 impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     // -----------------------------------------------------------------------
@@ -83,21 +87,353 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseAssignmentExpression — P1.5 / P3 placeholder
+    // parseAssignmentExpression — P1.5
     // -----------------------------------------------------------------------
+
+    /// True if the current token is any assignment operator. Port of
+    /// `JSParserImpl::checkAssign` (lib/Parser/JSParserImpl.cpp 273-291).
+    ///
+    /// The 16 compound-assignment operators + plain `=`. In C++ this is a
+    /// variadic `checkN(…)` call; in Rust we use `matches!`, which is the
+    /// idiomatic zero-overhead equivalent.
+    #[inline]
+    fn check_assign(&self) -> bool {
+        matches!(
+            self.cur_kind(),
+            TokenKind::equal
+                | TokenKind::starequal
+                | TokenKind::slashequal
+                | TokenKind::percentequal
+                | TokenKind::plusequal
+                | TokenKind::minusequal
+                | TokenKind::lesslessequal
+                | TokenKind::greatergreaterequal
+                | TokenKind::greatergreatergreaterequal
+                | TokenKind::starstarequal
+                | TokenKind::pipepipeequal
+                | TokenKind::ampampequal
+                | TokenKind::questionquestionequal
+                | TokenKind::ampequal
+                | TokenKind::caretequal
+                | TokenKind::pipeequal
+        )
+    }
+
+    /// True if the current token can legally follow an AssignmentExpression.
+    /// Port of `JSParserImpl::checkEndAssignmentExpression` (lines 293-306)
+    /// with `ofEndsAssignment == OfEndsAssignment::Yes` (the default).
+    ///
+    /// The "of" check mirrors C++ `checkUnescaped(ofIdent_)`: only fire when
+    /// the current token is a plain identifier that spells "of" byte-for-byte
+    /// (no `\u` escapes). In P1 we don't track the "no-escape" flag here, but
+    /// the identifier parser interns unescaped identifiers normally, so we
+    /// just compare the interned bytes to `b"of"`.
+    #[inline]
+    fn check_end_assignment_expression(&self) -> bool {
+        if matches!(
+            self.cur_kind(),
+            TokenKind::rw_in
+                | TokenKind::r_paren
+                | TokenKind::r_brace
+                | TokenKind::r_square
+                | TokenKind::comma
+                | TokenKind::semi
+                | TokenKind::colon
+                | TokenKind::eof
+        ) {
+            return true;
+        }
+        // checkUnescaped(ofIdent_): identifier spelled "of"
+        if self.cur_kind() == TokenKind::identifier {
+            let bytes = self
+                .lexer
+                .get_string_table()
+                .bytes(self.lexer.token().get_identifier());
+            if bytes == b"of" {
+                return true;
+            }
+        }
+        self.lexer.is_new_line_before_current_token()
+    }
 
     /// Parse an assignment expression. Port of
     /// `JSParserImpl::parseAssignmentExpression` (lines 6233-6551).
     ///
-    /// P1.5: assignment operators (=, +=, …) — deferred.
-    /// P3: yield / arrow functions — deferred.
-    /// For now this is a pass-through to parseConditionalExpression.
+    /// ## Structure
+    ///
+    /// The C++ uses a `State` stack + `parseHelper` closure to build
+    /// right-associative chains (`a = b = c` → `a = (b = c)`) without
+    /// deep recursion.  In Rust, the closure's mutable-state-by-reference
+    /// pattern conflicts with `&mut self`, so we inline the logic directly:
+    /// each loop iteration runs the "parseHelper" body, pushes a completed
+    /// `AssignState` entry, then returns or recurses.  The fold pass runs
+    /// afterwards, mirroring C++ lines 6528-6547.
+    ///
+    /// ## parseHelper return — `Option<Option<&'gc Node<'gc>>>`
+    ///
+    /// The C++ closure returns `Optional<Node*>`:
+    /// - `None`      = parse error; propagate failure.
+    /// - `Some(nullptr)` = assignment operator consumed; state.op is set;
+    ///   the driver must recurse for the RHS.
+    /// - `Some(node_ptr)` = terminal result (not an assignment op).
+    ///
+    /// We encode this as `Option<Option<&'gc Node>>`:
+    /// - `None`            = error.
+    /// - `Some(None)`      = operator consumed, continue the chain.
+    /// - `Some(Some(n))`   = terminal node.
+    ///
+    /// ## Deferrals (honest errors)
+    /// - P3: `yield` — emits error + returns `None`.
+    /// - P3: `=>` arrow — emits error + returns `None`.
+    /// - P1.8: destructuring reparse (ArrayExpression/ObjectExpression LHS) —
+    ///         unreachable in P1 (those parse forms error first in
+    ///         `parse_primary_expression`), but stubbed with an honest error.
+    /// - P6/P7: Flow/TS type parameters — skipped (gated by context flags that
+    ///          don't exist yet).
+    ///
+    /// ## MAX_NESTED_ASSIGNMENTS
+    /// `ESTree::MAX_NESTED_ASSIGNMENTS = 30000` (include/hermes/AST/ESTree.h:1407).
     pub(super) fn parse_assignment_expression(
         &mut self,
         param: Param,
     ) -> Option<&'gc Node<'gc>> {
-        // P1.5: assignment ops; P3: arrow/yield
-        self.parse_conditional_expression(param)
+        use crate::token_kinds::token_kind_str;
+
+        /// Maximum right-assoc assignment chain depth.
+        /// Mirrors `ESTree::MAX_NESTED_ASSIGNMENTS` (ESTree.h:1407).
+        const MAX_NESTED_ASSIGNMENTS: usize = 30000;
+
+        /// One frame of the right-associative assignment chain.
+        /// Mirrors C++ `State` inside `parseAssignmentExpression`.
+        struct AssignState<'gc> {
+            /// Start of the LHS expression (C++ `leftStartLoc`).
+            left_start_loc: SMLoc,
+            /// The already-parsed LHS (C++ `optLeftExpr`).
+            opt_left_expr: &'gc Node<'gc>,
+            /// The interned operator token string (C++ `op`).
+            op: atom_table::AtomBytes,
+            /// Start of the operator token (C++ `debugLoc`).
+            debug_loc: SMLoc,
+        }
+
+        // Stack of in-progress assignment levels.  C++ uses SmallVector<State,2>.
+        let mut stack: Vec<AssignState<'gc>> = Vec::new();
+
+        // -------------------------------------------------------------------
+        // "parseHelper" body — inlined (C++ lines 6249-6493).
+        //
+        // Runs one level: parses the conditional LHS, checks for an assignment
+        // operator, and if found pushes a frame and signals "continue".
+        //
+        // Return value: `Option<Option<&'gc Node>>` (see doc above).
+        //
+        // We encode the return with a helper enum to avoid macro-label issues
+        // or separate-function borrow fights.
+        // -------------------------------------------------------------------
+        enum LevelResult<'gc> {
+            /// Parse error — propagate.
+            Error,
+            /// Terminal node (not an assignment op, or yield/arrow handled).
+            Terminal(&'gc Node<'gc>),
+            /// Assignment operator consumed; frame pushed onto stack.
+            Continue,
+        }
+
+        // Execute one "parseHelper" pass with the given `param`.
+        // Pushes a frame to `stack` if an operator was found and consumed,
+        // or returns Error/Terminal otherwise.
+        let run_level = |this: &mut Self,
+                              stack: &mut Vec<AssignState<'gc>>,
+                              cur_param: Param|
+         -> LevelResult<'gc> {
+            // ----------------------------------------------------------------
+            // yield check (C++ 6257-6268) — P3 deferral.
+            // paramYield_ is always false in P1; stub so it's never silent.
+            // ----------------------------------------------------------------
+            if this.param_yield
+                && (this.check(TokenKind::rw_yield)
+                    || (this.check(TokenKind::identifier)
+                        && this
+                            .lexer
+                            .get_string_table()
+                            .bytes(this.lexer.token().get_identifier())
+                            == b"yield"))
+            {
+                this.error_cur(
+                    "yield expression not yet supported (parser phase P3)",
+                );
+                return LevelResult::Error;
+            }
+
+            // P3: async arrow (C++ 6270-6286) — skip in P1.
+            // Plain `async` parses as an Identifier downstream; no
+            // special-casing needed here.
+
+            // P6: Flow type-param block (C++ 6288-6339) — gated by
+            // context_.getParseFlow() which does not exist yet. Skip.
+
+            // C++ lines 6341-6345: leftStartLoc / hasNewLine / optLeftExpr.
+            let left_start_loc = this.cur_start();
+            let left_expr = match this.parse_conditional_expression(cur_param) {
+                Some(e) => e,
+                None => return LevelResult::Error,
+            };
+
+            // P6/P7: Flow/TS return-type / predicate blocks (C++ 6349-6446) — skip.
+
+            // ----------------------------------------------------------------
+            // Arrow check (C++ 6453-6466) — P3 deferral.
+            // ----------------------------------------------------------------
+            if this.check(TokenKind::equalgreater)
+                && !this.lexer.is_new_line_before_current_token()
+            {
+                this.error_cur(
+                    "arrow functions not yet supported (parser phase P3)",
+                );
+                return LevelResult::Error;
+            }
+
+            // P6: Flow typeParams error (C++ 6468-6477) — gated, skip.
+
+            // C++ line 6479: if (!checkAssign()) return *state.optLeftExpr;
+            if !this.check_assign() {
+                return LevelResult::Terminal(left_expr);
+            }
+
+            // ----------------------------------------------------------------
+            // Destructuring reparse (C++ 6483-6489) — P1.8 stub.
+            // Unreachable in P1 (`[`/`{` error in parse_primary_expression
+            // before we get here), but present as a forward-looking stub.
+            // P1.8: implement reparse_assignment_pattern (needs array/object
+            // literals).
+            // ----------------------------------------------------------------
+            if this.check(TokenKind::equal)
+                && matches!(
+                    left_expr,
+                    Node::ArrayExpression(_) | Node::ObjectExpression(_)
+                )
+            {
+                this.error_cur(
+                    "destructuring assignment target not yet supported \
+                     (parser phase P1.8)",
+                );
+                return LevelResult::Error;
+            }
+
+            // C++ line 6491-6493:
+            //   state.op = getTokenIdent(tok_->getKind());
+            //   state.debugLoc = advance().Start;
+            //   return nullptr;  (→ Some(None) in our encoding)
+            let op_kind = this.cur_kind();
+            let op = this
+                .gc
+                .ctx()
+                .atom_table
+                .atom_bytes(token_kind_str(op_kind).as_bytes());
+            let debug_loc = this.advance(GrammarContext::AllowRegExp).start;
+
+            stack.push(AssignState {
+                left_start_loc,
+                opt_left_expr: left_expr,
+                op,
+                debug_loc,
+            });
+            LevelResult::Continue
+        };
+
+        // -------------------------------------------------------------------
+        // Driver — C++ lines 6496-6524.
+        //
+        // Push a State, call parseHelper; if error → None; if terminal → break;
+        // else push new State and loop.
+        // -------------------------------------------------------------------
+        let opt_res: &'gc Node<'gc> = loop {
+            // First level uses the incoming `param`; subsequent RHS levels use
+            // the equivalent of AllowTypedArrowFunction::Yes / CoverTypedParameters::No
+            // which in plain-JS collapses to just passing param through (the only
+            // behaviorally different bit, PARAM_IN, is explicitly carried through
+            // in the recursive calls matching the C++ AllowTypedArrowFunction chain).
+            // C++ passes param on the first call and AllowTypedArrow/NoCoverParams
+            // on subsequent ones; in our plain-JS subset the difference is moot,
+            // so we pass `param` on the first call and on subsequent calls too
+            // (matching C++ behavior for plain JS where typed params don't exist).
+            let cur_param = if stack.is_empty() { param } else { param };
+
+            match run_level(self, &mut stack, cur_param) {
+                LevelResult::Error => return None,
+                LevelResult::Terminal(n) => break n,
+                LevelResult::Continue => {
+                    // C++ line 6513: stack.size() > MAX_NESTED_ASSIGNMENTS guard.
+                    if stack.len() > MAX_NESTED_ASSIGNMENTS {
+                        let range = self.cur_range();
+                        self.error_at(
+                            range,
+                            "Too many nested expressions/statements/declarations",
+                        );
+                        return None;
+                    }
+                    // Loop to parse the RHS of the assignment operator.
+                }
+            }
+        };
+
+        // -------------------------------------------------------------------
+        // Fold phase — C++ lines 6528-6547.
+        //
+        // Drain the stack right-associatively, building AssignmentExpression
+        // nodes.  `opt_res` is the innermost (rightmost) expression; we fold
+        // it into each level's left side, from bottom of stack outward.
+        // -------------------------------------------------------------------
+        let mut opt_res = opt_res;
+        while let Some(top) = stack.pop() {
+            // C++ line 6529: checkEndAssignmentExpression() guard.
+            if !self.check_end_assignment_expression() {
+                let range = self.cur_range();
+                self.error_at(
+                    range,
+                    "unexpected token after assignment expression",
+                );
+                return None;
+            }
+            let end = self.lexer.prev_token_end();
+            // C++ line 6540-6545: new AssignmentExpressionNode(op, left, right).
+            // AssignmentExpression::new(metadata, operator, left, right).
+            let node = Node::AssignmentExpression(AssignmentExpression::new(
+                NodeMetadata::new(self.dummy_range()),
+                top.op,
+                top.opt_left_expr,
+                opt_res,
+            ));
+            // C++ setLocation(leftStartLoc, getPrevTokenEndLoc(), debugLoc, node).
+            opt_res = self.set_location_d(top.left_start_loc, end, top.debug_loc, node);
+        }
+
+        Some(opt_res)
+    }
+
+    // -----------------------------------------------------------------------
+    // reparse_assignment_pattern — P1.8 stub
+    // -----------------------------------------------------------------------
+
+    /// Stub for `JSParserImpl::reparseAssignmentPattern`.
+    /// Will be implemented in P1.8 (array/object literal support).
+    ///
+    /// In P1.5 the call site in `parse_assignment_expression` is unreachable
+    /// because `[` and `{` error in `parse_primary_expression` before the LHS
+    /// can ever be an `ArrayExpression` or `ObjectExpression`.
+    ///
+    /// P1.8: implement reparseAssignmentPattern (needs array/object literals).
+    #[allow(dead_code)]
+    fn reparse_assignment_pattern(
+        &mut self,
+        _left: &'gc Node<'gc>,
+        _is_binding: bool,
+    ) -> Option<&'gc Node<'gc>> {
+        // P1.8: implement reparseAssignmentPattern (needs array/object literals).
+        self.error_cur(
+            "destructuring assignment target not yet supported (parser phase P1.8)",
+        );
+        None
     }
 
     // -----------------------------------------------------------------------

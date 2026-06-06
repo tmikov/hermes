@@ -632,4 +632,171 @@ mod tests {
         // Strict mode is now set on the lexer.
         assert!(parser.lexer.is_strict_mode());
     }
+
+    // P1.5: assignment expression tests.
+
+    /// Helper: parse a snippet and extract the expression from the first
+    /// ExpressionStatement.
+    fn parse_expr_from<'gc>(
+        gc: &'gc ast::context::GCLock<'_, '_>,
+        sm: &mut support::manager::SourceErrorManager,
+        atoms: &atom_table::AtomTable,
+        src: &[u8],
+    ) -> &'gc ast::node::Node<'gc> {
+        let buf_id = sm.add_buffer_bytes("input", src);
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(gc, lexer);
+        let program = parser.parse().expect("parse succeeded");
+        assert_eq!(parser.error_count_pub(), 0, "zero errors");
+        if let ast::node::Node::Program(p) = program {
+            let stmt = p.body.iter().next().expect("has statement");
+            if let ast::node::Node::ExpressionStatement(es) = stmt {
+                return es.expression;
+            }
+        }
+        panic!("expected ExpressionStatement");
+    }
+
+    #[test]
+    fn parses_simple_assignment() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+
+        let expr = parse_expr_from(&gc, &mut sm, atoms, b"a = b;");
+        match expr {
+            Node::AssignmentExpression(n) => {
+                let op_bytes = gc.ctx().atom_table.bytes(n.operator.get());
+                assert_eq!(op_bytes, b"=", "operator is =");
+                assert!(
+                    matches!(n.left, Node::Identifier(_)),
+                    "left is Identifier"
+                );
+                assert!(
+                    matches!(n.right, Node::Identifier(_)),
+                    "right is Identifier"
+                );
+            }
+            other => panic!("expected AssignmentExpression, got {:?}", other.kind()),
+        }
+    }
+
+    #[test]
+    fn parses_compound_assignment_plus() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+
+        let expr = parse_expr_from(&gc, &mut sm, atoms, b"a += 1;");
+        match expr {
+            Node::AssignmentExpression(n) => {
+                let op_bytes = gc.ctx().atom_table.bytes(n.operator.get());
+                assert_eq!(op_bytes, b"+=", "operator is +=");
+            }
+            other => panic!("expected AssignmentExpression, got {:?}", other.kind()),
+        }
+    }
+
+    #[test]
+    fn parses_right_assoc_chain() {
+        // a = b = c  must parse as  a = (b = c)
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+
+        let expr = parse_expr_from(&gc, &mut sm, atoms, b"a = b = c;");
+        match expr {
+            Node::AssignmentExpression(outer) => {
+                // outer.left == a
+                assert!(
+                    matches!(outer.left, Node::Identifier(_)),
+                    "outer.left is Identifier(a)"
+                );
+                // outer.right == (b = c)
+                match outer.right {
+                    Node::AssignmentExpression(inner) => {
+                        let inner_left = match inner.left {
+                            Node::Identifier(id) => id,
+                            other => panic!(
+                                "expected Identifier(b), got {:?}",
+                                other.kind()
+                            ),
+                        };
+                        let b_bytes = gc.ctx().atom_table.bytes(inner_left.name.get());
+                        assert_eq!(b_bytes, b"b", "inner.left is b");
+                        assert!(
+                            matches!(inner.right, Node::Identifier(_)),
+                            "inner.right is Identifier(c)"
+                        );
+                    }
+                    other => panic!(
+                        "outer.right must be AssignmentExpression(b=c), got {:?}",
+                        other.kind()
+                    ),
+                }
+            }
+            other => panic!("expected AssignmentExpression, got {:?}", other.kind()),
+        }
+    }
+
+    #[test]
+    fn assignment_not_confused_with_equality() {
+        // `a == b` must NOT produce an AssignmentExpression.
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+
+        let expr = parse_expr_from(&gc, &mut sm, atoms, b"a == b;");
+        assert!(
+            matches!(expr, Node::BinaryExpression(_)),
+            "== produces BinaryExpression, not AssignmentExpression"
+        );
+    }
+
+    #[test]
+    fn arrow_expr_errors_in_p15() {
+        // Arrow functions are P3; parsing `a => b` should error.
+        use ast::context::Context;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let buf_id = sm.add_buffer_bytes("input", b"a => b;");
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        assert!(parser.parse().is_none(), "arrow should error in P1.5");
+        assert!(parser.error_count_pub() >= 1);
+    }
 }
