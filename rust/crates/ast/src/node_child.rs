@@ -41,6 +41,8 @@ pub struct NodeMetadata<'gc> {
 }
 
 impl<'gc> NodeMetadata<'gc> {
+    /// Create metadata for `range`. `debug_loc` defaults to `range.start`,
+    /// matching the C++ 3-arg `setLocation` overload.
     pub fn new(range: SMRange) -> Self {
         NodeMetadata {
             phantom: PhantomData,

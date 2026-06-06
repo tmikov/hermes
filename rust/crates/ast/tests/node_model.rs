@@ -162,8 +162,8 @@ fn node_metadata_debug_loc_defaults_to_start() {
 
     let dbg = SMLoc { source: SourceId::from_index(0), offset: 15 };
     let md2 = NodeMetadata::new_with_debug(SMRange { start, end }, dbg);
-    assert_eq!(md2.debug_loc.get(), dbg);
+    assert_eq!(md2.debug_loc.get(), dbg, "new_with_debug must set explicit debug_loc");
 
     let dup = md2.duplicate_pub_for_test();
-    assert_eq!(dup.debug_loc.get(), dbg);
+    assert_eq!(dup.debug_loc.get(), dbg, "duplicate must carry debug_loc");
 }
