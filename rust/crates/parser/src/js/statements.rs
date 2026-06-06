@@ -1227,7 +1227,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         // C++ 1854-1861.
         let lparen_loc = self.cur_start();
-        let _ = lparen_loc; // note-location for `eat`; notes dropped per house style.
+        let _ = lparen_loc; // note-location for the later `eat` calls; notes dropped per house style.
         if !self.eat(
             TokenKind::l_paren,
             GrammarContext::AllowRegExp,
