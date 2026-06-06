@@ -10,11 +10,12 @@
 
 use ast::context::GCLock;
 use ast::node::{
-    ArrayExpression, AssignmentExpression, AwaitExpression, BigIntLiteral, BinaryExpression,
-    BooleanLiteral, CallExpression, ConditionalExpression, CoverInitializer, Empty, Identifier,
-    LogicalExpression, MemberExpression, MetaProperty, NewExpression, Node, NullLiteral,
-    NumericLiteral, ObjectExpression, OptionalCallExpression, OptionalMemberExpression, PrivateName,
-    Property, SequenceExpression, SpreadElement, StringLiteral, ThisExpression, UnaryExpression,
+    ArrayExpression, ArrayPattern, AssignmentExpression, AssignmentPattern, AwaitExpression,
+    BigIntLiteral, BinaryExpression, BooleanLiteral, CallExpression, ConditionalExpression,
+    CoverInitializer, Empty, Identifier, LogicalExpression, MemberExpression, MetaProperty,
+    NewExpression, Node, NullLiteral, NumericLiteral, ObjectExpression, ObjectPattern,
+    OptionalCallExpression, OptionalMemberExpression, PrivateName, Property, RestElement,
+    SequenceExpression, SpreadElement, StringLiteral, ThisExpression, UnaryExpression,
     UpdateExpression,
 };
 use ast::node_child::{NodeList, NodeMetadata};
@@ -304,10 +305,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
             // ----------------------------------------------------------------
             // Destructuring reparse (C++ 6483-6489).
-            // Array/object literals now parse (P1.7/P1.8), so this branch is
-            // now reachable (e.g. `[a] = b` or `{a} = b`).
-            // reparseAssignmentPattern is the NEXT sub-task; for now emit an
-            // honest error.
+            // When the LHS is an ArrayExpression or ObjectExpression and the
+            // operator is `=`, reparse the LHS as a destructuring pattern.
             // ----------------------------------------------------------------
             if this.check(TokenKind::equal)
                 && matches!(
@@ -315,11 +314,28 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     Node::ArrayExpression(_) | Node::ObjectExpression(_)
                 )
             {
-                this.error_cur(
-                    "destructuring assignment target not yet supported \
-                     (parser phase P1.9)",
-                );
-                return LevelResult::Error;
+                match this.reparse_assignment_pattern(left_expr, false) {
+                    Some(pattern) => {
+                        // Replace left_expr with the reparsed pattern in this
+                        // level's frame. We push the frame now (operator and RHS
+                        // will follow in the stack-fold phase).
+                        let op_kind = this.cur_kind();
+                        let op = this
+                            .gc
+                            .ctx()
+                            .atom_table
+                            .atom_bytes(token_kind_str(op_kind).as_bytes());
+                        let debug_loc = this.advance(GrammarContext::AllowRegExp).start;
+                        stack.push(AssignState {
+                            left_start_loc,
+                            opt_left_expr: pattern,
+                            op,
+                            debug_loc,
+                        });
+                        return LevelResult::Continue;
+                    }
+                    None => return LevelResult::Error,
+                }
             }
 
             // C++ line 6491-6493:
@@ -411,26 +427,343 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // reparse_assignment_pattern — P1.8 stub
+    // validate_binding_identifier — P1.8b
     // -----------------------------------------------------------------------
 
-    /// Stub for `JSParserImpl::reparseAssignmentPattern`.
-    /// P1.9: implement reparseAssignmentPattern (array/object destructuring).
+    /// Validate a binding identifier: emit errors for `yield`/`await`/`let`
+    /// in strict or param context. Port of
+    /// `JSParserImpl::validateBindingIdentifier` (lines 1008-1044).
     ///
-    /// Array and object literals now parse (P1.7/P1.8), so the call site is
-    /// reachable for `[a] = b` and `{a} = b`. The full reparse is the next
-    /// sub-task.
-    #[allow(dead_code)]
+    /// Emits errors but does NOT stop progress. Returns true if `kind` is a
+    /// legal binding identifier token kind (`identifier` or `rw_yield`).
+    ///
+    /// The borrow pattern: capture the comparison results into booleans BEFORE
+    /// the `&mut self` error calls to avoid overlapping borrows.
+    fn validate_binding_identifier(
+        &mut self,
+        range: support::location::SMRange,
+        id_bytes: &[u8],
+        kind: TokenKind,
+    ) -> bool {
+        // Capture comparison results before any &mut self error call.
+        let is_yield = id_bytes == b"yield";
+        let is_await = id_bytes == b"await";
+        let is_let = id_bytes == b"let";
+
+        if is_yield && (self.lexer.is_strict_mode() || self.param_yield) {
+            self.error_at(range, "Unexpected usage of 'yield' as an identifier");
+        }
+        if is_await && self.param_await {
+            self.error_at(range, "Unexpected usage of 'await' as an identifier");
+        }
+        if is_let && self.lexer.is_strict_mode() {
+            self.error_at(
+                range,
+                "Invalid use of strict mode reserved word as binding identifier",
+            );
+        }
+        kind == TokenKind::identifier || kind == TokenKind::rw_yield
+    }
+
+    // -----------------------------------------------------------------------
+    // reparse_assignment_pattern — P1.8b
+    // -----------------------------------------------------------------------
+
+    /// Reparse an expression node as a destructuring assignment pattern. Port
+    /// of `JSParserImpl::reparseAssignmentPattern` (lines 5913-5988).
+    ///
+    /// ## Immutable-children adaptation
+    /// The C++ mutates ArrayExpression/ObjectExpression in place. In Rust our
+    /// AST nodes have immutable children (`&'gc Node<'gc>`), so we BUILD FRESH
+    /// pattern nodes by reading the expression's data, not by mutating it.
+    ///
+    /// - `ArrayExpression` → `reparse_array_assignment_pattern`
+    /// - `ObjectExpression` → `reparse_object_assignment_pattern`
+    /// - `Identifier` → validate and return as-is
+    /// - already a `PatternNode` → return as-is
+    /// - Flow/TS covers (`CoverTypedIdentifier`, `TypeCastExpression`) → SKIP (P6)
+    /// - `in_decl=true` and no match → "identifier or pattern expected" error
+    /// - Otherwise → return as-is (P1 callers always pass `in_decl=false`)
     fn reparse_assignment_pattern(
         &mut self,
-        _left: &'gc Node<'gc>,
-        _is_binding: bool,
+        node: &'gc Node<'gc>,
+        in_decl: bool,
     ) -> Option<&'gc Node<'gc>> {
-        // P1.9: implement reparseAssignmentPattern (array/object destructuring).
-        self.error_cur(
-            "destructuring assignment target not yet supported (parser phase P1.9)",
-        );
-        None
+        // Only enter the reparse branches when the node has no parentheses.
+        if node.metadata().parens.get() == 0 {
+            if let Node::ArrayExpression(aen) = node {
+                return self.reparse_array_assignment_pattern(aen);
+            }
+            if let Node::ObjectExpression(oen) = node {
+                return self.reparse_object_assignment_pattern(oen);
+            }
+            if let Node::Identifier(ident) = node {
+                // Validation emits errors but does not prevent progress.
+                let range = node.range();
+                let name_bytes = self
+                    .gc
+                    .ctx()
+                    .atom_table
+                    .bytes(ident.name.get())
+                    .to_owned();
+                self.validate_binding_identifier(range, &name_bytes, TokenKind::identifier);
+                return Some(node);
+            }
+            if node.is_pattern() {
+                // PatternNodes have already been validated.
+                return Some(node);
+            }
+            // P6: CoverTypedIdentifier, TypeCastExpression — Flow-gated. Skip.
+        }
+
+        if in_decl {
+            let range = node.range();
+            self.error_at(range, "identifier or pattern expected");
+            return None;
+        }
+
+        // Not in decl, and no parens-free match: return unchanged (valid for
+        // assignment targets like member expressions, call expressions, etc.).
+        Some(node)
+    }
+
+    /// Reparse an ArrayExpression as an ArrayPattern. Port of
+    /// `JSParserImpl::reparseArrayAsignmentPattern` (lines 5990-6052).
+    ///
+    /// Builds a fresh `ArrayPattern` with freshly-reparsed elements.
+    fn reparse_array_assignment_pattern(
+        &mut self,
+        aen: &'gc ArrayExpression<'gc>,
+    ) -> Option<&'gc Node<'gc>> {
+        // Intern the "=" operator label once.
+        let equal_op = self.gc.ctx().atom_table.atom_bytes(b"=");
+
+        let mut elements: Vec<&'gc Node<'gc>> = Vec::new();
+        let elem_iter: Vec<&'gc Node<'gc>> = aen.elements.iter().collect();
+        let elem_count = elem_iter.len();
+
+        for (idx, elem) in elem_iter.iter().enumerate() {
+            let elem = *elem;
+
+            // Elision (Empty node) — pass through.
+            if matches!(elem, Node::Empty(_)) {
+                elements.push(elem);
+                continue;
+            }
+
+            // SpreadElement → RestElement.
+            if let Node::SpreadElement(spread) = elem {
+                // Rest must be the last element and there must be no trailing comma.
+                let is_last = idx == elem_count - 1;
+                if !is_last || aen.trailing_comma.get() {
+                    let range = elem.range();
+                    self.error_at(range, "rest element must be last");
+                    continue;
+                }
+                let arg = self.reparse_assignment_pattern(spread.argument, false)?;
+                let rest_end = elem.range().end;
+                let rest_start = elem.range().start;
+                let rest = Node::RestElement(RestElement::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    arg,
+                ));
+                let rest_ref = self.set_location(rest_start, rest_end, rest);
+                elements.push(rest_ref);
+                continue;
+            }
+
+            // Check for AssignmentExpression with `=` and no parens
+            // (unpacks into `left = init`).
+            let (mut sub_elem, init) =
+                if let Node::AssignmentExpression(asn) = elem {
+                    if elem.metadata().parens.get() == 0
+                        && asn.operator.get() == equal_op
+                    {
+                        (asn.left, Some(asn.right))
+                    } else {
+                        (elem, None)
+                    }
+                } else {
+                    (elem, None)
+                };
+
+            // Reparse sub_elem recursively.
+            match self.reparse_assignment_pattern(sub_elem, false) {
+                Some(reparsed) => sub_elem = reparsed,
+                None => continue,
+            }
+
+            // Wrap in AssignmentPattern if there was an initializer.
+            if let Some(init_expr) = init {
+                // For the location: C++ `setLocation(asn, asn, new AssignmentPatternNode)`.
+                // `asn` is the original AssignmentExpression elem — use its range.
+                let asn_range = elem.range();
+                let ap = Node::AssignmentPattern(AssignmentPattern::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    sub_elem,
+                    init_expr,
+                ));
+                sub_elem = self.set_location(asn_range.start, asn_range.end, ap);
+            }
+
+            elements.push(sub_elem);
+        }
+
+        // Build fresh ArrayPattern at the AEN's location.
+        let aen_range = aen.metadata.range.get();
+        let ap = Node::ArrayPattern(ArrayPattern::new(
+            NodeMetadata::new(self.dummy_range()),
+            NodeList::from_iter(self.gc, elements),
+            None,
+        ));
+        Some(self.set_location(aen_range.start, aen_range.end, ap))
+    }
+
+    /// Reparse an ObjectExpression as an ObjectPattern. Port of
+    /// `JSParserImpl::reparseObjectAssignmentPattern` (lines 6054-6151).
+    ///
+    /// Builds a fresh `ObjectPattern` with freshly-reparsed properties.
+    fn reparse_object_assignment_pattern(
+        &mut self,
+        oen: &'gc ObjectExpression<'gc>,
+    ) -> Option<&'gc Node<'gc>> {
+        // Intern the "=" and "init" atoms once.
+        let equal_op = self.gc.ctx().atom_table.atom_bytes(b"=");
+        let init_kind = self.gc.ctx().atom_table.atom_bytes(b"init");
+
+        let mut properties: Vec<&'gc Node<'gc>> = Vec::new();
+        let prop_iter: Vec<&'gc Node<'gc>> = oen.properties.iter().collect();
+        let prop_count = prop_iter.len();
+
+        for (idx, node) in prop_iter.iter().enumerate() {
+            let node = *node;
+
+            // SpreadElement → RestElement.
+            if let Node::SpreadElement(spread) = node {
+                // Rest must be the last property.
+                let is_last = idx == prop_count - 1;
+                if !is_last {
+                    let range = node.range();
+                    self.error_at(range, "rest property must be last");
+                    continue;
+                }
+                // NOTE: per spec, the rest argument is NOT recursively reparsed
+                // (see #if 0 block in C++). We just wrap the argument directly.
+                // For non-decl (`in_decl=false`, the only P1 caller), just wrap.
+                let rest_arg = spread.argument;
+                let rest_range = node.range();
+                let rest = Node::RestElement(RestElement::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    rest_arg,
+                ));
+                let rest_ref = self.set_location(rest_range.start, rest_range.end, rest);
+                properties.push(rest_ref);
+                continue;
+            }
+
+            // Must be a Property node.
+            let prop = match node {
+                Node::Property(p) => p,
+                _ => {
+                    let range = node.range();
+                    self.error_at(range, "invalid destructuring target");
+                    continue;
+                }
+            };
+
+            // Kind must be "init".
+            if prop.kind.get() != init_kind {
+                // Combine the start of the property with the start of the key
+                // (mirrors C++ `SourceErrorManager::combineIntoRange`).
+                let err_range = support::location::SMRange {
+                    start: node.range().start,
+                    end: prop.key.range().start,
+                };
+                self.error_at(err_range, "invalid destructuring target");
+                continue;
+            }
+
+            let orig_value = prop.value;
+            let end_loc = orig_value.range().end;
+
+            // Unpack AssignmentExpression(`=`) or CoverInitializer.
+            let (mut value, init) =
+                if let Node::AssignmentExpression(asn) = orig_value {
+                    if asn.operator.get() == equal_op {
+                        (asn.left, Some(asn.right))
+                    } else {
+                        (orig_value, None)
+                    }
+                } else if let Node::CoverInitializer(ci) = orig_value {
+                    // CoverInitializedName: `{a = 1}`.
+                    // Clone the key (which must be an Identifier) as the value.
+                    let key_ident = match prop.key {
+                        Node::Identifier(id) => id,
+                        _ => {
+                            debug_assert!(
+                                false,
+                                "CoverInitializedName must start with an identifier"
+                            );
+                            continue;
+                        }
+                    };
+                    // Build a fresh Identifier from the key.
+                    let cloned_ident = Node::Identifier(Identifier::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        key_ident.name.get(),
+                        None,
+                        false,
+                    ));
+                    let key_range = prop.key.range();
+                    let cloned_ref =
+                        self.set_location(key_range.start, key_range.end, cloned_ident);
+                    (cloned_ref as &'gc Node<'gc>, Some(ci.init as &'gc Node<'gc>))
+                } else {
+                    (orig_value, None)
+                };
+
+            // Recursively reparse the value.
+            match self.reparse_assignment_pattern(value, false) {
+                Some(reparsed) => value = reparsed,
+                None => continue,
+            }
+
+            // Wrap in AssignmentPattern if there was an initializer.
+            if let Some(init_expr) = init {
+                // C++ `setLocation(value, endLoc, new AssignmentPatternNode)`.
+                let val_start = value.range().start;
+                let ap = Node::AssignmentPattern(AssignmentPattern::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    value,
+                    init_expr,
+                ));
+                value = self.set_location(val_start, end_loc, ap);
+            }
+
+            // Build fresh Property preserving key/kind/computed/method/shorthand.
+            let new_prop = Node::Property(Property::new(
+                NodeMetadata::new(self.dummy_range()),
+                prop.key,
+                value,
+                prop.kind.get(),
+                prop.computed.get(),
+                prop.method.get(),
+                prop.shorthand.get(),
+            ));
+            let prop_range = node.range();
+            let new_prop_ref =
+                self.set_location(prop_range.start, prop_range.end, new_prop);
+            properties.push(new_prop_ref);
+        }
+
+        // Build fresh ObjectPattern at the OEN's location.
+        let oen_range = oen.metadata.range.get();
+        let op = Node::ObjectPattern(ObjectPattern::new(
+            NodeMetadata::new(self.dummy_range()),
+            NodeList::from_iter(self.gc, properties),
+            None,
+        ));
+        Some(self.set_location(oen_range.start, oen_range.end, op))
     }
 
     // -----------------------------------------------------------------------

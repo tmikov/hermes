@@ -1042,4 +1042,228 @@ mod tests {
         );
         assert!(parser.error_count_pub() >= 1);
     }
+
+    // P1.8b: destructuring-assignment reparse tests.
+
+    /// Helper: parse source, expect success, return first-statement expression.
+    fn parse_expr_ok<'gc>(
+        gc: &'gc ast::context::GCLock<'_, '_>,
+        sm: &mut support::manager::SourceErrorManager,
+        src: &[u8],
+    ) -> &'gc ast::node::Node<'gc> {
+        use ast::context::Context;
+        let buf_id = sm.add_buffer_bytes("input", src);
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(gc, lexer);
+        let program = parser.parse().expect("parse succeeded");
+        assert_eq!(parser.error_count_pub(), 0, "zero errors");
+        if let ast::node::Node::Program(p) = program {
+            let stmt = p.body.iter().next().expect("has statement");
+            if let ast::node::Node::ExpressionStatement(es) = stmt {
+                return es.expression;
+            }
+        }
+        panic!("expected ExpressionStatement");
+    }
+
+    #[test]
+    fn array_destructure_simple() {
+        // `[a] = b` → AssignmentExpression(=, ArrayPattern([Identifier(a)]), ...)
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let expr = parse_expr_ok(&gc, &mut sm, b"[a] = b;");
+        match expr {
+            Node::AssignmentExpression(asn) => {
+                let op = gc.ctx().atom_table.bytes(asn.operator.get());
+                assert_eq!(op, b"=");
+                assert!(
+                    matches!(asn.left, Node::ArrayPattern(_)),
+                    "left is ArrayPattern, got {:?}",
+                    asn.left.kind()
+                );
+            }
+            other => panic!("expected AssignmentExpression, got {:?}", other.kind()),
+        }
+    }
+
+    #[test]
+    fn array_destructure_with_rest() {
+        // `[a, ...b] = c` → ArrayPattern contains RestElement.
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let expr = parse_expr_ok(&gc, &mut sm, b"[a, ...b] = c;");
+        if let Node::AssignmentExpression(asn) = expr {
+            if let Node::ArrayPattern(ap) = asn.left {
+                let elems: Vec<_> = ap.elements.iter().collect();
+                assert_eq!(elems.len(), 2);
+                assert!(matches!(elems[0], Node::Identifier(_)));
+                assert!(matches!(elems[1], Node::RestElement(_)));
+            } else {
+                panic!("left must be ArrayPattern");
+            }
+        } else {
+            panic!("expected AssignmentExpression");
+        }
+    }
+
+    #[test]
+    fn array_destructure_with_hole() {
+        // `[a, , b] = c` → ArrayPattern has Empty hole.
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let expr = parse_expr_ok(&gc, &mut sm, b"[a, , b] = c;");
+        if let Node::AssignmentExpression(asn) = expr {
+            if let Node::ArrayPattern(ap) = asn.left {
+                let elems: Vec<_> = ap.elements.iter().collect();
+                assert_eq!(elems.len(), 3);
+                assert!(matches!(elems[0], Node::Identifier(_)));
+                assert!(matches!(elems[1], Node::Empty(_)));
+                assert!(matches!(elems[2], Node::Identifier(_)));
+            } else {
+                panic!("left must be ArrayPattern");
+            }
+        } else {
+            panic!("expected AssignmentExpression");
+        }
+    }
+
+    #[test]
+    fn array_destructure_with_default() {
+        // `[a = 1, b] = c` → first element is AssignmentPattern.
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let expr = parse_expr_ok(&gc, &mut sm, b"[a = 1, b] = c;");
+        if let Node::AssignmentExpression(asn) = expr {
+            if let Node::ArrayPattern(ap) = asn.left {
+                let elems: Vec<_> = ap.elements.iter().collect();
+                assert_eq!(elems.len(), 2);
+                assert!(
+                    matches!(elems[0], Node::AssignmentPattern(_)),
+                    "first element is AssignmentPattern"
+                );
+                assert!(matches!(elems[1], Node::Identifier(_)));
+            } else {
+                panic!("left must be ArrayPattern");
+            }
+        } else {
+            panic!("expected AssignmentExpression");
+        }
+    }
+
+    #[test]
+    fn object_destructure_shorthand() {
+        // `({a} = b)` → AssignmentExpression(=, ObjectPattern([Property(...)]), ...)
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let expr = parse_expr_ok(&gc, &mut sm, b"({a} = b);");
+        if let Node::AssignmentExpression(asn) = expr {
+            let op = gc.ctx().atom_table.bytes(asn.operator.get());
+            assert_eq!(op, b"=");
+            assert!(
+                matches!(asn.left, Node::ObjectPattern(_)),
+                "left is ObjectPattern, got {:?}",
+                asn.left.kind()
+            );
+        } else {
+            panic!("expected AssignmentExpression");
+        }
+    }
+
+    #[test]
+    fn object_destructure_cover_initializer() {
+        // `({a = 1} = b)` → Property value is AssignmentPattern.
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let expr = parse_expr_ok(&gc, &mut sm, b"({a = 1} = b);");
+        if let Node::AssignmentExpression(asn) = expr {
+            if let Node::ObjectPattern(op) = asn.left {
+                let props: Vec<_> = op.properties.iter().collect();
+                assert_eq!(props.len(), 1);
+                if let Node::Property(p) = props[0] {
+                    assert!(
+                        matches!(p.value, Node::AssignmentPattern(_)),
+                        "property value is AssignmentPattern"
+                    );
+                } else {
+                    panic!("expected Property");
+                }
+            } else {
+                panic!("left must be ObjectPattern");
+            }
+        } else {
+            panic!("expected AssignmentExpression");
+        }
+    }
+
+    #[test]
+    fn object_destructure_with_rest() {
+        // `({...r} = o)` → ObjectPattern([RestElement(Identifier(r))]).
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let expr = parse_expr_ok(&gc, &mut sm, b"({...r} = o);");
+        if let Node::AssignmentExpression(asn) = expr {
+            if let Node::ObjectPattern(op) = asn.left {
+                let props: Vec<_> = op.properties.iter().collect();
+                assert_eq!(props.len(), 1);
+                assert!(
+                    matches!(props[0], Node::RestElement(_)),
+                    "property is RestElement"
+                );
+            } else {
+                panic!("left must be ObjectPattern");
+            }
+        } else {
+            panic!("expected AssignmentExpression");
+        }
+    }
+
+    #[test]
+    fn nested_array_object_destructure() {
+        // `[{a}, [b]] = c` — nested pattern.
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let expr = parse_expr_ok(&gc, &mut sm, b"[{a}, [b]] = c;");
+        if let Node::AssignmentExpression(asn) = expr {
+            if let Node::ArrayPattern(ap) = asn.left {
+                let elems: Vec<_> = ap.elements.iter().collect();
+                assert_eq!(elems.len(), 2);
+                assert!(matches!(elems[0], Node::ObjectPattern(_)));
+                assert!(matches!(elems[1], Node::ArrayPattern(_)));
+            } else {
+                panic!("left must be ArrayPattern");
+            }
+        } else {
+            panic!("expected AssignmentExpression");
+        }
+    }
 }
