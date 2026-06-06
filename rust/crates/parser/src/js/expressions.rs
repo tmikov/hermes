@@ -443,7 +443,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     ///
     /// The borrow pattern: capture the comparison results into booleans BEFORE
     /// the `&mut self` error calls to avoid overlapping borrows.
-    fn validate_binding_identifier(
+    pub(super) fn validate_binding_identifier(
         &mut self,
         range: support::location::SMRange,
         id_bytes: &[u8],
@@ -2093,7 +2093,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// - `[expr]` computed key → the expression itself (caller tracks
     ///   `computed = true`)
     /// - Reserved word used as key → `IdentifierNode` (e.g. `{if: 1}`)
-    fn parse_property_name(&mut self) -> Option<&'gc Node<'gc>> {
+    pub(super) fn parse_property_name(&mut self) -> Option<&'gc Node<'gc>> {
         let tok_start = self.lexer.token().start_loc();
         let tok_end = self.lexer.token().end_loc();
 

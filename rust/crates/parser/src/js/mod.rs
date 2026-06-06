@@ -1365,4 +1365,187 @@ mod tests {
             panic!("expected Program");
         }
     }
+
+    // -----------------------------------------------------------------------
+    // P2.2 binding-pattern leaves (driven via the test-only wrapper, since they
+    // are not reachable from a statement until P2.3).
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn binding_array_pattern_basic() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let buf_id = sm.add_buffer_bytes("input", b"[a, , ...b]");
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        let pat = parser
+            .parse_binding_pattern_for_test()
+            .expect("array binding pattern parses");
+        assert_eq!(parser.error_count_pub(), 0, "no errors");
+
+        let ap = match pat {
+            Node::ArrayPattern(ap) => ap,
+            other => panic!("expected ArrayPattern, got {:?}", other.kind()),
+        };
+        let elems: Vec<&Node> = ap.elements.iter().collect();
+        assert_eq!(elems.len(), 3, "three elements");
+        assert!(
+            matches!(elems[0], Node::Identifier(_)),
+            "elem0 = Identifier(a)"
+        );
+        assert!(matches!(elems[1], Node::Empty(_)), "elem1 = Empty hole");
+        match elems[2] {
+            Node::RestElement(r) => {
+                assert!(
+                    matches!(r.argument, Node::Identifier(_)),
+                    "rest arg = Identifier(b)"
+                );
+            }
+            other => panic!("elem2 should be RestElement, got {:?}", other.kind()),
+        }
+    }
+
+    #[test]
+    fn binding_array_pattern_default_initializer() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let buf_id = sm.add_buffer_bytes("input", b"[a = 1]");
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        let pat = parser
+            .parse_binding_pattern_for_test()
+            .expect("array binding pattern with default parses");
+        assert_eq!(parser.error_count_pub(), 0, "no errors");
+
+        let ap = match pat {
+            Node::ArrayPattern(ap) => ap,
+            other => panic!("expected ArrayPattern, got {:?}", other.kind()),
+        };
+        let elems: Vec<&Node> = ap.elements.iter().collect();
+        assert_eq!(elems.len(), 1, "one element");
+        match elems[0] {
+            Node::AssignmentPattern(asn) => {
+                assert!(
+                    matches!(asn.left, Node::Identifier(_)),
+                    "left = Identifier(a)"
+                );
+                assert!(
+                    matches!(asn.right, Node::NumericLiteral(_)),
+                    "right = NumericLiteral(1)"
+                );
+            }
+            other => {
+                panic!("elem0 should be AssignmentPattern, got {:?}", other.kind())
+            }
+        }
+    }
+
+    #[test]
+    fn binding_object_pattern_basic() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let buf_id = sm.add_buffer_bytes("input", b"{a, b: c, d = 1, ...r}");
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        let pat = parser
+            .parse_binding_pattern_for_test()
+            .expect("object binding pattern parses");
+        assert_eq!(parser.error_count_pub(), 0, "no errors");
+
+        let op = match pat {
+            Node::ObjectPattern(op) => op,
+            other => panic!("expected ObjectPattern, got {:?}", other.kind()),
+        };
+        let props: Vec<&Node> = op.properties.iter().collect();
+        assert_eq!(props.len(), 4, "four properties");
+
+        // {a} — shorthand Property whose value is a fresh Identifier.
+        match props[0] {
+            Node::Property(p) => {
+                assert!(p.shorthand.get(), "a is shorthand");
+                assert!(!p.computed.get(), "a not computed");
+                assert!(matches!(p.key, Node::Identifier(_)), "key = a");
+                assert!(matches!(p.value, Node::Identifier(_)), "value = a");
+            }
+            other => panic!("prop0 should be Property, got {:?}", other.kind()),
+        }
+
+        // {b: c} — keyed Property, value Identifier(c), not shorthand.
+        match props[1] {
+            Node::Property(p) => {
+                assert!(!p.shorthand.get(), "b:c not shorthand");
+                assert!(matches!(p.key, Node::Identifier(_)), "key = b");
+                assert!(matches!(p.value, Node::Identifier(_)), "value = c");
+            }
+            other => panic!("prop1 should be Property, got {:?}", other.kind()),
+        }
+
+        // {d = 1} — Property whose value is an AssignmentPattern.
+        match props[2] {
+            Node::Property(p) => {
+                assert!(p.shorthand.get(), "d = 1 is shorthand");
+                match p.value {
+                    Node::AssignmentPattern(asn) => {
+                        assert!(
+                            matches!(asn.left, Node::Identifier(_)),
+                            "left = d"
+                        );
+                        assert!(
+                            matches!(asn.right, Node::NumericLiteral(_)),
+                            "right = 1"
+                        );
+                    }
+                    other => panic!(
+                        "prop2 value should be AssignmentPattern, got {:?}",
+                        other.kind()
+                    ),
+                }
+            }
+            other => panic!("prop2 should be Property, got {:?}", other.kind()),
+        }
+
+        // {...r} — RestElement whose argument is an Identifier.
+        match props[3] {
+            Node::RestElement(r) => {
+                assert!(
+                    matches!(r.argument, Node::Identifier(_)),
+                    "rest arg = r"
+                );
+            }
+            other => panic!("prop3 should be RestElement, got {:?}", other.kind()),
+        }
+    }
 }

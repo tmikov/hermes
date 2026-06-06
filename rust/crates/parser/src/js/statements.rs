@@ -9,11 +9,12 @@
 //! of `lib/Parser/JSParserImpl.cpp`.
 
 use ast::node::{
-    BreakStatement, ContinueStatement, DebuggerStatement, EmptyStatement,
-    ExpressionStatement, Identifier, LabeledStatement, Node, ReturnStatement,
-    StringLiteral, ThrowStatement, WithStatement,
+    ArrayPattern, AssignmentPattern, BreakStatement, ContinueStatement,
+    DebuggerStatement, Empty, EmptyStatement, ExpressionStatement, Identifier,
+    LabeledStatement, Node, ObjectPattern, Property, RestElement,
+    ReturnStatement, StringLiteral, ThrowStatement, WithStatement,
 };
-use ast::node_child::NodeMetadata;
+use ast::node_child::{NodeList, NodeMetadata};
 use atom_table::INVALID_ATOM_BYTES;
 use support::location::{SMLoc, SMRange};
 
@@ -676,5 +677,481 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         if is_static_builtin {
             self.use_static_builtin = true;
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // parseBindingIdentifier — 1047 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a `BindingIdentifier`. Port of
+    /// `JSParserImpl::parseBindingIdentifier` (lines 1047-1086).
+    ///
+    /// Returns `None` if the current token is neither an identifier nor a
+    /// reserved word, or if `validate_binding_identifier` rejects the kind.
+    ///
+    /// The `param` argument mirrors the C++ signature but, as in C++, it is not
+    /// directly consumed here — `validate_binding_identifier` reads the parser's
+    /// `param_yield`/`param_await`/strict-mode state. The Flow/TS
+    /// `getParseTypes()` block (`?`/`:` type annotation) is skipped (P6/P7);
+    /// `type` is `None` and `optional` is `false`.
+    #[allow(dead_code)] // P2.2 leaf; reachable from decls/for/catch in P2.3+
+    pub(super) fn parse_binding_identifier(
+        &mut self,
+        _param: Param,
+    ) -> Option<&'gc Node<'gc>> {
+        // C++ 1049-1051.
+        if !self.check(TokenKind::identifier)
+            && !self.lexer.token().is_res_word()
+        {
+            return None;
+        }
+        let ident_rng: SMRange = self.lexer.token().source_range();
+
+        // If we have an identifier or reserved word, then store it and the
+        // kind, and pass it to the validateBindingIdentifier function.
+        // C++ 1056-1060.
+        let id = self.lexer.token().get_res_word_or_identifier();
+        let kind = self.lexer.token().kind();
+        // validateBindingIdentifier compares the *passed-in* `id` atom; resolve
+        // its interned bytes to an owned buffer so the immutable borrow of the
+        // atom table ends before the `&mut self` validate call.
+        let id_bytes = self.gc.ctx().atom_table.bytes(id).to_owned();
+        if !self.validate_binding_identifier(ident_rng, &id_bytes, kind) {
+            return None;
+        }
+        self.advance(GrammarContext::AllowRegExp);
+
+        // P6/P7: context_.getParseTypes() `?`/`:` block skipped. type = None,
+        // optional = false. C++ 1063-1080.
+
+        // C++ 1082-1085.
+        let node = Node::Identifier(Identifier::new(
+            NodeMetadata::new(self.dummy_range()),
+            id,
+            None,  // type = null
+            false, // optional = false
+        ));
+        Some(self.set_location(ident_rng.start, self.lexer.prev_token_end(), node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseBindingPattern — 1281 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a `BindingPattern` (`[...]` array or `{...}` object). Port of
+    /// `JSParserImpl::parseBindingPattern` (lines 1281-1296).
+    #[allow(dead_code)] // P2.2 leaf; reachable from decls/for/catch in P2.3+
+    pub(super) fn parse_binding_pattern(
+        &mut self,
+        param: Param,
+    ) -> Option<&'gc Node<'gc>> {
+        assert!(
+            self.check(TokenKind::l_square) || self.check(TokenKind::l_brace),
+            "BindingPattern expects '{{' or '['"
+        );
+        if self.check(TokenKind::l_square) {
+            self.parse_array_binding_pattern(param)
+        } else {
+            self.parse_object_binding_pattern(param)
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // parseArrayBindingPattern — 1298 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse an `ArrayBindingPattern`. Port of
+    /// `JSParserImpl::parseArrayBindingPattern` (lines 1298-1360).
+    #[allow(dead_code)] // P2.2 leaf; reachable from decls/for/catch in P2.3+
+    fn parse_array_binding_pattern(
+        &mut self,
+        param: Param,
+    ) -> Option<&'gc Node<'gc>> {
+        assert!(self.check(TokenKind::l_square), "ArrayBindingPattern expects '['");
+
+        // Eat the '[', recording the start location. C++ 1303.
+        let start_loc = self.advance(GrammarContext::AllowRegExp).start;
+
+        let mut elem_list: Vec<&'gc Node<'gc>> = Vec::new();
+
+        if !self.check(TokenKind::r_square) {
+            loop {
+                if self.check(TokenKind::comma) {
+                    // Elision. C++ 1310-1312.
+                    let tok_start = self.lexer.token().start_loc();
+                    let tok_end = self.lexer.token().end_loc();
+                    let empty = Node::Empty(Empty::new(
+                        NodeMetadata::new(self.dummy_range()),
+                    ));
+                    elem_list.push(self.set_location(tok_start, tok_end, empty));
+                } else if self.check(TokenKind::dotdotdot) {
+                    // BindingRestElement. C++ 1313-1319.
+                    let rest_elem = self.parse_binding_rest_element(param)?;
+                    elem_list.push(rest_elem);
+                    break;
+                } else {
+                    // BindingElement. C++ 1320-1326.
+                    let elem = self.parse_binding_element(param)?;
+                    elem_list.push(elem);
+                }
+
+                if !self.check_and_eat(TokenKind::comma, GrammarContext::AllowRegExp) {
+                    break;
+                }
+                if self.check(TokenKind::r_square) {
+                    // Check for ",]".
+                    break;
+                }
+            }
+        }
+
+        // C++ 1335-1341. Closing eat uses AllowDiv.
+        if !self.eat(
+            TokenKind::r_square,
+            GrammarContext::AllowDiv,
+            " at end of array binding pattern '[...'",
+        ) {
+            return None;
+        }
+
+        // P6/P7: context_.getParseTypes() type block skipped. type = None.
+
+        // C++ 1356-1359.
+        let node = Node::ArrayPattern(ArrayPattern::new(
+            NodeMetadata::new(self.dummy_range()),
+            NodeList::from_iter(self.gc, elem_list),
+            None, // type = null
+        ));
+        Some(self.set_location(start_loc, self.lexer.prev_token_end(), node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseBindingElement — 1362 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a `BindingElement` (a binding target with optional initializer).
+    /// Port of `JSParserImpl::parseBindingElement` (lines 1362-1390).
+    #[allow(dead_code)] // P2.2 leaf; reachable from decls/for/catch in P2.3+
+    fn parse_binding_element(&mut self, param: Param) -> Option<&'gc Node<'gc>> {
+        let _guard = self.check_recursion()?;
+
+        // C++ 1366-1380.
+        let elem: &'gc Node<'gc> =
+            if self.check(TokenKind::l_square) || self.check(TokenKind::l_brace) {
+                self.parse_binding_pattern(param)?
+            } else {
+                match self.parse_binding_identifier(param) {
+                    Some(ident) => ident,
+                    None => {
+                        self.error_cur(
+                            "identifier, '{' or '[' expected in binding pattern",
+                        );
+                        return None;
+                    }
+                }
+            };
+
+        // No initializer? C++ 1382-1384.
+        if !self.check(TokenKind::equal) {
+            return Some(elem);
+        }
+
+        // C++ 1386-1389.
+        self.parse_binding_initializer(param, elem)
+    }
+
+    // -----------------------------------------------------------------------
+    // parseBindingRestElement — 1392 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a `BindingRestElement` (`...target`). Port of
+    /// `JSParserImpl::parseBindingRestElement` (lines 1392-1413).
+    #[allow(dead_code)] // P2.2 leaf; reachable from decls/for/catch in P2.3+
+    fn parse_binding_rest_element(
+        &mut self,
+        param: Param,
+    ) -> Option<&'gc Node<'gc>> {
+        assert!(
+            self.check(TokenKind::dotdotdot),
+            "BindingRestElement expected to start with '...'"
+        );
+
+        let start_loc = self.advance(GrammarContext::AllowRegExp).start;
+
+        let elem = self.parse_binding_element(param)?;
+        // A rest element may not have a default initializer. C++ 1402-1407.
+        // NOTE: the C++ error message has the typo "elemenent"; preserved here.
+        if matches!(elem, Node::AssignmentPattern(_)) {
+            let range = elem.range();
+            self.error_at(range, "rest elemenent may not have a default initializer");
+            return None;
+        }
+
+        // C++ 1409-1412.
+        let node = Node::RestElement(RestElement::new(
+            NodeMetadata::new(self.dummy_range()),
+            elem,
+        ));
+        Some(self.set_location(start_loc, self.lexer.prev_token_end(), node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseBindingInitializer — 1415 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a binding `Initializer` (`= AssignmentExpression`) and wrap the
+    /// already-parsed `left` target in an `AssignmentPattern`. Port of
+    /// `JSParserImpl::parseBindingInitializer` (lines 1415-1432).
+    #[allow(dead_code)] // P2.2 leaf; reachable from decls/for/catch in P2.3+
+    fn parse_binding_initializer(
+        &mut self,
+        param: Param,
+        left: &'gc Node<'gc>,
+    ) -> Option<&'gc Node<'gc>> {
+        assert!(self.check(TokenKind::equal), "binding initializer requires '='");
+
+        // Parse the initializer. C++ 1421.
+        let debug_loc = self.advance(GrammarContext::AllowRegExp).start;
+
+        let expr = self.parse_assignment_expression(PARAM_IN.plus(param))?;
+
+        // C++ 1427-1431.
+        let left_start = left.range().start;
+        let node = Node::AssignmentPattern(AssignmentPattern::new(
+            NodeMetadata::new(self.dummy_range()),
+            left,
+            expr,
+        ));
+        Some(self.set_location_d(
+            left_start,
+            self.lexer.prev_token_end(),
+            debug_loc,
+            node,
+        ))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseObjectBindingPattern — 1434 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse an `ObjectBindingPattern`. Port of
+    /// `JSParserImpl::parseObjectBindingPattern` (lines 1434-1491).
+    #[allow(dead_code)] // P2.2 leaf; reachable from decls/for/catch in P2.3+
+    fn parse_object_binding_pattern(
+        &mut self,
+        param: Param,
+    ) -> Option<&'gc Node<'gc>> {
+        assert!(self.check(TokenKind::l_brace), "ObjectBindingPattern expects '{{'");
+
+        // Eat the '{', recording the start location. C++ 1439.
+        let start_loc = self.advance(GrammarContext::AllowRegExp).start;
+
+        let mut prop_list: Vec<&'gc Node<'gc>> = Vec::new();
+
+        if !self.check(TokenKind::r_brace) {
+            loop {
+                if self.check(TokenKind::dotdotdot) {
+                    // BindingRestProperty. C++ 1445-1451.
+                    let rest_elem = self.parse_binding_rest_property(param)?;
+                    prop_list.push(rest_elem);
+                    break;
+                }
+                let prop = self.parse_binding_property(param)?;
+                prop_list.push(prop);
+
+                if !self.check_and_eat(TokenKind::comma, GrammarContext::AllowRegExp) {
+                    break;
+                }
+                if self.check(TokenKind::r_brace) {
+                    // check for ",}"
+                    break;
+                }
+            }
+        }
+
+        // C++ 1466-1472. Closing eat uses AllowDiv.
+        if !self.eat(
+            TokenKind::r_brace,
+            GrammarContext::AllowDiv,
+            " at end of object binding pattern '{...'",
+        ) {
+            return None;
+        }
+
+        // P6/P7: context_.getParseTypes() type block skipped. type = None.
+
+        // C++ 1487-1490.
+        let node = Node::ObjectPattern(ObjectPattern::new(
+            NodeMetadata::new(self.dummy_range()),
+            NodeList::from_iter(self.gc, prop_list),
+            None, // type = null
+        ));
+        Some(self.set_location(start_loc, self.lexer.prev_token_end(), node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseBindingProperty — 1493 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a `BindingProperty`. Port of
+    /// `JSParserImpl::parseBindingProperty` (lines 1493-1561).
+    #[allow(dead_code)] // P2.2 leaf; reachable from decls/for/catch in P2.3+
+    fn parse_binding_property(
+        &mut self,
+        param: Param,
+    ) -> Option<&'gc Node<'gc>> {
+        // C++ 1495-1500.
+        let computed = self.check(TokenKind::l_square);
+        let start_loc = self.lexer.token().start_loc();
+        let key = self.parse_property_name()?;
+
+        let value: &'gc Node<'gc>;
+        let shorthand: bool;
+
+        if self.check_and_eat(TokenKind::colon, GrammarContext::AllowRegExp) {
+            // PropertyName ":" BindingElement
+            //               ^
+            // C++ 1505-1511.
+            value = self.parse_binding_element(Param::default())?;
+            shorthand = false;
+        } else {
+            // SingleNameBinding :
+            //   BindingIdentifier Initializer[opt]
+            //                     ^
+            // C++ 1512-1553.
+
+            // Must validate BindingIdentifier, because there are certain
+            // identifiers which are valid as PropertyName but not as
+            // BindingIdentifier. C++ 1517-1528.
+            let ident = match key {
+                Node::Identifier(id) if !computed => id,
+                _ => {
+                    self.error_at(
+                        SMRange { start: start_loc, end: start_loc },
+                        "identifier expected in object binding pattern",
+                    );
+                    return None;
+                }
+            };
+            let ident_name = ident.name.get();
+            let ident_range = key.range();
+            let name_bytes =
+                self.gc.ctx().atom_table.bytes(ident_name).to_owned();
+            if !self.validate_binding_identifier(
+                ident_range,
+                &name_bytes,
+                TokenKind::identifier,
+            ) {
+                self.error_at(
+                    SMRange { start: start_loc, end: start_loc },
+                    "identifier expected in object binding pattern",
+                );
+                return None;
+            }
+
+            shorthand = true;
+
+            if self.check(TokenKind::equal) {
+                // BindingIdentifier Initializer
+                //                   ^
+                // Clone the key because parseBindingInitializer will wrap it.
+                // C++ 1535-1539.
+                let left_node = Node::Identifier(Identifier::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    ident_name,
+                    None,
+                    false,
+                ));
+                let left = self.set_location(
+                    ident_range.start,
+                    ident_range.end,
+                    left_node,
+                );
+                // C++ 1540-1544.
+                value = self.parse_binding_initializer(param.plus(PARAM_IN), left)?;
+            } else {
+                // BindingIdentifier
+                //                   ^
+                // Shorthand property initialization, clone the key directly.
+                // C++ 1548-1552.
+                let cloned = Node::Identifier(Identifier::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    ident_name,
+                    None,
+                    false,
+                ));
+                value = self.set_location(
+                    ident_range.start,
+                    ident_range.end,
+                    cloned,
+                );
+            }
+        }
+
+        // C++ 1556-1560.
+        let init_kind = self.gc.ctx().atom_table.atom_bytes(b"init");
+        let node = Node::Property(Property::new(
+            NodeMetadata::new(self.dummy_range()),
+            key,
+            value,
+            init_kind,
+            computed,
+            false, // method
+            shorthand,
+        ));
+        Some(self.set_location(start_loc, self.lexer.prev_token_end(), node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseBindingRestProperty — 1563 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a `BindingRestProperty` (`...identifier`). Port of
+    /// `JSParserImpl::parseBindingRestProperty` (lines 1563-1589).
+    #[allow(dead_code)] // P2.2 leaf; reachable from decls/for/catch in P2.3+
+    fn parse_binding_rest_property(
+        &mut self,
+        param: Param,
+    ) -> Option<&'gc Node<'gc>> {
+        assert!(
+            self.check(TokenKind::dotdotdot),
+            "BindingRestProperty expected to start with '...'"
+        );
+
+        let start_loc = self.advance(GrammarContext::AllowRegExp).start;
+
+        // NOTE: the spec says that this cannot be another pattern, even though
+        // it would make sense (the `#if 0` parseBindingElement branch is dead).
+        // C++ 1571-1577.
+        let elem = match self.parse_binding_identifier(param) {
+            Some(ident) => ident,
+            None => {
+                self.error_cur(
+                    "identifier expected after '...' in object pattern",
+                );
+                return None;
+            }
+        };
+
+        // C++ 1585-1588.
+        let node = Node::RestElement(RestElement::new(
+            NodeMetadata::new(self.dummy_range()),
+            elem,
+        ));
+        Some(self.set_location(start_loc, self.lexer.prev_token_end(), node))
+    }
+
+    // -----------------------------------------------------------------------
+    // Test-only wrappers (binding patterns are not reachable from a statement
+    // until P2.3; drive the leaves directly for unit tests).
+    // -----------------------------------------------------------------------
+
+    /// Test-only entry point: parse a binding pattern starting at the current
+    /// token (the constructor already lexed the first token).
+    #[cfg(test)]
+    pub(crate) fn parse_binding_pattern_for_test(
+        &mut self,
+    ) -> Option<&'gc Node<'gc>> {
+        self.parse_binding_pattern(Param::default())
     }
 }
