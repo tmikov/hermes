@@ -10,12 +10,12 @@
 //! test compares this byte-for-byte against `hermesc -dump-ast`.
 //!
 //! OUTPUT CONTRACT
-//!   On success (parsed AND error_count()==0): the dumped JSON (exactly what the
-//!     dumper emits; no extra trailing newline).
+//!   On success (parsed AND error_count()==0): exactly what the dumper emits
+//!     (which ends in a single newline via end_jsonl); nothing added.
 //!   On error: exactly "ERROR <count>\n".
 //!
 //! Args: [--pretty] [--dump-source-location] [--include-empty-ast-nodes]
-//!       [--include-raw-ast-prop] <file|->
+//!       [--include-raw-ast-prop] [file|-]   (omitted or "-" reads stdin)
 
 use std::io::{self, Read, Write};
 
@@ -57,11 +57,14 @@ fn main() {
     let bytes = match file_path.as_deref() {
         Some("-") | None => {
             let mut b = Vec::new();
-            io::stdin().read_to_end(&mut b).expect("read stdin");
+            io::stdin().read_to_end(&mut b).unwrap_or_else(|e| {
+                eprintln!("{prog}: error reading stdin: {e}");
+                std::process::exit(1);
+            });
             b
         }
         Some(p) => std::fs::read(p).unwrap_or_else(|e| {
-            eprintln!("{prog}: {p}: {e}");
+            eprintln!("{prog}: error reading '{p}': {e}");
             std::process::exit(1);
         }),
     };
@@ -117,4 +120,5 @@ fn main() {
             writeln!(out, "ERROR {}", sm.error_count()).unwrap();
         }
     }
+    out.flush().ok();
 }
