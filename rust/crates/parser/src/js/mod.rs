@@ -1963,4 +1963,119 @@ mod tests {
             errs.iter().map(|m| &m.message).collect::<Vec<_>>()
         );
     }
+
+    /// `for(a in b)c;` → ForInStatement: left is Identifier(a), right is
+    /// Identifier(b).
+    #[test]
+    fn for_in_basic() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt = parse_first_stmt(&gc, &mut sm, b"for(a in b)c;");
+        let Node::ForInStatement(f) = stmt else {
+            panic!("expected ForInStatement, got {:?}", stmt.kind())
+        };
+        let Node::Identifier(left) = f.left else {
+            panic!("left should be Identifier(a), got {:?}", f.left.kind())
+        };
+        assert_eq!(gc.ctx().atom_table.bytes(left.name.get()), b"a");
+        let Node::Identifier(right) = f.right else {
+            panic!("right should be Identifier(b), got {:?}", f.right.kind())
+        };
+        assert_eq!(gc.ctx().atom_table.bytes(right.name.get()), b"b");
+    }
+
+    /// `for([a] of b)c;` → ForOfStatement whose `left` is an ArrayPattern
+    /// (the `[a]` cover expression was reparsed into a pattern).
+    #[test]
+    fn for_of_array_pattern_left() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt = parse_first_stmt(&gc, &mut sm, b"for([a] of b)c;");
+        let Node::ForOfStatement(f) = stmt else {
+            panic!("expected ForOfStatement, got {:?}", stmt.kind())
+        };
+        assert!(
+            matches!(f.left, Node::ArrayPattern(_)),
+            "left should be ArrayPattern, got {:?}",
+            f.left.kind()
+        );
+        assert!(!f.r#await.get(), "await should be false");
+    }
+
+    /// `for(var a, b in c);` → reports "Only one binding must be declared in a
+    /// for-in/for-of loop".
+    #[test]
+    fn for_in_multiple_bindings_errors() {
+        use ast::context::Context;
+        use support::diag::{CollectingHandler, DiagKind};
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let _program =
+            parse_with_collector(&gc, &mut sm, atoms, b"for(var a, b in c);");
+        let h = sm.handler_as::<CollectingHandler>().unwrap();
+        let errs: Vec<_> = h
+            .messages()
+            .iter()
+            .filter(|m| m.kind == DiagKind::Error)
+            .collect();
+        assert!(
+            errs.iter().any(|m| m.message
+                == "Only one binding must be declared in a for-in/for-of loop"),
+            "expected single-binding error, got {:?}",
+            errs.iter().map(|m| &m.message).collect::<Vec<_>>()
+        );
+    }
+
+    /// `for(;;);` → ForStatement with init/test/update all None.
+    #[test]
+    fn for_empty_head() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt = parse_first_stmt(&gc, &mut sm, b"for(;;);");
+        let Node::ForStatement(f) = stmt else {
+            panic!("expected ForStatement, got {:?}", stmt.kind())
+        };
+        assert!(f.init.is_none(), "init should be None");
+        assert!(f.test.is_none(), "test should be None");
+        assert!(f.update.is_none(), "update should be None");
+        assert!(
+            matches!(f.body, Node::EmptyStatement(_)),
+            "body should be EmptyStatement, got {:?}",
+            f.body.kind()
+        );
+    }
+
+    /// `for(var i=0;i<2;i++);` → ForStatement whose `init` is a
+    /// VariableDeclaration.
+    #[test]
+    fn for_c_style_var_init() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt = parse_first_stmt(&gc, &mut sm, b"for(var i=0;i<2;i++);");
+        let Node::ForStatement(f) = stmt else {
+            panic!("expected ForStatement, got {:?}", stmt.kind())
+        };
+        let init = f.init.expect("init should be Some");
+        assert!(
+            matches!(init, Node::VariableDeclaration(_)),
+            "init should be VariableDeclaration, got {:?}",
+            init.kind()
+        );
+        assert!(f.test.is_some(), "test should be Some");
+        assert!(f.update.is_some(), "update should be Some");
+    }
 }

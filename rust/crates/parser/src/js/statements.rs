@@ -11,11 +11,11 @@
 use ast::node::{
     ArrayPattern, AssignmentPattern, BlockStatement, BreakStatement,
     CatchClause, ContinueStatement, DebuggerStatement, DoWhileStatement, Empty,
-    EmptyStatement, ExpressionStatement, Identifier, IfStatement,
-    LabeledStatement, Node, ObjectPattern, Property, RestElement,
-    ReturnStatement, StringLiteral, SwitchCase, SwitchStatement, ThrowStatement,
-    TryStatement, VariableDeclaration, VariableDeclarator, WhileStatement,
-    WithStatement,
+    EmptyStatement, ExpressionStatement, ForInStatement, ForOfStatement,
+    ForStatement, Identifier, IfStatement, LabeledStatement, Node,
+    ObjectPattern, Property, RestElement, ReturnStatement, StringLiteral,
+    SwitchCase, SwitchStatement, ThrowStatement, TryStatement,
+    VariableDeclaration, VariableDeclarator, WhileStatement, WithStatement,
 };
 use ast::node_child::{NodeList, NodeMetadata};
 use atom_table::INVALID_ATOM_BYTES;
@@ -24,7 +24,10 @@ use support::location::{SMLoc, SMRange};
 use crate::lexer::GrammarContext;
 use crate::token_kinds::TokenKind;
 
-use super::{AllowImportExport, JSParserImpl, Param, PARAM_IN, PARAM_RETURN};
+use super::{
+    AllowImportExport, IsClassHeritageArgument, JSParserImpl, Param, PARAM_IN,
+    PARAM_RETURN,
+};
 
 /// Whether `parseVariableDeclaration`/`parseVariableDeclarationList` may parse
 /// a binding *pattern* (`[...]`/`{...}`) as the declaration target. Port of the
@@ -594,8 +597,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 self.parse_do_while_statement(param.get(PARAM_RETURN))
             }
             TokenKind::rw_for => {
-                self.error_cur("for statement not yet supported (parser phase P2)");
-                None
+                // C++ 691-692.
+                self.parse_for_statement(param.get(PARAM_RETURN))
             }
             TokenKind::rw_continue => self.parse_continue_statement(),
             TokenKind::rw_break => self.parse_break_statement(),
@@ -1192,6 +1195,376 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             test,
         ));
         Some(self.set_location(start_loc, end_loc, node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseForStatement — 1843 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a `for` statement: C-style `for`, `for-in`, `for-of`, and the
+    /// `for await ( ... of ... )` form, with `var`/`let`/`const`/`using`/
+    /// `await using` heads and destructuring-pattern reparse on the LHS. Port of
+    /// `JSParserImpl::parseForStatement` (lines 1843-2093).
+    pub(super) fn parse_for_statement(
+        &mut self,
+        param: Param,
+    ) -> Option<&'gc Node<'gc>> {
+        // C++ 1844-1845.
+        assert!(self.check(TokenKind::rw_for));
+        let start_loc = self.advance(GrammarContext::AllowRegExp).start;
+
+        // C++ 1847-1852: `for await` prologue. (Won't fire in the P2 corpus since
+        // `param_await` is false at the top level, but ported for fidelity.)
+        let mut await_kw = false;
+        let mut await_rng = SMRange {
+            start: start_loc,
+            end: start_loc,
+        };
+        if self.param_await && self.check_unescaped_name(b"await") {
+            await_rng = self.advance(GrammarContext::AllowRegExp);
+            await_kw = true;
+        }
+
+        // C++ 1854-1861.
+        let lparen_loc = self.cur_start();
+        let _ = lparen_loc; // note-location for `eat`; notes dropped per house style.
+        if !self.eat(
+            TokenKind::l_paren,
+            GrammarContext::AllowRegExp,
+            " after 'for'",
+        ) {
+            return None;
+        }
+
+        // C++ 1863-1864. `decl` is a `VariableDeclaration` wrapped as `Node`.
+        let mut decl: Option<&'gc Node<'gc>> = None;
+        let mut expr1: Option<&'gc Node<'gc>> = None;
+
+        // -------------------------------------------------------------------
+        // Head dispatch. C++ 1866-1972.
+        // -------------------------------------------------------------------
+        if self.check2(TokenKind::rw_var, TokenKind::rw_const)
+            || self.check_unescaped_name(b"let")
+        {
+            // Productions valid here:
+            //   for ( var/let/const VariableDeclarationList
+            //   for [await] ( var/let/const VariableDeclaration
+            // C++ 1868-1884.
+            let var_start_loc = self.cur_start();
+            let decl_ident = self.lexer.token().get_res_word_or_identifier();
+            self.advance(GrammarContext::AllowRegExp);
+
+            let mut decl_list: Vec<&'gc Node<'gc>> = Vec::new();
+            if !self.parse_variable_declaration_list(
+                Param::default(),
+                &mut decl_list,
+                var_start_loc,
+                VariableDeclAllowPattern::Yes,
+            ) {
+                return None;
+            }
+
+            let end_loc = decl_list
+                .last()
+                .expect("variable declaration list is non-empty")
+                .range()
+                .end;
+            let node = Node::VariableDeclaration(VariableDeclaration::new(
+                NodeMetadata::new(self.dummy_range()),
+                decl_ident,
+                NodeList::from_iter(self.gc, decl_list),
+            ));
+            decl = Some(self.set_location(var_start_loc, end_loc, node));
+        } else if self.check_unescaped_name(b"using")
+            && self.lexer.is_using_followed_by_identifier()
+        {
+            // for ( using Identifier
+            //       ^
+            // NOTE: lookahead must not be 'using of', so we check that below.
+            // C++ 1885-1923.
+            let var_start_loc = self.advance(GrammarContext::AllowRegExp).start;
+
+            if self.check_unescaped_name(b"of") {
+                // for (using of ....)
+                //            ^
+                // Not actually a 'using' declaration. C++ 1892-1900.
+                let using_atom =
+                    self.gc.ctx().atom_table.atom_bytes(b"using");
+                let node = Node::Identifier(Identifier::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    using_atom,
+                    None,  // type = null
+                    false, // optional = false
+                ));
+                expr1 = Some(self.set_location(
+                    var_start_loc,
+                    self.lexer.prev_token_end(),
+                    node,
+                ));
+            } else {
+                // for ( using [no LineTerminator here] ForBinding
+                //                                      ^
+                // ForBinding: BindingIdentifier. C++ 1901-1922.
+                assert!(
+                    !self.lexer.is_new_line_before_current_token(),
+                    "newline checked by isUsingFollowedByIdentifier"
+                );
+                let ident = self.parse_binding_identifier(param)?;
+                let declarator =
+                    Node::VariableDeclarator(VariableDeclarator::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        None,
+                        ident,
+                    ));
+                let declarator = self.set_location(
+                    ident.range().start,
+                    ident.range().end,
+                    declarator,
+                );
+                let decl_list: Vec<&'gc Node<'gc>> = vec![declarator];
+
+                let using_atom =
+                    self.gc.ctx().atom_table.atom_bytes(b"using");
+                let node = Node::VariableDeclaration(VariableDeclaration::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    using_atom,
+                    NodeList::from_iter(self.gc, decl_list),
+                ));
+                decl = Some(self.set_location(
+                    var_start_loc,
+                    self.lexer.prev_token_end(),
+                    node,
+                ));
+            }
+        } else if self.check_unescaped_name(b"await") && {
+            // await using Identifier. C++ 1924-1926.
+            let using_atom = self.gc.ctx().atom_table.atom_bytes(b"using");
+            self.lexer.is_await_using_followed_by_identifier(using_atom)
+        } {
+            // C++ 1927-1946.
+            let var_start_loc = self.advance(GrammarContext::AllowRegExp).start;
+            self.advance(GrammarContext::AllowRegExp); // consume `using`
+
+            let ident = self.parse_binding_identifier(param)?;
+            let declarator = Node::VariableDeclarator(VariableDeclarator::new(
+                NodeMetadata::new(self.dummy_range()),
+                None,
+                ident,
+            ));
+            let declarator = self.set_location(
+                ident.range().start,
+                ident.range().end,
+                declarator,
+            );
+            let decl_list: Vec<&'gc Node<'gc>> = vec![declarator];
+
+            let await_using_atom =
+                self.gc.ctx().atom_table.atom_bytes(b"await using");
+            let node = Node::VariableDeclaration(VariableDeclaration::new(
+                NodeMetadata::new(self.dummy_range()),
+                await_using_atom,
+                NodeList::from_iter(self.gc, decl_list),
+            ));
+            decl = Some(self.set_location(
+                var_start_loc,
+                self.lexer.prev_token_end(),
+                node,
+            ));
+        } else {
+            // C++ 1947-1972.
+            if !self.check(TokenKind::semi) {
+                let opt_expr1 = if await_kw {
+                    //   for await ( LeftHandSideExpression
+                    //               ^
+                    // C++ 1950-1953.
+                    self.parse_left_hand_side_expression(
+                        IsClassHeritageArgument::No,
+                    )?
+                } else {
+                    // ForStatement:
+                    //   for ( Expression_opt
+                    //         ^
+                    // ForInOfStatement:
+                    //   for ( LeftHandSideExpression
+                    //         ^
+                    // Lookahead for LeftHandSideExpression cannot be 'let' or
+                    // 'async of'. We've handled `let` above. To distinguish the
+                    // two productions here, we let the resolver check that the
+                    // LHS of the `of` or `in` is valid (the resolver throws the
+                    // error instead of the parser). C++ 1954-1966.
+                    self.parse_expression(Param::default())?
+                };
+                expr1 = Some(opt_expr1);
+            }
+        }
+
+        // -------------------------------------------------------------------
+        // Branch: for-in/for-of vs C-style for. C++ 1974-2092.
+        // -------------------------------------------------------------------
+        if self.check(TokenKind::rw_in) || self.check_unescaped_name(b"of") {
+            // Productions valid here:
+            //   for [await] ( var/let/const VariableDeclaration[In] in/of
+            //   for [await] ( LeftHandSideExpression in/of
+            // C++ 1974-2029.
+
+            // C++ 1979-1984: only one binding allowed.
+            if let Some(d) = decl {
+                if let Node::VariableDeclaration(vd) = d {
+                    if vd.declarations.iter().count() > 1 {
+                        self.error_at(
+                            d.range(),
+                            "Only one binding must be declared in a for-in/for-of loop",
+                        );
+                        return None;
+                    }
+                }
+            }
+
+            // Check for a destructuring pattern on the left and reparse it.
+            // C++ 1986-1994.
+            if let Some(e) = expr1 {
+                if matches!(
+                    e,
+                    Node::ArrayExpression(_) | Node::ObjectExpression(_)
+                ) {
+                    expr1 = Some(self.reparse_assignment_pattern(e, false)?);
+                }
+            }
+
+            // Remember whether we are parsing for-in or for-of. C++ 1996-1998.
+            let for_in_loop = self.check(TokenKind::rw_in);
+            self.advance(GrammarContext::AllowRegExp);
+
+            // C++ 2000-2001.
+            if for_in_loop && await_kw {
+                self.error_at(await_rng, "unexpected 'await' in for..in loop");
+            }
+
+            // C++ 2003-2004: `parseExpression()` for in, `parseAssignment
+            // Expression(ParamIn)` for of.
+            let opt_right = if for_in_loop {
+                self.parse_expression(Param::default())
+            } else {
+                self.parse_assignment_expression(PARAM_IN)
+            };
+
+            // C++ 2006-2012.
+            if !self.eat(
+                TokenKind::r_paren,
+                GrammarContext::AllowRegExp,
+                " after 'for(... in/of ...'",
+            ) {
+                return None;
+            }
+
+            // C++ 2014-2016: check body and right together.
+            let body = self.parse_statement(param.get(PARAM_RETURN));
+            let (body, right) = match (body, opt_right) {
+                (Some(b), Some(r)) => (b, r),
+                _ => return None,
+            };
+
+            // left = decl ? decl : expr1. C++ 2021/2024.
+            let left = decl.unwrap_or_else(|| {
+                expr1.expect("for-in/of head must have decl or expr1")
+            });
+
+            // C++ 2018-2029.
+            let body_end = body.range().end;
+            let node = if for_in_loop {
+                Node::ForInStatement(ForInStatement::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    left,
+                    right,
+                    body,
+                ))
+            } else {
+                Node::ForOfStatement(ForOfStatement::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    left,
+                    right,
+                    body,
+                    await_kw,
+                ))
+            };
+            Some(self.set_location(start_loc, body_end, node))
+        } else if self.check_and_eat(TokenKind::semi, GrammarContext::AllowRegExp)
+        {
+            // Productions valid here:
+            //   for ( var/let/const VariableDeclarationList[In] ; Expression_opt
+            //         ; Expression_opt ) Statement
+            //   for ( Expression[In]_opt ; Expression_opt ; Expression_opt )
+            //         Statement
+            // C++ 2030-2083.
+
+            // C++ 2037-2038.
+            if await_kw {
+                self.error_at(
+                    await_rng,
+                    "unexpected 'await' in for loop without 'of'",
+                );
+            }
+
+            // C++ 2040-2041.
+            if let Some(d) = decl {
+                self.ensure_destructuring_initialized(d);
+            }
+
+            // C++ 2043-2049.
+            let test = if self.check(TokenKind::semi) {
+                None
+            } else {
+                Some(self.parse_expression(Param::default())?)
+            };
+
+            // C++ 2051-2057.
+            if !self.eat(
+                TokenKind::semi,
+                GrammarContext::AllowRegExp,
+                " after 'for( ... ; ...'",
+            ) {
+                return None;
+            }
+
+            // C++ 2059-2065.
+            let update = if self.check(TokenKind::r_paren) {
+                None
+            } else {
+                Some(self.parse_expression(Param::default())?)
+            };
+
+            // C++ 2067-2073.
+            if !self.eat(
+                TokenKind::r_paren,
+                GrammarContext::AllowRegExp,
+                " after 'for( ... ; ... ; ...'",
+            ) {
+                return None;
+            }
+
+            // C++ 2075-2077.
+            let body = self.parse_statement(param.get(PARAM_RETURN))?;
+
+            // init = decl ? decl : expr1. C++ 2079-2083.
+            let init = decl.or(expr1);
+            let body_end = body.range().end;
+            let node = Node::ForStatement(ForStatement::new(
+                NodeMetadata::new(self.dummy_range()),
+                init,
+                test,
+                update,
+                body,
+            ));
+            Some(self.set_location(start_loc, body_end, node))
+        } else {
+            // C++ 2084-2091.
+            self.error_expected2(
+                TokenKind::semi,
+                TokenKind::rw_in,
+                " inside 'for'",
+            );
+            None
+        }
     }
 
     // -----------------------------------------------------------------------

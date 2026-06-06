@@ -488,7 +488,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// - Flow/TS covers (`CoverTypedIdentifier`, `TypeCastExpression`) → SKIP (P6)
     /// - `in_decl=true` and no match → "identifier or pattern expected" error
     /// - Otherwise → return as-is (P1 callers always pass `in_decl=false`)
-    fn reparse_assignment_pattern(
+    pub(super) fn reparse_assignment_pattern(
         &mut self,
         node: &'gc Node<'gc>,
         in_decl: bool,
