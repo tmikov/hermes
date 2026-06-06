@@ -831,4 +831,216 @@ mod tests {
         assert!(parser.parse().is_none(), "arrow should error in P1.5");
         assert!(parser.error_count_pub() >= 1);
     }
+
+    // P1.8: object literal tests.
+
+    /// Helper: parse a snippet, return the parse result (Some = success).
+    fn parse_snippet(sm: &mut support::manager::SourceErrorManager, src: &[u8]) -> bool {
+        use ast::context::Context;
+        let buf_id = sm.add_buffer_bytes("input", src);
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        let result = parser.parse();
+        result.is_some() && parser.error_count_pub() == 0
+    }
+
+    #[test]
+    fn object_literal_empty_parses() {
+        let mut sm = support::manager::SourceErrorManager::new();
+        assert!(parse_snippet(&mut sm, b"({});"), "empty object literal");
+    }
+
+    #[test]
+    fn object_literal_keyed_parses() {
+        let mut sm = support::manager::SourceErrorManager::new();
+        assert!(parse_snippet(&mut sm, b"({a: 1, b: 2});"), "keyed properties");
+    }
+
+    #[test]
+    fn object_literal_shorthand_parses() {
+        let mut sm = support::manager::SourceErrorManager::new();
+        assert!(parse_snippet(&mut sm, b"({a, b});"), "shorthand properties");
+    }
+
+    #[test]
+    fn object_literal_computed_parses() {
+        let mut sm = support::manager::SourceErrorManager::new();
+        assert!(parse_snippet(&mut sm, b"({[x]: 1});"), "computed key");
+    }
+
+    #[test]
+    fn object_literal_spread_parses() {
+        let mut sm = support::manager::SourceErrorManager::new();
+        assert!(parse_snippet(&mut sm, b"({...a});"), "spread element");
+    }
+
+    #[test]
+    fn object_literal_string_and_number_keys_parse() {
+        let mut sm = support::manager::SourceErrorManager::new();
+        assert!(
+            parse_snippet(&mut sm, b"({\"s\": 1, 0: 2});"),
+            "string and number keys"
+        );
+    }
+
+    #[test]
+    fn object_literal_get_set_as_data_property() {
+        // `get` and `set` used as plain property names — must succeed.
+        let mut sm = support::manager::SourceErrorManager::new();
+        assert!(
+            parse_snippet(&mut sm, b"({get: 1, set: 2});"),
+            "get/set as data properties"
+        );
+        assert!(
+            parse_snippet(&mut sm, b"({get, set});"),
+            "get/set shorthand"
+        );
+    }
+
+    #[test]
+    fn object_literal_async_as_data_property() {
+        // `async` used as a plain property name — must succeed.
+        let mut sm = support::manager::SourceErrorManager::new();
+        assert!(
+            parse_snippet(&mut sm, b"({async: 1});"),
+            "async as data property"
+        );
+        assert!(
+            parse_snippet(&mut sm, b"({async});"),
+            "async shorthand"
+        );
+    }
+
+    #[test]
+    fn object_literal_cover_initializer_parses() {
+        // `({a=1})` is a CoverInitializedName — hermesc accepts it in raw AST dump.
+        let mut sm = support::manager::SourceErrorManager::new();
+        assert!(
+            parse_snippet(&mut sm, b"({a=1});"),
+            "CoverInitializedName must parse"
+        );
+    }
+
+    #[test]
+    fn object_getter_deferred() {
+        // Real getter `{get foo() {}}` — must error (P3).
+        use ast::context::Context;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let buf_id = sm.add_buffer_bytes("input", b"({get foo() {}});");
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        assert!(
+            parser.parse().is_none(),
+            "getter must error in P1.8 (deferred to P3)"
+        );
+        assert!(parser.error_count_pub() >= 1);
+    }
+
+    #[test]
+    fn object_setter_deferred() {
+        // Real setter `{set foo(v) {}}` — must error (P3).
+        use ast::context::Context;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let buf_id = sm.add_buffer_bytes("input", b"({set foo(v) {}});");
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        assert!(
+            parser.parse().is_none(),
+            "setter must error in P1.8 (deferred to P3)"
+        );
+        assert!(parser.error_count_pub() >= 1);
+    }
+
+    #[test]
+    fn object_method_deferred() {
+        // Object method `{foo() {}}` — must error (P3).
+        use ast::context::Context;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let buf_id = sm.add_buffer_bytes("input", b"({foo() {}});");
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        assert!(
+            parser.parse().is_none(),
+            "method must error in P1.8 (deferred to P3)"
+        );
+        assert!(parser.error_count_pub() >= 1);
+    }
+
+    #[test]
+    fn object_async_method_deferred() {
+        // Async method `{async foo() {}}` — must error (P3).
+        use ast::context::Context;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let buf_id = sm.add_buffer_bytes("input", b"({async foo() {}});");
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        assert!(
+            parser.parse().is_none(),
+            "async method must error in P1.8 (deferred to P3)"
+        );
+        assert!(parser.error_count_pub() >= 1);
+    }
+
+    #[test]
+    fn object_generator_method_deferred() {
+        // Generator method `{*foo() {}}` — must error (P3).
+        use ast::context::Context;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let buf_id = sm.add_buffer_bytes("input", b"({*foo() {}});");
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        assert!(
+            parser.parse().is_none(),
+            "generator method must error in P1.8 (deferred to P3)"
+        );
+        assert!(parser.error_count_pub() >= 1);
+    }
 }

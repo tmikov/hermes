@@ -11,10 +11,11 @@
 use ast::context::GCLock;
 use ast::node::{
     ArrayExpression, AssignmentExpression, AwaitExpression, BigIntLiteral, BinaryExpression,
-    BooleanLiteral, CallExpression, ConditionalExpression, Empty, Identifier, LogicalExpression,
-    MemberExpression, MetaProperty, NewExpression, Node, NullLiteral, NumericLiteral,
-    OptionalCallExpression, OptionalMemberExpression, PrivateName, SequenceExpression,
-    SpreadElement, StringLiteral, ThisExpression, UnaryExpression, UpdateExpression,
+    BooleanLiteral, CallExpression, ConditionalExpression, CoverInitializer, Empty, Identifier,
+    LogicalExpression, MemberExpression, MetaProperty, NewExpression, Node, NullLiteral,
+    NumericLiteral, ObjectExpression, OptionalCallExpression, OptionalMemberExpression, PrivateName,
+    Property, SequenceExpression, SpreadElement, StringLiteral, ThisExpression, UnaryExpression,
+    UpdateExpression,
 };
 use ast::node_child::{NodeList, NodeMetadata};
 use support::location::SMLoc;
@@ -302,11 +303,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
 
             // ----------------------------------------------------------------
-            // Destructuring reparse (C++ 6483-6489) — P1.8 stub.
-            // Unreachable in P1 (`[`/`{` error in parse_primary_expression
-            // before we get here), but present as a forward-looking stub.
-            // P1.8: implement reparse_assignment_pattern (needs array/object
-            // literals).
+            // Destructuring reparse (C++ 6483-6489).
+            // Array/object literals now parse (P1.7/P1.8), so this branch is
+            // now reachable (e.g. `[a] = b` or `{a} = b`).
+            // reparseAssignmentPattern is the NEXT sub-task; for now emit an
+            // honest error.
             // ----------------------------------------------------------------
             if this.check(TokenKind::equal)
                 && matches!(
@@ -316,7 +317,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             {
                 this.error_cur(
                     "destructuring assignment target not yet supported \
-                     (parser phase P1.8)",
+                     (parser phase P1.9)",
                 );
                 return LevelResult::Error;
             }
@@ -414,22 +415,20 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     // -----------------------------------------------------------------------
 
     /// Stub for `JSParserImpl::reparseAssignmentPattern`.
-    /// Will be implemented in P1.8 (array/object literal support).
+    /// P1.9: implement reparseAssignmentPattern (array/object destructuring).
     ///
-    /// In P1.5 the call site in `parse_assignment_expression` is unreachable
-    /// because `[` and `{` error in `parse_primary_expression` before the LHS
-    /// can ever be an `ArrayExpression` or `ObjectExpression`.
-    ///
-    /// P1.8: implement reparseAssignmentPattern (needs array/object literals).
+    /// Array and object literals now parse (P1.7/P1.8), so the call site is
+    /// reachable for `[a] = b` and `{a} = b`. The full reparse is the next
+    /// sub-task.
     #[allow(dead_code)]
     fn reparse_assignment_pattern(
         &mut self,
         _left: &'gc Node<'gc>,
         _is_binding: bool,
     ) -> Option<&'gc Node<'gc>> {
-        // P1.8: implement reparseAssignmentPattern (needs array/object literals).
+        // P1.9: implement reparseAssignmentPattern (array/object destructuring).
         self.error_cur(
-            "destructuring assignment target not yet supported (parser phase P1.8)",
+            "destructuring assignment target not yet supported (parser phase P1.9)",
         );
         None
     }
@@ -1599,6 +1598,571 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
+    // check_unescaped_name — P1.8 helper
+    // -----------------------------------------------------------------------
+
+    /// True if the current token is an `identifier` whose interned bytes equal
+    /// `name` AND the token has no `\u` escapes. Port of `checkUnescaped`
+    /// (JSParserImpl.h:538-543) + `isUnescaped` (529-534).
+    ///
+    /// The escape check mirrors C++ `isUnescaped`: a unicode escape like `get`
+    /// encodes `get` but its source form is 11 bytes wide, not 3. An unescaped
+    /// identifier has source width == interned byte count.
+    #[inline]
+    fn check_unescaped_name(&self, name: &[u8]) -> bool {
+        if self.cur_kind() != TokenKind::identifier {
+            return false;
+        }
+        let bytes = self
+            .lexer
+            .get_string_table()
+            .bytes(self.lexer.token().get_identifier());
+        if bytes != name {
+            return false;
+        }
+        // isUnescaped: token source range length == identifier byte length.
+        let tok_range = self.lexer.token().source_range();
+        let tok_len = (tok_range.end.offset - tok_range.start.offset) as usize;
+        tok_len == name.len()
+    }
+
+    // -----------------------------------------------------------------------
+    // parse_object_literal — P1.8
+    // -----------------------------------------------------------------------
+
+    /// Parse an object literal: `{ prop, ... }`. Port of
+    /// `JSParserImpl::parseObjectLiteral` (2792-2813).
+    ///
+    /// Delegates property parsing to `parse_object_properties`, then wraps
+    /// the result in an `ObjectExpression`.
+    fn parse_object_literal(&mut self) -> Option<&'gc Node<'gc>> {
+        debug_assert!(self.check(TokenKind::l_brace));
+
+        // Consume `{`; record its start for the final setLocation.
+        let start_loc = self.advance(GrammarContext::AllowRegExp).start;
+
+        let mut elem_list: Vec<&'gc Node<'gc>> = Vec::new();
+        if !self.parse_object_properties(&mut elem_list) {
+            return None;
+        }
+
+        let end_loc = self.lexer.token().end_loc();
+        if !self.eat(
+            TokenKind::r_brace,
+            GrammarContext::AllowDiv,
+            " at end of object literal '{'",
+        ) {
+            self.lexer.get_source_mgr_mut().note_at(
+                start_loc,
+                None,
+                "location of '{'",
+                support::diag::Subsystem::Parser,
+            );
+            return None;
+        }
+
+        let node = Node::ObjectExpression(ObjectExpression::new(
+            NodeMetadata::new(self.dummy_range()),
+            NodeList::from_iter(self.gc, elem_list),
+        ));
+        Some(self.set_location(start_loc, end_loc, node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parse_object_properties — P1.8
+    // -----------------------------------------------------------------------
+
+    /// Parse the comma-separated list of object properties. Port of
+    /// `JSParserImpl::parseObjectProperties` (2765-2790).
+    ///
+    /// Stops on `}` (not consumed). Returns false on parse error.
+    fn parse_object_properties(
+        &mut self,
+        elem_list: &mut Vec<&'gc Node<'gc>>,
+    ) -> bool {
+        if self.check(TokenKind::r_brace) {
+            return true;
+        }
+
+        loop {
+            if self.check(TokenKind::dotdotdot) {
+                // Spread element.
+                let spread = match self.parse_spread_element() {
+                    Some(n) => n,
+                    None => return false,
+                };
+                elem_list.push(spread);
+            } else {
+                let prop = match self.parse_property_assignment() {
+                    Some(n) => n,
+                    None => return false,
+                };
+                elem_list.push(prop);
+            }
+
+            // Consume comma, then stop on `}` (trailing comma allowed).
+            if !self.check_and_eat(TokenKind::comma, GrammarContext::AllowRegExp) {
+                break;
+            }
+            if self.check(TokenKind::r_brace) {
+                break;
+            }
+        }
+        true
+    }
+
+    // -----------------------------------------------------------------------
+    // parse_property_name — P1.8
+    // -----------------------------------------------------------------------
+
+    /// Parse a property name for an object literal or class member. Port of
+    /// `JSParserImpl::parsePropertyName` (3268-3340).
+    ///
+    /// Handles:
+    /// - String literal key → `StringLiteralNode`
+    /// - Numeric literal key → `NumericLiteralNode`
+    /// - BigInt literal key → `BigIntLiteralNode`
+    /// - `identifier` key (plain ident, not a reserved word) → `IdentifierNode`
+    /// - `[expr]` computed key → the expression itself (caller tracks
+    ///   `computed = true`)
+    /// - Reserved word used as key → `IdentifierNode` (e.g. `{if: 1}`)
+    fn parse_property_name(&mut self) -> Option<&'gc Node<'gc>> {
+        let tok_start = self.lexer.token().start_loc();
+        let tok_end = self.lexer.token().end_loc();
+
+        match self.cur_kind() {
+            TokenKind::string_literal => {
+                let value = self.lexer.token().get_string_literal();
+                let node = Node::StringLiteral(StringLiteral::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    value,
+                ));
+                let res = self.set_location(tok_start, tok_end, node);
+                self.advance(GrammarContext::AllowRegExp);
+                Some(res)
+            }
+
+            TokenKind::numeric_literal => {
+                let value = self.lexer.token().get_numeric_literal();
+                let node = Node::NumericLiteral(NumericLiteral::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    value,
+                ));
+                let res = self.set_location(tok_start, tok_end, node);
+                self.advance(GrammarContext::AllowRegExp);
+                Some(res)
+            }
+
+            TokenKind::bigint_literal => {
+                let bigint = self.lexer.token().get_bigint_literal();
+                let node = Node::BigIntLiteral(BigIntLiteral::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    bigint,
+                ));
+                let res = self.set_location(tok_start, tok_end, node);
+                self.advance(GrammarContext::AllowRegExp);
+                Some(res)
+            }
+
+            TokenKind::identifier => {
+                let name = self.lexer.token().get_identifier();
+                let node = Node::Identifier(Identifier::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    name,
+                    None,
+                    false,
+                ));
+                let res = self.set_location(tok_start, tok_end, node);
+                self.advance(GrammarContext::AllowRegExp);
+                Some(res)
+            }
+
+            TokenKind::l_square => {
+                // Computed key: `[expr]`.
+                let start_loc = self.advance(GrammarContext::AllowRegExp).start;
+                let opt_expr = self.parse_assignment_expression(PARAM_IN)?;
+                if !self.need(TokenKind::r_square, " at end of computed property key") {
+                    self.lexer.get_source_mgr_mut().note_at(
+                        start_loc,
+                        None,
+                        "start of property key",
+                        support::diag::Subsystem::Parser,
+                    );
+                    return None;
+                }
+                self.advance(GrammarContext::AllowRegExp);
+                Some(opt_expr)
+            }
+
+            _ => {
+                // Reserved word used as a property name (e.g. `{if: 1}`).
+                if self.lexer.token().is_res_word() {
+                    let name = self.lexer.token().get_res_word_identifier();
+                    let node = Node::Identifier(Identifier::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        name,
+                        None,
+                        false,
+                    ));
+                    let res = self.set_location(tok_start, tok_end, node);
+                    self.advance(GrammarContext::AllowRegExp);
+                    Some(res)
+                } else {
+                    self.error_cur(
+                        "invalid property name - must be a string, number or identifier",
+                    );
+                    None
+                }
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // parse_property_assignment — P1.8
+    // -----------------------------------------------------------------------
+
+    /// Parse a single object property (data subset). Port of
+    /// `JSParserImpl::parsePropertyAssignment` (2829-3266), data paths only.
+    ///
+    /// ## Implemented (data paths)
+    /// - `get`/`set` as data property (`{get: 1}`, `{set: 1}`, `{get}`, `{set}`)
+    /// - `async` as data property (`{async: 1}`, `{async}`)
+    /// - Plain `identifier` — shorthand (`{a}`) or keyed (`{a: 1}`)
+    /// - Computed key (`{[expr]: val}`)
+    /// - String/numeric/bigint keys (`{"k": 1}`, `{0: 1}`)
+    /// - Shorthand (`{a}`)
+    /// - `CoverInitializedName` (`{a = 1}`)
+    ///
+    /// ## Deferred (P3) with error
+    /// - Real getter/setter bodies (`get foo() {}`, `set foo(v) {}`)
+    /// - Async methods (`async foo() {}`, `async [k]() {}`)
+    /// - Generator methods (`*foo() {}`)
+    /// - Method definitions (`foo() {}`, `[k]() {}`)
+    ///
+    /// ## SaveFunctionState note
+    /// `SaveFunctionState saveFunctionState{this}` (C++ 2833) saves and restores
+    /// parser flags needed when entering methods/getters/setters. For the DATA
+    /// subset no functions are entered, so this is a no-op effect.
+    /// P3: SaveFunctionState (needed when methods/getters/setters land)
+    fn parse_property_assignment(&mut self) -> Option<&'gc Node<'gc>> {
+        let start_loc = self.cur_start();
+
+        // P3: SaveFunctionState (needed when methods/getters/setters land)
+
+        let mut computed = false;
+        let key: &'gc Node<'gc>;
+
+        if self.check_unescaped_name(b"get") {
+            // Could be a getter or a property named "get".
+            let ident = self.lexer.token().get_identifier();
+            let ident_rng = self.lexer.token().source_range();
+            self.advance(GrammarContext::AllowRegExp);
+
+            if self.check2(TokenKind::colon, TokenKind::l_paren) {
+                // `{get: value}` or `{get(…) {…}}` — data property "get".
+                // (Method case deferred below.)
+                key = self.set_location(
+                    ident_rng.start,
+                    ident_rng.end,
+                    Node::Identifier(Identifier::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        ident,
+                        None,
+                        false,
+                    )),
+                );
+                // Fall through to value logic.
+            } else if self.check2(TokenKind::comma, TokenKind::r_brace) {
+                // Shorthand `{get}`.
+                key = self.set_location(
+                    ident_rng.start,
+                    ident_rng.end,
+                    Node::Identifier(Identifier::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        ident,
+                        None,
+                        false,
+                    )),
+                );
+                let value = self.set_location(
+                    ident_rng.start,
+                    ident_rng.end,
+                    Node::Identifier(Identifier::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        ident,
+                        None,
+                        false,
+                    )),
+                );
+                let init_kind = self.gc.ctx().atom_table.atom_bytes(b"init");
+                let prop = Node::Property(Property::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    key,
+                    value,
+                    init_kind,
+                    false,
+                    false,
+                    true,
+                ));
+                return Some(self.set_location(start_loc, value.range().end, prop));
+            } else {
+                // Real getter: `get propName() { … }` — defer P3.
+                self.error_cur(
+                    "object getters/setters not yet supported (parser phase P3)",
+                );
+                return None;
+            }
+        } else if self.check_unescaped_name(b"set") {
+            // Could be a setter or a property named "set".
+            let ident = self.lexer.token().get_identifier();
+            let ident_rng = self.lexer.token().source_range();
+            self.advance(GrammarContext::AllowRegExp);
+
+            if self.check2(TokenKind::colon, TokenKind::l_paren) {
+                // `{set: value}` or `{set(…) {…}}` — data property "set".
+                key = self.set_location(
+                    ident_rng.start,
+                    ident_rng.end,
+                    Node::Identifier(Identifier::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        ident,
+                        None,
+                        false,
+                    )),
+                );
+                // Fall through to value logic.
+            } else if self.check2(TokenKind::comma, TokenKind::r_brace) {
+                // Shorthand `{set}`.
+                key = self.set_location(
+                    ident_rng.start,
+                    ident_rng.end,
+                    Node::Identifier(Identifier::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        ident,
+                        None,
+                        false,
+                    )),
+                );
+                let value = self.set_location(
+                    ident_rng.start,
+                    ident_rng.end,
+                    Node::Identifier(Identifier::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        ident,
+                        None,
+                        false,
+                    )),
+                );
+                let init_kind = self.gc.ctx().atom_table.atom_bytes(b"init");
+                let prop = Node::Property(Property::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    key,
+                    value,
+                    init_kind,
+                    false,
+                    false,
+                    true,
+                ));
+                return Some(self.set_location(start_loc, value.range().end, prop));
+            } else {
+                // Real setter: `set propName(v) { … }` — defer P3.
+                self.error_cur(
+                    "object getters/setters not yet supported (parser phase P3)",
+                );
+                return None;
+            }
+        } else if self.check_unescaped_name(b"async") {
+            // Could be an async method or a property named "async".
+            let ident = self.lexer.token().get_identifier();
+            let ident_rng = self.lexer.token().source_range();
+            self.advance(GrammarContext::AllowRegExp);
+
+            if self.check2(TokenKind::colon, TokenKind::l_paren) {
+                // `{async: value}` or `{async(…) {…}}` — data property "async".
+                // (Method case `{async(…) {…}}` deferred below.)
+                key = self.set_location(
+                    ident_rng.start,
+                    ident_rng.end,
+                    Node::Identifier(Identifier::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        ident,
+                        None,
+                        false,
+                    )),
+                );
+                // Fall through to value logic.
+            } else if self.check2(TokenKind::comma, TokenKind::r_brace) {
+                // Shorthand `{async}`.
+                key = self.set_location(
+                    ident_rng.start,
+                    ident_rng.end,
+                    Node::Identifier(Identifier::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        ident,
+                        None,
+                        false,
+                    )),
+                );
+                let value = self.set_location(
+                    ident_rng.start,
+                    ident_rng.end,
+                    Node::Identifier(Identifier::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        ident,
+                        None,
+                        false,
+                    )),
+                );
+                let init_kind = self.gc.ctx().atom_table.atom_bytes(b"init");
+                let prop = Node::Property(Property::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    key,
+                    value,
+                    init_kind,
+                    false,
+                    false,
+                    true,
+                ));
+                return Some(self.set_location(start_loc, value.range().end, prop));
+            } else {
+                // Async method: `async propName(…) {}` — defer P3.
+                // (Also catches `async * foo() {}` generators.)
+                self.error_cur(
+                    "async methods not yet supported (parser phase P3)",
+                );
+                return None;
+            }
+        } else if self.check(TokenKind::identifier) {
+            // Plain identifier key.
+            let ident = self.lexer.token().get_identifier();
+            let tok_start = self.lexer.token().start_loc();
+            let tok_end = self.lexer.token().end_loc();
+            key = self.set_location(
+                tok_start,
+                tok_end,
+                Node::Identifier(Identifier::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    ident,
+                    None,
+                    false,
+                )),
+            );
+            self.advance(GrammarContext::AllowRegExp);
+
+            // Shorthand if next is `,` or `}`.
+            if self.check2(TokenKind::comma, TokenKind::r_brace) {
+                let value = self.set_location(
+                    tok_start,
+                    tok_end,
+                    Node::Identifier(Identifier::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        ident,
+                        None,
+                        false,
+                    )),
+                );
+                let init_kind = self.gc.ctx().atom_table.atom_bytes(b"init");
+                let prop = Node::Property(Property::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    key,
+                    value,
+                    init_kind,
+                    false,
+                    false,
+                    true,
+                ));
+                return Some(self.set_location(start_loc, value.range().end, prop));
+            }
+            // Otherwise fall through to value logic.
+        } else {
+            // `*` generator method → defer P3.
+            if self.check(TokenKind::star) {
+                self.error_cur(
+                    "generator methods not yet supported (parser phase P3)",
+                );
+                return None;
+            }
+            // Computed key `[expr]`, or string/numeric/bigint key.
+            computed = self.check(TokenKind::l_square);
+            key = self.parse_property_name()?;
+        }
+
+        // -----------------------------------------------------------------------
+        // Value logic (C++ lines 3141-3265).
+        // -----------------------------------------------------------------------
+
+        let mut shorthand = false;
+
+        // CoverInitializedName: IdentifierReference `=` Initializer (C++ 3144-3157).
+        // This fires for shorthand patterns like `{a = 1}` used in destructuring covers.
+        if matches!(key, Node::Identifier(_)) && self.check(TokenKind::equal) && !computed {
+            // Advance past `=`; the start of the CoverInitializer is the `=`.
+            let cover_start = self.advance(GrammarContext::AllowRegExp).start;
+            let init_expr = self.parse_assignment_expression(PARAM_IN)?;
+            shorthand = true;
+
+            let cover_end = self.lexer.prev_token_end();
+            let value = self.set_location(
+                cover_start,
+                cover_end,
+                Node::CoverInitializer(CoverInitializer::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    init_expr,
+                )),
+            );
+            let init_kind = self.gc.ctx().atom_table.atom_bytes(b"init");
+            let prop = Node::Property(Property::new(
+                NodeMetadata::new(self.dummy_range()),
+                key,
+                value,
+                init_kind,
+                computed,
+                false,
+                shorthand,
+            ));
+            let end_loc = self.lexer.prev_token_end();
+            return Some(self.set_location(start_loc, end_loc, prop));
+        }
+
+        // Method definition `(` or `<` (also async from above) — defer P3.
+        if self.check2(TokenKind::l_paren, TokenKind::less) {
+            self.error_cur(
+                "object methods not yet supported (parser phase P3)",
+            );
+            return None;
+        }
+
+        // `: value` — standard property.
+        if !self.eat(
+            TokenKind::colon,
+            GrammarContext::AllowRegExp,
+            " in property initialization",
+        ) {
+            self.lexer.get_source_mgr_mut().note_at(
+                start_loc,
+                None,
+                "start of property initialization",
+                support::diag::Subsystem::Parser,
+            );
+            return None;
+        }
+        let value = self.parse_assignment_expression(PARAM_IN)?;
+
+        let end_loc = self.lexer.prev_token_end();
+        let init_kind = self.gc.ctx().atom_table.atom_bytes(b"init");
+        let prop = Node::Property(Property::new(
+            NodeMetadata::new(self.dummy_range()),
+            key,
+            value,
+            init_kind,
+            computed,
+            false, // method
+            shorthand,
+        ));
+        Some(self.set_location(start_loc, end_loc, prop))
+    }
+
+    // -----------------------------------------------------------------------
     // parse_member_select — P1.6
     // -----------------------------------------------------------------------
 
@@ -2054,13 +2618,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // array literal — P1.7
             TokenKind::l_square => self.parse_array_literal(),
 
-            // object literal — deferred (P1.8)
-            TokenKind::l_brace => {
-                self.error_cur(
-                    "object literals not yet supported (parser phase P1.8)",
-                );
-                None
-            }
+            // object literal — P1.8
+            TokenKind::l_brace => self.parse_object_literal(),
 
             // parenthesized expression / arrow-function cover — C++ 2598-2665
             TokenKind::l_paren => {
