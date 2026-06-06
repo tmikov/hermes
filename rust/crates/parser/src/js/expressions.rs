@@ -10,8 +10,9 @@
 
 use ast::context::GCLock;
 use ast::node::{
-    BigIntLiteral, BinaryExpression, BooleanLiteral, Identifier, LogicalExpression, Node,
-    NullLiteral, NumericLiteral, PrivateName, SequenceExpression, StringLiteral, ThisExpression,
+    AwaitExpression, BigIntLiteral, BinaryExpression, BooleanLiteral, Identifier,
+    LogicalExpression, Node, NullLiteral, NumericLiteral, PrivateName, SequenceExpression,
+    StringLiteral, ThisExpression, UnaryExpression, UpdateExpression,
 };
 use ast::node_child::{NodeList, NodeMetadata};
 use support::location::SMLoc;
@@ -476,35 +477,169 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseUnaryExpression — P1.3 placeholder
+    // parseUnaryExpression — P1.3
     // -----------------------------------------------------------------------
 
     /// Parse a unary expression. Port of
     /// `JSParserImpl::parseUnaryExpression` (lines 4112-4211).
     ///
-    /// P1.3: unary operators (delete, void, typeof, +, -, ~, !, ++, --,
-    ///       await) — deferred.
-    /// For now this is a pass-through to parsePostfixExpression.
+    /// Handles:
+    /// - Prefix unary: `delete`, `void`, `typeof`, `+`, `-`, `~`, `!`
+    ///   → `UnaryExpression(operator, argument, prefix=true)`
+    /// - Prefix update: `++`, `--` → `UpdateExpression(operator, argument, prefix=true)`
+    /// - `await` (when `param_await` is set) → `AwaitExpression(argument)`
+    /// - P7: TS type assertion `<Type>` — deferred (no parse-TS flag yet).
+    /// - Default: fall through to `parse_postfix_expression()`.
     pub(super) fn parse_unary_expression(&mut self) -> Option<&'gc Node<'gc>> {
-        // P1.3: prefix unary operators (delete/void/typeof/+/-/~/!/++/--)
-        // and await (when param_await is set). Both are deferred; the field
-        // reference below keeps rustc happy until P1.3 fills this in.
-        let _ = self.param_await; // read in P1.3 (await expression)
-        self.parse_postfix_expression()
+        use crate::token_kinds::token_kind_str;
+
+        let start_loc = self.cur_start();
+
+        match self.cur_kind() {
+            // Prefix UnaryExpression: delete / void / typeof / + / - / ~ / !
+            TokenKind::rw_delete
+            | TokenKind::rw_void
+            | TokenKind::rw_typeof
+            | TokenKind::plus
+            | TokenKind::minus
+            | TokenKind::tilde
+            | TokenKind::exclaim => {
+                let op_kind = self.cur_kind();
+                // Intern operator name before advancing (mirrors C++ `op = getTokenIdent(tok_)`)
+                let op_label = self.gc.ctx().atom_table.atom_bytes(
+                    token_kind_str(op_kind).as_bytes(),
+                );
+                self.advance(GrammarContext::AllowRegExp);
+                let _guard = self.check_recursion()?;
+                let expr = self.parse_unary_expression()?;
+
+                // ExponentiationExpression only allows UpdateExpression on the
+                // left. A bare unary operator before `**` must be parenthesized.
+                if self.check(TokenKind::starstar) {
+                    use support::location::SMRange;
+                    self.error_at(
+                        SMRange {
+                            start: start_loc,
+                            end: self.lexer.token().end_loc(),
+                        },
+                        "Unary operator before ** must use parens to disambiguate",
+                    );
+                }
+
+                let end_loc = self.lexer.prev_token_end();
+                let node = Node::UnaryExpression(UnaryExpression::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    op_label,
+                    expr,
+                    true,
+                ));
+                Some(self.set_location(start_loc, end_loc, node))
+            }
+
+            // Prefix UpdateExpression: ++ / --
+            TokenKind::plusplus | TokenKind::minusminus => {
+                let op_kind = self.cur_kind();
+                let op_label = self.gc.ctx().atom_table.atom_bytes(
+                    token_kind_str(op_kind).as_bytes(),
+                );
+                self.advance(GrammarContext::AllowRegExp);
+                let _guard = self.check_recursion()?;
+                let expr = self.parse_unary_expression()?;
+
+                let end_loc = self.lexer.prev_token_end();
+                let node = Node::UpdateExpression(UpdateExpression::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    op_label,
+                    expr,
+                    true,
+                ));
+                Some(self.set_location(start_loc, end_loc, node))
+            }
+
+            // P7: TS type assertion `< Type > UnaryExpression`
+            // Only active when context has parse-TS enabled and JSX disabled.
+            // No parse-TS flag exists yet; this branch is unreachable in P1.
+            TokenKind::less => {
+                // P7: TS type assertion (context.getParseTS() && !getParseJSX())
+                // fall through to postfix.
+                self.parse_postfix_expression()
+            }
+
+            // await expression (only when inside an async function)
+            TokenKind::identifier => {
+                // Capture whether the current identifier spells "await" BEFORE
+                // the &mut self advance call (avoids borrow conflict — same
+                // pattern as the yield check in parsePrimaryExpression).
+                let is_await = self
+                    .lexer
+                    .get_string_table()
+                    .bytes(self.lexer.token().get_identifier())
+                    == b"await";
+                if is_await && self.param_await {
+                    self.advance(GrammarContext::AllowRegExp);
+                    let _guard = self.check_recursion()?;
+                    let expr = self.parse_unary_expression()?;
+                    let end_loc = self.lexer.prev_token_end();
+                    let node = Node::AwaitExpression(AwaitExpression::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        expr,
+                    ));
+                    Some(self.set_location(start_loc, end_loc, node))
+                } else {
+                    // All other identifiers: fall through to postfix.
+                    self.parse_postfix_expression()
+                }
+            }
+
+            // Default: fall through to parsePostfixExpression.
+            _ => self.parse_postfix_expression(),
+        }
     }
 
     // -----------------------------------------------------------------------
-    // parsePostfixExpression — P1.3 placeholder
+    // parsePostfixExpression — P1.3
     // -----------------------------------------------------------------------
 
     /// Parse a postfix expression (++/-- suffix). Port of
     /// `JSParserImpl::parsePostfixExpression` (lines 4091-4110).
     ///
-    /// P1.3: postfix ++/-- — deferred.
-    /// For now this is a pass-through to parseLeftHandSideExpression.
+    /// Parses the LHS via `parse_left_hand_side_expression`, then if the
+    /// current token is `++`/`--` AND there is no newline before it, wraps
+    /// the result in a `UpdateExpression(operator, argument, prefix=false)`.
+    ///
+    /// The end-of-node range is the end of the `++`/`--` token (BEFORE
+    /// `advance`), and the debug loc is the *start* of the `++`/`--` token —
+    /// faithfully porting the C++ 4-arg `setLocation(startLoc, tok_, tok_, n)`.
     pub(super) fn parse_postfix_expression(&mut self) -> Option<&'gc Node<'gc>> {
-        // P1.3: postfix ++ / --
-        self.parse_left_hand_side_expression()
+        use crate::token_kinds::token_kind_str;
+
+        let start_loc = self.cur_start();
+        let expr = self.parse_left_hand_side_expression()?;
+
+        if self.check2(TokenKind::plusplus, TokenKind::minusminus)
+            && !self.lexer.is_new_line_before_current_token()
+        {
+            let op_kind = self.cur_kind();
+            let op_label = self.gc.ctx().atom_table.atom_bytes(
+                token_kind_str(op_kind).as_bytes(),
+            );
+            // Capture the operator token's locations BEFORE advancing.
+            // C++ 4-arg setLocation: start=startLoc, end=tok_->getEndLoc(),
+            // debugLoc=tok_->getStartLoc().
+            let op_start = self.lexer.token().start_loc();
+            let op_end = self.lexer.token().end_loc();
+            self.advance(GrammarContext::AllowDiv);
+
+            let node = Node::UpdateExpression(UpdateExpression::new(
+                NodeMetadata::new(self.dummy_range()),
+                op_label,
+                expr,
+                false,
+            ));
+            Some(self.set_location_d(start_loc, op_end, op_start, node))
+        } else {
+            Some(expr)
+        }
     }
 
     // -----------------------------------------------------------------------

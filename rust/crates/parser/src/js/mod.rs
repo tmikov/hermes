@@ -300,6 +300,26 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         allocated
     }
 
+    /// Allocate `node` with an explicit debug loc. Port of the 4-arg
+    /// `setLocation(start, end, debugLoc, node)`.
+    ///
+    /// Used where C++ passes a *different* `debugLoc` than `start` — currently
+    /// only the postfix `UpdateExpression` case where `debugLoc` is the start of
+    /// the `++`/`--` operator token while `start` is the start of the operand.
+    pub(super) fn set_location_d(
+        &self,
+        start: SMLoc,
+        end: SMLoc,
+        debug: SMLoc,
+        node: Node<'gc>,
+    ) -> &'gc Node<'gc> {
+        let allocated = self.gc.alloc(node);
+        let md = allocated.metadata();
+        md.range.set(SMRange { start, end });
+        md.debug_loc.set(debug);
+        allocated
+    }
+
     /// Parse the whole program. Entry point for the parser.
     /// Port of `JSParserImpl::parse` / `parseProgram` (lines 355-381).
     pub fn parse(&mut self) -> Option<&'gc Node<'gc>> {
