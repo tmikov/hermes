@@ -274,6 +274,28 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         self.error_cur(&msg);
         false
     }
+    /// Report a "'k1' or 'k2' expected{where_}" error at the current token.
+    /// Port of the two-token `errorExpected(k1, k2, where, what, whatLoc)`
+    /// convenience wrapper (JSParserImpl.h:455) which forwards to
+    /// `errorExpected(ArrayRef<TokenKind>(toks, 2), ...)`. The list-rendering
+    /// logic in C++ `errorExpected` (175-195) joins two tokens with " or " and
+    /// appends " expected". The `what`/`whatLoc` note args are dropped per house
+    /// style (see other `errorExpected` call sites in this port).
+    pub(super) fn error_expected2(
+        &mut self,
+        k1: TokenKind,
+        k2: TokenKind,
+        where_: &str,
+    ) {
+        let msg = format!(
+            "'{}' or '{}' expected{}",
+            crate::token_kinds::token_kind_str(k1),
+            crate::token_kinds::token_kind_str(k2),
+            where_
+        );
+        self.error_cur(&msg);
+    }
+
     /// Check the current token is `kind`; if so consume and return true, else
     /// report an error and return false. Port of `eat`.
     pub(super) fn eat(
@@ -373,7 +395,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let mut stmts: Vec<&'gc Node<'gc>> = Vec::new();
         if !self.parse_statement_list(
             Param::default(),
-            TokenKind::eof,
+            [TokenKind::eof],
             /* parse_directives= */ true,
             AllowImportExport::Yes,
             &mut stmts,
@@ -531,9 +553,11 @@ mod tests {
         }
     }
 
+    /// `if(x);` parses cleanly as of P2.4 (was a deferred-error test in P1.1).
     #[test]
-    fn deferred_if_statement_errors() {
+    fn if_statement_parses() {
         use ast::context::Context;
+        use ast::node::Node;
         use support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
@@ -548,13 +572,16 @@ mod tests {
             crate::lexer::GrammarContext::AllowRegExp,
         );
         let mut parser = JSParserImpl::new(&gc, lexer);
+        let program = parser.parse().expect("if statement parses in P2.4");
+        assert_eq!(parser.error_count_pub(), 0, "zero errors");
+        let Node::Program(p) = program else {
+            panic!("expected Program")
+        };
+        let stmt = p.body.iter().next().expect("one statement");
         assert!(
-            parser.parse().is_none(),
-            "if statement should error in P1.1"
-        );
-        assert!(
-            parser.error_count_pub() >= 1,
-            "must report at least one error"
+            matches!(stmt, Node::IfStatement(_)),
+            "expected IfStatement, got {:?}",
+            stmt.kind()
         );
     }
 
@@ -1760,6 +1787,180 @@ mod tests {
             matches!(second, Node::VariableDeclaration(_)),
             "`let x;` should be a VariableDeclaration, got {:?}",
             second.kind()
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // P2.4: block / if / while / do-while / switch / try statements.
+    // -----------------------------------------------------------------------
+
+    /// Helper: parse `src`, expect success with zero errors, return the first
+    /// statement of the Program body.
+    fn parse_first_stmt<'gc>(
+        gc: &'gc ast::context::GCLock<'_, '_>,
+        sm: &mut support::manager::SourceErrorManager,
+        src: &[u8],
+    ) -> &'gc ast::node::Node<'gc> {
+        let buf_id = sm.add_buffer_bytes("input", src);
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(gc, lexer);
+        let program = parser.parse().expect("parse succeeded");
+        assert_eq!(parser.error_count_pub(), 0, "zero errors");
+        if let ast::node::Node::Program(p) = program {
+            return p.body.iter().next().expect("has statement");
+        }
+        panic!("expected Program");
+    }
+
+    /// `{{x;}}` → a BlockStatement whose single child is a BlockStatement.
+    #[test]
+    fn nested_block_statement() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt = parse_first_stmt(&gc, &mut sm, b"{{x;}}");
+        let Node::BlockStatement(outer) = stmt else {
+            panic!("expected BlockStatement, got {:?}", stmt.kind())
+        };
+        let inner = outer.body.iter().next().expect("one inner statement");
+        assert!(
+            matches!(inner, Node::BlockStatement(_)),
+            "inner statement should be BlockStatement, got {:?}",
+            inner.kind()
+        );
+    }
+
+    /// `if(a)b;else c;` → IfStatement with a non-None alternate.
+    #[test]
+    fn if_with_else() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt = parse_first_stmt(&gc, &mut sm, b"if(a)b;else c;");
+        let Node::IfStatement(iff) = stmt else {
+            panic!("expected IfStatement, got {:?}", stmt.kind())
+        };
+        assert!(iff.alternate.is_some(), "alternate should be present");
+    }
+
+    /// `if(a)if(b)c;else d;` → the else binds to the INNER if (dangling-else).
+    #[test]
+    fn dangling_else_binds_to_inner_if() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt = parse_first_stmt(&gc, &mut sm, b"if(a)if(b)c;else d;");
+        let Node::IfStatement(outer) = stmt else {
+            panic!("expected IfStatement, got {:?}", stmt.kind())
+        };
+        // Outer if has no else; its consequent is the inner if which DOES.
+        assert!(
+            outer.alternate.is_none(),
+            "outer if should have no alternate"
+        );
+        let Node::IfStatement(inner) = outer.consequent else {
+            panic!(
+                "outer consequent should be IfStatement, got {:?}",
+                outer.consequent.kind()
+            )
+        };
+        assert!(
+            inner.alternate.is_some(),
+            "else should bind to the inner if"
+        );
+    }
+
+    /// `while(x)y;` → WhileStatement whose `test` is the Identifier `x` and
+    /// whose `body` is the ExpressionStatement `y;` (asserts body/test are NOT
+    /// swapped — the C++ ctor takes body first).
+    #[test]
+    fn while_body_and_test_not_swapped() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt = parse_first_stmt(&gc, &mut sm, b"while(x)y;");
+        let Node::WhileStatement(w) = stmt else {
+            panic!("expected WhileStatement, got {:?}", stmt.kind())
+        };
+        // test must be the Identifier `x`.
+        let Node::Identifier(id) = w.test else {
+            panic!("test should be Identifier(x), got {:?}", w.test.kind())
+        };
+        assert_eq!(gc.ctx().atom_table.bytes(id.name.get()), b"x");
+        // body must be the ExpressionStatement `y;`.
+        assert!(
+            matches!(w.body, Node::ExpressionStatement(_)),
+            "body should be ExpressionStatement, got {:?}",
+            w.body.kind()
+        );
+    }
+
+    /// `switch(x){default:;default:;}` → reports "more than one 'default'
+    /// clause in 'switch'".
+    #[test]
+    fn switch_duplicate_default_errors() {
+        use ast::context::Context;
+        use support::diag::{CollectingHandler, DiagKind};
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let _program = parse_with_collector(
+            &gc,
+            &mut sm,
+            atoms,
+            b"switch(x){default:;default:;}",
+        );
+        let h = sm.handler_as::<CollectingHandler>().unwrap();
+        let errs: Vec<_> = h
+            .messages()
+            .iter()
+            .filter(|m| m.kind == DiagKind::Error)
+            .collect();
+        assert!(
+            errs.iter().any(|m| m.message
+                == "more than one 'default' clause in 'switch'"),
+            "expected duplicate-default error, got {:?}",
+            errs.iter().map(|m| &m.message).collect::<Vec<_>>()
+        );
+    }
+
+    /// `try{}` (no catch/finally) → reports the catch/finally expected error.
+    #[test]
+    fn try_without_handler_errors() {
+        use ast::context::Context;
+        use support::diag::{CollectingHandler, DiagKind};
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let _program = parse_with_collector(&gc, &mut sm, atoms, b"try{}");
+        let h = sm.handler_as::<CollectingHandler>().unwrap();
+        let errs: Vec<_> = h
+            .messages()
+            .iter()
+            .filter(|m| m.kind == DiagKind::Error)
+            .collect();
+        assert!(
+            errs.iter().any(|m| m
+                .message
+                .contains("'catch' or 'finally' expected")),
+            "expected catch/finally error, got {:?}",
+            errs.iter().map(|m| &m.message).collect::<Vec<_>>()
         );
     }
 }

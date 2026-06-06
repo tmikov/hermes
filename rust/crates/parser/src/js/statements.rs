@@ -9,11 +9,13 @@
 //! of `lib/Parser/JSParserImpl.cpp`.
 
 use ast::node::{
-    ArrayPattern, AssignmentPattern, BreakStatement, ContinueStatement,
-    DebuggerStatement, Empty, EmptyStatement, ExpressionStatement, Identifier,
+    ArrayPattern, AssignmentPattern, BlockStatement, BreakStatement,
+    CatchClause, ContinueStatement, DebuggerStatement, DoWhileStatement, Empty,
+    EmptyStatement, ExpressionStatement, Identifier, IfStatement,
     LabeledStatement, Node, ObjectPattern, Property, RestElement,
-    ReturnStatement, StringLiteral, ThrowStatement, VariableDeclaration,
-    VariableDeclarator, WithStatement,
+    ReturnStatement, StringLiteral, SwitchCase, SwitchStatement, ThrowStatement,
+    TryStatement, VariableDeclaration, VariableDeclarator, WhileStatement,
+    WithStatement,
 };
 use ast::node_child::{NodeList, NodeMetadata};
 use atom_table::INVALID_ATOM_BYTES;
@@ -39,16 +41,24 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     // parseStatementList — 948 in JSParserImpl.cpp
     // -----------------------------------------------------------------------
 
-    /// Parse a statement list until `until` (typically `eof` or `r_brace`).
+    /// Parse a statement list until any of the `until` tokens (typically `eof`,
+    /// `r_brace`, or the switch-clause set `default`/`case`/`r_brace`).
     ///
     /// If `parse_directives` is true, leading string-literal statements are
     /// treated as directives (e.g., "use strict") before the general loop.
     ///
-    /// Port of `JSParserImpl::parseStatementList` (lines 948-971).
-    pub(super) fn parse_statement_list(
+    /// Port of `JSParserImpl::parseStatementList` (lines 948-971). The C++ is a
+    /// variadic template `parseStatementList(param, TokenKind until, ...,
+    /// Tail... otherUntil)` whose loop condition is
+    /// `!check(eof) && !checkN(until, otherUntil...)`. There are exactly two
+    /// arities: 1 until (block/program) and 3 untils (switch). We preserve that
+    /// monomorphization by making the `until` set a const-generic
+    /// `[TokenKind; N]` array (not a runtime slice), so each arity is a separate
+    /// instantiation exactly as in C++.
+    pub(super) fn parse_statement_list<const N: usize>(
         &mut self,
         param: Param,
-        until: TokenKind,
+        until: [TokenKind; N],
         parse_directives: bool,
         allow_import_export: AllowImportExport,
         stmt_list: &mut Vec<&'gc Node<'gc>>,
@@ -63,8 +73,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // Parse statement-list items until EOF or `until` token. C++ 964-968.
-        while !self.check(TokenKind::eof) && !self.check(until) {
+        // Parse statement-list items until EOF or any `until` token. C++ 964-968:
+        // `!check(eof) && !checkN(until, otherUntil...)`.
+        while !self.check(TokenKind::eof) && !until.contains(&self.cur_kind()) {
             if !self.parse_statement_list_item(param, allow_import_export, stmt_list) {
                 return false;
             }
@@ -561,8 +572,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         match self.cur_kind() {
             TokenKind::l_brace => {
-                self.error_cur("block statements not yet supported (parser phase P2)");
-                None
+                // C++ 679-680: parseBlock(param) with the default args
+                // grammarContext=AllowRegExp, parseDirectives=false.
+                self.parse_block(param, GrammarContext::AllowRegExp, false)
             }
             TokenKind::rw_var => {
                 // C++ 678-684: parseVariableStatement(Param{}).
@@ -570,16 +582,16 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
             TokenKind::semi => self.parse_empty_statement(),
             TokenKind::rw_if => {
-                self.error_cur("if statement not yet supported (parser phase P2)");
-                None
+                // C++ 685-686.
+                self.parse_if_statement(param.get(PARAM_RETURN))
             }
             TokenKind::rw_while => {
-                self.error_cur("while statement not yet supported (parser phase P2)");
-                None
+                // C++ 687-688.
+                self.parse_while_statement(param.get(PARAM_RETURN))
             }
             TokenKind::rw_do => {
-                self.error_cur("do statement not yet supported (parser phase P2)");
-                None
+                // C++ 689-690.
+                self.parse_do_while_statement(param.get(PARAM_RETURN))
             }
             TokenKind::rw_for => {
                 self.error_cur("for statement not yet supported (parser phase P2)");
@@ -600,13 +612,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
             TokenKind::rw_with => self.parse_with_statement(param.get(PARAM_RETURN)),
             TokenKind::rw_switch => {
-                self.error_cur("switch statement not yet supported (parser phase P2)");
-                None
+                // C++ 705-706.
+                self.parse_switch_statement(param.get(PARAM_RETURN))
             }
             TokenKind::rw_throw => self.parse_throw_statement(),
             TokenKind::rw_try => {
-                self.error_cur("try statement not yet supported (parser phase P2)");
-                None
+                // C++ 709-710.
+                self.parse_try_statement(param.get(PARAM_RETURN))
             }
             TokenKind::rw_debugger => self.parse_debugger_statement(),
             // default: parseExpressionOrLabelledStatement
@@ -942,6 +954,527 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             body,
         ));
         Some(self.set_location(start_loc, end, node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseBlock — 973 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a `{ StatementList }` block. Port of `JSParserImpl::parseBlock`
+    /// (lines 973-1006).
+    ///
+    /// C++ has default arguments `grammarContext = AllowRegExp`,
+    /// `parseDirectives = false`; we make them explicit parameters and the
+    /// callers pass the C++ defaults.
+    pub(super) fn parse_block(
+        &mut self,
+        param: Param,
+        grammar_context: GrammarContext,
+        parse_directives: bool,
+    ) -> Option<&'gc Node<'gc>> {
+        // {
+        assert!(self.check(TokenKind::l_brace));
+        let start_loc = self.advance(GrammarContext::AllowRegExp).start;
+
+        let mut stmt_list: Vec<&'gc Node<'gc>> = Vec::new();
+
+        // C++ 983-990.
+        if !self.parse_statement_list(
+            param,
+            [TokenKind::r_brace],
+            parse_directives,
+            AllowImportExport::No,
+            &mut stmt_list,
+        ) {
+            return None;
+        }
+
+        // }
+        // C++ 993-996: BlockStatementNode(body, /*implicit*/ false). The end
+        // location is the current token (the `}`), matching C++ `setLocation(
+        // startLoc, tok_, ...)`.
+        let end_loc = self.lexer.token().end_loc();
+        let node = Node::BlockStatement(BlockStatement::new(
+            NodeMetadata::new(self.dummy_range()),
+            NodeList::from_iter(self.gc, stmt_list),
+            false, // implicit
+        ));
+        let body = self.set_location(start_loc, end_loc, node);
+
+        // C++ 997-1003.
+        if !self.eat(TokenKind::r_brace, grammar_context, " at end of block") {
+            return None;
+        }
+
+        Some(body)
+    }
+
+    // -----------------------------------------------------------------------
+    // parseIfStatement — 1679 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse an `if ( Expr ) Stmt [else Stmt]` statement. Port of
+    /// `JSParserImpl::parseIfStatement` (lines 1679-1762).
+    pub(super) fn parse_if_statement(
+        &mut self,
+        param: Param,
+    ) -> Option<&'gc Node<'gc>> {
+        assert!(self.check(TokenKind::rw_if));
+        let start_loc = self.advance(GrammarContext::AllowRegExp).start;
+
+        // C++ 1684-1691.
+        if !self.eat(
+            TokenKind::l_paren,
+            GrammarContext::AllowRegExp,
+            " after 'if'",
+        ) {
+            return None;
+        }
+        let test = self.parse_expression(PARAM_IN)?;
+        // C++ 1695-1701.
+        if !self.eat(
+            TokenKind::r_paren,
+            GrammarContext::AllowRegExp,
+            " at end of 'if' condition",
+        ) {
+            return None;
+        }
+
+        // C++ 1739-1741.
+        let consequent =
+            self.parse_statement_or_function_declaration(param)?;
+
+        if self.check_and_eat(TokenKind::rw_else, GrammarContext::AllowRegExp) {
+            // C++ 1743-1754.
+            let alternate =
+                self.parse_statement_or_function_declaration(param)?;
+            let end = alternate.range().end;
+            let node = Node::IfStatement(IfStatement::new(
+                NodeMetadata::new(self.dummy_range()),
+                test,
+                consequent,
+                Some(alternate),
+            ));
+            Some(self.set_location(start_loc, end, node))
+        } else {
+            // C++ 1755-1761.
+            let end = consequent.range().end;
+            let node = Node::IfStatement(IfStatement::new(
+                NodeMetadata::new(self.dummy_range()),
+                test,
+                consequent,
+                None,
+            ));
+            Some(self.set_location(start_loc, end, node))
+        }
+    }
+
+    /// Parse a statement or (only in loose mode) a function declaration, the
+    /// consequent/alternate of an `if`. Port of the C++ lambda
+    /// `parseStatementOrFunctionDeclaration` (lines 1709-1737).
+    ///
+    /// ES2022 B.3.3 allows FunctionDeclaration as consequent and alternate,
+    /// wrapped in a synthetic implicit BlockStatement. That handling depends on
+    /// `parseFunctionDeclaration` and is deferred to phase P3; for now the
+    /// `function` case emits an honest error. The regular-statement case is
+    /// `parseStatement(param.get(ParamReturn))`.
+    ///
+    /// Implemented as a method rather than a closure (as in C++) because a Rust
+    /// closure capturing `&mut self` cannot be called while `self` is also
+    /// borrowed mutably by the surrounding parse method.
+    fn parse_statement_or_function_declaration(
+        &mut self,
+        param: Param,
+    ) -> Option<&'gc Node<'gc>> {
+        if self.check(TokenKind::rw_function) {
+            // P3: function declaration as if-consequent/alternate is deferred.
+            self.error_cur(
+                "function declaration in if-statement not yet supported (parser phase P3)",
+            );
+            return None;
+        }
+        self.parse_statement(param.get(PARAM_RETURN))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseWhileStatement — 1764 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a `while ( Expr ) Stmt` statement. Port of
+    /// `JSParserImpl::parseWhileStatement` (lines 1764-1796).
+    pub(super) fn parse_while_statement(
+        &mut self,
+        param: Param,
+    ) -> Option<&'gc Node<'gc>> {
+        assert!(self.check(TokenKind::rw_while));
+        let start_loc = self.advance(GrammarContext::AllowRegExp).start;
+
+        // C++ 1769-1775.
+        if !self.eat(
+            TokenKind::l_paren,
+            GrammarContext::AllowRegExp,
+            " after 'while'",
+        ) {
+            return None;
+        }
+        let test = self.parse_expression(PARAM_IN)?;
+        // C++ 1779-1785.
+        if !self.eat(
+            TokenKind::r_paren,
+            GrammarContext::AllowRegExp,
+            " at end of 'while' condition",
+        ) {
+            return None;
+        }
+
+        let body = self.parse_statement(param.get(PARAM_RETURN))?;
+
+        // C++ 1791-1795: WhileStatementNode(body, test) — body FIRST.
+        let end = body.range().end;
+        let node = Node::WhileStatement(WhileStatement::new(
+            NodeMetadata::new(self.dummy_range()),
+            body,
+            test,
+        ));
+        Some(self.set_location(start_loc, end, node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseDoWhileStatement — 1798 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a `do Stmt while ( Expr ) ;` statement. Port of
+    /// `JSParserImpl::parseDoWhileStatement` (lines 1798-1841).
+    pub(super) fn parse_do_while_statement(
+        &mut self,
+        param: Param,
+    ) -> Option<&'gc Node<'gc>> {
+        assert!(self.check(TokenKind::rw_do));
+        let start_loc = self.advance(GrammarContext::AllowRegExp).start;
+
+        let body = self.parse_statement(param.get(PARAM_RETURN))?;
+
+        // C++ 1807-1814.
+        if !self.eat(
+            TokenKind::rw_while,
+            GrammarContext::AllowRegExp,
+            " at end of 'do-while'",
+        ) {
+            return None;
+        }
+
+        // C++ 1816-1822.
+        if !self.eat(
+            TokenKind::l_paren,
+            GrammarContext::AllowRegExp,
+            " after 'do-while'",
+        ) {
+            return None;
+        }
+        let test = self.parse_expression(PARAM_IN)?;
+        // C++ 1826-1832.
+        if !self.eat(
+            TokenKind::r_paren,
+            GrammarContext::AllowRegExp,
+            " at end of 'do-while' condition",
+        ) {
+            return None;
+        }
+
+        // C++ 1834: optional semicolon.
+        self.eat_semi(true);
+
+        // C++ 1836-1840: DoWhileStatementNode(body, test) — body FIRST.
+        let end_loc = self.lexer.prev_token_end();
+        let node = Node::DoWhileStatement(DoWhileStatement::new(
+            NodeMetadata::new(self.dummy_range()),
+            body,
+            test,
+        ));
+        Some(self.set_location(start_loc, end_loc, node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseSwitchStatement — 2220 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a `switch ( Expr ) { CaseClauses }` statement. Port of
+    /// `JSParserImpl::parseSwitchStatement` (lines 2220-2340).
+    pub(super) fn parse_switch_statement(
+        &mut self,
+        param: Param,
+    ) -> Option<&'gc Node<'gc>> {
+        assert!(self.check(TokenKind::rw_switch));
+        let start_loc = self.advance(GrammarContext::AllowRegExp).start;
+
+        // C++ 2225-2232.
+        if !self.eat(
+            TokenKind::l_paren,
+            GrammarContext::AllowRegExp,
+            " after 'switch'",
+        ) {
+            return None;
+        }
+
+        let discriminant = self.parse_expression(PARAM_IN)?;
+
+        // C++ 2238-2244.
+        if !self.eat(
+            TokenKind::r_paren,
+            GrammarContext::AllowRegExp,
+            " after 'switch (...'",
+        ) {
+            return None;
+        }
+
+        // C++ 2246-2253.
+        if !self.eat(
+            TokenKind::l_brace,
+            GrammarContext::AllowRegExp,
+            " after 'switch (...)'",
+        ) {
+            return None;
+        }
+
+        let mut clause_list: Vec<&'gc Node<'gc>> = Vec::new();
+        // location of the 'default' clause. C++ 2256.
+        let mut default_location: Option<SMLoc> = None;
+
+        // Parse the switch body. C++ 2259-2324.
+        while !self.check(TokenKind::r_brace) {
+            let clause_start_loc = self.lexer.token().start_loc();
+
+            let mut test_expr: Option<&'gc Node<'gc>> = None;
+            // Set to true in error recovery when we want to parse but ignore the
+            // parsed statements. C++ 2263-2264.
+            let mut ignore_clause = false;
+            let mut stmt_list: Vec<&'gc Node<'gc>> = Vec::new();
+
+            let case_loc = self.lexer.token().start_loc();
+            if self.check_and_eat(TokenKind::rw_case, GrammarContext::AllowRegExp)
+            {
+                // C++ 2268-2272. parseExpression(ParamIn, CoverTypedParameters::
+                // No); the Cover argument is a Flow/TS knob absent from P1's
+                // parse_expression.
+                test_expr = Some(self.parse_expression(PARAM_IN)?);
+            } else if self
+                .check_and_eat(TokenKind::rw_default, GrammarContext::AllowRegExp)
+            {
+                // C++ 2273-2282.
+                if default_location.is_some() {
+                    self.error_at(
+                        SMRange {
+                            start: clause_start_loc,
+                            end: clause_start_loc,
+                        },
+                        "more than one 'default' clause in 'switch'",
+                    );
+                    // C++ also emits sm_.note(defaultLocation, "first 'default'
+                    // clause was defined here"); the note is dropped per house
+                    // style.
+
+                    // We want to continue parsing but ignore the statements.
+                    ignore_clause = true;
+                } else {
+                    default_location = Some(clause_start_loc);
+                }
+            } else {
+                // C++ 2283-2291.
+                self.error_expected2(
+                    TokenKind::rw_case,
+                    TokenKind::rw_default,
+                    " inside 'switch'",
+                );
+                return None;
+            }
+
+            // save the location in case the clause is empty. C++ 2293-2294.
+            let colon_loc = self.lexer.token().end_loc();
+            // C++ 2295-2301.
+            if !self.eat(
+                TokenKind::colon,
+                GrammarContext::AllowRegExp,
+                " after 'case ...' or 'default'",
+            ) {
+                return None;
+            }
+
+            // case Expression : StatementList[opt]. C++ 2305-2313.
+            if !self.parse_statement_list(
+                param.get(PARAM_RETURN),
+                [
+                    TokenKind::rw_default,
+                    TokenKind::rw_case,
+                    TokenKind::r_brace,
+                ],
+                false,
+                AllowImportExport::No,
+                &mut stmt_list,
+            ) {
+                return None;
+            }
+
+            // C++ 2315-2323.
+            if !ignore_clause {
+                let clause_end_loc = match stmt_list.last() {
+                    Some(last) => last.range().end,
+                    None => colon_loc,
+                };
+                let node = Node::SwitchCase(SwitchCase::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    test_expr,
+                    NodeList::from_iter(self.gc, stmt_list),
+                ));
+                clause_list.push(self.set_location(
+                    clause_start_loc,
+                    clause_end_loc,
+                    node,
+                ));
+            }
+            let _ = case_loc;
+        }
+
+        // C++ 2326-2333.
+        let end_loc = self.lexer.token().end_loc();
+        if !self.eat(
+            TokenKind::r_brace,
+            GrammarContext::AllowRegExp,
+            " at end of 'switch' statement",
+        ) {
+            return None;
+        }
+
+        // C++ 2335-2339.
+        let node = Node::SwitchStatement(SwitchStatement::new(
+            NodeMetadata::new(self.dummy_range()),
+            discriminant,
+            NodeList::from_iter(self.gc, clause_list),
+        ));
+        Some(self.set_location(start_loc, end_loc, node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseTryStatement — 2366 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a `try Block [catch ...] [finally Block]` statement. Port of
+    /// `JSParserImpl::parseTryStatement` (lines 2366-2465).
+    pub(super) fn parse_try_statement(
+        &mut self,
+        param: Param,
+    ) -> Option<&'gc Node<'gc>> {
+        assert!(self.check(TokenKind::rw_try));
+        let start_loc = self.advance(GrammarContext::AllowRegExp).start;
+
+        // C++ 2371-2375.
+        if !self.need(TokenKind::l_brace, " after 'try'") {
+            return None;
+        }
+        let try_body = self.parse_block(
+            param.get(PARAM_RETURN),
+            GrammarContext::AllowRegExp,
+            false,
+        )?;
+
+        let mut catch_handler: Option<&'gc Node<'gc>> = None;
+        let mut finally_handler: Option<&'gc Node<'gc>> = None;
+
+        // Parse the optional 'catch' handler. C++ 2380-2428.
+        let handler_start_loc = self.lexer.token().start_loc();
+        if self.check_and_eat(TokenKind::rw_catch, GrammarContext::AllowRegExp) {
+            let mut catch_param: Option<&'gc Node<'gc>> = None;
+            // CatchClause param is optional. C++ 2384-2411.
+            if self.check_and_eat(TokenKind::l_paren, GrammarContext::AllowRegExp)
+            {
+                catch_param = Some(
+                    if self.check2(TokenKind::l_square, TokenKind::l_brace) {
+                        self.parse_binding_pattern(Param::default())?
+                    } else {
+                        match self.parse_binding_identifier(Param::default()) {
+                            Some(ident) => ident,
+                            None => {
+                                // C++ 2393-2399: errorExpected(identifier,
+                                // "inside catch list", ...). The note arg is
+                                // dropped per house style.
+                                self.error_cur(
+                                    "'identifier' expected inside catch list",
+                                );
+                                return None;
+                            }
+                        }
+                    },
+                );
+
+                // C++ 2404-2410.
+                if !self.eat(
+                    TokenKind::r_paren,
+                    GrammarContext::AllowRegExp,
+                    " after 'catch (...'",
+                ) {
+                    return None;
+                }
+            }
+
+            // C++ 2413-2421.
+            if !self.need(TokenKind::l_brace, " after 'catch(...)'") {
+                return None;
+            }
+            let catch_body = self.parse_block(
+                param.get(PARAM_RETURN),
+                GrammarContext::AllowRegExp,
+                false,
+            )?;
+
+            // C++ 2423-2427.
+            let catch_end = catch_body.range().end;
+            let node = Node::CatchClause(CatchClause::new(
+                NodeMetadata::new(self.dummy_range()),
+                catch_param,
+                catch_body,
+            ));
+            catch_handler =
+                Some(self.set_location(handler_start_loc, catch_end, node));
+        }
+
+        // Parse the optional 'finally' handler. C++ 2430-2444.
+        let finally_loc = self.lexer.token().start_loc();
+        if self.check_and_eat(TokenKind::rw_finally, GrammarContext::AllowRegExp)
+        {
+            let _ = finally_loc;
+            if !self.need(TokenKind::l_brace, " after 'finally'") {
+                return None;
+            }
+            let finally_body = self.parse_block(
+                param.get(PARAM_RETURN),
+                GrammarContext::AllowRegExp,
+                false,
+            )?;
+            finally_handler = Some(finally_body);
+        }
+
+        // At least one handler must be present. C++ 2446-2455.
+        if catch_handler.is_none() && finally_handler.is_none() {
+            self.error_expected2(
+                TokenKind::rw_catch,
+                TokenKind::rw_finally,
+                " after 'try' block",
+            );
+            return None;
+        }
+
+        // Use the last handler's location as the end location. C++ 2457-2459.
+        let end_loc = match finally_handler {
+            Some(f) => f.range().end,
+            None => catch_handler.unwrap().range().end,
+        };
+        // C++ 2460-2464.
+        let node = Node::TryStatement(TryStatement::new(
+            NodeMetadata::new(self.dummy_range()),
+            try_body,
+            catch_handler,
+            finally_handler,
+        ));
+        Some(self.set_location(start_loc, end_loc, node))
     }
 
     // -----------------------------------------------------------------------
