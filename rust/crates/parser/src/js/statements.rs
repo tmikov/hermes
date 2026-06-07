@@ -1111,8 +1111,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 );
             }
             let range = function.range();
-            let mut stmts: Vec<&'gc Node<'gc>> = Vec::new();
-            stmts.push(function);
+            let stmts: Vec<&'gc Node<'gc>> = vec![function];
             let node = Node::BlockStatement(BlockStatement::new(
                 NodeMetadata::new(self.dummy_range()),
                 NodeList::from_iter(self.gc, stmts),
