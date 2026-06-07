@@ -34,7 +34,26 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// `force_eagerly` is threaded for fidelity (it feeds the `eagerly` arg of
     /// `parse_function_body`); in the Full-pass port the body is always parsed
     /// eagerly, so it has no observable effect.
+    ///
+    /// The C++ constructs a `SaveFunctionState` whose destructor restores
+    /// `strictMode` (383/510). A `"use strict"` directive in the body must NOT
+    /// leak strictness to the enclosing (possibly sloppy) code, so we save and
+    /// restore the lexer strict-mode flag around the body. The result is
+    /// computed first so the restore runs on every (including error `?`) path.
     pub(super) fn parse_function_helper(
+        &mut self,
+        param: Param,
+        is_declaration: bool,
+        force_eagerly: bool,
+    ) -> Option<&'gc Node<'gc>> {
+        let old_strict = self.lexer.is_strict_mode();
+        let result =
+            self.parse_function_helper_inner(param, is_declaration, force_eagerly);
+        self.lexer.set_strict_mode(old_strict);
+        result
+    }
+
+    fn parse_function_helper_inner(
         &mut self,
         param: Param,
         is_declaration: bool,

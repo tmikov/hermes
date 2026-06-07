@@ -812,6 +812,33 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         start_loc: SMLoc,
         force_async: bool,
     ) -> Option<&'gc Node<'gc>> {
+        // The C++ `SaveFunctionState` (5849) restores `strictMode` on scope
+        // exit. A `"use strict"` directive in the (block) body must not leak
+        // strictness to the enclosing code, so save/restore the lexer flag
+        // around the body. Result computed first so restore runs on every path.
+        let old_strict = self.lexer.is_strict_mode();
+        let result = self.parse_arrow_function_expression_inner(
+            param,
+            force_eagerly,
+            left_expr,
+            has_new_line,
+            start_loc,
+            force_async,
+        );
+        self.lexer.set_strict_mode(old_strict);
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn parse_arrow_function_expression_inner(
+        &mut self,
+        param: Param,
+        force_eagerly: bool,
+        left_expr: &'gc Node<'gc>,
+        has_new_line: bool,
+        start_loc: SMLoc,
+        force_async: bool,
+    ) -> Option<&'gc Node<'gc>> {
         // ArrowFunction : ArrowParameters [no line terminator] => ConciseBody.
         debug_assert!(
             self.check(TokenKind::equalgreater)
@@ -2708,12 +2735,22 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     ///
     /// ## SaveFunctionState note
     /// `SaveFunctionState saveFunctionState{this}` (C++ 2833) saves and restores
-    /// parser flags clobbered when entering a method/getter/setter body. In this
-    /// Full-pass port the relevant flags (`param_yield`/`param_await`) are saved
-    /// and restored locally via [`Self::save_param_yield`]/[`Self::save_param_await`]
-    /// ParamFlagGuards at each method leaf, so a dedicated SaveFunctionState RAII
-    /// is unnecessary.
+    /// parser flags clobbered when entering a method/getter/setter body. The
+    /// `param_yield`/`param_await` flags are saved/restored locally via
+    /// [`Self::save_param_yield`]/[`Self::save_param_await`] ParamFlagGuards at
+    /// each method leaf. The OTHER observable flag SaveFunctionState restores is
+    /// the lexer `strictMode` — a `"use strict"` directive inside a method body
+    /// must not leak strictness to the enclosing object-literal expression — so
+    /// this wrapper saves/restores it around the whole property parse (the
+    /// result is computed first so the restore runs on every error `?` path).
     fn parse_property_assignment(&mut self) -> Option<&'gc Node<'gc>> {
+        let old_strict = self.lexer.is_strict_mode();
+        let result = self.parse_property_assignment_inner();
+        self.lexer.set_strict_mode(old_strict);
+        result
+    }
+
+    fn parse_property_assignment_inner(&mut self) -> Option<&'gc Node<'gc>> {
         let start_loc = self.cur_start();
 
         let mut computed = false;
