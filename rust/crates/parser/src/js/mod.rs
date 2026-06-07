@@ -391,6 +391,26 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
     }
 
+    /// Return an *invalid* `SMRange` (mirrors a C++ default-constructed
+    /// `SMRange()`, whose `isValid()` is false). Used for nodes that C++ builds
+    /// without ever calling `setLocation` — e.g. the fresh `RestElement` created
+    /// from a `SpreadElement` in the async-arrow reparse path. The dumper's
+    /// `range_is_valid` treats `start.offset > end.offset` as invalid, so loc and
+    /// range are omitted, exactly as in the C++ dump.
+    pub(super) fn invalid_range(&self) -> SMRange {
+        let loc = self.cur_start();
+        SMRange {
+            start: SMLoc {
+                source: loc.source,
+                offset: 1,
+            },
+            end: SMLoc {
+                source: loc.source,
+                offset: 0,
+            },
+        }
+    }
+
     /// Allocate `node` with its source locations set. Port of the 3-arg
     /// `setLocation(start, end, node)`: debug loc defaults to start.
     pub(super) fn set_location(
@@ -1069,8 +1089,8 @@ mod tests {
     }
 
     #[test]
-    fn arrow_expr_errors_in_p15() {
-        // Arrow functions are P3; parsing `a => b` should error.
+    fn arrow_expr_parses_after_p33() {
+        // Arrow functions landed in P3.3; `a => b` now parses cleanly.
         use ast::context::Context;
         use support::manager::SourceErrorManager;
 
@@ -1086,8 +1106,8 @@ mod tests {
             crate::lexer::GrammarContext::AllowRegExp,
         );
         let mut parser = JSParserImpl::new(&gc, lexer);
-        assert!(parser.parse().is_none(), "arrow should error in P1.5");
-        assert!(parser.error_count_pub() >= 1);
+        assert!(parser.parse().is_some(), "arrow should parse in P3.3");
+        assert_eq!(parser.error_count_pub(), 0, "no errors");
     }
 
     // P1.8: object literal tests.
@@ -2372,5 +2392,242 @@ mod tests {
         let y = first_yield(&gc, &mut sm, b"function* g(){ yield 1; }");
         assert!(y.argument.is_some(), "yield 1 has an argument");
         assert!(!y.delegate.get(), "yield 1 is not delegating");
+    }
+
+    // ------------------------------------------------------------------
+    // P3.3 — arrow functions + cover-paren reparse
+    // ------------------------------------------------------------------
+
+    /// Parse `src` and return the `ArrowFunctionExpression` reached as the
+    /// first statement's expression.
+    fn first_arrow<'gc>(
+        gc: &'gc ast::context::GCLock<'_, '_>,
+        sm: &mut support::manager::SourceErrorManager,
+        src: &[u8],
+    ) -> &'gc ast::node::ArrowFunctionExpression<'gc> {
+        use ast::node::Node;
+        let stmt = parse_first_stmt(gc, sm, src);
+        let Node::ExpressionStatement(es) = stmt else {
+            panic!("expected ExpressionStatement, got {:?}", stmt.kind())
+        };
+        let Node::ArrowFunctionExpression(a) = es.expression else {
+            panic!(
+                "expected ArrowFunctionExpression, got {:?}",
+                es.expression.kind()
+            )
+        };
+        a
+    }
+
+    /// `a => a;` → expression=true, async=false, params=[Identifier].
+    #[test]
+    fn arrow_single_ident() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let a = first_arrow(&gc, &mut sm, b"a => a;");
+        assert!(a.expression.get(), "concise body is an expression");
+        assert!(!a.r#async.get(), "not async");
+        let params: Vec<_> = a.params.iter().collect();
+        assert_eq!(params.len(), 1, "one param");
+        assert!(
+            matches!(params[0], Node::Identifier(_)),
+            "param is Identifier, got {:?}",
+            params[0].kind()
+        );
+    }
+
+    /// `() => 0;` → params empty.
+    #[test]
+    fn arrow_empty_params() {
+        use ast::context::Context;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let a = first_arrow(&gc, &mut sm, b"() => 0;");
+        assert_eq!(a.params.iter().count(), 0, "no params");
+        assert!(a.expression.get(), "concise body");
+    }
+
+    /// `(a, ...b) => b;` → params=[Identifier, RestElement].
+    #[test]
+    fn arrow_rest_param() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let a = first_arrow(&gc, &mut sm, b"(a, ...b) => b;");
+        let params: Vec<_> = a.params.iter().collect();
+        assert_eq!(params.len(), 2, "two params");
+        assert!(
+            matches!(params[0], Node::Identifier(_)),
+            "first param Identifier, got {:?}",
+            params[0].kind()
+        );
+        assert!(
+            matches!(params[1], Node::RestElement(_)),
+            "second param RestElement, got {:?}",
+            params[1].kind()
+        );
+    }
+
+    /// `(a = 1) => a;` → params=[AssignmentPattern].
+    #[test]
+    fn arrow_default_param() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let a = first_arrow(&gc, &mut sm, b"(a = 1) => a;");
+        let params: Vec<_> = a.params.iter().collect();
+        assert_eq!(params.len(), 1, "one param");
+        assert!(
+            matches!(params[0], Node::AssignmentPattern(_)),
+            "param AssignmentPattern, got {:?}",
+            params[0].kind()
+        );
+    }
+
+    /// `({x}) => x;` → params=[ObjectPattern].
+    #[test]
+    fn arrow_object_pattern_param() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let a = first_arrow(&gc, &mut sm, b"({x}) => x;");
+        let params: Vec<_> = a.params.iter().collect();
+        assert_eq!(params.len(), 1, "one param");
+        assert!(
+            matches!(params[0], Node::ObjectPattern(_)),
+            "param ObjectPattern, got {:?}",
+            params[0].kind()
+        );
+    }
+
+    /// `a => { return a; };` → expression=false (block body).
+    #[test]
+    fn arrow_block_body() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let a = first_arrow(&gc, &mut sm, b"a => { return a; };");
+        assert!(!a.expression.get(), "block body is not an expression");
+        assert!(
+            matches!(a.body, Node::BlockStatement(_)),
+            "block body, got {:?}",
+            a.body.kind()
+        );
+    }
+
+    /// `async a => a;` → async=true.
+    #[test]
+    fn arrow_async_single_ident() {
+        use ast::context::Context;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let a = first_arrow(&gc, &mut sm, b"async a => a;");
+        assert!(a.r#async.get(), "async arrow");
+        assert_eq!(a.params.iter().count(), 1, "one param");
+    }
+
+    /// `async (a) => a;` → async=true, params=[Identifier] (parsed via the
+    /// async-CallExpression cover head).
+    #[test]
+    fn arrow_async_paren() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let a = first_arrow(&gc, &mut sm, b"async (a) => a;");
+        assert!(a.r#async.get(), "async arrow");
+        let params: Vec<_> = a.params.iter().collect();
+        assert_eq!(params.len(), 1, "one param");
+        assert!(
+            matches!(params[0], Node::Identifier(_)),
+            "param Identifier, got {:?}",
+            params[0].kind()
+        );
+    }
+
+    /// Non-arrow `(a)` → a parenthesized Identifier (parens recorded).
+    #[test]
+    fn paren_ident_not_arrow() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt = parse_first_stmt(&gc, &mut sm, b"(a);");
+        let Node::ExpressionStatement(es) = stmt else {
+            panic!("expected ExpressionStatement, got {:?}", stmt.kind())
+        };
+        assert!(
+            matches!(es.expression, Node::Identifier(_)),
+            "expression is Identifier, got {:?}",
+            es.expression.kind()
+        );
+        assert_eq!(
+            es.expression.metadata().parens.get(),
+            1,
+            "one paren recorded"
+        );
+    }
+
+    /// Non-arrow `(a, b)` → SequenceExpression.
+    #[test]
+    fn paren_sequence_not_arrow() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt = parse_first_stmt(&gc, &mut sm, b"(a, b);");
+        let Node::ExpressionStatement(es) = stmt else {
+            panic!("expected ExpressionStatement, got {:?}", stmt.kind())
+        };
+        assert!(
+            matches!(es.expression, Node::SequenceExpression(_)),
+            "expression is SequenceExpression, got {:?}",
+            es.expression.kind()
+        );
+    }
+
+    /// Non-arrow `(a,)` → SequenceExpression whose last element is a
+    /// `CoverTrailingComma` (matches hermesc — the cover node survives into the
+    /// AST when not followed by `=>`).
+    #[test]
+    fn paren_trailing_comma_not_arrow() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt = parse_first_stmt(&gc, &mut sm, b"(a,);");
+        let Node::ExpressionStatement(es) = stmt else {
+            panic!("expected ExpressionStatement, got {:?}", stmt.kind())
+        };
+        let Node::SequenceExpression(seq) = es.expression else {
+            panic!(
+                "expected SequenceExpression, got {:?}",
+                es.expression.kind()
+            )
+        };
+        let elems: Vec<_> = seq.expressions.iter().collect();
+        assert_eq!(elems.len(), 2, "[a, CoverTrailingComma]");
+        assert!(
+            matches!(elems[1], Node::CoverTrailingComma(_)),
+            "last element CoverTrailingComma, got {:?}",
+            elems[1].kind()
+        );
     }
 }

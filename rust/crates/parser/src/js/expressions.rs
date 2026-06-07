@@ -10,8 +10,9 @@
 
 use ast::context::GCLock;
 use ast::node::{
-    ArrayExpression, ArrayPattern, AssignmentExpression, AssignmentPattern, AwaitExpression,
-    BigIntLiteral, BinaryExpression, BooleanLiteral, CallExpression, ConditionalExpression,
+    ArrayExpression, ArrowFunctionExpression, ArrayPattern, AssignmentExpression, AssignmentPattern,
+    AwaitExpression, BigIntLiteral, BinaryExpression, BooleanLiteral, CallExpression,
+    ConditionalExpression, CoverEmptyArgs, CoverRestElement, CoverTrailingComma,
     CoverInitializer, Empty, Identifier, LogicalExpression, MemberExpression, MetaProperty,
     NewExpression, Node, NullLiteral, NumericLiteral, ObjectExpression, ObjectPattern,
     OptionalCallExpression, OptionalMemberExpression, PrivateName, Property, RegExpLiteral,
@@ -51,9 +52,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// a SequenceExpression for 2+ operands. Port of
     /// `JSParserImpl::parseExpression` (lines 6552-6609).
     ///
-    /// P1.1: the `dotdotdot` / `CoverTrailingComma` branches are deferred
-    /// (they are reached only inside arrow-function covers, which are P3).
-    /// We just parse the plain comma-sequence of assignment expressions.
+    /// The comma loop handles the cover-grammar tails used by the arrow-function
+    /// parameter cover: a trailing `,)` produces a `CoverTrailingComma` node, and
+    /// `,...x` produces a `CoverRestElement`. These cover nodes survive into the
+    /// resulting `SequenceExpression`; only `reparse_arrow_parameters` later
+    /// converts them into real parameters. (When the sequence is *not* followed
+    /// by `=>`, the cover nodes simply remain in the AST — matching hermesc.)
     pub(super) fn parse_expression(
         &mut self,
         param: Param,
@@ -70,30 +74,33 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         while self.check(TokenKind::comma) {
             // Eat the ",".
-            self.advance(GrammarContext::AllowRegExp);
+            let comma_rng = self.advance(GrammarContext::AllowRegExp);
 
             // CoverParenthesizedExpressionAndArrowParameterList: (Expression ,)
-            // — the trailing-comma cover node is P3 (arrow functions). For P1.1
-            // we stop here; the trailing comma before ')' will be handled when
-            // parsePrimaryExpression's l_paren branch is filled in (P3).
+            // C++ lines 6575-6583.
             if self.check(TokenKind::r_paren) {
-                // P3: CoverTrailingCommaNode deferred. AST-shape deviation: for
-                // `(a,)` C++ produces SequenceExpression([a, CoverTrailingComma]);
-                // we currently return just `a` (the trailing comma is consumed by
-                // the caller's `)`-eat). Only meaningful inside arrow-param covers,
-                // which are P3; no P1 corpus exercises it.
+                let cur_start = self.cur_start();
+                let node = Node::CoverTrailingComma(CoverTrailingComma::new(
+                    NodeMetadata::new(self.dummy_range()),
+                ));
+                let cover = self.set_location(comma_rng.start, cur_start, node);
+                expr_nodes.push(cover);
                 break;
             }
 
-            // P3: dotdotdot (spread) cover form is deferred.
-            let expr2 = self.parse_assignment_expression(param)?;
+            // C++ lines 6585-6600.
+            let expr2 = if self.check(TokenKind::dotdotdot) {
+                let rest = self.parse_binding_rest_element(param)?;
+                let rest_range = rest.range();
+                let node = Node::CoverRestElement(CoverRestElement::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    rest,
+                ));
+                self.set_location(rest_range.start, rest_range.end, node)
+            } else {
+                self.parse_assignment_expression(param)?
+            };
             expr_nodes.push(expr2);
-        }
-
-        // If only one expression was accumulated (the trailing-comma break above
-        // happened immediately), return it directly without wrapping.
-        if expr_nodes.len() == 1 {
-            return Some(expr_nodes[0]);
         }
 
         let end_loc = self.lexer.prev_token_end();
@@ -363,15 +370,28 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 };
             }
 
-            // P3: async arrow (C++ 6270-6286) — skip in P1.
-            // Plain `async` parses as an Identifier downstream; no
-            // special-casing needed here.
+            // Async arrow detection (C++ 6270-6286).
+            //   async x => …   — `async` followed by an identifier with no line
+            //   terminator forces async-arrow parsing. `start_loc` records the
+            //   `async` keyword (or the LHS start) for the final arrow location.
+            let start_loc = this.cur_start();
+            let mut force_async = false;
+            if this.check_unescaped_name(b"async") {
+                // C++: lexer_.lookahead1(TokenKind::identifier).
+                let opt_next =
+                    this.lexer.lookahead1::<false>(Some(TokenKind::identifier));
+                if opt_next == Some(TokenKind::identifier) {
+                    force_async = true;
+                }
+                // P6: Flow typed async arrow (C++ 6277-6285) — gated, skip.
+            }
 
             // P6: Flow type-param block (C++ 6288-6339) — gated by
             // context_.getParseFlow() which does not exist yet. Skip.
 
             // C++ lines 6341-6345: leftStartLoc / hasNewLine / optLeftExpr.
             let left_start_loc = this.cur_start();
+            let has_new_line = this.lexer.is_new_line_before_current_token();
             let left_expr = match this.parse_conditional_expression(cur_param) {
                 Some(e) => e,
                 None => return LevelResult::Error,
@@ -380,15 +400,27 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // P6/P7: Flow/TS return-type / predicate blocks (C++ 6349-6446) — skip.
 
             // ----------------------------------------------------------------
-            // Arrow check (C++ 6453-6466) — P3 deferral.
+            // Arrow check (C++ 6453-6466).
+            //   ArrowFunction : ArrowParameters [no line terminator] =>
+            //   ConciseBody.
+            // A successful arrow is the completed level result; return it via
+            // the `Terminal` channel (same as yield).
             // ----------------------------------------------------------------
             if this.check(TokenKind::equalgreater)
                 && !this.lexer.is_new_line_before_current_token()
             {
-                this.error_cur(
-                    "arrow functions not yet supported (parser phase P3)",
-                );
-                return LevelResult::Error;
+                // force_eagerly is inert in the eager port → pass false.
+                return match this.parse_arrow_function_expression(
+                    cur_param,
+                    false,
+                    left_expr,
+                    has_new_line,
+                    start_loc,
+                    force_async,
+                ) {
+                    Some(node) => LevelResult::Terminal(node),
+                    None => LevelResult::Error,
+                };
             }
 
             // P6: Flow typeParams error (C++ 6468-6477) — gated, skip.
@@ -519,6 +551,340 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         Some(opt_res)
+    }
+
+    // -----------------------------------------------------------------------
+    // reparseArrowParameters — 5681 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Convert an already-parsed cover expression into an arrow-function
+    /// parameter list, appending each parameter node to `param_list`. Port of
+    /// `JSParserImpl::reparseArrowParameters` (lines 5681-5816). Returns false on
+    /// a hard error.
+    ///
+    /// ## Immutable-AST adaptation
+    /// The C++ does `std::move(seqNode->_expressions)` / `std::move(callNode->
+    /// _arguments)` to steal the children out of the cover node. Our AST children
+    /// are immutable (`&'gc Node`), so we instead ITERATE the existing `NodeList`
+    /// (read the children) into a fresh `Vec` and process that — no mutation.
+    /// Fresh `RestElement`/`AssignmentPattern` nodes are built exactly as C++.
+    pub(super) fn reparse_arrow_parameters(
+        &mut self,
+        node: &'gc Node<'gc>,
+        has_new_line: bool,
+        param_list: &mut Vec<&'gc Node<'gc>>,
+        is_async: &mut bool,
+    ) -> bool {
+        // Empty argument list "()". C++ 5686-5688.
+        if node.metadata().parens.get() == 0
+            && matches!(node, Node::CoverEmptyArgs(_))
+        {
+            return true;
+        }
+
+        // A single identifier without parens. C++ 5690-5698.
+        if node.metadata().parens.get() == 0 {
+            if let Node::Identifier(ident) = node {
+                param_list.push(node);
+                let range = node.range();
+                let name_bytes = self
+                    .gc
+                    .ctx()
+                    .atom_table
+                    .bytes(ident.name.get())
+                    .to_owned();
+                return self.validate_binding_identifier(
+                    range,
+                    &name_bytes,
+                    TokenKind::identifier,
+                );
+            }
+        }
+
+        // The list of cover sub-expressions to reparse (C++ `nodeList`).
+        let node_list: Vec<&'gc Node<'gc>>;
+
+        // C++ 5702-5732.
+        if let Node::CallExpression(call_node) = node {
+            // Async function parameters look like call expressions. For example:
+            // async(x,y)
+            // It must have no surrounding parens and the name must be 'async'.
+            // It must also not already be `async`, because the CallExpression
+            // determines whether it is `async`.
+            // It must not have a newline between 'async' and the parameters.
+            // Set `isAsync = true` to indicate that this was async.
+            // C++ 5702-5719.
+            let callee_is_async = if let Node::Identifier(callee) =
+                call_node.callee
+            {
+                let callee_range = call_node.callee.range();
+                let callee_bytes = self
+                    .gc
+                    .ctx()
+                    .atom_table
+                    .bytes(callee.name.get())
+                    .to_owned();
+                // callee->_name == asyncIdent_ &&
+                // isUnescaped(callee->_name, callee->getSourceRange())
+                let unescaped = (callee_range.end.offset
+                    - callee_range.start.offset)
+                    as usize
+                    == callee_bytes.len();
+                callee_bytes == b"async" && unescaped
+            } else {
+                false
+            };
+            if !*is_async
+                && node.metadata().parens.get() == 0
+                && callee_is_async
+                && !has_new_line
+            {
+                node_list = call_node.arguments.iter().collect();
+                *is_async = true;
+            } else {
+                let range = node.range();
+                self.error_at(range, "invalid arrow function parameter list");
+                return false;
+            }
+        } else {
+            // C++ 5720-5732.
+            if node.metadata().parens.get() != 1 {
+                let range = node.range();
+                self.error_at(range, "invalid arrow function parameter list");
+                return false;
+            }
+
+            if let Node::SequenceExpression(seq_node) = node {
+                node_list = seq_node.expressions.iter().collect();
+            } else {
+                node.metadata().parens.set(0);
+                node_list = vec![node];
+            }
+        }
+
+        // C++ 5734: paramAwait_ = paramAwait_ || isAsync (RAII).
+        let _save_param_await =
+            self.save_param_await(self.param_await.get() || *is_async);
+
+        let list_len = node_list.len();
+        // C++ 5746-5813.
+        for (idx, expr0) in node_list.into_iter().enumerate() {
+            let is_last = idx == list_len - 1;
+            let mut expr = expr0;
+
+            // checkParens (C++ 5738-5744, 5750-5751).
+            if expr.metadata().parens.get() != 0 {
+                let range = expr.range();
+                self.error_at(
+                    range,
+                    "parentheses are not allowed around parameters",
+                );
+                continue;
+            }
+
+            // CoverRestElement. C++ 5753-5759.
+            if let Node::CoverRestElement(cre) = expr {
+                if !is_last {
+                    let range = expr.range();
+                    self.error_at(range, "rest parameter must be last");
+                } else {
+                    param_list.push(cre.rest);
+                }
+                continue;
+            }
+
+            // SpreadElement (async arrow heads parse rest as SpreadElement).
+            // C++ 5761-5770.
+            if let Node::SpreadElement(spread) = expr {
+                if !is_last {
+                    let range = expr.range();
+                    self.error_at(range, "rest parameter must be last");
+                } else {
+                    // C++ 5767-5768 builds a fresh RestElement with NO
+                    // setLocation, so its source range stays invalid and the
+                    // dumper omits loc/range. Use `invalid_range()` to match.
+                    let node = Node::RestElement(RestElement::new(
+                        NodeMetadata::new(self.invalid_range()),
+                        spread.argument,
+                    ));
+                    let rest = self.gc.alloc(node);
+                    param_list.push(rest);
+                }
+                continue;
+            }
+
+            // CoverTrailingComma — just skip. C++ 5772-5778.
+            if matches!(expr, Node::CoverTrailingComma(_)) {
+                debug_assert!(
+                    is_last,
+                    "CoverTrailingComma should have been only parsed last"
+                );
+                continue;
+            }
+
+            // If we encounter an initializer, unpack it. C++ 5780-5792.
+            let mut init: Option<&'gc Node<'gc>> = None;
+            let mut asn_range: Option<support::location::SMRange> = None;
+            if let Node::AssignmentExpression(asn) = expr {
+                let eq_op = self.gc.ctx().atom_table.atom_bytes(b"=");
+                if asn.operator.get() == eq_op {
+                    asn_range = Some(expr.range());
+                    expr = asn.left;
+                    init = Some(asn.right);
+
+                    if expr.metadata().parens.get() != 0 {
+                        let range = expr.range();
+                        self.error_at(
+                            range,
+                            "parentheses are not allowed around parameters",
+                        );
+                        continue;
+                    }
+                }
+            }
+
+            // reparseAssignmentPattern(expr, true). C++ 5794-5797.
+            let opt_param = match self.reparse_assignment_pattern(expr, true) {
+                Some(p) => p,
+                None => continue,
+            };
+            expr = opt_param;
+
+            // C++ 5799-5802.
+            if let Some(init) = init {
+                let r = asn_range.unwrap();
+                let node = Node::AssignmentPattern(AssignmentPattern::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    expr,
+                    init,
+                ));
+                expr = self.set_location(r.start, r.end, node);
+            }
+
+            // C++ 5804-5810.
+            if let Node::Identifier(ident) = expr {
+                let range = expr.range();
+                let name_bytes = self
+                    .gc
+                    .ctx()
+                    .atom_table
+                    .bytes(ident.name.get())
+                    .to_owned();
+                self.validate_binding_identifier(
+                    range,
+                    &name_bytes,
+                    TokenKind::identifier,
+                );
+            }
+
+            param_list.push(expr);
+        }
+
+        true
+    }
+
+    // -----------------------------------------------------------------------
+    // parseArrowFunctionExpression — 5818 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse the body of an arrow function given the already-parsed cover
+    /// parameters in `left_expr`. Port of
+    /// `JSParserImpl::parseArrowFunctionExpression` (lines 5818-5911).
+    ///
+    /// Full-pass / eager port: the `pass_ == PreParse` block (5896-5908) is
+    /// omitted. `force_eagerly` is threaded for fidelity (feeds
+    /// `parse_function_body`), but is inert in the eager port.
+    ///
+    /// P6/P7: the C++ `typeParams`/`returnType`/`predicate`/
+    /// `allowTypedArrowFunction` Flow/TS arguments are always null/None in the
+    /// plain-JS subset, so they are dropped from this signature.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn parse_arrow_function_expression(
+        &mut self,
+        param: Param,
+        force_eagerly: bool,
+        left_expr: &'gc Node<'gc>,
+        has_new_line: bool,
+        start_loc: SMLoc,
+        force_async: bool,
+    ) -> Option<&'gc Node<'gc>> {
+        // ArrowFunction : ArrowParameters [no line terminator] => ConciseBody.
+        debug_assert!(
+            self.check(TokenKind::equalgreater)
+                && !self.lexer.is_new_line_before_current_token(),
+            "ArrowFunctionExpression expects [no new line] '=>'"
+        );
+
+        // C++ 5834: argsParamAwait = forceAsync (RAII).
+        let _save_args_param_await = self.save_param_await(force_async);
+
+        // C++ 5836-5842.
+        if !self.eat(
+            TokenKind::equalgreater,
+            GrammarContext::AllowRegExp,
+            " in arrow function expression",
+        ) {
+            return None;
+        }
+
+        let mut is_async = force_async;
+        let mut param_list: Vec<&'gc Node<'gc>> = Vec::new();
+        // C++ 5846-5847.
+        if !self.reparse_arrow_parameters(
+            left_expr,
+            has_new_line,
+            &mut param_list,
+            &mut is_async,
+        ) {
+            return None;
+        }
+
+        // SaveFunctionState: lazy-compile bookkeeping, not modeled in the
+        // Full-pass port. (C++ 5849.)
+
+        // C++ 5854-5855: paramYield_ = false; paramAwait_ = isAsync (RAII).
+        let _save_body_param_yield = self.save_param_yield(false);
+        let _save_body_param_await = self.save_param_await(is_async);
+
+        let body;
+        let expression;
+        if self.check(TokenKind::l_brace) {
+            // C++ 5856-5867.
+            body = self.parse_function_body(
+                Param::default(),
+                force_eagerly,
+                // oldParamYield.get() == false; argsParamAwait.get() == force_async.
+                false,
+                force_async,
+                GrammarContext::AllowDiv,
+                /* parse_directives= */ true,
+            )?;
+            expression = false;
+        } else {
+            // It's possible to recurse onto parseAssignmentExpression directly
+            // and get stuck without a depth check if we don't have one here.
+            // C++ 5868-5882.
+            let _guard = self.check_recursion()?;
+            body = self.parse_assignment_expression(param.get(PARAM_IN))?;
+            expression = true;
+        }
+
+        // C++ 5884-5894.
+        let end = self.lexer.prev_token_end();
+        let params = NodeList::from_iter(self.gc, param_list);
+        let node =
+            Node::ArrowFunctionExpression(ArrowFunctionExpression::new(
+                NodeMetadata::new(self.dummy_range()),
+                params,
+                body,
+                // P6/P7: Flow typeParams/returnType/predicate (always None).
+                None,
+                None,
+                None,
+                expression,
+                is_async,
+            ));
+        Some(self.set_location(start_loc, end, node))
     }
 
     // -----------------------------------------------------------------------
@@ -3099,26 +3465,31 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
             // parenthesized expression / arrow-function cover — C++ 2598-2665
             TokenKind::l_paren => {
-                self.advance(GrammarContext::AllowRegExp);
+                let start_loc = self.advance(GrammarContext::AllowRegExp).start;
 
-                // Cover "()" — empty arrow params, P3. C++ lines 2602-2605.
+                // Cover "()". C++ lines 2602-2606.
                 if self.check(TokenKind::r_paren) {
-                    self.error_cur(
-                        "arrow functions not yet supported (parser phase P3)",
-                    );
-                    return None;
+                    let end_loc = self.advance(GrammarContext::AllowDiv).end;
+                    let node = Node::CoverEmptyArgs(CoverEmptyArgs::new(
+                        NodeMetadata::new(self.dummy_range()),
+                    ));
+                    return Some(self.set_location(start_loc, end_loc, node));
                 }
 
-                // Cover "(...rest)" — arrow params, P3. C++ lines 2609-2622.
-                if self.check(TokenKind::dotdotdot) {
-                    self.error_cur(
-                        "arrow functions not yet supported (parser phase P3)",
-                    );
-                    return None;
-                }
-
-                // Plain grouped expression: parse expr, eat ')'.
-                let expr = self.parse_expression(PARAM_IN)?;
+                // Cover "(...rest)". C++ lines 2608-2623.
+                let expr = if self.check(TokenKind::dotdotdot) {
+                    let rest = self.parse_binding_rest_element(PARAM_IN)?;
+                    let rest_range = rest.range();
+                    let node = Node::CoverRestElement(CoverRestElement::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        rest,
+                    ));
+                    self.set_location(rest_range.start, rest_range.end, node)
+                } else {
+                    // Plain grouped expression: parse expr.
+                    // C++ passes CoverTypedParameters::Yes (Flow/TS-only).
+                    self.parse_expression(PARAM_IN)?
+                };
 
                 // Flow type-cast annotation — deferred (context_.getParseFlow()).
 

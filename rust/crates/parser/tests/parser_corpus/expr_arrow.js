@@ -1,0 +1,12 @@
+a => a;
+(a) => a;
+(a, b) => a + b;
+() => 0;
+(a, ...b) => b;
+(a = 1) => a;
+({x}) => x;
+([y]) => y;
+a => { return a; };
+async a => a;
+async (a) => a;
+async () => 0;
