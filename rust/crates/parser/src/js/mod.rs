@@ -18,6 +18,7 @@ use support::location::{SMLoc, SMRange};
 use crate::lexer::{GrammarContext, JSLexer};
 use crate::token_kinds::TokenKind;
 
+mod classes;
 mod expressions;
 mod functions;
 mod statements;
@@ -273,7 +274,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     /// Report an error at `range`. Routed through the lexer's SourceErrorManager.
-    fn error_at(&mut self, range: SMRange, msg: &str) {
+    pub(super) fn error_at(&mut self, range: SMRange, msg: &str) {
         self.lexer.get_source_mgr_mut().error_at(
             range.start,
             Some(range),
@@ -844,9 +845,247 @@ mod tests {
         );
     }
 
+    // ----- P3.6: classes + decorators -----
+
+    /// `class A extends B {}` -> ClassDeclaration whose superClass is the
+    /// identifier `B`.
     #[test]
-    fn deferred_class_declaration_errors() {
-        assert_parse_errors(b"class C {}", "class declaration is P3");
+    fn class_declaration_with_heritage() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt = parse_one_stmt(&gc, &mut sm, b"class A extends B {}");
+        let Node::ClassDeclaration(cd) = stmt else {
+            panic!("expected ClassDeclaration, got {:?}", stmt.kind());
+        };
+        let sup = cd.super_class.expect("superClass present");
+        match sup {
+            Node::Identifier(id) => {
+                let bytes = gc.ctx().atom_table.bytes(id.name.get());
+                assert_eq!(bytes, b"B");
+            }
+            other => panic!("expected Identifier superClass, got {:?}", other.kind()),
+        }
+    }
+
+    /// Helper: parse `class A { <member> }` and return the single class-body
+    /// element.
+    fn parse_one_class_member<'gc>(
+        gc: &'gc ast::context::GCLock<'_, '_>,
+        sm: &mut support::manager::SourceErrorManager,
+        member_src: &str,
+    ) -> &'gc ast::node::Node<'gc> {
+        use ast::node::Node;
+        let src = format!("class A {{ {member_src} }}");
+        let stmt = parse_one_stmt(gc, sm, src.as_bytes());
+        let Node::ClassDeclaration(cd) = stmt else {
+            panic!("expected ClassDeclaration, got {:?}", stmt.kind());
+        };
+        let Node::ClassBody(cb) = cd.body else {
+            panic!("expected ClassBody");
+        };
+        cb.body.iter().next().expect("one class member")
+    }
+
+    /// `m(){}` -> MethodDefinition with kind "method".
+    #[test]
+    fn class_method_kind_method() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let member = parse_one_class_member(&gc, &mut sm, "m(){}");
+        let Node::MethodDefinition(md) = member else {
+            panic!("expected MethodDefinition, got {:?}", member.kind());
+        };
+        let kind = gc.ctx().atom_table.bytes(md.kind.get());
+        assert_eq!(kind, b"method");
+        assert!(!md.r#static.get(), "not static");
+    }
+
+    /// `constructor(){}` -> MethodDefinition with kind "constructor".
+    #[test]
+    fn class_method_kind_constructor() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let member = parse_one_class_member(&gc, &mut sm, "constructor(){}");
+        let Node::MethodDefinition(md) = member else {
+            panic!("expected MethodDefinition, got {:?}", member.kind());
+        };
+        let kind = gc.ctx().atom_table.bytes(md.kind.get());
+        assert_eq!(kind, b"constructor");
+    }
+
+    /// `get x(){}` -> MethodDefinition with kind "get".
+    #[test]
+    fn class_method_kind_get() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let member = parse_one_class_member(&gc, &mut sm, "get x(){}");
+        let Node::MethodDefinition(md) = member else {
+            panic!("expected MethodDefinition, got {:?}", member.kind());
+        };
+        let kind = gc.ctx().atom_table.bytes(md.kind.get());
+        assert_eq!(kind, b"get");
+    }
+
+    /// `static s(){}` -> static MethodDefinition.
+    #[test]
+    fn class_method_static() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let member = parse_one_class_member(&gc, &mut sm, "static s(){}");
+        let Node::MethodDefinition(md) = member else {
+            panic!("expected MethodDefinition, got {:?}", member.kind());
+        };
+        assert!(md.r#static.get(), "static flag set");
+    }
+
+    /// `#p(){}` -> MethodDefinition whose key is a PrivateName.
+    #[test]
+    fn class_private_method_key_is_private_name() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let member = parse_one_class_member(&gc, &mut sm, "#p(){}");
+        let Node::MethodDefinition(md) = member else {
+            panic!("expected MethodDefinition, got {:?}", member.kind());
+        };
+        assert!(
+            matches!(md.key, Node::PrivateName(_)),
+            "method key is PrivateName, got {:?}",
+            md.key.kind()
+        );
+    }
+
+    /// `x = 1;` -> ClassProperty with a value.
+    #[test]
+    fn class_field_with_value() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let member = parse_one_class_member(&gc, &mut sm, "x = 1;");
+        let Node::ClassProperty(cp) = member else {
+            panic!("expected ClassProperty, got {:?}", member.kind());
+        };
+        assert!(cp.value.is_some(), "field has a value");
+    }
+
+    /// `#f;` -> ClassPrivateProperty.
+    #[test]
+    fn class_private_field() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let member = parse_one_class_member(&gc, &mut sm, "#f;");
+        assert!(
+            matches!(member, Node::ClassPrivateProperty(_)),
+            "expected ClassPrivateProperty, got {:?}",
+            member.kind()
+        );
+    }
+
+    /// `static { }` -> StaticBlock.
+    #[test]
+    fn class_static_block() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let member = parse_one_class_member(&gc, &mut sm, "static { }");
+        assert!(
+            matches!(member, Node::StaticBlock(_)),
+            "expected StaticBlock, got {:?}",
+            member.kind()
+        );
+    }
+
+    /// `const C = class {};` -> ClassExpression.
+    #[test]
+    fn class_expression_parses() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let expr = parse_expr_from(&gc, &mut sm, atoms, b"(class {});");
+        assert!(
+            matches!(expr, Node::ClassExpression(_)),
+            "expected ClassExpression, got {:?}",
+            expr.kind()
+        );
+    }
+
+    /// A decorated class declaration: `@dec class A {}` -> ClassDeclaration with
+    /// a single Decorator.
+    #[test]
+    fn class_declaration_with_decorator() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt = parse_one_stmt(&gc, &mut sm, b"@dec class A {}");
+        let Node::ClassDeclaration(cd) = stmt else {
+            panic!("expected ClassDeclaration, got {:?}", stmt.kind());
+        };
+        let decorators: Vec<_> = cd.decorators.iter().collect();
+        assert_eq!(decorators.len(), 1, "one decorator");
+        assert!(
+            matches!(decorators[0], Node::Decorator(_)),
+            "expected Decorator node"
+        );
+    }
+
+    /// The class body is always strict mode, but that strictness must NOT leak
+    /// into the enclosing (sloppy) code. After a class declaration, a `with`
+    /// statement — which is illegal in strict mode — must still parse cleanly.
+    #[test]
+    fn class_strict_mode_does_not_leak() {
+        use ast::context::Context;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let buf_id = sm.add_buffer_bytes("input", b"class A {}\nwith(x) y;");
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        assert!(
+            parser.parse().is_some(),
+            "with-statement after class must parse (sloppy mode restored)"
+        );
+        assert_eq!(
+            parser.error_count_pub(),
+            0,
+            "no errors: class strict mode must not leak to enclosing sloppy code"
+        );
     }
 
     #[test]

@@ -254,11 +254,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         // C++ 829-835.
         if self.check2(TokenKind::at, TokenKind::rw_class) {
-            // P3: class declarations are deferred.
-            self.error_cur(
-                "class declarations not yet supported (parser phase P3)",
-            );
-            return None;
+            return self.parse_class_declaration(param);
         }
 
         // C++ 837-843.

@@ -1,0 +1,1144 @@
+/*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+//! Class and decorator parsing for the JS parser. Port of the class-parsing
+//! section of `lib/Parser/JSParserImpl.cpp` (parseDecoratorList /
+//! parseDecorator / parseClassDeclaration / parseClassExpression /
+//! parseClassTail / parseClassBody / parseClassBodyImpl / parseClassElement,
+//! C++ lines 4688-5679).
+//!
+//! Flow/TS productions (type params, `implements`, return/param/field type
+//! annotations, TS modifiers, Flow variance) are omitted; the corresponding
+//! node fields are filled with their JS-only defaults (`None` /
+//! `NodeList::empty()` / `false`). See the `// P6/P7` comments at each site.
+
+use ast::node::{
+    CallExpression, ClassBody, ClassDeclaration, ClassExpression, ClassPrivateProperty,
+    ClassProperty, Decorator, FunctionExpression, Identifier, MemberExpression, MethodDefinition,
+    Node, PrivateName, StaticBlock,
+};
+use ast::node_child::{NodeList, NodeMetadata};
+use support::location::{SMLoc, SMRange};
+
+use crate::lexer::GrammarContext;
+use crate::token_kinds::TokenKind;
+
+use super::{
+    AllowImportExport, IsClassHeritageArgument, JSParserImpl, Param, PARAM_DEFAULT, PARAM_IN,
+    PARAM_RETURN,
+};
+
+/// Whether `parseClassTail` builds a `ClassDeclaration` or a `ClassExpression`.
+/// Port of the C++ `enum class ClassParseKind { Expression, Declaration };`
+/// (JSParserImpl.h).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum ClassParseKind {
+    Expression,
+    Declaration,
+}
+
+impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
+    // -----------------------------------------------------------------------
+    // parseDecoratorList — 4688 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a list of decorators (`@expr @expr ...`) into `list`. Port of
+    /// `JSParserImpl::parseDecoratorList` (4688-4699).
+    pub(super) fn parse_decorator_list(
+        &mut self,
+        list: &mut Vec<&'gc Node<'gc>>,
+    ) -> bool {
+        debug_assert!(self.check(TokenKind::at));
+
+        while self.check(TokenKind::at) {
+            match self.parse_decorator() {
+                Some(decorator) => list.push(decorator),
+                None => return false,
+            }
+        }
+
+        true
+    }
+
+    // -----------------------------------------------------------------------
+    // parseDecorator — 4701 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a single decorator. Port of `JSParserImpl::parseDecorator`
+    /// (4701-4791). A decorator is either a parenthesized expression
+    /// (`@( Expression )`) or an identifier member chain (`@a.b.c`) with an
+    /// optional private-name property and an optional trailing call `(args)`.
+    fn parse_decorator(&mut self) -> Option<&'gc Node<'gc>> {
+        debug_assert!(self.check(TokenKind::at));
+
+        let start_loc = self.advance(GrammarContext::AllowRegExp).start;
+        let expr: &'gc Node<'gc>;
+
+        if self.check(TokenKind::l_paren) {
+            // DecoratorParenthesizedExpression:
+            // ( Expression[+In, ?Yield, ?Await] )
+            // ^
+            let paren_loc = self.advance(GrammarContext::AllowRegExp).start;
+            let inner = self.parse_expression(PARAM_IN)?;
+            if !self.eat(
+                TokenKind::r_paren,
+                GrammarContext::AllowDiv,
+                " at end of decorator expression",
+            ) {
+                self.lexer.get_source_mgr_mut().note_at(
+                    paren_loc,
+                    None,
+                    "location of '('",
+                    support::diag::Subsystem::Parser,
+                );
+                return None;
+            }
+            expr = inner;
+        } else {
+            // Must be identifier (start of DecoratorMemberExpression).
+            if !self.check(TokenKind::identifier) && !self.lexer.token().is_res_word() {
+                self.error_cur("identifier expected in decorator");
+                self.lexer.get_source_mgr_mut().note_at(
+                    start_loc,
+                    None,
+                    "location of '@'",
+                    support::diag::Subsystem::Parser,
+                );
+                return None;
+            }
+
+            let tok_rng = self.lexer.token().source_range();
+            let id_name = self.lexer.token().get_res_word_or_identifier();
+            let mut cur = self.set_location(
+                tok_rng.start,
+                tok_rng.end,
+                Node::Identifier(Identifier::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    id_name,
+                    None,
+                    false,
+                )),
+            );
+            self.advance(GrammarContext::AllowDiv);
+
+            // Parse member chain:
+            // DecoratorMemberExpression . IdentifierName
+            //                           ^
+            while self.check_and_eat(TokenKind::period, GrammarContext::AllowRegExp) {
+                let property: &'gc Node<'gc>;
+
+                if self.check(TokenKind::private_identifier) {
+                    property = self.parse_private_name()?;
+                } else if self.check(TokenKind::identifier)
+                    || self.lexer.token().is_res_word()
+                {
+                    let prop_rng = self.lexer.token().source_range();
+                    let prop_name = self.lexer.token().get_res_word_or_identifier();
+                    property = self.set_location(
+                        prop_rng.start,
+                        prop_rng.end,
+                        Node::Identifier(Identifier::new(
+                            NodeMetadata::new(self.dummy_range()),
+                            prop_name,
+                            None,
+                            false,
+                        )),
+                    );
+                    self.advance(GrammarContext::AllowDiv);
+                } else {
+                    self.error_cur("identifier expected after '.' in decorator");
+                    self.lexer.get_source_mgr_mut().note_at(
+                        start_loc,
+                        None,
+                        "location of '@'",
+                        support::diag::Subsystem::Parser,
+                    );
+                    return None;
+                }
+
+                let prop_end = property.range().end;
+                cur = self.set_location(
+                    start_loc,
+                    prop_end,
+                    Node::MemberExpression(MemberExpression::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        cur,
+                        property,
+                        false,
+                    )),
+                );
+            }
+
+            // DecoratorCallExpression:
+            // DecoratorMemberExpression Arguments
+            //                           ^
+            if self.check(TokenKind::l_paren) {
+                let (arg_list, end_loc) = self.parse_arguments()?;
+                cur = self.set_location(
+                    start_loc,
+                    end_loc,
+                    Node::CallExpression(CallExpression::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        cur,
+                        None,
+                        NodeList::from_iter(self.gc, arg_list),
+                    )),
+                );
+            }
+
+            expr = cur;
+        }
+
+        let end = self.lexer.prev_token_end();
+        Some(self.set_location(
+            start_loc,
+            end,
+            Node::Decorator(Decorator::new(
+                NodeMetadata::new(self.dummy_range()),
+                expr,
+            )),
+        ))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseClassDeclaration — 4793 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a class declaration. Port of `JSParserImpl::parseClassDeclaration`
+    /// (4793-4873). The class name is required unless `param` has `+Default`
+    /// (i.e. `export default class {}`).
+    pub(super) fn parse_class_declaration(
+        &mut self,
+        param: Param,
+    ) -> Option<&'gc Node<'gc>> {
+        // NOTE: Class definition is always strict mode code.
+        // C++ `SaveFunctionState saveFunctionState{this}; setStrictMode(true);`.
+        // The Rust parser does not model `SaveFunctionState` (it is lazy-compile
+        // bookkeeping, no-op'd elsewhere in this port), so we save/restore the
+        // one piece of state that matters here — the lexer strict-mode flag —
+        // explicitly so the class does not leak strictness to the enclosing
+        // (possibly sloppy) code. The result is computed first so the restore
+        // runs on every (including error) path.
+        let old_strict = self.lexer.is_strict_mode();
+        self.lexer.set_strict_mode(true);
+        let result = self.parse_class_declaration_inner(param);
+        self.lexer.set_strict_mode(old_strict);
+        result
+    }
+
+    fn parse_class_declaration_inner(
+        &mut self,
+        param: Param,
+    ) -> Option<&'gc Node<'gc>> {
+        debug_assert!(
+            self.check2(TokenKind::at, TokenKind::rw_class),
+            "class must start with '@' or 'class'"
+        );
+
+        let start_loc = self.cur_start();
+        let mut decorators: Vec<&'gc Node<'gc>> = Vec::new();
+
+        if self.check(TokenKind::at) {
+            if !self.parse_decorator_list(&mut decorators) {
+                return None;
+            }
+
+            if !self.eat(TokenKind::rw_class, GrammarContext::AllowRegExp, " in class") {
+                self.lexer.get_source_mgr_mut().note_at(
+                    start_loc,
+                    None,
+                    "start of class",
+                    support::diag::Subsystem::Parser,
+                );
+                return None;
+            }
+        } else {
+            // No decorators, eat the 'class' token.
+            debug_assert!(self.check(TokenKind::rw_class));
+            self.advance(GrammarContext::AllowRegExp);
+        }
+
+        let mut name: Option<&'gc Node<'gc>> = None;
+
+        if self.check(TokenKind::identifier) {
+            match self.parse_binding_identifier(Param::default()) {
+                Some(n) => name = Some(n),
+                None => {
+                    self.error_cur("identifier expected in class declaration");
+                    self.lexer.get_source_mgr_mut().note_at(
+                        start_loc,
+                        None,
+                        "location of 'class'",
+                        support::diag::Subsystem::Parser,
+                    );
+                    return None;
+                }
+            }
+        } else if !param.has(PARAM_DEFAULT) {
+            // Identifier is required unless we have +Default parameter.
+            self.error_cur("identifier expected after 'class'");
+            self.lexer.get_source_mgr_mut().note_at(
+                start_loc,
+                None,
+                "location of 'class'",
+                support::diag::Subsystem::Parser,
+            );
+            return None;
+        }
+
+        // P6/P7: Flow/TS class type parameters (`<...>`, C++ 4847-4862) omitted;
+        // type_params stays None.
+        self.parse_class_tail(
+            start_loc,
+            name,
+            None,
+            ClassParseKind::Declaration,
+            decorators,
+        )
+    }
+
+    // -----------------------------------------------------------------------
+    // parseClassExpression — 4875 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a class expression. Port of `JSParserImpl::parseClassExpression`
+    /// (4875-4951). The class name is optional (parsed only if the next token is
+    /// neither `extends` nor `{`).
+    pub(super) fn parse_class_expression(&mut self) -> Option<&'gc Node<'gc>> {
+        // NOTE: A class definition is always strict mode code. See the comment
+        // in `parse_class_declaration` for the save/restore rationale.
+        let old_strict = self.lexer.is_strict_mode();
+        self.lexer.set_strict_mode(true);
+        let result = self.parse_class_expression_inner();
+        self.lexer.set_strict_mode(old_strict);
+        result
+    }
+
+    fn parse_class_expression_inner(&mut self) -> Option<&'gc Node<'gc>> {
+        debug_assert!(
+            self.check2(TokenKind::at, TokenKind::rw_class),
+            "class must start with '@' or 'class'"
+        );
+
+        let start = self.cur_start();
+        let mut decorators: Vec<&'gc Node<'gc>> = Vec::new();
+
+        if self.check(TokenKind::at) {
+            if !self.parse_decorator_list(&mut decorators) {
+                return None;
+            }
+
+            if !self.eat(TokenKind::rw_class, GrammarContext::AllowRegExp, " in class") {
+                self.lexer.get_source_mgr_mut().note_at(
+                    start,
+                    None,
+                    "start of class",
+                    support::diag::Subsystem::Parser,
+                );
+                return None;
+            }
+        } else {
+            // No decorators, eat the 'class' token.
+            debug_assert!(self.check(TokenKind::rw_class));
+            self.advance(GrammarContext::AllowRegExp);
+        }
+
+        let mut name: Option<&'gc Node<'gc>> = None;
+
+        // P6/P7: Flow `implements`/`<` and TS `<` heritage checks (C++ 4908-4910)
+        // omitted; only the `extends`/`{` guard remains.
+        if !self.check2(TokenKind::rw_extends, TokenKind::l_brace) {
+            // Try to parse a BindingIdentifier if we did not see a ClassHeritage
+            // or a '{'.
+            match self.parse_binding_identifier(Param::default()) {
+                Some(n) => name = Some(n),
+                None => {
+                    self.error_cur("identifier expected in class expression");
+                    self.lexer.get_source_mgr_mut().note_at(
+                        start,
+                        None,
+                        "location of 'class'",
+                        support::diag::Subsystem::Parser,
+                    );
+                    return None;
+                }
+            }
+        }
+
+        // P6/P7: Flow/TS class type parameters (`<...>`, C++ 4925-4940) omitted;
+        // type_params stays None.
+        self.parse_class_tail(
+            start,
+            name,
+            None,
+            ClassParseKind::Expression,
+            decorators,
+        )
+    }
+
+    // -----------------------------------------------------------------------
+    // parseClassTail — 4953 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse the heritage + body of a class. Port of
+    /// `JSParserImpl::parseClassTail` (4953-5048). Builds either a
+    /// `ClassDeclaration` or `ClassExpression` per `kind`.
+    fn parse_class_tail(
+        &mut self,
+        start_loc: SMLoc,
+        name: Option<&'gc Node<'gc>>,
+        type_params: Option<&'gc Node<'gc>>,
+        kind: ClassParseKind,
+        decorators: Vec<&'gc Node<'gc>>,
+    ) -> Option<&'gc Node<'gc>> {
+        let mut super_class: Option<&'gc Node<'gc>> = None;
+        // P6/P7: super_type_params (Flow/TS `<...>` after extends) omitted.
+        let super_type_params: Option<&'gc Node<'gc>> = None;
+
+        if self.check_and_eat(TokenKind::rw_extends, GrammarContext::AllowRegExp) {
+            // ClassHeritage[opt] { ClassBody[opt] }
+            // ^
+            super_class =
+                Some(self.parse_left_hand_side_expression(IsClassHeritageArgument::Yes)?);
+            // P6/P7: Flow/TS super-type-arguments (`<...>`, C++ 4970-4985) omitted.
+        }
+
+        // P6/P7: Flow `implements` clause (C++ 4988-5010) omitted; pass an empty
+        // implements list.
+        let implements = NodeList::empty();
+
+        if !self.need(TokenKind::l_brace, " in class definition") {
+            self.lexer.get_source_mgr_mut().note_at(
+                start_loc,
+                None,
+                "start of class",
+                support::diag::Subsystem::Parser,
+            );
+            return None;
+        }
+
+        let body = self.parse_class_body(start_loc)?;
+        let body_end = body.range().end;
+
+        let decorator_list = NodeList::from_iter(self.gc, decorators);
+
+        let node = match kind {
+            ClassParseKind::Declaration => Node::ClassDeclaration(ClassDeclaration::new(
+                NodeMetadata::new(self.dummy_range()),
+                name,
+                type_params,
+                super_class,
+                super_type_params,
+                implements,
+                decorator_list,
+                body,
+            )),
+            ClassParseKind::Expression => Node::ClassExpression(ClassExpression::new(
+                NodeMetadata::new(self.dummy_range()),
+                name,
+                type_params,
+                super_class,
+                super_type_params,
+                implements,
+                decorator_list,
+                body,
+            )),
+        };
+        Some(self.set_location(start_loc, body_end, node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseClassBody — 5050 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a class body `{ ClassElement* }`. Port of
+    /// `JSParserImpl::parseClassBody` (5050-5076). Tracks the constructor for the
+    /// duplicate-constructor syntax-error check in `parse_class_body_impl`.
+    fn parse_class_body(&mut self, start_loc: SMLoc) -> Option<&'gc Node<'gc>> {
+        debug_assert!(
+            self.check(TokenKind::l_brace),
+            "class body must begin with '{{'"
+        );
+        let brace_loc = self.advance(GrammarContext::AllowRegExp).start;
+
+        // It is a Syntax Error if PrototypePropertyNameList of ClassElementList
+        // contains more than one occurrence of "constructor".
+        let mut constructor: Option<&'gc Node<'gc>> = None;
+        let mut body: Vec<&'gc Node<'gc>> = Vec::new();
+        while !self.check(TokenKind::r_brace) {
+            if !self.parse_class_body_impl(&mut body, &mut constructor, false) {
+                return None;
+            }
+        }
+
+        if !self.need(TokenKind::r_brace, " at end of class definition") {
+            self.lexer.get_source_mgr_mut().note_at(
+                start_loc,
+                None,
+                "start of class",
+                support::diag::Subsystem::Parser,
+            );
+            return None;
+        }
+        let end = self.advance(GrammarContext::AllowRegExp).end;
+
+        Some(self.set_location(
+            brace_loc,
+            end,
+            Node::ClassBody(ClassBody::new(
+                NodeMetadata::new(self.dummy_range()),
+                NodeList::from_iter(self.gc, body),
+            )),
+        ))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseClassBodyImpl — 5078 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse one class-body element and push it onto `body`. Port of
+    /// `JSParserImpl::parseClassBodyImpl` (5078-5201). Handles the leading
+    /// decorator list, the `static` modifier, empty `;` separators, the
+    /// duplicate-constructor diagnostic, and the invalid `constructor` field
+    /// name diagnostic.
+    fn parse_class_body_impl(
+        &mut self,
+        body: &mut Vec<&'gc Node<'gc>>,
+        constructor: &mut Option<&'gc Node<'gc>>,
+        eagerly: bool,
+    ) -> bool {
+        let mut is_static = false;
+        let start_range = self.lexer.token().source_range();
+
+        let mut decorators: Vec<&'gc Node<'gc>> = Vec::new();
+        if self.check(TokenKind::at) && !self.parse_decorator_list(&mut decorators) {
+            return false;
+        }
+
+        // P6/P7: Flow `declare` (C++ 5095-5108) and TS modifiers
+        // (accessibility/static/readonly, C++ 5110-5138) omitted. declare =
+        // readonly = false, accessibility = None.
+
+        match self.cur_kind() {
+            TokenKind::semi => {
+                self.advance(GrammarContext::AllowRegExp);
+            }
+            _ => {
+                if self.check(TokenKind::rw_static) {
+                    // static MethodDefinition / static FieldDefinition
+                    // (the TS `readonly || isStatic` guard, C++ 5146-5149, is
+                    // omitted since TS modifiers are not parsed.)
+                    is_static = true;
+                    self.advance(GrammarContext::AllowRegExp);
+                }
+                // LLVM_FALLTHROUGH to default: parse the ClassElement.
+                let elem = match self.parse_class_element(
+                    is_static,
+                    start_range,
+                    /* declare */ false,
+                    /* readonly */ false,
+                    /* accessibility */ None,
+                    decorators,
+                    eagerly,
+                ) {
+                    Some(e) => e,
+                    None => return false,
+                };
+
+                if let Node::MethodDefinition(method) = elem {
+                    let constructor_atom =
+                        self.gc.ctx().atom_table.atom_bytes(b"constructor");
+                    if method.kind.get() == constructor_atom {
+                        if let Some(first) = *constructor {
+                            // Cannot have duplicate constructors, but report the
+                            // error and move on to parse the rest of the class.
+                            self.error_at(
+                                elem.range(),
+                                "duplicate constructors in class",
+                            );
+                            self.lexer.get_source_mgr_mut().note_at(
+                                first.range().start,
+                                Some(first.range()),
+                                "first constructor definition",
+                                support::diag::Subsystem::Parser,
+                            );
+                        } else {
+                            *constructor = Some(elem);
+                        }
+                    }
+                } else if let Node::ClassProperty(prop) = elem {
+                    if !prop.computed.get() {
+                        let constructor_atom =
+                            self.gc.ctx().atom_table.atom_bytes(b"constructor");
+                        let is_ctor_name = match prop.key {
+                            Node::Identifier(id) => id.name.get() == constructor_atom,
+                            Node::StringLiteral(s) => s.value.get() == constructor_atom,
+                            _ => false,
+                        };
+                        if is_ctor_name {
+                            self.error_at(elem.range(), "invalid class property name");
+                        }
+                    }
+                }
+
+                body.push(elem);
+            }
+        }
+        true
+    }
+
+    // -----------------------------------------------------------------------
+    // parseClassElement — 5203 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse one class element (method / accessor / generator / async / field /
+    /// static block / private member). Port of `JSParserImpl::parseClassElement`
+    /// (5203-5679). This is the most intricate part of class parsing: it detects
+    /// `get`/`set`/`async`/`*` specifiers, static blocks, `static` used as a
+    /// property name, private names, and distinguishes fields from methods,
+    /// reporting the various special-kind syntax errors.
+    #[allow(clippy::too_many_arguments)]
+    fn parse_class_element(
+        &mut self,
+        mut is_static: bool,
+        start_range: SMRange,
+        declare: bool,
+        _readonly: bool,
+        accessibility: Option<()>,
+        decorators: Vec<&'gc Node<'gc>>,
+        eagerly: bool,
+    ) -> Option<&'gc Node<'gc>> {
+        let start_loc = self.cur_start();
+
+        // P6/P7: TS `optional` (`?`) field flag; always false in JS.
+        let optional = false;
+        let mut is_private = false;
+
+        // SpecialKind: indicates if this method is out of the ordinary — in
+        // particular getters and setters. Local to this function in C++.
+        #[derive(Clone, Copy, PartialEq, Eq)]
+        enum SpecialKind {
+            None,
+            Get,
+            Set,
+            Generator,
+            Async,
+            AsyncGenerator,
+        }
+
+        let mut special = SpecialKind::None;
+
+        // When true, call parsePropertyName. Set to false if 'get'/'set'/'async'
+        // or `static` were already parsed as the property name.
+        let mut do_parse_property_name = true;
+
+        let mut prop: Option<&'gc Node<'gc>> = None;
+        if self.check_name(b"get") {
+            let range = self.advance(GrammarContext::AllowRegExp);
+            // checkN(less, l_paren, r_brace, equal, colon, semi, star)
+            // less/colon are Flow/TS-only and never appear in JS, but we keep the
+            // full set so the detection is identical: `get` is a getter unless
+            // followed by one of these.
+            if !self.check_class_element_after_accessor_name() {
+                // This was actually a getter.
+                special = SpecialKind::Get;
+            } else {
+                let get_ident = self.gc.ctx().atom_table.atom_bytes(b"get");
+                prop = Some(self.set_location(
+                    range.start,
+                    range.end,
+                    Node::Identifier(Identifier::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        get_ident,
+                        None,
+                        false,
+                    )),
+                ));
+                do_parse_property_name = false;
+            }
+        } else if self.check_name(b"set") {
+            let range = self.advance(GrammarContext::AllowRegExp);
+            if !self.check_class_element_after_accessor_name() {
+                // If we don't see '(' then this was actually a setter.
+                special = SpecialKind::Set;
+            } else {
+                let set_ident = self.gc.ctx().atom_table.atom_bytes(b"set");
+                prop = Some(self.set_location(
+                    range.start,
+                    range.end,
+                    Node::Identifier(Identifier::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        set_ident,
+                        None,
+                        false,
+                    )),
+                ));
+                do_parse_property_name = false;
+            }
+        } else if self.check_unescaped_name(b"async") {
+            let range = self.advance(GrammarContext::AllowRegExp);
+            // checkN(less, l_paren, r_brace, equal, colon, semi) — note: no star,
+            // since `async *` is an async generator.
+            if !self.check_n4(
+                TokenKind::l_paren,
+                TokenKind::r_brace,
+                TokenKind::equal,
+                TokenKind::semi,
+            ) && !self.lexer.is_new_line_before_current_token()
+            {
+                // If we don't see '(' then this was actually an async method.
+                // Async methods cannot have a newline between 'async' and the
+                // name. These can be either Async or AsyncGenerator, so check.
+                special = if self
+                    .check_and_eat(TokenKind::star, GrammarContext::AllowRegExp)
+                {
+                    SpecialKind::AsyncGenerator
+                } else {
+                    SpecialKind::Async
+                };
+            } else {
+                let async_ident = self.gc.ctx().atom_table.atom_bytes(b"async");
+                prop = Some(self.set_location(
+                    range.start,
+                    range.end,
+                    Node::Identifier(Identifier::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        async_ident,
+                        None,
+                        false,
+                    )),
+                ));
+                do_parse_property_name = false;
+            }
+        } else if self.check_and_eat(TokenKind::star, GrammarContext::AllowRegExp) {
+            special = SpecialKind::Generator;
+        } else if is_static
+            && self.check_and_eat(TokenKind::l_brace, GrammarContext::AllowRegExp)
+        {
+            // This is a static block.
+            // ES14.0 15.7
+            // ClassStaticBlock :
+            //   static { ClassStaticBlockBody }
+            //          ^
+            let brace_loc = self.cur_start();
+            let mut block_body: Vec<&'gc Node<'gc>> = Vec::new();
+
+            {
+                // ClassStaticBlockStatementList :
+                //   StatementList[~Yield, +Await, ~Return]opt
+                //   ^
+                let _guard_yield = self.save_param_yield(false);
+                let _guard_await = self.save_param_await(true);
+                if !self.parse_statement_list(
+                    Param::default(),
+                    [TokenKind::r_brace],
+                    /* parse_directives */ false,
+                    AllowImportExport::No,
+                    &mut block_body,
+                ) {
+                    return None;
+                }
+            }
+            if !self.eat(
+                TokenKind::r_brace,
+                GrammarContext::AllowRegExp,
+                " at end of static block",
+            ) {
+                self.lexer.get_source_mgr_mut().note_at(
+                    brace_loc,
+                    None,
+                    "static block starts here",
+                    support::diag::Subsystem::Parser,
+                );
+                return None;
+            }
+
+            let end = self.lexer.prev_token_end();
+            return Some(self.set_location(
+                start_loc,
+                end,
+                Node::StaticBlock(StaticBlock::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    NodeList::from_iter(self.gc, block_body),
+                )),
+            ));
+        } else if is_static && self.static_is_property_name() {
+            // This is the name of the property/method. We've already parsed
+            // 'static', but it must be used as the PropertyName and not as an
+            // indicator for a static function.
+            let static_ident = self.gc.ctx().atom_table.atom_bytes(b"static");
+            prop = Some(self.set_location(
+                start_range.start,
+                start_range.end,
+                Node::Identifier(Identifier::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    static_ident,
+                    None,
+                    false,
+                )),
+            ));
+            is_static = false;
+            do_parse_property_name = false;
+        }
+
+        // P6/P7: Flow variance (`+`/`-`/readonly/writeonly, C++ 5368-5384)
+        // omitted; variance stays None.
+        let variance: Option<&'gc Node<'gc>> = None;
+
+        let mut computed = false;
+        if do_parse_property_name {
+            if self.check(TokenKind::private_identifier) {
+                is_private = true;
+                let tok_rng = self.lexer.token().source_range();
+                let priv_name = self.lexer.token().get_private_identifier();
+                prop = Some(self.set_location(
+                    tok_rng.start,
+                    tok_rng.end,
+                    Node::Identifier(Identifier::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        priv_name,
+                        None,
+                        false,
+                    )),
+                ));
+                self.advance(GrammarContext::AllowRegExp);
+            } else {
+                computed = self.check(TokenKind::l_square);
+                prop = Some(self.parse_property_name()?);
+            }
+        }
+
+        // prop is always set by this point (one of the branches above ran, or
+        // doParsePropertyName produced it).
+        let prop = prop.expect("class element property name must be set");
+
+        // Store the propName for comparisons, used for SyntaxErrors.
+        let prop_name: Option<atom_table::AtomBytes> = match prop {
+            Node::Identifier(id) => Some(id.name.get()),
+            Node::StringLiteral(s) => Some(s.value.get()),
+            _ => None,
+        };
+
+        let constructor_atom = self.gc.ctx().atom_table.atom_bytes(b"constructor");
+        let prototype_atom = self.gc.ctx().atom_table.atom_bytes(b"prototype");
+
+        let is_constructor =
+            !is_static && !computed && prop_name == Some(constructor_atom);
+
+        // P6/P7: the `< (type params)` check is omitted from the field-vs-method
+        // test below; only `l_paren` remains.
+        if special == SpecialKind::None && !self.check(TokenKind::l_paren) {
+            // Parse a class property, because this can't be a method definition.
+            // Attempt ASI after the fact, and continue on, letting the next
+            // iteration error if it wasn't actually a class property.
+            // FieldDefinition ;
+            //                 ^
+            // P6/P7: TS `?` optional flag + Flow/TS `: TypeAnnotation`
+            // (C++ 5423-5437) omitted; type_annotation stays None.
+            let type_annotation: Option<&'gc Node<'gc>> = None;
+
+            let mut value: Option<&'gc Node<'gc>> = None;
+            if self.check_and_eat(TokenKind::equal, GrammarContext::AllowRegExp) {
+                // ClassElementName Initializer[opt]
+                //                  ^
+                // NOTE: This is technically non-compliant, but having yield/await
+                // in the field initializer doesn't make sense.
+                // See https://github.com/tc39/ecma262/issues/3333
+                // Do [~Yield, +Await, ~Return] as suggested and error in
+                // resolution.
+                let _guard_yield = self.save_param_yield(false);
+                let _guard_await = self.save_param_await(true);
+                value = Some(self.parse_assignment_expression(PARAM_IN)?);
+                if declare {
+                    self.error_at(start_range, "Invalid 'declare' with initializer");
+                }
+            }
+            // ASI is allowed for separating class elements.
+            if !self.eat_semi(true) && type_annotation.is_none() {
+                self.error_cur("';' expected after class property");
+                self.lexer.get_source_mgr_mut().note_at(
+                    start_range.start,
+                    None,
+                    "start of class property",
+                    support::diag::Subsystem::Parser,
+                );
+                return None;
+            }
+            if is_private {
+                // The inner Identifier holds the private name (#-stripped); the
+                // `#constructor` check is on the identifier name.
+                if let Node::Identifier(id) = prop {
+                    if id.name.get() == constructor_atom {
+                        self.error_at(
+                            prop.range(),
+                            "Private names cannot be '#constructor'",
+                        );
+                    }
+                }
+                if accessibility.is_some() {
+                    self.error_at(
+                        start_range,
+                        "An accessibility modifier cannot be used with a private identifier",
+                    );
+                }
+                // P6/P7: TS modifiers node omitted; ts_modifiers = None.
+                let end = self.lexer.prev_token_end();
+                return Some(self.set_location(
+                    prop.range().start,
+                    end,
+                    Node::ClassPrivateProperty(ClassPrivateProperty::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        prop,
+                        value,
+                        is_static,
+                        NodeList::from_iter(self.gc, decorators),
+                        declare,
+                        optional,
+                        variance,
+                        type_annotation,
+                        None,
+                    )),
+                ));
+            }
+            // P6/P7: TS modifiers node omitted; ts_modifiers = None.
+            if is_static && !computed && prop_name == Some(prototype_atom) {
+                self.error_at(
+                    prop.range(),
+                    "Static class properties cannot be named 'prototype'",
+                );
+            }
+            let end = self.lexer.prev_token_end();
+            return Some(self.set_location(
+                start_range.start,
+                end,
+                Node::ClassProperty(ClassProperty::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    prop,
+                    value,
+                    computed,
+                    is_static,
+                    NodeList::from_iter(self.gc, decorators),
+                    declare,
+                    optional,
+                    variance,
+                    type_annotation,
+                    None,
+                )),
+            ));
+        }
+
+        if declare {
+            self.error_at(start_range, "Invalid 'declare' in class method");
+        }
+
+        let func_expr_start_loc = self.cur_start();
+
+        // P6/P7: Flow method type parameters (`<...>`, C++ 5530-5537) omitted;
+        // type_params stays None.
+        let type_params: Option<&'gc Node<'gc>> = None;
+
+        // (
+        if !self.need(TokenKind::l_paren, " in method definition") {
+            self.lexer.get_source_mgr_mut().note_at(
+                start_loc,
+                None,
+                "start of method definition",
+                support::diag::Subsystem::Parser,
+            );
+            return None;
+        }
+        let mut args: Vec<&'gc Node<'gc>> = Vec::new();
+
+        let yield_in_body =
+            special == SpecialKind::Generator || special == SpecialKind::AsyncGenerator;
+        let await_in_body =
+            special == SpecialKind::Async || special == SpecialKind::AsyncGenerator;
+
+        let _guard_yield = self.save_param_yield(yield_in_body);
+        let _guard_await = self.save_param_await(await_in_body);
+
+        if !self.parse_formal_parameters(Param::default(), &mut args) {
+            return None;
+        }
+
+        // P6/P7: Flow/TS return-type annotation (C++ 5561-5569) omitted;
+        // return_type stays None.
+
+        if !self.need(TokenKind::l_brace, " in method definition") {
+            self.lexer.get_source_mgr_mut().note_at(
+                start_loc,
+                None,
+                "start of method definition",
+                support::diag::Subsystem::Parser,
+            );
+            return None;
+        }
+
+        let body = self.parse_function_body(
+            PARAM_RETURN,
+            eagerly,
+            yield_in_body,
+            await_in_body,
+            GrammarContext::AllowRegExp,
+            true,
+        )?;
+        let body_end = body.range().end;
+
+        let params_len = args.len();
+        let func = FunctionExpression::new(
+            NodeMetadata::new(self.dummy_range()),
+            None,
+            NodeList::from_iter(self.gc, args),
+            body,
+            type_params,
+            None,        // return_type
+            None,        // predicate
+            yield_in_body, // generator
+            await_in_body, // async
+        );
+        debug_assert!(
+            self.lexer.is_strict_mode(),
+            "parseClassElement should only be used for classes"
+        );
+        func.is_method_definition.set(true);
+        let func_expr = self.set_location(
+            func_expr_start_loc,
+            body_end,
+            Node::FunctionExpression(func),
+        );
+
+        if special == SpecialKind::Get && params_len != 0 {
+            self.error_range(
+                start_loc,
+                body_end,
+                &format!(
+                    "getter method must no one formal arguments, found {}",
+                    params_len
+                ),
+            );
+        }
+
+        if special == SpecialKind::Set && params_len != 1 {
+            self.error_range(
+                start_loc,
+                body_end,
+                &format!(
+                    "setter method must have exactly one formal argument, found {}",
+                    params_len
+                ),
+            );
+        }
+
+        // P6/P7: accessor-with-type-parameters error (C++ 5619-5626) omitted.
+
+        if is_static && !is_private && !computed && prop_name == Some(prototype_atom) {
+            // ClassElement : static MethodDefinition
+            // It is a Syntax Error if PropName of MethodDefinition is "prototype".
+            self.error_range(start_loc, body_end, "prototype method must not be static");
+            return None;
+        }
+
+        if is_private && prop_name == Some(constructor_atom) {
+            // ClassElementName : PrivateIdentifier
+            // It is a Syntax Error if the StringValue of PrivateIdentifier is
+            // "#constructor".
+            self.error_range(
+                start_loc,
+                body_end,
+                "constructor method must not be private",
+            );
+            return None;
+        }
+
+        let mut kind = self.gc.ctx().atom_table.atom_bytes(b"method");
+        if is_constructor {
+            if special != SpecialKind::None {
+                // It is a Syntax Error if PropName of MethodDefinition is
+                // "constructor" and SpecialMethod of MethodDefinition is true.
+                self.error_range(
+                    start_loc,
+                    body_end,
+                    "constructor method must not be a getter or setter",
+                );
+                return None;
+            }
+            kind = self.gc.ctx().atom_table.atom_bytes(b"constructor");
+        } else if special == SpecialKind::Get {
+            kind = self.gc.ctx().atom_table.atom_bytes(b"get");
+        } else if special == SpecialKind::Set {
+            kind = self.gc.ctx().atom_table.atom_bytes(b"set");
+        }
+
+        let prop = if is_private {
+            self.set_location(
+                start_loc,
+                prop.range().end,
+                Node::PrivateName(PrivateName::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    prop,
+                )),
+            )
+        } else {
+            prop
+        };
+
+        // P6/P7: "Unexpected variance sigil" error (C++ 5670-5672) — variance is
+        // always None, so it never fires.
+
+        Some(self.set_location(
+            start_range.start,
+            body_end,
+            Node::MethodDefinition(MethodDefinition::new(
+                NodeMetadata::new(self.dummy_range()),
+                prop,
+                func_expr,
+                kind,
+                computed,
+                is_static,
+                NodeList::from_iter(self.gc, decorators),
+            )),
+        ))
+    }
+
+    /// `true` when the token following a `get`/`set` keyword indicates that it
+    /// was actually a property name, not an accessor specifier. Port of the
+    /// `checkN(less, l_paren, r_brace, equal, colon, semi, star)` test shared by
+    /// the get/set branches of `parseClassElement` (C++ 5260-5267 / 5279-5286).
+    /// `less`/`colon` are Flow/TS-only tokens that never appear in plain JS, but
+    /// are kept for an identical check.
+    fn check_class_element_after_accessor_name(&self) -> bool {
+        let k = self.cur_kind();
+        k == TokenKind::less
+            || k == TokenKind::l_paren
+            || k == TokenKind::r_brace
+            || k == TokenKind::equal
+            || k == TokenKind::colon
+            || k == TokenKind::semi
+            || k == TokenKind::star
+    }
+
+    /// `true` when the current token indicates that `static` was actually the
+    /// property name and not a modifier. Port of the `staticIsPropertyName`
+    /// closure (C++ 5241-5255). e.g. `static() {}` returns true (current tok is
+    /// `(`), but `static x;` returns false. The Flow/TS `less`/`colon` part is
+    /// omitted.
+    fn static_is_property_name(&self) -> bool {
+        self.check_n4(
+            TokenKind::l_paren,
+            TokenKind::equal,
+            TokenKind::r_brace,
+            TokenKind::semi,
+        )
+    }
+
+    /// Report an error spanning `[start, end]`. Convenience wrapper around
+    /// `error_at` for the `error({startLoc, endLoc}, msg)` call sites in
+    /// `parseClassElement`.
+    fn error_range(&mut self, start: SMLoc, end: SMLoc, msg: &str) {
+        self.error_at(SMRange { start, end }, msg);
+    }
+}

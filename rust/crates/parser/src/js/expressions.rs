@@ -2270,7 +2270,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// error "Rest parameter must be last formal parameter". In P1 arrow
     /// functions are deferred, so this error is never triggered in practice,
     /// but the check is present for correctness.
-    fn parse_arguments(
+    pub(super) fn parse_arguments(
         &mut self,
     ) -> Option<(Vec<&'gc Node<'gc>>, support::location::SMLoc)> {
         // Consume `(`.
@@ -2474,6 +2474,23 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let tok_range = self.lexer.token().source_range();
         let tok_len = (tok_range.end.offset - tok_range.start.offset) as usize;
         tok_len == name.len()
+    }
+
+    /// True if the current token is an identifier whose interned name equals
+    /// `name`, regardless of whether it was written with escapes. Port of the
+    /// C++ `check(<UniqueString *>)` overload (which compares `tok_` against an
+    /// interned identifier such as `getIdent_`/`setIdent_`), used by
+    /// `parseClassElement` to detect `get`/`set` accessor specifiers (escaped
+    /// `get` is still a getter in the C++ parser).
+    pub(super) fn check_name(&self, name: &[u8]) -> bool {
+        if self.cur_kind() != TokenKind::identifier {
+            return false;
+        }
+        let bytes = self
+            .lexer
+            .get_string_table()
+            .bytes(self.lexer.token().get_identifier());
+        bytes == name
     }
 
     // -----------------------------------------------------------------------
@@ -3781,13 +3798,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // function expression. C++ 2667-2670.
             TokenKind::rw_function => self.parse_function_expression(),
 
-            // decorator / class expression — deferred (P3)
-            TokenKind::at | TokenKind::rw_class => {
-                self.error_cur(
-                    "class expressions not yet supported (parser phase P3)",
-                );
-                None
-            }
+            // decorator / class expression. C++ 2671-2674.
+            TokenKind::at | TokenKind::rw_class => self.parse_class_expression(),
 
             // JSX — context-gated (getParseJSX()). For now emit the C++ error.
             // The JSX context flag is not yet wired; in P1 plain-JS corpus this
