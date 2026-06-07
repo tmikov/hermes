@@ -283,12 +283,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// - `Some(None)`      = operator consumed, continue the chain.
     /// - `Some(Some(n))`   = terminal node.
     ///
-    /// ## Deferrals (honest errors)
-    /// - P3: `yield` — emits error + returns `None`.
-    /// - P3: `=>` arrow — emits error + returns `None`.
-    /// - P1.8: destructuring reparse (ArrayExpression/ObjectExpression LHS) —
-    ///   unreachable in P1 (those parse forms error first in
-    ///   `parse_primary_expression`), but stubbed with an honest error.
+    /// ## Sub-productions
+    /// - `yield` (P3.2) and `=>` arrow functions (P3.3) are parsed inline.
+    /// - Destructuring-assignment reparse (ArrayExpression/ObjectExpression LHS)
+    ///   is handled by `reparse_assignment_pattern` (P1.8b).
     /// - P6/P7: Flow/TS type parameters — skipped (gated by context flags that
     ///   don't exist yet).
     ///
@@ -2150,8 +2148,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// This matches the C++ semantics without a per-iteration RAII guard
     /// (which would under-count, only tracking one level).
     ///
-    /// ### Deferrals
-    /// - Template literal as tag (tagged template) — P1.9: error + `None`.
+    /// A template literal immediately following the expression forms a tagged
+    /// template (P1.9).
     fn parse_optional_expression_except_new_tail(
         &mut self,
         is_constructor_call: IsConstructorCall,
