@@ -196,7 +196,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // 'await using' — only inside an await context. C++ 592-595.
         // The lexer helper takes the interned `using` atom (C++ kw.identUsing).
         let ident_using = self.gc.ctx().atom_table.atom_bytes(b"using");
-        if self.param_await
+        if self.param_await.get()
             && self.check_unescaped_name(b"await")
             && self
                 .lexer
@@ -249,11 +249,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         if self.check(TokenKind::rw_function)
             || (self.check_unescaped_name(b"async") && self.check_async_function())
         {
-            // P3: function declarations are deferred.
-            self.error_cur(
-                "function declarations not yet supported (parser phase P3)",
-            );
-            return None;
+            return self.parse_function_declaration(Param::default());
         }
 
         // C++ 829-835.
@@ -706,16 +702,21 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         {
             let id = opt_expr;
 
+            // C++ 1641-1663.
             let body: &'gc Node<'gc> = if self.check(TokenKind::rw_function) {
+                let func = self.parse_function_declaration(param)?;
                 // ES9.0 13.13.1
                 // It is a Syntax Error if any source text matches this rule.
                 // LabelledItem : FunctionDeclaration
-                // P3: function declarations as labeled items are not yet
-                // supported.
-                self.error_cur(
-                    "function declaration as labeled statement not yet supported (parser phase P3)",
+                // NOTE: GeneratorDeclarations are disallowed as part of the
+                // grammar as well, so all FunctionDeclarations are disallowed as
+                // labeled items, except via an AnnexB extension which is
+                // unsupported in Hermes.
+                self.error_at(
+                    func.range(),
+                    "Function declaration not allowed as body of labeled statement",
                 );
-                return None;
+                func
             } else {
                 // Statement.
                 self.parse_statement(param.get(PARAM_RETURN))?
@@ -1076,11 +1077,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// consequent/alternate of an `if`. Port of the C++ lambda
     /// `parseStatementOrFunctionDeclaration` (lines 1709-1737).
     ///
-    /// ES2022 B.3.3 allows FunctionDeclaration as consequent and alternate,
-    /// wrapped in a synthetic implicit BlockStatement. That handling depends on
-    /// `parseFunctionDeclaration` and is deferred to phase P3; for now the
-    /// `function` case emits an honest error. The regular-statement case is
-    /// `parseStatement(param.get(ParamReturn))`.
+    /// ES2022 B.3.3 allows FunctionDeclaration as consequent and alternate.
+    /// These FunctionDeclarations are supposed to be processed precisely as if
+    /// they were surrounded by BlockStatement, including function promotion. To
+    /// allow this, surround them with a synthetic BlockStatement and set the
+    /// 'implicit' flag to true to indicate that it wasn't in the original
+    /// source. Port of the C++ lambda `parseStatementOrFunctionDeclaration`
+    /// (lines 1709-1737).
     ///
     /// Implemented as a method rather than a closure (as in C++) because a Rust
     /// closure capturing `&mut self` cannot be called while `self` is also
@@ -1090,11 +1093,32 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         param: Param,
     ) -> Option<&'gc Node<'gc>> {
         if self.check(TokenKind::rw_function) {
-            // P3: function declaration as if-consequent/alternate is deferred.
-            self.error_cur(
-                "function declaration in if-statement not yet supported (parser phase P3)",
-            );
-            return None;
+            // C++ 1711-1732.
+            let function = self.parse_function_declaration(Param::default())?;
+            let func_decl = function
+                .as_function_declaration()
+                .expect("parseFunctionDeclaration returns a FunctionDeclaration");
+            if self.lexer.is_strict_mode() {
+                self.error_at(
+                    function.range(),
+                    "In strict mode, functions cannot be declared in if statements",
+                );
+            }
+            if func_decl.generator.get() || func_decl.r#async.get() {
+                self.error_at(
+                    function.range(),
+                    "Functions in if statements cannot be generator/async",
+                );
+            }
+            let range = function.range();
+            let mut stmts: Vec<&'gc Node<'gc>> = Vec::new();
+            stmts.push(function);
+            let node = Node::BlockStatement(BlockStatement::new(
+                NodeMetadata::new(self.dummy_range()),
+                NodeList::from_iter(self.gc, stmts),
+                true, // implicit
+            ));
+            return Some(self.set_location(range.start, range.end, node));
         }
         self.parse_statement(param.get(PARAM_RETURN))
     }
@@ -1220,7 +1244,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             start: start_loc,
             end: start_loc,
         };
-        if self.param_await && self.check_unescaped_name(b"await") {
+        if self.param_await.get() && self.check_unescaped_name(b"await") {
             await_rng = self.advance(GrammarContext::AllowRegExp);
             await_kw = true;
         }
@@ -2131,7 +2155,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse a `BindingElement` (a binding target with optional initializer).
     /// Port of `JSParserImpl::parseBindingElement` (lines 1362-1390).
-    fn parse_binding_element(&mut self, param: Param) -> Option<&'gc Node<'gc>> {
+    pub(super) fn parse_binding_element(
+        &mut self,
+        param: Param,
+    ) -> Option<&'gc Node<'gc>> {
         let _guard = self.check_recursion()?;
 
         // C++ 1366-1380.
@@ -2165,7 +2192,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse a `BindingRestElement` (`...target`). Port of
     /// `JSParserImpl::parseBindingRestElement` (lines 1392-1413).
-    fn parse_binding_rest_element(
+    pub(super) fn parse_binding_rest_element(
         &mut self,
         param: Param,
     ) -> Option<&'gc Node<'gc>> {

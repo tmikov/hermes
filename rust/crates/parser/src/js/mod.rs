@@ -19,6 +19,7 @@ use crate::lexer::{GrammarContext, JSLexer};
 use crate::token_kinds::TokenKind;
 
 mod expressions;
+mod functions;
 mod statements;
 
 /// Whether import/export declarations are allowed in this statement list.
@@ -107,6 +108,28 @@ impl Drop for RecursionGuard {
     }
 }
 
+/// RAII guard for a `paramYield_`/`paramAwait_` flag, restoring the saved old
+/// value on Drop. Mirrors C++ `llvh::SaveAndRestore<bool>` on those fields,
+/// which flip the flag for a scope (name-binding, or args+body) and restore it
+/// on EVERY exit path — including error early-returns. A manual save-local +
+/// restore-at-end would leak the new value on `?` early-returns, so the guard
+/// must own the restore.
+///
+/// Same `Rc<Cell<bool>>` design as `RecursionGuard`: the flag lives in an
+/// `Rc<Cell<bool>>` on the parser, and the guard owns its own `Rc` clone plus
+/// the saved old value, so the caller can freely use `&mut self` while the
+/// guard is alive.
+pub(super) struct ParamFlagGuard {
+    cell: Rc<Cell<bool>>,
+    old: bool,
+}
+
+impl Drop for ParamFlagGuard {
+    fn drop(&mut self) {
+        self.cell.set(self.old);
+    }
+}
+
 /// The JS parser.
 ///
 /// Four lifetime parameters:
@@ -136,11 +159,15 @@ pub struct JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// `Rc<Cell<u32>>` so `RecursionGuard` can own a handle without borrowing
     /// `self` (see `RecursionGuard`).
     recursion_depth: Rc<Cell<u32>>,
-    /// Set when the parser is inside a generator function (`yield`).
-    pub(super) param_yield: bool,
+    /// Set when the parser is inside a generator function (`yield`). In an
+    /// `Rc<Cell<bool>>` so `ParamFlagGuard` can own a handle without borrowing
+    /// `self`, restoring the saved value on every exit path (mirrors the C++
+    /// `llvh::SaveAndRestore<bool>` on `paramYield_`).
+    pub(super) param_yield: Rc<Cell<bool>>,
     /// Set when the parser is inside an async function (`await`).
     /// Read in P1.3+ (await expression parsing in parseUnaryExpression).
-    pub(super) param_await: bool,
+    /// In an `Rc<Cell<bool>>` — see `param_yield`.
+    pub(super) param_await: Rc<Cell<bool>>,
     /// Set on the `use static builtin` directive.
     pub(super) use_static_builtin: bool,
 }
@@ -160,8 +187,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             gc,
             lexer,
             recursion_depth: Rc::new(Cell::new(0)),
-            param_yield: false,
-            param_await: false,
+            param_yield: Rc::new(Cell::new(false)),
+            param_await: Rc::new(Cell::new(false)),
             use_static_builtin: false,
         }
     }
@@ -328,6 +355,28 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
         self.recursion_depth.set(depth);
         Some(RecursionGuard(Rc::clone(&self.recursion_depth)))
+    }
+
+    /// Set `param_yield` to `new_val`, returning a guard that restores the old
+    /// value on Drop. Port of `llvh::SaveAndRestore<bool>(paramYield_, new)`.
+    pub(super) fn save_param_yield(&self, new_val: bool) -> ParamFlagGuard {
+        let old = self.param_yield.get();
+        self.param_yield.set(new_val);
+        ParamFlagGuard {
+            cell: Rc::clone(&self.param_yield),
+            old,
+        }
+    }
+
+    /// Set `param_await` to `new_val`, returning a guard that restores the old
+    /// value on Drop. Port of `llvh::SaveAndRestore<bool>(paramAwait_, new)`.
+    pub(super) fn save_param_await(&self, new_val: bool) -> ParamFlagGuard {
+        let old = self.param_await.get();
+        self.param_await.set(new_val);
+        ParamFlagGuard {
+            cell: Rc::clone(&self.param_await),
+            old,
+        }
     }
 
     /// Return a placeholder `SMRange` (zero-width at current token start).
@@ -585,28 +634,24 @@ mod tests {
         );
     }
 
+    /// P3.1: a function expression now parses as a FunctionExpression.
     #[test]
-    fn deferred_function_expr_errors() {
+    fn function_expression_parses() {
         use ast::context::Context;
+        use ast::node::Node;
         use support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
-        let buf_id = sm.add_buffer_bytes("input", b"(function(){});");
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let atoms = &gc.ctx().atom_table;
-        let lexer = crate::lexer::JSLexer::new(
-            buf_id,
-            &mut sm,
-            atoms,
-            crate::lexer::GrammarContext::AllowRegExp,
-        );
-        let mut parser = JSParserImpl::new(&gc, lexer);
+
+        let expr = parse_expr_from(&gc, &mut sm, atoms, b"(function(){});");
         assert!(
-            parser.parse().is_none(),
-            "function expr should error in P1.1"
+            matches!(expr, Node::FunctionExpression(_)),
+            "expected FunctionExpression, got {:?}",
+            expr.kind()
         );
-        assert!(parser.error_count_pub() >= 1);
     }
 
     /// Helper: parse `src` and assert it fails with at least one error
@@ -635,9 +680,145 @@ mod tests {
     /// `parseDeclaration`/`parseStatementListItem` must emit an HONEST deferral
     /// error (not a silent misparse). Functions/classes are P3; import/export
     /// are P4.
+    // P3.1: function declarations/expressions, params, body.
+
+    /// Helper: parse `src`, expect a single top-level statement, return it.
+    fn parse_one_stmt<'gc>(
+        gc: &'gc ast::context::GCLock<'_, '_>,
+        sm: &mut support::manager::SourceErrorManager,
+        src: &[u8],
+    ) -> &'gc ast::node::Node<'gc> {
+        let buf_id = sm.add_buffer_bytes("input", src);
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(gc, lexer);
+        let program = parser.parse().expect("parse succeeded");
+        assert_eq!(parser.error_count_pub(), 0, "zero errors");
+        if let ast::node::Node::Program(p) = program {
+            return p.body.iter().next().expect("has one statement");
+        }
+        panic!("expected Program");
+    }
+
     #[test]
-    fn deferred_function_declaration_errors() {
-        assert_parse_errors(b"function f(){}", "function declaration is P3");
+    fn function_declaration_parses() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt = parse_one_stmt(&gc, &mut sm, b"function f(){}");
+        assert!(
+            matches!(stmt, Node::FunctionDeclaration(_)),
+            "expected FunctionDeclaration, got {:?}",
+            stmt.kind()
+        );
+    }
+
+    #[test]
+    fn generator_declaration_has_generator_flag() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt = parse_one_stmt(&gc, &mut sm, b"function* h(){}");
+        if let Node::FunctionDeclaration(fd) = stmt {
+            assert!(fd.generator.get(), "generator flag is true");
+            assert!(!fd.r#async.get(), "async flag is false");
+        } else {
+            panic!("expected FunctionDeclaration");
+        }
+    }
+
+    #[test]
+    fn async_declaration_has_async_flag() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt = parse_one_stmt(&gc, &mut sm, b"async function k(){}");
+        if let Node::FunctionDeclaration(fd) = stmt {
+            assert!(fd.r#async.get(), "async flag is true");
+            assert!(!fd.generator.get(), "generator flag is false");
+        } else {
+            panic!("expected FunctionDeclaration");
+        }
+    }
+
+    #[test]
+    fn function_params_identifier_and_rest() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt = parse_one_stmt(&gc, &mut sm, b"function f(a, ...r){}");
+        if let Node::FunctionDeclaration(fd) = stmt {
+            let params: Vec<_> = fd.params.iter().collect();
+            assert_eq!(params.len(), 2);
+            assert!(
+                matches!(params[0], Node::Identifier(_)),
+                "first param is Identifier"
+            );
+            assert!(
+                matches!(params[1], Node::RestElement(_)),
+                "second param is RestElement"
+            );
+        } else {
+            panic!("expected FunctionDeclaration");
+        }
+    }
+
+    #[test]
+    fn function_params_object_and_array_patterns() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt = parse_one_stmt(&gc, &mut sm, b"function g({x},[y]){}");
+        if let Node::FunctionDeclaration(fd) = stmt {
+            let params: Vec<_> = fd.params.iter().collect();
+            assert_eq!(params.len(), 2);
+            assert!(
+                matches!(params[0], Node::ObjectPattern(_)),
+                "first param is ObjectPattern"
+            );
+            assert!(
+                matches!(params[1], Node::ArrayPattern(_)),
+                "second param is ArrayPattern"
+            );
+        } else {
+            panic!("expected FunctionDeclaration");
+        }
+    }
+
+    /// `await` was implemented in P1.3 but only reachable inside an async
+    /// function body now that function bodies parse (P3.1).
+    #[test]
+    fn await_in_async_body_parses() {
+        let mut sm = support::manager::SourceErrorManager::new();
+        assert!(
+            parse_snippet(&mut sm, b"async function f(){ await x; }"),
+            "await in async body must parse cleanly"
+        );
+    }
+
+    /// `yield` is still a P3.2 honest error: a generator body containing
+    /// `yield` must fail to parse.
+    #[test]
+    fn yield_in_generator_still_deferred() {
+        assert_parse_errors(
+            b"function* g(){ yield 1; }",
+            "yield is deferred to P3.2",
+        );
     }
 
     #[test]

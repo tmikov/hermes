@@ -257,7 +257,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // yield check (C++ 6257-6268) — P3 deferral.
             // paramYield_ is always false in P1; stub so it's never silent.
             // ----------------------------------------------------------------
-            if this.param_yield
+            if this.param_yield.get()
                 && (this.check(TokenKind::rw_yield)
                     || (this.check(TokenKind::identifier)
                         && this
@@ -454,10 +454,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let is_await = id_bytes == b"await";
         let is_let = id_bytes == b"let";
 
-        if is_yield && (self.lexer.is_strict_mode() || self.param_yield) {
+        if is_yield && (self.lexer.is_strict_mode() || self.param_yield.get()) {
             self.error_at(range, "Unexpected usage of 'yield' as an identifier");
         }
-        if is_await && self.param_await {
+        if is_await && self.param_await.get() {
             self.error_at(range, "Unexpected usage of 'await' as an identifier");
         }
         if is_let && self.lexer.is_strict_mode() {
@@ -1294,7 +1294,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     .get_string_table()
                     .bytes(self.lexer.token().get_identifier())
                     == b"await";
-                if is_await && self.param_await {
+                if is_await && self.param_await.get() {
                     self.advance(GrammarContext::AllowRegExp);
                     let _guard = self.check_recursion()?;
                     let expr = self.parse_unary_expression()?;
@@ -2886,13 +2886,17 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     .get_string_table()
                     .bytes(self.lexer.token().get_identifier())
                     == b"yield";
-                if self.param_yield && is_yield {
+                if self.param_yield.get() && is_yield {
                     self.error_cur(
                         "Unexpected usage of 'yield' as an identifier reference",
                     );
                 }
-                // async function expression — deferred (P3). C++ lines 2502-2507.
-                // (checkAsyncFunction involves a lookahead; skip for P1.1.)
+                // async function expression. C++ lines 2502-2507.
+                if self.check_unescaped_name(b"async")
+                    && self.check_async_function()
+                {
+                    return self.parse_function_expression();
+                }
 
                 // `arguments` tracking inside arrow functions — C++ line 2508.
                 // Deferred: isArrowFunction_ flag is P3.
@@ -3048,13 +3052,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 self.parse_template_literal(Param::default())
             }
 
-            // function expression — deferred (P3)
-            TokenKind::rw_function => {
-                self.error_cur(
-                    "function expressions not yet supported (parser phase P3)",
-                );
-                None
-            }
+            // function expression. C++ 2667-2670.
+            TokenKind::rw_function => self.parse_function_expression(),
 
             // decorator / class expression — deferred (P3)
             TokenKind::at | TokenKind::rw_class => {
