@@ -17,7 +17,7 @@ use ast::node::{
     MetaProperty,
     NewExpression, Node, NullLiteral, NumericLiteral, ObjectExpression, ObjectPattern,
     OptionalCallExpression, OptionalMemberExpression, PrivateName, Property, RegExpLiteral,
-    RestElement, SequenceExpression, SpreadElement, StringLiteral, TaggedTemplateExpression,
+    RestElement, SequenceExpression, SpreadElement, StringLiteral, Super, TaggedTemplateExpression,
     TemplateElement, TemplateLiteral, ThisExpression, UnaryExpression, UpdateExpression,
     YieldExpression,
 };
@@ -2051,7 +2051,6 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// `JSParserImpl::parseOptionalExpressionExceptNew` (3424-3519).
     ///
     /// Deferrals:
-    /// - `rw_super` — P3: emit error and return `None`.
     /// - `rw_import` — P4: emit error and return `None`.
     fn parse_optional_expression_except_new(
         &mut self,
@@ -2060,9 +2059,32 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let start_loc = self.cur_start();
 
         let expr: &'gc Node<'gc> = if self.check(TokenKind::rw_super) {
-            // P3: `super.prop` / `super(args)` / `super[expr]`.
-            self.error_cur("'super' not yet supported (parser phase P3)");
-            return None;
+            // SuperProperty can be used the same way as PrimaryExpression, but
+            // must not have a TemplateLiteral immediately after the `super`
+            // keyword.
+            // C++ JSParserImpl.cpp 3429-3441 (rw_super branch).
+            let super_range = self.cur_range();
+            // C++ setLocation(tok_, tok_, new SuperNode()).
+            let node = self.set_location(
+                super_range.start,
+                super_range.end,
+                Node::Super(Super::new(NodeMetadata::new(self.dummy_range()))),
+            );
+            self.advance(GrammarContext::AllowRegExp);
+            if !self.check_n3(
+                TokenKind::l_paren,
+                TokenKind::l_square,
+                TokenKind::period,
+            ) {
+                // C++ errorExpected({l_paren, l_square, period}, "after 'super'
+                // keyword", "location of 'super'", startLoc). The "note"
+                // argument is dropped per house style.
+                self.error_cur(
+                    "'(', '[' or '.' expected after 'super' keyword",
+                );
+                return None;
+            }
+            node
         } else if self.check(TokenKind::rw_import) {
             // P4: `import.meta` and `import(source)`.
             self.error_cur(

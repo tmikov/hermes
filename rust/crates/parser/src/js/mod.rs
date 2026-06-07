@@ -2671,4 +2671,87 @@ mod tests {
             elems[1].kind()
         );
     }
+
+    /// Drill into `({ m() { return <expr>; } });` and return the return
+    /// statement's argument, for the `super` tests below.
+    #[cfg(test)]
+    fn return_arg_in_object_method<'gc>(
+        gc: &'gc ast::context::GCLock<'_, '_>,
+        sm: &mut support::manager::SourceErrorManager,
+        src: &[u8],
+    ) -> &'gc ast::node::Node<'gc> {
+        use ast::node::Node;
+        let stmt = parse_first_stmt(gc, sm, src);
+        let Node::ExpressionStatement(es) = stmt else {
+            panic!("expected ExpressionStatement, got {:?}", stmt.kind())
+        };
+        let Node::ObjectExpression(obj) = es.expression else {
+            panic!("expected ObjectExpression, got {:?}", es.expression.kind())
+        };
+        let prop = obj.properties.iter().next().expect("has property");
+        let Node::Property(prop) = prop else {
+            panic!("expected Property, got {:?}", prop.kind())
+        };
+        let Node::FunctionExpression(func) = prop.value else {
+            panic!("expected FunctionExpression, got {:?}", prop.value.kind())
+        };
+        let Node::BlockStatement(block) = func.body else {
+            panic!("expected BlockStatement, got {:?}", func.body.kind())
+        };
+        let ret = block.body.iter().next().expect("has return statement");
+        let Node::ReturnStatement(ret) = ret else {
+            panic!("expected ReturnStatement, got {:?}", ret.kind())
+        };
+        ret.argument.expect("return has argument")
+    }
+
+    /// `super.x` (in an object method) → a non-computed MemberExpression whose
+    /// object is a `Super` node.
+    #[test]
+    fn super_member_dot() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let arg = return_arg_in_object_method(
+            &gc,
+            &mut sm,
+            b"({ m() { return super.x; } });",
+        );
+        let Node::MemberExpression(member) = arg else {
+            panic!("expected MemberExpression, got {:?}", arg.kind())
+        };
+        assert!(
+            matches!(member.object, Node::Super(_)),
+            "object is Super, got {:?}",
+            member.object.kind()
+        );
+        assert!(!member.computed.get(), "super.x is not computed");
+    }
+
+    /// `super['y']` (in an object method) → a computed MemberExpression whose
+    /// object is a `Super` node.
+    #[test]
+    fn super_member_computed() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let arg = return_arg_in_object_method(
+            &gc,
+            &mut sm,
+            b"({ m() { return super['y']; } });",
+        );
+        let Node::MemberExpression(member) = arg else {
+            panic!("expected MemberExpression, got {:?}", arg.kind())
+        };
+        assert!(
+            matches!(member.object, Node::Super(_)),
+            "object is Super, got {:?}",
+            member.object.kind()
+        );
+        assert!(member.computed.get(), "super['y'] is computed");
+    }
 }
