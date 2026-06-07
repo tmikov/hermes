@@ -656,14 +656,16 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // Allow execution to continue because the expression may be parsed,
         // but report an error because it will be ambiguous whether the parse was
         // correct.
-        // C++ lines 1609-1615.
+        // C++ lines 1609-1615. `check_async_function` asserts the current
+        // token is `async`, so it is guarded by the `&&` short-circuit.
+        let is_async_function =
+            self.check_unescaped_name(b"async") && self.check_async_function();
         if self.check_n3(
             TokenKind::l_brace,
             TokenKind::rw_function,
             TokenKind::rw_class,
-        ) {
-            // P3: async function — `(checkUnescaped(asyncIdent_) &&
-            // checkAsyncFunction())` is deferred to phase P3.
+        ) || is_async_function
+        {
             // There's no need to stop reporting errors.
             self.error_cur("declaration not allowed as expression statement");
         }
