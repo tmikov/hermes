@@ -4,20 +4,21 @@ Hand this to a new session to restore context. It **references** the authoritati
 (read them; don't trust this summary over them) and records the conventions, file map,
 validation commands, and workflow.
 
-> **Date of handoff:** 2026-06-06. **Branch:** `rust` (base is `static_h`, NOT `main`).
+> **Date of handoff:** 2026-06-07. **Branch:** `rust` (base is `static_h`, NOT `main`).
 > **Status:** the **JS lexer**, **JSONParser**, and the **AST are COMPLETE**, and the **JS Parser is IN PROGRESS** —
-> **phases P0 (foundations + `parser_differential` gate), P1 (full value-expression grammar), and P2 (statements & declarations) are DONE**,
-> byte-for-byte vs `hermesc -dump-ast` over a **47-file corpus**, each sub-task two-stage reviewed + a whole-component capstone (PASS), zero warnings.
-> **Read `doc/superpowers/RustPortRoadmap.md` (the "🚧 JS Parser" section) for the authoritative P0/P1/P2 detail, the deferral set
-> (functions/classes/arrow/async/generators/getters/setters/methods/`super`/`yield`/decorators→P3, `import()`/`import`/`export`→P4, Flow/TS→P6/P7 —
-> all honest errors with tests), the two review-caught bugs (parser ctor not forwarding `Context::isStrictMode()`; P2.5 `[In]`-flag drop),
-> and the tracked non-blocking carry-forwards.** Specs/plans: `specs/2026-06-06-js-parser-design.md`,
-> `plans/2026-06-06-js-parser-{p0-foundations,p1-expressions,p2-statements}.md`.
-> **NEXT: Parser phase P3 — functions, classes, arrow functions, async/generators, getters/setters/object-&-class methods, `super`, `yield`, decorators**
-> (`lib/Parser/JSParserImpl.cpp`: parseFunctionDeclaration/Expression, parseClassDeclaration/Expression + members, arrow detection/`parseArrowFunctionExpression`,
-> `yield`/`await` expressions, the object-method/get/set branches in parsePropertyAssignment, `super` member/call). This unblocks most P1/P2 honest-error
-> deferrals. Write the P3 plan just-in-time (lexer/P1/P2-style) and execute subagent-driven.
-> The parser proper lives in `rust/crates/parser/src/js/{mod,expressions,statements}.rs`; the gate is
+> **phases P0 (foundations + `parser_differential` gate), P1 (value expressions), P2 (statements & declarations), and P3 (functions, classes,
+> arrows, async/generators, methods, `super`, `yield`, decorators) are DONE**, byte-for-byte vs `hermesc -dump-ast` over a **62-file corpus**,
+> each sub-task two-stage reviewed + a whole-component capstone (PASS), zero warnings.
+> **Read `doc/superpowers/RustPortRoadmap.md` (the "🚧 JS Parser" section) for the authoritative P0/P1/P2/P3 detail, the deferral set
+> (`import`/`export`/`import()`/`import.meta`→P4, Flow/TS→P6/P7 — all honest errors with tests), the review-caught bugs (parser ctor not
+> forwarding `Context::isStrictMode()`; P2.5 `[In]`-flag drop; P3 `lookahead1` `RequireNoNewLine` default; the capstone-caught `"use strict"`
+> leak from nested bodies), and the tracked non-blocking carry-forwards.** Specs/plans: `specs/2026-06-06-js-parser-design.md`,
+> `plans/2026-06-06-js-parser-{p0-foundations,p1-expressions,p2-statements}.md`, `plans/2026-06-07-js-parser-p3-functions-classes.md`.
+> **NEXT: Parser phase P4 — modules: `import`/`export` declarations + `import()` / `import.meta`**
+> (`lib/Parser/JSParserImpl.cpp`: parseImportDeclaration, parseExportDeclaration, parseFromClause, parseWithClause, named/namespace specifiers;
+> the `import(`/`import.meta` forms in parseOptionalExpressionExceptNew — currently honest P4 errors). Write the P4 plan just-in-time
+> (lexer/P1/P2/P3-style) and execute subagent-driven.
+> The parser proper lives in `rust/crates/parser/src/js/{mod,expressions,statements,functions,classes}.rs`; the gate is
 > `REQUIRE_DIFFERENTIAL=1 cargo test -p parser --test parser_differential` (build `ast-dump` first).
 
 ---
@@ -198,15 +199,16 @@ Commit directly to `rust`; **never** open a PR or merge (project rule).
 
 ## 6. What's next
 
-- **The JS Parser (IN PROGRESS — P0/P1/P2 DONE, P3 next)** (`lib/Parser/JSParserImpl.cpp` + `-flow.cpp`/`-jsx.cpp`/`-ts.cpp`,
+- **The JS Parser (IN PROGRESS — P0/P1/P2/P3 DONE, P4 next)** (`lib/Parser/JSParserImpl.cpp` + `-flow.cpp`/`-jsx.cpp`/`-ts.cpp`,
   `JSParserImpl.h`, `include/hermes/Parser/JSParser.h`) — consumes the lexer + AST + `Context`. The parser proper lives in
-  `rust/crates/parser/src/js/{mod,expressions,statements}.rs`; the `ast-dump` bin + C++ `hermesc -dump-ast` differential
-  (`tests/parser_differential.rs`, `REQUIRE_DIFFERENTIAL=1`, 47-file corpus) is the validation gate, and it exercises the AST's
-  `ESTreeJSONDumper` byte-for-byte. **P0** = foundations + gate; **P1** = full value-expression grammar; **P2** = statements &
-  declarations (block/if/loops/for-in-of/switch/try/return/break/continue/throw/with/debugger/labelled + var/let/const/using +
-  binding patterns). **NEXT P3** = functions, classes, arrow functions, async/generators, getters/setters/object-&-class methods,
-  `super`, `yield`, decorators — unblocks most P1/P2 honest-error deferrals. juno has an AST to crib from but NOT a parser
-  (`hparser` is FFI-to-C++); port the C++ directly. Write each phase plan just-in-time (lexer/P1/P2-style) and execute subagent-driven.
+  `rust/crates/parser/src/js/{mod,expressions,statements,functions,classes}.rs`; the `ast-dump` bin + C++ `hermesc -dump-ast` differential
+  (`tests/parser_differential.rs`, `REQUIRE_DIFFERENTIAL=1`, 62-file corpus) is the validation gate, and it exercises the AST's
+  `ESTreeJSONDumper` byte-for-byte. **P0** = foundations + gate; **P1** = value expressions; **P2** = statements & declarations;
+  **P3** = functions/classes/arrows/async/generators/methods/`super`/`yield`/decorators. **NEXT P4** = modules: `import`/`export`
+  declarations + `import()`/`import.meta`. Then Flow (P5/P6), TS (P7), JSX, and the Pre/Lazy passes remain. juno has an AST to crib from
+  but NOT a parser (`hparser` is FFI-to-C++); port the C++ directly. Write each phase plan just-in-time (lexer/P1/P2/P3-style) and execute
+  subagent-driven. **Port-wide RAII pattern:** C++ `SaveAndRestore`/`SaveFunctionState` → `Rc<Cell<bool>>` Drop-guards (`ParamFlagGuard`,
+  `RecursionGuard`) or explicit save/restore wrappers that survive `?` early-returns — strict-mode + param-yield/await state must not leak.
 - **AST phase 4 is DONE** (`ESTreeJSONDumper`): the generator emits `Node::node_type_str` (JSON `"type"` == variant
   name) + `Node::dump_children` (walks ONLY `.def`-arg fields in declaration order — no decorations — baking the
   **retained camelCase `.def` names** as literal JSON keys + a per-field `ESTREE_IGNORE_IF_EMPTY` flag, validated against

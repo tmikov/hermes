@@ -375,8 +375,25 @@ AST) — no dedicated C++ tool needed. A Rust `ast-dump` bin is diffed byte-for-
 > secondary "location of …" `sm_.note`, and some P1 `eat`/`need` `where_` strings lack a leading space — unobservable in `-dump-ast`,
 > tied to the `error`-limit/`force_eof` TODO); `in_decl` threading into reparse helpers (still `false` at the for-in/of reparse site).
 >
-> **Next: P3 — functions, classes, arrow functions, async/generators, `super`, `yield`, getters/setters/object-&-class methods, decorators.**
-> Write the P3 plan just-in-time. This unblocks most of the P1/P2 honest-error deferrals.
+> **🚧 P3 — functions, classes, arrows, async/generators, methods, `super`, `yield`, decorators DONE.** The full function/class grammar
+> dumps byte-for-byte vs `hermesc -dump-ast` over a **62-file corpus**. Sub-tasks (each two-stage reviewed + a whole-component capstone,
+> all green, zero warnings): P3.1 function decls/exprs + formal params + body (generators & async via `parseFunctionHelper`); P3.2 `yield`
+> (`await` was P1.3, now reachable); P3.3 arrow functions + the cover-paren reparse (`reparseArrowParameters`); P3.4 object methods/getters/
+> setters/async-&-generator methods; P3.5 `super` member & call; P3.6 classes (methods/fields/static-blocks/heritage/private members) +
+> decorators. Plan: `plans/2026-06-07-js-parser-p3-functions-classes.md`. **RAII conversions:** C++ `SaveAndRestore<bool>` on
+> `paramYield_`/`paramAwait_` → an `Rc<Cell<bool>>` + `ParamFlagGuard` Drop-guard (restores on every `?` path, mirrors `RecursionGuard`);
+> C++ `SaveFunctionState`'s strict-mode restore → explicit save/restore wrappers (classes force strict; functions/arrows/object-methods
+> save+restore). **Bugs caught by review (fixed):** (a) P3.1 had three `lookahead1::<false>` that should be `<true>` (C++ default
+> `RequireNoNewLine=true`) — async-arrow/async-function/import-call detection mis-fired across a newline; (b) the capstone caught a
+> `"use strict"`-leak: nested function/arrow/object-method bodies didn't restore the lexer strict-mode flag (C++ `SaveFunctionState` dtor
+> does), leaking strictness to enclosing sloppy code. Both have regression corpus files. **Full-pass only:** the C++ `pass_`/PreParse/Lazy
+> blocks and the `SaveFunctionState` arrow-bookkeeping are omitted (inert in eager parse); the `_param_yield`/`_param_await` args threaded
+> into `parse_function_body` are dormant (a future lazy-parse item). **Deferred (HONEST errors):** `import`/`export`/`import()`/`import.meta`
+> → P4; Flow/TS (type params, `implements`, annotations, TS modifiers, variance) → P6/P7 (context-gated off). **No `phase P3` stubs remain.**
+>
+> **Next: P4 — modules: `import`/`export` declarations + `import()` / `import.meta`** (`parseImportDeclaration`/`parseExportDeclaration`/
+> `parseFromClause`/`parseWithClause`/named & namespace specifiers; the `import(`/`import.meta` expression forms in
+> `parseOptionalExpressionExceptNew`). Write the P4 plan just-in-time.
 
 ## Key cross-cutting design decisions
 
