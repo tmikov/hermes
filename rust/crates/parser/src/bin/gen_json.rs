@@ -20,22 +20,42 @@
 //! `price` = i as f64 / 7.0 (two decimal places), `active` = i % 2 == 0.
 //!
 //! Usage: gen-json <count>
+//!
+//! Command-line parsing uses the `command_line` crate (the LLVM-`cl`-style
+//! option parser copied from juno).
 
 use std::io::{self, BufWriter, Write};
 
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    let prog = args.first().map(String::as_str).unwrap_or("gen-json");
+use command_line::{CommandLine, Opt, OptDesc};
 
-    if args.len() != 2 {
-        eprintln!("Usage: {prog} <count>");
-        std::process::exit(1);
+/// Command-line options. A single required positional `<count>`.
+struct Options {
+    count: Opt<u64>,
+}
+
+impl Options {
+    fn new(cl: &mut CommandLine) -> Options {
+        Options {
+            count: Opt::<u64>::new(
+                cl,
+                OptDesc {
+                    desc: Some("Number of records to generate."),
+                    value_desc: Some("count"),
+                    min_count: 1,
+                    ..Default::default()
+                },
+            ),
+        }
     }
+}
 
-    let count: u64 = args[1].parse().unwrap_or_else(|_| {
-        eprintln!("{prog}: <count> must be a non-negative integer");
-        std::process::exit(1);
-    });
+fn main() {
+    let mut cl =
+        CommandLine::new("Generate a deterministic big-JSON array for benchmarks.");
+    let opt = Options::new(&mut cl);
+    cl.parse_env_args();
+
+    let count: u64 = *opt.count;
 
     // Use a large BufWriter so we don't make a system call per record.
     let stdout = io::stdout();

@@ -16,57 +16,101 @@
 //!
 //! Args: [--pretty] [--dump-source-location] [--include-empty-ast-nodes]
 //!       [--include-raw-ast-prop] [file|-]   (omitted or "-" reads stdin)
+//!
+//! Command-line parsing uses the `command_line` crate (the LLVM-`cl`-style
+//! option parser copied from juno).
 
 use std::io::{self, Read, Write};
 
 use ast::context::Context;
 use ast::dump::{dump_estree_json_with_sm, ESTreeDumpMode, ESTreeRawProp, LocationDumpMode};
 use ast::node::Node;
+use command_line::{CommandLine, Opt, OptDesc};
 use parser::js::JSParserImpl;
 use parser::lexer::{GrammarContext, JSLexer};
 use support::manager::SourceErrorManager;
 
-fn main() {
-    let mut pretty = false;
-    let mut dump_loc = false;
-    let mut include_empty = false;
-    let mut include_raw = false;
-    let mut file_path: Option<String> = None;
+/// The parsed command-line options. Built into a [`CommandLine`] then read back
+/// after parsing (the juno `command_line` idiom).
+struct Options {
+    pretty: Opt<bool>,
+    dump_loc: Opt<bool>,
+    include_empty: Opt<bool>,
+    include_raw: Opt<bool>,
+    /// Input path; empty or "-" reads stdin.
+    input: Opt<String>,
+}
 
-    let prog = std::env::args().next().unwrap_or_else(|| "ast-dump".to_string());
-    for arg in std::env::args().skip(1) {
-        match arg.as_str() {
-            "--pretty" => pretty = true,
-            "--dump-source-location" => dump_loc = true,
-            "--include-empty-ast-nodes" => include_empty = true,
-            "--include-raw-ast-prop" => include_raw = true,
-            a if a.starts_with("--") => {
-                eprintln!("{prog}: unknown flag '{a}'");
-                std::process::exit(1);
-            }
-            a => {
-                if file_path.is_some() {
-                    eprintln!("{prog}: multiple input files");
-                    std::process::exit(1);
-                }
-                file_path = Some(a.to_string());
-            }
+impl Options {
+    fn new(cl: &mut CommandLine) -> Options {
+        Options {
+            pretty: Opt::new_flag(
+                cl,
+                OptDesc {
+                    long: Some("pretty"),
+                    desc: Some("Pretty-print the JSON output."),
+                    ..Default::default()
+                },
+            ),
+            dump_loc: Opt::new_flag(
+                cl,
+                OptDesc {
+                    long: Some("dump-source-location"),
+                    desc: Some("Emit 'loc' and 'range' source locations."),
+                    ..Default::default()
+                },
+            ),
+            include_empty: Opt::new_flag(
+                cl,
+                OptDesc {
+                    long: Some("include-empty-ast-nodes"),
+                    desc: Some("Include empty AST node fields."),
+                    ..Default::default()
+                },
+            ),
+            include_raw: Opt::new_flag(
+                cl,
+                OptDesc {
+                    long: Some("include-raw-ast-prop"),
+                    desc: Some("Include the 'raw' property on literals."),
+                    ..Default::default()
+                },
+            ),
+            input: Opt::<String>::new(
+                cl,
+                OptDesc {
+                    desc: Some("Input file ('-' or omitted reads stdin)."),
+                    value_desc: Some("file"),
+                    ..Default::default()
+                },
+            ),
         }
     }
+}
 
-    let bytes = match file_path.as_deref() {
-        Some("-") | None => {
-            let mut b = Vec::new();
-            io::stdin().read_to_end(&mut b).unwrap_or_else(|e| {
-                eprintln!("{prog}: error reading stdin: {e}");
-                std::process::exit(1);
-            });
-            b
-        }
-        Some(p) => std::fs::read(p).unwrap_or_else(|e| {
-            eprintln!("{prog}: error reading '{p}': {e}");
+fn main() {
+    let mut cl = CommandLine::new("Parse a JS file and dump the ESTree as JSON.");
+    let opt = Options::new(&mut cl);
+    cl.parse_env_args();
+
+    let pretty = *opt.pretty;
+    let dump_loc = *opt.dump_loc;
+    let include_empty = *opt.include_empty;
+    let include_raw = *opt.include_raw;
+
+    let input = &*opt.input;
+    let bytes = if input.is_empty() || input == "-" {
+        let mut b = Vec::new();
+        io::stdin().read_to_end(&mut b).unwrap_or_else(|e| {
+            eprintln!("ast-dump: error reading stdin: {e}");
             std::process::exit(1);
-        }),
+        });
+        b
+    } else {
+        std::fs::read(input).unwrap_or_else(|e| {
+            eprintln!("ast-dump: error reading '{input}': {e}");
+            std::process::exit(1);
+        })
     };
 
     let mut sm = SourceErrorManager::new();

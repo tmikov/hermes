@@ -24,4 +24,5 @@ support = { path = "../support" }
 atom_table = { path = "../atom_table" }
 unicode = { path = "../unicode" }
 ast = { path = "../ast" }
+command_line = { path = "../command_line" }
 bumpalo = "3.16"

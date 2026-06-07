@@ -39,60 +39,65 @@ use std::time::Instant;
 
 use atom_table::AtomTable;
 use bumpalo::Bump;
+use command_line::{CommandLine, Opt, OptDesc};
 use parser::json::{JSONFactory, JSONParser};
 use support::json_emitter::JSONEmitter;
 use support::manager::SourceErrorManager;
 
-fn usage(prog: &str) {
-    eprintln!(
-        "Usage: {prog} [--bench=N] [--convert-surrogates] <file|->\n  \
-         Parse JSON and emit canonical output to stdout.\n  \
-         --bench=N             Parse N times, print timing.\n  \
-         --convert-surrogates  Pass convert_surrogates=true.\n  \
-         Use - to read from stdin."
-    );
+/// Command-line options, built into a [`CommandLine`] then read back after
+/// parsing (the juno `command_line` idiom).
+struct Options {
+    /// Parse N times and print a timing line; 0 = normal single parse + dump.
+    bench: Opt<usize>,
+    convert_surrogates: Opt<bool>,
+    /// Input path; "-" reads stdin.
+    input: Opt<String>,
+}
+
+impl Options {
+    fn new(cl: &mut CommandLine) -> Options {
+        Options {
+            bench: Opt::<usize>::new(
+                cl,
+                OptDesc {
+                    long: Some("bench"),
+                    desc: Some(
+                        "Parse N times and print a timing line instead of the output.",
+                    ),
+                    value_desc: Some("N"),
+                    ..Default::default()
+                },
+            ),
+            convert_surrogates: Opt::new_flag(
+                cl,
+                OptDesc {
+                    long: Some("convert-surrogates"),
+                    desc: Some("Pass convert_surrogates=true to the JSON parser."),
+                    ..Default::default()
+                },
+            ),
+            input: Opt::<String>::new(
+                cl,
+                OptDesc {
+                    desc: Some("Input file ('-' reads stdin)."),
+                    value_desc: Some("file"),
+                    min_count: 1,
+                    ..Default::default()
+                },
+            ),
+        }
+    }
 }
 
 fn main() {
-    let mut bench_count: usize = 0;
-    let mut convert_surrogates = false;
-    let mut file_path: Option<String> = None;
+    let mut cl = CommandLine::new("Parse JSON and emit canonical output to stdout.");
+    let opt = Options::new(&mut cl);
+    cl.parse_env_args();
 
-    let prog = std::env::args().next().unwrap_or_else(|| "json-parse-dump".to_string());
-
-    for arg in std::env::args().skip(1) {
-        if let Some(val) = arg.strip_prefix("--bench=") {
-            match val.parse::<usize>() {
-                Ok(n) if n > 0 => bench_count = n,
-                _ => {
-                    eprintln!("{prog}: --bench value must be > 0");
-                    usage(&prog);
-                    std::process::exit(1);
-                }
-            }
-        } else if arg == "--convert-surrogates" {
-            convert_surrogates = true;
-        } else if arg.starts_with("--") {
-            eprintln!("{prog}: unknown flag '{arg}'");
-            usage(&prog);
-            std::process::exit(1);
-        } else {
-            if file_path.is_some() {
-                eprintln!("{prog}: too many positional arguments");
-                usage(&prog);
-                std::process::exit(1);
-            }
-            file_path = Some(arg);
-        }
-    }
-
-    let file_path = match file_path {
-        Some(p) => p,
-        None => {
-            usage(&prog);
-            std::process::exit(1);
-        }
-    };
+    let prog = "json-parse-dump";
+    let bench_count = *opt.bench;
+    let convert_surrogates = *opt.convert_surrogates;
+    let file_path: String = (*opt.input).clone();
 
     // Read input bytes (binary-safe; corpus is UTF-8 but we use the bytes variant).
     let bytes: Vec<u8> = if file_path == "-" {
