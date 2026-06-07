@@ -811,13 +811,13 @@ mod tests {
         );
     }
 
-    /// `yield` is still a P3.2 honest error: a generator body containing
-    /// `yield` must fail to parse.
+    /// P3.2: a generator body containing `yield` now parses cleanly.
     #[test]
-    fn yield_in_generator_still_deferred() {
-        assert_parse_errors(
-            b"function* g(){ yield 1; }",
-            "yield is deferred to P3.2",
+    fn yield_in_generator_parses() {
+        let mut sm = support::manager::SourceErrorManager::new();
+        assert!(
+            parse_snippet(&mut sm, b"function* g(){ yield 1; }"),
+            "yield in generator body must parse cleanly"
         );
     }
 
@@ -2304,5 +2304,73 @@ mod tests {
         );
         assert!(f.test.is_some(), "test should be Some");
         assert!(f.update.is_some(), "update should be Some");
+    }
+
+    // ------------------------------------------------------------------
+    // P3.2 — yield expressions
+    // ------------------------------------------------------------------
+
+    /// Parse `src` (a `function* g(){ <body> }`) and return the
+    /// `YieldExpression` reached as the first statement's expression.
+    fn first_yield<'gc>(
+        gc: &'gc ast::context::GCLock<'_, '_>,
+        sm: &mut support::manager::SourceErrorManager,
+        src: &[u8],
+    ) -> &'gc ast::node::YieldExpression<'gc> {
+        use ast::node::Node;
+        let decl = parse_first_stmt(gc, sm, src);
+        let Node::FunctionDeclaration(f) = decl else {
+            panic!("expected FunctionDeclaration, got {:?}", decl.kind())
+        };
+        let Node::BlockStatement(block) = f.body else {
+            panic!("expected BlockStatement body, got {:?}", f.body.kind())
+        };
+        let first = block.body.iter().next().expect("body has a statement");
+        let Node::ExpressionStatement(es) = first else {
+            panic!("expected ExpressionStatement, got {:?}", first.kind())
+        };
+        let Node::YieldExpression(y) = es.expression else {
+            panic!(
+                "expected YieldExpression, got {:?}",
+                es.expression.kind()
+            )
+        };
+        y
+    }
+
+    /// `function* g(){ yield* a; }` → delegate=true, argument Some.
+    #[test]
+    fn yield_delegate() {
+        use ast::context::Context;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let y = first_yield(&gc, &mut sm, b"function* g(){ yield* a; }");
+        assert!(y.delegate.get(), "yield* should set delegate=true");
+        assert!(y.argument.is_some(), "yield* a has an argument");
+    }
+
+    /// `function* g(){ yield; }` → argument None, delegate=false.
+    #[test]
+    fn yield_no_argument() {
+        use ast::context::Context;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let y = first_yield(&gc, &mut sm, b"function* g(){ yield; }");
+        assert!(y.argument.is_none(), "bare yield has no argument");
+        assert!(!y.delegate.get(), "bare yield is not delegating");
+    }
+
+    /// `function* g(){ yield 1; }` → argument Some, delegate=false.
+    #[test]
+    fn yield_with_argument() {
+        use ast::context::Context;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let y = first_yield(&gc, &mut sm, b"function* g(){ yield 1; }");
+        assert!(y.argument.is_some(), "yield 1 has an argument");
+        assert!(!y.delegate.get(), "yield 1 is not delegating");
     }
 }

@@ -17,6 +17,7 @@ use ast::node::{
     OptionalCallExpression, OptionalMemberExpression, PrivateName, Property, RegExpLiteral,
     RestElement, SequenceExpression, SpreadElement, StringLiteral, TaggedTemplateExpression,
     TemplateElement, TemplateLiteral, ThisExpression, UnaryExpression, UpdateExpression,
+    YieldExpression,
 };
 use ast::node_child::{NodeList, NodeMetadata};
 use support::location::SMLoc;
@@ -25,6 +26,17 @@ use crate::lexer::GrammarContext;
 use crate::token_kinds::TokenKind;
 
 use super::{IsClassHeritageArgument, IsConstructorCall, JSParserImpl, Param, PARAM_IN, PARAM_TAGGED};
+
+/// Whether the identifier `of` ends an AssignmentExpression. Faithful port of
+/// the C++ `enum class OfEndsAssignment { No, Yes };` (JSParserImpl.h). Passed
+/// to `check_end_assignment_expression`: `Yes` in the ordinary assignment
+/// chain, `No` inside `parse_yield_expression` (where `yield of;` should yield
+/// a variable called `of`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum OfEndsAssignment {
+    No,
+    Yes,
+}
 
 // For AssignState.op field type (interned operator label).
 use atom_table;
@@ -127,16 +139,19 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     /// True if the current token can legally follow an AssignmentExpression.
-    /// Port of `JSParserImpl::checkEndAssignmentExpression` (lines 293-306)
-    /// with `ofEndsAssignment == OfEndsAssignment::Yes` (the default).
+    /// Port of `JSParserImpl::checkEndAssignmentExpression` (lines 293-306).
     ///
     /// The "of" check mirrors C++ `checkUnescaped(ofIdent_)`: only fire when
     /// the current token is a plain identifier that spells "of" byte-for-byte
-    /// (no `\u` escapes). In P1 we don't track the "no-escape" flag here, but
-    /// the identifier parser interns unescaped identifiers normally, so we
-    /// just compare the interned bytes to `b"of"`.
+    /// (no `\u` escapes), and only when `of_ends_assignment == Yes`. In P1 we
+    /// don't track the "no-escape" flag here, but the identifier parser interns
+    /// unescaped identifiers normally, so we just compare the interned bytes to
+    /// `b"of"`.
     #[inline]
-    fn check_end_assignment_expression(&self) -> bool {
+    fn check_end_assignment_expression(
+        &self,
+        of_ends_assignment: OfEndsAssignment,
+    ) -> bool {
         if matches!(
             self.cur_kind(),
             TokenKind::rw_in
@@ -150,8 +165,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         ) {
             return true;
         }
-        // checkUnescaped(ofIdent_): identifier spelled "of"
-        if self.cur_kind() == TokenKind::identifier {
+        // (ofEndsAssignment == OfEndsAssignment::Yes && checkUnescaped(ofIdent_)):
+        // identifier spelled "of".
+        if of_ends_assignment == OfEndsAssignment::Yes
+            && self.cur_kind() == TokenKind::identifier
+        {
             let bytes = self
                 .lexer
                 .get_string_table()
@@ -161,6 +179,71 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
         self.lexer.is_new_line_before_current_token()
+    }
+
+    /// Parse a `yield` expression. Port of
+    /// `JSParserImpl::parseYieldExpression` (lines 4652-4686).
+    ///
+    /// Only reachable when `param_yield` is set (inside a generator body).
+    pub(super) fn parse_yield_expression(
+        &mut self,
+        param: Param,
+    ) -> Option<&'gc Node<'gc>> {
+        // C++ 4654-4657: must start with the `yield` keyword/identifier.
+        debug_assert!(
+            self.param_yield.get()
+                && self.check2(TokenKind::rw_yield, TokenKind::identifier)
+                && self
+                    .lexer
+                    .get_string_table()
+                    .bytes(self.lexer.token().get_res_word_or_identifier())
+                    == b"yield",
+            "yield expression must start with 'yield'"
+        );
+        // C++ 4658: SMRange yieldLoc = advance();
+        let yield_loc = self.advance(GrammarContext::AllowRegExp);
+
+        // C++ 4660-4670:
+        //   if (check(semi) || checkEndAssignmentExpression(OfEndsAssignment::No))
+        if self.check(TokenKind::semi)
+            || self.check_end_assignment_expression(OfEndsAssignment::No)
+        {
+            // 'of' doesn't end the assignment expression in a yield.
+            //    yield of;
+            //          ^
+            // is a valid position here and should simply yield a variable
+            // called 'of'.
+            return Some(self.set_location(
+                yield_loc.start,
+                yield_loc.end,
+                Node::YieldExpression(YieldExpression::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    None,
+                    false,
+                )),
+            ));
+        }
+
+        // C++ 4672: bool delegate = checkAndEat(TokenKind::star);
+        let delegate =
+            self.check_and_eat(TokenKind::star, GrammarContext::AllowRegExp);
+
+        // C++ 4674-4680: parse the argument. The simplified Rust signature only
+        // takes `param`, so the C++ eagerly/AllowTypedArrowFunction/
+        // CoverTypedParameters args are not threaded.
+        let arg = self.parse_assignment_expression(param.get(PARAM_IN))?;
+
+        // C++ 4682-4685: setLocation(yieldLoc, getPrevTokenEndLoc(), node).
+        let end = self.lexer.prev_token_end();
+        Some(self.set_location(
+            yield_loc.start,
+            end,
+            Node::YieldExpression(YieldExpression::new(
+                NodeMetadata::new(self.dummy_range()),
+                Some(arg),
+                delegate,
+            )),
+        ))
     }
 
     /// Parse an assignment expression. Port of
@@ -254,8 +337,16 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                               cur_param: Param|
          -> LevelResult<'gc> {
             // ----------------------------------------------------------------
-            // yield check (C++ 6257-6268) — P3 deferral.
-            // paramYield_ is always false in P1; stub so it's never silent.
+            // yield check (C++ 6257-6268).
+            //   if (paramYield_ && check(rw_yield, identifier) &&
+            //       tok_->getResWordOrIdentifier() == yieldIdent_) {
+            //     auto ret = parseYieldExpression(param);
+            //     if (!ret) return None;
+            //     return *ret;
+            //   }
+            // A successful yield expression is the completed level result; we
+            // return it as `Terminal` (the same channel the closure uses to hand
+            // back a finished expression).
             // ----------------------------------------------------------------
             if this.param_yield.get()
                 && (this.check(TokenKind::rw_yield)
@@ -266,10 +357,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                             .bytes(this.lexer.token().get_identifier())
                             == b"yield"))
             {
-                this.error_cur(
-                    "yield expression not yet supported (parser phase P3)",
-                );
-                return LevelResult::Error;
+                return match this.parse_yield_expression(cur_param) {
+                    Some(node) => LevelResult::Terminal(node),
+                    None => LevelResult::Error,
+                };
             }
 
             // P3: async arrow (C++ 6270-6286) — skip in P1.
@@ -406,7 +497,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let mut opt_res = opt_res;
         while let Some(top) = stack.pop() {
             // C++ line 6529: checkEndAssignmentExpression() guard.
-            if !self.check_end_assignment_expression() {
+            if !self.check_end_assignment_expression(OfEndsAssignment::Yes) {
                 let range = self.cur_range();
                 self.error_at(
                     range,
