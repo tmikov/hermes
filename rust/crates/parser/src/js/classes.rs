@@ -683,12 +683,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             let range = self.advance(GrammarContext::AllowRegExp);
             // checkN(less, l_paren, r_brace, equal, colon, semi) — note: no star,
             // since `async *` is an async generator.
-            if !self.check_n4(
-                TokenKind::l_paren,
-                TokenKind::r_brace,
-                TokenKind::equal,
-                TokenKind::semi,
-            ) && !self.lexer.is_new_line_before_current_token()
+            if !self.check_class_element_after_async_name()
+                && !self.lexer.is_new_line_before_current_token()
             {
                 // If we don't see '(' then this was actually an async method.
                 // Async methods cannot have a newline between 'async' and the
@@ -1119,6 +1115,21 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             || k == TokenKind::colon
             || k == TokenKind::semi
             || k == TokenKind::star
+    }
+
+    /// `true` when the current token after an `async` specifier means `async`
+    /// was actually the property name (not an async-method modifier). Port of
+    /// `checkN(less, l_paren, r_brace, equal, colon, semi)` (JSParserImpl.cpp
+    /// 5298-5304). No `star`, since `async *` is an async generator. `less`/
+    /// `colon` are Flow/TS tokens, kept for an identical check.
+    fn check_class_element_after_async_name(&self) -> bool {
+        let k = self.cur_kind();
+        k == TokenKind::less
+            || k == TokenKind::l_paren
+            || k == TokenKind::r_brace
+            || k == TokenKind::equal
+            || k == TokenKind::colon
+            || k == TokenKind::semi
     }
 
     /// `true` when the current token indicates that `static` was actually the
