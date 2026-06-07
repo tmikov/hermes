@@ -119,7 +119,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // possible a Statement begins with a call to `import()`, so do a
             // lookahead to see if the next token is '('. It can also be
             // import.meta, so check for '.'. C++ 898-923.
-            let opt_next = self.lexer.lookahead1::<false>(None);
+            let opt_next = self.lexer.lookahead1::<true>(None);
             if matches!(
                 opt_next,
                 Some(TokenKind::l_paren) | Some(TokenKind::period)
@@ -224,7 +224,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         );
         // Avoid passing rw_function to lookahead1; parseFunctionHelper relies on
         // seeing `async`. C++ 314-320.
-        self.lexer.lookahead1::<false>(None) == Some(TokenKind::rw_function)
+        self.lexer.lookahead1::<true>(None) == Some(TokenKind::rw_function)
     }
 
     // -----------------------------------------------------------------------

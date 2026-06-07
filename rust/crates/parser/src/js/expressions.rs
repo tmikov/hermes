@@ -379,7 +379,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             if this.check_unescaped_name(b"async") {
                 // C++: lexer_.lookahead1(TokenKind::identifier).
                 let opt_next =
-                    this.lexer.lookahead1::<false>(Some(TokenKind::identifier));
+                    this.lexer.lookahead1::<true>(Some(TokenKind::identifier));
                 if opt_next == Some(TokenKind::identifier) {
                     force_async = true;
                 }
