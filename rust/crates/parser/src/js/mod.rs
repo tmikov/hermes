@@ -397,6 +397,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// from a `SpreadElement` in the async-arrow reparse path. The dumper's
     /// `range_is_valid` treats `start.offset > end.offset` as invalid, so loc and
     /// range are omitted, exactly as in the C++ dump.
+    ///
+    /// Contrast [`Self::dummy_range`], a *valid* zero-width placeholder that is
+    /// expected to be overwritten by a subsequent `set_location` call.
     pub(super) fn invalid_range(&self) -> SMRange {
         let loc = self.cur_start();
         SMRange {
