@@ -13,7 +13,8 @@ use ast::node::{
     ArrayExpression, ArrowFunctionExpression, ArrayPattern, AssignmentExpression, AssignmentPattern,
     AwaitExpression, BigIntLiteral, BinaryExpression, BooleanLiteral, CallExpression,
     ConditionalExpression, CoverEmptyArgs, CoverRestElement, CoverTrailingComma,
-    CoverInitializer, Empty, Identifier, LogicalExpression, MemberExpression, MetaProperty,
+    CoverInitializer, Empty, FunctionExpression, Identifier, LogicalExpression, MemberExpression,
+    MetaProperty,
     NewExpression, Node, NullLiteral, NumericLiteral, ObjectExpression, ObjectPattern,
     OptionalCallExpression, OptionalMemberExpression, PrivateName, Property, RegExpLiteral,
     RestElement, SequenceExpression, SpreadElement, StringLiteral, TaggedTemplateExpression,
@@ -26,7 +27,10 @@ use support::location::SMLoc;
 use crate::lexer::GrammarContext;
 use crate::token_kinds::TokenKind;
 
-use super::{IsClassHeritageArgument, IsConstructorCall, JSParserImpl, Param, PARAM_IN, PARAM_TAGGED};
+use super::{
+    IsClassHeritageArgument, IsConstructorCall, JSParserImpl, Param, PARAM_IN, PARAM_RETURN,
+    PARAM_TAGGED,
+};
 
 /// Whether the identifier `of` ends an AssignmentExpression. Faithful port of
 /// the C++ `enum class OfEndsAssignment { No, Yes };` (JSParserImpl.h). Passed
@@ -2645,10 +2649,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     // parse_property_assignment — P1.8
     // -----------------------------------------------------------------------
 
-    /// Parse a single object property (data subset). Port of
-    /// `JSParserImpl::parsePropertyAssignment` (2829-3266), data paths only.
+    /// Parse a single object property. Port of
+    /// `JSParserImpl::parsePropertyAssignment` (2829-3266).
     ///
-    /// ## Implemented (data paths)
+    /// ## Data paths (P1.8)
     /// - `get`/`set` as data property (`{get: 1}`, `{set: 1}`, `{get}`, `{set}`)
     /// - `async` as data property (`{async: 1}`, `{async}`)
     /// - Plain `identifier` — shorthand (`{a}`) or keyed (`{a: 1}`)
@@ -2657,23 +2661,28 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// - Shorthand (`{a}`)
     /// - `CoverInitializedName` (`{a = 1}`)
     ///
-    /// ## Deferred (P3) with error
-    /// - Real getter/setter bodies (`get foo() {}`, `set foo(v) {}`)
-    /// - Async methods (`async foo() {}`, `async [k]() {}`)
-    /// - Generator methods (`*foo() {}`)
-    /// - Method definitions (`foo() {}`, `[k]() {}`)
+    /// ## Method paths (P3.4)
+    /// - Getter/setter bodies (`get foo() {}`, `set foo(v) {}`)
+    /// - Async methods (`async foo() {}`, `async *gen() {}`, `async [k]() {}`)
+    /// - Generator methods (`*foo() {}`, `*[k]() {}`)
+    /// - Plain method definitions (`foo() {}`, `[k]() {}`, `'s'() {}`, `0() {}`)
     ///
     /// ## SaveFunctionState note
     /// `SaveFunctionState saveFunctionState{this}` (C++ 2833) saves and restores
-    /// parser flags needed when entering methods/getters/setters. For the DATA
-    /// subset no functions are entered, so this is a no-op effect.
-    /// P3: SaveFunctionState (needed when methods/getters/setters land)
+    /// parser flags clobbered when entering a method/getter/setter body. In this
+    /// Full-pass port the relevant flags (`param_yield`/`param_await`) are saved
+    /// and restored locally via [`Self::save_param_yield`]/[`Self::save_param_await`]
+    /// ParamFlagGuards at each method leaf, so a dedicated SaveFunctionState RAII
+    /// is unnecessary.
     fn parse_property_assignment(&mut self) -> Option<&'gc Node<'gc>> {
         let start_loc = self.cur_start();
 
-        // P3: SaveFunctionState (needed when methods/getters/setters land)
-
         let mut computed = false;
+        // `generator`/`async`/`method` start false; the method leaves set them
+        // before falling into the shared value logic (C++ 2835-2838).
+        let mut generator = false;
+        let mut async_ = false;
+        let mut method = false;
         let key: &'gc Node<'gc>;
 
         if self.check_unescaped_name(b"get") {
@@ -2730,11 +2739,92 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 ));
                 return Some(self.set_location(start_loc, value.range().end, prop));
             } else {
-                // Real getter: `get propName() { … }` — defer P3.
-                self.error_cur(
-                    "object getters/setters not yet supported (parser phase P3)",
+                // A getter method (C++ 2877-2943): `get propName() { … }`.
+                computed = self.check(TokenKind::l_square);
+                let opt_key = self.parse_property_name()?;
+
+                let paren_loc = self.lexer.token().start_loc();
+                if !self.eat(
+                    TokenKind::l_paren,
+                    GrammarContext::AllowRegExp,
+                    " in getter declaration",
+                ) {
+                    self.lexer.get_source_mgr_mut().note_at(
+                        start_loc,
+                        None,
+                        "start of getter declaration",
+                        support::diag::Subsystem::Parser,
+                    );
+                    return None;
+                }
+                if !self.eat(
+                    TokenKind::r_paren,
+                    GrammarContext::AllowRegExp,
+                    " in empty getter parameter list",
+                ) {
+                    self.lexer.get_source_mgr_mut().note_at(
+                        start_loc,
+                        None,
+                        "start of getter declaration",
+                        support::diag::Subsystem::Parser,
+                    );
+                    return None;
+                }
+
+                // P6/P7: Flow/TS return-type annotation (C++ 2901-2909) omitted.
+
+                // C++ 2911-2912: a getter body is neither yield- nor
+                // await-contextual.
+                let _guard_yield = self.save_param_yield(false);
+                let _guard_await = self.save_param_await(false);
+                if !self.need(TokenKind::l_brace, " in getter declaration") {
+                    self.lexer.get_source_mgr_mut().note_at(
+                        start_loc,
+                        None,
+                        "start of getter declaration",
+                        support::diag::Subsystem::Parser,
+                    );
+                    return None;
+                }
+                let block = self.parse_function_body(
+                    PARAM_RETURN,
+                    /* eagerly */ false,
+                    false,
+                    false,
+                    GrammarContext::AllowRegExp,
+                    true,
+                )?;
+                let body_end = block.range().end;
+
+                let func = FunctionExpression::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    None,
+                    NodeList::empty(),
+                    block,
+                    None,
+                    None,
+                    None,
+                    false,
+                    false,
                 );
-                return None;
+                func.is_method_definition.set(true);
+                let func_expr = self.set_location(
+                    paren_loc,
+                    body_end,
+                    Node::FunctionExpression(func),
+                );
+
+                let get_kind = self.gc.ctx().atom_table.atom_bytes(b"get");
+                let prop = Node::Property(Property::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    opt_key,
+                    func_expr,
+                    get_kind,
+                    computed,
+                    false,
+                    false,
+                ));
+                return Some(self.set_location(start_loc, body_end, prop));
             }
         } else if self.check_unescaped_name(b"set") {
             // Could be a setter or a property named "set".
@@ -2789,11 +2879,90 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 ));
                 return Some(self.set_location(start_loc, value.range().end, prop));
             } else {
-                // Real setter: `set propName(v) { … }` — defer P3.
-                self.error_cur(
-                    "object getters/setters not yet supported (parser phase P3)",
+                // A setter method (C++ 2982-3055): `set propName(v) { … }`.
+                computed = self.check(TokenKind::l_square);
+                let opt_key = self.parse_property_name()?;
+
+                // C++ 2989-2990: a setter body is neither yield- nor
+                // await-contextual.
+                let _guard_yield = self.save_param_yield(false);
+                let _guard_await = self.save_param_await(false);
+
+                let paren_loc = self.lexer.token().start_loc();
+                self.eat(
+                    TokenKind::l_paren,
+                    GrammarContext::AllowRegExp,
+                    " in setter declaration",
                 );
-                return None;
+
+                // PropertySetParameterList -> FormalParameter -> BindingElement.
+                let param = self.parse_binding_element(Param::default())?;
+
+                if !self.eat(
+                    TokenKind::r_paren,
+                    GrammarContext::AllowRegExp,
+                    " at end of setter parameter list",
+                ) {
+                    self.lexer.get_source_mgr_mut().note_at(
+                        start_loc,
+                        None,
+                        "start of setter declaration",
+                        support::diag::Subsystem::Parser,
+                    );
+                    return None;
+                }
+
+                // P6/P7: Flow/TS return-type annotation (C++ 3015-3023) omitted.
+
+                if !self.need(TokenKind::l_brace, " in setter declaration") {
+                    self.lexer.get_source_mgr_mut().note_at(
+                        start_loc,
+                        None,
+                        "start of setter declaration",
+                        support::diag::Subsystem::Parser,
+                    );
+                    return None;
+                }
+                let block = self.parse_function_body(
+                    PARAM_RETURN,
+                    /* eagerly */ false,
+                    false,
+                    false,
+                    GrammarContext::AllowRegExp,
+                    true,
+                )?;
+                let body_end = block.range().end;
+
+                let params = NodeList::from_iter(self.gc, [param]);
+                let func = FunctionExpression::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    None,
+                    params,
+                    block,
+                    None,
+                    None,
+                    None,
+                    false,
+                    false,
+                );
+                func.is_method_definition.set(true);
+                let func_expr = self.set_location(
+                    paren_loc,
+                    body_end,
+                    Node::FunctionExpression(func),
+                );
+
+                let set_kind = self.gc.ctx().atom_table.atom_bytes(b"set");
+                let prop = Node::Property(Property::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    opt_key,
+                    func_expr,
+                    set_kind,
+                    computed,
+                    false,
+                    false,
+                ));
+                return Some(self.set_location(start_loc, body_end, prop));
             }
         } else if self.check_unescaped_name(b"async") {
             // Could be an async method or a property named "async".
@@ -2849,12 +3018,21 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 ));
                 return Some(self.set_location(start_loc, value.range().end, prop));
             } else {
-                // Async method: `async propName(…) {}` — defer P3.
-                // (Also catches `async * foo() {}` generators.)
-                self.error_cur(
-                    "async methods not yet supported (parser phase P3)",
-                );
-                return None;
+                // An async method (C++ 3094-3110): `async name() {}`,
+                // `async *gen() {}`, `async [k]() {}`.
+                if self.lexer.is_new_line_before_current_token() {
+                    self.error_cur(
+                        "newline not allowed after 'async' in a method definition",
+                    );
+                }
+                // This is an async function: parse the key and set `async`.
+                async_ = true;
+                method = true;
+                generator =
+                    self.check_and_eat(TokenKind::star, GrammarContext::AllowRegExp);
+                computed = self.check(TokenKind::l_square);
+                key = self.parse_property_name()?;
+                // Fall through to the shared value logic.
             }
         } else if self.check(TokenKind::identifier) {
             // Plain identifier key.
@@ -2899,14 +3077,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
             // Otherwise fall through to value logic.
         } else {
-            // `*` generator method → defer P3.
-            if self.check(TokenKind::star) {
-                self.error_cur(
-                    "generator methods not yet supported (parser phase P3)",
-                );
-                return None;
-            }
-            // Computed key `[expr]`, or string/numeric/bigint key.
+            // C++ 3131-3139: a generator method (`*name() {}`, `*[k]() {}`), or
+            // a computed/string/numeric/bigint-keyed property or method.
+            generator =
+                self.check_and_eat(TokenKind::star, GrammarContext::AllowRegExp);
             computed = self.check(TokenKind::l_square);
             key = self.parse_property_name()?;
         }
@@ -2948,29 +3122,97 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return Some(self.set_location(start_loc, end_loc, prop));
         }
 
-        // Method definition `(` or `<` (also async from above) — defer P3.
-        if self.check2(TokenKind::l_paren, TokenKind::less) {
-            self.error_cur(
-                "object methods not yet supported (parser phase P3)",
-            );
-            return None;
-        }
+        let value: &'gc Node<'gc>;
 
-        // `: value` — standard property.
-        if !self.eat(
-            TokenKind::colon,
-            GrammarContext::AllowRegExp,
-            " in property initialization",
-        ) {
-            self.lexer.get_source_mgr_mut().note_at(
-                start_loc,
+        // Method definition (C++ 3158-3245): try this when we have '(' (or '<',
+        // a Flow/TS type-param list — omitted here) to indicate a method, OR
+        // when we already know this is `async` (which must indicate a method, so
+        // we must avoid parsing an ordinary property from ':').
+        if self.check(TokenKind::l_paren) || async_ {
+            // Parse the MethodDefinition manually here (we already consumed the
+            // PropertyName above):
+            //   PropertyName "(" UniqueFormalParameters ")" "{" FunctionBody "}"
+            //                ^
+            let _guard_yield = self.save_param_yield(generator);
+            let _guard_await = self.save_param_await(async_);
+
+            method = true;
+
+            // P6/P7: Flow/TS type-params (C++ 3175-3191) omitted.
+
+            // (
+            let paren_loc = self.lexer.token().start_loc();
+            if !self.need(TokenKind::l_paren, " in method definition") {
+                self.lexer.get_source_mgr_mut().note_at(
+                    start_loc,
+                    None,
+                    "start of method definition",
+                    support::diag::Subsystem::Parser,
+                );
+                return None;
+            }
+
+            let mut args: Vec<&'gc Node<'gc>> = Vec::new();
+            if !self.parse_formal_parameters(Param::default(), &mut args) {
+                return None;
+            }
+
+            // P6/P7: Flow/TS return-type annotation (C++ 3207-3215) omitted.
+
+            if !self.need(TokenKind::l_brace, " in method definition") {
+                self.lexer.get_source_mgr_mut().note_at(
+                    start_loc,
+                    None,
+                    "start of method definition",
+                    support::diag::Subsystem::Parser,
+                );
+                return None;
+            }
+            let body = self.parse_function_body(
+                PARAM_RETURN,
+                /* eagerly */ false,
+                generator,
+                async_,
+                GrammarContext::AllowRegExp,
+                true,
+            )?;
+            let body_end = body.range().end;
+
+            let params = NodeList::from_iter(self.gc, args);
+            let func = FunctionExpression::new(
+                NodeMetadata::new(self.dummy_range()),
                 None,
-                "start of property initialization",
-                support::diag::Subsystem::Parser,
+                params,
+                body,
+                None,
+                None,
+                None,
+                generator,
+                async_,
             );
-            return None;
+            func.is_method_definition.set(true);
+            value = self.set_location(
+                paren_loc,
+                body_end,
+                Node::FunctionExpression(func),
+            );
+        } else {
+            // `: value` — standard property (C++ 3246-3259).
+            if !self.eat(
+                TokenKind::colon,
+                GrammarContext::AllowRegExp,
+                " in property initialization",
+            ) {
+                self.lexer.get_source_mgr_mut().note_at(
+                    start_loc,
+                    None,
+                    "start of property initialization",
+                    support::diag::Subsystem::Parser,
+                );
+                return None;
+            }
+            value = self.parse_assignment_expression(PARAM_IN)?;
         }
-        let value = self.parse_assignment_expression(PARAM_IN)?;
 
         let end_loc = self.lexer.prev_token_end();
         let init_kind = self.gc.ctx().atom_table.atom_bytes(b"init");
@@ -2980,7 +3222,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             value,
             init_kind,
             computed,
-            false, // method
+            method,
             shorthand,
         ));
         Some(self.set_location(start_loc, end_loc, prop))

@@ -1210,119 +1210,157 @@ mod tests {
         );
     }
 
-    #[test]
-    fn object_getter_deferred() {
-        // Real getter `{get foo() {}}` — must error (P3).
-        use ast::context::Context;
-        let mut sm = support::manager::SourceErrorManager::new();
-        let buf_id = sm.add_buffer_bytes("input", b"({get foo() {}});");
-        let mut ctx = Context::new();
-        let gc = ctx.lock();
-        let atoms = &gc.ctx().atom_table;
-        let lexer = crate::lexer::JSLexer::new(
-            buf_id,
-            &mut sm,
-            atoms,
-            crate::lexer::GrammarContext::AllowRegExp,
-        );
-        let mut parser = JSParserImpl::new(&gc, lexer);
-        assert!(
-            parser.parse().is_none(),
-            "getter must error in P1.8 (deferred to P3)"
-        );
-        assert!(parser.error_count_pub() >= 1);
+    // P3.4: object method / getter / setter tests.
+
+    /// Helper: parse `(OBJECT);`, expect success, return the single Property of
+    /// the contained ObjectExpression.
+    fn parse_single_property<'gc>(
+        gc: &'gc ast::context::GCLock<'_, '_>,
+        sm: &mut support::manager::SourceErrorManager,
+        src: &[u8],
+    ) -> &'gc ast::node::Property<'gc> {
+        use ast::node::Node;
+        let expr = parse_expr_ok(gc, sm, src);
+        let Node::ObjectExpression(obj) = expr else {
+            panic!("expected ObjectExpression, got {:?}", expr.kind());
+        };
+        let props: Vec<_> = obj.properties.iter().collect();
+        assert_eq!(props.len(), 1, "expected exactly one property");
+        match props[0] {
+            Node::Property(p) => p,
+            other => panic!("expected Property, got {:?}", other.kind()),
+        }
     }
 
     #[test]
-    fn object_setter_deferred() {
-        // Real setter `{set foo(v) {}}` — must error (P3).
+    fn object_getter_parses() {
+        // `{get x() { return 1; }}` → Property kind "get", value FunctionExpression.
         use ast::context::Context;
+        use ast::node::Node;
         let mut sm = support::manager::SourceErrorManager::new();
-        let buf_id = sm.add_buffer_bytes("input", b"({set foo(v) {}});");
         let mut ctx = Context::new();
         let gc = ctx.lock();
-        let atoms = &gc.ctx().atom_table;
-        let lexer = crate::lexer::JSLexer::new(
-            buf_id,
-            &mut sm,
-            atoms,
-            crate::lexer::GrammarContext::AllowRegExp,
-        );
-        let mut parser = JSParserImpl::new(&gc, lexer);
-        assert!(
-            parser.parse().is_none(),
-            "setter must error in P1.8 (deferred to P3)"
-        );
-        assert!(parser.error_count_pub() >= 1);
+        let p = parse_single_property(&gc, &mut sm, b"({get x() { return 1; }});");
+        assert_eq!(gc.ctx().atom_table.bytes(p.kind.get()), b"get");
+        assert!(!p.method.get(), "getter is not a method");
+        assert!(!p.computed.get());
+        let Node::FunctionExpression(f) = p.value else {
+            panic!("getter value must be FunctionExpression");
+        };
+        assert_eq!(f.params.iter().count(), 0, "getter has no params");
+        assert!(!f.generator.get());
+        assert!(!f.r#async.get());
     }
 
     #[test]
-    fn object_method_deferred() {
-        // Object method `{foo() {}}` — must error (P3).
+    fn object_setter_parses() {
+        // `{set x(v) {}}` → Property kind "set", value FunctionExpression w/ 1 param.
         use ast::context::Context;
+        use ast::node::Node;
         let mut sm = support::manager::SourceErrorManager::new();
-        let buf_id = sm.add_buffer_bytes("input", b"({foo() {}});");
         let mut ctx = Context::new();
         let gc = ctx.lock();
-        let atoms = &gc.ctx().atom_table;
-        let lexer = crate::lexer::JSLexer::new(
-            buf_id,
-            &mut sm,
-            atoms,
-            crate::lexer::GrammarContext::AllowRegExp,
-        );
-        let mut parser = JSParserImpl::new(&gc, lexer);
-        assert!(
-            parser.parse().is_none(),
-            "method must error in P1.8 (deferred to P3)"
-        );
-        assert!(parser.error_count_pub() >= 1);
+        let p = parse_single_property(&gc, &mut sm, b"({set x(v) {}});");
+        assert_eq!(gc.ctx().atom_table.bytes(p.kind.get()), b"set");
+        assert!(!p.method.get(), "setter is not a method");
+        let Node::FunctionExpression(f) = p.value else {
+            panic!("setter value must be FunctionExpression");
+        };
+        assert_eq!(f.params.iter().count(), 1, "setter has one param");
     }
 
     #[test]
-    fn object_async_method_deferred() {
-        // Async method `{async foo() {}}` — must error (P3).
+    fn object_method_parses() {
+        // `{m() {}}` → Property kind "init", method=true, value FunctionExpression.
         use ast::context::Context;
+        use ast::node::Node;
         let mut sm = support::manager::SourceErrorManager::new();
-        let buf_id = sm.add_buffer_bytes("input", b"({async foo() {}});");
         let mut ctx = Context::new();
         let gc = ctx.lock();
-        let atoms = &gc.ctx().atom_table;
-        let lexer = crate::lexer::JSLexer::new(
-            buf_id,
-            &mut sm,
-            atoms,
-            crate::lexer::GrammarContext::AllowRegExp,
-        );
-        let mut parser = JSParserImpl::new(&gc, lexer);
-        assert!(
-            parser.parse().is_none(),
-            "async method must error in P1.8 (deferred to P3)"
-        );
-        assert!(parser.error_count_pub() >= 1);
+        let p = parse_single_property(&gc, &mut sm, b"({m() {}});");
+        assert_eq!(gc.ctx().atom_table.bytes(p.kind.get()), b"init");
+        assert!(p.method.get(), "plain method has method=true");
+        assert!(!p.shorthand.get());
+        let Node::FunctionExpression(f) = p.value else {
+            panic!("method value must be FunctionExpression");
+        };
+        assert!(!f.generator.get());
+        assert!(!f.r#async.get());
     }
 
     #[test]
-    fn object_generator_method_deferred() {
-        // Generator method `{*foo() {}}` — must error (P3).
+    fn object_generator_method_parses() {
+        // `{*g() {}}` → method=true, value FunctionExpression.generator==true.
         use ast::context::Context;
+        use ast::node::Node;
         let mut sm = support::manager::SourceErrorManager::new();
-        let buf_id = sm.add_buffer_bytes("input", b"({*foo() {}});");
         let mut ctx = Context::new();
         let gc = ctx.lock();
-        let atoms = &gc.ctx().atom_table;
-        let lexer = crate::lexer::JSLexer::new(
-            buf_id,
-            &mut sm,
-            atoms,
-            crate::lexer::GrammarContext::AllowRegExp,
-        );
-        let mut parser = JSParserImpl::new(&gc, lexer);
+        let p = parse_single_property(&gc, &mut sm, b"({*g() {}});");
+        assert!(p.method.get());
+        let Node::FunctionExpression(f) = p.value else {
+            panic!("generator method value must be FunctionExpression");
+        };
+        assert!(f.generator.get(), "generator==true");
+        assert!(!f.r#async.get());
+    }
+
+    #[test]
+    fn object_async_method_parses() {
+        // `{async a() {}}` → method=true, value FunctionExpression.async==true.
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let p = parse_single_property(&gc, &mut sm, b"({async a() {}});");
+        assert!(p.method.get());
+        let Node::FunctionExpression(f) = p.value else {
+            panic!("async method value must be FunctionExpression");
+        };
+        assert!(f.r#async.get(), "async==true");
+        assert!(!f.generator.get());
+    }
+
+    #[test]
+    fn object_async_generator_method_parses() {
+        // `{async *ag() {}}` → both async and generator true.
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let p = parse_single_property(&gc, &mut sm, b"({async *ag() {}});");
+        assert!(p.method.get());
+        let Node::FunctionExpression(f) = p.value else {
+            panic!("async generator method value must be FunctionExpression");
+        };
+        assert!(f.r#async.get(), "async==true");
+        assert!(f.generator.get(), "generator==true");
+    }
+
+    #[test]
+    fn object_computed_method_parses() {
+        // `{[k]() {}}` → computed=true, method=true.
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let p = parse_single_property(&gc, &mut sm, b"({[k]() {}});");
+        assert!(p.computed.get(), "computed key");
+        assert!(p.method.get());
+        assert!(matches!(p.value, Node::FunctionExpression(_)));
+    }
+
+    #[test]
+    fn object_string_and_numeric_methods_parse() {
+        // `{'s'() {}, 0() {}}` → both methods parse with method=true.
+        let mut sm = support::manager::SourceErrorManager::new();
         assert!(
-            parser.parse().is_none(),
-            "generator method must error in P1.8 (deferred to P3)"
+            parse_snippet(&mut sm, b"({'s'() {}, 0() {}});"),
+            "string- and numeric-keyed methods"
         );
-        assert!(parser.error_count_pub() >= 1);
     }
 
     // P1.8b: destructuring-assignment reparse tests.
