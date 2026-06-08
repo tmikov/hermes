@@ -2076,8 +2076,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// optional-expression tail. Port of
     /// `JSParserImpl::parseOptionalExpressionExceptNew` (3424-3519).
     ///
-    /// Deferrals:
-    /// - `rw_import` — P4: emit error and return `None`.
+    /// The `rw_import` arm handles the `import.meta` MetaProperty and the
+    /// `import(...)` ImportExpression (dynamic import) forms (P4).
     fn parse_optional_expression_except_new(
         &mut self,
         is_constructor_call: IsConstructorCall,
@@ -2122,7 +2122,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 // ImportMeta: import . meta
                 //                      ^
                 // C++ 3444-3465.
-                if !self.check_unescaped_name(b"meta") {
+                // C++ 3447 uses `check(metaIdent_)` — the `check(UniqueString*)`
+                // overload (JSParserImpl.h:523), which compares the interned
+                // identifier and is escape-INsensitive (so `import.meta`
+                // is still a valid MetaProperty, matching the `new.target`
+                // sibling). Use `check_name`, NOT `check_unescaped_name`.
+                if !self.check_name(b"meta") {
                     // C++ error(tok_->getSourceRange(), "'meta' expected in
                     // member expression") plus a note pointing at the start of
                     // the member expression (the `import` keyword). Mirror the

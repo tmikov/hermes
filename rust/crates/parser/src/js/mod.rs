@@ -1188,6 +1188,37 @@ mod tests {
         assert_parse_errors(b"import.foo;", "'meta' expected after import.");
     }
 
+    /// C++ uses `check(metaIdent_)` (escape-insensitive) for the `meta`
+    /// keyword, so an escaped `meta` is still a valid `import.meta`
+    /// MetaProperty — it must NOT trip the `'meta' expected` error path.
+    #[test]
+    fn import_meta_escaped_meta_parses() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+
+        let expr =
+            parse_expr_from(&gc, &mut sm, atoms, b"import.m\\u0065ta;");
+        if let Node::MetaProperty(mp) = expr {
+            if let Node::Identifier(prop) = mp.property {
+                assert_eq!(
+                    gc.ctx().atom_table.bytes(prop.name.get()),
+                    b"meta",
+                    "escaped `m\\u0065ta` should intern to `meta`"
+                );
+            } else {
+                panic!("property should be an Identifier");
+            }
+        } else {
+            panic!("expected MetaProperty, got {:?}", expr.kind());
+        }
+    }
+
     /// Array literals are implemented in P1.7; `[1]` must now parse cleanly.
     #[test]
     fn array_literal_parses() {
