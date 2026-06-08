@@ -5,11 +5,12 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-//! Module (`import` declaration) parsing for the JS parser. Port of the
-//! module-declaration section of `lib/Parser/JSParserImpl.cpp`
+//! Module (`import`/`export` declaration) parsing for the JS parser. Port of
+//! the module-declaration section of `lib/Parser/JSParserImpl.cpp`
 //! (parseFromClause / parseWithClause / parseImportDeclaration /
 //! parseImportClause / parseNameSpaceImport / parseNamedImports /
-//! parseImportSpecifier, C++ lines 6611-7125).
+//! parseImportSpecifier, C++ lines 6611-7125; parseExportDeclaration /
+//! parseExportClause / parseExportSpecifier, C++ lines 7127-7467).
 //!
 //! Flow/TS productions (the `import type` / `import typeof` kind detection and
 //! the per-specifier `type`/`typeof` forms) are gated off by
@@ -21,16 +22,18 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
 use ast::node::{
-    Identifier, ImportAttribute, ImportDeclaration, ImportDefaultSpecifier,
-    ImportNamespaceSpecifier, ImportSpecifier, Node, StringLiteral,
+    ExportAllDeclaration, ExportDefaultDeclaration, ExportNamedDeclaration,
+    ExportNamespaceSpecifier, ExportSpecifier, Identifier, ImportAttribute,
+    ImportDeclaration, ImportDefaultSpecifier, ImportNamespaceSpecifier,
+    ImportSpecifier, Node, StringLiteral,
 };
 use ast::node_child::{NodeLabel, NodeList, NodeMetadata};
-use support::location::SMRange;
+use support::location::{SMLoc, SMRange};
 
 use crate::lexer::GrammarContext;
 use crate::token_kinds::TokenKind;
 
-use super::{JSParserImpl, Param};
+use super::{JSParserImpl, Param, PARAM_DEFAULT, PARAM_IN};
 
 impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     // -----------------------------------------------------------------------
@@ -589,5 +592,398 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             value_ident,
         ));
         Some(self.set_location(start_loc, self.lexer.prev_token_end(), node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseExportDeclaration — 7127 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse an `export` declaration. Port of
+    /// `JSParserImpl::parseExportDeclaration` (7127-7375).
+    ///
+    /// Flow productions (`export type` at 7133-7137, the Flow default-export
+    /// forms at 7209-7279, and the Flow `export-kind` detection at 7362-7368)
+    /// are gated off by `context_.getParseFlow()` in C++ and are omitted here;
+    /// the `// P5/P6/P7` comments mark each omission site. Until those land the
+    /// export kind is always `value`.
+    pub(super) fn parse_export_declaration(
+        &mut self,
+    ) -> Option<&'gc Node<'gc>> {
+        debug_assert!(
+            self.check(TokenKind::rw_export),
+            "parseExportDeclaration requires 'export'"
+        );
+        let start_loc = self.advance(GrammarContext::AllowRegExp).start;
+
+        // The `value` export kind label (used until Flow/TS export-kind lands).
+        let value_ident = self.gc.ctx().atom_table.atom_bytes(b"value");
+
+        // P5/P6: Flow `export type` declaration omitted. C++ 7133-7137.
+
+        if self.check_and_eat(TokenKind::star, GrammarContext::AllowRegExp) {
+            // export * FromClause;
+            // export * as IdentifierName FromClause;
+            // C++ 7139-7184.
+            let export_as: Option<&'gc Node<'gc>> = if self.check_name(b"as") {
+                // export * as IdentifierName FromClause;
+                //             ^
+                // `as` is a contextual identifier (escape-insensitive). C++ 7143.
+                self.advance(GrammarContext::AllowRegExp);
+                if !self.check(TokenKind::identifier)
+                    && !self.lexer.token().is_res_word()
+                {
+                    // C++ errorExpected(identifier, "in export clause", ...).
+                    // note arg dropped per house style.
+                    self.error_cur("identifier expected in export clause");
+                    return None;
+                }
+                let tok_start = self.lexer.token().start_loc();
+                let tok_end = self.lexer.token().end_loc();
+                let name = self.lexer.token().get_res_word_or_identifier();
+                let id = Node::Identifier(Identifier::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    name,
+                    None,
+                    false,
+                ));
+                let id = self.set_location(tok_start, tok_end, id);
+                self.advance(GrammarContext::AllowRegExp);
+                Some(id)
+            } else {
+                None
+            };
+
+            let source = self.parse_from_clause()?;
+            if !self.eat_semi(false) {
+                return None;
+            }
+
+            if let Some(export_as) = export_as {
+                // C++ 7168-7179.
+                let spec = Node::ExportNamespaceSpecifier(
+                    ExportNamespaceSpecifier::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        export_as,
+                    ),
+                );
+                let spec = self.set_location(
+                    start_loc,
+                    self.lexer.prev_token_end(),
+                    spec,
+                );
+                let node = Node::ExportNamedDeclaration(
+                    ExportNamedDeclaration::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        None,
+                        NodeList::from_iter(self.gc, vec![spec]),
+                        Some(source),
+                        value_ident,
+                    ),
+                );
+                return Some(self.set_location(
+                    start_loc,
+                    self.lexer.prev_token_end(),
+                    node,
+                ));
+            }
+            // C++ 7180-7184.
+            let node = Node::ExportAllDeclaration(ExportAllDeclaration::new(
+                NodeMetadata::new(self.dummy_range()),
+                source,
+                value_ident,
+            ));
+            return Some(self.set_location(
+                start_loc,
+                self.lexer.prev_token_end(),
+                node,
+            ));
+        } else if self
+            .check_and_eat(TokenKind::rw_default, GrammarContext::AllowRegExp)
+        {
+            // export default ... — C++ 7185-7293.
+            let _g = self.check_recursion()?;
+            // `export default async function` detection uses checkUnescaped
+            // (escape-SENSITIVE) for `async`, matching C++ 7189.
+            if self.check(TokenKind::rw_function)
+                || (self.check_unescaped_name(b"async")
+                    && self.check_async_function())
+            {
+                // export default HoistableDeclaration
+                // Currently, the only hoistable declarations are functions.
+                // C++ 7188-7199.
+                let fun = self.parse_function_declaration(PARAM_DEFAULT)?;
+                let node = Node::ExportDefaultDeclaration(
+                    ExportDefaultDeclaration::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        fun,
+                    ),
+                );
+                return Some(self.set_location(
+                    start_loc,
+                    fun.range().end,
+                    node,
+                ));
+            } else if self.check2(TokenKind::rw_class, TokenKind::at) {
+                // C++ 7200-7208.
+                let cls = self.parse_class_declaration(PARAM_DEFAULT)?;
+                let node = Node::ExportDefaultDeclaration(
+                    ExportDefaultDeclaration::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        cls,
+                    ),
+                );
+                return Some(self.set_location(
+                    start_loc,
+                    cls.range().end,
+                    node,
+                ));
+            } else {
+                // P6: Flow default exports (component/hook/enum/record,
+                // C++ 7209-7279) omitted.
+                //
+                // export default AssignmentExpression ;
+                // C++ 7280-7293.
+                let expr = self.parse_assignment_expression(PARAM_IN)?;
+                if !self.eat_semi(false) {
+                    return None;
+                }
+                let node = Node::ExportDefaultDeclaration(
+                    ExportDefaultDeclaration::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        expr,
+                    ),
+                );
+                return Some(self.set_location(
+                    start_loc,
+                    self.lexer.prev_token_end(),
+                    node,
+                ));
+            }
+        } else if self.check(TokenKind::l_brace) {
+            // export ExportClause FromClause ;
+            // export ExportClause ;
+            // C++ 7294-7331.
+            let mut specifiers: Vec<&'gc Node<'gc>> = Vec::new();
+            let mut invalids: Vec<SMRange> = Vec::new();
+
+            if !self.parse_export_clause(&mut specifiers, &mut invalids) {
+                return None;
+            }
+
+            // `from` is a contextual identifier (escape-insensitive). C++ 7306.
+            let source = if self.check_name(b"from") {
+                // export ExportClause FromClause ;
+                Some(self.parse_from_clause()?)
+            } else {
+                // export ExportClause ;
+                // ES9.0 15.2.3.1: when there is no FromClause, any ranges added
+                // to invalids are actually invalid, and should be reported as
+                // errors. C++ 7313-7321.
+                for range in &invalids {
+                    self.error_at(*range, "Invalid exported name");
+                }
+                None
+            };
+
+            if !self.eat_semi(false) {
+                return None;
+            }
+
+            let node =
+                Node::ExportNamedDeclaration(ExportNamedDeclaration::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    None,
+                    NodeList::from_iter(self.gc, specifiers),
+                    source,
+                    value_ident,
+                ));
+            return Some(self.set_location(
+                start_loc,
+                self.lexer.prev_token_end(),
+                node,
+            ));
+        } else if self.check(TokenKind::rw_var) {
+            // Could find another AssignmentExpression without hitting
+            // PrimaryExpression. C++ 7332-7346.
+            let _g = self.check_recursion()?;
+            // export VariableStatement
+            let var = self.parse_variable_statement(Param::default())?;
+            let node =
+                Node::ExportNamedDeclaration(ExportNamedDeclaration::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    Some(var),
+                    NodeList::empty(),
+                    None,
+                    value_ident,
+                ));
+            return Some(self.set_location(start_loc, var.range().end, node));
+        }
+
+        // export Declaration [~Yield]
+        // C++ 7348-7374.
+
+        if !self.check_declaration() {
+            self.error_at(self.cur_range(), "expected declaration in export");
+            return None;
+        }
+
+        let decl = self.parse_declaration(Param::default())?;
+
+        // P6: Flow type export-kind detection omitted (C++ 7362-7368); the kind
+        // stays `value`.
+
+        let node = Node::ExportNamedDeclaration(ExportNamedDeclaration::new(
+            NodeMetadata::new(self.dummy_range()),
+            Some(decl),
+            NodeList::empty(),
+            None,
+            value_ident,
+        ));
+        Some(self.set_location(start_loc, decl.range().end, node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseExportClause — 7377 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a `{ a, b as c, ... }` export clause, appending each
+    /// `ExportSpecifier` to `specifiers` and any potentially-invalid exported
+    /// name ranges to `invalids`. Port of `JSParserImpl::parseExportClause`
+    /// (7377-7407).
+    fn parse_export_clause(
+        &mut self,
+        specifiers: &mut Vec<&'gc Node<'gc>>,
+        invalids: &mut Vec<SMRange>,
+    ) -> bool {
+        // ExportClause:
+        //   { }
+        //   { ExportsList }
+        //   { ExportsList , }
+        debug_assert!(
+            self.check(TokenKind::l_brace),
+            "ExportClause requires '{{'"
+        );
+        let start_loc = self.advance(GrammarContext::AllowRegExp).start;
+
+        while !self.check(TokenKind::r_brace) {
+            // Read all the elements of the ExportsList.
+            let spec = match self.parse_export_specifier(start_loc, invalids) {
+                Some(s) => s,
+                None => return false,
+            };
+            specifiers.push(spec);
+
+            if !self.check_and_eat(TokenKind::comma, GrammarContext::AllowRegExp)
+            {
+                break;
+            }
+        }
+
+        // C++ 7401-7406: NOTE grammar context AllowDiv. note arg dropped per
+        // house style.
+        self.eat(
+            TokenKind::r_brace,
+            GrammarContext::AllowDiv,
+            " at end of export clause",
+        )
+    }
+
+    // -----------------------------------------------------------------------
+    // parseExportSpecifier — 7409 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a single export specifier (`a` or `a as b`). Port of
+    /// `JSParserImpl::parseExportSpecifier` (7409-7467).
+    fn parse_export_specifier(
+        &mut self,
+        _export_loc: SMLoc,
+        invalids: &mut Vec<SMRange>,
+    ) -> Option<&'gc Node<'gc>> {
+        // ExportSpecifier:
+        //   IdentifierName
+        //   IdentifierName as IdentifierName
+        if !self.check(TokenKind::identifier)
+            && !self.lexer.token().is_res_word()
+        {
+            // C++ errorExpected(identifier, "in export clause", ...).
+            // note arg dropped per house style.
+            self.error_cur("identifier expected in export clause");
+            return None;
+        }
+
+        // ES9.0 15.2.3.1 Early errors for ReferencedBindings in ExportClause.
+        // Add potentially error-raising identifier ranges to the invalids list
+        // here, and the owner of the invalids list will report the ranges as
+        // errors if necessary. C++ 7425-7433. These contextual reserved-word
+        // names use `check(UniqueString*)` (escape-insensitive) -> check_name.
+        if self.lexer.token().is_res_word()
+            || self.check_name(b"implements")
+            || self.check_name(b"interface")
+            || self.check_name(b"let")
+            || self.check_name(b"package")
+            || self.check_name(b"private")
+            || self.check_name(b"protected")
+            || self.check_name(b"public")
+            || self.check_name(b"static")
+        {
+            invalids.push(self.cur_range());
+        }
+
+        let tok_start = self.lexer.token().start_loc();
+        let tok_end = self.lexer.token().end_loc();
+        let local_name = self.lexer.token().get_res_word_or_identifier();
+        let local_node = Node::Identifier(Identifier::new(
+            NodeMetadata::new(self.dummy_range()),
+            local_name,
+            None,
+            false,
+        ));
+        let local = self.set_location(tok_start, tok_end, local_node);
+        self.advance(GrammarContext::AllowRegExp);
+
+        // `as` is a contextual identifier (escape-insensitive). C++ 7442.
+        let exported = if self.check_name(b"as") {
+            // IdentifierName as IdentifierName
+            self.advance(GrammarContext::AllowRegExp);
+            if !self.check(TokenKind::identifier)
+                && !self.lexer.token().is_res_word()
+            {
+                // note arg dropped per house style.
+                self.error_cur("identifier expected in export clause");
+                return None;
+            }
+            let tok_start = self.lexer.token().start_loc();
+            let tok_end = self.lexer.token().end_loc();
+            let exported_name =
+                self.lexer.token().get_res_word_or_identifier();
+            let exported_node = Node::Identifier(Identifier::new(
+                NodeMetadata::new(self.dummy_range()),
+                exported_name,
+                None,
+                false,
+            ));
+            let e = self.set_location(tok_start, tok_end, exported_node);
+            self.advance(GrammarContext::AllowRegExp);
+            e
+        } else {
+            // IdentifierName
+            local
+        };
+
+        // CRITICAL: ExportSpecifierNode(exported, local) — `exported` FIRST,
+        // then `local` (C++ 7466; node.rs fields `exported, local`). This is
+        // the OPPOSITE field order from ImportSpecifier(imported, local).
+        // setLocation(local, exported, ...): start = local start, end =
+        // exported end. C++ 7463-7466.
+        let node = Node::ExportSpecifier(ExportSpecifier::new(
+            NodeMetadata::new(self.dummy_range()),
+            exported,
+            local,
+        ));
+        Some(self.set_location(
+            local.range().start,
+            exported.range().end,
+            node,
+        ))
     }
 }

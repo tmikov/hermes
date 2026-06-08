@@ -1116,11 +1116,6 @@ mod tests {
     // P4.2: import declarations are now implemented; see the `import_*` tests
     // further below. The `import x from 'm';` form parses cleanly.
 
-    #[test]
-    fn deferred_export_declaration_errors() {
-        assert_parse_errors(b"export var x = 1;", "export declaration is P4");
-    }
-
     // P4.1: `import(...)` and `import.meta` expression forms.
 
     #[test]
@@ -1440,6 +1435,200 @@ mod tests {
         assert_parse_has_errors(
             b"{ import x from 'm'; }",
             "import inside a block must be at top level of module",
+        );
+    }
+
+    // P4.3: export declarations.
+
+    #[test]
+    fn export_named_specifier_parses() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        // The `var a;` declaration and the `export` share one program.
+        let buf_id = sm.add_buffer_bytes("input", b"var a;\nexport {a as b};");
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        let program = parser.parse().expect("parse succeeded");
+        assert_eq!(parser.error_count_pub(), 0, "zero errors");
+        let Node::Program(p) = program else {
+            panic!("expected Program")
+        };
+        let stmt = p.body.iter().nth(1).expect("has second statement");
+        if let Node::ExportNamedDeclaration(decl) = stmt {
+            assert!(decl.declaration.is_none(), "declaration None");
+            assert!(decl.source.is_none(), "source None");
+            assert_eq!(
+                gc.ctx().atom_table.bytes(decl.export_kind.get()),
+                b"value"
+            );
+            assert_eq!(decl.specifiers.iter().count(), 1);
+            let spec = decl.specifiers.iter().next().unwrap();
+            if let Node::ExportSpecifier(es) = spec {
+                assert_eq!(ident_bytes(&gc, es.exported), b"b");
+                assert_eq!(ident_bytes(&gc, es.local), b"a");
+            } else {
+                panic!("expected ExportSpecifier, got {:?}", spec.kind());
+            }
+        } else {
+            panic!("expected ExportNamedDeclaration, got {:?}", stmt.kind());
+        }
+    }
+
+    #[test]
+    fn export_named_from_parses() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt = parse_one_stmt(&gc, &mut sm, b"export {a} from 'm';");
+        if let Node::ExportNamedDeclaration(decl) = stmt {
+            if let Some(Node::StringLiteral(sl)) = decl.source {
+                assert_eq!(gc.ctx().atom_table.bytes(sl.value.get()), b"m");
+            } else {
+                panic!("source should be a StringLiteral");
+            }
+        } else {
+            panic!("expected ExportNamedDeclaration, got {:?}", stmt.kind());
+        }
+    }
+
+    #[test]
+    fn export_all_parses() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt = parse_one_stmt(&gc, &mut sm, b"export * from 'm';");
+        if let Node::ExportAllDeclaration(decl) = stmt {
+            if let Node::StringLiteral(sl) = decl.source {
+                assert_eq!(gc.ctx().atom_table.bytes(sl.value.get()), b"m");
+            } else {
+                panic!("source should be a StringLiteral");
+            }
+        } else {
+            panic!("expected ExportAllDeclaration, got {:?}", stmt.kind());
+        }
+    }
+
+    #[test]
+    fn export_namespace_parses() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt = parse_one_stmt(&gc, &mut sm, b"export * as ns from 'm';");
+        if let Node::ExportNamedDeclaration(decl) = stmt {
+            assert_eq!(decl.specifiers.iter().count(), 1);
+            let spec = decl.specifiers.iter().next().unwrap();
+            if let Node::ExportNamespaceSpecifier(ns) = spec {
+                assert_eq!(ident_bytes(&gc, ns.exported), b"ns");
+            } else {
+                panic!("expected ExportNamespaceSpecifier, got {:?}", spec.kind());
+            }
+        } else {
+            panic!("expected ExportNamedDeclaration, got {:?}", stmt.kind());
+        }
+    }
+
+    #[test]
+    fn export_default_expr_parses() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt = parse_one_stmt(&gc, &mut sm, b"export default 1;");
+        if let Node::ExportDefaultDeclaration(decl) = stmt {
+            assert!(
+                matches!(decl.declaration, Node::NumericLiteral(_)),
+                "declaration should be a NumericLiteral, got {:?}",
+                decl.declaration.kind()
+            );
+        } else {
+            panic!("expected ExportDefaultDeclaration, got {:?}", stmt.kind());
+        }
+    }
+
+    #[test]
+    fn export_default_function_parses() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt = parse_one_stmt(&gc, &mut sm, b"export default function(){}");
+        if let Node::ExportDefaultDeclaration(decl) = stmt {
+            if let Node::FunctionDeclaration(fd) = decl.declaration {
+                assert!(fd.id.is_none(), "default function has no id");
+            } else {
+                panic!(
+                    "declaration should be a FunctionDeclaration, got {:?}",
+                    decl.declaration.kind()
+                );
+            }
+        } else {
+            panic!("expected ExportDefaultDeclaration, got {:?}", stmt.kind());
+        }
+    }
+
+    #[test]
+    fn export_var_declaration_parses() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt = parse_one_stmt(&gc, &mut sm, b"export var x = 1;");
+        if let Node::ExportNamedDeclaration(decl) = stmt {
+            assert!(
+                matches!(decl.declaration, Some(Node::VariableDeclaration(_))),
+                "declaration should be a VariableDeclaration, got {:?}",
+                decl.declaration.map(|d| d.kind())
+            );
+        } else {
+            panic!("expected ExportNamedDeclaration, got {:?}", stmt.kind());
+        }
+    }
+
+    #[test]
+    fn export_function_declaration_parses() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt = parse_one_stmt(&gc, &mut sm, b"export function f(){}");
+        if let Node::ExportNamedDeclaration(decl) = stmt {
+            assert!(
+                matches!(decl.declaration, Some(Node::FunctionDeclaration(_))),
+                "declaration should be a FunctionDeclaration, got {:?}",
+                decl.declaration.map(|d| d.kind())
+            );
+        } else {
+            panic!("expected ExportNamedDeclaration, got {:?}", stmt.kind());
+        }
+    }
+
+    #[test]
+    fn export_in_block_errors() {
+        // A `{ export ... }` block body reaches `parse_statement_list_item`
+        // with `AllowImportExport::No`. Unlike import, export does NOT push the
+        // declaration; it just reports the "must be at top level" error.
+        assert_parse_has_errors(
+            b"{ export var x = 1; }",
+            "export inside a block must be at top level of module",
         );
     }
 

@@ -148,11 +148,21 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 }
             }
         } else if self.check(TokenKind::rw_export) {
-            // P4: export declarations are deferred. C++ 924-936.
-            self.error_cur(
-                "export declarations not yet supported (parser phase P4)",
-            );
-            return false;
+            // export declaration. C++ 924-936. NOTE the asymmetry vs import:
+            // import ALWAYS pushes (then reports the error); export pushes ONLY
+            // when allowed here, otherwise it just reports the error.
+            let export_decl = match self.parse_export_declaration() {
+                Some(d) => d,
+                None => return false,
+            };
+            if allow_import_export == AllowImportExport::Yes {
+                stmt_list.push(export_decl);
+            } else {
+                self.error_at(
+                    export_decl.range(),
+                    "export declaration must be at top level of module",
+                );
+            }
         } else {
             // C++ 937-942.
             match self.parse_statement(param.get(PARAM_RETURN)) {
