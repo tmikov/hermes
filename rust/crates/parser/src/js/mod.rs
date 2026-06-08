@@ -21,6 +21,7 @@ use crate::token_kinds::TokenKind;
 mod classes;
 mod expressions;
 mod functions;
+mod modules;
 mod statements;
 
 /// Whether import/export declarations are allowed in this statement list.
@@ -700,6 +701,30 @@ mod tests {
         assert!(parser.error_count_pub() >= 1, "{why}: expected an error");
     }
 
+    /// Like [`assert_parse_errors`], but only requires that at least one error
+    /// was reported — the parse may still recover and return a `Program`. Used
+    /// for diagnostics that C++ reports but continues past (e.g. a duplicate
+    /// named import, or an `import` nested in a block).
+    fn assert_parse_has_errors(src: &[u8], why: &str) {
+        use ast::context::Context;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let buf_id = sm.add_buffer_bytes("input", src);
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        let _ = parser.parse();
+        assert!(parser.error_count_pub() >= 1, "{why}: expected an error");
+    }
+
     /// P2 capstone: top-level declaration forms that route into
     /// `parseDeclaration`/`parseStatementListItem` must emit an HONEST deferral
     /// error (not a silent misparse). Functions/classes are P3; import/export
@@ -1088,10 +1113,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn deferred_import_declaration_errors() {
-        assert_parse_errors(b"import x from 'm';", "import declaration is P4");
-    }
+    // P4.2: import declarations are now implemented; see the `import_*` tests
+    // further below. The `import x from 'm';` form parses cleanly.
 
     #[test]
     fn deferred_export_declaration_errors() {
@@ -1217,6 +1240,207 @@ mod tests {
         } else {
             panic!("expected MetaProperty, got {:?}", expr.kind());
         }
+    }
+
+    // P4.2: import declarations.
+
+    /// Helper: the interned bytes of an `Identifier` node.
+    fn ident_bytes<'gc>(
+        gc: &'gc ast::context::GCLock<'_, '_>,
+        node: &ast::node::Node<'gc>,
+    ) -> Vec<u8> {
+        if let ast::node::Node::Identifier(id) = node {
+            gc.ctx().atom_table.bytes(id.name.get()).to_vec()
+        } else {
+            panic!("expected Identifier, got {:?}", node.kind());
+        }
+    }
+
+    #[test]
+    fn import_default_specifier_parses() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt = parse_one_stmt(&gc, &mut sm, b"import x from 'm';");
+        if let Node::ImportDeclaration(decl) = stmt {
+            assert_eq!(decl.specifiers.iter().count(), 1);
+            let spec = decl.specifiers.iter().next().unwrap();
+            if let Node::ImportDefaultSpecifier(ds) = spec {
+                assert_eq!(ident_bytes(&gc, ds.local), b"x");
+            } else {
+                panic!("expected ImportDefaultSpecifier, got {:?}", spec.kind());
+            }
+            if let Node::StringLiteral(sl) = decl.source {
+                assert_eq!(gc.ctx().atom_table.bytes(sl.value.get()), b"m");
+            } else {
+                panic!("source should be a StringLiteral");
+            }
+            assert_eq!(
+                gc.ctx().atom_table.bytes(decl.import_kind.get()),
+                b"value"
+            );
+        } else {
+            panic!("expected ImportDeclaration, got {:?}", stmt.kind());
+        }
+    }
+
+    #[test]
+    fn import_named_specifier_parses() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt = parse_one_stmt(&gc, &mut sm, b"import {b as c} from 'm';");
+        if let Node::ImportDeclaration(decl) = stmt {
+            assert_eq!(decl.specifiers.iter().count(), 1);
+            let spec = decl.specifiers.iter().next().unwrap();
+            if let Node::ImportSpecifier(is) = spec {
+                assert_eq!(ident_bytes(&gc, is.imported), b"b");
+                assert_eq!(ident_bytes(&gc, is.local), b"c");
+            } else {
+                panic!("expected ImportSpecifier, got {:?}", spec.kind());
+            }
+        } else {
+            panic!("expected ImportDeclaration, got {:?}", stmt.kind());
+        }
+    }
+
+    #[test]
+    fn import_namespace_specifier_parses() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt = parse_one_stmt(&gc, &mut sm, b"import * as ns from 'm';");
+        if let Node::ImportDeclaration(decl) = stmt {
+            assert_eq!(decl.specifiers.iter().count(), 1);
+            let spec = decl.specifiers.iter().next().unwrap();
+            if let Node::ImportNamespaceSpecifier(ns) = spec {
+                assert_eq!(ident_bytes(&gc, ns.local), b"ns");
+            } else {
+                panic!(
+                    "expected ImportNamespaceSpecifier, got {:?}",
+                    spec.kind()
+                );
+            }
+        } else {
+            panic!("expected ImportDeclaration, got {:?}", stmt.kind());
+        }
+    }
+
+    #[test]
+    fn import_default_plus_named_parses() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt =
+            parse_one_stmt(&gc, &mut sm, b"import d, {a, b} from 'm';");
+        if let Node::ImportDeclaration(decl) = stmt {
+            let specs: Vec<_> = decl.specifiers.iter().collect();
+            assert_eq!(specs.len(), 3);
+            assert!(matches!(specs[0], Node::ImportDefaultSpecifier(_)));
+            assert!(matches!(specs[1], Node::ImportSpecifier(_)));
+            assert!(matches!(specs[2], Node::ImportSpecifier(_)));
+        } else {
+            panic!("expected ImportDeclaration, got {:?}", stmt.kind());
+        }
+    }
+
+    #[test]
+    fn import_default_plus_namespace_parses() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt =
+            parse_one_stmt(&gc, &mut sm, b"import d, * as ns from 'm';");
+        if let Node::ImportDeclaration(decl) = stmt {
+            let specs: Vec<_> = decl.specifiers.iter().collect();
+            assert_eq!(specs.len(), 2);
+            assert!(matches!(specs[0], Node::ImportDefaultSpecifier(_)));
+            assert!(matches!(specs[1], Node::ImportNamespaceSpecifier(_)));
+        } else {
+            panic!("expected ImportDeclaration, got {:?}", stmt.kind());
+        }
+    }
+
+    #[test]
+    fn import_bare_parses() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt = parse_one_stmt(&gc, &mut sm, b"import 'm';");
+        if let Node::ImportDeclaration(decl) = stmt {
+            assert_eq!(decl.specifiers.iter().count(), 0);
+            assert_eq!(decl.attributes.iter().count(), 0);
+            if let Node::StringLiteral(sl) = decl.source {
+                assert_eq!(gc.ctx().atom_table.bytes(sl.value.get()), b"m");
+            } else {
+                panic!("source should be a StringLiteral");
+            }
+        } else {
+            panic!("expected ImportDeclaration, got {:?}", stmt.kind());
+        }
+    }
+
+    #[test]
+    fn import_attribute_parses() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt = parse_one_stmt(
+            &gc,
+            &mut sm,
+            b"import x from 'm' with { type: 'json' };",
+        );
+        if let Node::ImportDeclaration(decl) = stmt {
+            assert_eq!(decl.attributes.iter().count(), 1);
+            let attr = decl.attributes.iter().next().unwrap();
+            if let Node::ImportAttribute(ia) = attr {
+                assert_eq!(ident_bytes(&gc, ia.key), b"type");
+                if let Node::StringLiteral(sl) = ia.value {
+                    assert_eq!(
+                        gc.ctx().atom_table.bytes(sl.value.get()),
+                        b"json"
+                    );
+                } else {
+                    panic!("attribute value should be a StringLiteral");
+                }
+            } else {
+                panic!("expected ImportAttribute, got {:?}", attr.kind());
+            }
+        } else {
+            panic!("expected ImportDeclaration, got {:?}", stmt.kind());
+        }
+    }
+
+    #[test]
+    fn import_duplicate_named_errors() {
+        assert_parse_has_errors(
+            b"import {a, a} from 'm';",
+            "duplicate named import is a Duplicate entry error",
+        );
+    }
+
+    #[test]
+    fn import_in_block_errors() {
+        // A `{ import ... }` block body reaches `parse_statement_list_item`
+        // with `AllowImportExport::No`, triggering the top-level error.
+        assert_parse_has_errors(
+            b"{ import x from 'm'; }",
+            "import inside a block must be at top level of module",
+        );
     }
 
     /// Array literals are implemented in P1.7; `[1]` must now parse cleanly.

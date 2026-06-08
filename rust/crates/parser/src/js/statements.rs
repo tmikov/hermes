@@ -103,7 +103,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     pub(super) fn parse_statement_list_item(
         &mut self,
         param: Param,
-        _allow_import_export: AllowImportExport,
+        allow_import_export: AllowImportExport,
         stmt_list: &mut Vec<&'gc Node<'gc>>,
     ) -> bool {
         if self.check_declaration() {
@@ -131,11 +131,21 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     None => return false,
                 }
             } else {
-                // P4: import declarations are deferred.
-                self.error_cur(
-                    "import declarations not yet supported (parser phase P4)",
-                );
-                return false;
+                // import declaration. C++ 911-922. Note that C++ ALWAYS pushes
+                // the declaration onto the list (even when it is disallowed
+                // here), then reports the "must be at top level" error.
+                let import_decl = match self.parse_import_declaration() {
+                    Some(d) => d,
+                    None => return false,
+                };
+                let range = import_decl.range();
+                stmt_list.push(import_decl);
+                if allow_import_export == AllowImportExport::No {
+                    self.error_at(
+                        range,
+                        "import declaration must be at top level of module",
+                    );
+                }
             }
         } else if self.check(TokenKind::rw_export) {
             // P4: export declarations are deferred. C++ 924-936.
