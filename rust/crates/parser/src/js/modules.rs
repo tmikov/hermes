@@ -17,6 +17,7 @@
 //! corresponding `// P5/P6/P7` comments mark each omission site. Until those
 //! land, the import kind is always `value`.
 
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
 use ast::node::{
@@ -228,6 +229,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             self.advance(GrammarContext::AllowRegExp);
 
             let mut attributes: Vec<&'gc Node<'gc>> = Vec::new();
+            // Nested `if` mirrors the C++ 6740-6743 structure (an inner
+            // `if (!parseWithClause(...)) return None`); kept rather than
+            // collapsed for faithfulness.
+            #[allow(clippy::collapsible_if)]
             if self.check(TokenKind::rw_with)
                 && !self.lexer.is_new_line_before_current_token()
             {
@@ -262,6 +267,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let source = self.parse_from_clause()?;
 
         let mut attributes: Vec<&'gc Node<'gc>> = Vec::new();
+        // Nested `if` mirrors the C++ 6768-6771 structure; kept rather than
+        // collapsed for faithfulness.
+        #[allow(clippy::collapsible_if)]
         if self.check(TokenKind::rw_with)
             && !self.lexer.is_new_line_before_current_token()
         {
@@ -449,16 +457,21 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 },
                 _ => unreachable!("parseImportSpecifier returns an ImportSpecifier"),
             };
-            if bound_names.contains_key(&local_name) {
-                // Report the error but continue parsing to see if there's any
-                // others. (first-usage note dropped per house style.)
-                self.error_at(
-                    local_range,
-                    "Duplicate entry in import declaration list",
-                );
-            } else {
-                bound_names.insert(local_name, local_range);
-                specifiers.push(spec);
+            // C++ `boundNames.try_emplace(...)` (6915): insert-if-absent, then
+            // branch on whether it was inserted. The Entry API mirrors that.
+            match bound_names.entry(local_name) {
+                Entry::Vacant(e) => {
+                    e.insert(local_range);
+                    specifiers.push(spec);
+                }
+                Entry::Occupied(_) => {
+                    // Report the error but continue parsing to see if there's
+                    // any others. (first-usage note dropped per house style.)
+                    self.error_at(
+                        local_range,
+                        "Duplicate entry in import declaration list",
+                    );
+                }
             }
 
             if !self.check_and_eat(TokenKind::comma, GrammarContext::AllowRegExp)
