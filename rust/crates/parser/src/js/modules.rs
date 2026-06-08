@@ -175,9 +175,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             );
             attributes.push(attr);
 
-            // C++ 6704: `checkAndEat(comma)` — default grammar context is
-            // AllowDiv (JSParserImpl.h checkAndEat default).
-            if !self.check_and_eat(TokenKind::comma, GrammarContext::AllowDiv) {
+            // C++ 6704: `checkAndEat(comma)` — the default grammar context is
+            // AllowRegExp (JSParserImpl.h:507-510).
+            if !self.check_and_eat(TokenKind::comma, GrammarContext::AllowRegExp)
+            {
                 break;
             }
         }
@@ -498,7 +499,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         let value_ident = self.gc.ctx().atom_table.atom_bytes(b"value");
 
-        // P5/P6: Flow type/typeof import specifier omitted (C++ 6955-6073).
+        // P5/P6: Flow type/typeof import specifier omitted (C++ 6955-7073).
 
         // Not attempting to parse a type identifier. C++ 7074-7109.
         if !self.check(TokenKind::identifier)
