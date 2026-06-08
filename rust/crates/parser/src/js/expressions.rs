@@ -13,7 +13,8 @@ use ast::node::{
     ArrayExpression, ArrowFunctionExpression, ArrayPattern, AssignmentExpression, AssignmentPattern,
     AwaitExpression, BigIntLiteral, BinaryExpression, BooleanLiteral, CallExpression,
     ConditionalExpression, CoverEmptyArgs, CoverRestElement, CoverTrailingComma,
-    CoverInitializer, Empty, FunctionExpression, Identifier, LogicalExpression, MemberExpression,
+    CoverInitializer, Empty, FunctionExpression, Identifier, ImportExpression,
+    LogicalExpression, MemberExpression,
     MetaProperty,
     NewExpression, Node, NullLiteral, NumericLiteral, ObjectExpression, ObjectPattern,
     OptionalCallExpression, OptionalMemberExpression, PrivateName, Property, RegExpLiteral,
@@ -2111,11 +2112,118 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
             node
         } else if self.check(TokenKind::rw_import) {
-            // P4: `import.meta` and `import(source)`.
-            self.error_cur(
-                "import expressions not yet supported (parser phase P4)",
-            );
-            return None;
+            // C++ JSParserImpl.cpp 3442-3509 (rw_import branch).
+            // Consume `import`; C++ `advance()` returns the OLD range (the
+            // `import` range). Grammar context AllowRegExp matches the
+            // surrounding code.
+            let import_range = self.advance(GrammarContext::AllowRegExp);
+            if self.check_and_eat(TokenKind::period, GrammarContext::AllowRegExp)
+            {
+                // ImportMeta: import . meta
+                //                      ^
+                // C++ 3444-3465.
+                if !self.check_unescaped_name(b"meta") {
+                    // C++ error(tok_->getSourceRange(), "'meta' expected in
+                    // member expression") plus a note pointing at the start of
+                    // the member expression (the `import` keyword). Mirror the
+                    // sibling `new.target` error path.
+                    self.error_cur("'meta' expected in member expression");
+                    self.lexer.get_source_mgr_mut().note_at(
+                        import_range.start,
+                        None,
+                        "start of member expression",
+                        support::diag::Subsystem::Parser,
+                    );
+                    return None;
+                }
+                // Build MetaProperty(Identifier"import", Identifier"meta").
+                // Note: the `meta` node's NAME is the atom `import` (C++ uses
+                // `importIdent_` at 3456), located over `import_range`.
+                let import_ident =
+                    self.gc.ctx().atom_table.atom_bytes(b"import");
+                let meta_ident = self.gc.ctx().atom_table.atom_bytes(b"meta");
+                let meta = Node::Identifier(Identifier::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    import_ident,
+                    None,
+                    false,
+                ));
+                let meta_ref =
+                    self.set_location(import_range.start, import_range.end, meta);
+                let prop = Node::Identifier(Identifier::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    meta_ident,
+                    None,
+                    false,
+                ));
+                let prop_tok_start = self.lexer.token().start_loc();
+                let prop_tok_end = self.lexer.token().end_loc();
+                let prop_ref =
+                    self.set_location(prop_tok_start, prop_tok_end, prop);
+                // Advance past "meta".
+                self.advance(GrammarContext::AllowRegExp);
+                let meta_prop = Node::MetaProperty(MetaProperty::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    meta_ref,
+                    prop_ref,
+                ));
+                // C++ setLocation(meta, getPrevTokenEndLoc(), ...) — 3462-3465.
+                let end = self.lexer.prev_token_end();
+                self.set_location(import_range.start, end, meta_prop)
+            } else {
+                // ImportCall: import ( AssignmentExpression ... ) — C++
+                // 3466-3509.
+                // Guard against parseAssignmentExpression without
+                // parsePrimaryExpression.
+                let _guard = self.check_recursion()?;
+
+                // ImportCall must be a call with an AssignmentExpression as the
+                // argument.
+                if !self.eat(
+                    TokenKind::l_paren,
+                    GrammarContext::AllowRegExp,
+                    "in import call",
+                ) {
+                    return None;
+                }
+
+                let source = self.parse_assignment_expression(PARAM_IN)?;
+
+                self.check_and_eat(
+                    TokenKind::comma,
+                    GrammarContext::AllowRegExp,
+                );
+
+                let options = if !self.check(TokenKind::r_paren) {
+                    // C++ parseAssignmentExpression() — default param is
+                    // ParamIn (JSParserImpl.h 1132-1133).
+                    let o = self.parse_assignment_expression(PARAM_IN)?;
+                    self.check_and_eat(
+                        TokenKind::comma,
+                        GrammarContext::AllowRegExp,
+                    );
+                    Some(o)
+                } else {
+                    None
+                };
+
+                // Capture the `)` END before eating it (C++ 3496).
+                let end_loc = self.lexer.token().end_loc();
+                if !self.eat(
+                    TokenKind::r_paren,
+                    GrammarContext::AllowRegExp,
+                    "in import call",
+                ) {
+                    return None;
+                }
+
+                let node = Node::ImportExpression(ImportExpression::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    source,
+                    options,
+                ));
+                self.set_location(start_loc, end_loc, node)
+            }
         } else {
             self.parse_primary_expression()?
         };

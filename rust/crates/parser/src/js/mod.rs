@@ -1098,6 +1098,96 @@ mod tests {
         assert_parse_errors(b"export var x = 1;", "export declaration is P4");
     }
 
+    // P4.1: `import(...)` and `import.meta` expression forms.
+
+    #[test]
+    fn import_call_no_options() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+
+        let expr = parse_expr_from(&gc, &mut sm, atoms, b"import('m');");
+        if let Node::ImportExpression(ie) = expr {
+            assert!(
+                matches!(ie.source, Node::StringLiteral(_)),
+                "source should be a StringLiteral, got {:?}",
+                ie.source.kind()
+            );
+            assert!(ie.options.is_none(), "options should be None");
+        } else {
+            panic!("expected ImportExpression, got {:?}", expr.kind());
+        }
+    }
+
+    #[test]
+    fn import_call_with_options() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+
+        let expr = parse_expr_from(&gc, &mut sm, atoms, b"import('m', {});");
+        if let Node::ImportExpression(ie) = expr {
+            assert!(
+                matches!(ie.options, Some(Node::ObjectExpression(_))),
+                "options should be Some(ObjectExpression), got {:?}",
+                ie.options.map(|o| o.kind())
+            );
+        } else {
+            panic!("expected ImportExpression, got {:?}", expr.kind());
+        }
+    }
+
+    #[test]
+    fn import_meta_property() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+
+        let expr = parse_expr_from(&gc, &mut sm, atoms, b"import.meta;");
+        if let Node::MetaProperty(mp) = expr {
+            if let Node::Identifier(meta) = mp.meta {
+                assert_eq!(
+                    gc.ctx().atom_table.bytes(meta.name.get()),
+                    b"import",
+                    "meta identifier name should be `import`"
+                );
+            } else {
+                panic!("meta should be an Identifier");
+            }
+            if let Node::Identifier(prop) = mp.property {
+                assert_eq!(
+                    gc.ctx().atom_table.bytes(prop.name.get()),
+                    b"meta",
+                    "property identifier name should be `meta`"
+                );
+            } else {
+                panic!("property should be an Identifier");
+            }
+        } else {
+            panic!("expected MetaProperty, got {:?}", expr.kind());
+        }
+    }
+
+    #[test]
+    fn import_meta_bad_form_errors() {
+        assert_parse_errors(b"import.foo;", "'meta' expected after import.");
+    }
+
     /// Array literals are implemented in P1.7; `[1]` must now parse cleanly.
     #[test]
     fn array_literal_parses() {
