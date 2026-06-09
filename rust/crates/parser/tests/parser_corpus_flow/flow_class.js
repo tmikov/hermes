@@ -19,3 +19,6 @@ var D = class <T> implements K {
   y: T;
 };
 class E implements L {}
+class SW {
+  static<W>() {}
+}
