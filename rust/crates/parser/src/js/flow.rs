@@ -582,8 +582,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse a primary type annotation. Port of
     /// `JSParserImpl::parsePrimaryTypeAnnotationFlow` (flow.cpp:3305-3602).
-    /// P5.0 implements the `*`/`null`/`void`/literal/named-primitive arms;
-    /// the rest are honest errors (see the per-arm markers).
+    /// P5.0/P5.1 implement all arms except function/group/object types
+    /// (P5.2) and `interface` types (P5.3) — see the per-arm markers.
     fn parse_primary_type_annotation_flow(&mut self) -> Option<&'gc Node<'gc>> {
         let start = self.cur_start();
         match self.cur_kind() {
