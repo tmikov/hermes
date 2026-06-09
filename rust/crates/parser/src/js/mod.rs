@@ -3718,9 +3718,601 @@ mod tests {
         assert_flow_parse_has_errors(b"interface I {}", "interface is P5.3");
         // P6: Flow enum declarations.
         assert_flow_parse_has_errors(b"enum E {}", "Flow enum is P6");
-        // P5.1: generic type references.
-        assert_flow_parse_has_errors(b"type X = Y;", "generic types are P5.1");
-        // P5.1: negative literal types.
-        assert_flow_parse_has_errors(b"type X = -1;", "negative literals are P5.1");
+        // P5.2: function types.
+        assert_flow_parse_has_errors(
+            b"type X = (A) => B;",
+            "function types are P5.2",
+        );
+        // P5.2: the anonymous function type tail `T => R`.
+        assert_flow_parse_has_errors(
+            b"type X = A => B;",
+            "anon function types are P5.2",
+        );
+        // P5.2: object types.
+        assert_flow_parse_has_errors(
+            b"type X = { a: number };",
+            "object types are P5.2",
+        );
+    }
+
+    // P5.1: the full Flow type-annotation hierarchy (js/flow.rs).
+
+    /// Helper: parse `src` with the caller's (Flow-enabled) context and
+    /// return the right-hand side of the single top-level `TypeAlias`.
+    fn flow_alias_right<'gc>(
+        gc: &'gc ast::context::GCLock<'_, '_>,
+        sm: &mut support::manager::SourceErrorManager,
+        src: &[u8],
+    ) -> &'gc ast::node::Node<'gc> {
+        let stmt = parse_one_stmt(gc, sm, src);
+        let ast::node::Node::TypeAlias(alias) = stmt else {
+            panic!("expected TypeAlias, got {:?}", stmt.kind())
+        };
+        alias.right
+    }
+
+    /// Helper: assert `node` is a `GenericTypeAnnotation` over a plain
+    /// `Identifier` named `name` (the shape every bare `X` parses to).
+    fn assert_generic_named<'gc>(
+        gc: &'gc ast::context::GCLock<'_, '_>,
+        node: &ast::node::Node<'gc>,
+        name: &[u8],
+    ) {
+        use ast::node::Node;
+        let Node::GenericTypeAnnotation(g) = node else {
+            panic!("expected GenericTypeAnnotation, got {:?}", node.kind())
+        };
+        assert!(g.type_parameters.is_none(), "no type args");
+        assert_eq!(ident_bytes(gc, g.id), name);
+    }
+
+    /// Unions and intersections: member counts, leading-separator
+    /// equivalence, and `&` binding tighter than `|`.
+    #[test]
+    fn flow_union_intersection_types() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+
+        // `X | Y | Z` → a single Union with three members.
+        let ty = flow_alias_right(&gc, &mut sm, b"type A = X | Y | Z;");
+        let Node::UnionTypeAnnotation(u) = ty else {
+            panic!("expected UnionTypeAnnotation, got {:?}", ty.kind())
+        };
+        let members: Vec<_> = u.types.iter().collect();
+        assert_eq!(members.len(), 3);
+        assert_generic_named(&gc, members[0], b"X");
+        assert_generic_named(&gc, members[2], b"Z");
+
+        // A leading `|` is allowed and does not add a member.
+        let ty = flow_alias_right(&gc, &mut sm, b"type A = | X | Y;");
+        let Node::UnionTypeAnnotation(u) = ty else {
+            panic!("expected UnionTypeAnnotation, got {:?}", ty.kind())
+        };
+        assert_eq!(u.types.iter().count(), 2);
+
+        // ...but a sole leading `|` yields the bare element, not a union.
+        let ty = flow_alias_right(&gc, &mut sm, b"type A = | X;");
+        assert_generic_named(&gc, ty, b"X");
+
+        // `X & Y | Z` → Union[Intersection[X, Y], Z].
+        let ty = flow_alias_right(&gc, &mut sm, b"type A = X & Y | Z;");
+        let Node::UnionTypeAnnotation(u) = ty else {
+            panic!("expected UnionTypeAnnotation, got {:?}", ty.kind())
+        };
+        let members: Vec<_> = u.types.iter().collect();
+        assert_eq!(members.len(), 2);
+        let Node::IntersectionTypeAnnotation(i) = members[0] else {
+            panic!(
+                "expected IntersectionTypeAnnotation, got {:?}",
+                members[0].kind()
+            )
+        };
+        assert_eq!(i.types.iter().count(), 2);
+        assert_generic_named(&gc, members[1], b"Z");
+    }
+
+    /// `??X` parses as two nested NullableTypeAnnotations.
+    #[test]
+    fn flow_nullable_nesting() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+
+        let ty = flow_alias_right(&gc, &mut sm, b"type A = ??X;");
+        let Node::NullableTypeAnnotation(outer) = ty else {
+            panic!("expected NullableTypeAnnotation, got {:?}", ty.kind())
+        };
+        let Node::NullableTypeAnnotation(inner) = outer.type_annotation else {
+            panic!(
+                "expected nested NullableTypeAnnotation, got {:?}",
+                outer.type_annotation.kind()
+            )
+        };
+        assert_generic_named(&gc, inner.type_annotation, b"X");
+    }
+
+    /// Postfix types: `X[]`/`X[][]` arrays, `X[K]` indexed access, `X?.[K]`
+    /// optional indexed access, and the stickiness of `?.` in `X?.[A][B]`.
+    #[test]
+    fn flow_postfix_types() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+
+        // `X[][]` → Array(Array(X)).
+        let ty = flow_alias_right(&gc, &mut sm, b"type A = X[][];");
+        let Node::ArrayTypeAnnotation(outer) = ty else {
+            panic!("expected ArrayTypeAnnotation, got {:?}", ty.kind())
+        };
+        let Node::ArrayTypeAnnotation(inner) = outer.element_type else {
+            panic!(
+                "expected nested ArrayTypeAnnotation, got {:?}",
+                outer.element_type.kind()
+            )
+        };
+        assert_generic_named(&gc, inner.element_type, b"X");
+
+        // `X[K]` → IndexedAccessType.
+        let ty = flow_alias_right(&gc, &mut sm, b"type A = X[K];");
+        let Node::IndexedAccessType(idx) = ty else {
+            panic!("expected IndexedAccessType, got {:?}", ty.kind())
+        };
+        assert_generic_named(&gc, idx.object_type, b"X");
+        assert_generic_named(&gc, idx.index_type, b"K");
+
+        // `X?.[K]` → OptionalIndexedAccessType with optional=true.
+        let ty = flow_alias_right(&gc, &mut sm, b"type A = X?.[K];");
+        let Node::OptionalIndexedAccessType(opt) = ty else {
+            panic!("expected OptionalIndexedAccessType, got {:?}", ty.kind())
+        };
+        assert!(opt.optional.get(), "?.[ access is optional");
+
+        // `X?.[A][B]`: once a `?.[` is seen, the enclosing plain `[B]` access
+        // is also an OptionalIndexedAccessType, but with optional=false.
+        let ty = flow_alias_right(&gc, &mut sm, b"type A = X?.[A][B];");
+        let Node::OptionalIndexedAccessType(outer) = ty else {
+            panic!("expected OptionalIndexedAccessType, got {:?}", ty.kind())
+        };
+        assert!(!outer.optional.get(), "[B] itself is not optional");
+        let Node::OptionalIndexedAccessType(inner) = outer.object_type else {
+            panic!(
+                "expected inner OptionalIndexedAccessType, got {:?}",
+                outer.object_type.kind()
+            )
+        };
+        assert!(inner.optional.get(), "?.[A] is optional");
+    }
+
+    /// Generic types: qualified names are left-associated
+    /// QualifiedTypeIdentifiers; `Foo<>` is an empty (but present)
+    /// TypeParameterInstantiation.
+    #[test]
+    fn flow_generic_types() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+
+        // `Foo.Bar.Baz` → Qualified(Qualified(Foo, Bar), Baz).
+        let ty = flow_alias_right(&gc, &mut sm, b"type A = Foo.Bar.Baz;");
+        let Node::GenericTypeAnnotation(g) = ty else {
+            panic!("expected GenericTypeAnnotation, got {:?}", ty.kind())
+        };
+        assert!(g.type_parameters.is_none());
+        let Node::QualifiedTypeIdentifier(outer) = g.id else {
+            panic!("expected QualifiedTypeIdentifier, got {:?}", g.id.kind())
+        };
+        assert_eq!(ident_bytes(&gc, outer.id), b"Baz");
+        let Node::QualifiedTypeIdentifier(inner) = outer.qualification else {
+            panic!(
+                "expected inner QualifiedTypeIdentifier, got {:?}",
+                outer.qualification.kind()
+            )
+        };
+        assert_eq!(ident_bytes(&gc, inner.qualification), b"Foo");
+        assert_eq!(ident_bytes(&gc, inner.id), b"Bar");
+
+        // `Foo<>` → empty TypeParameterInstantiation.
+        let ty = flow_alias_right(&gc, &mut sm, b"type A = Foo<>;");
+        let Node::GenericTypeAnnotation(g) = ty else {
+            panic!("expected GenericTypeAnnotation, got {:?}", ty.kind())
+        };
+        let args = g.type_parameters.expect("has type args");
+        let Node::TypeParameterInstantiation(inst) = args else {
+            panic!("expected TypeParameterInstantiation, got {:?}", args.kind())
+        };
+        assert_eq!(inst.params.iter().count(), 0, "`Foo<>` has no args");
+
+        // `Foo<X, Y>` → two args.
+        let ty = flow_alias_right(&gc, &mut sm, b"type A = Foo<X, Y>;");
+        let Node::GenericTypeAnnotation(g) = ty else {
+            panic!("expected GenericTypeAnnotation, got {:?}", ty.kind())
+        };
+        let Node::TypeParameterInstantiation(inst) =
+            g.type_parameters.expect("has type args")
+        else {
+            panic!("expected TypeParameterInstantiation")
+        };
+        assert_eq!(inst.params.iter().count(), 2);
+    }
+
+    /// Typeof types: qualified chains, wrapping parens (recorded on the
+    /// argument's parens counter — invisible in the AST dump), type args.
+    #[test]
+    fn flow_typeof_types() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+
+        // `typeof x.y` → argument is a QualifiedTypeofIdentifier.
+        let ty = flow_alias_right(&gc, &mut sm, b"type A = typeof x.y;");
+        let Node::TypeofTypeAnnotation(t) = ty else {
+            panic!("expected TypeofTypeAnnotation, got {:?}", ty.kind())
+        };
+        assert!(t.type_arguments.is_none());
+        let Node::QualifiedTypeofIdentifier(q) = t.argument else {
+            panic!(
+                "expected QualifiedTypeofIdentifier, got {:?}",
+                t.argument.kind()
+            )
+        };
+        assert_eq!(ident_bytes(&gc, q.qualification), b"x");
+        assert_eq!(ident_bytes(&gc, q.id), b"y");
+
+        // `typeof (x)` → the paren is recorded on the Identifier argument.
+        let ty = flow_alias_right(&gc, &mut sm, b"type A = typeof (x);");
+        let Node::TypeofTypeAnnotation(t) = ty else {
+            panic!("expected TypeofTypeAnnotation, got {:?}", ty.kind())
+        };
+        assert!(matches!(t.argument, Node::Identifier(_)));
+        assert_eq!(t.argument.metadata().parens.get(), 1, "one paren recorded");
+
+        // `typeof x<Y>` → type arguments attached to the TypeofTypeAnnotation.
+        let ty = flow_alias_right(&gc, &mut sm, b"type A = typeof x<Y>;");
+        let Node::TypeofTypeAnnotation(t) = ty else {
+            panic!("expected TypeofTypeAnnotation, got {:?}", ty.kind())
+        };
+        let Node::TypeParameterInstantiation(inst) =
+            t.type_arguments.expect("has type args")
+        else {
+            panic!("expected TypeParameterInstantiation")
+        };
+        assert_eq!(inst.params.iter().count(), 1);
+    }
+
+    /// Tuple types: plain, labeled (with optional), spread (bare and
+    /// labeled), variance prefixes, inexact `...`, and empty.
+    #[test]
+    fn flow_tuple_types() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+
+        // `[X, Y]` → two unlabeled (bare type) elements, not inexact.
+        let ty = flow_alias_right(&gc, &mut sm, b"type A = [X, Y];");
+        let Node::TupleTypeAnnotation(t) = ty else {
+            panic!("expected TupleTypeAnnotation, got {:?}", ty.kind())
+        };
+        assert!(!t.inexact.get());
+        let elems: Vec<_> = t.element_types.iter().collect();
+        assert_eq!(elems.len(), 2);
+        assert_generic_named(&gc, elems[0], b"X");
+
+        // `[a: X, b?: Y]` → labeled elements; the second is optional.
+        let ty = flow_alias_right(&gc, &mut sm, b"type A = [a: X, b?: Y];");
+        let Node::TupleTypeAnnotation(t) = ty else {
+            panic!("expected TupleTypeAnnotation, got {:?}", ty.kind())
+        };
+        let elems: Vec<_> = t.element_types.iter().collect();
+        assert_eq!(elems.len(), 2);
+        let Node::TupleTypeLabeledElement(first) = elems[0] else {
+            panic!(
+                "expected TupleTypeLabeledElement, got {:?}",
+                elems[0].kind()
+            )
+        };
+        assert_eq!(ident_bytes(&gc, first.label), b"a");
+        assert!(!first.optional.get());
+        assert!(first.variance.is_none());
+        let Node::TupleTypeLabeledElement(second) = elems[1] else {
+            panic!(
+                "expected TupleTypeLabeledElement, got {:?}",
+                elems[1].kind()
+            )
+        };
+        assert!(second.optional.get(), "b? is optional");
+
+        // `[X, ...Y]` → bare spread (no label); `[...rest: Y]` → labeled.
+        let ty = flow_alias_right(&gc, &mut sm, b"type A = [X, ...Y];");
+        let Node::TupleTypeAnnotation(t) = ty else {
+            panic!("expected TupleTypeAnnotation, got {:?}", ty.kind())
+        };
+        let elems: Vec<_> = t.element_types.iter().collect();
+        let Node::TupleTypeSpreadElement(spread) = elems[1] else {
+            panic!(
+                "expected TupleTypeSpreadElement, got {:?}",
+                elems[1].kind()
+            )
+        };
+        assert!(spread.label.is_none());
+        assert_generic_named(&gc, spread.type_annotation, b"Y");
+
+        let ty = flow_alias_right(&gc, &mut sm, b"type A = [...rest: Y];");
+        let Node::TupleTypeAnnotation(t) = ty else {
+            panic!("expected TupleTypeAnnotation, got {:?}", ty.kind())
+        };
+        let elems: Vec<_> = t.element_types.iter().collect();
+        let Node::TupleTypeSpreadElement(spread) = elems[0] else {
+            panic!(
+                "expected TupleTypeSpreadElement, got {:?}",
+                elems[0].kind()
+            )
+        };
+        assert_eq!(ident_bytes(&gc, spread.label.expect("labeled")), b"rest");
+
+        // `[+a: X, -b: Y]` → Variance kinds "plus" / "minus".
+        let ty = flow_alias_right(&gc, &mut sm, b"type A = [+a: X, -b: Y];");
+        let Node::TupleTypeAnnotation(t) = ty else {
+            panic!("expected TupleTypeAnnotation, got {:?}", ty.kind())
+        };
+        let elems: Vec<_> = t.element_types.iter().collect();
+        let Node::TupleTypeLabeledElement(first) = elems[0] else {
+            panic!("expected TupleTypeLabeledElement")
+        };
+        let Node::Variance(v) = first.variance.expect("has variance") else {
+            panic!("expected Variance")
+        };
+        assert_eq!(gc.ctx().atom_table.bytes(v.kind.get()), b"plus");
+        let Node::TupleTypeLabeledElement(second) = elems[1] else {
+            panic!("expected TupleTypeLabeledElement")
+        };
+        let Node::Variance(v) = second.variance.expect("has variance") else {
+            panic!("expected Variance")
+        };
+        assert_eq!(gc.ctx().atom_table.bytes(v.kind.get()), b"minus");
+
+        // `[X, ...]` → inexact, with one element.
+        let ty = flow_alias_right(&gc, &mut sm, b"type A = [X, ...];");
+        let Node::TupleTypeAnnotation(t) = ty else {
+            panic!("expected TupleTypeAnnotation, got {:?}", ty.kind())
+        };
+        assert!(t.inexact.get(), "trailing ... makes the tuple inexact");
+        assert_eq!(t.element_types.iter().count(), 1);
+
+        // `[]` → empty tuple.
+        let ty = flow_alias_right(&gc, &mut sm, b"type A = [];");
+        let Node::TupleTypeAnnotation(t) = ty else {
+            panic!("expected TupleTypeAnnotation, got {:?}", ty.kind())
+        };
+        assert_eq!(t.element_types.iter().count(), 0);
+        assert!(!t.inexact.get());
+    }
+
+    /// The two tuple-specific diagnostics keep the exact C++ texts, and a
+    /// non-identifier label trips the reparse helper's "identifier expected".
+    #[test]
+    fn flow_tuple_errors() {
+        use ast::context::Context;
+        use support::diag::{CollectingHandler, DiagKind};
+        use support::manager::SourceErrorManager;
+
+        // Comma after the inexact `...`.
+        {
+            let mut sm = SourceErrorManager::new();
+            let mut ctx = Context::new();
+            ctx.set_parse_flow(true);
+            let gc = ctx.lock();
+            let atoms = &gc.ctx().atom_table;
+            let _ = parse_with_collector(&gc, &mut sm, atoms, b"type A = [X, ..., Y];");
+            let h = sm.handler_as::<CollectingHandler>().unwrap();
+            assert!(
+                h.messages().iter().any(|m| m.kind == DiagKind::Error
+                    && m.message
+                        == "trailing commas after inexact tuple types are not allowed"),
+                "got {:?}",
+                h.messages().iter().map(|m| &m.message).collect::<Vec<_>>()
+            );
+        }
+
+        // Variance on an unlabeled element.
+        {
+            let mut sm = SourceErrorManager::new();
+            let mut ctx = Context::new();
+            ctx.set_parse_flow(true);
+            let gc = ctx.lock();
+            let atoms = &gc.ctx().atom_table;
+            let _ = parse_with_collector(&gc, &mut sm, atoms, b"type A = [+X];");
+            let h = sm.handler_as::<CollectingHandler>().unwrap();
+            assert!(
+                h.messages().iter().any(|m| m.kind == DiagKind::Error
+                    && m.message
+                        == "Variance can only be used with labeled tuple elements"),
+                "got {:?}",
+                h.messages().iter().map(|m| &m.message).collect::<Vec<_>>()
+            );
+        }
+
+        // A label that cannot reparse as an identifier.
+        {
+            let mut sm = SourceErrorManager::new();
+            let mut ctx = Context::new();
+            ctx.set_parse_flow(true);
+            let gc = ctx.lock();
+            let atoms = &gc.ctx().atom_table;
+            let _ = parse_with_collector(&gc, &mut sm, atoms, b"type A = [1: X];");
+            let h = sm.handler_as::<CollectingHandler>().unwrap();
+            assert!(
+                h.messages().iter().any(|m| m.kind == DiagKind::Error
+                    && m.message == "identifier expected"),
+                "got {:?}",
+                h.messages().iter().map(|m| &m.message).collect::<Vec<_>>()
+            );
+        }
+    }
+
+    /// `keyof X` → KeyofTypeAnnotation over the generic argument.
+    #[test]
+    fn flow_keyof_type() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+
+        let ty = flow_alias_right(&gc, &mut sm, b"type A = keyof X;");
+        let Node::KeyofTypeAnnotation(k) = ty else {
+            panic!("expected KeyofTypeAnnotation, got {:?}", ty.kind())
+        };
+        assert_generic_named(&gc, k.argument, b"X");
+    }
+
+    /// `X extends Y ? A : B` → ConditionalTypeAnnotation with the four
+    /// generic children in the right slots.
+    #[test]
+    fn flow_conditional_type() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+
+        let ty =
+            flow_alias_right(&gc, &mut sm, b"type T = X extends Y ? A : B;");
+        let Node::ConditionalTypeAnnotation(c) = ty else {
+            panic!("expected ConditionalTypeAnnotation, got {:?}", ty.kind())
+        };
+        assert_generic_named(&gc, c.check_type, b"X");
+        assert_generic_named(&gc, c.extends_type, b"Y");
+        assert_generic_named(&gc, c.true_type, b"A");
+        assert_generic_named(&gc, c.false_type, b"B");
+    }
+
+    /// Infer types: a bound after `extends` is kept inside a conditional's
+    /// extends clause (conditional types disallowed there), but backtracked
+    /// away when a `?` follows in a position that allows conditional types.
+    #[test]
+    fn flow_infer_type_bound_and_backtrack() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+
+        // Helper: unwrap InferTypeAnnotation → TypeParameter.
+        fn infer_param<'gc>(node: &'gc Node<'gc>) -> &'gc ast::node::TypeParameter<'gc> {
+            let Node::InferTypeAnnotation(i) = node else {
+                panic!("expected InferTypeAnnotation, got {:?}", node.kind())
+            };
+            let Node::TypeParameter(p) = i.type_parameter else {
+                panic!(
+                    "expected TypeParameter, got {:?}",
+                    i.type_parameter.kind()
+                )
+            };
+            p
+        }
+
+        // `X extends infer U ? U : never` → infer without bound.
+        let ty = flow_alias_right(
+            &gc,
+            &mut sm,
+            b"type T = X extends infer U ? U : never;",
+        );
+        let Node::ConditionalTypeAnnotation(c) = ty else {
+            panic!("expected ConditionalTypeAnnotation, got {:?}", ty.kind())
+        };
+        let p = infer_param(c.extends_type);
+        assert_eq!(gc.ctx().atom_table.bytes(p.name.get()), b"U");
+        assert!(p.bound.is_none());
+        assert!(p.uses_extends_bound.get());
+
+        // `X extends infer U extends V ? U : never`: inside the conditional's
+        // extends clause conditional types are disallowed, so `extends V`
+        // binds to the infer type (the bound is KEPT).
+        let ty = flow_alias_right(
+            &gc,
+            &mut sm,
+            b"type T = X extends infer U extends V ? U : never;",
+        );
+        let Node::ConditionalTypeAnnotation(c) = ty else {
+            panic!("expected ConditionalTypeAnnotation, got {:?}", ty.kind())
+        };
+        let p = infer_param(c.extends_type);
+        let bound = p.bound.expect("bound kept");
+        assert_generic_named(&gc, bound, b"V");
+
+        // `infer U extends V ? A : B` at the top of an annotation: here
+        // conditional types ARE allowed, so seeing `?` after the speculative
+        // bound parse backtracks — `extends V` belongs to the conditional and
+        // the infer loses its bound.
+        let ty = flow_alias_right(
+            &gc,
+            &mut sm,
+            b"type T = infer U extends V ? A : B;",
+        );
+        let Node::ConditionalTypeAnnotation(c) = ty else {
+            panic!("expected ConditionalTypeAnnotation, got {:?}", ty.kind())
+        };
+        let p = infer_param(c.check_type);
+        assert!(p.bound.is_none(), "bound backtracked away");
+        assert_generic_named(&gc, c.extends_type, b"V");
+
+        // Without a following `?` the bound is kept even at the top level.
+        let ty =
+            flow_alias_right(&gc, &mut sm, b"type T = infer U extends V;");
+        let p = infer_param(ty);
+        assert!(p.bound.is_some(), "no `?` follows — bound kept");
+    }
+
+    /// Negative literal types: the value is negated and the raw spans the
+    /// `-` through the literal.
+    #[test]
+    fn flow_negative_literal_types() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+
+        let ty = flow_alias_right(&gc, &mut sm, b"type A = -3;");
+        let Node::NumberLiteralTypeAnnotation(n) = ty else {
+            panic!(
+                "expected NumberLiteralTypeAnnotation, got {:?}",
+                ty.kind()
+            )
+        };
+        assert_eq!(n.value.get(), -3.0);
+        assert_eq!(gc.ctx().atom_table.bytes(n.raw.get()), b"-3");
+
+        let ty = flow_alias_right(&gc, &mut sm, b"type A = -2n;");
+        let Node::BigIntLiteralTypeAnnotation(b) = ty else {
+            panic!(
+                "expected BigIntLiteralTypeAnnotation, got {:?}",
+                ty.kind()
+            )
+        };
+        assert_eq!(gc.ctx().atom_table.bytes(b.raw.get()), b"-2n");
     }
 }
