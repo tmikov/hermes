@@ -1067,13 +1067,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         // C++ 3653-3660: `parseTypeArgsFlow()` is called with its default
-        // trailing grammar context (AllowRegExp).
+        // trailing grammar context (Type, per JSParserImpl.h:1506).
         let mut type_arguments: Option<&'gc Node<'gc>> = None;
         if self.check(TokenKind::less)
             && !self.lexer.is_new_line_before_current_token()
         {
             type_arguments =
-                Some(self.parse_type_args_flow(GrammarContext::AllowRegExp)?);
+                Some(self.parse_type_args_flow(GrammarContext::Type)?);
         }
 
         // C++ 3662-3665.
@@ -1292,8 +1292,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse type arguments `<T, U>`, with the current token at `<`.
     /// \param trailing_grammar_context the grammar context with which the
-    ///   closing `>` is consumed (the C++ parameter defaults to AllowRegExp;
-    ///   Rust callers pass it explicitly).
+    ///   closing `>` is consumed (the C++ parameter defaults to Type, per
+    ///   JSParserImpl.h:1506-1508; Rust callers pass it explicitly).
     /// Port of `parseTypeArgsFlow` (flow.cpp:4816-4846).
     pub(super) fn parse_type_args_flow(
         &mut self,
@@ -1409,11 +1409,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         // C++ 5037-5044: `parseTypeArgsFlow()` is called with its default
-        // trailing grammar context (AllowRegExp).
+        // trailing grammar context (Type, per JSParserImpl.h:1506).
         let mut type_parameters: Option<&'gc Node<'gc>> = None;
         if self.check(TokenKind::less) {
             type_parameters =
-                Some(self.parse_type_args_flow(GrammarContext::AllowRegExp)?);
+                Some(self.parse_type_args_flow(GrammarContext::Type)?);
         }
 
         // C++ 5046-5049.

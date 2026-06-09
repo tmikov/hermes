@@ -13,3 +13,5 @@ type E = Foo.Bar.Baz;
 type F = Foo.if.else;
 type G = this;
 type H = static;
+type N1 = Foo<Bar<U>>;
+type N2 = Foo<Bar<Baz<U>>>;

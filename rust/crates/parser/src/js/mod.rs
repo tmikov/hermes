@@ -3948,6 +3948,40 @@ mod tests {
         assert_eq!(inst.params.iter().count(), 2);
     }
 
+    /// Nested generic type args: the closing `>` of inner type args must be
+    /// consumed with GrammarContext::Type (the C++ default for
+    /// `parseTypeArgsFlow`, JSParserImpl.h:1506) so the lexer splits the
+    /// following `>>` into two `>` tokens instead of one shift token.
+    #[test]
+    fn flow_nested_generic_type_args() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+
+        // `Foo<Bar<Baz<U>>>` → three nested GenericTypeAnnotation levels,
+        // each with exactly one type argument.
+        let ty = flow_alias_right(&gc, &mut sm, b"type A = Foo<Bar<Baz<U>>>;");
+        let mut node = ty;
+        for name in [&b"Foo"[..], b"Bar", b"Baz"] {
+            let Node::GenericTypeAnnotation(g) = node else {
+                panic!("expected GenericTypeAnnotation, got {:?}", node.kind())
+            };
+            assert_eq!(ident_bytes(&gc, g.id), name);
+            let Node::TypeParameterInstantiation(inst) =
+                g.type_parameters.expect("has type args")
+            else {
+                panic!("expected TypeParameterInstantiation")
+            };
+            assert_eq!(inst.params.iter().count(), 1, "one arg at each level");
+            node = inst.params.iter().next().unwrap();
+        }
+        // Innermost argument: a bare `U` with no type args.
+        assert_generic_named(&gc, node, b"U");
+    }
+
     /// Typeof types: qualified chains, wrapping parens (recorded on the
     /// argument's parens counter — invisible in the AST dump), type args.
     #[test]

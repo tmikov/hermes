@@ -10,3 +10,4 @@ type B = typeof x.y;
 type C = typeof (x);
 type D = typeof x<Y>;
 type E = typeof ((x));
+type N3 = typeof x<A<B<C>>>;
