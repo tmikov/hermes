@@ -703,7 +703,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         hook: bool,
     ) -> Option<&'gc Node<'gc>> {
         // C++ 3873-3874.
-        assert!(self.check(TokenKind::equalgreater));
+        debug_assert!(self.check(TokenKind::equalgreater));
         self.advance(GrammarContext::Type);
 
         // C++ 3876: `parseReturnTypeAnnotationFlow()` with its declaration
