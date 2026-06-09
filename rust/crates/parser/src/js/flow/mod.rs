@@ -23,7 +23,8 @@
 //!
 //! The `impl JSParserImpl` methods are split across the child modules below
 //! by concern, mirroring the `lexer/` directory split: `declarations` (the
-//! declaration gate and `type`/`opaque type` aliases), `types` (the
+//! declaration gate, `type`/`opaque type` aliases, and `interface`
+//! declarations), `types` (the
 //! annotation precedence hierarchy and reparse helpers), `function_types`
 //! (function types, predicates, return types), `object_types` (object-type
 //! bodies), and `params` (type parameters/arguments and generic type

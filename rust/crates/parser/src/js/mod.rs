@@ -863,27 +863,14 @@ mod tests {
     /// are P4.
     // P3.1: function declarations/expressions, params, body.
 
-    /// Helper: parse `src`, expect a single top-level statement, return it.
+    /// Helper: parse `src`, expect zero errors, return the first top-level
+    /// statement. Shorthand for [`flow_parse_stmt_at`] with index 0.
     fn parse_one_stmt<'gc>(
         gc: &'gc ast::context::GCLock<'_, '_>,
         sm: &mut support::manager::SourceErrorManager,
         src: &[u8],
     ) -> &'gc ast::node::Node<'gc> {
-        let buf_id = sm.add_buffer_bytes("input", src);
-        let atoms = &gc.ctx().atom_table;
-        let lexer = crate::lexer::JSLexer::new(
-            buf_id,
-            sm,
-            atoms,
-            crate::lexer::GrammarContext::AllowRegExp,
-        );
-        let mut parser = JSParserImpl::new(gc, lexer);
-        let program = parser.parse().expect("parse succeeded");
-        assert_eq!(parser.error_count_pub(), 0, "zero errors");
-        if let ast::node::Node::Program(p) = program {
-            return p.body.iter().next().expect("has one statement");
-        }
-        panic!("expected Program");
+        flow_parse_stmt_at(gc, sm, src, 0)
     }
 
     #[test]
@@ -3660,7 +3647,7 @@ mod tests {
         assert!(member.computed.get(), "super['y'] is computed");
     }
 
-    // P5.0: Flow type alias parsing (js/flow.rs).
+    // P5.0: Flow type alias parsing (js/flow/).
 
     /// Helper: parse `src` with Flow parsing enabled and assert at least one
     /// error was reported (the honest-deferral checks for unported Flow
@@ -3750,7 +3737,7 @@ mod tests {
         assert_flow_parse_has_errors(b"enum E {}", "Flow enum is P6");
     }
 
-    // P5.1: the full Flow type-annotation hierarchy (js/flow.rs).
+    // P5.1: the full Flow type-annotation hierarchy (js/flow/).
 
     /// Helper: parse `src` with the caller's (Flow-enabled) context and
     /// return the right-hand side of the single top-level `TypeAlias`.
@@ -4366,7 +4353,7 @@ mod tests {
     }
 
     // P5.2: function types, object types, type-parameter declarations,
-    // variance, predicates, return-type annotations (js/flow.rs).
+    // variance, predicates, return-type annotations (js/flow/).
 
     /// Helper: assert `node` is a `FunctionTypeAnnotation` and return it.
     fn as_fta<'gc, 'n>(
@@ -4998,9 +4985,9 @@ mod tests {
     // P5.3: opaque type aliases, interface declarations/type annotations,
     // and class implements entries (js/flow/).
 
-    /// Helper: parse `src` with Flow enabled, expect zero errors, return the
-    /// top-level statement at `idx` (for the strict-mode tests, where the
-    /// directive prologue is statement 0).
+    /// Helper: parse `src` with the caller's (e.g. Flow-enabled) context,
+    /// expect zero errors, return the top-level statement at `idx` (for the
+    /// strict-mode tests, where the directive prologue is statement 0).
     fn flow_parse_stmt_at<'gc>(
         gc: &'gc ast::context::GCLock<'_, '_>,
         sm: &mut support::manager::SourceErrorManager,
