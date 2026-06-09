@@ -52,7 +52,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     ///   (the C++ `wrappedStart` parameter, used for `: T` annotations).
     /// \param allow_anon_function_type value for `allow_anon_function_type`
     ///   while parsing this annotation (saved/restored around the parse).
-    pub(super) fn parse_type_annotation_flow(
+    pub(in crate::js) fn parse_type_annotation_flow(
         &mut self,
         wrapped_start: Option<SMLoc>,
         allow_anon_function_type: AllowAnonFunctionType,

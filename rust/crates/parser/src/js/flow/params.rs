@@ -31,7 +31,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// token at `<`. At least one parameter is required (empty `<>` is an
     /// error); a trailing comma is allowed. Port of `parseTypeParamsFlow`
     /// (flow.cpp:4690-4719).
-    pub(super) fn parse_type_params_flow(&mut self) -> Option<&'gc Node<'gc>> {
+    pub(in crate::js) fn parse_type_params_flow(
+        &mut self,
+    ) -> Option<&'gc Node<'gc>> {
         debug_assert!(self.check(TokenKind::less));
         // C++ 4692.
         let start = self.advance(GrammarContext::Type).start;
@@ -208,7 +210,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     ///   closing `>` is consumed (the C++ parameter defaults to Type, per
     ///   JSParserImpl.h:1506-1508; Rust callers pass it explicitly).
     /// Port of `parseTypeArgsFlow` (flow.cpp:4816-4846).
-    pub(super) fn parse_type_args_flow(
+    pub(in crate::js) fn parse_type_args_flow(
         &mut self,
         trailing_grammar_context: GrammarContext,
     ) -> Option<&'gc Node<'gc>> {
@@ -346,9 +348,6 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// `Name<TypeArgs>`, with the current token at the identifier (an
     /// identifier ONLY — no reserved word, per the C++ assert). Port of
     /// `JSParserImpl::parseClassImplementsFlow` (flow.cpp:5052-5076).
-    // Wired into class heritage parsing (C++ JSParserImpl.cpp:4988-5010) in
-    // P5.4; until then only unit tests reach it.
-    #[allow(dead_code)]
     pub(in crate::js) fn parse_class_implements_flow(
         &mut self,
     ) -> Option<&'gc Node<'gc>> {

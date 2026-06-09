@@ -227,9 +227,41 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// True if any type-annotation dialect is enabled. Port of the C++
     /// `context_.getParseTypes()` (Context.h:504-506).
-    #[allow(dead_code)] // used from P5.1 (import/export type-kind detection)
     pub(super) fn parse_types(&self) -> bool {
         self.parse_flow() || self.parse_ts()
+    }
+
+    /// Parse a type annotation in whichever type dialect is enabled. Port of
+    /// the `parseTypeAnnotation` dispatcher (JSParserImpl.h:1209-1222), which
+    /// calls the Flow version under `getParseFlow()` and otherwise falls
+    /// through to TS. The TS branch (`parseTypeAnnotationTS`) is P7; only the
+    /// Flow dispatch exists, so `parse_flow()` must be set.
+    pub(in crate::js) fn parse_type_annotation(
+        &mut self,
+        wrapped_start: Option<SMLoc>,
+        allow_anon_function_type: flow::AllowAnonFunctionType,
+    ) -> Option<&'gc Node<'gc>> {
+        debug_assert!(self.parse_flow() || self.parse_ts());
+        // P7: TS dispatch (parseTypeAnnotationTS, JSParserImpl.h:1218-1219).
+        self.parse_type_annotation_flow(wrapped_start, allow_anon_function_type)
+    }
+
+    /// Parse a function return type annotation (a type, or a Flow type
+    /// predicate such as `x is T`) in whichever type dialect is enabled. Port
+    /// of the `parseReturnTypeAnnotation` dispatcher
+    /// (JSParserImpl.h:1224-1237). The TS branch is P7; only the Flow dispatch
+    /// exists, so `parse_flow()` must be set.
+    pub(in crate::js) fn parse_return_type_annotation(
+        &mut self,
+        wrapped_start: Option<SMLoc>,
+        allow_anon_function_type: flow::AllowAnonFunctionType,
+    ) -> Option<&'gc Node<'gc>> {
+        debug_assert!(self.parse_flow() || self.parse_ts());
+        // P7: TS dispatch (parseTypeAnnotationTS, JSParserImpl.h:1233-1234).
+        self.parse_return_type_annotation_flow(
+            wrapped_start,
+            allow_anon_function_type,
+        )
     }
 
     #[inline]
@@ -5283,6 +5315,464 @@ mod tests {
         assert_error(
             b"opaque interface I {}",
             "invalid token in opaque type declaration",
+        );
+    }
+
+    // P5.4: Flow non-ambiguous integration — the type grammar hung off the
+    // core productions (functions, params, bindings, classes, object-literal
+    // methods).
+
+    /// Function signature: type params, annotated params, return type.
+    #[test]
+    fn flow_function_signature() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let stmt = parse_one_stmt(
+            &gc,
+            &mut sm,
+            b"function f<T>(x: T): T { return x; }",
+        );
+        let Node::FunctionDeclaration(f) = stmt else {
+            panic!("expected FunctionDeclaration, got {:?}", stmt.kind())
+        };
+        assert!(f.type_parameters.is_some(), "type params");
+        assert!(f.return_type.is_some(), "return type");
+        assert!(f.predicate.is_none(), "no predicate");
+        let param = f.params.iter().next().expect("one param");
+        let Node::Identifier(p) = param else {
+            panic!("expected Identifier param, got {:?}", param.kind())
+        };
+        assert!(p.type_annotation.is_some(), "param annotation");
+        assert!(!p.optional.get(), "param not optional");
+    }
+
+    /// `%checks` predicates: inferred (after a return type) and declared
+    /// (directly after the colon, with no return type).
+    #[test]
+    fn flow_function_predicates() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        // Return type + inferred predicate.
+        {
+            let mut sm = SourceErrorManager::new();
+            let mut ctx = Context::new();
+            ctx.set_parse_flow(true);
+            let gc = ctx.lock();
+            let stmt = parse_one_stmt(
+                &gc,
+                &mut sm,
+                b"function p(x: mixed): boolean %checks { return !!x; }",
+            );
+            let Node::FunctionDeclaration(f) = stmt else {
+                panic!("expected FunctionDeclaration, got {:?}", stmt.kind())
+            };
+            assert!(f.return_type.is_some(), "return type");
+            assert!(
+                matches!(f.predicate, Some(Node::InferredPredicate(_))),
+                "inferred predicate"
+            );
+        }
+
+        // Declared predicate with NO return type (`): %checks(expr)`).
+        {
+            let mut sm = SourceErrorManager::new();
+            let mut ctx = Context::new();
+            ctx.set_parse_flow(true);
+            let gc = ctx.lock();
+            let stmt = parse_one_stmt(
+                &gc,
+                &mut sm,
+                b"function q(x: mixed): %checks (x === 1) {}",
+            );
+            let Node::FunctionDeclaration(f) = stmt else {
+                panic!("expected FunctionDeclaration, got {:?}", stmt.kind())
+            };
+            assert!(f.return_type.is_none(), "no return type");
+            assert!(
+                matches!(f.predicate, Some(Node::DeclaredPredicate(_))),
+                "declared predicate"
+            );
+        }
+    }
+
+    /// A leading `this` parameter is pushed as the FIRST formal parameter,
+    /// with its type annotation and the following comma consumed.
+    #[test]
+    fn flow_this_param() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let stmt = parse_one_stmt(
+            &gc,
+            &mut sm,
+            b"function g(this: Object, a: number): void {}",
+        );
+        let Node::FunctionDeclaration(f) = stmt else {
+            panic!("expected FunctionDeclaration, got {:?}", stmt.kind())
+        };
+        let params: Vec<_> = f.params.iter().collect();
+        assert_eq!(params.len(), 2, "two params");
+        let Node::Identifier(this_param) = params[0] else {
+            panic!("expected Identifier, got {:?}", params[0].kind())
+        };
+        assert_eq!(
+            gc.ctx().atom_table.bytes(this_param.name.get()),
+            b"this",
+            "first param is 'this'"
+        );
+        assert!(this_param.type_annotation.is_some(), "'this' annotation");
+        assert!(!this_param.optional.get());
+        let Node::Identifier(a_param) = params[1] else {
+            panic!("expected Identifier, got {:?}", params[1].kind())
+        };
+        assert_eq!(gc.ctx().atom_table.bytes(a_param.name.get()), b"a");
+    }
+
+    /// Binding annotations: the `?` optional marker and `:` type on binding
+    /// identifiers, and `:` types on array/object binding patterns.
+    #[test]
+    fn flow_binding_annotations() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        /// The single declarator's id of the variable declaration in `src`.
+        fn decl_id<'gc>(
+            gc: &'gc ast::context::GCLock<'_, '_>,
+            src: &[u8],
+        ) -> &'gc Node<'gc> {
+            let mut sm = SourceErrorManager::new();
+            let stmt = parse_one_stmt(gc, &mut sm, src);
+            let Node::VariableDeclaration(d) = stmt else {
+                panic!("expected VariableDeclaration, got {:?}", stmt.kind())
+            };
+            let Node::VariableDeclarator(declarator) =
+                d.declarations.iter().next().expect("one declarator")
+            else {
+                panic!("expected VariableDeclarator")
+            };
+            declarator.id
+        }
+
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+
+        // `?` + `:` on a binding identifier.
+        let id = decl_id(&gc, b"var a?: number;");
+        let Node::Identifier(id) = id else {
+            panic!("expected Identifier, got {:?}", id.kind())
+        };
+        assert!(id.optional.get(), "optional");
+        assert!(id.type_annotation.is_some(), "id annotation");
+
+        // `:` on an array binding pattern.
+        let pat = decl_id(&gc, b"var [x, y]: T = c;");
+        let Node::ArrayPattern(pat) = pat else {
+            panic!("expected ArrayPattern, got {:?}", pat.kind())
+        };
+        assert!(pat.type_annotation.is_some(), "array pattern annotation");
+
+        // `:` on an object binding pattern.
+        let pat = decl_id(&gc, b"var {x}: T = c;");
+        let Node::ObjectPattern(pat) = pat else {
+            panic!("expected ObjectPattern, got {:?}", pat.kind())
+        };
+        assert!(pat.type_annotation.is_some(), "object pattern annotation");
+
+        // Optional parameter `a?: T` in a formal parameter list.
+        let mut sm = SourceErrorManager::new();
+        let stmt = parse_one_stmt(&gc, &mut sm, b"function fd(a?: T) {}");
+        let Node::FunctionDeclaration(f) = stmt else {
+            panic!("expected FunctionDeclaration, got {:?}", stmt.kind())
+        };
+        let param = f.params.iter().next().expect("one param");
+        let Node::Identifier(p) = param else {
+            panic!("expected Identifier param, got {:?}", param.kind())
+        };
+        assert!(p.optional.get(), "optional param");
+        assert!(p.type_annotation.is_some(), "optional param annotation");
+    }
+
+    /// Class integration: class/method type params, super-class type args,
+    /// the implements clause, field annotations + variance, method/getter
+    /// return types, and private-field annotations.
+    #[test]
+    fn flow_class_integration() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let stmt = parse_one_stmt(
+            &gc,
+            &mut sm,
+            b"class C<T> extends B<T> implements I, J<T> {\n\
+              \x20 x: number;\n\
+              \x20 +ro: T;\n\
+              \x20 readonly r: V;\n\
+              \x20 #p: T;\n\
+              \x20 static: number;\n\
+              \x20 m<U>(a: U): U { return a; }\n\
+              \x20 get g(): T { return this.x; }\n\
+              }",
+        );
+        let Node::ClassDeclaration(c) = stmt else {
+            panic!("expected ClassDeclaration, got {:?}", stmt.kind())
+        };
+        assert!(c.type_parameters.is_some(), "class type params");
+        assert!(c.super_class.is_some(), "super class");
+        assert!(c.super_type_arguments.is_some(), "super type args");
+
+        // implements I, J<T>
+        let impls: Vec<_> = c.implements.iter().collect();
+        assert_eq!(impls.len(), 2, "two implements entries");
+        let Node::ClassImplements(i0) = impls[0] else {
+            panic!("expected ClassImplements, got {:?}", impls[0].kind())
+        };
+        assert!(i0.type_parameters.is_none(), "I has no type args");
+        let Node::ClassImplements(i1) = impls[1] else {
+            panic!("expected ClassImplements, got {:?}", impls[1].kind())
+        };
+        assert!(i1.type_parameters.is_some(), "J<T> has type args");
+
+        let Node::ClassBody(body) = c.body else {
+            panic!("expected ClassBody")
+        };
+        let elems: Vec<_> = body.body.iter().collect();
+        assert_eq!(elems.len(), 7, "seven class elements");
+
+        // x: number;
+        let Node::ClassProperty(x) = elems[0] else {
+            panic!("expected ClassProperty, got {:?}", elems[0].kind())
+        };
+        assert!(x.type_annotation.is_some(), "x annotation");
+        assert!(x.variance.is_none(), "x has no variance");
+
+        // +ro: T;
+        let Node::ClassProperty(ro) = elems[1] else {
+            panic!("expected ClassProperty, got {:?}", elems[1].kind())
+        };
+        let Some(Node::Variance(v)) = ro.variance else {
+            panic!("expected Variance on +ro")
+        };
+        assert_eq!(gc.ctx().atom_table.bytes(v.kind.get()), b"plus");
+
+        // readonly r: V; (contextual-keyword variance)
+        let Node::ClassProperty(r) = elems[2] else {
+            panic!("expected ClassProperty, got {:?}", elems[2].kind())
+        };
+        let Some(Node::Variance(v)) = r.variance else {
+            panic!("expected Variance on readonly r")
+        };
+        assert_eq!(gc.ctx().atom_table.bytes(v.kind.get()), b"readonly");
+
+        // #p: T;
+        let Node::ClassPrivateProperty(p) = elems[3] else {
+            panic!("expected ClassPrivateProperty, got {:?}", elems[3].kind())
+        };
+        assert!(p.type_annotation.is_some(), "#p annotation");
+
+        // static: number; — `static` is the property NAME here.
+        let Node::ClassProperty(s) = elems[4] else {
+            panic!("expected ClassProperty, got {:?}", elems[4].kind())
+        };
+        let Node::Identifier(s_key) = s.key else {
+            panic!("expected Identifier key")
+        };
+        assert_eq!(gc.ctx().atom_table.bytes(s_key.name.get()), b"static");
+        assert!(!s.r#static.get(), "'static' is the name, not a modifier");
+        assert!(s.type_annotation.is_some(), "static-field annotation");
+
+        // m<U>(a: U): U {}
+        let Node::MethodDefinition(m) = elems[5] else {
+            panic!("expected MethodDefinition, got {:?}", elems[5].kind())
+        };
+        let Node::FunctionExpression(mf) = m.value else {
+            panic!("expected FunctionExpression")
+        };
+        assert!(mf.type_parameters.is_some(), "method type params");
+        assert!(mf.return_type.is_some(), "method return type");
+
+        // get g(): T {}
+        let Node::MethodDefinition(getter) = elems[6] else {
+            panic!("expected MethodDefinition, got {:?}", elems[6].kind())
+        };
+        assert_eq!(gc.ctx().atom_table.bytes(getter.kind.get()), b"get");
+        let Node::FunctionExpression(gf) = getter.value else {
+            panic!("expected FunctionExpression")
+        };
+        assert!(gf.return_type.is_some(), "getter return type");
+    }
+
+    /// An anonymous class expression: with Flow, `<`/`implements` after
+    /// `class` means there is no class name.
+    #[test]
+    fn flow_class_expression_heritage() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let expr = parse_expr_from(
+            &gc,
+            &mut sm,
+            atoms,
+            b"(class <T> implements K { y: T; });",
+        );
+        let Node::ClassExpression(c) = expr else {
+            panic!("expected ClassExpression, got {:?}", expr.kind())
+        };
+        assert!(c.id.is_none(), "anonymous");
+        assert!(c.type_parameters.is_some(), "type params");
+        assert_eq!(c.implements.iter().count(), 1, "one implements entry");
+    }
+
+    /// Object-literal methods: type params and return types, plus
+    /// `get`/`set` used as method names (detected via `<`).
+    #[test]
+    fn flow_object_literal_methods() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let expr = parse_expr_from(
+            &gc,
+            &mut sm,
+            atoms,
+            b"({ m<T>(x: T): T { return x; },\n\
+              \x20  get x(): number { return 1; },\n\
+              \x20  set y(v: number): void {},\n\
+              \x20  get<T>(x) { return x; } });",
+        );
+        let Node::ObjectExpression(obj) = expr else {
+            panic!("expected ObjectExpression, got {:?}", expr.kind())
+        };
+        let props: Vec<_> = obj.properties.iter().collect();
+        assert_eq!(props.len(), 4, "four properties");
+
+        // m<T>(x: T): T {}
+        let Node::Property(m) = props[0] else {
+            panic!("expected Property")
+        };
+        assert!(m.method.get(), "m is a method");
+        let Node::FunctionExpression(mf) = m.value else {
+            panic!("expected FunctionExpression")
+        };
+        assert!(mf.type_parameters.is_some(), "method type params");
+        assert!(mf.return_type.is_some(), "method return type");
+
+        // get x(): number {}
+        let Node::Property(g) = props[1] else {
+            panic!("expected Property")
+        };
+        assert_eq!(gc.ctx().atom_table.bytes(g.kind.get()), b"get");
+        let Node::FunctionExpression(gf) = g.value else {
+            panic!("expected FunctionExpression")
+        };
+        assert!(gf.return_type.is_some(), "getter return type");
+
+        // set y(v: number): void {}
+        let Node::Property(s) = props[2] else {
+            panic!("expected Property")
+        };
+        assert_eq!(gc.ctx().atom_table.bytes(s.kind.get()), b"set");
+        let Node::FunctionExpression(sf) = s.value else {
+            panic!("expected FunctionExpression")
+        };
+        assert!(sf.return_type.is_some(), "setter return type");
+
+        // get<T>(x) {} — a method NAMED "get" (the `<` routes to a method).
+        let Node::Property(gm) = props[3] else {
+            panic!("expected Property")
+        };
+        assert!(gm.method.get(), "get<T> is a method");
+        let Node::Identifier(gm_key) = gm.key else {
+            panic!("expected Identifier key")
+        };
+        assert_eq!(gc.ctx().atom_table.bytes(gm_key.name.get()), b"get");
+        let Node::FunctionExpression(gmf) = gm.value else {
+            panic!("expected FunctionExpression")
+        };
+        assert!(gmf.type_parameters.is_some(), "get<T> type params");
+    }
+
+    /// The P5.4 class-element diagnostics keep the exact C++ texts.
+    #[test]
+    fn flow_p54_errors() {
+        use ast::context::Context;
+        use support::diag::{CollectingHandler, DiagKind};
+        use support::manager::SourceErrorManager;
+
+        let assert_error = |src: &[u8], expected: &str| {
+            let mut sm = SourceErrorManager::new();
+            let mut ctx = Context::new();
+            ctx.set_parse_flow(true);
+            let gc = ctx.lock();
+            let atoms = &gc.ctx().atom_table;
+            let _ = parse_with_collector(&gc, &mut sm, atoms, src);
+            let h = sm.handler_as::<CollectingHandler>().unwrap();
+            assert!(
+                h.messages()
+                    .iter()
+                    .any(|m| m.kind == DiagKind::Error && m.message == expected),
+                "expected {:?}, got {:?}",
+                expected,
+                h.messages().iter().map(|m| &m.message).collect::<Vec<_>>()
+            );
+        };
+
+        // C++ JSParserImpl.cpp:5619-5626.
+        assert_error(
+            b"class C { get x<T>() { return 1; } }",
+            "accessor method may not have type parameters",
+        );
+        // C++ JSParserImpl.cpp:5670-5672 (variance is only valid on fields).
+        assert_error(b"class C { +m() {} }", "Unexpected variance sigil");
+    }
+
+    /// No-leak spot checks: with Flow parsing DISABLED the new sites must not
+    /// consume type syntax (each input still errors, exactly as hermesc does
+    /// without `-parse-flow`).
+    #[test]
+    fn flow_p54_no_leak() {
+        assert_parse_has_errors(
+            b"class C extends B<T> {}",
+            "super type args need Flow",
+        );
+        assert_parse_has_errors(
+            b"function f(): T { return 1; }",
+            "return type needs Flow",
+        );
+        assert_parse_has_errors(b"var a: T;", "binding annotation needs Flow");
+        assert_parse_has_errors(
+            b"var o = { m<T>() {} };",
+            "object-method type params need Flow",
         );
     }
 }

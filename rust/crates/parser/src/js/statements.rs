@@ -24,6 +24,7 @@ use support::location::{SMLoc, SMRange};
 use crate::lexer::GrammarContext;
 use crate::token_kinds::TokenKind;
 
+use super::flow::AllowAnonFunctionType;
 use super::{
     AllowImportExport, IsClassHeritageArgument, JSParserImpl, Param, PARAM_IN,
     PARAM_RETURN,
@@ -99,7 +100,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// `function`/`async function`/`class`/`@decorator` declarations are
     /// dispatched through `parse_declaration` which emits honest P3 errors;
     /// `import`/`export` declarations emit honest P4 errors. The Flow `declare`
-    /// branch (890-897) is omitted.
+    /// branch (`checkDeclareType` + `parseDeclareFLow`, 890-897) is P6.
     pub(super) fn parse_statement_list_item(
         &mut self,
         param: Param,
@@ -2077,9 +2078,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     ///
     /// The `param` argument mirrors the C++ signature but, as in C++, it is not
     /// directly consumed here — `validate_binding_identifier` reads the parser's
-    /// `param_yield`/`param_await`/strict-mode state. The Flow/TS
-    /// `getParseTypes()` block (`?`/`:` type annotation) is skipped (P6/P7);
-    /// `type` is `None` and `optional` is `false`.
+    /// `param_yield`/`param_await`/strict-mode state. With types enabled the
+    /// trailing `?` (optional marker) and `: TypeAnnotation` are parsed.
     pub(super) fn parse_binding_identifier(
         &mut self,
         _param: Param,
@@ -2106,15 +2106,30 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
         self.advance(GrammarContext::AllowRegExp);
 
-        // P6/P7: context_.getParseTypes() `?`/`:` block skipped. type = None,
-        // optional = false. C++ 1063-1080.
+        // `?` optional marker and `: TypeAnnotation`. C++ 1063-1080.
+        let mut type_annotation: Option<&'gc Node<'gc>> = None;
+        let mut optional = false;
+        if self.parse_types() {
+            if self.check(TokenKind::question) {
+                optional = true;
+                self.advance(GrammarContext::Type);
+            }
+
+            if self.check(TokenKind::colon) {
+                let annot_start = self.advance(GrammarContext::Type).start;
+                type_annotation = Some(self.parse_type_annotation(
+                    Some(annot_start),
+                    AllowAnonFunctionType::Yes,
+                )?);
+            }
+        }
 
         // C++ 1082-1085.
         let node = Node::Identifier(Identifier::new(
             NodeMetadata::new(self.dummy_range()),
             id,
-            None,  // type = null
-            false, // optional = false
+            type_annotation,
+            optional,
         ));
         Some(self.set_location(ident_rng.start, self.lexer.prev_token_end(), node))
     }
@@ -2197,13 +2212,21 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // P6/P7: context_.getParseTypes() type block skipped. type = None.
+        // `: TypeAnnotation`. C++ 1343-1354.
+        let mut type_annotation: Option<&'gc Node<'gc>> = None;
+        if self.parse_types() && self.check(TokenKind::colon) {
+            let annot_start = self.advance(GrammarContext::Type).start;
+            type_annotation = Some(self.parse_type_annotation(
+                Some(annot_start),
+                AllowAnonFunctionType::Yes,
+            )?);
+        }
 
         // C++ 1356-1359.
         let node = Node::ArrayPattern(ArrayPattern::new(
             NodeMetadata::new(self.dummy_range()),
             NodeList::from_iter(self.gc, elem_list),
-            None, // type = null
+            type_annotation,
         ));
         Some(self.set_location(start_loc, self.lexer.prev_token_end(), node))
     }
@@ -2360,13 +2383,21 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // P6/P7: context_.getParseTypes() type block skipped. type = None.
+        // `: TypeAnnotation`. C++ 1474-1485.
+        let mut type_annotation: Option<&'gc Node<'gc>> = None;
+        if self.parse_types() && self.check(TokenKind::colon) {
+            let annot_start = self.advance(GrammarContext::Type).start;
+            type_annotation = Some(self.parse_type_annotation(
+                Some(annot_start),
+                AllowAnonFunctionType::Yes,
+            )?);
+        }
 
         // C++ 1487-1490.
         let node = Node::ObjectPattern(ObjectPattern::new(
             NodeMetadata::new(self.dummy_range()),
             NodeList::from_iter(self.gc, prop_list),
-            None, // type = null
+            type_annotation,
         ));
         Some(self.set_location(start_loc, self.lexer.prev_token_end(), node))
     }

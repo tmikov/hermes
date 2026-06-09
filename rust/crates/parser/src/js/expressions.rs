@@ -28,6 +28,7 @@ use support::location::SMLoc;
 use crate::lexer::GrammarContext;
 use crate::token_kinds::TokenKind;
 
+use super::flow::AllowAnonFunctionType;
 use super::{
     IsClassHeritageArgument, IsConstructorCall, JSParserImpl, Param, PARAM_IN, PARAM_RETURN,
     PARAM_TAGGED,
@@ -2892,6 +2893,21 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     )),
                 );
                 // Fall through to value logic.
+            } else if self.parse_types() && self.check(TokenKind::less) {
+                // `{get<T>(…) {…}}` — a method named "get" with type params.
+                // C++ 2852-2860.
+                method = true;
+                key = self.set_location(
+                    ident_rng.start,
+                    ident_rng.end,
+                    Node::Identifier(Identifier::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        ident,
+                        None,
+                        false,
+                    )),
+                );
+                // Fall through to value logic (which sees the `<`).
             } else if self.check2(TokenKind::comma, TokenKind::r_brace) {
                 // Shorthand `{get}`.
                 key = self.set_location(
@@ -2958,7 +2974,15 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     return None;
                 }
 
-                // P6/P7: Flow/TS return-type annotation (C++ 2901-2909) omitted.
+                // `: ReturnType`. C++ 2900-2909.
+                let mut return_type: Option<&'gc Node<'gc>> = None;
+                if self.parse_types() && self.check(TokenKind::colon) {
+                    let annot_start = self.advance(GrammarContext::Type).start;
+                    return_type = Some(self.parse_return_type_annotation(
+                        Some(annot_start),
+                        AllowAnonFunctionType::Yes,
+                    )?);
+                }
 
                 // C++ 2911-2912: a getter body is neither yield- nor
                 // await-contextual.
@@ -2989,7 +3013,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     NodeList::empty(),
                     block,
                     None,
-                    None,
+                    return_type,
                     None,
                     false,
                     false,
@@ -3032,6 +3056,21 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     )),
                 );
                 // Fall through to value logic.
+            } else if self.parse_types() && self.check(TokenKind::less) {
+                // `{set<T>(…) {…}}` — a method named "set" with type params.
+                // C++ 2957-2965.
+                method = true;
+                key = self.set_location(
+                    ident_rng.start,
+                    ident_rng.end,
+                    Node::Identifier(Identifier::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        ident,
+                        None,
+                        false,
+                    )),
+                );
+                // Fall through to value logic (which sees the `<`).
             } else if self.check2(TokenKind::comma, TokenKind::r_brace) {
                 // Shorthand `{set}`.
                 key = self.set_location(
@@ -3099,7 +3138,15 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     return None;
                 }
 
-                // P6/P7: Flow/TS return-type annotation (C++ 3015-3023) omitted.
+                // `: ReturnType`. C++ 3014-3023.
+                let mut return_type: Option<&'gc Node<'gc>> = None;
+                if self.parse_types() && self.check(TokenKind::colon) {
+                    let annot_start = self.advance(GrammarContext::Type).start;
+                    return_type = Some(self.parse_return_type_annotation(
+                        Some(annot_start),
+                        AllowAnonFunctionType::Yes,
+                    )?);
+                }
 
                 if !self.need(TokenKind::l_brace, " in setter declaration") {
                     self.lexer.get_source_mgr_mut().note_at(
@@ -3127,7 +3174,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     params,
                     block,
                     None,
-                    None,
+                    return_type,
                     None,
                     false,
                     false,
@@ -3171,6 +3218,21 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     )),
                 );
                 // Fall through to value logic.
+            } else if self.parse_types() && self.check(TokenKind::less) {
+                // `{async<T>(…) {…}}` — a method named "async" with type
+                // params. C++ 3069-3077.
+                method = true;
+                key = self.set_location(
+                    ident_rng.start,
+                    ident_rng.end,
+                    Node::Identifier(Identifier::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        ident,
+                        None,
+                        false,
+                    )),
+                );
+                // Fall through to value logic (which sees the `<`).
             } else if self.check2(TokenKind::comma, TokenKind::r_brace) {
                 // Shorthand `{async}`.
                 key = self.set_location(
@@ -3311,11 +3373,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         let value: &'gc Node<'gc>;
 
-        // Method definition (C++ 3158-3245): try this when we have '(' (or '<',
-        // a Flow/TS type-param list — omitted here) to indicate a method, OR
-        // when we already know this is `async` (which must indicate a method, so
-        // we must avoid parsing an ordinary property from ':').
-        if self.check(TokenKind::l_paren) || async_ {
+        // Method definition (C++ 3158-3245): try this when we have '(' or '<'
+        // (a type-param list; the `less` check is unconditional in C++ — a `<`
+        // after a property key always routes here) to indicate a method, OR
+        // when we already know this is `async` (which must indicate a method,
+        // so we must avoid parsing an ordinary property from ':').
+        if self.check2(TokenKind::l_paren, TokenKind::less) || async_ {
             // Parse the MethodDefinition manually here (we already consumed the
             // PropertyName above):
             //   PropertyName "(" UniqueFormalParameters ")" "{" FunctionBody "}"
@@ -3325,7 +3388,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
             method = true;
 
-            // P6/P7: Flow/TS type-params (C++ 3175-3191) omitted.
+            // Flow method type parameters. C++ 3175-3183.
+            let mut type_params: Option<&'gc Node<'gc>> = None;
+            if self.parse_flow() && self.check(TokenKind::less) {
+                type_params = Some(self.parse_type_params_flow()?);
+            }
+            // P7: TS type parameters (C++ 3184-3191).
 
             // (
             let paren_loc = self.lexer.token().start_loc();
@@ -3344,7 +3412,15 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 return None;
             }
 
-            // P6/P7: Flow/TS return-type annotation (C++ 3207-3215) omitted.
+            // `: ReturnType`. C++ 3206-3215.
+            let mut return_type: Option<&'gc Node<'gc>> = None;
+            if self.parse_types() && self.check(TokenKind::colon) {
+                let annot_start = self.advance(GrammarContext::Type).start;
+                return_type = Some(self.parse_return_type_annotation(
+                    Some(annot_start),
+                    AllowAnonFunctionType::Yes,
+                )?);
+            }
 
             if !self.need(TokenKind::l_brace, " in method definition") {
                 self.lexer.get_source_mgr_mut().note_at(
@@ -3371,8 +3447,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 None,
                 params,
                 body,
-                None,
-                None,
+                type_params,
+                return_type,
                 None,
                 generator,
                 async_,

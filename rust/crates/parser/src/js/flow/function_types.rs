@@ -35,7 +35,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     ///
     /// \param wrapped_start like `parse_type_annotation_flow`'s: if `Some`,
     ///   the result is wrapped in a `TypeAnnotation` node.
-    pub(super) fn parse_return_type_annotation_flow(
+    pub(in crate::js) fn parse_return_type_annotation_flow(
         &mut self,
         wrapped_start: Option<SMLoc>,
         allow_anon_function_type: AllowAnonFunctionType,
@@ -703,10 +703,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Parse a `%checks` / `%checks(expr)` predicate, with the current token
     /// at the `%checks` identifier (lexed as a single identifier in Type
     /// grammar context). Port of `parsePredicateFlow` (flow.cpp:5078-5098).
-    // Wired into function declarations (`function f(): T %checks {}`) in
-    // P5.4; until then only unit tests reach it.
-    #[allow(dead_code)]
-    pub(in crate::js) fn parse_predicate_flow(&mut self) -> Option<&'gc Node<'gc>> {
+    pub(in crate::js) fn parse_predicate_flow(
+        &mut self,
+    ) -> Option<&'gc Node<'gc>> {
         debug_assert!(self.check_name(b"%checks"));
         // C++ 5080.
         let checks_rng = self.advance(GrammarContext::Type);

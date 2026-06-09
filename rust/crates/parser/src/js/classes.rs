@@ -11,15 +11,16 @@
 //! parseClassTail / parseClassBody / parseClassBodyImpl / parseClassElement,
 //! C++ lines 4688-5679).
 //!
-//! Flow/TS productions (type params, `implements`, return/param/field type
-//! annotations, TS modifiers, Flow variance) are omitted; the corresponding
-//! node fields are filled with their JS-only defaults (`None` /
-//! `NodeList::empty()` / `false`). See the `// P6/P7` comments at each site.
+//! The non-ambiguous Flow productions (class/method type parameters,
+//! super-class type arguments, `implements` clauses, field type annotations,
+//! member variance, method return types) are ported (P5.4). The Flow `declare`
+//! modifier is P6; the TS productions (modifiers, `?` optional fields, TS type
+//! params/args) are P7 — see the comments at each site.
 
 use ast::node::{
     CallExpression, ClassBody, ClassDeclaration, ClassExpression, ClassPrivateProperty,
     ClassProperty, Decorator, FunctionExpression, Identifier, MemberExpression, MethodDefinition,
-    Node, PrivateName, StaticBlock,
+    Node, PrivateName, StaticBlock, Variance,
 };
 use ast::node_child::{NodeList, NodeMetadata};
 use support::location::{SMLoc, SMRange};
@@ -27,6 +28,7 @@ use support::location::{SMLoc, SMRange};
 use crate::lexer::GrammarContext;
 use crate::token_kinds::TokenKind;
 
+use super::flow::{can_follow_variance_keyword_flow, AllowAnonFunctionType};
 use super::{
     AllowImportExport, IsClassHeritageArgument, JSParserImpl, Param, PARAM_DEFAULT, PARAM_IN,
     PARAM_RETURN,
@@ -290,12 +292,17 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // P6/P7: Flow/TS class type parameters (`<...>`, C++ 4847-4862) omitted;
-        // type_params stays None.
+        // Flow class type parameters. C++ 4847-4854.
+        let mut type_params: Option<&'gc Node<'gc>> = None;
+        if self.parse_flow() && self.check(TokenKind::less) {
+            type_params = Some(self.parse_type_params_flow()?);
+        }
+        // P7: TS type parameters (C++ 4855-4862).
+
         self.parse_class_tail(
             start_loc,
             name,
-            None,
+            type_params,
             ClassParseKind::Declaration,
             decorators,
         )
@@ -349,9 +356,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         let mut name: Option<&'gc Node<'gc>> = None;
 
-        // P6/P7: Flow `implements`/`<` and TS `<` heritage checks (C++ 4908-4910)
-        // omitted; only the `extends`/`{` guard remains.
-        if !self.check2(TokenKind::rw_extends, TokenKind::l_brace) {
+        // A ClassHeritage, `{`, or (with Flow) an `implements` clause or type
+        // parameters means there is no class name. C++ 4907-4910, De Morgan'd
+        // (`!a && !b` -> `!(a || b)`) for clippy. (The TS
+        // `getParseTS() && check(less)` arm is P7.)
+        if !(self.check2(TokenKind::rw_extends, TokenKind::l_brace)
+            || (self.parse_flow()
+                && self.check2(TokenKind::rw_implements, TokenKind::less)))
+        {
             // Try to parse a BindingIdentifier if we did not see a ClassHeritage
             // or a '{'.
             match self.parse_binding_identifier(Param::default()) {
@@ -369,12 +381,17 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // P6/P7: Flow/TS class type parameters (`<...>`, C++ 4925-4940) omitted;
-        // type_params stays None.
+        // Flow class type parameters. C++ 4925-4932.
+        let mut type_params: Option<&'gc Node<'gc>> = None;
+        if self.parse_flow() && self.check(TokenKind::less) {
+            type_params = Some(self.parse_type_params_flow()?);
+        }
+        // P7: TS type parameters (C++ 4933-4940).
+
         self.parse_class_tail(
             start,
             name,
-            None,
+            type_params,
             ClassParseKind::Expression,
             decorators,
         )
@@ -396,20 +413,60 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         decorators: Vec<&'gc Node<'gc>>,
     ) -> Option<&'gc Node<'gc>> {
         let mut super_class: Option<&'gc Node<'gc>> = None;
-        // P6/P7: super_type_params (Flow/TS `<...>` after extends) omitted.
-        let super_type_params: Option<&'gc Node<'gc>> = None;
+        let mut super_type_params: Option<&'gc Node<'gc>> = None;
 
         if self.check_and_eat(TokenKind::rw_extends, GrammarContext::AllowRegExp) {
             // ClassHeritage[opt] { ClassBody[opt] }
             // ^
             super_class =
                 Some(self.parse_left_hand_side_expression(IsClassHeritageArgument::Yes)?);
-            // P6/P7: Flow/TS super-type-arguments (`<...>`, C++ 4970-4985) omitted.
+            // Flow super-class type arguments. C++ 4970-4977. The C++ calls
+            // `parseTypeArgsFlow()` with its default trailing grammar context
+            // (Type, per JSParserImpl.h:1506-1508).
+            if self.parse_flow() && self.check(TokenKind::less) {
+                super_type_params =
+                    Some(self.parse_type_args_flow(GrammarContext::Type)?);
+            }
+            // P7: TS super-class type arguments (C++ 4978-4985).
         }
 
-        // P6/P7: Flow `implements` clause (C++ 4988-5010) omitted; pass an empty
-        // implements list.
-        let implements = NodeList::empty();
+        // Flow `implements` clause. C++ 4988-5010. In strict mode (a class is
+        // always strict) `implements` lexes as `rw_implements`; the C++ also
+        // accepts the `implementsIdent_` spelling, kept here for an identical
+        // check.
+        let mut implements: Vec<&'gc Node<'gc>> = Vec::new();
+        if self.parse_flow() {
+            let has_implements = self
+                .check_and_eat(TokenKind::rw_implements, GrammarContext::AllowRegExp)
+                || {
+                    if self.check_name(b"implements") {
+                        self.advance(GrammarContext::AllowRegExp);
+                        true
+                    } else {
+                        false
+                    }
+                };
+            if has_implements {
+                while !self.check(TokenKind::l_brace) {
+                    if !self.need(TokenKind::identifier, " in class 'implements'") {
+                        self.lexer.get_source_mgr_mut().note_at(
+                            start_loc,
+                            None,
+                            "start of class",
+                            support::diag::Subsystem::Parser,
+                        );
+                        return None;
+                    }
+                    let impl_node = self.parse_class_implements_flow()?;
+                    implements.push(impl_node);
+                    if !self.check_and_eat(TokenKind::comma, GrammarContext::AllowRegExp)
+                    {
+                        break;
+                    }
+                }
+            }
+        }
+        let implements = NodeList::from_iter(self.gc, implements);
 
         if !self.need(TokenKind::l_brace, " in class definition") {
             self.lexer.get_source_mgr_mut().note_at(
@@ -781,9 +838,38 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             do_parse_property_name = false;
         }
 
-        // P6/P7: Flow variance (`+`/`-`/readonly/writeonly, C++ 5368-5384)
-        // omitted; variance stays None.
-        let variance: Option<&'gc Node<'gc>> = None;
+        // Flow member variance: `+`/`-` sigils, or the contextual
+        // `readonly`/`writeonly` keywords when followed by a property name.
+        // C++ 5368-5384.
+        let mut variance: Option<&'gc Node<'gc>> = None;
+        if self.parse_flow() && self.check2(TokenKind::plus, TokenKind::minus) {
+            // C++ 5370-5376: the Variance kind is the interned "plus" /
+            // "minus" atom (plusIdent_ / minusIdent_).
+            let kind: &[u8] = if self.check(TokenKind::plus) {
+                b"plus"
+            } else {
+                b"minus"
+            };
+            let v_range = self.cur_range();
+            let v_node = Node::Variance(Variance::new(
+                NodeMetadata::new(self.dummy_range()),
+                self.lexer.get_identifier(kind),
+            ));
+            variance = Some(self.set_location(v_range.start, v_range.end, v_node));
+            self.advance(GrammarContext::Type);
+        } else if self.parse_flow()
+            && (self.check_name(b"readonly") || self.check_name(b"writeonly"))
+            && can_follow_variance_keyword_flow(self.lexer.lookahead1::<true>(None))
+        {
+            // C++ 5377-5383.
+            let v_range = self.cur_range();
+            let v_node = Node::Variance(Variance::new(
+                NodeMetadata::new(self.dummy_range()),
+                self.lexer.token().get_identifier(),
+            ));
+            variance = Some(self.set_location(v_range.start, v_range.end, v_node));
+            self.advance(GrammarContext::Type);
+        }
 
         let mut computed = false;
         if do_parse_property_name {
@@ -825,17 +911,27 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let is_constructor =
             !is_static && !computed && prop_name == Some(constructor_atom);
 
-        // P6/P7: the `< (type params)` check is omitted from the field-vs-method
-        // test below; only `l_paren` remains.
-        if special == SpecialKind::None && !self.check(TokenKind::l_paren) {
+        // The `<`-vs-`(` check is unconditional in C++ (5416-5417): a `<` after
+        // the property name always routes to the method path (where, without
+        // types enabled, the missing `(` is then reported).
+        if special == SpecialKind::None
+            && !self.check2(TokenKind::less, TokenKind::l_paren)
+        {
             // Parse a class property, because this can't be a method definition.
             // Attempt ASI after the fact, and continue on, letting the next
             // iteration error if it wasn't actually a class property.
             // FieldDefinition ;
             //                 ^
-            // P6/P7: TS `?` optional flag + Flow/TS `: TypeAnnotation`
-            // (C++ 5423-5437) omitted; type_annotation stays None.
-            let type_annotation: Option<&'gc Node<'gc>> = None;
+            // P7: the TS `?` optional flag (C++ 5424-5428).
+            // `: TypeAnnotation`. C++ 5429-5437.
+            let mut type_annotation: Option<&'gc Node<'gc>> = None;
+            if self.parse_types() && self.check(TokenKind::colon) {
+                let annot_start = self.advance(GrammarContext::Type).start;
+                type_annotation = Some(self.parse_type_annotation(
+                    Some(annot_start),
+                    AllowAnonFunctionType::Yes,
+                )?);
+            }
 
             let mut value: Option<&'gc Node<'gc>> = None;
             if self.check_and_eat(TokenKind::equal, GrammarContext::AllowRegExp) {
@@ -933,9 +1029,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         let func_expr_start_loc = self.cur_start();
 
-        // P6/P7: Flow method type parameters (`<...>`, C++ 5530-5537) omitted;
-        // type_params stays None.
-        let type_params: Option<&'gc Node<'gc>> = None;
+        // Flow method type parameters. C++ 5529-5537.
+        let mut type_params: Option<&'gc Node<'gc>> = None;
+        if self.parse_flow() && self.check(TokenKind::less) {
+            type_params = Some(self.parse_type_params_flow()?);
+        }
 
         // (
         if !self.need(TokenKind::l_paren, " in method definition") {
@@ -961,8 +1059,15 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // P6/P7: Flow/TS return-type annotation (C++ 5561-5569) omitted;
-        // return_type stays None.
+        // `: ReturnType` (no predicate on methods). C++ 5560-5569.
+        let mut return_type: Option<&'gc Node<'gc>> = None;
+        if self.parse_types() && self.check(TokenKind::colon) {
+            let annot_start = self.advance(GrammarContext::Type).start;
+            return_type = Some(self.parse_return_type_annotation(
+                Some(annot_start),
+                AllowAnonFunctionType::Yes,
+            )?);
+        }
 
         if !self.need(TokenKind::l_brace, " in method definition") {
             self.lexer.get_source_mgr_mut().note_at(
@@ -991,8 +1096,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             NodeList::from_iter(self.gc, args),
             body,
             type_params,
-            None,        // return_type
-            None,        // predicate
+            return_type,
+            None,          // predicate
             yield_in_body, // generator
             await_in_body, // async
         );
@@ -1029,7 +1134,17 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             );
         }
 
-        // P6/P7: accessor-with-type-parameters error (C++ 5619-5626) omitted.
+        // C++ 5619-5626 (compile-time `#if HERMES_PARSE_FLOW` only — no runtime
+        // context check; type_params can only be set with types enabled).
+        if (special == SpecialKind::Get || special == SpecialKind::Set)
+            && type_params.is_some()
+        {
+            self.error_range(
+                start_loc,
+                body_end,
+                "accessor method may not have type parameters",
+            );
+        }
 
         if is_static && !is_private && !computed && prop_name == Some(prototype_atom) {
             // ClassElement : static MethodDefinition
@@ -1082,8 +1197,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             prop
         };
 
-        // P6/P7: "Unexpected variance sigil" error (C++ 5670-5672) — variance is
-        // always None, so it never fires.
+        // A variance sigil is only valid on fields, not methods. C++ 5670-5672.
+        if let Some(variance) = variance {
+            self.error_at(variance.range(), "Unexpected variance sigil");
+        }
 
         Some(self.set_location(
             start_range.start,
@@ -1135,15 +1252,23 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// `true` when the current token indicates that `static` was actually the
     /// property name and not a modifier. Port of the `staticIsPropertyName`
     /// closure (C++ 5241-5255). e.g. `static() {}` returns true (current tok is
-    /// `(`), but `static x;` returns false. The Flow/TS `less`/`colon` part is
-    /// omitted.
+    /// `(`), but `static x;` returns false. With types enabled, `static: T;`
+    /// (field type) and `static<T>() {}` (method type params) also make
+    /// `static` the property name.
     fn static_is_property_name(&self) -> bool {
-        self.check_n4(
+        if self.check_n4(
             TokenKind::l_paren,
             TokenKind::equal,
             TokenKind::r_brace,
             TokenKind::semi,
-        )
+        ) {
+            return true;
+        }
+        // C++ 5249-5252.
+        if self.parse_types() && self.check2(TokenKind::less, TokenKind::colon) {
+            return true;
+        }
+        false
     }
 
     /// Report an error spanning `[start, end]`. Convenience wrapper around

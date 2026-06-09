@@ -12,14 +12,17 @@
 //!
 //! Full-pass / eager port only: there is no PreParse/LazyParse machinery, so
 //! the `pass_ == PreParse`/`pass_ == LazyParse` blocks are omitted (see the
-//! individual comments). Flow/TS blocks are omitted (P6/P7).
+//! individual comments). The Flow signature sites (type parameters, return
+//! type, `%checks` predicate, leading `this` parameter) are ported (P5.4);
+//! the TS blocks are omitted (P7).
 
-use ast::node::{FunctionDeclaration, FunctionExpression, Node};
+use ast::node::{FunctionDeclaration, FunctionExpression, Identifier, Node};
 use ast::node_child::{NodeList, NodeMetadata};
 
 use crate::lexer::GrammarContext;
 use crate::token_kinds::TokenKind;
 
+use super::flow::AllowAnonFunctionType;
 use super::{JSParserImpl, Param, PARAM_DEFAULT, PARAM_RETURN};
 
 impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
@@ -116,8 +119,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // P6/P7: Flow/TS type-params after the name (C++ 429-447) omitted.
-        let type_parameters = None;
+        // Flow type parameters after the name. C++ 429-438.
+        let mut type_parameters: Option<&'gc Node<'gc>> = None;
+        if self.parse_flow() && self.check(TokenKind::less) {
+            type_parameters = Some(self.parse_type_params_flow()?);
+        }
+        // P7: TS type parameters (C++ 440-447).
 
         // (
         // C++ 449-457.
@@ -137,10 +144,23 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // P6/P7: Flow/TS return-type / predicate (C++ 468-498) omitted. Pass
-        // return_type = None, predicate = None.
-        let return_type = None;
-        let predicate = None;
+        // Flow return type and/or `%checks` predicate. C++ 468-487.
+        let mut return_type: Option<&'gc Node<'gc>> = None;
+        let mut predicate: Option<&'gc Node<'gc>> = None;
+        if self.parse_flow() && self.check(TokenKind::colon) {
+            let annot_start = self.advance(GrammarContext::Type).start;
+            if !self.check_name(b"%checks") {
+                return_type = Some(self.parse_return_type_annotation_flow(
+                    Some(annot_start),
+                    AllowAnonFunctionType::Yes,
+                )?);
+            }
+
+            if self.check_name(b"%checks") {
+                predicate = Some(self.parse_predicate_flow()?);
+            }
+        }
+        // P7: TS return type (C++ 488-498).
 
         // {
         // C++ 500-508.
@@ -231,7 +251,39 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // (
         self.advance(GrammarContext::AllowRegExp);
 
-        // P6/P7: Flow/TS leading `this` parameter (C++ 607-633) omitted.
+        // The first parameter can be 'this' in Flow and TypeScript.
+        // C++ 607-633.
+        if self.parse_types() && self.check(TokenKind::rw_this) {
+            let name = self.lexer.token().get_res_word_or_identifier();
+            let this_param_start = self.advance(GrammarContext::AllowRegExp).start;
+
+            let annot_start = self.cur_start();
+            if !self.eat(
+                TokenKind::colon,
+                GrammarContext::Type,
+                " in 'this' type annotation",
+            ) {
+                // (eat note args "start of 'this'" dropped per house style.)
+                return false;
+            }
+
+            let Some(type_annotation) = self.parse_type_annotation(
+                Some(annot_start),
+                AllowAnonFunctionType::Yes,
+            ) else {
+                return false;
+            };
+            let node = Node::Identifier(Identifier::new(
+                NodeMetadata::new(self.dummy_range()),
+                name,
+                Some(type_annotation),
+                false,
+            ));
+            let end = self.lexer.prev_token_end();
+            param_list.push(self.set_location(this_param_start, end, node));
+
+            self.check_and_eat(TokenKind::comma, GrammarContext::AllowRegExp);
+        }
 
         // C++ 635-654.
         while !self.check(TokenKind::r_paren) {
