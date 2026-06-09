@@ -1,0 +1,13 @@
+type A = { x: number, y?: string };
+type B = {| a: T |};
+type C = { [k: string]: V };
+type D = { [K]: V };
+type E = { m(): void };
+type F = { get x(): T, set x(v: T): void };
+type G = { +ro: T, -wo: U };
+type H = { ...S, z: T };
+type I = { (): R };
+type J = { [[slot]]: T };
+type K = {};
+type L = { x: T; y: U };
+type M = { ... };

@@ -12,36 +12,42 @@
 //! the plain `type X = T;` alias pipeline; P5.1 the full type-annotation
 //! precedence hierarchy (`parseConditionalTypeAnnotationFlow` →
 //! `parsePrimaryTypeAnnotationFlow`), generic types, type arguments,
-//! `typeof`/tuple/`keyof`/`infer` types, and the reparse helpers. The
-//! remaining productions emit an honest "unsupported (parser phase P5.x)"
-//! error at the marked site; the later sub-tasks (P5.2 objects / functions /
-//! type params, P5.3 interfaces / declare / opaque, P6 enum / component /
+//! `typeof`/tuple/`keyof`/`infer` types, and the reparse helpers; P5.2
+//! function types, object types, type-parameter declarations, variance,
+//! predicates, and return-type annotations. The remaining productions emit
+//! an honest "unsupported (parser phase P5.x)" error at the marked site; the
+//! later sub-tasks (P5.3 interfaces / declare / opaque, P6 enum / component /
 //! hook / record / match) replace those markers with the real grammar.
 
 use ast::node::{
     AnyTypeAnnotation, ArrayTypeAnnotation, BigIntLiteralTypeAnnotation,
     BigIntTypeAnnotation, BooleanLiteralTypeAnnotation, BooleanTypeAnnotation,
-    ConditionalTypeAnnotation, EmptyTypeAnnotation, ExistsTypeAnnotation,
-    FunctionTypeParam, GenericTypeAnnotation, Identifier, IndexedAccessType,
-    InferTypeAnnotation, IntersectionTypeAnnotation, KeyofTypeAnnotation,
+    ConditionalTypeAnnotation, DeclaredPredicate, EmptyTypeAnnotation,
+    ExistsTypeAnnotation, FunctionTypeAnnotation, FunctionTypeParam,
+    GenericTypeAnnotation, Identifier, IndexedAccessType, InferTypeAnnotation,
+    InferredPredicate, IntersectionTypeAnnotation, KeyofTypeAnnotation,
     MixedTypeAnnotation, NeverTypeAnnotation, Node, NullLiteralTypeAnnotation,
     NullableTypeAnnotation, NumberLiteralTypeAnnotation, NumberTypeAnnotation,
-    OptionalIndexedAccessType, QualifiedTypeIdentifier,
-    QualifiedTypeofIdentifier, StringLiteralTypeAnnotation,
-    StringTypeAnnotation, SymbolTypeAnnotation, TupleTypeAnnotation,
-    TupleTypeLabeledElement, TupleTypeSpreadElement, TypeAlias, TypeAnnotation,
-    TypeParameter, TypeParameterInstantiation, TypeofTypeAnnotation,
+    ObjectTypeAnnotation, ObjectTypeCallProperty, ObjectTypeIndexer,
+    ObjectTypeInternalSlot, ObjectTypeMappedTypeProperty, ObjectTypeProperty,
+    ObjectTypeSpreadProperty, OptionalIndexedAccessType,
+    QualifiedTypeIdentifier, QualifiedTypeofIdentifier,
+    StringLiteralTypeAnnotation, StringTypeAnnotation, SymbolTypeAnnotation,
+    TupleTypeAnnotation, TupleTypeLabeledElement, TupleTypeSpreadElement,
+    TypeAlias, TypeAnnotation, TypeParameter, TypeParameterDeclaration,
+    TypeParameterInstantiation, TypePredicate, TypeofTypeAnnotation,
     UndefinedTypeAnnotation, UnionTypeAnnotation, UnknownTypeAnnotation,
     Variance, VoidTypeAnnotation,
 };
-use ast::node_child::{NodeLabel, NodeList, NodeMetadata};
+use ast::node_child::{NodeLabel, NodeList, NodeMetadata, NodeString};
+use atom_table::INVALID_ATOM_BYTES;
 use support::location::SMLoc;
 
 use crate::lexer::GrammarContext;
 use crate::token_kinds::{ord, TokenKind};
 
 use super::expressions::inc_parens;
-use super::JSParserImpl;
+use super::{JSParserImpl, PARAM_IN};
 
 /// Check if the given token kind can follow a contextual variance keyword
 /// (`readonly` or `writeonly`) in Flow mode. Used to disambiguate the
@@ -89,8 +95,34 @@ pub(super) enum TypeAliasKind {
 /// allowed when parsing a type annotation.
 /// Port of `JSParserImpl::AllowAnonFunctionType` (JSParserImpl.h:1207).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[allow(dead_code)] // `No` is passed from P5.2 on (e.g. function params).
 pub(super) enum AllowAnonFunctionType {
+    No,
+    Yes,
+}
+
+/// Whether a `proto` property modifier is allowed in an object type.
+/// Port of `JSParserImpl::AllowProtoProperty` (JSParserImpl.h:1444).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[allow(dead_code)] // `Yes` is passed by declare-class bodies (P6).
+pub(super) enum AllowProtoProperty {
+    No,
+    Yes,
+}
+
+/// Whether a `static` property modifier is allowed in an object type.
+/// Port of `JSParserImpl::AllowStaticProperty` (JSParserImpl.h:1447).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[allow(dead_code)] // `Yes` is passed by declare-class bodies (P6).
+pub(super) enum AllowStaticProperty {
+    No,
+    Yes,
+}
+
+/// Whether a `...T` spread property is allowed in an object type.
+/// Port of `JSParserImpl::AllowSpreadProperty` (JSParserImpl.h:1450).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[allow(dead_code)] // `No` is passed by interface bodies (P5.3).
+pub(super) enum AllowSpreadProperty {
     No,
     Yes,
 }
@@ -171,8 +203,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse a type alias, with `type` already consumed and `start` at the
     /// start of the declaration. Port of `JSParserImpl::parseTypeAliasFlow`
-    /// (flow.cpp:1981-2071). P5.0 implements only the `TypeAliasKind::None`
-    /// path (a plain `TypeAlias` node).
+    /// (flow.cpp:1981-2071). P5.0/P5.2 implement the `TypeAliasKind::None`
+    /// path (a plain `TypeAlias` node, with optional type parameters).
     pub(super) fn parse_type_alias_flow(
         &mut self,
         start: SMLoc,
@@ -195,11 +227,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         self.advance(GrammarContext::Type);
 
         // C++ 1995-2002.
-        let type_params: Option<&'gc Node<'gc>> = None;
+        let mut type_params: Option<&'gc Node<'gc>> = None;
         if self.check(TokenKind::less) {
-            // P5.2: parseTypeParamsFlow (C++ 1997-2001).
-            self.error_cur("type parameters unsupported (parser phase P5.2)");
-            return None;
+            type_params = Some(self.parse_type_params_flow()?);
         }
 
         // C++ 2004-2026: the Opaque/DeclareOpaque `super`/`extends`/legacy-`:`
@@ -272,6 +302,207 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             ));
         }
         Some(opt_type)
+    }
+
+    // -----------------------------------------------------------------------
+    // parseReturnTypeAnnotationFlow — 2883 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a function return type annotation, which may be a plain type or
+    /// a type predicate (`asserts x [is T]`, `implies x is T`, `x is T`).
+    /// Port of `parseReturnTypeAnnotationFlow` (flow.cpp:2883-3009).
+    ///
+    /// \param wrapped_start like `parse_type_annotation_flow`'s: if `Some`,
+    ///   the result is wrapped in a `TypeAnnotation` node.
+    pub(super) fn parse_return_type_annotation_flow(
+        &mut self,
+        wrapped_start: Option<SMLoc>,
+        allow_anon_function_type: AllowAnonFunctionType,
+    ) -> Option<&'gc Node<'gc>> {
+        let start = self.cur_start();
+        let return_type: &'gc Node<'gc>;
+        if self.check_name(b"asserts") {
+            // C++ 2888-2924.
+            // TypePredicate (asserts = true) or TypeAnnotation:
+            //   TypeAnnotation
+            //   asserts IdentifierName
+            //   asserts IdentifierName is TypeAnnotation
+            let opt_type = self
+                .parse_type_annotation_flow(None, allow_anon_function_type)?;
+
+            if self.check(TokenKind::identifier) {
+                // Validate the "asserts" token was an identifier not a more
+                // complex type (C++ 2898-2901; the reparsed node itself is
+                // unused).
+                self.reparse_type_annotation_as_identifier_flow(opt_type)?;
+                // C++ 2902-2907.
+                let id_range = self.cur_range();
+                let id_node = Node::Identifier(Identifier::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    self.lexer.token().get_identifier(),
+                    None,
+                    false,
+                ));
+                let id = self.set_location(
+                    id_range.start,
+                    id_range.end,
+                    id_node,
+                );
+                self.advance(GrammarContext::Type);
+                // C++ 2908-2916: checkAndEat(isIdent_, Type).
+                let mut type_annotation: Option<&'gc Node<'gc>> = None;
+                if self.check_name(b"is") {
+                    self.advance(GrammarContext::Type);
+                    // assert IdentifierName is TypeAnnotation
+                    //                          ^
+                    type_annotation = Some(self.parse_type_annotation_flow(
+                        None,
+                        allow_anon_function_type,
+                    )?);
+                }
+                // C++ 2917-2921.
+                let node = Node::TypePredicate(TypePredicate::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    id,
+                    type_annotation,
+                    self.lexer.get_identifier(b"asserts"),
+                ));
+                return_type = self.set_location(
+                    start,
+                    self.lexer.prev_token_end(),
+                    node,
+                );
+            } else {
+                return_type = opt_type;
+            }
+        } else if self.check_name(b"implies") {
+            // C++ 2925-2976.
+            // TypePredicate (implies = true) or TypeAnnotation:
+            //   TypeAnnotation
+            //   implies IdentifierName is TypeAnnotation
+
+            //   implies IdentifierName is TypeAnnotation
+            //   ^
+            let opt_type = self
+                .parse_type_annotation_flow(None, allow_anon_function_type)?;
+
+            if self.check2(TokenKind::identifier, TokenKind::rw_this) {
+                // Validate the "implies" token was an identifier not a more
+                // complex type (C++ 2938-2944).
+                let is_bare_generic = matches!(
+                    opt_type,
+                    Node::GenericTypeAnnotation(generic)
+                        if generic.type_parameters.is_none()
+                );
+                if !is_bare_generic {
+                    self.error_at_loc(
+                        self.cur_start(),
+                        "invalid return annotation. 'implies' type guard needs to be followed by identifier",
+                    );
+                    return None;
+                }
+
+                //   implies IdentifierName is TypeAnnotation
+                //           ^
+                let id_range = self.cur_range();
+                let id_node = Node::Identifier(Identifier::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    self.lexer.token().get_res_word_or_identifier(),
+                    None,
+                    false,
+                ));
+                let id = self.set_location(
+                    id_range.start,
+                    id_range.end,
+                    id_node,
+                );
+                self.advance(GrammarContext::Type);
+
+                //   implies IdentifierName is TypeAnnotation
+                //                          ^
+                // C++ 2957-2962: checkAndEat(isIdent_, Type).
+                if self.check_name(b"is") {
+                    self.advance(GrammarContext::Type);
+                } else {
+                    self.error_at_loc(
+                        self.cur_start(),
+                        "expecting 'is' after parameter of 'implies' type guard",
+                    );
+                    return None;
+                }
+                //   implies IdentifierName is TypeAnnotation
+                //                             ^
+                let type_t = self.parse_type_annotation_flow(
+                    None,
+                    allow_anon_function_type,
+                )?;
+                // C++ 2968-2972.
+                let node = Node::TypePredicate(TypePredicate::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    id,
+                    Some(type_t),
+                    self.lexer.get_identifier(b"implies"),
+                ));
+                return_type = self.set_location(
+                    start,
+                    self.lexer.prev_token_end(),
+                    node,
+                );
+            } else {
+                // implies (as type -- okay)
+                return_type = opt_type;
+            }
+        } else {
+            // C++ 2977-2999.
+            // TypePredicate (asserts = false && implies = false) or
+            // TypeAnnotation:
+            //   TypeAnnotation
+            //   IdentifierName is TypeAnnotation
+            let opt_type = self
+                .parse_type_annotation_flow(None, allow_anon_function_type)?;
+
+            // C++ 2986: checkAndEat(isIdent_, Type).
+            if self.check_name(b"is") {
+                self.advance(GrammarContext::Type);
+                let id =
+                    self.reparse_type_annotation_as_identifier_flow(opt_type)?;
+                let type_annotation = self.parse_type_annotation_flow(
+                    None,
+                    allow_anon_function_type,
+                )?;
+                // C++ 2993-2996: the C++ passes a null UniqueString for
+                // `kind` on an unprefixed predicate; the dumper emits
+                // `"kind": null` — INVALID_ATOM_BYTES is the Rust null
+                // NodeString.
+                let node = Node::TypePredicate(TypePredicate::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    id,
+                    Some(type_annotation),
+                    INVALID_ATOM_BYTES,
+                ));
+                return_type = self.set_location(
+                    start,
+                    self.lexer.prev_token_end(),
+                    node,
+                );
+            } else {
+                return_type = opt_type;
+            }
+        }
+
+        // C++ 3002-3008.
+        if let Some(wrapped_start) = wrapped_start {
+            let node = Node::TypeAnnotation(TypeAnnotation::new(
+                NodeMetadata::new(self.dummy_range()),
+                return_type,
+            ));
+            return Some(self.set_location(
+                wrapped_start,
+                self.lexer.prev_token_end(),
+                node,
+            ));
+        }
+        Some(return_type)
     }
 
     // -----------------------------------------------------------------------
@@ -449,9 +680,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return self.parse_function_type_annotation_with_params_flow(
                 start,
                 vec![ftp],
-                None, // this constraint
-                None, // rest
-                None, // type params
+                None,  // this constraint
+                None,  // rest
+                None,  // type params
+                false, // hook
             );
         }
 
@@ -460,19 +692,47 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse the `=> ReturnType` tail of a function type whose parameters
     /// have already been parsed. Port of
-    /// `parseFunctionTypeAnnotationWithParamsFlow` (flow.cpp:3866-3897).
+    /// `parseFunctionTypeAnnotationWithParamsFlow` (flow.cpp:3865-3897).
     fn parse_function_type_annotation_with_params_flow(
         &mut self,
-        _start: SMLoc,
-        _params: Vec<&'gc Node<'gc>>,
-        _this_constraint: Option<&'gc Node<'gc>>,
-        _rest: Option<&'gc Node<'gc>>,
-        _type_params: Option<&'gc Node<'gc>>,
+        start: SMLoc,
+        params: Vec<&'gc Node<'gc>>,
+        this_constraint: Option<&'gc Node<'gc>>,
+        rest: Option<&'gc Node<'gc>>,
+        type_params: Option<&'gc Node<'gc>>,
+        hook: bool,
     ) -> Option<&'gc Node<'gc>> {
-        // P5.2: parseFunctionTypeAnnotationWithParamsFlow (C++ 3866-3897);
-        // the C++ signature also threads a `hook: bool` (hook types are P6).
-        self.error_cur("function types unsupported (parser phase P5.2)");
-        None
+        // C++ 3873-3874.
+        assert!(self.check(TokenKind::equalgreater));
+        self.advance(GrammarContext::Type);
+
+        // C++ 3876: `parseReturnTypeAnnotationFlow()` with its declaration
+        // defaults (wrappedStart=None, AllowAnonFunctionType::Yes;
+        // JSParserImpl.h:1283-1286).
+        let return_type = self
+            .parse_return_type_annotation_flow(None, AllowAnonFunctionType::Yes)?;
+
+        // C++ 3880-3896.
+        if !hook {
+            let node =
+                Node::FunctionTypeAnnotation(FunctionTypeAnnotation::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    NodeList::from_iter(self.gc, params),
+                    this_constraint,
+                    return_type,
+                    rest,
+                    type_params,
+                ));
+            Some(self.set_location(start, self.lexer.prev_token_end(), node))
+        } else {
+            // P6: HookTypeAnnotation (C++ 3891-3895) — hook syntax is gated on
+            // getParseFlowComponentSyntax(), which the Rust Context does not
+            // implement yet; no caller passes hook=true in P5.
+            self.error_cur(
+                "hook type annotations are unsupported (parser phase P6)",
+            );
+            None
+        }
     }
 
     /// Port of `parsePrefixTypeAnnotationFlow` (flow.cpp:3232-3244).
@@ -582,8 +842,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse a primary type annotation. Port of
     /// `JSParserImpl::parsePrimaryTypeAnnotationFlow` (flow.cpp:3305-3602).
-    /// P5.0/P5.1 implement all arms except function/group/object types
-    /// (P5.2) and `interface` types (P5.3) — see the per-arm markers.
+    /// P5.0-P5.2 implement all arms except `interface` types (P5.3) — see
+    /// the per-arm markers.
     fn parse_primary_type_annotation_flow(&mut self) -> Option<&'gc Node<'gc>> {
         let start = self.cur_start();
         match self.cur_kind() {
@@ -597,33 +857,20 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
 
             // C++ 3313-3314.
-            TokenKind::less => {
-                // P5.2: parseFunctionTypeAnnotationFlow.
-                self.error_cur(
-                    "function type annotations are unsupported (parser phase P5.2)",
-                );
-                None
-            }
+            TokenKind::less => self.parse_function_type_annotation_flow(),
 
-            // C++ 3315-3316. NOTE: the C++ group path (`(T)`) calls
-            // `incParens()` on the inner type; the Rust AST has the
-            // matching `metadata().parens` slot — use it when porting.
+            // C++ 3315-3316.
             TokenKind::l_paren => {
-                // P5.2: parseFunctionOrGroupTypeAnnotationFlow.
-                self.error_cur(
-                    "function/group type annotations are unsupported (parser phase P5.2)",
-                );
-                None
+                self.parse_function_or_group_type_annotation_flow()
             }
 
             // C++ 3317-3322.
-            TokenKind::l_brace | TokenKind::l_bracepipe => {
-                // P5.2: parseObjectTypeAnnotationFlow.
-                self.error_cur(
-                    "object type annotations are unsupported (parser phase P5.2)",
-                );
-                None
-            }
+            TokenKind::l_brace | TokenKind::l_bracepipe => self
+                .parse_object_type_annotation_flow(
+                    AllowProtoProperty::No,
+                    AllowStaticProperty::No,
+                    AllowSpreadProperty::Yes,
+                ),
 
             // C++ 3323-3334.
             TokenKind::rw_interface => {
@@ -1287,6 +1534,1282 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
+    // parseFunctionTypeAnnotationFlow — 3823 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a (possibly generic) function type annotation
+    /// `<T>(params) => R`. Port of `parseFunctionTypeAnnotationFlow`
+    /// (flow.cpp:3823-3825).
+    fn parse_function_type_annotation_flow(&mut self) -> Option<&'gc Node<'gc>> {
+        self.parse_function_or_hook_type_annotation_flow(false)
+    }
+
+    /// Parse a function (or, P6, hook) type annotation with the current token
+    /// at `<` or `(`. Port of `parseFunctionOrHookTypeAnnotationFlow`
+    /// (flow.cpp:3827-3863). `hook` is threaded like the C++ bool; the only
+    /// P5 caller passes false (`parseHookTypeAnnotationFlow` is P6).
+    fn parse_function_or_hook_type_annotation_flow(
+        &mut self,
+        hook: bool,
+    ) -> Option<&'gc Node<'gc>> {
+        let start = self.cur_start();
+
+        // C++ 3831-3837.
+        let mut type_params: Option<&'gc Node<'gc>> = None;
+        if self.check(TokenKind::less) {
+            type_params = Some(self.parse_type_params_flow()?);
+        }
+
+        // C++ 3839-3844.
+        if !self.need(TokenKind::l_paren, " in function type annotation") {
+            return None;
+        }
+
+        // C++ 3846-3852.
+        let mut params: Vec<&'gc Node<'gc>> = Vec::new();
+        let mut this_constraint: Option<&'gc Node<'gc>> = None;
+        let rest = self.parse_function_type_annotation_params_flow(
+            &mut params,
+            &mut this_constraint,
+            hook,
+        )?;
+
+        // C++ 3854-3859.
+        if !self.need(TokenKind::equalgreater, " in function type annotation") {
+            return None;
+        }
+
+        // C++ 3861-3862.
+        self.parse_function_type_annotation_with_params_flow(
+            start,
+            params,
+            this_constraint,
+            rest,
+            type_params,
+            hook,
+        )
+    }
+
+    // -----------------------------------------------------------------------
+    // parseFunctionOrGroupTypeAnnotationFlow — 3899 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a parenthesized group type `(T)` or a parenthesized function
+    /// type `(params) => R`, with the current token at `(`. Port of
+    /// `parseFunctionOrGroupTypeAnnotationFlow` (flow.cpp:3899-4032).
+    fn parse_function_or_group_type_annotation_flow(
+        &mut self,
+    ) -> Option<&'gc Node<'gc>> {
+        debug_assert!(self.check(TokenKind::l_paren));
+        // This is either
+        // ( Type )
+        // ^
+        // or
+        // ( ParamList ) => Type
+        // ^
+        // so we use a similar approach to arrow function parameters by
+        // keeping track and reparsing in certain cases.
+        let start = self.advance(GrammarContext::Type).start;
+
+        let mut is_function = false;
+        let mut ty: Option<&'gc Node<'gc>> = None;
+        let mut rest: Option<&'gc Node<'gc>> = None;
+        let mut params: Vec<&'gc Node<'gc>> = Vec::new();
+        let mut this_constraint: Option<&'gc Node<'gc>> = None;
+
+        // C++ 3918-3937: a leading `this: T` constraint.
+        if self.check(TokenKind::rw_this) {
+            let opt_next = self.lexer.lookahead1::<true>(None);
+            if opt_next == Some(TokenKind::colon) {
+                let this_start = self.advance(GrammarContext::Type).start;
+                self.advance(GrammarContext::Type);
+                let type_annotation = self.parse_type_annotation_flow(
+                    None,
+                    AllowAnonFunctionType::Yes,
+                )?;
+
+                let ftp_node = Node::FunctionTypeParam(FunctionTypeParam::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    None, // name
+                    type_annotation,
+                    false, // optional
+                ));
+                this_constraint = Some(self.set_location(
+                    this_start,
+                    self.lexer.prev_token_end(),
+                    ftp_node,
+                ));
+                self.check_and_eat(TokenKind::comma, GrammarContext::Type);
+            } else if opt_next == Some(TokenKind::question) {
+                self.error_cur("'this' constraint may not be optional");
+            }
+        }
+
+        // C++ 3939-3965.
+        if self.allow_anon_function_type.get()
+            && self.check_and_eat(TokenKind::dotdotdot, GrammarContext::Type)
+        {
+            is_function = true;
+            // Must be parameters, and this must be the last one.
+            // Rest param must be the last param.
+            rest = Some(self.parse_function_type_annotation_param_flow()?);
+        } else if self.check(TokenKind::r_paren) {
+            is_function = true;
+            // ( )
+            //   ^
+            // No parameters, but this must be an empty param list.
+        } else {
+            // Not sure yet whether this is a param or simply a type.
+            let param = self.parse_function_type_annotation_param_flow()?;
+            let ftp = param
+                .as_function_type_param()
+                .expect("param parser returns FunctionTypeParam");
+            ty = Some(ftp.type_annotation);
+            if ftp.name.is_some() || ftp.optional.get() {
+                // Must be a param if it has a name or if it was optional.
+                is_function = true;
+            }
+            params.push(param);
+        }
+
+        // If isFunction was already forced by something previously then we
+        // have no choice but to attempt to parse as a function type
+        // annotation. C++ 3969-3990.
+        if (is_function || self.allow_anon_function_type.get())
+            && self.check_and_eat(TokenKind::comma, GrammarContext::Type)
+        {
+            is_function = true;
+            while !self.check(TokenKind::r_paren) {
+                let is_rest = rest.is_none()
+                    && self.check_and_eat(
+                        TokenKind::dotdotdot,
+                        GrammarContext::Type,
+                    );
+
+                let param = self.parse_function_type_annotation_param_flow()?;
+                if is_rest {
+                    rest = Some(param);
+                    self.check_and_eat(TokenKind::comma, GrammarContext::Type);
+                    break;
+                } else {
+                    params.push(param);
+                }
+
+                if !self.check_and_eat(TokenKind::comma, GrammarContext::Type)
+                {
+                    break;
+                }
+            }
+        }
+
+        // C++ 3992-3998.
+        if !self.eat(
+            TokenKind::r_paren,
+            GrammarContext::Type,
+            " at end of function annotation parameters",
+        ) {
+            return None;
+        }
+
+        // C++ 4000-4012.
+        if is_function {
+            if !self.eat(
+                TokenKind::equalgreater,
+                GrammarContext::Type,
+                " in function type annotation",
+            ) {
+                return None;
+            }
+        } else if self.allow_anon_function_type.get()
+            && self.check_and_eat(TokenKind::equalgreater, GrammarContext::Type)
+        {
+            is_function = true;
+        }
+
+        // C++ 4014-4017: a plain parenthesized group — return the inner type
+        // with its paren count bumped.
+        if !is_function {
+            let ty =
+                ty.expect("non-function group type must have an inner type");
+            inc_parens(ty);
+            return Some(ty);
+        }
+
+        // C++ 4019-4024.
+        let return_type = self.parse_return_type_annotation_flow(
+            None,
+            if self.allow_anon_function_type.get() {
+                AllowAnonFunctionType::Yes
+            } else {
+                AllowAnonFunctionType::No
+            },
+        )?;
+
+        // C++ 4026-4031: a function type reached through the group cover
+        // never has type parameters.
+        let node = Node::FunctionTypeAnnotation(FunctionTypeAnnotation::new(
+            NodeMetadata::new(self.dummy_range()),
+            NodeList::from_iter(self.gc, params),
+            this_constraint,
+            return_type,
+            rest,
+            None, // typeParams
+        ));
+        Some(self.set_location(start, self.lexer.prev_token_end(), node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseObjectTypeAnnotationFlow — 4034 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse an object type annotation, with the current token at `{` or
+    /// `{|`. Port of `parseObjectTypeAnnotationFlow` (flow.cpp:4034-4085).
+    pub(super) fn parse_object_type_annotation_flow(
+        &mut self,
+        allow_proto_property: AllowProtoProperty,
+        allow_static_property: AllowStaticProperty,
+        allow_spread_property: AllowSpreadProperty,
+    ) -> Option<&'gc Node<'gc>> {
+        debug_assert!(self.check2(TokenKind::l_brace, TokenKind::l_bracepipe));
+        let exact = self.check(TokenKind::l_bracepipe);
+        let start = self.advance(GrammarContext::Type).start;
+
+        let mut properties: Vec<&'gc Node<'gc>> = Vec::new();
+        let mut indexers: Vec<&'gc Node<'gc>> = Vec::new();
+        let mut call_properties: Vec<&'gc Node<'gc>> = Vec::new();
+        let mut internal_slots: Vec<&'gc Node<'gc>> = Vec::new();
+        let mut inexact = false;
+
+        // C++ 4048-4057.
+        if !self.parse_object_type_properties_flow(
+            allow_proto_property,
+            allow_static_property,
+            allow_spread_property,
+            &mut properties,
+            &mut indexers,
+            &mut call_properties,
+            &mut internal_slots,
+            &mut inexact,
+        ) {
+            return None;
+        }
+
+        // C++ 4059-4064.
+        if exact && inexact {
+            // Doesn't prevent parsing from continuing, but it is an error.
+            self.error_at_loc(
+                start,
+                "Explicit inexact syntax cannot appear inside an explicit exact object type",
+            );
+        }
+
+        // C++ 4066-4073.
+        let end = self.cur_range().end;
+        if !self.eat(
+            if exact {
+                TokenKind::piper_brace
+            } else {
+                TokenKind::r_brace
+            },
+            GrammarContext::Type,
+            " at end of exact object type annotation",
+        ) {
+            return None;
+        }
+
+        // C++ 4075-4084.
+        let node = Node::ObjectTypeAnnotation(ObjectTypeAnnotation::new(
+            NodeMetadata::new(self.dummy_range()),
+            NodeList::from_iter(self.gc, properties),
+            NodeList::from_iter(self.gc, indexers),
+            NodeList::from_iter(self.gc, call_properties),
+            NodeList::from_iter(self.gc, internal_slots),
+            inexact,
+            exact,
+        ));
+        Some(self.set_location(start, end, node))
+    }
+
+    /// Parse the members of an object type into the four out-lists, leaving
+    /// the closing `}`/`|}` as the current token. Returns false if an error
+    /// was reported. Port of `parseObjectTypePropertiesFlow`
+    /// (flow.cpp:4087-4151).
+    #[allow(clippy::too_many_arguments)] // faithful to the C++ signature.
+    fn parse_object_type_properties_flow(
+        &mut self,
+        allow_proto_property: AllowProtoProperty,
+        allow_static_property: AllowStaticProperty,
+        allow_spread_property: AllowSpreadProperty,
+        properties: &mut Vec<&'gc Node<'gc>>,
+        indexers: &mut Vec<&'gc Node<'gc>>,
+        call_properties: &mut Vec<&'gc Node<'gc>>,
+        internal_slots: &mut Vec<&'gc Node<'gc>>,
+        inexact: &mut bool,
+    ) -> bool {
+        while !self.check2(TokenKind::r_brace, TokenKind::piper_brace) {
+            let start = self.cur_start();
+            if self.check(TokenKind::dotdotdot) {
+                // Spread property or explicit '...' for inexact.
+                self.advance(GrammarContext::Type);
+                if self.check2(TokenKind::comma, TokenKind::semi) {
+                    // C++ 4101-4105.
+                    *inexact = true;
+                    self.advance(GrammarContext::Type);
+                    // Explicit '...' must be the last element in the type
+                    // annotation.
+                    return true;
+                } else if self.check2(
+                    TokenKind::r_brace,
+                    TokenKind::piper_brace,
+                ) {
+                    // C++ 4106-4108.
+                    *inexact = true;
+                    return true;
+                } else {
+                    // C++ 4109-4121.
+                    if allow_spread_property == AllowSpreadProperty::No {
+                        self.error_at_loc(
+                            start,
+                            "Spreading a type is only allowed inside an object type",
+                        );
+                    }
+                    let Some(spread_type) = self.parse_type_annotation_flow(
+                        None,
+                        AllowAnonFunctionType::Yes,
+                    ) else {
+                        return false;
+                    };
+                    let node = Node::ObjectTypeSpreadProperty(
+                        ObjectTypeSpreadProperty::new(
+                            NodeMetadata::new(self.dummy_range()),
+                            spread_type,
+                        ),
+                    );
+                    let located = self.set_location(
+                        start,
+                        self.lexer.prev_token_end(),
+                        node,
+                    );
+                    properties.push(located);
+                }
+            } else {
+                // C++ 4122-4131.
+                if !self.parse_property_type_annotation_flow(
+                    allow_proto_property,
+                    allow_static_property,
+                    properties,
+                    indexers,
+                    call_properties,
+                    internal_slots,
+                ) {
+                    return false;
+                }
+            }
+
+            // C++ 4133-4147.
+            if self.check2(TokenKind::comma, TokenKind::semi) {
+                self.advance(GrammarContext::Type);
+            } else if self.check2(TokenKind::r_brace, TokenKind::piper_brace) {
+                return true;
+            } else {
+                self.error_expected4(
+                    TokenKind::comma,
+                    TokenKind::semi,
+                    TokenKind::r_brace,
+                    TokenKind::piper_brace,
+                    " after property",
+                );
+                return false;
+            }
+        }
+
+        true
+    }
+
+    /// Parse one object-type member (property, method, accessor, call
+    /// property, indexer, mapped type, or internal slot), pushing it into the
+    /// appropriate out-list. Returns false if an error was reported. Port of
+    /// `parsePropertyTypeAnnotationFlow` (flow.cpp:4153-4439).
+    fn parse_property_type_annotation_flow(
+        &mut self,
+        allow_proto_property: AllowProtoProperty,
+        allow_static_property: AllowStaticProperty,
+        properties: &mut Vec<&'gc Node<'gc>>,
+        indexers: &mut Vec<&'gc Node<'gc>>,
+        call_properties: &mut Vec<&'gc Node<'gc>>,
+        internal_slots: &mut Vec<&'gc Node<'gc>>,
+    ) -> bool {
+        let start_range = self.cur_range();
+        let start = start_range.start;
+
+        let mut variance: Option<&'gc Node<'gc>> = None;
+        let mut is_static = false;
+        let mut proto = false;
+
+        // C++ 4167-4170.
+        if self.check_name(b"proto") {
+            proto = true;
+            self.advance(GrammarContext::Type);
+        }
+
+        // C++ 4172-4175.
+        if !proto
+            && (self.check(TokenKind::rw_static) || self.check_name(b"static"))
+        {
+            is_static = true;
+            self.advance(GrammarContext::Type);
+        }
+
+        // C++ 4177-4190.
+        if self.check2(TokenKind::plus, TokenKind::minus) {
+            let kind: &[u8] = if self.check(TokenKind::plus) {
+                b"plus"
+            } else {
+                b"minus"
+            };
+            let v_range = self.cur_range();
+            let v_node = Node::Variance(Variance::new(
+                NodeMetadata::new(self.dummy_range()),
+                self.lexer.get_identifier(kind),
+            ));
+            variance =
+                Some(self.set_location(v_range.start, v_range.end, v_node));
+            self.advance(GrammarContext::Type);
+        } else if (self.check_name(b"readonly")
+            || self.check_name(b"writeonly"))
+            && can_follow_variance_keyword_flow(
+                self.lexer.lookahead1::<true>(None),
+            )
+        {
+            let v_range = self.cur_range();
+            let v_node = Node::Variance(Variance::new(
+                NodeMetadata::new(self.dummy_range()),
+                self.lexer.token().get_identifier(),
+            ));
+            variance =
+                Some(self.set_location(v_range.start, v_range.end, v_node));
+            self.advance(GrammarContext::Type);
+        }
+
+        // C++ 4192-4315.
+        if self.check_and_eat(TokenKind::l_square, GrammarContext::Type) {
+            if self.check_and_eat(TokenKind::l_square, GrammarContext::Type) {
+                // Internal slot `[[id]]` (C++ 4193-4274).
+                if let Some(variance) = variance {
+                    let range = variance.metadata().range.get();
+                    self.error_at(range, "Unexpected variance sigil");
+                }
+                if proto {
+                    self.error_at(start_range, "invalid 'proto' modifier");
+                }
+                if is_static
+                    && allow_static_property == AllowStaticProperty::No
+                {
+                    self.error_at(start_range, "invalid 'static' modifier");
+                }
+                // C++ 4204-4211.
+                if !self.check(TokenKind::identifier)
+                    && !self.lexer.token().is_res_word()
+                {
+                    // errorExpected(identifier, "in internal slot", ...).
+                    self.need(TokenKind::identifier, " in internal slot");
+                    return false;
+                }
+                // C++ 4212-4217.
+                let id_range = self.cur_range();
+                let id_node = Node::Identifier(Identifier::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    self.lexer.token().get_res_word_or_identifier(),
+                    None,
+                    false,
+                ));
+                let id = self.set_location(
+                    id_range.start,
+                    id_range.end,
+                    id_node,
+                );
+                self.advance(GrammarContext::Type);
+
+                // C++ 4219-4232.
+                if !self.eat(
+                    TokenKind::r_square,
+                    GrammarContext::Type,
+                    " at end of internal slot",
+                ) {
+                    return false;
+                }
+                if !self.eat(
+                    TokenKind::r_square,
+                    GrammarContext::Type,
+                    " at end of internal slot",
+                ) {
+                    return false;
+                }
+
+                let mut optional = false;
+                let method;
+                let value;
+
+                if self.check2(TokenKind::less, TokenKind::l_paren) {
+                    // Type params and method (C++ 4238-4251).
+                    method = true;
+                    let mut type_params: Option<&'gc Node<'gc>> = None;
+                    if self.check(TokenKind::less) {
+                        let Some(tp) = self.parse_type_params_flow() else {
+                            return false;
+                        };
+                        type_params = Some(tp);
+                    }
+                    let Some(methodish) = self
+                        .parse_methodish_type_annotation_flow(
+                            start,
+                            type_params,
+                        )
+                    else {
+                        return false;
+                    };
+                    value = methodish;
+                } else {
+                    // Standard type annotation (C++ 4252-4267).
+                    method = false;
+                    optional = self.check_and_eat(
+                        TokenKind::question,
+                        GrammarContext::Type,
+                    );
+                    if !self.eat(
+                        TokenKind::colon,
+                        GrammarContext::Type,
+                        " in type annotation",
+                    ) {
+                        return false;
+                    }
+                    let Some(v) = self.parse_type_annotation_flow(
+                        None,
+                        AllowAnonFunctionType::Yes,
+                    ) else {
+                        return false;
+                    };
+                    value = v;
+                }
+
+                // C++ 4269-4274.
+                let node = Node::ObjectTypeInternalSlot(
+                    ObjectTypeInternalSlot::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        id,
+                        value,
+                        optional,
+                        is_static,
+                        method,
+                    ),
+                );
+                let located = self.set_location(
+                    start,
+                    self.lexer.prev_token_end(),
+                    node,
+                );
+                internal_slots.push(located);
+            } else {
+                // Indexer or Mapped Type (C++ 4275-4313).
+                // We can have
+                // [ Identifier : TypeAnnotation ]
+                //   ^
+                // or
+                // [ TypeAnnotation ]
+                //   ^
+                // or
+                // [ TypeParameter in TypeAnnotation ]
+                //   ^
+                // Because we cannot differentiate without looking ahead for
+                // the `in` or `:`, we call `parseTypeAnnotation`, check for
+                // the next token and then convert the TypeAnnotation to the
+                // appropriate node.
+                let Some(left) = self.parse_type_annotation_before_colon_flow()
+                else {
+                    return false;
+                };
+
+                if self.check_and_eat(TokenKind::rw_in, GrammarContext::Type) {
+                    let Some(prop) = self.parse_type_mapped_type_property_flow(
+                        start, left, variance,
+                    ) else {
+                        return false;
+                    };
+                    properties.push(prop);
+                } else {
+                    let Some(indexer) = self.parse_type_indexer_property_flow(
+                        start, left, variance, is_static,
+                    ) else {
+                        return false;
+                    };
+                    indexers.push(indexer);
+                }
+
+                // C++ 4307-4312.
+                if proto {
+                    self.error_at(start_range, "invalid 'proto' modifier");
+                }
+                if is_static
+                    && allow_static_property == AllowStaticProperty::No
+                {
+                    self.error_at(start_range, "invalid 'static' modifier");
+                }
+            }
+            return true;
+        }
+
+        // C++ 4319-4351.
+        if self.check2(TokenKind::less, TokenKind::l_paren) {
+            // C++ 4320-4337: a consumed `static`/`proto` that is not allowed
+            // as a modifier here was actually the method name.
+            if (is_static && allow_static_property == AllowStaticProperty::No)
+                || (proto && allow_proto_property == AllowProtoProperty::No)
+            {
+                let key_node = Node::Identifier(Identifier::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    self.lexer.get_identifier(if is_static {
+                        b"static"
+                    } else {
+                        b"proto"
+                    }),
+                    None,
+                    false,
+                ));
+                let key = self.set_location(
+                    start_range.start,
+                    start_range.end,
+                    key_node,
+                );
+                // The C++ (4327-4328) also clears `proto`; it is never read
+                // again on this path, so only `is_static` (passed below) is
+                // reset here.
+                is_static = false;
+                if let Some(variance) = variance {
+                    let range = variance.metadata().range.get();
+                    self.error_at(range, "Unexpected variance sigil");
+                }
+                let Some(prop) =
+                    self.parse_method_type_property_flow(start, is_static, key)
+                else {
+                    return false;
+                };
+                properties.push(prop);
+                return true;
+            }
+            // C++ 4338-4350.
+            if let Some(variance) = variance {
+                let range = variance.metadata().range.get();
+                self.error_at(range, "call property must not specify variance");
+            }
+            if proto {
+                self.error_at(start_range, "invalid 'proto' modifier");
+            }
+            let Some(call) = self.parse_type_call_property_flow(start, is_static)
+            else {
+                return false;
+            };
+            call_properties.push(call);
+            return true;
+        }
+
+        // C++ 4353-4369: a consumed `static`/`proto` directly followed by
+        // `:`/`?` was actually the property name.
+        if (is_static || proto)
+            && self.check2(TokenKind::colon, TokenKind::question)
+        {
+            if let Some(variance) = variance {
+                let range = variance.metadata().range.get();
+                self.error_at(range, "Unexpected variance sigil");
+            }
+            let key_node = Node::Identifier(Identifier::new(
+                NodeMetadata::new(self.dummy_range()),
+                self.lexer.get_identifier(if is_static {
+                    b"static"
+                } else {
+                    b"proto"
+                }),
+                None,
+                false,
+            ));
+            let key = self.set_location(
+                start_range.start,
+                start_range.end,
+                key_node,
+            );
+            is_static = false;
+            proto = false;
+            let Some(prop) = self.parse_type_property_flow(
+                start, variance, is_static, proto, key,
+            ) else {
+                return false;
+            };
+            properties.push(prop);
+            return true;
+        }
+
+        // C++ 4371-4374.
+        let Some(key) = self.parse_property_name() else {
+            return false;
+        };
+
+        // C++ 4376-4391.
+        if self.check2(TokenKind::less, TokenKind::l_paren) {
+            if let Some(variance) = variance {
+                let range = variance.metadata().range.get();
+                self.error_at(range, "Unexpected variance sigil");
+            }
+            if proto {
+                self.error_at(start_range, "invalid 'proto' modifier");
+            }
+            if is_static && allow_static_property == AllowStaticProperty::No {
+                self.error_at(start_range, "invalid 'static' modifier");
+            }
+            let Some(prop) =
+                self.parse_method_type_property_flow(start, is_static, key)
+            else {
+                return false;
+            };
+            properties.push(prop);
+            return true;
+        }
+
+        // C++ 4393-4405.
+        if self.check2(TokenKind::colon, TokenKind::question) {
+            if proto && allow_proto_property == AllowProtoProperty::No {
+                self.error_at(start_range, "invalid 'proto' modifier");
+            }
+            if is_static && allow_static_property == AllowStaticProperty::No {
+                self.error_at(start_range, "invalid 'static' modifier");
+            }
+            let Some(prop) = self.parse_type_property_flow(
+                start, variance, is_static, proto, key,
+            ) else {
+                return false;
+            };
+            properties.push(prop);
+            return true;
+        }
+
+        // C++ 4407-4431: a `get`/`set` accessor — the parsed key was the
+        // accessor specifier and the real key follows.
+        if let Node::Identifier(ident) = key {
+            let (is_getter, is_setter) = {
+                let bytes =
+                    self.lexer.get_string_table().bytes(ident.name.get());
+                (bytes == b"get", bytes == b"set")
+            };
+            if is_getter || is_setter {
+                if let Some(variance) = variance {
+                    let range = variance.metadata().range.get();
+                    self.error_at(
+                        range,
+                        "accessor property must not specify variance",
+                    );
+                }
+                if proto {
+                    self.error_at(start_range, "invalid 'proto' modifier");
+                }
+                if is_static
+                    && allow_static_property == AllowStaticProperty::No
+                {
+                    self.error_at(start_range, "invalid 'static' modifier");
+                }
+                let Some(key) = self.parse_property_name() else {
+                    return false;
+                };
+                let Some(get_set) = self.parse_get_or_set_type_property_flow(
+                    start, is_static, is_getter, key,
+                ) else {
+                    return false;
+                };
+                properties.push(get_set);
+                return true;
+            }
+        }
+
+        // C++ 4433-4438.
+        self.error_expected2(
+            TokenKind::colon,
+            TokenKind::question,
+            " in property type annotation",
+        );
+        false
+    }
+
+    /// Parse the `[?] : T` tail of a plain object-type property. Port of
+    /// `parseTypePropertyFlow` (flow.cpp:4441-4472).
+    fn parse_type_property_flow(
+        &mut self,
+        start: SMLoc,
+        variance: Option<&'gc Node<'gc>>,
+        is_static: bool,
+        proto: bool,
+        key: &'gc Node<'gc>,
+    ) -> Option<&'gc Node<'gc>> {
+        debug_assert!(self.check2(TokenKind::colon, TokenKind::question));
+
+        // C++ 4449-4450.
+        let optional =
+            self.check_and_eat(TokenKind::question, GrammarContext::Type);
+        // C++ 4451-4457.
+        if !self.eat(
+            TokenKind::colon,
+            GrammarContext::Type,
+            " in type property",
+        ) {
+            return None;
+        }
+
+        // C++ 4459-4462.
+        let value = self
+            .parse_type_annotation_flow(None, AllowAnonFunctionType::Yes)?;
+
+        // C++ 4464-4471.
+        let node = Node::ObjectTypeProperty(ObjectTypeProperty::new(
+            NodeMetadata::new(self.dummy_range()),
+            key,
+            value,
+            false, // method
+            optional,
+            is_static,
+            proto,
+            variance,
+            self.lexer.get_identifier(b"init"),
+        ));
+        Some(self.set_location(start, self.lexer.prev_token_end(), node))
+    }
+
+    /// Parse the `<T>(params): R` tail of an object-type method property.
+    /// Port of `parseMethodTypePropertyFlow` (flow.cpp:4474-4510).
+    fn parse_method_type_property_flow(
+        &mut self,
+        start: SMLoc,
+        is_static: bool,
+        key: &'gc Node<'gc>,
+    ) -> Option<&'gc Node<'gc>> {
+        debug_assert!(self.check2(TokenKind::less, TokenKind::l_paren));
+
+        // C++ 4480-4486.
+        let mut type_params: Option<&'gc Node<'gc>> = None;
+        if self.check(TokenKind::less) {
+            type_params = Some(self.parse_type_params_flow()?);
+        }
+
+        // C++ 4488-4491.
+        let value =
+            self.parse_methodish_type_annotation_flow(start, type_params)?;
+
+        // C++ 4493-4509.
+        let node = Node::ObjectTypeProperty(ObjectTypeProperty::new(
+            NodeMetadata::new(self.dummy_range()),
+            key,
+            value,
+            true,  // method
+            false, // optional
+            is_static,
+            false, // proto
+            None,  // variance
+            self.lexer.get_identifier(b"init"),
+        ));
+        Some(self.set_location(start, self.lexer.prev_token_end(), node))
+    }
+
+    /// Parse the `(params): R` tail of an object-type accessor property,
+    /// checking the accessor arity. Port of `parseGetOrSetTypePropertyFlow`
+    /// (flow.cpp:4512-4550).
+    fn parse_get_or_set_type_property_flow(
+        &mut self,
+        start: SMLoc,
+        is_static: bool,
+        is_getter: bool,
+        key: &'gc Node<'gc>,
+    ) -> Option<&'gc Node<'gc>> {
+        // C++ 4517-4519.
+        let value = self.parse_methodish_type_annotation_flow(start, None)?;
+        let fta = value
+            .as_function_type_annotation()
+            .expect("methodish parser returns FunctionTypeAnnotation");
+
+        // Check the number of parameters, but we can continue parsing anyway
+        // (C++ 4528-4537).
+        if is_getter {
+            if !fta.params.is_empty() {
+                let range = value.metadata().range.get();
+                self.error_at(range, "Getter must have 0 parameters");
+            }
+        } else if fta.params.iter().count() != 1 {
+            let range = value.metadata().range.get();
+            self.error_at(range, "Setter must have 1 parameter");
+        }
+
+        // C++ 4539-4543.
+        if let Some(this_constraint) = fta.this {
+            let range = this_constraint.metadata().range.get();
+            self.error_at(range, "Accessors must not have 'this' annotations");
+        }
+
+        // C++ 4545-4549.
+        let kind: &[u8] = if is_getter { b"get" } else { b"set" };
+        let node = Node::ObjectTypeProperty(ObjectTypeProperty::new(
+            NodeMetadata::new(self.dummy_range()),
+            key,
+            value,
+            false, // method
+            false, // optional
+            is_static,
+            false, // proto
+            None,  // variance
+            self.lexer.get_identifier(kind),
+        ));
+        Some(self.set_location(start, self.lexer.prev_token_end(), node))
+    }
+
+    /// Parse the rest of a mapped type member `[K in T][+?/-?/?]: V`, with
+    /// `left` the already-parsed key and `in` consumed. Port of
+    /// `parseTypeMappedTypePropertyFlow` (flow.cpp:4552-4620).
+    fn parse_type_mapped_type_property_flow(
+        &mut self,
+        start: SMLoc,
+        left: &'gc Node<'gc>,
+        variance: Option<&'gc Node<'gc>>,
+    ) -> Option<&'gc Node<'gc>> {
+        // C++ 4556-4564: the key reparses as a bare type parameter spanning
+        // exactly `left`'s range.
+        let id = self.reparse_type_annotation_as_id_flow(left)?;
+        let left_range = left.metadata().range.get();
+        let key_tparam_node = Node::TypeParameter(TypeParameter::new(
+            NodeMetadata::new(self.dummy_range()),
+            id,
+            false, // const
+            None,  // bound
+            None,  // variance
+            None,  // default
+            false, // usesExtendsBound
+        ));
+        let key_tparam = self.set_location(
+            left_range.start,
+            left_range.end,
+            key_tparam_node,
+        );
+
+        // C++ 4566-4568.
+        let source_type = self
+            .parse_type_annotation_flow(None, AllowAnonFunctionType::Yes)?;
+
+        // C++ 4570-4576.
+        if !self.eat(
+            TokenKind::r_square,
+            GrammarContext::Type,
+            " in mapped type",
+        ) {
+            return None;
+        }
+
+        // C++ 4578-4601: the optionality sigil. The C++ passes a null
+        // UniqueString when there is no sigil; the dumper emits
+        // `"optional": null` — INVALID_ATOM_BYTES is the Rust null
+        // NodeString.
+        let mut optional: NodeString = INVALID_ATOM_BYTES;
+        if self.check_and_eat(TokenKind::plus, GrammarContext::Type) {
+            if !self.eat(
+                TokenKind::question,
+                GrammarContext::Type,
+                " in mapped type",
+            ) {
+                return None;
+            }
+            optional = self.lexer.get_identifier(b"PlusOptional");
+        } else if self.check_and_eat(TokenKind::minus, GrammarContext::Type) {
+            if !self.eat(
+                TokenKind::question,
+                GrammarContext::Type,
+                " in mapped type",
+            ) {
+                return None;
+            }
+            optional = self.lexer.get_identifier(b"MinusOptional");
+        } else if self.check_and_eat(TokenKind::question, GrammarContext::Type)
+        {
+            optional = self.lexer.get_identifier(b"Optional");
+        }
+
+        // C++ 4603-4609.
+        if !self.eat(
+            TokenKind::colon,
+            GrammarContext::Type,
+            " in mapped type",
+        ) {
+            return None;
+        }
+
+        // C++ 4611-4613.
+        let prop_type = self
+            .parse_type_annotation_flow(None, AllowAnonFunctionType::Yes)?;
+
+        // C++ 4615-4619.
+        let node = Node::ObjectTypeMappedTypeProperty(
+            ObjectTypeMappedTypeProperty::new(
+                NodeMetadata::new(self.dummy_range()),
+                key_tparam,
+                prop_type,
+                source_type,
+                variance,
+                optional,
+            ),
+        );
+        Some(self.set_location(start, self.lexer.prev_token_end(), node))
+    }
+
+    /// Parse the rest of an indexer member `[id: K]: V` / `[K]: V`, with
+    /// `left` the already-parsed bracket contents (or its `id` part). Port of
+    /// `parseTypeIndexerPropertyFlow` (flow.cpp:4622-4669).
+    fn parse_type_indexer_property_flow(
+        &mut self,
+        start: SMLoc,
+        left: &'gc Node<'gc>,
+        variance: Option<&'gc Node<'gc>>,
+        is_static: bool,
+    ) -> Option<&'gc Node<'gc>> {
+        // C++ 4627-4641.
+        let id: Option<&'gc Node<'gc>>;
+        let key: &'gc Node<'gc>;
+        if self.check_and_eat(TokenKind::colon, GrammarContext::Type) {
+            id = Some(self.reparse_type_annotation_as_identifier_flow(left)?);
+            key = self
+                .parse_type_annotation_flow(None, AllowAnonFunctionType::Yes)?;
+        } else {
+            id = None;
+            key = left;
+        }
+
+        // C++ 4643-4649.
+        if !self.eat(TokenKind::r_square, GrammarContext::Type, " in indexer")
+        {
+            return None;
+        }
+
+        // C++ 4651-4657.
+        if !self.eat(TokenKind::colon, GrammarContext::Type, " in indexer") {
+            return None;
+        }
+
+        // C++ 4659-4662.
+        let value = self
+            .parse_type_annotation_flow(None, AllowAnonFunctionType::Yes)?;
+
+        // C++ 4664-4668.
+        let node = Node::ObjectTypeIndexer(ObjectTypeIndexer::new(
+            NodeMetadata::new(self.dummy_range()),
+            id,
+            key,
+            value,
+            is_static,
+            variance,
+        ));
+        Some(self.set_location(start, self.lexer.prev_token_end(), node))
+    }
+
+    /// Parse an object-type call property `<T>(params): R`. Port of
+    /// `parseTypeCallPropertyFlow` (flow.cpp:4671-4688).
+    fn parse_type_call_property_flow(
+        &mut self,
+        start: SMLoc,
+        is_static: bool,
+    ) -> Option<&'gc Node<'gc>> {
+        // C++ 4674-4680.
+        let mut type_params: Option<&'gc Node<'gc>> = None;
+        if self.check(TokenKind::less) {
+            type_params = Some(self.parse_type_params_flow()?);
+        }
+        // C++ 4681-4683.
+        let value =
+            self.parse_methodish_type_annotation_flow(start, type_params)?;
+        // C++ 4684-4687.
+        let node = Node::ObjectTypeCallProperty(ObjectTypeCallProperty::new(
+            NodeMetadata::new(self.dummy_range()),
+            value,
+            is_static,
+        ));
+        Some(self.set_location(start, self.lexer.prev_token_end(), node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseTypeParamsFlow — 4690 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a type-parameter declaration `<T, U: B, ...>`, with the current
+    /// token at `<`. At least one parameter is required (empty `<>` is an
+    /// error); a trailing comma is allowed. Port of `parseTypeParamsFlow`
+    /// (flow.cpp:4690-4719).
+    pub(super) fn parse_type_params_flow(&mut self) -> Option<&'gc Node<'gc>> {
+        debug_assert!(self.check(TokenKind::less));
+        // C++ 4692.
+        let start = self.advance(GrammarContext::Type).start;
+
+        let mut params: Vec<&'gc Node<'gc>> = Vec::new();
+
+        // C++ 4696-4704: a do-while — at least one parameter is required.
+        loop {
+            params.push(self.parse_type_param_flow()?);
+
+            if !self.check_and_eat(TokenKind::comma, GrammarContext::Type) {
+                break;
+            }
+            if self.check(TokenKind::greater) {
+                break;
+            }
+        }
+
+        // C++ 4706-4713.
+        let end = self.cur_range().end;
+        if !self.eat(
+            TokenKind::greater,
+            GrammarContext::Type,
+            " at end of type parameters",
+        ) {
+            return None;
+        }
+
+        // C++ 4715-4718.
+        let node = Node::TypeParameterDeclaration(
+            TypeParameterDeclaration::new(
+                NodeMetadata::new(self.dummy_range()),
+                NodeList::from_iter(self.gc, params),
+            ),
+        );
+        Some(self.set_location(start, end, node))
+    }
+
+    /// Parse a single type parameter `[const] [variance] name [: B|extends B]
+    /// [= D]`. Port of `parseTypeParamFlow` (flow.cpp:4721-4814).
+    fn parse_type_param_flow(&mut self) -> Option<&'gc Node<'gc>> {
+        let start = self.cur_start();
+        // C++ 4723-4728.
+        let mut is_const = false;
+        let mut variance: Option<&'gc Node<'gc>> = None;
+        if self.check(TokenKind::rw_const) {
+            is_const = true;
+            self.advance(GrammarContext::Type);
+        }
+
+        // `in` and `out` are both ambiguous: variance modifier (`<in T>`,
+        // `<out T>`) vs name (`<in>`, `<out>`, `<in: T>`, `<in extends Foo>`).
+        // Defer the decision: consume the keyword here, and below — once we
+        // know the *actual* next token — either promote it to variance or
+        // treat it as the name itself. (C++ 4730-4749.)
+        let mut variance_keyword_range = self.dummy_range();
+        let mut variance_keyword_kind: Option<NodeLabel> = None;
+
+        if self.check2(TokenKind::plus, TokenKind::minus) {
+            let kind: &[u8] = if self.check(TokenKind::plus) {
+                b"plus"
+            } else {
+                b"minus"
+            };
+            let v_range = self.cur_range();
+            let v_node = Node::Variance(Variance::new(
+                NodeMetadata::new(self.dummy_range()),
+                self.lexer.get_identifier(kind),
+            ));
+            variance =
+                Some(self.set_location(v_range.start, v_range.end, v_node));
+            self.advance(GrammarContext::Type);
+        } else if self.check(TokenKind::rw_in) || self.check_name(b"out") {
+            variance_keyword_kind =
+                Some(self.lexer.token().get_res_word_or_identifier());
+            variance_keyword_range = self.cur_range();
+            self.advance(GrammarContext::Type);
+        }
+
+        // Type-param name: identifier or `in` (rw_in). `in` is accepted
+        // because Flow reclassifies it to an identifier in TYPE lex mode
+        // (matching `<in>`, `<in: T>`, `<in extends T>`, `<X, in, Y>`). `out`
+        // is already a plain identifier in Hermes, so `<out>` etc. work
+        // without special handling. (C++ 4751-4776.)
+        let name: NodeLabel;
+        if self.check(TokenKind::identifier) || self.check(TokenKind::rw_in) {
+            if let Some(kind) = variance_keyword_kind {
+                // The deferred `in` was variance, and the current token is
+                // the name.
+                let v_node = Node::Variance(Variance::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    kind,
+                ));
+                variance = Some(self.set_location(
+                    variance_keyword_range.start,
+                    variance_keyword_range.end,
+                    v_node,
+                ));
+            }
+            name = self.lexer.token().get_res_word_or_identifier();
+            self.advance(GrammarContext::Type);
+        } else if let Some(kind) = variance_keyword_kind {
+            // The deferred `in`/`out` was the type-param name itself, not
+            // variance. Reached when the next token is `>`, `,`, `:`, `=`,
+            // or `rw_extends` (none of which are name tokens). E.g. `<in>`,
+            // `<out: T>`, `<in extends T>`, `<out = T>`, `<X, in, Y>`.
+            name = kind;
+        } else {
+            // errorExpected(identifier, "in type parameter", ...).
+            self.need(TokenKind::identifier, " in type parameter");
+            return None;
+        }
+
+        // C++ 4778-4799.
+        let mut bound: Option<&'gc Node<'gc>> = None;
+        let mut uses_extends_bound = false;
+        if self.check(TokenKind::colon) {
+            let bound_start = self.advance(GrammarContext::Type).start;
+            let bound_type = self
+                .parse_type_annotation_flow(None, AllowAnonFunctionType::Yes)?;
+            let bound_node = Node::TypeAnnotation(TypeAnnotation::new(
+                NodeMetadata::new(self.dummy_range()),
+                bound_type,
+            ));
+            bound = Some(self.set_location(
+                bound_start,
+                self.lexer.prev_token_end(),
+                bound_node,
+            ));
+        } else if self.check(TokenKind::rw_extends) {
+            uses_extends_bound = true;
+            let bound_start = self.advance(GrammarContext::Type).start;
+            let bound_type = self
+                .parse_type_annotation_flow(None, AllowAnonFunctionType::Yes)?;
+            let bound_node = Node::TypeAnnotation(TypeAnnotation::new(
+                NodeMetadata::new(self.dummy_range()),
+                bound_type,
+            ));
+            bound = Some(self.set_location(
+                bound_start,
+                self.lexer.prev_token_end(),
+                bound_node,
+            ));
+        }
+
+        // C++ 4801-4807.
+        let mut initializer: Option<&'gc Node<'gc>> = None;
+        if self.check_and_eat(TokenKind::equal, GrammarContext::Type) {
+            initializer = Some(self.parse_type_annotation_flow(
+                None,
+                AllowAnonFunctionType::Yes,
+            )?);
+        }
+
+        // C++ 4809-4813.
+        let node = Node::TypeParameter(TypeParameter::new(
+            NodeMetadata::new(self.dummy_range()),
+            name,
+            is_const,
+            bound,
+            variance,
+            initializer,
+            uses_extends_bound,
+        ));
+        Some(self.set_location(start, self.lexer.prev_token_end(), node))
+    }
+
+    // -----------------------------------------------------------------------
     // parseTypeArgsFlow — 4816 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
@@ -1337,6 +2860,206 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             ),
         );
         Some(self.set_location(start, end, node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseMethodishTypeAnnotationFlow — 4848 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a method-ish type annotation `(params): R` starting at the
+    /// current `(` (used by object-type methods, accessors, call properties,
+    /// and internal slots — the return type follows a `:`, not `=>`). Returns
+    /// a `FunctionTypeAnnotation` node. Port of
+    /// `parseMethodishTypeAnnotationFlow` (flow.cpp:4848-4879).
+    fn parse_methodish_type_annotation_flow(
+        &mut self,
+        start: SMLoc,
+        type_params: Option<&'gc Node<'gc>>,
+    ) -> Option<&'gc Node<'gc>> {
+        let mut params: Vec<&'gc Node<'gc>> = Vec::new();
+        let mut this_constraint: Option<&'gc Node<'gc>> = None;
+
+        // C++ 4855-4860.
+        if !self.need(TokenKind::l_paren, " at start of parameters") {
+            return None;
+        }
+        let rest = self.parse_function_type_annotation_params_flow(
+            &mut params,
+            &mut this_constraint,
+            false, // hook
+        )?;
+
+        // C++ 4862-4868.
+        if !self.eat(
+            TokenKind::colon,
+            GrammarContext::Type,
+            " in function type annotation",
+        ) {
+            return None;
+        }
+
+        // C++ 4870: `parseReturnTypeAnnotationFlow()` declaration defaults.
+        let return_type = self
+            .parse_return_type_annotation_flow(None, AllowAnonFunctionType::Yes)?;
+
+        // C++ 4874-4878.
+        let node = Node::FunctionTypeAnnotation(FunctionTypeAnnotation::new(
+            NodeMetadata::new(self.dummy_range()),
+            NodeList::from_iter(self.gc, params),
+            this_constraint,
+            return_type,
+            rest,
+            type_params,
+        ));
+        Some(self.set_location(start, self.lexer.prev_token_end(), node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseFunctionTypeAnnotationParamsFlow — 4881 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse the parenthesized parameter list of a function type, with the
+    /// current token at `(`. Parameters are appended to `params`, an optional
+    /// leading `this: T` constraint is stored in `this_constraint`, and the
+    /// optional rest parameter is returned (the C++ returns
+    /// `Optional<FunctionTypeParamNode*>` — outer `None` here means an error
+    /// was reported, inner `None` means no rest parameter). Port of
+    /// `parseFunctionTypeAnnotationParamsFlow` (flow.cpp:4881-4944).
+    fn parse_function_type_annotation_params_flow(
+        &mut self,
+        params: &mut Vec<&'gc Node<'gc>>,
+        this_constraint: &mut Option<&'gc Node<'gc>>,
+        hook: bool,
+    ) -> Option<Option<&'gc Node<'gc>>> {
+        debug_assert!(self.check(TokenKind::l_paren));
+        // C++ 4887.
+        self.advance(GrammarContext::Type);
+
+        let mut rest: Option<&'gc Node<'gc>> = None;
+        *this_constraint = None;
+
+        // C++ 4892-4911: a leading `this: T` constraint.
+        if self.check(TokenKind::rw_this) && !hook {
+            let opt_next = self.lexer.lookahead1::<true>(None);
+            if opt_next == Some(TokenKind::colon) {
+                let this_start = self.advance(GrammarContext::Type).start;
+                self.advance(GrammarContext::Type);
+                let type_annotation = self.parse_type_annotation_flow(
+                    None,
+                    AllowAnonFunctionType::Yes,
+                )?;
+
+                let ftp_node = Node::FunctionTypeParam(FunctionTypeParam::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    None, // name
+                    type_annotation,
+                    false, // optional
+                ));
+                *this_constraint = Some(self.set_location(
+                    this_start,
+                    self.lexer.prev_token_end(),
+                    ftp_node,
+                ));
+                self.check_and_eat(TokenKind::comma, GrammarContext::Type);
+            } else if opt_next == Some(TokenKind::question) {
+                self.error_cur("'this' constraint may not be optional");
+            }
+        }
+
+        // C++ 4913-4933.
+        while !self.check(TokenKind::r_paren) {
+            let is_rest =
+                self.check_and_eat(TokenKind::dotdotdot, GrammarContext::Type);
+
+            let param = if hook {
+                // P6: parseHookTypeAnnotationParamFlow (C++ 4917) — hook
+                // syntax is gated on getParseFlowComponentSyntax(); no P5
+                // caller passes hook=true.
+                self.error_cur(
+                    "hook type annotations are unsupported (parser phase P6)",
+                );
+                return None;
+            } else {
+                self.parse_function_type_annotation_param_flow()?
+            };
+
+            if is_rest {
+                // Rest param must be the last param.
+                rest = Some(param);
+                self.check_and_eat(TokenKind::comma, GrammarContext::Type);
+                break;
+            } else {
+                params.push(param);
+                if !self.check_and_eat(TokenKind::comma, GrammarContext::Type)
+                {
+                    break;
+                }
+            }
+        }
+
+        // C++ 4935-4941.
+        if !self.eat(
+            TokenKind::r_paren,
+            GrammarContext::Type,
+            " at end of function annotation parameters",
+        ) {
+            return None;
+        }
+
+        Some(rest)
+    }
+
+    /// Parse one function-type parameter, which is either a bare type or a
+    /// named `name[?]: T`. Port of `parseFunctionTypeAnnotationParamFlow`
+    /// (flow.cpp:4957-5005).
+    fn parse_function_type_annotation_param_flow(
+        &mut self,
+    ) -> Option<&'gc Node<'gc>> {
+        let start = self.cur_start();
+
+        // C++ 4961-4968.
+        if self.check(TokenKind::rw_this) {
+            let opt_next = self.lexer.lookahead1::<true>(None);
+            if opt_next == Some(TokenKind::colon) {
+                self.error_cur("'this' constraint must be the first parameter");
+            }
+        }
+
+        // C++ 4970-4972.
+        let left = self.parse_type_annotation_before_colon_flow()?;
+
+        let mut name: Option<&'gc Node<'gc>> = None;
+        let type_annotation: &'gc Node<'gc>;
+        let mut optional = false;
+
+        // C++ 4978-4998.
+        if self.check2(TokenKind::colon, TokenKind::question) {
+            // The node is actually supposed to be an identifier, not a
+            // TypeAnnotation.
+            name = Some(self.reparse_type_annotation_as_identifier_flow(left)?);
+            optional =
+                self.check_and_eat(TokenKind::question, GrammarContext::Type);
+            if !self.eat(
+                TokenKind::colon,
+                GrammarContext::Type,
+                " in function parameter type annotation",
+            ) {
+                return None;
+            }
+            type_annotation = self
+                .parse_type_annotation_flow(None, AllowAnonFunctionType::Yes)?;
+        } else {
+            type_annotation = left;
+        }
+
+        // C++ 5000-5004.
+        let node = Node::FunctionTypeParam(FunctionTypeParam::new(
+            NodeMetadata::new(self.dummy_range()),
+            name,
+            type_annotation,
+            optional,
+        ));
+        Some(self.set_location(start, self.lexer.prev_token_end(), node))
     }
 
     // -----------------------------------------------------------------------
@@ -1423,6 +3146,50 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             type_parameters,
         ));
         Some(self.set_location(start, self.lexer.prev_token_end(), node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parsePredicateFlow — 5078 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a `%checks` / `%checks(expr)` predicate, with the current token
+    /// at the `%checks` identifier (lexed as a single identifier in Type
+    /// grammar context). Port of `parsePredicateFlow` (flow.cpp:5078-5098).
+    // Wired into function declarations (`function f(): T %checks {}`) in
+    // P5.4; until then only unit tests reach it.
+    #[allow(dead_code)]
+    pub(super) fn parse_predicate_flow(&mut self) -> Option<&'gc Node<'gc>> {
+        debug_assert!(self.check_name(b"%checks"));
+        // C++ 5080.
+        let checks_rng = self.advance(GrammarContext::Type);
+        // C++ 5081: `checkAndEat(l_paren)` with GrammarContext::AllowRegExp —
+        // deliberate; what follows is a JS expression, not a type.
+        if self.check_and_eat(TokenKind::l_paren, GrammarContext::AllowRegExp) {
+            // C++ 5082: `parseConditionalExpression()` with its declaration
+            // defaults (ParamIn, CoverTypedParameters::Yes; the Rust port's
+            // cover-typed handling inside is a P6 omission).
+            let cond = self.parse_conditional_expression(PARAM_IN)?;
+            // C++ 5085-5092.
+            let end = self.cur_range().end;
+            if !self.eat(
+                TokenKind::r_paren,
+                GrammarContext::Type,
+                " in declared predicate",
+            ) {
+                return None;
+            }
+            // C++ 5093-5094.
+            let node = Node::DeclaredPredicate(DeclaredPredicate::new(
+                NodeMetadata::new(self.dummy_range()),
+                cond,
+            ));
+            return Some(self.set_location(checks_rng.start, end, node));
+        }
+        // C++ 5096-5097: the InferredPredicate spans the `%checks` token.
+        let node = Node::InferredPredicate(InferredPredicate::new(
+            NodeMetadata::new(self.dummy_range()),
+        ));
+        Some(self.set_location(checks_rng.start, checks_rng.end, node))
     }
 
     // -----------------------------------------------------------------------

@@ -320,6 +320,17 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let range = self.cur_range();
         self.error_at(range, msg);
     }
+    /// Report an error at a point location, with no highlighted range. Port of
+    /// the C++ `error(SMLoc, Twine)` overload (used e.g. by the Flow object
+    /// type "Explicit inexact syntax" and 'implies' predicate errors).
+    pub(super) fn error_at_loc(&mut self, loc: SMLoc, msg: &str) {
+        self.lexer.get_source_mgr_mut().error_at(
+            loc,
+            None,
+            msg,
+            support::diag::Subsystem::Parser,
+        );
+    }
 
     /// Check the current token is `kind`; if not, report an error and return
     /// false. Port of `need`.
@@ -352,6 +363,31 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             "'{}' or '{}' expected{}",
             crate::token_kinds::token_kind_str(k1),
             crate::token_kinds::token_kind_str(k2),
+            where_
+        );
+        self.error_cur(&msg);
+    }
+
+    /// Report a "'k1', 'k2', 'k3' or 'k4' expected{where_}" error at the
+    /// current token. Port of the four-token `errorExpected` initializer-list
+    /// call (e.g. the Flow object-type property separator at
+    /// JSParserImpl-flow.cpp:4138-4145); the C++ list rendering joins all but
+    /// the last token with ", " and the last with " or ". The `what`/`whatLoc`
+    /// note args are dropped per house style.
+    pub(super) fn error_expected4(
+        &mut self,
+        k1: TokenKind,
+        k2: TokenKind,
+        k3: TokenKind,
+        k4: TokenKind,
+        where_: &str,
+    ) {
+        let msg = format!(
+            "'{}', '{}', '{}' or '{}' expected{}",
+            crate::token_kinds::token_kind_str(k1),
+            crate::token_kinds::token_kind_str(k2),
+            crate::token_kinds::token_kind_str(k3),
+            crate::token_kinds::token_kind_str(k4),
             where_
         );
         self.error_cur(&msg);
@@ -3710,29 +3746,17 @@ mod tests {
     /// Honest deferral errors for the unported Flow productions.
     #[test]
     fn flow_deferred_productions_error() {
-        // P5.2: type parameters.
-        assert_flow_parse_has_errors(b"type X<T> = number;", "type params are P5.2");
         // P5.3: opaque type aliases.
         assert_flow_parse_has_errors(b"opaque type X = number;", "opaque is P5.3");
         // P5.3: interface declarations.
         assert_flow_parse_has_errors(b"interface I {}", "interface is P5.3");
+        // P5.3: interface type annotations.
+        assert_flow_parse_has_errors(
+            b"type X = interface { a: number };",
+            "interface types are P5.3",
+        );
         // P6: Flow enum declarations.
         assert_flow_parse_has_errors(b"enum E {}", "Flow enum is P6");
-        // P5.2: function types.
-        assert_flow_parse_has_errors(
-            b"type X = (A) => B;",
-            "function types are P5.2",
-        );
-        // P5.2: the anonymous function type tail `T => R`.
-        assert_flow_parse_has_errors(
-            b"type X = A => B;",
-            "anon function types are P5.2",
-        );
-        // P5.2: object types.
-        assert_flow_parse_has_errors(
-            b"type X = { a: number };",
-            "object types are P5.2",
-        );
     }
 
     // P5.1: the full Flow type-annotation hierarchy (js/flow.rs).
@@ -4348,5 +4372,637 @@ mod tests {
             )
         };
         assert_eq!(gc.ctx().atom_table.bytes(b.raw.get()), b"-2n");
+    }
+
+    // P5.2: function types, object types, type-parameter declarations,
+    // variance, predicates, return-type annotations (js/flow.rs).
+
+    /// Helper: assert `node` is a `FunctionTypeAnnotation` and return it.
+    fn as_fta<'gc, 'n>(
+        node: &'n ast::node::Node<'gc>,
+    ) -> &'n ast::node::FunctionTypeAnnotation<'gc> {
+        let ast::node::Node::FunctionTypeAnnotation(fta) = node else {
+            panic!("expected FunctionTypeAnnotation, got {:?}", node.kind())
+        };
+        fta
+    }
+
+    /// Helper: assert `node` is a `FunctionTypeParam` and return it.
+    fn as_ftp<'gc, 'n>(
+        node: &'n ast::node::Node<'gc>,
+    ) -> &'n ast::node::FunctionTypeParam<'gc> {
+        let ast::node::Node::FunctionTypeParam(ftp) = node else {
+            panic!("expected FunctionTypeParam, got {:?}", node.kind())
+        };
+        ftp
+    }
+
+    /// The full function-type shape: type params, `this` constraint, named/
+    /// optional params, rest, and the return type.
+    #[test]
+    fn flow_function_type_full_shape() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+
+        let ty = flow_alias_right(
+            &gc,
+            &mut sm,
+            b"type A = <T>(this: X, a: B, c?: D, ...rest: E) => R;",
+        );
+        let fta = as_fta(ty);
+
+        // Type parameters.
+        let tp = fta.type_parameters.expect("has type params");
+        let Node::TypeParameterDeclaration(tpd) = tp else {
+            panic!("expected TypeParameterDeclaration, got {:?}", tp.kind())
+        };
+        assert_eq!(tpd.params.iter().count(), 1);
+
+        // `this` constraint: an unnamed FunctionTypeParam.
+        let this_param = as_ftp(fta.this.expect("has this constraint"));
+        assert!(this_param.name.is_none(), "this constraint has no name");
+        assert_generic_named(&gc, this_param.type_annotation, b"X");
+
+        // Named + optional params.
+        let params: Vec<_> = fta.params.iter().collect();
+        assert_eq!(params.len(), 2);
+        let a = as_ftp(params[0]);
+        assert_eq!(ident_bytes(&gc, a.name.expect("a named")), b"a");
+        assert!(!a.optional.get());
+        let c = as_ftp(params[1]);
+        assert_eq!(ident_bytes(&gc, c.name.expect("c named")), b"c");
+        assert!(c.optional.get());
+
+        // Rest param.
+        let rest = as_ftp(fta.rest.expect("has rest"));
+        assert_eq!(ident_bytes(&gc, rest.name.expect("rest named")), b"rest");
+
+        // Return type.
+        assert_generic_named(&gc, fta.return_type, b"R");
+
+        // An unnamed parameter type: `(number) => string`.
+        let ty = flow_alias_right(&gc, &mut sm, b"type C = (number) => string;");
+        let fta = as_fta(ty);
+        assert!(fta.this.is_none());
+        assert!(fta.rest.is_none());
+        assert!(fta.type_parameters.is_none());
+        let params: Vec<_> = fta.params.iter().collect();
+        assert_eq!(params.len(), 1);
+        let p = as_ftp(params[0]);
+        assert!(p.name.is_none(), "bare type param has no name");
+        assert!(matches!(p.type_annotation, Node::NumberTypeAnnotation(_)));
+    }
+
+    /// `(T)` group vs `(x: T) => R` vs `(T) => R` disambiguation; the group
+    /// returns the inner type with its paren count bumped.
+    #[test]
+    fn flow_group_vs_function_type() {
+        use ast::context::Context;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+
+        // A plain group: the inner type itself, parens incremented.
+        let ty = flow_alias_right(&gc, &mut sm, b"type A = (X);");
+        assert_generic_named(&gc, ty, b"X");
+        assert_eq!(ty.metadata().parens.get(), 1, "group bumps parens");
+
+        // A named param forces a function type.
+        let ty = flow_alias_right(&gc, &mut sm, b"type B = (x: X) => R;");
+        let fta = as_fta(ty);
+        let params: Vec<_> = fta.params.iter().collect();
+        assert_eq!(ident_bytes(&gc, as_ftp(params[0]).name.unwrap()), b"x");
+
+        // An unnamed param resolved as a function by the trailing `=>`.
+        let ty = flow_alias_right(&gc, &mut sm, b"type C = (X) => R;");
+        let fta = as_fta(ty);
+        assert!(as_ftp(fta.params.iter().next().unwrap()).name.is_none());
+
+        // An empty param list is always a function.
+        let ty = flow_alias_right(&gc, &mut sm, b"type D = () => R;");
+        assert!(as_fta(ty).params.is_empty());
+    }
+
+    /// The anonymous function type `T => U => V` nests to the right.
+    #[test]
+    fn flow_anon_function_type() {
+        use ast::context::Context;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+
+        let ty = flow_alias_right(&gc, &mut sm, b"type A = T => U => V;");
+        let outer = as_fta(ty);
+        let param = as_ftp(outer.params.iter().next().expect("one param"));
+        assert!(param.name.is_none());
+        assert_generic_named(&gc, param.type_annotation, b"T");
+        let inner = as_fta(outer.return_type);
+        assert_generic_named(&gc, inner.return_type, b"V");
+    }
+
+    /// Object types: plain/optional/method/get/set properties with their
+    /// `kind` atoms and variance.
+    #[test]
+    fn flow_object_type_properties() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+
+        let ty = flow_alias_right(
+            &gc,
+            &mut sm,
+            b"type A = { x: B, y?: C, m(): D, get g(): E, set s(v: F): void, +ro: G };",
+        );
+        let Node::ObjectTypeAnnotation(obj) = ty else {
+            panic!("expected ObjectTypeAnnotation, got {:?}", ty.kind())
+        };
+        assert!(!obj.exact.get());
+        assert!(!obj.inexact.get());
+        assert!(obj.indexers.is_empty());
+        assert!(obj.call_properties.is_empty());
+        assert!(obj.internal_slots.is_empty());
+
+        let props: Vec<_> = obj.properties.iter().collect();
+        assert_eq!(props.len(), 6);
+        let prop = |i: usize| -> &ast::node::ObjectTypeProperty<'_> {
+            let Node::ObjectTypeProperty(p) = props[i] else {
+                panic!("expected ObjectTypeProperty, got {:?}", props[i].kind())
+            };
+            p
+        };
+
+        // x: B
+        let x = prop(0);
+        assert_eq!(ident_bytes(&gc, x.key), b"x");
+        assert!(!x.method.get() && !x.optional.get());
+        assert!(!x.r#static.get() && !x.proto.get());
+        assert!(x.variance.is_none());
+        assert_eq!(gc.ctx().atom_table.bytes(x.kind.get()), b"init");
+
+        // y?: C
+        let y = prop(1);
+        assert!(y.optional.get());
+
+        // m(): D — a method; the value is a FunctionTypeAnnotation.
+        let m = prop(2);
+        assert!(m.method.get());
+        assert_generic_named(&gc, as_fta(m.value).return_type, b"D");
+        assert_eq!(gc.ctx().atom_table.bytes(m.kind.get()), b"init");
+
+        // get g(): E
+        let g = prop(3);
+        assert!(!g.method.get());
+        assert_eq!(ident_bytes(&gc, g.key), b"g");
+        assert_eq!(gc.ctx().atom_table.bytes(g.kind.get()), b"get");
+
+        // set s(v: F): void
+        let s = prop(4);
+        assert_eq!(gc.ctx().atom_table.bytes(s.kind.get()), b"set");
+        assert_eq!(as_fta(s.value).params.iter().count(), 1);
+
+        // +ro: G
+        let ro = prop(5);
+        let variance = ro.variance.expect("has variance");
+        let Node::Variance(v) = variance else {
+            panic!("expected Variance, got {:?}", variance.kind())
+        };
+        assert_eq!(gc.ctx().atom_table.bytes(v.kind.get()), b"plus");
+    }
+
+    /// Object types: indexers (with and without an id), mapped types with
+    /// every optionality sigil, call properties, internal slots, spreads,
+    /// exact `{| |}`, and explicit inexact `{ ... }`.
+    #[test]
+    fn flow_object_type_member_families() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+
+        let obj_of = |sm: &mut support::manager::SourceErrorManager,
+                      src: &[u8]| {
+            let ty = flow_alias_right(&gc, sm, src);
+            let Node::ObjectTypeAnnotation(obj) = ty else {
+                panic!("expected ObjectTypeAnnotation, got {:?}", ty.kind())
+            };
+            obj
+        };
+
+        // Indexer with an id: `[k: string]: V`.
+        let obj = obj_of(&mut sm, b"type A = { [k: string]: V };");
+        let idx = obj.indexers.iter().next().expect("one indexer");
+        let Node::ObjectTypeIndexer(idx) = idx else {
+            panic!("expected ObjectTypeIndexer, got {:?}", idx.kind())
+        };
+        assert_eq!(ident_bytes(&gc, idx.id.expect("has id")), b"k");
+        assert!(matches!(idx.key, Node::StringTypeAnnotation(_)));
+        assert!(!idx.r#static.get());
+
+        // Indexer without an id: `[K]: V`.
+        let obj = obj_of(&mut sm, b"type B = { [K]: V };");
+        let idx = obj.indexers.iter().next().expect("one indexer");
+        let Node::ObjectTypeIndexer(idx) = idx else {
+            panic!("expected ObjectTypeIndexer, got {:?}", idx.kind())
+        };
+        assert!(idx.id.is_none());
+        assert_generic_named(&gc, idx.key, b"K");
+
+        // Mapped types: every optionality sigil (a null NodeString when no
+        // sigil — matching the C++ nullptr → `"optional": null` dump).
+        for (src, sigil) in [
+            (b"type C = { [K in T]: V };".as_slice(), None),
+            (b"type D = { [K in T]?: V };", Some(b"Optional".as_slice())),
+            (b"type E = { [K in T]+?: V };", Some(b"PlusOptional")),
+            (b"type F = { [K in T]-?: V };", Some(b"MinusOptional")),
+        ] {
+            let obj = obj_of(&mut sm, src);
+            let prop = obj.properties.iter().next().expect("one property");
+            let Node::ObjectTypeMappedTypeProperty(mapped) = prop else {
+                panic!(
+                    "expected ObjectTypeMappedTypeProperty, got {:?}",
+                    prop.kind()
+                )
+            };
+            let Node::TypeParameter(key_tparam) = mapped.key_tparam else {
+                panic!("expected TypeParameter")
+            };
+            assert_eq!(
+                gc.ctx().atom_table.bytes(key_tparam.name.get()),
+                b"K"
+            );
+            assert_generic_named(&gc, mapped.source_type, b"T");
+            assert_generic_named(&gc, mapped.prop_type, b"V");
+            match sigil {
+                None => assert_eq!(
+                    mapped.optional.get(),
+                    atom_table::INVALID_ATOM_BYTES,
+                    "no sigil dumps as null"
+                ),
+                Some(s) => assert_eq!(
+                    gc.ctx().atom_table.bytes(mapped.optional.get()),
+                    s
+                ),
+            }
+        }
+
+        // Mapped type with variance before the bracket: `+[K in T]: V`.
+        let obj = obj_of(&mut sm, b"type G = { +[K in T]: V };");
+        let prop = obj.properties.iter().next().expect("one property");
+        let Node::ObjectTypeMappedTypeProperty(mapped) = prop else {
+            panic!("expected ObjectTypeMappedTypeProperty")
+        };
+        assert!(mapped.variance.is_some());
+
+        // Call property + internal slot + spread.
+        let obj =
+            obj_of(&mut sm, b"type H = { (x: A): R, [[slot]]: T, ...S };");
+        let call = obj.call_properties.iter().next().expect("one call");
+        let Node::ObjectTypeCallProperty(call) = call else {
+            panic!("expected ObjectTypeCallProperty, got {:?}", call.kind())
+        };
+        assert_eq!(as_fta(call.value).params.iter().count(), 1);
+        let slot = obj.internal_slots.iter().next().expect("one slot");
+        let Node::ObjectTypeInternalSlot(slot) = slot else {
+            panic!("expected ObjectTypeInternalSlot, got {:?}", slot.kind())
+        };
+        assert_eq!(ident_bytes(&gc, slot.id), b"slot");
+        assert!(!slot.method.get() && !slot.optional.get());
+        let spread = obj.properties.iter().next().expect("one spread");
+        let Node::ObjectTypeSpreadProperty(spread) = spread else {
+            panic!("expected ObjectTypeSpreadProperty, got {:?}", spread.kind())
+        };
+        assert_generic_named(&gc, spread.argument, b"S");
+
+        // A method-typed internal slot: `[[m]](): R`.
+        let obj = obj_of(&mut sm, b"type I = { [[m]](): R };");
+        let slot = obj.internal_slots.iter().next().expect("one slot");
+        let Node::ObjectTypeInternalSlot(slot) = slot else {
+            panic!("expected ObjectTypeInternalSlot")
+        };
+        assert!(slot.method.get());
+
+        // Exact `{| |}` and explicit inexact `{ ... }`.
+        let obj = obj_of(&mut sm, b"type J = {| a: T |};");
+        assert!(obj.exact.get());
+        let obj = obj_of(&mut sm, b"type K = { a: T, ... };");
+        assert!(obj.inexact.get());
+        let obj = obj_of(&mut sm, b"type L = { ... };");
+        assert!(obj.inexact.get());
+        assert!(obj.properties.is_empty());
+    }
+
+    /// `static`/`proto` (and `readonly` before `:`) fall back to property
+    /// and method names in an object type that disallows those modifiers.
+    #[test]
+    fn flow_object_type_modifier_name_fallbacks() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+
+        for (src, name, method) in [
+            (b"type A = { static: T };".as_slice(), b"static".as_slice(), false),
+            (b"type B = { proto: T };", b"proto", false),
+            (b"type C = { static(): R };", b"static", true),
+            (b"type D = { readonly: T };", b"readonly", false),
+        ] {
+            let ty = flow_alias_right(&gc, &mut sm, src);
+            let Node::ObjectTypeAnnotation(obj) = ty else {
+                panic!("expected ObjectTypeAnnotation, got {:?}", ty.kind())
+            };
+            let prop = obj.properties.iter().next().expect("one property");
+            let Node::ObjectTypeProperty(prop) = prop else {
+                panic!("expected ObjectTypeProperty, got {:?}", prop.kind())
+            };
+            assert_eq!(ident_bytes(&gc, prop.key), name);
+            assert_eq!(prop.method.get(), method);
+            assert!(!prop.r#static.get(), "the keyword was the name");
+            assert!(!prop.proto.get(), "the keyword was the name");
+        }
+    }
+
+    /// Type-parameter declarations: const, sigil and keyword variance with
+    /// the `in`/`out` name-vs-variance disambiguation, `:` vs `extends`
+    /// bounds, and defaults.
+    #[test]
+    fn flow_type_param_declarations() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+
+        let params_of = |sm: &mut support::manager::SourceErrorManager,
+                         src: &[u8]| {
+            let stmt = parse_one_stmt(&gc, sm, src);
+            let Node::TypeAlias(alias) = stmt else {
+                panic!("expected TypeAlias, got {:?}", stmt.kind())
+            };
+            let tp = alias.type_parameters.expect("has type params");
+            let Node::TypeParameterDeclaration(tpd) = tp else {
+                panic!("expected TypeParameterDeclaration, got {:?}", tp.kind())
+            };
+            tpd.params.iter().collect::<Vec<_>>()
+        };
+        let tparam = |node: &'_ ast::node::Node<'_>| {
+            let Node::TypeParameter(p) = node else {
+                panic!("expected TypeParameter, got {:?}", node.kind())
+            };
+            let name = gc.ctx().atom_table.bytes(p.name.get()).to_vec();
+            let variance = p.variance.map(|v| {
+                let Node::Variance(v) = v else {
+                    panic!("expected Variance, got {:?}", v.kind())
+                };
+                gc.ctx().atom_table.bytes(v.kind.get()).to_vec()
+            });
+            (name, variance)
+        };
+
+        // Plain + trailing comma.
+        let params = params_of(&mut sm, b"type A<T,> = T;");
+        assert_eq!(params.len(), 1);
+        assert_eq!(tparam(params[0]), (b"T".to_vec(), None));
+
+        // `const` modifier.
+        let params = params_of(&mut sm, b"type B<const T> = T;");
+        let Node::TypeParameter(p) = params[0] else { unreachable!() };
+        assert!(p.r#const.get());
+
+        // Sigil variance.
+        let params = params_of(&mut sm, b"type C<+T, -U> = [T, U];");
+        assert_eq!(tparam(params[0]), (b"T".to_vec(), Some(b"plus".to_vec())));
+        assert_eq!(tparam(params[1]), (b"U".to_vec(), Some(b"minus".to_vec())));
+
+        // `in T` / `out T`: the keyword is variance, `T` is the name.
+        let params = params_of(&mut sm, b"type D<in T, out U> = [T, U];");
+        assert_eq!(tparam(params[0]), (b"T".to_vec(), Some(b"in".to_vec())));
+        assert_eq!(tparam(params[1]), (b"U".to_vec(), Some(b"out".to_vec())));
+
+        // `<in>` / `<out = X>`: the keyword is the NAME, no variance.
+        let params = params_of(&mut sm, b"type E<in> = X;");
+        assert_eq!(tparam(params[0]), (b"in".to_vec(), None));
+        let params = params_of(&mut sm, b"type F<out = X> = out;");
+        assert_eq!(tparam(params[0]), (b"out".to_vec(), None));
+        let Node::TypeParameter(p) = params[0] else { unreachable!() };
+        assert!(p.default.is_some(), "`= X` is the default");
+
+        // `:` bound (wrapped in TypeAnnotation) vs `extends` bound.
+        let params = params_of(&mut sm, b"type G<T: number> = T;");
+        let Node::TypeParameter(p) = params[0] else { unreachable!() };
+        let bound = p.bound.expect("has bound");
+        let Node::TypeAnnotation(bound) = bound else {
+            panic!("expected TypeAnnotation, got {:?}", bound.kind())
+        };
+        assert!(matches!(
+            bound.type_annotation,
+            Node::NumberTypeAnnotation(_)
+        ));
+        assert!(!p.uses_extends_bound.get());
+
+        let params = params_of(&mut sm, b"type H<T extends U> = T;");
+        let Node::TypeParameter(p) = params[0] else { unreachable!() };
+        assert!(p.bound.is_some());
+        assert!(p.uses_extends_bound.get());
+
+        // Default.
+        let params = params_of(&mut sm, b"type I<T = string> = T;");
+        let Node::TypeParameter(p) = params[0] else { unreachable!() };
+        assert!(matches!(
+            p.default.expect("has default"),
+            Node::StringTypeAnnotation(_)
+        ));
+    }
+
+    /// Return-type predicates through function types: unprefixed `x is T`
+    /// (null kind), `asserts x [is T]`, and `implies x is T`.
+    #[test]
+    fn flow_type_predicates() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+
+        let predicate_of = |sm: &mut support::manager::SourceErrorManager,
+                            src: &[u8]| {
+            let ty = flow_alias_right(&gc, sm, src);
+            as_fta(ty).return_type
+        };
+
+        // Unprefixed `x is number`: the kind is the null NodeString
+        // (C++ passes nullptr; dumps as `"kind": null`).
+        let ret = predicate_of(&mut sm, b"type A = (x: mixed) => x is number;");
+        let Node::TypePredicate(p) = ret else {
+            panic!("expected TypePredicate, got {:?}", ret.kind())
+        };
+        assert_eq!(ident_bytes(&gc, p.parameter_name), b"x");
+        assert!(matches!(
+            p.type_annotation.expect("has type"),
+            Node::NumberTypeAnnotation(_)
+        ));
+        assert_eq!(p.kind.get(), atom_table::INVALID_ATOM_BYTES);
+
+        // `asserts x is T` and the type-less `asserts x`.
+        let ret =
+            predicate_of(&mut sm, b"type B = (x: mixed) => asserts x is T;");
+        let Node::TypePredicate(p) = ret else {
+            panic!("expected TypePredicate, got {:?}", ret.kind())
+        };
+        assert_eq!(gc.ctx().atom_table.bytes(p.kind.get()), b"asserts");
+        assert!(p.type_annotation.is_some());
+
+        let ret = predicate_of(&mut sm, b"type C = (x: mixed) => asserts x;");
+        let Node::TypePredicate(p) = ret else {
+            panic!("expected TypePredicate, got {:?}", ret.kind())
+        };
+        assert!(p.type_annotation.is_none());
+
+        // A bare `asserts` return type is just a generic type.
+        let ret = predicate_of(&mut sm, b"type D = (x: mixed) => asserts;");
+        assert_generic_named(&gc, ret, b"asserts");
+
+        // `implies x is T`.
+        let ret =
+            predicate_of(&mut sm, b"type E = (x: mixed) => implies x is T;");
+        let Node::TypePredicate(p) = ret else {
+            panic!("expected TypePredicate, got {:?}", ret.kind())
+        };
+        assert_eq!(gc.ctx().atom_table.bytes(p.kind.get()), b"implies");
+        assert!(p.type_annotation.is_some());
+    }
+
+    /// `%checks` predicates: `parse_predicate_flow` is wired into function
+    /// declarations in P5.4, so drive it directly — `%checks` only lexes as
+    /// one identifier in Type grammar context.
+    #[test]
+    fn flow_checks_predicates() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let parse_predicate = |src: &[u8]| -> (&'static str, bool) {
+            let mut sm = SourceErrorManager::new();
+            let buf_id = sm.add_buffer_bytes("input", src);
+            let mut ctx = Context::new();
+            ctx.set_parse_flow(true);
+            let gc = ctx.lock();
+            let atoms = &gc.ctx().atom_table;
+            let lexer = crate::lexer::JSLexer::new(
+                buf_id,
+                &mut sm,
+                atoms,
+                crate::lexer::GrammarContext::AllowRegExp,
+            );
+            let mut parser = JSParserImpl::new(&gc, lexer);
+            // Skip the leading `x`, re-lexing in Type context so the
+            // following `%checks` scans as a single identifier.
+            parser.advance(crate::lexer::GrammarContext::Type);
+            let pred =
+                parser.parse_predicate_flow().expect("predicate parses");
+            let kind = match pred {
+                Node::DeclaredPredicate(d) => {
+                    assert!(
+                        matches!(d.value, Node::Identifier(_)),
+                        "the checks expression is parsed as a JS expression"
+                    );
+                    "declared"
+                }
+                Node::InferredPredicate(_) => "inferred",
+                other => panic!("unexpected predicate {:?}", other.kind()),
+            };
+            (kind, parser.error_count_pub() == 0)
+        };
+
+        assert_eq!(parse_predicate(b"x %checks(y)"), ("declared", true));
+        assert_eq!(parse_predicate(b"x %checks"), ("inferred", true));
+    }
+
+    /// The P5.2 diagnostics keep the exact C++ texts.
+    #[test]
+    fn flow_p52_errors() {
+        use ast::context::Context;
+        use support::diag::{CollectingHandler, DiagKind};
+        use support::manager::SourceErrorManager;
+
+        let assert_error = |src: &[u8], expected: &str| {
+            let mut sm = SourceErrorManager::new();
+            let mut ctx = Context::new();
+            ctx.set_parse_flow(true);
+            let gc = ctx.lock();
+            let atoms = &gc.ctx().atom_table;
+            let _ = parse_with_collector(&gc, &mut sm, atoms, src);
+            let h = sm.handler_as::<CollectingHandler>().unwrap();
+            assert!(
+                h.messages()
+                    .iter()
+                    .any(|m| m.kind == DiagKind::Error && m.message == expected),
+                "expected {:?}, got {:?}",
+                expected,
+                h.messages().iter().map(|m| &m.message).collect::<Vec<_>>()
+            );
+        };
+
+        assert_error(
+            b"type A = {| a: T, ... |};",
+            "Explicit inexact syntax cannot appear inside an explicit exact object type",
+        );
+        assert_error(
+            b"type A = { get x(a: B): T };",
+            "Getter must have 0 parameters",
+        );
+        assert_error(
+            b"type A = { set x(): void };",
+            "Setter must have 1 parameter",
+        );
+        assert_error(
+            b"type A = { get x(this: B): T };",
+            "Accessors must not have 'this' annotations",
+        );
+        assert_error(
+            b"type A = (this?: X) => Y;",
+            "'this' constraint may not be optional",
+        );
+        assert_error(
+            b"type A = (a: X, this: Y) => Z;",
+            "'this' constraint must be the first parameter",
+        );
+        assert_error(
+            b"type A = { +(): R };",
+            "call property must not specify variance",
+        );
+        assert_error(
+            b"type A = { +get x(): T };",
+            "accessor property must not specify variance",
+        );
+        assert_error(b"type A = { proto x: T };", "invalid 'proto' modifier");
+        assert_error(b"type A = { static x: T };", "invalid 'static' modifier");
+        assert_error(b"type A = { +[[s]]: T };", "Unexpected variance sigil");
+        // `implies<T>` parses as a generic WITH type args, so the following
+        // identifier triggers the not-a-bare-identifier guard.
+        assert_error(
+            b"type A = (x) => implies<T> x is U;",
+            "invalid return annotation. 'implies' type guard needs to be followed by identifier",
+        );
+        assert_error(
+            b"type A = (x) => implies x;",
+            "expecting 'is' after parameter of 'implies' type guard",
+        );
+        // "Spreading a type is only allowed inside an object type" needs an
+        // interface body (AllowSpreadProperty::No) — reachable in P5.3.
     }
 }
