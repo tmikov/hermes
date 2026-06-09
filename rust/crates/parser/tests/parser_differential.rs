@@ -17,10 +17,13 @@
 //!   `"raw"` field (e.g. on NumericLiteral); the Rust dumper omits it unless
 //!   `--include-raw-ast-prop` is passed, so the harness always passes it.
 //!
-//! The gate is deliberately trivia-only (empty/whitespace/comments) for phase
-//! P0; later parser phases extend the corpus with real JS. Skip cleanly when
-//! hermesc is absent; set `REQUIRE_DIFFERENTIAL=1` to turn a missing hermesc
-//! into a hard failure (used in CI).
+//! Two corpora:
+//! - `tests/parser_corpus`: standard JS, no extra flags (phases P0-P4).
+//! - `tests/parser_corpus_flow`: Flow type syntax; hermesc gets `-parse-flow`
+//!   and ast-dump gets `--parse-flow` (phase P5).
+//!
+//! Skip cleanly when hermesc is absent; set `REQUIRE_DIFFERENTIAL=1` to turn a
+//! missing hermesc into a hard failure (used in CI).
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -32,13 +35,11 @@ fn hermesc_bin() -> PathBuf {
         .join("../../../cmake-build-asan/bin/hermesc")
 }
 
-/// Directory that holds the parser differential corpus.
-fn corpus_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/parser_corpus")
-}
-
-#[test]
-fn parser_differential_p0() {
+/// Run every `.js` file in `corpus` through hermesc (with `hermesc_extra`
+/// appended to the base flags) and ast-dump (with `ast_dump_extra` appended),
+/// asserting byte-identical stdout. Skips (or hard-fails under
+/// `REQUIRE_DIFFERENTIAL=1`) when hermesc is missing.
+fn run_differential(corpus: &str, hermesc_extra: &[&str], ast_dump_extra: &[&str]) {
     let hermesc = hermesc_bin();
     if !hermesc.exists() {
         if std::env::var_os("REQUIRE_DIFFERENTIAL").is_some() {
@@ -66,17 +67,19 @@ fn parser_differential_p0() {
         ast_dump.display()
     );
 
-    let mut files: Vec<PathBuf> = std::fs::read_dir(corpus_dir())
-        .expect("parser_corpus dir missing")
+    let corpus_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(corpus);
+    let mut files: Vec<PathBuf> = std::fs::read_dir(&corpus_dir)
+        .unwrap_or_else(|e| panic!("{} dir missing: {e}", corpus_dir.display()))
         .map(|e| e.unwrap().path())
         .filter(|p| p.extension().map(|e| e == "js").unwrap_or(false))
         .collect();
     files.sort();
-    assert!(!files.is_empty(), "parser_corpus is empty");
+    assert!(!files.is_empty(), "{corpus} is empty");
 
     for f in &files {
         let c = Command::new(&hermesc)
             .args(["-dump-ast", "-dump-source-location=both"])
+            .args(hermesc_extra)
             .arg(f)
             .output()
             .expect("failed to run hermesc");
@@ -90,6 +93,7 @@ fn parser_differential_p0() {
         );
         let r = Command::new(&ast_dump)
             .args(["--pretty", "--dump-source-location", "--include-raw-ast-prop"])
+            .args(ast_dump_extra)
             .arg(f)
             .output()
             .expect("failed to run ast-dump");
@@ -100,5 +104,18 @@ fn parser_differential_p0() {
             f.display()
         );
     }
-    eprintln!("parser differential: {} corpus files matched", files.len());
+    eprintln!(
+        "parser differential ({corpus}): {} corpus files matched",
+        files.len()
+    );
+}
+
+#[test]
+fn parser_differential_p0() {
+    run_differential("tests/parser_corpus", &[], &[]);
+}
+
+#[test]
+fn parser_differential_flow() {
+    run_differential("tests/parser_corpus_flow", &["-parse-flow"], &["--parse-flow"]);
 }

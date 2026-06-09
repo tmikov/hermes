@@ -180,7 +180,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Returns true if the current token begins a declaration. Port of the
     /// header method `JSParserImpl::checkDeclaration()` (JSParserImpl.h:565-645)
-    /// without the Flow/TS extension blocks (597-642).
+    /// including the Flow extension block (597-627), without the TS block
+    /// (629-642).
     ///
     /// Needs `&mut self` because the `let`/`using`/`await using` disambiguation
     /// performs a lexer lookahead.
@@ -225,7 +226,35 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return true;
         }
 
-        // Flow/TS blocks (597-642) omitted.
+        // Flow declarations, gated on getParseFlow(). C++ 597-627.
+        if self.parse_flow() {
+            // P6: component/hook declarations (gated on
+            // getParseFlowComponentSyntax(), C++ 599-608) and record
+            // declarations (gated on getParseFlowRecords(), C++ 609-611)
+            // omitted — the Rust Context does not implement those flags yet.
+
+            // `opaque` followed by an identifier (`type`). C++ 612-615.
+            // The C++ `check(<ident>)` overload is escape-insensitive.
+            if self.check_name(b"opaque") {
+                let opt_next = self.lexer.lookahead1::<true>(None);
+                return opt_next == Some(TokenKind::identifier);
+            }
+            // `type`/`interface` followed by an identifier. C++ 616-619.
+            if self.check_name(b"type") || self.check_name(b"interface") {
+                let opt_next = self.lexer.lookahead1::<true>(None);
+                return opt_next == Some(TokenKind::identifier);
+            }
+            // C++ 620-622.
+            if self.check(TokenKind::rw_interface) {
+                return true;
+            }
+            // C++ 623-625.
+            if self.check(TokenKind::rw_enum) {
+                return true;
+            }
+        }
+
+        // P7: TS block (629-641) omitted.
         false
     }
 
@@ -254,9 +283,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Parse a declaration. Port of `JSParserImpl::parseDeclaration`
     /// (lines 815-877). Assumes `check_declaration()` is true.
     ///
-    /// `function`/`async function` (820-827) and `@`/`class` (829-835)
-    /// declarations emit honest P3 errors; the Flow/TS blocks (857-873) are
-    /// omitted.
+    /// The Flow block (857-863) dispatches to `parse_flow_declaration` when
+    /// Flow parsing is enabled; the TS block (866-872) is omitted (P7).
     pub(super) fn parse_declaration(
         &mut self,
         param: Param,
@@ -289,7 +317,16 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return self.parse_using_declaration(param);
         }
 
-        // Flow/TS blocks (857-873) omitted.
+        // Flow declarations. C++ 857-863. Binary like the C++: `None` means
+        // an error was already reported (no fall-through — when
+        // `check_declaration()` is true and no earlier arm matched, the
+        // declaration must be a Flow declaration).
+        if self.parse_flow() {
+            return self.parse_flow_declaration();
+        }
+
+        // P7: TS declarations (C++ 866-872) omitted.
+
         unreachable!("check_declaration() returned true without a declaration");
     }
 

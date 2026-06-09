@@ -15,7 +15,8 @@
 //!   On error: exactly "ERROR <count>\n".
 //!
 //! Args: [--pretty] [--dump-source-location] [--include-empty-ast-nodes]
-//!       [--include-raw-ast-prop] [file|-]   (omitted or "-" reads stdin)
+//!       [--include-raw-ast-prop] [--parse-flow] [file|-]
+//!       (omitted or "-" reads stdin)
 //!
 //! Command-line parsing uses the `command_line` crate (the LLVM-`cl`-style
 //! option parser copied from juno).
@@ -37,6 +38,8 @@ struct Options {
     dump_loc: Opt<bool>,
     include_empty: Opt<bool>,
     include_raw: Opt<bool>,
+    /// Enable Flow type parsing (the hermesc `-parse-flow` flag).
+    parse_flow: Opt<bool>,
     /// Input path; empty or "-" reads stdin.
     input: Opt<String>,
 }
@@ -76,6 +79,14 @@ impl Options {
                     ..Default::default()
                 },
             ),
+            parse_flow: Opt::new_flag(
+                cl,
+                OptDesc {
+                    long: Some("parse-flow"),
+                    desc: Some("Enable Flow type parsing."),
+                    ..Default::default()
+                },
+            ),
             input: Opt::<String>::new(
                 cl,
                 OptDesc {
@@ -97,6 +108,7 @@ fn main() {
     let dump_loc = *opt.dump_loc;
     let include_empty = *opt.include_empty;
     let include_raw = *opt.include_raw;
+    let parse_flow = *opt.parse_flow;
 
     let input = &*opt.input;
     let bytes = if input.is_empty() || input == "-" {
@@ -116,6 +128,9 @@ fn main() {
     let mut sm = SourceErrorManager::new();
     let buf_id = sm.add_buffer_bytes("input", &bytes);
     let mut ctx = Context::new();
+    if parse_flow {
+        ctx.set_parse_flow(true);
+    }
     let gc = ctx.lock();
 
     // Parse in a scope so the parser (and its &mut sm borrow) drops before we

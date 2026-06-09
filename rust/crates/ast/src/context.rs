@@ -180,6 +180,9 @@ pub struct Context<'ast> {
     /// Whether strict mode has been forced.
     strict_mode: bool,
 
+    /// Whether to parse Flow type syntax. Mirrors C++ `Context::getParseFlow()`.
+    parse_flow: bool,
+
     /// Whether to warn about undefined variables in strict mode functions.
     pub warn_undefined: bool,
 }
@@ -208,6 +211,7 @@ impl<'ast> Context<'ast> {
             atom_table: Default::default(),
             markbit_marked: true,
             strict_mode: false,
+            parse_flow: false,
             warn_undefined: false,
         }
     }
@@ -318,6 +322,18 @@ impl<'ast> Context<'ast> {
     /// Enable strict mode. Note that it cannot be unset.
     pub fn enable_strict_mode(&mut self) {
         self.strict_mode = true;
+    }
+
+    /// Return true if Flow type parsing is enabled.
+    /// Mirrors C++ `Context::getParseFlow()`.
+    pub fn parse_flow(&self) -> bool {
+        self.parse_flow
+    }
+
+    /// Enable or disable Flow type parsing.
+    /// Mirrors C++ `Context::setParseFlow()`.
+    pub fn set_parse_flow(&mut self, v: bool) {
+        self.parse_flow = v;
     }
 
     pub fn gc(&mut self) {

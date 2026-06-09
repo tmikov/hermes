@@ -20,6 +20,7 @@ use crate::token_kinds::TokenKind;
 
 mod classes;
 mod expressions;
+mod flow;
 mod functions;
 mod modules;
 mod statements;
@@ -172,6 +173,15 @@ pub struct JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     pub(super) param_await: Rc<Cell<bool>>,
     /// Set on the `use static builtin` directive.
     pub(super) use_static_builtin: bool,
+    /// Whether an anonymous function type (`T => U` without parentheses) is
+    /// allowed in the current type-annotation context. Port of the C++
+    /// `allowAnonFunctionType_` field (JSParserImpl.h:255).
+    /// In an `Rc<Cell<bool>>` — see `param_yield`.
+    pub(super) allow_anon_function_type: Rc<Cell<bool>>,
+    /// Whether a conditional type (`T extends U ? V : W`) not wrapped in
+    /// parentheses is allowed. Port of the C++ `allowConditionalType_` field
+    /// (JSParserImpl.h:259). In an `Rc<Cell<bool>>` — see `param_yield`.
+    pub(super) allow_conditional_type: Rc<Cell<bool>>,
 }
 
 impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
@@ -192,12 +202,34 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             param_yield: Rc::new(Cell::new(false)),
             param_await: Rc::new(Cell::new(false)),
             use_static_builtin: false,
+            allow_anon_function_type: Rc::new(Cell::new(false)),
+            allow_conditional_type: Rc::new(Cell::new(false)),
         }
     }
 
     /// True if the parser detected `use static builtin`.
     pub fn get_use_static_builtin(&self) -> bool {
         self.use_static_builtin
+    }
+
+    /// True if Flow type parsing is enabled. Shorthand for the C++
+    /// `context_.getParseFlow()` calls throughout the parser.
+    pub(super) fn parse_flow(&self) -> bool {
+        self.gc.ctx().parse_flow()
+    }
+
+    /// True if TypeScript parsing is enabled. Shorthand for the C++
+    /// `context_.getParseTS()`.
+    #[allow(dead_code)] // used from P5.1 (import/export type-kind detection)
+    pub(super) fn parse_ts(&self) -> bool {
+        false // P7: TypeScript parsing.
+    }
+
+    /// True if any type-annotation dialect is enabled. Port of the C++
+    /// `context_.getParseTypes()` (Context.h:504-506).
+    #[allow(dead_code)] // used from P5.1 (import/export type-kind detection)
+    pub(super) fn parse_types(&self) -> bool {
+        self.parse_flow() || self.parse_ts()
     }
 
     #[inline]
@@ -377,6 +409,38 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         self.param_await.set(new_val);
         ParamFlagGuard {
             cell: Rc::clone(&self.param_await),
+            old,
+        }
+    }
+
+    /// Set `allow_anon_function_type` to `new_val`, returning a guard that
+    /// restores the old value on Drop. Port of the
+    /// `llvh::SaveAndRestore<bool>(allowAnonFunctionType_, new)` in
+    /// `parseTypeAnnotationFlow` (JSParserImpl-flow.cpp:3080-3082).
+    pub(super) fn save_allow_anon_function_type(
+        &self,
+        new_val: bool,
+    ) -> ParamFlagGuard {
+        let old = self.allow_anon_function_type.get();
+        self.allow_anon_function_type.set(new_val);
+        ParamFlagGuard {
+            cell: Rc::clone(&self.allow_anon_function_type),
+            old,
+        }
+    }
+
+    /// Set `allow_conditional_type` to `new_val`, returning a guard that
+    /// restores the old value on Drop. Port of the
+    /// `llvh::SaveAndRestore<bool>(allowConditionalType_, ...)` uses in the
+    /// Flow type grammar (e.g. JSParserImpl-flow.cpp:3098).
+    pub(super) fn save_allow_conditional_type(
+        &self,
+        new_val: bool,
+    ) -> ParamFlagGuard {
+        let old = self.allow_conditional_type.get();
+        self.allow_conditional_type.set(new_val);
+        ParamFlagGuard {
+            cell: Rc::clone(&self.allow_conditional_type),
             old,
         }
     }
@@ -3526,5 +3590,122 @@ mod tests {
             member.object.kind()
         );
         assert!(member.computed.get(), "super['y'] is computed");
+    }
+
+    // P5.0: Flow type alias parsing (js/flow.rs).
+
+    /// Helper: parse `src` with Flow parsing enabled and assert at least one
+    /// error was reported (the honest-deferral checks for unported Flow
+    /// productions).
+    fn assert_flow_parse_has_errors(src: &[u8], why: &str) {
+        use ast::context::Context;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let buf_id = sm.add_buffer_bytes("input", src);
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        let _ = parser.parse();
+        assert!(parser.error_count_pub() >= 1, "{why}: expected an error");
+    }
+
+    /// `type X = number;` → TypeAlias{id "X", no type params, right
+    /// NumberTypeAnnotation}.
+    #[test]
+    fn flow_type_alias_number() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let stmt = parse_one_stmt(&gc, &mut sm, b"type X = number;");
+        let Node::TypeAlias(alias) = stmt else {
+            panic!("expected TypeAlias, got {:?}", stmt.kind())
+        };
+        assert_eq!(ident_bytes(&gc, alias.id), b"X");
+        assert!(alias.type_parameters.is_none(), "no type parameters");
+        assert!(
+            matches!(alias.right, Node::NumberTypeAnnotation(_)),
+            "right is NumberTypeAnnotation, got {:?}",
+            alias.right.kind()
+        );
+    }
+
+    /// `type X = 'hi';` → TypeAlias whose right is a
+    /// StringLiteralTypeAnnotation with value "hi".
+    #[test]
+    fn flow_type_alias_string_literal() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let stmt = parse_one_stmt(&gc, &mut sm, b"type X = 'hi';");
+        let Node::TypeAlias(alias) = stmt else {
+            panic!("expected TypeAlias, got {:?}", stmt.kind())
+        };
+        let Node::StringLiteralTypeAnnotation(lit) = alias.right else {
+            panic!(
+                "expected StringLiteralTypeAnnotation, got {:?}",
+                alias.right.kind()
+            )
+        };
+        assert_eq!(gc.ctx().atom_table.bytes(lit.value.get()), b"hi");
+        assert_eq!(gc.ctx().atom_table.bytes(lit.raw.get()), b"'hi'");
+    }
+
+    /// Without `parse_flow`, `type X = number;` is plain JS: `type` is an
+    /// ordinary identifier expression and the following `X` is a syntax
+    /// error, exactly like hermesc without `-parse-flow` ("';' expected").
+    #[test]
+    fn flow_disabled_type_alias_is_plain_js() {
+        assert_parse_has_errors(
+            b"type X = number;",
+            "'type X' must not parse as a declaration without parse_flow",
+        );
+    }
+
+    /// Without `parse_flow`, `type` stays usable as a plain identifier.
+    #[test]
+    fn flow_disabled_type_is_plain_identifier() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt = parse_one_stmt(&gc, &mut sm, b"var type = 1;");
+        assert!(
+            matches!(stmt, Node::VariableDeclaration(_)),
+            "expected VariableDeclaration, got {:?}",
+            stmt.kind()
+        );
+    }
+
+    /// Honest deferral errors for the unported Flow productions.
+    #[test]
+    fn flow_deferred_productions_error() {
+        // P5.2: type parameters.
+        assert_flow_parse_has_errors(b"type X<T> = number;", "type params are P5.2");
+        // P5.3: opaque type aliases.
+        assert_flow_parse_has_errors(b"opaque type X = number;", "opaque is P5.3");
+        // P5.3: interface declarations.
+        assert_flow_parse_has_errors(b"interface I {}", "interface is P5.3");
+        // P6: Flow enum declarations.
+        assert_flow_parse_has_errors(b"enum E {}", "Flow enum is P6");
+        // P5.1: generic type references.
+        assert_flow_parse_has_errors(b"type X = Y;", "generic types are P5.1");
+        // P5.1: negative literal types.
+        assert_flow_parse_has_errors(b"type X = -1;", "negative literals are P5.1");
     }
 }
