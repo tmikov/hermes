@@ -128,9 +128,7 @@ fn main() {
     let mut sm = SourceErrorManager::new();
     let buf_id = sm.add_buffer_bytes("input", &bytes);
     let mut ctx = Context::new();
-    if parse_flow {
-        ctx.set_parse_flow(true);
-    }
+    ctx.set_parse_flow(parse_flow);
     let gc = ctx.lock();
 
     // Parse in a scope so the parser (and its &mut sm borrow) drops before we

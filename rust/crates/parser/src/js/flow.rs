@@ -556,10 +556,6 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// the literal type annotations.
     fn cur_token_source_atom(&self) -> NodeLabel {
         let range = self.lexer.token().source_range();
-        let buf_start = self.lexer.get_buffer_start();
-        let buf = self.lexer.buffer_bytes();
-        let start = (range.start.offset - buf_start) as usize;
-        let end = (range.end.offset - buf_start) as usize;
-        self.lexer.get_string_literal(&buf[start..end])
+        self.source_bytes_atom(range.start, range.end)
     }
 }

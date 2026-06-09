@@ -2006,16 +2006,21 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let raw_directive: atom_table::AtomBytes = if !contains_escapes {
             str_value
         } else {
-            // Raw is the source text minus the enclosing quote characters.
-            // buf_start is the offset of the first byte of the buffer;
-            // tok_start / tok_end are absolute offsets (SMLoc = u32 offset).
-            let buf_start = self.lexer.get_buffer_start();
-            let buf = self.lexer.buffer_bytes();
-            // tok_start and tok_end are absolute offsets; subtract buf_start.
-            let start_off = (tok_start.offset - buf_start) as usize;
-            let end_off = (tok_end.offset - buf_start) as usize;
-            // Slice is +1/-1 to skip the enclosing quote characters.
-            let raw_slice = &buf[start_off + 1..end_off - 1];
+            // Raw is the source text minus the enclosing quote characters
+            // (the +1/-1 below skip the quotes). The C++ interns it via
+            // `lexer_.getIdentifier` (NOT `getStringLiteral` — no surrogate
+            // re-encoding), so we use `get_identifier` on the shared
+            // `source_bytes` slice instead of `source_bytes_atom`.
+            let raw_slice = self.source_bytes(
+                SMLoc {
+                    source: tok_start.source,
+                    offset: tok_start.offset + 1,
+                },
+                SMLoc {
+                    source: tok_end.source,
+                    offset: tok_end.offset - 1,
+                },
+            );
             self.lexer.get_identifier(raw_slice)
         };
 

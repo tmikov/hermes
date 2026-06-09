@@ -373,6 +373,29 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
     }
 
+    /// The raw source bytes of the absolute source range `[start, end)`.
+    /// Shared by the call sites that reproduce the C++
+    /// `StringRef(start.getPointer(), end - start)` raw-slice idiom (directive
+    /// raws, literal-type raws).
+    pub(super) fn source_bytes(&self, start: SMLoc, end: SMLoc) -> &[u8] {
+        let buf_start = self.lexer.get_buffer_start();
+        let buf = self.lexer.buffer_bytes();
+        &buf[(start.offset - buf_start) as usize
+            ..(end.offset - buf_start) as usize]
+    }
+
+    /// Intern the raw source text of the absolute source range `[start, end)`.
+    /// The Rust equivalent of the C++
+    /// `lexer_.getStringLiteral(StringRef(start, end - start))` idiom used for
+    /// the raw spelling of literal type annotations.
+    pub(super) fn source_bytes_atom(
+        &self,
+        start: SMLoc,
+        end: SMLoc,
+    ) -> atom_table::AtomBytes {
+        self.lexer.get_string_literal(self.source_bytes(start, end))
+    }
+
     /// Increment the recursion depth and return a guard that decrements it on
     /// drop. Returns `None` (and reports an error) if the limit is exceeded.
     ///
@@ -765,17 +788,18 @@ mod tests {
         assert!(parser.error_count_pub() >= 1, "{why}: expected an error");
     }
 
-    /// Like [`assert_parse_errors`], but only requires that at least one error
-    /// was reported — the parse may still recover and return a `Program`. Used
-    /// for diagnostics that C++ reports but continues past (e.g. a duplicate
-    /// named import, or an `import` nested in a block).
-    fn assert_parse_has_errors(src: &[u8], why: &str) {
+    /// Shared body of [`assert_parse_has_errors`] /
+    /// [`assert_flow_parse_has_errors`]: parse `src` (with Flow parsing
+    /// enabled iff `parse_flow`) and assert at least one error was reported —
+    /// the parse may still recover and return a `Program`.
+    fn assert_parse_has_errors_impl(src: &[u8], why: &str, parse_flow: bool) {
         use ast::context::Context;
         use support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let buf_id = sm.add_buffer_bytes("input", src);
         let mut ctx = Context::new();
+        ctx.set_parse_flow(parse_flow);
         let gc = ctx.lock();
         let atoms = &gc.ctx().atom_table;
         let lexer = crate::lexer::JSLexer::new(
@@ -787,6 +811,14 @@ mod tests {
         let mut parser = JSParserImpl::new(&gc, lexer);
         let _ = parser.parse();
         assert!(parser.error_count_pub() >= 1, "{why}: expected an error");
+    }
+
+    /// Like [`assert_parse_errors`], but only requires that at least one error
+    /// was reported — the parse may still recover and return a `Program`. Used
+    /// for diagnostics that C++ reports but continues past (e.g. a duplicate
+    /// named import, or an `import` nested in a block).
+    fn assert_parse_has_errors(src: &[u8], why: &str) {
+        assert_parse_has_errors_impl(src, why, false);
     }
 
     /// P2 capstone: top-level declaration forms that route into
@@ -3598,24 +3630,7 @@ mod tests {
     /// error was reported (the honest-deferral checks for unported Flow
     /// productions).
     fn assert_flow_parse_has_errors(src: &[u8], why: &str) {
-        use ast::context::Context;
-        use support::manager::SourceErrorManager;
-
-        let mut sm = SourceErrorManager::new();
-        let buf_id = sm.add_buffer_bytes("input", src);
-        let mut ctx = Context::new();
-        ctx.set_parse_flow(true);
-        let gc = ctx.lock();
-        let atoms = &gc.ctx().atom_table;
-        let lexer = crate::lexer::JSLexer::new(
-            buf_id,
-            &mut sm,
-            atoms,
-            crate::lexer::GrammarContext::AllowRegExp,
-        );
-        let mut parser = JSParserImpl::new(&gc, lexer);
-        let _ = parser.parse();
-        assert!(parser.error_count_pub() >= 1, "{why}: expected an error");
+        assert_parse_has_errors_impl(src, why, true);
     }
 
     /// `type X = number;` → TypeAlias{id "X", no type params, right
