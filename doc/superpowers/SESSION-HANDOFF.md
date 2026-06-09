@@ -4,25 +4,40 @@ Hand this to a new session to restore context. It **references** the authoritati
 (read them; don't trust this summary over them) and records the conventions, file map,
 validation commands, and workflow.
 
-> **Date of handoff:** 2026-06-08. **Branch:** `rust` (base is `static_h`, NOT `main`).
+> **Date of handoff:** 2026-06-09. **Branch:** `rust` (base is `static_h`, NOT `main`).
 > **Status:** the **JS lexer**, **JSONParser**, and the **AST are COMPLETE**, and the **JS Parser is IN PROGRESS** —
 > **phases P0 (foundations + `parser_differential` gate), P1 (value expressions), P2 (statements & declarations), P3 (functions, classes,
-> arrows, async/generators, methods, `super`, `yield`, decorators), and P4 (modules: `import`/`export` declarations + `import()`/`import.meta`)
-> are DONE**, byte-for-byte vs `hermesc -dump-ast` over a **75-file corpus**, each sub-task two-stage reviewed + a whole-component capstone (PASS),
-> zero warnings, zero new clippy lints. **The parser now handles the ENTIRE standard-ECMAScript grammar — only Flow/TS/JSX + Pre/Lazy passes remain.**
-> **Read `doc/superpowers/RustPortRoadmap.md` (the "🚧 JS Parser" section) for the authoritative P0–P4 detail, the deferral set
-> (now Flow/TS/JSX only → P5/P6/P7 — all honest omissions with `// P5/P6/P7` markers + tests), the review-caught bugs (parser ctor not
-> forwarding `Context::isStrictMode()`; P2.5 `[In]`-flag drop; P3 `lookahead1` `RequireNoNewLine` default; the capstone-caught `"use strict"`
-> leak from nested bodies; P4 `import.meta`/`from`/`as` needing escape-INsensitive `check_name` not `check_unescaped_name`; P4 with-clause
-> comma `AllowRegExp`), and the tracked non-blocking carry-forwards.** Specs/plans: `specs/2026-06-06-js-parser-design.md`,
+> arrows, async/generators, methods, `super`, `yield`, decorators), P4 (modules), and P5 (the FLOW TYPE GRAMMAR + declarative integration)
+> are DONE**, byte-for-byte vs `hermesc -dump-ast` over a **76-file plain + 24-file Flow corpus** (the Flow corpus passes `-parse-flow` to
+> both binaries; Flow is gated by the new `Context::parse_flow` flag and does NOT leak into plain JS), each sub-task two-stage reviewed +
+> a whole-phase capstone, zero warnings, zero new clippy lints. **The parser handles the entire standard-ECMAScript grammar + the whole
+> Flow type-annotation grammar** (annotation hierarchy, function/object/tuple types, type-params/args, generics, predicates,
+> `type`/`opaque type`/`interface` declarations, and the non-ambiguous integration: function/class/method type-params + return types +
+> predicates, leading `this` param, binding/pattern annotations, class heritage/`implements`/variance/field types, object-literal method
+> types).
+> **Read `doc/superpowers/RustPortRoadmap.md` (the "🚧 JS Parser" section) for the authoritative P0–P5 detail, the deferral set
+> (→ **P6**: ambiguous-expression Flow — typed arrows, `as`/`as const`, `(x:T)` casts + cover-typed-identifier, call/`?.`/`new` type-args
+> (the SavePoint+suppression sites in `expressions.rs`) — plus `declare` statements, `enum`, `component`/`hook`, `match`, `record`,
+> `import type`, `export type` clause forms, hook types, component-syntax paths; → **P7**: TS; all honest omissions with `// P6`/`// P7`
+> markers + tests), and the review-caught bugs (P5.1: `parse_type_args_flow`'s trailing grammar context must be `Type` — the lexer only
+> splits `>>` in `Type` context, so nested `Foo<Bar<Baz<U>>>` failed while the shallow corpus passed; the P5 capstone: a SILENT
+> `exportKind:"value"`-vs-`"type"` divergence on `export type`/`export opaque type`/`export interface` through two P4-era stubs — fixed by
+> porting the C++ export-kind detection (JSParserImpl.cpp:7361-7368) + the alias branch of `parseExportTypeDeclarationFlow`).
+> **Port-wide lesson: C++ DEFAULT ARGUMENTS are spec** — `checkAndEat` defaults `AllowRegExp`, `parseTypeArgsFlow` defaults `Type`
+> (JSParserImpl.h:1506); always read the header defaults, never assume. Specs/plans: `specs/2026-06-06-js-parser-design.md`,
 > `plans/2026-06-06-js-parser-{p0-foundations,p1-expressions,p2-statements}.md`, `plans/2026-06-07-js-parser-p3-functions-classes.md`,
-> `plans/2026-06-08-js-parser-p4-modules.md`.
-> **NEXT: Flow (P5/P6) — the type grammar — and/or TS (P7) and JSX, plus the Pre/Lazy passes** (`lib/Parser/JSParserImpl-flow.cpp` 5,438 LOC,
-> `-ts.cpp` 1,437, `-jsx.cpp` 505; context-gated `getParseFlow()`/`getParseTS()`/`getParseJSX()`). The omitted P4 Flow blocks (`import type`/
-> `typeof`, `export type`, Flow default exports, type export-kind) land here. Write each phase plan just-in-time (lexer/P1–P4-style) and execute
-> subagent-driven. juno has no parser to crib from (`hparser` is FFI-to-C++); port the C++ directly.
-> The parser proper lives in `rust/crates/parser/src/js/{mod,expressions,statements,functions,classes,modules}.rs`; the gate is
-> `REQUIRE_DIFFERENTIAL=1 cargo test -p parser --test parser_differential` (build `ast-dump` first).
+> `plans/2026-06-08-js-parser-p4-modules.md`, `plans/2026-06-09-js-parser-p5-flow-types.md`.
+> **NEXT: P6 — the rest of Flow**: the ambiguous expression grammar (typed arrows C++ 6277-6477/4510-4572, `as` 4320-4350, casts
+> 2641-2651/4628-4643, call/`?.`/`new` type-args 3744-3777/3809-3828/3957-3975/4036-4062), the `declare` routing + `parseDeclareFLow`
+> family (flow.cpp:95-193, 2159-2882), `enum` (5148-5438), `component`/`hook` (195-859), `match` (860-1616), `record` (1618-1979),
+> `import type`/`export type` clauses (modules.rs), hook types, component-syntax before-colon/renders paths — **the P5 capstone report
+> re-derived the full P6 work-list with file:line pointers.** Then TS (P7), JSX, and the Pre/Lazy passes. Write each phase plan
+> just-in-time (lexer/P1–P5-style) and execute subagent-driven. juno has no parser to crib from (`hparser` is FFI-to-C++); port the C++
+> directly.
+> The parser proper lives in `rust/crates/parser/src/js/{mod,expressions,statements,functions,classes,modules}.rs` +
+> **`js/flow/{mod,declarations,types,function_types,object_types,params}.rs`**; the gate is
+> `REQUIRE_DIFFERENTIAL=1 cargo test -p parser --test parser_differential` (build `ast-dump` first; the Flow corpus needs
+> `cmake-build-asan/bin/hermesc`).
 
 ---
 
