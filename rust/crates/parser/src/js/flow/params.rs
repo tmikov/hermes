@@ -10,9 +10,9 @@
 //! corresponding sections of `lib/Parser/JSParserImpl-flow.cpp`.
 
 use ast::node::{
-    GenericTypeAnnotation, Identifier, Node, QualifiedTypeIdentifier,
-    TypeAnnotation, TypeParameter, TypeParameterDeclaration,
-    TypeParameterInstantiation, Variance,
+    ClassImplements, GenericTypeAnnotation, Identifier, Node,
+    QualifiedTypeIdentifier, TypeAnnotation, TypeParameter,
+    TypeParameterDeclaration, TypeParameterInstantiation, Variance,
 };
 use ast::node_child::{NodeLabel, NodeList, NodeMetadata};
 
@@ -331,6 +331,52 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         // C++ 5046-5049.
         let node = Node::GenericTypeAnnotation(GenericTypeAnnotation::new(
+            NodeMetadata::new(self.dummy_range()),
+            id,
+            type_parameters,
+        ));
+        Some(self.set_location(start, self.lexer.prev_token_end(), node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseClassImplementsFlow — 5052 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse one entry of a class `implements` clause: `Name` or
+    /// `Name<TypeArgs>`, with the current token at the identifier (an
+    /// identifier ONLY — no reserved word, per the C++ assert). Port of
+    /// `JSParserImpl::parseClassImplementsFlow` (flow.cpp:5052-5076).
+    // Wired into class heritage parsing (C++ JSParserImpl.cpp:4988-5010) in
+    // P5.4; until then only unit tests reach it.
+    #[allow(dead_code)]
+    pub(in crate::js) fn parse_class_implements_flow(
+        &mut self,
+    ) -> Option<&'gc Node<'gc>> {
+        // C++ 5054-5055.
+        debug_assert!(self.check(TokenKind::identifier));
+        let start = self.cur_start();
+
+        // C++ 5057-5062.
+        let id_range = self.cur_range();
+        let id_node = Node::Identifier(Identifier::new(
+            NodeMetadata::new(self.dummy_range()),
+            self.lexer.token().get_identifier(),
+            None,
+            false,
+        ));
+        let id = self.set_location(id_range.start, id_range.end, id_node);
+        self.advance(GrammarContext::Type);
+
+        // C++ 5064-5069: `parseTypeArgsFlow()` is called with its default
+        // trailing grammar context (Type, per JSParserImpl.h:1506).
+        let mut type_parameters: Option<&'gc Node<'gc>> = None;
+        if self.check(TokenKind::less) {
+            type_parameters =
+                Some(self.parse_type_args_flow(GrammarContext::Type)?);
+        }
+
+        // C++ 5071-5075.
+        let node = Node::ClassImplements(ClassImplements::new(
             NodeMetadata::new(self.dummy_range()),
             id,
             type_parameters,

@@ -15,7 +15,8 @@ use ast::node::{
     BigIntTypeAnnotation, BooleanLiteralTypeAnnotation, BooleanTypeAnnotation,
     ConditionalTypeAnnotation, EmptyTypeAnnotation, ExistsTypeAnnotation,
     FunctionTypeParam, Identifier, IndexedAccessType, InferTypeAnnotation,
-    IntersectionTypeAnnotation, KeyofTypeAnnotation, MixedTypeAnnotation,
+    InterfaceTypeAnnotation, IntersectionTypeAnnotation, KeyofTypeAnnotation,
+    MixedTypeAnnotation,
     NeverTypeAnnotation, Node, NullLiteralTypeAnnotation,
     NullableTypeAnnotation, NumberLiteralTypeAnnotation, NumberTypeAnnotation,
     OptionalIndexedAccessType, QualifiedTypeofIdentifier,
@@ -167,7 +168,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     /// Port of `parseUnionTypeAnnotationFlow` (flow.cpp:3147-3174).
-    fn parse_union_type_annotation_flow(&mut self) -> Option<&'gc Node<'gc>> {
+    pub(super) fn parse_union_type_annotation_flow(
+        &mut self,
+    ) -> Option<&'gc Node<'gc>> {
         // C++ 3148-3149: `start` is captured BEFORE the optional leading `|`.
         let start = self.cur_start();
         self.check_and_eat(TokenKind::pipe, GrammarContext::Type);
@@ -370,8 +373,6 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse a primary type annotation. Port of
     /// `JSParserImpl::parsePrimaryTypeAnnotationFlow` (flow.cpp:3305-3602).
-    /// P5.0-P5.2 implement all arms except `interface` types (P5.3) — see
-    /// the per-arm markers.
     fn parse_primary_type_annotation_flow(&mut self) -> Option<&'gc Node<'gc>> {
         let start = self.cur_start();
         match self.cur_kind() {
@@ -400,13 +401,23 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     AllowSpreadProperty::Yes,
                 ),
 
-            // C++ 3323-3334.
+            // C++ 3323-3334. `interface` lexes as rw_interface only in
+            // strict mode (it is a future reserved word); in loose mode it is
+            // an identifier and reaches the NamedType::Interface arm below.
             TokenKind::rw_interface => {
-                // P5.3: InterfaceTypeAnnotation (parseInterfaceTailFlow).
-                self.error_cur(
-                    "interface type annotations are unsupported (parser phase P5.3)",
+                self.advance(GrammarContext::Type);
+                let mut extends: Vec<&'gc Node<'gc>> = Vec::new();
+                let body = self.parse_interface_tail_flow(&mut extends)?;
+                // The end location is the body node's end.
+                let end = body.metadata().range.get().end;
+                let node = Node::InterfaceTypeAnnotation(
+                    InterfaceTypeAnnotation::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        NodeList::from_iter(self.gc, extends),
+                        Some(body),
+                    ),
                 );
-                None
+                Some(self.set_location(start, end, node))
             }
 
             // C++ 3335-3336.
@@ -530,12 +541,23 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                         ))
                     }
                     NamedType::Interface => {
-                        // P5.3: InterfaceTypeAnnotation via
-                        // parseInterfaceTailFlow (C++ 3447-3457).
-                        self.error_cur(
-                            "interface type annotations are unsupported (parser phase P5.3)",
+                        // C++ 3447-3457 (the loose-mode spelling, where
+                        // `interface` is an identifier rather than
+                        // rw_interface).
+                        self.advance(GrammarContext::Type);
+                        let mut extends: Vec<&'gc Node<'gc>> = Vec::new();
+                        let body =
+                            self.parse_interface_tail_flow(&mut extends)?;
+                        // The end location is the body node's end.
+                        let end = body.metadata().range.get().end;
+                        let node = Node::InterfaceTypeAnnotation(
+                            InterfaceTypeAnnotation::new(
+                                NodeMetadata::new(self.dummy_range()),
+                                NodeList::from_iter(self.gc, extends),
+                                Some(body),
+                            ),
                         );
-                        None
+                        Some(self.set_location(start, end, node))
                     }
                     NamedType::Infer => {
                         // C++ 3459-3504.

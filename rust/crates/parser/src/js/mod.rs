@@ -3746,15 +3746,6 @@ mod tests {
     /// Honest deferral errors for the unported Flow productions.
     #[test]
     fn flow_deferred_productions_error() {
-        // P5.3: opaque type aliases.
-        assert_flow_parse_has_errors(b"opaque type X = number;", "opaque is P5.3");
-        // P5.3: interface declarations.
-        assert_flow_parse_has_errors(b"interface I {}", "interface is P5.3");
-        // P5.3: interface type annotations.
-        assert_flow_parse_has_errors(
-            b"type X = interface { a: number };",
-            "interface types are P5.3",
-        );
         // P6: Flow enum declarations.
         assert_flow_parse_has_errors(b"enum E {}", "Flow enum is P6");
     }
@@ -5002,7 +4993,309 @@ mod tests {
             b"type A = (x) => implies x;",
             "expecting 'is' after parameter of 'implies' type guard",
         );
-        // "Spreading a type is only allowed inside an object type" needs an
-        // interface body (AllowSpreadProperty::No) — reachable in P5.3.
+    }
+
+    // P5.3: opaque type aliases, interface declarations/type annotations,
+    // and class implements entries (js/flow/).
+
+    /// Helper: parse `src` with Flow enabled, expect zero errors, return the
+    /// top-level statement at `idx` (for the strict-mode tests, where the
+    /// directive prologue is statement 0).
+    fn flow_parse_stmt_at<'gc>(
+        gc: &'gc ast::context::GCLock<'_, '_>,
+        sm: &mut support::manager::SourceErrorManager,
+        src: &[u8],
+        idx: usize,
+    ) -> &'gc ast::node::Node<'gc> {
+        let buf_id = sm.add_buffer_bytes("input", src);
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(gc, lexer);
+        let program = parser.parse().expect("parse succeeded");
+        assert_eq!(parser.error_count_pub(), 0, "zero errors");
+        if let ast::node::Node::Program(p) = program {
+            return p.body.iter().nth(idx).expect("has enough statements");
+        }
+        panic!("expected Program");
+    }
+
+    /// The `opaque type` alias shapes: plain, type params, the legacy
+    /// `: Supertype`, and the `super`/`extends` bounds.
+    #[test]
+    fn flow_opaque_type_shapes() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        // (src, has type params, lower bound, upper bound, supertype)
+        let check = |src: &[u8],
+                     has_tp: bool,
+                     has_lower: bool,
+                     has_upper: bool,
+                     has_super: bool| {
+            let mut sm = SourceErrorManager::new();
+            let mut ctx = Context::new();
+            ctx.set_parse_flow(true);
+            let gc = ctx.lock();
+            let stmt = parse_one_stmt(&gc, &mut sm, src);
+            let Node::OpaqueType(o) = stmt else {
+                panic!("expected OpaqueType, got {:?}", stmt.kind())
+            };
+            assert_eq!(o.type_parameters.is_some(), has_tp, "{src:?} tp");
+            assert_eq!(o.lower_bound.is_some(), has_lower, "{src:?} lower");
+            assert_eq!(o.upper_bound.is_some(), has_upper, "{src:?} upper");
+            assert_eq!(o.supertype.is_some(), has_super, "{src:?} super");
+        };
+
+        check(b"opaque type A = number;", false, false, false, false);
+        check(b"opaque type B<T> = T;", true, false, false, false);
+        check(b"opaque type C: number = 1;", false, false, false, true);
+        check(b"opaque type D super X = Y;", false, true, false, false);
+        check(b"opaque type E extends F = G;", false, false, true, false);
+        check(
+            b"opaque type H super X extends F = G;",
+            false,
+            true,
+            true,
+            false,
+        );
+
+        // The node shape of the legacy-supertype form.
+        let mut sm = SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let stmt = parse_one_stmt(&gc, &mut sm, b"opaque type C: number = 1;");
+        let Node::OpaqueType(o) = stmt else {
+            panic!("expected OpaqueType, got {:?}", stmt.kind())
+        };
+        assert_eq!(ident_bytes(&gc, o.id), b"C");
+        assert!(
+            matches!(o.supertype, Some(Node::NumberTypeAnnotation(_))),
+            "supertype is NumberTypeAnnotation"
+        );
+        assert!(
+            matches!(o.impltype, Node::NumberLiteralTypeAnnotation(_)),
+            "impltype is NumberLiteralTypeAnnotation, got {:?}",
+            o.impltype.kind()
+        );
+    }
+
+    /// Interface declarations: id, type params, the `extends` list (with the
+    /// GenericTypeAnnotation → InterfaceExtends unwrapping), and the body.
+    #[test]
+    fn flow_interface_declaration() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+
+        // Plain interface with one property.
+        let stmt = parse_one_stmt(&gc, &mut sm, b"interface I { x: number }");
+        let Node::InterfaceDeclaration(decl) = stmt else {
+            panic!("expected InterfaceDeclaration, got {:?}", stmt.kind())
+        };
+        assert_eq!(ident_bytes(&gc, decl.id), b"I");
+        assert!(decl.type_parameters.is_none(), "no type params");
+        assert!(decl.extends.is_empty(), "no extends");
+        let Node::ObjectTypeAnnotation(body) = decl.body else {
+            panic!("expected ObjectTypeAnnotation body")
+        };
+        assert_eq!(body.properties.iter().count(), 1, "one property");
+
+        // Type params + a two-entry extends list; the second entry keeps the
+        // generic's type arguments.
+        let stmt = parse_one_stmt(
+            &gc,
+            &mut sm,
+            b"interface J<T> extends K, L<T> { m(): void }",
+        );
+        let Node::InterfaceDeclaration(decl) = stmt else {
+            panic!("expected InterfaceDeclaration, got {:?}", stmt.kind())
+        };
+        assert_eq!(ident_bytes(&gc, decl.id), b"J");
+        assert!(decl.type_parameters.is_some(), "has type params");
+        let extends: Vec<_> = decl.extends.iter().collect();
+        assert_eq!(extends.len(), 2, "two extends entries");
+        let Node::InterfaceExtends(e0) = extends[0] else {
+            panic!("expected InterfaceExtends, got {:?}", extends[0].kind())
+        };
+        assert_eq!(ident_bytes(&gc, e0.id), b"K");
+        assert!(e0.type_parameters.is_none(), "K has no type args");
+        let Node::InterfaceExtends(e1) = extends[1] else {
+            panic!("expected InterfaceExtends, got {:?}", extends[1].kind())
+        };
+        assert_eq!(ident_bytes(&gc, e1.id), b"L");
+        assert!(e1.type_parameters.is_some(), "L<T> keeps its type args");
+
+        // Empty body.
+        let stmt = parse_one_stmt(&gc, &mut sm, b"interface E {}");
+        let Node::InterfaceDeclaration(decl) = stmt else {
+            panic!("expected InterfaceDeclaration, got {:?}", stmt.kind())
+        };
+        let Node::ObjectTypeAnnotation(body) = decl.body else {
+            panic!("expected ObjectTypeAnnotation body")
+        };
+        assert!(body.properties.is_empty(), "empty body");
+    }
+
+    /// `interface { ... }` as a TYPE annotation, in both spellings:
+    /// loose mode lexes `interface` as a plain identifier (the
+    /// NamedType::Interface arm); strict mode lexes it as rw_interface (the
+    /// reserved-word arm). Both build InterfaceTypeAnnotation.
+    #[test]
+    fn flow_interface_type_annotation() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+
+        // Loose mode: the identifier arm.
+        let right =
+            flow_alias_right(&gc, &mut sm, b"type A = interface { x: number };");
+        let Node::InterfaceTypeAnnotation(ita) = right else {
+            panic!("expected InterfaceTypeAnnotation, got {:?}", right.kind())
+        };
+        assert!(ita.extends.is_empty(), "no extends");
+        assert!(
+            matches!(ita.body, Some(Node::ObjectTypeAnnotation(_))),
+            "body is ObjectTypeAnnotation"
+        );
+
+        // An interface type with an extends clause.
+        let right = flow_alias_right(
+            &gc,
+            &mut sm,
+            b"type B = interface extends I { y: T };",
+        );
+        let Node::InterfaceTypeAnnotation(ita) = right else {
+            panic!("expected InterfaceTypeAnnotation, got {:?}", right.kind())
+        };
+        let extends: Vec<_> = ita.extends.iter().collect();
+        assert_eq!(extends.len(), 1, "one extends entry");
+        assert!(matches!(extends[0], Node::InterfaceExtends(_)));
+
+        // Strict mode: the rw_interface arm (type position).
+        let stmt = flow_parse_stmt_at(
+            &gc,
+            &mut sm,
+            b"'use strict'; type C = interface { x: number };",
+            1,
+        );
+        let Node::TypeAlias(alias) = stmt else {
+            panic!("expected TypeAlias, got {:?}", stmt.kind())
+        };
+        assert!(
+            matches!(alias.right, Node::InterfaceTypeAnnotation(_)),
+            "rw_interface arm builds InterfaceTypeAnnotation, got {:?}",
+            alias.right.kind()
+        );
+
+        // Strict mode: the rw_interface arm (declaration position).
+        let stmt = flow_parse_stmt_at(
+            &gc,
+            &mut sm,
+            b"'use strict'; interface S { x: number }",
+            1,
+        );
+        assert!(
+            matches!(stmt, Node::InterfaceDeclaration(_)),
+            "rw_interface declaration parses, got {:?}",
+            stmt.kind()
+        );
+    }
+
+    /// `parse_class_implements_flow` (direct call — the class-heritage
+    /// integration lands in P5.4): `I` and `I<T>`.
+    #[test]
+    fn flow_class_implements() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let parse_impl = |src: &[u8], expect_args: bool| {
+            let mut sm = SourceErrorManager::new();
+            let buf_id = sm.add_buffer_bytes("input", src);
+            let mut ctx = Context::new();
+            ctx.set_parse_flow(true);
+            let gc = ctx.lock();
+            let atoms = &gc.ctx().atom_table;
+            let lexer = crate::lexer::JSLexer::new(
+                buf_id,
+                &mut sm,
+                atoms,
+                crate::lexer::GrammarContext::AllowRegExp,
+            );
+            let mut parser = JSParserImpl::new(&gc, lexer);
+            let node = parser
+                .parse_class_implements_flow()
+                .expect("class implements parses");
+            let Node::ClassImplements(ci) = node else {
+                panic!("expected ClassImplements, got {:?}", node.kind())
+            };
+            assert_eq!(ident_bytes(&gc, ci.id), b"I");
+            assert_eq!(
+                ci.type_parameters.is_some(),
+                expect_args,
+                "{src:?} type args"
+            );
+            assert_eq!(parser.error_count_pub(), 0, "zero errors");
+        };
+
+        parse_impl(b"I", false);
+        parse_impl(b"I<T>", true);
+    }
+
+    /// The P5.3 diagnostics keep the exact C++ texts.
+    #[test]
+    fn flow_p53_errors() {
+        use ast::context::Context;
+        use support::diag::{CollectingHandler, DiagKind};
+        use support::manager::SourceErrorManager;
+
+        let assert_error = |src: &[u8], expected: &str| {
+            let mut sm = SourceErrorManager::new();
+            let mut ctx = Context::new();
+            ctx.set_parse_flow(true);
+            let gc = ctx.lock();
+            let atoms = &gc.ctx().atom_table;
+            let _ = parse_with_collector(&gc, &mut sm, atoms, src);
+            let h = sm.handler_as::<CollectingHandler>().unwrap();
+            assert!(
+                h.messages()
+                    .iter()
+                    .any(|m| m.kind == DiagKind::Error && m.message == expected),
+                "expected {:?}, got {:?}",
+                expected,
+                h.messages().iter().map(|m| &m.message).collect::<Vec<_>>()
+            );
+        };
+
+        // Interface bodies pass AllowSpreadProperty::No, finally making this
+        // P5.2 diagnostic reachable.
+        assert_error(
+            b"interface I { ...T }",
+            "Spreading a type is only allowed inside an object type",
+        );
+        // An opaque alias requires `= T` (only DeclareOpaque may omit it).
+        assert_error(b"opaque type X;", "'=' expected in type alias");
+        // `opaque` must be followed by `type`.
+        assert_error(
+            b"opaque interface I {}",
+            "invalid token in opaque type declaration",
+        );
     }
 }

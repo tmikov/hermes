@@ -14,10 +14,12 @@
 //! `parsePrimaryTypeAnnotationFlow`), generic types, type arguments,
 //! `typeof`/tuple/`keyof`/`infer` types, and the reparse helpers; P5.2
 //! function types, object types, type-parameter declarations, variance,
-//! predicates, and return-type annotations. The remaining productions emit
-//! an honest "unsupported (parser phase P5.x)" error at the marked site; the
-//! later sub-tasks (P5.3 interfaces / declare / opaque, P6 enum / component /
-//! hook / record / match) replace those markers with the real grammar.
+//! predicates, and return-type annotations; P5.3 `opaque type` aliases,
+//! `interface` declarations and type annotations, and class `implements`
+//! entries. The remaining productions emit an honest "unsupported (parser
+//! phase P6)" error at the marked site; the later sub-tasks (P6 declare /
+//! enum / component / hook / record / match) replace those markers with the
+//! real grammar.
 //!
 //! The `impl JSParserImpl` methods are split across the child modules below
 //! by concern, mirroring the `lexer/` directory split: `declarations` (the
@@ -70,7 +72,7 @@ pub(super) fn can_follow_variance_keyword_flow(
 /// Which alias declaration form is being parsed.
 /// Port of `JSParserImpl::TypeAliasKind` (JSParserImpl.h:1390).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[allow(dead_code)] // DeclareOpaque is constructed by parseDeclareFLow (P5.3).
+#[allow(dead_code)] // DeclareOpaque is constructed by parseDeclareFLow (P6).
 pub(super) enum TypeAliasKind {
     None,
     Declare,
@@ -108,7 +110,6 @@ pub(super) enum AllowStaticProperty {
 /// Whether a `...T` spread property is allowed in an object type.
 /// Port of `JSParserImpl::AllowSpreadProperty` (JSParserImpl.h:1450).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[allow(dead_code)] // `No` is passed by interface bodies (P5.3).
 pub(super) enum AllowSpreadProperty {
     No,
     Yes,
