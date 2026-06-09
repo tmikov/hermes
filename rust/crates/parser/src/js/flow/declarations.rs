@@ -10,8 +10,9 @@
 //! entry points of `lib/Parser/JSParserImpl-flow.cpp`.
 
 use ast::node::{
-    DeclareInterface, DeclareOpaqueType, DeclareTypeAlias, Identifier,
-    InterfaceDeclaration, InterfaceExtends, Node, OpaqueType, TypeAlias,
+    DeclareInterface, DeclareOpaqueType, DeclareTypeAlias,
+    ExportNamedDeclaration, Identifier, InterfaceDeclaration,
+    InterfaceExtends, Node, OpaqueType, TypeAlias,
 };
 use ast::node_child::{NodeList, NodeMetadata};
 use support::location::SMLoc;
@@ -388,5 +389,74 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         ));
         extends.push(self.set_location(range.start, range.end, node));
         true
+    }
+
+    // -----------------------------------------------------------------------
+    // parseExportTypeDeclarationFlow — 2498 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse the tail of `export type ...` with the cursor at `type` and
+    /// `start_loc` at `export`. Port of
+    /// `JSParserImpl::parseExportTypeDeclarationFlow` (flow.cpp:2498-2575).
+    ///
+    /// The `export type A = ...` alias form (flow.cpp:2557-2566) is
+    /// implemented; the `export type * FromClause;` re-export
+    /// (flow.cpp:2503-2518) and the `export type { ... } [FromClause];`
+    /// specifier-clause form (flow.cpp:2520-2556) are P6 — they report an
+    /// honest deferral error instead of silently mis-parsing.
+    pub(in crate::js) fn parse_export_type_declaration_flow(
+        &mut self,
+        start_loc: SMLoc,
+    ) -> Option<&'gc Node<'gc>> {
+        // C++ 2500-2501.
+        debug_assert!(self.check_name(b"type"));
+        let type_ident_loc = self.advance(GrammarContext::AllowRegExp).start;
+
+        if self.check(TokenKind::star) {
+            // P6: export type * FromClause; (flow.cpp:2503-2518).
+            self.error_cur(
+                "'export type *' re-exports are unsupported (parser phase P6)",
+            );
+            return None;
+        }
+
+        if self.check(TokenKind::l_brace) {
+            // P6: export type ExportClause [FromClause]; (flow.cpp:2520-2556).
+            self.error_cur(
+                "'export type {' export clauses are unsupported (parser phase P6)",
+            );
+            return None;
+        }
+
+        // C++ 2557-2566.
+        if self.check(TokenKind::identifier) {
+            let alias = self
+                .parse_type_alias_flow(type_ident_loc, TypeAliasKind::None)?;
+            let type_ident = self.gc.ctx().atom_table.atom_bytes(b"type");
+            let node =
+                Node::ExportNamedDeclaration(ExportNamedDeclaration::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    Some(alias),
+                    NodeList::empty(),
+                    None,
+                    type_ident,
+                ));
+            return Some(self.set_location(
+                start_loc,
+                alias.range().end,
+                node,
+            ));
+        }
+
+        // C++ 2569-2574: errorExpected(star, l_brace, identifier,
+        // "in export type declaration", ...). note arg dropped per house
+        // style.
+        self.error_expected3(
+            TokenKind::star,
+            TokenKind::l_brace,
+            TokenKind::identifier,
+            " in export type declaration",
+        );
+        None
     }
 }

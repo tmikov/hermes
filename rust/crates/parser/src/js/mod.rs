@@ -219,8 +219,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     /// True if TypeScript parsing is enabled. Shorthand for the C++
-    /// `context_.getParseTS()`.
-    #[allow(dead_code)] // used from P5.1 (import/export type-kind detection)
+    /// `context_.getParseTS()`. Used by `parse_types()`; always false until
+    /// TypeScript parsing lands (P7).
     pub(super) fn parse_ts(&self) -> bool {
         false // P7: TypeScript parsing.
     }
@@ -395,6 +395,28 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             "'{}' or '{}' expected{}",
             crate::token_kinds::token_kind_str(k1),
             crate::token_kinds::token_kind_str(k2),
+            where_
+        );
+        self.error_cur(&msg);
+    }
+
+    /// Report a "'k1', 'k2' or 'k3' expected{where_}" error at the current
+    /// token. Port of the three-token `errorExpected` initializer-list call
+    /// (e.g. the export-type dispatch at JSParserImpl-flow.cpp:2569-2574); the
+    /// C++ list rendering joins all but the last token with ", " and the last
+    /// with " or ". The `what`/`whatLoc` note args are dropped per house style.
+    pub(super) fn error_expected3(
+        &mut self,
+        k1: TokenKind,
+        k2: TokenKind,
+        k3: TokenKind,
+        where_: &str,
+    ) {
+        let msg = format!(
+            "'{}', '{}' or '{}' expected{}",
+            crate::token_kinds::token_kind_str(k1),
+            crate::token_kinds::token_kind_str(k2),
+            crate::token_kinds::token_kind_str(k3),
             where_
         );
         self.error_cur(&msg);
@@ -1780,6 +1802,85 @@ mod tests {
         assert_parse_has_errors(
             b"{ export var x = 1; }",
             "export inside a block must be at top level of module",
+        );
+    }
+
+    // P5 capstone: Flow `export type` and export-kind detection
+    // (C++ JSParserImpl.cpp:7133-7137, 7361-7368; flow.cpp:2498-2575).
+
+    /// Helper: parse `src` with Flow enabled, expect one top-level
+    /// `ExportNamedDeclaration`, and assert its `exportKind` atom is `kind`.
+    fn assert_flow_export_kind(src: &[u8], kind: &[u8]) {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let stmt = flow_parse_stmt_at(&gc, &mut sm, src, 0);
+        let Node::ExportNamedDeclaration(decl) = stmt else {
+            panic!("expected ExportNamedDeclaration, got {:?}", stmt.kind())
+        };
+        assert_eq!(
+            gc.ctx().atom_table.bytes(decl.export_kind.get()),
+            kind,
+            "exportKind for {:?}",
+            String::from_utf8_lossy(src)
+        );
+    }
+
+    /// `export type A = ...;` routes through
+    /// `parse_export_type_declaration_flow` (C++ 7133-7137 →
+    /// flow.cpp:2557-2566) and gets exportKind `type`.
+    #[test]
+    fn flow_export_type_alias_kind_is_type() {
+        assert_flow_export_kind(b"export type A = number;", b"type");
+    }
+
+    /// `export opaque type` goes through the `export <Declaration>` path; the
+    /// kind detection (C++ 7361-7368) makes it `type`.
+    #[test]
+    fn flow_export_opaque_type_kind_is_type() {
+        assert_flow_export_kind(b"export opaque type B = string;", b"type");
+    }
+
+    /// `export interface` goes through the `export <Declaration>` path; the
+    /// kind detection (C++ 7361-7368) makes it `type`.
+    #[test]
+    fn flow_export_interface_kind_is_type() {
+        assert_flow_export_kind(b"export interface I { x: number }", b"type");
+    }
+
+    /// Value declarations keep exportKind `value` even with Flow enabled.
+    #[test]
+    fn flow_export_value_kinds_stay_value() {
+        assert_flow_export_kind(b"export var x = 1;", b"value");
+        assert_flow_export_kind(b"export function f(){}", b"value");
+    }
+
+    /// Without `parse_flow`, `export type A = 1;` does not hit the Flow
+    /// route: `type` is not a declaration start, so it errors exactly like
+    /// hermesc without `-parse-flow` ("expected declaration in export").
+    #[test]
+    fn export_type_without_flow_errors() {
+        assert_parse_has_errors(
+            b"export type A = 1;",
+            "export type without Flow is not a declaration",
+        );
+    }
+
+    /// The `export type {…}` / `export type *` specifier/re-export forms of
+    /// parseExportTypeDeclarationFlow (flow.cpp:2503-2556) are P6; they must
+    /// report an honest deferral error instead of silently mis-parsing.
+    #[test]
+    fn flow_export_type_clause_and_star_are_honest_p6_errors() {
+        assert_flow_parse_has_errors(
+            b"export type {x};",
+            "export type {…} is P6 and must error honestly",
+        );
+        assert_flow_parse_has_errors(
+            b"export type * from 'm';",
+            "export type * is P6 and must error honestly",
         );
     }
 

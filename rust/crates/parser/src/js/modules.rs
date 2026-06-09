@@ -15,7 +15,7 @@
 //! Flow/TS productions (the `import type` / `import typeof` kind detection and
 //! the per-specifier `type`/`typeof` forms) are gated off by
 //! `context_.getParseFlow()`/`getParseTS()` in C++; they are omitted here. The
-//! corresponding `// P5/P6/P7` comments mark each omission site. Until those
+//! corresponding `// P6/P7` comments mark each omission site. Until those
 //! land, the import kind is always `value`.
 
 use std::collections::hash_map::Entry;
@@ -306,14 +306,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// ## Documented simplification
     /// C++ returns `Optional<UniqueString* kind>` and fills `specifiers` by
     /// reference. Since `kind` is always `value` until Flow/TS `import type`
-    /// lands (P5/P6), we return just the `Vec` of specifiers and let the caller
+    /// lands (P6/P7), we return just the `Vec` of specifiers and let the caller
     /// supply the `value` kind. The kind return is reintroduced when
     /// `import type` is implemented.
     fn parse_import_clause(&mut self) -> Option<Vec<&'gc Node<'gc>>> {
         let mut specifiers: Vec<&'gc Node<'gc>> = Vec::new();
         let start_loc = self.cur_start();
 
-        // P5/P6/P7: Flow/TS import-kind (type/typeof) detection omitted.
+        // P6/P7: Flow/TS import-kind (type/typeof) detection omitted.
         // C++ 6790-6805.
 
         if self.check(TokenKind::identifier) {
@@ -515,7 +515,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         let value_ident = self.gc.ctx().atom_table.atom_bytes(b"value");
 
-        // P5/P6: Flow type/typeof import specifier omitted (C++ 6955-7073).
+        // P6: Flow type/typeof import specifier omitted (C++ 6955-7073).
 
         // Not attempting to parse a type identifier. C++ 7074-7109.
         if !self.check(TokenKind::identifier)
@@ -601,11 +601,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Parse an `export` declaration. Port of
     /// `JSParserImpl::parseExportDeclaration` (7127-7375).
     ///
-    /// Flow productions (`export type` at 7133-7137, the Flow default-export
-    /// forms at 7209-7279, and the Flow `export-kind` detection at 7362-7368)
-    /// are gated off by `context_.getParseFlow()` in C++ and are omitted here;
-    /// the `// P5/P6/P7` comments mark each omission site. Until those land the
-    /// export kind is always `value`.
+    /// The Flow `export type` dispatch (C++ 7133-7137) and the Flow
+    /// export-kind detection (C++ 7361-7368) are implemented; the Flow
+    /// default-export forms (component/hook/enum/record, C++ 7209-7279) are
+    /// P6, marked by a `// P6` comment at the omission site.
     pub(super) fn parse_export_declaration(
         &mut self,
     ) -> Option<&'gc Node<'gc>> {
@@ -615,10 +614,15 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         );
         let start_loc = self.advance(GrammarContext::AllowRegExp).start;
 
-        // The `value` export kind label (used until Flow/TS export-kind lands).
+        // The `value` export kind label.
         let value_ident = self.gc.ctx().atom_table.atom_bytes(b"value");
 
-        // P5/P6: Flow `export type` declaration omitted. C++ 7133-7137.
+        // Flow `export type ...`: every such form dispatches to
+        // parseExportTypeDeclarationFlow. C++ 7133-7137, gated on
+        // getParseFlow(); `check(typeIdent_)` is escape-insensitive.
+        if self.parse_flow() && self.check_name(b"type") {
+            return self.parse_export_type_declaration_flow(start_loc);
+        }
 
         if self.check_and_eat(TokenKind::star, GrammarContext::AllowRegExp) {
             // export * FromClause;
@@ -829,15 +833,29 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         let decl = self.parse_declaration(Param::default())?;
 
-        // P6: Flow type export-kind detection omitted (C++ 7362-7368); the kind
-        // stays `value`.
+        // Flow export-kind detection: exporting a Flow type declaration makes
+        // the export kind `type` instead of `value`. C++ 7361-7368, guarded
+        // only by compile-time `#if HERMES_PARSE_FLOW` — there is no runtime
+        // getParseFlow() check, so none here either (these node kinds can only
+        // be produced when Flow parsing is enabled anyway).
+        let kind = if matches!(
+            decl,
+            Node::TypeAlias(_)
+                | Node::OpaqueType(_)
+                | Node::DeclareTypeAlias(_)
+                | Node::InterfaceDeclaration(_)
+        ) {
+            self.gc.ctx().atom_table.atom_bytes(b"type")
+        } else {
+            value_ident
+        };
 
         let node = Node::ExportNamedDeclaration(ExportNamedDeclaration::new(
             NodeMetadata::new(self.dummy_range()),
             Some(decl),
             NodeList::empty(),
             None,
-            value_ident,
+            kind,
         ));
         Some(self.set_location(start_loc, decl.range().end, node))
     }

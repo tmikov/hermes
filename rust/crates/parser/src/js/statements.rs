@@ -230,9 +230,21 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // Flow declarations, gated on getParseFlow(). C++ 597-627.
         if self.parse_flow() {
             // P6: component/hook declarations (gated on
-            // getParseFlowComponentSyntax(), C++ 599-608) and record
-            // declarations (gated on getParseFlowRecords(), C++ 609-611)
-            // omitted — the Rust Context does not implement those flags yet.
+            // getParseFlowComponentSyntax(), C++ 599-608) omitted — the Rust
+            // Context does not implement that flag yet.
+            //
+            // The record check (`checkRecordDeclarationFlow()`, C++ 609-611)
+            // is deliberately NOT ported. Unlike the parse side (which is
+            // gated on getParseFlowRecords() inside parseFlowDeclaration,
+            // flow.cpp:47), the C++ checkDeclaration() record check is
+            // UNgated. Consequence in C++ with records disabled: on
+            // `record R {}` checkDeclaration() answers true, but
+            // parseFlowDeclaration matches nothing and silently returns None
+            // (flow.cpp:89-92 — the `kind == None` assert passes), so
+            // `hermesc -parse-flow` exits 2 with ZERO diagnostics. The Rust
+            // omits the check entirely: the same input takes the ordinary
+            // expression-statement path and reports one normal syntax error —
+            // a deliberate, better-behaved deviation.
 
             // `opaque` followed by an identifier (`type`). C++ 612-615.
             // The C++ `check(<ident>)` overload is escape-insensitive.
