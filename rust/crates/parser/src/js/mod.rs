@@ -3893,11 +3893,227 @@ mod tests {
         );
     }
 
-    /// Honest deferral errors for the unported Flow productions.
+    // ----------------------------------------------------------------------
+    // P6.2: Flow `enum` declarations.
+    // ----------------------------------------------------------------------
+
+    /// Helper: lock a Flow context, parse `src`, and return the first
+    /// statement, which must be an `EnumDeclaration`. The enum body is
+    /// returned alongside.
+    fn flow_enum<'gc>(
+        gc: &'gc ast::context::GCLock<'_, '_>,
+        sm: &mut support::manager::SourceErrorManager,
+        src: &[u8],
+    ) -> (&'gc ast::node::Node<'gc>, &'gc ast::node::Node<'gc>) {
+        let stmt = parse_one_stmt(gc, sm, src);
+        let ast::node::Node::EnumDeclaration(decl) = stmt else {
+            panic!("expected EnumDeclaration, got {:?}", stmt.kind())
+        };
+        (stmt, decl.body)
+    }
+
+    /// `enum E {}` now PARSES (P6.2): it yields an `EnumDeclaration` whose body
+    /// is an empty, non-explicit `EnumStringBody` (the untyped/empty default).
     #[test]
-    fn flow_deferred_productions_error() {
-        // P6.2: Flow enum declarations.
-        assert_flow_parse_has_errors(b"enum E {}", "Flow enum is P6.2");
+    fn flow_enum_empty() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let (_, body) = flow_enum(&gc, &mut sm, b"enum E {}");
+        let Node::EnumStringBody(b) = body else {
+            panic!("expected EnumStringBody, got {:?}", body.kind())
+        };
+        assert!(b.members.is_empty(), "no members");
+        assert!(!b.explicit_type.get(), "no explicit type");
+        assert!(!b.has_unknown_members.get(), "no unknown members");
+        assert_eq!(sm.error_count(), 0, "no errors");
+    }
+
+    /// `enum E { A, B, C }` → defaulted string-body members.
+    #[test]
+    fn flow_enum_defaulted() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let (_, body) = flow_enum(&gc, &mut sm, b"enum E { A, B, C }");
+        let Node::EnumStringBody(b) = body else {
+            panic!("expected EnumStringBody, got {:?}", body.kind())
+        };
+        assert_eq!(b.members.iter().count(), 3, "three members");
+        for m in b.members.iter() {
+            assert!(
+                matches!(m, Node::EnumDefaultedMember(_)),
+                "member is defaulted, got {:?}",
+                m.kind()
+            );
+        }
+        assert_eq!(sm.error_count(), 0);
+    }
+
+    /// `enum N of number { A = 1, B = 2 }` → `EnumNumberBody` with explicit
+    /// type and `EnumNumberMember`s.
+    #[test]
+    fn flow_enum_number_typed() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let (_, body) =
+            flow_enum(&gc, &mut sm, b"enum N of number { A = 1, B = 2 }");
+        let Node::EnumNumberBody(b) = body else {
+            panic!("expected EnumNumberBody, got {:?}", body.kind())
+        };
+        assert!(b.explicit_type.get(), "explicit type");
+        assert_eq!(b.members.iter().count(), 2);
+        for m in b.members.iter() {
+            assert!(
+                matches!(m, Node::EnumNumberMember(_)),
+                "member is EnumNumberMember, got {:?}",
+                m.kind()
+            );
+        }
+        assert_eq!(sm.error_count(), 0);
+    }
+
+    /// `enum B of boolean { A = true, B = false }` → `EnumBooleanBody`.
+    #[test]
+    fn flow_enum_boolean_typed() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let (_, body) = flow_enum(
+            &gc,
+            &mut sm,
+            b"enum B of boolean { A = true, B = false }",
+        );
+        let Node::EnumBooleanBody(b) = body else {
+            panic!("expected EnumBooleanBody, got {:?}", body.kind())
+        };
+        assert!(b.explicit_type.get());
+        assert!(matches!(
+            b.members.iter().next().unwrap(),
+            Node::EnumBooleanMember(_)
+        ));
+        assert_eq!(sm.error_count(), 0);
+    }
+
+    /// `enum Y of symbol { A, B }` → `EnumSymbolBody` (which has NO
+    /// `explicit_type` field) with defaulted members.
+    #[test]
+    fn flow_enum_symbol_body_has_no_explicit_type() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let (_, body) = flow_enum(&gc, &mut sm, b"enum Y of symbol { A, B }");
+        let Node::EnumSymbolBody(b) = body else {
+            panic!("expected EnumSymbolBody, got {:?}", body.kind())
+        };
+        // EnumSymbolBody intentionally has no `explicit_type` field — only
+        // `members` and `has_unknown_members`. Defaulted symbol members are
+        // legal.
+        assert_eq!(b.members.iter().count(), 2);
+        assert!(!b.has_unknown_members.get());
+        assert_eq!(sm.error_count(), 0);
+    }
+
+    /// `enum E { A = 1, B = 2, ... }` → inexact body (`has_unknown_members`).
+    #[test]
+    fn flow_enum_inexact() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let (_, body) =
+            flow_enum(&gc, &mut sm, b"enum E { A = 1, B = 2, ... }");
+        let Node::EnumNumberBody(b) = body else {
+            panic!("expected EnumNumberBody, got {:?}", body.kind())
+        };
+        assert!(b.has_unknown_members.get(), "has unknown members");
+        assert_eq!(b.members.iter().count(), 2, "two real members");
+        assert_eq!(sm.error_count(), 0);
+    }
+
+    /// `enum E { A = -1, B = 2 }` → a negated `EnumNumberMember`.
+    #[test]
+    fn flow_enum_negative_member() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let (_, body) = flow_enum(&gc, &mut sm, b"enum E { A = -1, B = 2 }");
+        let Node::EnumNumberBody(b) = body else {
+            panic!("expected EnumNumberBody, got {:?}", body.kind())
+        };
+        let first = b.members.iter().next().unwrap();
+        let Node::EnumNumberMember(m) = first else {
+            panic!("expected EnumNumberMember, got {:?}", first.kind())
+        };
+        let Node::NumericLiteral(lit) = m.init else {
+            panic!("expected NumericLiteral, got {:?}", m.init.kind())
+        };
+        assert_eq!(lit.value.get(), -1.0, "negated literal");
+        assert_eq!(sm.error_count(), 0);
+    }
+
+    /// A kind-mismatch (`number` enum with a string member) is a hard error.
+    #[test]
+    fn flow_enum_kind_mismatch_errors() {
+        assert_flow_parse_has_errors(
+            b"enum N of number { A = 1, B = \"x\" }",
+            "string initializer in number enum must error",
+        );
+    }
+
+    /// Inconsistent initializers (some defaulted, some not) is a hard error.
+    #[test]
+    fn flow_enum_inconsistent_initializers_errors() {
+        assert_flow_parse_has_errors(
+            b"enum E { A = 1, B }",
+            "mixed initialized/defaulted members must error",
+        );
+    }
+
+    /// A defaulted-only `number` enum (no inferable values) is a hard error.
+    #[test]
+    fn flow_enum_defaulted_number_errors() {
+        assert_flow_parse_has_errors(
+            b"enum N of number { A, B }",
+            "number enums must use initializers",
+        );
+    }
+
+    /// Without `parse_flow`, `enum` stays a plain identifier.
+    #[test]
+    fn flow_disabled_enum_is_plain_identifier() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt = parse_one_stmt(&gc, &mut sm, b"var enum2 = 1;");
+        assert!(
+            matches!(stmt, Node::VariableDeclaration(_)),
+            "expected VariableDeclaration, got {:?}",
+            stmt.kind()
+        );
     }
 
     // ----------------------------------------------------------------------

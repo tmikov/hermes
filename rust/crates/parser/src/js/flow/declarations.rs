@@ -10,9 +10,13 @@
 //! entry points of `lib/Parser/JSParserImpl-flow.cpp`.
 
 use ast::node::{
-    DeclareInterface, DeclareOpaqueType, DeclareTypeAlias,
-    ExportNamedDeclaration, Identifier, InterfaceDeclaration,
-    InterfaceExtends, Node, OpaqueType, TypeAlias,
+    BigIntLiteral, BooleanLiteral, DeclareEnum, DeclareInterface,
+    DeclareOpaqueType, DeclareTypeAlias, EnumBigIntBody, EnumBigIntMember,
+    EnumBooleanBody, EnumBooleanMember, EnumDeclaration, EnumDefaultedMember,
+    EnumNumberBody, EnumNumberMember, EnumStringBody, EnumStringMember,
+    EnumSymbolBody, ExportNamedDeclaration, Identifier, InterfaceDeclaration,
+    InterfaceExtends, Node, NumericLiteral, OpaqueType, StringLiteral,
+    TypeAlias,
 };
 use ast::node_child::{NodeList, NodeMetadata};
 use support::location::SMLoc;
@@ -25,6 +29,41 @@ use super::{
     AllowAnonFunctionType, AllowProtoProperty, AllowSpreadProperty,
     AllowStaticProperty, TypeAliasKind,
 };
+
+/// The kind of a Flow `enum`. Port of `JSParserImpl::EnumKind`
+/// (JSParserImpl.h:1550-1556 — keep the SAME variant order).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EnumKind {
+    String,
+    Number,
+    BigInt,
+    Boolean,
+    Symbol,
+}
+
+/// The user-facing name of an enum kind. Port of
+/// `JSParserImpl::enumKindStrFlow` (JSParserImpl.h:1558-1572).
+fn enum_kind_str_flow(kind: EnumKind) -> &'static str {
+    match kind {
+        EnumKind::String => "string",
+        EnumKind::Number => "number",
+        EnumKind::BigInt => "bigint",
+        EnumKind::Boolean => "boolean",
+        EnumKind::Symbol => "symbol",
+    }
+}
+
+/// The enum kind implied by a member node, or `None` for a defaulted member.
+/// Port of `JSParserImpl::getMemberEnumKindFlow` (JSParserImpl.h:1574-1587).
+fn get_member_enum_kind_flow(member: &Node<'_>) -> Option<EnumKind> {
+    match member {
+        Node::EnumStringMember(_) => Some(EnumKind::String),
+        Node::EnumNumberMember(_) => Some(EnumKind::Number),
+        Node::EnumBigIntMember(_) => Some(EnumKind::BigInt),
+        Node::EnumBooleanMember(_) => Some(EnumKind::Boolean),
+        _ => None,
+    }
+}
 
 impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     // -----------------------------------------------------------------------
@@ -48,9 +87,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         // C++ 51-56.
         if self.check(TokenKind::rw_enum) {
-            // P6: parseEnumDeclarationFlow (C++ 52-55).
-            self.error_cur("Flow enum declarations are unsupported (parser phase P6)");
-            return None;
+            // C++ 52-55. The `declare enum` / `export declare enum` routing
+            // (which calls this with declare=true) lands in P6.6.
+            return self.parse_enum_declaration_flow(start, /*declare*/ false);
         }
 
         // C++ 58-62. `checkAndEat(<ident>)` advances with the default
@@ -458,5 +497,491 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             " in export type declaration",
         );
         None
+    }
+
+    // -----------------------------------------------------------------------
+    // parseEnumDeclarationFlow — 5148 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a Flow `enum` declaration, with the cursor at `enum` and `start`
+    /// at the start of the declaration. Port of
+    /// `JSParserImpl::parseEnumDeclarationFlow` (flow.cpp:5148-5205).
+    ///
+    /// \param declare whether this is a `declare enum` (the `declare` routing
+    ///   that passes `true` lands in P6.6).
+    pub(in crate::js) fn parse_enum_declaration_flow(
+        &mut self,
+        start: SMLoc,
+        declare: bool,
+    ) -> Option<&'gc Node<'gc>> {
+        // C++ 5151-5152.
+        debug_assert!(self.check(TokenKind::rw_enum));
+        self.advance(GrammarContext::AllowRegExp);
+
+        // C++ 5154-5161: errorExpected(identifier, "in enum declaration",
+        // "start of declaration", start) — the single-token form renders
+        // "'identifier' expected in enum declaration"; `need` matches it
+        // exactly (note args dropped per house style).
+        if !self.need(TokenKind::identifier, " in enum declaration") {
+            return None;
+        }
+        // C++ 5162-5166.
+        let id_range = self.cur_range();
+        let id_node = Node::Identifier(Identifier::new(
+            NodeMetadata::new(self.dummy_range()),
+            self.lexer.token().get_identifier(),
+            None,
+            false,
+        ));
+        let id = self.set_location(id_range.start, id_range.end, id_node);
+        // C++ 5167.
+        self.advance(GrammarContext::Type);
+
+        // C++ 5169-5185: an optional `of <kind>` explicit type.
+        let mut opt_kind: Option<EnumKind> = None;
+        let mut explicit_type_start: Option<SMLoc> = None;
+        if self.check_name(b"of") {
+            explicit_type_start = Some(self.advance(GrammarContext::AllowRegExp).start);
+
+            // C++ 5174-5184: the five contextual kind idents. `checkAndEat` of
+            // a contextual ident → `check_name` + advance (default
+            // GrammarContext::AllowRegExp).
+            if self.check_name(b"string") {
+                self.advance(GrammarContext::AllowRegExp);
+                opt_kind = Some(EnumKind::String);
+            } else if self.check_name(b"number") {
+                self.advance(GrammarContext::AllowRegExp);
+                opt_kind = Some(EnumKind::Number);
+            } else if self.check_name(b"bigint") {
+                self.advance(GrammarContext::AllowRegExp);
+                opt_kind = Some(EnumKind::BigInt);
+            } else if self.check_name(b"boolean") {
+                self.advance(GrammarContext::AllowRegExp);
+                opt_kind = Some(EnumKind::Boolean);
+            } else if self.check_name(b"symbol") {
+                self.advance(GrammarContext::AllowRegExp);
+                opt_kind = Some(EnumKind::Symbol);
+            }
+        }
+
+        // C++ 5187-5192.
+        if !self.need(TokenKind::l_brace, " in enum declaration") {
+            return None;
+        }
+
+        // C++ 5194-5196.
+        let body = self.parse_enum_body_flow(opt_kind, explicit_type_start)?;
+
+        // C++ 5198-5204.
+        let end = body.range().end;
+        if declare {
+            let node = Node::DeclareEnum(DeclareEnum::new(
+                NodeMetadata::new(self.dummy_range()),
+                id,
+                body,
+            ));
+            return Some(self.set_location(start, end, node));
+        }
+        let node = Node::EnumDeclaration(EnumDeclaration::new(
+            NodeMetadata::new(self.dummy_range()),
+            id,
+            body,
+        ));
+        Some(self.set_location(start, end, node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseEnumBodyFlow — 5207 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse the `{ ... }` body of an enum, with the cursor at `{`. `opt_kind`
+    /// is the explicit kind from `of <kind>` (if any) and `explicit_type_start`
+    /// is the location of that explicit type (if any). Port of
+    /// `JSParserImpl::parseEnumBodyFlow` (flow.cpp:5207-5352).
+    fn parse_enum_body_flow(
+        &mut self,
+        opt_kind: Option<EnumKind>,
+        explicit_type_start: Option<SMLoc>,
+    ) -> Option<&'gc Node<'gc>> {
+        // C++ 5210-5211.
+        debug_assert!(self.check(TokenKind::l_brace));
+        let mut start = self.advance(GrammarContext::AllowRegExp).start;
+
+        // The kind may be inferred from the members if it was not explicit.
+        let mut opt_kind = opt_kind;
+
+        // C++ 5213-5261.
+        let mut members: Vec<&'gc Node<'gc>> = Vec::new();
+        let mut has_unknown_members = false;
+        while !self.check(TokenKind::r_brace) {
+            // C++ 5216-5227: the inexact `...`, which must come last.
+            if self.check(TokenKind::dotdotdot) {
+                let dotdotdot_loc =
+                    self.advance(GrammarContext::Type).start;
+                if !self.check(TokenKind::r_brace) {
+                    self.error_at_loc(
+                        dotdotdot_loc,
+                        "The `...` must come after all enum members. \
+                         Move it to the end of the enum body.",
+                    );
+                    return None;
+                }
+                has_unknown_members = true;
+                break;
+            }
+            // C++ 5228-5233.
+            if !self.need(TokenKind::identifier, " in enum declaration") {
+                return None;
+            }
+
+            // C++ 5235-5239.
+            let member = self.parse_enum_member_flow()?;
+            let opt_member_kind = get_member_enum_kind_flow(member);
+
+            // C++ 5241-5256.
+            if let Some(kind) = opt_kind {
+                // We've already figured out the type of the enum, so ensure
+                // that the new member is compatible with this.
+                if let Some(member_kind) = opt_member_kind {
+                    if kind != member_kind {
+                        let range = member.range();
+                        self.error_at(
+                            range,
+                            &format!(
+                                "cannot use {} initializer in {} enum",
+                                enum_kind_str_flow(member_kind),
+                                enum_kind_str_flow(kind),
+                            ),
+                        );
+                        self.lexer.get_source_mgr_mut().note_at(
+                            start,
+                            None,
+                            "start of enum body",
+                            support::diag::Subsystem::Parser,
+                        );
+                        return None;
+                    }
+                }
+            } else {
+                opt_kind = opt_member_kind;
+            }
+
+            // C++ 5258-5260.
+            members.push(member);
+            if !self.check_and_eat(TokenKind::comma, GrammarContext::AllowRegExp)
+            {
+                break;
+            }
+        }
+
+        // C++ 5263-5292.
+        if !members.is_empty() {
+            // Ensure that enum members use initializers consistently.
+            // This is vacuously true when `members` is empty, so just make
+            // sure all members use initializers iff the first member does.
+            let uses_initializers = !matches!(
+                members[0],
+                Node::EnumDefaultedMember(_)
+            );
+            for member in &members {
+                let member_uses =
+                    !matches!(member, Node::EnumDefaultedMember(_));
+                if uses_initializers != member_uses {
+                    let range = member.range();
+                    self.error_at(
+                        range,
+                        "enum members need to consistently either all use \
+                         initializers, or use no initializers",
+                    );
+                    let first_range = members[0].range();
+                    self.lexer.get_source_mgr_mut().note_range(
+                        first_range,
+                        "first enum member",
+                        support::diag::Subsystem::Parser,
+                    );
+                    return None;
+                }
+            }
+
+            // C++ 5283-5291.
+            if !uses_initializers {
+                // It's only legal to use defaulted members for string and
+                // symbol enums, because other kinds of enums can't infer
+                // values from names.
+                if let Some(kind) = opt_kind {
+                    if kind != EnumKind::String && kind != EnumKind::Symbol {
+                        self.error_at_loc(
+                            start,
+                            "number and boolean enums must use initializers",
+                        );
+                        return None;
+                    }
+                }
+            }
+        }
+
+        // C++ 5294-5301.
+        let end = self.lexer.token().end_loc();
+        if !self.eat(
+            TokenKind::r_brace,
+            GrammarContext::AllowRegExp,
+            " in enum body",
+        ) {
+            return None;
+        }
+
+        // C++ 5303-5306.
+        let has_explicit_type = explicit_type_start.is_some();
+        if let Some(ets) = explicit_type_start {
+            start = ets;
+        }
+
+        let members = NodeList::from_iter(self.gc, members);
+
+        // C++ 5308-5314: an untyped/empty enum is a string-body enum.
+        let Some(kind) = opt_kind else {
+            let node = Node::EnumStringBody(EnumStringBody::new(
+                NodeMetadata::new(self.dummy_range()),
+                members,
+                has_explicit_type,
+                has_unknown_members,
+            ));
+            return Some(self.set_location(start, end, node));
+        };
+
+        // C++ 5316-5351: there are different node kinds per enum kind.
+        let node = match kind {
+            EnumKind::String => Node::EnumStringBody(EnumStringBody::new(
+                NodeMetadata::new(self.dummy_range()),
+                members,
+                has_explicit_type,
+                has_unknown_members,
+            )),
+            EnumKind::Number => Node::EnumNumberBody(EnumNumberBody::new(
+                NodeMetadata::new(self.dummy_range()),
+                members,
+                has_explicit_type,
+                has_unknown_members,
+            )),
+            EnumKind::BigInt => Node::EnumBigIntBody(EnumBigIntBody::new(
+                NodeMetadata::new(self.dummy_range()),
+                members,
+                has_explicit_type,
+                has_unknown_members,
+            )),
+            EnumKind::Boolean => Node::EnumBooleanBody(EnumBooleanBody::new(
+                NodeMetadata::new(self.dummy_range()),
+                members,
+                has_explicit_type,
+                has_unknown_members,
+            )),
+            EnumKind::Symbol => {
+                // C++ 5343-5344: symbol enums can only be made via explicit
+                // type. EnumSymbolBody has no `explicit_type` field.
+                debug_assert!(
+                    has_explicit_type,
+                    "symbol enums can only be made via explicit type"
+                );
+                Node::EnumSymbolBody(EnumSymbolBody::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    members,
+                    has_unknown_members,
+                ))
+            }
+        };
+        Some(self.set_location(start, end, node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseEnumMemberFlow — 5354 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse one enum member, with the cursor at the member's identifier. Port
+    /// of `JSParserImpl::parseEnumMemberFlow` (flow.cpp:5354-5432).
+    fn parse_enum_member_flow(&mut self) -> Option<&'gc Node<'gc>> {
+        // C++ 5355-5360.
+        debug_assert!(self.check(TokenKind::identifier));
+        let id_range = self.cur_range();
+        let id_node = Node::Identifier(Identifier::new(
+            NodeMetadata::new(self.dummy_range()),
+            self.lexer.token().get_identifier(),
+            None,
+            false,
+        ));
+        let id = self.set_location(id_range.start, id_range.end, id_node);
+        // C++ 5361.
+        self.advance(GrammarContext::AllowRegExp);
+
+        // C++ 5363-5428.
+        let member: &'gc Node<'gc>;
+        if self.check_and_eat(TokenKind::equal, GrammarContext::AllowRegExp) {
+            // Parse initializer.
+            let tok_range = self.cur_range();
+            if self.check2(TokenKind::rw_true, TokenKind::rw_false) {
+                // C++ 5366-5372.
+                let value = self.check(TokenKind::rw_true);
+                let init_node = Node::BooleanLiteral(BooleanLiteral::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    value,
+                ));
+                let init = self.set_location(
+                    tok_range.start,
+                    tok_range.end,
+                    init_node,
+                );
+                let m = Node::EnumBooleanMember(EnumBooleanMember::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    id,
+                    init,
+                ));
+                member = self.set_location(
+                    id.range().start,
+                    tok_range.end,
+                    m,
+                );
+            } else if self.check(TokenKind::string_literal) {
+                // C++ 5373-5379.
+                let value = self.lexer.token().get_string_literal();
+                let init_node = Node::StringLiteral(StringLiteral::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    value,
+                ));
+                let init = self.set_location(
+                    tok_range.start,
+                    tok_range.end,
+                    init_node,
+                );
+                let m = Node::EnumStringMember(EnumStringMember::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    id,
+                    init,
+                ));
+                member = self.set_location(
+                    id.range().start,
+                    tok_range.end,
+                    m,
+                );
+            } else if self.check(TokenKind::minus) {
+                // C++ 5380-5397: a negated numeric literal.
+                let minus_start = self.cur_start();
+                self.advance(GrammarContext::AllowRegExp);
+                if self.check(TokenKind::numeric_literal) {
+                    let num_range = self.cur_range();
+                    // Negate the literal.
+                    let value = -self.lexer.token().get_numeric_literal();
+                    let init_node = Node::NumericLiteral(NumericLiteral::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        value,
+                    ));
+                    let init = self.set_location(
+                        minus_start,
+                        num_range.end,
+                        init_node,
+                    );
+                    let m = Node::EnumNumberMember(EnumNumberMember::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        id,
+                        init,
+                    ));
+                    member = self.set_location(
+                        id.range().start,
+                        num_range.end,
+                        m,
+                    );
+                } else {
+                    // C++ 5390-5396: errorExpected(numeric_literal,
+                    // "in negated enum member initializer", ...) — single-token
+                    // form rendered via `need` (note args dropped per house
+                    // style). `need` reports at the current token without
+                    // consuming, matching errorExpected.
+                    self.need(
+                        TokenKind::numeric_literal,
+                        " in negated enum member initializer",
+                    );
+                    return None;
+                }
+            } else if self.check(TokenKind::numeric_literal) {
+                // C++ 5398-5404.
+                let value = self.lexer.token().get_numeric_literal();
+                let init_node = Node::NumericLiteral(NumericLiteral::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    value,
+                ));
+                let init = self.set_location(
+                    tok_range.start,
+                    tok_range.end,
+                    init_node,
+                );
+                let m = Node::EnumNumberMember(EnumNumberMember::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    id,
+                    init,
+                ));
+                member = self.set_location(
+                    id.range().start,
+                    tok_range.end,
+                    m,
+                );
+            } else if self.check(TokenKind::bigint_literal) {
+                // C++ 5405-5411.
+                let bigint = self.lexer.token().get_bigint_literal();
+                let init_node = Node::BigIntLiteral(BigIntLiteral::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    bigint,
+                ));
+                let init = self.set_location(
+                    tok_range.start,
+                    tok_range.end,
+                    init_node,
+                );
+                let m = Node::EnumBigIntMember(EnumBigIntMember::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    id,
+                    init,
+                ));
+                member = self.set_location(
+                    id.range().start,
+                    tok_range.end,
+                    m,
+                );
+            } else {
+                // C++ 5412-5422: errorExpected over the five literal token
+                // kinds. The four-token wrapper plus rw_false covers the set
+                // {rw_true, rw_false, string_literal, numeric_literal,
+                // bigint_literal}; note args dropped per house style.
+                self.error_expected_enum_member_init();
+                return None;
+            }
+            // C++ 5424.
+            self.advance(GrammarContext::AllowRegExp);
+        } else {
+            // C++ 5425-5427.
+            let m = Node::EnumDefaultedMember(EnumDefaultedMember::new(
+                NodeMetadata::new(self.dummy_range()),
+                id,
+            ));
+            member = self.set_location(id.range().start, id.range().end, m);
+        }
+
+        // C++ 5430-5431.
+        Some(member)
+    }
+
+    /// Report the five-token `errorExpected` for an enum member initializer
+    /// (`true`, `false`, a string, a number, or a bigint). Port of the
+    /// initializer-list `errorExpected` at flow.cpp:5412-5422. The Rust
+    /// `error_expected*` family tops out at four tokens, so render the
+    /// five-token list directly to stay byte-faithful to the C++ message.
+    fn error_expected_enum_member_init(&mut self) {
+        use crate::token_kinds::token_kind_str;
+        let msg = format!(
+            "'{}', '{}', '{}', '{}' or '{}' expected in enum member initializer",
+            token_kind_str(TokenKind::rw_true),
+            token_kind_str(TokenKind::rw_false),
+            token_kind_str(TokenKind::string_literal),
+            token_kind_str(TokenKind::numeric_literal),
+            token_kind_str(TokenKind::bigint_literal),
+        );
+        self.error_cur(&msg);
     }
 }
