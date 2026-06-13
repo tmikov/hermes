@@ -24,7 +24,7 @@ use ast::node::{
 use ast::node_child::{NodeList, NodeMetadata};
 use support::location::SMLoc;
 
-use crate::js::{JSParserImpl, Param};
+use crate::js::{JSParserImpl, Param, PARAM_IN};
 use crate::lexer::GrammarContext;
 use crate::token_kinds::TokenKind;
 
@@ -908,12 +908,15 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     AllowAnonFunctionType::Yes,
                 )?;
 
-                // C++ 1758-1764.
+                // C++ 1758-1764. parseAssignmentExpression() defaults to
+                // param=ParamIn (JSParserImpl.h:1132) — the `[In]` grammar
+                // parameter must be set so `in` is a relational operator inside
+                // a record property initializer.
                 let mut value: Option<&'gc Node<'gc>> = None;
                 if self.check_and_eat(TokenKind::equal, GrammarContext::AllowRegExp)
                 {
                     value = Some(self.parse_assignment_expression(
-                        Param::default(),
+                        PARAM_IN,
                         AllowTypedArrowFunction::Yes,
                         CoverTypedParameters::Yes,
                         None,
