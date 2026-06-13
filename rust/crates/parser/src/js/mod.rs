@@ -7234,6 +7234,31 @@ mod tests {
         );
     }
 
+    /// A newline between `match` and `(` means this is NOT a match construct
+    /// (C++ `lookahead1(None)` defaults to `RequireNoNewLine = true`). hermesc
+    /// rejects `match\n(x) { _ => 1 }` with `';' expected`; the parser must too
+    /// (it must not silently parse a `MatchExpression`/`MatchStatement`).
+    #[test]
+    fn flow_match_newline_is_not_match() {
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = match_ctx();
+        let gc = ctx.lock();
+        let buf_id = sm.add_buffer_bytes("input", b"match\n(x) { _ => 1 }\n");
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        let _ = parser.parse();
+        assert!(
+            parser.error_count_pub() > 0,
+            "`match\\n(x) {{…}}` must error (newline blocks the match), not parse as a match"
+        );
+    }
+
     /// Both the statement and the expression forms can be distinguished by
     /// context: `const r = match (x) {…}` is an expression; bare
     /// `match (x) {…}` is a statement.

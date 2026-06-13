@@ -112,7 +112,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 // C++ 3016-3035: `component`/`hook`/`renders` (no following
                 // `?`) followed by `:` or `?` is a label, parsed as a generic
                 // type whose id is the keyword.
-                let opt_next = self.lexer.lookahead1::<false>(None);
+                let opt_next = self.lexer.lookahead1::<true>(None);
                 if opt_next == Some(TokenKind::colon)
                     || opt_next == Some(TokenKind::question)
                 {
@@ -126,7 +126,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 let start_loc = self.cur_start();
                 let id = self.make_keyword_generic_type();
                 self.advance(GrammarContext::Type);
-                let opt_next = self.lexer.lookahead1::<false>(None);
+                let opt_next = self.lexer.lookahead1::<true>(None);
                 if opt_next == Some(TokenKind::colon) {
                     return Some(id);
                 }

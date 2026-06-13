@@ -52,11 +52,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         if !self.check_name(b"match") {
             return false;
         }
-        // checkMaybeFlowMatchSlowPath — flow.cpp:861-863.
-        // The lookahead requires no specific newline behavior (the newline
-        // check happens after parsing the arguments), so REQUIRE_NO_NEWLINE is
-        // false.
-        let opt_next = self.lexer.lookahead1::<false>(None);
+        // checkMaybeFlowMatchSlowPath — flow.cpp:861-863. C++ `lookahead1(None)`
+        // uses the header default `RequireNoNewLine = true` (JSLexer.h:658): a
+        // newline between `match` and `(` means this is NOT a match construct
+        // (e.g. `match\n(x)` is `match` then `(x)`, not `match(x)`).
+        let opt_next = self.lexer.lookahead1::<true>(None);
         opt_next == Some(TokenKind::l_paren)
     }
 

@@ -653,7 +653,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     ) -> Option<&'gc Node<'gc>> {
         // C++ 4948-4953.
         if self.check(TokenKind::rw_this)
-            && self.lexer.lookahead1::<false>(None) == Some(TokenKind::colon)
+            && self.lexer.lookahead1::<true>(None) == Some(TokenKind::colon)
         {
             self.error_at(
                 self.cur_range(),

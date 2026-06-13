@@ -200,7 +200,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // C++ 199-204: don't pass an `expectedToken` so we don't advance on a
         // match (lets `parseComponentDeclarationFlow` reparse the token), and
         // so this stays idempotent.
-        self.lexer.lookahead1::<false>(None) == Some(TokenKind::identifier)
+        self.lexer.lookahead1::<true>(None) == Some(TokenKind::identifier)
     }
 
     /// Whether the current token (`async`) starts an `async component`
@@ -243,7 +243,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return false;
         }
         // C++ 772-777.
-        self.lexer.lookahead1::<false>(None) == Some(TokenKind::identifier)
+        self.lexer.lookahead1::<true>(None) == Some(TokenKind::identifier)
     }
 
     // -----------------------------------------------------------------------
@@ -772,7 +772,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // C++ 1622-1627: don't pass an `expectedToken` so we don't advance on a
         // match (lets `parseRecordDeclarationFlow` reparse the token), and so
         // this stays idempotent.
-        self.lexer.lookahead1::<false>(None) == Some(TokenKind::identifier)
+        self.lexer.lookahead1::<true>(None) == Some(TokenKind::identifier)
     }
 
     // -----------------------------------------------------------------------
@@ -1104,7 +1104,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// than a property name) only if the FOLLOWING token is not one of
     /// `:`/`<`/`(`/`}`/eof. Idempotent (`lookahead1(None)`).
     fn is_record_modifier_keyword(&mut self) -> bool {
-        let Some(next) = self.lexer.lookahead1::<false>(None) else {
+        let Some(next) = self.lexer.lookahead1::<true>(None) else {
             return false;
         };
         !matches!(
