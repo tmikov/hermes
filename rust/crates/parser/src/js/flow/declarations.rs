@@ -10,18 +10,19 @@
 //! entry points of `lib/Parser/JSParserImpl-flow.cpp`.
 
 use ast::node::{
-    BigIntLiteral, BooleanLiteral, DeclareEnum, DeclareInterface,
-    DeclareOpaqueType, DeclareTypeAlias, EnumBigIntBody, EnumBigIntMember,
-    EnumBooleanBody, EnumBooleanMember, EnumDeclaration, EnumDefaultedMember,
-    EnumNumberBody, EnumNumberMember, EnumStringBody, EnumStringMember,
-    EnumSymbolBody, ExportNamedDeclaration, Identifier, InterfaceDeclaration,
+    BigIntLiteral, BooleanLiteral, ComponentDeclaration, ComponentParameter,
+    DeclareComponent, DeclareEnum, DeclareInterface, DeclareOpaqueType,
+    DeclareTypeAlias, EnumBigIntBody, EnumBigIntMember, EnumBooleanBody,
+    EnumBooleanMember, EnumDeclaration, EnumDefaultedMember, EnumNumberBody,
+    EnumNumberMember, EnumStringBody, EnumStringMember, EnumSymbolBody,
+    ExportNamedDeclaration, HookDeclaration, Identifier, InterfaceDeclaration,
     InterfaceExtends, Node, NumericLiteral, OpaqueType, StringLiteral,
     TypeAlias,
 };
 use ast::node_child::{NodeList, NodeMetadata};
 use support::location::SMLoc;
 
-use crate::js::JSParserImpl;
+use crate::js::{JSParserImpl, Param};
 use crate::lexer::GrammarContext;
 use crate::token_kinds::TokenKind;
 
@@ -80,10 +81,46 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         assert!(self.check_declaration(), "invalid start for Flow declaration");
         let start = self.cur_start();
 
-        // P6: component/hook declarations (gated on
-        // getParseFlowComponentSyntax(), C++ 25-45) and record declarations
-        // (gated on getParseFlowRecords(), C++ 47-49) — the Rust Context does
-        // not implement those flags yet.
+        // C++ 25-30: `async component`.
+        if self.parse_flow_component_syntax()
+            && self.check_unescaped_name(b"async")
+            && self.check_async_component_flow()
+        {
+            self.advance(GrammarContext::AllowRegExp); // consume 'async'
+            return self.parse_component_declaration_flow(
+                start, /* declare */ false, /* is_async */ true,
+            );
+        }
+
+        // C++ 32-35: `component`.
+        if self.parse_flow_component_syntax()
+            && self.check_component_declaration_flow()
+        {
+            return self.parse_component_declaration_flow(
+                start, /* declare */ false, /* is_async */ false,
+            );
+        }
+
+        // C++ 37-41: `async hook`.
+        if self.parse_flow_component_syntax()
+            && self.check_unescaped_name(b"async")
+            && self.check_async_hook_flow()
+        {
+            self.advance(GrammarContext::AllowRegExp); // consume 'async'
+            return self
+                .parse_hook_declaration_flow(start, /* is_async */ true);
+        }
+
+        // C++ 43-45: `hook`.
+        if self.parse_flow_component_syntax()
+            && self.check_hook_declaration_flow()
+        {
+            return self
+                .parse_hook_declaration_flow(start, /* is_async */ false);
+        }
+
+        // P6.4: record declarations (gated on getParseFlowRecords(), C++ 47-49)
+        // — the Rust Context does not implement that flag yet.
 
         // C++ 51-56.
         if self.check(TokenKind::rw_enum) {
@@ -140,6 +177,578 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         // C++ 89-92.
         unreachable!("checkDeclaration() returned true without 'type' or 'interface'");
+    }
+
+    // -----------------------------------------------------------------------
+    // checkComponentDeclarationFlow — 195 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Whether the current token starts a `component` declaration. Port of
+    /// `JSParserImpl::checkComponentDeclarationFlow` (flow.cpp:195-205). MUST
+    /// be idempotent (it is called from `checkDeclaration`), so the lookahead
+    /// passes no expected token.
+    pub(in crate::js) fn check_component_declaration_flow(&mut self) -> bool {
+        // C++ 196-197.
+        if !self.check_name(b"component") {
+            return false;
+        }
+        // C++ 199-204: don't pass an `expectedToken` so we don't advance on a
+        // match (lets `parseComponentDeclarationFlow` reparse the token), and
+        // so this stays idempotent.
+        self.lexer.lookahead1::<false>(None) == Some(TokenKind::identifier)
+    }
+
+    /// Whether the current token (`async`) starts an `async component`
+    /// declaration. Port of `JSParserImpl::checkAsyncComponentFlow`
+    /// (flow.cpp:207-218). Callers must already have checked
+    /// `check_unescaped_name(b"async")`.
+    pub(in crate::js) fn check_async_component_flow(&mut self) -> bool {
+        // C++ 211.
+        debug_assert!(self.check_unescaped_name(b"async"));
+        // C++ 212-216.
+        let save_point = self.lexer.save_point();
+        self.advance(GrammarContext::AllowRegExp);
+        let result = !self.lexer.is_new_line_before_current_token()
+            && self.check_component_declaration_flow();
+        save_point.restore(&mut self.lexer);
+        result
+    }
+
+    /// Whether the current token (`async`) starts an `async hook` declaration.
+    /// Port of `JSParserImpl::checkAsyncHookFlow` (flow.cpp:220-231). Callers
+    /// must already have checked `check_unescaped_name(b"async")`.
+    pub(in crate::js) fn check_async_hook_flow(&mut self) -> bool {
+        // C++ 224.
+        debug_assert!(self.check_unescaped_name(b"async"));
+        // C++ 225-229.
+        let save_point = self.lexer.save_point();
+        self.advance(GrammarContext::AllowRegExp);
+        let result = !self.lexer.is_new_line_before_current_token()
+            && self.check_hook_declaration_flow();
+        save_point.restore(&mut self.lexer);
+        result
+    }
+
+    /// Whether the current token starts a `hook` declaration. Port of
+    /// `JSParserImpl::checkHookDeclarationFlow` (flow.cpp:768-778). MUST be
+    /// idempotent (called from `checkDeclaration`).
+    pub(in crate::js) fn check_hook_declaration_flow(&mut self) -> bool {
+        // C++ 769-770.
+        if !self.check_name(b"hook") {
+            return false;
+        }
+        // C++ 772-777.
+        self.lexer.lookahead1::<false>(None) == Some(TokenKind::identifier)
+    }
+
+    // -----------------------------------------------------------------------
+    // parseComponentDeclarationFlow — 233 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a `component` declaration (or, when `declare`, a
+    /// `DeclareComponent`), with the cursor at `component` and `start` at the
+    /// start of the declaration. Port of
+    /// `JSParserImpl::parseComponentDeclarationFlow` (flow.cpp:233-330).
+    ///
+    /// The `declare` form (which uses component-type parameters) is reachable
+    /// only from the `declare component` routing in P6.6.
+    pub(in crate::js) fn parse_component_declaration_flow(
+        &mut self,
+        start: SMLoc,
+        declare: bool,
+        is_async: bool,
+    ) -> Option<&'gc Node<'gc>> {
+        // C++ 237-239.
+        debug_assert!(self.check_name(b"component"));
+        self.advance(GrammarContext::AllowRegExp);
+
+        // C++ 241-252: components always require a name identifier.
+        let Some(id) = self.parse_binding_identifier(Param::default()) else {
+            // C++ 245-251: errorExpected(identifier, "after 'component'",
+            // "location of 'component'", start). The note arg is dropped per
+            // house style; `start` retained only for symmetry with the C++.
+            let _ = start;
+            self.error_cur("'identifier' expected after 'component'");
+            return None;
+        };
+
+        // C++ 254-261.
+        let mut type_params: Option<&'gc Node<'gc>> = None;
+        if self.check(TokenKind::less) {
+            type_params = Some(self.parse_type_params_flow()?);
+        }
+
+        // C++ 263-269.
+        if !self.need(
+            TokenKind::l_paren,
+            " at start of component parameter list",
+        ) {
+            return None;
+        }
+
+        // C++ 271-282.
+        let mut param_list: Vec<&'gc Node<'gc>> = Vec::new();
+        let mut rest: Option<&'gc Node<'gc>> = None;
+        if declare {
+            rest = self.parse_component_type_parameters_flow(
+                Param::default(),
+                &mut param_list,
+            )?;
+        } else if !self
+            .parse_component_parameters_flow(Param::default(), &mut param_list)
+        {
+            return None;
+        }
+
+        // C++ 284-290.
+        let mut renders_type: Option<&'gc Node<'gc>> = None;
+        if self.check_name(b"renders") {
+            renders_type =
+                Some(self.parse_component_render_type_flow(false)?);
+        }
+
+        let params = NodeList::from_iter(self.gc, param_list);
+
+        // C++ 292-301: the declare form ends here with `eatSemi`.
+        if declare {
+            if !self.eat_semi(false) {
+                return None;
+            }
+            let node = Node::DeclareComponent(DeclareComponent::new(
+                NodeMetadata::new(self.dummy_range()),
+                id,
+                params,
+                rest,
+                type_params,
+                renders_type,
+            ));
+            return Some(self.set_location(
+                start,
+                self.lexer.prev_token_end(),
+                node,
+            ));
+        }
+
+        // C++ 303-309.
+        if !self.need(TokenKind::l_brace, " in component declaration") {
+            return None;
+        }
+
+        // C++ 311-318: paramAwait_ = isAsync around the body; the function
+        // state is saved/restored by the body parse.
+        let body = {
+            let _guard_await = self.save_param_await(is_async);
+            self.parse_function_body(
+                Param::default(),
+                false,
+                false,
+                is_async,
+                GrammarContext::AllowRegExp,
+                true,
+            )?
+        };
+
+        // C++ 320-329.
+        let end = body.range().end;
+        let node = Node::ComponentDeclaration(ComponentDeclaration::new(
+            NodeMetadata::new(self.dummy_range()),
+            id,
+            params,
+            body,
+            type_params,
+            renders_type,
+            is_async,
+        ));
+        Some(self.set_location(start, end, node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseComponentParametersFlow — 332 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse the `( ... )` parameter list of a `component` declaration into
+    /// `param_list`. Returns false if an error was reported. Port of
+    /// `JSParserImpl::parseComponentParametersFlow` (flow.cpp:332-373).
+    fn parse_component_parameters_flow(
+        &mut self,
+        param: Param,
+        param_list: &mut Vec<&'gc Node<'gc>>,
+    ) -> bool {
+        // C++ 335-338.
+        debug_assert!(self.check(TokenKind::l_paren));
+        self.advance(GrammarContext::AllowRegExp);
+
+        // C++ 340-360.
+        while !self.check(TokenKind::r_paren) {
+            if self.check(TokenKind::dotdotdot) {
+                // C++ 341-348: a BindingRestElement.
+                let Some(rest_elem) = self.parse_binding_rest_element(param)
+                else {
+                    return false;
+                };
+                param_list.push(rest_elem);
+                self.check_and_eat(TokenKind::comma, GrammarContext::Type);
+                break;
+            }
+
+            // C++ 351-356: a ComponentParameter.
+            let Some(param_node) = self.parse_component_parameter_flow(param)
+            else {
+                return false;
+            };
+            param_list.push(param_node);
+
+            // C++ 358-359.
+            if !self.check_and_eat(TokenKind::comma, GrammarContext::AllowRegExp)
+            {
+                break;
+            }
+        }
+
+        // C++ 362-372.
+        self.eat(
+            TokenKind::r_paren,
+            GrammarContext::AllowRegExp,
+            " at end of component parameter list",
+        )
+    }
+
+    // -----------------------------------------------------------------------
+    // parseComponentParameterFlow — 375 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse one `component` parameter (the three shapes:
+    /// `StringLiteral as BindingElement`, `IdentifierName`,
+    /// `IdentifierName as BindingElement`). Port of
+    /// `JSParserImpl::parseComponentParameterFlow` (flow.cpp:375-489).
+    fn parse_component_parameter_flow(
+        &mut self,
+        param: Param,
+    ) -> Option<&'gc Node<'gc>> {
+        // C++ 382.
+        let param_start = self.cur_start();
+
+        // C++ 384-409: `StringLiteral as BindingElement` — the local via `as`
+        // is required.
+        if self.check(TokenKind::string_literal) {
+            let str_range = self.cur_range();
+            let value = self.lexer.token().get_string_literal();
+            let name_node = Node::StringLiteral(StringLiteral::new(
+                NodeMetadata::new(self.dummy_range()),
+                value,
+            ));
+            let name_elem =
+                self.set_location(str_range.start, str_range.end, name_node);
+            self.advance(GrammarContext::AllowRegExp);
+
+            // C++ 393-398.
+            if !self.check_name(b"as") {
+                self.error_at(
+                    name_elem.range(),
+                    "string literal names require a local via `as`",
+                );
+                return None;
+            }
+            self.advance(GrammarContext::AllowRegExp);
+
+            // C++ 400-408.
+            let binding = self.parse_binding_element(Param::default())?;
+            let node = Node::ComponentParameter(ComponentParameter::new(
+                NodeMetadata::new(self.dummy_range()),
+                name_elem,
+                binding,
+                false,
+            ));
+            return Some(self.set_location(
+                param_start,
+                self.lexer.prev_token_end(),
+                node,
+            ));
+        }
+
+        // C++ 411-481: `IdentifierName` with optional `as BindingElement` or
+        // shorthand `IdentifierName?: T = init`.
+        if self.check(TokenKind::identifier) || self.lexer.token().is_res_word()
+        {
+            let id = self.lexer.token().get_res_word_or_identifier();
+            let ident_rng = self.cur_range();
+            let ident_kind = self.lexer.token().kind();
+            let name_node = Node::Identifier(Identifier::new(
+                NodeMetadata::new(self.dummy_range()),
+                id,
+                None,
+                false,
+            ));
+            let name_elem =
+                self.set_location(ident_rng.start, ident_rng.end, name_node);
+            self.advance(GrammarContext::AllowRegExp);
+
+            // C++ 421-433: `IdentifierName as BindingElement`.
+            if self.check_name(b"as") {
+                self.advance(GrammarContext::AllowRegExp);
+                let binding = self.parse_binding_element(Param::default())?;
+                let node = Node::ComponentParameter(ComponentParameter::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    name_elem,
+                    binding,
+                    false,
+                ));
+                return Some(self.set_location(
+                    param_start,
+                    self.lexer.prev_token_end(),
+                    node,
+                ));
+            }
+
+            // C++ 435-437: validate the shorthand name as a local binding.
+            let id_bytes = self.gc.ctx().atom_table.bytes(id).to_owned();
+            if !self.validate_binding_identifier(
+                ident_rng,
+                &id_bytes,
+                ident_kind,
+            ) {
+                self.error_at(ident_rng, "Invalid local name for component");
+            }
+
+            // C++ 439-447: `IdentifierName?` optional marker.
+            let mut type_annot: Option<&'gc Node<'gc>> = None;
+            let mut optional = false;
+            if self.check(TokenKind::question) {
+                optional = true;
+                self.advance(GrammarContext::Type);
+            }
+
+            // C++ 449-457: `: TypeParam`.
+            if self.check(TokenKind::colon) {
+                let annot_start = self.advance(GrammarContext::Type).start;
+                type_annot = Some(self.parse_type_annotation(
+                    Some(annot_start),
+                    AllowAnonFunctionType::Yes,
+                )?);
+            }
+
+            // C++ 459-462: the shorthand local is an Identifier (carrying the
+            // optional marker and type annotation).
+            let elem_node = Node::Identifier(Identifier::new(
+                NodeMetadata::new(self.dummy_range()),
+                id,
+                type_annot,
+                optional,
+            ));
+            let elem = self.set_location(
+                ident_rng.start,
+                self.lexer.prev_token_end(),
+                elem_node,
+            );
+
+            // C++ 465-474: `= init`.
+            let local_elem = if self.check(TokenKind::equal) {
+                self.parse_binding_initializer(param, elem)?
+            } else {
+                elem
+            };
+
+            // C++ 476-480.
+            let node = Node::ComponentParameter(ComponentParameter::new(
+                NodeMetadata::new(self.dummy_range()),
+                name_elem,
+                local_elem,
+                true,
+            ));
+            return Some(self.set_location(
+                param_start,
+                self.lexer.prev_token_end(),
+                node,
+            ));
+        }
+
+        // C++ 483-486.
+        self.error_at_loc(
+            self.cur_start(),
+            "identifier or string literal expected in component parameter name",
+        );
+        None
+    }
+
+    // -----------------------------------------------------------------------
+    // parseRenderTypeOperator — 489 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse the `renders`/`renders?`/`renders*` operator keyword, consuming
+    /// it (and the trailing `?`/`*`), and return the interned operator label.
+    /// Port of `JSParserImpl::parseRenderTypeOperator` (flow.cpp:489-523).
+    pub(in crate::js) fn parse_render_type_operator(
+        &mut self,
+    ) -> Option<ast::node_child::NodeLabel> {
+        // C++ 490.
+        debug_assert!(self.check_name(b"renders"));
+        // C++ 491-520: the `checkFollowingCharacter` calls must run with the
+        // `renders` ident still the current token, so we can't advance until
+        // after them (the ordering trap).
+        let operator: &[u8];
+        if self.lexer.check_following_character(b'?') {
+            // C++ 492-502.
+            let start = self.advance(GrammarContext::Type).start;
+            if !self.eat(
+                TokenKind::question,
+                GrammarContext::Type,
+                " in render type annotation",
+            ) {
+                let _ = start;
+                return None;
+            }
+            operator = b"renders?";
+        } else if self.lexer.check_following_character(b'*') {
+            // C++ 503-513.
+            let start = self.advance(GrammarContext::Type).start;
+            if !self.eat(
+                TokenKind::star,
+                GrammarContext::Type,
+                " in render type annotation",
+            ) {
+                let _ = start;
+                return None;
+            }
+            operator = b"renders*";
+        } else {
+            // C++ 514-520: normal `renders`, but we must still eat the token.
+            self.advance(GrammarContext::Type);
+            operator = b"renders";
+        }
+        Some(self.gc.ctx().atom_table.atom_bytes(operator))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseComponentRenderTypeFlow — 525 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a `renders <Type>` render-type annotation. Port of
+    /// `JSParserImpl::parseComponentRenderTypeFlow` (flow.cpp:525-553).
+    ///
+    /// \param component_type whether this is for a component TYPE annotation
+    ///   (which uses `parsePrefixTypeAnnotationFlow` for the body) rather than
+    ///   a component DECLARATION (which uses `parseTypeAnnotationFlow`). This
+    ///   precedence asymmetry is intentional — see the C++ comment.
+    pub(in crate::js) fn parse_component_render_type_flow(
+        &mut self,
+        component_type: bool,
+    ) -> Option<&'gc Node<'gc>> {
+        // C++ 527-528.
+        let annot_start = self.cur_start();
+        let operator = self.parse_render_type_operator();
+        // C++ 530-546: because unions have higher precedence than renders, the
+        // body precedence differs between component types and declarations.
+        let body = if component_type {
+            self.parse_prefix_type_annotation_flow()
+        } else {
+            self.parse_type_annotation_flow(None, AllowAnonFunctionType::Yes)
+        };
+        // C++ 547-548.
+        let (Some(body), Some(operator)) = (body, operator) else {
+            return None;
+        };
+        // C++ 549-552.
+        let node = Node::TypeOperator(ast::node::TypeOperator::new(
+            NodeMetadata::new(self.dummy_range()),
+            operator,
+            body,
+        ));
+        Some(self.set_location(annot_start, self.lexer.prev_token_end(), node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseHookDeclarationFlow — 780 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a `hook` declaration, with the cursor at `hook` and `start` at the
+    /// start of the declaration. Port of
+    /// `JSParserImpl::parseHookDeclarationFlow` (flow.cpp:780-858).
+    pub(in crate::js) fn parse_hook_declaration_flow(
+        &mut self,
+        start: SMLoc,
+        is_async: bool,
+    ) -> Option<&'gc Node<'gc>> {
+        // C++ 784-785.
+        debug_assert!(self.check_name(b"hook"));
+        self.advance(GrammarContext::AllowRegExp);
+
+        // C++ 787-795: hooks always require a name identifier.
+        let Some(id) = self.parse_binding_identifier(Param::default()) else {
+            // C++ 791-794: errorExpected(identifier, "after 'hook'",
+            // "location of 'hook'", start) — note arg dropped per house style.
+            let _ = start;
+            self.error_cur("'identifier' expected after 'hook'");
+            return None;
+        };
+
+        // C++ 797-804.
+        let mut type_params: Option<&'gc Node<'gc>> = None;
+        if self.check(TokenKind::less) {
+            type_params = Some(self.parse_type_params_flow()?);
+        }
+
+        // C++ 806-812.
+        if !self.need(TokenKind::l_paren, " at start of hook parameter list") {
+            return None;
+        }
+
+        // C++ 814-851: paramAwait_ = isAsync spans the params AND the body.
+        let _guard_await = self.save_param_await(is_async);
+
+        let mut param_list: Vec<&'gc Node<'gc>> = Vec::new();
+        // C++ 818-819: hooks use ORDINARY formal parameters, not component
+        // parameters.
+        if !self.parse_formal_parameters(Param::default(), &mut param_list) {
+            return None;
+        }
+        let params = NodeList::from_iter(self.gc, param_list);
+
+        // C++ 821-835: an optional `: ReturnType`; `%checks` predicates are
+        // unsupported in hooks.
+        let mut return_type: Option<&'gc Node<'gc>> = None;
+        if self.check(TokenKind::colon) {
+            let annot_start = self.advance(GrammarContext::Type).start;
+            if !self.check_name(b"checks") {
+                return_type = Some(self.parse_return_type_annotation_flow(
+                    Some(annot_start),
+                    AllowAnonFunctionType::Yes,
+                )?);
+            } else {
+                self.error_at_loc(
+                    self.cur_start(),
+                    "checks predicates unsupported with hooks",
+                );
+                return None;
+            }
+        }
+
+        // C++ 837-843.
+        if !self.need(TokenKind::l_brace, " in hook declaration") {
+            return None;
+        }
+
+        // C++ 845-851.
+        let body = self.parse_function_body(
+            Param::default(),
+            false,
+            false,
+            is_async,
+            GrammarContext::AllowRegExp,
+            true,
+        )?;
+
+        // C++ 853-857.
+        let end = body.range().end;
+        let node = Node::HookDeclaration(HookDeclaration::new(
+            NodeMetadata::new(self.dummy_range()),
+            id,
+            params,
+            body,
+            type_params,
+            return_type,
+            is_async,
+        ));
+        Some(self.set_location(start, end, node))
     }
 
     // -----------------------------------------------------------------------

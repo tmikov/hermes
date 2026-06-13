@@ -229,9 +229,22 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         // Flow declarations, gated on getParseFlow(). C++ 597-627.
         if self.parse_flow() {
-            // P6: component/hook declarations (gated on
-            // getParseFlowComponentSyntax(), C++ 599-608) omitted — the Rust
-            // Context does not implement that flag yet.
+            // C++ 599-608: component/hook declarations (gated on
+            // getParseFlowComponentSyntax()).
+            if self.parse_flow_component_syntax()
+                && (self.check_component_declaration_flow()
+                    || (self.check_unescaped_name(b"async")
+                        && self.check_async_component_flow()))
+            {
+                return true;
+            }
+            if self.parse_flow_component_syntax()
+                && (self.check_hook_declaration_flow()
+                    || (self.check_unescaped_name(b"async")
+                        && self.check_async_hook_flow()))
+            {
+                return true;
+            }
             //
             // The record check (`checkRecordDeclarationFlow()`, C++ 609-611)
             // is deliberately NOT ported. Unlike the parse side (which is
@@ -2323,7 +2336,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Parse a binding `Initializer` (`= AssignmentExpression`) and wrap the
     /// already-parsed `left` target in an `AssignmentPattern`. Port of
     /// `JSParserImpl::parseBindingInitializer` (lines 1415-1432).
-    fn parse_binding_initializer(
+    pub(super) fn parse_binding_initializer(
         &mut self,
         param: Param,
         left: &'gc Node<'gc>,

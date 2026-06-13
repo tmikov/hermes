@@ -13,16 +13,18 @@
 use ast::node::{
     AnyTypeAnnotation, ArrayTypeAnnotation, BigIntLiteralTypeAnnotation,
     BigIntTypeAnnotation, BooleanLiteralTypeAnnotation, BooleanTypeAnnotation,
-    ConditionalTypeAnnotation, EmptyTypeAnnotation, ExistsTypeAnnotation,
-    FunctionTypeParam, Identifier, IndexedAccessType, InferTypeAnnotation,
+    ComponentTypeAnnotation, ComponentTypeParameter, ConditionalTypeAnnotation,
+    EmptyTypeAnnotation, ExistsTypeAnnotation,
+    FunctionTypeParam, GenericTypeAnnotation, Identifier, IndexedAccessType,
+    InferTypeAnnotation,
     InterfaceTypeAnnotation, IntersectionTypeAnnotation, KeyofTypeAnnotation,
     MixedTypeAnnotation,
     NeverTypeAnnotation, Node, NullLiteralTypeAnnotation,
     NullableTypeAnnotation, NumberLiteralTypeAnnotation, NumberTypeAnnotation,
-    OptionalIndexedAccessType, QualifiedTypeofIdentifier,
+    OptionalIndexedAccessType, QualifiedTypeofIdentifier, StringLiteral,
     StringLiteralTypeAnnotation, StringTypeAnnotation, SymbolTypeAnnotation,
     TupleTypeAnnotation, TupleTypeLabeledElement, TupleTypeSpreadElement,
-    TypeAnnotation, TypeParameter, TypeofTypeAnnotation,
+    TypeAnnotation, TypeOperator, TypeParameter, TypeofTypeAnnotation,
     UndefinedTypeAnnotation, UnionTypeAnnotation, UnknownTypeAnnotation,
     Variance, VoidTypeAnnotation,
 };
@@ -30,7 +32,7 @@ use ast::node_child::{NodeLabel, NodeList, NodeMetadata};
 use support::location::SMLoc;
 
 use crate::js::expressions::inc_parens;
-use crate::js::JSParserImpl;
+use crate::js::{JSParserImpl, Param};
 use crate::lexer::GrammarContext;
 use crate::token_kinds::TokenKind;
 
@@ -91,13 +93,91 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     pub(super) fn parse_type_annotation_before_colon_flow(
         &mut self,
     ) -> Option<&'gc Node<'gc>> {
-        // P6: the component-syntax lookahead paths (the `component`/`hook`/
-        // `renders` contextual keywords, C++ 3014-3072) are gated on
-        // getParseFlowComponentSyntax(), which the Rust Context does not
-        // implement yet.
+        // C++ 3012-3073: if the identifier name is a known keyword we need to
+        // look ahead to see if it's a type or an identifier, otherwise it
+        // could fail to parse. Gated on getParseFlowComponentSyntax().
+        if self.check(TokenKind::identifier) && self.parse_flow_component_syntax()
+        {
+            let name = self
+                .gc
+                .ctx()
+                .atom_table
+                .bytes(self.lexer.token().get_res_word_or_identifier())
+                .to_owned();
+            let renders_q =
+                name == b"renders" && self.lexer.check_following_character(b'?');
+            if (name == b"component" || name == b"hook")
+                || (name == b"renders" && !renders_q)
+            {
+                // C++ 3016-3035: `component`/`hook`/`renders` (no following
+                // `?`) followed by `:` or `?` is a label, parsed as a generic
+                // type whose id is the keyword.
+                let opt_next = self.lexer.lookahead1::<false>(None);
+                if opt_next == Some(TokenKind::colon)
+                    || opt_next == Some(TokenKind::question)
+                {
+                    let id = self.make_keyword_generic_type();
+                    self.advance(GrammarContext::Type);
+                    return Some(id);
+                }
+            } else if renders_q {
+                // C++ 3036-3071: `renders?` — either a `renders?` label on a
+                // `:`-typed element, or the `renders?` type operator.
+                let start_loc = self.cur_start();
+                let id = self.make_keyword_generic_type();
+                self.advance(GrammarContext::Type);
+                let opt_next = self.lexer.lookahead1::<false>(None);
+                if opt_next == Some(TokenKind::colon) {
+                    return Some(id);
+                }
+                // C++ 3055-3062.
+                if !self.eat(
+                    TokenKind::question,
+                    GrammarContext::Type,
+                    " in render type annotation",
+                ) {
+                    return None;
+                }
+                let body = self.parse_prefix_type_annotation_flow()?;
+                let operator =
+                    self.gc.ctx().atom_table.atom_bytes(b"renders?");
+                let node = Node::TypeOperator(TypeOperator::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    operator,
+                    body,
+                ));
+                return Some(self.set_location(
+                    start_loc,
+                    self.lexer.prev_token_end(),
+                    node,
+                ));
+            }
+        }
 
         // C++ 3075.
         self.parse_type_annotation_flow(None, AllowAnonFunctionType::Yes)
+    }
+
+    /// Build a `GenericTypeAnnotation` whose id is the current token's keyword
+    /// identifier (a `component`/`hook`/`renders` contextual keyword used as a
+    /// labelled-element name). Helper for the label-disambiguation paths of
+    /// `parseTypeAnnotationBeforeColonFlow` (flow.cpp:3023-3032 / 3040-3049).
+    /// Does NOT advance — the caller advances after.
+    fn make_keyword_generic_type(&mut self) -> &'gc Node<'gc> {
+        let range = self.cur_range();
+        let id_node = Node::Identifier(Identifier::new(
+            NodeMetadata::new(self.dummy_range()),
+            self.lexer.token().get_res_word_or_identifier(),
+            None,
+            false,
+        ));
+        let id = self.set_location(range.start, range.end, id_node);
+        let generic = Node::GenericTypeAnnotation(GenericTypeAnnotation::new(
+            NodeMetadata::new(self.dummy_range()),
+            id,
+            None,
+        ));
+        self.set_location(range.start, range.end, generic)
     }
 
     /// Port of `parseConditionalTypeAnnotationFlow` (flow.cpp:3096-3145).
@@ -267,7 +347,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     /// Port of `parsePrefixTypeAnnotationFlow` (flow.cpp:3232-3244).
-    fn parse_prefix_type_annotation_flow(&mut self) -> Option<&'gc Node<'gc>> {
+    pub(super) fn parse_prefix_type_annotation_flow(&mut self) -> Option<&'gc Node<'gc>> {
         let start = self.cur_start();
         // C++ 3234-3242: nullable `?T` (right-recursive, so `??T` nests).
         if self.check_and_eat(TokenKind::question, GrammarContext::Type) {
@@ -439,10 +519,16 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 enum NamedType<'gc> {
                     Prim(Node<'gc>),
                     Keyof,
+                    Renders,
+                    Component,
+                    Hook,
                     Interface,
                     Infer,
                     Generic,
                 }
+                // C++ 3420/3432/3439: the `renders`/`component`/`hook` arms
+                // are gated on getParseFlowComponentSyntax().
+                let component_syntax = self.parse_flow_component_syntax();
                 let arm = {
                     let name = self.lexer.get_string_table().bytes(
                         self.lexer.token().get_res_word_or_identifier(),
@@ -509,9 +595,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                         ),
                         // C++ 3410-3418.
                         b"keyof" => NamedType::Keyof,
-                        // P6: `renders`/`component`/`hook` (C++ 3420-3446)
-                        // are gated on getParseFlowComponentSyntax(), which
-                        // the Rust Context does not implement yet.
+                        // C++ 3420-3431.
+                        b"renders" if component_syntax => NamedType::Renders,
+                        // C++ 3432-3438.
+                        b"component" if component_syntax => {
+                            NamedType::Component
+                        }
+                        // C++ 3439-3445.
+                        b"hook" if component_syntax => NamedType::Hook,
                         // C++ 3447-3457.
                         b"interface" => NamedType::Interface,
                         // C++ 3459-3504.
@@ -539,6 +630,33 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                             self.lexer.prev_token_end(),
                             node,
                         ))
+                    }
+                    NamedType::Renders => {
+                        // C++ 3420-3431.
+                        let operator = self.parse_render_type_operator();
+                        let body = self.parse_prefix_type_annotation_flow();
+                        let (Some(body), Some(operator)) = (body, operator)
+                        else {
+                            return None;
+                        };
+                        let node = Node::TypeOperator(TypeOperator::new(
+                            NodeMetadata::new(self.dummy_range()),
+                            operator,
+                            body,
+                        ));
+                        Some(self.set_location(
+                            start,
+                            self.lexer.prev_token_end(),
+                            node,
+                        ))
+                    }
+                    NamedType::Component => {
+                        // C++ 3432-3438.
+                        self.parse_component_type_annotation_flow()
+                    }
+                    NamedType::Hook => {
+                        // C++ 3439-3445.
+                        self.parse_hook_type_annotation_flow()
                     }
                     NamedType::Interface => {
                         // C++ 3447-3457 (the loose-mode spelling, where
@@ -1160,6 +1278,275 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             false,
         ));
         Some(self.set_location(range.start, range.end, node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseComponentTypeAnnotationFlow — 555 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a `component(params) renders T` TYPE annotation, with the cursor
+    /// at `component`. Port of
+    /// `JSParserImpl::parseComponentTypeAnnotationFlow` (flow.cpp:555-604).
+    pub(super) fn parse_component_type_annotation_flow(
+        &mut self,
+    ) -> Option<&'gc Node<'gc>> {
+        // C++ 557-558.
+        debug_assert!(self.check_name(b"component"));
+        let start = self.advance(GrammarContext::Type).start;
+
+        // C++ 560-566: component type annotations should not contain a name.
+        if self.check(TokenKind::identifier) {
+            self.error_at(
+                self.cur_range(),
+                "component type annotations should not contain a name",
+            );
+            self.advance(GrammarContext::Type);
+        }
+
+        // C++ 568-575.
+        let mut type_params: Option<&'gc Node<'gc>> = None;
+        if self.check(TokenKind::less) {
+            type_params = Some(self.parse_type_params_flow()?);
+        }
+
+        // C++ 577-583.
+        if !self.need(
+            TokenKind::l_paren,
+            " at start of component parameter list",
+        ) {
+            return None;
+        }
+
+        // C++ 585-589.
+        let mut param_list: Vec<&'gc Node<'gc>> = Vec::new();
+        let rest = self.parse_component_type_parameters_flow(
+            Param::default(),
+            &mut param_list,
+        )?;
+
+        // C++ 591-597.
+        let mut renders_type: Option<&'gc Node<'gc>> = None;
+        if self.check_name(b"renders") {
+            renders_type = Some(self.parse_component_render_type_flow(true)?);
+        }
+
+        // C++ 599-603.
+        let node = Node::ComponentTypeAnnotation(ComponentTypeAnnotation::new(
+            NodeMetadata::new(self.dummy_range()),
+            NodeList::from_iter(self.gc, param_list),
+            rest,
+            type_params,
+            renders_type,
+        ));
+        Some(self.set_location(start, self.lexer.prev_token_end(), node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseComponentTypeParametersFlow — 606 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse the `( ... )` parameter list of a component TYPE annotation into
+    /// `param_list`, returning the optional rest parameter (outer `None` =
+    /// error already reported, `Some(None)` = no rest parameter). Port of
+    /// `JSParserImpl::parseComponentTypeParametersFlow` (flow.cpp:606-648).
+    pub(super) fn parse_component_type_parameters_flow(
+        &mut self,
+        param: Param,
+        param_list: &mut Vec<&'gc Node<'gc>>,
+    ) -> Option<Option<&'gc Node<'gc>>> {
+        // C++ 609-613.
+        debug_assert!(self.check(TokenKind::l_paren));
+        self.advance(GrammarContext::Type);
+        let mut rest: Option<&'gc Node<'gc>> = None;
+
+        // C++ 616-635.
+        while !self.check(TokenKind::r_paren) {
+            if self.check(TokenKind::dotdotdot) {
+                // C++ 617-624: a ComponentTypeRestParameter.
+                rest = Some(self.parse_component_type_rest_parameter_flow(param)?);
+                break;
+            }
+
+            // C++ 626-631.
+            let param_node = self.parse_component_type_parameter_flow(param)?;
+            param_list.push(param_node);
+
+            // C++ 633-634.
+            if !self.check_and_eat(TokenKind::comma, GrammarContext::Type) {
+                break;
+            }
+        }
+
+        // C++ 637-645.
+        if !self.eat(
+            TokenKind::r_paren,
+            GrammarContext::Type,
+            " at end of component type parameter list",
+        ) {
+            return None;
+        }
+
+        Some(rest)
+    }
+
+    // -----------------------------------------------------------------------
+    // parseComponentTypeRestParameterFlow — 650 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a `...IdentifierName: T` / `...T` rest parameter of a component
+    /// TYPE annotation, with the cursor at `...`. Port of
+    /// `JSParserImpl::parseComponentTypeRestParameterFlow` (flow.cpp:650-698).
+    fn parse_component_type_rest_parameter_flow(
+        &mut self,
+        _param: Param,
+    ) -> Option<&'gc Node<'gc>> {
+        // C++ 657-659.
+        debug_assert!(self.check(TokenKind::dotdotdot));
+        let start = self.advance(GrammarContext::Type).start;
+
+        // C++ 661-663.
+        let left = self.parse_type_annotation_before_colon_flow()?;
+
+        // C++ 665-689.
+        let mut name: Option<&'gc Node<'gc>> = None;
+        let type_annotation: &'gc Node<'gc>;
+        let mut optional = false;
+        if self.check2(TokenKind::colon, TokenKind::question) {
+            // C++ 670-686: the node is actually supposed to be an identifier,
+            // not a TypeAnnotation.
+            name = Some(self.reparse_type_annotation_as_identifier_flow(left)?);
+            optional =
+                self.check_and_eat(TokenKind::question, GrammarContext::Type);
+            if !self.eat(
+                TokenKind::colon,
+                GrammarContext::Type,
+                " in component parameter type annotation",
+            ) {
+                return None;
+            }
+            type_annotation =
+                self.parse_type_annotation_flow(None, AllowAnonFunctionType::Yes)?;
+        } else {
+            type_annotation = left;
+        }
+
+        // C++ 691.
+        self.check_and_eat(TokenKind::comma, GrammarContext::Type);
+
+        // C++ 693-697.
+        let node = Node::ComponentTypeParameter(ComponentTypeParameter::new(
+            NodeMetadata::new(self.dummy_range()),
+            name,
+            type_annotation,
+            optional,
+        ));
+        Some(self.set_location(start, self.lexer.prev_token_end(), node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseComponentTypeParameterFlow — 700 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse one `Name?: T` parameter of a component TYPE annotation (the name
+    /// is a string literal or identifier; `as` is rejected). Port of
+    /// `JSParserImpl::parseComponentTypeParameterFlow` (flow.cpp:700-766).
+    fn parse_component_type_parameter_flow(
+        &mut self,
+        _param: Param,
+    ) -> Option<&'gc Node<'gc>> {
+        // C++ 706.
+        let param_start = self.cur_start();
+        let name_elem: &'gc Node<'gc>;
+
+        // C++ 708-730.
+        if self.check(TokenKind::string_literal) {
+            // C++ 708-715.
+            let str_range = self.cur_range();
+            let value = self.lexer.token().get_string_literal();
+            let node = Node::StringLiteral(StringLiteral::new(
+                NodeMetadata::new(self.dummy_range()),
+                value,
+            ));
+            name_elem =
+                self.set_location(str_range.start, str_range.end, node);
+            self.advance(GrammarContext::Type);
+        } else if self.check(TokenKind::identifier)
+            || self.lexer.token().is_res_word()
+        {
+            // C++ 716-724.
+            let ident_rng = self.cur_range();
+            let id = self.lexer.token().get_res_word_or_identifier();
+            let node = Node::Identifier(Identifier::new(
+                NodeMetadata::new(self.dummy_range()),
+                id,
+                None,
+                false,
+            ));
+            name_elem =
+                self.set_location(ident_rng.start, ident_rng.end, node);
+            self.advance(GrammarContext::Type);
+        } else {
+            // C++ 725-729.
+            self.error_at_loc(
+                self.cur_start(),
+                "identifier or string literal expected in component type parameter name",
+            );
+            return None;
+        }
+
+        // C++ 732-735: `as` is not allowed in component type parameters.
+        if self.check_name(b"as") {
+            self.error_at_loc(
+                self.cur_start(),
+                "'as' not allowed in component type parameter",
+            );
+            return None;
+        }
+
+        // C++ 737-743.
+        let mut optional = false;
+        if self.check_and_eat(TokenKind::question, GrammarContext::Type) {
+            optional = true;
+        }
+
+        // C++ 745-753.
+        if !self.eat(
+            TokenKind::colon,
+            GrammarContext::Type,
+            " in component type parameter",
+        ) {
+            return None;
+        }
+
+        // C++ 755-759: parseTypeAnnotation() with default args
+        // (wrappedStart=None, AllowAnonFunctionType::Yes).
+        let ty =
+            self.parse_type_annotation(None, AllowAnonFunctionType::Yes)?;
+
+        // C++ 761-765.
+        let node = Node::ComponentTypeParameter(ComponentTypeParameter::new(
+            NodeMetadata::new(self.dummy_range()),
+            Some(name_elem),
+            ty,
+            optional,
+        ));
+        Some(self.set_location(param_start, self.lexer.prev_token_end(), node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseHookTypeAnnotationFlow — 3816 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a `hook(params) => R` TYPE annotation, with the cursor at `hook`.
+    /// Port of `JSParserImpl::parseHookTypeAnnotationFlow` (flow.cpp:3816-3821).
+    pub(super) fn parse_hook_type_annotation_flow(
+        &mut self,
+    ) -> Option<&'gc Node<'gc>> {
+        // C++ 3818-3819.
+        debug_assert!(self.check_name(b"hook"));
+        self.advance(GrammarContext::Type);
+        // C++ 3820.
+        self.parse_function_or_hook_type_annotation_flow(true)
     }
 
     /// Intern the raw source text of the current token. The Rust equivalent

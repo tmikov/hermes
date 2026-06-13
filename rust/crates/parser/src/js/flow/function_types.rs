@@ -10,8 +10,9 @@
 //! of `lib/Parser/JSParserImpl-flow.cpp`.
 
 use ast::node::{
-    DeclaredPredicate, FunctionTypeAnnotation, FunctionTypeParam, Identifier,
-    InferredPredicate, Node, TypeAnnotation, TypePredicate,
+    DeclaredPredicate, FunctionTypeAnnotation, FunctionTypeParam,
+    HookTypeAnnotation, Identifier, InferredPredicate, Node, TypeAnnotation,
+    TypePredicate,
 };
 use ast::node_child::{NodeList, NodeMetadata};
 use atom_table::INVALID_ATOM_BYTES;
@@ -261,13 +262,15 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 ));
             Some(self.set_location(start, self.lexer.prev_token_end(), node))
         } else {
-            // P6: HookTypeAnnotation (C++ 3891-3895) — hook syntax is gated on
-            // getParseFlowComponentSyntax(), which the Rust Context does not
-            // implement yet; no caller passes hook=true in P5.
-            self.error_cur(
-                "hook type annotations are unsupported (parser phase P6)",
-            );
-            None
+            // C++ 3890-3895: HookTypeAnnotation.
+            let node = Node::HookTypeAnnotation(HookTypeAnnotation::new(
+                NodeMetadata::new(self.dummy_range()),
+                NodeList::from_iter(self.gc, params),
+                return_type,
+                rest,
+                type_params,
+            ));
+            Some(self.set_location(start, self.lexer.prev_token_end(), node))
         }
     }
 
@@ -286,7 +289,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// at `<` or `(`. Port of `parseFunctionOrHookTypeAnnotationFlow`
     /// (flow.cpp:3827-3863). `hook` is threaded like the C++ bool; the only
     /// P5 caller passes false (`parseHookTypeAnnotationFlow` is P6).
-    fn parse_function_or_hook_type_annotation_flow(
+    pub(super) fn parse_function_or_hook_type_annotation_flow(
         &mut self,
         hook: bool,
     ) -> Option<&'gc Node<'gc>> {
@@ -605,14 +608,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             let is_rest =
                 self.check_and_eat(TokenKind::dotdotdot, GrammarContext::Type);
 
+            // C++ 4917-4918.
             let param = if hook {
-                // P6: parseHookTypeAnnotationParamFlow (C++ 4917) — hook
-                // syntax is gated on getParseFlowComponentSyntax(); no P5
-                // caller passes hook=true.
-                self.error_cur(
-                    "hook type annotations are unsupported (parser phase P6)",
-                );
-                return None;
+                self.parse_hook_type_annotation_param_flow()?
             } else {
                 self.parse_function_type_annotation_param_flow()?
             };
@@ -641,6 +639,29 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         Some(rest)
+    }
+
+    // -----------------------------------------------------------------------
+    // parseHookTypeAnnotationParamFlow — 4946 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse one hook-type parameter. Identical to a function-type parameter
+    /// except that a `this` constraint is rejected. Port of
+    /// `JSParserImpl::parseHookTypeAnnotationParamFlow` (flow.cpp:4946-4955).
+    fn parse_hook_type_annotation_param_flow(
+        &mut self,
+    ) -> Option<&'gc Node<'gc>> {
+        // C++ 4948-4953.
+        if self.check(TokenKind::rw_this)
+            && self.lexer.lookahead1::<false>(None) == Some(TokenKind::colon)
+        {
+            self.error_at(
+                self.cur_range(),
+                "hooks do not support 'this' constraints",
+            );
+        }
+        // C++ 4954.
+        self.parse_function_type_annotation_param_flow()
     }
 
     /// Parse one function-type parameter, which is either a bare type or a

@@ -226,8 +226,6 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// True if Flow `component`/`hook` syntax is enabled. Shorthand for the C++
     /// `context_.getParseFlowComponentSyntax()`.
-    // P6.3: first consumer is the component/hook grammar.
-    #[allow(dead_code)]
     pub(super) fn parse_flow_component_syntax(&self) -> bool {
         self.gc.ctx().parse_flow_component_syntax()
     }
@@ -6558,6 +6556,276 @@ mod tests {
         );
         // C++ JSParserImpl.cpp:5670-5672 (variance is only valid on fields).
         assert_error(b"class C { +m() {} }", "Unexpected variance sigil");
+    }
+
+    // -----------------------------------------------------------------------
+    // P6.3 — Flow component/hook syntax + hook type annotation.
+    // -----------------------------------------------------------------------
+
+    /// Parse `src` with both `parse_flow` and `parse_flow_component_syntax`
+    /// enabled, expect zero errors, and return the `idx`th top-level
+    /// statement.
+    fn comp_parse_stmt_at<'gc>(
+        gc: &'gc ast::context::GCLock<'_, '_>,
+        sm: &mut support::manager::SourceErrorManager,
+        src: &[u8],
+        idx: usize,
+    ) -> &'gc ast::node::Node<'gc> {
+        let buf_id = sm.add_buffer_bytes("input", src);
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(gc, lexer);
+        let program = parser.parse().expect("parse succeeded");
+        assert_eq!(parser.error_count_pub(), 0, "zero errors for {src:?}");
+        if let ast::node::Node::Program(p) = program {
+            return p.body.iter().nth(idx).expect("has enough statements");
+        }
+        panic!("expected Program");
+    }
+
+    /// Build a component-syntax-enabled `Context` (Flow + component syntax).
+    fn comp_ctx() -> ast::context::Context<'static> {
+        let mut ctx = ast::context::Context::new();
+        ctx.set_parse_flow(true);
+        ctx.set_parse_flow_component_syntax(true);
+        ctx
+    }
+
+    /// `component Foo() {}` — basic component declaration.
+    #[test]
+    fn flow_component_basic() {
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = comp_ctx();
+        let gc = ctx.lock();
+        let stmt = comp_parse_stmt_at(&gc, &mut sm, b"component Foo() {}", 0);
+        let Node::ComponentDeclaration(c) = stmt else {
+            panic!("expected ComponentDeclaration, got {:?}", stmt.kind())
+        };
+        assert_eq!(ident_bytes(&gc, c.id), b"Foo");
+        assert_eq!(c.params.iter().count(), 0);
+        assert!(c.type_parameters.is_none());
+        assert!(c.renders_type.is_none());
+        assert!(!c.r#async.get());
+    }
+
+    /// The three component-parameter shapes: string-literal name with `as`
+    /// local, ident name with `as` local, and the shorthand
+    /// `ident?: T = init` (plus a rest element).
+    #[test]
+    fn flow_component_parameters() {
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = comp_ctx();
+        let gc = ctx.lock();
+        let stmt = comp_parse_stmt_at(
+            &gc,
+            &mut sm,
+            b"component Foo(\"data-id\" as id, name?: string, x: number = 5, ...rest: Props) {}",
+            0,
+        );
+        let Node::ComponentDeclaration(c) = stmt else {
+            panic!("expected ComponentDeclaration, got {:?}", stmt.kind())
+        };
+        let params: Vec<_> = c.params.iter().collect();
+        assert_eq!(params.len(), 4);
+
+        // "data-id" as id — string-literal name, not shorthand.
+        let Node::ComponentParameter(p0) = params[0] else {
+            panic!("expected ComponentParameter, got {:?}", params[0].kind())
+        };
+        assert!(matches!(p0.name, Node::StringLiteral(_)));
+        assert!(!p0.shorthand.get());
+
+        // name?: string — shorthand, optional, no `as`.
+        let Node::ComponentParameter(p1) = params[1] else {
+            panic!("expected ComponentParameter, got {:?}", params[1].kind())
+        };
+        assert!(p1.shorthand.get());
+        let Node::Identifier(local1) = p1.local else {
+            panic!("expected Identifier local, got {:?}", p1.local.kind())
+        };
+        assert!(local1.optional.get());
+        assert!(local1.type_annotation.is_some());
+
+        // x: number = 5 — shorthand with a default (AssignmentPattern local).
+        let Node::ComponentParameter(p2) = params[2] else {
+            panic!("expected ComponentParameter, got {:?}", params[2].kind())
+        };
+        assert!(p2.shorthand.get());
+        assert!(matches!(p2.local, Node::AssignmentPattern(_)));
+
+        // ...rest: Props — a rest element (a RestElement, not a
+        // ComponentParameter).
+        assert!(matches!(params[3], Node::RestElement(_)));
+    }
+
+    /// `renders` / `renders?` / `renders*` operators on component
+    /// declarations, with the operator label captured on the `TypeOperator`.
+    #[test]
+    fn flow_component_renders_operators() {
+        use ast::node::Node;
+        let check = |src: &[u8], op: &[u8]| {
+            let mut sm = support::manager::SourceErrorManager::new();
+            let mut ctx = comp_ctx();
+            let gc = ctx.lock();
+            let stmt = comp_parse_stmt_at(&gc, &mut sm, src, 0);
+            let Node::ComponentDeclaration(c) = stmt else {
+                panic!("expected ComponentDeclaration, got {:?}", stmt.kind())
+            };
+            let renders = c.renders_type.expect("has renders type");
+            let Node::TypeOperator(t) = renders else {
+                panic!("expected TypeOperator, got {:?}", renders.kind())
+            };
+            assert_eq!(gc.ctx().atom_table.bytes(t.operator.get()), op);
+        };
+        check(b"component A() renders React.Node {}", b"renders");
+        check(b"component B() renders? Bar {}", b"renders?");
+        check(b"component C() renders* Baz {}", b"renders*");
+    }
+
+    /// `async component` and generic `hook` declarations.
+    #[test]
+    fn flow_component_async_and_generic_hook() {
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = comp_ctx();
+        let gc = ctx.lock();
+        let stmt0 = comp_parse_stmt_at(
+            &gc,
+            &mut sm,
+            b"async component App() renders null { return null; }\nhook useZ<T>(x: T): T { return x; }",
+            0,
+        );
+        let Node::ComponentDeclaration(c) = stmt0 else {
+            panic!("expected ComponentDeclaration, got {:?}", stmt0.kind())
+        };
+        assert!(c.r#async.get());
+        assert!(c.renders_type.is_some());
+
+        let stmt1 = comp_parse_stmt_at(
+            &gc,
+            &mut sm,
+            b"async component App() renders null { return null; }\nhook useZ<T>(x: T): T { return x; }",
+            1,
+        );
+        let Node::HookDeclaration(h) = stmt1 else {
+            panic!("expected HookDeclaration, got {:?}", stmt1.kind())
+        };
+        assert_eq!(ident_bytes(&gc, h.id), b"useZ");
+        assert!(h.type_parameters.is_some());
+        assert!(h.return_type.is_some());
+        assert!(!h.r#async.get());
+    }
+
+    /// `type C = component(...) renders T;` and `type H = hook(...) => R;`
+    /// type annotations.
+    #[test]
+    fn flow_component_and_hook_type_annotations() {
+        use ast::node::Node;
+        let alias_right = |stmt: &ast::node::Node<'_>| -> ast::node::NodeKind {
+            let Node::TypeAlias(a) = stmt else {
+                panic!("expected TypeAlias, got {:?}", stmt.kind())
+            };
+            a.right.kind()
+        };
+
+        // component type annotation.
+        {
+            let mut sm = support::manager::SourceErrorManager::new();
+            let mut ctx = comp_ctx();
+            let gc = ctx.lock();
+            let stmt = comp_parse_stmt_at(
+                &gc,
+                &mut sm,
+                b"type C = component(foo: string, ...bar: number) renders Baz;",
+                0,
+            );
+            let Node::TypeAlias(a) = stmt else {
+                panic!("expected TypeAlias, got {:?}", stmt.kind())
+            };
+            let Node::ComponentTypeAnnotation(ct) = a.right else {
+                panic!("expected ComponentTypeAnnotation, got {:?}", a.right.kind())
+            };
+            assert_eq!(ct.params.iter().count(), 1);
+            assert!(ct.rest.is_some());
+            assert!(ct.renders_type.is_some());
+        }
+
+        // hook type annotation.
+        {
+            let mut sm = support::manager::SourceErrorManager::new();
+            let mut ctx = comp_ctx();
+            let gc = ctx.lock();
+            let stmt = comp_parse_stmt_at(
+                &gc,
+                &mut sm,
+                b"type H = hook(a: number, b: string) => void;",
+                0,
+            );
+            assert_eq!(alias_right(stmt), ast::node::NodeKind::HookTypeAnnotation);
+            let Node::TypeAlias(a) = stmt else { unreachable!() };
+            let Node::HookTypeAnnotation(h) = a.right else {
+                panic!("expected HookTypeAnnotation, got {:?}", a.right.kind())
+            };
+            assert_eq!(h.params.iter().count(), 2);
+            assert!(h.rest.is_none());
+        }
+    }
+
+    /// A hook type annotation rejects a `this` constraint.
+    #[test]
+    fn flow_hook_type_rejects_this() {
+        use ast::context::Context;
+        use support::manager::SourceErrorManager;
+        let src = b"type H = hook(this: number) => void;";
+        let mut sm = SourceErrorManager::new();
+        let buf_id = sm.add_buffer_bytes("input", src);
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        ctx.set_parse_flow_component_syntax(true);
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        let _ = parser.parse();
+        assert!(
+            parser.error_count_pub() >= 1,
+            "hook type 'this' constraint must error"
+        );
+    }
+
+    /// `async component`/`async hook` *declarations* are not allowed inside a
+    /// `declare`; but here verify the simpler gate: with component syntax OFF,
+    /// `component`/`hook`/`renders` stay plain identifiers.
+    #[test]
+    fn flow_component_syntax_gated_off() {
+        // Without the component-syntax flag, `component Foo() {}` is NOT a
+        // declaration; it is parsed as the identifier `component` followed by
+        // `Foo`, which is a syntax error (matching hermesc's exit 2 under
+        // `-parse-flow` alone).
+        assert_parse_has_errors_impl(
+            b"component Foo() {}",
+            "component needs component-syntax flag",
+            /* parse_flow */ true,
+        );
+        // But `component` remains a valid identifier in an expression.
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = ast::context::Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let stmt = parse_one_stmt(&gc, &mut sm, b"var component = 1;");
+        assert!(matches!(stmt, ast::node::Node::VariableDeclaration(_)));
     }
 
     /// No-leak spot checks: with Flow parsing DISABLED the new sites must not
