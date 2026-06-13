@@ -10,7 +10,8 @@
 
 use ast::context::GCLock;
 use ast::node::{
-    ArrayExpression, ArrowFunctionExpression, ArrayPattern, AssignmentExpression, AssignmentPattern,
+    ArrayExpression, ArrowFunctionExpression, ArrayPattern, AsConstExpression, AsExpression,
+    AssignmentExpression, AssignmentPattern,
     AwaitExpression, BigIntLiteral, BinaryExpression, BooleanLiteral, CallExpression,
     ConditionalExpression, CoverEmptyArgs, CoverRestElement, CoverTrailingComma,
     CoverInitializer, Empty, FunctionExpression, Identifier, ImportExpression,
@@ -1345,6 +1346,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             Some(p) => p as u32,
             None => match kind {
                 TokenKind::rw_in | TokenKind::rw_instanceof => 8,
+                // IDENT_OP(as_operator, "as", 8) (TokenKinds.def:163). The C++
+                // `getPrecedence` flat table assigns IDENT_OP entries their
+                // precedence; `binop_precedence` only covers the BINOP range,
+                // so the `as` operator is handled here.
+                TokenKind::as_operator => 8,
                 _ => 0,
             },
         }
@@ -1369,16 +1375,66 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     /// Convert the current identifier token to `as_operator` if it spells "as"
-    /// and the parser context has TS/Flow type-parsing enabled.
-    ///
-    /// P6/P7 stub: TS/Flow 'as' operator (needs Context parse-types flag +
-    /// `lexer.convert_cur_token_to_ident_op`).  In P1 the body is compiled out
-    /// (mirroring C++ `#if HERMES_PARSE_TS || HERMES_PARSE_FLOW`), so this is
-    /// a pure no-op.
+    /// and the parser context has TS/Flow type-parsing enabled. Port of
+    /// `JSParserImpl::convertIdentOpIfPossible` (JSParserImpl.cpp:4252-4260).
     #[inline]
     fn convert_ident_op_if_possible(&mut self) {
-        // P6/P7: TS/Flow 'as' operator (needs Context parse-types flag +
-        // lexer.convert_cur_token_to_ident_op).  No-op until then.
+        // C++ 4254-4257: gated on `getParseTypes()` and the current token being
+        // an `identifier` whose (escape-sensitive) value is `as`.
+        if self.cur_kind() == TokenKind::identifier && self.parse_types() {
+            let bytes = self
+                .lexer
+                .get_string_table()
+                .bytes(self.lexer.token().get_identifier());
+            if bytes == b"as" {
+                self.lexer
+                    .convert_cur_token_to_ident_op(TokenKind::as_operator);
+            }
+        }
+    }
+
+    /// Build the `as_operator` result node in `newBinNode`. Port of the Flow
+    /// arm of `JSParserImpl::parseBinaryExpression::newBinNode`
+    /// (JSParserImpl.cpp:4319-4351). `right` is the parsed type annotation.
+    ///
+    /// Special-cases `x as const` (a `GenericTypeAnnotation` with no type-params,
+    /// no parens, whose `id` is an `Identifier` named `const`, not optional and
+    /// with no type-annotation) → `AsConstExpression`; otherwise `AsExpression`.
+    fn make_as_node(
+        &mut self,
+        left: &'gc Node<'gc>,
+        right: &'gc Node<'gc>,
+        start: SMLoc,
+        end: SMLoc,
+    ) -> &'gc Node<'gc> {
+        // C++ 4330: must be parsing Flow types (the TS half is P7).
+        debug_assert!(self.parse_flow(), "must be parsing types");
+        // C++ 4331-4345: `x as const` special case.
+        if let Node::GenericTypeAnnotation(gen) = right {
+            if gen.type_parameters.is_none() && right.metadata().parens.get() == 0 {
+                if let Node::Identifier(ident) = gen.id {
+                    let const_atom =
+                        self.gc.ctx().atom_table.atom_bytes(b"const");
+                    if ident.name.get() == const_atom
+                        && !ident.optional.get()
+                        && ident.type_annotation.is_none()
+                    {
+                        let node = Node::AsConstExpression(AsConstExpression::new(
+                            NodeMetadata::new(self.dummy_range()),
+                            left,
+                        ));
+                        return self.set_location(start, end, node);
+                    }
+                }
+            }
+        }
+        // C++ 4346-4349: the general `x as T` case.
+        let node = Node::AsExpression(AsExpression::new(
+            NodeMetadata::new(self.dummy_range()),
+            left,
+            right,
+        ));
+        self.set_location(start, end, node)
     }
 
     /// Parse a binary expression using a stack-based precedence-climbing
@@ -1393,7 +1449,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// - Private-name LHS for `#x in y`.
     /// - `&&`/`||`/`??` → `LogicalExpression`; others → `BinaryExpression`.
     /// - Nullish/boolean mixing error ("Mixing '??' with '&&' or '||' …").
-    /// - `as_operator` (TS/Flow): stubbed as unreachable in P1 (P6/P7).
+    /// - `as_operator` (Flow): `x as T` → `AsExpression`, `x as const` →
+    ///   `AsConstExpression` (P6.0; the TS `as`/`as const` is P7).
     pub(super) fn parse_binary_expression(
         &mut self,
         param: Param,
@@ -1551,15 +1608,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                         op_label,
                     ));
                     self.set_location(new_start, new_end, node)
+                } else if entry.op_kind == TokenKind::as_operator {
+                    // Flow `as`/`as const` (C++ newBinNode 4319-4351). `top_expr`
+                    // here is the parsed type annotation (RHS).
+                    self.make_as_node(entry.expr, top_expr, new_start, new_end)
                 } else {
-                    // P6/P7: as_operator branch (TS AsExpression / Flow
-                    // AsExpression / AsConstExpression) — unreachable in P1
-                    // because convert_ident_op_if_possible is a no-op.
-                    debug_assert_ne!(
-                        entry.op_kind,
-                        TokenKind::as_operator,
-                        "as_operator is unreachable in P1 (no parse-types context)"
-                    );
                     let node = Node::BinaryExpression(BinaryExpression::new(
                         NodeMetadata::new(self.dummy_range()),
                         entry.expr,
@@ -1578,51 +1631,61 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 expr_start: top_expr_start,
             });
 
-            // Consume the operator token.
-            // P6/P7: as_operator uses GrammarContext::Type and then parses
-            // a type annotation instead of a unary expression — unreachable
-            // in P1.
-            self.advance(GrammarContext::AllowRegExp);
-            top_expr_start = self.cur_start();
-
-            // Parse the right-hand operand (private identifier or unary).
-            top_expr = if self.check(TokenKind::private_identifier) {
-                let tok_start = self.lexer.token().start_loc();
-                let tok_end = self.lexer.token().end_loc();
-                let priv_ident_name = self.lexer.token().get_private_identifier();
-                let ident_node = Node::Identifier(Identifier::new(
-                    NodeMetadata::new(self.dummy_range()),
-                    priv_ident_name,
-                    None,
-                    false,
-                ));
-                let ident_ref = self.set_location(tok_start, tok_end, ident_node);
-                let priv_node = Node::PrivateName(PrivateName::new(
-                    NodeMetadata::new(self.dummy_range()),
-                    ident_ref,
-                ));
-                let priv_ref = self.set_location(tok_start, tok_end, priv_node);
-                self.advance(GrammarContext::AllowDiv);
-
-                // Validate: PrivateName as RHS is only legal for `in`, and
-                // the current operator on the stack-top must be exactly `in`
-                // with no higher-precedence operator above it.
-                let prev_prec = stack
-                    .last()
-                    .map(|e| Self::get_precedence(e.op_kind))
-                    .unwrap_or(0);
-                let in_prec = Self::get_precedence(TokenKind::rw_in);
-                if !self.check(TokenKind::rw_in) || prev_prec >= in_prec {
-                    let priv_range = priv_ref.range();
-                    self.error_at(
-                        priv_range,
-                        "Private name can only be used as left-hand side of `in` expression",
-                    );
-                }
-                priv_ref
+            // Consume the operator token and parse the RHS.
+            // C++ 4432-4453: the `as_operator` consumes with GrammarContext::Type
+            // and the RHS is a *type annotation* (not a unary expression); every
+            // other operator consumes with the default (AllowRegExp) and the RHS
+            // is a private-identifier or unary expression.
+            if cur_kind == TokenKind::as_operator {
+                self.advance(GrammarContext::Type);
+                top_expr_start = self.cur_start();
+                // C++ parseTypeAnnotation() — defaults AllowAnonFunctionType::Yes
+                // (JSParserImpl.h:1209). `parse_type_annotation` dispatches to the
+                // Flow version (only one available; TS is P7).
+                top_expr = self.parse_type_annotation(None, AllowAnonFunctionType::Yes)?;
             } else {
-                self.parse_unary_expression()?
-            };
+                self.advance(GrammarContext::AllowRegExp);
+                top_expr_start = self.cur_start();
+
+                // Parse the right-hand operand (private identifier or unary).
+                top_expr = if self.check(TokenKind::private_identifier) {
+                    let tok_start = self.lexer.token().start_loc();
+                    let tok_end = self.lexer.token().end_loc();
+                    let priv_ident_name = self.lexer.token().get_private_identifier();
+                    let ident_node = Node::Identifier(Identifier::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        priv_ident_name,
+                        None,
+                        false,
+                    ));
+                    let ident_ref = self.set_location(tok_start, tok_end, ident_node);
+                    let priv_node = Node::PrivateName(PrivateName::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        ident_ref,
+                    ));
+                    let priv_ref = self.set_location(tok_start, tok_end, priv_node);
+                    self.advance(GrammarContext::AllowDiv);
+
+                    // Validate: PrivateName as RHS is only legal for `in`, and
+                    // the current operator on the stack-top must be exactly `in`
+                    // with no higher-precedence operator above it.
+                    let prev_prec = stack
+                        .last()
+                        .map(|e| Self::get_precedence(e.op_kind))
+                        .unwrap_or(0);
+                    let in_prec = Self::get_precedence(TokenKind::rw_in);
+                    if !self.check(TokenKind::rw_in) || prev_prec >= in_prec {
+                        let priv_range = priv_ref.range();
+                        self.error_at(
+                            priv_range,
+                            "Private name can only be used as left-hand side of `in` expression",
+                        );
+                    }
+                    priv_ref
+                } else {
+                    self.parse_unary_expression()?
+                };
+            }
             top_expr_end = self.lexer.prev_token_end();
             self.convert_ident_op_if_possible();
         }
@@ -1663,12 +1726,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     op_label,
                 ));
                 self.set_location(new_start, new_end, node)
+            } else if entry.op_kind == TokenKind::as_operator {
+                // Flow `as`/`as const` (C++ newBinNode 4319-4351).
+                self.make_as_node(entry.expr, top_expr, new_start, new_end)
             } else {
-                debug_assert_ne!(
-                    entry.op_kind,
-                    TokenKind::as_operator,
-                    "as_operator is unreachable in P1 (no parse-types context)"
-                );
                 let node = Node::BinaryExpression(BinaryExpression::new(
                     NodeMetadata::new(self.dummy_range()),
                     entry.expr,
@@ -1877,8 +1938,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// `seenOptionalChain`, and dispatches to `parseCallExpression` when the
     /// next token is `(` or a template literal.
     ///
-    /// P6/P7: Flow/TS type-argument and record expression blocks are gated by
-    /// context flags that don't exist yet; they are omitted.
+    /// Flow type-argument speculation on the call tail is handled (P6.0). The
+    /// Flow record-expression alternative commit-condition + the record branch
+    /// itself are P6.4; the TS half is P7.
     pub(super) fn parse_left_hand_side_expression_tail(
         &mut self,
         start_loc: support::location::SMLoc,
@@ -1897,10 +1959,30 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     Node::OptionalMemberExpression(_) | Node::OptionalCallExpression(_)
                 ));
 
-        // P6/P7: Flow/TS type-arguments block (4036-4062) — gated on
-        // context_.getParseFlow()/getParseTS() which don't exist yet. Skip.
-        // typeArgs stays None (null) in P1.
-        let type_args: Option<&'gc Node<'gc>> = None;
+        // Flow/TS type-arguments block (C++ 4036-4062). If the `<` immediately
+        // follows a `?.` it cannot be a binary expression and is unambiguously
+        // Flow type syntax — hence the `optional` case uses the non-ambiguous
+        // `getParseFlow()` gate; otherwise `getParseFlowAmbiguous()`. (TS: P7.)
+        let mut type_args: Option<&'gc Node<'gc>> = None;
+        let flow_gate = if optional {
+            self.parse_flow()
+        } else {
+            self.parse_flow_ambiguous()
+        };
+        if flow_gate && self.check(TokenKind::less) {
+            let (opt_type_args, sp) = self.speculative_type_args();
+            // Commit when a `(` follows (call expression with type-args).
+            // P6.4: the Flow record-expression alternative commit-condition
+            //   `|| (parse_flow() && parse_flow_records()
+            //        && is_class_heritage_argument != Yes
+            //        && check_record_expression_flow(expr))`
+            // lands with `record` expressions.
+            if opt_type_args.is_some() && self.check(TokenKind::l_paren) {
+                type_args = opt_type_args;
+            } else {
+                sp.restore(&mut self.lexer);
+            }
+        }
 
         // Is this a CallExpression? (4065-4074)
         // C++ checks checkN(l_paren, no_substitution_template, template_head).
@@ -1937,8 +2019,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// - `new <callee> [(<args>)]` → `NewExpression`; if arguments follow, also
     ///   handles trailing member selects.
     ///
-    /// P6/P7: Flow/TS `typeArgs` block is gated and omitted; `type_arguments`
-    /// is always `None` in P1.
+    /// Flow `typeArgs` speculation on `new` is handled (P6.0): `new C<T>` keeps
+    /// type-args with no `(` required. The TS half is P7.
     pub(super) fn parse_new_expression_or_optional_expression(
         &mut self,
         is_constructor_call: IsConstructorCall,
@@ -2027,8 +2109,18 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let expr = self
             .parse_new_expression_or_optional_expression(IsConstructorCall::Yes)?;
 
-        // P6/P7: typeArgs block (3957-3975) — gated; skip. type_args = None.
-        let type_args: Option<&'gc Node<'gc>> = None;
+        // Flow/TS typeArgs block (C++ 3957-3975): attempt type-args at a `<`,
+        // rolling back if it was a comparison. Unlike call expressions, no `(`
+        // is required to commit — `new C<T>` is a valid NewExpression. (TS: P7.)
+        let mut type_args: Option<&'gc Node<'gc>> = None;
+        if self.parse_flow_ambiguous() && self.check(TokenKind::less) {
+            let (opt_type_args, sp) = self.speculative_type_args();
+            if opt_type_args.is_some() {
+                type_args = opt_type_args;
+            } else {
+                sp.restore(&mut self.lexer);
+            }
+        }
 
         // If there's no `(`, this is `new Foo` (no args) — a NewExpression.
         if !self.check(TokenKind::l_paren) {
@@ -3507,9 +3599,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// `seen_optional_chain` is the outer flag; `optional` is whether THIS
     /// particular suffix started with `?.`.
     ///
-    /// P6/P7: Flow/TS `typeArgs` blocks (3744-3777) are gated on parse-Flow /
-    /// parse-TS context flags that don't exist yet; omitted.  `type_args` is
-    /// always `None` in P1.
+    /// Flow `?.<T>()` type-arguments on an optional call are handled (P6.0):
+    /// a `<` immediately after `?.` is unambiguously Flow type syntax. The TS
+    /// half is P7.
     fn parse_member_select(
         &mut self,
         start_loc: support::location::SMLoc,
@@ -3566,12 +3658,16 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // The C++ condition is:
         //   checkAndEat(period) ||
         //   (optional && !(check(l_paren) || (getParseFlow() && check(less))))
-        //
-        // In P1, `getParseFlow()` is false, so the condition simplifies to:
-        //   checkAndEat(period) || (optional && !check(l_paren))
+        // i.e. a bare `?.` that is NOT followed by `(` and NOT followed by a
+        // Flow `<…>` type-argument list is the `?.id` form.
         let ate_period =
             self.check_and_eat(TokenKind::period, GrammarContext::AllowDiv);
-        if ate_period || (optional && !self.check(TokenKind::l_paren)) {
+        let questiondot_typeargs =
+            self.parse_flow() && self.check(TokenKind::less);
+        if ate_period
+            || (optional
+                && !(self.check(TokenKind::l_paren) || questiondot_typeargs))
+        {
             // The next token must be an identifier, a private identifier, or a
             // reserved word used as a member name (e.g. `a.if`).
             if !self.check2(TokenKind::identifier, TokenKind::private_identifier)
@@ -3631,12 +3727,34 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return Some(self.set_location_d(start_loc, id_end, punc_loc, node));
         }
 
-        // The only remaining case is `?.(args)` — optional call on `?.`.
-        // C++ assert: `optional && check(l_paren)`.
-        debug_assert!(optional && self.check(TokenKind::l_paren));
+        // The only remaining case is `?.(args)` or `?.<T>(args)` — an optional
+        // call on `?.`. C++ assert: `optional && (check(l_paren) ||
+        // (getParseFlow() && check(less)))`.
+        debug_assert!(
+            optional
+                && (self.check(TokenKind::l_paren)
+                    || (self.parse_flow() && self.check(TokenKind::less)))
+        );
 
-        // P6/P7: typeArgs block (3744-3777) — gated; skip.
-        let type_args: Option<&'gc Node<'gc>> = None;
+        // Flow type-arguments on an optional call (C++ 3744-3760). NO SavePoint
+        // here: a `<` immediately after `?.` is unambiguously Flow type syntax,
+        // so we commit and require the `(`. (TS half is P7.)
+        let mut type_args: Option<&'gc Node<'gc>> = None;
+        if self.parse_flow() && self.check(TokenKind::less) {
+            type_args = Some(self.parse_type_args_flow(GrammarContext::Type)?);
+            if !self.need(
+                TokenKind::l_paren,
+                "after type arguments in optional call",
+            ) {
+                self.lexer.get_source_mgr_mut().note_at(
+                    object_loc,
+                    None,
+                    "start of optional call",
+                    support::diag::Subsystem::Parser,
+                );
+                return None;
+            }
+        }
 
         let debug_loc = self.lexer.token().start_loc();
         let (arg_list, end_loc) = self.parse_arguments()?;
@@ -3648,6 +3766,35 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             true,
         ));
         Some(self.set_location_d(start_loc, end_loc, debug_loc, node))
+    }
+
+    /// Speculatively parse Flow type-arguments `<…>` at the current `<`,
+    /// suppressing any parser diagnostics produced during the attempt. Common
+    /// helper for the ambiguous call/new/LHS-tail sites
+    /// (JSParserImpl.cpp:3810-3827, 3958-3974, 4044-4061): each of those takes a
+    /// `SavePoint`, opens a `SaveAndSuppressMessages`, parses type-args, then
+    /// keeps or rolls back based on a per-site commit condition.
+    ///
+    /// Returns `(parsed_type_args, save_point)`. The caller decides whether the
+    /// commit-condition holds: if not, it must call `sp.restore(&mut self.lexer)`
+    /// and drop the type-args. Diagnostic suppression is always restored here.
+    fn speculative_type_args(
+        &mut self,
+    ) -> (Option<&'gc Node<'gc>>, crate::lexer::SavePoint) {
+        debug_assert!(self.check(TokenKind::less));
+        let sp = self.lexer.save_point();
+        // C++ SourceErrorManager::SaveAndSuppressMessages{&sm_, Subsystem::Parser}:
+        // pure-suppress parser messages during the speculative parse (lexer
+        // messages still flow). Mirror the lexer-lookahead idiom (save/set/restore).
+        let saved_suppressed = self.lexer.get_source_mgr().suppressed_messages();
+        self.lexer
+            .get_source_mgr_mut()
+            .set_suppressed_messages(Some(support::diag::Subsystem::Parser));
+        let type_args = self.parse_type_args_flow(GrammarContext::Type);
+        self.lexer
+            .get_source_mgr_mut()
+            .set_suppressed_messages(saved_suppressed);
+        (type_args, sp)
     }
 
     // -----------------------------------------------------------------------
@@ -3666,11 +3813,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// - `[expr]` / `.id` / `?.id` / `?.(args)` → `parseMemberSelect`.
     /// - Template literal → P1.9 deferral error.
     ///
-    /// `type_args` carries Flow/TS type arguments from the caller; always
-    /// `None` in P1. After each `(args)` call the type-args are consumed
-    /// (reset to `None`) to allow the next call in the chain to supply its own.
+    /// `type_args` carries Flow/TS type arguments from the caller. After each
+    /// `(args)` call the type-args are consumed (reset to `None`) so the next
+    /// call in the chain can speculatively supply its own (`f<T>()<U>()`).
     ///
-    /// P6/P7: Flow/TS type-argument parsing (3809-3828) — gated; omitted.
+    /// Flow type-argument speculation (P6.0) runs at the top of the loop; the
+    /// TS half is P7.
     fn parse_call_expression(
         &mut self,
         start_loc: support::location::SMLoc,
@@ -3682,7 +3830,22 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let mut object_loc = start_loc;
 
         loop {
-            // P6/P7: Flow/TS type-argument block (3809-3828) — gated; skip.
+            // Flow/TS type-argument block (C++ 3809-3828). Each call in a chain
+            // may carry type arguments; attempt to parse them at a `<`, rolling
+            // back if it was just a comparison operator. (TS half is P7.)
+            if self.parse_flow_ambiguous()
+                && type_args.is_none()
+                && self.check(TokenKind::less)
+            {
+                let (opt_type_args, sp) = self.speculative_type_args();
+                if opt_type_args.is_some() && self.check(TokenKind::l_paren) {
+                    // Call expression with type arguments.
+                    type_args = opt_type_args;
+                } else {
+                    // Not a call with type-args; roll back.
+                    sp.restore(&mut self.lexer);
+                }
+            }
 
             if self.check(TokenKind::l_paren) {
                 let debug_loc = self.lexer.token().start_loc();

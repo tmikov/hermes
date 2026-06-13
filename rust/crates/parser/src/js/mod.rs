@@ -218,6 +218,36 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         self.gc.ctx().parse_flow()
     }
 
+    /// True if the Flow ambiguous-expression grammar is enabled. Shorthand for
+    /// the C++ `context_.getParseFlowAmbiguous()`.
+    pub(super) fn parse_flow_ambiguous(&self) -> bool {
+        self.gc.ctx().parse_flow_ambiguous()
+    }
+
+    /// True if Flow `component`/`hook` syntax is enabled. Shorthand for the C++
+    /// `context_.getParseFlowComponentSyntax()`.
+    // P6.3: first consumer is the component/hook grammar.
+    #[allow(dead_code)]
+    pub(super) fn parse_flow_component_syntax(&self) -> bool {
+        self.gc.ctx().parse_flow_component_syntax()
+    }
+
+    /// True if Flow `record` declarations/expressions are enabled. Shorthand for
+    /// the C++ `context_.getParseFlowRecords()`.
+    // P6.4: first consumer is the record grammar.
+    #[allow(dead_code)]
+    pub(super) fn parse_flow_records(&self) -> bool {
+        self.gc.ctx().parse_flow_records()
+    }
+
+    /// True if Flow `match` expressions/statements are enabled. Shorthand for
+    /// the C++ `context_.getParseFlowMatch()`.
+    // P6.5: first consumer is the match grammar.
+    #[allow(dead_code)]
+    pub(super) fn parse_flow_match(&self) -> bool {
+        self.gc.ctx().parse_flow_match()
+    }
+
     /// True if TypeScript parsing is enabled. Shorthand for the C++
     /// `context_.getParseTS()`. Used by `parse_types()`; always false until
     /// TypeScript parsing lands (P7).
@@ -3866,8 +3896,189 @@ mod tests {
     /// Honest deferral errors for the unported Flow productions.
     #[test]
     fn flow_deferred_productions_error() {
-        // P6: Flow enum declarations.
-        assert_flow_parse_has_errors(b"enum E {}", "Flow enum is P6");
+        // P6.2: Flow enum declarations.
+        assert_flow_parse_has_errors(b"enum E {}", "Flow enum is P6.2");
+    }
+
+    // ----------------------------------------------------------------------
+    // P6.0: Flow ambiguous-expression grammar — `as`/`as const` + type-args.
+    // ----------------------------------------------------------------------
+
+    /// Helper: lock a Flow-ambiguous context (both `parse_flow` and
+    /// `parse_flow_ambiguous`), parse `src`, and return the first statement's
+    /// expression (it must be an `ExpressionStatement`).
+    fn flow_ambiguous_expr<'gc>(
+        gc: &'gc ast::context::GCLock<'_, '_>,
+        sm: &mut support::manager::SourceErrorManager,
+        src: &[u8],
+    ) -> &'gc ast::node::Node<'gc> {
+        let stmt = parse_one_stmt(gc, sm, src);
+        let ast::node::Node::ExpressionStatement(es) = stmt else {
+            panic!("expected ExpressionStatement, got {:?}", stmt.kind())
+        };
+        es.expression
+    }
+
+    /// `x as number` → `AsExpression{ Identifier "x", NumberTypeAnnotation }`.
+    #[test]
+    fn flow_as_expression() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        ctx.set_parse_flow_ambiguous(true);
+        let gc = ctx.lock();
+        let expr = flow_ambiguous_expr(&gc, &mut sm, b"x as number;");
+        let Node::AsExpression(as_expr) = expr else {
+            panic!("expected AsExpression, got {:?}", expr.kind())
+        };
+        assert_eq!(ident_bytes(&gc, as_expr.expression), b"x");
+        assert!(
+            matches!(as_expr.type_annotation, Node::NumberTypeAnnotation(_)),
+            "type is NumberTypeAnnotation, got {:?}",
+            as_expr.type_annotation.kind()
+        );
+    }
+
+    /// `y as const` → `AsConstExpression{ Identifier "y" }` (the `const`
+    /// special-case, NOT an `AsExpression` over a `GenericTypeAnnotation`).
+    #[test]
+    fn flow_as_const_expression() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        ctx.set_parse_flow_ambiguous(true);
+        let gc = ctx.lock();
+        let expr = flow_ambiguous_expr(&gc, &mut sm, b"y as const;");
+        let Node::AsConstExpression(as_const) = expr else {
+            panic!("expected AsConstExpression, got {:?}", expr.kind())
+        };
+        assert_eq!(ident_bytes(&gc, as_const.expression), b"y");
+    }
+
+    /// `f<T>()` is a `CallExpression` whose `type_arguments` is populated, and
+    /// `a < b` rolls the speculation back into a `BinaryExpression`.
+    #[test]
+    fn flow_call_type_args_vs_comparison() {
+        use ast::context::Context;
+        use ast::node::Node;
+        // f<T>() — type-args kept.
+        {
+            let mut sm = support::manager::SourceErrorManager::new();
+            let mut ctx = Context::new();
+            ctx.set_parse_flow(true);
+            ctx.set_parse_flow_ambiguous(true);
+            let gc = ctx.lock();
+            let expr = flow_ambiguous_expr(&gc, &mut sm, b"f<T>();");
+            let Node::CallExpression(call) = expr else {
+                panic!("expected CallExpression, got {:?}", expr.kind())
+            };
+            assert!(
+                call.type_arguments.is_some(),
+                "f<T>() must keep type arguments"
+            );
+        }
+        // a < b — speculation rolled back to a comparison.
+        {
+            let mut sm = support::manager::SourceErrorManager::new();
+            let mut ctx = Context::new();
+            ctx.set_parse_flow(true);
+            ctx.set_parse_flow_ambiguous(true);
+            let gc = ctx.lock();
+            let expr = flow_ambiguous_expr(&gc, &mut sm, b"a < b;");
+            assert!(
+                matches!(expr, Node::BinaryExpression(_)),
+                "a < b must be a BinaryExpression, got {:?}",
+                expr.kind()
+            );
+        }
+    }
+
+    /// `new C<T>` (no args) is a `NewExpression` with type-args; `new C<T>(x)`
+    /// keeps both type-args and arguments.
+    #[test]
+    fn flow_new_type_args() {
+        use ast::context::Context;
+        use ast::node::Node;
+        // new C<T> — type-args, NO parens required.
+        {
+            let mut sm = support::manager::SourceErrorManager::new();
+            let mut ctx = Context::new();
+            ctx.set_parse_flow(true);
+            ctx.set_parse_flow_ambiguous(true);
+            let gc = ctx.lock();
+            let expr = flow_ambiguous_expr(&gc, &mut sm, b"new C<T>;");
+            let Node::NewExpression(new_expr) = expr else {
+                panic!("expected NewExpression, got {:?}", expr.kind())
+            };
+            assert!(
+                new_expr.type_arguments.is_some(),
+                "new C<T> must keep type arguments"
+            );
+            assert_eq!(new_expr.arguments.iter().count(), 0, "no args");
+        }
+        // new C<T>(x) — type-args AND one argument.
+        {
+            let mut sm = support::manager::SourceErrorManager::new();
+            let mut ctx = Context::new();
+            ctx.set_parse_flow(true);
+            ctx.set_parse_flow_ambiguous(true);
+            let gc = ctx.lock();
+            let expr = flow_ambiguous_expr(&gc, &mut sm, b"new C<T>(x);");
+            let Node::NewExpression(new_expr) = expr else {
+                panic!("expected NewExpression, got {:?}", expr.kind())
+            };
+            assert!(new_expr.type_arguments.is_some(), "type args kept");
+            assert_eq!(new_expr.arguments.iter().count(), 1, "one arg");
+        }
+    }
+
+    /// `obj?.foo<T>(x)` is an `OptionalCallExpression` with type-args (the
+    /// `?.<T>()` form is unambiguous Flow — no SavePoint, no rollback).
+    #[test]
+    fn flow_optional_call_type_args() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        ctx.set_parse_flow_ambiguous(true);
+        let gc = ctx.lock();
+        let expr = flow_ambiguous_expr(&gc, &mut sm, b"obj?.foo<T>(x);");
+        // obj?.foo is an OptionalMemberExpression; the trailing call is an
+        // OptionalCallExpression carrying the type arguments.
+        let Node::OptionalCallExpression(call) = expr else {
+            panic!("expected OptionalCallExpression, got {:?}", expr.kind())
+        };
+        assert!(
+            call.type_arguments.is_some(),
+            "obj?.foo<T>(x) must keep type arguments"
+        );
+        assert_eq!(call.arguments.iter().count(), 1, "one argument");
+    }
+
+    /// Without the ambiguous flag, `f<T>()` is NOT a type-args call: `f < T`
+    /// is a comparison, exactly like plain JS. (Guards against Flow leakage.)
+    #[test]
+    fn flow_ambiguous_off_keeps_comparison() {
+        use ast::context::Context;
+        use ast::node::Node;
+        // parse_flow ON but parse_flow_ambiguous OFF: still a comparison chain.
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        // deliberately NOT setting parse_flow_ambiguous.
+        let gc = ctx.lock();
+        let expr = flow_ambiguous_expr(&gc, &mut sm, b"f < T > (g);");
+        // `f < T > (g)` parses as `(f < T) > (g)` — a comparison, not a call.
+        assert!(
+            matches!(expr, Node::BinaryExpression(_)),
+            "without ambiguous flag, f<T>(g) is a comparison, got {:?}",
+            expr.kind()
+        );
     }
 
     // P5.1: the full Flow type-annotation hierarchy (js/flow/).

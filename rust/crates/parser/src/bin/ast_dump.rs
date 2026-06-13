@@ -38,8 +38,19 @@ struct Options {
     dump_loc: Opt<bool>,
     include_empty: Opt<bool>,
     include_raw: Opt<bool>,
-    /// Enable Flow type parsing (the hermesc `-parse-flow` flag).
+    /// Enable Flow type parsing (the hermesc `-parse-flow` flag). hermesc's
+    /// `-parse-flow` defaults to `ParseFlowSetting::ALL`, so this also enables
+    /// the ambiguous-expression grammar.
     parse_flow: Opt<bool>,
+    /// Enable Flow `component`/`hook` syntax (hermesc `-Xparse-component-syntax`).
+    /// Implies `parse_flow`.
+    parse_component_syntax: Opt<bool>,
+    /// Enable Flow `record` declarations/expressions (hermesc
+    /// `-Xparse-flow-records`). Implies `parse_flow`.
+    parse_flow_records: Opt<bool>,
+    /// Enable Flow `match` expressions/statements (hermesc `-Xparse-flow-match`).
+    /// Implies `parse_flow`.
+    parse_flow_match: Opt<bool>,
     /// Input path; empty or "-" reads stdin.
     input: Opt<String>,
 }
@@ -87,6 +98,30 @@ impl Options {
                     ..Default::default()
                 },
             ),
+            parse_component_syntax: Opt::new_flag(
+                cl,
+                OptDesc {
+                    long: Some("parse-component-syntax"),
+                    desc: Some("Enable Flow component/hook syntax (implies --parse-flow)."),
+                    ..Default::default()
+                },
+            ),
+            parse_flow_records: Opt::new_flag(
+                cl,
+                OptDesc {
+                    long: Some("parse-flow-records"),
+                    desc: Some("Enable Flow record syntax (implies --parse-flow)."),
+                    ..Default::default()
+                },
+            ),
+            parse_flow_match: Opt::new_flag(
+                cl,
+                OptDesc {
+                    long: Some("parse-flow-match"),
+                    desc: Some("Enable Flow match syntax (implies --parse-flow)."),
+                    ..Default::default()
+                },
+            ),
             input: Opt::<String>::new(
                 cl,
                 OptDesc {
@@ -108,7 +143,15 @@ fn main() {
     let dump_loc = *opt.dump_loc;
     let include_empty = *opt.include_empty;
     let include_raw = *opt.include_raw;
-    let parse_flow = *opt.parse_flow;
+    let parse_component_syntax = *opt.parse_component_syntax;
+    let parse_flow_records = *opt.parse_flow_records;
+    let parse_flow_match = *opt.parse_flow_match;
+    // hermesc's hidden `-Xparse-*` flags imply `-parse-flow`; mirror that, and
+    // `-parse-flow` itself defaults to `ParseFlowSetting::ALL` (ambiguous on).
+    let parse_flow = *opt.parse_flow
+        || parse_component_syntax
+        || parse_flow_records
+        || parse_flow_match;
 
     let input = &*opt.input;
     let bytes = if input.is_empty() || input == "-" {
@@ -129,6 +172,12 @@ fn main() {
     let buf_id = sm.add_buffer_bytes("input", &bytes);
     let mut ctx = Context::new();
     ctx.set_parse_flow(parse_flow);
+    // hermesc `-parse-flow` defaults to `ParseFlowSetting::ALL`, which IS the
+    // ambiguous-expression grammar; enabling Flow at all enables ambiguous.
+    ctx.set_parse_flow_ambiguous(parse_flow);
+    ctx.set_parse_flow_component_syntax(parse_component_syntax);
+    ctx.set_parse_flow_records(parse_flow_records);
+    ctx.set_parse_flow_match(parse_flow_match);
     let gc = ctx.lock();
 
     // Parse in a scope so the parser (and its &mut sm borrow) drops before we

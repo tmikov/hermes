@@ -183,6 +183,23 @@ pub struct Context<'ast> {
     /// Whether to parse Flow type syntax. Mirrors C++ `Context::getParseFlow()`.
     parse_flow: bool,
 
+    /// Whether to parse the Flow ambiguous-expression grammar (type-args on
+    /// call/new, `as`, typed arrows, type-casts). Mirrors C++
+    /// `Context::getParseFlowAmbiguous()` (= `parseFlow_ == ParseFlowSetting::ALL`).
+    parse_flow_ambiguous: bool,
+
+    /// Whether to parse Flow `component`/`hook` syntax. Mirrors C++
+    /// `Context::getParseFlowComponentSyntax()`.
+    parse_flow_component_syntax: bool,
+
+    /// Whether to parse Flow `record` declarations/expressions. Mirrors C++
+    /// `Context::getParseFlowRecords()`.
+    parse_flow_records: bool,
+
+    /// Whether to parse Flow `match` expressions/statements. Mirrors C++
+    /// `Context::getParseFlowMatch()`.
+    parse_flow_match: bool,
+
     /// Whether to warn about undefined variables in strict mode functions.
     pub warn_undefined: bool,
 }
@@ -212,6 +229,10 @@ impl<'ast> Context<'ast> {
             markbit_marked: true,
             strict_mode: false,
             parse_flow: false,
+            parse_flow_ambiguous: false,
+            parse_flow_component_syntax: false,
+            parse_flow_records: false,
+            parse_flow_match: false,
             warn_undefined: false,
         }
     }
@@ -334,6 +355,50 @@ impl<'ast> Context<'ast> {
     /// Mirrors C++ `Context::setParseFlow()`.
     pub fn set_parse_flow(&mut self, v: bool) {
         self.parse_flow = v;
+    }
+
+    /// Return true if the Flow ambiguous-expression grammar is enabled.
+    /// Mirrors C++ `Context::getParseFlowAmbiguous()`.
+    pub fn parse_flow_ambiguous(&self) -> bool {
+        self.parse_flow_ambiguous
+    }
+
+    /// Enable or disable the Flow ambiguous-expression grammar.
+    pub fn set_parse_flow_ambiguous(&mut self, v: bool) {
+        self.parse_flow_ambiguous = v;
+    }
+
+    /// Return true if Flow `component`/`hook` syntax is enabled.
+    /// Mirrors C++ `Context::getParseFlowComponentSyntax()`.
+    pub fn parse_flow_component_syntax(&self) -> bool {
+        self.parse_flow_component_syntax
+    }
+
+    /// Enable or disable Flow `component`/`hook` syntax.
+    pub fn set_parse_flow_component_syntax(&mut self, v: bool) {
+        self.parse_flow_component_syntax = v;
+    }
+
+    /// Return true if Flow `record` declarations/expressions are enabled.
+    /// Mirrors C++ `Context::getParseFlowRecords()`.
+    pub fn parse_flow_records(&self) -> bool {
+        self.parse_flow_records
+    }
+
+    /// Enable or disable Flow `record` declarations/expressions.
+    pub fn set_parse_flow_records(&mut self, v: bool) {
+        self.parse_flow_records = v;
+    }
+
+    /// Return true if Flow `match` expressions/statements are enabled.
+    /// Mirrors C++ `Context::getParseFlowMatch()`.
+    pub fn parse_flow_match(&self) -> bool {
+        self.parse_flow_match
+    }
+
+    /// Enable or disable Flow `match` expressions/statements.
+    pub fn set_parse_flow_match(&mut self, v: bool) {
+        self.parse_flow_match = v;
     }
 
     pub fn gc(&mut self) {
