@@ -15,9 +15,11 @@ use ast::node::{
     DeclareTypeAlias, EnumBigIntBody, EnumBigIntMember, EnumBooleanBody,
     EnumBooleanMember, EnumDeclaration, EnumDefaultedMember, EnumNumberBody,
     EnumNumberMember, EnumStringBody, EnumStringMember, EnumSymbolBody,
-    ExportNamedDeclaration, HookDeclaration, Identifier, InterfaceDeclaration,
-    InterfaceExtends, Node, NumericLiteral, OpaqueType, StringLiteral,
-    TypeAlias,
+    ExportNamedDeclaration, FunctionExpression, HookDeclaration, Identifier,
+    InterfaceDeclaration, InterfaceExtends, MethodDefinition, Node,
+    NumericLiteral, OpaqueType, RecordDeclaration, RecordDeclarationBody,
+    RecordDeclarationImplements, RecordDeclarationProperty,
+    RecordDeclarationStaticProperty, StringLiteral, TypeAlias,
 };
 use ast::node_child::{NodeList, NodeMetadata};
 use support::location::SMLoc;
@@ -28,7 +30,8 @@ use crate::token_kinds::TokenKind;
 
 use super::{
     AllowAnonFunctionType, AllowProtoProperty, AllowSpreadProperty,
-    AllowStaticProperty, TypeAliasKind,
+    AllowStaticProperty, AllowTypedArrowFunction, CoverTypedParameters,
+    TypeAliasKind,
 };
 
 /// The kind of a Flow `enum`. Port of `JSParserImpl::EnumKind`
@@ -119,8 +122,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 .parse_hook_declaration_flow(start, /* is_async */ false);
         }
 
-        // P6.4: record declarations (gated on getParseFlowRecords(), C++ 47-49)
-        // — the Rust Context does not implement that flag yet.
+        // C++ 47-49: record declarations (gated on getParseFlowRecords()).
+        if self.parse_flow_records() && self.check_record_declaration_flow() {
+            return self.parse_record_declaration_flow(start);
+        }
 
         // C++ 51-56.
         if self.check(TokenKind::rw_enum) {
@@ -749,6 +754,407 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             is_async,
         ));
         Some(self.set_location(start, end, node))
+    }
+
+    // -----------------------------------------------------------------------
+    // checkRecordDeclarationFlow — 1618 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Whether the current token starts a `record` declaration. Port of
+    /// `JSParserImpl::checkRecordDeclarationFlow` (flow.cpp:1618-1628). MUST be
+    /// idempotent (it is called from the parse side, which reparses the token
+    /// on a match), so the lookahead passes no expected token.
+    pub(in crate::js) fn check_record_declaration_flow(&mut self) -> bool {
+        // C++ 1619-1620.
+        if !self.check_name(b"record") {
+            return false;
+        }
+        // C++ 1622-1627: don't pass an `expectedToken` so we don't advance on a
+        // match (lets `parseRecordDeclarationFlow` reparse the token), and so
+        // this stays idempotent.
+        self.lexer.lookahead1::<false>(None) == Some(TokenKind::identifier)
+    }
+
+    // -----------------------------------------------------------------------
+    // parseRecordDeclarationFlow — 1630 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a `record` declaration, with the cursor at `record` and `start` at
+    /// the start of the declaration. Port of
+    /// `JSParserImpl::parseRecordDeclarationFlow` (flow.cpp:1630-1901).
+    pub(in crate::js) fn parse_record_declaration_flow(
+        &mut self,
+        start: SMLoc,
+    ) -> Option<&'gc Node<'gc>> {
+        // C++ 1631-1632.
+        debug_assert!(self.check_name(b"record"));
+        self.advance(GrammarContext::AllowRegExp);
+
+        // C++ 1634-1640.
+        let Some(id) = self.parse_binding_identifier(Param::default()) else {
+            // C++ 1637-1639: errorExpected(identifier, "after 'record'",
+            // "location of 'record'", start) — note args dropped per house
+            // style; `start` retained for symmetry with the C++.
+            let _ = start;
+            self.error_cur("'identifier' expected after 'record'");
+            return None;
+        };
+
+        // C++ 1642-1649.
+        let mut type_params: Option<&'gc Node<'gc>> = None;
+        if self.check(TokenKind::less) {
+            type_params = Some(self.parse_type_params_flow()?);
+        }
+
+        // C++ 1651-1667: an optional `implements` clause.
+        let mut implements_list: Vec<&'gc Node<'gc>> = Vec::new();
+        if self.check_name(b"implements") {
+            self.advance(GrammarContext::Type);
+            // C++ 1655-1666: a do-while.
+            loop {
+                if !self.need(TokenKind::identifier, " in record 'implements'") {
+                    return None;
+                }
+                let implements =
+                    self.parse_record_declaration_implements_flow()?;
+                implements_list.push(implements);
+                if !self.check_and_eat(TokenKind::comma, GrammarContext::Type) {
+                    break;
+                }
+            }
+        }
+
+        // C++ 1669-1675.
+        if !self.need(TokenKind::l_brace, " in record declaration") {
+            return None;
+        }
+
+        // C++ 1677-1679.
+        let body_start = self.advance(GrammarContext::AllowRegExp).start;
+        let mut body_elements: Vec<&'gc Node<'gc>> = Vec::new();
+
+        // C++ 1681-1879.
+        while !self.check(TokenKind::r_brace) {
+            // C++ 1682-1689.
+            if self.check(TokenKind::eof) {
+                self.error_at_loc(body_start, "'}' expected in record body");
+                return None;
+            }
+
+            // C++ 1691-1706: `isModifierKeyword` — distinguish a `static`/
+            // `async` modifier keyword from a property name by looking at the
+            // token that follows. If it is `:`/`<`/`(`/`}`/eof the keyword is
+            // itself the property name, not a modifier.
+            let prop_start_loc = self.cur_start();
+
+            // C++ 1710-1721: modifiers `static`, `async`, generator (`*`).
+            let mut is_static = false;
+            if self.check_name(b"static") && self.is_record_modifier_keyword() {
+                self.advance(GrammarContext::AllowRegExp);
+                is_static = true;
+            }
+            let mut is_async = false;
+            if self.check_name(b"async") && self.is_record_modifier_keyword() {
+                self.advance(GrammarContext::AllowRegExp);
+                is_async = true;
+            }
+            let is_generator =
+                self.check_and_eat(TokenKind::star, GrammarContext::AllowRegExp);
+
+            // C++ 1723-1730.
+            if self.check(TokenKind::l_square) {
+                self.error_at_loc(
+                    self.cur_start(),
+                    "records do not support computed properties",
+                );
+                return None;
+            }
+            if self.check(TokenKind::private_identifier) {
+                self.error_at_loc(
+                    self.cur_start(),
+                    "records do not support private elements",
+                );
+                return None;
+            }
+
+            // C++ 1731-1742.
+            let key = self.parse_property_name()?;
+            if let Node::Identifier(key_ident) = key {
+                let constructor_atom =
+                    self.gc.ctx().atom_table.atom_bytes(b"constructor");
+                let prototype_atom =
+                    self.gc.ctx().atom_table.atom_bytes(b"prototype");
+                if key_ident.name.get() == constructor_atom
+                    || (is_static && key_ident.name.get() == prototype_atom)
+                {
+                    self.error_at(key.range(), "invalid record property name");
+                    return None;
+                }
+            }
+
+            if self.check(TokenKind::colon) {
+                // C++ 1744-1797: Property.
+                if is_async || is_generator {
+                    self.error_at(
+                        key.range(),
+                        "invalid async/generator modifier for record property, expected a method definition",
+                    );
+                    return None;
+                }
+                // C++ 1752-1756: eat the colon (in Type context).
+                let annot_start = self.advance(GrammarContext::Type).start;
+                let type_annot = self.parse_type_annotation_flow(
+                    Some(annot_start),
+                    AllowAnonFunctionType::Yes,
+                )?;
+
+                // C++ 1758-1764.
+                let mut value: Option<&'gc Node<'gc>> = None;
+                if self.check_and_eat(TokenKind::equal, GrammarContext::AllowRegExp)
+                {
+                    value = Some(self.parse_assignment_expression(
+                        Param::default(),
+                        AllowTypedArrowFunction::Yes,
+                        CoverTypedParameters::Yes,
+                        None,
+                    )?);
+                }
+
+                // C++ 1766-1785.
+                let prop = if is_static {
+                    // C++ 1767-1778: a static record property requires an
+                    // initializer.
+                    let Some(value) = value else {
+                        // C++ 1769-1772: error at key->getEndLoc().
+                        self.error_at_loc(
+                            key.range().end,
+                            "static record properties must have an initializer",
+                        );
+                        return None;
+                    };
+                    let node = Node::RecordDeclarationStaticProperty(
+                        RecordDeclarationStaticProperty::new(
+                            NodeMetadata::new(self.dummy_range()),
+                            key,
+                            type_annot,
+                            value,
+                        ),
+                    );
+                    self.set_location(prop_start_loc, value.range().end, node)
+                } else {
+                    // C++ 1779-1784: the end loc is the initializer if present,
+                    // else the type annotation.
+                    let end = value
+                        .map(|v| v.range().end)
+                        .unwrap_or_else(|| type_annot.range().end);
+                    let node = Node::RecordDeclarationProperty(
+                        RecordDeclarationProperty::new(
+                            NodeMetadata::new(self.dummy_range()),
+                            key,
+                            type_annot,
+                            value,
+                        ),
+                    );
+                    self.set_location(prop_start_loc, end, node)
+                };
+                body_elements.push(prop);
+
+                // C++ 1788-1797: a trailing `,` is required unless `}`/eof
+                // follows.
+                if !self.check2(TokenKind::r_brace, TokenKind::eof)
+                    && !self.eat(
+                        TokenKind::comma,
+                        GrammarContext::AllowRegExp,
+                        " after property",
+                    )
+                {
+                    return None;
+                }
+            } else if self.check(TokenKind::l_paren) || self.check(TokenKind::less)
+            {
+                // C++ 1798-1872: Method.
+                let mut method_type_params: Option<&'gc Node<'gc>> = None;
+                if self.check(TokenKind::less) {
+                    method_type_params = Some(self.parse_type_params_flow()?);
+                }
+
+                // C++ 1808-1815.
+                if !self.check(TokenKind::l_paren) {
+                    self.error_cur("'(' expected in method parameters");
+                    return None;
+                }
+
+                // C++ 1817-1819.
+                let mut param_list: Vec<&'gc Node<'gc>> = Vec::new();
+                if !self
+                    .parse_formal_parameters(Param::default(), &mut param_list)
+                {
+                    return None;
+                }
+                let params = NodeList::from_iter(self.gc, param_list);
+
+                // C++ 1821-1828: an optional `: ReturnType`.
+                let mut return_type: Option<&'gc Node<'gc>> = None;
+                if self.check(TokenKind::colon) {
+                    let annot_start = self.advance(GrammarContext::Type).start;
+                    return_type = Some(self.parse_return_type_annotation_flow(
+                        Some(annot_start),
+                        AllowAnonFunctionType::Yes,
+                    )?);
+                }
+
+                // C++ 1830-1837.
+                if !self.check(TokenKind::l_brace) {
+                    self.error_cur("'{' expected in method body");
+                    return None;
+                }
+
+                // C++ 1839-1852: paramYield_ = isGenerator, paramAwait_ =
+                // isAsync around the body (mirrors the class-method pattern).
+                let body = {
+                    let _guard_yield = self.save_param_yield(is_generator);
+                    let _guard_await = self.save_param_await(is_async);
+                    self.parse_function_body(
+                        Param::default(),
+                        false,
+                        is_generator,
+                        is_async,
+                        GrammarContext::AllowRegExp,
+                        true,
+                    )?
+                };
+                let body_end = body.range().end;
+
+                // C++ 1854-1865.
+                let func = Node::FunctionExpression(FunctionExpression::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    None,
+                    params,
+                    body,
+                    method_type_params,
+                    return_type,
+                    None,
+                    is_generator,
+                    is_async,
+                ));
+                let func_expr =
+                    self.set_location(prop_start_loc, body_end, func);
+
+                // C++ 1867-1872.
+                let method_ident =
+                    self.gc.ctx().atom_table.atom_bytes(b"method");
+                let method = Node::MethodDefinition(MethodDefinition::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    key,
+                    func_expr,
+                    method_ident,
+                    false,
+                    is_static,
+                    NodeList::empty(),
+                ));
+                body_elements
+                    .push(self.set_location(prop_start_loc, body_end, method));
+            } else {
+                // C++ 1873-1878.
+                self.error_at_loc(
+                    key.range().end,
+                    "expected ':' for property, '(' for method, or '<' for method with type parameters",
+                );
+                return None;
+            }
+        }
+
+        // C++ 1881-1888.
+        if !self.eat(
+            TokenKind::r_brace,
+            GrammarContext::AllowRegExp,
+            " in record body",
+        ) {
+            return None;
+        }
+
+        // C++ 1890-1894.
+        let body_node = Node::RecordDeclarationBody(RecordDeclarationBody::new(
+            NodeMetadata::new(self.dummy_range()),
+            NodeList::from_iter(self.gc, body_elements),
+        ));
+        let body = self.set_location(
+            body_start,
+            self.lexer.prev_token_end(),
+            body_node,
+        );
+
+        // C++ 1896-1900.
+        let end = body.range().end;
+        let node = Node::RecordDeclaration(RecordDeclaration::new(
+            NodeMetadata::new(self.dummy_range()),
+            id,
+            type_params,
+            NodeList::from_iter(self.gc, implements_list),
+            body,
+        ));
+        Some(self.set_location(start, end, node))
+    }
+
+    /// The `isModifierKeyword` lambda from `parseRecordDeclarationFlow`
+    /// (flow.cpp:1691-1706): a `static`/`async` token is a modifier (rather
+    /// than a property name) only if the FOLLOWING token is not one of
+    /// `:`/`<`/`(`/`}`/eof. Idempotent (`lookahead1(None)`).
+    fn is_record_modifier_keyword(&mut self) -> bool {
+        let Some(next) = self.lexer.lookahead1::<false>(None) else {
+            return false;
+        };
+        !matches!(
+            next,
+            TokenKind::colon // token: T
+                | TokenKind::less // token<T>() {}
+                | TokenKind::l_paren // token() {}
+                | TokenKind::r_brace // end of record
+                | TokenKind::eof // end of file
+        )
+    }
+
+    // -----------------------------------------------------------------------
+    // parseRecordDeclarationImplementsFlow — 1903 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse one entry of a `record` `implements` clause: an Identifier with
+    /// optional `<typeArgs>`, wrapped in a `RecordDeclarationImplements`. Port
+    /// of `JSParserImpl::parseRecordDeclarationImplementsFlow`
+    /// (flow.cpp:1903-1927).
+    fn parse_record_declaration_implements_flow(
+        &mut self,
+    ) -> Option<&'gc Node<'gc>> {
+        // C++ 1905-1906.
+        debug_assert!(self.check(TokenKind::identifier));
+        let start = self.cur_start();
+
+        // C++ 1908-1913.
+        let id_range = self.cur_range();
+        let id_node = Node::Identifier(Identifier::new(
+            NodeMetadata::new(self.dummy_range()),
+            self.lexer.token().get_identifier(),
+            None,
+            false,
+        ));
+        let id = self.set_location(id_range.start, id_range.end, id_node);
+        self.advance(GrammarContext::Type);
+
+        // C++ 1915-1921.
+        let mut type_args: Option<&'gc Node<'gc>> = None;
+        if self.check(TokenKind::less) {
+            type_args = Some(self.parse_type_args_flow(GrammarContext::Type)?);
+        }
+
+        // C++ 1923-1926.
+        let node = Node::RecordDeclarationImplements(
+            RecordDeclarationImplements::new(
+                NodeMetadata::new(self.dummy_range()),
+                id,
+                type_args,
+            ),
+        );
+        Some(self.set_location(start, self.lexer.prev_token_end(), node))
     }
 
     // -----------------------------------------------------------------------

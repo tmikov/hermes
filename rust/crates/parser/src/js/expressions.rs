@@ -2489,14 +2489,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// `seenOptionalChain`, and dispatches to `parseCallExpression` when the
     /// next token is `(` or a template literal.
     ///
-    /// Flow type-argument speculation on the call tail is handled (P6.0). The
-    /// Flow record-expression alternative commit-condition + the record branch
-    /// itself are P6.4; the TS half is P7.
+    /// Flow type-argument speculation on the call tail is handled (P6.0), as is
+    /// the Flow record-expression branch + its alternative type-args
+    /// commit-condition (P6.4). The TS half is P7.
     pub(super) fn parse_left_hand_side_expression_tail(
         &mut self,
         start_loc: support::location::SMLoc,
         mut expr: &'gc Node<'gc>,
-        _is_class_heritage_argument: IsClassHeritageArgument,
+        is_class_heritage_argument: IsClassHeritageArgument,
     ) -> Option<&'gc Node<'gc>> {
         // Consume `?.` if present (4030-4034).
         let optional =
@@ -2522,13 +2522,19 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         };
         if flow_gate && self.check(TokenKind::less) {
             let (opt_type_args, sp) = self.speculative_type_args();
-            // Commit when a `(` follows (call expression with type-args).
-            // P6.4: the Flow record-expression alternative commit-condition
-            //   `|| (parse_flow() && parse_flow_records()
-            //        && is_class_heritage_argument != Yes
-            //        && check_record_expression_flow(expr))`
-            // lands with `record` expressions.
-            if opt_type_args.is_some() && self.check(TokenKind::l_paren) {
+            // Commit when a `(` follows (call expression with type-args), OR
+            // — P6.4 — when the Flow record-expression alternative holds
+            // (C++ 4049-4053): `parse_flow() && parse_flow_records()
+            //   && is_class_heritage_argument != Yes
+            //   && check_record_expression_flow(expr)`.
+            if opt_type_args.is_some()
+                && (self.check(TokenKind::l_paren)
+                    || (self.parse_flow()
+                        && self.parse_flow_records()
+                        && is_class_heritage_argument
+                            != IsClassHeritageArgument::Yes
+                        && self.check_record_expression_flow(expr)))
+            {
                 type_args = opt_type_args;
             } else {
                 sp.restore(&mut self.lexer);
@@ -2550,8 +2556,15 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 optional,
             )?;
         }
-
-        // P6: Flow record expression (4075-4086) — gated, skip.
+        // P6.4: Flow record expression (C++ 4075-4086).
+        else if self.parse_flow()
+            && self.parse_flow_records()
+            && is_class_heritage_argument != IsClassHeritageArgument::Yes
+            && self.check_record_expression_flow(expr)
+        {
+            expr =
+                self.parse_record_expression_flow(start_loc, expr, type_args)?;
+        }
 
         Some(expr)
     }
@@ -3325,7 +3338,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// `JSParserImpl::parseObjectProperties` (2765-2790).
     ///
     /// Stops on `}` (not consumed). Returns false on parse error.
-    fn parse_object_properties(
+    pub(super) fn parse_object_properties(
         &mut self,
         elem_list: &mut Vec<&'gc Node<'gc>>,
     ) -> bool {

@@ -247,17 +247,22 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
             //
             // The record check (`checkRecordDeclarationFlow()`, C++ 609-611)
-            // is deliberately NOT ported. Unlike the parse side (which is
-            // gated on getParseFlowRecords() inside parseFlowDeclaration,
-            // flow.cpp:47), the C++ checkDeclaration() record check is
-            // UNgated. Consequence in C++ with records disabled: on
-            // `record R {}` checkDeclaration() answers true, but
-            // parseFlowDeclaration matches nothing and silently returns None
+            // is GATED on getParseFlowRecords() here — a deliberate deviation.
+            // The C++ checkDeclaration() record check is UNgated. Consequence
+            // in C++ with records DISABLED: on `record R {}` checkDeclaration()
+            // answers true, but parseFlowDeclaration matches nothing (its own
+            // record arm IS gated, flow.cpp:47) and silently returns None
             // (flow.cpp:89-92 — the `kind == None` assert passes), so
-            // `hermesc -parse-flow` exits 2 with ZERO diagnostics. The Rust
-            // omits the check entirely: the same input takes the ordinary
+            // `hermesc -parse-flow` exits 2 with ZERO diagnostics. With the
+            // Rust gate, records-disabled input takes the ordinary
             // expression-statement path and reports one normal syntax error —
-            // a deliberate, better-behaved deviation.
+            // a deliberate, better-behaved deviation. With records ENABLED the
+            // gate is transparent and behaves exactly like the C++ (P6.4).
+            if self.parse_flow_records()
+                && self.check_record_declaration_flow()
+            {
+                return true;
+            }
 
             // `opaque` followed by an identifier (`type`). C++ 612-615.
             // The C++ `check(<ident>)` overload is escape-insensitive.

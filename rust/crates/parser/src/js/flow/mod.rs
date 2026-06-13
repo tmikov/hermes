@@ -37,7 +37,101 @@ mod object_types;
 mod params;
 mod types;
 
+use ast::node::{Node, RecordExpression, RecordExpressionProperties};
+use ast::node_child::{NodeList, NodeMetadata};
+use support::location::SMLoc;
+
+use crate::js::JSParserImpl;
+use crate::lexer::GrammarContext;
 use crate::token_kinds::{ord, TokenKind};
+
+impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
+    // -----------------------------------------------------------------------
+    // checkRecordExpressionFlow — 1929 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Whether `expr` followed by the current `{` forms a `record` expression.
+    /// Port of `JSParserImpl::checkRecordExpressionFlow` (flow.cpp:1929-1946).
+    ///
+    /// The current token must be `{` with no newline before it; `expr` must be
+    /// either an Identifier with a non-empty name whose first character is NOT
+    /// a lowercase ascii letter `a`-`z`, or any MemberExpression.
+    pub(in crate::js) fn check_record_expression_flow(
+        &self,
+        expr: &Node<'gc>,
+    ) -> bool {
+        // C++ 1930-1932.
+        if !self.check(TokenKind::l_brace)
+            || self.lexer.is_new_line_before_current_token()
+        {
+            return false;
+        }
+        // C++ 1933-1940: record expression names cannot begin with lowercase
+        // 'a'-'z'.
+        if let Node::Identifier(ident) = expr {
+            let name = self.gc.ctx().atom_table.bytes(ident.name.get());
+            if name.is_empty() || (name[0] >= b'a' && name[0] <= b'z') {
+                return false;
+            }
+            return true;
+        }
+        // C++ 1941-1944: member expressions are always allowed.
+        matches!(expr, Node::MemberExpression(_))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseRecordExpressionFlow — 1948 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a `record` expression body — `Constructor[<TypeArgs>] { props }` —
+    /// with the cursor at `{`. Port of
+    /// `JSParserImpl::parseRecordExpressionFlow` (flow.cpp:1948-1979).
+    pub(in crate::js) fn parse_record_expression_flow(
+        &mut self,
+        start_loc: SMLoc,
+        constructor: &'gc Node<'gc>,
+        type_args: Option<&'gc Node<'gc>>,
+    ) -> Option<&'gc Node<'gc>> {
+        // C++ 1952-1953.
+        debug_assert!(self.check(TokenKind::l_brace));
+        let properties_start_loc = self.advance(GrammarContext::AllowRegExp).start;
+
+        // C++ 1955-1957.
+        let mut elem_list: Vec<&'gc Node<'gc>> = Vec::new();
+        if !self.parse_object_properties(&mut elem_list) {
+            return None;
+        }
+
+        // C++ 1959-1966: the record-expression `}` is eaten in AllowDiv.
+        let end_loc = self.cur_range().end;
+        if !self.eat(
+            TokenKind::r_brace,
+            GrammarContext::AllowDiv,
+            " at end of record expression '{...'",
+        ) {
+            return None;
+        }
+
+        // C++ 1968-1972.
+        let props_node = Node::RecordExpressionProperties(
+            RecordExpressionProperties::new(
+                NodeMetadata::new(self.dummy_range()),
+                NodeList::from_iter(self.gc, elem_list),
+            ),
+        );
+        let properties =
+            self.set_location(properties_start_loc, end_loc, props_node);
+
+        // C++ 1974-1978.
+        let node = Node::RecordExpression(RecordExpression::new(
+            NodeMetadata::new(self.dummy_range()),
+            constructor,
+            type_args,
+            properties,
+        ));
+        Some(self.set_location(start_loc, end_loc, node))
+    }
+}
 
 /// Check if the given token kind can follow a contextual variance keyword
 /// (`readonly` or `writeonly`) in Flow mode. Used to disambiguate the

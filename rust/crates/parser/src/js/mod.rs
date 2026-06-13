@@ -232,8 +232,6 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// True if Flow `record` declarations/expressions are enabled. Shorthand for
     /// the C++ `context_.getParseFlowRecords()`.
-    // P6.4: first consumer is the record grammar.
-    #[allow(dead_code)]
     pub(super) fn parse_flow_records(&self) -> bool {
         self.gc.ctx().parse_flow_records()
     }
@@ -6845,6 +6843,250 @@ mod tests {
         assert_parse_has_errors(
             b"var o = { m<T>() {} };",
             "object-method type params need Flow",
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // P6.4 — Flow record declarations + expressions.
+    // -----------------------------------------------------------------------
+
+    /// Build a records-enabled `Context` (Flow + ambiguous + records). The
+    /// ambiguous-expression grammar is set because hermesc `-parse-flow`
+    /// defaults to `ParseFlowSetting::ALL` (ambiguous on), and the record
+    /// EXPRESSION type-args speculation (`ns.Maker<T> {…}`) is gated on it.
+    fn rec_ctx() -> ast::context::Context<'static> {
+        let mut ctx = ast::context::Context::new();
+        ctx.set_parse_flow(true);
+        ctx.set_parse_flow_ambiguous(true);
+        ctx.set_parse_flow_records(true);
+        ctx
+    }
+
+    /// Parse `src` with records enabled, expect zero errors, return statement
+    /// `idx`. Reuses the component-test helper (which only needs the flags set
+    /// on the passed `gc`).
+    fn rec_parse_stmt_at<'gc>(
+        gc: &'gc ast::context::GCLock<'_, '_>,
+        sm: &mut support::manager::SourceErrorManager,
+        src: &[u8],
+        idx: usize,
+    ) -> &'gc ast::node::Node<'gc> {
+        comp_parse_stmt_at(gc, sm, src, idx)
+    }
+
+    /// `record Foo {}` — an empty record declaration.
+    #[test]
+    fn flow_record_empty() {
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = rec_ctx();
+        let gc = ctx.lock();
+        let stmt = rec_parse_stmt_at(&gc, &mut sm, b"record Foo {}", 0);
+        let Node::RecordDeclaration(r) = stmt else {
+            panic!("expected RecordDeclaration, got {:?}", stmt.kind())
+        };
+        assert_eq!(ident_bytes(&gc, r.id), b"Foo");
+        assert!(r.type_parameters.is_none(), "no type params");
+        assert_eq!(r.implements.iter().count(), 0, "no implements");
+        let Node::RecordDeclarationBody(body) = r.body else {
+            panic!("expected RecordDeclarationBody, got {:?}", r.body.kind())
+        };
+        assert_eq!(body.elements.iter().count(), 0, "empty body");
+    }
+
+    /// `record R<T> implements I, J<K> { ... }` — type params + an implements
+    /// clause carrying type-args, plus property / static-property / method /
+    /// async-generator-method body elements.
+    #[test]
+    fn flow_record_full() {
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = rec_ctx();
+        let gc = ctx.lock();
+        let stmt = rec_parse_stmt_at(
+            &gc,
+            &mut sm,
+            b"record Point<T> implements I, J<K> {\n\
+              x: number, y: T,\n\
+              static origin: Point = mk(),\n\
+              dist(o: Point): number { return 0; }\n\
+              async *gen<U>(): U {}\n\
+            }",
+            0,
+        );
+        let Node::RecordDeclaration(r) = stmt else {
+            panic!("expected RecordDeclaration, got {:?}", stmt.kind())
+        };
+        assert_eq!(ident_bytes(&gc, r.id), b"Point");
+        assert!(r.type_parameters.is_some(), "has type params");
+
+        // Two implements entries; the second carries type-args.
+        let impls: Vec<_> = r.implements.iter().collect();
+        assert_eq!(impls.len(), 2, "two implements entries");
+        let Node::RecordDeclarationImplements(i0) = impls[0] else {
+            panic!("expected RecordDeclarationImplements")
+        };
+        assert_eq!(ident_bytes(&gc, i0.id), b"I");
+        assert!(i0.type_arguments.is_none(), "I has no type-args");
+        let Node::RecordDeclarationImplements(i1) = impls[1] else {
+            panic!("expected RecordDeclarationImplements")
+        };
+        assert_eq!(ident_bytes(&gc, i1.id), b"J");
+        assert!(i1.type_arguments.is_some(), "J<K> has type-args");
+
+        let Node::RecordDeclarationBody(body) = r.body else {
+            panic!("expected RecordDeclarationBody")
+        };
+        let elems: Vec<_> = body.elements.iter().collect();
+        assert_eq!(elems.len(), 5, "x, y, static origin, dist, gen");
+
+        // x: number — a plain property with no default.
+        let Node::RecordDeclarationProperty(p_x) = elems[0] else {
+            panic!("expected RecordDeclarationProperty, got {:?}", elems[0].kind())
+        };
+        assert_eq!(ident_bytes(&gc, p_x.key), b"x");
+        assert!(p_x.default_value.is_none(), "x has no initializer");
+
+        // static origin: Point = mk() — a static property (value required).
+        let Node::RecordDeclarationStaticProperty(p_origin) = elems[2] else {
+            panic!(
+                "expected RecordDeclarationStaticProperty, got {:?}",
+                elems[2].kind()
+            )
+        };
+        assert_eq!(ident_bytes(&gc, p_origin.key), b"origin");
+
+        // dist(o: Point): number {...} — a method.
+        let Node::MethodDefinition(m_dist) = elems[3] else {
+            panic!("expected MethodDefinition, got {:?}", elems[3].kind())
+        };
+        assert!(!m_dist.r#static.get(), "dist is not static");
+        let Node::FunctionExpression(f_dist) = m_dist.value else {
+            panic!("expected FunctionExpression")
+        };
+        assert!(!f_dist.generator.get() && !f_dist.r#async.get());
+        assert!(f_dist.return_type.is_some(), "dist has a return type");
+
+        // async *gen<U>(): U {} — an async generator method with type params.
+        let Node::MethodDefinition(m_gen) = elems[4] else {
+            panic!("expected MethodDefinition, got {:?}", elems[4].kind())
+        };
+        let Node::FunctionExpression(f_gen) = m_gen.value else {
+            panic!("expected FunctionExpression")
+        };
+        assert!(f_gen.generator.get(), "gen is a generator");
+        assert!(f_gen.r#async.get(), "gen is async");
+        assert!(f_gen.type_parameters.is_some(), "gen has type params");
+    }
+
+    /// `Point { x: 1 }` — a record EXPRESSION with an Identifier constructor.
+    #[test]
+    fn flow_record_expr_ident() {
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = rec_ctx();
+        let gc = ctx.lock();
+        let init = {
+            let stmt =
+                rec_parse_stmt_at(&gc, &mut sm, b"const p = Point { x: 1 };", 0);
+            let Node::VariableDeclaration(vd) = stmt else {
+                panic!("expected VariableDeclaration")
+            };
+            let Node::VariableDeclarator(d) =
+                vd.declarations.iter().next().unwrap()
+            else {
+                panic!("expected VariableDeclarator")
+            };
+            d.init.expect("has init")
+        };
+        let Node::RecordExpression(re) = init else {
+            panic!("expected RecordExpression, got {:?}", init.kind())
+        };
+        assert_eq!(ident_bytes(&gc, re.record_constructor), b"Point");
+        assert!(re.type_arguments.is_none(), "no type-args");
+        let Node::RecordExpressionProperties(props) = re.properties else {
+            panic!("expected RecordExpressionProperties")
+        };
+        assert_eq!(props.properties.iter().count(), 1, "one property");
+    }
+
+    /// `ns.Maker<T> { a: 3 }` — a record expression with a MemberExpression
+    /// constructor AND type-args (exercises the LHS-tail commit-condition).
+    #[test]
+    fn flow_record_expr_member_typeargs() {
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = rec_ctx();
+        let gc = ctx.lock();
+        let init = {
+            let stmt = rec_parse_stmt_at(
+                &gc,
+                &mut sm,
+                b"const q = ns.Maker<T> { a: 3 };",
+                0,
+            );
+            let Node::VariableDeclaration(vd) = stmt else {
+                panic!("expected VariableDeclaration")
+            };
+            let Node::VariableDeclarator(d) =
+                vd.declarations.iter().next().unwrap()
+            else {
+                panic!("expected VariableDeclarator")
+            };
+            d.init.expect("has init")
+        };
+        let Node::RecordExpression(re) = init else {
+            panic!("expected RecordExpression, got {:?}", init.kind())
+        };
+        assert!(
+            matches!(re.record_constructor, Node::MemberExpression(_)),
+            "MemberExpression constructor"
+        );
+        assert!(re.type_arguments.is_some(), "ns.Maker<T> has type-args");
+    }
+
+    /// `checkRecordExpressionFlow` rejects a constructor whose name begins with
+    /// a lowercase ascii letter: `point { x: 1 }` is a block-bodied arrow's
+    /// label-or-block, NOT a record — it must NOT parse as a RecordExpression.
+    /// With records enabled but a lowercase ctor, hermesc treats `point` as an
+    /// identifier expression statement followed by a block; the Rust must too.
+    #[test]
+    fn flow_record_expr_lowercase_rejected() {
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = rec_ctx();
+        let gc = ctx.lock();
+        // `point` (lowercase) then a block `{ x }`. Not a record expression;
+        // `point` is an expression statement, `{ x }` a block statement.
+        let stmt = rec_parse_stmt_at(&gc, &mut sm, b"point\n{ x }", 0);
+        assert!(
+            !matches!(stmt, Node::RecordExpression(_)),
+            "lowercase ctor must not form a RecordExpression"
+        );
+    }
+
+    /// With records DISABLED, `record R {}` must NOT parse as a record (it is a
+    /// plain identifier `record` then `R` — an error), confirming the gate.
+    #[test]
+    fn flow_record_disabled_is_not_record() {
+        use ast::context::Context;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true); // Flow on, records OFF.
+        let gc = ctx.lock();
+        let buf_id = sm.add_buffer_bytes("input", b"record R {}");
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        let _ = parser.parse();
+        assert!(
+            parser.error_count_pub() > 0,
+            "record disabled: `record R {{}}` must report a syntax error"
         );
     }
 }
