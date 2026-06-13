@@ -24,7 +24,7 @@ use support::location::{SMLoc, SMRange};
 use crate::lexer::GrammarContext;
 use crate::token_kinds::TokenKind;
 
-use super::flow::AllowAnonFunctionType;
+use super::flow::{AllowAnonFunctionType, AllowTypedArrowFunction, CoverTypedParameters};
 use super::{
     AllowImportExport, IsClassHeritageArgument, JSParserImpl, Param, PARAM_IN,
     PARAM_RETURN,
@@ -609,7 +609,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         // C++ passes AllowTypedArrowFunction::Yes / CoverTypedParameters::No;
         // P1's parse_assignment_expression takes only `param`.
-        let expr = self.parse_assignment_expression(param)?;
+        let expr = self.parse_assignment_expression(param, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
 
         let end_loc = self.lexer.prev_token_end();
         let node = Node::VariableDeclarator(VariableDeclarator::new(
@@ -758,7 +758,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         let start_loc = self.cur_start();
-        let opt_expr = self.parse_expression(PARAM_IN)?;
+        let opt_expr = self.parse_expression(PARAM_IN, CoverTypedParameters::Yes)?;
 
         // Check whether this is a label. The expression must have started with an
         // identifier, be just an identifier and be followed by ':'.
@@ -852,7 +852,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        let argument = self.parse_expression(PARAM_IN)?;
+        let argument = self.parse_expression(PARAM_IN, CoverTypedParameters::Yes)?;
 
         if !self.eat_semi(false) {
             return None;
@@ -885,7 +885,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return Some(self.set_location(start_loc, end_loc, node));
         }
 
-        let argument = self.parse_expression(PARAM_IN)?;
+        let argument = self.parse_expression(PARAM_IN, CoverTypedParameters::Yes)?;
 
         if !self.eat_semi(false) {
             return None;
@@ -1007,7 +1007,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        let object = self.parse_expression(PARAM_IN)?;
+        let object = self.parse_expression(PARAM_IN, CoverTypedParameters::Yes)?;
 
         if !self.eat(
             TokenKind::r_paren,
@@ -1102,7 +1102,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         ) {
             return None;
         }
-        let test = self.parse_expression(PARAM_IN)?;
+        let test = self.parse_expression(PARAM_IN, CoverTypedParameters::Yes)?;
         // C++ 1695-1701.
         if !self.eat(
             TokenKind::r_paren,
@@ -1211,7 +1211,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         ) {
             return None;
         }
-        let test = self.parse_expression(PARAM_IN)?;
+        let test = self.parse_expression(PARAM_IN, CoverTypedParameters::Yes)?;
         // C++ 1779-1785.
         if !self.eat(
             TokenKind::r_paren,
@@ -1265,7 +1265,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         ) {
             return None;
         }
-        let test = self.parse_expression(PARAM_IN)?;
+        let test = self.parse_expression(PARAM_IN, CoverTypedParameters::Yes)?;
         // C++ 1826-1832.
         if !self.eat(
             TokenKind::r_paren,
@@ -1483,7 +1483,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     // two productions here, we let the resolver check that the
                     // LHS of the `of` or `in` is valid (the resolver throws the
                     // error instead of the parser). C++ 1954-1966.
-                    self.parse_expression(Param::default())?
+                    self.parse_expression(Param::default(), CoverTypedParameters::Yes)?
                 };
                 expr1 = Some(opt_expr1);
             }
@@ -1536,9 +1536,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // uses the header default `Param = ParamIn` (JSParserImpl.h:1141),
             // so `in` is recognized as a binary operator in the right-hand side.
             let opt_right = if for_in_loop {
-                self.parse_expression(PARAM_IN)
+                self.parse_expression(PARAM_IN, CoverTypedParameters::Yes)
             } else {
-                self.parse_assignment_expression(PARAM_IN)
+                self.parse_assignment_expression(PARAM_IN, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)
             };
 
             // C++ 2006-2012.
@@ -1607,7 +1607,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             let test = if self.check(TokenKind::semi) {
                 None
             } else {
-                Some(self.parse_expression(PARAM_IN)?)
+                Some(self.parse_expression(PARAM_IN, CoverTypedParameters::Yes)?)
             };
 
             // C++ 2051-2057.
@@ -1623,7 +1623,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             let update = if self.check(TokenKind::r_paren) {
                 None
             } else {
-                Some(self.parse_expression(PARAM_IN)?)
+                Some(self.parse_expression(PARAM_IN, CoverTypedParameters::Yes)?)
             };
 
             // C++ 2067-2073.
@@ -1682,7 +1682,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        let discriminant = self.parse_expression(PARAM_IN)?;
+        let discriminant = self.parse_expression(PARAM_IN, CoverTypedParameters::Yes)?;
 
         // C++ 2238-2244.
         if !self.eat(
@@ -1722,7 +1722,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 // C++ 2268-2272. parseExpression(ParamIn, CoverTypedParameters::
                 // No); the Cover argument is a Flow/TS knob absent from P1's
                 // parse_expression.
-                test_expr = Some(self.parse_expression(PARAM_IN)?);
+                test_expr = Some(self.parse_expression(PARAM_IN, CoverTypedParameters::Yes)?);
             } else if self
                 .check_and_eat(TokenKind::rw_default, GrammarContext::AllowRegExp)
             {
@@ -2331,7 +2331,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // Parse the initializer. C++ 1421.
         let debug_loc = self.advance(GrammarContext::AllowRegExp).start;
 
-        let expr = self.parse_assignment_expression(PARAM_IN.plus(param))?;
+        let expr = self.parse_assignment_expression(PARAM_IN.plus(param), AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
 
         // C++ 1427-1431.
         let left_start = left.range().start;

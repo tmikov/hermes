@@ -33,6 +33,7 @@ use support::location::{SMLoc, SMRange};
 use crate::lexer::GrammarContext;
 use crate::token_kinds::TokenKind;
 
+use super::flow::{AllowTypedArrowFunction, CoverTypedParameters};
 use super::{JSParserImpl, Param, PARAM_DEFAULT, PARAM_IN};
 
 impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
@@ -747,7 +748,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 //
                 // export default AssignmentExpression ;
                 // C++ 7280-7293.
-                let expr = self.parse_assignment_expression(PARAM_IN)?;
+                let expr = self.parse_assignment_expression(PARAM_IN, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
                 if !self.eat_semi(false) {
                     return None;
                 }

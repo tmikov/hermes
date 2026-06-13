@@ -14,6 +14,7 @@ use ast::node::{
     AssignmentExpression, AssignmentPattern,
     AwaitExpression, BigIntLiteral, BinaryExpression, BooleanLiteral, CallExpression,
     ConditionalExpression, CoverEmptyArgs, CoverRestElement, CoverTrailingComma,
+    CoverTypedIdentifier, TypeCastExpression,
     CoverInitializer, Empty, FunctionExpression, Identifier, ImportExpression,
     LogicalExpression, MemberExpression,
     MetaProperty,
@@ -30,6 +31,7 @@ use crate::lexer::GrammarContext;
 use crate::token_kinds::TokenKind;
 
 use super::flow::AllowAnonFunctionType;
+use super::flow::{AllowTypedArrowFunction, CoverTypedParameters};
 use super::{
     IsClassHeritageArgument, IsConstructorCall, JSParserImpl, Param, PARAM_IN, PARAM_RETURN,
     PARAM_TAGGED,
@@ -68,9 +70,16 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     pub(super) fn parse_expression(
         &mut self,
         param: Param,
+        cover_typed_parameters: CoverTypedParameters,
     ) -> Option<&'gc Node<'gc>> {
         let start_loc = self.cur_start();
-        let opt_expr = self.parse_assignment_expression(param)?;
+        // C++ 6556-6561: first operand threads `coverTypedParameters`.
+        let opt_expr = self.parse_assignment_expression(
+            param,
+            AllowTypedArrowFunction::Yes,
+            cover_typed_parameters,
+            None,
+        )?;
 
         if !self.check(TokenKind::comma) {
             return Some(opt_expr);
@@ -105,7 +114,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 ));
                 self.set_location(rest_range.start, rest_range.end, node)
             } else {
-                self.parse_assignment_expression(param)?
+                // C++ 6596: parseAssignmentExpression(param) — defaults.
+                self.parse_assignment_expression(
+                    param,
+                    AllowTypedArrowFunction::Yes,
+                    CoverTypedParameters::Yes,
+                    None,
+                )?
             };
             expr_nodes.push(expr2);
         }
@@ -245,7 +260,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // C++ 4674-4680: parse the argument. The simplified Rust signature only
         // takes `param`, so the C++ eagerly/AllowTypedArrowFunction/
         // CoverTypedParameters args are not threaded.
-        let arg = self.parse_assignment_expression(param.get(PARAM_IN))?;
+        let arg = self.parse_assignment_expression(param.get(PARAM_IN), AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
 
         // C++ 4682-4685: setLocation(yieldLoc, getPrevTokenEndLoc(), node).
         let end = self.lexer.prev_token_end();
@@ -290,14 +305,18 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// - `yield` (P3.2) and `=>` arrow functions (P3.3) are parsed inline.
     /// - Destructuring-assignment reparse (ArrayExpression/ObjectExpression LHS)
     ///   is handled by `reparse_assignment_pattern` (P1.8b).
-    /// - P6/P7: Flow/TS type parameters — skipped (gated by context flags that
-    ///   don't exist yet).
+    /// - Flow typed arrows (`<T>(…) => …`), the return-type/predicate
+    ///   backtrack, and typed async arrows are handled inline (P6.1; gated on
+    ///   `parse_flow`). The TS half of the return-type backtrack is P7.
     ///
     /// ## MAX_NESTED_ASSIGNMENTS
     /// `ESTree::MAX_NESTED_ASSIGNMENTS = 30000` (include/hermes/AST/ESTree.h:1407).
     pub(super) fn parse_assignment_expression(
         &mut self,
         param: Param,
+        allow_typed_arrow_function: AllowTypedArrowFunction,
+        cover_typed_parameters: CoverTypedParameters,
+        type_params: Option<&'gc Node<'gc>>,
     ) -> Option<&'gc Node<'gc>> {
         use crate::token_kinds::token_kind_str;
 
@@ -346,7 +365,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // or returns Error/Terminal otherwise.
         let run_level = |this: &mut Self,
                               stack: &mut Vec<AssignState<'gc>>,
-                              cur_param: Param|
+                              cur_param: Param,
+                              allow_typed_arrow_function: AllowTypedArrowFunction,
+                              cover_typed_parameters: CoverTypedParameters,
+                              mut type_params: Option<&'gc Node<'gc>>|
          -> LevelResult<'gc> {
             // ----------------------------------------------------------------
             // yield check (C++ 6257-6268).
@@ -388,21 +410,163 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 if opt_next == Some(TokenKind::identifier) {
                     force_async = true;
                 }
-                // P6: Flow typed async arrow (C++ 6277-6285) — gated, skip.
+                // Flow typed async arrow (C++ 6277-6285). When `async` is
+                // followed by `<` or `(`, speculatively try a typed async arrow
+                // function. Tri-state: `Some(node)` commits; `None` falls back
+                // to the normal async handling below.
+                if this.parse_flow()
+                    && (opt_next == Some(TokenKind::less)
+                        || opt_next == Some(TokenKind::l_paren))
+                {
+                    if let Some(async_arrow) =
+                        this.try_parse_typed_async_arrow_function(cur_param)
+                    {
+                        return LevelResult::Terminal(async_arrow);
+                    }
+                }
             }
 
-            // P6: Flow type-param block (C++ 6288-6339) — gated by
-            // context_.getParseFlow() which does not exist yet. Skip.
+            // Flow type-param head `<T>(…) => …` (C++ 6288-6339).
+            if this.parse_flow()
+                && allow_typed_arrow_function == AllowTypedArrowFunction::Yes
+                && type_params.is_none()
+                && this.check(TokenKind::less)
+            {
+                let sp = this.lexer.save_point();
+                // C++ CollectMessagesRAII collect{&sm_, true}: defer messages,
+                // commit on success / discard on rollback.
+                let prev = this.lexer.get_source_mgr_mut().begin_collecting();
+                // Do as the flow parser does due to JSX ambiguities. First try
+                // parsing as an assignment expression disallowing typed arrow
+                // functions; if that works, return it directly (C++ 6300-6309).
+                let opt_assign = this.parse_assignment_expression(
+                    cur_param,
+                    AllowTypedArrowFunction::No,
+                    CoverTypedParameters::No,
+                    None,
+                );
+                if let Some(assign) = opt_assign {
+                    // That worked, commit the collected messages.
+                    this.lexer.get_source_mgr_mut().end_collecting(prev, false);
+                    return LevelResult::Terminal(assign);
+                } else {
+                    // Consume the type parameters and try again (C++ 6311-6336).
+                    this.lexer.get_source_mgr_mut().end_collecting(prev, true);
+                    sp.restore(&mut this.lexer);
+                    // The Rust `SavePoint::restore` consumes `self`; C++ reuses
+                    // one SavePoint and calls `.restore()` again on the bail
+                    // paths below. We are back at `<` after the restore above, so
+                    // re-snapshot here for the possible second restore.
+                    let sp2 = this.lexer.save_point();
+                    let opt_type_params = this.parse_type_params_flow();
+                    // Type parameters must be followed by a '(' to be meaningful.
+                    if let Some(tp) = opt_type_params {
+                        if this.check(TokenKind::l_paren) {
+                            type_params = Some(tp);
+                            let opt_assign = this.parse_assignment_expression(
+                                cur_param,
+                                AllowTypedArrowFunction::Yes,
+                                CoverTypedParameters::No,
+                                type_params,
+                            );
+                            if let Some(assign) = opt_assign {
+                                // We've got the arrow function now.
+                                return LevelResult::Terminal(assign);
+                            } else {
+                                // That's everything we can try.
+                                let tp_range = tp.range();
+                                this.error_at(
+                                    tp_range,
+                                    "type parameters must be used in an \
+                                     arrow function expression",
+                                );
+                                return LevelResult::Error;
+                            }
+                        } else {
+                            // Invalid type params, and also invalid JSX. Bail.
+                            sp2.restore(&mut this.lexer);
+                        }
+                    } else {
+                        // Invalid type params, and also invalid JSX. Bail.
+                        sp2.restore(&mut this.lexer);
+                    }
+                }
+            }
 
             // C++ lines 6341-6345: leftStartLoc / hasNewLine / optLeftExpr.
             let left_start_loc = this.cur_start();
             let has_new_line = this.lexer.is_new_line_before_current_token();
-            let left_expr = match this.parse_conditional_expression(cur_param) {
+            let left_expr = match this
+                .parse_conditional_expression(cur_param, cover_typed_parameters)
+            {
                 Some(e) => e,
                 None => return LevelResult::Error,
             };
 
-            // P6/P7: Flow/TS return-type / predicate blocks (C++ 6349-6446) — skip.
+            // Flow return-type / predicate backtracking (C++ 6349-6402).
+            let mut return_type: Option<&'gc Node<'gc>> = None;
+            let mut predicate: Option<&'gc Node<'gc>> = None;
+            if this.parse_flow()
+                && allow_typed_arrow_function == AllowTypedArrowFunction::Yes
+                && (left_expr.metadata().parens.get() != 0
+                    || matches!(left_expr, Node::CoverEmptyArgs(_)))
+                && this.check(TokenKind::colon)
+            {
+                let sp = this.lexer.save_point();
+                // Defer our decision on whether to show or suppress messages.
+                // On failure we may need to lex JSX children instead of function
+                // type parameters, so messages are buffered (C++ 6369).
+                let prev = this.lexer.get_source_mgr_mut().begin_collecting();
+                let annot_start =
+                    this.advance(GrammarContext::Type).start;
+                let starts_with_predicate = this.check_name(b"%checks");
+                let opt_type = if starts_with_predicate {
+                    None
+                } else {
+                    this.parse_return_type_annotation_flow(
+                        Some(annot_start),
+                        AllowAnonFunctionType::No,
+                    )
+                };
+                if let Some(t) = opt_type {
+                    return_type = Some(t);
+                }
+                if opt_type.is_some() || starts_with_predicate {
+                    if this.check(TokenKind::equalgreater) {
+                        // Done parsing the return type and predicate.
+                        // Successful parse, show buffered messages.
+                        this.lexer
+                            .get_source_mgr_mut()
+                            .end_collecting(prev, false);
+                    } else if this.check_name(b"%checks") {
+                        let opt_pred = this.parse_predicate_flow();
+                        if opt_pred.is_some()
+                            && this.check(TokenKind::equalgreater)
+                        {
+                            predicate = opt_pred;
+                            this.lexer
+                                .get_source_mgr_mut()
+                                .end_collecting(prev, false);
+                        } else {
+                            this.lexer
+                                .get_source_mgr_mut()
+                                .end_collecting(prev, true);
+                            return_type = None;
+                            predicate = None;
+                            sp.restore(&mut this.lexer);
+                        }
+                    } else {
+                        this.lexer
+                            .get_source_mgr_mut()
+                            .end_collecting(prev, true);
+                        return_type = None;
+                        sp.restore(&mut this.lexer);
+                    }
+                } else {
+                    this.lexer.get_source_mgr_mut().end_collecting(prev, true);
+                    sp.restore(&mut this.lexer);
+                }
+            }
 
             // ----------------------------------------------------------------
             // Arrow check (C++ 6453-6466).
@@ -414,13 +578,22 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             if this.check(TokenKind::equalgreater)
                 && !this.lexer.is_new_line_before_current_token()
             {
+                // C++ 6463: typeParams ? typeParams->getStartLoc() : startLoc.
+                let arrow_start = match type_params {
+                    Some(tp) => tp.range().start,
+                    None => start_loc,
+                };
                 // force_eagerly is inert in the eager port → pass false.
                 return match this.parse_arrow_function_expression(
                     cur_param,
                     false,
                     left_expr,
                     has_new_line,
-                    start_loc,
+                    type_params,
+                    return_type,
+                    predicate,
+                    arrow_start,
+                    allow_typed_arrow_function,
                     force_async,
                 ) {
                     Some(node) => LevelResult::Terminal(node),
@@ -428,7 +601,16 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 };
             }
 
-            // P6: Flow typeParams error (C++ 6468-6477) — gated, skip.
+            // Flow typeParams error (C++ 6468-6477): generic type parameters were
+            // parsed but no `=>` arrow follows.
+            if type_params.is_some() {
+                let range = this.cur_range();
+                this.error_at(
+                    range,
+                    "'=>' expected in generic arrow function",
+                );
+                return LevelResult::Error;
+            }
 
             // C++ line 6479: if (!checkAssign()) return *state.optLeftExpr;
             if !this.check_assign() {
@@ -498,15 +680,30 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // else push new State and loop.
         // -------------------------------------------------------------------
         let opt_res: &'gc Node<'gc> = loop {
-            // First level uses the incoming `param`; subsequent RHS levels use
-            // the equivalent of AllowTypedArrowFunction::Yes / CoverTypedParameters::No
-            // which in plain-JS collapses to just passing param through (the only
-            // behaviorally different bit, PARAM_IN, is explicitly carried through
-            // C++ passes the outer `allowTypedArrowFunction`/`coverTypedParameters`/
-            // `typeParams` on the first level and `Yes`/`No`/`null` on subsequent
-            // levels (6499-6523). Those args are Flow/TS-only (deferred to P6/P7),
-            // so in the plain-JS subset every level just threads `param`.
-            match run_level(self, &mut stack, param) {
+            // First level uses the incoming Flow params; subsequent RHS levels
+            // use AllowTypedArrowFunction::Yes / CoverTypedParameters::No / null
+            // (C++ 6499-6523).
+            let (lvl_allow, lvl_cover, lvl_type_params) = if stack.is_empty() {
+                (
+                    allow_typed_arrow_function,
+                    cover_typed_parameters,
+                    type_params,
+                )
+            } else {
+                (
+                    AllowTypedArrowFunction::Yes,
+                    CoverTypedParameters::No,
+                    None,
+                )
+            };
+            match run_level(
+                self,
+                &mut stack,
+                param,
+                lvl_allow,
+                lvl_cover,
+                lvl_type_params,
+            ) {
                 LevelResult::Error => return None,
                 LevelResult::Terminal(n) => break n,
                 LevelResult::Continue => {
@@ -800,9 +997,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// omitted. `force_eagerly` is threaded for fidelity (feeds
     /// `parse_function_body`), but is inert in the eager port.
     ///
-    /// P6/P7: the C++ `typeParams`/`returnType`/`predicate`/
-    /// `allowTypedArrowFunction` Flow/TS arguments are always null/None in the
-    /// plain-JS subset, so they are dropped from this signature.
+    /// The Flow `type_params`/`return_type`/`predicate` arguments attach to the
+    /// resulting `ArrowFunctionExpression`; `allow_typed_arrow` is threaded into
+    /// the concise (expression) body parse (C++ 5872-5877).
     #[allow(clippy::too_many_arguments)]
     pub(super) fn parse_arrow_function_expression(
         &mut self,
@@ -810,7 +1007,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         force_eagerly: bool,
         left_expr: &'gc Node<'gc>,
         has_new_line: bool,
+        type_params: Option<&'gc Node<'gc>>,
+        return_type: Option<&'gc Node<'gc>>,
+        predicate: Option<&'gc Node<'gc>>,
         start_loc: SMLoc,
+        allow_typed_arrow: AllowTypedArrowFunction,
         force_async: bool,
     ) -> Option<&'gc Node<'gc>> {
         // The C++ `SaveFunctionState` (5849) restores `strictMode` on scope
@@ -823,7 +1024,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             force_eagerly,
             left_expr,
             has_new_line,
+            type_params,
+            return_type,
+            predicate,
             start_loc,
+            allow_typed_arrow,
             force_async,
         );
         self.lexer.set_strict_mode(old_strict);
@@ -837,7 +1042,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         force_eagerly: bool,
         left_expr: &'gc Node<'gc>,
         has_new_line: bool,
+        type_params: Option<&'gc Node<'gc>>,
+        return_type: Option<&'gc Node<'gc>>,
+        predicate: Option<&'gc Node<'gc>>,
         start_loc: SMLoc,
+        allow_typed_arrow: AllowTypedArrowFunction,
         force_async: bool,
     ) -> Option<&'gc Node<'gc>> {
         // ArrowFunction : ArrowParameters [no line terminator] => ConciseBody.
@@ -897,7 +1106,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // and get stuck without a depth check if we don't have one here.
             // C++ 5868-5882.
             let _guard = self.check_recursion()?;
-            body = self.parse_assignment_expression(param.get(PARAM_IN))?;
+            // C++ 5872-5877: concise body threads `allowTypedArrowFunction`.
+            body = self.parse_assignment_expression(
+                param.get(PARAM_IN),
+                allow_typed_arrow,
+                CoverTypedParameters::No,
+                None,
+            )?;
             expression = true;
         }
 
@@ -909,10 +1124,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 NodeMetadata::new(self.dummy_range()),
                 params,
                 body,
-                // P6/P7: Flow typeParams/returnType/predicate (always None).
-                None,
-                None,
-                None,
+                type_params,
+                return_type,
+                predicate,
                 expression,
                 is_async,
             ));
@@ -974,7 +1188,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// - `ObjectExpression` → `reparse_object_assignment_pattern`
     /// - `Identifier` → validate and return as-is
     /// - already a `PatternNode` → return as-is
-    /// - Flow/TS covers (`CoverTypedIdentifier`, `TypeCastExpression`) → SKIP (P6)
+    /// - Flow covers (`CoverTypedIdentifier`, `TypeCastExpression`) → rebuild
+    ///   the target pattern/identifier with the carried type annotation (P6.1)
     /// - `in_decl=true` and no match → "identifier or pattern expected" error
     /// - Otherwise → return as-is (P1 callers always pass `in_decl=false`)
     pub(super) fn reparse_assignment_pattern(
@@ -1006,7 +1221,41 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 // PatternNodes have already been validated.
                 return Some(node);
             }
-            // P6: CoverTypedIdentifier, TypeCastExpression — Flow-gated. Skip.
+            // Flow: CoverTypedIdentifier (C++ 5941-5960). The reparsed target
+            // receives the cover's `right` as its type annotation. Because the
+            // Rust AST pattern/identifier type-annotation fields are immutable
+            // after construction, rebuild the target node with the annotation.
+            if let Node::CoverTypedIdentifier(cover) = node {
+                let sub = self.reparse_assignment_pattern(cover.left, in_decl)?;
+                let ty = cover.right;
+                let cover_range = node.range();
+                if let Some(rebuilt) = self.rebuild_pattern_with_type(
+                    sub,
+                    ty,
+                    Some(cover.optional.get()),
+                ) {
+                    return Some(self.set_location(
+                        cover_range.start,
+                        cover_range.end,
+                        rebuilt,
+                    ));
+                }
+                // Not a pattern/identifier target: fall through (matches the
+                // C++ which has no else and returns the error below if inDecl).
+            }
+            // Flow: TypeCastExpression (C++ 5961-5978).
+            if let Node::TypeCastExpression(typecast) = node {
+                let sub =
+                    self.reparse_assignment_pattern(typecast.expression, in_decl)?;
+                let ty = Some(typecast.type_annotation);
+                if let Some(rebuilt) =
+                    self.rebuild_pattern_with_type(sub, ty, None)
+                {
+                    let sub_start = sub.range().start;
+                    let ty_end = typecast.type_annotation.range().end;
+                    return Some(self.set_location(sub_start, ty_end, rebuilt));
+                }
+            }
         }
 
         if in_decl {
@@ -1018,6 +1267,48 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // Not in decl, and no parens-free match: return unchanged (valid for
         // assignment targets like member expressions, call expressions, etc.).
         Some(node)
+    }
+
+    /// Rebuild an `ArrayPattern`/`ObjectPattern`/`Identifier` carrying a new type
+    /// annotation (and, for identifiers, an optional `optional` flag). Mirrors
+    /// the C++ in-place mutation of `_typeAnnotation`/`_optional` in
+    /// `reparseAssignmentPattern` (5947-5977); the Rust AST type-annotation
+    /// fields are immutable after construction, so a fresh node is built.
+    /// Returns `None` if `sub` is not one of the three reparsable kinds. The
+    /// caller assigns the location via `set_location`.
+    fn rebuild_pattern_with_type(
+        &self,
+        sub: &'gc Node<'gc>,
+        ty: Option<&'gc Node<'gc>>,
+        optional: Option<bool>,
+    ) -> Option<Node<'gc>> {
+        match sub {
+            Node::ArrayPattern(apn) => {
+                Some(Node::ArrayPattern(ArrayPattern::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    apn.elements,
+                    ty,
+                )))
+            }
+            Node::ObjectPattern(opn) => {
+                Some(Node::ObjectPattern(ObjectPattern::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    opn.properties,
+                    ty,
+                )))
+            }
+            Node::Identifier(id) => {
+                Some(Node::Identifier(Identifier::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    id.name.get(),
+                    ty,
+                    // C++ sets `_optional` only for the cover case (5957); the
+                    // typecast case leaves it untouched.
+                    optional.unwrap_or_else(|| id.optional.get()),
+                )))
+            }
+            _ => None,
+        }
     }
 
     /// Reparse an ArrayExpression as an ArrayPattern. Port of
@@ -1266,41 +1557,133 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Parse a conditional (ternary `?:`) expression. Port of
     /// `JSParserImpl::parseConditionalExpression` (lines 4477-4615).
     ///
-    /// Plain-JS path only. Type-gated branches are stubbed out:
-    ///   - P6/P7: cover typed identifier (4492-4501) — skipped.
-    ///   - P6/P7: typed arrow backtracking (4510-4572) — skipped.
+    /// `cover_typed_parameters` controls whether a `CoverTypedIdentifier` may be
+    /// produced for what might turn out to be typed arrow parameters (C++ default
+    /// `CoverTypedParameters::Yes`, JSParserImpl.h:1016).
     pub(super) fn parse_conditional_expression(
         &mut self,
         param: Param,
+        cover_typed_parameters: CoverTypedParameters,
     ) -> Option<&'gc Node<'gc>> {
         let start_loc = self.cur_start();
 
         let test = self.parse_binary_expression(param)?;
 
-        // P6/P7: cover typed identifier (CoverTypedParameters / tryParseCoverTypedIdentifierNode)
-        // Only reached when context_.getParseTypes() is true — skip in P1.
-
         if !self.check(TokenKind::question) {
+            // No '?', so this isn't a conditional expression. If
+            // CoverTypedParameters::Yes, account for this being formal
+            // parameters (C++ 4486-4504).
+            if self.parse_types()
+                && cover_typed_parameters == CoverTypedParameters::Yes
+            {
+                // tri-state: outer None = error → ?; Some(Some(n)) = node;
+                // Some(None) = not a cover, continue.
+                let opt_cover =
+                    self.try_parse_cover_typed_identifier_node(test, false)?;
+                if let Some(cover) = opt_cover {
+                    return Some(cover);
+                }
+            }
             return Some(test);
         }
 
         let question_range = self.cur_range();
 
-        // P6/P7: typed arrow backtracking block (4510-4572):
-        // savePoint, AllowTypedArrowFunction::Yes, consequent-with-colon check.
-        // Only active when context_.getParseTypes() — skip in P1.
-        // `consequent` stays None; we fall through to the plain-JS path below.
+        let mut consequent: Option<&'gc Node<'gc>> = None;
+
+        // Flow/TS typed-parameter cover + typed-arrow consequent backtracking
+        // (C++ 4510-4571).
+        if self.parse_types() {
+            // Save here to save the '?' (we can only save on punctuators).
+            let sp = self.lexer.save_point();
+            self.advance(GrammarContext::AllowRegExp);
+
+            // If CoverTypedParameters::Yes, the '?' may be part of an optional
+            // parameter, not a conditional (C++ 4522-4528).
+            if cover_typed_parameters == CoverTypedParameters::Yes {
+                let opt_cover =
+                    self.try_parse_cover_typed_identifier_node(test, true)?;
+                if let Some(cover) = opt_cover {
+                    return Some(cover);
+                }
+            }
+
+            // A '?' without ':' that is not a conditional: typed arrow params
+            // without a type annotation, e.g. `(foo?) => 1` (C++ 4536-4542).
+            if cover_typed_parameters == CoverTypedParameters::Yes
+                && (self.check(TokenKind::comma)
+                    || self.check(TokenKind::r_paren)
+                    || self.check(TokenKind::equal))
+            {
+                let node =
+                    Node::CoverTypedIdentifier(CoverTypedIdentifier::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        test,
+                        None,
+                        true,
+                    ));
+                return Some(self.set_location(
+                    start_loc,
+                    question_range.end,
+                    node,
+                ));
+            }
+
+            // Real backtracking stage. Parse with AllowTypedArrowFunction::Yes,
+            // then require a ':' afterwards; otherwise restore and retry below
+            // with AllowTypedArrowFunction::No (C++ 4544-4570).
+            // SaveAndSuppressMessages: pure-suppress parser messages.
+            let saved_suppressed =
+                self.lexer.get_source_mgr().suppressed_messages();
+            self.lexer.get_source_mgr_mut().set_suppressed_messages(Some(
+                support::diag::Subsystem::Parser,
+            ));
+            let _guard = match self.check_recursion() {
+                Some(g) => g,
+                None => {
+                    self.lexer
+                        .get_source_mgr_mut()
+                        .set_suppressed_messages(saved_suppressed);
+                    return None;
+                }
+            };
+            let opt_consequent = self.parse_assignment_expression(
+                PARAM_IN,
+                AllowTypedArrowFunction::Yes,
+                CoverTypedParameters::No,
+                None,
+            );
+            self.lexer
+                .get_source_mgr_mut()
+                .set_suppressed_messages(saved_suppressed);
+            if let Some(c) = opt_consequent {
+                if self.check(TokenKind::colon) {
+                    consequent = Some(c);
+                } else {
+                    sp.restore(&mut self.lexer);
+                }
+            } else {
+                sp.restore(&mut self.lexer);
+            }
+        }
 
         // CHECK_RECURSION: mirrors C++ line 4576 (before the !consequent block).
         let _guard = self.check_recursion()?;
 
-        // Consume the '?'.
-        self.advance(GrammarContext::AllowRegExp);
-
-        // Parse the consequent (true branch).
-        // C++ passes ParamIn | AllowTypedArrowFunction::No | CoverTypedParameters::No.
-        // In P1 the extra args don't exist; we pass PARAM_IN.
-        let consequent = self.parse_assignment_expression(PARAM_IN)?;
+        // Only try with AllowTypedArrowFunction::No if we haven't already set up
+        // the consequent above (C++ 4580-4591).
+        let consequent = if let Some(c) = consequent {
+            c
+        } else {
+            // Consume the '?' (first time, or after savePoint.restore()).
+            self.advance(GrammarContext::AllowRegExp);
+            self.parse_assignment_expression(
+                PARAM_IN,
+                AllowTypedArrowFunction::No,
+                CoverTypedParameters::No,
+                None,
+            )?
+        };
 
         // Eat ':' — required after '... ? ...'.
         if !self.eat(
@@ -1312,8 +1695,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // Parse the alternate (false branch).
-        let alternate = self.parse_assignment_expression(param)?;
+        // Parse the alternate (false branch). C++ 4601-4605:
+        // AllowTypedArrowFunction::Yes, CoverTypedParameters::No.
+        let alternate = self.parse_assignment_expression(
+            param,
+            AllowTypedArrowFunction::Yes,
+            CoverTypedParameters::No,
+            None,
+        )?;
 
         let end_loc = self.lexer.prev_token_end();
         let node = Node::ConditionalExpression(ConditionalExpression::new(
@@ -1323,6 +1712,167 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             consequent,
         ));
         Some(self.set_location(start_loc, end_loc, node))
+    }
+
+    // -----------------------------------------------------------------------
+    // tryParseCoverTypedIdentifierNode — 4618 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// In Flow/TS arrow-function parameters, optional parameters look like
+    /// `Identifier ? : TypeAnnotation`. Because the colon and type annotation are
+    /// optional, consume the colon here and return a `CoverTypedIdentifier` if it
+    /// is possible we are parsing typed arrow parameters. Port of
+    /// `JSParserImpl::tryParseCoverTypedIdentifierNode` (lines 4618-4649).
+    ///
+    /// Tri-state result (mirrors the C++ `Optional<Node *>`):
+    ///   - `None`            = error already reported, propagate with `?`.
+    ///   - `Some(None)`      = not a cover node, continue as usual.
+    ///   - `Some(Some(n))`   = the `CoverTypedIdentifier` node.
+    fn try_parse_cover_typed_identifier_node(
+        &mut self,
+        test: &'gc Node<'gc>,
+        optional: bool,
+    ) -> Option<Option<&'gc Node<'gc>>> {
+        debug_assert!(self.parse_types(), "must be parsing types");
+        // Faithful to C++ 4628-4646: the outer `if` has a trailing fall-through
+        // comment after the inner `if`, so they are not actually collapsible.
+        #[allow(clippy::collapsible_if)]
+        if self.check(TokenKind::colon)
+            && test.metadata().parens.get() == 0
+        {
+            if matches!(
+                test,
+                Node::Identifier(_)
+                    | Node::ObjectExpression(_)
+                    | Node::ArrayExpression(_)
+            ) {
+                // Deliberately wrap the type annotation later when reparsing.
+                // C++ 4633-4634: parseTypeAnnotation(annotStart) — wraps.
+                let annot_start = self.advance(GrammarContext::Type).start;
+                let ty = self.parse_type_annotation(
+                    Some(annot_start),
+                    AllowAnonFunctionType::Yes,
+                )?;
+
+                let end = self.lexer.prev_token_end();
+                let node =
+                    Node::CoverTypedIdentifier(CoverTypedIdentifier::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        test,
+                        Some(ty),
+                        optional,
+                    ));
+                let test_start = test.range().start;
+                return Some(Some(self.set_location(test_start, end, node)));
+            }
+            // The colon indicates something other than the typeAnnotation for
+            // the parameter. Continue as usual.
+        }
+        Some(None)
+    }
+
+    // -----------------------------------------------------------------------
+    // tryParseTypedAsyncArrowFunction — 6154 in JSParserImpl.cpp
+    // -----------------------------------------------------------------------
+
+    /// Speculatively parse a typed async arrow function
+    /// (`async <T>(x: T): T => …` / `async (x: number) => x`). Port of
+    /// `JSParserImpl::tryParseTypedAsyncArrowFunction` (lines 6154-6230).
+    ///
+    /// Entered when `async` is followed by `<` or `(`. Returns `None` if this is
+    /// not a typed async arrow (caller falls back to normal async handling).
+    fn try_parse_typed_async_arrow_function(
+        &mut self,
+        param: Param,
+    ) -> Option<&'gc Node<'gc>> {
+        debug_assert!(self.parse_flow());
+        debug_assert!(self.check_unescaped_name(b"async"));
+        let sp = self.lexer.save_point();
+        let start = self.advance(GrammarContext::AllowRegExp).start;
+
+        let mut type_params: Option<&'gc Node<'gc>> = None;
+        let mut return_type: Option<&'gc Node<'gc>> = None;
+        let mut predicate: Option<&'gc Node<'gc>> = None;
+
+        // C++ SaveAndSuppressMessages: pure-suppress parser messages while the
+        // speculative parse runs.
+        let saved_suppressed = self.lexer.get_source_mgr().suppressed_messages();
+        self.lexer.get_source_mgr_mut().set_suppressed_messages(Some(
+            support::diag::Subsystem::Parser,
+        ));
+
+        // Labeled block so every early-bail path restores suppression below; the
+        // block evaluates to `Some((leftExpr, hasNewLine))` on success.
+        let result: Option<(&'gc Node<'gc>, bool)> = 'try_async: {
+            if self.check(TokenKind::less) {
+                match self.parse_type_params_flow() {
+                    Some(tp) => type_params = Some(tp),
+                    None => break 'try_async None,
+                }
+            }
+
+            if !self.check(TokenKind::l_paren) {
+                break 'try_async None;
+            }
+
+            let has_new_line = self.lexer.is_new_line_before_current_token();
+            let left_expr = match self
+                .parse_conditional_expression(param, CoverTypedParameters::Yes)
+            {
+                Some(e) => e,
+                None => break 'try_async None,
+            };
+
+            if self.check(TokenKind::colon) {
+                let annot_start = self.advance(GrammarContext::Type).start;
+                if !self.check_name(b"%checks") {
+                    match self.parse_return_type_annotation_flow(
+                        Some(annot_start),
+                        AllowAnonFunctionType::No,
+                    ) {
+                        Some(t) => return_type = Some(t),
+                        None => break 'try_async None,
+                    }
+                }
+                if self.check_name(b"%checks") {
+                    match self.parse_predicate_flow() {
+                        Some(p) => predicate = Some(p),
+                        None => break 'try_async None,
+                    }
+                }
+            }
+
+            if !self.check(TokenKind::equalgreater) {
+                break 'try_async None;
+            }
+
+            Some((left_expr, has_new_line))
+        };
+
+        self.lexer
+            .get_source_mgr_mut()
+            .set_suppressed_messages(saved_suppressed);
+
+        let (left_expr, has_new_line) = match result {
+            Some(v) => v,
+            None => {
+                sp.restore(&mut self.lexer);
+                return None;
+            }
+        };
+
+        self.parse_arrow_function_expression(
+            param,
+            /* eagerly */ false,
+            left_expr,
+            has_new_line,
+            type_params,
+            return_type,
+            predicate,
+            start,
+            AllowTypedArrowFunction::Yes,
+            /* force_async */ true,
+        )
     }
 
     // -----------------------------------------------------------------------
@@ -2286,7 +2836,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     return None;
                 }
 
-                let source = self.parse_assignment_expression(PARAM_IN)?;
+                let source = self.parse_assignment_expression(PARAM_IN, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
 
                 self.check_and_eat(
                     TokenKind::comma,
@@ -2296,7 +2846,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 let options = if !self.check(TokenKind::r_paren) {
                     // C++ parseAssignmentExpression() — default param is
                     // ParamIn (JSParserImpl.h 1132-1133).
-                    let o = self.parse_assignment_expression(PARAM_IN)?;
+                    let o = self.parse_assignment_expression(PARAM_IN, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
                     self.check_and_eat(
                         TokenKind::comma,
                         GrammarContext::AllowRegExp,
@@ -2518,7 +3068,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 let is_spread =
                     self.check_and_eat(TokenKind::dotdotdot, GrammarContext::AllowRegExp);
 
-                let arg = self.parse_assignment_expression(PARAM_IN)?;
+                let arg = self.parse_assignment_expression(PARAM_IN, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
 
                 if is_spread {
                     let spread_end = self.lexer.prev_token_end();
@@ -2617,7 +3167,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     // Regular assignment expression. (C++ parseArrayLiteral has
                     // no CHECK_RECURSION here — the recursion guards live in the
                     // expression chain it calls into.)
-                    let expr = self.parse_assignment_expression(PARAM_IN)?;
+                    let expr = self.parse_assignment_expression(PARAM_IN, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
                     elem_list.push(expr);
                 }
 
@@ -2672,7 +3222,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         // (C++ parseSpreadElement has no CHECK_RECURSION; the guard lives in the
         // expression chain it calls into.)
-        let arg = self.parse_assignment_expression(PARAM_IN)?;
+        let arg = self.parse_assignment_expression(PARAM_IN, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
 
         let end_loc = self.lexer.prev_token_end();
         let node = Node::SpreadElement(SpreadElement::new(NodeMetadata::new(self.dummy_range()), arg));
@@ -2879,7 +3429,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             TokenKind::l_square => {
                 // Computed key: `[expr]`.
                 let start_loc = self.advance(GrammarContext::AllowRegExp).start;
-                let opt_expr = self.parse_assignment_expression(PARAM_IN)?;
+                let opt_expr = self.parse_assignment_expression(PARAM_IN, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
                 if !self.need(TokenKind::r_square, " at end of computed property key") {
                     self.lexer.get_source_mgr_mut().note_at(
                         start_loc,
@@ -3438,7 +3988,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         if matches!(key, Node::Identifier(_)) && self.check(TokenKind::equal) && !computed {
             // Advance past `=`; the start of the CoverInitializer is the `=`.
             let cover_start = self.advance(GrammarContext::AllowRegExp).start;
-            let init_expr = self.parse_assignment_expression(PARAM_IN)?;
+            let init_expr = self.parse_assignment_expression(PARAM_IN, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
             shorthand = true;
 
             let cover_end = self.lexer.prev_token_end();
@@ -3567,7 +4117,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 );
                 return None;
             }
-            value = self.parse_assignment_expression(PARAM_IN)?;
+            value = self.parse_assignment_expression(PARAM_IN, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
         }
 
         let end_loc = self.lexer.prev_token_end();
@@ -3620,7 +4170,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // Parsing an Expression directly without going through
             // PrimaryExpression; can overflow, so check.
             let _guard = self.check_recursion()?;
-            let prop_expr = self.parse_expression(PARAM_IN)?;
+            let prop_expr = self.parse_expression(PARAM_IN, CoverTypedParameters::Yes)?;
             let end_loc = self.lexer.token().end_loc();
             if !self.eat(
                 TokenKind::r_square,
@@ -4157,10 +4707,50 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 } else {
                     // Plain grouped expression: parse expr.
                     // C++ passes CoverTypedParameters::Yes (Flow/TS-only).
-                    self.parse_expression(PARAM_IN)?
+                    self.parse_expression(PARAM_IN, CoverTypedParameters::Yes)?
                 };
 
-                // Flow type-cast annotation — deferred (context_.getParseFlow()).
+                // Flow type-cast annotation (C++ 2625-2653).
+                let mut expr = expr;
+                if self.parse_flow() {
+                    // The location encompasses the `()` by using `start_loc` and
+                    // the current token (`)`) as start/end. If `tok_` is not
+                    // `)`, the `eat` below errors immediately.
+                    let cast_end = self.cur_range().end;
+                    if let Node::CoverTypedIdentifier(cover) = expr {
+                        if let Some(right) = cover.right {
+                            if !cover.optional.get() {
+                                let node = Node::TypeCastExpression(
+                                    TypeCastExpression::new(
+                                        NodeMetadata::new(self.dummy_range()),
+                                        cover.left,
+                                        right,
+                                    ),
+                                );
+                                expr = self
+                                    .set_location(start_loc, cast_end, node);
+                            }
+                        }
+                    } else if self.check(TokenKind::colon) {
+                        let annot_start =
+                            self.advance(GrammarContext::Type).start;
+                        let ty = self.parse_type_annotation_flow(
+                            Some(annot_start),
+                            AllowAnonFunctionType::Yes,
+                        )?;
+                        // Re-read the end after parsing (now at `)`); C++ uses
+                        // `tok_` which is the post-annotation token.
+                        let cast_end2 = self.cur_range().end;
+                        let node = Node::TypeCastExpression(
+                            TypeCastExpression::new(
+                                NodeMetadata::new(self.dummy_range()),
+                                expr,
+                                ty,
+                            ),
+                        );
+                        expr = self.set_location(start_loc, cast_end2, node);
+                    }
+                }
 
                 if !self.eat(
                     TokenKind::r_paren,
@@ -4296,7 +4886,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             let sub_start = self.advance(GrammarContext::AllowRegExp).start;
 
             // Parse the substitution expression.
-            let opt_expr = self.parse_expression(PARAM_IN);
+            let opt_expr = self.parse_expression(PARAM_IN, CoverTypedParameters::Yes);
             let opt_expr = match opt_expr {
                 Some(e) => e,
                 None => return None,

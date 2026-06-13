@@ -713,9 +713,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // deliberate; what follows is a JS expression, not a type.
         if self.check_and_eat(TokenKind::l_paren, GrammarContext::AllowRegExp) {
             // C++ 5082: `parseConditionalExpression()` with its declaration
-            // defaults (ParamIn, CoverTypedParameters::Yes; the Rust port's
-            // cover-typed handling inside is a P6 omission).
-            let cond = self.parse_conditional_expression(PARAM_IN)?;
+            // defaults (ParamIn, CoverTypedParameters::Yes).
+            let cond = self.parse_conditional_expression(
+                PARAM_IN,
+                crate::js::flow::CoverTypedParameters::Yes,
+            )?;
             // C++ 5085-5092.
             let end = self.cur_range().end;
             if !self.eat(

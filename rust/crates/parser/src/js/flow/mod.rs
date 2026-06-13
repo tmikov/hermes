@@ -90,6 +90,27 @@ pub(super) enum AllowAnonFunctionType {
     Yes,
 }
 
+/// Whether a typed arrow function (`<T>(x: T): T => …` / `(x): T => …`) may be
+/// recognized at this assignment-expression position. Port of the C++ runtime
+/// enum `JSParserImpl::AllowTypedArrowFunction` (JSParserImpl.h:1133). Kept as a
+/// runtime enum param (faithful — it is a runtime enum in C++ too), NOT a bool
+/// or const-generic.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum AllowTypedArrowFunction {
+    No,
+    Yes,
+}
+
+/// Whether a `CoverTypedIdentifier` node (`x: T` / `x?: T` inside what might be
+/// arrow parameters) may be produced at this position. Port of the C++ runtime
+/// enum `JSParserImpl::CoverTypedParameters` (JSParserImpl.h:1014). Kept as a
+/// runtime enum param (faithful), NOT a bool or const-generic.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum CoverTypedParameters {
+    No,
+    Yes,
+}
+
 /// Whether a `proto` property modifier is allowed in an object type.
 /// Port of `JSParserImpl::AllowProtoProperty` (JSParserImpl.h:1444).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

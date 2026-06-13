@@ -4081,6 +4081,282 @@ mod tests {
         );
     }
 
+    // ----------------------------------------------------------------------
+    // P6.1: typed arrows + return-type/predicate backtrack + type-cast +
+    // CoverTypedIdentifier.
+    // ----------------------------------------------------------------------
+
+    /// Lock a Flow context (parse_flow only; the typed-arrow grammar is gated
+    /// on `parse_flow`, NOT `parse_flow_ambiguous`), parse `src`, return the
+    /// init of the single top-level `const`.
+    fn flow_const_init<'gc>(
+        gc: &'gc ast::context::GCLock<'_, '_>,
+        sm: &mut support::manager::SourceErrorManager,
+        src: &[u8],
+    ) -> &'gc ast::node::Node<'gc> {
+        let stmt = parse_one_stmt(gc, sm, src);
+        let ast::node::Node::VariableDeclaration(vd) = stmt else {
+            panic!("expected VariableDeclaration, got {:?}", stmt.kind())
+        };
+        let decl = vd.declarations.iter().next().expect("one declarator");
+        let ast::node::Node::VariableDeclarator(d) = decl else {
+            panic!("expected VariableDeclarator, got {:?}", decl.kind())
+        };
+        d.init.expect("declarator has an init")
+    }
+
+    /// `<T>(x: T): T => x` → an ArrowFunctionExpression carrying type
+    /// parameters, a return type, and `expression == true`.
+    #[test]
+    fn flow_typed_arrow_full() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let init =
+            flow_const_init(&gc, &mut sm, b"const f = <T>(x: T): T => x;");
+        let Node::ArrowFunctionExpression(arrow) = init else {
+            panic!("expected ArrowFunctionExpression, got {:?}", init.kind())
+        };
+        assert!(arrow.type_parameters.is_some(), "has type parameters");
+        assert!(arrow.return_type.is_some(), "has return type");
+        assert!(arrow.predicate.is_none(), "no predicate");
+        assert!(arrow.expression.get(), "concise (expression) body");
+        assert!(!arrow.r#async.get(), "not async");
+    }
+
+    /// `(x): x is number => true` → an arrow with a predicate (type guard) and
+    /// no return type.
+    #[test]
+    fn flow_typed_arrow_predicate() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let init = flow_const_init(
+            &gc,
+            &mut sm,
+            b"const g = (x): x is number => true;",
+        );
+        let Node::ArrowFunctionExpression(arrow) = init else {
+            panic!("expected ArrowFunctionExpression, got {:?}", init.kind())
+        };
+        assert!(arrow.type_parameters.is_none(), "no type parameters");
+        // `x is number` is a TypePredicate carried as the return_type; the
+        // separate `predicate` field is only set by the `%checks` form.
+        let rt = arrow.return_type.expect("predicate sets return_type");
+        let Node::TypeAnnotation(ta) = rt else {
+            panic!("return_type wraps a TypeAnnotation, got {:?}", rt.kind())
+        };
+        assert!(
+            matches!(ta.type_annotation, Node::TypePredicate(_)),
+            "return type is a TypePredicate, got {:?}",
+            ta.type_annotation.kind()
+        );
+        assert!(arrow.predicate.is_none(), "no %checks predicate");
+    }
+
+    /// `(): void => {}` → an arrow with a return type and a block body
+    /// (`expression == false`).
+    #[test]
+    fn flow_typed_arrow_void_block() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let init = flow_const_init(&gc, &mut sm, b"const e = (): void => {};");
+        let Node::ArrowFunctionExpression(arrow) = init else {
+            panic!("expected ArrowFunctionExpression, got {:?}", init.kind())
+        };
+        assert!(arrow.return_type.is_some(), "has return type");
+        assert!(!arrow.expression.get(), "block body");
+    }
+
+    /// `async <T>(x: T): T => x` → an async typed arrow.
+    #[test]
+    fn flow_typed_async_arrow() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let init =
+            flow_const_init(&gc, &mut sm, b"const f = async <T>(x: T): T => x;");
+        let Node::ArrowFunctionExpression(arrow) = init else {
+            panic!("expected ArrowFunctionExpression, got {:?}", init.kind())
+        };
+        assert!(arrow.r#async.get(), "is async");
+        assert!(arrow.type_parameters.is_some(), "has type parameters");
+        assert!(arrow.return_type.is_some(), "has return type");
+    }
+
+    /// `async (x: number) => x` → an async typed arrow without type params.
+    #[test]
+    fn flow_typed_async_arrow_no_generics() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let init =
+            flow_const_init(&gc, &mut sm, b"const g = async (x: number) => x;");
+        let Node::ArrowFunctionExpression(arrow) = init else {
+            panic!("expected ArrowFunctionExpression, got {:?}", init.kind())
+        };
+        assert!(arrow.r#async.get(), "is async");
+        assert!(arrow.type_parameters.is_none(), "no type parameters");
+    }
+
+    /// `async (x) => x` (no types) is still an async arrow function — the
+    /// typed-async path falls back to the normal async handling.
+    #[test]
+    fn flow_plain_async_arrow_still_works() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let init = flow_const_init(&gc, &mut sm, b"const g = async (x) => x;");
+        let Node::ArrowFunctionExpression(arrow) = init else {
+            panic!("expected ArrowFunctionExpression, got {:?}", init.kind())
+        };
+        assert!(arrow.r#async.get(), "is async");
+        assert!(arrow.type_parameters.is_none(), "no type parameters");
+        assert!(arrow.return_type.is_none(), "no return type");
+    }
+
+    /// `async` used as a plain identifier (not followed by `<`/`(`/an ident on
+    /// the same line) stays an identifier reference.
+    #[test]
+    fn flow_async_as_identifier() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let init = flow_const_init(&gc, &mut sm, b"const a = async;");
+        assert!(
+            matches!(init, Node::Identifier(_)),
+            "bare `async` is an Identifier, got {:?}",
+            init.kind()
+        );
+    }
+
+    /// `(x: number)` parenthesized type-cast → `TypeCastExpression`.
+    #[test]
+    fn flow_type_cast() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let init = flow_const_init(&gc, &mut sm, b"const a = (x: number);");
+        let Node::TypeCastExpression(cast) = init else {
+            panic!("expected TypeCastExpression, got {:?}", init.kind())
+        };
+        assert_eq!(ident_bytes(&gc, cast.expression), b"x");
+        assert!(
+            matches!(cast.type_annotation, Node::TypeAnnotation(_)),
+            "type is wrapped in a TypeAnnotation, got {:?}",
+            cast.type_annotation.kind()
+        );
+    }
+
+    /// `({p}: O)` object-pattern type-cast → `TypeCastExpression` whose
+    /// expression is an ObjectExpression.
+    #[test]
+    fn flow_type_cast_object() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let init = flow_const_init(&gc, &mut sm, b"const b = ({p}: O);");
+        let Node::TypeCastExpression(cast) = init else {
+            panic!("expected TypeCastExpression, got {:?}", init.kind())
+        };
+        assert!(
+            matches!(cast.expression, Node::ObjectExpression(_)),
+            "expr is ObjectExpression, got {:?}",
+            cast.expression.kind()
+        );
+    }
+
+    /// `cond ? (a: T) => a : b` — the conditional-consequent cover: the typed
+    /// arrow in the consequent must be recognized through the backtracking.
+    #[test]
+    fn flow_conditional_consequent_cover() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let init =
+            flow_const_init(&gc, &mut sm, b"const c = cond ? (a: T) => a : b;");
+        let Node::ConditionalExpression(cond) = init else {
+            panic!("expected ConditionalExpression, got {:?}", init.kind())
+        };
+        assert!(
+            matches!(cond.consequent, Node::ArrowFunctionExpression(_)),
+            "consequent is a typed arrow, got {:?}",
+            cond.consequent.kind()
+        );
+        assert_eq!(ident_bytes(&gc, cond.alternate), b"b");
+    }
+
+    /// CRITICAL disambiguation: with `parse_flow` on, `(a < b, c > (d))` must
+    /// still parse as a SequenceExpression of comparisons (NOT a typed arrow).
+    /// The `<T>(…) =>` head must roll back when there is no `=>`.
+    #[test]
+    fn flow_typed_arrow_disambiguation_comparison() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let init =
+            flow_const_init(&gc, &mut sm, b"const r = (a < b, c > (d));");
+        // `(a < b, c > (d))` → a parenthesized SequenceExpression of two
+        // BinaryExpressions; it must NOT have been eaten as an arrow head.
+        assert!(
+            matches!(init, Node::SequenceExpression(_)),
+            "comparison sequence, got {:?}",
+            init.kind()
+        );
+    }
+
+    /// `a < b` at an assignment position (where a typed arrow could start) with
+    /// `parse_flow` on still parses as a comparison.
+    #[test]
+    fn flow_typed_arrow_lt_not_arrow() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let init = flow_const_init(&gc, &mut sm, b"const r = a < b;");
+        assert!(
+            matches!(init, Node::BinaryExpression(_)),
+            "a < b is a comparison, got {:?}",
+            init.kind()
+        );
+    }
+
     // P5.1: the full Flow type-annotation hierarchy (js/flow/).
 
     /// Helper: parse `src` with the caller's (Flow-enabled) context and

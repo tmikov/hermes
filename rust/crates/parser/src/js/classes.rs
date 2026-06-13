@@ -28,7 +28,7 @@ use support::location::{SMLoc, SMRange};
 use crate::lexer::GrammarContext;
 use crate::token_kinds::TokenKind;
 
-use super::flow::{can_follow_variance_keyword_flow, AllowAnonFunctionType};
+use super::flow::{can_follow_variance_keyword_flow, AllowAnonFunctionType, AllowTypedArrowFunction, CoverTypedParameters};
 use super::{
     AllowImportExport, IsClassHeritageArgument, JSParserImpl, Param, PARAM_DEFAULT, PARAM_IN,
     PARAM_RETURN,
@@ -85,7 +85,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // ( Expression[+In, ?Yield, ?Await] )
             // ^
             let paren_loc = self.advance(GrammarContext::AllowRegExp).start;
-            let inner = self.parse_expression(PARAM_IN)?;
+            let inner = self.parse_expression(PARAM_IN, CoverTypedParameters::Yes)?;
             if !self.eat(
                 TokenKind::r_paren,
                 GrammarContext::AllowDiv,
@@ -944,7 +944,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 // resolution.
                 let _guard_yield = self.save_param_yield(false);
                 let _guard_await = self.save_param_await(true);
-                value = Some(self.parse_assignment_expression(PARAM_IN)?);
+                value = Some(self.parse_assignment_expression(PARAM_IN, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?);
                 if declare {
                     self.error_at(start_range, "Invalid 'declare' with initializer");
                 }
