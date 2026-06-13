@@ -1336,9 +1336,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// - `rw_in` and `rw_instanceof` are reserved words (outside that range)
     ///   but the C++ RESWORD macro gives them precedence 8; handle them
     ///   explicitly here.
-    /// - `as_operator` (IDENT_OP, precedence 8) is only injected by
-    ///   `convertIdentOpIfPossible`, which is a no-op in P1 (TS/Flow gated).
-    ///   It is therefore unreachable here; we leave it unhandled.
+    /// - `as_operator` (IDENT_OP, precedence 8) is injected by
+    ///   `convertIdentOpIfPossible` when Flow/TS type-parsing is on;
+    ///   `binop_precedence` only covers the BINOP range, so it is handled
+    ///   explicitly in the `None` arm below.
     #[inline]
     fn get_precedence(kind: TokenKind) -> u32 {
         use crate::token_kinds::binop_precedence;
