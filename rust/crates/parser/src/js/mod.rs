@@ -1894,17 +1894,28 @@ mod tests {
     }
 
     /// The `export type {…}` / `export type *` specifier/re-export forms of
-    /// parseExportTypeDeclarationFlow (flow.cpp:2503-2556) are P6; they must
-    /// report an honest deferral error instead of silently mis-parsing.
+    /// parseExportTypeDeclarationFlow (flow.cpp:2503-2556) are ported in P6.6
+    /// and carry exportKind `type`.
     #[test]
-    fn flow_export_type_clause_and_star_are_honest_p6_errors() {
-        assert_flow_parse_has_errors(
-            b"export type {x};",
-            "export type {…} is P6 and must error honestly",
-        );
-        assert_flow_parse_has_errors(
-            b"export type * from 'm';",
-            "export type * is P6 and must error honestly",
+    fn flow_export_type_clause_and_star_have_type_kind() {
+        use ast::context::Context;
+        use ast::node::Node;
+        assert_flow_export_kind(b"export type {x};", b"type");
+        assert_flow_export_kind(b"export type {x} from 'm';", b"type");
+
+        // `export type *` produces an ExportAllDeclaration (not a named one).
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let stmt =
+            flow_parse_stmt_at(&gc, &mut sm, b"export type * from 'm';", 0);
+        let Node::ExportAllDeclaration(decl) = stmt else {
+            panic!("expected ExportAllDeclaration, got {:?}", stmt.kind())
+        };
+        assert_eq!(
+            gc.ctx().atom_table.bytes(decl.export_kind.get()),
+            b"type"
         );
     }
 
@@ -7485,5 +7496,327 @@ mod tests {
             matches!(d.init, Some(Node::Identifier(_))),
             "`match` is a plain identifier reference when the flag is off"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // P6.6: declare family + import/export type clauses + Flow default exports
+    // -----------------------------------------------------------------------
+
+    /// Parse `src` with Flow on (and component syntax optionally on), returning
+    /// the program's whole body and asserting zero errors.
+    fn flow_parse_body<'gc>(
+        gc: &'gc ast::context::GCLock<'_, '_>,
+        sm: &mut support::manager::SourceErrorManager,
+        src: &[u8],
+        components: bool,
+    ) -> Vec<&'gc ast::node::Node<'gc>> {
+        let _ = components; // ctx is already configured by the caller
+        let buf_id = sm.add_buffer_bytes("input", src);
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(gc, lexer);
+        let program = parser.parse().expect("parse succeeded");
+        assert_eq!(
+            parser.error_count_pub(),
+            0,
+            "zero errors for {:?}",
+            String::from_utf8_lossy(src)
+        );
+        if let ast::node::Node::Program(p) = program {
+            return p.body.iter().collect();
+        }
+        panic!("expected Program");
+    }
+
+    /// Each `declare` statement form parses to the right node kind.
+    #[test]
+    fn flow_declare_forms() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let check = |src: &[u8], pred: fn(&Node) -> bool| {
+            let mut sm = SourceErrorManager::new();
+            let mut ctx = Context::new();
+            ctx.set_parse_flow(true);
+            let gc = ctx.lock();
+            let stmt = flow_parse_stmt_at(&gc, &mut sm, src, 0);
+            assert!(pred(stmt), "wrong node for {:?}: {:?}", String::from_utf8_lossy(src), stmt.kind());
+        };
+
+        check(b"declare function foo(x: number): string;", |n| {
+            matches!(n, Node::DeclareFunction(_))
+        });
+        check(b"declare var x: number;", |n| {
+            matches!(n, Node::DeclareVariable(_))
+        });
+        check(b"declare type T = number;", |n| {
+            matches!(n, Node::DeclareTypeAlias(_))
+        });
+        check(b"declare interface I { foo(): void }", |n| {
+            matches!(n, Node::DeclareInterface(_))
+        });
+        check(
+            b"declare class C<T> extends B mixins M implements I { x: number; }",
+            |n| matches!(n, Node::DeclareClass(_)),
+        );
+        check(b"declare module 'x' { declare var y: number; }", |n| {
+            matches!(n, Node::DeclareModule(_))
+        });
+        check(b"declare module.exports: { a: number };", |n| {
+            matches!(n, Node::DeclareModuleExports(_))
+        });
+        check(b"declare namespace NS { declare var z: string; }", |n| {
+            matches!(n, Node::DeclareNamespace(_))
+        });
+        check(b"declare opaque type O: number;", |n| {
+            matches!(n, Node::DeclareOpaqueType(_))
+        });
+        check(b"declare enum E { A, B }", |n| {
+            matches!(n, Node::DeclareEnum(_))
+        });
+    }
+
+    /// The various `declare export ...` arms wrap their declaration (or
+    /// specifiers) in a DeclareExportDeclaration / DeclareExportAllDeclaration,
+    /// with `default` set only for `declare export default`.
+    #[test]
+    fn flow_declare_export_forms() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let decl_of = |src: &[u8]| -> bool {
+            // returns the `default` flag of a DeclareExportDeclaration
+            let mut sm = SourceErrorManager::new();
+            let mut ctx = Context::new();
+            ctx.set_parse_flow(true);
+            let gc = ctx.lock();
+            let stmt = flow_parse_stmt_at(&gc, &mut sm, src, 0);
+            let Node::DeclareExportDeclaration(d) = stmt else {
+                panic!("expected DeclareExportDeclaration for {:?}, got {:?}",
+                    String::from_utf8_lossy(src), stmt.kind())
+            };
+            d.default.get()
+        };
+
+        assert!(!decl_of(b"declare export function f(): void;"));
+        assert!(decl_of(b"declare export default number;"));
+        assert!(!decl_of(b"declare export opaque type T2: number;"));
+
+        // `declare export interface I2` uses the no-arg interface parser →
+        // its declaration is a plain InterfaceDeclaration (not DeclareInterface).
+        {
+            let mut sm = SourceErrorManager::new();
+            let mut ctx = Context::new();
+            ctx.set_parse_flow(true);
+            let gc = ctx.lock();
+            let stmt = flow_parse_stmt_at(
+                &gc,
+                &mut sm,
+                b"declare export interface I2 { a: number }",
+                0,
+            );
+            let Node::DeclareExportDeclaration(d) = stmt else {
+                panic!("expected DeclareExportDeclaration")
+            };
+            assert!(
+                matches!(d.declaration, Some(Node::InterfaceDeclaration(_))),
+                "declare export interface wraps an InterfaceDeclaration"
+            );
+        }
+
+        // `declare export * from 'mod'` → DeclareExportAllDeclaration.
+        {
+            let mut sm = SourceErrorManager::new();
+            let mut ctx = Context::new();
+            ctx.set_parse_flow(true);
+            let gc = ctx.lock();
+            let stmt2 = flow_parse_stmt_at(
+                &gc,
+                &mut sm,
+                b"declare export * from 'mod';",
+                0,
+            );
+            assert!(matches!(stmt2, Node::DeclareExportAllDeclaration(_)));
+        }
+    }
+
+    /// `import type`/`import typeof` set the declaration's importKind, and the
+    /// per-specifier `type`/`typeof` forms set each specifier's importKind.
+    #[test]
+    fn flow_import_type_kinds() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let import_kind = |src: &[u8]| -> Vec<u8> {
+            let mut sm = SourceErrorManager::new();
+            let mut ctx = Context::new();
+            ctx.set_parse_flow(true);
+            let gc = ctx.lock();
+            let stmt = flow_parse_stmt_at(&gc, &mut sm, src, 0);
+            let Node::ImportDeclaration(d) = stmt else {
+                panic!("expected ImportDeclaration for {:?}, got {:?}",
+                    String::from_utf8_lossy(src), stmt.kind())
+            };
+            gc.ctx().atom_table.bytes(d.import_kind.get()).to_vec()
+        };
+
+        assert_eq!(import_kind(b"import type {A} from 'x';"), b"type");
+        assert_eq!(import_kind(b"import typeof B from 'x';"), b"typeof");
+        assert_eq!(import_kind(b"import {A} from 'x';"), b"value");
+
+        // Per-specifier kinds in `import {type A2, typeof C} from 'x';`.
+        let mut sm = SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let stmt = flow_parse_stmt_at(
+            &gc,
+            &mut sm,
+            b"import {type A2, typeof C} from 'x';",
+            0,
+        );
+        let Node::ImportDeclaration(d) = stmt else {
+            panic!("expected ImportDeclaration")
+        };
+        // The declaration-level kind is `value` (only the specifiers are typed).
+        assert_eq!(gc.ctx().atom_table.bytes(d.import_kind.get()), b"value");
+        let kinds: Vec<Vec<u8>> = d
+            .specifiers
+            .iter()
+            .map(|s| {
+                let Node::ImportSpecifier(is) = s else {
+                    panic!("expected ImportSpecifier")
+                };
+                gc.ctx().atom_table.bytes(is.import_kind.get()).to_vec()
+            })
+            .collect();
+        assert_eq!(kinds, vec![b"type".to_vec(), b"typeof".to_vec()]);
+    }
+
+    /// The `import type from 'x'` trap: a default import literally named `type`
+    /// (not a type import). The declaration kind stays `value` and the single
+    /// specifier is an ImportDefaultSpecifier named `type`.
+    #[test]
+    fn flow_import_type_from_trap() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let stmt = flow_parse_stmt_at(&gc, &mut sm, b"import type from 'x';", 0);
+        let Node::ImportDeclaration(d) = stmt else {
+            panic!("expected ImportDeclaration")
+        };
+        assert_eq!(
+            gc.ctx().atom_table.bytes(d.import_kind.get()),
+            b"value",
+            "the trap resets the kind to value"
+        );
+        let spec = d.specifiers.iter().next().expect("one specifier");
+        let Node::ImportDefaultSpecifier(s) = spec else {
+            panic!("expected ImportDefaultSpecifier, got {:?}", spec.kind())
+        };
+        let Node::Identifier(local) = s.local else {
+            panic!("expected Identifier local")
+        };
+        assert_eq!(gc.ctx().atom_table.bytes(local.name.get()), b"type");
+    }
+
+    /// A `declare module`'s body recurses into the `declare` statement branch,
+    /// so an inner `declare export var` parses.
+    #[test]
+    fn flow_declare_module_body_recursion() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let stmt = flow_parse_stmt_at(
+            &gc,
+            &mut sm,
+            b"declare module 'x' { declare export var y: number; }",
+            0,
+        );
+        let Node::DeclareModule(m) = stmt else {
+            panic!("expected DeclareModule")
+        };
+        let Node::BlockStatement(b) = m.body else {
+            panic!("expected BlockStatement body")
+        };
+        let inner = b.body.iter().next().expect("one inner declaration");
+        assert!(
+            matches!(inner, Node::DeclareExportDeclaration(_)),
+            "inner declare export var parses, got {:?}",
+            inner.kind()
+        );
+    }
+
+    /// `declare component`/`declare hook` route through the component-syntax
+    /// parsers (gated on the dedicated flag).
+    #[test]
+    fn flow_declare_component_and_hook() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        ctx.set_parse_flow_component_syntax(true);
+        let gc = ctx.lock();
+        let body = flow_parse_body(
+            &gc,
+            &mut sm,
+            b"declare component Foo(p: number) renders Bar;\n\
+              declare hook useY(a: string): number;",
+            true,
+        );
+        assert!(matches!(body[0], Node::DeclareComponent(_)));
+        assert!(matches!(body[1], Node::DeclareHook(_)));
+    }
+
+    /// Plain `import`/`export` are unaffected by the kind-erasure revert:
+    /// the declaration kind stays `value` and a plain import/export parses.
+    #[test]
+    fn flow_plain_import_export_unaffected() {
+        use ast::context::Context;
+        use ast::node::Node;
+        use support::manager::SourceErrorManager;
+
+        // Plain JS (no Flow): `import {a as b} from 'm';` parses with kind value.
+        let mut sm = SourceErrorManager::new();
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let stmt =
+            flow_parse_stmt_at(&gc, &mut sm, b"import {a as b} from 'm';", 0);
+        let Node::ImportDeclaration(d) = stmt else {
+            panic!("expected ImportDeclaration")
+        };
+        assert_eq!(gc.ctx().atom_table.bytes(d.import_kind.get()), b"value");
+        let Node::ImportSpecifier(is) =
+            d.specifiers.iter().next().unwrap()
+        else {
+            panic!("expected ImportSpecifier")
+        };
+        assert_eq!(gc.ctx().atom_table.bytes(is.import_kind.get()), b"value");
+
+        // Plain export.
+        let stmt2 =
+            flow_parse_stmt_at(&gc, &mut sm, b"export {a as b};", 0);
+        assert!(matches!(stmt2, Node::ExportNamedDeclaration(_)));
     }
 }

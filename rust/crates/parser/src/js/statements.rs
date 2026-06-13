@@ -115,6 +115,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 }
                 None => return false,
             }
+        } else if self.parse_flow() && self.check_declare_type() {
+            // C++ 889-897: declare var/function/interface/etc. `declare` is a
+            // contextual ident, lookahead-gated by `check_declare_type`.
+            let start = self.advance(GrammarContext::Type).start;
+            match self.parse_declare_flow(start) {
+                Some(decl) => stmt_list.push(decl),
+                None => return false,
+            }
         } else if self.check(TokenKind::rw_import) {
             // 'import' can indicate an import declaration, but it's also
             // possible a Statement begins with a call to `import()`, so do a
@@ -173,6 +181,36 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         true
+    }
+
+    // -----------------------------------------------------------------------
+    // checkDeclareType — JSParserImpl.h:647
+    // -----------------------------------------------------------------------
+
+    /// Whether the current `declare` ident begins a `declare` statement (rather
+    /// than being a plain identifier). Port of `JSParserImpl::checkDeclareType`
+    /// (JSParserImpl.h:647-661). `declare` is a contextual ident
+    /// (escape-insensitive → check_name) and the lookahead uses
+    /// `RequireNoNewLine = true` (JSLexer.h default; → `lookahead1::<true>`).
+    pub(super) fn check_declare_type(&mut self) -> bool {
+        // C++ 649.
+        if !self.check_name(b"declare") {
+            return false;
+        }
+        // C++ 650-657.
+        matches!(
+            self.lexer.lookahead1::<true>(None),
+            Some(
+                TokenKind::identifier
+                    | TokenKind::rw_interface
+                    | TokenKind::rw_var
+                    | TokenKind::rw_const
+                    | TokenKind::rw_function
+                    | TokenKind::rw_class
+                    | TokenKind::rw_export
+                    | TokenKind::rw_enum
+            )
+        )
     }
 
     // -----------------------------------------------------------------------

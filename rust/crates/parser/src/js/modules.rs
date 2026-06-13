@@ -12,11 +12,9 @@
 //! parseImportSpecifier, C++ lines 6611-7125; parseExportDeclaration /
 //! parseExportClause / parseExportSpecifier, C++ lines 7127-7467).
 //!
-//! Flow/TS productions (the `import type` / `import typeof` kind detection and
-//! the per-specifier `type`/`typeof` forms) are gated off by
-//! `context_.getParseFlow()`/`getParseTS()` in C++; they are omitted here. The
-//! corresponding `// P6/P7` comments mark each omission site. Until those
-//! land, the import kind is always `value`.
+//! The Flow `import type` / `import typeof` kind detection and the per-specifier
+//! `type`/`typeof` forms (C++ gated on `context_.getParseFlow()`) are ported
+//! here (P6.6); the TS-only branches stay omitted with `// P7`.
 
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -215,7 +213,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         );
         let start_loc = self.advance(GrammarContext::AllowRegExp).start;
 
-        // The `value` import kind label (used until Flow/TS `import type` lands).
+        // The `value` import kind label (used for the no-specifier string form).
         let value_ident = self.gc.ctx().atom_table.atom_bytes(b"value");
 
         if self.check(TokenKind::string_literal) {
@@ -263,10 +261,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             ));
         }
 
-        // C++ 6756-6781. `parseImportClause` returns the specifiers; the kind it
-        // returns in C++ is always `value` until Flow/TS lands (see
-        // `parse_import_clause`).
-        let specifiers = self.parse_import_clause()?;
+        // C++ 6756-6781. `parseImportClause` returns the import kind (`value`,
+        // `type`, or `typeof`) and fills in the specifiers.
+        let (specifiers, kind) = self.parse_import_clause()?;
 
         let source = self.parse_from_clause()?;
 
@@ -291,7 +288,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             NodeList::from_iter(self.gc, specifiers),
             source,
             NodeList::from_iter(self.gc, attributes),
-            value_ident,
+            kind,
         ));
         Some(self.set_location(start_loc, self.lexer.prev_token_end(), node))
     }
@@ -301,55 +298,93 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     // -----------------------------------------------------------------------
 
     /// Parse the import clause (default binding, namespace import, and/or named
-    /// imports) and return the specifiers. Port of
-    /// `JSParserImpl::parseImportClause` (6784-6871).
-    ///
-    /// ## Documented simplification
-    /// C++ returns `Optional<UniqueString* kind>` and fills `specifiers` by
-    /// reference. Since `kind` is always `value` until Flow/TS `import type`
-    /// lands (P6/P7), we return just the `Vec` of specifiers and let the caller
-    /// supply the `value` kind. The kind return is reintroduced when
-    /// `import type` is implemented.
-    fn parse_import_clause(&mut self) -> Option<Vec<&'gc Node<'gc>>> {
+    /// imports), returning the parsed specifiers AND the import kind (`value`,
+    /// `type`, or `typeof`). Port of `JSParserImpl::parseImportClause`
+    /// (6784-6871).
+    fn parse_import_clause(
+        &mut self,
+    ) -> Option<(Vec<&'gc Node<'gc>>, NodeLabel)> {
         let mut specifiers: Vec<&'gc Node<'gc>> = Vec::new();
         let start_loc = self.cur_start();
 
-        // P6/P7: Flow/TS import-kind (type/typeof) detection omitted.
-        // C++ 6790-6805.
+        let value_ident = self.gc.ctx().atom_table.atom_bytes(b"value");
+        let type_ident = self.gc.ctx().atom_table.atom_bytes(b"type");
+
+        // C++ 6788-6796: the Flow `import type` / `import typeof` kind. `type`
+        // is a contextual ident (escape-insensitive → check_name); `typeof` is
+        // a reserved word. (The TS-only `import type` block, C++ 6798-6805, is
+        // // P7.)
+        let mut kind = value_ident;
+        let mut kind_range = SMRange {
+            start: start_loc,
+            end: start_loc,
+        };
+        if self.parse_flow()
+            && (self.check_name(b"type") || self.check(TokenKind::rw_typeof))
+        {
+            kind = self.lexer.token().get_res_word_or_identifier();
+            kind_range = self.advance(GrammarContext::AllowRegExp);
+        }
 
         if self.check(TokenKind::identifier) {
-            // The `check(fromIdent_) && kind == typeIdent_` sub-branch
-            // (C++ 6808-6818) can't fire because kind is always `value`, so we
-            // port only the `else` (C++ 6819-6837).
-            //
-            // ImportedDefaultBinding
-            // ImportedDefaultBinding , NameSpaceImport
-            // ImportedDefaultBinding , NamedImports
-            let default_binding =
-                match self.parse_binding_identifier(Param::default()) {
-                    Some(b) => b,
-                    None => {
-                        // C++ errorExpected(identifier, "in import clause", ...).
-                        // note arg dropped per house style.
-                        let _ = start_loc;
-                        self.error_cur("'identifier' expected in import clause");
-                        return None;
-                    }
-                };
-            let spec = Node::ImportDefaultSpecifier(
-                ImportDefaultSpecifier::new(
+            // C++ 6808-6818: the `import type from 'x'` trap — a default import
+            // whose name happens to be `type`. `check(fromIdent_)` is
+            // escape-insensitive → check_name.
+            if self.check_name(b"from") && kind == type_ident {
+                // Not actually a type import, just import default with the name
+                // 'type'.
+                kind = value_ident;
+                let default_node = Node::Identifier(Identifier::new(
                     NodeMetadata::new(self.dummy_range()),
-                    default_binding,
-                ),
-            );
-            let rng = default_binding.range();
-            specifiers.push(self.set_location(rng.start, rng.end, spec));
+                    type_ident,
+                    None,
+                    false,
+                ));
+                let default_binding = self.set_location(
+                    kind_range.start,
+                    kind_range.end,
+                    default_node,
+                );
+                let spec = Node::ImportDefaultSpecifier(
+                    ImportDefaultSpecifier::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        default_binding,
+                    ),
+                );
+                let rng = default_binding.range();
+                specifiers.push(self.set_location(rng.start, rng.end, spec));
+            } else {
+                // ImportedDefaultBinding
+                // ImportedDefaultBinding , NameSpaceImport
+                // ImportedDefaultBinding , NamedImports
+                // C++ 6819-6837.
+                let default_binding =
+                    match self.parse_binding_identifier(Param::default()) {
+                        Some(b) => b,
+                        None => {
+                            // C++ errorExpected(identifier, "in import clause",
+                            // ...). note arg dropped per house style.
+                            self.error_cur(
+                                "'identifier' expected in import clause",
+                            );
+                            return None;
+                        }
+                    };
+                let spec = Node::ImportDefaultSpecifier(
+                    ImportDefaultSpecifier::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        default_binding,
+                    ),
+                );
+                let rng = default_binding.range();
+                specifiers.push(self.set_location(rng.start, rng.end, spec));
+            }
 
             if !self.check_and_eat(TokenKind::comma, GrammarContext::AllowRegExp)
             {
                 // If there was no comma, there's no more bindings to parse,
                 // so return immediately. C++ 6838-6842.
-                return Some(specifiers);
+                return Some((specifiers, kind));
             }
         }
 
@@ -361,7 +396,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // NameSpaceImport
             let ns = self.parse_name_space_import()?;
             specifiers.push(ns);
-            return Some(specifiers);
+            return Some((specifiers, kind));
         }
 
         // NamedImports is the only remaining possibility. C++ 6860-6866.
@@ -369,13 +404,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // returns the accumulated kind WITHOUT propagating an error-None, so we
         // replicate that and return the accumulated specifiers.
         if !self.need(TokenKind::l_brace, " in import specifier clause") {
-            return Some(specifiers);
+            return Some((specifiers, kind));
         }
 
         if !self.parse_named_imports(&mut specifiers) {
             return None;
         }
-        Some(specifiers)
+        Some((specifiers, kind))
     }
 
     // -----------------------------------------------------------------------
@@ -501,9 +536,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     // parseImportSpecifier — 6943 in JSParserImpl.cpp
     // -----------------------------------------------------------------------
 
-    /// Parse a single named-import specifier (`a` or `a as b`). Port of the
-    /// non-Flow `else` branch of `JSParserImpl::parseImportSpecifier`
-    /// (the JS-only path, C++ 7074-7124).
+    /// Parse a single named-import specifier (`a`, `a as b`, or the Flow
+    /// `type`/`typeof` kinded forms). Port of
+    /// `JSParserImpl::parseImportSpecifier` (C++ 6943-7125).
     fn parse_import_specifier(
         &mut self,
         import_loc: support::location::SMLoc,
@@ -515,56 +550,247 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let _ = import_loc;
 
         let value_ident = self.gc.ctx().atom_table.atom_bytes(b"value");
+        let type_ident = self.gc.ctx().atom_table.atom_bytes(b"type");
+        let typeof_ident = self.gc.ctx().atom_table.atom_bytes(b"typeof");
 
-        // P6: Flow type/typeof import specifier omitted (C++ 6955-7073).
+        // C++ 6950-6953.
+        let mut kind = value_ident;
+        let imported: &'gc Node<'gc>;
+        let mut local: &'gc Node<'gc>;
+        let local_kind: TokenKind;
 
-        // Not attempting to parse a type identifier. C++ 7074-7109.
-        if !self.check(TokenKind::identifier)
-            && !self.lexer.token().is_res_word()
+        // C++ 6955-6959: `import { typeof X }`. `typeof` is a reserved word.
+        if self.parse_flow()
+            && self.check_and_eat(TokenKind::rw_typeof, GrammarContext::AllowRegExp)
         {
-            // C++ errorExpected(identifier, "in import specifier", ...).
-            // note arg dropped per house style.
-            self.error_cur("'identifier' expected in import specifier");
-            return None;
+            kind = typeof_ident;
         }
-        let tok_start = self.lexer.token().start_loc();
-        let tok_end = self.lexer.token().end_loc();
-        let imported_name = self.lexer.token().get_res_word_or_identifier();
-        let imported_node = Node::Identifier(Identifier::new(
-            NodeMetadata::new(self.dummy_range()),
-            imported_name,
-            None,
-            false,
-        ));
-        let imported = self.set_location(tok_start, tok_end, imported_node);
-        // When there's no `as`, `imported` and `local` are the SAME node (C++
-        // sets `local = imported`, the same pointer).
-        let mut local = imported;
-        let mut local_kind = self.cur_kind();
-        self.advance(GrammarContext::AllowRegExp);
 
-        // `as` is a contextual identifier (escape-insensitive). C++ 7093.
-        if self.check_name(b"as") {
-            self.advance(GrammarContext::AllowRegExp);
+        // C++ 6964-6965: `import { type X }`. `type` is a contextual ident
+        // (escape-insensitive → check_name); only enter when no `typeof` kind
+        // was set above.
+        if self.parse_flow() && self.check_name(b"type") && kind == value_ident {
+            // Consume 'type', but make no assumptions about what it means yet.
+            // C++ 6967.
+            let type_range = self.advance(GrammarContext::AllowRegExp);
+            if self.check2(TokenKind::r_brace, TokenKind::comma) {
+                // C++ 6968-6975: just 'type'.
+                let imp_node = Node::Identifier(Identifier::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    type_ident,
+                    None,
+                    false,
+                ));
+                imported = self.set_location(
+                    type_range.start,
+                    type_range.end,
+                    imp_node,
+                );
+                local = imported;
+                local_kind = TokenKind::identifier;
+            } else if self.check_name(b"as") {
+                // C++ 6976-7033.
+                let as_range = self.advance(GrammarContext::AllowRegExp);
+                let as_ident = self.gc.ctx().atom_table.atom_bytes(b"as");
+                if self.check2(TokenKind::r_brace, TokenKind::comma) {
+                    // C++ 6978-6987: 'type' 'as'.
+                    kind = type_ident;
+                    let imp_node = Node::Identifier(Identifier::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        as_ident,
+                        None,
+                        false,
+                    ));
+                    imported = self.set_location(
+                        as_range.start,
+                        as_range.end,
+                        imp_node,
+                    );
+                    local = imported;
+                    local_kind = TokenKind::identifier;
+                    self.advance(GrammarContext::AllowRegExp);
+                } else if self.check_name(b"as") {
+                    // C++ 6988-7010: 'type' 'as' 'as' Identifier.
+                    self.advance(GrammarContext::AllowRegExp);
+                    if !self.check(TokenKind::identifier)
+                        && !self.lexer.token().is_res_word()
+                    {
+                        self.error_cur(
+                            "'identifier' expected in import specifier",
+                        );
+                        return None;
+                    }
+                    kind = type_ident;
+                    let imp_node = Node::Identifier(Identifier::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        as_ident,
+                        None,
+                        false,
+                    ));
+                    imported = self.set_location(
+                        as_range.start,
+                        as_range.end,
+                        imp_node,
+                    );
+                    let loc_range = self.cur_range();
+                    let loc_name =
+                        self.lexer.token().get_res_word_or_identifier();
+                    let loc_node = Node::Identifier(Identifier::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        loc_name,
+                        None,
+                        false,
+                    ));
+                    local = self.set_location(
+                        loc_range.start,
+                        loc_range.end,
+                        loc_node,
+                    );
+                    local_kind = TokenKind::identifier;
+                    self.advance(GrammarContext::AllowRegExp);
+                } else {
+                    // C++ 7011-7033: 'type' 'as' Identifier.
+                    if !self.check(TokenKind::identifier)
+                        && !self.lexer.token().is_res_word()
+                    {
+                        self.error_cur(
+                            "'identifier' expected in import specifier",
+                        );
+                        return None;
+                    }
+                    let imp_node = Node::Identifier(Identifier::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        type_ident,
+                        None,
+                        false,
+                    ));
+                    imported = self.set_location(
+                        type_range.start,
+                        type_range.end,
+                        imp_node,
+                    );
+                    let loc_range = self.cur_range();
+                    let loc_name =
+                        self.lexer.token().get_res_word_or_identifier();
+                    let loc_node = Node::Identifier(Identifier::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        loc_name,
+                        None,
+                        false,
+                    ));
+                    local = self.set_location(
+                        loc_range.start,
+                        loc_range.end,
+                        loc_node,
+                    );
+                    local_kind = TokenKind::identifier;
+                    self.advance(GrammarContext::AllowRegExp);
+                }
+            } else {
+                // C++ 7034-7073: 'type' Identifier (optionally `as Identifier`).
+                kind = type_ident;
+                if !self.check(TokenKind::identifier)
+                    && !self.lexer.token().is_res_word()
+                {
+                    self.error_cur("'identifier' expected in import specifier");
+                    return None;
+                }
+                let imp_range = self.cur_range();
+                let imp_name = self.lexer.token().get_res_word_or_identifier();
+                let imp_node = Node::Identifier(Identifier::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    imp_name,
+                    None,
+                    false,
+                ));
+                imported = self.set_location(
+                    imp_range.start,
+                    imp_range.end,
+                    imp_node,
+                );
+                local = imported;
+                let mut lk = self.cur_kind();
+                self.advance(GrammarContext::AllowRegExp);
+                if self.check_name(b"as") {
+                    // C++ 7054-7072: type Identifier 'as' Identifier.
+                    self.advance(GrammarContext::AllowRegExp);
+                    if !self.check(TokenKind::identifier)
+                        && !self.lexer.token().is_res_word()
+                    {
+                        self.error_cur(
+                            "'identifier' expected in import specifier",
+                        );
+                        return None;
+                    }
+                    let loc_range = self.cur_range();
+                    let loc_name =
+                        self.lexer.token().get_res_word_or_identifier();
+                    let loc_node = Node::Identifier(Identifier::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        loc_name,
+                        None,
+                        false,
+                    ));
+                    local = self.set_location(
+                        loc_range.start,
+                        loc_range.end,
+                        loc_node,
+                    );
+                    lk = self.cur_kind();
+                    self.advance(GrammarContext::AllowRegExp);
+                }
+                local_kind = lk;
+            }
+        } else {
+            // Not attempting to parse a type identifier. C++ 7074-7110.
             if !self.check(TokenKind::identifier)
                 && !self.lexer.token().is_res_word()
             {
+                // C++ errorExpected(identifier, "in import specifier", ...).
                 // note arg dropped per house style.
                 self.error_cur("'identifier' expected in import specifier");
                 return None;
             }
             let tok_start = self.lexer.token().start_loc();
             let tok_end = self.lexer.token().end_loc();
-            let local_name = self.lexer.token().get_res_word_or_identifier();
-            let local_node = Node::Identifier(Identifier::new(
+            let imported_name = self.lexer.token().get_res_word_or_identifier();
+            let imported_node = Node::Identifier(Identifier::new(
                 NodeMetadata::new(self.dummy_range()),
-                local_name,
+                imported_name,
                 None,
                 false,
             ));
-            local = self.set_location(tok_start, tok_end, local_node);
-            local_kind = self.cur_kind();
+            imported = self.set_location(tok_start, tok_end, imported_node);
+            // When there's no `as`, `imported` and `local` are the SAME node
+            // (C++ sets `local = imported`, the same pointer).
+            local = imported;
+            let mut lk = self.cur_kind();
             self.advance(GrammarContext::AllowRegExp);
+
+            // `as` is a contextual identifier (escape-insensitive). C++ 7093.
+            if self.check_name(b"as") {
+                self.advance(GrammarContext::AllowRegExp);
+                if !self.check(TokenKind::identifier)
+                    && !self.lexer.token().is_res_word()
+                {
+                    // note arg dropped per house style.
+                    self.error_cur("'identifier' expected in import specifier");
+                    return None;
+                }
+                let tok_start = self.lexer.token().start_loc();
+                let tok_end = self.lexer.token().end_loc();
+                let local_name = self.lexer.token().get_res_word_or_identifier();
+                let local_node = Node::Identifier(Identifier::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    local_name,
+                    None,
+                    false,
+                ));
+                local = self.set_location(tok_start, tok_end, local_node);
+                lk = self.cur_kind();
+                self.advance(GrammarContext::AllowRegExp);
+            }
+            local_kind = lk;
         }
 
         // Only the local name must be parsed as a binding identifier.
@@ -590,7 +816,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             NodeMetadata::new(self.dummy_range()),
             imported,
             local,
-            value_ident,
+            kind,
         ));
         Some(self.set_location(start_loc, self.lexer.prev_token_end(), node))
     }
@@ -602,10 +828,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Parse an `export` declaration. Port of
     /// `JSParserImpl::parseExportDeclaration` (7127-7375).
     ///
-    /// The Flow `export type` dispatch (C++ 7133-7137) and the Flow
-    /// export-kind detection (C++ 7361-7368) are implemented; the Flow
-    /// default-export forms (component/hook/enum/record, C++ 7209-7279) are
-    /// P6, marked by a `// P6` comment at the omission site.
+    /// The Flow `export type` dispatch (C++ 7133-7137), the export-kind
+    /// detection (C++ 7361-7368), and the Flow default-export forms
+    /// (component/hook/enum/record, C++ 7209-7279) are all ported.
     pub(super) fn parse_export_declaration(
         &mut self,
     ) -> Option<&'gc Node<'gc>> {
@@ -742,10 +967,123 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     cls.range().end,
                     node,
                 ));
+            } else if self.parse_flow()
+                && self.parse_flow_component_syntax()
+                && self.check_unescaped_name(b"async")
+                && self.check_async_component_flow()
+            {
+                // C++ 7209-7222: export default async component.
+                let comp_start = self.advance(GrammarContext::AllowRegExp).start;
+                let comp = self.parse_component_declaration_flow(
+                    comp_start, /* declare */ false, /* is_async */ true,
+                )?;
+                let node = Node::ExportDefaultDeclaration(
+                    ExportDefaultDeclaration::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        comp,
+                    ),
+                );
+                return Some(self.set_location(
+                    start_loc,
+                    comp.range().end,
+                    node,
+                ));
+            } else if self.parse_flow()
+                && self.parse_flow_component_syntax()
+                && self.check_component_declaration_flow()
+            {
+                // C++ 7223-7234: export default component.
+                let comp_start = self.cur_start();
+                let comp = self.parse_component_declaration_flow(
+                    comp_start, /* declare */ false, /* is_async */ false,
+                )?;
+                let node = Node::ExportDefaultDeclaration(
+                    ExportDefaultDeclaration::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        comp,
+                    ),
+                );
+                return Some(self.set_location(
+                    start_loc,
+                    comp.range().end,
+                    node,
+                ));
+            } else if self.parse_flow()
+                && self.parse_flow_component_syntax()
+                && self.check_unescaped_name(b"async")
+                && self.check_async_hook_flow()
+            {
+                // C++ 7235-7247: export default async hook.
+                let hook_start = self.advance(GrammarContext::AllowRegExp).start;
+                let hook = self
+                    .parse_hook_declaration_flow(hook_start, /* is_async */ true)?;
+                let node = Node::ExportDefaultDeclaration(
+                    ExportDefaultDeclaration::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        hook,
+                    ),
+                );
+                return Some(self.set_location(
+                    start_loc,
+                    hook.range().end,
+                    node,
+                ));
+            } else if self.parse_flow()
+                && self.parse_flow_component_syntax()
+                && self.check_hook_declaration_flow()
+            {
+                // C++ 7247-7257: export default hook.
+                let hook_start = self.cur_start();
+                let hook = self.parse_hook_declaration_flow(
+                    hook_start, /* is_async */ false,
+                )?;
+                let node = Node::ExportDefaultDeclaration(
+                    ExportDefaultDeclaration::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        hook,
+                    ),
+                );
+                return Some(self.set_location(
+                    start_loc,
+                    hook.range().end,
+                    node,
+                ));
+            } else if self.parse_flow() && self.check(TokenKind::rw_enum) {
+                // C++ 7258-7267: export default enum.
+                let enum_start = self.cur_start();
+                let enum_decl = self
+                    .parse_enum_declaration_flow(enum_start, /* declare */ false)?;
+                let node = Node::ExportDefaultDeclaration(
+                    ExportDefaultDeclaration::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        enum_decl,
+                    ),
+                );
+                return Some(self.set_location(
+                    start_loc,
+                    enum_decl.range().end,
+                    node,
+                ));
+            } else if self.parse_flow()
+                && self.parse_flow_records()
+                && self.check_record_declaration_flow()
+            {
+                // C++ 7268-7279: export default record.
+                let record_start = self.cur_start();
+                let record =
+                    self.parse_record_declaration_flow(record_start)?;
+                let node = Node::ExportDefaultDeclaration(
+                    ExportDefaultDeclaration::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        record,
+                    ),
+                );
+                return Some(self.set_location(
+                    start_loc,
+                    record.range().end,
+                    node,
+                ));
             } else {
-                // P6: Flow default exports (component/hook/enum/record,
-                // C++ 7209-7279) omitted.
-                //
                 // export default AssignmentExpression ;
                 // C++ 7280-7293.
                 let expr = self.parse_assignment_expression(PARAM_IN, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
@@ -869,7 +1207,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// `ExportSpecifier` to `specifiers` and any potentially-invalid exported
     /// name ranges to `invalids`. Port of `JSParserImpl::parseExportClause`
     /// (7377-7407).
-    fn parse_export_clause(
+    pub(in crate::js) fn parse_export_clause(
         &mut self,
         specifiers: &mut Vec<&'gc Node<'gc>>,
         invalids: &mut Vec<SMRange>,

@@ -10,21 +10,25 @@
 //! entry points of `lib/Parser/JSParserImpl-flow.cpp`.
 
 use ast::node::{
-    BigIntLiteral, BooleanLiteral, ComponentDeclaration, ComponentParameter,
-    DeclareComponent, DeclareEnum, DeclareInterface, DeclareOpaqueType,
-    DeclareTypeAlias, EnumBigIntBody, EnumBigIntMember, EnumBooleanBody,
-    EnumBooleanMember, EnumDeclaration, EnumDefaultedMember, EnumNumberBody,
-    EnumNumberMember, EnumStringBody, EnumStringMember, EnumSymbolBody,
-    ExportNamedDeclaration, FunctionExpression, HookDeclaration, Identifier,
-    InterfaceDeclaration, InterfaceExtends, MethodDefinition, Node,
-    NumericLiteral, OpaqueType, RecordDeclaration, RecordDeclarationBody,
-    RecordDeclarationImplements, RecordDeclarationProperty,
-    RecordDeclarationStaticProperty, StringLiteral, TypeAlias,
+    BigIntLiteral, BlockStatement, BooleanLiteral, ComponentDeclaration,
+    ComponentParameter, DeclareClass, DeclareComponent, DeclareEnum,
+    DeclareExportAllDeclaration, DeclareExportDeclaration, DeclareFunction,
+    DeclareHook, DeclareInterface, DeclareModule, DeclareModuleExports,
+    DeclareNamespace, DeclareOpaqueType, DeclareTypeAlias, DeclareVariable,
+    EnumBigIntBody, EnumBigIntMember, EnumBooleanBody, EnumBooleanMember,
+    EnumDeclaration, EnumDefaultedMember, EnumNumberBody, EnumNumberMember,
+    EnumStringBody, EnumStringMember, EnumSymbolBody, ExportAllDeclaration,
+    ExportNamedDeclaration, FunctionExpression, FunctionTypeAnnotation,
+    HookDeclaration, HookTypeAnnotation, Identifier, InterfaceDeclaration,
+    InterfaceExtends, MethodDefinition, Node, NumericLiteral, OpaqueType,
+    RecordDeclaration, RecordDeclarationBody, RecordDeclarationImplements,
+    RecordDeclarationProperty, RecordDeclarationStaticProperty, StringLiteral,
+    TypeAlias, TypeAnnotation,
 };
 use ast::node_child::{NodeList, NodeMetadata};
-use support::location::SMLoc;
+use support::location::{SMLoc, SMRange};
 
-use crate::js::{JSParserImpl, Param, PARAM_IN};
+use crate::js::{AllowImportExport, JSParserImpl, Param, PARAM_IN};
 use crate::lexer::GrammarContext;
 use crate::token_kinds::TokenKind;
 
@@ -1449,18 +1453,924 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
+    // parseDeclareFLow — 95 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a `declare ...` statement, with `declare` already consumed and
+    /// `start` at the `declare` keyword. Port of `JSParserImpl::parseDeclareFLow`
+    /// (flow.cpp:95-193).
+    pub(in crate::js) fn parse_declare_flow(
+        &mut self,
+        start: SMLoc,
+    ) -> Option<&'gc Node<'gc>> {
+        // C++ 96-98: `declare type`.
+        if self.check_name(b"type") {
+            self.advance(GrammarContext::AllowRegExp);
+            return self.parse_type_alias_flow(start, TypeAliasKind::Declare);
+        }
+        // C++ 99-106: `declare opaque type`.
+        if self.check_name(b"opaque") {
+            self.advance(GrammarContext::AllowRegExp);
+            if !self.check_name(b"type") {
+                self.error_cur("'type' required in opaque type declaration");
+                return None;
+            }
+            self.advance(GrammarContext::Type);
+            return self
+                .parse_type_alias_flow(start, TypeAliasKind::DeclareOpaque);
+        }
+        // C++ 107-109: `declare interface`.
+        if self.check(TokenKind::rw_interface) || self.check_name(b"interface") {
+            return self.parse_interface_declaration_flow(Some(start));
+        }
+        // C++ 110-112: `declare class`.
+        if self.check(TokenKind::rw_class) {
+            return self.parse_declare_class_flow(start);
+        }
+        // C++ 113-115: `declare function`.
+        if self.check(TokenKind::rw_function) {
+            return self.parse_declare_function_flow(start);
+        }
+
+        // C++ 117-119: `declare hook`.
+        if self.parse_flow_component_syntax()
+            && self.check_hook_declaration_flow()
+        {
+            return self.parse_declare_hook_flow(start);
+        }
+
+        // C++ 121-129: `declare async hook` (an error, then parse as hook).
+        if self.parse_flow_component_syntax()
+            && self.check_unescaped_name(b"async")
+            && self.check_async_hook_flow()
+        {
+            self.error_cur(
+                "`async` is not supported for declared hooks. \
+                 Use `declare hook` instead.",
+            );
+            self.advance(GrammarContext::AllowRegExp); // consume 'async'
+            return self.parse_declare_hook_flow(start);
+        }
+
+        // C++ 131-139: `declare async component` (an error, then component).
+        if self.parse_flow_component_syntax()
+            && self.check_unescaped_name(b"async")
+            && self.check_async_component_flow()
+        {
+            self.error_cur(
+                "`async` is not supported for declared components. \
+                 Use `declare component` instead.",
+            );
+            self.advance(GrammarContext::AllowRegExp); // consume 'async'
+            return self
+                .parse_component_declaration_flow(start, true, false);
+        }
+
+        // C++ 141-144: `declare component`.
+        if self.parse_flow_component_syntax()
+            && self.check_component_declaration_flow()
+        {
+            return self
+                .parse_component_declaration_flow(start, true, false);
+        }
+        // C++ 145-147: `declare enum`.
+        if self.check(TokenKind::rw_enum) {
+            return self.parse_enum_declaration_flow(start, true);
+        }
+        // C++ 148-150: `declare module`.
+        if self.check_name(b"module") {
+            return self.parse_declare_module_flow(start);
+        }
+        // C++ 151-153: `declare namespace`.
+        if self.check_name(b"namespace") {
+            return self.parse_declare_namespace_flow(start);
+        }
+
+        // C++ 154-177: `declare var`/`const`/`let`. NOTE the var-kind advance
+        // here is the DEFAULT GrammarContext (AllowRegExp), unlike the `Type`
+        // advance in parseDeclareExportFlow.
+        if self.check2(TokenKind::rw_var, TokenKind::rw_const)
+            || self.check_name(b"let")
+        {
+            let kind = self.lexer.token().get_res_word_or_identifier();
+            self.advance(GrammarContext::AllowRegExp);
+            let Some(id) = self.parse_binding_identifier(Param::default())
+            else {
+                // C++ 158-165: errorExpected(identifier, "in var declaration",
+                // "start of declaration", start). note args dropped.
+                let _ = start;
+                self.error_cur("'identifier' expected in var declaration");
+                return None;
+            };
+            // C++ 166-170.
+            if self.identifier_type_annotation(id).is_none() {
+                self.error_at(
+                    id.range(),
+                    "expected type annotation on declared var",
+                );
+            }
+            if !self.eat_semi(false) {
+                return None;
+            }
+            let node = Node::DeclareVariable(DeclareVariable::new(
+                NodeMetadata::new(self.dummy_range()),
+                id,
+                kind,
+            ));
+            return Some(self.set_location(
+                start,
+                self.lexer.prev_token_end(),
+                node,
+            ));
+        }
+
+        // C++ 179-190: otherwise it must be `declare export`.
+        if !self.check(TokenKind::rw_export) {
+            self.error_expected4(
+                TokenKind::rw_export,
+                TokenKind::rw_interface,
+                TokenKind::rw_function,
+                TokenKind::rw_class,
+                " in declared type",
+            );
+            return None;
+        }
+
+        // C++ 192.
+        self.parse_declare_export_flow(start)
+    }
+
+    /// The `(*optIdent)->_typeAnnotation` access on a parsed binding identifier
+    /// (C++ flow.cpp:166 / 2775). Returns the identifier's type annotation if it
+    /// has one (only `IdentifierNode`s carry one).
+    fn identifier_type_annotation(
+        &self,
+        id: &'gc Node<'gc>,
+    ) -> Option<&'gc Node<'gc>> {
+        match id {
+            Node::Identifier(i) => i.type_annotation,
+            _ => None,
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // parseDeclareFunctionOrHookFlow — 2159 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse a `declare function`/`declare hook` declaration, with the cursor
+    /// at the `function`/`hook` keyword and `start` at `declare`. The parsed
+    /// signature is attached to the id's type annotation, then wrapped in a
+    /// `DeclareFunction(id, predicate)` (or `DeclareHook(id)`). Port of
+    /// `JSParserImpl::parseDeclareFunctionOrHookFlow` (flow.cpp:2159-2258).
+    fn parse_declare_function_or_hook_flow(
+        &mut self,
+        start: SMLoc,
+        hook: bool,
+    ) -> Option<&'gc Node<'gc>> {
+        // C++ 2162.
+        self.advance(GrammarContext::Type);
+
+        // C++ 2164-2169.
+        if !self.need(TokenKind::identifier, " in declare function type") {
+            return None;
+        }
+
+        // C++ 2171-2172.
+        let id_name = self.lexer.token().get_identifier();
+        let id_start = self.advance(GrammarContext::Type).start;
+
+        // C++ 2174.
+        let func_start = self.cur_start();
+
+        // C++ 2176-2182.
+        let mut type_params: Option<&'gc Node<'gc>> = None;
+        if self.check(TokenKind::less) {
+            type_params = Some(self.parse_type_params_flow()?);
+        }
+
+        // C++ 2184-2189.
+        if !self.need(TokenKind::l_paren, " in declare function type") {
+            return None;
+        }
+
+        // C++ 2191-2196.
+        let mut params: Vec<&'gc Node<'gc>> = Vec::new();
+        let mut this_constraint: Option<&'gc Node<'gc>> = None;
+        let rest = self.parse_function_type_annotation_params_flow(
+            &mut params,
+            &mut this_constraint,
+            hook,
+        )?;
+
+        // C++ 2198-2204.
+        if !self.eat(
+            TokenKind::colon,
+            GrammarContext::Type,
+            " in declare function type",
+        ) {
+            return None;
+        }
+
+        // C++ 2206-2210: parseReturnTypeAnnotationFlow() — defaults
+        // (None, AllowAnonFunctionType::Yes).
+        let return_type = self.parse_return_type_annotation_flow(
+            None,
+            AllowAnonFunctionType::Yes,
+        )?;
+        let func_end = self.lexer.prev_token_end();
+
+        // C++ 2212-2218.
+        let mut predicate: Option<&'gc Node<'gc>> = None;
+        if self.check_name(b"checks") && !hook {
+            predicate = Some(self.parse_predicate_flow()?);
+        }
+
+        // C++ 2220-2221.
+        if !self.eat_semi(false) {
+            return None;
+        }
+
+        let params_list = NodeList::from_iter(self.gc, params);
+
+        if !hook {
+            // C++ 2223-2241.
+            let fn_type =
+                Node::FunctionTypeAnnotation(FunctionTypeAnnotation::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    params_list,
+                    this_constraint,
+                    return_type,
+                    rest,
+                    type_params,
+                ));
+            let fn_type = self.set_location(func_start, func_end, fn_type);
+            let annot = Node::TypeAnnotation(TypeAnnotation::new(
+                NodeMetadata::new(self.dummy_range()),
+                fn_type,
+            ));
+            let annot = self.set_location(func_start, func_end, annot);
+            let ident_node = Node::Identifier(Identifier::new(
+                NodeMetadata::new(self.dummy_range()),
+                id_name,
+                Some(annot),
+                false,
+            ));
+            let ident =
+                self.set_location(id_start, annot.range().end, ident_node);
+            let node = Node::DeclareFunction(DeclareFunction::new(
+                NodeMetadata::new(self.dummy_range()),
+                ident,
+                predicate,
+            ));
+            Some(self.set_location(start, self.lexer.prev_token_end(), node))
+        } else {
+            // C++ 2242-2257.
+            let hook_type =
+                Node::HookTypeAnnotation(HookTypeAnnotation::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    params_list,
+                    return_type,
+                    rest,
+                    type_params,
+                ));
+            let hook_type = self.set_location(func_start, func_end, hook_type);
+            let annot = Node::TypeAnnotation(TypeAnnotation::new(
+                NodeMetadata::new(self.dummy_range()),
+                hook_type,
+            ));
+            let annot = self.set_location(func_start, func_end, annot);
+            let ident_node = Node::Identifier(Identifier::new(
+                NodeMetadata::new(self.dummy_range()),
+                id_name,
+                Some(annot),
+                false,
+            ));
+            let ident =
+                self.set_location(id_start, annot.range().end, ident_node);
+            let node = Node::DeclareHook(DeclareHook::new(
+                NodeMetadata::new(self.dummy_range()),
+                ident,
+            ));
+            Some(self.set_location(start, self.lexer.prev_token_end(), node))
+        }
+    }
+
+    /// `declare function`. Port of `parseDeclareFunctionFlow` (flow.cpp:2260).
+    fn parse_declare_function_flow(
+        &mut self,
+        start: SMLoc,
+    ) -> Option<&'gc Node<'gc>> {
+        debug_assert!(self.check(TokenKind::rw_function));
+        self.parse_declare_function_or_hook_flow(start, false)
+    }
+
+    /// `declare hook`. Port of `parseDeclareHookFlow` (flow.cpp:2265).
+    fn parse_declare_hook_flow(
+        &mut self,
+        start: SMLoc,
+    ) -> Option<&'gc Node<'gc>> {
+        debug_assert!(self.check_name(b"hook"));
+        self.parse_declare_function_or_hook_flow(start, true)
+    }
+
+    // -----------------------------------------------------------------------
+    // parseDeclareModuleFlow — 2270 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse `declare module ...`, with the cursor at `module` and `start` at
+    /// `declare`. Port of `JSParserImpl::parseDeclareModuleFlow`
+    /// (flow.cpp:2270-2349).
+    fn parse_declare_module_flow(
+        &mut self,
+        start: SMLoc,
+    ) -> Option<&'gc Node<'gc>> {
+        // C++ 2271-2272.
+        debug_assert!(self.check_name(b"module"));
+        self.advance(GrammarContext::Type);
+
+        // C++ 2274-2296: `declare module.exports: T`.
+        if self.check_and_eat(TokenKind::period, GrammarContext::Type) {
+            if !self.check_name(b"exports") {
+                self.error_at(self.cur_range(), "expected module.exports declaration");
+                return None;
+            }
+            self.advance(GrammarContext::Type);
+
+            let annot_start = self.cur_start();
+            if !self.eat(
+                TokenKind::colon,
+                GrammarContext::Type,
+                " in module.exports declaration",
+            ) {
+                return None;
+            }
+            let type_annot = self.parse_type_annotation_flow(
+                Some(annot_start),
+                AllowAnonFunctionType::Yes,
+            )?;
+            // C++ 2291: eatSemi(true) — the optional form for module.exports.
+            self.eat_semi(true);
+            let node = Node::DeclareModuleExports(DeclareModuleExports::new(
+                NodeMetadata::new(self.dummy_range()),
+                type_annot,
+            ));
+            return Some(self.set_location(
+                start,
+                self.lexer.prev_token_end(),
+                node,
+            ));
+        }
+
+        // C++ 2298-2318: `declare module <string|ident> { ... }`.
+        // Faithful to the C++ `ESTree::Node *id = nullptr;` branch-assign idiom.
+        #[allow(clippy::needless_late_init)]
+        let id: &'gc Node<'gc>;
+        if self.check(TokenKind::string_literal) {
+            let str_range = self.cur_range();
+            let value = self.lexer.token().get_string_literal();
+            let node = Node::StringLiteral(StringLiteral::new(
+                NodeMetadata::new(self.dummy_range()),
+                value,
+            ));
+            id = self.set_location(str_range.start, str_range.end, node);
+        } else {
+            if !self.need(TokenKind::identifier, " in module declaration") {
+                return None;
+            }
+            let id_range = self.cur_range();
+            let node = Node::Identifier(Identifier::new(
+                NodeMetadata::new(self.dummy_range()),
+                self.lexer.token().get_identifier(),
+                None,
+                false,
+            ));
+            id = self.set_location(id_range.start, id_range.end, node);
+        }
+        self.advance(GrammarContext::Type);
+
+        // C++ 2321-2330.
+        let body_start = self.cur_start();
+        if !self.eat(
+            TokenKind::l_brace,
+            GrammarContext::Type,
+            " in module declaration",
+        ) {
+            return None;
+        }
+
+        // C++ 2332-2337: the body recurses into statement-list items (which
+        // include the `declare` statement branch).
+        let mut declarations: Vec<&'gc Node<'gc>> = Vec::new();
+        while !self.check(TokenKind::r_brace) {
+            if !self.parse_statement_list_item(
+                Param::default(),
+                AllowImportExport::Yes,
+                &mut declarations,
+            ) {
+                return None;
+            }
+        }
+
+        // C++ 2339-2348.
+        let body_end = self.advance(GrammarContext::Type).end;
+        let body_node = Node::BlockStatement(BlockStatement::new(
+            NodeMetadata::new(self.dummy_range()),
+            NodeList::from_iter(self.gc, declarations),
+            false,
+        ));
+        let body = self.set_location(body_start, body_end, body_node);
+        let node = Node::DeclareModule(DeclareModule::new(
+            NodeMetadata::new(self.dummy_range()),
+            id,
+            body,
+        ));
+        Some(self.set_location(start, body.range().end, node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseDeclareNamespaceFlow — 2351 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse `declare namespace ...`, with the cursor at `namespace` and `start`
+    /// at `declare`. Port of `JSParserImpl::parseDeclareNamespaceFlow`
+    /// (flow.cpp:2351-2398).
+    fn parse_declare_namespace_flow(
+        &mut self,
+        start: SMLoc,
+    ) -> Option<&'gc Node<'gc>> {
+        // C++ 2352-2353.
+        debug_assert!(self.check_name(b"namespace"));
+        self.advance(GrammarContext::Type);
+
+        // C++ 2357-2368.
+        if !self.need(TokenKind::identifier, " in namespace declaration") {
+            return None;
+        }
+        let id_range = self.cur_range();
+        let id_node = Node::Identifier(Identifier::new(
+            NodeMetadata::new(self.dummy_range()),
+            self.lexer.token().get_identifier(),
+            None,
+            false,
+        ));
+        let id = self.set_location(id_range.start, id_range.end, id_node);
+        self.advance(GrammarContext::Type);
+
+        // C++ 2372-2379.
+        let body_start = self.cur_start();
+        if !self.eat(
+            TokenKind::l_brace,
+            GrammarContext::Type,
+            " in namespace declaration",
+        ) {
+            return None;
+        }
+
+        // C++ 2381-2386.
+        let mut declarations: Vec<&'gc Node<'gc>> = Vec::new();
+        while !self.check(TokenKind::r_brace) {
+            if !self.parse_statement_list_item(
+                Param::default(),
+                AllowImportExport::Yes,
+                &mut declarations,
+            ) {
+                return None;
+            }
+        }
+
+        // C++ 2388-2397.
+        let body_end = self.advance(GrammarContext::Type).end;
+        let body_node = Node::BlockStatement(BlockStatement::new(
+            NodeMetadata::new(self.dummy_range()),
+            NodeList::from_iter(self.gc, declarations),
+            false,
+        ));
+        let body = self.set_location(body_start, body_end, body_node);
+        let node = Node::DeclareNamespace(DeclareNamespace::new(
+            NodeMetadata::new(self.dummy_range()),
+            id,
+            body,
+        ));
+        Some(self.set_location(start, body.range().end, node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseDeclareClassFlow — 2400 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse `declare class ...`, with the cursor at `class` and `start` at
+    /// `declare`. Port of `JSParserImpl::parseDeclareClassFlow`
+    /// (flow.cpp:2400-2496).
+    fn parse_declare_class_flow(
+        &mut self,
+        start: SMLoc,
+    ) -> Option<&'gc Node<'gc>> {
+        // C++ 2401-2402.
+        debug_assert!(self.check(TokenKind::rw_class));
+        self.advance(GrammarContext::Type);
+
+        // C++ 2404-2406: class definitions are always strict-mode code.
+        let old_strict = self.lexer.is_strict_mode();
+        self.lexer.set_strict_mode(true);
+
+        let result = self.parse_declare_class_flow_inner(start);
+
+        // C++ 2405: SaveFunctionState restores strict mode on scope exit.
+        self.lexer.set_strict_mode(old_strict);
+        result
+    }
+
+    /// The body of `parseDeclareClassFlow` after the strict-mode save, factored
+    /// out so the strict-mode restore survives the `?` early-returns.
+    fn parse_declare_class_flow_inner(
+        &mut self,
+        start: SMLoc,
+    ) -> Option<&'gc Node<'gc>> {
+        // C++ 2408-2420.
+        if !self.need(TokenKind::identifier, " in class declaration") {
+            return None;
+        }
+        let id_range = self.cur_range();
+        let id_node = Node::Identifier(Identifier::new(
+            NodeMetadata::new(self.dummy_range()),
+            self.lexer.token().get_identifier(),
+            None,
+            false,
+        ));
+        let id = self.set_location(id_range.start, id_range.end, id_node);
+        self.advance(GrammarContext::Type);
+
+        // C++ 2422-2428.
+        let mut type_params: Option<&'gc Node<'gc>> = None;
+        if self.check(TokenKind::less) {
+            type_params = Some(self.parse_type_params_flow()?);
+        }
+
+        // C++ 2430-2440: `extends`.
+        let mut extends: Vec<&'gc Node<'gc>> = Vec::new();
+        if self.check_and_eat(TokenKind::rw_extends, GrammarContext::AllowRegExp)
+        {
+            if !self.need(TokenKind::identifier, " in class 'extends'") {
+                return None;
+            }
+            if !self.parse_interface_extends(&mut extends) {
+                return None;
+            }
+        }
+
+        // C++ 2442-2454: `mixins`.
+        let mut mixins: Vec<&'gc Node<'gc>> = Vec::new();
+        if self.check_name(b"mixins") {
+            self.advance(GrammarContext::AllowRegExp);
+            loop {
+                if !self.need(TokenKind::identifier, " in class 'mixins'") {
+                    return None;
+                }
+                if !self.parse_interface_extends(&mut mixins) {
+                    return None;
+                }
+                if !self.check_and_eat(TokenKind::comma, GrammarContext::Type) {
+                    break;
+                }
+            }
+        }
+
+        // C++ 2456-2470: `implements`.
+        let mut implements: Vec<&'gc Node<'gc>> = Vec::new();
+        if self.check_and_eat(TokenKind::rw_implements, GrammarContext::AllowRegExp)
+        {
+            loop {
+                if !self.need(TokenKind::identifier, " in class 'implements'") {
+                    return None;
+                }
+                let impl_node = self.parse_class_implements_flow()?;
+                implements.push(impl_node);
+                if !self.check_and_eat(TokenKind::comma, GrammarContext::Type) {
+                    break;
+                }
+            }
+        }
+
+        // C++ 2472-2484.
+        if !self.need(TokenKind::l_brace, " in declared class") {
+            return None;
+        }
+        let body = self.parse_object_type_annotation_flow(
+            AllowProtoProperty::Yes,
+            AllowStaticProperty::Yes,
+            AllowSpreadProperty::No,
+        )?;
+
+        // C++ 2486-2495.
+        let end = body.range().end;
+        let node = Node::DeclareClass(DeclareClass::new(
+            NodeMetadata::new(self.dummy_range()),
+            id,
+            type_params,
+            NodeList::from_iter(self.gc, extends),
+            NodeList::from_iter(self.gc, implements),
+            NodeList::from_iter(self.gc, mixins),
+            body,
+        ));
+        Some(self.set_location(start, end, node))
+    }
+
+    // -----------------------------------------------------------------------
+    // parseDeclareExportFlow — 2577 in JSParserImpl-flow.cpp
+    // -----------------------------------------------------------------------
+
+    /// Parse `declare export ...`, with the cursor at `export` and `start` at
+    /// `declare`. Port of `JSParserImpl::parseDeclareExportFlow`
+    /// (flow.cpp:2577-2881).
+    fn parse_declare_export_flow(
+        &mut self,
+        start: SMLoc,
+    ) -> Option<&'gc Node<'gc>> {
+        // C++ 2578-2580.
+        debug_assert!(self.check(TokenKind::rw_export));
+        self.advance(GrammarContext::Type);
+        let mut declare_start = self.cur_start();
+
+        // C++ 2582-2669: `declare export default ...`.
+        if self.check_and_eat(TokenKind::rw_default, GrammarContext::Type) {
+            declare_start = self.cur_start();
+            // C++ 2584-2592: default function.
+            if self.check(TokenKind::rw_function) {
+                let func = self.parse_declare_function_flow(declare_start)?;
+                return self.wrap_declare_export(start, Some(func), true);
+            }
+            // C++ 2594-2603: default hook.
+            if self.parse_flow_component_syntax()
+                && self.check_hook_declaration_flow()
+            {
+                let func = self.parse_declare_hook_flow(declare_start)?;
+                return self.wrap_declare_export(start, Some(func), true);
+            }
+            // C++ 2604-2619: default async hook (error then hook).
+            if self.parse_flow_component_syntax()
+                && self.check_unescaped_name(b"async")
+                && self.check_async_hook_flow()
+            {
+                self.error_cur(
+                    "`async` is not supported for declared hooks. \
+                     Use `declare hook` instead.",
+                );
+                self.advance(GrammarContext::AllowRegExp); // consume 'async'
+                let hook = self.parse_declare_hook_flow(declare_start)?;
+                return self.wrap_declare_export(start, Some(hook), true);
+            }
+            // C++ 2620-2636: default async component (error then component).
+            if self.parse_flow_component_syntax()
+                && self.check_unescaped_name(b"async")
+                && self.check_async_component_flow()
+            {
+                self.error_cur(
+                    "`async` is not supported for declared components. \
+                     Use `declare component` instead.",
+                );
+                self.advance(GrammarContext::AllowRegExp); // consume 'async'
+                let comp = self
+                    .parse_component_declaration_flow(start, true, true)?;
+                return self.wrap_declare_export(start, Some(comp), true);
+            }
+            // C++ 2637-2648: default component.
+            if self.parse_flow_component_syntax()
+                && self.check_component_declaration_flow()
+            {
+                let comp = self
+                    .parse_component_declaration_flow(start, true, false)?;
+                return self.wrap_declare_export(start, Some(comp), true);
+            }
+            // C++ 2649-2658: default class.
+            if self.check(TokenKind::rw_class) {
+                let cls = self.parse_declare_class_flow(declare_start)?;
+                return self.wrap_declare_export(start, Some(cls), true);
+            }
+            // C++ 2659-2668: default type annotation. NOTE the end loc here is
+            // getPrevTokenEndLoc() (the semicolon), not the type's own end.
+            let ty = self.parse_type_annotation_flow(
+                None,
+                AllowAnonFunctionType::Yes,
+            )?;
+            if !self.eat_semi(false) {
+                return None;
+            }
+            let node =
+                Node::DeclareExportDeclaration(DeclareExportDeclaration::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    Some(ty),
+                    NodeList::empty(),
+                    None,
+                    true,
+                ));
+            return Some(self.set_location(
+                start,
+                self.lexer.prev_token_end(),
+                node,
+            ));
+        }
+
+        // C++ 2671-2680: function.
+        if self.check(TokenKind::rw_function) {
+            let func = self.parse_declare_function_flow(declare_start)?;
+            return self.wrap_declare_export(start, Some(func), false);
+        }
+        // C++ 2682-2691: hook.
+        if self.parse_flow_component_syntax()
+            && self.check_hook_declaration_flow()
+        {
+            let func = self.parse_declare_hook_flow(declare_start)?;
+            return self.wrap_declare_export(start, Some(func), false);
+        }
+        // C++ 2693-2708: async hook (error then hook).
+        if self.parse_flow_component_syntax()
+            && self.check_unescaped_name(b"async")
+            && self.check_async_hook_flow()
+        {
+            self.error_cur(
+                "`async` is not supported for declared hooks. \
+                 Use `declare hook` instead.",
+            );
+            self.advance(GrammarContext::AllowRegExp); // consume 'async'
+            let hook = self.parse_declare_hook_flow(declare_start)?;
+            return self.wrap_declare_export(start, Some(hook), false);
+        }
+        // C++ 2710-2719: class.
+        if self.check(TokenKind::rw_class) {
+            let cls = self.parse_declare_class_flow(declare_start)?;
+            return self.wrap_declare_export(start, Some(cls), false);
+        }
+        // C++ 2721-2737: async component (error then component).
+        if self.parse_flow_component_syntax()
+            && self.check_unescaped_name(b"async")
+            && self.check_async_component_flow()
+        {
+            self.error_cur(
+                "`async` is not supported for declared components. \
+                 Use `declare component` instead.",
+            );
+            self.advance(GrammarContext::AllowRegExp); // consume 'async'
+            let comp =
+                self.parse_component_declaration_flow(start, true, true)?;
+            return self.wrap_declare_export(start, Some(comp), false);
+        }
+        // C++ 2739-2750: component.
+        if self.parse_flow_component_syntax()
+            && self.check_component_declaration_flow()
+        {
+            let comp =
+                self.parse_component_declaration_flow(start, true, false)?;
+            return self.wrap_declare_export(start, Some(comp), false);
+        }
+        // C++ 2752-2761: enum.
+        if self.check(TokenKind::rw_enum) {
+            let enum_decl = self.parse_enum_declaration_flow(start, true)?;
+            return self.wrap_declare_export(start, Some(enum_decl), false);
+        }
+
+        // C++ 2763-2795: var/const/let. NOTE the var-kind advance here IS
+        // `Type` (asymmetric with parseDeclareFLow's default-ctx advance).
+        if self.check2(TokenKind::rw_var, TokenKind::rw_const)
+            || self.check_name(b"let")
+        {
+            let kind = self.lexer.token().get_res_word_or_identifier();
+            let var_start = self.advance(GrammarContext::Type).start;
+            let Some(id) = self.parse_binding_identifier(Param::default())
+            else {
+                self.error_cur("'identifier' expected in var declaration");
+                return None;
+            };
+            if self.identifier_type_annotation(id).is_none() {
+                self.error_at(
+                    id.range(),
+                    "expected type annotation on declared var",
+                );
+            }
+            if !self.eat_semi(false) {
+                return None;
+            }
+            let end = self.lexer.prev_token_end();
+            let var_node = Node::DeclareVariable(DeclareVariable::new(
+                NodeMetadata::new(self.dummy_range()),
+                id,
+                kind,
+            ));
+            let var = self.set_location(var_start, end, var_node);
+            return self.wrap_declare_export(start, Some(var), false);
+        }
+
+        // C++ 2797-2812: `declare export opaque type`.
+        if self.check_name(b"opaque") {
+            self.advance(GrammarContext::Type);
+            if !self.check_name(b"type") {
+                self.error_cur("'type' required in opaque type declaration");
+                return None;
+            }
+            self.advance(GrammarContext::Type);
+            let ty = self.parse_type_alias_flow(
+                declare_start,
+                TypeAliasKind::DeclareOpaque,
+            )?;
+            return self.wrap_declare_export(start, Some(ty), false);
+        }
+
+        // C++ 2814-2824: `declare export type`.
+        if self.check_name(b"type") {
+            self.advance(GrammarContext::Type);
+            let ty = self
+                .parse_type_alias_flow(declare_start, TypeAliasKind::None)?;
+            return self.wrap_declare_export(start, Some(ty), false);
+        }
+
+        // C++ 2826-2835: `declare export interface` — NOTE the no-arg call
+        // (→ InterfaceDeclaration, NOT DeclareInterface).
+        if self.check(TokenKind::rw_interface) || self.check_name(b"interface") {
+            let iface = self.parse_interface_declaration_flow(None)?;
+            return self.wrap_declare_export(start, Some(iface), false);
+        }
+
+        // C++ 2837-2854: `declare export * from 'foo'`.
+        if self.check_and_eat(TokenKind::star, GrammarContext::Type) {
+            if !self.check_name(b"from") {
+                self.error_cur(
+                    "expected 'from' clause in export declaration",
+                );
+                return None;
+            }
+            let source = self.parse_from_clause()?;
+            if !self.eat_semi(false) {
+                return None;
+            }
+            let node = Node::DeclareExportAllDeclaration(
+                DeclareExportAllDeclaration::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    source,
+                ),
+            );
+            return Some(self.set_location(
+                start,
+                self.lexer.prev_token_end(),
+                node,
+            ));
+        }
+
+        // C++ 2856-2880: `declare export { ... } [from]`.
+        if !self.need(TokenKind::l_brace, " in export specifier") {
+            return None;
+        }
+        let mut specifiers: Vec<&'gc Node<'gc>> = Vec::new();
+        let mut invalids: Vec<SMRange> = Vec::new();
+        if !self.parse_export_clause(&mut specifiers, &mut invalids) {
+            return None;
+        }
+        let source = if self.check_name(b"from") {
+            Some(self.parse_from_clause()?)
+        } else {
+            None
+        };
+        if !self.eat_semi(false) {
+            return None;
+        }
+        let node = Node::DeclareExportDeclaration(DeclareExportDeclaration::new(
+            NodeMetadata::new(self.dummy_range()),
+            None,
+            NodeList::from_iter(self.gc, specifiers),
+            source,
+            false,
+        ));
+        Some(self.set_location(start, self.lexer.prev_token_end(), node))
+    }
+
+    /// Build a `DeclareExportDeclaration(decl, [], None, default)` spanning
+    /// `start`..end-of-decl. Shared by the many `parseDeclareExportFlow` arms
+    /// that wrap a single declaration (C++ e.g. 2588-2592).
+    fn wrap_declare_export(
+        &mut self,
+        start: SMLoc,
+        decl: Option<&'gc Node<'gc>>,
+        default: bool,
+    ) -> Option<&'gc Node<'gc>> {
+        let end = decl.map_or_else(
+            || self.lexer.prev_token_end(),
+            |d| d.range().end,
+        );
+        let node = Node::DeclareExportDeclaration(DeclareExportDeclaration::new(
+            NodeMetadata::new(self.dummy_range()),
+            decl,
+            NodeList::empty(),
+            None,
+            default,
+        ));
+        Some(self.set_location(start, end, node))
+    }
+
+    // -----------------------------------------------------------------------
     // parseExportTypeDeclarationFlow — 2498 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse the tail of `export type ...` with the cursor at `type` and
     /// `start_loc` at `export`. Port of
     /// `JSParserImpl::parseExportTypeDeclarationFlow` (flow.cpp:2498-2575).
-    ///
-    /// The `export type A = ...` alias form (flow.cpp:2557-2566) is
-    /// implemented; the `export type * FromClause;` re-export
-    /// (flow.cpp:2503-2518) and the `export type { ... } [FromClause];`
-    /// specifier-clause form (flow.cpp:2520-2556) are P6 — they report an
-    /// honest deferral error instead of silently mis-parsing.
     pub(in crate::js) fn parse_export_type_declaration_flow(
         &mut self,
         start_loc: SMLoc,
@@ -1468,28 +2378,68 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // C++ 2500-2501.
         debug_assert!(self.check_name(b"type"));
         let type_ident_loc = self.advance(GrammarContext::AllowRegExp).start;
+        let type_ident = self.gc.ctx().atom_table.atom_bytes(b"type");
 
-        if self.check(TokenKind::star) {
-            // P6: export type * FromClause; (flow.cpp:2503-2518).
-            self.error_cur(
-                "'export type *' re-exports are unsupported (parser phase P6)",
-            );
-            return None;
+        if self.check_and_eat(TokenKind::star, GrammarContext::AllowRegExp) {
+            // export type * FromClause; (flow.cpp:2503-2518).
+            let source = self.parse_from_clause()?;
+            if !self.eat_semi(false) {
+                return None;
+            }
+            let node = Node::ExportAllDeclaration(ExportAllDeclaration::new(
+                NodeMetadata::new(self.dummy_range()),
+                source,
+                type_ident,
+            ));
+            return Some(self.set_location(
+                start_loc,
+                self.lexer.prev_token_end(),
+                node,
+            ));
         }
 
         if self.check(TokenKind::l_brace) {
-            // P6: export type ExportClause [FromClause]; (flow.cpp:2520-2556).
-            self.error_cur(
-                "'export type {' export clauses are unsupported (parser phase P6)",
-            );
-            return None;
+            // export type ExportClause [FromClause]; (flow.cpp:2520-2556).
+            let mut specifiers: Vec<&'gc Node<'gc>> = Vec::new();
+            let mut invalids: Vec<SMRange> = Vec::new();
+            if !self.parse_export_clause(&mut specifiers, &mut invalids) {
+                return None;
+            }
+
+            // `from` is a contextual ident (escape-insensitive). C++ 2530.
+            let source = if self.check_name(b"from") {
+                Some(self.parse_from_clause()?)
+            } else {
+                // C++ 2537-2545: no FromClause → the invalids are real errors.
+                for range in &invalids {
+                    self.error_at(*range, "Invalid exported name");
+                }
+                None
+            };
+
+            if !self.eat_semi(false) {
+                return None;
+            }
+
+            let node =
+                Node::ExportNamedDeclaration(ExportNamedDeclaration::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    None,
+                    NodeList::from_iter(self.gc, specifiers),
+                    source,
+                    type_ident,
+                ));
+            return Some(self.set_location(
+                start_loc,
+                self.lexer.prev_token_end(),
+                node,
+            ));
         }
 
         // C++ 2557-2566.
         if self.check(TokenKind::identifier) {
             let alias = self
                 .parse_type_alias_flow(type_ident_loc, TypeAliasKind::None)?;
-            let type_ident = self.gc.ctx().atom_table.atom_bytes(b"type");
             let node =
                 Node::ExportNamedDeclaration(ExportNamedDeclaration::new(
                     NodeMetadata::new(self.dummy_range()),

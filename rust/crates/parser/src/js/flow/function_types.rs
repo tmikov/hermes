@@ -562,7 +562,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// `Optional<FunctionTypeParamNode*>` — outer `None` here means an error
     /// was reported, inner `None` means no rest parameter). Port of
     /// `parseFunctionTypeAnnotationParamsFlow` (flow.cpp:4881-4944).
-    fn parse_function_type_annotation_params_flow(
+    pub(super) fn parse_function_type_annotation_params_flow(
         &mut self,
         params: &mut Vec<&'gc Node<'gc>>,
         this_constraint: &mut Option<&'gc Node<'gc>>,
