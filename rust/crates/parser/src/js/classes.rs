@@ -13,9 +13,10 @@
 //!
 //! The non-ambiguous Flow productions (class/method type parameters,
 //! super-class type arguments, `implements` clauses, field type annotations,
-//! member variance, method return types) are ported (P5.4). The Flow `declare`
-//! modifier is P6; the TS productions (modifiers, `?` optional fields, TS type
-//! params/args) are P7 — see the comments at each site.
+//! member variance, method return types) are ported (P5.4), as is the Flow
+//! `declare` class-property modifier (P6, C++ 5095-5108). The TS productions
+//! (modifiers, `?` optional fields, TS type params/args) are P7 — see the
+//! comments at each site.
 
 use ast::node::{
     CallExpression, ClassBody, ClassDeclaration, ClassExpression, ClassPrivateProperty,
@@ -576,9 +577,28 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return false;
         }
 
-        // P6/P7: Flow `declare` (C++ 5095-5108) and TS modifiers
-        // (accessibility/static/readonly, C++ 5110-5138) omitted. declare =
-        // readonly = false, accessibility = None.
+        // Flow `declare` class-property modifier (C++ 5095-5108). Only a
+        // modifier when followed by something that can start a class member;
+        // otherwise `declare` is itself the property name. C++
+        // `lookahead1(llvh::None)` uses the header default RequireNoNewLine=true.
+        // P7: TS modifiers (accessibility/readonly, C++ 5110-5138) still omitted.
+        let mut declare = false;
+        if self.parse_flow() && self.check_name(b"declare") {
+            let opt_next = self.lexer.lookahead1::<true>(None);
+            if matches!(
+                opt_next,
+                Some(
+                    TokenKind::rw_static
+                        | TokenKind::identifier
+                        | TokenKind::plus
+                        | TokenKind::private_identifier
+                        | TokenKind::minus
+                )
+            ) {
+                declare = true;
+                self.advance(GrammarContext::AllowRegExp);
+            }
+        }
 
         match self.cur_kind() {
             TokenKind::semi => {
@@ -596,7 +616,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 let elem = match self.parse_class_element(
                     is_static,
                     start_range,
-                    /* declare */ false,
+                    declare,
                     /* readonly */ false,
                     /* accessibility */ None,
                     decorators,

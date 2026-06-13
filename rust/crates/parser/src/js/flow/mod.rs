@@ -16,10 +16,11 @@
 //! function types, object types, type-parameter declarations, variance,
 //! predicates, and return-type annotations; P5.3 `opaque type` aliases,
 //! `interface` declarations and type annotations, and class `implements`
-//! entries. The remaining productions emit an honest "unsupported (parser
-//! phase P6)" error at the marked site; the later sub-tasks (P6 declare /
-//! enum / component / hook / record / match) replace those markers with the
-//! real grammar.
+//! entries. P6 added the rest of Flow: the ambiguous-expression grammar
+//! (typed arrows, `as`/`as const`, type-casts, call/new/optional-chain
+//! type-args), plus `enum`, `component`/`hook`, `record`, `match`, and the
+//! `declare` statement family with `import type`/`export type` clauses. Only
+//! TS (P7) and JSX remain.
 //!
 //! The `impl JSParserImpl` methods are split across the child modules below
 //! by concern, mirroring the `lexer/` directory split: `declarations` (the
