@@ -238,8 +238,6 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// True if Flow `match` expressions/statements are enabled. Shorthand for
     /// the C++ `context_.getParseFlowMatch()`.
-    // P6.5: first consumer is the match grammar.
-    #[allow(dead_code)]
     pub(super) fn parse_flow_match(&self) -> bool {
         self.gc.ctx().parse_flow_match()
     }
@@ -7087,6 +7085,380 @@ mod tests {
         assert!(
             parser.error_count_pub() > 0,
             "record disabled: `record R {{}}` must report a syntax error"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // P6.5: Flow `match` expressions and statements.
+    // -----------------------------------------------------------------------
+
+    /// Build a `Context` with Flow + `parse_flow_match` enabled.
+    fn match_ctx() -> ast::context::Context<'static> {
+        use ast::context::Context;
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        ctx.set_parse_flow_match(true);
+        ctx
+    }
+
+    /// Parse `src` with the match flag on; expect zero errors; return the
+    /// statement at `idx`.
+    fn match_parse_stmt_at<'gc>(
+        gc: &'gc ast::context::GCLock<'_, '_>,
+        sm: &mut support::manager::SourceErrorManager,
+        src: &[u8],
+        idx: usize,
+    ) -> &'gc ast::node::Node<'gc> {
+        let buf_id = sm.add_buffer_bytes("input", src);
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(gc, lexer);
+        let program = parser.parse().expect("parse succeeded");
+        assert_eq!(parser.error_count_pub(), 0, "zero errors for {src:?}");
+        if let ast::node::Node::Program(p) = program {
+            return p.body.iter().nth(idx).expect("has enough statements");
+        }
+        panic!("expected Program");
+    }
+
+    /// Extract the single `MatchExpression` from `const r = <match-expr>;`.
+    fn match_expr_from<'gc>(
+        gc: &'gc ast::context::GCLock<'_, '_>,
+        sm: &mut support::manager::SourceErrorManager,
+        src: &[u8],
+    ) -> &'gc ast::node::Node<'gc> {
+        use ast::node::Node;
+        let stmt = match_parse_stmt_at(gc, sm, src, 0);
+        let Node::VariableDeclaration(vd) = stmt else {
+            panic!("expected VariableDeclaration, got {:?}", stmt.kind())
+        };
+        let decl = vd.declarations.iter().next().expect("one declarator");
+        let Node::VariableDeclarator(d) = decl else {
+            panic!("expected VariableDeclarator")
+        };
+        d.init.expect("has init")
+    }
+
+    /// `match (x) { 1 => 'a', _ => 'c' }` is a `MatchExpression` whose cases
+    /// carry `MatchLiteralPattern`/`MatchWildcardPattern` and expression bodies.
+    #[test]
+    fn flow_match_expression_basic() {
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = match_ctx();
+        let gc = ctx.lock();
+        let expr =
+            match_expr_from(&gc, &mut sm, b"const r = match (x) { 1 => 'a', _ => 'c' };");
+        let Node::MatchExpression(m) = expr else {
+            panic!("expected MatchExpression, got {:?}", expr.kind())
+        };
+        assert!(matches!(m.argument, Node::Identifier(_)), "arg is `x`");
+        let mut it = m.cases.iter();
+        let Node::MatchExpressionCase(c0) = it.next().unwrap() else {
+            panic!("expected MatchExpressionCase")
+        };
+        assert!(
+            matches!(c0.pattern, Node::MatchLiteralPattern(_)),
+            "first case is a literal pattern"
+        );
+        assert!(c0.guard.is_none(), "no guard");
+        let Node::MatchExpressionCase(c1) = it.next().unwrap() else {
+            panic!("expected MatchExpressionCase")
+        };
+        assert!(
+            matches!(c1.pattern, Node::MatchWildcardPattern(_)),
+            "second case is the wildcard `_`"
+        );
+        assert!(it.next().is_none(), "exactly two cases");
+    }
+
+    /// A `match` statement: block bodies, optional commas.
+    #[test]
+    fn flow_match_statement_basic() {
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = match_ctx();
+        let gc = ctx.lock();
+        let stmt =
+            match_parse_stmt_at(&gc, &mut sm, b"match (x) { 1 => { f(); } _ => { g(); } }", 0);
+        let Node::MatchStatement(m) = stmt else {
+            panic!("expected MatchStatement, got {:?}", stmt.kind())
+        };
+        let mut it = m.cases.iter();
+        let Node::MatchStatementCase(c0) = it.next().unwrap() else {
+            panic!("expected MatchStatementCase")
+        };
+        assert!(
+            matches!(c0.body, Node::BlockStatement(_)),
+            "statement case body is a block"
+        );
+        assert!(it.next().is_some(), "second case present");
+    }
+
+    /// `match(1, 2)` is a plain CallExpression even with the flag on (no `{`),
+    /// and `match (foo)(bar)` is a chained CallExpression — the call path.
+    #[test]
+    fn flow_match_call_not_match() {
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = match_ctx();
+        let gc = ctx.lock();
+
+        let stmt0 = match_parse_stmt_at(&gc, &mut sm, b"match(1, 2);\nmatch (foo)(bar);", 0);
+        let Node::ExpressionStatement(es0) = stmt0 else {
+            panic!("expected ExpressionStatement")
+        };
+        let Node::CallExpression(call) = es0.expression else {
+            panic!("expected CallExpression, got {:?}", es0.expression.kind())
+        };
+        // The callee is the `match` identifier.
+        assert!(matches!(call.callee, Node::Identifier(_)), "callee is `match`");
+
+        let stmt1 = match_parse_stmt_at(&gc, &mut sm, b"match(1, 2);\nmatch (foo)(bar);", 1);
+        let Node::ExpressionStatement(es1) = stmt1 else {
+            panic!("expected ExpressionStatement")
+        };
+        // `match (foo)(bar)` → CallExpression whose callee is itself a
+        // CallExpression `match(foo)`.
+        let Node::CallExpression(outer) = es1.expression else {
+            panic!("expected CallExpression")
+        };
+        assert!(
+            matches!(outer.callee, Node::CallExpression(_)),
+            "outer callee is `match(foo)`"
+        );
+    }
+
+    /// Both the statement and the expression forms can be distinguished by
+    /// context: `const r = match (x) {…}` is an expression; bare
+    /// `match (x) {…}` is a statement.
+    #[test]
+    fn flow_match_expr_vs_stmt() {
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = match_ctx();
+        let gc = ctx.lock();
+        let e = match_expr_from(&gc, &mut sm, b"const r = match (x) { _ => 1 };");
+        assert!(matches!(e, Node::MatchExpression(_)), "expr form");
+        let s = match_parse_stmt_at(&gc, &mut sm, b"match (x) { _ => { y; } }", 0);
+        assert!(matches!(s, Node::MatchStatement(_)), "stmt form");
+    }
+
+    /// Object + array patterns, including the `...const rest` rest binding.
+    #[test]
+    fn flow_match_object_array_patterns() {
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = match_ctx();
+        let gc = ctx.lock();
+        let expr = match_expr_from(
+            &gc,
+            &mut sm,
+            b"const r = match (x) { {a: 1, b: _} => 1, [1, 2, ...const rest] => 2, _ => 3 };",
+        );
+        let Node::MatchExpression(m) = expr else {
+            panic!("expected MatchExpression")
+        };
+        let mut it = m.cases.iter();
+        let Node::MatchExpressionCase(c0) = it.next().unwrap() else {
+            panic!("case 0")
+        };
+        let Node::MatchObjectPattern(obj) = c0.pattern else {
+            panic!("expected MatchObjectPattern, got {:?}", c0.pattern.kind())
+        };
+        assert_eq!(obj.properties.iter().count(), 2, "two object props");
+        assert!(obj.rest.is_none(), "no object rest");
+        let Node::MatchExpressionCase(c1) = it.next().unwrap() else {
+            panic!("case 1")
+        };
+        let Node::MatchArrayPattern(arr) = c1.pattern else {
+            panic!("expected MatchArrayPattern, got {:?}", c1.pattern.kind())
+        };
+        assert_eq!(arr.elements.iter().count(), 2, "two array elements");
+        let rest = arr.rest.expect("array rest present");
+        let Node::MatchRestPattern(rp) = rest else {
+            panic!("expected MatchRestPattern")
+        };
+        assert!(rp.argument.is_some(), "rest binds `const rest`");
+    }
+
+    /// Or-patterns, `const`/`let` bindings, and an `if` guard.
+    #[test]
+    fn flow_match_or_and_guard() {
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = match_ctx();
+        let gc = ctx.lock();
+        let expr = match_expr_from(
+            &gc,
+            &mut sm,
+            b"const r = match (x) { 1 | 2 | 3 => 'low', const y if (y > 0) => 'pos', _ => 'z' };",
+        );
+        let Node::MatchExpression(m) = expr else {
+            panic!("expected MatchExpression")
+        };
+        let mut it = m.cases.iter();
+        let Node::MatchExpressionCase(c0) = it.next().unwrap() else {
+            panic!("case 0")
+        };
+        let Node::MatchOrPattern(or) = c0.pattern else {
+            panic!("expected MatchOrPattern, got {:?}", c0.pattern.kind())
+        };
+        assert_eq!(or.patterns.iter().count(), 3, "three or-alternatives");
+        let Node::MatchExpressionCase(c1) = it.next().unwrap() else {
+            panic!("case 1")
+        };
+        assert!(
+            matches!(c1.pattern, Node::MatchBindingPattern(_)),
+            "second case is a `const y` binding"
+        );
+        assert!(c1.guard.is_some(), "second case has an `if` guard");
+    }
+
+    /// Member pattern (`Foo.Bar`), unary pattern (`-2`), and an instance
+    /// pattern (`Status{value: const v}`).
+    #[test]
+    fn flow_match_member_unary_instance() {
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = match_ctx();
+        let gc = ctx.lock();
+        let expr = match_expr_from(
+            &gc,
+            &mut sm,
+            b"const r = match (x) { Foo.Bar => 1, -2 => 2, Status{value: const v} => v, _ => 0 };",
+        );
+        let Node::MatchExpression(m) = expr else {
+            panic!("expected MatchExpression")
+        };
+        let mut it = m.cases.iter();
+        let Node::MatchExpressionCase(c0) = it.next().unwrap() else {
+            panic!("case 0")
+        };
+        assert!(
+            matches!(c0.pattern, Node::MatchMemberPattern(_)),
+            "first case is a member pattern, got {:?}",
+            c0.pattern.kind()
+        );
+        let Node::MatchExpressionCase(c1) = it.next().unwrap() else {
+            panic!("case 1")
+        };
+        let Node::MatchUnaryPattern(u) = c1.pattern else {
+            panic!("expected MatchUnaryPattern, got {:?}", c1.pattern.kind())
+        };
+        assert_eq!(
+            gc.ctx().atom_table.bytes(u.operator.get()),
+            b"-",
+            "unary operator is `-`"
+        );
+        let Node::MatchExpressionCase(c2) = it.next().unwrap() else {
+            panic!("case 2")
+        };
+        let Node::MatchInstancePattern(inst) = c2.pattern else {
+            panic!("expected MatchInstancePattern, got {:?}", c2.pattern.kind())
+        };
+        assert!(
+            matches!(inst.properties, Node::MatchInstanceObjectPattern(_)),
+            "instance properties are a MatchInstanceObjectPattern"
+        );
+    }
+
+    /// The `as` binding pattern wrapping an or-pattern group: `(1 | 2) as const k`.
+    #[test]
+    fn flow_match_as_pattern() {
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = match_ctx();
+        let gc = ctx.lock();
+        let expr =
+            match_expr_from(&gc, &mut sm, b"const r = match (x) { (1 | 2) as const k => k, _ => 0 };");
+        let Node::MatchExpression(m) = expr else {
+            panic!("expected MatchExpression")
+        };
+        let c0 = m.cases.iter().next().unwrap();
+        let Node::MatchExpressionCase(c0) = c0 else {
+            panic!("case 0")
+        };
+        let Node::MatchAsPattern(asp) = c0.pattern else {
+            panic!("expected MatchAsPattern, got {:?}", c0.pattern.kind())
+        };
+        // The group `(1 | 2)` emits no wrapper, so the inner pattern is the
+        // or-pattern directly.
+        assert!(
+            matches!(asp.pattern, Node::MatchOrPattern(_)),
+            "as-pattern wraps a group-elided or-pattern"
+        );
+        assert!(
+            matches!(asp.target, Node::MatchBindingPattern(_)),
+            "as-target is a `const k` binding"
+        );
+    }
+
+    /// A bare `...rest` (no binding keyword) inside an array pattern is a parse
+    /// error — faithful to hermesc.
+    #[test]
+    fn flow_match_rest_needs_binding() {
+        let mut sm = support::manager::SourceErrorManager::new();
+        let mut ctx = match_ctx();
+        let gc = ctx.lock();
+        let buf_id =
+            sm.add_buffer_bytes("input", b"const r = match (x) { [...rest] => 1, _ => 0 };");
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        let _ = parser.parse();
+        assert!(
+            parser.error_count_pub() > 0,
+            "`...rest` without a binding keyword must error"
+        );
+    }
+
+    /// With the match flag OFF, `match` is a plain identifier: `match(x)` is a
+    /// call, and `const r = match;` is an identifier reference.
+    #[test]
+    fn flow_match_disabled_is_identifier() {
+        use ast::context::Context;
+        use ast::node::Node;
+        let mut sm = support::manager::SourceErrorManager::new();
+        // Flow on, match OFF.
+        let mut ctx = Context::new();
+        ctx.set_parse_flow(true);
+        let gc = ctx.lock();
+        let buf_id = sm.add_buffer_bytes("input", b"const r = match;\nmatch(x);");
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        let program = parser.parse().expect("parses");
+        assert_eq!(parser.error_count_pub(), 0, "no errors when match is off");
+        let Node::Program(p) = program else {
+            panic!("expected Program")
+        };
+        // First statement: `const r = match;` — init is a bare Identifier.
+        let mut body = p.body.iter();
+        let Node::VariableDeclaration(vd) = body.next().unwrap() else {
+            panic!("expected VariableDeclaration")
+        };
+        let Node::VariableDeclarator(d) = vd.declarations.iter().next().unwrap() else {
+            panic!("expected VariableDeclarator")
+        };
+        assert!(
+            matches!(d.init, Some(Node::Identifier(_))),
+            "`match` is a plain identifier reference when the flag is off"
         );
     }
 }

@@ -2920,7 +2920,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     ///
     /// A template literal immediately following the expression forms a tagged
     /// template (P1.9).
-    fn parse_optional_expression_except_new_tail(
+    pub(in crate::js) fn parse_optional_expression_except_new_tail(
         &mut self,
         is_constructor_call: IsConstructorCall,
         start_loc: support::location::SMLoc,
@@ -4590,7 +4590,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 // `arguments` tracking inside arrow functions — C++ line 2508.
                 // Deferred: isArrowFunction_ flag is P3.
 
-                // Flow match expression — deferred (context_.getParseFlowMatch()).
+                // Flow match expression. C++ JSParserImpl.cpp:2513-2518.
+                if self.parse_flow()
+                    && self.parse_flow_match()
+                    && self.check_maybe_flow_match()
+                {
+                    return self.parse_match_call_or_match_expression_flow();
+                }
 
                 let name = self.lexer.token().get_identifier();
                 let tok_start = self.lexer.token().start_loc();

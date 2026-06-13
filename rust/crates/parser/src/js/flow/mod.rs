@@ -33,6 +33,7 @@
 
 mod declarations;
 mod function_types;
+mod match_;
 mod object_types;
 mod params;
 mod types;

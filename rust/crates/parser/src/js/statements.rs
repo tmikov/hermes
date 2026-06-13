@@ -704,8 +704,24 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 self.parse_try_statement(param.get(PARAM_RETURN))
             }
             TokenKind::rw_debugger => self.parse_debugger_statement(),
-            // default: parseExpressionOrLabelledStatement. C++ 725.
-            _ => self.parse_expression_or_labelled_statement(param.get(PARAM_RETURN)),
+            // default. C++ 714-725.
+            _ => {
+                // Flow match statement. C++ JSParserImpl.cpp:715-723.
+                if self.parse_flow()
+                    && self.parse_flow_match()
+                    && self.check_maybe_flow_match()
+                {
+                    // Tri-state: None → hard error (propagate); Some(Some(n)) →
+                    // a match statement; Some(None) → not a match, fall through
+                    // to an expression-statement.
+                    if let Some(node) =
+                        self.try_parse_match_statement_flow(param.get(PARAM_RETURN))?
+                    {
+                        return Some(node);
+                    }
+                }
+                self.parse_expression_or_labelled_statement(param.get(PARAM_RETURN))
+            }
         }
     }
 
