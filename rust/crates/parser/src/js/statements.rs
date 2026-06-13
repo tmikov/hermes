@@ -607,9 +607,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // Parse the initializer. C++ 1263-1278.
         let debug_loc = self.advance(GrammarContext::AllowRegExp).start;
 
-        // C++ passes AllowTypedArrowFunction::Yes / CoverTypedParameters::No;
-        // P1's parse_assignment_expression takes only `param`.
-        let expr = self.parse_assignment_expression(param, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
+        // C++ 1266-1270: parseAssignmentExpression(param, /* eagerly */ false,
+        // AllowTypedArrowFunction::Yes, CoverTypedParameters::No).
+        let expr = self.parse_assignment_expression(param, AllowTypedArrowFunction::Yes, CoverTypedParameters::No, None)?;
 
         let end_loc = self.lexer.prev_token_end();
         let node = Node::VariableDeclarator(VariableDeclarator::new(
@@ -758,7 +758,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         let start_loc = self.cur_start();
-        let opt_expr = self.parse_expression(PARAM_IN, CoverTypedParameters::Yes)?;
+        // C++ 1630: parseExpression(ParamIn, CoverTypedParameters::No) — a bare
+        // `ident:` here is a labelled statement, NOT a cover type annotation.
+        let opt_expr = self.parse_expression(PARAM_IN, CoverTypedParameters::No)?;
 
         // Check whether this is a label. The expression must have started with an
         // identifier, be just an identifier and be followed by ':'.
@@ -1719,10 +1721,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             let case_loc = self.lexer.token().start_loc();
             if self.check_and_eat(TokenKind::rw_case, GrammarContext::AllowRegExp)
             {
-                // C++ 2268-2272. parseExpression(ParamIn, CoverTypedParameters::
-                // No); the Cover argument is a Flow/TS knob absent from P1's
-                // parse_expression.
-                test_expr = Some(self.parse_expression(PARAM_IN, CoverTypedParameters::Yes)?);
+                // C++ 2269: parseExpression(ParamIn, CoverTypedParameters::No) —
+                // the `:` after the case test must NOT be eaten as a cover type
+                // annotation.
+                test_expr = Some(self.parse_expression(PARAM_IN, CoverTypedParameters::No)?);
             } else if self
                 .check_and_eat(TokenKind::rw_default, GrammarContext::AllowRegExp)
             {
