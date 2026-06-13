@@ -4,40 +4,37 @@ Hand this to a new session to restore context. It **references** the authoritati
 (read them; don't trust this summary over them) and records the conventions, file map,
 validation commands, and workflow.
 
-> **Date of handoff:** 2026-06-09. **Branch:** `rust` (base is `static_h`, NOT `main`).
+> **Date of handoff:** 2026-06-13. **Branch:** `rust` (base is `static_h`, NOT `main`).
 > **Status:** the **JS lexer**, **JSONParser**, and the **AST are COMPLETE**, and the **JS Parser is IN PROGRESS** —
 > **phases P0 (foundations + `parser_differential` gate), P1 (value expressions), P2 (statements & declarations), P3 (functions, classes,
-> arrows, async/generators, methods, `super`, `yield`, decorators), P4 (modules), and P5 (the FLOW TYPE GRAMMAR + declarative integration)
-> are DONE**, byte-for-byte vs `hermesc -dump-ast` over a **76-file plain + 24-file Flow corpus** (the Flow corpus passes `-parse-flow` to
-> both binaries; Flow is gated by the new `Context::parse_flow` flag and does NOT leak into plain JS), each sub-task two-stage reviewed +
-> a whole-phase capstone, zero warnings, zero new clippy lints. **The parser handles the entire standard-ECMAScript grammar + the whole
-> Flow type-annotation grammar** (annotation hierarchy, function/object/tuple types, type-params/args, generics, predicates,
-> `type`/`opaque type`/`interface` declarations, and the non-ambiguous integration: function/class/method type-params + return types +
-> predicates, leading `this` param, binding/pattern annotations, class heritage/`implements`/variance/field types, object-literal method
-> types).
-> **Read `doc/superpowers/RustPortRoadmap.md` (the "🚧 JS Parser" section) for the authoritative P0–P5 detail, the deferral set
-> (→ **P6**: ambiguous-expression Flow — typed arrows, `as`/`as const`, `(x:T)` casts + cover-typed-identifier, call/`?.`/`new` type-args
-> (the SavePoint+suppression sites in `expressions.rs`) — plus `declare` statements, `enum`, `component`/`hook`, `match`, `record`,
-> `import type`, `export type` clause forms, hook types, component-syntax paths; → **P7**: TS; all honest omissions with `// P6`/`// P7`
-> markers + tests), and the review-caught bugs (P5.1: `parse_type_args_flow`'s trailing grammar context must be `Type` — the lexer only
-> splits `>>` in `Type` context, so nested `Foo<Bar<Baz<U>>>` failed while the shallow corpus passed; the P5 capstone: a SILENT
-> `exportKind:"value"`-vs-`"type"` divergence on `export type`/`export opaque type`/`export interface` through two P4-era stubs — fixed by
-> porting the C++ export-kind detection (JSParserImpl.cpp:7361-7368) + the alias branch of `parseExportTypeDeclarationFlow`).
-> **Port-wide lesson: C++ DEFAULT ARGUMENTS are spec** — `checkAndEat` defaults `AllowRegExp`, `parseTypeArgsFlow` defaults `Type`
-> (JSParserImpl.h:1506); always read the header defaults, never assume. Specs/plans: `specs/2026-06-06-js-parser-design.md`,
-> `plans/2026-06-06-js-parser-{p0-foundations,p1-expressions,p2-statements}.md`, `plans/2026-06-07-js-parser-p3-functions-classes.md`,
-> `plans/2026-06-08-js-parser-p4-modules.md`, `plans/2026-06-09-js-parser-p5-flow-types.md`.
-> **NEXT: P6 — the rest of Flow**: the ambiguous expression grammar (typed arrows C++ 6277-6477/4510-4572, `as` 4320-4350, casts
-> 2641-2651/4628-4643, call/`?.`/`new` type-args 3744-3777/3809-3828/3957-3975/4036-4062), the `declare` routing + `parseDeclareFLow`
-> family (flow.cpp:95-193, 2159-2882), `enum` (5148-5438), `component`/`hook` (195-859), `match` (860-1616), `record` (1618-1979),
-> `import type`/`export type` clauses (modules.rs), hook types, component-syntax before-colon/renders paths — **the P5 capstone report
-> re-derived the full P6 work-list with file:line pointers.** Then TS (P7), JSX, and the Pre/Lazy passes. Write each phase plan
-> just-in-time (lexer/P1–P5-style) and execute subagent-driven. juno has no parser to crib from (`hparser` is FFI-to-C++); port the C++
-> directly.
+> arrows, async/generators, methods, `super`, `yield`, decorators), P4 (modules), P5 (the FLOW TYPE GRAMMAR + declarative integration),
+> and P6 (the REST OF FLOW) are DONE**, byte-for-byte vs `hermesc -dump-ast` (+ the matching hidden flag) over a **76-file plain + 42 Flow
+> + 8 component + 5 records + 7 match corpus**, each sub-task two-stage reviewed + a whole-phase capstone, zero warnings, zero new clippy
+> lints, `generated_idempotent` green (P6 added NO AST nodes). **The parser now handles the ENTIRE standard-ECMAScript grammar + ALL of
+> Flow** — the type grammar (P5) plus the ambiguous-expression grammar (typed arrows sync+async, `as`/`as const`, `(x:T)` casts +
+> `CoverTypedIdentifier`, call/`new`/`?.` type-args), `enum`, `component`/`hook`, `record`, `match`, the `declare` statement family +
+> `import type`/`export type` clauses, and the class-member `declare` modifier (P6), behind five `Context` flags
+> (`parse_flow` + `parse_flow_ambiguous`/`_component_syntax`/`_records`/`_match`) that do NOT leak into plain JS. **Only TS (P7), JSX, and
+> the Pre/Lazy passes remain.**
+> **Read `doc/superpowers/RustPortRoadmap.md` (the "🚧 JS Parser" section, the P5 + P6 DONE blocks) for the authoritative detail, the
+> remaining deferral set (→ **P7**: TS — `parse_ts()` is a `false` stub, all TS branches commented `// P7`; → JSX; → the Pre/Lazy passes),
+> and the review-caught bugs. **Port-wide lessons, re-confirmed by P6:** (1) **C++ DEFAULT ARGUMENTS are spec** — read the header. P6 hit
+> this twice: `parse_assignment_expression`'s default `CoverTypedParameters` (3 sites needed explicit `No` for `switch`/`case` + labelled
+> stmts), a record property initializer needing `ParamIn`, and — biggest — **`lexer.lookahead1(None)` defaults to `RequireNoNewLine = true`
+> (JSLexer.h:658)**: 8 Flow sites used `::<false>` and mis-parsed newline cases (`match\n(x)`, `record\nFoo{}`); all flipped to `::<true>`.
+> (2) **Two-stage review catches what the differential corpus misses** — all three P6 bugs above were review-caught, not corpus-caught.
+> (3) **A capstone that maps every `getParseFlow*()`-gated C++ site to its Rust production** found the silently-deferred class-member
+> `declare` modifier. Specs/plans: `specs/2026-06-06-js-parser-design.md`, `plans/2026-06-06-js-parser-{p0,p1,p2}…`, `…p3…`, `…p4…`,
+> `2026-06-09-js-parser-p5-flow-types.md`, `2026-06-13-js-parser-p6-flow-extensions.md`.
+> **NEXT: P7 — TypeScript** (`lib/Parser/JSParserImpl-ts.cpp`, 1,437 lines, behind the `parse_ts()` flag that is currently a `false` stub;
+> every TS-only branch is already commented `// P7` at its site — grep `// P7`). Then **JSX** (`-jsx.cpp`, 505 lines; the lexer's JSX
+> support is already done) and the **Pre/Lazy passes**. The four-flag gate + per-feature hidden-flag corpus dirs are the model to follow.
+> Write each phase plan just-in-time (lexer/P1–P6-style) and execute subagent-driven. juno has no parser to crib from (`hparser` is
+> FFI-to-C++); port the C++ directly.
 > The parser proper lives in `rust/crates/parser/src/js/{mod,expressions,statements,functions,classes,modules}.rs` +
-> **`js/flow/{mod,declarations,types,function_types,object_types,params}.rs`**; the gate is
-> `REQUIRE_DIFFERENTIAL=1 cargo test -p parser --test parser_differential` (build `ast-dump` first; the Flow corpus needs
-> `cmake-build-asan/bin/hermesc`).
+> **`js/flow/{mod,declarations,types,function_types,object_types,params,match_}.rs`**; the gate is
+> `REQUIRE_DIFFERENTIAL=1 cargo test -p parser --test parser_differential` (build `ast-dump` first; the Flow corpora need
+> `cmake-build-asan/bin/hermesc`; gated dirs `parser_corpus_flow{,_component,_records,_match}` each pass their hidden flag to both binaries).
 
 ---
 
