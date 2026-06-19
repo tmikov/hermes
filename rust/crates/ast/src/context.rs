@@ -200,6 +200,10 @@ pub struct Context<'ast> {
     /// `Context::getParseFlowMatch()`.
     parse_flow_match: bool,
 
+    /// Whether to parse TypeScript type syntax. Mirrors C++
+    /// `Context::getParseTS()`.
+    parse_ts: bool,
+
     /// Whether to warn about undefined variables in strict mode functions.
     pub warn_undefined: bool,
 }
@@ -233,6 +237,7 @@ impl<'ast> Context<'ast> {
             parse_flow_component_syntax: false,
             parse_flow_records: false,
             parse_flow_match: false,
+            parse_ts: false,
             warn_undefined: false,
         }
     }
@@ -399,6 +404,18 @@ impl<'ast> Context<'ast> {
     /// Enable or disable Flow `match` expressions/statements.
     pub fn set_parse_flow_match(&mut self, v: bool) {
         self.parse_flow_match = v;
+    }
+
+    /// Return true if TypeScript type parsing is enabled.
+    /// Mirrors C++ `Context::getParseTS()`.
+    pub fn parse_ts(&self) -> bool {
+        self.parse_ts
+    }
+
+    /// Enable or disable TypeScript type parsing.
+    /// Mirrors C++ `Context::setParseTS()`.
+    pub fn set_parse_ts(&mut self, v: bool) {
+        self.parse_ts = v;
     }
 
     pub fn gc(&mut self) {

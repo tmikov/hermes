@@ -51,6 +51,10 @@ struct Options {
     /// Enable Flow `match` expressions/statements (hermesc `-Xparse-flow-match`).
     /// Implies `parse_flow`.
     parse_flow_match: Opt<bool>,
+    /// Enable TypeScript type parsing (the hermesc `-parse-ts` flag). TS and
+    /// Flow are mutually-exclusive dialects, so this does NOT imply
+    /// `parse_flow`.
+    parse_ts: Opt<bool>,
     /// Input path; empty or "-" reads stdin.
     input: Opt<String>,
 }
@@ -122,6 +126,14 @@ impl Options {
                     ..Default::default()
                 },
             ),
+            parse_ts: Opt::new_flag(
+                cl,
+                OptDesc {
+                    long: Some("parse-ts"),
+                    desc: Some("Enable TypeScript type parsing."),
+                    ..Default::default()
+                },
+            ),
             input: Opt::<String>::new(
                 cl,
                 OptDesc {
@@ -178,6 +190,9 @@ fn main() {
     ctx.set_parse_flow_component_syntax(parse_component_syntax);
     ctx.set_parse_flow_records(parse_flow_records);
     ctx.set_parse_flow_match(parse_flow_match);
+    // TS and Flow are mutually-exclusive dialects; do NOT OR `parse_ts` into
+    // `parse_flow`.
+    ctx.set_parse_ts(*opt.parse_ts);
     let gc = ctx.lock();
 
     // Parse in a scope so the parser (and its &mut sm borrow) drops before we

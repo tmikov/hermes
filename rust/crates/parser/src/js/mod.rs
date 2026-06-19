@@ -24,6 +24,7 @@ mod flow;
 mod functions;
 mod modules;
 mod statements;
+mod ts;
 
 /// Whether import/export declarations are allowed in this statement list.
 /// Port of `JSParserImpl::AllowImportExport`.
@@ -243,10 +244,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     /// True if TypeScript parsing is enabled. Shorthand for the C++
-    /// `context_.getParseTS()`. Used by `parse_types()`; always false until
-    /// TypeScript parsing lands (P7).
+    /// `context_.getParseTS()`. Used by `parse_types()`.
     pub(super) fn parse_ts(&self) -> bool {
-        false // P7: TypeScript parsing.
+        self.gc.ctx().parse_ts()
     }
 
     /// True if any type-annotation dialect is enabled. Port of the C++
@@ -258,16 +258,23 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Parse a type annotation in whichever type dialect is enabled. Port of
     /// the `parseTypeAnnotation` dispatcher (JSParserImpl.h:1209-1222), which
     /// calls the Flow version under `getParseFlow()` and otherwise falls
-    /// through to TS. The TS branch (`parseTypeAnnotationTS`) is P7; only the
-    /// Flow dispatch exists, so `parse_flow()` must be set.
+    /// through to TS (`parseTypeAnnotationTS`, which ignores the
+    /// `allow_anon_function_type` argument — it manages the flag itself).
     pub(in crate::js) fn parse_type_annotation(
         &mut self,
         wrapped_start: Option<SMLoc>,
         allow_anon_function_type: flow::AllowAnonFunctionType,
     ) -> Option<&'gc Node<'gc>> {
         debug_assert!(self.parse_flow() || self.parse_ts());
-        // P7: TS dispatch (parseTypeAnnotationTS, JSParserImpl.h:1218-1219).
-        self.parse_type_annotation_flow(wrapped_start, allow_anon_function_type)
+        // C++ 1214-1216: Flow first if getParseFlow().
+        if self.parse_flow() {
+            return self.parse_type_annotation_flow(
+                wrapped_start,
+                allow_anon_function_type,
+            );
+        }
+        // C++ 1218-1219: otherwise TS.
+        self.parse_type_annotation_ts(wrapped_start)
     }
 
     /// Parse a function return type annotation (a type, or a Flow type

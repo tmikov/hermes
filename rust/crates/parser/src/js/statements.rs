@@ -323,7 +323,19 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // P7: TS block (629-641) omitted.
+        // TS declarations, gated on getParseTS(). C++ 629-641.
+        if self.parse_ts() {
+            // `type`/`interface`/`namespace` followed by an identifier. C++
+            // 631-634. The C++ `check(<ident>)` overload is escape-insensitive.
+            // P7.0 wires only the `type` case; `interface`/`namespace`/`enum`
+            // arrive in P7.4. The structure mirrors the C++ checkN so those
+            // can be added as new `check_name` disjuncts here.
+            if self.check_name(b"type") {
+                let opt_next = self.lexer.lookahead1::<true>(None);
+                return opt_next == Some(TokenKind::identifier);
+            }
+        }
+
         false
     }
 
@@ -394,7 +406,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return self.parse_flow_declaration();
         }
 
-        // P7: TS declarations (C++ 866-872) omitted.
+        // TS declarations. C++ 866-872. Binary like the C++: `None` means an
+        // error was already reported (no fall-through — when
+        // `check_declaration()` is true and no earlier arm matched, the
+        // declaration must be a TS declaration).
+        if self.parse_ts() {
+            return self.parse_ts_declaration();
+        }
 
         unreachable!("check_declaration() returned true without a declaration");
     }
