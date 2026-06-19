@@ -190,7 +190,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         if !self.check(TokenKind::identifier)
             && !self.lexer.token().is_res_word()
         {
-            self.error_expected_jsx_element_name();
+            // C++ 430: "as JSX element name".
+            self.error_expected_jsx_element_name("as JSX element name");
             return None;
         }
 
@@ -213,7 +214,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             if !self.check(TokenKind::identifier)
                 && !self.lexer.token().is_res_word()
             {
-                self.error_expected_jsx_element_name();
+                // C++ 446-450: "in JSX element name".
+                self.error_expected_jsx_element_name("in JSX element name");
                 return None;
             }
 
@@ -249,7 +251,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             if !self.check(TokenKind::identifier)
                 && !self.lexer.token().is_res_word()
             {
-                self.error_expected_jsx_element_name();
+                // C++ 472-476: "in JSX element name".
+                self.error_expected_jsx_element_name("in JSX element name");
                 return None;
             }
 
@@ -299,13 +302,17 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         Some(name)
     }
 
-    /// Emit the C++ `errorExpected(TokenKind::identifier, "as JSX element
-    /// name", ...)` diagnostic (jsx.cpp:430). Rendered via the same
-    /// "'<tok>' expected <where>" idiom as `need`/`error_expected*`.
-    fn error_expected_jsx_element_name(&mut self) {
+    /// Emit the C++ `errorExpected(TokenKind::identifier, where_, ...)`
+    /// diagnostic for a JSX element name. The C++ uses two distinct `where_`
+    /// strings: `"as JSX element name"` at the leading name (jsx.cpp:430) and
+    /// `"in JSX element name"` at the `:`/`.` continuation sites
+    /// (jsx.cpp:446-450 / 472-476). Rendered via the same "'<tok>' expected
+    /// <where>" idiom as `need`/`error_expected*`.
+    fn error_expected_jsx_element_name(&mut self, where_: &str) {
         let msg = format!(
-            "'{}' expected as JSX element name",
+            "'{}' expected {}",
             crate::token_kinds::token_kind_str(TokenKind::identifier),
+            where_,
         );
         self.error_cur(&msg);
     }
