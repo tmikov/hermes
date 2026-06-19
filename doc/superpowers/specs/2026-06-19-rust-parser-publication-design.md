@@ -25,6 +25,9 @@ button-press once the implementation lands.
 | Naming | **`hermes-*` family.** |
 | Provenance framing | Lead on **authorship**, not a disclaimer: "A Rust port of the Hermes front-end by Tzvetan Mikov, the architect of Hermes. **Not an official Meta project and not supported by Meta.**" Do **not** emphasize the word "unofficial." |
 | Blog post | Wanted. Outline **all three candidate angles**; choose the lead at drafting time once comparison data exists. |
+| Support level | **Best-effort.** Issues and PRs welcome, addressed as time permits, no SLA. Stated in `README`/`CONTRIBUTING`. |
+| Name reservation | **Reserve early (definite step).** Claim the `hermes-*` names on crates.io with placeholder releases before launch. |
+| CI / differential | **Differential in nightly/cached CI.** Rust workspace tests on every push; the byte-for-byte differential gate runs on a nightly schedule (or against a cached `hermesc` build artifact). |
 
 ### What makes this project distinctive (the positioning thesis)
 
@@ -137,13 +140,17 @@ All location-agnostic; all doable in-tree now. These survive any later repo extr
 4. **rustdoc + `examples/`** (parse file, dump ESTree JSON, walk AST).
 5. **`README` + `ARCHITECTURE.md` + `CHANGELOG` + `CONTRIBUTING`** distilled from the
    existing specs/roadmap, with the provenance banner.
-6. **CI:** GitHub Actions building/testing the workspace; ideally also building
-   `hermesc` to run the differential gate in CI.
+6. **CI:** GitHub Actions running the Rust workspace tests on every push (fast). The
+   byte-for-byte differential gate runs **nightly** (or against a cached `hermesc` build
+   artifact) so the engine build doesn't slow every push while the headline conformance
+   claim is still enforced continuously.
 7. **Comparison harness:** a `publish = false` bench crate pulling SWC/OXC/Biome/Boa as
    dev-deps over the shared corpus.
-8. **Publish dry-run:** `cargo publish --dry-run`; record the dependency-order publish
-   list (support crates first, then `hermes-ast`, then `hermes-parser`); optionally
-   reserve the `hermes-*` names early.
+8. **Publish dry-run + name reservation:** `cargo publish --dry-run`; record the
+   dependency-order publish list (support crates first, then `hermes-ast`, then
+   `hermes-parser`). **Reserve the `hermes-*` names early** by publishing placeholder
+   releases (a definite step, not optional), so the family names cannot be taken before
+   launch.
 9. **Blog post draft** (Section 6).
 
 ## 6. Blog post (Section E)
@@ -172,7 +179,9 @@ Venue is TBD (personal blog / Rust community / engineering blog) — decided at 
 - **Perf may underwhelm** vs OXC. Mitigation: feature-led framing; honest caveats; the
   fidelity story is the value proposition, not raw speed.
 - **Maintenance commitment.** Once on crates.io, expect issues and semver obligations.
-  Set expectations in `README`/`CONTRIBUTING` (e.g. support level, response cadence).
+  Mitigation: advertise a **best-effort** support level in `README`/`CONTRIBUTING`
+  (issues/PRs welcome, addressed as time permits, no SLA) so expectations are set
+  honestly from day one.
 - **Copied-code licensing.** `atom_table`/`unicode` are copied from juno; preserve
   upstream license + credit in `NOTICE`.
 
