@@ -162,3 +162,15 @@ fn parser_differential_ts() {
 fn parser_differential_jsx() {
     run_differential("tests/parser_corpus_jsx", &["-parse-jsx"], &["--parse-jsx"]);
 }
+
+#[test]
+fn parser_differential_jsx_flow() {
+    // JSX with Flow type-arguments on an opening tag (jsx.cpp:124-132). This is
+    // the only JSX production not reachable under standalone `-parse-jsx`, so it
+    // gets its own corpus run with BOTH flags enabled.
+    run_differential(
+        "tests/parser_corpus_jsx_flow",
+        &["-parse-jsx", "-parse-flow"],
+        &["--parse-jsx", "--parse-flow"],
+    );
+}
