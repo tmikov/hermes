@@ -22,6 +22,7 @@ mod classes;
 mod expressions;
 mod flow;
 mod functions;
+mod jsx;
 mod modules;
 mod statements;
 mod ts;
@@ -134,6 +135,28 @@ impl Drop for ParamFlagGuard {
     }
 }
 
+/// RAII guard for `jsx_depth`, restoring the saved old value on Drop. Mirrors
+/// the C++ `llvh::SaveAndRestore<uint32_t>(jsxDepth_, <value>)` at
+/// JSParserImpl-jsx.cpp:24, 78, 176, which set a new depth for a scope and
+/// restore the old one on EVERY exit — including the `?`/None error
+/// early-returns. A manual save-local + restore-at-end would leak the new value
+/// on a `?` early-return, so the guard owns the restore.
+///
+/// Same `Rc<Cell<u32>>` design as `RecursionGuard`: the depth lives in an
+/// `Rc<Cell<u32>>` on the parser, and the guard owns its own `Rc` clone plus
+/// the saved old value, so the caller can freely use `&mut self` while the
+/// guard is alive.
+pub(super) struct JsxDepthGuard {
+    cell: Rc<Cell<u32>>,
+    old: u32,
+}
+
+impl Drop for JsxDepthGuard {
+    fn drop(&mut self) {
+        self.cell.set(self.old);
+    }
+}
+
 /// The JS parser.
 ///
 /// Four lifetime parameters:
@@ -183,6 +206,13 @@ pub struct JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// parentheses is allowed. Port of the C++ `allowConditionalType_` field
     /// (JSParserImpl.h:259). In an `Rc<Cell<bool>>` — see `param_yield`.
     pub(super) allow_conditional_type: Rc<Cell<bool>>,
+    /// Current JSX element nesting depth. Port of the C++ `jsxDepth_` field
+    /// (JSParserImpl.h:251). Controls the lexer-mode switch in
+    /// `parse_jsx_opening_element`/`parse_jsx_closing`: only the outermost
+    /// (`<= 1`) self-closing/closing tag returns to standard JS mode; deeper
+    /// tags stay in JSX-child mode. In an `Rc<Cell<u32>>` so `JsxDepthGuard` can
+    /// own a handle without borrowing `self` (see `JsxDepthGuard`).
+    pub(super) jsx_depth: Rc<Cell<u32>>,
 }
 
 impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
@@ -205,6 +235,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             use_static_builtin: false,
             allow_anon_function_type: Rc::new(Cell::new(false)),
             allow_conditional_type: Rc::new(Cell::new(false)),
+            jsx_depth: Rc::new(Cell::new(0)),
         }
     }
 
@@ -610,6 +641,19 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         self.allow_conditional_type.set(new_val);
         ParamFlagGuard {
             cell: Rc::clone(&self.allow_conditional_type),
+            old,
+        }
+    }
+
+    /// Set `jsx_depth` to `new_val`, returning a guard that restores the old
+    /// value on Drop. Port of the
+    /// `llvh::SaveAndRestore<uint32_t>(jsxDepth_, <value>)` uses in the JSX
+    /// grammar (JSParserImpl-jsx.cpp:24, 78, 176).
+    pub(super) fn save_jsx_depth(&self, new_val: u32) -> JsxDepthGuard {
+        let old = self.jsx_depth.get();
+        self.jsx_depth.set(new_val);
+        JsxDepthGuard {
+            cell: Rc::clone(&self.jsx_depth),
             old,
         }
     }

@@ -55,6 +55,9 @@ struct Options {
     /// Flow are mutually-exclusive dialects, so this does NOT imply
     /// `parse_flow`.
     parse_ts: Opt<bool>,
+    /// Enable JSX parsing (the hermesc `-parse-jsx` flag). JSX is an independent
+    /// flag: it does NOT imply (and is not implied by) `parse_flow`/`parse_ts`.
+    parse_jsx: Opt<bool>,
     /// Input path; empty or "-" reads stdin.
     input: Opt<String>,
 }
@@ -134,6 +137,14 @@ impl Options {
                     ..Default::default()
                 },
             ),
+            parse_jsx: Opt::new_flag(
+                cl,
+                OptDesc {
+                    long: Some("parse-jsx"),
+                    desc: Some("Enable JSX parsing."),
+                    ..Default::default()
+                },
+            ),
             input: Opt::<String>::new(
                 cl,
                 OptDesc {
@@ -193,6 +204,8 @@ fn main() {
     // TS and Flow are mutually-exclusive dialects; do NOT OR `parse_ts` into
     // `parse_flow`.
     ctx.set_parse_ts(*opt.parse_ts);
+    // JSX is an independent flag; do NOT OR it into `parse_flow`/`parse_ts`.
+    ctx.set_parse_jsx(*opt.parse_jsx);
     let gc = ctx.lock();
 
     // Parse in a scope so the parser (and its &mut sm borrow) drops before we

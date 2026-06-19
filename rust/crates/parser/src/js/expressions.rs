@@ -4907,12 +4907,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // decorator / class expression. C++ 2671-2674.
             TokenKind::at | TokenKind::rw_class => self.parse_class_expression(),
 
-            // JSX — context-gated (getParseJSX()). For now emit the C++ error.
-            // The JSX context flag is not yet wired; in P1 plain-JS corpus this
-            // branch won't fire. C++ lines 2692-2703.
+            // JSX — context-gated (getParseJSX()). C++ lines 2691-2703.
             TokenKind::less => {
-                // C++ error: "invalid expression (possible JSX: pass -parse-jsx)"
-                // We keep a simpler message since JSX context is not yet wired.
+                if self.parse_jsx() {
+                    return self.parse_jsx_root();
+                }
                 self.error_cur(
                     "invalid expression (possible JSX: pass -parse-jsx to parse)",
                 );

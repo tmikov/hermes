@@ -157,3 +157,8 @@ fn parser_differential_flow_match() {
 fn parser_differential_ts() {
     run_differential("tests/parser_corpus_ts", &["-parse-ts"], &["--parse-ts"]);
 }
+
+#[test]
+fn parser_differential_jsx() {
+    run_differential("tests/parser_corpus_jsx", &["-parse-jsx"], &["--parse-jsx"]);
+}
