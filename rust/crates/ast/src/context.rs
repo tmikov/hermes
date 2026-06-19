@@ -204,6 +204,11 @@ pub struct Context<'ast> {
     /// `Context::getParseTS()`.
     parse_ts: bool,
 
+    /// Whether to parse JSX syntax. Mirrors C++ `Context::getParseJSX()`.
+    /// Defaults to off; the TS `<Type>expr` assertion grammar is only enabled
+    /// when JSX is *disabled* (C++ JSParserImpl.cpp:4164).
+    parse_jsx: bool,
+
     /// Whether to warn about undefined variables in strict mode functions.
     pub warn_undefined: bool,
 }
@@ -238,6 +243,7 @@ impl<'ast> Context<'ast> {
             parse_flow_records: false,
             parse_flow_match: false,
             parse_ts: false,
+            parse_jsx: false,
             warn_undefined: false,
         }
     }
@@ -416,6 +422,17 @@ impl<'ast> Context<'ast> {
     /// Mirrors C++ `Context::setParseTS()`.
     pub fn set_parse_ts(&mut self, v: bool) {
         self.parse_ts = v;
+    }
+
+    /// Return true if JSX parsing is enabled. Mirrors C++
+    /// `Context::getParseJSX()`.
+    pub fn parse_jsx(&self) -> bool {
+        self.parse_jsx
+    }
+
+    /// Enable or disable JSX parsing. Mirrors C++ `Context::setParseJSX()`.
+    pub fn set_parse_jsx(&mut self, v: bool) {
+        self.parse_jsx = v;
     }
 
     pub fn gc(&mut self) {

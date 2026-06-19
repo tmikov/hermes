@@ -249,6 +249,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         self.gc.ctx().parse_ts()
     }
 
+    /// True if JSX parsing is enabled. Shorthand for the C++
+    /// `context_.getParseJSX()`.
+    pub(super) fn parse_jsx(&self) -> bool {
+        self.gc.ctx().parse_jsx()
+    }
+
     /// True if any type-annotation dialect is enabled. Port of the C++
     /// `context_.getParseTypes()` (Context.h:504-506).
     pub(super) fn parse_types(&self) -> bool {
@@ -296,6 +302,22 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
         // C++ 1233-1234: otherwise TS (parseTypeAnnotationTS).
         self.parse_type_annotation_ts(wrapped_start)
+    }
+
+    /// Parse a type-argument list (`<A, B>`) in whichever type dialect is
+    /// enabled. Port of the `parseTypeArguments` dispatcher
+    /// (JSParserImpl.h:1240-1248): Flow if `getParseFlow()`, otherwise TS.
+    pub(in crate::js) fn parse_type_arguments(
+        &mut self,
+    ) -> Option<&'gc Node<'gc>> {
+        debug_assert!(self.parse_flow() || self.parse_ts());
+        // C++ 1242-1244: Flow first if getParseFlow().
+        if self.parse_flow() {
+            return self
+                .parse_type_args_flow(crate::lexer::GrammarContext::Type);
+        }
+        // C++ 1245-1246: otherwise TS.
+        self.parse_ts_type_arguments()
     }
 
     #[inline]

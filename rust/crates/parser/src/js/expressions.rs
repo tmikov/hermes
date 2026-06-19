@@ -21,7 +21,8 @@ use ast::node::{
     NewExpression, Node, NullLiteral, NumericLiteral, ObjectExpression, ObjectPattern,
     OptionalCallExpression, OptionalMemberExpression, PrivateName, Property, RegExpLiteral,
     RestElement, SequenceExpression, SpreadElement, StringLiteral, Super, TaggedTemplateExpression,
-    TemplateElement, TemplateLiteral, ThisExpression, UnaryExpression, UpdateExpression,
+    TemplateElement, TemplateLiteral, ThisExpression, TSAsExpression, TSTypeAssertion,
+    UnaryExpression, UpdateExpression,
     YieldExpression,
 };
 use ast::node_child::{NodeList, NodeMetadata};
@@ -307,7 +308,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     ///   is handled by `reparse_assignment_pattern` (P1.8b).
     /// - Flow typed arrows (`<T>(…) => …`), the return-type/predicate
     ///   backtrack, and typed async arrows are handled inline (P6.1; gated on
-    ///   `parse_flow`). The TS half of the return-type backtrack is P7.
+    ///   `parse_flow`). The TS return-type backtrack is a parallel block
+    ///   gated on `parse_ts` (P7.5b).
     ///
     /// ## MAX_NESTED_ASSIGNMENTS
     /// `ESTree::MAX_NESTED_ASSIGNMENTS = 30000` (include/hermes/AST/ESTree.h:1407).
@@ -555,6 +557,44 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                             predicate = None;
                             sp.restore(&mut this.lexer);
                         }
+                    } else {
+                        this.lexer
+                            .get_source_mgr_mut()
+                            .end_collecting(prev, true);
+                        return_type = None;
+                        sp.restore(&mut this.lexer);
+                    }
+                } else {
+                    this.lexer.get_source_mgr_mut().end_collecting(prev, true);
+                    sp.restore(&mut this.lexer);
+                }
+            }
+
+            // TS return-type backtracking (C++ 6405-6444): a separate
+            // `#if HERMES_PARSE_TS` sibling block. Simpler than Flow — no
+            // predicates — but the same `: RetType =>` cover-typed-arrow shape.
+            if this.parse_ts()
+                && allow_typed_arrow_function == AllowTypedArrowFunction::Yes
+                && (left_expr.metadata().parens.get() != 0
+                    || matches!(left_expr, Node::CoverEmptyArgs(_)))
+                && this.check(TokenKind::colon)
+            {
+                let sp = this.lexer.save_point();
+                // Defer the show/suppress decision: on failure we may need to
+                // lex JSX children instead of function type params (C++ 6417).
+                let prev = this.lexer.get_source_mgr_mut().begin_collecting();
+                let annot_start = this.advance(GrammarContext::Type).start;
+                let opt_type =
+                    this.parse_type_annotation_ts(Some(annot_start));
+                if let Some(t) = opt_type {
+                    return_type = Some(t);
+                }
+                if opt_type.is_some() {
+                    if this.check(TokenKind::equalgreater) {
+                        // Done parsing the return type. Show buffered messages.
+                        this.lexer
+                            .get_source_mgr_mut()
+                            .end_collecting(prev, false);
                     } else {
                         this.lexer
                             .get_source_mgr_mut()
@@ -1958,7 +1998,19 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         start: SMLoc,
         end: SMLoc,
     ) -> &'gc Node<'gc> {
-        // C++ 4330: must be parsing Flow types (the TS half is P7).
+        // C++ 4321-4327: under TS, `x as T` is a `TSAsExpression`. This branch
+        // is checked BEFORE the Flow `as`/`as const` handling, and TS has no
+        // `as const` special case — `x as const` is a plain `TSAsExpression`
+        // whose `typeAnnotation` is a `TSTypeReference` to `const`.
+        if self.parse_ts() {
+            let node = Node::TSAsExpression(TSAsExpression::new(
+                NodeMetadata::new(self.dummy_range()),
+                left,
+                right,
+            ));
+            return self.set_location(start, end, node);
+        }
+        // C++ 4330: otherwise must be parsing Flow types.
         debug_assert!(self.parse_flow(), "must be parsing types");
         // C++ 4331-4345: `x as const` special case.
         if let Node::GenericTypeAnnotation(gen) = right {
@@ -2000,8 +2052,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// - Private-name LHS for `#x in y`.
     /// - `&&`/`||`/`??` → `LogicalExpression`; others → `BinaryExpression`.
     /// - Nullish/boolean mixing error ("Mixing '??' with '&&' or '||' …").
-    /// - `as_operator` (Flow): `x as T` → `AsExpression`, `x as const` →
-    ///   `AsConstExpression` (P6.0; the TS `as`/`as const` is P7).
+    /// - `as_operator`: under TS, `x as T` → `TSAsExpression` (no `as const`
+    ///   special case); under Flow, `x as T` → `AsExpression`, `x as const` →
+    ///   `AsConstExpression`.
     pub(super) fn parse_binary_expression(
         &mut self,
         param: Param,
@@ -2191,8 +2244,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 self.advance(GrammarContext::Type);
                 top_expr_start = self.cur_start();
                 // C++ parseTypeAnnotation() — defaults AllowAnonFunctionType::Yes
-                // (JSParserImpl.h:1209). `parse_type_annotation` dispatches to the
-                // Flow version (only one available; TS is P7).
+                // (JSParserImpl.h:1209). `parse_type_annotation` dispatches to
+                // the Flow or TS version per the enabled dialect.
                 top_expr = self.parse_type_annotation(None, AllowAnonFunctionType::Yes)?;
             } else {
                 self.advance(GrammarContext::AllowRegExp);
@@ -2307,7 +2360,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     ///   → `UnaryExpression(operator, argument, prefix=true)`
     /// - Prefix update: `++`, `--` → `UpdateExpression(operator, argument, prefix=true)`
     /// - `await` (when `param_await` is set) → `AwaitExpression(argument)`
-    /// - P7: TS type assertion `<Type>` — deferred (no parse-TS flag yet).
+    /// - TS type assertion `<Type>expr` (when `parse_ts` && !`parse_jsx`).
     /// - Default: fall through to `parse_postfix_expression()`.
     pub(super) fn parse_unary_expression(&mut self) -> Option<&'gc Node<'gc>> {
         use crate::token_kinds::token_kind_str;
@@ -2375,13 +2428,43 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 Some(self.set_location(start_loc, end_loc, node))
             }
 
-            // P7: TS type assertion `< Type > UnaryExpression`
-            // Only active when context has parse-TS enabled and JSX disabled.
-            // No parse-TS flag exists yet; this branch is unreachable in P1.
+            // TS type assertion `< Type > UnaryExpression` (C++ 4162-4189).
             TokenKind::less => {
-                // P7: TS type assertion (context.getParseTS() && !getParseJSX())
-                // fall through to postfix.
-                self.parse_postfix_expression()
+                // TSTypeAssertions are only parsed when JSX is disabled, so
+                // there's no backtracking necessary here (C++ 4164-4166).
+                if self.parse_ts() && !self.parse_jsx() {
+                    // < Type > UnaryExpression
+                    // ^
+                    self.advance(GrammarContext::Type);
+                    let opt_type = self.parse_type_annotation_ts(None)?;
+                    // C++ 4170-4172: the closing `>` is eaten in AllowRegExp —
+                    // the ONE place a TS `>` is not consumed in Type context.
+                    if !self.eat(
+                        TokenKind::greater,
+                        GrammarContext::AllowRegExp,
+                        "in type assertion",
+                    ) {
+                        self.lexer.get_source_mgr_mut().note_at(
+                            start_loc,
+                            None,
+                            "start of assertion",
+                            support::diag::Subsystem::Parser,
+                        );
+                        return None;
+                    }
+                    let _guard = self.check_recursion()?;
+                    let opt_expr = self.parse_unary_expression()?;
+                    let end = self.lexer.prev_token_end();
+                    let node = Node::TSTypeAssertion(TSTypeAssertion::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        opt_type,
+                        opt_expr,
+                    ));
+                    Some(self.set_location(start_loc, end, node))
+                } else {
+                    // Not a TS assertion: fall through to postfix.
+                    self.parse_postfix_expression()
+                }
             }
 
             // await expression (only when inside an async function)
@@ -2491,7 +2574,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     ///
     /// Flow type-argument speculation on the call tail is handled (P6.0), as is
     /// the Flow record-expression branch + its alternative type-args
-    /// commit-condition (P6.4). The TS half is P7.
+    /// commit-condition (P6.4). The TS arm is OR'd into the same gate (P7.5b).
     pub(super) fn parse_left_hand_side_expression_tail(
         &mut self,
         start_loc: support::location::SMLoc,
@@ -2513,14 +2596,16 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // Flow/TS type-arguments block (C++ 4036-4062). If the `<` immediately
         // follows a `?.` it cannot be a binary expression and is unambiguously
         // Flow type syntax — hence the `optional` case uses the non-ambiguous
-        // `getParseFlow()` gate; otherwise `getParseFlowAmbiguous()`. (TS: P7.)
+        // `getParseFlow()` gate; otherwise `getParseFlowAmbiguous()`. The C++
+        // gate ORs `getParseTS()` on top: `((optional ? getParseFlow() :
+        // getParseFlowAmbiguous()) || getParseTS())`.
         let mut type_args: Option<&'gc Node<'gc>> = None;
         let flow_gate = if optional {
             self.parse_flow()
         } else {
             self.parse_flow_ambiguous()
         };
-        if flow_gate && self.check(TokenKind::less) {
+        if (flow_gate || self.parse_ts()) && self.check(TokenKind::less) {
             let (opt_type_args, sp) = self.speculative_type_args();
             // Commit when a `(` follows (call expression with type-args), OR
             // — P6.4 — when the Flow record-expression alternative holds
@@ -2584,7 +2669,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     ///   handles trailing member selects.
     ///
     /// Flow `typeArgs` speculation on `new` is handled (P6.0): `new C<T>` keeps
-    /// type-args with no `(` required. The TS half is P7.
+    /// type-args with no `(` required. The TS arm is OR'd in (P7.5b).
     pub(super) fn parse_new_expression_or_optional_expression(
         &mut self,
         is_constructor_call: IsConstructorCall,
@@ -2675,9 +2760,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         // Flow/TS typeArgs block (C++ 3957-3975): attempt type-args at a `<`,
         // rolling back if it was a comparison. Unlike call expressions, no `(`
-        // is required to commit — `new C<T>` is a valid NewExpression. (TS: P7.)
+        // is required to commit — `new C<T>` is a valid NewExpression. The C++
+        // gate is `(getParseFlowAmbiguous() || getParseTS())`.
         let mut type_args: Option<&'gc Node<'gc>> = None;
-        if self.parse_flow_ambiguous() && self.check(TokenKind::less) {
+        if (self.parse_flow_ambiguous() || self.parse_ts())
+            && self.check(TokenKind::less)
+        {
             let (opt_type_args, sp) = self.speculative_type_args();
             if opt_type_args.is_some() {
                 type_args = opt_type_args;
@@ -4168,7 +4256,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     ///
     /// Flow `?.<T>()` type-arguments on an optional call are handled (P6.0):
     /// a `<` immediately after `?.` is unambiguously Flow type syntax. The TS
-    /// half is P7.
+    /// sibling block (`?.m<T>()`) is handled likewise (P7.5b).
     fn parse_member_select(
         &mut self,
         start_loc: support::location::SMLoc,
@@ -4305,10 +4393,27 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         // Flow type-arguments on an optional call (C++ 3744-3760). NO SavePoint
         // here: a `<` immediately after `?.` is unambiguously Flow type syntax,
-        // so we commit and require the `(`. (TS half is P7.)
+        // so we commit and require the `(`.
         let mut type_args: Option<&'gc Node<'gc>> = None;
         if self.parse_flow() && self.check(TokenKind::less) {
             type_args = Some(self.parse_type_args_flow(GrammarContext::Type)?);
+            if !self.need(
+                TokenKind::l_paren,
+                "after type arguments in optional call",
+            ) {
+                self.lexer.get_source_mgr_mut().note_at(
+                    object_loc,
+                    None,
+                    "start of optional call",
+                    support::diag::Subsystem::Parser,
+                );
+                return None;
+            }
+        }
+        // TS type-arguments on an optional call (C++ 3761-3777): a TS-only
+        // sibling `#if HERMES_PARSE_TS` block, likewise unambiguous after `?.`.
+        if self.parse_ts() && self.check(TokenKind::less) {
+            type_args = Some(self.parse_ts_type_arguments()?);
             if !self.need(
                 TokenKind::l_paren,
                 "after type arguments in optional call",
@@ -4357,7 +4462,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         self.lexer
             .get_source_mgr_mut()
             .set_suppressed_messages(Some(support::diag::Subsystem::Parser));
-        let type_args = self.parse_type_args_flow(GrammarContext::Type);
+        let type_args = self.parse_type_arguments();
         self.lexer
             .get_source_mgr_mut()
             .set_suppressed_messages(saved_suppressed);
@@ -4385,7 +4490,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// call in the chain can speculatively supply its own (`f<T>()<U>()`).
     ///
     /// Flow type-argument speculation (P6.0) runs at the top of the loop; the
-    /// TS half is P7.
+    /// TS arm is OR'd into the same gate (P7.5b).
     fn parse_call_expression(
         &mut self,
         start_loc: support::location::SMLoc,
@@ -4399,8 +4504,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         loop {
             // Flow/TS type-argument block (C++ 3809-3828). Each call in a chain
             // may carry type arguments; attempt to parse them at a `<`, rolling
-            // back if it was just a comparison operator. (TS half is P7.)
-            if self.parse_flow_ambiguous()
+            // back if it was just a comparison operator. The C++ gate is
+            // `(getParseFlowAmbiguous() || getParseTS())`.
+            if (self.parse_flow_ambiguous() || self.parse_ts())
                 && type_args.is_none()
                 && self.check(TokenKind::less)
             {

@@ -14,7 +14,8 @@
 //!
 //! The Flow `import type` / `import typeof` kind detection and the per-specifier
 //! `type`/`typeof` forms (C++ gated on `context_.getParseFlow()`) are ported
-//! here (P6.6); the TS-only branches stay omitted with `// P7`.
+//! here (P6.6); the TS-only `import type` kind detection (C++ gated on
+//! `context_.getParseTS()`) is ported here (P7.5b).
 
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -312,8 +313,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         // C++ 6788-6796: the Flow `import type` / `import typeof` kind. `type`
         // is a contextual ident (escape-insensitive → check_name); `typeof` is
-        // a reserved word. (The TS-only `import type` block, C++ 6798-6805, is
-        // // P7.)
+        // a reserved word.
         let mut kind = value_ident;
         let mut kind_range = SMRange {
             start: start_loc,
@@ -322,6 +322,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         if self.parse_flow()
             && (self.check_name(b"type") || self.check(TokenKind::rw_typeof))
         {
+            kind = self.lexer.token().get_res_word_or_identifier();
+            kind_range = self.advance(GrammarContext::AllowRegExp);
+        }
+        // C++ 6798-6805: the TS-only `import type` kind. TS has no `import
+        // typeof`, so only `type` (a contextual ident → check_name) is matched.
+        if self.parse_ts() && self.check_name(b"type") {
             kind = self.lexer.token().get_res_word_or_identifier();
             kind_range = self.advance(GrammarContext::AllowRegExp);
         }
