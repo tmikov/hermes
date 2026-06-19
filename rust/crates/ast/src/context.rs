@@ -431,6 +431,8 @@ impl<'ast> Context<'ast> {
     }
 
     /// Enable or disable JSX parsing. Mirrors C++ `Context::setParseJSX()`.
+    /// Currently only read by the TS `<Type>` cast gate; the setter is wired
+    /// when the JSX phase lands.
     pub fn set_parse_jsx(&mut self, v: bool) {
         self.parse_jsx = v;
     }
