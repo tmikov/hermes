@@ -1,0 +1,41 @@
+name: Rust
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build, test, and lint (Rust)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96.0"
+          components: rustfmt, clippy
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+
+      - name: Build (zero warnings)
+        working-directory: rust
+        env:
+          RUSTFLAGS: "-D warnings"
+        run: cargo build --manifest-path Cargo.toml
+
+      - name: Test
+        # Differential tests auto-skip without REQUIRE_DIFFERENTIAL=1,
+        # so this step is fast and needs no C++ build.
+        working-directory: rust
+        run: cargo test --manifest-path Cargo.toml
+
+      - name: Clippy (parser)
+        working-directory: rust
+        run: cargo clippy --manifest-path Cargo.toml -p parser

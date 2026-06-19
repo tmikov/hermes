@@ -1,0 +1,70 @@
+name: Rust differential (nightly)
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  differential:
+    name: Rust differential tests against C++ oracle
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install CMake and Ninja
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y cmake ninja-build
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96.0"
+          components: rustfmt, clippy
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+
+      # Cache the C++ oracle build to amortise the engine build cost.
+      # The key invalidates on any change to CMakeLists files or C/C++ sources.
+      - name: Cache cmake-build-asan
+        uses: actions/cache@v4
+        with:
+          path: cmake-build-asan
+          key: >-
+            cmake-asan-${{ runner.os }}-${{ hashFiles(
+              '**/CMakeLists.txt',
+              '**/*.cmake',
+              'lib/**/*.cpp',
+              'lib/**/*.h',
+              'include/**/*.h'
+            ) }}
+          restore-keys: cmake-asan-${{ runner.os }}-
+
+      - name: Configure C++ oracle (ASan + Debug + -O1)
+        run: |
+          cmake -B cmake-build-asan -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DHERMES_ENABLE_ADDRESS_SANITIZER=ON \
+            -DCMAKE_CXX_FLAGS="-O1" \
+            -DCMAKE_C_FLAGS="-O1"
+
+      - name: Build C++ oracle targets
+        run: cmake --build cmake-build-asan --target ast-dump json-parse-dump
+
+      - name: Run differential tests
+        env:
+          REQUIRE_DIFFERENTIAL: "1"
+        run: >-
+          cargo test
+          --manifest-path rust/Cargo.toml
+          -p parser
+          --test parser_differential
+          --test json_differential
