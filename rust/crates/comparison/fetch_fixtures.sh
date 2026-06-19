@@ -26,17 +26,17 @@ download() {
 
 echo "Fetching fixtures into $FIXTURES_DIR ..."
 
-# React 18.2.0 — unminified development build (~300 KB)
+# React 18.2.0 — unminified development build (~110 KB)
 download \
     "https://unpkg.com/react@18.2.0/umd/react.development.js" \
     "react.development.js"
 
-# jQuery 3.7.1 — unminified (~290 KB)
+# jQuery 3.7.1 — unminified (~285 KB)
 download \
     "https://code.jquery.com/jquery-3.7.1.js" \
     "jquery-3.7.1.js"
 
-# Three.js r160 minified — large bundle (~660 KB)
+# Three.js r160 minified — large bundle (~670 KB)
 download \
     "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js" \
     "three.min.js"

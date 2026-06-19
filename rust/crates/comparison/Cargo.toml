@@ -28,7 +28,10 @@ ast        = { path = "../ast" }
 parser     = { path = "../parser" }
 bumpalo    = "3.16"
 
-# Competitors
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+# Competitors (benches only)
 swc_common      = "*"
 swc_ecma_ast    = "*"
 swc_ecma_parser = "*"
@@ -44,9 +47,6 @@ oxc_span      = "*"
 boa_ast      = "*"
 boa_parser   = "*"
 boa_interner = "*"
-
-[dev-dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
 
 [[bench]]
 name = "parse_throughput"

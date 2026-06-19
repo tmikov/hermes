@@ -45,8 +45,9 @@ conformance claim.
 
 ### 3. The only complete Flow parser in Rust
 
-SWC dropped Flow type-stripping years ago and has only shallow remnants. OXC
-and Biome have no Flow support. This port implements the **full** Flow type
+SWC has only partial, opt-in Flow support (type-stripping focus, shallower than
+this port); OXC and Biome have no Flow support. This port implements the **full**
+Flow type
 grammar: type annotations, conditional/union/intersection types, function/object
 types, generics, predicates, `opaque type`, `interface` declarations, typed
 arrows, `as`/`as const` casts, `enum`, `component`/`hook`, `record`, `match`,

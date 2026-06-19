@@ -35,8 +35,8 @@ button-press once the implementation lands.
    clean-room Rust-first design like SWC/OXC/Biome.
 2. **Byte-for-byte differential testing** against the C++ reference
    (`hermesc -dump-ast`) — a conformance-rigor claim none of the alternatives make.
-3. **Full Flow type grammar** — rare-to-unique among Rust parsers (SWC dropped Flow;
-   OXC and Biome never had it).
+3. **Full Flow type grammar** — rare-to-unique among Rust parsers (SWC has only
+   partial/shallow Flow; OXC and Biome never had it).
 4. **ESTree-compatible AST + JSON output** matching Hermes exactly.
 
 The publication, docs, and comparison all lead with these four.
@@ -162,8 +162,8 @@ at drafting time once the comparison data is in (the others become supporting se
   Rust byte-for-byte." Centerpiece: the differential oracle, templates→generics,
   RAII→guards, the discipline that keeps a port honest.
 - **Angle 2 — The only complete Flow parser in Rust.** Lead on the feature gap (SWC
-  dropped Flow; OXC/Biome never had it), why Flow is hard, how a faithful Hermes port
-  fills it.
+  has only partial/shallow Flow; OXC/Biome never had it), why Flow is hard, how a
+  faithful Hermes port fills it.
 - **Angle 3 — AI/subagent-driven port.** The workflow itself: porting tens of KLOC of
   C++ via subagent-driven development gated by a byte-for-byte differential oracle plus
   two-stage review. Likely the highest-reach angle.
