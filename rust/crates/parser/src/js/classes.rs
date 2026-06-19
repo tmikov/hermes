@@ -23,9 +23,8 @@ use ast::node::{
     ClassProperty, Decorator, FunctionExpression, Identifier, MemberExpression, MethodDefinition,
     Node, PrivateName, StaticBlock, TSModifiers, Variance,
 };
-use ast::node_child::NodeLabel;
+use ast::node_child::{NodeLabel, NodeList, NodeMetadata};
 use atom_table::INVALID_ATOM_BYTES;
-use ast::node_child::{NodeList, NodeMetadata};
 use support::location::{SMLoc, SMRange};
 
 use crate::lexer::GrammarContext;
@@ -990,7 +989,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // FieldDefinition ;
             //                 ^
             // TS `?` optional flag. C++ 5424-5428.
-            if self.parse_ts() && self.check_and_eat(TokenKind::question, GrammarContext::AllowRegExp) {
+            if self.parse_ts()
+                && self
+                    .check_and_eat(TokenKind::question, GrammarContext::AllowRegExp)
+            {
                 optional = true;
             }
             // `: TypeAnnotation`. C++ 5429-5437.
