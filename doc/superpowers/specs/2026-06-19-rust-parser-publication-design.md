@@ -23,7 +23,7 @@ button-press once the implementation lands.
 | Timing | **Prepare now, publish later.** 0.x-vs-1.0 decided at launch. |
 | Comparison | **Both, feature-led**: feature/correctness matrix is the headline; perf is a secondary, honestly-caveated section. |
 | Naming | **`hermes-*` family.** |
-| Provenance framing | Lead on **authorship**, not a disclaimer: "A Rust port of the Hermes front-end by Tzvetan Mikov, the original designer of Hermes. **Not an official Meta project and not supported by Meta.**" Do **not** emphasize the word "unofficial." |
+| Provenance framing | Lead on **authorship**, not a disclaimer: "A Rust port of the Hermes front-end by Tzvetan Mikov, the architect of Hermes. **Not an official Meta project and not supported by Meta.**" Do **not** emphasize the word "unofficial." |
 | Blog post | Wanted. Outline **all three candidate angles**; choose the lead at drafting time once comparison data exists. |
 
 ### What makes this project distinctive (the positioning thesis)
@@ -167,7 +167,7 @@ Venue is TBD (personal blog / Rust community / engineering blog) — decided at 
 
 - **Naming / brand.** `hermes-*` collides conceptually with Meta's official npm
   `hermes-parser` (the WASM Hermes parser). Mitigation: the authorship-led provenance
-  banner ("by the original designer of Hermes; not an official Meta project / not
+  banner ("by the architect of Hermes; not an official Meta project / not
   supported by Meta"). Residual risk accepted knowingly.
 - **Perf may underwhelm** vs OXC. Mitigation: feature-led framing; honest caveats; the
   fidelity story is the value proposition, not raw speed.
