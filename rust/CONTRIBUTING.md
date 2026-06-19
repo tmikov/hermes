@@ -153,7 +153,7 @@ byte-for-byte.
 - Line limit: follow `rustfmt` defaults.
 - Naming: Rust standard (`snake_case` functions/methods/fields, `PascalCase`
   types, `SCREAMING_SNAKE_CASE` constants).
-- `unsafe` is forbidden except in the two sanctioned locations
+- `unsafe` is forbidden except in the three sanctioned locations
   (`cursor.rs` in `parser`; `context.rs` in `ast`; `atom_table` for the
   interner). Adding `unsafe` elsewhere requires explicit discussion.
 

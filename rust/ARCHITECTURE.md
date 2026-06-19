@@ -41,7 +41,8 @@ rust/
 
 Contains the `SourceErrorManager` façade (buffer, locations, line index,
 diagnostics), the `JSONEmitter` (ESTree JSON output), and a WTF-8 ↔ UTF-16
-codec (`support::utf8`). Zero `unsafe` — the crate uses `#![forbid(unsafe_code)]`.
+codec (`support::utf8`). Zero `unsafe` — forbids `unsafe` via
+`[lints.rust] unsafe_code = "forbid"` in its Cargo.toml.
 
 ### `atom_table`
 
@@ -53,7 +54,8 @@ here; it does not leak across crate boundaries.
 
 Unicode character-property predicates and range tables, generated from
 `UnicodeData.inc` (Unicode 17.0.0) by the committed `gen_tables.py` script.
-Zero `unsafe`.
+Zero `unsafe` — forbids `unsafe` via `[lints.rust] unsafe_code = "forbid"` in
+its Cargo.toml.
 
 ### `ast`
 
@@ -243,16 +245,17 @@ This confirms the committed `src/node.rs` is byte-for-byte identical to what
 ```
 hermesc (C++ oracle) ← differential tests only
          ↑
-    parser ──→ ast ──→ support ──→ (std)
+    parser ──→ ast ──→ support ──→ unicode → (std)
          │         └──→ atom_table
          └──→ unicode
          └──→ atom_table
          └──→ command_line (CLI flags, no logic)
 ```
 
-`support` and `unicode` have no intra-workspace dependencies. The `ast` crate
-depends on `support` and `atom_table`. The `parser` crate depends on all of the
-above. The `command_line` crate is a thin CLI argument helper.
+`unicode` has no intra-workspace dependencies. The `support` crate depends on
+`unicode`. The `ast` crate depends on `support` and `atom_table`. The `parser`
+crate depends on all of the above. The `command_line` crate is a thin CLI
+argument helper.
 
 ---
 
