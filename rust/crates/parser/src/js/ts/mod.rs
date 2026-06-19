@@ -13,13 +13,17 @@
 //! `context_.getParseTS()` is set. The structure mirrors the Flow port
 //! (`js/flow/`) one-to-one so the two stay easy to compare.
 //!
-//! P7.0 (this commit) lands the end-to-end scaffolding: the declaration gate
+//! P7.0 landed the end-to-end scaffolding: the declaration gate
 //! (`parse_ts_declaration`), the `type X = T;` alias pipeline, and the
 //! type-annotation precedence hierarchy down to the `string`/`number`
-//! primitive keyword arms (`parse_type_annotation_ts` →
-//! `parse_ts_union_type` → `parse_ts_intersection_type` →
-//! `parse_ts_postfix_type` → `parse_ts_primary_type`). Everything else is an
-//! honest parse error until later P7 tasks fill it in.
+//! primitive keyword arms. P7.1 fills in the type-grammar core: the full
+//! `parse_type_annotation_ts` (predicate backtrack, conditional type), the
+//! complete `parse_ts_primary_type` switch (all primitive keywords, literals,
+//! `this`, `*`, tuples, `typeof`, references), type references/qualified
+//! names, type queries, type parameters/arguments, and the
+//! `reparse_identifier_as_ts_type_annotation` helper. The
+//! parenthesized/function (`(`/`new`/`<`) → P7.2, object (`{`) → P7.3, and
+//! `interface` → P7.4 arms remain honest parse errors.
 //!
 //! The `impl JSParserImpl` methods are split across the child modules below by
 //! concern, mirroring the Flow split: `declarations` (the declaration gate and

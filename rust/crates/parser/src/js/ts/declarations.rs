@@ -64,9 +64,6 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Parse a TS `type X = T;` alias declaration, with `start` at the `type`
     /// keyword. Port of `JSParserImpl::parseTSTypeAliasDeclaration`
     /// (ts.cpp:537-578).
-    ///
-    /// P7.0 defers type parameters (`type X<...> = T;`): a `<` after the name
-    /// is an honest parse error pending P7's `parseTSTypeParameters`.
     fn parse_ts_type_alias_declaration(
         &mut self,
         start: SMLoc,
@@ -87,13 +84,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let id = self.set_location(id_range.start, id_range.end, id_node);
         self.advance(GrammarContext::Type);
 
-        // C++ 550-556: type parameters. Deferred in P7.0 (honest error).
-        let type_params: Option<&'gc Node<'gc>> = None;
+        // C++ 550-556: type parameters.
+        let mut type_params: Option<&'gc Node<'gc>> = None;
         if self.check(TokenKind::less) {
-            self.error_cur(
-                "TypeScript type parameters are not yet supported",
-            );
-            return None;
+            type_params = Some(self.parse_ts_type_parameters()?);
         }
 
         // C++ 558-564.
