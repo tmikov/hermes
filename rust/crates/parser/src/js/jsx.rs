@@ -146,13 +146,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let _depth_guard = self.save_jsx_depth(self.jsx_depth.get() + 1);
         // C++ 79-81.
         let opening = self.parse_jsx_opening_element(start)?;
-        // C++ 82-87: self-closing element has no children/closing.
-        let opening_self_closing = opening
+        // `parse_jsx_opening_element` always returns a `JSXOpeningElement`
+        // (the C++ signature is typed `JSXOpeningElementNode*`); our untyped
+        // `&Node` return needs the cast back, so bind it once here.
+        let opening_el = opening
             .as_jsx_opening_element()
-            .expect("parse_jsx_opening_element returns a JSXOpeningElement")
-            .self_closing
-            .get();
-        if opening_self_closing {
+            .expect("parse_jsx_opening_element returns a JSXOpeningElement");
+        // C++ 82-87: self-closing element has no children/closing.
+        if opening_el.self_closing.get() {
             let end = opening.metadata().range.get().end;
             let node = Node::JSXElement(JSXElement::new(
                 NodeMetadata::new(self.dummy_range()),
@@ -170,10 +171,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // C++ 97-108: check the closing is not a fragment and the name matches.
         // The C++ `sm_.note` secondary diagnostics are dropped per house style.
         if let Node::JSXClosingElement(closing_el) = closing {
-            let opening_name = opening
-                .as_jsx_opening_element()
-                .expect("opening is a JSXOpeningElement")
-                .name;
+            let opening_name = opening_el.name;
             if !tag_names_match(opening_name, closing_el.name) {
                 let range = closing.metadata().range.get();
                 self.error_at(range, "Closing tag must match opening");
@@ -237,7 +235,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             attributes.push(self.parse_jsx_attribute()?);
         }
 
-        // C++ 150: default (AllowRegExp) context, matching `checkAndEat(slash)`.
+        // C++ 150: default (AllowRegExp) context for `checkAndEat(slash)`.
         let self_closing =
             self.check_and_eat(TokenKind::slash, GrammarContext::AllowRegExp);
 
@@ -539,7 +537,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // C++ 340-378.
         let value: &'gc Node<'gc> = if self.check(TokenKind::string_literal) {
             // C++ 341-348.
-            let raw = self.lexer.get_string_literal(self.lexer.token_input_str());
+            let raw =
+                self.lexer.get_string_literal(self.lexer.token_input_str());
             let str_value = self.lexer.token().get_string_literal();
             let tok_range = self.cur_range();
             let v = self.set_location(
