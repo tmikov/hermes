@@ -4049,7 +4049,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             if self.parse_flow() && self.check(TokenKind::less) {
                 type_params = Some(self.parse_type_params_flow()?);
             }
-            // P7: TS type parameters (C++ 3184-3191).
+            // TS method type parameters. C++ 3184-3191.
+            if self.parse_ts() && self.check(TokenKind::less) {
+                type_params = Some(self.parse_ts_type_parameters()?);
+            }
 
             // (
             let paren_loc = self.lexer.token().start_loc();

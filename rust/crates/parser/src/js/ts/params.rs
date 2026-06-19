@@ -29,7 +29,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse a TS type-parameter declaration (`<T, U = V>`).
     /// Port of `JSParserImpl::parseTSTypeParameters` (ts.cpp:801-830).
-    pub(super) fn parse_ts_type_parameters(
+    pub(in crate::js) fn parse_ts_type_parameters(
         &mut self,
     ) -> Option<&'gc Node<'gc>> {
         // C++ 802-803.
@@ -122,7 +122,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse a TS type-argument list (`<A, B>`) on a generic reference.
     /// Port of `JSParserImpl::parseTSTypeArguments` (ts.cpp:1160-1190).
-    pub(super) fn parse_ts_type_arguments(
+    pub(in crate::js) fn parse_ts_type_arguments(
         &mut self,
     ) -> Option<&'gc Node<'gc>> {
         // C++ 1161-1162.

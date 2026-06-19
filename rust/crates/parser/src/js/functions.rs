@@ -124,7 +124,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         if self.parse_flow() && self.check(TokenKind::less) {
             type_parameters = Some(self.parse_type_params_flow()?);
         }
-        // P7: TS type parameters (C++ 440-447).
+        // TS type parameters after the name. C++ 440-447.
+        if self.parse_ts() && self.check(TokenKind::less) {
+            type_parameters = Some(self.parse_ts_type_parameters()?);
+        }
 
         // (
         // C++ 449-457.
@@ -160,7 +163,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 predicate = Some(self.parse_predicate_flow()?);
             }
         }
-        // P7: TS return type (C++ 488-498).
+        // TS return type. C++ 488-498.
+        if self.parse_ts() && self.check(TokenKind::colon) {
+            let annot_start = self.advance(GrammarContext::Type).start;
+            if !self.check_name(b"%checks") {
+                return_type = Some(self.parse_type_annotation_ts(Some(annot_start))?);
+            }
+        }
 
         // {
         // C++ 500-508.

@@ -21,8 +21,10 @@
 use ast::node::{
     CallExpression, ClassBody, ClassDeclaration, ClassExpression, ClassPrivateProperty,
     ClassProperty, Decorator, FunctionExpression, Identifier, MemberExpression, MethodDefinition,
-    Node, PrivateName, StaticBlock, Variance,
+    Node, PrivateName, StaticBlock, TSModifiers, Variance,
 };
+use ast::node_child::NodeLabel;
+use atom_table::INVALID_ATOM_BYTES;
 use ast::node_child::{NodeList, NodeMetadata};
 use support::location::{SMLoc, SMRange};
 
@@ -298,7 +300,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         if self.parse_flow() && self.check(TokenKind::less) {
             type_params = Some(self.parse_type_params_flow()?);
         }
-        // P7: TS type parameters (C++ 4855-4862).
+        // TS class type parameters. C++ 4855-4862.
+        if self.parse_ts() && self.check(TokenKind::less) {
+            type_params = Some(self.parse_ts_type_parameters()?);
+        }
 
         self.parse_class_tail(
             start_loc,
@@ -358,12 +363,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let mut name: Option<&'gc Node<'gc>> = None;
 
         // A ClassHeritage, `{`, or (with Flow) an `implements` clause or type
-        // parameters means there is no class name. C++ 4907-4910, De Morgan'd
-        // (`!a && !b` -> `!(a || b)`) for clippy. (The TS
-        // `getParseTS() && check(less)` arm is P7.)
+        // parameters, or (with TS) type parameters means there is no class name.
+        // C++ 4907-4910, De Morgan'd (`!a && !b` -> `!(a || b)`) for clippy.
         if !(self.check2(TokenKind::rw_extends, TokenKind::l_brace)
             || (self.parse_flow()
-                && self.check2(TokenKind::rw_implements, TokenKind::less)))
+                && self.check2(TokenKind::rw_implements, TokenKind::less))
+            || (self.parse_ts() && self.check(TokenKind::less)))
         {
             // Try to parse a BindingIdentifier if we did not see a ClassHeritage
             // or a '{'.
@@ -387,7 +392,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         if self.parse_flow() && self.check(TokenKind::less) {
             type_params = Some(self.parse_type_params_flow()?);
         }
-        // P7: TS type parameters (C++ 4933-4940).
+        // TS class type parameters. C++ 4933-4940.
+        if self.parse_ts() && self.check(TokenKind::less) {
+            type_params = Some(self.parse_ts_type_parameters()?);
+        }
 
         self.parse_class_tail(
             start,
@@ -428,7 +436,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 super_type_params =
                     Some(self.parse_type_args_flow(GrammarContext::Type)?);
             }
-            // P7: TS super-class type arguments (C++ 4978-4985).
+            // TS super-class type arguments. C++ 4978-4985.
+            if self.parse_ts() && self.check(TokenKind::less) {
+                super_type_params = Some(self.parse_ts_type_arguments()?);
+            }
         }
 
         // Flow `implements` clause. C++ 4988-5010. In strict mode (a class is
@@ -581,7 +592,6 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // modifier when followed by something that can start a class member;
         // otherwise `declare` is itself the property name. C++
         // `lookahead1(llvh::None)` uses the header default RequireNoNewLine=true.
-        // P7: TS modifiers (accessibility/readonly, C++ 5110-5138) still omitted.
         let mut declare = false;
         if self.parse_flow() && self.check_name(b"declare") {
             let opt_next = self.lexer.lookahead1::<true>(None);
@@ -600,25 +610,62 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
+        // TS class-member modifiers. C++ 5110-5138. In TS, modifiers may appear
+        // in this order: accessibility - static - readonly. All of them can be
+        // used as identifiers, so each is only consumed when followed by another
+        // modifier or a member name (`canFollowModifierTS`).
+        let mut readonly = false;
+        let mut accessibility: NodeLabel = INVALID_ATOM_BYTES;
+        if self.parse_ts() {
+            if self.check_n3(
+                TokenKind::rw_private,
+                TokenKind::rw_protected,
+                TokenKind::rw_public,
+            ) && can_follow_modifier_ts(self.lexer.lookahead1::<true>(None))
+            {
+                accessibility = self.lexer.token().get_res_word_identifier();
+                self.advance(GrammarContext::AllowRegExp);
+            }
+
+            if self.check(TokenKind::rw_static)
+                && can_follow_modifier_ts(self.lexer.lookahead1::<true>(None))
+            {
+                is_static = true;
+                self.advance(GrammarContext::AllowRegExp);
+            }
+
+            if self.check_name(b"readonly")
+                && can_follow_modifier_ts(self.lexer.lookahead1::<true>(None))
+            {
+                readonly = true;
+                self.advance(GrammarContext::AllowRegExp);
+            }
+        }
+
         match self.cur_kind() {
             TokenKind::semi => {
                 self.advance(GrammarContext::AllowRegExp);
             }
             _ => {
                 if self.check(TokenKind::rw_static) {
-                    // static MethodDefinition / static FieldDefinition
-                    // (the TS `readonly || isStatic` guard, C++ 5146-5149, is
-                    // omitted since TS modifiers are not parsed.)
-                    is_static = true;
-                    self.advance(GrammarContext::AllowRegExp);
+                    // C++ 5146-5149: don't advance() when `readonly` or `static`
+                    // is already seen, so the current one can be regarded as an
+                    // identifier. `static` cannot come after `readonly` in TS.
+                    if self.parse_ts() && (readonly || is_static) {
+                        // Leave `static` to be parsed as a property name.
+                    } else {
+                        // static MethodDefinition / static FieldDefinition
+                        is_static = true;
+                        self.advance(GrammarContext::AllowRegExp);
+                    }
                 }
                 // LLVM_FALLTHROUGH to default: parse the ClassElement.
                 let elem = match self.parse_class_element(
                     is_static,
                     start_range,
                     declare,
-                    /* readonly */ false,
-                    /* accessibility */ None,
+                    readonly,
+                    accessibility,
                     decorators,
                     eagerly,
                 ) {
@@ -684,15 +731,15 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         mut is_static: bool,
         start_range: SMRange,
         declare: bool,
-        _readonly: bool,
-        accessibility: Option<()>,
+        readonly: bool,
+        accessibility: NodeLabel,
         decorators: Vec<&'gc Node<'gc>>,
         eagerly: bool,
     ) -> Option<&'gc Node<'gc>> {
         let start_loc = self.cur_start();
 
-        // P6/P7: TS `optional` (`?`) field flag; always false in JS.
-        let optional = false;
+        // TS `optional` (`?`) field flag; set below at the field site.
+        let mut optional = false;
         let mut is_private = false;
 
         // SpecialKind: indicates if this method is out of the ordinary — in
@@ -942,7 +989,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // iteration error if it wasn't actually a class property.
             // FieldDefinition ;
             //                 ^
-            // P7: the TS `?` optional flag (C++ 5424-5428).
+            // TS `?` optional flag. C++ 5424-5428.
+            if self.parse_ts() && self.check_and_eat(TokenKind::question, GrammarContext::AllowRegExp) {
+                optional = true;
+            }
             // `: TypeAnnotation`. C++ 5429-5437.
             let mut type_annotation: Option<&'gc Node<'gc>> = None;
             if self.parse_types() && self.check(TokenKind::colon) {
@@ -991,13 +1041,25 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                         );
                     }
                 }
-                if accessibility.is_some() {
+                if accessibility != INVALID_ATOM_BYTES {
                     self.error_at(
                         start_range,
                         "An accessibility modifier cannot be used with a private identifier",
                     );
                 }
-                // P6/P7: TS modifiers node omitted; ts_modifiers = None.
+                // TS modifiers node. C++ 5475-5480: a private property carries a
+                // `TSModifiers` with a null accessibility (private names can't be
+                // combined with an accessibility modifier). Built without
+                // `setLocation` in C++, so it has an invalid (omitted) range.
+                let modifiers: Option<&'gc Node<'gc>> = if self.parse_ts() {
+                    Some(self.gc.alloc(Node::TSModifiers(TSModifiers::new(
+                        NodeMetadata::new(self.invalid_range()),
+                        INVALID_ATOM_BYTES,
+                        readonly,
+                    ))))
+                } else {
+                    None
+                };
                 let end = self.lexer.prev_token_end();
                 return Some(self.set_location(
                     prop.range().start,
@@ -1012,11 +1074,20 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                         optional,
                         variance,
                         type_annotation,
-                        None,
+                        modifiers,
                     )),
                 ));
             }
-            // P6/P7: TS modifiers node omitted; ts_modifiers = None.
+            // TS modifiers node. C++ 5495-5501.
+            let modifiers: Option<&'gc Node<'gc>> = if self.parse_ts() {
+                Some(self.gc.alloc(Node::TSModifiers(TSModifiers::new(
+                    NodeMetadata::new(self.invalid_range()),
+                    accessibility,
+                    readonly,
+                ))))
+            } else {
+                None
+            };
             if is_static && !computed && prop_name == Some(prototype_atom) {
                 self.error_at(
                     prop.range(),
@@ -1038,7 +1109,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     optional,
                     variance,
                     type_annotation,
-                    None,
+                    modifiers,
                 )),
             ));
         }
@@ -1297,4 +1368,22 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     fn error_range(&mut self, start: SMLoc, end: SMLoc, msg: &str) {
         self.error_at(SMRange { start, end }, msg);
     }
+}
+
+/// Check whether a token following a TS class-member modifier can itself be a
+/// modifier or a member name, used to disambiguate the modifier keyword from a
+/// property name of the same spelling. Port of the static
+/// `JSParserImpl::canFollowModifierTS` (JSParserImpl.h 1645-1660).
+fn can_follow_modifier_ts(opt_token_kind: Option<TokenKind>) -> bool {
+    matches!(
+        opt_token_kind,
+        Some(
+            TokenKind::identifier
+                | TokenKind::private_identifier
+                | TokenKind::rw_private
+                | TokenKind::rw_protected
+                | TokenKind::rw_public
+                | TokenKind::rw_static
+        )
+    )
 }

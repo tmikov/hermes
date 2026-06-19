@@ -280,19 +280,22 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Parse a function return type annotation (a type, or a Flow type
     /// predicate such as `x is T`) in whichever type dialect is enabled. Port
     /// of the `parseReturnTypeAnnotation` dispatcher
-    /// (JSParserImpl.h:1224-1237). The TS branch is P7; only the Flow dispatch
-    /// exists, so `parse_flow()` must be set.
+    /// (JSParserImpl.h:1224-1237).
     pub(in crate::js) fn parse_return_type_annotation(
         &mut self,
         wrapped_start: Option<SMLoc>,
         allow_anon_function_type: flow::AllowAnonFunctionType,
     ) -> Option<&'gc Node<'gc>> {
         debug_assert!(self.parse_flow() || self.parse_ts());
-        // P7: TS dispatch (parseTypeAnnotationTS, JSParserImpl.h:1233-1234).
-        self.parse_return_type_annotation_flow(
-            wrapped_start,
-            allow_anon_function_type,
-        )
+        // C++ 1229-1232: Flow first if getParseFlow().
+        if self.parse_flow() {
+            return self.parse_return_type_annotation_flow(
+                wrapped_start,
+                allow_anon_function_type,
+            );
+        }
+        // C++ 1233-1234: otherwise TS (parseTypeAnnotationTS).
+        self.parse_type_annotation_ts(wrapped_start)
     }
 
     #[inline]
