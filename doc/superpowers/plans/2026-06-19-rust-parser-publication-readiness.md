@@ -429,7 +429,11 @@ A `publish = false` `comparison` crate that benchmarks parse-to-AST throughput v
 - Create: `rust/crates/comparison/benches/parse_throughput.rs`
 - Create: `rust/crates/comparison/fixtures/.gitignore` + `rust/crates/comparison/fetch_fixtures.sh`
 - Create: `rust/crates/comparison/FEATURE-MATRIX.md`
-- Modify: `rust/Cargo.toml` (add `crates/comparison` to members)
+- Modify: `rust/Cargo.toml` (add `crates/comparison` to the workspace **`exclude`** list — NOT `members`)
+
+**CRITICAL — workspace isolation:** `comparison` pulls heavy external parsers (OXC, Biome, SWC, Boa). It must be **excluded** from the main workspace so those deps cannot break `cargo build --manifest-path rust/Cargo.toml` (the gate every other task and CI uses) and so it resolves its own `Cargo.lock`. Achieve this by (a) adding `exclude = ["crates/comparison"]` to the `[workspace]` table in `rust/Cargo.toml`, and (b) giving `rust/crates/comparison/Cargo.toml` its own empty `[workspace]` table so it is a standalone workspace root. Path deps (`parser = { path = "../parser" }`) still work across workspace boundaries. Build/run it with its own manifest: `--manifest-path rust/crates/comparison/Cargo.toml` (NOT `-p comparison` against the root).
+
+**This task is split into two sequential sub-agents:** Part A = Steps 1–4 + Step 6 (the harness: crate, fixtures, benches, run, commit). Part B = Step 5 (the feature matrix, committed separately).
 
 **Interfaces:**
 - Consumes: `parser`/`ast` (this port), and `swc_ecma_parser`, `oxc_parser`+`oxc_allocator`, `biome_js_parser`+`biome_js_syntax`, `boa_parser` as dev/bench deps.
@@ -444,6 +448,10 @@ version = "0.0.0"
 edition = "2021"
 publish = false
 
+# Standalone workspace root: isolates the heavy external-parser deps and lock
+# from the main rust/ workspace. Build with --manifest-path on THIS file.
+[workspace]
+
 [dependencies]
 parser = { path = "../parser" }
 ast = { path = "../ast" }
@@ -452,22 +460,25 @@ atom_table = { path = "../atom_table" }
 
 [dev-dependencies]
 criterion = "0.5"
-swc_ecma_parser = "*"      # Step 1a: pin to the newest version that builds on 1.96.0
+swc_ecma_parser = "*"      # Step 1a: resolve each to a concrete version
+swc_common = "*"           # (SWC needs a SourceMap/Lrc to parse)
 oxc_parser = "*"
 oxc_allocator = "*"
+oxc_span = "*"             # SourceType for oxc_parser::Parser::new
 biome_js_parser = "*"
 biome_js_syntax = "*"
 boa_parser = "*"
+boa_interner = "*"         # boa_parser needs an Interner
 
 [[bench]]
 name = "parse_throughput"
 harness = false
 ```
-**Step 1a:** replace each `"*"` with a concrete version: run `cargo update --manifest-path rust/Cargo.toml -p comparison` and, if any crate fails to build on 1.96.0, pin down to the last compatible release (record the chosen versions in `FEATURE-MATRIX.md`). If a competitor cannot build on the pinned toolchain at all, drop it from the *bench* and note it in the matrix as "not benchmarked (MSRV)".
+**Step 1a:** resolve each `"*"` to a concrete version. From the comparison dir's own manifest: `cargo generate-lockfile --manifest-path rust/crates/comparison/Cargo.toml` then `cargo build --manifest-path rust/crates/comparison/Cargo.toml --benches`. rustc here is **1.96.0 (2026-05-25)** — newer than these crates' MSRVs, so version conflicts are unlikely; if one still fails to build, pin it down to the last compatible release and record the version. If a competitor genuinely cannot build, drop it from the *bench* and note "not benchmarked (build)" — do NOT let it block the task. Record the final chosen versions (write them into a comment at the top of the bench file; Part B's matrix will cite them).
 
 - [ ] **Step 2: Write `fetch_fixtures.sh`**
 
-A script that downloads a fixed corpus into `fixtures/` (e.g. `react.development.js`, `typescript.js`, `jquery.js`, and one large minified bundle) by pinned URL + version. `fixtures/.gitignore` ignores `*.js` (don't vendor large third-party files; the script reproduces them). Print sizes at the end.
+A script that downloads a fixed **plain-JavaScript** corpus into `fixtures/` by pinned URL + version: `react.development.js`, `jquery.js`, and one large minified bundle (e.g. a pinned `vue.global.js` or `three.min.js`). **Do NOT include TypeScript or JSX fixtures** — this port's TS/JSX are still in progress and would error; note in the script's header comment that TS/JSX fixtures are a follow-up once those land. `fixtures/.gitignore` ignores `*.js` (don't vendor large third-party files; the script reproduces them). Print sizes at the end.
 
 - [ ] **Step 3: Write the benchmark**
 
@@ -476,21 +487,22 @@ A script that downloads a fixed corpus into `fixtures/` (e.g. `react.development
 - [ ] **Step 4: Run benches (informational; not a pass/fail gate)**
 
 Run: `bash rust/crates/comparison/fetch_fixtures.sh`
-Run: `cargo bench --manifest-path rust/Cargo.toml -p comparison 2>&1 | tail -30`
-Expected: criterion prints throughput per parser/fixture. **Record the numbers** for the README/blog. (If this port is not fastest, that is fine and expected — see spec §4.)
+Run: `cargo bench --manifest-path rust/crates/comparison/Cargo.toml 2>&1 | tail -40`
+Expected: criterion prints throughput per parser/fixture. **Record the numbers** (paste a summary table into the Part A report). (If this port is not fastest, that is fine and expected — see spec §4.)
 
 - [ ] **Step 5: Write `FEATURE-MATRIX.md`**
 
 A markdown table: rows = {this port, SWC, OXC, Biome, Boa}; columns = {ECMAScript, JSX, TypeScript, **Flow**, AST model (ESTree?/own/CST), error recovery, comments+locations, allocator model, conformance methodology, maturity}. **Verify every cell against each project's current docs/source** (cite the version checked). Lead the surrounding prose with the three differentiators (faithful port + differential testing + Flow). Pin the competitor versions used.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Commit (Part A — harness only; matrix lands in Part B)**
 
 ```bash
 git add rust/Cargo.toml rust/crates/comparison/
-git commit -m "rust(publish): add comparison harness (benches) + feature matrix vs SWC/OXC/Biome/Boa
+git commit -m "rust(publish): add comparison benchmark harness vs SWC/OXC/Biome/Boa (excluded crate)
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 ```
+Note: `rust/crates/comparison/Cargo.lock` is generated; commit it (it's the standalone crate's lock, useful for reproducible benches). Do NOT commit `fixtures/*.js`.
 
 ---
 
