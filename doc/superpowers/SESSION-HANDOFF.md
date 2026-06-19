@@ -8,36 +8,38 @@ validation commands, and workflow.
 > **Status:** the **JS lexer**, **JSONParser**, and the **AST are COMPLETE**, and the **JS Parser is IN PROGRESS** —
 > **phases P0 (foundations + `parser_differential` gate), P1 (value expressions), P2 (statements & declarations), P3 (functions, classes,
 > arrows, async/generators, methods, `super`, `yield`, decorators), P4 (modules), P5 (the FLOW TYPE GRAMMAR + declarative integration),
-> P6 (the REST OF FLOW), and P7 (ALL of TYPESCRIPT) are DONE**, byte-for-byte vs `hermesc -dump-ast` (+ the matching hidden/dialect flag)
-> over a **76-file plain + 42 Flow + 8 component + 5 records + 7 match + 20 TS corpus**, each sub-task two-stage reviewed (spec w/
-> adversarial diffing + quality) + a whole-phase capstone, zero warnings, zero new clippy lints, `generated_idempotent` green (P6 AND P7
-> added NO AST nodes). **The parser now handles the ENTIRE standard-ECMAScript grammar + ALL of Flow + ALL of TypeScript** — Flow's type
-> grammar (P5) + ambiguous-expression grammar + `enum`/`component`/`hook`/`record`/`match`/`declare` (P6), and TypeScript's full type
-> grammar, function/constructor/object types, interface/enum/namespace, `<Type>` casts, `as`/`as const`, typed arrows, class member
-> modifiers, and `import type` (P7), behind six `Context` flags (`parse_flow` + `parse_flow_ambiguous`/`_component_syntax`/`_records`/
-> `_match`, and `parse_ts` — mutually exclusive with `parse_flow`) that do NOT leak into plain JS. **Only JSX and the Pre/Lazy passes
-> remain** (a dormant `Context::parse_jsx` flag already exists, read by the TS cast gate, to be set when JSX lands).
-> **Read `doc/superpowers/RustPortRoadmap.md` (the "🚧 JS Parser" section, the P5 + P6 + P7 DONE blocks) for the authoritative detail, the
-> remaining deferral set (→ **JSX**: `JSParserImpl-jsx.cpp`, 505 lines, the lexer JSX support is done; → the Pre/Lazy passes), and the
-> review-caught bugs. **Port-wide lessons, re-confirmed by P6 AND P7:** (1) **C++ DEFAULT ARGUMENTS are spec** — read the header.
+> P6 (the REST OF FLOW), P7 (ALL of TYPESCRIPT), and P8 (JSX) are DONE**, byte-for-byte vs `hermesc -dump-ast` (+ the matching
+> hidden/dialect flag) over a **76-file plain + 42 Flow + 8 component + 5 records + 7 match + 20 TS + 6 JSX + 1 flow·JSX corpus**, each
+> sub-task two-stage reviewed (spec w/ adversarial diffing + quality) + a whole-phase capstone, zero warnings, zero new clippy lints,
+> `generated_idempotent` green (P6, P7 AND P8 added NO AST nodes). **The parser now handles the ENTIRE standard-ECMAScript grammar + ALL of
+> Flow + ALL of TypeScript + JSX** — Flow's type grammar (P5) + ambiguous-expression grammar + `enum`/`component`/`hook`/`record`/`match`/
+> `declare` (P6), TypeScript's full type grammar + interface/enum/namespace + `<Type>` casts/`as`/typed arrows/class modifiers/`import type`
+> (P7), and JSX elements/fragments/children/attributes/spread/expression-containers/namespaced+member names/closing-tag matching (P8), behind
+> seven `Context` flags (`parse_flow` + `parse_flow_ambiguous`/`_component_syntax`/`_records`/`_match`, `parse_ts` — mutually exclusive with
+> `parse_flow` — and `parse_jsx`, an independent flag) that do NOT leak into plain JS. **Only the Pre/Lazy passes remain.**
+> **Read `doc/superpowers/RustPortRoadmap.md` (the "🚧 JS Parser" section, the P5 + P6 + P7 + P8 DONE blocks) for the authoritative detail,
+> the remaining deferral set (→ the **Pre/Lazy passes**: the `pass_`/PreParse/Lazy machinery + `SaveFunctionState` the eager Full pass
+> no-ops; the `_param_yield`/`_param_await` args threaded into `parse_function_body` are the dormant hooks), and the review-caught bugs.
+> **Port-wide lessons, re-confirmed by P6, P7 AND P8:** (1) **C++ DEFAULT ARGUMENTS are spec** — read the header.
 > **`lexer.lookahead1(None)` defaults to `RequireNoNewLine = true` (JSLexer.h:658)** → always `::<true>`; and the grammar-context arg is
-> per-call-site spec (TS uses `GrammarContext::Type` pervasively so `>>` splits for nested generics, with three deliberate `AllowRegExp`
-> exceptions: interface `extends`, enum-member `=`, the type-assertion `>`). (2) **Two-stage review + adversarial differential diffing
-> catches what the corpus misses.** (3) **A capstone that maps every dialect-gated C++ site to its Rust production** confirms completeness
-> — for P7 it verified all 26 `getParseTS()` sites are wired AND that every silent-drop candidate (`import typeof`, `export type`,
-> `abstract`, `declare`, `satisfies`, `x!: T`, per-specifier `import { type X }`) is **rejected by hermesc itself**, so the omissions are
-> correct. Specs/plans: `specs/2026-06-06-js-parser-design.md`, `plans/2026-06-06-js-parser-{p0,p1,p2}…`, `…p3…`, `…p4…`,
-> `2026-06-09-js-parser-p5-flow-types.md`, `2026-06-13-js-parser-p6-flow-extensions.md`, `2026-06-19-js-parser-p7-typescript.md`.
-> **NEXT: JSX** (`lib/Parser/JSParserImpl-jsx.cpp`, 505 lines; the lexer's JSX support — `advanceInJSXChild`, HTML entities — is already
-> done; the `Context::parse_jsx` flag already exists). Then the **Pre/Lazy passes**. The dialect-flag gate + per-dialect corpus dir is the
-> model to follow (add a `parser_corpus_jsx` dir running `hermesc -parse-jsx` vs `ast-dump --parse-jsx`). Write each phase plan
-> just-in-time (lexer/P1–P7-style) and execute subagent-driven. juno has no parser to crib from (`hparser` is FFI-to-C++); port the C++
-> directly.
-> The parser proper lives in `rust/crates/parser/src/js/{mod,expressions,statements,functions,classes,modules}.rs` +
+> per-call-site spec (TS uses `GrammarContext::Type` pervasively so `>>` splits for nested generics, with `AllowRegExp` exceptions; JSX uses
+> `AllowJSXIdentifier` almost everywhere, with `AllowRegExp` at the `{`-child / spread / attribute-value advances, and a `jsx_depth`-driven
+> `advance_in_jsx_child`-vs-`advance` lexer-mode switch at 4 sites — getting that branch wrong corrupts the post-JSX token stream).
+> (2) **Two-stage review + adversarial differential diffing catches what the corpus misses.** (3) **A capstone that maps every dialect-gated
+> C++ site to its Rust production** confirms completeness — for P7/P8 it verified all `getParseTS()`/`getParseJSX()` sites are wired AND that
+> every silent-drop candidate is **rejected by hermesc itself** (so the omissions are correct). Specs/plans:
+> `specs/2026-06-06-js-parser-design.md`, `plans/2026-06-06-js-parser-{p0,p1,p2}…`, `…p3…`, `…p4…`,
+> `2026-06-09-js-parser-p5-flow-types.md`, `2026-06-13-js-parser-p6-flow-extensions.md`, `2026-06-19-js-parser-p7-typescript.md`,
+> `2026-06-19-js-parser-p8-jsx.md`.
+> **NEXT: the Pre/Lazy passes** (the three-pass Full/Pre/Lazy machinery — `SaveFunctionState`, lazy-function deferral, the `pass_` blocks the
+> eager Full pass currently no-ops). After that the Parser component is COMPLETE and **Sema** (scope resolution + FlowChecker) is the next
+> component. Write each phase plan just-in-time (lexer/P1–P8-style) and execute subagent-driven. juno has no parser to crib from (`hparser`
+> is FFI-to-C++); port the C++ directly.
+> The parser proper lives in `rust/crates/parser/src/js/{mod,expressions,statements,functions,classes,modules,jsx}.rs` +
 > **`js/flow/{mod,declarations,types,function_types,object_types,params,match_}.rs`** + **`js/ts/{mod,types,function_types,object_types,
 > declarations,params}.rs`**; the gate is `REQUIRE_DIFFERENTIAL=1 cargo test -p parser --test parser_differential` (build `ast-dump`
-> first; the Flow/TS corpora need `cmake-build-asan/bin/hermesc`; gated dirs `parser_corpus_flow{,_component,_records,_match}` +
-> `parser_corpus_ts` each pass their hidden/dialect flag to both binaries).
+> first; the Flow/TS/JSX corpora need `cmake-build-asan/bin/hermesc`; gated dirs `parser_corpus_flow{,_component,_records,_match}`,
+> `parser_corpus_ts`, `parser_corpus_jsx`, `parser_corpus_jsx_flow` each pass their hidden/dialect flag(s) to both binaries).
 
 ---
 
