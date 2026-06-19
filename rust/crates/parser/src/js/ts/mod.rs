@@ -21,9 +21,10 @@
 //! complete `parse_ts_primary_type` switch (all primitive keywords, literals,
 //! `this`, `*`, tuples, `typeof`, references), type references/qualified
 //! names, type queries, type parameters/arguments, and the
-//! `reparse_identifier_as_ts_type_annotation` helper. The
-//! parenthesized/function (`(`/`new`/`<`) → P7.2, object (`{`) → P7.3, and
-//! `interface` → P7.4 arms remain honest parse errors.
+//! `reparse_identifier_as_ts_type_annotation` helper. P7.2 fills in the
+//! parenthesized/function/constructor types (`(`/`new`/`<`) including the
+//! `(`-cover disambiguation and TS parameter properties. The object (`{`) →
+//! P7.3 and `interface` → P7.4 arms remain honest parse errors.
 //!
 //! The `impl JSParserImpl` methods are split across the child modules below by
 //! concern, mirroring the Flow split: `declarations` (the declaration gate and
@@ -43,7 +44,6 @@ mod types;
 /// Whether a parenthesized type is a constructor type (`new (...) => T`).
 /// Port of `JSParserImpl::IsConstructorType` (JSParserImpl.h:1599). Runtime
 /// enum (faithful), NOT a bool.
-#[allow(dead_code)] // Consumed by parseTSFunctionOrParenthesizedType (P7.2).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum IsConstructorType {
     No,

@@ -18,8 +18,9 @@
 //! primary-type switch (all keyword names, literals, `this`, `*`, tuples,
 //! `typeof`, and references); type references and qualified names; type
 //! queries; tuple types; and the `reparse_identifier_as_ts_type_annotation`
-//! helper. The parenthesized/function (`(`, `new`, `<`) → P7.2, object (`{`) →
-//! P7.3, and `interface` → P7.4 arms remain honest deferrals.
+//! helper. P7.2 wires the parenthesized/function/constructor (`(`, `new`, `<`)
+//! arms to `parse_ts_function_or_parenthesized_type`. The object (`{`) → P7.3
+//! and `interface` → P7.4 arms remain honest deferrals.
 
 use ast::node::{
     BigIntLiteral, BooleanLiteral, ExistsTypeAnnotation, Identifier, Node,
@@ -33,6 +34,7 @@ use ast::node::{
 use ast::node_child::{NodeList, NodeMetadata};
 use support::location::SMLoc;
 
+use crate::js::ts::IsConstructorType;
 use crate::js::JSParserImpl;
 use crate::lexer::GrammarContext;
 use crate::token_kinds::TokenKind;
@@ -102,20 +104,33 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         } else if self.check(TokenKind::rw_new) {
             // C++ 53-72: constructor type `new <T>(...) => U`.
             self.advance(GrammarContext::Type);
+            let mut type_params: Option<&'gc Node<'gc>> = None;
             if self.check(TokenKind::less) {
-                let _type_params = self.parse_ts_type_parameters()?;
+                type_params = Some(self.parse_ts_type_parameters()?);
             }
-            // C++ 62-71: parseTSFunctionOrParenthesizedType — P7.2.
-            self.error_cur(
-                "TypeScript constructor types are not yet supported",
-            );
-            return None;
+            // C++ 62-67.
+            if !self.need(TokenKind::l_paren, " in constructor type") {
+                return None;
+            }
+            // C++ 68-72.
+            self.parse_ts_function_or_parenthesized_type(
+                start,
+                type_params,
+                IsConstructorType::Yes,
+            )?
         } else if self.check(TokenKind::less) {
             // C++ 73-83: generic function type `<T>(...) => U`.
-            let _type_params = self.parse_ts_type_parameters()?;
-            // C++ 77-82: parseTSFunctionOrParenthesizedType — P7.2.
-            self.error_cur("TypeScript function types are not yet supported");
-            return None;
+            let type_params = self.parse_ts_type_parameters()?;
+            // C++ 77-78.
+            if !self.need(TokenKind::l_paren, " in function type") {
+                return None;
+            }
+            // C++ 79-83.
+            self.parse_ts_function_or_parenthesized_type(
+                start,
+                Some(type_params),
+                IsConstructorType::No,
+            )?
         } else {
             // C++ 84-89.
             self.parse_ts_union_type()?
@@ -347,13 +362,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 Some(self.set_location(start, end, node))
             }
 
-            // C++ 912-914: parseTSFunctionOrParenthesizedType — P7.2.
-            TokenKind::l_paren => {
-                self.error_cur(
-                    "TypeScript parenthesized types are not yet supported",
-                );
-                None
-            }
+            // C++ 912-914: parseTSFunctionOrParenthesizedType.
+            TokenKind::l_paren => self.parse_ts_function_or_parenthesized_type(
+                start,
+                None,
+                IsConstructorType::No,
+            ),
 
             // C++ 915-916: parseTSObjectType — P7.3.
             TokenKind::l_brace => {
@@ -708,8 +722,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// matching primitive-keyword node, else a `TSTypeReference` to the
     /// identifier. Port of
     /// `JSParserImpl::reparseIdentifierAsTSTypeAnnotation` (ts.cpp:1406-1431).
-    /// Used by `parseTSFunctionOrParenthesizedType` (P7.2).
-    #[allow(dead_code)] // Consumed by parseTSFunctionOrParenthesizedType (P7.2).
+    /// Used by `parseTSFunctionOrParenthesizedType`.
     pub(super) fn reparse_identifier_as_ts_type_annotation(
         &self,
         ident: &'gc Node<'gc>,
