@@ -206,7 +206,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let start = self.cur_start();
 
         // C++ 928-990: the `rw_static`/identifier arm, matched on the
-        // res-word-or-identifier name. P7.0 handles only `string`/`number`.
+        // res-word-or-identifier name. P7.0 handles only the `identifier`
+        // subset for `string`/`number`; P7.1 adds the `rw_static` half and the
+        // remaining keyword names.
         if self.check(TokenKind::identifier) {
             let name = self
                 .lexer
