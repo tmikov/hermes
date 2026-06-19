@@ -3,6 +3,13 @@ name = "parser"
 version = "0.0.0"
 edition = "2021"
 publish = false
+description = "A Rust port of the Hermes JavaScript/Flow/TypeScript parser (front-end) by Tzvetan Mikov, the architect of Hermes. Not an official Meta project."
+license = "MIT"
+repository = "https://github.com/tmikov/hermes"
+authors = ["Tzvetan Mikov <tmikov@gmail.com>"]
+keywords = ["javascript", "parser", "flow", "ecmascript", "ast"]
+categories = ["parser-implementations", "development-tools"]
+readme = "README.md"
 
 [[bin]]
 name = "ast-dump"

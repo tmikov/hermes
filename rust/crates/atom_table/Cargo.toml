@@ -3,6 +3,12 @@ name = "atom_table"
 version = "0.0.0"
 edition = "2021"
 publish = false
+description = "String interner for the Hermes Rust front-end (ported from juno)."
+license = "MIT"
+repository = "https://github.com/tmikov/hermes"
+authors = ["Tzvetan Mikov <tmikov@gmail.com>"]
+categories = ["development-tools"]
+readme = "README.md"
 
 # This crate intentionally carries encapsulated `unsafe` (interior mutability +
 # an append-only self-referential string map copied from juno). It is the one
