@@ -22,8 +22,8 @@ data appendix at the bottom. Do not write full prose until the lead is chosen.
 
 **Hook (1-2 paragraphs):**
 Hermes is the JavaScript engine running React Native on hundreds of millions of
-Android and iOS devices. Its C++ front-end — lexer, parser, AST — is roughly 20 000
-lines of battle-tested, production-hardened code. This is the story of translating
+Android and iOS devices. Its C++ front-end — lexer, parser, AST — is roughly 20 000 lines [verify before publishing]
+of battle-tested, production-hardened code. This is the story of translating
 it into Rust without inventing a new design, changing the algorithm, or drifting from
 the original, and how a byte-for-byte differential oracle against the real
 `hermesc` binary enforced that discipline every step of the way.
@@ -83,6 +83,7 @@ the original, and how a byte-for-byte differential oracle against the real
      continuous conformance certificate.
 
 **Facts/figures this angle needs from the appendix:**
+- The hook's "~20,000 lines" figure must be verified before publishing.
 - Differential gate command and corpus counts (Appendix D).
 - A concrete differential catch (not yet recorded — needs one real example from port
   history; find in commit log or session notes).
@@ -98,7 +99,7 @@ the original, and how a byte-for-byte differential oracle against the real
 
 **Hook (1-2 paragraphs):**
 If you write Flow-typed JavaScript, your options in the Rust tooling ecosystem are
-grim. SWC dropped deep Flow support years ago; OXC and Biome never had any. The
+grim. SWC's Flow support is shallow (type-stripping via `Syntax::Flow`); OXC and Biome have none. The
 `hermes-parser` crate is, as far as is known, the only Rust parser with a complete
 Flow type grammar — not a stripping pass, not an approximation, but the full language
 as Facebook ships it. This post explains why Flow is harder to parse than it looks,
@@ -169,7 +170,7 @@ type-stripping). The distinction must be precise in the post.
 Byte-for-Byte Differential Oracle"
 
 **Hook (1-2 paragraphs):**
-The Hermes JavaScript parser is roughly 20 000 lines of C++. Porting it to Rust
+The Hermes JavaScript parser is roughly 20 000 lines [verify before publishing] of C++. Porting it to Rust
 manually — function by function, with a senior engineer reviewing each change —
 would take many months. This port was done differently: with subagent-driven
 development, where each subagent takes a bounded implementation task and a
@@ -188,8 +189,8 @@ differential, complete Flow grammar), then explain the process.
 **Section beats:**
 
 1. **The problem: scale vs. quality**
-   - ~16 900 lines of JS parser C++ (JSParserImpl-*.cpp), plus ~3 700 lines of
-     lexer (JSLexer). Total ported: tens of KLOC.
+   - ~16 900 lines of JS parser C++ [verify before publishing] (JSParserImpl-*.cpp), plus ~3 700 lines of
+     lexer (JSLexer) [verify before publishing]. Total ported: tens of KLOC.
    - Naive approach: hand-translate line-by-line. Problem: tedious, error-prone, hard
      to review in bulk.
    - The insight: subagents can handle bounded porting tasks (one module, one
@@ -361,6 +362,8 @@ the identical format.
 | `parser_corpus_flow_records/` | `-parse-flow -Xparse-flow-records` | 5 |
 | `parser_corpus_flow_match/` | `-parse-flow -Xparse-flow-match` | 7 |
 | **Total** | | **138** |
+
+*Note: A 6th directory `parser_corpus_ts/` (7 files) exists but its differential gate is not yet active, as TypeScript support is in progress.*
 
 **Gate command:**
 
