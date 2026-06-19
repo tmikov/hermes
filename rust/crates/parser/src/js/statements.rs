@@ -326,13 +326,22 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // TS declarations, gated on getParseTS(). C++ 629-641.
         if self.parse_ts() {
             // `type`/`interface`/`namespace` followed by an identifier. C++
-            // 631-634. The C++ `check(<ident>)` overload is escape-insensitive.
-            // P7.0 wires only the `type` case; `interface`/`namespace`/`enum`
-            // arrive in P7.4. The structure mirrors the C++ checkN so those
-            // can be added as new `check_name` disjuncts here.
-            if self.check_name(b"type") {
+            // 631-634. The C++ `check(<ident>)` overload is escape-insensitive,
+            // so each disjunct uses `check_name`.
+            if self.check_name(b"type")
+                || self.check_name(b"interface")
+                || self.check_name(b"namespace")
+            {
                 let opt_next = self.lexer.lookahead1::<true>(None);
                 return opt_next == Some(TokenKind::identifier);
+            }
+            // C++ 635-637.
+            if self.check(TokenKind::rw_interface) {
+                return true;
+            }
+            // C++ 638-640.
+            if self.check(TokenKind::rw_enum) {
+                return true;
             }
         }
 

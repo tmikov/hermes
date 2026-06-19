@@ -73,7 +73,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Parse one member of a TS object type: a call signature, property
     /// signature, method signature, or index signature. Port of
     /// `JSParserImpl::parseTSObjectTypeMember` (ts.cpp:1226-1363).
-    fn parse_ts_object_type_member(&mut self) -> Option<&'gc Node<'gc>> {
+    pub(super) fn parse_ts_object_type_member(
+        &mut self,
+    ) -> Option<&'gc Node<'gc>> {
         // C++ 1227.
         let start = self.cur_start();
 

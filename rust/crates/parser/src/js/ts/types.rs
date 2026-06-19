@@ -372,13 +372,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // C++ 915-916: parseTSObjectType.
             TokenKind::l_brace => self.parse_ts_object_type(),
 
-            // C++ 917-918: parseTSInterfaceDeclaration — P7.4.
-            TokenKind::rw_interface => {
-                self.error_cur(
-                    "TypeScript interface declarations are not yet supported",
-                );
-                None
-            }
+            // C++ 917-918: parseTSInterfaceDeclaration.
+            TokenKind::rw_interface => self.parse_ts_interface_declaration(),
 
             // C++ 919-920.
             TokenKind::rw_typeof => self.parse_ts_type_query(),
@@ -588,7 +583,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse a (possibly dotted) TS qualified name (`A.B.C`).
     /// Port of `JSParserImpl::parseTSQualifiedName` (ts.cpp:1083-1114).
-    fn parse_ts_qualified_name(&mut self) -> Option<&'gc Node<'gc>> {
+    pub(super) fn parse_ts_qualified_name(
+        &mut self,
+    ) -> Option<&'gc Node<'gc>> {
         // C++ 1084-1090.
         let id_range = self.cur_range();
         let id_node = Node::Identifier(Identifier::new(
