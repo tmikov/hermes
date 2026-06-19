@@ -369,13 +369,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 IsConstructorType::No,
             ),
 
-            // C++ 915-916: parseTSObjectType — P7.3.
-            TokenKind::l_brace => {
-                self.error_cur(
-                    "TypeScript object types are not yet supported",
-                );
-                None
-            }
+            // C++ 915-916: parseTSObjectType.
+            TokenKind::l_brace => self.parse_ts_object_type(),
 
             // C++ 917-918: parseTSInterfaceDeclaration — P7.4.
             TokenKind::rw_interface => {

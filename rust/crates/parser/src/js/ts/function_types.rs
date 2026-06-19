@@ -266,8 +266,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// current token at `(`. Parameters are appended to `params`. Returns
     /// `true` on success, `false` if an error was reported. Port of
     /// `JSParserImpl::parseTSFunctionTypeParams` (ts.cpp:391-417). Used by the
-    /// object-type call/method signatures (P7.3).
-    #[allow(dead_code)] // Consumed by the object-type signatures (P7.3).
+    /// object-type call/method signatures.
     pub(super) fn parse_ts_function_type_params(
         &mut self,
         _start: SMLoc,
