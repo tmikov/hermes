@@ -33,8 +33,13 @@ validation commands, and workflow.
 > `2026-06-19-js-parser-p8-jsx.md`.
 > **NEXT: the Pre/Lazy passes** (the three-pass Full/Pre/Lazy machinery — `SaveFunctionState`, lazy-function deferral, the `pass_` blocks the
 > eager Full pass currently no-ops). After that the Parser component is COMPLETE and **Sema** (scope resolution + FlowChecker) is the next
-> component. Write each phase plan just-in-time (lexer/P1–P8-style) and execute subagent-driven. juno has no parser to crib from (`hparser`
-> is FFI-to-C++); port the C++ directly.
+> component. **⚠️ OPEN DESIGN QUESTION — brainstorm BEFORE writing the plan:** unlike P0–P8, this phase is parsing-strategy *infrastructure*,
+> not grammar, and the `-dump-ast` differential that gated every prior phase will NOT naturally exercise it — the eager Full pass yields the
+> same AST as a lazy parse by construction, so byte-for-byte-vs-`hermesc -dump-ast` is blind to whether lazy parsing even ran. Decide the
+> validation oracle first (candidates: reparse-equivalence — lazily-deferred function bodies reparse to the same AST as eager; deferred-region
+> tracking; or a `hermes`/`shermes` lazy-compile flag that exposes observable lazy behavior). Open the session with the
+> `superpowers:brainstorming` skill on this, THEN `writing-plans`. Write each phase plan just-in-time (lexer/P1–P8-style) and execute
+> subagent-driven. juno has no parser to crib from (`hparser` is FFI-to-C++); port the C++ directly.
 > The parser proper lives in `rust/crates/parser/src/js/{mod,expressions,statements,functions,classes,modules,jsx}.rs` +
 > **`js/flow/{mod,declarations,types,function_types,object_types,params,match_}.rs`** + **`js/ts/{mod,types,function_types,object_types,
 > declarations,params}.rs`**; the gate is `REQUIRE_DIFFERENTIAL=1 cargo test -p parser --test parser_differential` (build `ast-dump`
