@@ -307,6 +307,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         self.pre_parsed = t;
     }
 
+    /// Set the strict-mode flag on the underlying lexer. Mirrors the C++
+    /// `JSParser::setStrictMode` (JSParser.h:66-68) that `HBC.cpp:158` calls
+    /// immediately before `parseLazyFunction` to propagate the function's
+    /// recorded strict mode into the re-parse.
+    pub fn set_strict_mode(&mut self, strict: bool) {
+        self.lexer.set_strict_mode(strict);
+    }
+
     /// True if Flow type parsing is enabled. Shorthand for the C++
     /// `context_.getParseFlow()` calls throughout the parser.
     pub(super) fn parse_flow(&self) -> bool {

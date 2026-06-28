@@ -54,6 +54,12 @@ struct FuncEntry {
     param_yield: bool,
     /// `param_await` stored in the stub (only valid when `is_lazy_stub`).
     param_await: bool,
+    /// Start offset of the function body `{` — the key into the pre-parse
+    /// side-table (`PreParsedBufferInfo.function_info`). Used by the caller
+    /// to retrieve `strict_mode` and set it on the lazy parser before
+    /// `parse_lazy_function`, mirroring HBC.cpp:158
+    /// (`parser.setStrictMode(lazyData.strictMode)`).
+    body_start_offset: u32,
 }
 
 // ---------------------------------------------------------------------------
@@ -100,6 +106,7 @@ fn collect_funcs<'gc>(node: &'gc Node<'gc>, out: &mut BTreeMap<u32, FuncEntry>) 
                     is_lazy_stub: is_stub,
                     param_yield: py,
                     param_await: pa,
+                    body_start_offset: fd.body.range().start.offset,
                 },
             );
             collect_funcs(fd.body, out);
@@ -114,6 +121,7 @@ fn collect_funcs<'gc>(node: &'gc Node<'gc>, out: &mut BTreeMap<u32, FuncEntry>) 
                     is_lazy_stub: is_stub,
                     param_yield: py,
                     param_await: pa,
+                    body_start_offset: fe.body.range().start.offset,
                 },
             );
             collect_funcs(fe.body, out);
@@ -132,6 +140,7 @@ fn collect_funcs<'gc>(node: &'gc Node<'gc>, out: &mut BTreeMap<u32, FuncEntry>) 
                         is_lazy_stub: is_stub,
                         param_yield: py,
                         param_await: pa,
+                        body_start_offset: afe.body.range().start.offset,
                     },
                 );
                 collect_funcs(afe.body, out);
@@ -143,6 +152,11 @@ fn collect_funcs<'gc>(node: &'gc Node<'gc>, out: &mut BTreeMap<u32, FuncEntry>) 
 
         Node::Property(prop) => {
             if let Some((is_stub, py, pa)) = func_value_block_info(prop.value) {
+                let body_start = if let Node::FunctionExpression(fe) = prop.value {
+                    fe.body.range().start.offset
+                } else {
+                    0
+                };
                 out.insert(
                     node.range().start.offset,
                     FuncEntry {
@@ -150,6 +164,7 @@ fn collect_funcs<'gc>(node: &'gc Node<'gc>, out: &mut BTreeMap<u32, FuncEntry>) 
                         is_lazy_stub: is_stub,
                         param_yield: py,
                         param_await: pa,
+                        body_start_offset: body_start,
                     },
                 );
                 if let Node::FunctionExpression(fe) = prop.value {
@@ -162,6 +177,11 @@ fn collect_funcs<'gc>(node: &'gc Node<'gc>, out: &mut BTreeMap<u32, FuncEntry>) 
 
         Node::MethodDefinition(md) => {
             if let Some((is_stub, py, pa)) = func_value_block_info(md.value) {
+                let body_start = if let Node::FunctionExpression(fe) = md.value {
+                    fe.body.range().start.offset
+                } else {
+                    0
+                };
                 out.insert(
                     node.range().start.offset,
                     FuncEntry {
@@ -169,6 +189,7 @@ fn collect_funcs<'gc>(node: &'gc Node<'gc>, out: &mut BTreeMap<u32, FuncEntry>) 
                         is_lazy_stub: is_stub,
                         param_yield: py,
                         param_await: pa,
+                        body_start_offset: body_start,
                     },
                 );
                 if let Node::FunctionExpression(fe) = md.value {
@@ -366,6 +387,11 @@ fn check_file(src: &[u8], label: &str, threshold: u32) -> usize {
     };
 
     // ---- 3. LazyParse + 4. offset equality + 5. body comparisons ----
+    // Clone the table so we can look up strict_mode per body during BFS
+    // (mirroring HBC.cpp:158: `parser.setStrictMode(lazyData.strictMode)`
+    // called immediately before each `parseLazyFunction`). The clone is cheap
+    // relative to parse time; `PreParsedFunctionInfo` is `#[derive(Clone)]`.
+    let table_ref = table.clone();
     let mut ctx3 = Context::new();
     ctx3.set_preemptive_function_compilation_threshold(threshold);
     let gc3 = ctx3.lock();
@@ -416,6 +442,18 @@ fn check_file(src: &[u8], label: &str, threshold: u32) -> usize {
 
     while let Some((offset, entry)) = queue.pop_front() {
         let start = support::location::SMLoc { source: id, offset };
+
+        // Mirror HBC.cpp:158: set the lazy parser's strict mode from the
+        // pre-parsed table entry for this function's body, identified by its
+        // body-start offset (the key `parse_function_body` stores at PreParse
+        // time). This ensures `static`, `let`, etc. are lexed correctly for
+        // strict-mode bodies (e.g. class methods) without any in-function hack.
+        let strict = table_ref
+            .function_info
+            .get(&entry.body_start_offset)
+            .map(|info| info.strict_mode)
+            .unwrap_or(false);
+        lp.set_strict_mode(strict);
 
         let reparsed = lp
             .parse_lazy_function(

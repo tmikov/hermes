@@ -53,6 +53,7 @@ pub struct PreParsedFunctionInfo {
 
 /// Per-buffer table produced by the `PreParse` pass.
 /// Port of `PreParsedBufferInfo` (PreParser.h:60-63).
+#[derive(Clone)]
 pub struct PreParsedBufferInfo {
     /// Maps function-body start **offset** (within the source buffer) to its
     /// pre-parsed metadata. The C++ uses `SMLoc` (a pointer) as the key;
@@ -187,24 +188,16 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         param_await: bool,
         start: SMLoc,
     ) -> Option<&'gc Node<'gc>> {
-        // cpp:7553-7556.
-        // For MethodDefinition, the class body is always strict (C++ line
-        // 4800/4881 in parseClassDeclaration/parseClassExpression). Strict
-        // mode MUST be set before `seek` → `advance` re-lexes the first
-        // token, because `static` (a future reserved word) is only recognised
-        // as `rw_static` in strict mode; in non-strict mode it is lexed as a
-        // plain identifier. Save and restore the strict flag around the whole
-        // demand-parse so callers are unaffected.
-        let old_strict = self.lexer.is_strict_mode();
-        if kind == NodeKind::MethodDefinition {
-            self.lexer.set_strict_mode(true);
-        }
-
+        // cpp:7553-7556. Seek to the deferred function's start and restore
+        // the grammar context it was originally parsed in.
+        // Strict mode is the CALLER's responsibility (mirroring HBC.cpp:158:
+        // `parser.setStrictMode(lazyData.strictMode)` before
+        // `parseLazyFunction`); this function does not touch it.
         self.seek(start);
         self.param_yield.set(param_yield);
         self.param_await.set(param_await);
 
-        let result = match kind {
+        match kind {
             // cpp:7559-7560.
             NodeKind::FunctionExpression => {
                 self.parse_function_expression(/* force_eagerly= */ true)
@@ -247,8 +240,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
             // cpp:7581-7595. Re-parse a single class element; the deferred
             // function is the `value` of the resulting `MethodDefinition`.
-            // Class bodies are always strict; strict mode was set before
-            // `seek` above so the first token is lexed correctly.
+            // Strict mode must already be set by the caller (class bodies are
+            // always strict) so that `static` is lexed as `rw_static`.
             NodeKind::MethodDefinition => {
                 let mut body: Vec<&'gc Node<'gc>> = Vec::new();
                 let mut constructor: Option<&'gc Node<'gc>> = None;
@@ -273,11 +266,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
             // cpp:7597-7598.
             _ => unreachable!("Asked to parse unexpected node type"),
-        };
-
-        // Restore strict mode to the state before this demand-parse.
-        self.lexer.set_strict_mode(old_strict);
-        result
+        }
     }
 }
 
