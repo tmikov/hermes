@@ -560,26 +560,27 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 - Consumes: all prior tasks (metadata, docs, bins extracted, no `command_line` dep in the library).
 - Produces: a workspace whose published crates are named `hermes-*` and pass `cargo publish --dry-run`; reserved names on crates.io.
 
-- [ ] **Step 1: Rename packages while keeping `use <short>::` working (zero code churn)**
+- [ ] **Step 1: Rename packages AND lib names to the `hermes_*` family (DECIDED: Option B — clean import path)**
 
-For each library crate, set the package name and keep the short lib name:
+**Decision (locked 2026-06-28):** publish with the conventional Rust experience — users `cargo add hermes-parser` and write `use hermes_parser::`. This requires a full lib-name rename, NOT the short-name aliasing. **Run this ONLY after the parallel `rust` implementation workstream has merged**, because it churns ~49 files and would otherwise conflict.
+
+For each library crate, set both the package name and the matching `hermes_*` lib name (lib names use underscores):
 ```toml
 # parser/Cargo.toml
 [package]
 name = "hermes-parser"
-[lib]
-name = "parser"
+# (no [lib] name override — defaults to hermes_parser)
 ```
-Apply analogously: `ast`→`hermes-ast` (lib `ast`), `support`→`hermes-support` (lib `support`), `atom_table`→`hermes-atom-table` (lib `atom_table`), `unicode`→`hermes-unicode` (lib `unicode`).
+Apply analogously: `ast`→`hermes-ast` (lib `hermes_ast`), `support`→`hermes-support` (lib `hermes_support`), `atom_table`→`hermes-atom-table` (lib `hermes_atom_table`), `unicode`→`hermes-unicode` (lib `hermes_unicode`).
 
-In every Cargo.toml that has path deps (`parser`, `ast`, `tools`, `comparison`, `support`), alias each path dep so the local name stays short:
-```toml
-ast = { path = "../ast", package = "hermes-ast" }
-support = { path = "../support", package = "hermes-support" }
-atom_table = { path = "../atom_table", package = "hermes-atom-table" }
-unicode = { path = "../unicode", package = "hermes-unicode" }
+Then do the one-time mechanical rename of every intra-workspace import + path-dep key across `rust/` (the ~49 files). Use a scripted `sed` over `rust/crates/*/src` and `rust/crates/*/tests` and the `tools`/`comparison` crates:
+```bash
+# imports + paths in code  (run from repo root; word-boundary anchored)
+grep -rl --include='*.rs' -E '\b(parser|ast|support|atom_table|unicode)::' rust/crates | while read f; do
+  sed -i -E 's/\bparser::/hermes_parser::/g; s/\bast::/hermes_ast::/g; s/\bsupport::/hermes_support::/g; s/\batom_table::/hermes_atom_table::/g; s/\bunicode::/hermes_unicode::/g' "$f"
+done
 ```
-This keeps all `use ast::`/`use support::` lines compiling unchanged. **Decision point (record in CHANGELOG):** external users will then write `use parser::`/`use ast::` even though they add `hermes-parser`/`hermes-ast`. If you prefer the conventional `use hermes_parser::`, instead drop the `[lib] name` lines and do a one-time `sed` rename of `use parser::`→`use hermes_parser::` (etc.) across `rust/` — only worth it once the parallel workstream has merged. Default: keep short lib names.
+Also update every `extern`/path-dep KEY in the dependent Cargo.tomls so the dependency name matches the new lib name (e.g. in `parser/Cargo.toml`: `ast = { path = "../ast" }` → `hermes_ast = { path = "../ast", package = "hermes-ast" }`; repeat for `support`/`atom_table`/`unicode`, and in `ast`, `tools`, `comparison`). After this, code reads `use hermes_ast::…` and deps resolve by package name. **Caveat:** hand-check the `sed` results — a bare `use ast;` or `mod ast` (module, not crate) or a struct field named `parser` must NOT be rewritten; the `::` anchor avoids most false hits but review the diff. Record in CHANGELOG that the public import paths are `hermes_parser` / `hermes_ast`.
 
 - [ ] **Step 2: Verify the renamed workspace builds and tests pass**
 
@@ -671,4 +672,4 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 **Type/name consistency:** crate names are bare (`parser`/`ast`/…) through Tasks 1–9 and renamed to `hermes-*` only in Task 10; `-p parser` is used in Tasks 3–9 and `-p hermes-parser` only after the Task 10 rename — consistent with the non-disruption rule. Bin names (`ast-dump`, `json-parse-dump`, `gen-json`) are stable across Task 6's move.
 
-**Known deliberate deferrals:** launch version, blog venue, and the optional `use hermes_parser::` full rename (Task 10 Step 1 decision point).
+**Known deliberate deferrals:** launch version and blog venue. (The lib-naming question is now DECIDED — Option B, full `use hermes_parser::` rename — see Task 10 Step 1.)
