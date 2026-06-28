@@ -331,6 +331,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // expression (with the header defaults Yes/Yes/None).
             let body = self.parse_assignment_expression(
                 PARAM_IN,
+                false,
                 AllowTypedArrowFunction::Yes,
                 CoverTypedParameters::Yes,
                 None,

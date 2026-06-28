@@ -78,6 +78,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // C++ 6556-6561: first operand threads `coverTypedParameters`.
         let opt_expr = self.parse_assignment_expression(
             param,
+            false,
             AllowTypedArrowFunction::Yes,
             cover_typed_parameters,
             None,
@@ -119,6 +120,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 // C++ 6596: parseAssignmentExpression(param) — defaults.
                 self.parse_assignment_expression(
                     param,
+                    false,
                     AllowTypedArrowFunction::Yes,
                     CoverTypedParameters::Yes,
                     None,
@@ -262,7 +264,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // C++ 4674-4680: parse the argument. The simplified Rust signature only
         // takes `param`, so the C++ eagerly/AllowTypedArrowFunction/
         // CoverTypedParameters args are not threaded.
-        let arg = self.parse_assignment_expression(param.get(PARAM_IN), AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
+        let arg = self.parse_assignment_expression(param.get(PARAM_IN), false, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
 
         // C++ 4682-4685: setLocation(yieldLoc, getPrevTokenEndLoc(), node).
         let end = self.lexer.prev_token_end();
@@ -317,6 +319,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     pub(super) fn parse_assignment_expression(
         &mut self,
         param: Param,
+        force_eagerly: bool,
         allow_typed_arrow_function: AllowTypedArrowFunction,
         cover_typed_parameters: CoverTypedParameters,
         type_params: Option<&'gc Node<'gc>>,
@@ -444,6 +447,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 // functions; if that works, return it directly (C++ 6300-6309).
                 let opt_assign = this.parse_assignment_expression(
                     cur_param,
+                    false,
                     AllowTypedArrowFunction::No,
                     CoverTypedParameters::No,
                     None,
@@ -468,6 +472,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                             type_params = Some(tp);
                             let opt_assign = this.parse_assignment_expression(
                                 cur_param,
+                                false,
                                 AllowTypedArrowFunction::Yes,
                                 CoverTypedParameters::No,
                                 type_params,
@@ -624,10 +629,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     Some(tp) => tp.range().start,
                     None => start_loc,
                 };
-                // force_eagerly is inert in the eager port → pass false.
+                // Forward the caller's eager flag. In the eager port this is
+                // inert except when `parse_lazy_function` reparses an arrow
+                // body (cpp:7565-7566).
                 return match this.parse_arrow_function_expression(
                     cur_param,
-                    false,
+                    force_eagerly,
                     left_expr,
                     has_new_line,
                     type_params,
@@ -1155,6 +1162,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // C++ 5872-5877: concise body threads `allowTypedArrowFunction`.
             body = self.parse_assignment_expression(
                 param.get(PARAM_IN),
+                // C++ 5874 passes forceEagerly=true: a concise (expression)
+                // arrow body is never a lazy stub.
+                true,
                 allow_typed_arrow,
                 CoverTypedParameters::No,
                 None,
@@ -1731,6 +1741,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             };
             let opt_consequent = self.parse_assignment_expression(
                 PARAM_IN,
+                false,
                 AllowTypedArrowFunction::Yes,
                 CoverTypedParameters::No,
                 None,
@@ -1761,6 +1772,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             self.advance(GrammarContext::AllowRegExp);
             self.parse_assignment_expression(
                 PARAM_IN,
+                false,
                 AllowTypedArrowFunction::No,
                 CoverTypedParameters::No,
                 None,
@@ -1781,6 +1793,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // AllowTypedArrowFunction::Yes, CoverTypedParameters::No.
         let alternate = self.parse_assignment_expression(
             param,
+            false,
             AllowTypedArrowFunction::Yes,
             CoverTypedParameters::No,
             None,
@@ -2979,7 +2992,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     return None;
                 }
 
-                let source = self.parse_assignment_expression(PARAM_IN, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
+                let source = self.parse_assignment_expression(PARAM_IN, false, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
 
                 self.check_and_eat(
                     TokenKind::comma,
@@ -2989,7 +3002,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 let options = if !self.check(TokenKind::r_paren) {
                     // C++ parseAssignmentExpression() — default param is
                     // ParamIn (JSParserImpl.h 1132-1133).
-                    let o = self.parse_assignment_expression(PARAM_IN, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
+                    let o = self.parse_assignment_expression(PARAM_IN, false, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
                     self.check_and_eat(
                         TokenKind::comma,
                         GrammarContext::AllowRegExp,
@@ -3211,7 +3224,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 let is_spread =
                     self.check_and_eat(TokenKind::dotdotdot, GrammarContext::AllowRegExp);
 
-                let arg = self.parse_assignment_expression(PARAM_IN, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
+                let arg = self.parse_assignment_expression(PARAM_IN, false, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
 
                 if is_spread {
                     let spread_end = self.lexer.prev_token_end();
@@ -3310,7 +3323,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     // Regular assignment expression. (C++ parseArrayLiteral has
                     // no CHECK_RECURSION here — the recursion guards live in the
                     // expression chain it calls into.)
-                    let expr = self.parse_assignment_expression(PARAM_IN, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
+                    let expr = self.parse_assignment_expression(PARAM_IN, false, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
                     elem_list.push(expr);
                 }
 
@@ -3365,7 +3378,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         // (C++ parseSpreadElement has no CHECK_RECURSION; the guard lives in the
         // expression chain it calls into.)
-        let arg = self.parse_assignment_expression(PARAM_IN, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
+        let arg = self.parse_assignment_expression(PARAM_IN, false, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
 
         let end_loc = self.lexer.prev_token_end();
         let node = Node::SpreadElement(SpreadElement::new(NodeMetadata::new(self.dummy_range()), arg));
@@ -3485,7 +3498,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 };
                 elem_list.push(spread);
             } else {
-                let prop = match self.parse_property_assignment() {
+                let prop = match self.parse_property_assignment(false) {
                     Some(n) => n,
                     None => return false,
                 };
@@ -3572,7 +3585,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             TokenKind::l_square => {
                 // Computed key: `[expr]`.
                 let start_loc = self.advance(GrammarContext::AllowRegExp).start;
-                let opt_expr = self.parse_assignment_expression(PARAM_IN, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
+                let opt_expr = self.parse_assignment_expression(PARAM_IN, false, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
                 if !self.need(TokenKind::r_square, " at end of computed property key") {
                     self.lexer.get_source_mgr_mut().note_at(
                         start_loc,
@@ -3641,20 +3654,26 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// must not leak strictness to the enclosing object-literal expression — so
     /// this wrapper saves/restores it around the whole property parse (the
     /// result is computed first so the restore runs on every error `?` path).
-    fn parse_property_assignment(&mut self) -> Option<&'gc Node<'gc>> {
+    pub(super) fn parse_property_assignment(
+        &mut self,
+        eagerly: bool,
+    ) -> Option<&'gc Node<'gc>> {
         let old_strict = self.lexer.is_strict_mode();
         // SaveFunctionState for object method/getter/setter scope — mirrors
         // the SaveFunctionState constructed for each method in C++.
         // is_arrow=false: method is a regular function scope.
         let _g = self.save_function_state(false);
         let old_seen_len = self.seen_directives.len();
-        let result = self.parse_property_assignment_inner();
+        let result = self.parse_property_assignment_inner(eagerly);
         self.seen_directives.truncate(old_seen_len);
         self.lexer.set_strict_mode(old_strict);
         result
     }
 
-    fn parse_property_assignment_inner(&mut self) -> Option<&'gc Node<'gc>> {
+    fn parse_property_assignment_inner(
+        &mut self,
+        eagerly: bool,
+    ) -> Option<&'gc Node<'gc>> {
         let start_loc = self.cur_start();
 
         let mut computed = false;
@@ -3791,7 +3810,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 }
                 let block = self.parse_function_body(
                     PARAM_RETURN,
-                    /* eagerly */ false,
+                    eagerly,
                     false,
                     false,
                     GrammarContext::AllowRegExp,
@@ -3951,7 +3970,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 }
                 let block = self.parse_function_body(
                     PARAM_RETURN,
-                    /* eagerly */ false,
+                    eagerly,
                     false,
                     false,
                     GrammarContext::AllowRegExp,
@@ -4137,7 +4156,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         if matches!(key, Node::Identifier(_)) && self.check(TokenKind::equal) && !computed {
             // Advance past `=`; the start of the CoverInitializer is the `=`.
             let cover_start = self.advance(GrammarContext::AllowRegExp).start;
-            let init_expr = self.parse_assignment_expression(PARAM_IN, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
+            let init_expr = self.parse_assignment_expression(PARAM_IN, false, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
             shorthand = true;
 
             let cover_end = self.lexer.prev_token_end();
@@ -4228,7 +4247,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
             let body = self.parse_function_body(
                 PARAM_RETURN,
-                /* eagerly */ false,
+                eagerly,
                 generator,
                 async_,
                 GrammarContext::AllowRegExp,
@@ -4269,7 +4288,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 );
                 return None;
             }
-            value = self.parse_assignment_expression(PARAM_IN, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
+            value = self.parse_assignment_expression(PARAM_IN, false, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
         }
 
         let end_loc = self.lexer.prev_token_end();
@@ -4741,7 +4760,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 if self.check_unescaped_name(b"async")
                     && self.check_async_function()
                 {
-                    return self.parse_function_expression();
+                    return self.parse_function_expression(false);
                 }
 
                 // `arguments` tracking inside arrow functions — C++ line 2508.
@@ -4962,7 +4981,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
 
             // function expression. C++ 2667-2670.
-            TokenKind::rw_function => self.parse_function_expression(),
+            TokenKind::rw_function => self.parse_function_expression(false),
 
             // decorator / class expression. C++ 2671-2674.
             TokenKind::at | TokenKind::rw_class => self.parse_class_expression(),

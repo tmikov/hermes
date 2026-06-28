@@ -136,6 +136,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // C++ 1271-1274: parseAssignmentExpression(ParamIn).
             key = self.parse_assignment_expression(
                 PARAM_IN,
+                false,
                 AllowTypedArrowFunction::Yes,
                 CoverTypedParameters::Yes,
                 None,

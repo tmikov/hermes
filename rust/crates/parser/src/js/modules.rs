@@ -947,7 +947,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 // export default HoistableDeclaration
                 // Currently, the only hoistable declarations are functions.
                 // C++ 7188-7199.
-                let fun = self.parse_function_declaration(PARAM_DEFAULT)?;
+                let fun = self.parse_function_declaration(PARAM_DEFAULT, false)?;
                 let node = Node::ExportDefaultDeclaration(
                     ExportDefaultDeclaration::new(
                         NodeMetadata::new(self.dummy_range()),
@@ -1092,7 +1092,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             } else {
                 // export default AssignmentExpression ;
                 // C++ 7280-7293.
-                let expr = self.parse_assignment_expression(PARAM_IN, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
+                let expr = self.parse_assignment_expression(PARAM_IN, false, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
                 if !self.eat_semi(false) {
                     return None;
                 }

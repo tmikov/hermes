@@ -387,7 +387,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         if self.check(TokenKind::rw_function)
             || (self.check_unescaped_name(b"async") && self.check_async_function())
         {
-            return self.parse_function_declaration(Param::default());
+            return self.parse_function_declaration(Param::default(), false);
         }
 
         // C++ 829-835.
@@ -692,7 +692,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         // C++ 1266-1270: parseAssignmentExpression(param, /* eagerly */ false,
         // AllowTypedArrowFunction::Yes, CoverTypedParameters::No).
-        let expr = self.parse_assignment_expression(param, AllowTypedArrowFunction::Yes, CoverTypedParameters::No, None)?;
+        let expr = self.parse_assignment_expression(param, false, AllowTypedArrowFunction::Yes, CoverTypedParameters::No, None)?;
 
         let end_loc = self.lexer.prev_token_end();
         let node = Node::VariableDeclarator(VariableDeclarator::new(
@@ -873,7 +873,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
             // C++ 1641-1663.
             let body: &'gc Node<'gc> = if self.check(TokenKind::rw_function) {
-                let func = self.parse_function_declaration(param)?;
+                let func = self.parse_function_declaration(param, false)?;
                 // ES9.0 13.13.1
                 // It is a Syntax Error if any source text matches this rule.
                 // LabelledItem : FunctionDeclaration
@@ -1263,7 +1263,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     ) -> Option<&'gc Node<'gc>> {
         if self.check(TokenKind::rw_function) {
             // C++ 1711-1732.
-            let function = self.parse_function_declaration(Param::default())?;
+            let function = self.parse_function_declaration(Param::default(), false)?;
             let func_decl = function
                 .as_function_declaration()
                 .expect("parseFunctionDeclaration returns a FunctionDeclaration");
@@ -1639,7 +1639,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             let opt_right = if for_in_loop {
                 self.parse_expression(PARAM_IN, CoverTypedParameters::Yes)
             } else {
-                self.parse_assignment_expression(PARAM_IN, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)
+                self.parse_assignment_expression(PARAM_IN, false, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)
             };
 
             // C++ 2006-2012.
@@ -2435,7 +2435,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // Parse the initializer. C++ 1421.
         let debug_loc = self.advance(GrammarContext::AllowRegExp).start;
 
-        let expr = self.parse_assignment_expression(PARAM_IN.plus(param), AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
+        let expr = self.parse_assignment_expression(PARAM_IN.plus(param), false, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
 
         // C++ 1427-1431.
         let left_start = left.range().start;

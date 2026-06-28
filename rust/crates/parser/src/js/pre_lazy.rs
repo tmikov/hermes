@@ -89,9 +89,12 @@ impl Drop for SaveFunctionState {
     }
 }
 
-use crate::lexer::JSLexer;
+use ast::node::{Node, NodeKind};
 
-use super::JSParserImpl;
+use crate::lexer::{GrammarContext, JSLexer};
+
+use super::flow::{AllowTypedArrowFunction, CoverTypedParameters};
+use super::{JSParserImpl, PARAM_IN, PARAM_RETURN};
 
 impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Pre-parse a source buffer: build a `PreParse`-mode parser, set strict
@@ -153,6 +156,120 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     #[allow(dead_code)]
     pub(super) fn copy_seen_directives(&self) -> Vec<Vec<u8>> {
         self.seen_directives.clone()
+    }
+
+    /// Move the parser to `loc` and re-lex the current token from there.
+    /// Port of `JSParserImpl::seek` (JSParserImpl.h:128-131): the C++ does
+    /// `lexer_.seek(startPos); tok_ = lexer_.advance();`. Our lexer keeps the
+    /// current token internally, so we seek the lexer cursor then `advance`
+    /// (with `AllowRegExp`, matching the parameterless C++ `lexer_.advance()`).
+    ///
+    /// `dead_code`-allowed: the only caller so far is `parse_lazy_function`,
+    /// which is itself the not-yet-wired on-demand entry point.
+    #[allow(dead_code)]
+    pub(super) fn seek(&mut self, loc: SMLoc) {
+        self.lexer.seek(loc);
+        self.advance(GrammarContext::AllowRegExp);
+    }
+
+    /// On-demand parse of a single deferred function body. Called when a
+    /// previously lazy-stubbed function is first executed: the parser is seeked
+    /// back to `start` and the function is re-parsed eagerly so its real body
+    /// (instead of the lazy stub) is produced.
+    ///
+    /// Port of `JSParserImpl::parseLazyFunction` (JSParserImpl.cpp:7548-7600).
+    /// `kind` selects which eager entry point to drive; `param_yield`/
+    /// `param_await` restore the grammar context the function was originally
+    /// parsed in. Returns the re-parsed function node (the `FunctionExpression`,
+    /// `FunctionDeclaration`, or `ArrowFunctionExpression`), or — for accessors
+    /// and class methods — the `value` function extracted from the wrapping
+    /// `Property`/`MethodDefinition` node (cpp:7572,7591).
+    ///
+    /// `dead_code`-allowed: this is the on-demand re-parse entry point, invoked
+    /// by the (not-yet-ported) lazy-compilation driver. Covered by tests.
+    #[allow(dead_code)]
+    pub(super) fn parse_lazy_function(
+        &mut self,
+        kind: NodeKind,
+        param_yield: bool,
+        param_await: bool,
+        start: SMLoc,
+    ) -> Option<&'gc Node<'gc>> {
+        // cpp:7553-7556.
+        self.seek(start);
+        self.param_yield.set(param_yield);
+        self.param_await.set(param_await);
+
+        match kind {
+            // cpp:7559-7560.
+            NodeKind::FunctionExpression => {
+                self.parse_function_expression(/* force_eagerly= */ true)
+            }
+
+            // cpp:7562-7563.
+            NodeKind::FunctionDeclaration => {
+                self.parse_function_declaration(
+                    PARAM_RETURN,
+                    /* force_eagerly= */ true,
+                )
+            }
+
+            // cpp:7565-7566. parseAssignmentExpression(ParamIn, /*eagerly*/true)
+            // with the header defaults for the remaining args.
+            NodeKind::ArrowFunctionExpression => self.parse_assignment_expression(
+                PARAM_IN,
+                /* force_eagerly= */ true,
+                AllowTypedArrowFunction::Yes,
+                CoverTypedParameters::Yes,
+                None,
+            ),
+
+            // cpp:7568-7579. Re-parse the property; the deferred function is its
+            // `value`. `dyn_cast<PropertyNode>` failure is not technically
+            // unreachable (a fudged source buffer), so we just return None.
+            NodeKind::Property => {
+                let node = self.parse_property_assignment(/* eagerly= */ true)?;
+                match node {
+                    Node::Property(prop) => Some(prop.value),
+                    _ => {
+                        debug_assert!(
+                            false,
+                            "Expected a getter/setter function"
+                        );
+                        None
+                    }
+                }
+            }
+
+            // cpp:7581-7595. Re-parse a single class element; the deferred
+            // function is the `value` of the resulting `MethodDefinition`.
+            NodeKind::MethodDefinition => {
+                let mut body: Vec<&'gc Node<'gc>> = Vec::new();
+                let mut constructor: Option<&'gc Node<'gc>> = None;
+                let success = self.parse_class_body_impl(
+                    &mut body,
+                    &mut constructor,
+                    /* eagerly= */ true,
+                );
+                debug_assert!(
+                    success && body.len() == 1,
+                    "Unexpected parse_class_body_impl result"
+                );
+                if !success || body.len() != 1 {
+                    return None;
+                }
+                match body[0] {
+                    Node::MethodDefinition(method) => Some(method.value),
+                    _ => {
+                        debug_assert!(false, "Expected MethodDefinitionNode");
+                        None
+                    }
+                }
+            }
+
+            // cpp:7597-7598.
+            _ => unreachable!("Asked to parse unexpected node type"),
+        }
     }
 }
 
@@ -278,6 +395,96 @@ mod tests {
         let mut finder = LazyFinder(false);
         finder.visit_node(node);
         finder.0
+    }
+
+    /// Find the first `FunctionDeclaration` node in the AST and return it.
+    fn find_function_decl<'gc>(
+        node: &'gc ast::node::Node<'gc>,
+    ) -> Option<&'gc ast::node::Node<'gc>> {
+        use ast::node::Node;
+        use ast::visitor::Visitor;
+
+        struct FnFinder<'gc>(Option<&'gc Node<'gc>>);
+        impl<'gc> Visitor<'gc> for FnFinder<'gc> {
+            fn visit_node(&mut self, node: &'gc Node<'gc>) {
+                if self.0.is_some() {
+                    return;
+                }
+                if let Node::FunctionDeclaration(_) = node {
+                    self.0 = Some(node);
+                    return;
+                }
+                node.visit_children(self);
+            }
+        }
+
+        let mut finder = FnFinder(None);
+        finder.visit_node(node);
+        finder.0
+    }
+
+    // Demand-parsing a deferred function reproduces a non-stub body. We first
+    // PreParse + LazyParse (threshold 0) to get a skeleton whose function body
+    // is a lazy stub, then call `parse_lazy_function` at the function's start
+    // and assert the re-parsed body is eager (not a stub) and non-empty.
+    #[test]
+    fn parse_lazy_function_reparses_body() {
+        use ast::context::Context;
+        use ast::node::{Node, NodeKind};
+        use support::manager::SourceErrorManager;
+        use crate::lexer::{GrammarContext, JSLexer};
+        use crate::js::{JSParserImpl, ParserPass};
+
+        let src = b"function a(){ return 1 + 2; }\n";
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer_bytes("t", src);
+        let mut ctx = Context::new();
+        ctx.set_preemptive_function_compilation_threshold(0); // defer everything
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        // First PreParse to build the table.
+        let table = {
+            let l = JSLexer::new(id, &mut sm, atoms, GrammarContext::AllowRegExp);
+            let mut pp =
+                JSParserImpl::new_with_pass(&gc, l, ParserPass::PreParse);
+            pp.parse().unwrap();
+            pp.take_pre_parsed()
+        };
+        // LazyParse to build the skeleton with a lazy-stub body.
+        let l = JSLexer::new(id, &mut sm, atoms, GrammarContext::AllowRegExp);
+        let mut lp =
+            JSParserImpl::new_with_pass(&gc, l, ParserPass::LazyParse);
+        lp.set_pre_parsed(table);
+        let prog = lp.parse().unwrap();
+        assert!(has_lazy_stub(prog), "skeleton body should be a lazy stub");
+
+        // Grab the FunctionDeclaration's start location from the skeleton.
+        let func = find_function_decl(prog).expect("FunctionDeclaration");
+        let start = func.range().start;
+
+        // Demand-parse the deferred function body eagerly.
+        let body = lp
+            .parse_lazy_function(NodeKind::FunctionDeclaration, false, false, start)
+            .expect("parse_lazy_function should succeed");
+
+        // The result is a FunctionDeclaration whose body is a real (non-stub)
+        // BlockStatement containing the `return 1 + 2;` statement.
+        let Node::FunctionDeclaration(fd) = body else {
+            panic!("expected a FunctionDeclaration node");
+        };
+        let Node::BlockStatement(block) = fd.body else {
+            panic!("expected a BlockStatement body");
+        };
+        assert!(
+            !block.is_lazy_function_body.get(),
+            "re-parsed body must NOT be a lazy stub"
+        );
+        assert!(
+            !block.body.is_empty(),
+            "re-parsed body must contain statements"
+        );
+        // The single statement is the `return 1 + 2;`.
+        assert!(!has_lazy_stub(body), "re-parsed function has no lazy stub");
     }
 
     // LazyParse with threshold 0 defers a function body: the BlockStatement

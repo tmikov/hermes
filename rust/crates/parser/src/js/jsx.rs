@@ -424,6 +424,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         {
             let assign = self.parse_assignment_expression(
                 PARAM_IN,
+                false,
                 AllowTypedArrowFunction::Yes,
                 CoverTypedParameters::Yes,
                 None,
@@ -441,6 +442,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // C++ 280-286.
         let assign = self.parse_assignment_expression(
             PARAM_IN,
+            false,
             AllowTypedArrowFunction::Yes,
             CoverTypedParameters::Yes,
             None,
@@ -478,6 +480,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // C++ 304-306.
         let assign = self.parse_assignment_expression(
             PARAM_IN,
+            false,
             AllowTypedArrowFunction::Yes,
             CoverTypedParameters::Yes,
             None,
@@ -564,6 +567,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
             let assign = self.parse_assignment_expression(
                 PARAM_IN,
+                false,
                 AllowTypedArrowFunction::Yes,
                 CoverTypedParameters::Yes,
                 None,

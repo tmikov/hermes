@@ -579,7 +579,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// decorator list, the `static` modifier, empty `;` separators, the
     /// duplicate-constructor diagnostic, and the invalid `constructor` field
     /// name diagnostic.
-    fn parse_class_body_impl(
+    pub(super) fn parse_class_body_impl(
         &mut self,
         body: &mut Vec<&'gc Node<'gc>>,
         constructor: &mut Option<&'gc Node<'gc>>,
@@ -1022,7 +1022,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 // resolution.
                 let _guard_yield = self.save_param_yield(false);
                 let _guard_await = self.save_param_await(true);
-                value = Some(self.parse_assignment_expression(PARAM_IN, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?);
+                value = Some(self.parse_assignment_expression(PARAM_IN, false, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?);
                 if declare {
                     self.error_at(start_range, "Invalid 'declare' with initializer");
                 }

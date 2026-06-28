@@ -921,6 +921,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 {
                     value = Some(self.parse_assignment_expression(
                         PARAM_IN,
+                        false,
                         AllowTypedArrowFunction::Yes,
                         CoverTypedParameters::Yes,
                         None,

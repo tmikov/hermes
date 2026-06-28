@@ -364,6 +364,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         if self.check_and_eat(TokenKind::equal, GrammarContext::AllowRegExp) {
             init = Some(self.parse_assignment_expression(
                 PARAM_IN,
+                false,
                 AllowTypedArrowFunction::Yes,
                 CoverTypedParameters::Yes,
                 None,

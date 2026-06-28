@@ -467,8 +467,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     pub(super) fn parse_function_declaration(
         &mut self,
         param: Param,
+        force_eagerly: bool,
     ) -> Option<&'gc Node<'gc>> {
-        self.parse_function_helper(param, /* is_declaration= */ true, false)
+        self.parse_function_helper(
+            param,
+            /* is_declaration= */ true,
+            force_eagerly,
+        )
     }
 
     // -----------------------------------------------------------------------
@@ -478,11 +483,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Parse a function expression. Port of the thin wrapper
     /// `JSParserImpl::parseFunctionExpression(forceEagerly=false)` which calls
     /// `parseFunctionHelper(Param{}, /*isDeclaration*/ false, forceEagerly)`.
-    pub(super) fn parse_function_expression(&mut self) -> Option<&'gc Node<'gc>> {
+    pub(super) fn parse_function_expression(
+        &mut self,
+        force_eagerly: bool,
+    ) -> Option<&'gc Node<'gc>> {
         self.parse_function_helper(
             Param::default(),
             /* is_declaration= */ false,
-            false,
+            force_eagerly,
         )
     }
 }
