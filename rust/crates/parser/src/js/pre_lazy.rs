@@ -163,10 +163,6 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// `lexer_.seek(startPos); tok_ = lexer_.advance();`. Our lexer keeps the
     /// current token internally, so we seek the lexer cursor then `advance`
     /// (with `AllowRegExp`, matching the parameterless C++ `lexer_.advance()`).
-    ///
-    /// `dead_code`-allowed: the only caller so far is `parse_lazy_function`,
-    /// which is itself the not-yet-wired on-demand entry point.
-    #[allow(dead_code)]
     pub(super) fn seek(&mut self, loc: SMLoc) {
         self.lexer.seek(loc);
         self.advance(GrammarContext::AllowRegExp);
@@ -184,11 +180,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// `FunctionDeclaration`, or `ArrowFunctionExpression`), or — for accessors
     /// and class methods — the `value` function extracted from the wrapping
     /// `Property`/`MethodDefinition` node (cpp:7572,7591).
-    ///
-    /// `dead_code`-allowed: this is the on-demand re-parse entry point, invoked
-    /// by the (not-yet-ported) lazy-compilation driver. Covered by tests.
-    #[allow(dead_code)]
-    pub(super) fn parse_lazy_function(
+    pub fn parse_lazy_function(
         &mut self,
         kind: NodeKind,
         param_yield: bool,
@@ -196,11 +188,23 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         start: SMLoc,
     ) -> Option<&'gc Node<'gc>> {
         // cpp:7553-7556.
+        // For MethodDefinition, the class body is always strict (C++ line
+        // 4800/4881 in parseClassDeclaration/parseClassExpression). Strict
+        // mode MUST be set before `seek` → `advance` re-lexes the first
+        // token, because `static` (a future reserved word) is only recognised
+        // as `rw_static` in strict mode; in non-strict mode it is lexed as a
+        // plain identifier. Save and restore the strict flag around the whole
+        // demand-parse so callers are unaffected.
+        let old_strict = self.lexer.is_strict_mode();
+        if kind == NodeKind::MethodDefinition {
+            self.lexer.set_strict_mode(true);
+        }
+
         self.seek(start);
         self.param_yield.set(param_yield);
         self.param_await.set(param_await);
 
-        match kind {
+        let result = match kind {
             // cpp:7559-7560.
             NodeKind::FunctionExpression => {
                 self.parse_function_expression(/* force_eagerly= */ true)
@@ -243,6 +247,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
             // cpp:7581-7595. Re-parse a single class element; the deferred
             // function is the `value` of the resulting `MethodDefinition`.
+            // Class bodies are always strict; strict mode was set before
+            // `seek` above so the first token is lexed correctly.
             NodeKind::MethodDefinition => {
                 let mut body: Vec<&'gc Node<'gc>> = Vec::new();
                 let mut constructor: Option<&'gc Node<'gc>> = None;
@@ -251,25 +257,27 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     &mut constructor,
                     /* eagerly= */ true,
                 );
-                debug_assert!(
-                    success && body.len() == 1,
-                    "Unexpected parse_class_body_impl result"
-                );
                 if !success || body.len() != 1 {
-                    return None;
-                }
-                match body[0] {
-                    Node::MethodDefinition(method) => Some(method.value),
-                    _ => {
-                        debug_assert!(false, "Expected MethodDefinitionNode");
-                        None
+                    debug_assert!(false, "Unexpected parse_class_body_impl result");
+                    None
+                } else {
+                    match body[0] {
+                        Node::MethodDefinition(method) => Some(method.value),
+                        _ => {
+                            debug_assert!(false, "Expected MethodDefinitionNode");
+                            None
+                        }
                     }
                 }
             }
 
             // cpp:7597-7598.
             _ => unreachable!("Asked to parse unexpected node type"),
-        }
+        };
+
+        // Restore strict mode to the state before this demand-parse.
+        self.lexer.set_strict_mode(old_strict);
+        result
     }
 }
 
@@ -523,3 +531,4 @@ mod tests {
         );
     }
 }
+

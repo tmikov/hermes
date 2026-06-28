@@ -1134,7 +1134,6 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             type_params = Some(self.parse_type_params_flow()?);
         }
 
-        // (
         if !self.need(TokenKind::l_paren, " in method definition") {
             self.lexer.get_source_mgr_mut().note_at(
                 start_loc,
