@@ -60,7 +60,7 @@ fn load_fixture(name: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Parser wrappers
+// Parser wrappers (success path — black_box the result)
 // ---------------------------------------------------------------------------
 
 fn parse_hermes(src: &str) {
@@ -111,6 +111,91 @@ fn parse_boa(src: &str) {
 }
 
 // ---------------------------------------------------------------------------
+// Fairness assert helpers — each returns true if the parser errored as expected
+// ---------------------------------------------------------------------------
+
+/// Returns true if hermes reported a parse error (parse() returns None OR
+/// the SourceErrorManager has at least one error recorded).
+fn hermes_errors_on(src: &str) -> bool {
+    let bytes = src.as_bytes();
+    let mut sm = SourceErrorManager::new();
+    let buf_id = sm.add_buffer_bytes("bench", bytes);
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let result: Option<&Node> = {
+        let atoms = &gc.ctx().atom_table;
+        let lexer = JSLexer::new(buf_id, &mut sm, atoms, GrammarContext::AllowRegExp);
+        let mut p = JSParserImpl::new(&gc, lexer);
+        p.parse()
+    };
+    result.is_none() || sm.error_count() > 0
+}
+
+/// Returns true if SWC produced a parse error (Err result).
+fn swc_errors_on(src: &str) -> bool {
+    let cm: Lrc<SourceMap> = Default::default();
+    let fm = cm.new_source_file(
+        FileName::Custom("bench.js".into()).into(),
+        src.to_string(),
+    );
+    let lexer = Lexer::new(
+        Syntax::Es(Default::default()),
+        Default::default(),
+        StringInput::from(&*fm),
+        None,
+    );
+    let mut p = SwcParser::new_from(lexer);
+    p.parse_program().is_err()
+}
+
+/// Returns true if OXC produced at least one parse error.
+/// OXC 0.137.0 exposes diagnostics via `ParserReturn::diagnostics`.
+fn oxc_errors_on(src: &str) -> bool {
+    let allocator = Allocator::default();
+    let source_type = SourceType::default();
+    let result = oxc_parser::Parser::new(&allocator, src, source_type).parse();
+    !result.diagnostics.is_empty()
+}
+
+/// Returns true if Boa produced a parse error (Err result).
+fn boa_errors_on(src: &str) -> bool {
+    let scope = Scope::new_global();
+    let mut interner = Interner::default();
+    BoaParser::new(Source::from_bytes(src.as_bytes()))
+        .parse_script(&scope, &mut interner)
+        .is_err()
+}
+
+/// Run the fairness check: assert all four parsers error on every `.err` file.
+/// Panics with a clear diagnostic naming any parser that did NOT error.
+fn assert_error_fixtures(err_fixtures: &[(&str, String)]) {
+    let mut all_ok = true;
+    for (name, src) in err_fixtures {
+        let h = hermes_errors_on(src);
+        let s = swc_errors_on(src);
+        let o = oxc_errors_on(src);
+        let b = boa_errors_on(src);
+        if !h || !s || !o || !b {
+            all_ok = false;
+            eprintln!(
+                "FAIRNESS FAILURE on fixture '{name}': hermes={h} swc={s} oxc={o} boa={b}"
+            );
+        }
+    }
+    if all_ok {
+        println!(
+            "fairness check: all parsers errored on .err fixtures ✓"
+        );
+    } else {
+        panic!(
+            "Fairness check failed: one or more parsers did NOT error on a .err fixture. \
+             See stderr output above. A parser that succeeds on a corrupted fixture is \
+             lazy/short-circuiting and its throughput is not comparable."
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Benchmark
 // ---------------------------------------------------------------------------
 
@@ -119,6 +204,7 @@ fn bench_parse(c: &mut Criterion) {
         ("react", "react.development.js"),
         ("jquery", "jquery-3.7.1.js"),
         ("three_min", "three.min.js"),
+        ("typescript", "typescript.js"),
     ];
 
     // Load all fixtures upfront (panics with a helpful message if missing).
@@ -151,6 +237,58 @@ fn bench_parse(c: &mut Criterion) {
     }
 
     group.finish();
+
+    // -----------------------------------------------------------------------
+    // Error-variant group
+    //
+    // Each .err.js file is the corresponding valid fixture with a deliberately
+    // broken statement appended at EOF:
+    //     var __bench_parse_error__ = ;
+    // This forces every eager parser to traverse the whole file and then fail.
+    // A parser that succeeds on a .err file is lazy/short-circuiting; its
+    // throughput is not comparable to eager parsers.  The fairness assert
+    // below catches that case.
+    // -----------------------------------------------------------------------
+
+    let err_fixtures_spec: &[(&str, &str)] = &[
+        ("react", "react.development.err.js"),
+        ("jquery", "jquery-3.7.1.err.js"),
+        ("three_min", "three.min.err.js"),
+        ("typescript", "typescript.err.js"),
+    ];
+
+    let err_fixture_data: Vec<(&str, String)> = err_fixtures_spec
+        .iter()
+        .map(|(name, file)| (*name, load_fixture(file)))
+        .collect();
+
+    // Fairness gate: every parser must report a parse error on every .err file.
+    assert_error_fixtures(&err_fixture_data);
+
+    let mut err_group = c.benchmark_group("parse_err");
+
+    for (name, src) in &err_fixture_data {
+        let bytes = src.len() as u64;
+        err_group.throughput(Throughput::Bytes(bytes));
+
+        err_group.bench_function(BenchmarkId::new("hermes", name), |b| {
+            b.iter(|| parse_hermes(src));
+        });
+
+        err_group.bench_function(BenchmarkId::new("swc", name), |b| {
+            b.iter(|| parse_swc(src));
+        });
+
+        err_group.bench_function(BenchmarkId::new("oxc", name), |b| {
+            b.iter(|| parse_oxc(src));
+        });
+
+        err_group.bench_function(BenchmarkId::new("boa", name), |b| {
+            b.iter(|| parse_boa(src));
+        });
+    }
+
+    err_group.finish();
 }
 
 criterion_group!(benches, bench_parse);
