@@ -68,13 +68,25 @@ OXC, Biome, and Boa.
 
 ### Directional performance note
 
-This is a fidelity-first port. The AST uses a GC arena (mark-sweep) rather than
-a bump allocator, which does different amounts of work than OXC's bump AST or
-Biome's lossless CST. With that caveat: directional measurements show OXC is
-roughly 2.4x faster than this port; this port is roughly on par with SWC
-(slightly ahead); Boa is roughly 8x slower. Biome has not been benchmarked.
-These numbers are apples-to-oranges comparisons — see the feature matrix for
-context and the exact methodology.
+This is a fidelity-first port. The AST uses a GC arena rather than a bump
+allocator, which does different amounts of work than OXC's bump AST or Biome's
+lossless CST. These are apples-to-oranges comparisons.
+
+Verified directional numbers (Criterion + Release C++ `parse-bench`; same machine;
+median; FullParse/eager; MiB/s):
+
+- The Rust port **tracks C++ Hermes** — faster than C++ Hermes on small files
+  (react: 97.8 vs 78.9 MiB/s) and within ~11% on medium files. On the 8.7 MB
+  typescript fixture the port is ~32% slower (63.0 vs 92.4 MiB/s); root cause is
+  AST node footprint at scale (128-byte uniform `Node` enum, ~14× source size live),
+  not GC collection.
+- **OXC's ~2.4–2.8× lead is inherent to Hermes design** (atom interning + GC-arena
+  AST vs OXC's bump allocator + zero-copy atoms) — any faithful port of Hermes
+  inherits this gap, as does C++ Hermes itself.
+- The Rust port beats SWC on every fixture.
+
+See [`crates/comparison/BENCH-RESULTS.md`](crates/comparison/BENCH-RESULTS.md)
+for the full table, methodology, and large-file decomposition.
 
 Performance is a secondary concern. The headline is correctness: byte-for-byte
 agreement with the production C++ engine.

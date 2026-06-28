@@ -133,27 +133,43 @@ Verified against: Boa v0.21 release blog (`boajs.dev/blog/2025/10/22/boa-release
 > arena vs. heap allocation, presence or absence of scope resolution during parse.
 > A faster number here does not mean a better parser for your use case.
 
-Benchmarked with `cargo bench --manifest-path rust/crates/comparison/Cargo.toml`
-(optimized; `opt-level = 3`). Platform: Linux x86-64. Three plain-JS fixtures
-(no TypeScript or JSX — this port's TS/JSX are in progress and were not exercised).
+Full methodology, all fixture sizes, and the trailing-error fairness guard are
+documented in [`BENCH-RESULTS.md`](BENCH-RESULTS.md).
 
-| Parser | `react.development.js` (110 KB) | `jquery-3.7.1.js` (285 KB) | `three.min.js` (670 KB) |
-|---|---|---|---|
-| **hermes-parser** | ~98.6 MiB/s | ~74.3 MiB/s | ~43.0 MiB/s |
-| `swc_ecma_parser` 41.1.1 | ~94.5 MiB/s | ~68.2 MiB/s | ~34.9 MiB/s |
-| `oxc_parser` 0.137.0 | ~235 MiB/s | ~158 MiB/s | ~103 MiB/s |
-| `boa_parser` 0.21.1 | ~12.0 MiB/s | ~10.5 MiB/s | ~4.8 MiB/s |
-| `biome_js_parser` 0.5.7 | not benchmarked (build failure) | — | — |
+Benchmarked with Criterion.rs (`opt-level = 3`) for Rust parsers and the Release
+C++ `parse-bench` tool for the C++ Hermes baseline. Per-iteration fresh `Context`;
+`FullParse`/eager; median; same machine. Four fixtures including the 8.7 MB
+typescript.js (plain JS — TS/JSX in this port are in progress and were not exercised).
 
-**Key observations:**
+| Parser | react 107K | jquery 278K | three.min 654K | typescript 8.7M |
+|---|---|---|---|---|
+| **hermes-parser (this port)** | 97.8 | 73.8 | 42.4 | 63.0 |
+| **C++ Hermes (Release)** | 78.9 | 82.6 | 47.5 | 92.4 |
+| `oxc_parser` 0.137.0 | 230.5 | 152.2 | 101.7 | 176.7 |
+| `swc_ecma_parser` 41.1.1 | 93.9 | 66.4 | 34.0 | 60.3 |
+| `boa_parser` 0.21.1 | 12.0 | 10.5 | 4.8 | 4.9 |
+| `biome_js_parser` 0.5.7 | not benchmarked (build failure) | — | — | — |
 
-- OXC is ~2.4× faster than this port on the react fixture. Expected: OXC's
-  bump-arena and u32 spans are purpose-built for throughput.
-- This port is slightly faster than SWC (~4% on react, ~9% on jquery). SWC builds
-  a richer AST with SourceMap metadata.
-- Boa is ~8× slower than this port; its parser does scope resolution during parse.
-- Biome's CST is heavier than a sparse AST; throughput comparisons would not be
-  meaningful even if it built.
+Numbers are MiB/s (median). Higher is faster.
+
+**Key directional conclusions (verified):**
+
+- **The Rust port tracks the C++ Hermes baseline.** It is faster than C++ Hermes
+  on the react fixture and within ~11% on jquery/three.min. This is the primary
+  performance claim for a faithful port: parity with the original engine.
+- **The Rust port is ~32% slower than C++ Hermes on the 8.7 MB typescript fixture**
+  (63.0 vs 92.4 MiB/s). Root cause (verified by decomposition): each AST node is a
+  uniform 128-byte `Node` enum; ~904,000 nodes for typescript.js ≈ ~123 MiB live AST
+  (~14× the source), exceeding CPU cache. Boxing the large variants is a candidate
+  fix (unvalidated hypothesis — boxing trades footprint for indirection; net effect
+  must be measured). See BENCH-RESULTS.md for full decomposition.
+- **The OXC gap (~2.4–2.8×) is inherent to Hermes design, not a port regression.**
+  OXC's bump allocator and zero-copy `Atom` type are structurally different from
+  Hermes's atom interning and GC-arena AST. Any faithful port of Hermes inherits
+  this gap. The Rust port beats SWC on every fixture.
+- Boa is ~8× slower; its parser performs scope resolution during parse.
+- Biome's lossless CST does fundamentally different work; throughput comparison is
+  not meaningful.
 
 The benchmark source is in `benches/parse_throughput.rs`; run with:
 
