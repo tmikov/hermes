@@ -24,8 +24,11 @@ mod flow;
 mod functions;
 mod jsx;
 mod modules;
+mod pre_lazy;
 mod statements;
 mod ts;
+
+pub use pre_lazy::ParserPass;
 
 /// Whether import/export declarations are allowed in this statement list.
 /// Port of `JSParserImpl::AllowImportExport`.
@@ -213,6 +216,8 @@ pub struct JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// tags stay in JSX-child mode. In an `Rc<Cell<u32>>` so `JsxDepthGuard` can
     /// own a handle without borrowing `self` (see `JsxDepthGuard`).
     pub(super) jsx_depth: Rc<Cell<u32>>,
+    /// The current parser mode. Port of `pass_{FullParse}` (JSParserImpl.h:179).
+    pub(super) pass: ParserPass,
 }
 
 impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
@@ -236,7 +241,20 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             allow_anon_function_type: Rc::new(Cell::new(false)),
             allow_conditional_type: Rc::new(Cell::new(false)),
             jsx_depth: Rc::new(Cell::new(0)),
+            pass: ParserPass::FullParse,
         }
+    }
+
+    /// Construct the parser in a specific pass. Port of the C++
+    /// `JSParserImpl(Context&, bufferId, ParserPass)` ctor (JSParserImpl.cpp:39).
+    pub fn new_with_pass(
+        gc: &'gc GCLock<'ast, 'ctx>,
+        lexer: JSLexer<'a>,
+        pass: ParserPass,
+    ) -> Self {
+        let mut p = Self::new(gc, lexer);
+        p.pass = pass;
+        p
     }
 
     /// True if the parser detected `use static builtin`.
