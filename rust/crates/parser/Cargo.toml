@@ -16,6 +16,10 @@ path = "src/bin/json_parse_dump.rs"
 name = "gen-json"
 path = "src/bin/gen_json.rs"
 
+[[bin]]
+name = "preparse-dump"
+path = "src/bin/preparse_dump.rs"
+
 [lints.rust]
 unsafe_code = "deny"   # the cursor module (later) gets a scoped #[allow]; token tables are unsafe-free
 
