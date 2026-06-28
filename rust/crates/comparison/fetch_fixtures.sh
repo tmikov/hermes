@@ -41,5 +41,22 @@ download \
     "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js" \
     "three.min.js"
 
+# TypeScript 5.4.5 — compiled TypeScript compiler in plain JS (~8–9 MB)
+download \
+    "https://cdn.jsdelivr.net/npm/typescript@5.4.5/lib/typescript.js" \
+    "typescript.js"
+
+echo ""
+echo "Generating trailing-error variants..."
+
+# Generate .err.js variant for each fixture: append guaranteed syntax error
+for js_file in "$FIXTURES_DIR"/*.js; do
+    err_file="${js_file%.js}.err.js"
+    cp "$js_file" "$err_file"
+    printf '\nvar __bench_parse_error__ = ;\n' >> "$err_file"
+    echo "  created: $(basename "$err_file")"
+done
+
+echo ""
 echo "Done. Fixture sizes:"
-wc -c "$FIXTURES_DIR"/*.js
+ls -lh "$FIXTURES_DIR"/*.js | awk '{print $5 "\t" $9}'
