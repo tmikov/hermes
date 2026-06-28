@@ -1041,9 +1041,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// parameters in `left_expr`. Port of
     /// `JSParserImpl::parseArrowFunctionExpression` (lines 5818-5911).
     ///
-    /// Full-pass / eager port: the `pass_ == PreParse` block (5896-5908) is
-    /// omitted. `force_eagerly` is threaded for fidelity (feeds
-    /// `parse_function_body`), but is inert in the eager port.
+    /// The `pass_ == PreParse` block (cpp:5896-5908) is ported: when in
+    /// `PreParse` mode, `parse_function_body` records the body info in the
+    /// side-table (cpp:803-810). `force_eagerly` threads through to
+    /// `parse_function_body` for the `LazyParse` skip logic.
     ///
     /// The Flow `type_params`/`return_type`/`predicate` arguments attach to the
     /// resulting `ArrowFunctionExpression`; `allow_typed_arrow` is threaded into
@@ -1133,8 +1134,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // SaveFunctionState: lazy-compile bookkeeping, not modeled in the
-        // Full-pass port. (C++ 5849.)
+        // `SaveFunctionState` (cpp:5849) is constructed in the outer wrapper
+        // `parse_arrow_function_expression` (is_arrow=true), which covers both
+        // the parameter reparse above and the body below.
 
         // C++ 5854-5855: paramYield_ = false; paramAwait_ = isAsync (RAII).
         let _save_body_param_yield = self.save_param_yield(false);

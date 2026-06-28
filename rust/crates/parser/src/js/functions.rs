@@ -50,9 +50,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         force_eagerly: bool,
     ) -> Option<&'gc Node<'gc>> {
         let old_strict = self.lexer.is_strict_mode();
-        // SaveFunctionState guard — mirrors C++ SaveFunctionState (cpp:510).
-        // is_arrow=false: regular function resets the arrow-bookkeeping flags.
-        let _g = self.save_function_state(false);
+        // Note: the `SaveFunctionState` guard is constructed INSIDE
+        // `parse_function_helper_inner`, AFTER `parse_formal_parameters` —
+        // mirroring C++ cpp:510 which places it after `parseFormalParameters`
+        // (cpp:465) and before `parseFunctionBody`. This matters for default-
+        // parameter arrows: a `() => arguments` inside a default value must
+        // NOT set `contains_arrow_functions` on this function scope; it belongs
+        // to the enclosing scope.
         let old_seen_len = self.seen_directives.len();
         let result =
             self.parse_function_helper_inner(param, is_declaration, force_eagerly);
@@ -189,8 +193,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // SaveFunctionState: lazy-compile bookkeeping, not modeled in the
-        // Full-pass port. (C++ 510.)
+        // SaveFunctionState guard — mirrors C++ SaveFunctionState (cpp:510),
+        // which is placed AFTER parseFormalParameters and BEFORE
+        // parseFunctionBody. is_arrow=false: regular function resets the
+        // arrow-bookkeeping flags so that nested arrows are tracked relative to
+        // THIS function body, not a surrounding default-parameter expression.
+        // The guard owns `Rc<Cell<bool>>` clones, so no borrow of `self` is
+        // needed; it lives until the end of this function, covering the body.
+        let _sfs = self.save_function_state(false);
 
         // Grammar context to be used when lexing the closing brace. C++ 512-514.
         let grammar_context = if is_declaration {
@@ -199,8 +209,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             GrammarContext::AllowDiv
         };
 
-        // Full-pass only: the C++ PreParse path (516-560) is not ported (no
-        // lazy-compile pass yet); port only the eager tail (562-597).
+        // The C++ PreParse path (cpp:516-560) skips the AST with an
+        // AllocationScope and stores a blank-body node before parsing. Rust
+        // replicates the PreParse *recording* (cpp:803-810) inside
+        // `parse_function_body`; the only thing intentionally not replicated is
+        // the blank-body + AllocationScope memory shortcut — the GC arena
+        // reclaims nodes when the PreParse GCLock is dropped. Port continues
+        // with the eager tail (cpp:562-597).
         //
         // The body's paramYield/paramAwait are the args+body values
         // (is_generator/is_async) — in the Full-pass port these are inert, but

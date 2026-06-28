@@ -98,6 +98,16 @@ fn func_value_block_info<'gc>(value: &'gc Node<'gc>) -> Option<(bool, bool, bool
 fn collect_funcs<'gc>(node: &'gc Node<'gc>, out: &mut BTreeMap<u32, FuncEntry>) {
     match node {
         Node::FunctionDeclaration(fd) => {
+            // Anonymous FunctionDeclarations (`export default function(){}`)
+            // cannot be re-parsed via `parse_lazy_function` because it calls
+            // `parse_function_declaration(PARAM_RETURN, …)` which requires a
+            // name. Skip them; they are always a direct child of
+            // `ExportDefaultDeclaration` and have no nested functions that
+            // would be missed by the overall recursive walk.
+            if fd.id.is_none() {
+                collect_funcs(fd.body, out);
+                return;
+            }
             let (is_stub, py, pa) = block_info(fd.body);
             out.insert(
                 node.range().start.offset,
@@ -228,6 +238,11 @@ fn collect_eager_body_strings<'gc>(
 ) {
     match node {
         Node::FunctionDeclaration(fd) => {
+            // Skip anonymous FunctionDeclarations (see collect_funcs note).
+            if fd.id.is_none() {
+                collect_eager_body_strings(fd.body, atoms, out);
+                return;
+            }
             let start = node.range().start.offset;
             out.insert(start, dump_node(fd.body, atoms));
             collect_eager_body_strings(fd.body, atoms, out);
@@ -548,40 +563,36 @@ fn lazy_corpus_reparse_equivalence() {
     );
 }
 
-/// A selection of files from the standard parser corpus.
+/// All files from the standard parser corpus (sorted, deterministic).
+/// Files that contain no function-like nodes contribute 0 comparisons and
+/// are silently skipped by the check_file logic; we assert that at least 10
+/// body comparisons actually happened across all thresholds so a mass-rename
+/// cannot silently hollow out the test.
 #[test]
 fn parser_corpus_reparse_equivalence() {
-    const SELECTED: &[&str] = &[
-        "class_basic.js",
-        "class_methods.js",
-        "func_basic.js",
-        "func_generator.js",
-        "func_async.js",
-        "arrow.js",
-        "expr_object.js",
-    ];
-    let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/parser_corpus");
+    let files = corpus_files("tests/parser_corpus");
+    assert!(!files.is_empty(), "parser corpus is empty");
     let mut total_files = 0usize;
     let mut total_comparisons = 0usize;
-    let mut skipped = 0usize;
-    for name in SELECTED {
-        let path = base.join(name);
-        if !path.exists() {
-            eprintln!("skip (not found): {name}");
-            skipped += 1;
-            continue;
-        }
-        let src = std::fs::read(&path)
+    for path in &files {
+        let src = std::fs::read(path)
             .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+        let label = path.file_name().unwrap().to_string_lossy().into_owned();
         for &thresh in &THRESHOLDS {
-            let n = check_file(src.as_slice(), name, thresh);
+            let n = check_file(&src, &label, thresh);
             total_comparisons += n;
         }
         total_files += 1;
     }
+    assert!(
+        total_comparisons >= 10,
+        "parser_corpus_reparse_equivalence: only {total_comparisons} body \
+         comparisons — expected at least 10; check that corpus files with \
+         functions still exist"
+    );
     eprintln!(
         "parser_corpus_reparse_equivalence: {total_files} files × {} thresholds, \
-         {total_comparisons} body comparisons — all passed ({skipped} skipped)",
+         {total_comparisons} body comparisons — all passed",
         THRESHOLDS.len(),
     );
 }
