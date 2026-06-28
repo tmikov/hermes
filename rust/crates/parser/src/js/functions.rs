@@ -10,11 +10,10 @@
 //! (`parseFunctionHelper`, `parseFormalParameters`, `parseFunctionBody`,
 //! `parseFunctionDeclaration`, `parseFunctionExpression`).
 //!
-//! Full-pass / eager port only: there is no PreParse/LazyParse machinery, so
-//! the `pass_ == PreParse`/`pass_ == LazyParse` blocks are omitted (see the
-//! individual comments). The Flow signature sites (type parameters, return
-//! type, `%checks` predicate, leading `this` parameter) are ported (P5.4);
-//! the TS blocks are omitted (P7).
+//! The PreParse side-table recording (cpp:803-810) and LazyParse skip-and-stub
+//! block (cpp:747-796) are both implemented in `parse_function_body`. The Flow
+//! signature sites (type parameters, return type, `%checks` predicate, leading
+//! `this` parameter) are ported (P5.4); the TS blocks are omitted (P7).
 
 use ast::node::{FunctionDeclaration, FunctionExpression, Identifier, Node};
 use ast::node_child::{NodeList, NodeMetadata};
@@ -339,23 +338,99 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Parse a function body (a brace-enclosed block in the `[Return]` context).
     /// Port of `JSParserImpl::parseFunctionBody` (lines 740-813).
     ///
-    /// The `pass_ == LazyParse && !eagerly` block (747-797) is omitted (lazy
-    /// compile not yet ported). The `pass_ == PreParse` store (803-810) IS
-    /// implemented: after the block parses we record a `PreParsedFunctionInfo`
-    /// keyed by the block's start offset (the `{` location) so that a
-    /// subsequent `LazyParse` can skip the body. The `eagerly`/`param_yield`/
-    /// `param_await` params are threaded for fidelity but have no observable
-    /// effect in the Full-pass port.
+    /// The `pass_ == LazyParse && !eagerly` block (747-797) is now ported: when
+    /// in LazyParse mode and the body is not forced eager, we seek past it and
+    /// return a stub `BlockStatement` with `is_lazy_function_body=true`.
+    /// The `pass_ == PreParse` store (803-810) records `PreParsedFunctionInfo`
+    /// for a subsequent `LazyParse` to consume.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn parse_function_body(
         &mut self,
         _param: Param,
-        _eagerly: bool,
-        _param_yield: bool,
-        _param_await: bool,
+        eagerly: bool,
+        param_yield: bool,
+        param_await: bool,
         grammar_context: GrammarContext,
         parse_directives: bool,
     ) -> Option<&'gc Node<'gc>> {
+        // cpp:747-796 — LazyParse skip block: if we are in LazyParse mode and
+        // the function is not forced eager, skip the body by seeking past it
+        // and return a stub BlockStatement with the decoration fields set.
+        if self.pass == ParserPass::LazyParse && !eagerly {
+            let start = self.cur_start();
+            // The pre-parse table is keyed by the `{` offset.
+            let info = self
+                .pre_parsed
+                .function_info
+                .get(&start.offset)
+                .expect("no function info stored during preparse")
+                .clone();
+            let end = info.end;
+            if (end.offset - start.offset) as u32
+                >= self.gc.ctx().preemptive_function_compilation_threshold()
+            {
+                // Seek the lexer past the closing `}` and scan the next token
+                // (which is the token *after* the `}`, i.e. past the body).
+                self.lexer.seek(end);
+                self.advance(grammar_context);
+                // Ensure prev_token_end reflects the `}` position because
+                // seek() bypassed the normal advance() bookkeeping.
+                // C++ line 763.
+                self.lexer.set_prev_token_end_loc(end);
+                // Propagate "use strict" from the pre-parsed info so that code
+                // after the body sees the correct strictness. C++ line 766.
+                self.lexer.set_strict_mode(info.strict_mode);
+
+                // Build stub directive nodes: one ExpressionStatement wrapping
+                // a StringLiteral per directive recorded during PreParse.
+                // C++ lines 771-778.
+                use ast::node::{
+                    BlockStatement, ExpressionStatement, StringLiteral,
+                };
+                let mut stmt_list: Vec<&'gc Node<'gc>> = Vec::new();
+                for dir_bytes in &info.directives {
+                    // Re-intern the raw directive bytes into the current
+                    // session's atom table (atoms are arena-scoped).
+                    let atom = self.lexer.get_identifier(dir_bytes);
+                    let str_node = Node::StringLiteral(StringLiteral::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        atom,
+                    ));
+                    let str_lit =
+                        self.set_location(start, end, str_node);
+                    let dir_stmt =
+                        Node::ExpressionStatement(ExpressionStatement::new(
+                            NodeMetadata::new(self.dummy_range()),
+                            str_lit,
+                            atom,
+                        ));
+                    stmt_list.push(self.gc.alloc(dir_stmt));
+                }
+
+                // Build the stub BlockStatement. C++ lines 780-794.
+                let stmts = NodeList::from_iter(self.gc, stmt_list);
+                let body_node =
+                    Node::BlockStatement(BlockStatement::new(
+                        NodeMetadata::new(self.dummy_range()),
+                        stmts,
+                        false,
+                    ));
+                let body = self.set_location(start, end, body_node);
+                // Set lazy decoration fields.
+                if let Node::BlockStatement(b) = body {
+                    b.is_lazy_function_body.set(true);
+                    b.param_yield.set(param_yield);
+                    b.param_await.set(param_await);
+                    b.buffer_id.set(self.lexer.get_buffer_id().index());
+                    b.contains_arrow_functions
+                        .set(info.contains_arrow_functions);
+                    b.may_contain_arrow_functions_using_arguments
+                        .set(info.may_contain_arrow_functions_using_arguments);
+                }
+                return Some(body);
+            }
+        }
+
         let body = self.parse_block(PARAM_RETURN, grammar_context, parse_directives)?;
 
         // cpp:803-810 — record this function body in the PreParse side-table so

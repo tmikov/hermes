@@ -29,6 +29,7 @@ pub enum ParserPass {
 /// Information about a pre-parsed function body, recorded during the
 /// `PreParse` pass and consumed during `LazyParse`.
 /// Port of `PreParsedFunctionInfo` (PreParser.h:38-58).
+#[derive(Clone)]
 pub struct PreParsedFunctionInfo {
     /// The end location of the function body (closing `}`).
     pub end: SMLoc,
@@ -250,5 +251,68 @@ mod tests {
             .filter(|i| !i.directives.is_empty())
             .count();
         assert_eq!(with_dir, 1);
+    }
+
+    /// Walk the AST looking for a BlockStatement with
+    /// `is_lazy_function_body == true`.
+    fn has_lazy_stub<'gc>(node: &'gc ast::node::Node<'gc>) -> bool {
+        use ast::node::Node;
+        use ast::visitor::Visitor;
+
+        struct LazyFinder(bool);
+        impl<'gc> Visitor<'gc> for LazyFinder {
+            fn visit_node(&mut self, node: &'gc Node<'gc>) {
+                if self.0 {
+                    return;
+                }
+                if let Node::BlockStatement(b) = node {
+                    if b.is_lazy_function_body.get() {
+                        self.0 = true;
+                        return;
+                    }
+                }
+                node.visit_children(self);
+            }
+        }
+
+        let mut finder = LazyFinder(false);
+        finder.visit_node(node);
+        finder.0
+    }
+
+    // LazyParse with threshold 0 defers a function body: the BlockStatement
+    // is a lazy stub.
+    #[test]
+    fn lazyparse_defers_body() {
+        use ast::context::Context;
+        use support::manager::SourceErrorManager;
+        use crate::lexer::{GrammarContext, JSLexer};
+        use crate::js::{JSParserImpl, ParserPass};
+
+        let src = b"function a(){ return 1 + 2; }\n";
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer_bytes("t", src);
+        let mut ctx = Context::new();
+        ctx.set_preemptive_function_compilation_threshold(0); // defer everything
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        // First PreParse to build the table.
+        let table = {
+            let l = JSLexer::new(id, &mut sm, atoms, GrammarContext::AllowRegExp);
+            let mut pp =
+                JSParserImpl::new_with_pass(&gc, l, ParserPass::PreParse);
+            pp.parse().unwrap();
+            pp.take_pre_parsed()
+        };
+        let l = JSLexer::new(id, &mut sm, atoms, GrammarContext::AllowRegExp);
+        let mut lp =
+            JSParserImpl::new_with_pass(&gc, l, ParserPass::LazyParse);
+        lp.set_pre_parsed(table);
+        let prog = lp.parse().unwrap();
+        // Walk to the function's body and assert it's a lazy stub.
+        assert!(
+            has_lazy_stub(prog),
+            "expected a lazy function body stub"
+        );
     }
 }
