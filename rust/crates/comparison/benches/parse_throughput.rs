@@ -39,6 +39,7 @@ use oxc_allocator::Allocator;
 use oxc_span::SourceType;
 use parser::js::JSParserImpl;
 use parser::lexer::{GrammarContext, JSLexer};
+use parser::token_kinds::TokenKind;
 use support::manager::SourceErrorManager;
 use swc_common::sync::Lrc;
 use swc_common::{FileName, SourceMap};
@@ -76,6 +77,26 @@ fn parse_hermes(src: &str) {
         p.parse()
     };
     black_box(_result);
+}
+
+/// Lex-only benchmark: drive the lexer to EOF without building any AST.
+/// This isolates lexing + identifier-interning from AST-node construction.
+fn lex_only_hermes(src: &str) {
+    let bytes = src.as_bytes();
+    let mut sm = SourceErrorManager::new();
+    let buf_id = sm.add_buffer_bytes("bench", bytes);
+    // We need an AtomTable for the lexer to intern identifiers into.
+    // Allocate it through a throw-away Context so the API matches parse_hermes.
+    let ctx = Context::new();
+    let atoms = &ctx.atom_table;
+    let mut lexer = JSLexer::new(buf_id, &mut sm, atoms, GrammarContext::AllowRegExp);
+    // Advance through every token until EOF.
+    loop {
+        let tok = lexer.advance(GrammarContext::AllowRegExp);
+        if black_box(tok.kind()) == TokenKind::eof {
+            break;
+        }
+    }
 }
 
 fn parse_swc(src: &str) {
@@ -291,5 +312,47 @@ fn bench_parse(c: &mut Criterion) {
     err_group.finish();
 }
 
-criterion_group!(benches, bench_parse);
+// ---------------------------------------------------------------------------
+// Lex-only decomposition benchmark (Task 5)
+//
+// Runs only the Hermes lexer to EOF on each fixture — no JSParserImpl, no AST
+// construction.  Comparing `lex_only/hermes/<fixture>` to
+// `parse/hermes/<fixture>` decomposes the full-parse cost into:
+//   * lexing + identifier-interning   (lex_only portion)
+//   * AST-node construction           (remainder)
+//
+// If the lex_only throughput is much higher than full-parse on large files but
+// not on small files, AST-construction cost scales super-linearly (e.g. due to
+// node footprint / cache pressure), which is the leading hypothesis for the
+// ~32% Rust-vs-C++ gap on typescript.js.
+// ---------------------------------------------------------------------------
+
+fn bench_lex_only(c: &mut Criterion) {
+    let fixtures: &[(&str, &str)] = &[
+        ("react", "react.development.js"),
+        ("jquery", "jquery-3.7.1.js"),
+        ("three_min", "three.min.js"),
+        ("typescript", "typescript.js"),
+    ];
+
+    let fixture_data: Vec<(&str, String)> = fixtures
+        .iter()
+        .map(|(name, file)| (*name, load_fixture(file)))
+        .collect();
+
+    let mut group = c.benchmark_group("lex_only");
+
+    for (name, src) in &fixture_data {
+        let bytes = src.len() as u64;
+        group.throughput(Throughput::Bytes(bytes));
+
+        group.bench_function(BenchmarkId::new("hermes", name), |b| {
+            b.iter(|| lex_only_hermes(src));
+        });
+    }
+
+    group.finish();
+}
+
+criterion_group!(benches, bench_parse, bench_lex_only);
 criterion_main!(benches);
