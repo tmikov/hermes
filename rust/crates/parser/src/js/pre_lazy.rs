@@ -88,9 +88,37 @@ impl Drop for SaveFunctionState {
     }
 }
 
+use crate::lexer::JSLexer;
+
 use super::JSParserImpl;
 
 impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
+    /// Pre-parse a source buffer: build a `PreParse`-mode parser, set strict
+    /// mode if requested, run `parse()`, and return the parser so the caller
+    /// can extract `take_pre_parsed()` and `get_use_static_builtin()`.
+    ///
+    /// Returns `None` if parsing fails (syntax error). Returns `Some(parser)`
+    /// on success; the caller owns the pre-parsed side-table via `take_pre_parsed()`.
+    ///
+    /// Port of `JSParserImpl::preParseBuffer` (JSParserImpl.cpp:7534-7546).
+    /// Deviation from C++:
+    /// - C++ wraps both the `AllocationScope` and the parser in a `PreParser`
+    ///   struct and returns a `shared_ptr<JSParserImpl>` aliased to that struct,
+    ///   so the scope is kept alive as long as the pointer lives. In Rust there
+    ///   is no `AllocationScope`; nodes are arena-allocated in the `GCLock` and
+    ///   reclaimed when the lock is dropped. The caller controls the lock
+    ///   lifetime independently, so we simply return the parser itself.
+    pub fn pre_parse_buffer(
+        gc: &'gc ast::context::GCLock<'ast, 'ctx>,
+        lexer: JSLexer<'a>,
+        strict: bool,
+    ) -> Option<JSParserImpl<'gc, 'ast, 'ctx, 'a>> {
+        let mut p = JSParserImpl::new_with_pass(gc, lexer, ParserPass::PreParse);
+        p.lexer.set_strict_mode(strict);
+        p.parse()?;
+        Some(p)
+    }
+
     /// Construct a `SaveFunctionState` guard that saves and restores the three
     /// arrow-bookkeeping flags on Drop. Also sets the flags for the new
     /// function scope. Port of the `SaveFunctionState` ctor
@@ -189,5 +217,38 @@ mod tests {
         assert!(!p.contains_arrow_functions.get(), "contains_arrow restored");
         // Verify strict-mode restore is the caller's responsibility.
         assert!(!p.lexer.is_strict_mode(), "strict was never changed by guard");
+    }
+
+    // PreParse over a file with two functions records both, with correct strict
+    // flag and directives.
+    #[test]
+    fn preparse_records_functions() {
+        use ast::context::Context;
+        use support::manager::SourceErrorManager;
+        use crate::lexer::{GrammarContext, JSLexer};
+        use crate::js::{JSParserImpl, ParserPass};
+
+        let src = b"function a(){ 'use strict'; return 1; }\nvar b = () => 2;\n";
+        let mut sm = SourceErrorManager::new();
+        let id = sm.add_buffer_bytes("t", src);
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let lexer = JSLexer::new(id, &mut sm, atoms, GrammarContext::AllowRegExp);
+        let mut p = JSParserImpl::new_with_pass(&gc, lexer, ParserPass::PreParse);
+        assert!(p.parse().is_some());
+        let t = p.take_pre_parsed();
+        // function a's body { ... } and the arrow are both recorded.
+        assert_eq!(t.function_info.len(), 2);
+        // exactly one recorded function is strict (function a, due to 'use strict').
+        let strict_count =
+            t.function_info.values().filter(|i| i.strict_mode).count();
+        assert_eq!(strict_count, 1);
+        let with_dir = t
+            .function_info
+            .values()
+            .filter(|i| !i.directives.is_empty())
+            .count();
+        assert_eq!(with_dir, 1);
     }
 }

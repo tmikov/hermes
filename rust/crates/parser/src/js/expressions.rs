@@ -33,6 +33,7 @@ use crate::token_kinds::TokenKind;
 
 use super::flow::AllowAnonFunctionType;
 use super::flow::{AllowTypedArrowFunction, CoverTypedParameters};
+use super::pre_lazy::{ParserPass, PreParsedFunctionInfo};
 use super::{
     IsClassHeritageArgument, IsConstructorCall, JSParserImpl, Param, PARAM_IN, PARAM_RETURN,
     PARAM_TAGGED,
@@ -1175,7 +1176,43 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 expression,
                 is_async,
             ));
-        Some(self.set_location(start_loc, end, node))
+        let arrow = self.set_location(start_loc, end, node);
+
+        // cpp:5896-5908 — record the arrow function in the PreParse side-table.
+        // The C++ uses try_emplace + assert(inserted) because an arrow can only
+        // appear once at a given source offset. We mirror the assert with a
+        // debug_assert on the vacant-entry path. The C++ uses an AllocationScope
+        // to discard the AST; Rust lets the GC arena reclaim nodes after the
+        // PreParse GCLock is dropped.
+        //
+        // Collect side-table values before entering the HashMap entry API to
+        // avoid overlapping (&self, &mut self) borrows.
+        if self.pass == ParserPass::PreParse {
+            use std::collections::hash_map::Entry;
+            let key = start_loc.offset;
+            let info = PreParsedFunctionInfo {
+                end: body.range().end,
+                strict_mode: self.lexer.is_strict_mode(),
+                directives: self.copy_seen_directives(),
+                contains_arrow_functions: self.contains_arrow_functions.get(),
+                may_contain_arrow_functions_using_arguments: self
+                    .may_contain_arrow_functions_using_arguments
+                    .get(),
+            };
+            match self.pre_parsed.function_info.entry(key) {
+                Entry::Vacant(e) => {
+                    e.insert(info);
+                }
+                Entry::Occupied(_) => {
+                    debug_assert!(
+                        false,
+                        "duplicate arrow start offset in PreParse table"
+                    );
+                }
+            }
+        }
+
+        Some(arrow)
     }
 
     // -----------------------------------------------------------------------

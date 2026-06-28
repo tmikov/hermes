@@ -23,6 +23,7 @@ use crate::lexer::GrammarContext;
 use crate::token_kinds::TokenKind;
 
 use super::flow::AllowAnonFunctionType;
+use super::pre_lazy::{ParserPass, PreParsedFunctionInfo};
 use super::{JSParserImpl, Param, PARAM_DEFAULT, PARAM_RETURN};
 
 impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
@@ -338,12 +339,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Parse a function body (a brace-enclosed block in the `[Return]` context).
     /// Port of `JSParserImpl::parseFunctionBody` (lines 740-813).
     ///
-    /// Full-pass / eager port only: the `pass_ == LazyParse && !eagerly` block
-    /// (747-797) and the `pass_ == PreParse` store (803-810) are omitted; only
-    /// the eager `parseBlock(ParamReturn, ...)` tail (799-801) is ported. The
-    /// `eagerly`/`param_yield`/`param_await` params are threaded for fidelity
-    /// (callers pass them) but in the Full-pass port the body is always parsed
-    /// eagerly, so they have no observable effect.
+    /// The `pass_ == LazyParse && !eagerly` block (747-797) is omitted (lazy
+    /// compile not yet ported). The `pass_ == PreParse` store (803-810) IS
+    /// implemented: after the block parses we record a `PreParsedFunctionInfo`
+    /// keyed by the block's start offset (the `{` location) so that a
+    /// subsequent `LazyParse` can skip the body. The `eagerly`/`param_yield`/
+    /// `param_await` params are threaded for fidelity but have no observable
+    /// effect in the Full-pass port.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn parse_function_body(
         &mut self,
@@ -354,7 +356,29 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         grammar_context: GrammarContext,
         parse_directives: bool,
     ) -> Option<&'gc Node<'gc>> {
-        self.parse_block(PARAM_RETURN, grammar_context, parse_directives)
+        let body = self.parse_block(PARAM_RETURN, grammar_context, parse_directives)?;
+
+        // cpp:803-810 — record this function body in the PreParse side-table so
+        // that a subsequent LazyParse run can skip over it. The C++ uses an
+        // AllocationScope to discard the AST; Rust just lets the GC arena
+        // reclaim nodes after the PreParse GCLock is dropped.
+        if self.pass == ParserPass::PreParse {
+            let key = body.range().start.offset;
+            self.pre_parsed.function_info.insert(
+                key,
+                PreParsedFunctionInfo {
+                    end: body.range().end,
+                    strict_mode: self.lexer.is_strict_mode(),
+                    directives: self.copy_seen_directives(),
+                    contains_arrow_functions: self.contains_arrow_functions.get(),
+                    may_contain_arrow_functions_using_arguments: self
+                        .may_contain_arrow_functions_using_arguments
+                        .get(),
+                },
+            );
+        }
+
+        Some(body)
     }
 
     // -----------------------------------------------------------------------
