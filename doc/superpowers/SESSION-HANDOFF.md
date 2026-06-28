@@ -4,8 +4,8 @@ Hand this to a new session to restore context. It **references** the authoritati
 (read them; don't trust this summary over them) and records the conventions, file map,
 validation commands, and workflow.
 
-> **Date of handoff:** 2026-06-19. **Branch:** `rust` (base is `static_h`, NOT `main`).
-> **Status:** the **JS lexer**, **JSONParser**, and the **AST are COMPLETE**, and the **JS Parser is IN PROGRESS** —
+> **Date of handoff:** 2026-06-28. **Branch:** `rust` (base is `static_h`, NOT `main`).
+> **Status:** the **JS lexer**, **JSONParser**, the **AST**, and now the **JS Parser are ALL COMPLETE** —
 > **phases P0 (foundations + `parser_differential` gate), P1 (value expressions), P2 (statements & declarations), P3 (functions, classes,
 > arrows, async/generators, methods, `super`, `yield`, decorators), P4 (modules), P5 (the FLOW TYPE GRAMMAR + declarative integration),
 > P6 (the REST OF FLOW), P7 (ALL of TYPESCRIPT), and P8 (JSX) are DONE**, byte-for-byte vs `hermesc -dump-ast` (+ the matching
@@ -16,7 +16,11 @@ validation commands, and workflow.
 > `declare` (P6), TypeScript's full type grammar + interface/enum/namespace + `<Type>` casts/`as`/typed arrows/class modifiers/`import type`
 > (P7), and JSX elements/fragments/children/attributes/spread/expression-containers/namespaced+member names/closing-tag matching (P8), behind
 > seven `Context` flags (`parse_flow` + `parse_flow_ambiguous`/`_component_syntax`/`_records`/`_match`, `parse_ts` — mutually exclusive with
-> `parse_flow` — and `parse_jsx`, an independent flag) that do NOT leak into plain JS. **Only the Pre/Lazy passes remain.**
+> `parse_flow` — and `parse_jsx`, an independent flag) that do NOT leak into plain JS. **The Pre/Lazy passes are now DONE too — the three-pass
+> Full/Pre/Lazy machinery + `parse_lazy_function`, gated by two oracles (Oracle B: a C++ `preparse-dump` byte-for-byte side-table differential vs
+> hermesc; Oracle A: Rust-only reparse-equivalence of deferred bodies vs the eager AST). So the PARSER COMPONENT IS COMPLETE; the next component
+> is Sema.** (See the roadmap's "✅ JS Parser — COMPLETE" Pre/Lazy block for detail, incl. the two capstone-caught bugs: strict-mode must be set by
+> the CALLER of `parse_lazy_function` per `HBC.cpp:158`, and `SaveFunctionState` must be constructed AFTER formal params per cpp:510.)
 > **Read `doc/superpowers/RustPortRoadmap.md` (the "🚧 JS Parser" section, the P5 + P6 + P7 + P8 DONE blocks) for the authoritative detail,
 > the remaining deferral set (→ the **Pre/Lazy passes**: the `pass_`/PreParse/Lazy machinery + `SaveFunctionState` the eager Full pass
 > no-ops; the `_param_yield`/`_param_await` args threaded into `parse_function_body` are the dormant hooks), and the review-caught bugs.
@@ -31,15 +35,14 @@ validation commands, and workflow.
 > `specs/2026-06-06-js-parser-design.md`, `plans/2026-06-06-js-parser-{p0,p1,p2}…`, `…p3…`, `…p4…`,
 > `2026-06-09-js-parser-p5-flow-types.md`, `2026-06-13-js-parser-p6-flow-extensions.md`, `2026-06-19-js-parser-p7-typescript.md`,
 > `2026-06-19-js-parser-p8-jsx.md`.
-> **NEXT: the Pre/Lazy passes** (the three-pass Full/Pre/Lazy machinery — `SaveFunctionState`, lazy-function deferral, the `pass_` blocks the
-> eager Full pass currently no-ops). After that the Parser component is COMPLETE and **Sema** (scope resolution + FlowChecker) is the next
-> component. **⚠️ OPEN DESIGN QUESTION — brainstorm BEFORE writing the plan:** unlike P0–P8, this phase is parsing-strategy *infrastructure*,
-> not grammar, and the `-dump-ast` differential that gated every prior phase will NOT naturally exercise it — the eager Full pass yields the
-> same AST as a lazy parse by construction, so byte-for-byte-vs-`hermesc -dump-ast` is blind to whether lazy parsing even ran. Decide the
-> validation oracle first (candidates: reparse-equivalence — lazily-deferred function bodies reparse to the same AST as eager; deferred-region
-> tracking; or a `hermes`/`shermes` lazy-compile flag that exposes observable lazy behavior). Open the session with the
-> `superpowers:brainstorming` skill on this, THEN `writing-plans`. Write each phase plan just-in-time (lexer/P1–P8-style) and execute
-> subagent-driven. juno has no parser to crib from (`hparser` is FFI-to-C++); port the C++ directly.
+> **NEXT: Sema** (scope resolution + FlowChecker) — the Parser is now COMPLETE. The Pre/Lazy open design question (how to validate
+> lazy parsing when `-dump-ast` is blind to it) was resolved in `specs/2026-06-28-pre-lazy-passes-design.md`: TWO oracles — Oracle B (a C++
+> `tools/preparse-dump/` tool + Rust bin + byte-for-byte `preparse_differential` of the `PreParsedBufferInfo` side-table vs hermesc, 13+76 files)
+> and Oracle A (Rust-only `lazy_reparse` proving deferred bodies reparse to the eager hermesc-verified AST). Both shipped; the capstone caught a
+> real flag-attribution bug a corpus-gated differential alone would miss (default-param arrows — `SaveFunctionState` was built before params
+> instead of after; cpp:510). **Sema has no `-dump-ast` analog either — decide its validation oracle during brainstorming.** Open the session with
+> `superpowers:brainstorming`, THEN `writing-plans`. Write each phase plan just-in-time and execute subagent-driven. juno has no parser to crib
+> from (`hparser` is FFI-to-C++); port the C++ directly.
 > The parser proper lives in `rust/crates/parser/src/js/{mod,expressions,statements,functions,classes,modules,jsx}.rs` +
 > **`js/flow/{mod,declarations,types,function_types,object_types,params,match_}.rs`** + **`js/ts/{mod,types,function_types,object_types,
 > declarations,params}.rs`**; the gate is `REQUIRE_DIFFERENTIAL=1 cargo test -p parser --test parser_differential` (build `ast-dump`
