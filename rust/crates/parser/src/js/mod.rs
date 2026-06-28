@@ -9,6 +9,7 @@
 //! Recursive-descent LL(1) over `JSLexer`, building the `ast` ESTree.
 
 use std::cell::Cell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use ast::context::GCLock;
@@ -29,6 +30,7 @@ mod statements;
 mod ts;
 
 pub use pre_lazy::ParserPass;
+use pre_lazy::PreParsedBufferInfo;
 
 /// Whether import/export declarations are allowed in this statement list.
 /// Port of `JSParserImpl::AllowImportExport`.
@@ -218,6 +220,10 @@ pub struct JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     pub(super) jsx_depth: Rc<Cell<u32>>,
     /// The current parser mode. Port of `pass_{FullParse}` (JSParserImpl.h:179).
     pub(super) pass: ParserPass,
+    /// Side-table built during `PreParse` and consumed during `LazyParse`.
+    /// Port of the `PreParsedBufferInfo` pointer held by `JSParserImpl`
+    /// (JSParserImpl.h, used in PreParser.h).
+    pub(super) pre_parsed: PreParsedBufferInfo,
 }
 
 impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
@@ -242,6 +248,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             allow_conditional_type: Rc::new(Cell::new(false)),
             jsx_depth: Rc::new(Cell::new(0)),
             pass: ParserPass::FullParse,
+            pre_parsed: PreParsedBufferInfo {
+                function_info: HashMap::new(),
+            },
         }
     }
 
@@ -260,6 +269,25 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// True if the parser detected `use static builtin`.
     pub fn get_use_static_builtin(&self) -> bool {
         self.use_static_builtin
+    }
+
+    /// Move the pre-parsed side-table out of the parser (leaving an empty one
+    /// in its place). Called after a `PreParse` run to hand the table to the
+    /// caller before a subsequent `LazyParse`.
+    pub fn take_pre_parsed(&mut self) -> PreParsedBufferInfo {
+        std::mem::replace(
+            &mut self.pre_parsed,
+            PreParsedBufferInfo {
+                function_info: HashMap::new(),
+            },
+        )
+    }
+
+    /// Install a pre-parsed side-table produced by a prior `PreParse` run.
+    /// Called before a `LazyParse` so the parser can skip already-indexed
+    /// function bodies.
+    pub fn set_pre_parsed(&mut self, t: PreParsedBufferInfo) {
+        self.pre_parsed = t;
     }
 
     /// True if Flow type parsing is enabled. Shorthand for the C++

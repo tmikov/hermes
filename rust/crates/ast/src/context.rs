@@ -211,6 +211,12 @@ pub struct Context<'ast> {
 
     /// Whether to warn about undefined variables in strict mode functions.
     pub warn_undefined: bool,
+
+    /// Even if lazily compiling, eagerly compile any functions under this size
+    /// in bytes. Port of `Context::preemptiveFunctionCompilationThreshold_`
+    /// (Context.h:236); getter/setter at Context.h:516-521. Default `0`
+    /// (= no threshold, consistent with the C++ initializer).
+    preemptive_function_compilation_threshold: u32,
 }
 
 impl Default for Context<'_> {
@@ -245,6 +251,7 @@ impl<'ast> Context<'ast> {
             parse_ts: false,
             parse_jsx: false,
             warn_undefined: false,
+            preemptive_function_compilation_threshold: 0,
         }
     }
 
@@ -435,6 +442,18 @@ impl<'ast> Context<'ast> {
     /// when the JSX phase lands.
     pub fn set_parse_jsx(&mut self, v: bool) {
         self.parse_jsx = v;
+    }
+
+    /// Return the preemptive-function-compilation threshold (bytes). Port of
+    /// `Context::getPreemptiveFunctionCompilationThreshold()` (Context.h:516-518).
+    pub fn preemptive_function_compilation_threshold(&self) -> u32 {
+        self.preemptive_function_compilation_threshold
+    }
+
+    /// Set the preemptive-function-compilation threshold (bytes). Port of
+    /// `Context::setPreemptiveFunctionCompilationThreshold()` (Context.h:520-522).
+    pub fn set_preemptive_function_compilation_threshold(&mut self, byte_count: u32) {
+        self.preemptive_function_compilation_threshold = byte_count;
     }
 
     pub fn gc(&mut self) {
