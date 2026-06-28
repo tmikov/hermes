@@ -2171,6 +2171,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let bytes = self.lexer.get_string_table().bytes(directive);
         let is_use_strict = bytes == b"use strict";
         let is_static_builtin = bytes == b"use static builtin";
+        // Record the directive for lazy pass recovery before setting strict
+        // mode. Port of `seenDirectives_.push_back` (JSParserImpl.cpp:341).
+        self.seen_directives.push(bytes.to_vec());
         if is_use_strict {
             self.lexer.set_strict_mode(true);
         }

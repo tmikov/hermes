@@ -221,15 +221,17 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     ) -> Option<&'gc Node<'gc>> {
         // NOTE: Class definition is always strict mode code.
         // C++ `SaveFunctionState saveFunctionState{this}; setStrictMode(true);`.
-        // The Rust parser does not model `SaveFunctionState` (it is lazy-compile
-        // bookkeeping, no-op'd elsewhere in this port), so we save/restore the
-        // one piece of state that matters here — the lexer strict-mode flag —
-        // explicitly so the class does not leak strictness to the enclosing
-        // (possibly sloppy) code. The result is computed first so the restore
-        // runs on every (including error) path.
+        // We add the SaveFunctionState guard (is_arrow=false, class body is
+        // a regular function scope), save/restore seen_directives, and force
+        // strict mode on, mirroring the C++ class-body force-strict path.
         let old_strict = self.lexer.is_strict_mode();
+        // SaveFunctionState — mirrors C++ class-body force-strict path
+        // (SaveFunctionState saveFunctionState{this}; setStrictMode(true);).
+        let _g = self.save_function_state(false);
+        let old_seen_len = self.seen_directives.len();
         self.lexer.set_strict_mode(true);
         let result = self.parse_class_declaration_inner(param);
+        self.seen_directives.truncate(old_seen_len);
         self.lexer.set_strict_mode(old_strict);
         result
     }
@@ -324,8 +326,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // NOTE: A class definition is always strict mode code. See the comment
         // in `parse_class_declaration` for the save/restore rationale.
         let old_strict = self.lexer.is_strict_mode();
+        // SaveFunctionState — mirrors C++ class-body force-strict path.
+        let _g = self.save_function_state(false);
+        let old_seen_len = self.seen_directives.len();
         self.lexer.set_strict_mode(true);
         let result = self.parse_class_expression_inner();
+        self.seen_directives.truncate(old_seen_len);
         self.lexer.set_strict_mode(old_strict);
         result
     }

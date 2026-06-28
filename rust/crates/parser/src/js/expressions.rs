@@ -1059,6 +1059,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // strictness to the enclosing code, so save/restore the lexer flag
         // around the body. Result computed first so restore runs on every path.
         let old_strict = self.lexer.is_strict_mode();
+        // SaveFunctionState guard — mirrors C++ SaveFunctionState (cpp:5849).
+        // is_arrow=true: sets containsArrowFunctions_ on the enclosing scope.
+        let _g = self.save_function_state(true);
+        let old_seen_len = self.seen_directives.len();
         let result = self.parse_arrow_function_expression_inner(
             param,
             force_eagerly,
@@ -1071,6 +1075,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             allow_typed_arrow,
             force_async,
         );
+        self.seen_directives.truncate(old_seen_len);
         self.lexer.set_strict_mode(old_strict);
         result
     }
@@ -3601,7 +3606,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// result is computed first so the restore runs on every error `?` path).
     fn parse_property_assignment(&mut self) -> Option<&'gc Node<'gc>> {
         let old_strict = self.lexer.is_strict_mode();
+        // SaveFunctionState for object method/getter/setter scope — mirrors
+        // the SaveFunctionState constructed for each method in C++.
+        // is_arrow=false: method is a regular function scope.
+        let _g = self.save_function_state(false);
+        let old_seen_len = self.seen_directives.len();
         let result = self.parse_property_assignment_inner();
+        self.seen_directives.truncate(old_seen_len);
         self.lexer.set_strict_mode(old_strict);
         result
     }
@@ -4697,7 +4708,19 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 }
 
                 // `arguments` tracking inside arrow functions — C++ line 2508.
-                // Deferred: isArrowFunction_ flag is P3.
+                // If we are inside an arrow function and the identifier is
+                // `arguments`, the enclosing non-arrow function may need to
+                // capture its `arguments` object. Port of
+                // JSParserImpl.cpp:2508-2511.
+                if self.is_arrow_function.get() {
+                    let name_bytes = self.gc.ctx().atom_table.bytes(
+                        self.lexer.token().get_identifier(),
+                    );
+                    if name_bytes == b"arguments" {
+                        self.may_contain_arrow_functions_using_arguments
+                            .set(true);
+                    }
+                }
 
                 // Flow match expression. C++ JSParserImpl.cpp:2513-2518.
                 if self.parse_flow()

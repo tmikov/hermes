@@ -224,6 +224,19 @@ pub struct JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Port of the `PreParsedBufferInfo` pointer held by `JSParserImpl`
     /// (JSParserImpl.h, used in PreParser.h).
     pub(super) pre_parsed: PreParsedBufferInfo,
+    /// Whether the current function is an arrow. Only set/restored by
+    /// `SaveFunctionState`. Port of `isArrowFunction_` (JSParserImpl.h:225).
+    pub(super) is_arrow_function: Rc<Cell<bool>>,
+    /// Whether the nearest enclosing non-arrow function contains an arrow.
+    /// Port of `containsArrowFunctions_` (JSParserImpl.h:236).
+    pub(super) contains_arrow_functions: Rc<Cell<bool>>,
+    /// Whether that function may contain an arrow child that references
+    /// `arguments`, requiring eager Arguments capture.
+    /// Port of `mayContainArrowFunctionsUsingArguments_` (JSParserImpl.h:246).
+    pub(super) may_contain_arrow_functions_using_arguments: Rc<Cell<bool>>,
+    /// Directives seen in the current function scope (for lazy directive
+    /// recovery). Port of `seenDirectives_` (JSParserImpl.h:220).
+    pub(super) seen_directives: Vec<Vec<u8>>,
 }
 
 impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
@@ -251,6 +264,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             pre_parsed: PreParsedBufferInfo {
                 function_info: HashMap::new(),
             },
+            is_arrow_function: Rc::new(Cell::new(false)),
+            contains_arrow_functions: Rc::new(Cell::new(false)),
+            may_contain_arrow_functions_using_arguments: Rc::new(Cell::new(false)),
+            seen_directives: Vec::new(),
         }
     }
 

@@ -50,8 +50,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         force_eagerly: bool,
     ) -> Option<&'gc Node<'gc>> {
         let old_strict = self.lexer.is_strict_mode();
+        // SaveFunctionState guard — mirrors C++ SaveFunctionState (cpp:510).
+        // is_arrow=false: regular function resets the arrow-bookkeeping flags.
+        let _g = self.save_function_state(false);
+        let old_seen_len = self.seen_directives.len();
         let result =
             self.parse_function_helper_inner(param, is_declaration, force_eagerly);
+        self.seen_directives.truncate(old_seen_len);
         self.lexer.set_strict_mode(old_strict);
         result
     }
