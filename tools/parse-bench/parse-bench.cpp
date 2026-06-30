@@ -24,6 +24,8 @@
 
 #include "hermes/AST/Context.h"
 #include "hermes/Parser/JSParser.h"
+#include "hermes/Sema/SemContext.h"
+#include "hermes/Sema/SemResolve.h"
 #include "hermes/Support/SourceErrorManager.h"
 
 #include "llvh/Support/MemoryBuffer.h"
@@ -48,9 +50,11 @@ struct SilentDiagCtx {
   unsigned errorCount = 0;
 };
 
+static unsigned long gDiagCount = 0;
 static void silentDiagHandler(const llvh::SMDiagnostic &, void *ctx) {
-  // Do nothing — completely suppress all diagnostics to keep output clean.
-  // We rely on JSParser::parse() returning llvh::None on error instead.
+  // Count diagnostics (the SMDiagnostic's location is computed before this is
+  // called, which is what triggers SourceMgr::getOffsets). Output suppressed.
+  ++gDiagCount;
   (void)ctx;
 }
 
@@ -58,6 +62,10 @@ static void silentDiagHandler(const llvh::SMDiagnostic &, void *ctx) {
 // Sink to prevent the optimizer from discarding parse results.
 // ---------------------------------------------------------------------------
 static volatile int gSink = 0;
+
+// When true, parseOnce also runs semantic resolution (binding/scope) after
+// parse, to match OXC's parse + oxc_semantic for a fair end-to-end comparison.
+static bool gRunSema = false;
 
 // ---------------------------------------------------------------------------
 // Parse \p source (len bytes) once and return true if it parsed without error.
@@ -78,9 +86,60 @@ static bool parseOnce(const char *data, size_t len) {
   llvh::Optional<ESTree::ProgramNode *> r = p.parse();
 
   bool ok = r.hasValue() && sm.getErrorCount() == 0;
+  if (gRunSema && r.hasValue()) {
+    sema::SemContext semContext{*context};
+    resolveASTForParser(*context, semContext, *r);
+  }
   // Accumulate into the sink so the compiler cannot eliminate the parse.
   gSink += (int)(intptr_t)(r.hasValue() ? *r : nullptr);
   return ok;
+}
+
+// Time setup / parse / teardown separately for one parse of \p data.
+// Returns {setup_s, parse_s, teardown_s}.
+struct Phases {
+  double setup, parse, teardown;
+};
+static Phases parseOnceBreakdown(const char *data, size_t len) {
+  using clk = std::chrono::steady_clock;
+  auto t0 = clk::now();
+  auto context = std::make_shared<Context>();
+  auto &sm = context->getSourceErrorManager();
+  SilentDiagCtx diagCtx;
+  sm.setDiagHandler(silentDiagHandler, &diagCtx);
+  auto buf = llvh::MemoryBuffer::getMemBufferCopy(
+      llvh::StringRef{data, len}, "source");
+  int bufId = sm.addNewSourceBuffer(std::move(buf));
+  auto pp = std::make_unique<parser::JSParser>(*context, bufId, parser::FullParse);
+  auto t1 = clk::now();
+  llvh::Optional<ESTree::ProgramNode *> r = pp->parse();
+  auto t2 = clk::now();
+  gSink += (int)(intptr_t)(r.hasValue() ? *r : nullptr);
+  // Explicit teardown: drop parser then context (frees AST + string table).
+  pp.reset();
+  context.reset();
+  auto t3 = clk::now();
+  auto secs = [](auto a, auto b) {
+    return std::chrono::duration<double>(b - a).count();
+  };
+  return {secs(t0, t1), secs(t1, t2), secs(t2, t3)};
+}
+
+// Lex \p data to EOF (no parsing, no AST construction). Returns token count.
+static size_t lexOnce(const char *data, size_t len) {
+  parser::JSLexer::Allocator alloc;
+  SourceErrorManager sm;
+  sm.setDiagHandler(silentDiagHandler, nullptr);
+  auto buf = llvh::MemoryBuffer::getMemBufferCopy(llvh::StringRef{data, len}, "source");
+  parser::JSLexer lex(std::move(buf), sm, alloc);
+  size_t n = 0;
+  const parser::Token *tok;
+  do {
+    tok = lex.advance(parser::JSLexer::AllowRegExp);
+    ++n;
+  } while (tok->getKind() != parser::TokenKind::eof);
+  gSink += (int)n;
+  return n;
 }
 
 // ---------------------------------------------------------------------------
@@ -127,6 +186,8 @@ static void usage(const char *argv0) {
 // ---------------------------------------------------------------------------
 int main(int argc, char **argv) {
   int iters = 30;
+  bool breakdown = false;
+  bool lexOnly = false;
   std::vector<const char *> files;
 
   for (int i = 1; i < argc; ++i) {
@@ -137,6 +198,12 @@ int main(int argc, char **argv) {
         llvh::errs() << argv[0] << ": --iters must be positive\n";
         return 1;
       }
+    } else if (std::strcmp(arg, "--breakdown") == 0) {
+      breakdown = true;
+    } else if (std::strcmp(arg, "--lex-only") == 0) {
+      lexOnly = true;
+    } else if (std::strcmp(arg, "--sema") == 0) {
+      gRunSema = true;
     } else if (arg[0] == '-' && arg[1] == '-') {
       llvh::errs() << argv[0] << ": unknown flag '" << arg << "'\n";
       usage(argv[0]);
@@ -153,7 +220,8 @@ int main(int argc, char **argv) {
 
   // Header.
   llvh::outs() << "parse-bench: C++ Hermes JSParser (FullParse) baseline\n";
-  llvh::outs() << "iters=" << iters << " (+ 1 warm-up)\n\n";
+  llvh::outs() << "iters=" << iters << " (+ 1 warm-up)"
+               << (lexOnly ? "  mode=LEX-ONLY" : "  mode=PARSE") << "\n\n";
 
   for (const char *path : files) {
     // Read file once.
@@ -163,6 +231,54 @@ int main(int argc, char **argv) {
       continue;
     }
     size_t bytes = src.size();
+
+    if (lexOnly) {
+      gDiagCount = 0;
+      size_t ntok = lexOnce(src.data(), bytes); // warm-up
+      unsigned long diags = gDiagCount; // diagnostics emitted by ONE lex
+      std::vector<double> times;
+      for (int it = 0; it < iters; ++it) {
+        auto t0 = std::chrono::steady_clock::now();
+        lexOnce(src.data(), bytes);
+        auto t1 = std::chrono::steady_clock::now();
+        times.push_back(std::chrono::duration<double, std::milli>(t1 - t0).count());
+      }
+      double m = median(times);
+      double mib = (m > 0) ? (double)bytes / (m * 1e-3) / (1024.0 * 1024.0) : 0.0;
+      const char *nm = path;
+      for (const char *q = path; *q; ++q)
+        if (*q == '/') nm = q + 1;
+      llvh::outs() << nm << "  size=" << bytes << "  tokens=" << ntok
+                   << "  diags=" << diags
+                   << "  median=" << llvh::format("%.3f", m) << " ms"
+                   << "  LEX=" << llvh::format("%.1f", mib) << " MiB/s\n";
+      continue;
+    }
+
+    if (breakdown) {
+      parseOnceBreakdown(src.data(), bytes); // warm-up
+      std::vector<double> setup, parse, teardown;
+      for (int it = 0; it < iters; ++it) {
+        Phases p = parseOnceBreakdown(src.data(), bytes);
+        setup.push_back(p.setup * 1e3);
+        parse.push_back(p.parse * 1e3);
+        teardown.push_back(p.teardown * 1e3);
+      }
+      double s = median(setup), pa = median(parse), td = median(teardown);
+      double parseMib = (pa > 0) ? (double)bytes / (pa * 1e-3) / (1024.0 * 1024.0) : 0.0;
+      double fullMib =
+          (s + pa + td > 0) ? (double)bytes / ((s + pa + td) * 1e-3) / (1024.0 * 1024.0) : 0.0;
+      const char *nm = path;
+      for (const char *q = path; *q; ++q)
+        if (*q == '/') nm = q + 1;
+      llvh::outs() << nm << "  size=" << bytes << "\n"
+                   << "  setup=" << llvh::format("%.3f", s) << " ms"
+                   << "  parse=" << llvh::format("%.3f", pa) << " ms"
+                   << "  teardown=" << llvh::format("%.3f", td) << " ms\n"
+                   << "  PARSE-ONLY=" << llvh::format("%.1f", parseMib) << " MiB/s"
+                   << "  full-iter=" << llvh::format("%.1f", fullMib) << " MiB/s\n";
+      continue;
+    }
 
     // Warm-up (not timed).
     bool ok = parseOnce(src.data(), bytes);

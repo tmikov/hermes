@@ -4,4 +4,4 @@
 # LICENSE file in the root directory of this source tree.
 
 add_hermes_tool(parse-bench parse-bench.cpp
-  LINK_OBJLIBS hermesParser hermesAST hermesSupport LLVHSupport)
+  LINK_OBJLIBS hermesSema hermesParser hermesAST hermesSupport LLVHSupport)
