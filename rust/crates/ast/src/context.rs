@@ -761,7 +761,7 @@ impl<'ast, 'ctx> GCLock<'ast, 'ctx> {
     /// # Safety
     ///
     /// The caller must guarantee that when the guard drops:
-    /// - no `&Node`, `NodeList`, or interior reference into an allocation
+    /// - no `&Node`, `NodeList`, `&NodeListElement`, or interior reference into an allocation
     ///   made after this call survives — the storage is freed and any such
     ///   reference dangles; and
     /// - no `NodeRc` points into those allocations (debug-asserted).
