@@ -34,7 +34,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use ast::context::Context;
-use ast::dump::{ESTreeDumpMode, dump_estree_json};
+use ast::dump::{ESTreeDumpMode, ESTreeRawProp, LocationDumpMode, dump_estree_json_with_sm};
 use ast::node::{Node, NodeKind};
 use parser::js::{JSParserImpl, ParserPass};
 use parser::lexer::{GrammarContext, JSLexer};
@@ -234,85 +234,101 @@ impl<'gc> ast::visitor::Visitor<'gc> for ChildVisitor<'_> {
 fn collect_eager_body_strings<'gc>(
     node: &'gc Node<'gc>,
     atoms: &atom_table::AtomTable,
+    sm: &support::manager::SourceErrorManager,
     out: &mut BTreeMap<u32, String>,
 ) {
     match node {
         Node::FunctionDeclaration(fd) => {
             // Skip anonymous FunctionDeclarations (see collect_funcs note).
             if fd.id.is_none() {
-                collect_eager_body_strings(fd.body, atoms, out);
+                collect_eager_body_strings(fd.body, atoms, sm, out);
                 return;
             }
             let start = node.range().start.offset;
-            out.insert(start, dump_node(fd.body, atoms));
-            collect_eager_body_strings(fd.body, atoms, out);
+            out.insert(start, dump_node(fd.body, atoms, sm));
+            collect_eager_body_strings(fd.body, atoms, sm, out);
         }
         Node::FunctionExpression(fe) => {
             let start = node.range().start.offset;
-            out.insert(start, dump_node(fe.body, atoms));
-            collect_eager_body_strings(fe.body, atoms, out);
+            out.insert(start, dump_node(fe.body, atoms, sm));
+            collect_eager_body_strings(fe.body, atoms, sm, out);
         }
         Node::ArrowFunctionExpression(afe) => {
             if let Node::BlockStatement(_) = afe.body {
                 let start = node.range().start.offset;
-                out.insert(start, dump_node(afe.body, atoms));
-                collect_eager_body_strings(afe.body, atoms, out);
+                out.insert(start, dump_node(afe.body, atoms, sm));
+                collect_eager_body_strings(afe.body, atoms, sm, out);
             } else {
-                collect_eager_body_strings(afe.body, atoms, out);
+                collect_eager_body_strings(afe.body, atoms, sm, out);
             }
         }
         Node::Property(prop) => {
             if func_value_block_info(prop.value).is_some() {
                 let start = node.range().start.offset;
                 if let Node::FunctionExpression(fe) = prop.value {
-                    out.insert(start, dump_node(fe.body, atoms));
-                    collect_eager_body_strings(fe.body, atoms, out);
+                    out.insert(start, dump_node(fe.body, atoms, sm));
+                    collect_eager_body_strings(fe.body, atoms, sm, out);
                 }
             } else {
-                collect_eager_body_string_children(node, atoms, out);
+                collect_eager_body_string_children(node, atoms, sm, out);
             }
         }
         Node::MethodDefinition(md) => {
             if func_value_block_info(md.value).is_some() {
                 let start = node.range().start.offset;
                 if let Node::FunctionExpression(fe) = md.value {
-                    out.insert(start, dump_node(fe.body, atoms));
-                    collect_eager_body_strings(fe.body, atoms, out);
+                    out.insert(start, dump_node(fe.body, atoms, sm));
+                    collect_eager_body_strings(fe.body, atoms, sm, out);
                 }
             } else {
-                collect_eager_body_string_children(node, atoms, out);
+                collect_eager_body_string_children(node, atoms, sm, out);
             }
         }
-        _ => collect_eager_body_string_children(node, atoms, out),
+        _ => collect_eager_body_string_children(node, atoms, sm, out),
     }
 }
 
 fn collect_eager_body_string_children<'gc>(
     node: &'gc Node<'gc>,
     atoms: &atom_table::AtomTable,
+    sm: &support::manager::SourceErrorManager,
     out: &mut BTreeMap<u32, String>,
 ) {
-    node.visit_children(&mut EagerBodyChildVisitor { atoms, out });
+    node.visit_children(&mut EagerBodyChildVisitor { atoms, sm, out });
 }
 
 struct EagerBodyChildVisitor<'a> {
     atoms: &'a atom_table::AtomTable,
+    sm: &'a support::manager::SourceErrorManager,
     out: &'a mut BTreeMap<u32, String>,
 }
 
 impl<'gc> ast::visitor::Visitor<'gc> for EagerBodyChildVisitor<'_> {
     fn visit_node(&mut self, node: &'gc Node<'gc>) {
-        collect_eager_body_strings(node, self.atoms, self.out);
+        collect_eager_body_strings(node, self.atoms, self.sm, self.out);
     }
 }
 
 // ---------------------------------------------------------------------------
-// Dump helper — dump a node to JSON without location info.
+// Dump helper — dump a node to JSON with full location info.
 // ---------------------------------------------------------------------------
 
-fn dump_node<'a>(node: &'a Node<'a>, atoms: &atom_table::AtomTable) -> String {
+fn dump_node<'a>(
+    node: &'a Node<'a>,
+    atoms: &atom_table::AtomTable,
+    sm: &support::manager::SourceErrorManager,
+) -> String {
     let mut out = String::new();
-    dump_estree_json(&mut out, node, false, ESTreeDumpMode::HideEmpty, atoms);
+    dump_estree_json_with_sm(
+        &mut out,
+        node,
+        false,
+        ESTreeDumpMode::HideEmpty,
+        sm,
+        LocationDumpMode::LocAndRange,
+        ESTreeRawProp::Exclude,
+        atoms,
+    );
     out
 }
 
@@ -373,6 +389,14 @@ fn check_file(src: &[u8], label: &str, threshold: u32) -> usize {
     let mut sm = SourceErrorManager::new();
     let id = sm.add_buffer_bytes(label, src);
 
+    // A second SourceErrorManager for location dumps: the live parsers hold
+    // `&mut sm`, so dumps resolve line/col through an identical read-only
+    // copy. Same content + first buffer => same SourceId (asserted).
+    let mut sm_dump = SourceErrorManager::new();
+    let id_dump = sm_dump.add_buffer_bytes(label, src);
+    assert_eq!(id, id_dump, "buffer id mismatch between managers");
+    let sm_dump = sm_dump; // no longer mutated
+
     // ---- 1. Eager parse — capture body dump strings while the GCLock is live.
     let eager_bodies: BTreeMap<u32, String>;
     let eager_offsets: BTreeSet<u32>;
@@ -384,7 +408,7 @@ fn check_file(src: &[u8], label: &str, threshold: u32) -> usize {
         let root = p.parse().unwrap_or_else(|| panic!("[{label}] eager parse failed"));
 
         let mut bodies: BTreeMap<u32, String> = BTreeMap::new();
-        collect_eager_body_strings(root, &gc1.ctx().atom_table, &mut bodies);
+        collect_eager_body_strings(root, &gc1.ctx().atom_table, &sm_dump, &mut bodies);
         eager_bodies = bodies;
         eager_offsets = eager_bodies.keys().copied().collect();
         // gc1, ctx1 drop here — nodes reclaimed, but strings are owned.
@@ -494,7 +518,7 @@ fn check_file(src: &[u8], label: &str, threshold: u32) -> usize {
         if !has_nested_stubs {
             // Leaf level: no nested stubs — perform the byte-for-byte
             // body comparison against the eager parse.
-            let re_dump = dump_node(re_body, &gc3.ctx().atom_table);
+            let re_dump = dump_node(re_body, &gc3.ctx().atom_table, &sm_dump);
             let eg_dump = eager_bodies
                 .get(&offset)
                 .unwrap_or_else(|| panic!("[{label}] no eager body at offset {offset}"));
