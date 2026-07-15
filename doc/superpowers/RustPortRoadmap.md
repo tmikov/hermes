@@ -513,8 +513,10 @@ AST) — no dedicated C++ tool needed. A Rust `ast-dump` bin is diffed byte-for-
 > the skip-and-stub in `parse_function_body` (seek past bodies ≥ threshold → stub `BlockStatement{is_lazy_function_body}` with synthesized
 > directives + decorations) + `parse_lazy_function` (the 5-kind demand dispatch) + the parser `seek`, plus **Oracle A**: a Rust-only
 > `lazy_reparse` test proving deferred bodies reparse to the eager (hermesc-verified) AST (offset-set subset + per-leaf body-dump equality over a
-> threshold sweep). **Two documented faithful-port deviations:** the side-table is threaded on the parser (the `GCLock` borrows `Context`
-> immutably during parse) rather than stored on `Context`; and there is no `AllocationScope` (no bump allocator — PreParse just discards the AST).
+> threshold sweep). **One remaining faithful-port deviation:** the side-table is threaded on the parser (the `GCLock` borrows `Context`
+> immutably during parse) rather than stored on `Context`. The `AllocationScope` discipline IS ported: `support::Deque::truncate`
+> + `iter_from` give arena-truncate semantics; `ast::AllocationScope` (a `GCLock`-scoped bump truncate with a documented no-escape
+> contract) gates the two reclamation sites — see `specs/2026-07-15-preparse-scoped-reclamation-design.md`.
 > **No AST nodes added** (the `BlockStatement` lazy decorations pre-existed). **Review-caught bugs (the oracles + capstone are why the port is
 > correct):** (a) **L2.3 — `parse_lazy_function` set strict mode internally**, but C++ leaves that to the CALLER (`HBC.cpp:158`
 > `setStrictMode(lazyData.strictMode)` before the call); Oracle A surfaced it (a class method's `static` mis-lexed in a sloppy caller context),
@@ -525,6 +527,17 @@ AST) — no dedicated C++ tool needed. A Rust `ast-dump` bin is diffed byte-for-
 > and locked by a new `13_default_param_arrow.js` corpus file. **Lesson: a corpus-gated differential only proves what the corpus exercises; the
 > structural-fidelity capstone (mapping every C++ pass/lazy site to its Rust production) is what found the gap.** Spec:
 > `specs/2026-06-28-pre-lazy-passes-design.md`; plan: `plans/2026-06-28-js-parser-pre-lazy-passes.md`.
+>
+> **PreParse scoped reclamation DONE (2026-07-15).** The `AllocationScope` discipline is now fully ported (spec:
+> `specs/2026-07-15-preparse-scoped-reclamation-design.md`; plan: `plans/2026-07-15-preparse-scoped-reclamation.md`).
+> Two C++ scope sites ported: (1) the keeper-with-blank-body branch in `parse_function_helper_inner` (cpp:516-560),
+> and (2) the whole-pass scope in `pre_parse_buffer` (cpp:7523). Peak PreParse AST is now ≈ skeleton + open function
+> nest (measured: 251 vs 8,351 nodes mid-pass = 33× reduction; 0 residual post-pass), gated by
+> `tests/preparse_memory.rs`. Oracle hardening: Oracle B (`preparse_differential`) now covers Flow/TS too — 13+76+42+20
+> = 151 files byte-identical vs hermesc, with a non-degeneracy guard; Oracle A (`lazy_reparse`) now compares LOCATED
+> dumps (78/78), covering the lazy source-range machinery. The parser `unsafe` surface gained two statement-scoped
+> `#[allow(unsafe_code)]` sites (the two `alloc_scope` calls in `functions.rs` and `pre_lazy.rs`); the `AllocationScope`
+> no-escape contract is documented in `ast/src/context.rs`.
 >
 > **The Parser component is COMPLETE. Next component: Sema** (scope resolution + FlowChecker). Write each phase plan just-in-time and execute
 > subagent-driven.

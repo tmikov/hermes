@@ -4,7 +4,7 @@ Hand this to a new session to restore context. It **references** the authoritati
 (read them; don't trust this summary over them) and records the conventions, file map,
 validation commands, and workflow.
 
-> **Date of handoff:** 2026-06-28. **Branch:** `rust` (base is `static_h`, NOT `main`).
+> **Date of handoff:** 2026-07-15. **Branch:** `rust` (base is `static_h`, NOT `main`).
 > **Status:** the **JS lexer**, **JSONParser**, the **AST**, and now the **JS Parser are ALL COMPLETE** —
 > **phases P0 (foundations + `parser_differential` gate), P1 (value expressions), P2 (statements & declarations), P3 (functions, classes,
 > arrows, async/generators, methods, `super`, `yield`, decorators), P4 (modules), P5 (the FLOW TYPE GRAMMAR + declarative integration),
@@ -40,7 +40,12 @@ validation commands, and workflow.
 > `tools/preparse-dump/` tool + Rust bin + byte-for-byte `preparse_differential` of the `PreParsedBufferInfo` side-table vs hermesc, 13+76 files)
 > and Oracle A (Rust-only `lazy_reparse` proving deferred bodies reparse to the eager hermesc-verified AST). Both shipped; the capstone caught a
 > real flag-attribution bug a corpus-gated differential alone would miss (default-param arrows — `SaveFunctionState` was built before params
-> instead of after; cpp:510). **Sema has no `-dump-ast` analog either — decide its validation oracle during brainstorming.** Open the session with
+> instead of after; cpp:510). **PreParse scoped reclamation is also DONE (2026-07-15):** the `AllocationScope` discipline is now ported —
+> `ast::AllocationScope` + `support::Deque::truncate`/`iter_from` at the two C++ scope sites (cpp:516-560 and cpp:7523); peak PreParse AST
+> reduced 33× (251 vs 8,351 nodes mid-pass; 0 residual post-pass), gated by `tests/preparse_memory.rs`. Oracle B now covers Flow/TS too
+> (151 files total); Oracle A now compares LOCATED dumps (78/78). Spec: `specs/2026-07-15-preparse-scoped-reclamation-design.md`. The
+> `AllocationScope` deviation is retired; the sole remaining faithful-port deviation is the side-table-threaded-on-parser.
+> **Sema has no `-dump-ast` analog either — decide its validation oracle during brainstorming.** Open the session with
 > `superpowers:brainstorming`, THEN `writing-plans`. Write each phase plan just-in-time and execute subagent-driven. juno has no parser to crib
 > from (`hparser` is FFI-to-C++); port the C++ directly.
 > The parser proper lives in `rust/crates/parser/src/js/{mod,expressions,statements,functions,classes,modules,jsx}.rs` +
@@ -95,12 +100,12 @@ toolchain pinned `rust/rust-toolchain.toml` (1.96.0).
 | `rust/crates/support/` | `SourceErrorManager` + buffer/locations/line-index/diagnostics; `JSONEmitter`; **+ `Deque`/`HeapSize`** (shared utilities, moved from juno); **+ `utf8` WTF-8↔UTF-16 codec** (faithful copy of the subset of `parser::utf8` the JSON dumper needs; gained a `unicode` dep). Byte-for-byte vs `hermesc` (`tests/golden.rs`). | zero (`forbid`) |
 | `rust/crates/atom_table/` | juno `atom_table` verbatim + `AtomBytes`/`atom_bytes` WTF-8 path (the interner). | **encapsulated** (sanctioned) |
 | `rust/crates/unicode/` | `CharacterProperties` predicates + tables generated from `UnicodeData.inc` (17.0.0) by `gen_tables.py`. | zero (`forbid`) |
-| `rust/crates/parser/` | **the lexer** + token tables + number parsing + UTF codec + the JSONParser. | only in `cursor.rs` (scoped) |
+| `rust/crates/parser/` | **the lexer** + token tables + number parsing + UTF codec + the JSONParser. | `cursor.rs` (scoped `*const u8`); two statement-scoped `#[allow(unsafe_code)]` at the `alloc_scope` call sites in `functions.rs` + `pre_lazy.rs` (sanctioned; no-escape contract documented) |
 | `rust/crates/ast/` | **the AST** — juno **GC arena** (`Context`/`GCLock`/`NodeRc` + mark-sweep) copied+adapted; immutable children + `Cell` attributes; **full 271-node set generated from `ESTree.def`** by `gen_nodes.py` → `// @generated src/node.rs` (phase 2). `NodeKind`+ranges, `is_*`/`as_*`, `visit_children`/`mark_lists`, `new`. **Phase 3:** generated `builder` module + `VisitorMut`/`TransformResult`/`Path`/`NodeField` + `visit_children_mut` (functional rebuild); read `Visitor` unchanged. **Phase 4:** generated `node_type_str` + `dump_children`, hand-written `src/dump.rs` (`ESTreeJSONDumper`); 9 `tests/dump_golden.rs`. | only in `context.rs` (scoped) |
 
 **Lexer modules** (`rust/crates/parser/src/`): `token_kinds.rs` (TokenKind from `TokenKinds.def`),
 `number.rs` (scanNumber primitives), `html_entities.rs` (generated), `utf8.rs` (UTF-8↔16 codec),
-`cursor.rs` (the `*const u8` cursor — decision B, the ONLY parser `unsafe`), `token.rs`
+`cursor.rs` (the `*const u8` cursor — decision B, the primary parser `unsafe`; two additional statement-scoped `#[allow(unsafe_code)]` at the `alloc_scope` call sites in `functions.rs`/`pre_lazy.rs` are also sanctioned), `token.rs`
 (Token/RegExpLiteral/StoredComment/StoredToken), and `lexer/` split into
 `{mod,escape,identifier,number,string,template,dump,regexp,jsx,state,lookahead}.rs` (each an
 `impl<'a> JSLexer<'a>` block; child modules see the struct's private fields).
@@ -188,7 +193,7 @@ If `cmake-build-asan/` is missing, configure it (it's git-ignored):
 - We keep C-idiom comparisons (`>= '0' && <= '9'`) faithful to the C++ over clippy style lints, but
   fix genuine new lints (`int_plus_one`, `never_loop`, `approx_constant`, `needless_return`) with
   scoped `#[allow]` + comment or a clippy-clean rewrite. Gate on `cargo build` warnings (zero).
-- **Only `getAllocator` has no Rust analog** (no bump allocator) — the one documented surface gap.
+- **`getAllocator` has no Rust analog** for the lexer (no bump allocator for decoded strings — the one remaining lexer surface gap). The `AllocationScope` discipline IS ported for the PreParse passes: `ast::AllocationScope` + `support::Deque::truncate`/`iter_from` provide arena-truncate semantics at the two C++ scope sites (cpp:516-560, cpp:7523); see `specs/2026-07-15-preparse-scoped-reclamation-design.md`.
 
 ---
 
