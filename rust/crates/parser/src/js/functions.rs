@@ -15,7 +15,7 @@
 //! signature sites (type parameters, return type, `%checks` predicate, leading
 //! `this` parameter) are ported (P5.4); the TS blocks are omitted (P7).
 
-use ast::node::{FunctionDeclaration, FunctionExpression, Identifier, Node};
+use ast::node::{BlockStatement, FunctionDeclaration, FunctionExpression, Identifier, Node};
 use ast::node_child::{NodeList, NodeMetadata};
 
 use crate::lexer::GrammarContext;
@@ -209,14 +209,78 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             GrammarContext::AllowDiv
         };
 
-        // The C++ PreParse path (cpp:516-560) skips the AST with an
-        // AllocationScope and stores a blank-body node before parsing. Rust
-        // replicates the PreParse *recording* (cpp:803-810) inside
-        // `parse_function_body`; the only thing intentionally not replicated is
-        // the blank-body + AllocationScope memory shortcut — the GC arena
-        // reclaims nodes when the PreParse GCLock is dropped. Port continues
-        // with the eager tail (cpp:562-597).
+        // cpp:516-560 — PreParse: create the keeper we want to keep BEFORE
+        // the AllocationScope, parse the real body INSIDE the scope, and
+        // reclaim the body subtree on scope exit. The keeper gets a blank
+        // body; only the source extent (start..body end) is retained. The
+        // side-table store inside parse_function_body (cpp:803-810) records
+        // owned offsets/bools/bytes and safely survives the truncation.
         //
+        // Adaptation: the C++ allocates the keeper node pre-scope and
+        // returns it; we keep the keeper as a stack VALUE (its children —
+        // params, blank body, id, types — are arena-allocated pre-scope)
+        // and let set_location allocate it post-scope. Equivalent: either
+        // way no keeper storage lies inside the truncated suffix.
+        if self.pass == ParserPass::PreParse {
+            // Blank body, unlocated, like the C++ `BlockStatementNode({},
+            // false)` (cpp:531, 544).
+            let blank_body = self.gc.alloc(Node::BlockStatement(
+                BlockStatement::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    NodeList::from_iter(self.gc, Vec::<&'gc Node<'gc>>::new()),
+                    false,
+                ),
+            ));
+            let params = NodeList::from_iter(self.gc, param_list);
+            let keeper = if is_declaration {
+                Node::FunctionDeclaration(FunctionDeclaration::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    opt_id,
+                    params,
+                    blank_body,
+                    type_parameters,
+                    return_type,
+                    predicate,
+                    is_generator,
+                    is_async,
+                ))
+            } else {
+                Node::FunctionExpression(FunctionExpression::new(
+                    NodeMetadata::new(self.dummy_range()),
+                    opt_id,
+                    params,
+                    blank_body,
+                    type_parameters,
+                    return_type,
+                    predicate,
+                    is_generator,
+                    is_async,
+                ))
+            };
+
+            // cpp:548. SAFETY: nothing allocated inside the scope escapes —
+            // the body subtree is discarded (only its end SMLoc, plain
+            // data, is read out before the drop), the keeper and all its
+            // children are pre-scope, and the side-table holds no node
+            // references. On the error path the `?` drops the guard, which
+            // is exactly the C++ dtor behavior.
+            #[allow(unsafe_code)] // alloc_scope mirrors C++ AllocationScope
+            let scope = unsafe { self.gc.alloc_scope() };
+            let body = self.parse_function_body(
+                Param::default(),
+                false,
+                is_generator,
+                is_async,
+                grammar_context,
+                /* parse_directives= */ true,
+            )?;
+            let body_end = body.range().end;
+            // `body` must not be used past this point: the drop reclaims
+            // its storage.
+            drop(scope);
+            return Some(self.set_location(start_loc, body_end, keeper));
+        }
+
         // The body's paramYield/paramAwait are the args+body values
         // (is_generator/is_async) — in the Full-pass port these are inert, but
         // we pass them for fidelity. C++ `saveArgsAndBodyParamYield.get()`

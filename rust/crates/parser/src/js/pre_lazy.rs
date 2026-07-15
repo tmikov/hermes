@@ -484,6 +484,53 @@ mod tests {
         assert!(!has_lazy_stub(body), "re-parsed function has no lazy stub");
     }
 
+    // Site 1 (cpp:516-560): PreParse reclaims each function body when the
+    // function completes. Measured by driving a PreParse parser manually
+    // (no whole-pass scope yet) and comparing node counts against an eager
+    // parse of the same source: the retained PreParse AST is the skeleton
+    // spine + blank-bodied keepers, a small fraction of the full AST.
+    #[test]
+    fn preparse_reclaims_function_bodies() {
+        use ast::context::Context;
+        use support::manager::SourceErrorManager;
+        use crate::lexer::{GrammarContext, JSLexer};
+        use crate::js::{JSParserImpl, ParserPass};
+
+        // One function with a fat body (~20 statements), repeated 50x.
+        let mut src: Vec<u8> = Vec::new();
+        for f in 0..50 {
+            src.extend_from_slice(format!("function f{f}(a, b) {{\n").as_bytes());
+            for i in 0..20 {
+                src.extend_from_slice(
+                    format!("  var x{i} = a + b * {i};\n").as_bytes(),
+                );
+            }
+            src.extend_from_slice(b"  return a;\n}\n");
+        }
+
+        let count_nodes = |pass: ParserPass| -> usize {
+            let mut sm = SourceErrorManager::new();
+            let id = sm.add_buffer_bytes("t", &src);
+            let mut ctx = Context::new();
+            let gc = ctx.lock();
+            let atoms = &gc.ctx().atom_table;
+            let lexer =
+                JSLexer::new(id, &mut sm, atoms, GrammarContext::AllowRegExp);
+            let mut p = JSParserImpl::new_with_pass(&gc, lexer, pass);
+            assert!(p.parse().is_some(), "parse failed");
+            gc.ctx().num_nodes()
+        };
+
+        let eager = count_nodes(ParserPass::FullParse);
+        let pre = count_nodes(ParserPass::PreParse);
+        // Shape assertion, generous constant: the keepers + spine must be a
+        // small fraction of the full AST (each body is ~20x its keeper).
+        assert!(
+            pre * 5 < eager,
+            "PreParse retained O(file) AST: pre={pre} eager={eager}"
+        );
+    }
+
     // LazyParse with threshold 0 defers a function body: the BlockStatement
     // is a lazy stub.
     #[test]
