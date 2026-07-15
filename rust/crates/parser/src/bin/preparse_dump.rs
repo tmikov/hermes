@@ -28,9 +28,24 @@ use parser::lexer::{GrammarContext, JSLexer};
 use support::manager::SourceErrorManager;
 
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
     let prog = "preparse-dump";
-    let file_path = if args.len() > 1 { args[1].as_str() } else { "-" };
+    let mut parse_flow = false;
+    let mut parse_ts = false;
+    let mut file_path: Option<String> = None;
+    for arg in std::env::args().skip(1) {
+        match arg.as_str() {
+            "--parse-flow" => parse_flow = true,
+            "--parse-ts" => parse_ts = true,
+            _ => {
+                if file_path.is_some() {
+                    eprintln!("{prog}: too many arguments");
+                    std::process::exit(1);
+                }
+                file_path = Some(arg);
+            }
+        }
+    }
+    let file_path = file_path.unwrap_or_else(|| "-".to_string());
 
     let bytes: Vec<u8> = if file_path == "-" {
         let mut buf = Vec::new();
@@ -40,7 +55,7 @@ fn main() {
         });
         buf
     } else {
-        std::fs::read(file_path).unwrap_or_else(|e| {
+        std::fs::read(&file_path).unwrap_or_else(|e| {
             eprintln!("{prog}: error reading '{file_path}': {e}");
             std::process::exit(1);
         })
@@ -49,6 +64,11 @@ fn main() {
     let mut sm = SourceErrorManager::new();
     let buf_id = sm.add_buffer_bytes("input", &bytes);
     let mut ctx = Context::new();
+    // hermesc -parse-flow defaults to ParseFlowSetting::ALL → ambiguous on
+    // (same plumbing as ast_dump.rs).
+    ctx.set_parse_flow(parse_flow);
+    ctx.set_parse_flow_ambiguous(parse_flow);
+    ctx.set_parse_ts(parse_ts);
     let gc = ctx.lock();
     let atoms = &gc.ctx().atom_table;
     let lexer = JSLexer::new(buf_id, &mut sm, atoms, GrammarContext::AllowRegExp);

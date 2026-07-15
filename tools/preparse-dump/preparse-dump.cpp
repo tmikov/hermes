@@ -15,7 +15,7 @@
 ///     [dir...]\n"
 ///   On error: "ERROR <count>\n"
 ///
-/// Args: <file|->
+/// Args: [--parse-flow] [--parse-ts] <file|->
 ///   - means read from stdin.
 
 #include "hermes/AST/Context.h"
@@ -37,8 +37,17 @@ using namespace hermes::parser;
 
 int main(int argc, char **argv) {
   const char *filePath = nullptr;
+  bool parseFlow = false, parseTS = false;
   for (int i = 1; i < argc; ++i) {
     const char *arg = argv[i];
+    if (std::strcmp(arg, "--parse-flow") == 0) {
+      parseFlow = true;
+      continue;
+    }
+    if (std::strcmp(arg, "--parse-ts") == 0) {
+      parseTS = true;
+      continue;
+    }
     if (filePath != nullptr) {
       llvh::errs() << argv[0] << ": too many arguments\n";
       return 1;
@@ -46,7 +55,8 @@ int main(int argc, char **argv) {
     filePath = arg;
   }
   if (filePath == nullptr) {
-    llvh::errs() << "Usage: " << argv[0] << " <file|->\n";
+    llvh::errs() << "Usage: " << argv[0]
+                 << " [--parse-flow] [--parse-ts] <file|->\n";
     return 1;
   }
 
@@ -59,6 +69,10 @@ int main(int argc, char **argv) {
   }
 
   auto ctx = std::make_shared<Context>();
+  if (parseFlow)
+    ctx->setParseFlow(ParseFlowSetting::ALL);
+  if (parseTS)
+    ctx->setParseTS(true);
   SourceErrorManager &sm = ctx->getSourceErrorManager();
   // Suppress diagnostics — we report errors via "ERROR N" ourselves.
   sm.setDiagHandler([](const llvh::SMDiagnostic &, void *) {}, nullptr);

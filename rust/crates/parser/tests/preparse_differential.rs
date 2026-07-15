@@ -26,7 +26,10 @@ fn cpp_bin() -> PathBuf {
 
 /// Run every `.js` file in `corpus` through both binaries and assert
 /// byte-identical stdout. Returns the number of files tested.
-fn run_differential(corpus: &str) -> usize {
+///
+/// `extra` is forwarded as additional arguments to BOTH binaries before the
+/// file path (e.g. `&["--parse-flow"]`).
+fn run_differential(corpus: &str, extra: &[&str]) -> usize {
     let cpp = cpp_bin();
     if !cpp.exists() {
         if std::env::var_os("REQUIRE_DIFFERENTIAL").is_some() {
@@ -55,10 +58,12 @@ fn run_differential(corpus: &str) -> usize {
     }
     for path in &files {
         let cpp_out = Command::new(&cpp)
+            .args(extra)
             .arg(path)
             .output()
             .expect("spawn preparse-dump (C++)");
         let rust_out = Command::new(rust)
+            .args(extra)
             .arg(path)
             .output()
             .expect("spawn preparse-dump (Rust)");
@@ -81,10 +86,22 @@ fn run_differential(corpus: &str) -> usize {
 
 #[test]
 fn preparse_differential_lazy_corpus() {
-    run_differential("tests/parser_corpus_lazy");
+    run_differential("tests/parser_corpus_lazy", &[]);
 }
 
 #[test]
 fn preparse_differential_parser_corpus() {
-    run_differential("tests/parser_corpus");
+    run_differential("tests/parser_corpus", &[]);
+}
+
+#[test]
+fn preparse_differential_flow_corpus() {
+    // Flow ambiguous grammar ON (hermesc -parse-flow defaults to ALL);
+    // both binaries get the identical flag.
+    run_differential("tests/parser_corpus_flow", &["--parse-flow"]);
+}
+
+#[test]
+fn preparse_differential_ts_corpus() {
+    run_differential("tests/parser_corpus_ts", &["--parse-ts"]);
 }
