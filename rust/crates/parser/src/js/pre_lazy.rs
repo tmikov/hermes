@@ -98,21 +98,13 @@ use super::flow::{AllowTypedArrowFunction, CoverTypedParameters};
 use super::{JSParserImpl, PARAM_IN, PARAM_RETURN};
 
 impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
-    /// Pre-parse a source buffer: build a `PreParse`-mode parser, set strict
-    /// mode if requested, run `parse()`, and return the parser so the caller
-    /// can extract `take_pre_parsed()` and `get_use_static_builtin()`.
-    ///
-    /// Returns `None` if parsing fails (syntax error). Returns `Some(parser)`
-    /// on success; the caller owns the pre-parsed side-table via `take_pre_parsed()`.
-    ///
     /// Port of `JSParserImpl::preParseBuffer` (JSParserImpl.cpp:7534-7546).
-    /// Deviation from C++:
-    /// - C++ wraps both the `AllocationScope` and the parser in a `PreParser`
-    ///   struct and returns a `shared_ptr<JSParserImpl>` aliased to that struct,
-    ///   so the scope is kept alive as long as the pointer lives. In Rust there
-    ///   is no `AllocationScope`; nodes are arena-allocated in the `GCLock` and
-    ///   reclaimed when the lock is dropped. The caller controls the lock
-    ///   lifetime independently, so we simply return the parser itself.
+    /// The C++ `PreParser` wrapper holds an `AllocationScope` (cpp:7523)
+    /// that reclaims the whole pass AST when the returned shared_ptr dies;
+    /// here the scope is opened around `parse()` and dropped before
+    /// returning — tighter, and sound because the `Program` result is
+    /// discarded and `JSParserImpl` holds no node references. The pass
+    /// output is the side-table + parser flags only.
     pub fn pre_parse_buffer(
         gc: &'gc ast::context::GCLock<'ast, 'ctx>,
         lexer: JSLexer<'a>,
@@ -120,7 +112,15 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     ) -> Option<JSParserImpl<'gc, 'ast, 'ctx, 'a>> {
         let mut p = JSParserImpl::new_with_pass(gc, lexer, ParserPass::PreParse);
         p.lexer.set_strict_mode(strict);
-        p.parse()?;
+        // SAFETY: the only node reference produced inside the scope is the
+        // `Program` result, consumed by `.is_some()` before the drop.
+        #[allow(unsafe_code)] // alloc_scope mirrors C++ AllocationScope
+        let scope = unsafe { gc.alloc_scope() };
+        let ok = p.parse().is_some();
+        drop(scope);
+        if !ok {
+            return None;
+        }
         Some(p)
     }
 
