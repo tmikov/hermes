@@ -81,6 +81,56 @@ impl<T> Deque<T> {
         self.storage.iter_mut().flatten()
     }
 
+    /// Truncate the deque to `len` elements, dropping every element at
+    /// index >= `len` and freeing fully-vacated trailing chunks. Surviving
+    /// elements never move (only trailing elements/chunks are dropped), so
+    /// references to them remain valid. Used by the AST arena's
+    /// `AllocationScope` (bump-allocator save/restore semantics, mirroring
+    /// the C++ `BumpPtrAllocator::pushScope`/`popScope`,
+    /// hermes/Support/Allocator.h:500).
+    pub fn truncate(&mut self, len: usize) {
+        debug_assert!(len <= self.len(), "truncate beyond deque length");
+        let mut remaining = len;
+        let mut keep = 0usize; // number of chunks to keep
+        for chunk in &mut self.storage {
+            keep += 1;
+            if remaining < chunk.len() {
+                chunk.truncate(remaining);
+                break;
+            }
+            remaining -= chunk.len();
+            if remaining == 0 {
+                break;
+            }
+        }
+        // Always keep at least one chunk: `push` assumes storage is
+        // non-empty (deque.rs `new()` pre-creates chunk 0).
+        self.storage.truncate(keep.max(1));
+    }
+
+    /// Iterate over the elements starting at `index`. Positions by chunk
+    /// arithmetic (a handful of chunk-boundary comparisons; skipped
+    /// elements are not walked), so iterating a suffix is O(suffix).
+    /// An `index` at or past `len()` yields an empty iterator.
+    pub fn iter_from(&self, index: usize) -> impl Iterator<Item = &T> {
+        let mut skip = index;
+        let mut start_chunk = self.storage.len();
+        for (i, chunk) in self.storage.iter().enumerate() {
+            if skip < chunk.len() {
+                start_chunk = i;
+                break;
+            }
+            skip -= chunk.len();
+        }
+        self.storage[start_chunk..]
+            .iter()
+            .enumerate()
+            .flat_map(move |(i, chunk)| {
+                let s = if i == 0 { skip } else { 0 };
+                chunk[s..].iter()
+            })
+    }
+
     /// Allocate a new chunk in the node storage.
     fn new_chunk(&mut self) {
         let capacity = self.next_chunk_capacity;
@@ -132,5 +182,53 @@ mod tests {
         let again = d.iter().nth(1000).unwrap();
         assert_eq!(again as *const usize as usize, addr);
         assert_eq!(*again, 1000);
+    }
+
+    #[test]
+    fn truncate_within_and_across_chunks() {
+        // 2500 elements spans chunk 0 (1024) and chunk 1 (2048 capacity).
+        let mut d = Deque::new();
+        for i in 0..2500usize {
+            d.push(i);
+        }
+        assert_eq!(d.len(), 2500);
+        // Truncate within chunk 1.
+        d.truncate(1500);
+        assert_eq!(d.len(), 1500);
+        assert_eq!(d.iter().copied().last(), Some(1499));
+        // Survivors intact and re-push works.
+        assert_eq!(d.iter().nth(1023).copied(), Some(1023));
+        d.push(9999);
+        assert_eq!(d.len(), 1501);
+        assert_eq!(d.iter().copied().last(), Some(9999));
+        // Truncate dropping the whole trailing chunk.
+        d.truncate(500);
+        assert_eq!(d.len(), 500);
+        // Truncate to zero leaves a usable deque.
+        d.truncate(0);
+        assert_eq!(d.len(), 0);
+        d.push(1);
+        assert_eq!(d.len(), 1);
+        // Truncate to exactly the current length is a no-op.
+        d.truncate(1);
+        assert_eq!(d.len(), 1);
+    }
+
+    #[test]
+    fn iter_from_positions_correctly() {
+        let mut d = Deque::new();
+        for i in 0..2500usize {
+            d.push(i);
+        }
+        // Mid-chunk-1 start.
+        let v: Vec<usize> = d.iter_from(1030).copied().take(3).collect();
+        assert_eq!(v, vec![1030, 1031, 1032]);
+        // Exactly at a chunk boundary.
+        assert_eq!(d.iter_from(1024).copied().next(), Some(1024));
+        // From zero == full iteration.
+        assert_eq!(d.iter_from(0).count(), 2500);
+        // From len() and beyond: empty.
+        assert_eq!(d.iter_from(2500).count(), 0);
+        assert_eq!(d.iter_from(9999).count(), 0);
     }
 }
