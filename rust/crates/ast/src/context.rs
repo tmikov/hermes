@@ -569,6 +569,14 @@ impl<'ast> Context<'ast> {
         nodes.len()
     }
 
+    /// Returns the number of list-element slots which have been allocated.
+    /// Includes elements currently in use as well as elements in the free
+    /// list.
+    pub fn num_list_elements(&self) -> usize {
+        let list_elements = unsafe { &*self.list_elements.get() };
+        list_elements.len()
+    }
+
     /// Returns the number of node slots currently in the free list (i.e.
     /// allocated but unused, reclaimed by GC).
     pub fn num_free_nodes(&self) -> usize {
@@ -707,6 +715,68 @@ impl<'ast, 'ctx> GCLock<'ast, 'ctx> {
     #[inline]
     pub fn bytes(&self, ident: AtomBytes) -> &[u8] {
         self.ctx.bytes(ident)
+    }
+}
+
+/// RAII allocation scope over the arena: everything allocated (nodes AND
+/// list elements) between construction and drop is reclaimed at drop, with
+/// bump-allocator save/restore semantics. Port of the C++ `AllocationScope`
+/// (hermes/Support/Allocator.h:500-521) as used by the parser's PreParse
+/// pass (JSParserImpl.cpp:548, 7523).
+///
+/// See [`GCLock::alloc_scope`] for the safety contract.
+pub struct AllocationScope<'gcl, 'ast, 'ctx> {
+    lock: &'gcl GCLock<'ast, 'ctx>,
+    nodes_watermark: usize,
+    list_elements_watermark: usize,
+}
+
+impl Drop for AllocationScope<'_, '_, '_> {
+    fn drop(&mut self) {
+        let ctx: &Context<'_> = self.lock.ctx;
+        let nodes = unsafe { &mut *ctx.nodes.get() };
+        #[cfg(debug_assertions)]
+        for entry in nodes.iter_from(self.nodes_watermark) {
+            // A NodeRc into the suffix would dangle after truncation.
+            debug_assert!(
+                entry.count.get() == 0,
+                "NodeRc points into a truncated AllocationScope suffix"
+            );
+            // gc() cannot run under a GCLock, so no suffix entry can be
+            // free (free-list pops reuse only pre-watermark slots).
+            debug_assert!(!entry.is_free(), "free entry in scope suffix");
+        }
+        nodes.truncate(self.nodes_watermark);
+        let list_elements = unsafe { &mut *ctx.list_elements.get() };
+        list_elements.truncate(self.list_elements_watermark);
+    }
+}
+
+impl<'ast, 'ctx> GCLock<'ast, 'ctx> {
+    /// Open an allocation scope: everything allocated between this call and
+    /// the returned guard's drop is reclaimed at drop (nodes and list
+    /// elements). Mirrors the C++ `AllocationScope` discipline the PreParse
+    /// pass uses (JSParserImpl.cpp:516-560).
+    ///
+    /// # Safety
+    ///
+    /// The caller must guarantee that when the guard drops:
+    /// - no `&Node`, `NodeList`, or interior reference into an allocation
+    ///   made after this call survives — the storage is freed and any such
+    ///   reference dangles; and
+    /// - no `NodeRc` points into those allocations (debug-asserted).
+    ///
+    /// If the `Context` ran `gc()` before this pass, in-scope allocations
+    /// may be served from the free list at pre-watermark positions; those
+    /// escape reclamation harmlessly (unreferenced until the next `gc()`).
+    pub unsafe fn alloc_scope<'s>(&'s self) -> AllocationScope<'s, 'ast, 'ctx> {
+        let nodes = unsafe { &*self.ctx.nodes.get() };
+        let list_elements = unsafe { &*self.ctx.list_elements.get() };
+        AllocationScope {
+            lock: self,
+            nodes_watermark: nodes.len(),
+            list_elements_watermark: list_elements.len(),
+        }
     }
 }
 
@@ -972,5 +1042,56 @@ mod tests {
         assert!(matches!(node, Node::NumericLiteral(nl) if nl.value.get() == 42.0));
         // Drop rc while the lock is held so the Context doesn't panic on drop.
         drop(rc);
+    }
+
+    #[test]
+    fn alloc_scope_truncates_nodes_and_lists() {
+        let mut ctx = Context::new();
+        let gc = GCLock::new(&mut ctx);
+        let base_nodes = gc.ctx().num_nodes();
+        let base_elems = gc.ctx().num_list_elements();
+
+        // Pre-scope survivor.
+        let survivor = num(&gc, 99.0);
+        {
+            let _scope = unsafe { gc.alloc_scope() };
+            for _ in 0..100 {
+                num(&gc, 0.0);
+            }
+            // A NodeList inside the scope allocates list elements.
+            let a = num(&gc, 1.0);
+            let _list = NodeList::from_iter(&gc, [a]);
+            assert_eq!(gc.ctx().num_nodes(), base_nodes + 102);
+            assert!(gc.ctx().num_list_elements() > base_elems);
+        }
+        // Scope drop reclaimed everything allocated inside it.
+        assert_eq!(gc.ctx().num_nodes(), base_nodes + 1);
+        assert_eq!(gc.ctx().num_list_elements(), base_elems);
+        // The pre-scope survivor is untouched.
+        assert!(matches!(survivor, Node::NumericLiteral(n) if n.value.get() == 99.0));
+    }
+
+    #[test]
+    fn alloc_scope_nests() {
+        let mut ctx = Context::new();
+        let gc = GCLock::new(&mut ctx);
+        let base = gc.ctx().num_nodes();
+        {
+            let _outer = unsafe { gc.alloc_scope() };
+            num(&gc, 1.0); // 1 outer allocation
+            {
+                let _inner = unsafe { gc.alloc_scope() };
+                for _ in 0..50 {
+                    num(&gc, 0.0);
+                }
+            }
+            assert_eq!(gc.ctx().num_nodes(), base + 1, "inner scope reclaimed");
+            // Outer keeps allocating after the inner truncate (bump reuse).
+            for _ in 0..10 {
+                num(&gc, 0.0);
+            }
+            assert_eq!(gc.ctx().num_nodes(), base + 11);
+        }
+        assert_eq!(gc.ctx().num_nodes(), base);
     }
 }
