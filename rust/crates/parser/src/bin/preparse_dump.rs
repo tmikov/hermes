@@ -17,7 +17,7 @@
 //!     [dir...]\n"
 //!   On error: "ERROR <count>\n"
 //!
-//! Args: [file|-]
+//! Args: [--parse-flow] [--parse-ts] [file|-]
 //!   omitted or "-" reads stdin.
 
 use std::io::{self, Read, Write};

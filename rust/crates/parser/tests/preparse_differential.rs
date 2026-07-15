@@ -69,6 +69,14 @@ fn run_differential(corpus: &str, extra: &[&str]) -> usize {
             .expect("spawn preparse-dump (Rust)");
         let cpp_s = String::from_utf8_lossy(&cpp_out.stdout);
         let rust_s = String::from_utf8_lossy(&rust_out.stdout);
+        // Non-degeneracy guard: a typo'd flag makes both binaries treat it
+        // as a filename and emit empty stdout, which would match vacuously.
+        // Every corpus file must produce a real side-table dump.
+        assert!(
+            cpp_s.starts_with("PREPARSE "),
+            "degenerate C++ output on {:?} (bad flag or unreadable file?): {cpp_s:?}",
+            path.file_name().unwrap()
+        );
         assert_eq!(
             cpp_s,
             rust_s,
