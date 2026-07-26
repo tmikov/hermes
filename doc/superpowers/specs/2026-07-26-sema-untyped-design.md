@@ -95,9 +95,10 @@ ids (`scope` + `sem_info`); `For*`/`Switch` carry `label_index` + `scope`.
   C++ uses deques + pointers — pointer→index is the established port adaptation).
 - The two C++ side maps `sideIdentifierDeclarationDecl_` and `promotedFunctionDecls_`
   (`SemContext.h:683-691`) become `HashMap<NodeId, DeclId>`.
-- Node **backrefs** inside sema records (`FunctionInfo::node`,
-  `LexicalScope::hoistedFunctions`) are `NodeRc` — they are references handed to
-  consumers (IRGen, the dumper), not keys; pinning attached tree nodes is free.
+- Node **backrefs** inside sema records (`LexicalScope::hoistedFunctions`,
+  `FunctionInfo::imports` — plan-time audit confirmed `FunctionInfo` itself has no
+  node pointer) are `NodeRc` — they are references handed to consumers (IRGen, the
+  dumper), not keys; pinning attached tree nodes is free.
 - `sema::Keywords` and the C++ decoration accessors (`getSemInfo`, `getScope`,
   `getDecl`, `getDeclarationDecl`/`getExpressionDecl`) become `SemContext` methods.
 - `SemContextDumper` ports with its first-print-order `PtrNumbering`
@@ -130,8 +131,9 @@ Children stay plain immutable references (deep `match` ergonomics preserved; **n
 
 **Plan-time audit obligations for this scheme:**
 (a) backref fixup — when a node with `sem_info`/`scope` set is on a rebuilt spine,
-patch the corresponding record's `NodeRc` (`FunctionInfo::node`,
-`hoistedFunctions` entries); enumerate every node-pointer field in the C++ records.
+patch any sema-record `NodeRc` that referenced it (`LexicalScope::hoistedFunctions`,
+`FunctionInfo::imports` entries); enumerate every node-pointer field in the C++
+records.
 (b) verify the C++ resolver never writes a node decoration *after* visiting that
 node's children (a post-order write to the old node would be lost); restructure if
 any site exists.
