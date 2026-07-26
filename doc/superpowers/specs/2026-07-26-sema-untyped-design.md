@@ -57,6 +57,21 @@ raw-address-keyed maps):
 - Cost: ≤4 bytes/node (`NodeMetadata` is 25 bytes pre-padding). No machinery beyond
   the plain counter (no generations, no reverse lookup) — YAGNI.
 
+**Freed-id log (drain model).** So subsystems can free data keyed by dead ids, both
+node-freeing paths — the GC sweep and `AllocationScope::truncate` — append the
+`NodeId` of each freed node to a `Vec<NodeId>` on the `Context`. No callbacks, no
+registration: the driver that owns both the context and the side tables drains it
+(`ctx.take_freed_ids()`) and hands it to each subsystem (`sem_ctx.prune(&dead)`).
+`Context` never learns who its consumers are; cost with no consumer is one
+empty-Vec check per collection. Notes:
+- The log is purely a memory optimization — safety comes from id **non-reuse**
+  (a missed prune is a lingering entry, never corruption).
+- Discipline (documented on `NodeId`): subsystems insert entries only with the node
+  in hand under `GCLock` — inserting by a stored id after a collection could key
+  data to an already-reported dead id, leaking that entry permanently.
+- Single-consumer `take` semantics for now; grows into a cursor-based log if
+  multiple independent consumers ever appear.
+
 ### 3.2 Decorations live in the nodes (already generated)
 
 The AST generator already ported the C++ `ESTree.h` decoration set 1:1 as `Cell`
@@ -175,7 +190,8 @@ whole-component capstone (including the structural-fidelity template grep). Phas
 boundaries may shift when plans are written against actual C++ line ranges; the gate
 contents are the commitment, not the exact split.
 
-- **S0 — foundations:** `NodeId` in `ast` (+ `gen_nodes.py`); `sema` crate scaffold;
+- **S0 — foundations:** `NodeId` in `ast` (+ `gen_nodes.py`) + the freed-id log
+  (sweep + `AllocationScope::truncate`, §3.1); `sema` crate scaffold;
   `SemContext` + `Keywords` + known-globals + `SemContextDumper`; `sema-dump` bin +
   differential harness green on a trivial subset.
 - **S1 — declarations & scopes:** `DeclCollector`; scope creation; var/let/const/
