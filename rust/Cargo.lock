@@ -37,6 +37,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sema"
+version = "0.0.0"
+dependencies = [
+ "ast",
+ "atom_table",
+ "command_line",
+ "parser",
+ "support",
+]
+
+[[package]]
 name = "support"
 version = "0.0.0"
 dependencies = [

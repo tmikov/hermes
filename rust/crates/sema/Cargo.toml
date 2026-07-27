@@ -1,0 +1,21 @@
+[package]
+name = "sema"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[features]
+dump-bin = ["dep:parser", "dep:command_line"]
+
+[dependencies]
+support = { path = "../support" }
+atom_table = { path = "../atom_table" }
+ast = { path = "../ast" }
+parser = { path = "../parser", optional = true }
+command_line = { path = "../command_line", optional = true }
+
+[dev-dependencies]
+parser = { path = "../parser" }
