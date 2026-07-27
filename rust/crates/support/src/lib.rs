@@ -8,6 +8,7 @@ pub mod json_emitter;
 pub mod line_index;
 pub mod location;
 pub mod manager;
+pub mod persistent_scoped_map;
 pub mod render;
 pub mod utf8;
 
