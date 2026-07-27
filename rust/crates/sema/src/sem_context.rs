@@ -49,6 +49,7 @@
 //!   flagged here for the same reason it flags the other two.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use ast::context::NodeRc;
 use ast::node::{Identifier, Node};
@@ -559,7 +560,19 @@ pub struct SemContext {
     decls: Vec<Decl>,
 
     /// The currently lexically visible names.
-    binding_table: BindingTable,
+    ///
+    /// Deviation: `Rc`-wrapped, where C++ holds the table by value
+    /// (SemContext.h:610). Every `PersistentScopedMap` operation takes
+    /// `&self` (it is interior-mutable), but a `Scope` guard borrows the
+    /// table for as long as the scope is open — and the resolver needs that
+    /// guard to coexist with a `&mut SemContext` (it calls `new_scope`/
+    /// `new_global` while a scope is open). Rust cannot split a `&mut
+    /// SemContext` into "`&BindingTable` + `&mut` everything else" across a
+    /// crate boundary, so `SemanticResolver` instead holds a `&BindingTable`
+    /// derived from its own `Rc` clone (see `binding_table_rc` and
+    /// `resolve::resolve_ast`). C++ needs no such thing: `bindingTable_` is
+    /// a plain reference member there.
+    binding_table: Rc<BindingTable>,
     /// Global binding table scope.
     binding_table_global_scope: BindingTableScopePtr,
 
@@ -590,7 +603,7 @@ impl SemContext {
             functions: Vec::new(),
             scopes: Vec::new(),
             decls: Vec::new(),
-            binding_table: BindingTable::new(),
+            binding_table: Rc::new(BindingTable::new()),
             binding_table_global_scope: BindingTableScopePtr::default(),
             side_identifier_declaration_decl: HashMap::new(),
             promoted_function_decls: HashMap::new(),
@@ -852,6 +865,12 @@ impl SemContext {
     /// \return the binding table. Port of `getBindingTable` (SemContext.h:613-618).
     pub fn binding_table(&self) -> &BindingTable {
         &self.binding_table
+    }
+    /// \return an owning handle to the binding table, whose lifetime is
+    /// independent of any borrow of this `SemContext`. No C++ counterpart —
+    /// see the `binding_table` field's deviation note.
+    pub fn binding_table_rc(&self) -> Rc<BindingTable> {
+        Rc::clone(&self.binding_table)
     }
 
     /// Add a builtin declaration for later processing by FlowChecker. Port

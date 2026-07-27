@@ -10,6 +10,15 @@ unsafe_code = "forbid"
 [features]
 dump-bin = ["dep:parser", "dep:command_line"]
 
+# The Rust side of the `sema_differential` oracle test. Gated on `dump-bin`
+# because it needs the parser + the command-line option parser; the test
+# itself is `#![cfg(feature = "dump-bin")]` for the same reason (a test may
+# not depend on its own crate's features any other way).
+[[bin]]
+name = "sema-dump"
+path = "src/bin/sema_dump.rs"
+required-features = ["dump-bin"]
+
 [dependencies]
 support = { path = "../support" }
 atom_table = { path = "../atom_table" }

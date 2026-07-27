@@ -22,4 +22,7 @@ pub mod dump;
 pub mod dump_context;
 pub mod ids;
 pub mod keywords;
+pub mod libhermes;
+pub mod resolve;
+pub mod resolver;
 pub mod sem_context;
