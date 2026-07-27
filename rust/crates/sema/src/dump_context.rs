@@ -14,6 +14,21 @@
 //!
 //! ## Deviations
 //!
+//! - **Output sink is `&mut Vec<u8>`, not `&mut String`.** C++ writes to a
+//!   `llvh::raw_ostream`, which is just a byte sink (see
+//!   `lib/Support/StringTable.cpp:13-15` for how `UniqueString::str()`
+//!   bytes flow straight through it, unescaped and unvalidated).
+//!   Identifier text is WTF-8: a `\uD800`-style escape can produce a lone
+//!   surrogate code point, whose encoding is NOT valid UTF-8 (a Rust
+//!   `char`/`str` can't hold a surrogate code point), so it can't be
+//!   pushed into a `String`. Decl names come from identifiers and CAN
+//!   contain such escapes, and this dumper's entire purpose is byte-exact
+//!   output for a differential oracle — corrupting or rejecting those
+//!   bytes would defeat the point. So every entry point here writes to a
+//!   plain `Vec<u8>`: ASCII formatting (numbers, keywords) goes through
+//!   the local `push_str` helper (`str::as_bytes`), and atom text goes
+//!   through `push_atom`, which copies `gc.bytes(atom)` verbatim — no
+//!   decoding, no validation, no possibility of a panic on this path.
 //! - The public entry points that print a name (`print_sem_context`,
 //!   `print_decl_ref`) take an extra `gc: &GCLock` parameter that the C++
 //!   signatures don't have. C++ resolves `d->name` (a `UniqueString*`)
@@ -90,8 +105,9 @@ struct Env<'e, 'ast, 'ctx> {
 /// Port of `AnnotateDeclFunc` (SemContext.h:696-697). C++ passes the
 /// `Decl*` itself; here the stable `DeclId` is passed instead (the
 /// callback can look the decl back up in the `SemContext` it already has
-/// if it needs fields).
-pub type AnnotateDeclFunc = Box<dyn Fn(&mut String, DeclId)>;
+/// if it needs fields). Appends to the same byte buffer the rest of the
+/// dumper writes to.
+pub type AnnotateDeclFunc = Box<dyn Fn(&mut Vec<u8>, DeclId)>;
 
 /// Port of `hermes::sema::SemContextDumper` (SemContext.h:694-756).
 pub struct SemContextDumper {
@@ -137,7 +153,7 @@ impl SemContextDumper {
     /// global function). Port of `printSemContext` (cpp:417-451).
     pub fn print_sem_context(
         &mut self,
-        out: &mut String,
+        out: &mut Vec<u8>,
         gc: &GCLock,
         ctx: &SemContext,
         root_func: Option<FunctionInfoId>,
@@ -145,7 +161,7 @@ impl SemContextDumper {
         let root_func = root_func
             .unwrap_or_else(|| FunctionInfoId::from_sema_id(SemaId(0)));
 
-        out.push_str("SemContext\n");
+        push_str(out, "SemContext\n");
 
         // Bucket every function other than `root_func` under its parent —
         // see the module doc for why a plain index-order pass reproduces
@@ -169,7 +185,7 @@ impl SemContextDumper {
     /// `print_sem_context`. Port of the `dumpFunction` lambda (cpp:438-449).
     fn dump_function(
         &mut self,
-        out: &mut String,
+        out: &mut Vec<u8>,
         env: Env<'_, '_, '_>,
         children: &HashMap<Option<FunctionInfoId>, Vec<FunctionInfoId>>,
         f: FunctionInfoId,
@@ -186,20 +202,23 @@ impl SemContextDumper {
     /// Port of `printFunction` (cpp:453-475).
     fn print_function(
         &mut self,
-        out: &mut String,
+        out: &mut Vec<u8>,
         env: Env<'_, '_, '_>,
         f: FunctionInfoId,
         level: u32,
     ) {
         let info = env.sc.function(f);
         push_indent(out, level);
-        out.push_str(if info.is_static_block {
-            "StaticBlock "
-        } else {
-            "Func "
-        });
-        out.push_str(if info.strict { "strict" } else { "loose" });
-        out.push('\n');
+        push_str(
+            out,
+            if info.is_static_block {
+                "StaticBlock "
+            } else {
+                "Func "
+            },
+        );
+        push_str(out, if info.strict { "strict" } else { "loose" });
+        out.push(b'\n');
 
         let scopes = info.get_scopes();
         debug_assert!(
@@ -232,7 +251,7 @@ impl SemContextDumper {
     /// `processedCount` this port checks in `print_function`.
     fn dump_scope(
         &mut self,
-        out: &mut String,
+        out: &mut Vec<u8>,
         env: Env<'_, '_, '_>,
         children: &HashMap<Option<ScopeId>, Vec<ScopeId>>,
         s: ScopeId,
@@ -252,26 +271,26 @@ impl SemContextDumper {
     /// Port of `printScope` (cpp:492-506).
     fn print_scope(
         &mut self,
-        out: &mut String,
+        out: &mut Vec<u8>,
         env: Env<'_, '_, '_>,
         s: ScopeId,
         level: u32,
     ) {
         push_indent(out, level);
-        out.push_str("Scope %s.");
+        push_str(out, "Scope %s.");
         let n = self.scope_numbers.get_number(s);
-        out.push_str(&n.to_string());
-        out.push('\n');
+        push_str(out, &n.to_string());
+        out.push(b'\n');
 
         let scope = env.sc.scope(s);
         for &d in &scope.decls {
             push_indent(out, level + 1);
             self.print_decl(out, env, d);
-            out.push('\n');
+            out.push(b'\n');
         }
         for fd in &scope.hoisted_functions {
             push_indent(out, level + 1);
-            out.push_str("hoistedFunction ");
+            push_str(out, "hoistedFunction ");
             // C++: `cast<IdentifierNode>(fd->_id)->_name->str()` — an
             // unconditional cast, since a hoisted function always has a
             // name. Faithfully unwrap rather than silently skip.
@@ -287,37 +306,37 @@ impl SemContextDumper {
                 .as_identifier()
                 .expect("FunctionDeclaration.id is always an Identifier");
             push_atom(out, env.gc, ident.name.get());
-            out.push('\n');
+            out.push(b'\n');
         }
     }
 
     /// Port of `printScopeRef` (cpp:508-512). Unlike `print_scope`, this
     /// never prints a name, so it needs no `GCLock`.
-    pub fn print_scope_ref(&mut self, out: &mut String, s: ScopeId) {
-        out.push_str("Scope %s.");
-        out.push_str(&self.scope_numbers.get_number(s).to_string());
+    pub fn print_scope_ref(&mut self, out: &mut Vec<u8>, s: ScopeId) {
+        push_str(out, "Scope %s.");
+        push_str(out, &self.scope_numbers.get_number(s).to_string());
     }
 
     /// Port of `printDecl` (cpp:514-554), including the CASE-macro switches
     /// for `Decl::Kind` and `Decl::Special` (cpp:519-543, 546-554).
     fn print_decl(
         &mut self,
-        out: &mut String,
+        out: &mut Vec<u8>,
         env: Env<'_, '_, '_>,
         d: DeclId,
     ) {
-        out.push_str("Decl %d.");
+        push_str(out, "Decl %d.");
         let n = self.decl_numbers.get_number(d);
-        out.push_str(&n.to_string());
-        out.push_str(" '");
+        push_str(out, &n.to_string());
+        push_str(out, " '");
         let decl = env.sc.decl(d);
         push_atom(out, env.gc, decl.name);
-        out.push_str("' ");
-        out.push_str(decl_kind_str(decl.kind));
+        push_str(out, "' ");
+        push_str(out, decl_kind_str(decl.kind));
 
         if decl.special != DeclSpecial::NotSpecial {
-            out.push(' ');
-            out.push_str(decl_special_str(decl.special));
+            out.push(b' ');
+            push_str(out, decl_special_str(decl.special));
         }
 
         if let Some(annotate) = &self.annotate_decl {
@@ -328,54 +347,46 @@ impl SemContextDumper {
     /// Port of `printDeclRef` (cpp:556-562).
     pub fn print_decl_ref(
         &mut self,
-        out: &mut String,
+        out: &mut Vec<u8>,
         gc: &GCLock,
         ctx: &SemContext,
         d: DeclId,
         print_name: bool,
     ) {
-        out.push_str("%d.");
-        out.push_str(&self.decl_numbers.get_number(d).to_string());
+        push_str(out, "%d.");
+        push_str(out, &self.decl_numbers.get_number(d).to_string());
         if print_name {
             let decl = ctx.decl(d);
             if decl.name != INVALID_ATOM_BYTES {
-                out.push_str(" '");
+                push_str(out, " '");
                 push_atom(out, gc, decl.name);
-                out.push('\'');
+                out.push(b'\'');
             }
         }
     }
 }
 
 /// Port of `ind(level)` (cpp:15-17): `level * 4` spaces.
-fn push_indent(out: &mut String, level: u32) {
-    for _ in 0..level * 4 {
-        out.push(' ');
-    }
+fn push_indent(out: &mut Vec<u8>, level: u32) {
+    out.resize(out.len() + (level * 4) as usize, b' ');
 }
 
-/// Push an atom's text into `out`, matching what the C++ dumper does when
-/// it writes `d->name`/`_name->str()` straight to a `raw_ostream`: the raw
-/// bytes, unescaped, verbatim.
-///
-/// Identifier text is WTF-8: `\uD800`-style escapes can produce lone
-/// surrogate code points, whose 3-byte CESU-8-like encoding is NOT valid
-/// UTF-8 (a `char`/`str` can't hold a surrogate code point). `String` must
-/// hold valid UTF-8, so those bytes can't be pushed as-is; a
-/// `String::from_utf8_lossy` fallback would silently replace them with
-/// U+FFFD, producing output that looks plausible but is byte-wise wrong
-/// versus the C++ oracle it's meant to match exactly. S0's tested names
-/// are all plain ASCII (always valid UTF-8), so instead of silently
-/// mangling we decode strictly and panic loudly on the lone-surrogate
-/// case; a real WTF-8-safe renderer is deferred to whichever later task
-/// first needs to dump such a name.
-fn push_atom(out: &mut String, gc: &GCLock, atom: Atom) {
-    let bytes = gc.bytes(atom);
-    let s = std::str::from_utf8(bytes).expect(
-        "atom text is not valid UTF-8 (WTF-8 lone surrogate?); not \
-         supported by SemContextDumper in S0",
-    );
-    out.push_str(s);
+/// Append ASCII/UTF-8 formatting text (literal format strings and
+/// `usize::to_string()` output — never atom/identifier text, which goes
+/// through `push_atom` instead) to the byte buffer.
+fn push_str(out: &mut Vec<u8>, s: &str) {
+    out.extend_from_slice(s.as_bytes());
+}
+
+/// Push an atom's raw bytes into `out`, matching what the C++ dumper does
+/// when it writes `d->name`/`_name->str()` straight to a `raw_ostream`:
+/// the bytes, unescaped and unvalidated, verbatim (see the module doc's
+/// "Output sink" deviation). Identifier text is WTF-8 — lone surrogate
+/// code points from `\uD800`-style escapes are not valid UTF-8 — so this
+/// deliberately does NOT decode or validate; it just copies bytes,
+/// exactly like `raw_ostream::operator<<(StringRef)` does.
+fn push_atom(out: &mut Vec<u8>, gc: &GCLock, atom: Atom) {
+    out.extend_from_slice(gc.bytes(atom));
 }
 
 /// The `Decl::Kind` → string table. Port of the `CASE` macro switch in
@@ -455,13 +466,13 @@ mod tests {
         );
 
         let annotate: AnnotateDeclFunc =
-            Box::new(|out: &mut String, d: DeclId| {
-                out.push_str(" /* annotated ");
-                out.push_str(&d.index().to_string());
-                out.push_str(" */");
+            Box::new(|out: &mut Vec<u8>, d: DeclId| {
+                push_str(out, " /* annotated ");
+                push_str(out, &d.index().to_string());
+                push_str(out, " */");
             });
         let mut dumper = SemContextDumper::new_annotated(annotate);
-        let mut out = String::new();
+        let mut out = Vec::new();
         dumper.print_sem_context(&mut out, &gc, &sc, None);
 
         let expected = "\
@@ -470,7 +481,7 @@ Func loose
     Scope %s.1
         Decl %d.1 'x' Let /* annotated 0 */
 ";
-        assert_eq!(out, expected);
+        assert_eq!(String::from_utf8(out).unwrap(), expected);
     }
 
     /// `print_decl_ref` with `print_name = false` must omit the name even
@@ -497,13 +508,13 @@ Func loose
         );
 
         let mut dumper = SemContextDumper::new();
-        let mut out = String::new();
+        let mut out = Vec::new();
         dumper.print_decl_ref(&mut out, &gc, &sc, d, false);
-        assert_eq!(out, "%d.1");
+        assert_eq!(out, b"%d.1");
 
-        let mut out2 = String::new();
+        let mut out2 = Vec::new();
         dumper.print_decl_ref(&mut out2, &gc, &sc, d, true);
-        assert_eq!(out2, "%d.1 'x'");
+        assert_eq!(out2, b"%d.1 'x'");
     }
 
     /// `print_scope_ref` never prints a name and needs no `GCLock`.
@@ -523,9 +534,9 @@ Func loose
         let s = sc.new_scope(f, None);
 
         let mut dumper = SemContextDumper::new();
-        let mut out = String::new();
+        let mut out = Vec::new();
         dumper.print_scope_ref(&mut out, s);
-        assert_eq!(out, "Scope %s.1");
+        assert_eq!(out, b"Scope %s.1");
     }
 
     /// A `Decl` with a `special` must print the extra ` Special` suffix
@@ -552,7 +563,7 @@ Func loose
         );
 
         let mut dumper = SemContextDumper::new();
-        let mut out = String::new();
+        let mut out = Vec::new();
         dumper.print_sem_context(&mut out, &gc, &sc, None);
         let expected = "\
 SemContext
@@ -560,7 +571,7 @@ Func loose
     Scope %s.1
         Decl %d.1 'arguments' Var Arguments
 ";
-        assert_eq!(out, expected);
+        assert_eq!(String::from_utf8(out).unwrap(), expected);
     }
 
     /// A `StaticBlock` FunctionInfo prints `StaticBlock ` instead of
@@ -582,8 +593,63 @@ Func loose
         sc.new_scope(f, None);
 
         let mut dumper = SemContextDumper::new();
-        let mut out = String::new();
+        let mut out = Vec::new();
         dumper.print_sem_context(&mut out, &gc, &sc, None);
-        assert_eq!(out, "SemContext\nStaticBlock strict\n    Scope %s.1\n");
+        assert_eq!(out, b"SemContext\nStaticBlock strict\n    Scope %s.1\n");
+    }
+
+    /// The finding this test locks in: a decl whose name is WTF-8 with a
+    /// lone surrogate (not valid UTF-8) must round-trip byte-for-byte into
+    /// the output, with no panic — matching the C++ `raw_ostream`, which
+    /// just writes the bytes verbatim (see the module doc's "Output sink"
+    /// deviation). `\uD800` alone (an unpaired high surrogate) encodes as
+    /// WTF-8 `[0xED, 0xA0, 0x80]`, which is invalid UTF-8 proper.
+    #[test]
+    fn decl_name_with_wtf8_lone_surrogate_passes_through_unmodified() {
+        let mut ctx = Context::new();
+        let gc = GCLock::new(&mut ctx);
+        let mut sc = SemContext::new(Keywords::new(&gc));
+        let f = sc.new_function(
+            FuncIsArrow::No,
+            ConstructorKind::None,
+            None,
+            None,
+            false,
+            Default::default(),
+        );
+        let s = sc.new_scope(f, None);
+
+        // Intern the raw lone-surrogate WTF-8 bytes directly (bypassing
+        // `str`, which cannot represent them) via `atom_bytes`, which only
+        // requires `Into<Vec<u8>> + AsRef<[u8]>`, not valid UTF-8.
+        let lone_surrogate_name: Vec<u8> = vec![0xED, 0xA0, 0x80];
+        let name = gc.atom_bytes(lone_surrogate_name.clone());
+        let d = sc.new_decl_in_scope(
+            name,
+            DeclKind::Let,
+            s,
+            DeclSpecial::NotSpecial,
+        );
+
+        let mut dumper = SemContextDumper::new();
+        let mut out = Vec::new();
+        // Must not panic.
+        dumper.print_decl_ref(&mut out, &gc, &sc, d, true);
+
+        let mut expected = b"%d.1 '".to_vec();
+        expected.extend_from_slice(&lone_surrogate_name);
+        expected.push(b'\'');
+        assert_eq!(out, expected);
+
+        // Also exercise the full `print_sem_context` path (goes through
+        // `print_decl`'s `push_atom` call, not just `print_decl_ref`'s).
+        let mut out2 = Vec::new();
+        dumper.print_sem_context(&mut out2, &gc, &sc, None);
+        let mut expected2 =
+            b"SemContext\nFunc loose\n    Scope %s.1\n        Decl %d.1 '"
+                .to_vec();
+        expected2.extend_from_slice(&lone_surrogate_name);
+        expected2.extend_from_slice(b"' Let\n");
+        assert_eq!(out2, expected2);
     }
 }

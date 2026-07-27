@@ -97,7 +97,7 @@ fn prints_global_function_scope_decls_and_nested_strict_function() {
         .push(NodeRc::from_node(&gc, g_decl_node));
 
     let mut dumper = SemContextDumper::new();
-    let mut out = String::new();
+    let mut out = Vec::new();
     dumper.print_sem_context(&mut out, &gc, &sc, None);
 
     let expected = "\
@@ -110,5 +110,9 @@ Func loose
         Scope %s.2
             hoistedFunction g
 ";
-    assert_eq!(out, expected);
+    // ASCII-only golden: comparing as `String` is fine here (and reads
+    // better than a byte-slice literal); the byte-buffer output sink's
+    // WTF-8 pass-through behavior is exercised directly by a dedicated
+    // unit test in `sema::dump_context`'s own test module.
+    assert_eq!(String::from_utf8(out).unwrap(), expected);
 }
