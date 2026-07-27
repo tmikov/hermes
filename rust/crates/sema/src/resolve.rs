@@ -10,7 +10,7 @@
 //!
 //! Only the untyped arm is ported. The `flowContext` parameter and the
 //! `#if HERMES_PARSE_FLOW` block it guards (`FlowChecker::run` + `lowerAST`,
-//! cpp:177-187) belong to the FlowChecker component, which this crate does
+//! cpp:178-188) belong to the FlowChecker component, which this crate does
 //! not have; `declCollectorMap` exists in C++ only to hand the resolver's
 //! `DeclCollector`s to that checker (`flowContext ? &declCollectorMap :
 //! nullptr`), so it is not ported either. The `typed` resolver argument it

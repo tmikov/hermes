@@ -27,9 +27,9 @@
 //!
 //! This mirrors CompilerDriver's `-dump-sema` path: load the runtime library
 //! (`libhermes`) as a global-definitions file first
-//! (CompilerDriver.cpp:1999-2007 → `loadGlobalDefinition`, :762-774), parse
-//! the input, then `sema::resolveAST(..., declFileList)` (:939-947) and
-//! `sema::semDump` (:968-975). `-Xstd-globals` defaults to true, so the
+//! (CompilerDriver.cpp:2001-2008 → `loadGlobalDefinition`, :762-774), parse
+//! the input, then `sema::resolveAST(..., declFileList)` (:940-947) and
+//! `sema::semDump` (:969-974). `-Xstd-globals` defaults to true, so the
 //! libhermes load is unconditional here.
 //!
 //! Command-line parsing uses the `command_line` crate (the LLVM-`cl`-style

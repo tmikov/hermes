@@ -30,7 +30,7 @@
 //!   in the constant's bytes, though, hence this note.
 //!
 //! This string is parsed by the `sema-dump` bin exactly like CompilerDriver's
-//! `loadGlobalDefinition` (CompilerDriver.cpp:762-774, called at :2001-2007)
+//! `loadGlobalDefinition` (CompilerDriver.cpp:762-774, called at :2001-2008)
 //! does, and the resulting `Program` becomes the single ambient-declaration
 //! file passed to `resolve::resolve_ast`. The 63 `UndeclaredGlobalProperty`
 //! decls the empty-input dump contains are exactly this list, deduplicated

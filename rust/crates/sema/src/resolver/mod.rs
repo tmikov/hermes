@@ -94,7 +94,7 @@ const AST_MAX_RECURSION_DEPTH: u32 = 1024;
 /// `DebugInfoSetting` (`include/hermes/AST/Context.h`) is not ported yet — it
 /// is a compiler-driver knob (`-g3`), not something sema computes — and
 /// nothing on the S0 path can set it, so both uses on this path (`ScopeRAII`,
-/// SemanticResolver.cpp:2934-2936; `visit(ProgramNode *)`, cpp:218-220) test
+/// SemanticResolver.cpp:2934-2936; `visit(ProgramNode *)`, cpp:219-221) test
 /// this constant instead. The `if` statements are kept in the exact shape of
 /// the C++ code so that porting the real setting later is a one-line change.
 const DEBUG_INFO_SETTING_ALL: bool = false;
@@ -144,7 +144,7 @@ pub struct FunctionContext {
     pub binding_table_scope_depth: u32,
 }
 
-/// Port of `SemanticResolver::FoundDirectives` (SemanticResolver.h:471-485).
+/// Port of `SemanticResolver::FoundDirectives` (SemanticResolver.h:471-484).
 #[derive(Debug, Clone, Copy, Default)]
 struct FoundDirectives<'ast> {
     /// The *first* "use strict" directive statement, if any. Kept as the
@@ -160,13 +160,13 @@ struct FoundDirectives<'ast> {
     /// Whether a "noinline" directive was seen (and not cancelled).
     no_inline: bool,
     /// Whether a "builtin" directive was seen. Read by
-    /// `hasBuiltinDirective` (cpp:2815-2823), which is S2 scope.
+    /// `hasBuiltinDirective` (cpp:2816-2824), which is S2 scope.
     #[allow(dead_code)]
     builtin: bool,
 }
 
 /// The state a scope entry saves so `exit_scope` can restore it. Port of
-/// `SemanticResolver::ScopeRAII`'s members (SemanticResolver.h:336-341)
+/// `SemanticResolver::ScopeRAII`'s members (SemanticResolver.h:336-342)
 /// minus `resolver_` (implicit in the method receiver) and `bindingScope_`
 /// (owned by `SemanticResolver::binding_scopes`, since a
 /// `persistent_scoped_map::Scope` borrows the table and so cannot be moved
@@ -179,7 +179,7 @@ pub struct ScopeState {
 
 /// The state a function entry saves so `exit_function` can restore it. C++
 /// keeps this in `FunctionContext::prevContext_` plus the `SaveAndRestore`
-/// of `globalFunctionContext_` at the call site (cpp:202).
+/// of `globalFunctionContext_` at the call site (cpp:203).
 #[must_use = "every enter_function must be paired with exit_function"]
 pub struct FunctionState {
     /// Whether this context was installed as `globalFunctionContext_` and
@@ -273,7 +273,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
 
         // Buffer all generated messages and print them sorted in the end.
         // Port of the `bufferMessages_{&sm_}` member initializer
-        // (SemanticResolver.cpp:47); the matching `disableBuffering` is in
+        // (SemanticResolver.cpp:49); the matching `disableBuffering` is in
         // the `Drop` impl below.
         sm.enable_buffering();
 
@@ -343,7 +343,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 
     /// Port of `SemanticResolver::functionContext()`
-    /// (SemanticResolver.h:174-177).
+    /// (SemanticResolver.h:174-176).
     fn function_context(&self) -> &FunctionContext {
         self.function_stack
             .last()
@@ -369,7 +369,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     /// `FunctionInfo` and a `DeclCollector` for `node`
     /// (SemanticResolver.cpp:2963-2992), fused with the `SaveAndRestore` of
     /// `globalFunctionContext_` its S0-reachable call site wraps it in
-    /// (cpp:202).
+    /// (cpp:203).
     ///
     /// \param install_as_global_context port of that `SaveAndRestore`.
     #[allow(clippy::too_many_arguments)]
@@ -391,7 +391,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             strict,
             custom_directives,
         );
-        // C++'s depth-exceeded lambda (cpp:2976-2982) mutates the resolver
+        // C++'s depth-exceeded lambda (cpp:2985-2989) mutates the resolver
         // from inside the collector's walk. That closure cannot borrow
         // `self` mutably here (the `kw` argument already borrows it), so it
         // only records the offending node and the two effects are applied
@@ -434,7 +434,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 
     /// Port of `FunctionContext::~FunctionContext`
-    /// (SemanticResolver.cpp:3049-3054) plus the call site's
+    /// (SemanticResolver.cpp:3049-3070) plus the call site's
     /// `SaveAndRestore` restore.
     fn exit_function(&mut self, state: FunctionState) {
         self.function_stack
@@ -446,7 +446,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 
     /// Port of `SemanticResolver::recursionDepthExceeded`
-    /// (SemanticResolver.cpp:2758-2761).
+    /// (SemanticResolver.cpp:2759-2762).
     fn recursion_depth_exceeded(&mut self, gc: &GCLock, node: &NodeRc) {
         let end_loc = node.node(gc).range().end;
         self.sm.error(
@@ -662,7 +662,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 
     /// Scan the directive prologue of `body`. Port of
-    /// `SemanticResolver::scanDirectives` (cpp:2764-2812).
+    /// `SemanticResolver::scanDirectives` (cpp:2764-2814).
     ///
     /// The C++ `else if (directive == X) { if (cond) ... }` chain is written
     /// here as `else if (directive == X && cond)`. That is equivalent: the
@@ -770,7 +770,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
         }
     }
 
-    /// Port of the `declareAmbientGlobal` lambda (cpp:2899-2907).
+    /// Port of the `declareAmbientGlobal` lambda (cpp:2897-2906).
     ///
     /// \param name the `_name` of the `IdentifierNode` being declared; C++
     ///   takes the node and casts it, but the name is all it uses.
@@ -808,7 +808,7 @@ impl Drop for SemanticResolver<'_, '_, '_, '_> {
 
 /// This visitor struct collects declarations within a single closure without
 /// descending into child closures. Port of `processAmbientDecls`'s local
-/// `struct DeclHoisting` (cpp:2855-2897); its `enter`/`leave` are empty and
+/// `struct DeclHoisting` (cpp:2856-2895); its `enter`/`leave` are empty and
 /// its `shouldVisit` is the body of `visit_node` below.
 ///
 /// C++ collects the `VariableDeclaratorNode *`/`FunctionDeclarationNode *`
@@ -915,7 +915,7 @@ fn set_node_scope(node: &Node, scope: ScopeId) {
     }
 }
 
-/// Port of `node->setSemInfo(semInfo)` (SemanticResolver.cpp:2990), i.e.
+/// Port of `node->setSemInfo(semInfo)` (SemanticResolver.cpp:2991), i.e.
 /// `ESTree::FunctionLikeDecoration::setSemInfo`. Enumerates the same six
 /// function-like node kinds as `sema::dump`'s `function_like_sem_info`.
 fn set_node_sem_info(node: &Node, sem_info: FunctionInfoId) {
