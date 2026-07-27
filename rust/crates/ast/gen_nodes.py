@@ -433,6 +433,7 @@ HEADER = """\
 use std::cell::Cell;
 use crate::node_child::{NodeChild, NodeLabel, NodeList, NodeMetadata, NodeString, Strictness, INVALID_LABEL};
 use crate::visitor::{Path, TransformResult, Visitor, VisitorMut};
+use crate::NodeId;
 use crate::SemaId;
 """
 
@@ -517,6 +518,11 @@ def emit_accessors(items, nodes, out):
     for name, _ in nodes:
         out.append(f"            Node::{name}(n) => &n.metadata,")
     out.append("        }")
+    out.append("    }")
+    out.append("")
+    # node_id().
+    out.append("    pub fn node_id(&self) -> NodeId {")
+    out.append("        self.metadata().id.get()")
     out.append("    }")
     out.append("")
     # range().

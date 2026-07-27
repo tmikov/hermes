@@ -5,6 +5,7 @@ use std::marker::PhantomData;
 use support::location::{SMLoc, SMRange};
 
 use crate::context::{GCLock, NodeListElement};
+use crate::NodeId;
 use crate::node::{EmptyStatement, Node};
 use crate::visitor::{Path, TransformResult, VisitorMut};
 
@@ -38,6 +39,10 @@ pub struct NodeMetadata<'gc> {
     pub debug_loc: Cell<SMLoc>,
     /// 0, 1, or 2 (meaning "2 or more"), mirroring ESTree.h Node::parens_.
     pub parens: Cell<u8>,
+    /// Identity of the arena slot this metadata is (or will be) stored in.
+    /// `UNASSIGNED` until `Context::alloc` stamps a fresh id; belongs to the
+    /// slot's occupant, not to this metadata value across rebuilds.
+    pub id: Cell<NodeId>,
 }
 
 impl<'gc> NodeMetadata<'gc> {
@@ -49,6 +54,7 @@ impl<'gc> NodeMetadata<'gc> {
             range: Cell::new(range),
             debug_loc: Cell::new(range.start),
             parens: Cell::new(0),
+            id: Cell::new(NodeId::UNASSIGNED),
         }
     }
 
@@ -59,17 +65,21 @@ impl<'gc> NodeMetadata<'gc> {
             range: Cell::new(range),
             debug_loc: Cell::new(debug_loc),
             parens: Cell::new(0),
+            id: Cell::new(NodeId::UNASSIGNED),
         }
     }
 
     /// Deep-copy the metadata, copying `Cell` values into fresh `Cell`s.
-    /// Used by builders when cloning a node.
+    /// Used by builders when cloning a node. The id resets to `UNASSIGNED`:
+    /// it belongs to the arena slot's occupant, and `Context::alloc` stamps
+    /// a fresh one when the duplicate is stored.
     pub(crate) fn duplicate(&self) -> NodeMetadata<'gc> {
         NodeMetadata {
             phantom: self.phantom,
             range: Cell::new(self.range.get()),
             debug_loc: Cell::new(self.debug_loc.get()),
             parens: Cell::new(self.parens.get()),
+            id: Cell::new(NodeId::UNASSIGNED),
         }
     }
 

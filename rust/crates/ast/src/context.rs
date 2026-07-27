@@ -12,6 +12,7 @@
 //! Garbage-collected Storage structures for AST nodes.
 
 use std::cell::Cell;
+use std::cell::RefCell;
 use std::cell::UnsafeCell;
 use std::ffi::c_void;
 use std::hash::Hash;
@@ -27,6 +28,7 @@ use atom_table::AtomTable;
 
 use support::deque::Deque;
 use crate::node::Node;
+use crate::NodeId;
 use crate::node_child::NodeList;
 use crate::visitor::Visitor;
 use support::HeapSize;
@@ -217,6 +219,17 @@ pub struct Context<'ast> {
     /// (Context.h:236); getter/setter at Context.h:516-521. Default `0`
     /// (= no threshold, consistent with the C++ initializer).
     preemptive_function_compilation_threshold: u32,
+
+    /// Monotonic counter for `NodeId` assignment. Starts at `1` (`0` is
+    /// `NodeId::UNASSIGNED`); `alloc` stamps the current value onto every
+    /// node it establishes, then advances it. Never reset, never reused.
+    next_node_id: Cell<u32>,
+
+    /// Ids of nodes freed since the last `take_freed_node_ids()`. Appended to
+    /// by both node-freeing paths: `gc()`'s sweep and `AllocationScope::drop`.
+    /// Consumers (sema side tables) drain this to prune dead entries keyed
+    /// by `NodeId` (see doc/superpowers/specs/2026-07-26-sema-untyped-design.md §3.1).
+    freed_node_ids: RefCell<Vec<NodeId>>,
 }
 
 impl Default for Context<'_> {
@@ -252,6 +265,8 @@ impl<'ast> Context<'ast> {
             parse_jsx: false,
             warn_undefined: false,
             preemptive_function_compilation_threshold: 0,
+            next_node_id: Cell::new(1),
+            freed_node_ids: RefCell::new(Vec::new()),
         }
     }
 
@@ -286,6 +301,11 @@ impl<'ast> Context<'ast> {
             entry.set_markbit(!self.markbit_marked);
             entry
         };
+        // Stamp a fresh, never-reused id unconditionally — both the
+        // free-list-reuse and fresh-push arms land here.
+        let id = self.next_node_id.get();
+        self.next_node_id.set(id.checked_add(1).expect("NodeId overflow"));
+        entry.inner.metadata().id.set(NodeId(id));
         // Transmute here to handle the fact that Cell<> is invariant over its type,
         // meaning the lifetime doesn't automatically narrow from `'ast` to `'s`.
         unsafe { std::mem::transmute(&entry.inner) }
@@ -526,6 +546,9 @@ impl<'ast> Context<'ast> {
             }
         }
 
+        // Borrow once: every node this sweep frees appends its id here so
+        // sema side tables (keyed by NodeId) can prune the dead entries.
+        let mut freed_node_ids = self.freed_node_ids.borrow_mut();
         for entry in nodes.iter_mut() {
             if entry.is_free() {
                 // Skip free entries.
@@ -540,6 +563,7 @@ impl<'ast> Context<'ast> {
                 continue;
             }
             // Passed all checks, this entry is free.
+            freed_node_ids.push(entry.inner.metadata().id.get());
             entry.ctx_id_markbit.set(FREE_ENTRY);
             free_nodes.push(unsafe { NonNull::new_unchecked(entry as *mut StorageEntry) });
         }
@@ -560,6 +584,13 @@ impl<'ast> Context<'ast> {
         }
 
         self.markbit_marked = !self.markbit_marked;
+    }
+
+    /// Drain and return the ids of every node freed (by `gc()` or by an
+    /// `AllocationScope` truncation) since the last call. Consumers use this
+    /// to prune dead entries out of side tables keyed by `NodeId`.
+    pub fn take_freed_node_ids(&mut self) -> Vec<NodeId> {
+        std::mem::take(&mut *self.freed_node_ids.borrow_mut())
     }
 
     /// Returns the number of node slots which have been allocated.
@@ -745,6 +776,13 @@ impl Drop for AllocationScope<'_, '_, '_> {
             // gc() cannot run under a GCLock, so no suffix entry can be
             // free (free-list pops reuse only pre-watermark slots).
             debug_assert!(!entry.is_free(), "free entry in scope suffix");
+        }
+        // Log every reclaimed node's id (the debug asserts above already
+        // guarantee no suffix entry is free) so sema side tables can prune
+        // dead entries, same as the gc() sweep does.
+        let mut freed_node_ids = ctx.freed_node_ids.borrow_mut();
+        for entry in nodes.iter_from(self.nodes_watermark) {
+            freed_node_ids.push(entry.inner.metadata().id.get());
         }
         nodes.truncate(self.nodes_watermark);
         let list_elements = unsafe { &mut *ctx.list_elements.get() };

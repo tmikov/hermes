@@ -14,6 +14,7 @@
 use std::cell::Cell;
 use crate::node_child::{NodeChild, NodeLabel, NodeList, NodeMetadata, NodeString, Strictness, INVALID_LABEL};
 use crate::visitor::{Path, TransformResult, Visitor, VisitorMut};
+use crate::NodeId;
 use crate::SemaId;
 
 #[repr(u32)]
@@ -7179,6 +7180,10 @@ impl<'gc> Node<'gc> {
             Node::SHBuiltin(n) => &n.metadata,
             Node::ImplicitCheckedCast(n) => &n.metadata,
         }
+    }
+
+    pub fn node_id(&self) -> NodeId {
+        self.metadata().id.get()
     }
 
     pub fn range(&self) -> support::location::SMRange {
