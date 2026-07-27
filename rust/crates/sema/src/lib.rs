@@ -17,6 +17,7 @@
 //! - `lib/Sema/SemanticValidator.cpp` / `include/hermes/Sema/SemResolve.h`
 //!   (the validator/resolver this crate will host as later tasks land)
 
+pub mod dump;
 pub mod dump_context;
 pub mod ids;
 pub mod keywords;

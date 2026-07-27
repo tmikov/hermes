@@ -366,15 +366,19 @@ impl SemContextDumper {
     }
 }
 
-/// Port of `ind(level)` (cpp:15-17): `level * 4` spaces.
-fn push_indent(out: &mut Vec<u8>, level: u32) {
+/// Port of `ind(level)` (cpp:15-17): `level * 4` spaces. `pub(crate)`
+/// because `dump::ASTPrinter` (SemResolve.cpp:20-157) uses the exact same
+/// indentation convention and reuses this helper rather than duplicating
+/// it.
+pub(crate) fn push_indent(out: &mut Vec<u8>, level: u32) {
     out.resize(out.len() + (level * 4) as usize, b' ');
 }
 
 /// Append ASCII/UTF-8 formatting text (literal format strings and
 /// `usize::to_string()` output — never atom/identifier text, which goes
-/// through `push_atom` instead) to the byte buffer.
-fn push_str(out: &mut Vec<u8>, s: &str) {
+/// through `push_atom` instead) to the byte buffer. `pub(crate)`: shared
+/// with `dump::ASTPrinter` (see `push_indent`'s doc for why).
+pub(crate) fn push_str(out: &mut Vec<u8>, s: &str) {
     out.extend_from_slice(s.as_bytes());
 }
 
@@ -384,8 +388,9 @@ fn push_str(out: &mut Vec<u8>, s: &str) {
 /// "Output sink" deviation). Identifier text is WTF-8 — lone surrogate
 /// code points from `\uD800`-style escapes are not valid UTF-8 — so this
 /// deliberately does NOT decode or validate; it just copies bytes,
-/// exactly like `raw_ostream::operator<<(StringRef)` does.
-fn push_atom(out: &mut Vec<u8>, gc: &GCLock, atom: Atom) {
+/// exactly like `raw_ostream::operator<<(StringRef)` does. `pub(crate)`:
+/// shared with `dump::ASTPrinter` (see `push_indent`'s doc for why).
+pub(crate) fn push_atom(out: &mut Vec<u8>, gc: &GCLock, atom: Atom) {
     out.extend_from_slice(gc.bytes(atom));
 }
 
