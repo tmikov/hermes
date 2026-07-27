@@ -162,7 +162,7 @@ All of `SemResolve.h`, per the implement-completely rule:
 ## 5. Validation
 
 1. **Primary — `sema_differential`** (`REQUIRE_DIFFERENTIAL=1 cargo test -p sema
-   --test sema_differential`): Rust `sema-dump` bin vs `hermesc -dump-sema`,
+   --features dump-bin --test sema_differential`): Rust `sema-dump` bin vs `hermesc -dump-sema`,
    byte-for-byte on **stdout + stderr + exit status**. Comparing stderr makes
    error/warning files first-class corpus members (sema diagnostics flow through the
    byte-compatible `SourceErrorManager`). Corpora:
@@ -192,10 +192,11 @@ whole-component capstone (including the structural-fidelity template grep). Phas
 boundaries may shift when plans are written against actual C++ line ranges; the gate
 contents are the commitment, not the exact split.
 
-- **S0 — foundations:** `NodeId` in `ast` (+ `gen_nodes.py`) + the freed-id log
+- **S0 — foundations (DONE, 2026-07-26):** `NodeId` in `ast` (+ `gen_nodes.py`) + the freed-id log
   (sweep + `AllocationScope::truncate`, §3.1); `sema` crate scaffold;
-  `SemContext` + `Keywords` + known-globals + `SemContextDumper`; `sema-dump` bin +
-  differential harness green on a trivial subset.
+  `SemContext` + `Keywords` (133 atoms) + known-globals + `SemContextDumper`; `sema-dump` bin +
+  differential harness green (6-file corpus, stdout+stderr+exit status). See the roadmap's Sema
+  row for the full what-shipped and the gate command.
 - **S1 — declarations & scopes:** `DeclCollector`; scope creation; var/let/const/
   function hoisting; parameter scopes; identifier-resolution core.
 - **S2 — rest of the walk:** labels/break/continue; catch; classes + private names;

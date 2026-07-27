@@ -48,6 +48,11 @@ validation commands, and workflow.
 > **Sema has no `-dump-ast` analog either — decide its validation oracle during brainstorming.** Open the session with
 > `superpowers:brainstorming`, THEN `writing-plans`. Write each phase plan just-in-time and execute subagent-driven. juno has no parser to crib
 > from (`hparser` is FFI-to-C++); port the C++ directly.
+> **Update (2026-07-26): Sema S0 (foundations) is DONE.** Commits `bd4090d17..7f097b899` on `rust`. Gate (live, green):
+> `REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml -p sema --features dump-bin --test sema_differential -- --nocapture`
+> → "sema differential (tests/sema_corpus): 6 corpus files matched". See the roadmap's Sema row for the full what-shipped detail.
+> **NEXT: S1 — declarations & scopes** (`DeclCollector`; scope creation; var/let/const/function hoisting; parameter scopes;
+> identifier-resolution core); plan to be written just-in-time. Spec: `specs/2026-07-26-sema-untyped-design.md`.
 > The parser proper lives in `rust/crates/parser/src/js/{mod,expressions,statements,functions,classes,modules,jsx}.rs` +
 > **`js/flow/{mod,declarations,types,function_types,object_types,params,match_}.rs`** + **`js/ts/{mod,types,function_types,object_types,
 > declarations,params}.rs`**; the gate is `REQUIRE_DIFFERENTIAL=1 cargo test -p parser --test parser_differential` (build `ast-dump`
@@ -90,7 +95,8 @@ validation commands, and workflow.
 
 **Component status** (see the roadmap table): `SourceErrorManager` ✅ · **JS lexer ✅** ·
 **JSONParser ✅** · **AST ✅ (all 4 phases: GC spine + generated 271-node set + transforming visitor + `ESTreeJSONDumper`)** ·
-JS Parser (next) / Sema / IR / Optimizer / BCGen — future.
+**JS Parser ✅ (P0–P8 + Pre/Lazy passes, entire standard-JS + Flow + TypeScript + JSX grammar)** ·
+**Sema 🚧 (S0 foundations DONE; S1 declarations & scopes next)** / IR / Optimizer / BCGen — future.
 
 Rust workspace: **`rust/Cargo.toml`** (members: `support`, `parser`, `atom_table`, `unicode`),
 toolchain pinned `rust/rust-toolchain.toml` (1.96.0).
