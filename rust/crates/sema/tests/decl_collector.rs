@@ -465,6 +465,8 @@ fn recursion_depth_exceeded_callback_fires_and_stops_that_subtree() {
 
     assert_eq!(fired, 1, "callback must fire exactly once");
     // The var 20 levels deep must NOT have been collected anywhere: the
-    // walk was cut off before reaching it.
-    assert!(dc.scoped_func_decls().is_empty());
+    // walk was cut off before reaching it. `scoped_func_decls` is vacuously
+    // empty here (the fixture has no functions at all), so assert directly
+    // that no scope recorded any declarations for the enclosing `Program`.
+    assert!(dc.scope_decls_for_node(program.node_id()).is_none());
 }

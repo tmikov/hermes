@@ -602,6 +602,13 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
         {
             let scope_state =
                 self.enter_scope(Some(node), /* functionScope */ true);
+            // C++ wraps this assignment in `llvh::SaveAndRestore<...>
+            // saveGlobalScope(globalScope_, ...)` (SemanticResolver.cpp:227)
+            // so `globalScope_` reverts to its enclosing value on return —
+            // needed once `visitProgram` can recurse (lazy compilation,
+            // direct `eval`). The S0 entry path only ever visits one
+            // `Program`, so the restore is not yet observable; it is
+            // deliberately not ported until the S5 lazy/eval work lands.
             self.global_scope = self.cur_binding_scope().ptr();
             self.sem_ctx
                 .set_binding_table_global_scope(self.global_scope.clone());
@@ -802,6 +809,18 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
 /// happens when the resolver is dropped, not at the end of `run`.
 impl Drop for SemanticResolver<'_, '_, '_, '_> {
     fn drop(&mut self) {
+        // `binding_scopes` must be unwound back-to-front (innermost first),
+        // matching `exit_scope`'s own `Vec::pop`: each `Scope`'s `Drop`
+        // requires it to be the *current* (i.e. innermost) binding-table
+        // scope, enforced by a `debug_assert!` in `pop_scope`. `Vec`'s
+        // implicit `Drop` instead drops front-to-back (outermost first), so
+        // if this resolver is dropped mid-unwind with >= 2 scopes still
+        // open (e.g. a panic while resolving a nested block), that
+        // debug_assert fires while already unwinding from another panic —
+        // a double panic, which aborts the process instead of propagating
+        // the original panic. Draining back-to-front here sidesteps that
+        // regardless of how this resolver gets dropped.
+        while self.binding_scopes.pop().is_some() {}
         self.sm.disable_buffering();
     }
 }

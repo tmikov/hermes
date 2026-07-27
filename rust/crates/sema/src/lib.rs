@@ -14,7 +14,7 @@
 //!   `FunctionInfo` — see `sema::ids`)
 //! - `include/hermes/AST/Context.h` (`Keywords`, line 168) and
 //!   `include/hermes/AST/Keywords.def` (see `sema::keywords`)
-//! - `lib/Sema/SemanticValidator.cpp` / `include/hermes/Sema/SemResolve.h`
+//! - `lib/Sema/SemanticResolver.cpp` / `include/hermes/Sema/SemResolve.h`
 //!   (the validator/resolver this crate will host as later tasks land)
 
 pub mod decl_collector;

@@ -123,17 +123,25 @@ fn run_differential(
             .arg(f)
             .output()
             .expect("failed to run sema-dump");
-        assert_eq!(
+        // Compare the raw bytes, not a lossy UTF-8 decode: two distinct
+        // invalid-UTF-8 byte sequences can both map to U+FFFD and compare
+        // equal as `String`s while still being a real byte-for-byte
+        // divergence. The lossy strings are only for the assert message.
+        assert!(
+            c.stdout == r.stdout,
+            "sema dump mismatch (stdout) for {}:\n--- hermesc ---\n{}\n\
+             --- sema-dump ---\n{}",
+            f.display(),
             String::from_utf8_lossy(&c.stdout),
-            String::from_utf8_lossy(&r.stdout),
-            "sema dump mismatch (stdout) for {}",
-            f.display()
+            String::from_utf8_lossy(&r.stdout)
         );
-        assert_eq!(
+        assert!(
+            c.stderr == r.stderr,
+            "sema dump mismatch (stderr) for {}:\n--- hermesc ---\n{}\n\
+             --- sema-dump ---\n{}",
+            f.display(),
             String::from_utf8_lossy(&c.stderr),
-            String::from_utf8_lossy(&r.stderr),
-            "sema dump mismatch (stderr) for {}",
-            f.display()
+            String::from_utf8_lossy(&r.stderr)
         );
         assert_eq!(
             c.status.code(),
