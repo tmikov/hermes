@@ -828,6 +828,15 @@ impl SemContext {
         &mut self.decls[id.index()]
     }
 
+    /// \return the number of functions in storage. Not part of the C++ API
+    /// (C++ has no such count — `printSemContext` just range-for's the
+    /// private `functions_` deque directly, SemContext.cpp:429-436); added
+    /// so `SemContextDumper` can walk every `FunctionInfoId` in storage
+    /// (index/allocation) order the same way, from outside this module.
+    pub fn functions_len(&self) -> usize {
+        self.functions.len()
+    }
+
     /// Set the binding table global scope. Port of
     /// `setBindingTableGlobalScope` (SemContext.h:526-533); the C++ assert
     /// that this can only be called on a root SemContext is vacuous here

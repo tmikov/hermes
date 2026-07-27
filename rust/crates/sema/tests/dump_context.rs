@@ -1,0 +1,114 @@
+/*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+//! Golden test for `sema::dump_context::SemContextDumper`, ported from
+//! `lib/Sema/SemContext.cpp:415-563`. Hand-builds a `SemContext` (no
+//! parser) and asserts the exact multi-line text the C++ `printSemContext`
+//! would produce for the equivalent structure.
+
+use ast::context::{Context, GCLock, NodeRc};
+use ast::node::{BlockStatement, FunctionDeclaration, Identifier, Node};
+use ast::node_child::{NodeList, NodeMetadata};
+use sema::dump_context::SemContextDumper;
+use sema::keywords::Keywords;
+use sema::sem_context::{
+    ConstructorKind, DeclKind, DeclSpecial, FuncIsArrow, SemContext,
+};
+
+fn r() -> support::location::SMRange {
+    let l = support::location::SMLoc {
+        source: support::location::SourceId::from_index(0),
+        offset: 0,
+    };
+    support::location::SMRange { start: l, end: l }
+}
+
+#[test]
+fn prints_global_function_scope_decls_and_nested_strict_function() {
+    let mut ctx = Context::new();
+    let gc = GCLock::new(&mut ctx);
+    let mut sc = SemContext::new(Keywords::new(&gc));
+
+    // Global function (loose) + global scope + 2 decls.
+    let global_fn = sc.new_function(
+        FuncIsArrow::No,
+        ConstructorKind::None,
+        None,
+        None,
+        /* strict */ false,
+        Default::default(),
+    );
+    let global_scope = sc.new_scope(global_fn, None);
+    sc.new_decl_in_scope(
+        gc.atom_bytes("x"),
+        DeclKind::Let,
+        global_scope,
+        DeclSpecial::NotSpecial,
+    );
+    sc.new_decl_in_scope(
+        gc.atom_bytes("f"),
+        DeclKind::GlobalProperty,
+        global_scope,
+        DeclSpecial::NotSpecial,
+    );
+
+    // Nested function (strict), child of the global function/scope, with
+    // one hoisted-function entry pointing at a hand-built
+    // `FunctionDeclaration` whose id is the `Identifier` "g".
+    let nested_fn = sc.new_function(
+        FuncIsArrow::No,
+        ConstructorKind::None,
+        Some(global_fn),
+        Some(global_scope),
+        /* strict */ true,
+        Default::default(),
+    );
+    let nested_scope = sc.new_scope(nested_fn, None);
+
+    let g_id = gc.alloc(Node::Identifier(Identifier::new(
+        NodeMetadata::new(r()),
+        gc.atom_bytes("g"),
+        None,
+        false,
+    )));
+    let g_decl_node = gc.alloc(Node::FunctionDeclaration(
+        FunctionDeclaration::new(
+            NodeMetadata::new(r()),
+            Some(g_id),
+            NodeList::empty(),
+            gc.alloc(Node::BlockStatement(BlockStatement::new(
+                NodeMetadata::new(r()),
+                NodeList::empty(),
+                false,
+            ))),
+            None,
+            None,
+            None,
+            false,
+            false,
+        ),
+    ));
+    sc.scope_mut(nested_scope)
+        .hoisted_functions
+        .push(NodeRc::from_node(&gc, g_decl_node));
+
+    let mut dumper = SemContextDumper::new();
+    let mut out = String::new();
+    dumper.print_sem_context(&mut out, &gc, &sc, None);
+
+    let expected = "\
+SemContext
+Func loose
+    Scope %s.1
+        Decl %d.1 'x' Let
+        Decl %d.2 'f' GlobalProperty
+    Func strict
+        Scope %s.2
+            hoistedFunction g
+";
+    assert_eq!(out, expected);
+}
