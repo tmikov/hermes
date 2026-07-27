@@ -49,11 +49,13 @@
 //!   `isStrictMode()` and `getDebugInfoSetting()`, which are read from the
 //!   `GCLock` / handled at the call sites that need them.
 //! - **`bufferMessages_`** (`SourceErrorManager::SaveAndBufferMessages`,
-//!   SemanticResolver.h:34 — buffers diagnostics and prints them sorted on
-//!   destruction) is NOT ported: the S0 corpus produces no diagnostics, and
-//!   the ported `SourceErrorManager` has no buffering mode yet. It must land
-//!   with the first S1 error test, or diagnostic *order* will differ from
-//!   hermesc even when the text matches.
+//!   SemanticResolver.h:34) is ported as an `enable_buffering()` in
+//!   [`SemanticResolver::new`] paired with a `disable_buffering()` in the
+//!   `Drop` impl — the one place a `Drop` guard *does* fit here, because the
+//!   resolver owns the `&mut SourceErrorManager` it flushes through. That
+//!   matches the C++ member's lifetime exactly: buffering spans the whole
+//!   resolver, and the flush (stable-sorted by source position) happens on
+//!   destruction, not at the end of `run`.
 //! - **`saveDecls_`, `typed_`, `curClassContext_`, `canReferenceSuper_`, the
 //!   four `forbid*` flags** are not ported: nothing on the S0 path reads
 //!   them, and each belongs to a later stage that will introduce it with its
@@ -92,7 +94,7 @@ const AST_MAX_RECURSION_DEPTH: u32 = 1024;
 /// `DebugInfoSetting` (`include/hermes/AST/Context.h`) is not ported yet — it
 /// is a compiler-driver knob (`-g3`), not something sema computes — and
 /// nothing on the S0 path can set it, so both uses on this path (`ScopeRAII`,
-/// SemanticResolver.cpp:2936-2938; `visit(ProgramNode *)`, cpp:214-216) test
+/// SemanticResolver.cpp:2934-2936; `visit(ProgramNode *)`, cpp:218-220) test
 /// this constant instead. The `if` statements are kept in the exact shape of
 /// the C++ code so that porting the real setting later is a one-line change.
 const DEBUG_INFO_SETTING_ALL: bool = false;
@@ -142,15 +144,15 @@ pub struct FunctionContext {
     pub binding_table_scope_depth: u32,
 }
 
-/// Port of `SemanticResolver::FoundDirectives` (SemanticResolver.h:498-511).
+/// Port of `SemanticResolver::FoundDirectives` (SemanticResolver.h:471-485).
 #[derive(Debug, Clone, Copy, Default)]
-struct FoundDirectives {
-    /// Whether a "use strict" directive was seen. C++ stores the *first*
-    /// `ExpressionStatementNode *` so a later diagnostic can point at it; no
-    /// S0 diagnostic uses it, so this port keeps only its presence and
-    /// leaves carrying the node to the S1 task that first needs the
-    /// location.
-    use_strict_node: bool,
+struct FoundDirectives<'ast> {
+    /// The *first* "use strict" directive statement, if any. Kept as the
+    /// node (not just a flag) because C++ points a diagnostic at it — see
+    /// `visitFunctionLikeInFunctionContext`'s "'use strict' not allowed
+    /// inside function with non-simple parameter list" error
+    /// (SemanticResolver.cpp:1748-1751).
+    use_strict_node: Option<&'ast Node<'ast>>,
     /// The strongest source-visibility directive seen.
     source_visibility: SourceVisibility,
     /// Whether an "inline" directive was seen (and not cancelled).
@@ -191,6 +193,13 @@ pub struct SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     /// All semantic tables are persisted here.
     sem_ctx: &'sc mut SemContext,
     /// A copy of `Context::getSM()` for easier access.
+    ///
+    /// Also stands in for C++'s `bufferMessages_`
+    /// (`SourceErrorManager::SaveAndBufferMessages`,
+    /// SourceErrorManager.h:633-643): buffering is enabled on this manager
+    /// by [`SemanticResolver::new`] and disabled — i.e. flushed, sorted by
+    /// source position — by the `Drop` impl below, giving the C++ member's
+    /// exact lifetime without a separate field.
     sm: &'sm mut SourceErrorManager,
     /// The currently lexically visible names. See the module doc for why
     /// this is a separate borrow rather than `sem_ctx.binding_table()`.
@@ -262,6 +271,12 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
         restricted_global_properties.insert(sem_ctx.kw.ident_undefined);
         restricted_global_properties.insert(sem_ctx.kw.ident_infinity);
 
+        // Buffer all generated messages and print them sorted in the end.
+        // Port of the `bufferMessages_{&sm_}` member initializer
+        // (SemanticResolver.cpp:47); the matching `disableBuffering` is in
+        // the `Drop` impl below.
+        sm.enable_buffering();
+
         SemanticResolver {
             sem_ctx,
             sm,
@@ -328,7 +343,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 
     /// Port of `SemanticResolver::functionContext()`
-    /// (SemanticResolver.h:302-304).
+    /// (SemanticResolver.h:174-177).
     fn function_context(&self) -> &FunctionContext {
         self.function_stack
             .last()
@@ -376,7 +391,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             strict,
             custom_directives,
         );
-        // C++'s depth-exceeded lambda (cpp:2977-2982) mutates the resolver
+        // C++'s depth-exceeded lambda (cpp:2976-2982) mutates the resolver
         // from inside the collector's walk. That closure cannot borrow
         // `self` mutably here (the `kw` argument already borrows it), so it
         // only records the offending node and the two effects are applied
@@ -419,7 +434,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 
     /// Port of `FunctionContext::~FunctionContext`
-    /// (SemanticResolver.cpp:3000-3002) plus the call site's
+    /// (SemanticResolver.cpp:3049-3054) plus the call site's
     /// `SaveAndRestore` restore.
     fn exit_function(&mut self, state: FunctionState) {
         self.function_stack
@@ -431,7 +446,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 
     /// Port of `SemanticResolver::recursionDepthExceeded`
-    /// (SemanticResolver.cpp:2149-2152).
+    /// (SemanticResolver.cpp:2758-2761).
     fn recursion_depth_exceeded(&mut self, gc: &GCLock, node: &NodeRc) {
         let end_loc = node.node(gc).range().end;
         self.sm.error(
@@ -444,7 +459,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
 
     /// Create a binding scope and push a semantic scope. Port of
     /// `SemanticResolver::ScopeRAII::ScopeRAII`
-    /// (SemanticResolver.cpp:2919-2947); the C++ member-initializer list
+    /// (SemanticResolver.cpp:2919-2944); the C++ member-initializer list
     /// runs before the constructor body, so the binding scope is pushed
     /// first.
     ///
@@ -490,7 +505,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
 
     /// Pops the created scope. Port of
     /// `SemanticResolver::ScopeRAII::~ScopeRAII`
-    /// (SemanticResolver.cpp:2948-2950) plus the implicit destruction of the
+    /// (SemanticResolver.cpp:2945-2947) plus the implicit destruction of the
     /// `bindingScope_` member (which, being declared last, is destroyed
     /// first).
     fn exit_scope(&mut self, state: ScopeState) {
@@ -566,7 +581,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             /* install_as_global_context */ true,
         );
         let directives = self.scan_directives(program.body.iter());
-        if directives.use_strict_node {
+        if directives.use_strict_node.is_some() {
             let f = self.cur_function_info();
             self.sem_ctx.function_mut(f).strict = true;
         }
@@ -653,7 +668,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     /// here as `else if (directive == X && cond)`. That is equivalent: the
     /// keyword atoms are pairwise distinct, so a directive that matched `X`
     /// can never match a later arm of the chain.
-    fn scan_directives<'ast, I>(&mut self, body: I) -> FoundDirectives
+    fn scan_directives<'ast, I>(&mut self, body: I) -> FoundDirectives<'ast>
     where
         I: IntoIterator<Item = &'ast Node<'ast>>,
     {
@@ -677,9 +692,9 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             }
 
             if directive == kw_use_strict {
-                // C++ records the first such statement node; see
-                // `FoundDirectives::use_strict_node`.
-                directives.use_strict_node = true;
+                // `get_or_insert`: C++'s `if (!useStrictNode) useStrictNode
+                // = exprSt;` keeps the FIRST such statement.
+                directives.use_strict_node.get_or_insert(node);
             } else if directive == kw_show_source
                 && SourceVisibility::ShowSource > directives.source_visibility
             {
@@ -755,7 +770,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
         }
     }
 
-    /// Port of the `declareAmbientGlobal` lambda (cpp:2900-2909).
+    /// Port of the `declareAmbientGlobal` lambda (cpp:2899-2907).
     ///
     /// \param name the `_name` of the `IdentifierNode` being declared; C++
     ///   takes the node and casts it, but the name is all it uses.
@@ -774,9 +789,26 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 }
 
+/// Port of the `bufferMessages_` member's destruction
+/// (`SourceErrorManager::SaveAndBufferMessages::~SaveAndBufferMessages`,
+/// SourceErrorManager.h:640-642): flush every diagnostic the resolver
+/// produced, stable-sorted by source position.
+///
+/// This is the one C++ RAII object on this path that maps onto a Rust `Drop`
+/// guard rather than an `enter_*`/`exit_*` pair (see the module doc): it
+/// needs only the `&mut SourceErrorManager` the resolver already owns, not
+/// `&mut SemanticResolver`, so there is no borrow conflict. Its lifetime is
+/// the resolver's, exactly like the C++ member's — the flush therefore
+/// happens when the resolver is dropped, not at the end of `run`.
+impl Drop for SemanticResolver<'_, '_, '_, '_> {
+    fn drop(&mut self) {
+        self.sm.disable_buffering();
+    }
+}
+
 /// This visitor struct collects declarations within a single closure without
 /// descending into child closures. Port of `processAmbientDecls`'s local
-/// `struct DeclHoisting` (cpp:2856-2898); its `enter`/`leave` are empty and
+/// `struct DeclHoisting` (cpp:2855-2897); its `enter`/`leave` are empty and
 /// its `shouldVisit` is the body of `visit_node` below.
 ///
 /// C++ collects the `VariableDeclaratorNode *`/`FunctionDeclarationNode *`
@@ -856,7 +888,7 @@ fn make_strictness(strict: bool) -> Strictness {
 }
 
 /// Port of `scopeNode->setScope(scope)` in `ScopeRAII`
-/// (SemanticResolver.cpp:2932-2933), i.e.
+/// (SemanticResolver.cpp:2931-2932), i.e.
 /// `ESTree::ScopeDecorationBase::setScope`. Enumerates the same 15
 /// scope-bearing node kinds as `sema::dump`'s `node_scope`.
 fn set_node_scope(node: &Node, scope: ScopeId) {
@@ -883,7 +915,7 @@ fn set_node_scope(node: &Node, scope: ScopeId) {
     }
 }
 
-/// Port of `node->setSemInfo(semInfo)` (SemanticResolver.cpp:2991), i.e.
+/// Port of `node->setSemInfo(semInfo)` (SemanticResolver.cpp:2990), i.e.
 /// `ESTree::FunctionLikeDecoration::setSemInfo`. Enumerates the same six
 /// function-like node kinds as `sema::dump`'s `function_like_sem_info`.
 fn set_node_sem_info(node: &Node, sem_info: FunctionInfoId) {

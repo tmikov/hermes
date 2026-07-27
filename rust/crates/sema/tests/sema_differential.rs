@@ -28,8 +28,12 @@
 //!
 //! The corpus is standard JS only (S0's resolver handles literals, string
 //! literals, empty statements and the directive prologue; anything else
-//! panics by design). stderr is expected to be empty for every file here;
-//! the comparison is wired now so S1's error corpus drops straight in.
+//! panics by design). `inline-noinline.js` produces a real warning, so the
+//! stderr comparison is not vacuous: it pins the diagnostic text, the
+//! `file:line:col: kind:` prefix, the echoed source line and the caret
+//! underline — and, transitively, that `sema-dump` installs a diagnostic
+//! handler at all (a handler-less `SourceErrorManager` silently discards
+//! every message).
 //!
 //! Skip cleanly when hermesc is absent; set `REQUIRE_DIFFERENTIAL=1` to turn
 //! a missing hermesc into a hard failure (used in CI).

@@ -27,6 +27,9 @@ use parser::lexer::{GrammarContext, JSLexer};
 use sema::keywords::Keywords;
 use sema::resolve::resolve_ast;
 use sema::sem_context::{DeclKind, SemContext};
+use std::cell::RefCell;
+use std::rc::Rc;
+use support::diag::{DiagHandler, ResolvedDiagnostic};
 use support::manager::SourceErrorManager;
 
 /// Parse `src` as a `Program` and return its root node, panicking on any
@@ -155,6 +158,63 @@ fn ambient_decls_become_undeclared_global_properties() {
     // are both skipped by the `bindingTable_.count(name)` guard, which is
     // exactly why libhermes' 64 declarations dump as 63 decls.
     assert_eq!(names, vec!["a", "b", "c"]);
+}
+
+/// `bufferMessages_`: diagnostics produced during resolution are buffered
+/// and only reach the handler when the resolver is dropped. If the
+/// `enable_buffering`/`disable_buffering` pair were unbalanced, the message
+/// would never be delivered (still buffered) — so a delivered message proves
+/// the flush ran.
+#[test]
+fn resolver_diagnostics_are_buffered_then_flushed() {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    // A handler whose log can be read without borrowing `sm` (the resolver
+    // holds `&mut sm` for its whole lifetime).
+    let log: Rc<RefCell<Vec<String>>> = Rc::default();
+    sm.set_handler(Box::new(SharedHandler(Rc::clone(&log))));
+    let root = parse(&gc, &mut sm, "\"inline\";\n\"noinline\";\n");
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+
+    {
+        let binding_table = sem_ctx.binding_table_rc();
+        let mut resolver = sema::resolver::SemanticResolver::new(
+            &binding_table,
+            &mut sem_ctx,
+            &mut sm,
+            &[],
+            true,
+        );
+        assert!(resolver.run(&gc, root));
+        // The warning has been produced and counted, but is still buffered:
+        // nothing has reached the handler.
+        assert_eq!(
+            log.borrow().len(),
+            0,
+            "message escaped the buffer before the resolver was dropped"
+        );
+    }
+    // Dropping the resolver disables buffering, which flushes.
+    assert_eq!(
+        log.borrow().as_slice(),
+        ["Should not declare both 'inline' and 'noinline'.".to_string()],
+        "buffered message was never flushed"
+    );
+    assert_eq!(sm.warning_count(), 1);
+}
+
+/// A `DiagHandler` whose log lives outside the `SourceErrorManager`, so it
+/// can be inspected while the manager is mutably borrowed.
+struct SharedHandler(Rc<RefCell<Vec<String>>>);
+
+impl DiagHandler for SharedHandler {
+    fn handle(&mut self, diag: &ResolvedDiagnostic) {
+        self.0.borrow_mut().push(diag.message.clone());
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// Resolution boundary: a construct S0 does not model must panic loudly

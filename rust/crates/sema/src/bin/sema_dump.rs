@@ -15,8 +15,11 @@
 //!     `sema::dump::sem_dump` emits (which ends in a newline); nothing added,
 //!     exit 0.
 //!   On a parse error or a resolution failure: nothing on stdout, exit 1.
-//!     The diagnostics themselves were already streamed to stderr by the
-//!     SourceErrorManager, which is what hermesc does too.
+//!     Diagnostics (errors AND warnings) go to stderr through the installed
+//!     `StderrHandler`, in hermesc's `file:line:col: kind: message` + source
+//!     line + caret format. Note that a `SourceErrorManager` with no handler
+//!     installed silently DISCARDS every diagnostic, so installing one is
+//!     what makes the differential's stderr comparison meaningful.
 //!
 //! Args: [--parse-flow] [--parse-component-syntax] [--parse-flow-records]
 //!       [--parse-flow-match] [--parse-ts] [--parse-jsx] [file|-]
@@ -45,6 +48,7 @@ use sema::libhermes::LIBHERMES;
 use sema::resolve::resolve_ast;
 use sema::sem_context::SemContext;
 use support::manager::SourceErrorManager;
+use support::render::StderrHandler;
 
 /// The parsed command-line options. Built into a [`CommandLine`] then read
 /// back after parsing (the juno `command_line` idiom). This is `ast-dump`'s
@@ -180,6 +184,13 @@ fn main() {
     };
 
     let mut sm = SourceErrorManager::new();
+    // A `SourceErrorManager` starts with no handler and drops everything it
+    // is given, so this must happen before the first parse. hermesc installs
+    // its own printing handler the same way (the `SourceErrorManager`
+    // constructor defaults to `printDiagnosticHelper`).
+    let output_options = sm.output_options();
+    sm.set_handler(Box::new(StderrHandler::new(output_options)));
+
     let mut ctx = Context::new();
     ctx.set_parse_flow(parse_flow);
     // hermesc `-parse-flow` defaults to `ParseFlowSetting::ALL`, which IS
@@ -243,8 +254,8 @@ fn main() {
     };
     let root = match parsed {
         Some(root) if sm.error_count() == 0 => root,
-        // Diagnostics have already been printed to stderr by the
-        // SourceErrorManager; hermesc exits nonzero with no stdout output.
+        // The diagnostics were printed to stderr as they were produced;
+        // hermesc exits nonzero with no stdout output.
         _ => std::process::exit(1),
     };
 
