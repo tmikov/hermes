@@ -327,14 +327,98 @@ impl DiagHandler for SharedHandler {
 }
 
 /// Resolution boundary: a construct not yet modeled must panic loudly
-/// rather than resolve to something wrong. Identifier references are now
-/// modeled (S1 T4, `visit(IdentifierNode *)`) and so are functions (S1 T7);
-/// a call expression still needs `visit(CallExpressionNode *)`
-/// (SemanticResolver.cpp:1117, S2).
+/// rather than resolve to something wrong. Calls themselves are modeled as
+/// of S2 T6 (`visit(CallExpressionNode *)`, SemanticResolver.cpp:1117), but
+/// the `$SHBuiltin` CommonJS-module protocol inside them is S4 — the panic
+/// is the guarantee it is not silently mis-resolved.
 #[test]
-#[should_panic(expected = "sema S1: unhandled node kind CallExpression")]
-fn call_expression_is_not_modeled() {
-    resolve("f();");
+#[should_panic(expected = "$SHBuiltin.moduleFactory needs visitModuleFactory")]
+fn shbuiltin_module_factory_is_not_modeled() {
+    resolve("$SHBuiltin.moduleFactory(1, function (g, r) {});");
+}
+
+/// The same for the other two module property names, so all three panics are
+/// pinned rather than only the first.
+#[test]
+#[should_panic(expected = "$SHBuiltin.export needs visitModuleExport")]
+fn shbuiltin_export_is_not_modeled() {
+    resolve("$SHBuiltin.export('x', 1);");
+}
+
+#[test]
+#[should_panic(expected = "$SHBuiltin.import needs visitModuleImport")]
+fn shbuiltin_import_is_not_modeled() {
+    resolve("$SHBuiltin.import(1, 'x');");
+}
+
+// ---- S2 T6: the eval specials -------------------------------------------
+
+/// `registerLocalEval` (SemanticResolver.cpp:2835-2843) reached end-to-end
+/// through a real direct `eval()` call: the scope the call is in AND every
+/// ancestor up to the global scope get `local_eval`, while a sibling scope
+/// does not. `LexicalScope::local_eval` never reaches `-dump-sema`, so the
+/// differential is blind to this — only a unit test can catch a regression.
+#[test]
+fn a_direct_eval_marks_its_whole_scope_chain() {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    // `eval` is unbound here (no ambient decls), which is the `isEval = true`
+    // branch of cpp:1129-1131.
+    let root = parse(
+        &gc,
+        &mut sm,
+        "function f() { { eval('1'); } }\nfunction g() { { 1; } }\n",
+    );
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    resolve_ast(&gc, &mut sem_ctx, &mut sm, root, &[])
+        .expect("resolution failed");
+
+    // Three FunctionInfos, in creation order: the global function, `f`, `g`.
+    assert_eq!(sem_ctx.functions_len(), 3);
+    let global = sem_ctx.get_global_function();
+    let f = FunctionInfoId::from_sema_id(ast::SemaId(1));
+    let g = FunctionInfoId::from_sema_id(ast::SemaId(2));
+    // `f`'s scopes are its body scope and the nested block's; same for `g`.
+    let marked = |func| -> Vec<bool> {
+        sem_ctx
+            .function(func)
+            .get_scopes()
+            .iter()
+            .map(|s| sem_ctx.scope(*s).local_eval)
+            .collect()
+    };
+    assert_eq!(marked(global), vec![true], "the global scope is an ancestor");
+    assert_eq!(marked(f), vec![true, true], "the call's scope and its parent");
+    assert_eq!(marked(g), vec![false, false], "an unrelated function");
+}
+
+/// With `eval` disabled (`Context::setEnableEval(false)`, cpp:1134-1149) the
+/// warning becomes `EvalDisabled` and `registerLocalEval` does NOT run.
+/// Unreachable from the differential corpus: `sema_differential.rs` has no
+/// per-file flag mechanism, so it can only ever compare hermesc's default
+/// (eval enabled) against ours.
+#[test]
+fn disabled_eval_warns_differently_and_marks_no_scope() {
+    let mut ctx = Context::new();
+    ctx.set_enable_eval(false);
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let log: Rc<RefCell<Vec<String>>> = Rc::default();
+    sm.set_handler(Box::new(SharedHandler(Rc::clone(&log))));
+    let root = parse(&gc, &mut sm, "eval('1');\n");
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    resolve_ast(&gc, &mut sem_ctx, &mut sm, root, &[])
+        .expect("resolution failed");
+
+    assert_eq!(
+        log.borrow().as_slice(),
+        ["eval() is disabled at runtime".to_string()]
+    );
+    assert!(
+        !sem_ctx.scope(sem_ctx.get_global_scope()).local_eval,
+        "registerLocalEval must not run when eval is disabled"
+    );
 }
 
 /// `var` declarations are now modeled (S1 T5): `var x;` at the top level
@@ -860,14 +944,20 @@ fn function_expression_name_scope_belongs_to_the_enclosing_function() {
 /// So the assertion is the test's own shape: `should_panic` can only pass
 /// if the original panic propagated normally through three open scopes.
 #[test]
-#[should_panic(expected = "sema S1: unhandled node kind CallExpression")]
+#[should_panic(expected = "$SHBuiltin.export needs visitModuleExport")]
 fn a_panic_deep_inside_nested_scopes_unwinds_cleanly() {
     let mut ctx = Context::new();
     let gc = ctx.lock();
     let mut sm = SourceErrorManager::new();
-    // `g()` is an unhandled kind (S2). It sits inside a block, inside a
-    // function body, inside the program — three live binding scopes.
-    let root = parse(&gc, &mut sm, "function f() {\n  {\n    g();\n  }\n}\n");
+    // `$SHBuiltin.export(...)` is the S4 module protocol, hence a deliberate
+    // panic (S2 T6 made plain calls resolve, so this replaced the original
+    // `g()`). It sits inside a block, inside a function body, inside the
+    // program — three live binding scopes.
+    let root = parse(
+        &gc,
+        &mut sm,
+        "function f() {\n  {\n    $SHBuiltin.export('x', 1);\n  }\n}\n",
+    );
     let mut sem_ctx = SemContext::new(Keywords::new(&gc));
     let _ = resolve_ast(&gc, &mut sem_ctx, &mut sm, root, &[]);
 }

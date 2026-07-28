@@ -99,6 +99,15 @@
 //! `create_static_block_function_info` live, and what makes S1 T4's
 //! documented `typeof` double-fire quirk reachable (see
 //! `tests/sema_corpus/error-static-block-typeof-arguments.js`).
+//! From S2 T6, `visit(CallExpressionNode *)` (cpp:1117-1205) and
+//! `registerLocalEval` (cpp:2835-2843, `calls.rs`) — a direct call to
+//! `eval()` warns and marks its whole scope chain as a local-`eval` user,
+//! **spec §3.4 rewrite #3** turns `$SHBuiltin.prop(...)` into a call whose
+//! callee's object is an `SHBuiltin` node, and `super()` outside a derived
+//! class constructor is reported, which is what turns S2 T4's
+//! `MethodDefinition` `ConstructorKind` seam observable and (being a
+//! `SpreadElement` whitelist parent) S2 T2's spread handling reachable in
+//! call arguments.
 //! Together this reproduces `hermesc -dump-sema`
 //! byte-for-byte for programs made of literals, empty statements, bare
 //! identifier reads (including through non-computed member/property
@@ -107,13 +116,15 @@
 //! parameter shape, arrow functions of every body/parameter shape,
 //! generators and `async` functions, the loop/label/switch statements above
 //! and the expression forms above, classes with fields, methods,
-//! `super.x` member access, private members and static blocks — which is
-//! what `tests/sema_differential.rs` enforces against the real compiler.
-//! Calls (the `eval`/`$SHBuiltin` specials, `super()`), imports,
-//! and everything else the C++ resolver handles remain later tasks' scope —
-//! see `declarations.rs`'s, `functions.rs`'s, `expressions.rs`'s,
-//! `statements.rs`'s and `classes.rs`'s module docs for exactly which of
-//! *their* branches are ported but not yet corpus-reachable.
+//! `super.x` member access, private members and static blocks, and calls of
+//! every shape (plain, optional, `new`, `eval`, `$SHBuiltin.prop(...)`,
+//! `super()`) — which is what `tests/sema_differential.rs` enforces against
+//! the real compiler. Imports/exports, the `$SHBuiltin` CommonJS-module
+//! protocol, and everything else the C++ resolver handles remain later
+//! tasks' scope — see `declarations.rs`'s, `functions.rs`'s,
+//! `expressions.rs`'s, `statements.rs`'s, `classes.rs`'s and `calls.rs`'s
+//! module docs for exactly which of *their* branches are ported but not yet
+//! corpus-reachable.
 //!
 //! Everything not covered is *deliberately absent rather than
 //! approximated*: `visit_node` panics with `sema S1: unhandled node kind
@@ -203,6 +214,17 @@
 //!   two children by hand and creates the builder only after the last write;
 //!   see `classes.rs`'s module doc and
 //!   `a_rebuilt_class_keeps_its_synthetic_function_infos`.
+//!
+//!   **S2 T6 audit result: no exception.** `visit(CallExpressionNode *)`
+//!   (cpp:1117-1205) writes NO decoration at all — `CallExpression` has no
+//!   `Cell` fields — and rewrite #3's other rebuilt node, the callee
+//!   `MemberExpression`, carries only `computed`, which the generated
+//!   builder's `from_node` copies. The one thing that visit does have to get
+//!   right is the mirror image: the rewrite must be reported as `Changed`
+//!   even when the rebuilt node's own children walk reports `Unchanged`
+//!   (`$SHBuiltin.bar()` — no arguments, nothing below changes), which
+//!   `calls::visit_call_expression`'s tail does explicitly and
+//!   `tests/sema_corpus/shbuiltin-calls.js` pins.
 //! - **Node identity is not stable across a rebuild.** A rebuilt node is a
 //!   new allocation with a fresh `NodeId` (`NodeMetadata::duplicate`), so
 //!   anything keyed by node identity — a `NodeRc` held in a side table, or a
@@ -329,6 +351,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+mod calls;
 mod classes;
 mod declarations;
 mod expressions;
@@ -1109,6 +1132,12 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             Node::MemberExpression(_) | Node::OptionalMemberExpression(_) => {
                 self.visit_member_like_expression(gc, node, path)
             }
+            // `visit(CallExpressionNode*)` (cpp:1117-1205) — the direct-`eval`
+            // detection, rewrite #3 (`$SHBuiltin.prop(...)` → `SHBuiltin`) and
+            // the `super()` check; see `calls::visit_call_expression` (S2 T6),
+            // whose module doc also records why `OptionalCallExpression` and
+            // `NewExpression` are NOT routed here.
+            Node::CallExpression(_) => self.visit_call_expression(gc, node),
             // Kinds with no `visit()` overload in C++: the generic dispatch
             // visits their children (`ExpressionStatement`'s `_expression`
             // — `_directive` is a NodeString, not a node) and here also
@@ -1168,11 +1197,31 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // `_callee`/`_arguments` through `visitESTreeChildren`. It is
             // here because it is one of the five parents
             // `visit(SpreadElementNode *)` whitelists (cpp:1460) and the only
-            // one of them the corpus can reach today: `CallExpression`/
-            // `OptionalCallExpression` have their own override (cpp:1117, the
-            // `eval`/`$SHBuiltin` specials, S2 T6) and stay panicking. Its
-            // Flow-only `_typeArguments` child is self-enforcing in exactly
-            // the way `ObjectPattern`'s `_typeAnnotation` is, above.
+            // one of them the corpus could reach before S2 T6. Its Flow-only
+            // `_typeArguments` child is self-enforcing in exactly the way
+            // `ObjectPattern`'s `_typeAnnotation` is, above.
+            //
+            // S2 T6 adds `OptionalCallExpression` — the sibling of the ONE
+            // call-family kind that does have an override (`CallExpression`,
+            // cpp:1117, now `calls::visit_call_expression`). It is a sibling,
+            // not a subclass: ESTree.def:304-319 makes both children of the
+            // `CallExpressionLike` GROUP, so `visit(CallExpressionNode *)` is
+            // not viable for it and C++ picks the catch-all `visit(Node *)`
+            // (SemanticResolver.h:191-193). See `calls.rs`'s module doc for
+            // what that means observably (`eval?.()` warns about nothing,
+            // `$SHBuiltin.foo?.(1)` is not rewritten). Same task adds
+            // `SHBuiltin`, the node rewrite #3 CREATES: it is an
+            // `ESTREE_NODE_0_ARGS` kind (ESTree.def:1505) with no override,
+            // so this arm is exactly `Unchanged` for it — but it must be
+            // present, because the rewritten callee's children walk reaches
+            // it. And `IfStatement`, which the static-block corpus needs: it
+            // appears nowhere in the SemanticResolver.h:200-304 inventory, so
+            // C++ walks its `_test`/`_consequent`/`_alternate` through
+            // `visitESTreeChildren`, and `DeclCollector` has no override for
+            // it either, so it creates no scope. (Its only mentions anywhere
+            // in `lib/Sema/` are `CheckImplicitReturn.cpp:96-97` and the
+            // `FlowChecker` — two later/typed passes, neither of them this
+            // resolver.)
             //
             // S2 T3 adds `ThrowStatement`, which `throw`-inside-`try` corpus
             // files need: `ThrowStatement` appears nowhere in
@@ -1219,6 +1268,9 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             | Node::TemplateElement(_)
             | Node::SwitchCase(_)
             | Node::NewExpression(_)
+            | Node::OptionalCallExpression(_)
+            | Node::SHBuiltin(_)
+            | Node::IfStatement(_)
             | Node::Empty(_) => node.visit_children_mut(gc, self),
             _ => panic!(
                 "sema S1: unhandled node kind {} — later tasks",

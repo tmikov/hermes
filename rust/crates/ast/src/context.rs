@@ -182,6 +182,15 @@ pub struct Context<'ast> {
     /// Whether strict mode has been forced.
     strict_mode: bool,
 
+    /// Is 'eval()' is enabled. Port of `Context::enableEval_`
+    /// (Context.h:227-228); getter/setter at Context.h:407-412. Read by
+    /// `SemanticResolver::visit(CallExpressionNode *)` (SemanticResolver.cpp:
+    /// 1134) to decide between the `DirectEval` warning + `registerLocalEval`
+    /// and the `EvalDisabled` warning. Default `true`, matching the C++
+    /// member initializer (hermesc only turns it off for
+    /// `-enable-eval=false`).
+    enable_eval: bool,
+
     /// Whether to parse Flow type syntax. Mirrors C++ `Context::getParseFlow()`.
     parse_flow: bool,
 
@@ -256,6 +265,7 @@ impl<'ast> Context<'ast> {
             atom_table: Default::default(),
             markbit_marked: true,
             strict_mode: false,
+            enable_eval: true,
             parse_flow: false,
             parse_flow_ambiguous: false,
             parse_flow_component_syntax: false,
@@ -381,6 +391,18 @@ impl<'ast> Context<'ast> {
     /// Enable strict mode. Note that it cannot be unset.
     pub fn enable_strict_mode(&mut self) {
         self.strict_mode = true;
+    }
+
+    /// Return true if `eval()` is enabled. Mirrors C++
+    /// `Context::getEnableEval()` (Context.h:407-409).
+    pub fn enable_eval(&self) -> bool {
+        self.enable_eval
+    }
+
+    /// Enable or disable `eval()`. Mirrors C++
+    /// `Context::setEnableEval()` (Context.h:410-412).
+    pub fn set_enable_eval(&mut self, v: bool) {
+        self.enable_eval = v;
     }
 
     /// Return true if Flow type parsing is enabled.

@@ -256,10 +256,14 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     /// ambient-global creation — every check below runs in that order
     /// regardless of whether `decl` already resolved, exactly like the C++).
     ///
+    /// `pub(super)` for the second C++ call site, which is not in this file:
+    /// `visit(CallExpressionNode *)`'s `$SHBuiltin` rewrite (cpp:1160, see
+    /// `calls::visit_call_expression`).
+    ///
     /// \param node an `Identifier` node.
     /// \param in_typeof whether `node` is the direct operand of `typeof`.
     /// \return the resolved (or newly created ambient-global) declaration.
-    fn resolve_identifier<'gc>(
+    pub(super) fn resolve_identifier<'gc>(
         &mut self,
         gc: &'gc GCLock,
         node: &'gc Node<'gc>,
@@ -449,6 +453,13 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
         // $SHBuiltin should have been replaced with SHBuiltinNode as part of
         // a member call expression earlier. Any use that gets here is
         // invalid.
+        //
+        // "earlier" is `visit(CallExpressionNode *)`'s rewrite #3
+        // (cpp:1153-1165, `calls::visit_call_expression`, S2 T6), which runs
+        // BEFORE the call's children are walked and so removes the
+        // identifier before this visit could ever see it. Every shape it
+        // declines to rewrite lands here instead — see
+        // `tests/sema_corpus/error-shbuiltin.js`.
         if identifier.name.get() == self.kw().ident_sh_builtin {
             self.sm.error_range(
                 identifier.metadata.range.get(),

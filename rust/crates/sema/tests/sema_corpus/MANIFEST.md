@@ -60,6 +60,22 @@ on `CallExpression` (S2 T6) and their rows were re-classified. After it the
 Imported table has 31 rows (30 from `test/Sema` + the gap-filler) and the
 Deferred table 24, i.e. 30 + 24 = 54. See "S2 Task 5 additions" at the end.
 
+**S2 Task 6** (`visit(CallExpressionNode *)`: the direct-`eval` detection,
+rewrite #3 `$SHBuiltin.prop(...)` → `SHBuiltin`, the `super()` check) is the
+single biggest unlock of the sweep: it re-probed the **sixteen** rows blocked on
+`CallExpression` and imported **all sixteen** (`arguments-arg-let.js`,
+`const-reassignment.js`, `diagnode_errors.js`, `disabled-eval.js`,
+`eval-warn.js`, `let-arguments-in-arrow.js`, `private-load-store-error.js`,
+`reject-with.js`, `static-initialization-block.js`,
+`static-initialization-block-lazy-error.js`, `super-in-arrow.js`,
+`super-in-subclass.js`, `super-in-subclass-error.js`,
+`undeclared-private-name-error.js`, `valid-super-references.js`,
+`var-scope-redeclaration-error.js`). The seventeenth `CallExpression` row,
+`xmod-errors.js`, turned out to be blocked on something strictly deeper — the
+`$SHBuiltin` CommonJS-module protocol — and was re-classified to S4. After it
+the Imported table has 47 rows (46 from `test/Sema` + the gap-filler) and the
+Deferred table 8, i.e. 46 + 8 = 54. See "S2 Task 6 additions" at the end.
+
 ## Imported (byte-identical vs hermesc)
 
 | File | Note |
@@ -95,6 +111,22 @@ Deferred table 24, i.e. 30 + 24 = 54. See "S2 Task 5 additions" at the end.
 | `private-name-in-extends-error.js` | **S2 T5** — `the private name "#foo" was not declared in any enclosing class`: the superclass expression is visited BEFORE the private names are declared (cpp:936-939) |
 | `field-value-arguments-error.js` | **S2 T5** — `invalid use of 'arguments'` in a PRIVATE field initializer (the `ClassPrivateProperty` half of the flag save/restores), which is what kept this file deferred after S2 T4 |
 | `static-initialization-block-error.js` | **S2 T5** — a `let`/`let` redeclaration inside a static block, i.e. the block's own body scope |
+| `arguments-arg-let.js` | **S2 T6** — `let arguments` in a function that also has a parameter named `arguments` |
+| `const-reassignment.js` | **S2 T6** — every `const` reassignment shape, reported through calls |
+| `diagnode_errors.js` | **S2 T6** — the `$SHBuiltin`-free half of the diag-node tests |
+| `disabled-eval.js` | **S2 T6** — a bare `eval("print(1)")` at global scope. Its `RUN:` lines want `-enable-eval=false`, which the harness has no flag support for, so what this pins is the **enabled** (`DirectEval`) branch; the `EvalDisabled` branch is unit-tested instead — see the note below |
+| `eval-warn.js` | **S2 T6** — two direct `eval()` calls inside functions, one with extra arguments, i.e. the `DirectEval` warning over the callee's range |
+| `let-arguments-in-arrow.js` | **S2 T6** — `let arguments` referenced from inside an arrow |
+| `private-load-store-error.js` | **S2 T6** — the private load/store restrictions as `test/Sema` writes them (with `sink(...)` calls); the call-free `error-private-load-store.js` from S2 T5 remains the exhaustive version |
+| `reject-with.js` | **S2 T6** — `with` plus a call in its body |
+| `static-initialization-block.js` | **S2 T6** — a static block whose body calls `sink(y)`; also the first corpus file to need `IfStatement` (added to `visit_node`'s override-free generic arm by this task) |
+| `static-initialization-block-lazy-error.js` | **S2 T6** — `forbidArgumentsAsIdentifier_` reached through three nested arrows in a static block. Its `RUN:` line also wants `-lazy`, which the harness ignores; the diagnostics are identical without it |
+| `super-in-arrow.js` | **S2 T6** — `super()` through one and two levels of arrow inside a derived constructor (`nearestNonArrow`) |
+| `super-in-subclass.js` | **S2 T6** — `super()` two arrows deep in a derived constructor |
+| `super-in-subclass-error.js` | **S2 T6** — four `super() call only allowed in derived class constructor` shapes: a base-class constructor, an arrow inside one, a plain function inside a *derived* constructor, and an object-literal method |
+| `undeclared-private-name-error.js` | **S2 T6** — `the private name "#x" was not declared in any enclosing class`, as `test/Sema` writes it |
+| `valid-super-references.js` | **S2 T6** — every legal `super.x` shape, including the two field initializers that call an IIFE (which is what needed `CallExpression`) |
+| `var-scope-redeclaration-error.js` | **S2 T6** — `var` redeclaration errors across `try`/`catch` with a call in the body |
 
 `deep-ast-err.js` is listed in the Deferred table below but is NOT a real S1
 gap: the entire `.js` file is comment lines (its `RUN:` lines generate the
@@ -110,30 +142,14 @@ files in, 54 accounted for below) rather than silently dropped. It is also
 
 | File | Blocking construct | Target phase |
 |---|---|---|
-| `arguments-arg-let.js` | `CallExpression` (`print(...)`) | S2 |
 | `break-in-nested-func.js` | loose-mode block-nested `FunctionDeclaration` (`ScopedFunctionPromoter`) | S3 |
-| `const-reassignment.js` | `CallExpression` | S2 |
 | `deep-ast-err.js` | vacuous — see note above (not a real S1 gap) | n/a |
-| `diagnode_errors.js` | `CallExpression` | S2 |
-| `disabled-eval.js` | `CallExpression` | S2 |
-| `eval-warn.js` | `CallExpression` | S2 |
 | `function-redeclaration-error.js` | loose- AND strict-mode block-nested `FunctionDeclaration` (`ScopedFunctionPromoter`) — re-probed after S2 T3 unblocked its `try`/`catch` clauses; the remaining blocker is the `sema S1: scoped function declarations are S3 scope` assert | S3 |
 | `invalid-args-eval.js` | **not a port gap** — the resolver's loop/`for` support landed in S2 T1 and every diagnostic in this file is produced, with identical text and locations, but two of them collide at the *same* source location (`89:9`: the strict-mode `cannot declare 'arguments'` error and the `was not declared in function "global"` warning). C++'s buffered-message flush uses `std::sort` (`SourceErrorManager.cpp:61-71`), which is NOT stable, so their relative order is unspecified and in practice depends on the whole 24-message array; our `disable_buffering` uses a stable `sort_by_key` (`support/src/manager.rs:903-909`, a documented deviation). Minimized to two messages the two sides agree; only at this file's message count does libstdc++'s introsort reorder the tie. Not faithfully fixable (there is no defined tie order to match), and the file's actual subject is S1's `arguments`/`eval` declaration rules, so the loop-specific rows were extracted into the new `error-for-decl-strict.js` instead | n/a (C++ unstable-sort tie) |
-| `let-arguments-in-arrow.js` | `CallExpression` (arrows landed in S2 T2; `print(...)` remains) | S2 |
-| `private-load-store-error.js` | `CallExpression` (`sink(...)`) — the private names and the `MemberExpression`/`OptionalMemberExpression` restriction branches landed in S2 T5, and its whole subject is reproduced call-free by the new `error-private-load-store.js` | S2 T6 |
 | `regress-function-promotion-decl.js` | loose-mode block-nested `FunctionDeclaration` (`ScopedFunctionPromoter`) | S3 |
 | `regress-nested-expressions-error.js` | recursion-depth-limit mismatch: hermesc and sema-dump both correctly error `Too many nested expressions/statements/declarations` on the deeply-nested `get<<=get<<=...` chain, but at different columns (hermesc col 3052, sema-dump col 6124) — the two recursion trackers (`JSParserImpl::recursionDepth_`/`SemanticResolver`'s tracker vs our ported ones) increment at different rates per grammar production, so the exact trip point diverges even though both share the same `MAX_RECURSION_DEPTH = 1024`. Same landmine category as the S1 ledger's "parser recursion limit unported" item (S0-era finding, T6 review) — tracked together, not re-derived/fixed here | parser-gap follow-up (recursion-depth-counting parity) |
-| `reject-with.js` | `CallExpression` (`print(a)`) — `with` itself landed in S2 T3 (see `error-with.js`) | S2 |
-| `static-initialization-block-lazy-error.js` | `CallExpression` (`print(...)`) — `StaticBlock` landed in S2 T5; its subject (`forbidArgumentsAsIdentifier_` reached through three nested arrows) is covered call-free by the new `error-static-block.js`. Its `RUN:` line also wants `-lazy`, which the harness has no flag support for | S2 T6 |
-| `static-initialization-block.js` | `CallExpression` (`sink(y)`) plus `IfStatement`, which no corpus file has needed yet (it has no `SemanticResolver::visit` override, so it belongs in `visit_node`'s override-free generic arm whenever a file first needs it) — `StaticBlock` itself landed in S2 T5 and its subject is covered by the new `static-blocks.js` | S2 T6 |
-| `super-in-arrow.js` | `CallExpression` (`super()` and `print(...)`) — the class and `super.x` paths landed in S2 T4 | S2 T6 |
-| `super-in-subclass-error.js` | `CallExpression` — its subject IS the `super() call only allowed in derived class constructor` check (cpp:1195-1202) | S2 T6 |
-| `super-in-subclass.js` | `CallExpression` (`super()`) | S2 T6 |
 | `type-alias-children.js` | typed dialect (`-parse-flow` RUN flag; harness has no per-file flags) — WITHOUT the flag, hermesc and sema-dump both hit the identical `';' expected` parse error on `type A = B;`, but that's a coincidental match on a syntax error, not a test of the file's actual subject (TypeAlias children resolution); same vacuous-match category `deep-ast-err.js` was excluded for, so it does not belong in `sema_corpus/` either | dialect-corpus phase |
-| `undeclared-private-name-error.js` | `CallExpression` (`print(...)`) — private names landed in S2 T5 and the same diagnostic is pinned call-free by the new `error-private-load-store.js` | S2 T6 |
-| `valid-super-references.js` | `CallExpression` (`super()` and `print(...)`) — `super.x` itself landed in S2 T4 | S2 T6 |
-| `var-scope-redeclaration-error.js` | `CallExpression` (`something()`) — `try`/`catch` landed in S2 T3 | S2 |
-| `xmod-errors.js` | `CallExpression` | S2 |
+| `xmod-errors.js` | the `$SHBuiltin` CommonJS-module protocol: `visitModuleFactory`/`visitModuleExport`/`visitModuleImport` (cpp:1320-1453), reached from the three property-name branches of rewrite #3 (cpp:1168-1189). `CallExpression` itself landed in S2 T6, which ports those three branches as loud phase-tagged panics — its row was re-classified from "`CallExpression` / S2" accordingly. Every diagnostic in the file (`$SHBuiltin.moduleFactory requires exactly two arguments.` and 17 more) comes from those three functions | S4 modules |
 
 ## Subdirectories (`test/Sema/flow/`, `test/Sema/flow/ffi/`, `test/Sema/lowering/`)
 
@@ -251,8 +267,10 @@ Not corpus-reachable, and documented at their sites rather than curated away:
   gets reinterpreted into a `RestElement`/`CoverRestElement`. Probed with
   `import(...a)`, `switch (...a)`, `` tag`${...a}` `` and the destructuring
   reinterpret paths. `CallExpression`/`OptionalCallExpression` are whitelisted
-  parents but have their own visit override (the `eval`/`$SHBuiltin` specials),
-  so they stay deferred to S2 T6.
+  parents that were still deferred when this note was written; **S2 T6
+  RESOLVED that** — `calls-shapes.js` now exercises `f(...a)`, `f(1, ...a, 2)`,
+  `f?.(...a)` and `new f(...a)`, so four of the five whitelisted parents are
+  live (`ArrayExpression` is the fifth, covered since S2 T2).
 - **`invalid meta property X.Y`** (cpp:868-871). The parser only builds a
   `MetaProperty` after matching `new` `.` `target` / `import` `.` `meta`
   exactly, and reports `'target'/'meta' expected in member expression`
@@ -397,3 +415,49 @@ Not corpus-reachable, and documented at their sites rather than curated away:
 - **`DebugInfoSetting::ALL`** (cpp:1065-1069) would store the static block's
   binding-table scope for `eval` of its children. Ported in shape behind
   `DEBUG_INFO_SETTING_ALL`, exactly like the other two uses of that constant.
+
+## S2 Task 6 additions
+
+Seven new files plus the sixteen re-probed `test/Sema` imports listed in the
+S2 Task 6 paragraph at the top. Each was verified byte-for-byte (stdout, stderr
+and exit status) against `hermesc -dump-sema` **before** being added:
+
+| File | Covers |
+|---|---|
+| `calls-shapes.js` | every call shape that hits NONE of the three specials, i.e. the plain `visitESTreeChildren` tail at cpp:1204: callee shapes (identifier, member, computed member, IIFE, arrow IIFE, sequence, logical, a call of a call), `new` in five forms, `OptionalCallExpression` in seven forms (`f?.()`, `o.m?.()`, `o?.m()`, `o?.m?.(1)`, `f?.()()`, `f()?.()`), spread arguments in `CallExpression`/`OptionalCallExpression`/`NewExpression` (three of `visit(SpreadElementNode *)`'s five whitelisted parents, cpp:1460), calls in every statement position (`if`/`while`/`do`/`for`/`for-in`/`switch`/`try`/`throw`/labeled), calls in every function-like body (function, nested function expression, both arrow body shapes, generator, `async`), and calls in a computed class key, a field initializer, a method body and a static block. This is also the first corpus file to need `OptionalCallExpression` in `visit_node`'s override-free generic arm |
+| `eval-direct.js` | the `DirectEval` half of the eval detection (cpp:1118-1151): a direct `eval()` at global scope, with extra arguments, with none, inside a function, inside both arrow body shapes, three block levels deep, in a method, a field initializer and a static block — plus the four shapes that are NOT direct calls and therefore warn about nothing (`o.eval("8")`, `eval?.("9")`, `new eval("10")`, and `eval` merely referenced) |
+| `eval-shadowed.js` | the negative half (cpp:1121-1131): `isEval` is false when the binding is not a global-scope `UndeclaredGlobalProperty`/`GlobalProperty`, so a parameter, a `var`, a `let`, a block `let`, a nested `function` and a catch parameter all named `eval` suppress the warning — **and the quirk that a GLOBAL `var eval` does NOT**, because `GlobalProperty` in the global scope is one of the two kinds the check accepts. Loose mode throughout, since every one of those declarations is a strict-mode error |
+| `shbuiltin-calls.js` | **rewrite #3** (cpp:1153-1165): `$SHBuiltin.foo(1)` and friends, whose dump shows the `Id '$SHBuiltin'` line replaced by a bare `SHBuiltin` line (with no `[D:E:...]`) — at global scope, in a function, in an arrow, in a method, a field initializer and a static block; a rewritten call used as a value, as a callee and as an argument to another rewritten call; and one whose argument FOLDS, so the rebuilt `CallExpression` is rebuilt a second time by its own children walk |
+| `error-shbuiltin.js` | every shape rewrite #3 does NOT rewrite, all of which end in `invalid use of $SHBuiltin` from `visit(IdentifierNode *)` (cpp:310-314) because the identifier survives into the children walk: a bare reference, a member access that is not a call, a call whose callee is the identifier itself, a COMPUTED member call (both literal and dynamic key), an `OptionalCallExpression` and an `OptionalMemberExpression` callee, a `NewExpression`, and a shadowed `let $SHBuiltin` — **pinning that each surviving occurrence is reported exactly ONCE** even where `visit(CallExpressionNode *)` also called `resolveIdentifier` on it. Its one legal line, `a.$SHBuiltin(1)`, is the contrast: a non-computed member *property* returns early at cpp:287-293 |
+| `super-calls.js` | the legal `super()` shapes (cpp:1195-1202): a derived constructor, with arguments, with a spread, in nested block/`if`/`for`/`try`/`catch`/`switch` positions, through one and two arrows and through an arrow's parameter default (all `nearestNonArrow`), a derived class expression, a derived class inside a function, and `extends` of a parenthesized expression |
+| `error-super-call.js` | the eight `super() call only allowed in derived class constructor` shapes: a base-class constructor, an arrow inside one, a plain function inside a *derived* constructor (the function is itself the nearest non-arrow), an object-literal method, an instance and a static method of a derived class, a derived class's field initializer (which runs in the synthetic elements-initializer `FunctionInfo`), and `super(1, 2 + 3)` — the last one pinning that the range covers the ARGUMENTS, since the diagnostic uses `node->getSourceRange()` |
+
+Not corpus-reachable, and documented at their sites rather than curated away:
+
+- **The `EvalDisabled` warning and the `registerLocalEval`-is-skipped branch**
+  (cpp:1143-1149) need `Context::setEnableEval(false)`, i.e. hermesc's
+  `-enable-eval=false`. `sema_differential.rs` has no per-file flag mechanism,
+  so the corpus can only ever compare hermesc's default (eval enabled) against
+  ours — which is why `disabled-eval.js` was imported for its ENABLED-branch
+  behavior and the disabled branch is pinned by the unit test
+  `disabled_eval_warns_differently_and_marks_no_scope` in `tests/resolver.rs`
+  instead. The flag itself IS ported (`ast::Context::enable_eval`, default
+  `true`, matching Context.h:228).
+- **`LexicalScope::localEval`** — what `registerLocalEval` (cpp:2835-2843)
+  actually writes — is never printed by `-dump-sema`, so the differential is
+  structurally blind to it. Pinned by two unit tests instead:
+  `register_local_eval_marks_the_whole_ancestor_chain` (the helper directly,
+  in `resolver/calls.rs`) and `a_direct_eval_marks_its_whole_scope_chain` (end
+  to end through a real `eval()` call, in `tests/resolver.rs`).
+- **The three `$SHBuiltin` module property names** (`moduleFactory`, `export`,
+  `import`, cpp:1168-1189) are S4; see `xmod-errors.js`'s Deferred row. All
+  three are loud phase-tagged panics, pinned by
+  `shbuiltin_{module_factory,export,import}_is_not_modeled` in
+  `tests/resolver.rs`.
+- **`$SHBuiltin.#x(...)`** inside a class declaring `#x` makes the C++ assert:
+  cpp:1166-1167 uses `llvh::cast<IdentifierNode>(methodCallee->_property)`, but a
+  non-computed member expression's property may also be a `PrivateName`. Same
+  category as S2 T4's `class C { x = class {}; }` finding — a pre-existing C++
+  defect, not a port gap — so the shape stays out of the corpus and
+  `calls.rs`'s `sh_builtin_property_name` reproduces the failing `cast` as an
+  explicit panic.

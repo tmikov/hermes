@@ -1353,7 +1353,9 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     /// `ESTREE_NODE_0_ARGS` kind, ESTree.def:275) nor touches
     /// `node` at all — only `parent` — hence the `Unchanged` and the absent
     /// `node` parameter. `super(...)`'s own check lives in
-    /// `visit(CallExpressionNode *)` (cpp:1195-1202), which is S2 T6.
+    /// `visit(CallExpressionNode *)` (cpp:1195-1202) — `calls.rs`, S2 T6 —
+    /// which is exactly why a `CallExpression` parent is NOT in the
+    /// `MemberExpressionLike` range tested below.
     pub(super) fn visit_super<'gc>(
         &mut self,
         path: Option<Path<'gc>>,
