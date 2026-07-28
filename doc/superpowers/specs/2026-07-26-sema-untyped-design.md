@@ -132,6 +132,20 @@ the generic constant-folding replacement above; audit for more is a plan task):
    fires only if `$SHBuiltin` resolves to `UndeclaredGlobalProperty`)
 4. anonymous `export default function` → `FunctionExpression` (`:1527`)
 
+> **Status (S2, 2026-07-28): rewrites 1, 2 and 3 have SHIPPED** — #1 in S2 T2
+> (`resolver/functions.rs`), #2 in S2 T3 (`resolver/statements.rs`), #3 in S2 T6
+> (`resolver/calls.rs`) — each exactly as designed here: build the replacement at the
+> C++ point, visit the NEW subtree, return `Changed`. Rewrite #4 belongs to the module
+> visits and is carried to **S4**. The audit obligations below are discharged:
+> (a) the `hoistedFunctions` backref fixup shipped in S1 T7 (`FunctionInfo::imports`
+> is owed by S4, which introduces its only writer); (b) the "no post-order decoration
+> write" check turned up **two** exceptions across the whole plain-JS walk, both handled
+> by writing to the node that is RETURNED — `Switch`'s `label_index` (S2 T1) and the
+> class visit, which hand-drives its children so the returned node is built last
+> (S2 T4); (c) no *named* rewrite site beyond the four turned up in S1 or S2 — the
+> generic `ppNode` replacement used by constant folding is the extra mechanism, recorded
+> in the correction above.
+
 Children stay plain immutable references (deep `match` ergonomics preserved; **no
 `Cell` children**). Instead the resolver runs as a `VisitorMut` functional transform:
 
@@ -220,13 +234,24 @@ contents are the commitment, not the exact split.
   function/parameter scopes + the §3.4(a) backref fixup (T7); a 69-file corpus sweep with
   `MANIFEST.md` (T8). See the roadmap's Sema row for the full what-shipped and the gate
   command; commits `53ddf2e92..77a41ed3e`.
-- **S2 — rest of the walk:** labels/break/continue; catch; classes + private names;
-  the four rewrites; eval/`arguments`/`with`; strict-mode checks;
-  `mayReachImplicitReturn`.
+- **S2 — rest of the walk (DONE, 2026-07-28):** loops/labels/`break`/`continue`/`switch`
+  (T1); arrows + rewrite #1 + `yield`/`await`/spread/meta + the `Cover*` errors (T2);
+  try/catch + rewrite #2, `with` + the `Unresolver`, the regexp visit as a documented
+  regex-engine deferral (T3); classes + `ClassContext` + `super` (T4); private names +
+  static blocks (T5); call specials — direct `eval` + rewrite #3 + `super()` (T6);
+  `CheckImplicitReturn`, i.e. `mayReachImplicitReturn` (T7); corpus sweep round 2 (T8).
+  Three of the four §3.4 rewrites shipped (see the §3.4 status note); `export default`
+  moved to S4 with the module visits. See the roadmap's Sema row for the full
+  what-shipped and the gate; commits `94b4695f1..dc2fb1661`, gate 69 → **160** files
+  (88 succeeding on hermesc).
 - **S3 — `ScopedFunctionPromoter`** + loose-mode promotion + `promotedFunctionDecls_`.
-- **S4 — modules & flavors:** CommonJS wrapping; ambient decls;
-  `resolve_ast_for_parser`; dialect corpora green.
+- **S4 — modules & flavors:** the module visits + rewrite #4 (anonymous `export default
+  function`) + the `$SHBuiltin` module protocol; CommonJS wrapping; ambient decls;
+  `FunctionInfo::imports` backref fixup; `resolve_ast_for_parser`; dialect corpora green
+  (which needs per-file flag support in `sema_differential.rs`).
 - **S5 — lazy + eval entry points; capstone.**
+- **Not a Sema phase:** real regular-expression validation, which needs the regex engine
+  (`lib/Regex/`) — a future component of its own.
 
 ## 7. Deliberate deviations (to record in the roadmap on completion)
 

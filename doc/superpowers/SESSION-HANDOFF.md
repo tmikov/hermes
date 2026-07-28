@@ -50,21 +50,33 @@ validation commands, and workflow.
 > from (`hparser` is FFI-to-C++); port the C++ directly.
 > **Update (2026-07-26): Sema S0 (foundations) is DONE.** Commits `bd4090d17..7f097b899` on `rust`.
 > **Update (2026-07-28): Sema S1 (declarations & scopes) is DONE.** Commits `53ddf2e92..77a41ed3e` on `rust`.
-> Gate (live, green, unchanged since S0):
+> S1 shipped the resolver as a direct `ast::VisitorMut` implementation (one phase early — the C++'s generic `Node **ppNode`
+> replacement, used by constant folding, needed the mechanism from the start), hermesc error-epilogue parity, `ASTEval`
+> constant folding, identifier resolution, the full declaration/redeclaration matrix, expression fold+validation wiring,
+> function/parameter scopes, and a 69-file `test/Sema` corpus sweep with `MANIFEST.md`.
+> **Update (2026-07-28): Sema S2 (rest of the walk) is DONE.** Commits `94b4695f1..dc2fb1661` on `rust`. Nine tasks:
+> loops/labels/`break`/`continue`/`switch`; arrows + §3.4 rewrite #1 + `yield`/`await`/spread/meta + the `Cover*` errors;
+> try/catch + rewrite #2 + `with`/`Unresolver` + the regexp visit (an explicit regex-engine deferral); classes +
+> `ClassContext` + `super`; private names + static blocks; call specials (direct `eval` + rewrite #3 `$SHBuiltin` +
+> `super()`); `CheckImplicitReturn`; a round-2 corpus sweep that also ran both binaries over 1416 upstream `test/` files;
+> docs. **Three of the four §3.4 rewrites have now shipped** (#4, anonymous `export default function`, is S4 with the module
+> visits). New resolver modules `resolver/{statements,unresolver,classes,calls}.rs` plus `src/check_implicit_return.rs`.
+> Gate (live, green):
 > `REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml -p sema --features dump-bin --test sema_differential -- --nocapture`
-> → "sema differential (tests/sema_corpus): 69 corpus files matched" (42 succeed on hermesc). S1 shipped the resolver as a
-> direct `ast::VisitorMut` implementation (one phase early — the C++'s generic `Node **ppNode` replacement, used by constant
-> folding, needed the mechanism from the start), hermesc error-epilogue parity, `ASTEval` constant folding, identifier
-> resolution, the full declaration/redeclaration matrix, expression fold+validation wiring, function/parameter scopes, and a
-> 69-file `test/Sema` corpus sweep with `MANIFEST.md`. See the roadmap's Sema row for the full what-shipped detail and the
-> S2/S3 carry-item list (loops/labels/switch, try/catch, classes+private names, the remaining §3.4 rewrites, call specials,
-> `ScopedFunctionPromoter`, plus two tracked parser-phase follow-ups found by the S1 error differentials).
-> **NEXT: EXECUTE the S2 plan — it is already WRITTEN and committed:
-> `plans/2026-07-28-sema-s2-rest-of-walk.md`** (9 tasks: loops/labels/switch; arrows + yield/await/spread/meta; try/catch +
-> with/Unresolver + regexp-deferred; classes/ClassContext; private names + static blocks; call specials incl. the `$SHBuiltin`
-> rewrite; `CheckImplicitReturn`; corpus sweep round 2; docs). Execute it subagent-driven
-> (`superpowers:subagent-driven-development`) — the plan was deliberately written in the S1 session with full context and each
-> task brief is self-contained; do NOT re-plan. Spec: `specs/2026-07-26-sema-untyped-design.md`.
+> → "sema differential (tests/sema_corpus): 160 corpus files matched" (88 succeed on hermesc).
+> **Read the roadmap's Sema row for the authoritative what-shipped detail and the S3/S4/S5 carry-item list** — S3 promotion;
+> S4 modules (+ rewrite #4, the `$SHBuiltin` module protocol, `FunctionInfo::imports`) and "flavors" (typed dialects + the
+> 178 `test/Sema/flow/**` files + the per-file-flag harness debt); S5 lazy/`eval`; the regex engine as its own future
+> component; the documented landmines (same-location diagnostic ties, two hermesc self-aborts); and the two tracked
+> parser-phase follow-ups the sema sweeps measured (the 180-file `errorExpected` same-line-range gap, and the recursion
+> stack-overflow crash that disproved the old "ours is silent" wording).
+> **NEXT: S3 — `ScopedFunctionPromoter`** (`lib/Sema/ScopedFunctionPromoter.{h,cpp}`, 37+328 lines): loose-mode block-nested
+> function promotion + `promotedFunctionDecls_`, replacing the two deliberate asserts at `resolver/mod.rs:1395`
+> (`visit_program`) and `resolver/functions.rs:1057` (`visit_function_body_after_params_visited`). **An S3 plan does NOT
+> exist yet** — open with `superpowers:brainstorming`, THEN `superpowers:writing-plans`, and execute it subagent-driven
+> (`superpowers:subagent-driven-development`). Spec: `specs/2026-07-26-sema-untyped-design.md`; the executed plans are
+> `plans/2026-07-26-sema-s0-foundations.md`, `plans/2026-07-28-sema-s1-declarations-scopes.md`,
+> `plans/2026-07-28-sema-s2-rest-of-walk.md`.
 > The parser proper lives in `rust/crates/parser/src/js/{mod,expressions,statements,functions,classes,modules,jsx}.rs` +
 > **`js/flow/{mod,declarations,types,function_types,object_types,params,match_}.rs`** + **`js/ts/{mod,types,function_types,object_types,
 > declarations,params}.rs`**; the gate is `REQUIRE_DIFFERENTIAL=1 cargo test -p parser --test parser_differential` (build `ast-dump`
@@ -108,9 +120,9 @@ validation commands, and workflow.
 **Component status** (see the roadmap table): `SourceErrorManager` ✅ · **JS lexer ✅** ·
 **JSONParser ✅** · **AST ✅ (all 4 phases: GC spine + generated 271-node set + transforming visitor + `ESTreeJSONDumper`)** ·
 **JS Parser ✅ (P0–P8 + Pre/Lazy passes, entire standard-JS + Flow + TypeScript + JSX grammar)** ·
-**Sema 🚧 (S0 foundations + S1 declarations & scopes DONE; S2 rest-of-the-walk next)** / IR / Optimizer / BCGen — future.
+**Sema 🚧 (S0 foundations + S1 declarations & scopes + S2 rest-of-the-walk DONE; S3 `ScopedFunctionPromoter` next)** / IR / Optimizer / BCGen — future.
 
-Rust workspace: **`rust/Cargo.toml`** (members: `support`, `parser`, `atom_table`, `unicode`),
+Rust workspace: **`rust/Cargo.toml`** (members: `support`, `parser`, `atom_table`, `unicode`, `ast`, `command_line`, `sema`),
 toolchain pinned `rust/rust-toolchain.toml` (1.96.0).
 
 | Crate | What | `unsafe`? |
@@ -161,7 +173,7 @@ Release (`gen-json` bin + `--bench=N`). **C++ source of truth:** `include/hermes
 
 ```bash
 # Rust workspace (do NOT cd; use --manifest-path). Build/test:
-cargo test  --manifest-path rust/Cargo.toml            # whole workspace (≈236 tests)
+cargo test  --manifest-path rust/Cargo.toml            # whole workspace (722 tests / 42 suites as of Sema S2)
 cargo test  --manifest-path rust/Cargo.toml -p parser  # lexer + JSONParser crate
 cargo test  --manifest-path rust/Cargo.toml -p ast     # AST: GC arena + generated 271-node model + spine/structural/transform/dump_golden tests
 cargo build --manifest-path rust/Cargo.toml            # expect ZERO warnings
