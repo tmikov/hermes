@@ -25,6 +25,7 @@ use ast::node_child::{NodeList, NodeMetadata, Strictness};
 use atom_table::INVALID_ATOM_BYTES;
 use parser::js::JSParserImpl;
 use parser::lexer::{GrammarContext, JSLexer};
+use sema::ids::FunctionInfoId;
 use sema::keywords::Keywords;
 use sema::resolve::resolve_ast;
 use sema::sem_context::{DeclKind, SemContext};
@@ -326,8 +327,9 @@ impl DiagHandler for SharedHandler {
 
 /// Resolution boundary: a construct not yet modeled must panic loudly
 /// rather than resolve to something wrong. Identifier references are now
-/// modeled (S1 T4, `visit(IdentifierNode *)`); a call expression still
-/// needs `visit(CallExpressionNode *)` (S1 T6, function visiting).
+/// modeled (S1 T4, `visit(IdentifierNode *)`) and so are functions (S1 T7);
+/// a call expression still needs `visit(CallExpressionNode *)`
+/// (SemanticResolver.cpp:1117, S2).
 #[test]
 #[should_panic(expected = "sema S1: unhandled node kind CallExpression")]
 fn call_expression_is_not_modeled() {
@@ -565,4 +567,306 @@ fn a_long_assignment_chain_does_not_recurse() {
         "a linearized `=` chain must not exhaust the recursion budget"
     );
     assert_eq!(sm.error_count(), 0);
+}
+
+// ---- S1 T7: functions ---------------------------------------------------
+//
+// The differential (`sema_differential.rs`) already pins the *dump* of every
+// shape below. What it cannot see is node identity — `SemContextDumper`
+// prints `hoistedFunction <name>`, and a stale `NodeRc` carries the same
+// name as its rebuilt copy — nor the scope-list shape behind
+// `getParameterScope()`/`getFunctionBodyScope()`. Those are what these
+// tests pin.
+
+/// \return the `FunctionInfoId` decorating a function-like node.
+fn sem_info_of(node: &Node) -> FunctionInfoId {
+    let id = match node {
+        Node::FunctionDeclaration(n) => n.sem_info.get(),
+        Node::FunctionExpression(n) => n.sem_info.get(),
+        _ => panic!("not a function-like node"),
+    };
+    FunctionInfoId::from_sema_id(id.expect("visitFunctionLike sets semInfo"))
+}
+
+/// \return the first statement of a resolved `Program`.
+fn first_statement<'gc>(root: &'gc Node<'gc>) -> &'gc Node<'gc> {
+    let Node::Program(p) = root else {
+        unreachable!("not a Program root")
+    };
+    p.body.iter().next().expect("empty program body")
+}
+
+/// **The `hoistedFunctions` backref fixup** (spec §3.4 (a)).
+///
+/// `visit(FunctionDeclarationNode *)` records the function node in
+/// `curScope_->hoistedFunctions` *before* descending into it (cpp:236). A
+/// fold inside the body (`1 + 2`) rebuilds the `BlockStatement` and
+/// therefore the `FunctionDeclaration`, so the recorded `NodeRc` would
+/// point at a node that is no longer in the tree unless the visit patches
+/// it — see `resolver/functions.rs`'s module doc.
+///
+/// The differential cannot catch this (the dump prints only the name), so
+/// the check is on node identity: the recorded node must be the one
+/// `resolve_ast` returned, and that one must NOT be the node that went in
+/// (otherwise the test would pass vacuously, having never exercised a
+/// rebuild at all).
+#[test]
+fn hoisted_function_backref_follows_a_rebuilt_node() {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let src = "function f() {\n  var x = 1 + 2;\n}\n";
+    let root = parse(&gc, &mut sm, src);
+    let original_id = first_statement(root).node_id();
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    let resolved = resolve_ast(&gc, &mut sem_ctx, &mut sm, root, &[])
+        .expect("resolution failed");
+
+    let rebuilt = first_statement(resolved);
+    assert!(
+        matches!(rebuilt, Node::FunctionDeclaration(_)),
+        "the first statement must be the function declaration"
+    );
+    assert_ne!(
+        rebuilt.node_id(),
+        original_id,
+        "non-degeneracy: the fold must have REBUILT the FunctionDeclaration, \
+         otherwise this test proves nothing"
+    );
+
+    let global_scope = sem_ctx.get_global_scope();
+    let hoisted = &sem_ctx.scope(global_scope).hoisted_functions;
+    assert_eq!(hoisted.len(), 1, "one hoisted function declaration");
+    assert_eq!(
+        hoisted[0].node(&gc).node_id(),
+        rebuilt.node_id(),
+        "the hoistedFunctions entry is stale: it points at the \
+         pre-rebuild FunctionDeclaration"
+    );
+}
+
+/// A function whose body is NOT rewritten must leave its `hoistedFunctions`
+/// entry pointer-identical — the fixup must not fire spuriously (and the
+/// visit must return `Unchanged`, keeping the tree shared).
+#[test]
+fn hoisted_function_backref_is_untouched_without_a_rebuild() {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let src = "function f(a) {\n  return a;\n}\n";
+    let root = parse(&gc, &mut sm, src);
+    let original_id = first_statement(root).node_id();
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    let resolved = resolve_ast(&gc, &mut sem_ctx, &mut sm, root, &[])
+        .expect("resolution failed");
+
+    assert_eq!(first_statement(resolved).node_id(), original_id);
+    let global_scope = sem_ctx.get_global_scope();
+    let hoisted = &sem_ctx.scope(global_scope).hoisted_functions;
+    assert_eq!(hoisted.len(), 1);
+    assert_eq!(hoisted[0].node(&gc).node_id(), original_id);
+}
+
+/// `declareParams`' redeclaration rules (cpp:1770-1796): a loose, simple
+/// parameter list may repeat a name without an error, but the SECOND
+/// declaration wins — a new `Decl` is created and the existing binding is
+/// re-pointed at it, so a body reference resolves to the second parameter.
+#[test]
+fn duplicate_loose_parameters_rebind_to_the_last_declaration() {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let src = "function f(a, a) {\n  return a;\n}\n";
+    let root = parse(&gc, &mut sm, src);
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    let resolved = resolve_ast(&gc, &mut sem_ctx, &mut sm, root, &[])
+        .expect("resolution failed");
+    assert_eq!(sm.error_count(), 0, "loose duplicate params are allowed");
+
+    let func_decl = first_statement(resolved);
+    let info = sem_info_of(func_decl);
+    let body_scope = sem_ctx.function(info).get_function_body_scope();
+    // Two distinct Parameter decls, plus the implicit 'arguments'.
+    let decls = &sem_ctx.scope(body_scope).decls;
+    let params: Vec<_> = decls
+        .iter()
+        .copied()
+        .filter(|&d| sem_ctx.decl(d).kind == DeclKind::Parameter)
+        .collect();
+    assert_eq!(params.len(), 2, "each 'a' gets its own Decl");
+    assert_ne!(params[0], params[1]);
+
+    // The `return a;` reference resolves to the LAST parameter decl.
+    let Node::FunctionDeclaration(fd) = func_decl else {
+        unreachable!()
+    };
+    let Node::BlockStatement(block) = fd.body else {
+        unreachable!("function body is a BlockStatement")
+    };
+    let Some(Node::ReturnStatement(ret)) = block.body.iter().next() else {
+        unreachable!("body starts with a ReturnStatement")
+    };
+    let Some(Node::Identifier(ident)) = ret.argument else {
+        unreachable!("`return a;` returns an Identifier")
+    };
+    assert_eq!(
+        sem_ctx.get_expression_decl(ident),
+        Some(params[1]),
+        "the body reference must see the second parameter"
+    );
+}
+
+/// A strict duplicate parameter IS an error (`uniqueParams`, cpp:1755-1756
+/// and 1778-1783) — the same code path, opposite outcome.
+#[test]
+fn duplicate_strict_parameters_are_an_error() {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let root = parse(
+        &gc,
+        &mut sm,
+        "\"use strict\";\nfunction f(a, a) {\n  return a;\n}\n",
+    );
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    assert!(
+        resolve_ast(&gc, &mut sem_ctx, &mut sm, root, &[]).is_none(),
+        "a duplicate strict parameter must fail resolution"
+    );
+    assert_eq!(sm.error_count(), 1);
+}
+
+/// **The dual scope layout** (cpp:1846-1881). With parameter expressions the
+/// function gets THREE scopes, in creation order: the parameter scope, the
+/// (always empty) temporary `arguments` scope, and the function body scope
+/// — and `getParameterScope()` (scopes[0]) is then distinct from
+/// `getFunctionBodyScope()`. The `arguments` Decl lands in scopes[0], i.e.
+/// the parameter scope (`SemContext::funcArgumentsDecl`).
+#[test]
+fn parameter_expressions_split_the_parameter_and_body_scopes() {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let src = "function f(a, b = a) {\n  var c;\n  return c;\n}\n";
+    let root = parse(&gc, &mut sm, src);
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    let resolved = resolve_ast(&gc, &mut sem_ctx, &mut sm, root, &[])
+        .expect("resolution failed");
+
+    let info = sem_info_of(first_statement(resolved));
+    assert!(sem_ctx.function(info).has_parameter_expressions);
+    assert!(!sem_ctx.function(info).simple_parameter_list);
+    let scopes = sem_ctx.function(info).get_scopes().to_vec();
+    assert_eq!(scopes.len(), 3, "param scope, temp arguments scope, body");
+    let param_scope = sem_ctx.function(info).get_parameter_scope();
+    let body_scope = sem_ctx.function(info).get_function_body_scope();
+    assert_eq!(param_scope, scopes[0]);
+    assert_eq!(body_scope, scopes[2]);
+    assert_ne!(param_scope, body_scope);
+
+    // The temporary 'arguments' scope holds no Decls of its own: it only
+    // carries a binding, which is popped before the body is visited.
+    assert!(sem_ctx.scope(scopes[1]).decls.is_empty());
+
+    let kinds = |s| {
+        sem_ctx
+            .scope(s)
+            .decls
+            .iter()
+            .map(|&d| sem_ctx.decl(d).kind)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        kinds(param_scope),
+        vec![DeclKind::Parameter, DeclKind::Parameter, DeclKind::Var],
+        "both parameters and the implicit 'arguments' live in scopes[0]"
+    );
+    assert_eq!(kinds(body_scope), vec![DeclKind::Var], "just `var c`");
+}
+
+/// Without parameter expressions there is exactly ONE scope, and the
+/// parameter scope and the function body scope are the same object
+/// (cpp:1874-1881).
+#[test]
+fn simple_parameters_share_one_scope_with_the_body() {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let src = "function f(a) {\n  var c;\n  return c;\n}\n";
+    let root = parse(&gc, &mut sm, src);
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    let resolved = resolve_ast(&gc, &mut sem_ctx, &mut sm, root, &[])
+        .expect("resolution failed");
+
+    let info = sem_info_of(first_statement(resolved));
+    assert!(!sem_ctx.function(info).has_parameter_expressions);
+    assert_eq!(sem_ctx.function(info).get_scopes().len(), 1);
+    assert_eq!(
+        sem_ctx.function(info).get_parameter_scope(),
+        sem_ctx.function(info).get_function_body_scope()
+    );
+}
+
+/// The `FunctionExprName` scope (cpp:1953-1961) belongs to the ENCLOSING
+/// function, not to the function expression: `ScopeRAII` runs before the
+/// `FunctionContext` is pushed, so `curFunctionInfo()` is still the outer
+/// one. It is also the scope the `FunctionExpression` node is decorated
+/// with.
+#[test]
+fn function_expression_name_scope_belongs_to_the_enclosing_function() {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let src = "var g = function me() {\n  return me;\n};\n";
+    let root = parse(&gc, &mut sm, src);
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    let resolved = resolve_ast(&gc, &mut sem_ctx, &mut sm, root, &[])
+        .expect("resolution failed");
+
+    let global_fn = sem_ctx.get_global_function();
+    // The global function owns the global scope plus the name scope.
+    let scopes = sem_ctx.function(global_fn).get_scopes().to_vec();
+    assert_eq!(scopes.len(), 2);
+    let name_scope = scopes[1];
+    assert_eq!(sem_ctx.scope(name_scope).parent_function, global_fn);
+    let decls = &sem_ctx.scope(name_scope).decls;
+    assert_eq!(decls.len(), 1);
+    assert_eq!(sem_ctx.decl(decls[0]).kind, DeclKind::FunctionExprName);
+
+    // ... and the FunctionExpression node carries it.
+    let Node::VariableDeclaration(vd) = first_statement(resolved) else {
+        unreachable!()
+    };
+    let Some(Node::VariableDeclarator(decl)) = vd.declarations.iter().next()
+    else {
+        unreachable!()
+    };
+    let Some(Node::FunctionExpression(fe)) = decl.init else {
+        unreachable!("initializer is a FunctionExpression")
+    };
+    assert_eq!(fe.scope.get(), Some(name_scope.sema_id()));
+}
+
+/// **The nested-scope unwind regression test** (S0 carry-item). With
+/// functions and blocks there are now >= 2 binding scopes open in the
+/// middle of a resolution (here: the global scope, the function body scope
+/// and the block scope). `SemanticResolver`'s `Drop` must unwind them
+/// back-to-front; `Vec`'s own front-to-back drop would trip
+/// `pop_scope`'s "must be the current scope" `debug_assert!` *while already
+/// panicking*, which is a double panic and therefore an ABORT — the test
+/// process would die instead of reporting a failure.
+///
+/// So the assertion is the test's own shape: `should_panic` can only pass
+/// if the original panic propagated normally through three open scopes.
+#[test]
+#[should_panic(expected = "sema S1: unhandled node kind CallExpression")]
+fn a_panic_deep_inside_nested_scopes_unwinds_cleanly() {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    // `g()` is an unhandled kind (S2). It sits inside a block, inside a
+    // function body, inside the program — three live binding scopes.
+    let root = parse(&gc, &mut sm, "function f() {\n  {\n    g();\n  }\n}\n");
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    let _ = resolve_ast(&gc, &mut sem_ctx, &mut sm, root, &[]);
 }

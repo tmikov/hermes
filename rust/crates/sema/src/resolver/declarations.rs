@@ -713,7 +713,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
 
     /// Port of `SemanticResolver::validateDeclarationName`
     /// (SemanticResolver.cpp:2641-2677).
-    fn validate_declaration_name(
+    pub(super) fn validate_declaration_name(
         &mut self,
         gc: &GCLock,
         decl_kind: DeclKind,

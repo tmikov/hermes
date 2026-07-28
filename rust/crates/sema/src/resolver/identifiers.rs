@@ -43,12 +43,12 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     /// parameters. Port of `SemanticResolver::declareArguments`
     /// (SemanticResolver.h:349-355).
     ///
-    /// Unused until the function-visiting task (S1+) calls it from
-    /// `visitFunctionLike`'s four C++ call sites (cpp:994, 1039, 1860, 1923)
-    /// — added now because it is a direct, self-contained port with no
-    /// dependency on anything those tasks still have to add.
-    #[allow(dead_code)]
-    fn declare_arguments(&mut self) {
+    /// Called from the function visits (S1 T7, `functions.rs`) at the two
+    /// C++ call sites those cover — the temporary-arguments scope
+    /// (cpp:1860) and the function-body declaration (cpp:1923); the other
+    /// two (cpp:994, 1039) belong to S2's class field initializers and
+    /// static blocks.
+    pub(super) fn declare_arguments(&mut self) {
         let func = self.cur_function_info();
         let arguments_name = self.kw().ident_arguments;
         let args_decl = self.sem_ctx.func_arguments_decl(func, arguments_name);

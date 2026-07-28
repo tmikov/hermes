@@ -192,7 +192,7 @@ fn rebuild_assignment_chain<'gc>(
 }
 
 /// Reduce a child visit's result to "the replacement, if any".
-fn replacement_of<'gc>(
+pub(super) fn replacement_of<'gc>(
     result: TransformResult<&'gc Node<'gc>>,
 ) -> Option<&'gc Node<'gc>> {
     match result {

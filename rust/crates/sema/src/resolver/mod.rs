@@ -33,16 +33,27 @@
 //! `isLValue` — `+`/`-` and `=` chains are walked iteratively, constants
 //! fold, and assignment/update targets are validated (const, strict
 //! `eval`/`arguments`, the loose-mode `arguments` quirk), together with the
-//! strict `delete`-of-a-variable and `delete super.x` errors. Together this
-//! reproduces `hermesc -dump-sema` byte-for-byte for programs made of
-//! literals, empty statements, bare identifier reads (including through
-//! non-computed member/property positions, which are skipped rather than
-//! resolved), `var`/`let`/`const` declarations in blocks, and the
-//! expression forms above — which is what `tests/sema_differential.rs`
-//! enforces against the real compiler. Function/class declarations, catch
-//! clauses, imports, and everything else the C++ resolver handles remain
-//! later tasks' scope — see `declarations.rs`'s module doc for exactly which
-//! of *its* branches are ported but not yet corpus-reachable.
+//! strict `delete`-of-a-variable and `delete super.x` errors. From S1 T7
+//! (`functions.rs`), `visit(FunctionDeclarationNode *, Node *)`,
+//! `visit(FunctionExpressionNode *, Node *)`, `visitFunctionLike`,
+//! `visitFunctionLikeInFunctionContext`,
+//! `visitFunctionBodyAfterParamsVisited`, `visitFunctionExpression` and
+//! `visit(ReturnStatementNode *)` — function declarations and expressions
+//! get their own `FunctionInfo`, their parameters are declared and
+//! validated (including the dual parameter/body scope layout that
+//! parameter expressions force), the implicit `arguments` object is
+//! declared where the spec-deviating rule says it should be, and bodies
+//! resolve inside the function scope. Together this reproduces `hermesc
+//! -dump-sema` byte-for-byte for programs made of literals, empty
+//! statements, bare identifier reads (including through non-computed
+//! member/property positions, which are skipped rather than resolved),
+//! `var`/`let`/`const` declarations in blocks, functions of every
+//! parameter shape, and the expression forms above — which is what
+//! `tests/sema_differential.rs` enforces against the real compiler. Arrow
+//! functions, class declarations, catch clauses, imports, and everything
+//! else the C++ resolver handles remain later tasks' scope — see
+//! `declarations.rs`'s and `functions.rs`'s module docs for exactly which
+//! of *their* branches are ported but not yet corpus-reachable.
 //!
 //! Everything not covered is *deliberately absent rather than
 //! approximated*: `visit_node` panics with `sema S1: unhandled node kind
@@ -121,11 +132,16 @@
 //!   node that is no longer part of the returned tree. Whenever a node that
 //!   carries `sem_info`/`scope` (or is recorded in `hoisted_functions` /
 //!   `imports`) ends up on a rebuilt spine, the corresponding sema-record
-//!   `NodeRc` must be patched to the new node. Neither list is populated yet
-//!   — `hoisted_functions` lands with `processDeclarations` (S3) and
-//!   `imports` with the module visits (S4) — so the obligation is recorded
-//!   here rather than implemented; whoever first pushes into either list
-//!   owns the fixup.
+//!   `NodeRc` must be patched to the new node.
+//!
+//!   `hoisted_functions` is populated as of S1 T7 (`visit(
+//!   FunctionDeclarationNode *)`, cpp:236) and DISCHARGES the obligation
+//!   there: `functions::visit_function_declaration` remembers the scope and
+//!   index it pushed into and rewrites that slot when the visit returns
+//!   `Changed` — see `functions.rs`'s module doc for the mechanism and for
+//!   why only a unit test (not the differential) can catch a regression.
+//!   `FunctionInfo::imports` is still unpopulated; the module visits (S4)
+//!   that first push into it own the same fixup.
 //!
 //! A visit that needs to do work *between* two children (C++
 //! `visit(AssignmentExpressionNode *)` validates `_left` before visiting
@@ -220,6 +236,7 @@ use std::collections::{HashMap, HashSet};
 
 mod declarations;
 mod expressions;
+mod functions;
 mod identifiers;
 
 use ast::context::{GCLock, NodeRc};
@@ -315,9 +332,10 @@ struct FoundDirectives<'ast> {
     always_inline: bool,
     /// Whether a "noinline" directive was seen (and not cancelled).
     no_inline: bool,
-    /// Whether a "builtin" directive was seen. Read by
+    /// Whether a "builtin" directive was seen. Copied into
+    /// `FunctionInfo::custom_directives.builtin` by
+    /// `visitFunctionLikeInFunctionContext` (cpp:1716); also read by
     /// `hasBuiltinDirective` (cpp:2816-2824), which is S2 scope.
-    #[allow(dead_code)]
     builtin: bool,
 }
 
@@ -404,8 +422,10 @@ pub struct SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     /// entering a function that was defined using method syntax, a super
     /// binding exists. Arrow functions inherit this flag. The only other
     /// super bindings exist in class field initializer values and static
-    /// blocks. Port of `canReferenceSuper_` (SemanticResolver.h:79); unread/
-    /// unwritten until the `SuperNode` visit lands.
+    /// blocks. Port of `canReferenceSuper_` (SemanticResolver.h:79);
+    /// save/restored around every function by `visit_function_like` (S1 T7)
+    /// but not yet *read* — the `SuperNode` visit that reads it is S2,
+    /// hence the `dead_code` allowance.
     #[allow(dead_code)]
     can_reference_super: bool,
     /// 'await' isn't allowed to be an identifier anywhere in the parameters
@@ -417,8 +437,10 @@ pub struct SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     /// (SemanticResolver.h:95); read by `resolve_identifier`.
     forbid_await_as_identifier: bool,
     /// True if we are forbidding await expressions. Port of
-    /// `forbidAwaitExpression_` (SemanticResolver.h:98); unread/unwritten
-    /// until the `AwaitExpression` visit lands.
+    /// `forbidAwaitExpression_` (SemanticResolver.h:98); save/restored
+    /// around every function by `visit_function_like_in_function_context`
+    /// (S1 T7) but not yet *read* — the `AwaitExpression` visit that reads
+    /// it is S2, hence the `dead_code` allowance.
     #[allow(dead_code)]
     forbid_await_expression: bool,
     /// True if we are forbidding the reference to the special 'arguments'
@@ -801,6 +823,21 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             }
             Node::UpdateExpression(_) => self.visit_update_expression(gc, node),
             Node::UnaryExpression(_) => self.visit_unary_expression(gc, node),
+            // `visit(FunctionDeclarationNode*, Node*)` (cpp:233-243),
+            // `visit(FunctionExpressionNode*, Node*)` (cpp:244-248) and
+            // `visit(ReturnStatementNode*)` (cpp:1469-1475) — see
+            // `functions::*` (S1 T7). `ArrowFunctionExpression`
+            // (cpp:249-275) is deliberately NOT listed: its own visit
+            // rewrites an expression body into a `BlockStatement` and needs
+            // the `Super`/`Await` visits, so arrows stay S2 and keep hitting
+            // the panic below.
+            Node::FunctionDeclaration(_) => {
+                self.visit_function_declaration(gc, node, path)
+            }
+            Node::FunctionExpression(_) => {
+                self.visit_function_expression(gc, node, path)
+            }
+            Node::ReturnStatement(_) => self.visit_return_statement(gc, node),
             // Kinds with no `visit()` overload in C++: the generic dispatch
             // visits their children (`ExpressionStatement`'s `_expression`
             // — `_directive` is a NodeString, not a node) and here also
