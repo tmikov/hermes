@@ -15,8 +15,10 @@ classification — we always probe with plain `-dump-sema`, because that's the
 only thing `sema_differential.rs` tests and the harness has no per-file-flag
 support (out of scope to add here, per the task brief).
 
-Total top-level files: 54. Imported: 16 (15 from `test/Sema` + 1 new
-gap-filler, `expr-visit-generic.js`, added in Step 2 below). Deferred: 38.
+Total top-level files: 54. Imported: 15 (14 from `test/Sema` + 1 new
+gap-filler, `expr-visit-generic.js`, added in Step 2 below). Deferred: 40
+(14 + 40 = 54; counting `deep-ast-err.js`, which is listed but is a vacuous
+non-gap — see its row's note below).
 
 ## Imported (byte-identical vs hermesc)
 
@@ -35,18 +37,18 @@ gap-filler, `expr-visit-generic.js`, added in Step 2 below). Deferred: 38.
 | `restricted-global-error.js` | `let undefined;` at global scope — restricted-global-shadow error |
 | `restricted-global-nested.js` | restricted global name shadowed inside a nested (non-global) scope — allowed |
 | `restricted-global-var.js` | `var` (not `let`) shadowing a restricted global — allowed |
-| `type-alias-children.js` | Flow `type A = B;` parsed WITHOUT `-parse-flow` — both sides hit the identical `';' expected` parse error at the same location; not exercising type-alias semantics, just a coincidentally-matching syntax error |
 | `var-scope-redeclaration.js` | `var` redeclared across nested function/block scopes — allowed shapes |
 | `expr-visit-generic.js` | **new file, not from `test/Sema`** — Step 2 gap-filler, see below |
 
-`deep-ast-err.js` was NOT imported despite trivially matching: the entire
-`.js` file is comment lines (its `RUN:` lines generate the actual `1 + 1 +
-...` stress input via a shell `echo` pipe, never written into the file
-itself), so running `-dump-sema` on the file as-is degenerates to an empty
-program. Importing it would inflate the "matched" count without testing
-anything. It is also `UNSUPPORTED: linux && asan` upstream. Left out of the
-corpus entirely (not even listed as "deferred" below, since there is nothing
-here to defer).
+`deep-ast-err.js` is listed in the Deferred table below but is NOT a real S1
+gap: the entire `.js` file is comment lines (its `RUN:` lines generate the
+actual `1 + 1 + ...` stress input via a shell `echo` pipe, never written into
+the file itself), so running `-dump-sema` on the file as-is degenerates to an
+empty program that trivially matches. Importing it would inflate the
+"matched" count without testing anything, so it stays out of `sema_corpus/`;
+it's kept in the table purely for accounting completeness (54 top-level
+files in, 54 accounted for below) rather than silently dropped. It is also
+`UNSUPPORTED: linux && asan` upstream.
 
 ## Deferred
 
@@ -87,6 +89,7 @@ here to defer).
 | `super-in-arrow.js` | `ClassDeclaration` | S2 |
 | `super-in-subclass-error.js` | `ClassDeclaration` | S2 |
 | `super-in-subclass.js` | `ClassDeclaration` | S2 |
+| `type-alias-children.js` | typed dialect (`-parse-flow` RUN flag; harness has no per-file flags) — WITHOUT the flag, hermesc and sema-dump both hit the identical `';' expected` parse error on `type A = B;`, but that's a coincidental match on a syntax error, not a test of the file's actual subject (TypeAlias children resolution); same vacuous-match category `deep-ast-err.js` was excluded for, so it does not belong in `sema_corpus/` either | dialect-corpus phase |
 | `undeclared-private-name-error.js` | `CallExpression` | S2 |
 | `valid-super-references.js` | `Super` | S2 |
 | `var-scope-redeclaration-error.js` | `TryStatement` | S2 |
@@ -125,7 +128,7 @@ feature (var/let/const, destructuring incl. defaults/rest/nested, blocks,
 binary/unary + folding, assignment/update, function decls/exprs, parameter
 scopes incl. the dual-scope layout, `arguments`, `return`, directives,
 restricted globals, redeclaration-error shapes) already had corpus coverage
-before this sweep (now reinforced by the 15 files imported above).
+before this sweep (now reinforced by the 14 files imported above).
 
 ## Gate
 
@@ -134,6 +137,6 @@ REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml \
     -p sema --features dump-bin --test sema_differential -- --nocapture
 ```
 
-Final count: **70 corpus files matched** (54 pre-existing + 15 imported from
-`test/Sema` + 1 new gap-filler; 42 succeed on hermesc, 28 are hermesc-failure
+Final count: **69 corpus files matched** (54 pre-existing + 14 imported from
+`test/Sema` + 1 new gap-filler; 42 succeed on hermesc, 27 are hermesc-failure
 files compared byte-for-byte on the error path).
