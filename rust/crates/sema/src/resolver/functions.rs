@@ -997,7 +997,10 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     /// `pub(crate)` inside `ast`, so the walk is written out here.
     ///
     /// \return the rebuilt list, or `None` if no element changed.
-    fn visit_node_list<'gc>(
+    ///
+    /// `pub(super)` rather than private: `statements.rs` drives
+    /// `SwitchStatement`'s `_cases` list the same way (S2 T1).
+    pub(super) fn visit_node_list<'gc>(
         &mut self,
         gc: &'gc GCLock,
         list: NodeList<'gc>,

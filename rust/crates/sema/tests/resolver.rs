@@ -870,3 +870,308 @@ fn a_panic_deep_inside_nested_scopes_unwinds_cleanly() {
     let mut sem_ctx = SemContext::new(Keywords::new(&gc));
     let _ = resolve_ast(&gc, &mut sem_ctx, &mut sm, root, &[]);
 }
+
+// ---- S2 T1: loops, labels, break/continue, switch ---------------------
+//
+// `label_index` is NOT printed by `-dump-sema`, so `sema_differential.rs` is
+// completely BLIND to a wrong (or missing) label index — a break-target
+// miscompile would pass the byte comparison. These tests are the only pin on
+// it, so they read the `Cell`s straight off the tree `resolve_ast` RETURNED.
+
+/// The `label_index` decoration of any of the label-bearing node kinds —
+/// the test-side counterpart of the resolver's `label_index_of`
+/// (`getLabelDecorationBase`, SemanticResolver.cpp:680-693).
+fn label_index(node: &Node) -> u32 {
+    match node {
+        Node::WhileStatement(n) => n.label_index.get(),
+        Node::DoWhileStatement(n) => n.label_index.get(),
+        Node::ForInStatement(n) => n.label_index.get(),
+        Node::ForOfStatement(n) => n.label_index.get(),
+        Node::ForStatement(n) => n.label_index.get(),
+        Node::SwitchStatement(n) => n.label_index.get(),
+        Node::BreakStatement(n) => n.label_index.get(),
+        Node::ContinueStatement(n) => n.label_index.get(),
+        Node::LabeledStatement(n) => n.label_index.get(),
+        _ => panic!("no label decoration on {}", node.node_type_str()),
+    }
+}
+
+/// Parse + resolve `src`, returning the `SemContext` and the RETURNED root.
+/// The closure shape is forced by the `GCLock` borrow (see `resolve` above).
+fn with_resolved<R>(
+    src: &str,
+    f: impl for<'gc> FnOnce(&SemContext, &'gc Node<'gc>) -> R,
+) -> R {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let root = parse(&gc, &mut sm, src);
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    let resolved = resolve_ast(&gc, &mut sem_ctx, &mut sm, root, &[])
+        .unwrap_or_else(|| panic!("resolution failed for: {src}"));
+    f(&sem_ctx, resolved)
+}
+
+/// Every one of the five `LoopStatementNode` kinds allocates exactly one
+/// label, in visit order, from the enclosing function's counter
+/// (`allocateLabel`, cpp:555/601/617/627).
+#[test]
+fn every_loop_kind_allocates_one_label_in_visit_order() {
+    let src = "while (a) ;\ndo ; while (a);\nfor (;;) ;\n\
+               for (x in a) ;\nfor (x of a) ;\n";
+    with_resolved(src, |sem_ctx, resolved| {
+        let Node::Program(p) = resolved else {
+            unreachable!("not a Program")
+        };
+        let kinds: Vec<(u32, &str)> = p
+            .body
+            .iter()
+            .map(|n| (label_index(n), n.node_type_str()))
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![
+                (0, "WhileStatement"),
+                (1, "DoWhileStatement"),
+                (2, "ForStatement"),
+                (3, "ForInStatement"),
+                (4, "ForOfStatement"),
+            ]
+        );
+        assert_eq!(
+            sem_ctx.function(sem_ctx.get_global_function()).num_labels,
+            5
+        );
+    });
+}
+
+/// A `LabeledStatement` gets its own label index, but a `break`/`continue`
+/// naming it resolves to the label's *target statement* — the enclosing
+/// loop, not the `LabeledStatement` (cpp:642-652 + 700-702/729-731).
+#[test]
+fn labeled_break_and_continue_target_the_labeled_loop() {
+    let src = "l1: while (a) {\n  l2: for (;;) {\n    break l1;\n\
+               \x20   continue l2;\n  }\n}\n";
+    with_resolved(src, |sem_ctx, resolved| {
+        let outer_labeled = first_statement(resolved);
+        assert_eq!(label_index(outer_labeled), 0, "l1: itself");
+        let Node::LabeledStatement(l1) = outer_labeled else {
+            unreachable!("not a LabeledStatement")
+        };
+        assert_eq!(label_index(l1.body), 1, "the while");
+        let Node::WhileStatement(w) = l1.body else {
+            unreachable!("not a WhileStatement")
+        };
+        let Node::BlockStatement(outer_block) = w.body else {
+            unreachable!("not a BlockStatement")
+        };
+        let inner_labeled =
+            outer_block.body.iter().next().expect("empty while body");
+        assert_eq!(label_index(inner_labeled), 2, "l2: itself");
+        let Node::LabeledStatement(l2) = inner_labeled else {
+            unreachable!("not a LabeledStatement")
+        };
+        assert_eq!(label_index(l2.body), 3, "the for");
+        let Node::ForStatement(f) = l2.body else {
+            unreachable!("not a ForStatement")
+        };
+        let Node::BlockStatement(inner_block) = f.body else {
+            unreachable!("not a BlockStatement")
+        };
+        let mut it = inner_block.body.iter();
+        let brk = it.next().expect("no break");
+        let cont = it.next().expect("no continue");
+        assert_eq!(
+            label_index(brk),
+            1,
+            "`break l1` targets the WHILE (label 1), not the label (0)"
+        );
+        assert_eq!(label_index(cont), 3, "`continue l2` targets the for");
+        assert_eq!(
+            sem_ctx.function(sem_ctx.get_global_function()).num_labels,
+            4
+        );
+    });
+}
+
+/// Unlabeled `break` uses `currentLoopOrSwitch` and unlabeled `continue`
+/// uses `currentLoop` (cpp:709-713 / 746-748), so inside a switch nested in
+/// a loop they target *different* statements.
+#[test]
+fn unlabeled_break_and_continue_use_their_own_innermost_target() {
+    let src = "while (a) {\n  switch (b) {\n  case 0:\n    break;\n\
+               \x20   continue;\n  }\n}\n";
+    with_resolved(src, |_sem_ctx, resolved| {
+        let while_stmt = first_statement(resolved);
+        assert_eq!(label_index(while_stmt), 0);
+        let Node::WhileStatement(w) = while_stmt else {
+            unreachable!("not a WhileStatement")
+        };
+        let Node::BlockStatement(block) = w.body else {
+            unreachable!("not a BlockStatement")
+        };
+        let switch_stmt = block.body.iter().next().expect("empty body");
+        assert_eq!(label_index(switch_stmt), 1);
+        let Node::SwitchStatement(sw) = switch_stmt else {
+            unreachable!("not a SwitchStatement")
+        };
+        let Some(Node::SwitchCase(case)) = sw.cases.iter().next() else {
+            unreachable!("no SwitchCase")
+        };
+        let mut it = case.consequent.iter();
+        let brk = it.next().expect("no break");
+        let cont = it.next().expect("no continue");
+        assert_eq!(label_index(brk), 1, "`break` targets the switch");
+        assert_eq!(label_index(cont), 0, "`continue` targets the while");
+    });
+}
+
+/// **The known decorate-after-children exception** (resolver/mod.rs module
+/// doc; cpp:520-539). `visit(SwitchStatementNode *)` visits `_discriminant`
+/// FIRST and only then calls `setLabelIndex`. A folding discriminant
+/// (`1 + 2`) makes that visit return `Changed`, so the switch is REBUILT —
+/// and a naive port that snapshotted the builder before writing the label
+/// would hand back a switch with `INVALID_LABEL`, i.e. a `break` pointing at
+/// nothing. Neither the label index nor this rebuild is visible in
+/// `-dump-sema`, so this test is the only thing standing between that bug
+/// and a green gate.
+#[test]
+fn a_rebuilt_switch_keeps_its_label_index_and_scope() {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let src = "switch (1 + 2) {\ncase 0:\n  break;\n}\n";
+    let root = parse(&gc, &mut sm, src);
+    let original_id = first_statement(root).node_id();
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    let resolved = resolve_ast(&gc, &mut sem_ctx, &mut sm, root, &[])
+        .expect("resolution failed");
+
+    let switch_stmt = first_statement(resolved);
+    assert_ne!(
+        switch_stmt.node_id(),
+        original_id,
+        "non-degeneracy: the fold must have REBUILT the SwitchStatement, \
+         otherwise this test proves nothing"
+    );
+    let Node::SwitchStatement(sw) = switch_stmt else {
+        unreachable!("not a SwitchStatement")
+    };
+    assert!(
+        matches!(sw.discriminant, Node::NumericLiteral(_)),
+        "non-degeneracy: the discriminant must have folded"
+    );
+    assert_eq!(
+        sw.label_index.get(),
+        0,
+        "the REBUILT switch lost its label index"
+    );
+    assert!(
+        sw.scope.get().is_some(),
+        "the REBUILT switch lost its scope decoration"
+    );
+    let Some(Node::SwitchCase(case)) = sw.cases.iter().next() else {
+        unreachable!("no SwitchCase")
+    };
+    let brk = case.consequent.iter().next().expect("no break");
+    assert_eq!(
+        label_index(brk),
+        0,
+        "the `break` must target the switch's label"
+    );
+}
+
+/// A loop nobody rewrites must come back pointer-identical: writing the
+/// label index and the scope through `Cell`s must not force a rebuild.
+#[test]
+fn an_unrewritten_loop_is_returned_as_is() {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let src = "for (var i = 0; i < 10; ++i) {\n  break;\n}\n";
+    let root = parse(&gc, &mut sm, src);
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    let resolved = resolve_ast(&gc, &mut sem_ctx, &mut sm, root, &[])
+        .expect("resolution failed");
+    assert!(
+        std::ptr::eq(root, resolved),
+        "an unrewritten loop must be returned as-is, not rebuilt"
+    );
+}
+
+/// The label is erased from `labelMap` when its statement is left
+/// (`make_scope_exit`, cpp:670-675), so the same name may be reused by a
+/// *sibling* labeled statement without a duplicate-definition error.
+#[test]
+fn a_label_is_erased_on_leaving_its_statement() {
+    // `resolve` panics if resolution failed, so reaching the assert proves
+    // no "label 'l' is already defined" error was reported.
+    let (sem_ctx, _) = resolve("l: ;\nl: ;\n");
+    assert_eq!(sem_ctx.function(sem_ctx.get_global_function()).num_labels, 2);
+}
+
+/// The label's *target statement* walk (cpp:642-652): a label directly
+/// enclosing another label that encloses a loop resolves to the LOOP, so
+/// `continue l1` is legal and points at the `while` — two levels down.
+#[test]
+fn a_label_enclosing_a_label_enclosing_a_loop_targets_the_loop() {
+    let src = "l1: l2: while (a) {\n  continue l1;\n}\n";
+    with_resolved(src, |_sem_ctx, resolved| {
+        let l1_node = first_statement(resolved);
+        assert_eq!(label_index(l1_node), 0, "l1: itself");
+        let Node::LabeledStatement(l1) = l1_node else {
+            unreachable!("not a LabeledStatement")
+        };
+        assert_eq!(label_index(l1.body), 1, "l2: itself");
+        let Node::LabeledStatement(l2) = l1.body else {
+            unreachable!("not a LabeledStatement")
+        };
+        assert_eq!(label_index(l2.body), 2, "the while");
+        let Node::WhileStatement(w) = l2.body else {
+            unreachable!("not a WhileStatement")
+        };
+        let Node::BlockStatement(block) = w.body else {
+            unreachable!("not a BlockStatement")
+        };
+        let cont = block.body.iter().next().expect("empty body");
+        assert_eq!(
+            label_index(cont),
+            2,
+            "`continue l1` must reach the while (label 2) through l2"
+        );
+    });
+}
+
+/// The same decorate-then-rebuild hazard as
+/// `a_rebuilt_switch_keeps_its_label_index_and_scope`, for a `for` loop: a
+/// fold in the init rebuilds the `ForStatement`, whose label index and scope
+/// were written before `visit_children_mut` snapshotted the builder.
+#[test]
+fn a_rebuilt_for_loop_keeps_its_label_index_and_scope() {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let src = "for (var i = 1 + 2; ; ) {\n  break;\n}\n";
+    let root = parse(&gc, &mut sm, src);
+    let original_id = first_statement(root).node_id();
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    let resolved = resolve_ast(&gc, &mut sem_ctx, &mut sm, root, &[])
+        .expect("resolution failed");
+
+    let for_node = first_statement(resolved);
+    assert_ne!(
+        for_node.node_id(),
+        original_id,
+        "non-degeneracy: the fold must have REBUILT the ForStatement"
+    );
+    let Node::ForStatement(f) = for_node else {
+        unreachable!("not a ForStatement")
+    };
+    assert_eq!(f.label_index.get(), 0, "the REBUILT for lost its label");
+    assert!(f.scope.get().is_some(), "the REBUILT for lost its scope");
+    let Node::BlockStatement(block) = f.body else {
+        unreachable!("not a BlockStatement")
+    };
+    let brk = block.body.iter().next().expect("no break");
+    assert_eq!(label_index(brk), 0);
+}

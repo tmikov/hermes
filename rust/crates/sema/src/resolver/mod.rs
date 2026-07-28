@@ -43,17 +43,27 @@
 //! validated (including the dual parameter/body scope layout that
 //! parameter expressions force), the implicit `arguments` object is
 //! declared where the spec-deviating rule says it should be, and bodies
-//! resolve inside the function scope. Together this reproduces `hermesc
-//! -dump-sema` byte-for-byte for programs made of literals, empty
-//! statements, bare identifier reads (including through non-computed
-//! member/property positions, which are skipped rather than resolved),
+//! resolve inside the function scope. From S2 T1 (`statements.rs`),
+//! `visit(SwitchStatementNode *)`, `visit(ForIn/ForOfStatementNode *)` +
+//! `visitForInOf`, `visit(For/DoWhile/WhileStatementNode *)`,
+//! `visit(LabeledStatementNode *)`, `getLabelDecorationBase` and
+//! `visit(Break/ContinueStatementNode *)` — every loop shape gets its label
+//! index and (where C++ creates one) its own scope with the declarations
+//! hoisted into it, labeled statements maintain the per-function
+//! `labelMap`, and `break`/`continue` resolve to a label index or report
+//! the four "not within a loop"/"label is not defined"/"not a loop label"
+//! diagnostics. Together this reproduces `hermesc -dump-sema`
+//! byte-for-byte for programs made of literals, empty statements, bare
+//! identifier reads (including through non-computed member/property
+//! positions, which are skipped rather than resolved),
 //! `var`/`let`/`const` declarations in blocks, functions of every
-//! parameter shape, and the expression forms above — which is what
-//! `tests/sema_differential.rs` enforces against the real compiler. Arrow
-//! functions, class declarations, catch clauses, imports, and everything
-//! else the C++ resolver handles remain later tasks' scope — see
-//! `declarations.rs`'s and `functions.rs`'s module docs for exactly which
-//! of *their* branches are ported but not yet corpus-reachable.
+//! parameter shape, the loop/label/switch statements above and the
+//! expression forms above — which is what `tests/sema_differential.rs`
+//! enforces against the real compiler. Arrow functions, class
+//! declarations, catch clauses, imports, and everything else the C++
+//! resolver handles remain later tasks' scope — see `declarations.rs`'s,
+//! `functions.rs`'s and `statements.rs`'s module docs for exactly which of
+//! *their* branches are ported but not yet corpus-reachable.
 //!
 //! Everything not covered is *deliberately absent rather than
 //! approximated*: `visit_node` panics with `sema S1: unhandled node kind
@@ -104,14 +114,21 @@
 //!   spec §3.4 obligation (b) is the standing audit of every remaining
 //!   visit.
 //!
-//!   **S2 NOTE — known exception.** `visit(SwitchStatementNode *)`
-//!   (SemanticResolver.cpp:520-539) visits `_discriminant` FIRST (:522) and
-//!   only then writes `node->setLabelIndex(...)` (:526). Under this
-//!   mechanism a folded discriminant (`switch (1+2)`) rebuilds the
-//!   `SwitchStatement`, and a naive "snapshot the builder, then write the
-//!   label" would drop `label_index` — a break-target miscompile. The S2
-//!   port must write the label to the REBUILT node (or restructure to
-//!   write-before-children). See spec §3.4 obligation (b).
+//!   **The known exception, DISCHARGED in S2 T1.**
+//!   `visit(SwitchStatementNode *)` (SemanticResolver.cpp:520-539) visits
+//!   `_discriminant` FIRST (:522) and only then writes
+//!   `node->setLabelIndex(...)` (:526). Under this mechanism a folded
+//!   discriminant (`switch (1+2)`) rebuilds the `SwitchStatement`, and a
+//!   naive "snapshot the builder, then write the label" would drop
+//!   `label_index` — a break-target miscompile.
+//!   `statements::SemanticResolver::visit_switch_statement` handles it by
+//!   writing both decorations on the original node and creating the builder
+//!   only afterwards, so the rebuilt node carries them; see
+//!   `statements.rs`'s module doc for the full argument, and
+//!   `a_rebuilt_switch_keeps_its_label_index_and_scope` in
+//!   `tests/resolver.rs` for the regression test (the differential is blind
+//!   to it — `label_index` is never dumped). Spec §3.4 obligation (b)
+//!   remains the standing audit for the visits still to be ported.
 //! - **Node identity is not stable across a rebuild.** A rebuilt node is a
 //!   new allocation with a fresh `NodeId` (`NodeMetadata::duplicate`), so
 //!   anything keyed by node identity — a `NodeRc` held in a side table, or a
@@ -238,6 +255,7 @@ mod declarations;
 mod expressions;
 mod functions;
 mod identifiers;
+mod statements;
 
 use ast::context::{GCLock, NodeRc};
 use ast::node::Node;
@@ -838,6 +856,31 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
                 self.visit_function_expression(gc, node, path)
             }
             Node::ReturnStatement(_) => self.visit_return_statement(gc, node),
+            // `visit(SwitchStatementNode*)` (cpp:520-539),
+            // `visit(ForInStatementNode*)`/`visit(ForOfStatementNode*)` +
+            // `visitForInOf` (cpp:541-598),
+            // `visit(ForStatementNode*)` (cpp:600-614),
+            // `visit(DoWhileStatementNode*)` (cpp:616-625),
+            // `visit(WhileStatementNode*)` (cpp:626-635),
+            // `visit(LabeledStatementNode*)` (cpp:637-678),
+            // `visit(BreakStatementNode*)` (cpp:695-721) and
+            // `visit(ContinueStatementNode*)` (cpp:723-755) — see
+            // `statements::*` (S2 T1).
+            Node::SwitchStatement(_) => self.visit_switch_statement(gc, node),
+            Node::ForInStatement(_) | Node::ForOfStatement(_) => {
+                self.visit_for_in_of(gc, node)
+            }
+            Node::ForStatement(_) => self.visit_for_statement(gc, node),
+            Node::WhileStatement(_) | Node::DoWhileStatement(_) => {
+                self.visit_while_like(gc, node)
+            }
+            Node::LabeledStatement(_) => {
+                self.visit_labeled_statement(gc, node)
+            }
+            Node::BreakStatement(_) => self.visit_break_statement(gc, node),
+            Node::ContinueStatement(_) => {
+                self.visit_continue_statement(gc, node)
+            }
             // Kinds with no `visit()` overload in C++: the generic dispatch
             // visits their children (`ExpressionStatement`'s `_expression`
             // — `_directive` is a NodeString, not a node) and here also
@@ -886,6 +929,12 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // `Super` cpp:1086, `MetaProperty` cpp:837,
             // `YieldExpression`/`AwaitExpression` cpp:1476/1494 — are
             // deliberately left panicking until their own task ports them.)
+            //
+            // S2 T1 adds `SwitchCase`, the only child kind its statement
+            // visits reach that has no override of its own: it appears
+            // nowhere in the SemanticResolver.h:200-304 `visit` inventory,
+            // so C++ walks its `_test`/`_consequent` through
+            // `visitESTreeChildren` exactly like this arm does.
             Node::ExpressionStatement(_)
             | Node::EmptyStatement(_)
             | Node::NumericLiteral(_)
@@ -907,6 +956,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             | Node::SequenceExpression(_)
             | Node::TemplateLiteral(_)
             | Node::TemplateElement(_)
+            | Node::SwitchCase(_)
             | Node::Empty(_) => node.visit_children_mut(gc, self),
             _ => panic!(
                 "sema S1: unhandled node kind {} — later tasks",

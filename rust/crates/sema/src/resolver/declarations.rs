@@ -63,7 +63,7 @@ const TYPED: bool = false;
 /// The text of `atom`, for error/warning messages. Same pattern as
 /// `identifiers.rs`'s inline `String::from_utf8_lossy(gc.bytes(a))`, pulled
 /// out here since this file needs it at several call sites.
-fn atom_str(gc: &GCLock, atom: Atom) -> String {
+pub(super) fn atom_str(gc: &GCLock, atom: Atom) -> String {
     String::from_utf8_lossy(gc.bytes(atom)).into_owned()
 }
 
