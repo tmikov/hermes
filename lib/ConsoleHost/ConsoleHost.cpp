@@ -15,6 +15,7 @@
 #include "hermes/VM/Domain.h"
 #include "hermes/VM/JSArray.h"
 #include "hermes/VM/JSArrayBuffer.h"
+#include "hermes/VM/JSLib.h"
 #include "hermes/VM/JSObject.h"
 #include "hermes/VM/JSTypedArray.h"
 #include "hermes/VM/NativeArgs.h"
@@ -310,6 +311,53 @@ static vm::CallResult<vm::HermesValue> clearTimeout(
   return HermesValue::encodeUndefinedValue();
 }
 
+/// console.log/console.info/console.debug — format like print(), on stdout.
+static vm::CallResult<vm::HermesValue> consoleLog(
+    void *,
+    vm::Runtime &runtime) {
+  if (LLVM_UNLIKELY(
+          vm::printArgsToStream(runtime, llvh::outs(), 0) ==
+          vm::ExecutionStatus::EXCEPTION))
+    return vm::ExecutionStatus::EXCEPTION;
+  return vm::HermesValue::encodeUndefinedValue();
+}
+
+/// console.warn/console.error — like console.log, but on stderr.
+static vm::CallResult<vm::HermesValue> consoleError(
+    void *,
+    vm::Runtime &runtime) {
+  if (LLVM_UNLIKELY(
+          vm::printArgsToStream(runtime, llvh::errs(), 0) ==
+          vm::ExecutionStatus::EXCEPTION))
+    return vm::ExecutionStatus::EXCEPTION;
+  return vm::HermesValue::encodeUndefinedValue();
+}
+
+/// console.assert(condition, ...data) — if condition is falsy, write
+/// "Assertion failed" followed by the remaining arguments to stderr.
+static vm::CallResult<vm::HermesValue> consoleAssert(
+    void *,
+    vm::Runtime &runtime) {
+  using namespace vm;
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  if (toBoolean(args.getArg(0)))
+    return HermesValue::encodeUndefinedValue();
+
+  if (args.getArgCount() <= 1) {
+    llvh::errs() << "Assertion failed\n";
+    llvh::errs().flush();
+    return HermesValue::encodeUndefinedValue();
+  }
+
+  llvh::errs() << "Assertion failed: ";
+  if (LLVM_UNLIKELY(
+          printArgsToStream(runtime, llvh::errs(), 1) ==
+          ExecutionStatus::EXCEPTION))
+    return ExecutionStatus::EXCEPTION;
+  return HermesValue::encodeUndefinedValue();
+}
+
 /// Synchronously read a file and return its contents as a Uint8Array.
 static vm::CallResult<vm::HermesValue> hermescliLoadFile(
     void *,
@@ -542,7 +590,6 @@ void installConsoleBindings(
 
   struct : public vm::Locals {
     vm::PinnedValue<vm::JSObject> console;
-    vm::PinnedValue<> print;
   } lv;
   vm::LocalsRAII lraii{runtime, &lv};
 
@@ -656,18 +703,36 @@ void installConsoleBindings(
               .get(),
           normalDPF,
           lv.console));
-  lv.print = runtime.ignoreAllocationFailure(
-      vm::JSObject::getNamed_RJS(
-          runtime.getGlobal(),
-          runtime,
-          vm::Predefined::getSymbolID(vm::Predefined::print)));
-  runtime.ignoreAllocationFailure(
-      vm::JSObject::defineOwnProperty(
-          lv.console,
-          runtime,
-          vm::Predefined::getSymbolID(vm::Predefined::log),
-          normalDPF,
-          lv.print));
+  // console.log/info/debug all write to stdout, like print(). warn and error
+  // write to stderr. assert reports only when its condition is falsy.
+  auto defineConsoleMethod = [&](const char *name,
+                                 vm::NativeFunctionPtr functionPtr,
+                                 unsigned paramCount) -> void {
+    vm::GCScopeMarkerRAII marker{runtime};
+    auto sym = runtime
+                   .ignoreAllocationFailure(
+                       runtime.getIdentifierTable().getSymbolHandle(
+                           runtime, llvh::createASCIIRef(name)))
+                   .get();
+    auto func = vm::NativeFunction::create(
+        runtime,
+        runtime.functionPrototype,
+        vm::Runtime::makeNullHandle<vm::Environment>(),
+        nullptr,
+        functionPtr,
+        sym,
+        paramCount,
+        vm::Runtime::makeNullHandle<vm::JSObject>());
+    runtime.ignoreAllocationFailure(vm::JSObject::defineOwnProperty(
+        lv.console, runtime, sym, normalDPF, func));
+  };
+
+  defineConsoleMethod("log", consoleLog, 0);
+  defineConsoleMethod("info", consoleLog, 0);
+  defineConsoleMethod("debug", consoleLog, 0);
+  defineConsoleMethod("warn", consoleError, 0);
+  defineConsoleMethod("error", consoleError, 0);
+  defineConsoleMethod("assert", consoleAssert, 0);
 
   initTest262Harness(runtime);
 
