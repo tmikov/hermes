@@ -25,6 +25,7 @@ use ast::node_child::{NodeList, NodeMetadata, Strictness};
 use atom_table::INVALID_ATOM_BYTES;
 use parser::js::JSParserImpl;
 use parser::lexer::{GrammarContext, JSLexer};
+use sema::dump::sem_dump;
 use sema::ids::FunctionInfoId;
 use sema::keywords::Keywords;
 use sema::resolve::resolve_ast;
@@ -1358,6 +1359,298 @@ fn an_arrow_not_using_arguments_leaves_the_propagation_flag_clear() {
         assert!(
             !f.contains_arrow_functions_using_arguments,
             "f's own usesArguments must not leak into the arrow flag"
+        );
+    });
+}
+
+// ---- S2 T3: try/catch (rewrite #2), `with` + the Unresolver -------------
+
+/// Parse + resolve `src`, requiring resolution to FAIL with exactly
+/// `errors` errors, and hand the closure the `GCLock`, the `SemContext` and
+/// the root node that went IN.
+///
+/// `resolve_ast` returns `None` on any error (C++'s `false`), so it cannot
+/// give back a root for the `with` tests below — `visit(WithStatementNode *)`
+/// always reports "with statement is not supported" when `compile_` is set.
+/// Using the input root is sound only because nothing in these inputs
+/// rewrites anything (no fold, no arrow, no try/catch+finally), so no
+/// ancestor is ever rebuilt and the input root IS the decorated tree; the
+/// `identifier_states` assertions (which would see `false`/no-decl on a
+/// stale tree) plus `unrewritten_resolution_returns_the_same_root` are what
+/// keep that assumption honest.
+///
+/// A handler is installed so the expected diagnostics do not print to the
+/// test runner's stderr when the resolver flushes its buffer.
+fn with_failed_resolution<R>(
+    src: &str,
+    errors: u32,
+    f: impl for<'gc> FnOnce(&GCLock, &SemContext, &'gc Node<'gc>) -> R,
+) -> R {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    sm.set_handler(Box::new(SharedHandler(Rc::default())));
+    let root = parse(&gc, &mut sm, src);
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    assert!(
+        resolve_ast(&gc, &mut sem_ctx, &mut sm, root, &[]).is_none(),
+        "expected resolution to fail for: {src}"
+    );
+    assert_eq!(sm.error_count(), errors, "unexpected error count for: {src}");
+    f(&gc, &sem_ctx, root)
+}
+
+/// Every `Identifier` in `node`'s subtree, in visit order, as
+/// `(name, unresolvable)`.
+fn identifier_states<'gc>(
+    gc: &GCLock,
+    node: &'gc Node<'gc>,
+) -> Vec<(String, bool)> {
+    struct Collect<'a, 'b, 'c> {
+        gc: &'a GCLock<'b, 'c>,
+        out: Vec<(String, bool)>,
+    }
+    impl<'gc> ast::visitor::Visitor<'gc> for Collect<'_, '_, '_> {
+        fn visit_node(&mut self, node: &'gc Node<'gc>) {
+            if let Node::Identifier(id) = node {
+                let name = atom_string(self.gc, id.name.get());
+                self.out.push((name, id.unresolvable.get()));
+            }
+            node.visit_children(self);
+        }
+    }
+    let mut c = Collect { gc, out: Vec::new() };
+    ast::visitor::Visitor::visit_node(&mut c, node);
+    c.out
+}
+
+/// The third statement of a resolved `Program`, as a `WithStatement`.
+fn third_with_statement<'gc>(
+    root: &'gc Node<'gc>,
+) -> &'gc ast::node::WithStatement<'gc> {
+    let Node::Program(p) = root else {
+        unreachable!("not a Program root")
+    };
+    p.body
+        .iter()
+        .nth(2)
+        .expect("no third statement")
+        .as_with_statement()
+        .expect("the third statement is not a WithStatement")
+}
+
+/// **The `Unresolver` pass** (`resolver/unresolver.rs`, port of
+/// SemanticResolver.h:679-711 + cpp:3186-3210), reached through
+/// `visit(WithStatementNode *)` (cpp:763-768).
+///
+/// `with` runs the pass over its BODY with `curScope_->depth + 1`, so:
+/// every identifier in the body that resolved to a declaration in a scope
+/// *shallower* than that loses its resolution and gets `unresolvable`; a
+/// declaration made inside the `with` body (depth 1 here, i.e. not less than
+/// 0 + 1) keeps it; and the `with`'s own `_object` — outside the pass's root
+/// — is untouched.
+///
+/// The differential is blind to all of this: hermesc reports the
+/// not-supported error and exits before printing any dump (`error-with.js`
+/// in the corpus pins that), so this test is the only pin on the pass.
+#[test]
+fn with_statement_unresolves_identifiers_above_its_depth() {
+    let src = "var o = {a: 1};\nvar outer = 1;\n\
+               with (o) {\n  let inner;\n  outer;\n  inner;\n  o;\n}\n";
+    with_failed_resolution(src, 1, |gc, sem_ctx, root| {
+        let with = third_with_statement(root);
+
+        // `_object` is outside the Unresolver's root, so `o` here keeps its
+        // resolution.
+        assert_eq!(
+            identifier_states(gc, with.object),
+            vec![("o".to_string(), false)]
+        );
+
+        // Inside the body: `let inner` (depth 1) and every reference to it
+        // keep their decl; the two globals (depth 0 < 1) are unresolved.
+        assert_eq!(
+            identifier_states(gc, with.body),
+            vec![
+                ("inner".to_string(), false),
+                ("outer".to_string(), true),
+                ("inner".to_string(), false),
+                ("o".to_string(), true),
+            ]
+        );
+
+        // `setExpressionDecl(node, nullptr)` ran too, not just the flag: the
+        // dumper prints ` UNR` and NO `[...]` bracket for those two, and the
+        // untouched ones still print their decl.
+        let mut out = Vec::new();
+        sem_dump(&mut out, gc, sem_ctx, with.body);
+        let dumped = String::from_utf8(out).expect("dump is not UTF-8");
+        assert!(dumped.contains("Id 'outer' UNR\n"), "{dumped}");
+        assert!(dumped.contains("Id 'o' UNR\n"), "{dumped}");
+        assert!(dumped.contains("Id 'inner' [D:E:"), "{dumped}");
+    });
+}
+
+/// The pass early-returns on an identifier that is already `unresolvable`
+/// (cpp:3193-3195), which is what keeps `SemContext::get_expression_decl`'s
+/// "not on an unresolvable identifier" assertion from firing when a second,
+/// nested `with` walks the same subtree.
+#[test]
+fn nested_with_statements_do_not_re_unresolve() {
+    let src = "var o = {};\nvar outer = 1;\n\
+               with (o) { with (o) { outer; } }\n";
+    with_failed_resolution(src, 2, |gc, _sem_ctx, root| {
+        let with = third_with_statement(root);
+        // The inner `with`'s pass (depth 1 + 1 = 2) runs first and unresolves
+        // `o` and `outer`; the outer one (depth 0 + 1 = 1) then walks the same
+        // identifiers, hits the early return, and leaves them alone.
+        assert_eq!(
+            identifier_states(gc, with.body),
+            vec![("o".to_string(), true), ("outer".to_string(), true)]
+        );
+    });
+}
+
+/// **Rewrite #2** (`visit(TryStatementNode *)`, cpp:771-811): a `try` with
+/// both a handler and a finalizer becomes
+/// `try { try <block> catch <handler> } finally <finalizer>`.
+///
+/// `-dump-sema` shows the resulting *shape* (`try-catch-finally.js` in the
+/// corpus compares it byte-for-byte) but prints no source locations at all,
+/// so the two `copyLocationFrom`/`setEndLoc` calls (cpp:797-798, 804) can
+/// only be checked here. The synthesized nested `try` spans from the
+/// original `try` keyword to the END of the handler; the wrapper block
+/// copies that same range and is NOT implicit (cpp:803's `false`).
+#[test]
+fn try_with_catch_and_finally_is_rewritten_into_nested_trys() {
+    let src = "try { 1; } catch (e) { 2; } finally { 3; }\n";
+    with_resolved(src, |_sem_ctx, resolved| {
+        let outer = first_statement(resolved)
+            .as_try_statement()
+            .expect("not a TryStatement");
+        assert!(
+            outer.handler.is_none(),
+            "the outer statement must have given its handler away"
+        );
+        assert!(outer.finalizer.is_some());
+
+        // tryStatement->_block = BlockStatementNode({nestedTry}, false)
+        let wrapper = outer
+            .block
+            .as_block_statement()
+            .expect("the new block is not a BlockStatement");
+        assert!(!wrapper.implicit.get(), "cpp:803 passes `false`");
+        let mut wrapper_body = wrapper.body.iter();
+        let nested = wrapper_body
+            .next()
+            .expect("the wrapper block is empty")
+            .as_try_statement()
+            .expect("the wrapper's only statement is not a TryStatement");
+        assert!(
+            wrapper_body.next().is_none(),
+            "the wrapper block holds exactly one statement"
+        );
+        assert!(nested.handler.is_some());
+        assert!(
+            nested.finalizer.is_none(),
+            "the nested try must have no finalizer, or it would rewrite again"
+        );
+
+        // nestedTry->copyLocationFrom(tryStatement) +
+        // nestedTry->setEndLoc(nestedTry->_handler->getEndLoc()).
+        let whole = first_statement(resolved).range();
+        let handler_range = nested.handler.unwrap().range();
+        let nested_range = nested.metadata.range.get();
+        assert_eq!(nested_range.start, whole.start);
+        assert_eq!(nested_range.end, handler_range.end);
+        assert_ne!(
+            nested_range.end, whole.end,
+            "a `finally` follows the handler, so the ranges must differ"
+        );
+        // tryStatement->_block->copyLocationFrom(nestedTry).
+        assert_eq!(wrapper.metadata.range.get(), nested_range);
+    });
+}
+
+/// A `try` missing either half is left alone: `visit(TryStatementNode *)`
+/// returns `Unchanged`, so the whole tree comes back pointer-identical.
+#[test]
+fn try_without_both_handler_and_finalizer_is_not_rewritten() {
+    let sources =
+        ["try { 1; } catch (e) { 2; }\n", "try { 1; } finally { 2; }\n"];
+    for src in sources {
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let mut sm = SourceErrorManager::new();
+        let root = parse(&gc, &mut sm, src);
+        let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+        let resolved = resolve_ast(&gc, &mut sem_ctx, &mut sm, root, &[])
+            .unwrap_or_else(|| panic!("resolution failed for: {src}"));
+        assert!(
+            std::ptr::eq(resolved, root),
+            "{src} must not rebuild anything"
+        );
+    }
+}
+
+/// The rewrite is a replacement, so it must be reported even when the
+/// children walk below it changes nothing further — otherwise the parent
+/// would keep the pre-rewrite subtree. Same shape as rewrite #1's
+/// `Unchanged if rewritten` arm.
+#[test]
+fn the_try_rewrite_is_reported_even_when_no_child_changes() {
+    let src = "try { } catch (e) { } finally { }\n";
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let root = parse(&gc, &mut sm, src);
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    let resolved = resolve_ast(&gc, &mut sem_ctx, &mut sm, root, &[])
+        .expect("resolution failed");
+    assert!(
+        !std::ptr::eq(resolved, root),
+        "the rewrite must have rebuilt the Program"
+    );
+    let outer = first_statement(resolved)
+        .as_try_statement()
+        .expect("not a TryStatement");
+    assert!(outer.handler.is_none());
+}
+
+/// `visit(CatchClauseNode *)`'s `ScopeRAII` decoration must survive a
+/// rebuild forced from inside the clause: a fold in the catch BODY rebuilds
+/// the body block, hence the `CatchClause`, and `scope` is a `Cell` the
+/// builder snapshots (see `resolver/mod.rs`'s "decorate before recursing").
+#[test]
+fn a_rebuilt_catch_clause_keeps_its_scope() {
+    let src = "try { } catch (e) { 1 + 2; }\n";
+    with_resolved(src, |sem_ctx, resolved| {
+        let outer = first_statement(resolved)
+            .as_try_statement()
+            .expect("not a TryStatement");
+        let catch = outer
+            .handler
+            .expect("no handler")
+            .as_catch_clause()
+            .expect("handler is not a CatchClause");
+        let scope = catch.scope.get().expect("the rebuilt clause lost `scope`");
+        // The catch parameter is declared in that very scope.
+        let scope_id = sema::ids::ScopeId::from_sema_id(scope);
+        let decls = &sem_ctx.scope(scope_id).decls;
+        assert_eq!(decls.len(), 1, "the catch param must be the only decl");
+        assert_eq!(sem_ctx.decl(decls[0]).kind, DeclKind::ES5Catch);
+        // Non-degeneracy: the fold must have happened, i.e. the clause
+        // really was rebuilt.
+        let body = catch
+            .body
+            .as_block_statement()
+            .expect("catch body is not a block");
+        let Some(Node::ExpressionStatement(es)) = body.body.iter().next() else {
+            panic!("no ExpressionStatement in the catch body")
+        };
+        assert!(
+            matches!(es.expression, Node::NumericLiteral(_)),
+            "1 + 2 did not fold, so the CatchClause was never rebuilt"
         );
     });
 }

@@ -112,6 +112,7 @@ use crate::ids::FunctionInfoId;
 use crate::sem_context::{Binding, ConstructorKind, DeclKind};
 
 use super::expressions::replacement_of;
+use super::unresolver::Unresolver;
 use super::{
     make_strictness, FoundDirectives, SemanticResolver, DEBUG_INFO_SETTING_ALL,
 };
@@ -212,7 +213,7 @@ impl<'gc> FuncBuilder<'gc> {
 /// C++ constructs the node first and then calls `copyLocationFrom` on it;
 /// here the location lives in the `NodeMetadata` a constructor takes, so the
 /// call becomes "build the metadata to construct it with".
-fn copy_location_from<'gc>(src: &Node<'gc>) -> NodeMetadata<'gc> {
+pub(super) fn copy_location_from<'gc>(src: &Node<'gc>) -> NodeMetadata<'gc> {
     NodeMetadata::new_with_debug(src.range(), src.metadata().debug_loc.get())
 }
 
@@ -1093,11 +1094,12 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
         // mode.
         // TODO: enable this when non-strict direct eval is supported.
         //
-        // Ported AS DEAD CODE, with C++'s own literal `false` guard: the
-        // `Unresolver` pass (SemanticResolver.h:681-711,
-        // SemanticResolver.cpp:3186-3210) is not ported because nothing can
-        // reach it. Keeping the statement means the day the TODO is
-        // honored, this is the line that changes.
+        // Ported AS DEAD CODE, with C++'s own literal `false` guard, so that
+        // the day the TODO is honored this is the line that changes. The
+        // `Unresolver` pass it names (SemanticResolver.h:679-711,
+        // SemanticResolver.cpp:3186-3210) IS ported as of S2 T3
+        // (`resolver/unresolver.rs`) — reached today only from
+        // `visit(WithStatementNode *)`.
         let lex_scope = self
             .sem_ctx
             .function(self.cur_function_info())
@@ -1107,9 +1109,8 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             && self.sem_ctx.scope(lex_scope).local_eval
             && !self.sem_ctx.function(self.cur_function_info()).strict
         {
-            unreachable!(
-                "Unresolver::run is unreachable in C++ too (cpp:1935-1938)"
-            );
+            let depth = self.sem_ctx.scope(lex_scope).depth;
+            Unresolver::run(self.sem_ctx, depth, node);
         }
 
         // Determine whether the function can run the implicit return.

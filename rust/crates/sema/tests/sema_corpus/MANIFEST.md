@@ -34,6 +34,14 @@ re-probed the three `ArrowFunctionExpression`-deferred rows and imported two of
 them (`await-arrow.js`, `await-arrow-error.js`); see "S2 Task 2 additions" at
 the end.
 
+**S2 Task 3** (try/catch + rewrite #2, `with` + the `Unresolver`, the regexp
+visit) re-probed the six rows blocked on `TryStatement`/`WithStatement` and
+imported three of them (`catch-block.js`, `catch-block-destr.js`,
+`catch-block-error.js`); the other three turned out to be blocked on something
+else and their rows were corrected. After it the Imported table has 23 rows
+(22 from `test/Sema` + the gap-filler) and the Deferred table 32, i.e.
+22 + 32 = 54. See "S2 Task 3 additions" at the end.
+
 ## Imported (byte-identical vs hermesc)
 
 | File | Note |
@@ -58,6 +66,9 @@ the end.
 | `regress-ast-const-folding.js` | **S2 T1** — `for (w of (1 + 1))`: a fold in a `for-of` right-hand side |
 | `await-arrow.js` | **S2 T2** — `let await` referenced from a nested arrow inside an async arrow's parameter default |
 | `await-arrow-error.js` | **S2 T2** — the three `await is not a valid identifier name in an async function` shapes (`forbidAwaitAsIdentifier_` through nested arrow params) |
+| `catch-block.js` | **S2 T3** — `try {} catch (e) { let x; }`: the ES5Catch decl and the clause's two nested scopes |
+| `catch-block-destr.js` | **S2 T3** — a destructured catch parameter (plain `Catch` decls) |
+| `catch-block-error.js` | **S2 T3** — the `Catch`-vs-`let` redeclaration error+note pair in the clause's own scope |
 
 `deep-ast-err.js` is listed in the Deferred table below but is NOT a real S1
 gap: the entire `.js` file is comment lines (its `RUN:` lines generate the
@@ -75,9 +86,6 @@ files in, 54 accounted for below) rather than silently dropped. It is also
 |---|---|---|
 | `arguments-arg-let.js` | `CallExpression` (`print(...)`) | S2 |
 | `break-in-nested-func.js` | loose-mode block-nested `FunctionDeclaration` (`ScopedFunctionPromoter`) | S3 |
-| `catch-block-destr.js` | `TryStatement` | S2 |
-| `catch-block-error.js` | `TryStatement` | S2 |
-| `catch-block.js` | `TryStatement` | S2 |
 | `class-children.js` | `ClassDeclaration` | S2 |
 | `const-reassignment.js` | `CallExpression` | S2 |
 | `deep-ast-err.js` | vacuous — see note above (not a real S1 gap) | n/a |
@@ -86,7 +94,7 @@ files in, 54 accounted for below) rather than silently dropped. It is also
 | `eval-warn.js` | `CallExpression` | S2 |
 | `field-init-bindings.js` | `ClassDeclaration` | S2 |
 | `field-value-arguments-error.js` | `ClassDeclaration` | S2 |
-| `function-redeclaration-error.js` | `TryStatement` | S2 |
+| `function-redeclaration-error.js` | loose- AND strict-mode block-nested `FunctionDeclaration` (`ScopedFunctionPromoter`) — re-probed after S2 T3 unblocked its `try`/`catch` clauses; the remaining blocker is the `sema S1: scoped function declarations are S3 scope` assert | S3 |
 | `invalid-args-eval.js` | **not a port gap** — the resolver's loop/`for` support landed in S2 T1 and every diagnostic in this file is produced, with identical text and locations, but two of them collide at the *same* source location (`89:9`: the strict-mode `cannot declare 'arguments'` error and the `was not declared in function "global"` warning). C++'s buffered-message flush uses `std::sort` (`SourceErrorManager.cpp:61-71`), which is NOT stable, so their relative order is unspecified and in practice depends on the whole 24-message array; our `disable_buffering` uses a stable `sort_by_key` (`support/src/manager.rs:903-909`, a documented deviation). Minimized to two messages the two sides agree; only at this file's message count does libstdc++'s introsort reorder the tie. Not faithfully fixable (there is no defined tie order to match), and the file's actual subject is S1's `arguments`/`eval` declaration rules, so the loop-specific rows were extracted into the new `error-for-decl-strict.js` instead | n/a (C++ unstable-sort tie) |
 | `let-arguments-in-arrow.js` | `CallExpression` (arrows landed in S2 T2; `print(...)` remains) | S2 |
 | `private-declaration-dup-error.js` | `ClassDeclaration` | S2 |
@@ -96,7 +104,7 @@ files in, 54 accounted for below) rather than silently dropped. It is also
 | `regress-function-promotion-decl.js` | loose-mode block-nested `FunctionDeclaration` (`ScopedFunctionPromoter`) | S3 |
 | `regress-nested-expressions-error.js` | recursion-depth-limit mismatch: hermesc and sema-dump both correctly error `Too many nested expressions/statements/declarations` on the deeply-nested `get<<=get<<=...` chain, but at different columns (hermesc col 3052, sema-dump col 6124) — the two recursion trackers (`JSParserImpl::recursionDepth_`/`SemanticResolver`'s tracker vs our ported ones) increment at different rates per grammar production, so the exact trip point diverges even though both share the same `MAX_RECURSION_DEPTH = 1024`. Same landmine category as the S1 ledger's "parser recursion limit unported" item (S0-era finding, T6 review) — tracked together, not re-derived/fixed here | parser-gap follow-up (recursion-depth-counting parity) |
 | `reject-super-references.js` | `Super` | S2 |
-| `reject-with.js` | `WithStatement` | S2 |
+| `reject-with.js` | `CallExpression` (`print(a)`) — `with` itself landed in S2 T3 (see `error-with.js`) | S2 |
 | `static-initialization-block-error.js` | `ClassDeclaration` | S2 |
 | `static-initialization-block-lazy-error.js` | `ClassDeclaration` | S2 |
 | `static-initialization-block.js` | `ClassDeclaration` | S2 |
@@ -106,7 +114,7 @@ files in, 54 accounted for below) rather than silently dropped. It is also
 | `type-alias-children.js` | typed dialect (`-parse-flow` RUN flag; harness has no per-file flags) — WITHOUT the flag, hermesc and sema-dump both hit the identical `';' expected` parse error on `type A = B;`, but that's a coincidental match on a syntax error, not a test of the file's actual subject (TypeAlias children resolution); same vacuous-match category `deep-ast-err.js` was excluded for, so it does not belong in `sema_corpus/` either | dialect-corpus phase |
 | `undeclared-private-name-error.js` | `CallExpression` | S2 |
 | `valid-super-references.js` | `Super` | S2 |
-| `var-scope-redeclaration-error.js` | `TryStatement` | S2 |
+| `var-scope-redeclaration-error.js` | `CallExpression` (`something()`) — `try`/`catch` landed in S2 T3 | S2 |
 | `xmod-errors.js` | `CallExpression` | S2 |
 
 ## Subdirectories (`test/Sema/flow/`, `test/Sema/flow/ffi/`, `test/Sema/lowering/`)
@@ -160,6 +168,9 @@ hermesc, 32 are hermesc-failure files).
 
 Final count after S2 Task 2: **99 corpus files matched** (58 succeed on
 hermesc, 41 are hermesc-failure files).
+
+Final count after S2 Task 3: **107 corpus files matched** (63 succeed on
+hermesc, 44 are hermesc-failure files).
 
 ## S2 Task 1 additions
 
@@ -230,3 +241,32 @@ Not corpus-reachable, and documented at their sites rather than curated away:
   `test/Parser/class-static-block-await-error.js`) — i.e. once S2 T4/T5 land
   the class visits. `CoverTypedIdentifier` likewise needs `-parse-flow`
   (dialect-corpus phase).
+
+## S2 Task 3 additions
+
+Five new files plus the three re-probed `test/Sema` imports
+(`catch-block.js`, `catch-block-destr.js`, `catch-block-error.js`), each
+verified byte-for-byte (stdout, stderr and exit status) against
+`hermesc -dump-sema` before being added:
+
+| File | Covers |
+|---|---|
+| `try-catch-finally.js` | **rewrite #2** — `try`/`catch`, `try`/`finally` and `try`/`catch`/`finally`, the last of which the dump shows as two nested `TryStatement`s wrapped in a synthesized `BlockStatement` with its own (empty) scope; nested rewrites, a `var` hoisted out of a `try` body, `throw` in both a `try` body and a handler (`ThrowStatement`, added to `visit_node`'s override-free generic arm by this task), and an outer `try`/`finally` whose *inner* statement is rewritten while a fold in the innermost body rebuilds the whole spine |
+| `catch-shapes.js` | every catch-parameter shape: a simple binding (`ES5Catch`), array and object patterns incl. defaults/rest/nesting (plain `Catch`), the optional (absent) binding, the ES10 B.3.5 `var`-merges-with-a-simple-catch-binding case (which also exercises the `[D:%d.N E:%d.M]` side-table dump), a `let` shadowing the param in the body block, and a fold in a catch body (which rebuilds the `CatchClause` and must not lose its `scope`) |
+| `error-catch-redecl.js` | the `Catch`/`ES5Catch` rows of the redeclaration decision table, now reachable: `let`/`const` in the clause's own scope, a destructured binding vs `var` in the body (no B.3.5 exception), two names bound by one catch parameter, and a nested-block `let`/`let` |
+| `error-with.js` | `with statement is not supported`, at `getStartLoc` (a caret, not a range), twice — hermesc exits 2 without printing any dump, which is why the `Unresolver` is unit-tested rather than differentially tested |
+| `regexp-literals.js` | valid `RegExpLiteral`s of every flavor (classes, quantifiers, all flags, named/non-capturing groups, escapes, lookaround, one inside a function) — see the deferral note below |
+
+Not corpus-reachable, and documented at their sites rather than curated away:
+
+- **`Invalid regular expression: <engine error>`** (cpp:829-832) needs Hermes's
+  regex engine (`lib/Regex/` + `CompiledRegExp::tryCompile`), which is a
+  separate unported component. `resolver/expressions.rs`'s stub validator
+  accepts everything, so an invalid-regex file (`var re = /a(/;` → hermesc:
+  `Invalid regular expression: Parenthesized expression not closed`, exit 2)
+  cannot be matched and is **deferred to the regex component**. Valid regexes
+  are unaffected, which is what makes `regexp-literals.js` a real test — see
+  that file's header and the module doc's "REGEX-ENGINE DEFERRED" block.
+- **The `Unresolver`'s local-`eval` call site** (cpp:1931-1937) is dead in C++
+  too (`if (false && lexScope->localEval && ...)`), so only the `with` call
+  site exercises the pass, and that one is dump-invisible (above).

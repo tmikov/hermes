@@ -60,7 +60,17 @@
 //! together with `visit(Yield/Await/SpreadElement/MetaProperty)` and the
 //! five `visit(Cover*Node *)` error stubs (`expressions.rs`), which is what
 //! turns S1 T7's dormant arrow branches (super/`arguments` inheritance, the
-//! async-arrow `await` rule in `visitParams`) live. Together this
+//! async-arrow `await` rule in `visitParams`) live. From S2 T3,
+//! `visit(TryStatementNode *)`, `visit(CatchClauseNode *)` and
+//! `visit(WithStatementNode *)` (`statements.rs`) — **spec §3.4 rewrite
+//! #2**: a `try` with both a handler and a finalizer becomes two nested
+//! `try`s before it is visited, catch clauses get their own scope holding
+//! only the catch parameter's bindings, and `with` reports its
+//! not-supported error and then runs the new `Unresolver` pass
+//! (`unresolver.rs`, the port of SemanticResolver.h:679-711) over its body,
+//! which is what turns S1 T5's dormant `Catch`/`ES5Catch` redeclaration
+//! rows live — plus `visit(RegExpLiteralNode *)` (`expressions.rs`), whose
+//! regex-engine boundary is documented at its site. Together this
 //! reproduces `hermesc -dump-sema`
 //! byte-for-byte for programs made of literals, empty statements, bare
 //! identifier reads (including through non-computed member/property
@@ -277,6 +287,7 @@ mod expressions;
 mod functions;
 mod identifiers;
 mod statements;
+mod unresolver;
 
 use ast::context::{GCLock, NodeRc};
 use ast::node::Node;
@@ -918,6 +929,15 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             | Node::CoverInitializer(_)
             | Node::CoverRestElement(_)
             | Node::CoverTypedIdentifier(_) => self.visit_cover_node(node),
+            // `visit(WithStatementNode*)` (cpp:757-769),
+            // `visit(TryStatementNode*)` (cpp:771-811, rewrite #2) and
+            // `visit(CatchClauseNode*)` (cpp:813-819) — see `statements::*`
+            // (S2 T3); `visit(RegExpLiteralNode*)` (cpp:821-835) — see
+            // `expressions::visit_regexp_literal` (S2 T3).
+            Node::WithStatement(_) => self.visit_with_statement(gc, node),
+            Node::TryStatement(_) => self.visit_try_statement(gc, node),
+            Node::CatchClause(_) => self.visit_catch_clause(gc, node),
+            Node::RegExpLiteral(_) => self.visit_regexp_literal(gc, node),
             // Kinds with no `visit()` overload in C++: the generic dispatch
             // visits their children (`ExpressionStatement`'s `_expression`
             // — `_directive` is a NodeString, not a node) and here also
@@ -984,7 +1004,17 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // `eval`/`$SHBuiltin` specials, S2 T6) and stay panicking. Its
             // Flow-only `_typeArguments` child is self-enforcing in exactly
             // the way `ObjectPattern`'s `_typeAnnotation` is, above.
+            //
+            // S2 T3 adds `ThrowStatement`, which `throw`-inside-`try` corpus
+            // files need: `ThrowStatement` appears nowhere in
+            // `lib/Sema/` at all (only `CheckImplicitReturn.cpp:155`
+            // mentions it), so it has no `SemanticResolver::visit` override
+            // and C++ reaches its one child (`_argument`, non-null,
+            // ESTree.def:187) through `visitESTreeChildren`, exactly like
+            // this arm. `DeclCollector` has no override for it either, so it
+            // creates no scope.
             Node::ExpressionStatement(_)
+            | Node::ThrowStatement(_)
             | Node::EmptyStatement(_)
             | Node::NumericLiteral(_)
             | Node::StringLiteral(_)

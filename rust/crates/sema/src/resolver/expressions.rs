@@ -30,6 +30,53 @@
 //! `visit_spread_element`'s and `visit_meta_property`'s doc comments for the
 //! parser evidence.
 //!
+//! S2 T3 adds `visit(RegExpLiteralNode *)` (cpp:821-835) — a literal, hence
+//! this file rather than `statements.rs`.
+//!
+//! ## REGEX-ENGINE DEFERRED
+//!
+//! `visit(RegExpLiteralNode *)` exists for exactly two side effects, and
+//! neither of them is resolution:
+//!
+//! ```text
+//! if (auto compiled = CompiledRegExp::tryCompile(
+//!         regexp->_pattern->str(), regexp->_flags->str(), &regexpError)) {
+//!   astContext_.addCompiledRegExp(
+//!       regexp->_pattern, regexp->_flags, std::move(*compiled));
+//! } else {
+//!   sm_.error(
+//!       regexp->getSourceRange(),
+//!       "Invalid regular expression: " + Twine(regexpError));
+//! }
+//! ```
+//!
+//! `CompiledRegExp::tryCompile` runs Hermes's own regex engine
+//! (`lib/Regex/`, plus `RegexSerialization.cpp`) over the literal: on
+//! success the bytecode it produced is cached on the `Context` for BCGen to
+//! pick up later, on failure its parse error becomes a sema diagnostic. That
+//! engine is a separate component this port does not have, so
+//! [`try_compile_regexp`] stands in for it and accepts everything, and the
+//! success branch has no cache to write to (this port's `Context` has no
+//! `addCompiledRegExp`; nothing in sema or `-dump-sema` ever reads it back).
+//!
+//! Where the boundary sits, precisely:
+//!
+//! - A **valid** regex is unaffected. Verified against the oracle: a
+//!   `RegExpLiteral` contributes one bare `RegExpLiteral` line to
+//!   `-dump-sema` and nothing to the `SemContext`, no matter what it matches
+//!   — so `regexp-literals.js` in the corpus is a real byte-for-byte test of
+//!   this visit, not a placeholder.
+//! - An **invalid** regex is the one thing this cannot reproduce: hermesc
+//!   reports `Invalid regular expression: <engine error>` over the literal's
+//!   range and exits 2 (verified: `/a(/` → "Parenthesized expression not
+//!   closed"). Matching it requires the engine's exact error strings, i.e.
+//!   the engine. Such a file is therefore recorded in the corpus MANIFEST as
+//!   deferred-to-the-regex-component instead of being silently skipped, and
+//!   the `Err` arm of the match is a **panic** rather than the ported
+//!   `sm_.error` call: the deferral can only ever change dump bytes through
+//!   a rejected pattern, so a rejection must be loud the day a real
+//!   validator replaces the stub.
+//!
 //! ## The fold loop: `list[i+1]->_left` becomes a rebuild
 //!
 //! C++'s binary visit linearizes a `+`/`-` chain into
@@ -918,6 +965,70 @@ impl SemanticResolver<'_, '_, '_, '_> {
         }
         TransformResult::Unchanged
     }
+
+    // ---- visit(RegExpLiteralNode *) -------------------------------------
+
+    /// Port of `SemanticResolver::visit(RegExpLiteralNode *regexp)`
+    /// (SemanticResolver.cpp:821-835). See the module doc's **REGEX-ENGINE
+    /// DEFERRED** section for the one thing this cannot do yet.
+    pub(super) fn visit_regexp_literal<'gc>(
+        &mut self,
+        gc: &'gc GCLock,
+        node: &'gc Node<'gc>,
+    ) -> TransformResult<&'gc Node<'gc>> {
+        let regexp = node
+            .as_reg_exp_literal()
+            .expect("visit_regexp_literal: not a RegExpLiteral");
+
+        // llvh::StringRef regexpError;
+        if self.compile() {
+            match try_compile_regexp(regexp.pattern.get(), regexp.flags.get()) {
+                Ok(()) => {
+                    // astContext_.addCompiledRegExp(
+                    //     regexp->_pattern, regexp->_flags,
+                    //     std::move(*compiled));
+                    //
+                    // `Context::addCompiledRegExp` is a *cache* the bytecode
+                    // generator later drains (`Context::getCompiledRegExp`);
+                    // nothing sema itself, or `-dump-sema`, reads it. There
+                    // is no such table on this port's `Context` yet, so the
+                    // successful branch has nothing to record — see the
+                    // module doc.
+                }
+                Err(regexp_error) => panic!(
+                    "sema: REGEX-ENGINE DEFERRED — the stub validator \
+                     rejected /{}/{}: {regexp_error}. Replacing it with a \
+                     real validator means porting \
+                     SemanticResolver.cpp:829-832's diagnostic at the same \
+                     time: sm_.error(regexp->getSourceRange(), \"Invalid \
+                     regular expression: \" + Twine(regexpError))",
+                    atom_str(gc, regexp.pattern.get()),
+                    atom_str(gc, regexp.flags.get()),
+                ),
+            }
+        }
+        // visitESTreeChildren(*this, regexp): a `RegExpLiteral` has no node
+        // children at all (`_pattern`/`_flags` are `NodeLabel`s), so this is
+        // unconditionally `Unchanged`.
+        node.visit_children_mut(gc, self)
+    }
+}
+
+/// Stand-in for `CompiledRegExp::tryCompile(pattern, flags, &error)`
+/// (`include/hermes/Regex/RegexSerialization.h`), which compiles the literal
+/// with Hermes's own regex engine purely to *validate* it.
+///
+/// **REGEX-ENGINE DEFERRED.** That engine (`lib/Regex/`, plus
+/// `CompiledRegExp`'s serialization) is a whole separate component this port
+/// does not have; reimplementing it here would be a second, unreviewed copy
+/// of it. So this accepts every input, and the caller's `Err` arm is a loud
+/// panic rather than a diagnostic: the ONLY way the deferral can change
+/// `-dump-sema` bytes is a pattern C++ rejects and this accepts, and the
+/// panic is what makes that visible the moment a real validator lands here.
+///
+/// See `expressions.rs`'s module doc for the corpus consequence.
+fn try_compile_regexp(_pattern: Atom, _flags: Atom) -> Result<(), String> {
+    Ok(())
 }
 
 /// The `_name` of a `MetaProperty`'s `_meta`/`_property`. Port of

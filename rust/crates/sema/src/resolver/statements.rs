@@ -6,11 +6,12 @@
  */
 
 //! S2 T1: statements — loops, labeled statements, `break`/`continue` and
-//! `switch`. A further `impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc,
-//! 'sm, 'ad>` block, split out of `resolver/mod.rs` the same way
-//! `identifiers.rs` (S1 T4), `declarations.rs` (S1 T5), `expressions.rs`
-//! (S1 T6) and `functions.rs` (S1 T7) were — see `identifiers.rs`'s module
-//! doc for why a child module sees `mod.rs`'s private fields and helpers.
+//! `switch`; S2 T3 adds `try`/`catch` and `with`. A further `impl<'bt, 'sc,
+//! 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad>` block, split out of
+//! `resolver/mod.rs` the same way `identifiers.rs` (S1 T4),
+//! `declarations.rs` (S1 T5), `expressions.rs` (S1 T6) and `functions.rs`
+//! (S1 T7) were — see `identifiers.rs`'s module doc for why a child module
+//! sees `mod.rs`'s private fields and helpers.
 //!
 //! Ports `SemanticResolver::visit(SwitchStatementNode *)`
 //! (SemanticResolver.cpp:520-539), `visit(ForInStatementNode *)`
@@ -20,8 +21,40 @@
 //! `visit(WhileStatementNode *)` (cpp:626-635),
 //! `visit(LabeledStatementNode *)` (cpp:637-678), the file-static
 //! `getLabelDecorationBase` (cpp:680-693),
-//! `visit(BreakStatementNode *)` (cpp:695-721) and
-//! `visit(ContinueStatementNode *)` (cpp:723-755).
+//! `visit(BreakStatementNode *)` (cpp:695-721),
+//! `visit(ContinueStatementNode *)` (cpp:723-755),
+//! `visit(WithStatementNode *)` (cpp:757-769),
+//! `visit(TryStatementNode *)` (cpp:771-811) and
+//! `visit(CatchClauseNode *)` (cpp:813-819).
+//!
+//! ## Rewrite #2: try/catch/finally becomes nested trys (spec §3.4)
+//!
+//! `visit(TryStatementNode *)` (cpp:771-811) is the second of the two
+//! subtree rewrites the resolver performs (`functions.rs`'s "Rewrite #1" is
+//! the first). When `compile_` is set and the statement has BOTH a handler
+//! and a finalizer, C++ mutates the node it was handed: it allocates a
+//! nested `TryStatementNode` holding the original block + handler, wraps it
+//! in a fresh non-implicit `BlockStatementNode`, and rewrites the outer
+//! statement to `block = <that block>, handler = nullptr` — only then does it
+//! visit the three children.
+//!
+//! Both structural fields are immutable here, so the rewrite instead
+//! produces a **new outer `TryStatement`** and the children walk runs on
+//! that node, exactly as C++'s runs on the mutated one. `TryStatement`
+//! carries no `Cell` decorations at all, so the "write decorations on the
+//! node you RETURN" trap that rewrite #1 documents cannot bite here; what
+//! does matter is that the synthesized `BlockStatement` is a *fresh* node,
+//! and therefore has no `DeclCollector` entry — `visit(BlockStatementNode *)`
+//! gives it a scope with no declarations in it. That is not an artifact of
+//! this port: C++'s `DeclCollector` ran when the enclosing
+//! `FunctionContext` was created, long before the rewrite, so its
+//! pointer-keyed map misses the new block for the very same reason. The dump
+//! shows the whole shape (`try-catch-finally.js` in the corpus pins it
+//! byte-for-byte, including that empty wrapper scope).
+//!
+//! Unlike rewrite #1 the *inner* rewritten node is visited as an ordinary
+//! child: the nested `TryStatement` has a handler but no finalizer, so its
+//! own visit takes the no-rewrite path.
 //!
 //! ## `label_index` is invisible to the differential
 //!
@@ -72,12 +105,15 @@
 use std::collections::hash_map::Entry;
 
 use ast::context::{GCLock, NodeRc};
-use ast::node::{builder, Node, NodeField};
+use ast::node::{builder, BlockStatement, Node, NodeField, TryStatement};
+use ast::node_child::NodeList;
 use ast::visitor::{Path, TransformResult, VisitorMut};
 use support::diag::Subsystem;
 
 use super::declarations::atom_str;
 use super::expressions::replacement_of;
+use super::functions::copy_location_from;
+use super::unresolver::Unresolver;
 use super::{Label, SemanticResolver};
 
 /// Port of the file-static `getLabelDecorationBase(StatementNode *)`
@@ -687,6 +723,200 @@ impl SemanticResolver<'_, '_, '_, '_> {
         }
 
         node.visit_children_mut(gc, self)
+    }
+
+    // ---- visit(WithStatementNode *) -------------------------------------
+
+    /// Port of `SemanticResolver::visit(ESTree::WithStatementNode *node)`
+    /// (SemanticResolver.cpp:757-769).
+    ///
+    /// The children are driven one at a time rather than through
+    /// `visit_children_mut` because C++ re-reads `node->_body` AFTER
+    /// `visitESTreeChildren` — i.e. it hands the `Unresolver` whatever the
+    /// walk left in that field, replacement included — and a
+    /// `visit_children_mut` result would only give this visit the rebuilt
+    /// `WithStatement`, not its new body.
+    pub(super) fn visit_with_statement<'gc>(
+        &mut self,
+        gc: &'gc GCLock,
+        node: &'gc Node<'gc>,
+    ) -> TransformResult<&'gc Node<'gc>> {
+        let with = node
+            .as_with_statement()
+            .expect("visit_with_statement: not a WithStatement");
+
+        if self.compile() {
+            self.sm
+                .error(node.range().start, "with statement is not supported");
+        }
+
+        // visitESTreeChildren(*this, node): `_object`, then `_body`.
+        let mut b = builder::WithStatement::from_node(with);
+        if let Some(v) = replacement_of(self.call(
+            gc,
+            with.object,
+            Some(Path::new(node, NodeField::object)),
+        )) {
+            b.object(v);
+        }
+        let body = match self.call(
+            gc,
+            with.body,
+            Some(Path::new(node, NodeField::body)),
+        ) {
+            TransformResult::Changed(v) => {
+                b.body(v);
+                v
+            }
+            TransformResult::Unchanged => with.body,
+            other => unreachable!(
+                "the resolver never removes or expands a child: {other:?}"
+            ),
+        };
+
+        // uint32_t depth = curScope_->depth;
+        let cur_scope = self
+            .cur_scope
+            .expect("a WithStatement is always inside some scope");
+        let depth = self.sem_ctx.scope(cur_scope).depth;
+        // Run the Unresolver to avoid resolving to variables past the depth
+        // of the `with`.
+        // Pass `depth + 1` because variables declared in this scope also
+        // cannot be trusted.
+        //
+        // C++ runs this even though `compile_` already reported an error
+        // above (`resolveAST` will return false either way); the pass is
+        // still what decorates the body, so the port keeps it unconditional.
+        Unresolver::run(self.sem_ctx, depth + 1, body);
+
+        b.build(gc)
+    }
+
+    // ---- visit(TryStatementNode *) --------------------------------------
+
+    /// Port of `SemanticResolver::visit(ESTree::TryStatementNode
+    /// *tryStatement)` (SemanticResolver.cpp:771-811) — **spec §3.4 rewrite
+    /// #2**, see the module doc.
+    pub(super) fn visit_try_statement<'gc>(
+        &mut self,
+        gc: &'gc GCLock,
+        node: &'gc Node<'gc>,
+    ) -> TransformResult<&'gc Node<'gc>> {
+        let try_statement = node
+            .as_try_statement()
+            .expect("visit_try_statement: not a TryStatement");
+
+        // A try statement with both catch and finally handlers is technically
+        // two nested try statements. Transform:
+        //
+        //    try {
+        //      tryBody;
+        //    } catch {
+        //      catchBody;
+        //    } finally {
+        //      finallyBody;
+        //    }
+        //
+        // into
+        //
+        //    try {
+        //      try {
+        //        tryBody;
+        //      } catch {
+        //        catchBody;
+        //      }
+        //    } finally {
+        //      finallyBody;
+        //    }
+        let rewritten: Option<&'gc Node<'gc>> = if self.compile() {
+            match (try_statement.handler, try_statement.finalizer) {
+                (Some(handler), Some(_)) => {
+                    // auto *nestedTry = new (astContext_) TryStatementNode(
+                    //     tryStatement->_block,
+                    //     tryStatement->_handler,
+                    //     nullptr);
+                    // nestedTry->copyLocationFrom(tryStatement);
+                    let nested_meta = copy_location_from(node);
+                    // nestedTry->setEndLoc(
+                    //     nestedTry->_handler->getEndLoc());
+                    let mut nested_range = nested_meta.range.get();
+                    nested_range.end = handler.range().end;
+                    nested_meta.range.set(nested_range);
+                    let nested_try =
+                        gc.alloc(Node::TryStatement(TryStatement::new(
+                            nested_meta,
+                            try_statement.block,
+                            Some(handler),
+                            None,
+                        )));
+
+                    // ESTree::NodeList stmtList;
+                    // stmtList.push_back(*nestedTry);
+                    // tryStatement->_block = new (astContext_)
+                    //     BlockStatementNode(std::move(stmtList), false);
+                    // tryStatement->_block->copyLocationFrom(nestedTry);
+                    let new_block =
+                        gc.alloc(Node::BlockStatement(BlockStatement::new(
+                            copy_location_from(nested_try),
+                            NodeList::from_iter(gc, [nested_try]),
+                            /* implicit */ false,
+                        )));
+
+                    let mut b =
+                        builder::TryStatement::from_node(try_statement);
+                    b.block(new_block);
+                    // tryStatement->_handler = nullptr;
+                    b.handler(None);
+                    Some(b.build_forced(gc))
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
+        // Everything below reads the (possibly) rewritten statement, exactly
+        // as C++ reads the node it mutated in place.
+        let node = rewritten.unwrap_or(node);
+
+        // visitESTreeNode(*this, tryStatement->_block, tryStatement);
+        // visitESTreeNode(*this, tryStatement->_handler, tryStatement);
+        // visitESTreeNode(*this, tryStatement->_finalizer, tryStatement);
+        //
+        // `visit_children_mut` walks exactly these three fields in exactly
+        // this order (node.rs's `Builder::TryStatement` arm) with `node` as
+        // the parent, and skips the `None` ones the way `visitESTreeNode`
+        // skips null.
+        match node.visit_children_mut(gc, self) {
+            // The rewrite is itself a replacement, so a children walk that
+            // changed nothing further must still hand the new node back.
+            TransformResult::Unchanged => match rewritten {
+                Some(n) => TransformResult::Changed(n),
+                None => TransformResult::Unchanged,
+            },
+            other => other,
+        }
+    }
+
+    // ---- visit(CatchClauseNode *) ---------------------------------------
+
+    /// Port of `SemanticResolver::visit(ESTree::CatchClauseNode *node)`
+    /// (SemanticResolver.cpp:813-819).
+    pub(super) fn visit_catch_clause<'gc>(
+        &mut self,
+        gc: &'gc GCLock,
+        node: &'gc Node<'gc>,
+    ) -> TransformResult<&'gc Node<'gc>> {
+        // ScopeRAII scope{*this, node};
+        let scope_state = self.enter_scope(Some(node), false);
+        // Process catch clause's declarations (not the ones in the body).
+        self.process_collected_declarations(gc, node);
+        // Visit the body, which will make a new scope. The `scope`
+        // decoration is already on `node`, so the rebuild a replacement
+        // inside the clause forces carries it (see `resolver/mod.rs`'s
+        // "decorate before recursing").
+        let result = node.visit_children_mut(gc, self);
+        self.exit_scope(scope_state);
+        result
     }
 }
 
