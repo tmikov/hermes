@@ -1175,3 +1175,189 @@ fn a_rebuilt_for_loop_keeps_its_label_index_and_scope() {
     let brk = block.body.iter().next().expect("no break");
     assert_eq!(label_index(brk), 0);
 }
+
+// ==== Arrow functions (S2 T2) ========================================
+//
+// `visit(ArrowFunctionExpressionNode *)` (SemanticResolver.cpp:249-275) is
+// two things the differential can only partly see: the **expression-body →
+// block+return rewrite** (:253-266), which IS printed by `-dump-sema` (the
+// corpus files pin it byte-for-byte), and the
+// `containsArrowFunctions`/`containsArrowFunctionsUsingArguments`
+// bookkeeping (:270-274), which `SemContextDumper` never prints at all.
+// These tests pin the synthesized nodes' shape and locations — neither of
+// which the dump shows — and the two flags.
+
+/// \return the `ArrowFunctionExpression` initializing the single declarator
+/// of a `var` statement.
+fn arrow_of_var<'gc>(stmt: &'gc Node<'gc>) -> &'gc Node<'gc> {
+    let Node::VariableDeclaration(vd) = stmt else {
+        panic!("not a VariableDeclaration: {}", stmt.node_type_str())
+    };
+    let Some(Node::VariableDeclarator(d)) = vd.declarations.iter().next() else {
+        panic!("no VariableDeclarator")
+    };
+    d.init.expect("declarator has no initializer")
+}
+
+/// **Rewrite #1** (cpp:253-266): `compile_ && _expression` replaces the
+/// arrow's expression body with `BlockStatement([ReturnStatement(body)],
+/// /* implicit */ true)`, both synthesized nodes taking their location from
+/// the ORIGINAL body (`copyLocationFrom`, :255 and :262), and clears
+/// `_expression`.
+#[test]
+fn an_expression_bodied_arrow_is_rewritten_to_a_block_with_return() {
+    with_resolved("var f = (x) => x;\n", |_sem_ctx, resolved| {
+        let arrow_node = arrow_of_var(first_statement(resolved));
+        let Node::ArrowFunctionExpression(arrow) = arrow_node else {
+            panic!("not an arrow: {}", arrow_node.node_type_str())
+        };
+        assert!(
+            !arrow.expression.get(),
+            "the RETURNED arrow must carry expression = false"
+        );
+        let Node::BlockStatement(block) = arrow.body else {
+            panic!(
+                "body is not a BlockStatement: {}",
+                arrow.body.node_type_str()
+            )
+        };
+        assert!(block.implicit.get(), "the synthesized block is implicit");
+        let mut stmts = block.body.iter();
+        let Some(Node::ReturnStatement(ret)) = stmts.next() else {
+            panic!("the block's only statement is not a ReturnStatement")
+        };
+        assert!(stmts.next().is_none(), "the block has exactly one statement");
+        let arg = ret.argument.expect("the return has no argument");
+        assert!(
+            matches!(arg, Node::Identifier(_)),
+            "the returned expression is the original body"
+        );
+        // copyLocationFrom(arrowFunc->_body) — range AND debug location.
+        assert_eq!(block.metadata.range.get(), arg.range());
+        assert_eq!(ret.metadata.range.get(), arg.range());
+        assert_eq!(
+            block.metadata.debug_loc.get(),
+            arg.metadata().debug_loc.get()
+        );
+        assert_eq!(
+            ret.metadata.debug_loc.get(),
+            arg.metadata().debug_loc.get()
+        );
+    });
+}
+
+/// An arrow that already has a block body is left completely alone: the
+/// `compile_ && _expression` guard is false, so no node is allocated and the
+/// arrow comes back pointer-identical (C++ would not have mutated it).
+#[test]
+fn a_block_bodied_arrow_is_not_rewritten() {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let root = parse(&gc, &mut sm, "var f = (x) => { return x; };\n");
+    let original_id = arrow_of_var(first_statement(root)).node_id();
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    let resolved = resolve_ast(&gc, &mut sem_ctx, &mut sm, root, &[])
+        .expect("resolution failed");
+
+    let arrow_node = arrow_of_var(first_statement(resolved));
+    assert_eq!(
+        arrow_node.node_id(),
+        original_id,
+        "a block-bodied arrow must not be rebuilt"
+    );
+    let Node::ArrowFunctionExpression(arrow) = arrow_node else {
+        panic!("not an arrow")
+    };
+    assert!(!arrow.expression.get());
+}
+
+/// The decorate-before-recurse hazard for the rewrite: the rewritten arrow is
+/// visited, and a fold inside the synthesized `ReturnStatement` rebuilds the
+/// `BlockStatement` and therefore the arrow a SECOND time. The arrow this
+/// visit returns must still carry `expression = false` and the `sem_info`
+/// that `enter_function` wrote on the pre-rebuild node.
+#[test]
+fn a_rewritten_arrow_whose_body_folds_keeps_its_decorations() {
+    with_resolved("var f = () => 1 + 2;\n", |sem_ctx, resolved| {
+        let arrow_node = arrow_of_var(first_statement(resolved));
+        let Node::ArrowFunctionExpression(arrow) = arrow_node else {
+            panic!("not an arrow")
+        };
+        assert!(
+            !arrow.expression.get(),
+            "the twice-rebuilt arrow lost expression = false"
+        );
+        let sem_info = arrow
+            .sem_info
+            .get()
+            .expect("the twice-rebuilt arrow lost its sem_info");
+        assert!(sem_ctx.function(FunctionInfoId::from_sema_id(sem_info)).arrow);
+        let Node::BlockStatement(block) = arrow.body else {
+            panic!("body is not a BlockStatement")
+        };
+        let Some(Node::ReturnStatement(ret)) = block.body.iter().next() else {
+            panic!("no ReturnStatement")
+        };
+        // Non-degeneracy: the fold must actually have happened, which is what
+        // forced the second rebuild.
+        assert!(
+            matches!(ret.argument, Some(Node::NumericLiteral(_))),
+            "1 + 2 did not fold, so the arrow was never rebuilt twice"
+        );
+    });
+}
+
+/// `containsArrowFunctions` + `containsArrowFunctionsUsingArguments`
+/// (cpp:270-274) propagate from the arrow's OWN `usesArguments` to the
+/// enclosing function. Invisible to `-dump-sema`.
+#[test]
+fn an_arrow_using_arguments_propagates_to_the_enclosing_function() {
+    let src = "function f() { var g = () => arguments; }\n";
+    with_resolved(src, |sem_ctx, resolved| {
+        let f = sem_ctx.function(sem_info_of(first_statement(resolved)));
+        assert!(f.contains_arrow_functions);
+        assert!(
+            f.contains_arrow_functions_using_arguments,
+            "the arrow's usesArguments must reach f"
+        );
+        assert!(
+            !f.uses_arguments,
+            "f itself does not reference 'arguments' (the arrow does)"
+        );
+        // The global function contains no arrow of its own.
+        let global = sem_ctx.function(sem_ctx.get_global_function());
+        assert!(!global.contains_arrow_functions);
+        assert!(!global.contains_arrow_functions_using_arguments);
+    });
+}
+
+/// The propagation is transitive through the arrow's own
+/// `containsArrowFunctionsUsingArguments` (the second disjunct, cpp:273):
+/// only the INNER arrow references `arguments`.
+#[test]
+fn nested_arrows_propagate_arguments_use_outward() {
+    let src = "function f() { var g = () => { var h = () => arguments; }; }\n";
+    with_resolved(src, |sem_ctx, resolved| {
+        let f = sem_ctx.function(sem_info_of(first_statement(resolved)));
+        assert!(f.contains_arrow_functions);
+        assert!(f.contains_arrow_functions_using_arguments);
+    });
+}
+
+/// The flag reads the ARROW's `semInfo`, not the enclosing function's: `f`
+/// uses `arguments` itself and contains an arrow that does not, which must
+/// leave `containsArrowFunctionsUsingArguments` false.
+#[test]
+fn an_arrow_not_using_arguments_leaves_the_propagation_flag_clear() {
+    let src = "function f() { arguments; var g = () => 1; }\n";
+    with_resolved(src, |sem_ctx, resolved| {
+        let f = sem_ctx.function(sem_info_of(first_statement(resolved)));
+        assert!(f.uses_arguments, "f references 'arguments' directly");
+        assert!(f.contains_arrow_functions);
+        assert!(
+            !f.contains_arrow_functions_using_arguments,
+            "f's own usesArguments must not leak into the arrow flag"
+        );
+    });
+}

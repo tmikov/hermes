@@ -5,16 +5,18 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-//! S1 T7: functions — parameter scopes, bodies, `arguments`. A further
-//! `impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad>` block,
-//! split out of `resolver/mod.rs` the same way `identifiers.rs` (S1 T4),
-//! `declarations.rs` (S1 T5) and `expressions.rs` (S1 T6) were — see
-//! `identifiers.rs`'s module doc for why a child module sees `mod.rs`'s
+//! S1 T7: functions — parameter scopes, bodies, `arguments`; S2 T2: arrow
+//! functions and **rewrite #1** (expression body → block + `return`). A
+//! further `impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad>`
+//! block, split out of `resolver/mod.rs` the same way `identifiers.rs`
+//! (S1 T4), `declarations.rs` (S1 T5) and `expressions.rs` (S1 T6) were —
+//! see `identifiers.rs`'s module doc for why a child module sees `mod.rs`'s
 //! private fields and helpers.
 //!
 //! Ports `SemanticResolver::visit(FunctionDeclarationNode *, Node *)`
 //! (SemanticResolver.cpp:233-243), `visit(FunctionExpressionNode *, Node *)`
-//! (cpp:244-248), `visitFunctionLike` (cpp:1646-1683),
+//! (cpp:244-248), `visit(ArrowFunctionExpressionNode *, Node *)`
+//! (cpp:249-275, S2 T2), `visitFunctionLike` (cpp:1646-1683),
 //! `visitFunctionLikeInFunctionContext` (cpp:1685-1882),
 //! `visitFunctionBodyAfterParamsVisited` (cpp:1884-1945),
 //! `visitFunctionExpression` (cpp:1947-1965) and
@@ -66,15 +68,30 @@
 //! is what pins it, by comparing the recorded node's identity against the
 //! `FunctionDeclaration` in the tree `resolve_ast` returned.
 //!
+//! ## Rewrite #1: the arrow's expression body (spec §3.4)
+//!
+//! C++'s arrow visit mutates the node it was handed: it allocates a
+//! `ReturnStatement` + a `BlockStatement`, writes them into
+//! `arrowFunc->_body`, clears `arrowFunc->_expression` (cpp:264-265) and only
+//! *then* runs the normal `visitFunctionLike` flow over the new body. Both
+//! structural fields are immutable here, so the rewrite instead produces a
+//! **new arrow node** and every later step — `visit_function_like`,
+//! `enter_function`'s `setSemInfo`, the strictness decoration, the params/body
+//! walk — runs on that new node, exactly as C++'s run on the mutated one.
+//!
+//! `_expression` is a `Cell<bool>`, i.e. a decoration the generated builders
+//! snapshot at `from_node`. Per `resolver/mod.rs`'s "decorate before
+//! recursing", it is therefore written on the rewritten arrow *before* that
+//! arrow is visited — never on the node the visit was called with, which is
+//! discarded. A fold inside the synthesized `ReturnStatement`
+//! (`() => 1 + 2`) rebuilds the arrow a second time, and that rebuild copies
+//! `expression = false` along with `sem_info` and `strictness`. Pinned by
+//! `a_rewritten_arrow_whose_body_folds_keeps_its_decorations` in
+//! `tests/resolver.rs`; the differential sees the rewritten `BlockStatement`/
+//! `ReturnStatement` (they are printed) but not the `_expression` flag.
+//!
 //! ## What's dormant
 //!
-//! - **Arrow functions.** Every arrow-specific branch below is ported
-//!   (`isArrow` in `visitFunctionLike`, the async-arrow `await` rule in
-//!   `visitParams`, the three `isa<ArrowFunctionExpressionNode>` tests in
-//!   the scope layout and the `arguments` decision), but
-//!   `ArrowFunctionExpression` has no arm in `visit_node`, so it still hits
-//!   the "unhandled node kind" panic. S2 removes that panic; nothing here
-//!   changes then.
 //! - **The `MethodDefinition` constructor branch** (cpp:1652-1661) needs
 //!   `curClassContext_`, which belongs to S2's class work. It is ported as
 //!   a documented seam that panics if the parent really is a
@@ -87,10 +104,11 @@
 //!   see the comment at its site.
 
 use ast::context::{GCLock, NodeRc};
-use ast::node::{builder, Node, NodeField};
-use ast::node_child::{NodeList, Strictness};
+use ast::node::{builder, BlockStatement, Node, NodeField, ReturnStatement};
+use ast::node_child::{NodeList, NodeMetadata, Strictness};
 use ast::visitor::{Path, TransformResult, VisitorMut};
 
+use crate::ids::FunctionInfoId;
 use crate::sem_context::{Binding, ConstructorKind, DeclKind};
 
 use super::expressions::replacement_of;
@@ -129,17 +147,17 @@ const TYPED: bool = false;
 /// the three C++ functions below, as a builder for the node that owns them
 /// — see the module doc.
 ///
-/// Only the two kinds `visit_node` dispatches into function visiting can
-/// occur; `ArrowFunctionExpression` will join them in S2 (its builder has
-/// the identical `params`/`body` setters), and every other kind is a
-/// programming error, not a language construct.
+/// Only the three kinds `visit_node` dispatches into function visiting can
+/// occur; every other kind is a programming error, not a language construct.
 enum FuncBuilder<'gc> {
     Declaration(builder::FunctionDeclaration<'gc>),
     Expression(builder::FunctionExpression<'gc>),
+    Arrow(builder::ArrowFunctionExpression<'gc>),
 }
 
 impl<'gc> FuncBuilder<'gc> {
-    /// \pre `node` is a `FunctionDeclaration` or a `FunctionExpression`.
+    /// \pre `node` is a `FunctionDeclaration`, a `FunctionExpression` or an
+    ///   `ArrowFunctionExpression`.
     fn from_node(node: &'gc Node<'gc>) -> FuncBuilder<'gc> {
         match node {
             Node::FunctionDeclaration(n) => FuncBuilder::Declaration(
@@ -148,8 +166,11 @@ impl<'gc> FuncBuilder<'gc> {
             Node::FunctionExpression(n) => FuncBuilder::Expression(
                 builder::FunctionExpression::from_node(n),
             ),
+            Node::ArrowFunctionExpression(n) => FuncBuilder::Arrow(
+                builder::ArrowFunctionExpression::from_node(n),
+            ),
             _ => panic!(
-                "sema S1: no function builder for {} — arrows are S2",
+                "sema: no function builder for {}",
                 node.node_type_str()
             ),
         }
@@ -160,6 +181,7 @@ impl<'gc> FuncBuilder<'gc> {
         match self {
             FuncBuilder::Declaration(b) => b.params(params),
             FuncBuilder::Expression(b) => b.params(params),
+            FuncBuilder::Arrow(b) => b.params(params),
         }
     }
 
@@ -168,6 +190,7 @@ impl<'gc> FuncBuilder<'gc> {
         match self {
             FuncBuilder::Declaration(b) => b.body(body),
             FuncBuilder::Expression(b) => b.body(body),
+            FuncBuilder::Arrow(b) => b.body(body),
         }
     }
 
@@ -176,8 +199,39 @@ impl<'gc> FuncBuilder<'gc> {
         match self {
             FuncBuilder::Declaration(b) => b.build(gc),
             FuncBuilder::Expression(b) => b.build(gc),
+            FuncBuilder::Arrow(b) => b.build(gc),
         }
     }
+}
+
+/// Port of `ESTree::Node::copyLocationFrom(const Node *src)`
+/// (`include/hermes/AST/ESTree.h:124-128`): copies the source range and the
+/// debug location — and, deliberately, NOT `parens_`, which a freshly
+/// allocated node leaves at 0 either way.
+///
+/// C++ constructs the node first and then calls `copyLocationFrom` on it;
+/// here the location lives in the `NodeMetadata` a constructor takes, so the
+/// call becomes "build the metadata to construct it with".
+fn copy_location_from<'gc>(src: &Node<'gc>) -> NodeMetadata<'gc> {
+    NodeMetadata::new_with_debug(src.range(), src.metadata().debug_loc.get())
+}
+
+/// \return the `FunctionInfoId` a function-like node's `sem_info` decoration
+/// names. Port of `node->getSemInfo()` (`ESTree::FunctionLikeDecoration::
+/// getSemInfo`) for the one caller that needs it, `visit(
+/// ArrowFunctionExpressionNode *)` (cpp:273-274); the same six kinds as
+/// `mod.rs`'s `set_node_sem_info`, which is what wrote it.
+fn node_sem_info(node: &Node) -> FunctionInfoId {
+    let id = match node {
+        Node::Program(n) => n.sem_info.get(),
+        Node::FunctionExpression(n) => n.sem_info.get(),
+        Node::ArrowFunctionExpression(n) => n.sem_info.get(),
+        Node::FunctionDeclaration(n) => n.sem_info.get(),
+        Node::ComponentDeclaration(n) => n.sem_info.get(),
+        Node::HookDeclaration(n) => n.sem_info.get(),
+        _ => panic!("{} is not a function-like node", node.node_type_str()),
+    };
+    FunctionInfoId::from_sema_id(id.expect("semInfo must be set"))
 }
 
 /// Port of `ESTree::getParams(FunctionLikeNode *)`
@@ -211,7 +265,11 @@ fn function_like_body<'gc>(node: &'gc Node<'gc>) -> &'gc Node<'gc> {
 /// (`lib/AST/ESTree.cpp:186-205`). The `default` arm's
 /// `assert(kind == Program)` is a `debug_assert!` here for the same reason
 /// `identifiers.rs`'s `function_like_identifier` uses one.
-fn is_generator(node: &Node) -> bool {
+///
+/// `pub(super)` rather than private: `expressions.rs`'s
+/// `visit(YieldExpressionNode *)` calls it on `functionContext()->node`
+/// (cpp:1479).
+pub(super) fn is_generator(node: &Node) -> bool {
     match node {
         Node::FunctionExpression(n) => n.generator.get(),
         Node::ArrowFunctionExpression(_) => false,
@@ -384,6 +442,105 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             self.visit_function_like(gc, node, Some(ident_node), parent);
         self.exit_scope(scope_state);
         result
+    }
+
+    // ---- visit(ArrowFunctionExpressionNode *, Node *) ------------------
+
+    /// Port of `SemanticResolver::visit(ESTree::ArrowFunctionExpressionNode
+    /// *arrowFunc, ESTree::Node *parent)` (SemanticResolver.cpp:249-275),
+    /// **rewrite #1** included — see the module doc for why the rewrite
+    /// allocates a new arrow instead of mutating this one.
+    pub(super) fn visit_arrow_function_expression<'gc>(
+        &mut self,
+        gc: &'gc GCLock,
+        node: &'gc Node<'gc>,
+        path: Option<Path<'gc>>,
+    ) -> TransformResult<&'gc Node<'gc>> {
+        let arrow = node.as_arrow_function_expression().expect(
+            "visit_arrow_function_expression: not an ArrowFunctionExpression",
+        );
+
+        // Convert expression functions to a full-body to simplify IRGen.
+        //
+        // `rewritten_node` is C++'s `arrowFunc` after the mutation at
+        // cpp:264-265: everything below reads the body/params off it, and
+        // `expression = false` is written on it BEFORE it is visited (see
+        // the module doc's "Rewrite #1").
+        let mut rewritten = false;
+        let rewritten_node: &'gc Node<'gc> = if self.compile()
+            && arrow.expression.get()
+        {
+            let ret_stmt = gc.alloc(Node::ReturnStatement(
+                ReturnStatement::new(
+                    copy_location_from(arrow.body),
+                    Some(arrow.body),
+                ),
+            ));
+            // ESTree::NodeList stmtList; stmtList.push_back(*retStmt);
+            let stmt_list = NodeList::from_iter(gc, [ret_stmt]);
+            let block_stmt =
+                gc.alloc(Node::BlockStatement(BlockStatement::new(
+                    copy_location_from(arrow.body),
+                    stmt_list,
+                    /* implicit */ true,
+                )));
+
+            // arrowFunc->_body = blockStmt;
+            let mut b = builder::ArrowFunctionExpression::from_node(arrow);
+            b.body(block_stmt);
+            let new_node = b.build_forced(gc);
+            // arrowFunc->_expression = false;
+            new_node
+                .as_arrow_function_expression()
+                .expect("the arrow builder builds an arrow")
+                .expression
+                .set(false);
+            rewritten = true;
+            new_node
+        } else {
+            node
+        };
+
+        let result = self.visit_function_like(
+            gc,
+            rewritten_node,
+            None,
+            path.map(|p| p.parent),
+        );
+
+        // `visit_function_like` has popped the arrow's own `FunctionContext`,
+        // so `cur_function_info()` is the ENCLOSING function — which is what
+        // C++'s `curFunctionInfo()` names here too, the arrow's
+        // `FunctionContext` having been destroyed on return from
+        // `visitFunctionLike`.
+        let enclosing = self.cur_function_info();
+        self.sem_ctx.function_mut(enclosing).contains_arrow_functions = true;
+        // `arrowFunc->getSemInfo()`: the arrow's OWN FunctionInfo, decorated
+        // by `enter_function` on `rewritten_node` during the visit above. A
+        // rebuild inside `visit_function_like` copies the decoration, so
+        // reading it off the pre-rebuild node is the same value.
+        let arrow_info = node_sem_info(rewritten_node);
+        let uses = self
+            .sem_ctx
+            .function(enclosing)
+            .contains_arrow_functions_using_arguments
+            || self
+                .sem_ctx
+                .function(arrow_info)
+                .contains_arrow_functions_using_arguments
+            || self.sem_ctx.function(arrow_info).uses_arguments;
+        self.sem_ctx
+            .function_mut(enclosing)
+            .contains_arrow_functions_using_arguments = uses;
+
+        // The rewrite itself is a replacement, so a `visit_function_like`
+        // that changed nothing further must still hand back the new arrow.
+        match result {
+            TransformResult::Unchanged if rewritten => {
+                TransformResult::Changed(rewritten_node)
+            }
+            other => other,
+        }
     }
 
     // ---- visitFunctionLike ---------------------------------------------

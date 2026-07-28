@@ -19,6 +19,17 @@
 //! `validateAssignmentTarget` (cpp:2679-2711) and `isLValue`
 //! (cpp:2713-2757).
 //!
+//! S2 T2 adds the remaining small expression visits, all of them pure
+//! validation over the current resolver state (none allocates or rewrites
+//! anything): `visit(YieldExpressionNode *)` (cpp:1476-1492),
+//! `visit(AwaitExpressionNode *)` (cpp:1494-1508) — the resolver's only
+//! reader of `forbidAwaitExpression_` — `visit(SpreadElementNode *, Node *)`
+//! (cpp:1455-1467), `visit(MetaPropertyNode *)` (cpp:837-872) and the five
+//! `visit(Cover*Node *)` overloads (cpp:1558-1577). Three of those error
+//! paths are defensive in the C++ too (no parse can reach them): see
+//! `visit_spread_element`'s and `visit_meta_property`'s doc comments for the
+//! parser evidence.
+//!
 //! ## The fold loop: `list[i+1]->_left` becomes a rebuild
 //!
 //! C++'s binary visit linearizes a `+`/`-` chain into
@@ -128,8 +139,10 @@ use crate::linearize::{
     linearize_left, linearize_right, OperatorExpr, MAX_NESTED_ASSIGNMENTS,
     MAX_NESTED_BINARY,
 };
-use crate::sem_context::{Constness, DeclSpecial};
+use crate::sem_context::{Atom, Constness, DeclSpecial};
 
+use super::declarations::atom_str;
+use super::functions::is_generator;
 use super::SemanticResolver;
 
 /// Port of `astContext_.getCodeGenerationSettings().test262`
@@ -645,6 +658,278 @@ impl SemanticResolver<'_, '_, '_, '_> {
         }
 
         false
+    }
+
+    // ==== S2 T2: yield / await / spread / meta / the Cover nodes =========
+
+    // ---- visit(YieldExpressionNode *) ----------------------------------
+
+    /// Port of `SemanticResolver::visit(ESTree::YieldExpressionNode *node)`
+    /// (SemanticResolver.cpp:1476-1492).
+    pub(super) fn visit_yield_expression<'gc>(
+        &mut self,
+        gc: &'gc GCLock,
+        node: &'gc Node<'gc>,
+    ) -> TransformResult<&'gc Node<'gc>> {
+        // functionContext()->node && !ESTree::isGenerator(
+        //     functionContext()->node)
+        //
+        // The `node` of a `FunctionContext` is null only for the contexts
+        // created by the `ExistingGlobalScopeTag`/`FunctionInfo *`
+        // constructors (S5), hence the `Option`.
+        let in_non_generator = match &self.function_context().node {
+            Some(n) => !is_generator(n.node(gc)),
+            None => false,
+        };
+        if self.in_global_scope_context() || in_non_generator {
+            self.sm.error_range(
+                node.range(),
+                "'yield' not in a generator function",
+            );
+        }
+
+        if self.function_context().is_formal_params {
+            // For generators functions (the only time YieldExpression is
+            // parsed):
+            // It is a Syntax Error if UniqueFormalParameters Contains
+            // YieldExpression is true.
+            self.sm.error_range(
+                node.range(),
+                "'yield' not allowed in a formal parameter",
+            );
+        }
+
+        node.visit_children_mut(gc, self)
+    }
+
+    // ---- visit(AwaitExpressionNode *) ----------------------------------
+
+    /// Port of `SemanticResolver::visit(ESTree::AwaitExpressionNode
+    /// *awaitExpr)` (SemanticResolver.cpp:1494-1508). cpp:1495 is the ONLY
+    /// read of `forbidAwaitExpression_` anywhere in the C++ resolver, which
+    /// is why the flag has been write-only in this port since S1 T7 wired
+    /// `visitFunctionLikeInFunctionContext`'s save/restore (cpp:1831-1832).
+    /// Three more writers exist — `visit(ClassPrivatePropertyNode *)`
+    /// (cpp:976), `visit(ClassPropertyNode *)` (cpp:1028) and
+    /// `visit(StaticBlockNode *)` (cpp:1074), each forcing it to `true` — and
+    /// they are S2 T4/T5's; those are also the only paths that
+    /// can make the error below fire, since the parser will not build an
+    /// `AwaitExpression` outside an async function otherwise (see
+    /// `test/Parser/await-field-error.js`).
+    pub(super) fn visit_await_expression<'gc>(
+        &mut self,
+        gc: &'gc GCLock,
+        node: &'gc Node<'gc>,
+    ) -> TransformResult<&'gc Node<'gc>> {
+        if self.forbid_await_expression {
+            self.sm
+                .error_range(node.range(), "'await' not in an async function");
+        }
+
+        if self.function_context().is_formal_params {
+            // ES14.0 15.8.1
+            // It is a Syntax Error if FormalParameters Contains
+            // AwaitExpression is true.
+            self.sm.error_range(
+                node.range(),
+                "'await' not allowed in a formal parameter",
+            );
+        }
+
+        node.visit_children_mut(gc, self)
+    }
+
+    // ---- visit(SpreadElementNode *, Node *) ----------------------------
+
+    /// Port of `SemanticResolver::visit(ESTree::SpreadElementNode *node,
+    /// Node *parent)` (SemanticResolver.cpp:1455-1467).
+    ///
+    /// The `RecordExpressionProperties` arm is `#if HERMES_PARSE_FLOW` in
+    /// C++; this port has a single, unconditional node set (the `ast` crate
+    /// generates all 271 kinds from `ESTree.def` with no dialect `cfg`), so
+    /// it is simply part of the whitelist here.
+    ///
+    /// **Not corpus-reachable.** No `JSParserImpl` path can build a
+    /// `SpreadElementNode` whose parent is outside this whitelist: the three
+    /// construction sites are `parseArrayLiteral`/`parseObjectProperties`
+    /// (`JSParserImpl.cpp:2727, 2770` → `parseSpreadElement`, :2815-2827) and
+    /// `parseArguments` (:3610, whose result is a `CallExpression`,
+    /// `OptionalCallExpression` or `NewExpression`), and `...` anywhere else
+    /// is either an `invalid expression` parse error or reinterpreted into a
+    /// `RestElement`/`CoverRestElement`. So the error below is defensive in
+    /// C++ too, and the corpus can only pin the accepting arms. Verified by
+    /// probing hermesc with `import(...a)`, `switch (...a)`,
+    /// `` tag`${...a}` `` and the destructuring reinterpret paths — all parse
+    /// errors or `RestElement`s.
+    pub(super) fn visit_spread_element<'gc>(
+        &mut self,
+        gc: &'gc GCLock,
+        node: &'gc Node<'gc>,
+        path: Option<Path<'gc>>,
+    ) -> TransformResult<&'gc Node<'gc>> {
+        // `parent` is `None` only for the root node, which a `SpreadElement`
+        // never is; `matches!` on `None` therefore takes the error branch,
+        // exactly like C++'s chain of failing `isa<>` tests would.
+        if !matches!(
+            path.map(|p| p.parent),
+            Some(
+                Node::ObjectExpression(_)
+                    | Node::ArrayExpression(_)
+                    | Node::CallExpression(_)
+                    | Node::OptionalCallExpression(_)
+                    | Node::NewExpression(_)
+                    | Node::RecordExpressionProperties(_)
+            )
+        ) {
+            self.sm
+                .error_range(node.range(), "spread operator is not supported");
+        }
+        node.visit_children_mut(gc, self)
+    }
+
+    // ---- visit(MetaPropertyNode *) -------------------------------------
+
+    /// Port of `SemanticResolver::visit(ESTree::MetaPropertyNode *node)`
+    /// (SemanticResolver.cpp:837-872).
+    ///
+    /// Every path through the C++ function ends in a bare `return` or falls
+    /// off the end — there is no `visitESTreeChildren` — so the two
+    /// `IdentifierNode` children are deliberately NOT resolved, and this
+    /// visit can only ever return `Unchanged`.
+    pub(super) fn visit_meta_property<'gc>(
+        &mut self,
+        gc: &'gc GCLock,
+        node: &'gc Node<'gc>,
+    ) -> TransformResult<&'gc Node<'gc>> {
+        let mp = node
+            .as_meta_property()
+            .expect("visit_meta_property: not a MetaProperty");
+        let meta = meta_property_name(mp.meta);
+        let property = meta_property_name(mp.property);
+
+        if meta == self.kw().ident_new && property == self.kw().ident_target {
+            if self.in_global_scope_context() {
+                // ES9.0 15.1.1:
+                // It is a Syntax Error if StatementList Contains NewTarget
+                // unless the source code containing NewTarget is eval code
+                // that is being processed by a direct eval.
+                // Hermes does not support local eval, so we assume that this
+                // is not inside a local eval call.
+                self.sm.error_range(
+                    node.range(),
+                    "'new.target' not in a function",
+                );
+            }
+            let sem_info = self.function_context().sem_info;
+            if self.sem_ctx.nearest_non_arrow(sem_info)
+                == self.sem_ctx.get_global_function()
+            {
+                self.sm.error_range(
+                    node.range(),
+                    "'new.target' not allowed in arrow function in global \
+                     scope",
+                );
+            }
+            return TransformResult::Unchanged;
+        }
+
+        // C++ compares `_name->str()` against the literal "import"/"meta"
+        // rather than against `kw_`; identifier names are uniqued, so
+        // comparing the interned atoms is the same test.
+        if meta == self.kw().ident_import && property == self.kw().ident_meta {
+            if self.compile() {
+                self.sm.error_range(
+                    node.range(),
+                    "'import.meta' is currently unsupported",
+                );
+            }
+            return TransformResult::Unchanged;
+        }
+
+        // Not corpus-reachable: `parseNewExpressionOrOptionalExpression` and
+        // `parseOptionalExpressionExceptNew` only build a `MetaProperty` after
+        // matching `new` `.` `target` / `import` `.` `meta` exactly, and
+        // report `'target'/'meta' expected in member expression` otherwise.
+        // Ported for fidelity.
+        self.sm.error_range(
+            node.range(),
+            format!(
+                "invalid meta property {}.{}",
+                atom_str(gc, meta),
+                atom_str(gc, property)
+            ),
+        );
+        TransformResult::Unchanged
+    }
+
+    // ---- the Cover visits ----------------------------------------------
+
+    /// Port of the four (five, with the Flow one) `visit(Cover*Node *)`
+    /// overloads (SemanticResolver.cpp:1558-1577). The parser produces a
+    /// `Cover*` node when a construct is only legal as part of something it
+    /// turned out not to be part of — most often arrow parameters — and
+    /// leaves rejecting it to sema, which is this function.
+    ///
+    /// None of the five C++ overloads calls `visitESTreeChildren`, so each
+    /// reports its error and stops: no child of a cover node is ever
+    /// resolved, and the visit is always `Unchanged`.
+    ///
+    /// `CoverTypedIdentifier` is `#if HERMES_PARSE_FLOW` in C++; see
+    /// `visit_spread_element`'s note on why this port has no such gate.
+    pub(super) fn visit_cover_node<'gc>(
+        &mut self,
+        node: &'gc Node<'gc>,
+    ) -> TransformResult<&'gc Node<'gc>> {
+        match node {
+            Node::CoverEmptyArgs(_) => {
+                self.sm.error_range(
+                    node.range(),
+                    "invalid empty parentheses '( )'",
+                );
+            }
+            Node::CoverTrailingComma(_) => {
+                self.sm
+                    .error_range(node.range(), "expression expected after ','");
+            }
+            // `sm_.error(node->getStartLoc(), ...)`: a location, not a range
+            // — the only one of the five that points rather than underlines.
+            Node::CoverInitializer(_) => {
+                self.sm.error(
+                    node.range().start,
+                    "':' expected in property initialization",
+                );
+            }
+            Node::CoverRestElement(_) => {
+                self.sm.error_range(
+                    node.range(),
+                    "'...' not allowed in this context",
+                );
+            }
+            Node::CoverTypedIdentifier(_) => {
+                self.sm.error_range(
+                    node.range(),
+                    "typecast not allowed in this context",
+                );
+            }
+            _ => unreachable!(
+                "visit_cover_node on a {}",
+                node.node_type_str()
+            ),
+        }
+        TransformResult::Unchanged
+    }
+}
+
+/// The `_name` of a `MetaProperty`'s `_meta`/`_property`. Port of
+/// `llvh::cast<IdentifierNode>(node->_meta)` + `->_name` (cpp:838-839, 841):
+/// a failing `cast` in C++ is an explicit panic here.
+fn meta_property_name(node: &Node) -> Atom {
+    match node {
+        Node::Identifier(id) => id.name.get(),
+        _ => panic!(
+            "MetaProperty child is a {}, not an Identifier",
+            node.node_type_str()
+        ),
     }
 }
 

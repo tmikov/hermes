@@ -15,15 +15,24 @@ classification — we always probe with plain `-dump-sema`, because that's the
 only thing `sema_differential.rs` tests and the harness has no per-file-flag
 support (out of scope to add here, per the task brief).
 
-Total top-level files: 54. Imported: 18 (17 from `test/Sema` + 1 new
-gap-filler, `expr-visit-generic.js`, added in Step 2 below). Deferred: 37
-(17 + 37 = 54; counting `deep-ast-err.js`, which is listed but is a vacuous
-non-gap — see its row's note below).
+Total top-level files: 54. Imported **as of the S1 Task 8 sweep**: 18 (17 from
+`test/Sema` + 1 new gap-filler, `expr-visit-generic.js`, added in Step 2
+below); deferred: 37 (17 + 37 = 54; counting `deep-ast-err.js`, which is listed
+but is a vacuous non-gap — see its row's note below). Later tasks move rows out
+of Deferred as they unblock them, so the *live* tables below are the source of
+truth: after S2 Task 2 the Imported table has 20 rows (19 from `test/Sema` + the
+gap-filler) and the Deferred table 35, i.e. 19 + 35 = 54 top-level files still
+fully accounted for.
 
 **S2 Task 1** (loops, labels, `break`/`continue`, `switch`) re-ran the sweep
 for the files it unblocked and imported three of them
 (`label-errors.js`, `for-using-not-supported.js`,
 `regress-ast-const-folding.js`); see "S2 Task 1 additions" at the end.
+
+**S2 Task 2** (arrows + rewrite #1, yield/await/spread/meta, the Cover errors)
+re-probed the three `ArrowFunctionExpression`-deferred rows and imported two of
+them (`await-arrow.js`, `await-arrow-error.js`); see "S2 Task 2 additions" at
+the end.
 
 ## Imported (byte-identical vs hermesc)
 
@@ -47,6 +56,8 @@ for the files it unblocked and imported three of them
 | `for-using-not-supported.js` | **S2 T1** — `using` declarations in `for-in`/`for-of` heads (the explicit rejection in `extractIdentsFromDecl`) |
 | `label-errors.js` | **S2 T1** — every `break`/`continue`/label error shape, including the two error+note pairs |
 | `regress-ast-const-folding.js` | **S2 T1** — `for (w of (1 + 1))`: a fold in a `for-of` right-hand side |
+| `await-arrow.js` | **S2 T2** — `let await` referenced from a nested arrow inside an async arrow's parameter default |
+| `await-arrow-error.js` | **S2 T2** — the three `await is not a valid identifier name in an async function` shapes (`forbidAwaitAsIdentifier_` through nested arrow params) |
 
 `deep-ast-err.js` is listed in the Deferred table below but is NOT a real S1
 gap: the entire `.js` file is comment lines (its `RUN:` lines generate the
@@ -63,8 +74,6 @@ files in, 54 accounted for below) rather than silently dropped. It is also
 | File | Blocking construct | Target phase |
 |---|---|---|
 | `arguments-arg-let.js` | `CallExpression` (`print(...)`) | S2 |
-| `await-arrow-error.js` | `ArrowFunctionExpression` | S2 |
-| `await-arrow.js` | `ArrowFunctionExpression` | S2 |
 | `break-in-nested-func.js` | loose-mode block-nested `FunctionDeclaration` (`ScopedFunctionPromoter`) | S3 |
 | `catch-block-destr.js` | `TryStatement` | S2 |
 | `catch-block-error.js` | `TryStatement` | S2 |
@@ -79,7 +88,7 @@ files in, 54 accounted for below) rather than silently dropped. It is also
 | `field-value-arguments-error.js` | `ClassDeclaration` | S2 |
 | `function-redeclaration-error.js` | `TryStatement` | S2 |
 | `invalid-args-eval.js` | **not a port gap** — the resolver's loop/`for` support landed in S2 T1 and every diagnostic in this file is produced, with identical text and locations, but two of them collide at the *same* source location (`89:9`: the strict-mode `cannot declare 'arguments'` error and the `was not declared in function "global"` warning). C++'s buffered-message flush uses `std::sort` (`SourceErrorManager.cpp:61-71`), which is NOT stable, so their relative order is unspecified and in practice depends on the whole 24-message array; our `disable_buffering` uses a stable `sort_by_key` (`support/src/manager.rs:903-909`, a documented deviation). Minimized to two messages the two sides agree; only at this file's message count does libstdc++'s introsort reorder the tie. Not faithfully fixable (there is no defined tie order to match), and the file's actual subject is S1's `arguments`/`eval` declaration rules, so the loop-specific rows were extracted into the new `error-for-decl-strict.js` instead | n/a (C++ unstable-sort tie) |
-| `let-arguments-in-arrow.js` | `ArrowFunctionExpression` | S2 |
+| `let-arguments-in-arrow.js` | `CallExpression` (arrows landed in S2 T2; `print(...)` remains) | S2 |
 | `private-declaration-dup-error.js` | `ClassDeclaration` | S2 |
 | `private-load-store-error.js` | `ClassDeclaration` | S2 |
 | `private-name-in-extends-error.js` | `ClassDeclaration` | S2 |
@@ -149,6 +158,9 @@ hermesc-failure files compared byte-for-byte on the error path).
 Final count after S2 Task 1: **80 corpus files matched** (48 succeed on
 hermesc, 32 are hermesc-failure files).
 
+Final count after S2 Task 2: **99 corpus files matched** (58 succeed on
+hermesc, 41 are hermesc-failure files).
+
 ## S2 Task 1 additions
 
 Eight new files, each verified byte-for-byte (stdout, stderr and exit status)
@@ -169,3 +181,52 @@ against `hermesc -dump-sema` before being added:
 loose-mode `ScopedFunctionPromoter` (S3), which is why
 `error-break-across-function.js` uses function *expressions* to reach the same
 resolver paths today.
+
+## S2 Task 2 additions
+
+Seventeen new files plus the two re-probed `test/Sema` imports
+(`await-arrow.js`, `await-arrow-error.js`), each verified byte-for-byte (stdout,
+stderr and exit status) against `hermesc -dump-sema` before being added:
+
+| File | Covers |
+|---|---|
+| `arrows-basic.js` | **rewrite #1** — the dump shows the synthesized `BlockStatement`/`ReturnStatement` for every expression-bodied arrow, byte-compared; single-token params, block bodies (untouched), curried arrows, defaults, destructuring params, rest params |
+| `arrows-arguments.js` | an arrow's `arguments` resolving through `nearestNonArrow` to the enclosing function's declaration (and to a global property at top level) |
+| `arrows-async-await.js` | `async` arrows with `await` in the body, an async arrow nested in an async function, and a plain arrow beside it |
+| `arrows-param-expressions.js` | an arrow with parameter expressions — the dual parameter/body scope layout, `arguments` NOT declared in either, and folds inside the defaults (the "fold inside an arrow" shape the S1 capstone asked for) |
+| `generators-yield.js` | `visit(YieldExpressionNode *)` in real generators: `yield` with and without an argument, `yield*`, a folding argument, generator function expressions and a nested generator |
+| `error-yield-in-formal-param.js` | `'yield' not allowed in a formal parameter` (`isFormalParams`) |
+| `error-await-in-formal-param.js` | `'await' not allowed in a formal parameter` (ES14.0 15.8.1) |
+| `error-async-generator.js` | **S1-capstone pin** — `async generators are unsupported`, i.e. the `ENABLE_ASYNC_GENERATORS` constant's branch, for both a declaration and an expression |
+| `new-target.js` | `new.target` accepted: in a function, in a function expression, and in arrows nested one and two deep inside a function (`nearestNonArrow`) |
+| `error-new-target-global.js` | both `new.target` error shapes — at global scope BOTH fire (`isGlobalScope()` *and* `nearestNonArrow(global) == globalFunction`), inside a global arrow only the second |
+| `error-import-meta.js` | `'import.meta' is currently unsupported` (the `compile_`-guarded branch) |
+| `spread-shapes.js` | the reachable arms of `visit(SpreadElementNode *)`'s parent whitelist: `ArrayExpression`, `ObjectExpression`, `NewExpression`, and a nested spread |
+| `error-cover-nodes.js` | all four non-Flow `Cover*` error stubs: `( )`, `(1, )`, `({ p = 1 })`, `(...e)` — including the one that reports at `getStartLoc` rather than over a range |
+| `arrows-nested.js` | a chain of nested arrows (each level rewritten), `arguments` reached past another arrow and past a function expression that has its own, and `for await (... of ...)` inside an async arrow |
+| `error-arrows.js` | duplicate arrow parameters (an error even in loose mode — `uniqueParams` is unconditionally true for arrows, cpp:1755-1756), a parameter/`let` collision in the body, and `'use strict'` inside an arrow with a non-simple parameter list |
+| `error-arrows-strict.js` | `arguments`/`eval` as arrow parameter names in strict mode |
+| `function-expr-name-fold.js` | **S1-capstone pin** — a NAMED `FunctionExpression` whose body folds, so the node carrying the function-expression-name scope decoration is rebuilt |
+
+Not corpus-reachable, and documented at their sites rather than curated away:
+
+- **`spread operator is not supported`** (cpp:1465). `JSParserImpl` builds a
+  `SpreadElementNode` in exactly three places, and all of their parents are on
+  the whitelist; `...` anywhere else is an `invalid expression` parse error or
+  gets reinterpreted into a `RestElement`/`CoverRestElement`. Probed with
+  `import(...a)`, `switch (...a)`, `` tag`${...a}` `` and the destructuring
+  reinterpret paths. `CallExpression`/`OptionalCallExpression` are whitelisted
+  parents but have their own visit override (the `eval`/`$SHBuiltin` specials),
+  so they stay deferred to S2 T6.
+- **`invalid meta property X.Y`** (cpp:868-871). The parser only builds a
+  `MetaProperty` after matching `new` `.` `target` / `import` `.` `meta`
+  exactly, and reports `'target'/'meta' expected in member expression`
+  otherwise (probed: `new.foo`, `import.foo`).
+- **`'yield' not in a generator function` / `'await' not in an async
+  function'`** (cpp:1480, 1496). Both need a `YieldExpression`/
+  `AwaitExpression` whose *enclosing* function context is not a
+  generator/async one, which the parser only produces inside class field
+  initializers and static blocks (`test/Parser/await-field-error.js`,
+  `test/Parser/class-static-block-await-error.js`) — i.e. once S2 T4/T5 land
+  the class visits. `CoverTypedIdentifier` likewise needs `-parse-flow`
+  (dialect-corpus phase).

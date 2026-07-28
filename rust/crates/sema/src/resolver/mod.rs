@@ -52,17 +52,28 @@
 //! hoisted into it, labeled statements maintain the per-function
 //! `labelMap`, and `break`/`continue` resolve to a label index or report
 //! the four "not within a loop"/"label is not defined"/"not a loop label"
-//! diagnostics. Together this reproduces `hermesc -dump-sema`
+//! diagnostics. From S2 T2, `visit(ArrowFunctionExpressionNode *, Node *)`
+//! (`functions.rs`) — **spec §3.4 rewrite #1**: an expression-bodied arrow
+//! is rewritten into a block with a single `return` before it is visited,
+//! and the `containsArrowFunctions`/
+//! `containsArrowFunctionsUsingArguments` bookkeeping propagates outward —
+//! together with `visit(Yield/Await/SpreadElement/MetaProperty)` and the
+//! five `visit(Cover*Node *)` error stubs (`expressions.rs`), which is what
+//! turns S1 T7's dormant arrow branches (super/`arguments` inheritance, the
+//! async-arrow `await` rule in `visitParams`) live. Together this
+//! reproduces `hermesc -dump-sema`
 //! byte-for-byte for programs made of literals, empty statements, bare
 //! identifier reads (including through non-computed member/property
 //! positions, which are skipped rather than resolved),
 //! `var`/`let`/`const` declarations in blocks, functions of every
-//! parameter shape, the loop/label/switch statements above and the
-//! expression forms above — which is what `tests/sema_differential.rs`
-//! enforces against the real compiler. Arrow functions, class
-//! declarations, catch clauses, imports, and everything else the C++
-//! resolver handles remain later tasks' scope — see `declarations.rs`'s,
-//! `functions.rs`'s and `statements.rs`'s module docs for exactly which of
+//! parameter shape, arrow functions of every body/parameter shape,
+//! generators and `async` functions, the loop/label/switch statements above
+//! and the expression forms above — which is what
+//! `tests/sema_differential.rs` enforces against the real compiler. Class
+//! declarations, catch clauses, calls (the `eval`/`$SHBuiltin` specials),
+//! `super`, imports, and everything else the C++ resolver handles remain
+//! later tasks' scope — see `declarations.rs`'s, `functions.rs`'s,
+//! `expressions.rs`'s and `statements.rs`'s module docs for exactly which of
 //! *their* branches are ported but not yet corpus-reachable.
 //!
 //! Everything not covered is *deliberately absent rather than
@@ -129,6 +140,16 @@
 //!   `tests/resolver.rs` for the regression test (the differential is blind
 //!   to it — `label_index` is never dumped). Spec §3.4 obligation (b)
 //!   remains the standing audit for the visits still to be ported.
+//!
+//!   **S2 T2 audit result: no new exception, but one related trap.**
+//!   `visit(ArrowFunctionExpressionNode *)` (cpp:249-275) writes the
+//!   `Cell<bool>` `_expression` *before* recursing, so the invariant holds
+//!   as stated — but the node it must write it on is the REWRITTEN arrow the
+//!   visit builds (rewrite #1), not the arrow it was handed, which is
+//!   discarded. Writing it on the incoming node would be silently lost.
+//!   Same rule, same reason: the write has to land on the node that will be
+//!   returned. See `functions.rs`'s "Rewrite #1" section and
+//!   `a_rewritten_arrow_whose_body_folds_keeps_its_decorations`.
 //! - **Node identity is not stable across a rebuild.** A rebuilt node is a
 //!   new allocation with a fresh `NodeId` (`NodeMetadata::duplicate`), so
 //!   anything keyed by node identity — a `NodeRc` held in a side table, or a
@@ -457,9 +478,7 @@ pub struct SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     /// True if we are forbidding await expressions. Port of
     /// `forbidAwaitExpression_` (SemanticResolver.h:98); save/restored
     /// around every function by `visit_function_like_in_function_context`
-    /// (S1 T7) but not yet *read* — the `AwaitExpression` visit that reads
-    /// it is S2, hence the `dead_code` allowance.
-    #[allow(dead_code)]
+    /// (S1 T7) and read by `expressions::visit_await_expression` (S2 T2).
     forbid_await_expression: bool,
     /// True if we are forbidding the reference to the special 'arguments'
     /// object. Port of `forbidSpecialArgumentsReference_`
@@ -844,16 +863,17 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // `visit(FunctionDeclarationNode*, Node*)` (cpp:233-243),
             // `visit(FunctionExpressionNode*, Node*)` (cpp:244-248) and
             // `visit(ReturnStatementNode*)` (cpp:1469-1475) — see
-            // `functions::*` (S1 T7). `ArrowFunctionExpression`
-            // (cpp:249-275) is deliberately NOT listed: its own visit
-            // rewrites an expression body into a `BlockStatement` and needs
-            // the `Super`/`Await` visits, so arrows stay S2 and keep hitting
-            // the panic below.
+            // `functions::*` (S1 T7); `visit(ArrowFunctionExpressionNode*,
+            // Node*)` (cpp:249-275), which carries rewrite #1 — see
+            // `functions::visit_arrow_function_expression` (S2 T2).
             Node::FunctionDeclaration(_) => {
                 self.visit_function_declaration(gc, node, path)
             }
             Node::FunctionExpression(_) => {
                 self.visit_function_expression(gc, node, path)
+            }
+            Node::ArrowFunctionExpression(_) => {
+                self.visit_arrow_function_expression(gc, node, path)
             }
             Node::ReturnStatement(_) => self.visit_return_statement(gc, node),
             // `visit(SwitchStatementNode*)` (cpp:520-539),
@@ -881,6 +901,23 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             Node::ContinueStatement(_) => {
                 self.visit_continue_statement(gc, node)
             }
+            // `visit(YieldExpressionNode*)` (cpp:1476-1492),
+            // `visit(AwaitExpressionNode*)` (cpp:1494-1508),
+            // `visit(SpreadElementNode*, Node*)` (cpp:1455-1467),
+            // `visit(MetaPropertyNode*)` (cpp:837-872) and the five
+            // `visit(Cover*Node*)` overloads (cpp:1558-1577) — see
+            // `expressions::*` (S2 T2).
+            Node::YieldExpression(_) => self.visit_yield_expression(gc, node),
+            Node::AwaitExpression(_) => self.visit_await_expression(gc, node),
+            Node::SpreadElement(_) => {
+                self.visit_spread_element(gc, node, path)
+            }
+            Node::MetaProperty(_) => self.visit_meta_property(gc, node),
+            Node::CoverEmptyArgs(_)
+            | Node::CoverTrailingComma(_)
+            | Node::CoverInitializer(_)
+            | Node::CoverRestElement(_)
+            | Node::CoverTypedIdentifier(_) => self.visit_cover_node(node),
             // Kinds with no `visit()` overload in C++: the generic dispatch
             // visits their children (`ExpressionStatement`'s `_expression`
             // — `_directive` is a NodeString, not a node) and here also
@@ -935,6 +972,18 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // nowhere in the SemanticResolver.h:200-304 `visit` inventory,
             // so C++ walks its `_test`/`_consequent` through
             // `visitESTreeChildren` exactly like this arm does.
+            //
+            // S2 T2 adds `NewExpression` on the same grounds — it appears
+            // nowhere in that inventory either (only `CallExpression` and the
+            // two `MemberExpressionLike` kinds do), so C++ reaches its
+            // `_callee`/`_arguments` through `visitESTreeChildren`. It is
+            // here because it is one of the five parents
+            // `visit(SpreadElementNode *)` whitelists (cpp:1460) and the only
+            // one of them the corpus can reach today: `CallExpression`/
+            // `OptionalCallExpression` have their own override (cpp:1117, the
+            // `eval`/`$SHBuiltin` specials, S2 T6) and stay panicking. Its
+            // Flow-only `_typeArguments` child is self-enforcing in exactly
+            // the way `ObjectPattern`'s `_typeAnnotation` is, above.
             Node::ExpressionStatement(_)
             | Node::EmptyStatement(_)
             | Node::NumericLiteral(_)
@@ -957,6 +1006,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             | Node::TemplateLiteral(_)
             | Node::TemplateElement(_)
             | Node::SwitchCase(_)
+            | Node::NewExpression(_)
             | Node::Empty(_) => node.visit_children_mut(gc, self),
             _ => panic!(
                 "sema S1: unhandled node kind {} — later tasks",
