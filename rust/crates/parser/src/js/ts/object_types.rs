@@ -269,9 +269,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 Some(key) => params.push(key),
                 None => {
                     // C++ 1371-1374: errorExpected(identifier, "in property",
-                    // ...). The `what`/`whatLoc` note args are dropped per house
-                    // style.
-                    self.need(TokenKind::identifier, " in property");
+                    // "start of property", start). `start` is real, so this
+                    // routes through `need_at` (the note text is still
+                    // dropped per house style).
+                    self.need_at(TokenKind::identifier, " in property", start);
                     return None;
                 }
             }

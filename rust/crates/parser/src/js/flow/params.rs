@@ -142,7 +142,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // `<out: T>`, `<in extends T>`, `<out = T>`, `<X, in, Y>`.
             name = kind;
         } else {
-            // errorExpected(identifier, "in type parameter", ...).
+            // flow.cpp:4774: errorExpected(identifier, "in type parameter",
+            // nullptr, {}) — VERIFIED whatLoc-less in C++ (unlike its
+            // sibling below), so the plain `need` (no location) is correct
+            // as-is.
             self.need(TokenKind::identifier, " in type parameter");
             return None;
         }
@@ -286,11 +289,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             if !self.check(TokenKind::identifier)
                 && !self.lexer.token().is_res_word()
             {
-                // errorExpected(identifier, "in qualified generic type name",
-                // ...).
-                self.need(
+                // flow.cpp:5020-5027: errorExpected(identifier, "in
+                // qualified generic type name", "start of type name",
+                // start). `start` is real, so this routes through
+                // `need_at`.
+                self.need_at(
                     TokenKind::identifier,
                     " in qualified generic type name",
+                    start,
                 );
                 return None;
             }

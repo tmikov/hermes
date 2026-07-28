@@ -2904,11 +2904,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 TokenKind::l_square,
                 TokenKind::period,
             ) {
-                // C++ errorExpected({l_paren, l_square, period}, "after 'super'
-                // keyword", "location of 'super'", startLoc). The "note"
-                // argument is dropped per house style.
-                self.error_cur(
+                // C++ 3436-3440: errorExpected({l_paren, l_square, period},
+                // "after 'super' keyword", "location of 'super'", startLoc).
+                // `startLoc` is real (the note text is still dropped per
+                // house style).
+                self.error_expected_msg(
                     "'(', '[' or '.' expected after 'super' keyword",
+                    Some(start_loc),
                 );
                 return None;
             }

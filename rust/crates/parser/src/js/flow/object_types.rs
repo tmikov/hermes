@@ -183,12 +183,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             } else if self.check2(TokenKind::r_brace, TokenKind::piper_brace) {
                 return true;
             } else {
+                // C++ 4133-4147: whatLoc is `start` (this property's start).
                 self.error_expected4(
                     TokenKind::comma,
                     TokenKind::semi,
                     TokenKind::r_brace,
                     TokenKind::piper_brace,
                     " after property",
+                    start,
                 );
                 return false;
             }
@@ -282,8 +284,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 if !self.check(TokenKind::identifier)
                     && !self.lexer.token().is_res_word()
                 {
-                    // errorExpected(identifier, "in internal slot", ...).
-                    self.need(TokenKind::identifier, " in internal slot");
+                    // C++ 4204-4211: errorExpected(identifier, "in internal
+                    // slot", "start of internal slot", start). `start` is
+                    // real, so this routes through `need_at`.
+                    self.need_at(
+                        TokenKind::identifier,
+                        " in internal slot",
+                        start,
+                    );
                     return false;
                 }
                 // C++ 4212-4217.
@@ -598,11 +606,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // C++ 4433-4438.
+        // C++ 4433-4438: whatLoc is `start`.
         self.error_expected2(
             TokenKind::colon,
             TokenKind::question,
             " in property type annotation",
+            start,
         );
         false
     }

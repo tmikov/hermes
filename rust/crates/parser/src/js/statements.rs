@@ -666,11 +666,15 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             match self.parse_binding_identifier(Param::default()) {
                 Some(ident) => ident,
                 None => {
-                    // C++ errorExpected(identifier, "in declaration",
-                    // "declaration started here", declLoc). The note arg is
-                    // dropped per house style; report at the declaration start.
-                    let _ = decl_loc;
-                    self.error_cur("'identifier' expected in declaration");
+                    // C++ 1244-1250: errorExpected(identifier, "in
+                    // declaration", "declaration started here", declLoc).
+                    // `declLoc` is real, so route through `error_expected_msg`
+                    // for the same-line combined-range caret (the `what`
+                    // note-text is still dropped per house style).
+                    self.error_expected_msg(
+                        "'identifier' expected in declaration",
+                        Some(decl_loc),
+                    );
                     return None;
                 }
             }
@@ -1751,11 +1755,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             ));
             Some(self.set_location(start_loc, body_end, node))
         } else {
-            // C++ 2084-2091.
+            // C++ 2084-2091: whatLoc is `startLoc` (the 'for' keyword).
             self.error_expected2(
                 TokenKind::semi,
                 TokenKind::rw_in,
                 " inside 'for'",
+                start_loc,
             );
             None
         }
@@ -1846,11 +1851,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     default_location = Some(clause_start_loc);
                 }
             } else {
-                // C++ 2283-2291.
+                // C++ 2283-2291: whatLoc is `startLoc` (the 'switch' keyword).
                 self.error_expected2(
                     TokenKind::rw_case,
                     TokenKind::rw_default,
                     " inside 'switch'",
+                    start_loc,
                 );
                 return None;
             }
@@ -1933,8 +1939,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         assert!(self.check(TokenKind::rw_try));
         let start_loc = self.advance(GrammarContext::AllowRegExp).start;
 
-        // C++ 2371-2375.
-        if !self.need(TokenKind::l_brace, " after 'try'") {
+        // C++ 2371-2375: whatLoc is `startLoc` (the 'try' keyword).
+        if !self.need_at(TokenKind::l_brace, " after 'try'", start_loc) {
             return None;
         }
         let try_body = self.parse_block(
@@ -1961,10 +1967,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                             Some(ident) => ident,
                             None => {
                                 // C++ 2393-2399: errorExpected(identifier,
-                                // "inside catch list", ...). The note arg is
-                                // dropped per house style.
-                                self.error_cur(
+                                // "inside catch list", "location of
+                                // 'catch'", handlerStartLoc) — `whatLoc` is
+                                // real (the note-text is still dropped per
+                                // house style).
+                                self.error_expected_msg(
                                     "'identifier' expected inside catch list",
+                                    Some(handler_start_loc),
                                 );
                                 return None;
                             }
@@ -1982,8 +1991,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 }
             }
 
-            // C++ 2413-2421.
-            if !self.need(TokenKind::l_brace, " after 'catch(...)'") {
+            // C++ 2413-2421: whatLoc is `handlerStartLoc` (the 'catch'
+            // keyword).
+            if !self.need_at(
+                TokenKind::l_brace,
+                " after 'catch(...)'",
+                handler_start_loc,
+            ) {
                 return None;
             }
             let catch_body = self.parse_block(
@@ -2007,8 +2021,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let finally_loc = self.lexer.token().start_loc();
         if self.check_and_eat(TokenKind::rw_finally, GrammarContext::AllowRegExp)
         {
-            let _ = finally_loc;
-            if !self.need(TokenKind::l_brace, " after 'finally'") {
+            // C++ 2433-2437: whatLoc is `finallyLoc` (the 'finally' keyword).
+            if !self.need_at(
+                TokenKind::l_brace,
+                " after 'finally'",
+                finally_loc,
+            ) {
                 return None;
             }
             let finally_body = self.parse_block(
@@ -2019,12 +2037,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             finally_handler = Some(finally_body);
         }
 
-        // At least one handler must be present. C++ 2446-2455.
+        // At least one handler must be present. C++ 2446-2455: whatLoc is
+        // `startLoc` (the 'try' keyword).
         if catch_handler.is_none() && finally_handler.is_none() {
             self.error_expected2(
                 TokenKind::rw_catch,
                 TokenKind::rw_finally,
                 " after 'try' block",
+                start_loc,
             );
             return None;
         }

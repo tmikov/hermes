@@ -675,8 +675,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         if !self.check(TokenKind::identifier)
             && !self.lexer.token().is_res_word()
         {
-            // C++ 430: "as JSX element name".
-            self.error_expected_jsx_element_name("as JSX element name");
+            // C++ 430: "as JSX element name", whatLoc = nullptr, {}.
+            self.error_expected_jsx_element_name("as JSX element name", None);
             return None;
         }
 
@@ -699,8 +699,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             if !self.check(TokenKind::identifier)
                 && !self.lexer.token().is_res_word()
             {
-                // C++ 446-450: "in JSX element name".
-                self.error_expected_jsx_element_name("in JSX element name");
+                // C++ 446-450: "in JSX element name", whatLoc = `start`.
+                self.error_expected_jsx_element_name(
+                    "in JSX element name",
+                    Some(start),
+                );
                 return None;
             }
 
@@ -736,8 +739,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             if !self.check(TokenKind::identifier)
                 && !self.lexer.token().is_res_word()
             {
-                // C++ 472-476: "in JSX element name".
-                self.error_expected_jsx_element_name("in JSX element name");
+                // C++ 472-476: "in JSX element name", whatLoc = `start`.
+                self.error_expected_jsx_element_name(
+                    "in JSX element name",
+                    Some(start),
+                );
                 return None;
             }
 
@@ -789,16 +795,22 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Emit the C++ `errorExpected(TokenKind::identifier, where_, ...)`
     /// diagnostic for a JSX element name. The C++ uses two distinct `where_`
-    /// strings: `"as JSX element name"` at the leading name (jsx.cpp:430) and
-    /// `"in JSX element name"` at the `:`/`.` continuation sites
-    /// (jsx.cpp:446-450 / 472-476). Rendered via the same "'<tok>' expected
-    /// <where>" idiom as `need`/`error_expected*`.
-    fn error_expected_jsx_element_name(&mut self, where_: &str) {
+    /// strings AND two distinct `whatLoc`s: `"as JSX element name"` at the
+    /// leading name (jsx.cpp:430) passes `nullptr, {}` (no location — the
+    /// caller passes `None`), while the `:`/`.` continuation sites
+    /// (jsx.cpp:446-450 / 472-476, `"in JSX element name"`) pass a real
+    /// `start` (the caller passes `Some(start)`). Rendered via the same
+    /// "'<tok>' expected <where>" idiom as `need`/`error_expected*`.
+    fn error_expected_jsx_element_name(
+        &mut self,
+        where_: &str,
+        what_loc: Option<SMLoc>,
+    ) {
         let msg = format!(
             "'{}' expected {}",
             crate::token_kinds::token_kind_str(TokenKind::identifier),
             where_,
         );
-        self.error_cur(&msg);
+        self.error_expected_msg(&msg, what_loc);
     }
 }

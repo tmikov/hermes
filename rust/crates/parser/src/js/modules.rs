@@ -368,10 +368,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     match self.parse_binding_identifier(Param::default()) {
                         Some(b) => b,
                         None => {
-                            // C++ errorExpected(identifier, "in import clause",
-                            // ...). note arg dropped per house style.
-                            self.error_cur(
+                            // C++ 6823-6829: errorExpected(identifier, "in
+                            // import clause", "start of import clause",
+                            // startLoc). `start_loc` is real (the note text
+                            // is still dropped per house style).
+                            self.error_expected_msg(
                                 "'identifier' expected in import clause",
+                                Some(start_loc),
                             );
                             return None;
                         }
@@ -405,11 +408,16 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return Some((specifiers, kind));
         }
 
-        // NamedImports is the only remaining possibility. C++ 6860-6866.
-        // note arg dropped per house style. NOTE: when the brace is missing C++
-        // returns the accumulated kind WITHOUT propagating an error-None, so we
+        // NamedImports is the only remaining possibility. C++ 6860-6866:
+        // whatLoc is `startLoc` (the note text is still dropped per house
+        // style). NOTE: when the brace is missing C++ returns the
+        // accumulated kind WITHOUT propagating an error-None, so we
         // replicate that and return the accumulated specifiers.
-        if !self.need(TokenKind::l_brace, " in import specifier clause") {
+        if !self.need_at(
+            TokenKind::l_brace,
+            " in import specifier clause",
+            start_loc,
+        ) {
             return Some((specifiers, kind));
         }
 
@@ -446,9 +454,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let local = match self.parse_binding_identifier(Param::default()) {
             Some(l) => l,
             None => {
-                // C++ errorExpected(identifier, "in namespace import", ...).
-                // note arg dropped per house style.
-                self.error_cur("'identifier' expected in namespace import");
+                // C++ 6884-6889: errorExpected(identifier, "in namespace
+                // import", "location of namespace import", startLoc).
+                // `start_loc` is real (the note text is still dropped per
+                // house style).
+                self.error_expected_msg(
+                    "'identifier' expected in namespace import",
+                    Some(start_loc),
+                );
                 return None;
             }
         };
@@ -553,7 +566,6 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         //   ImportedBinding
         //   IdentifierName as ImportedBinding
         let start_loc = self.cur_start();
-        let _ = import_loc;
 
         let value_ident = self.gc.ctx().atom_table.atom_bytes(b"value");
         let type_ident = self.gc.ctx().atom_table.atom_bytes(b"type");
@@ -621,8 +633,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     if !self.check(TokenKind::identifier)
                         && !self.lexer.token().is_res_word()
                     {
-                        self.error_cur(
+                        // C++ 6994-6999: whatLoc is `importLoc`.
+                        self.error_expected_msg(
                             "'identifier' expected in import specifier",
+                            Some(import_loc),
                         );
                         return None;
                     }
@@ -659,8 +673,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     if !self.check(TokenKind::identifier)
                         && !self.lexer.token().is_res_word()
                     {
-                        self.error_cur(
+                        // C++ 7017-7022: whatLoc is `importLoc`.
+                        self.error_expected_msg(
                             "'identifier' expected in import specifier",
+                            Some(import_loc),
                         );
                         return None;
                     }
@@ -698,7 +714,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 if !self.check(TokenKind::identifier)
                     && !self.lexer.token().is_res_word()
                 {
-                    self.error_cur("'identifier' expected in import specifier");
+                    // C++ 7041-7046: whatLoc is `importLoc`.
+                    self.error_expected_msg(
+                        "'identifier' expected in import specifier",
+                        Some(import_loc),
+                    );
                     return None;
                 }
                 let imp_range = self.cur_range();
@@ -723,8 +743,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     if !self.check(TokenKind::identifier)
                         && !self.lexer.token().is_res_word()
                     {
-                        self.error_cur(
+                        // C++ 7060-7065: whatLoc is `importLoc`.
+                        self.error_expected_msg(
                             "'identifier' expected in import specifier",
+                            Some(import_loc),
                         );
                         return None;
                     }
@@ -752,9 +774,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             if !self.check(TokenKind::identifier)
                 && !self.lexer.token().is_res_word()
             {
-                // C++ errorExpected(identifier, "in import specifier", ...).
-                // note arg dropped per house style.
-                self.error_cur("'identifier' expected in import specifier");
+                // C++ 7079-7084: errorExpected(identifier, "in import
+                // specifier", "specifiers start", importLoc). `import_loc`
+                // is real (the note text is still dropped per house style).
+                self.error_expected_msg(
+                    "'identifier' expected in import specifier",
+                    Some(import_loc),
+                );
                 return None;
             }
             let tok_start = self.lexer.token().start_loc();
@@ -779,8 +805,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 if !self.check(TokenKind::identifier)
                     && !self.lexer.token().is_res_word()
                 {
-                    // note arg dropped per house style.
-                    self.error_cur("'identifier' expected in import specifier");
+                    // C++ 7097-7102: whatLoc is `importLoc` (the note text
+                    // is still dropped per house style).
+                    self.error_expected_msg(
+                        "'identifier' expected in import specifier",
+                        Some(import_loc),
+                    );
                     return None;
                 }
                 let tok_start = self.lexer.token().start_loc();
@@ -868,9 +898,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 if !self.check(TokenKind::identifier)
                     && !self.lexer.token().is_res_word()
                 {
-                    // C++ errorExpected(identifier, "in export clause", ...).
-                    // note arg dropped per house style.
-                    self.error_cur("identifier expected in export clause");
+                    // C++ 7144-7149: errorExpected(identifier, "in export
+                    // clause", "start of export", startLoc). `start_loc` is
+                    // real (the note text is still dropped per house style).
+                    self.error_expected_msg(
+                        "identifier expected in export clause",
+                        Some(start_loc),
+                    );
                     return None;
                 }
                 let tok_start = self.lexer.token().start_loc();
@@ -1259,7 +1293,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// `JSParserImpl::parseExportSpecifier` (7409-7467).
     fn parse_export_specifier(
         &mut self,
-        _export_loc: SMLoc,
+        export_loc: SMLoc,
         invalids: &mut Vec<SMRange>,
     ) -> Option<&'gc Node<'gc>> {
         // ExportSpecifier:
@@ -1268,9 +1302,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         if !self.check(TokenKind::identifier)
             && !self.lexer.token().is_res_word()
         {
-            // C++ errorExpected(identifier, "in export clause", ...).
-            // note arg dropped per house style.
-            self.error_cur("identifier expected in export clause");
+            // C++ 7419-7424: errorExpected(identifier, "in export clause",
+            // "location of export clause", exportLoc). `export_loc` is real
+            // (the note text is still dropped per house style).
+            self.error_expected_msg(
+                "identifier expected in export clause",
+                Some(export_loc),
+            );
             return None;
         }
 
@@ -1311,8 +1349,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             if !self.check(TokenKind::identifier)
                 && !self.lexer.token().is_res_word()
             {
-                // note arg dropped per house style.
-                self.error_cur("identifier expected in export clause");
+                // C++ 7447-7452: whatLoc is `exportLoc` (the note text is
+                // still dropped per house style).
+                self.error_expected_msg(
+                    "identifier expected in export clause",
+                    Some(export_loc),
+                );
                 return None;
             }
             let tok_start = self.lexer.token().start_loc();

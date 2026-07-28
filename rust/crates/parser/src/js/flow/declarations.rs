@@ -274,10 +274,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // C++ 241-252: components always require a name identifier.
         let Some(id) = self.parse_binding_identifier(Param::default()) else {
             // C++ 245-251: errorExpected(identifier, "after 'component'",
-            // "location of 'component'", start). The note arg is dropped per
-            // house style; `start` retained only for symmetry with the C++.
-            let _ = start;
-            self.error_cur("'identifier' expected after 'component'");
+            // "location of 'component'", start). `start` is real (the note
+            // text is still dropped per house style).
+            self.error_expected_msg(
+                "'identifier' expected after 'component'",
+                Some(start),
+            );
             return None;
         };
 
@@ -684,9 +686,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // C++ 787-795: hooks always require a name identifier.
         let Some(id) = self.parse_binding_identifier(Param::default()) else {
             // C++ 791-794: errorExpected(identifier, "after 'hook'",
-            // "location of 'hook'", start) — note arg dropped per house style.
-            let _ = start;
-            self.error_cur("'identifier' expected after 'hook'");
+            // "location of 'hook'", start). `start` is real (the note text
+            // is still dropped per house style).
+            self.error_expected_msg(
+                "'identifier' expected after 'hook'",
+                Some(start),
+            );
             return None;
         };
 
@@ -797,10 +802,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // C++ 1634-1640.
         let Some(id) = self.parse_binding_identifier(Param::default()) else {
             // C++ 1637-1639: errorExpected(identifier, "after 'record'",
-            // "location of 'record'", start) — note args dropped per house
-            // style; `start` retained for symmetry with the C++.
-            let _ = start;
-            self.error_cur("'identifier' expected after 'record'");
+            // "location of 'record'", start). `start` is real (the note
+            // text is still dropped per house style).
+            self.error_expected_msg(
+                "'identifier' expected after 'record'",
+                Some(start),
+            );
             return None;
         };
 
@@ -1558,9 +1565,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             let Some(id) = self.parse_binding_identifier(Param::default())
             else {
                 // C++ 158-165: errorExpected(identifier, "in var declaration",
-                // "start of declaration", start). note args dropped.
-                let _ = start;
-                self.error_cur("'identifier' expected in var declaration");
+                // "start of declaration", start). `start` is real (the note
+                // text is still dropped per house style).
+                self.error_expected_msg(
+                    "'identifier' expected in var declaration",
+                    Some(start),
+                );
                 return None;
             };
             // C++ 166-170.
@@ -1585,7 +1595,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             ));
         }
 
-        // C++ 179-190: otherwise it must be `declare export`.
+        // C++ 179-190: otherwise it must be `declare export`. whatLoc is
+        // `start`. NOTE: the C++ list has a 5TH token (`rw_var`) that this
+        // `error_expected4` call omits — `error_expected*` tops out at four
+        // tokens (see `error_expected_enum_member_init` for the established
+        // five-token workaround); flagged as a separate, pre-existing
+        // message-text divergence, out of this task's location/range scope.
         if !self.check(TokenKind::rw_export) {
             self.error_expected4(
                 TokenKind::rw_export,
@@ -1593,6 +1608,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 TokenKind::rw_function,
                 TokenKind::rw_class,
                 " in declared type",
+                start,
             );
             return None;
         }
@@ -2457,13 +2473,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         // C++ 2569-2574: errorExpected(star, l_brace, identifier,
-        // "in export type declaration", ...). note arg dropped per house
-        // style.
+        // "in export type declaration", ..., startLoc). whatLoc is real
+        // (`startLoc`); the note-text is still dropped per house style.
         self.error_expected3(
             TokenKind::star,
             TokenKind::l_brace,
             TokenKind::identifier,
             " in export type declaration",
+            start_loc,
         );
         None
     }
@@ -2488,10 +2505,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         self.advance(GrammarContext::AllowRegExp);
 
         // C++ 5154-5161: errorExpected(identifier, "in enum declaration",
-        // "start of declaration", start) — the single-token form renders
-        // "'identifier' expected in enum declaration"; `need` matches it
-        // exactly (note args dropped per house style).
-        if !self.need(TokenKind::identifier, " in enum declaration") {
+        // "start of declaration", start). `start` is real, so this routes
+        // through `need_at` for the same-line combined-range caret (the
+        // note text is still dropped per house style).
+        if !self.need_at(TokenKind::identifier, " in enum declaration", start) {
             return None;
         }
         // C++ 5162-5166.
@@ -2859,13 +2876,15 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     );
                 } else {
                     // C++ 5390-5396: errorExpected(numeric_literal,
-                    // "in negated enum member initializer", ...) — single-token
-                    // form rendered via `need` (note args dropped per house
-                    // style). `need` reports at the current token without
-                    // consuming, matching errorExpected.
-                    self.need(
+                    // "in negated enum member initializer", ...,
+                    // id->getStartLoc()). whatLoc is real (`id`'s start), so
+                    // this routes through `need_at` (note text still dropped
+                    // per house style). `need_at` reports at the current
+                    // token without consuming, matching errorExpected.
+                    self.need_at(
                         TokenKind::numeric_literal,
                         " in negated enum member initializer",
+                        id.range().start,
                     );
                     return None;
                 }
@@ -2915,10 +2934,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 );
             } else {
                 // C++ 5412-5422: errorExpected over the five literal token
-                // kinds. The four-token wrapper plus rw_false covers the set
-                // {rw_true, rw_false, string_literal, numeric_literal,
-                // bigint_literal}; note args dropped per house style.
-                self.error_expected_enum_member_init();
+                // kinds, whatLoc = id->getStartLoc() (real; the note text
+                // is still dropped per house style).
+                self.error_expected_enum_member_init(id.range().start);
                 return None;
             }
             // C++ 5424.
@@ -2938,10 +2956,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Report the five-token `errorExpected` for an enum member initializer
     /// (`true`, `false`, a string, a number, or a bigint). Port of the
-    /// initializer-list `errorExpected` at flow.cpp:5412-5422. The Rust
-    /// `error_expected*` family tops out at four tokens, so render the
-    /// five-token list directly to stay byte-faithful to the C++ message.
-    fn error_expected_enum_member_init(&mut self) {
+    /// initializer-list `errorExpected` at flow.cpp:5412-5422 (whatLoc =
+    /// `id->getStartLoc()`, real). The Rust `error_expected*` family tops
+    /// out at four tokens, so render the five-token list directly to stay
+    /// byte-faithful to the C++ message, routed through `error_expected_msg`
+    /// for the same-line combined-range caret.
+    fn error_expected_enum_member_init(&mut self, what_loc: SMLoc) {
         use crate::token_kinds::token_kind_str;
         let msg = format!(
             "'{}', '{}', '{}', '{}' or '{}' expected in enum member initializer",
@@ -2951,6 +2971,6 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             token_kind_str(TokenKind::numeric_literal),
             token_kind_str(TokenKind::bigint_literal),
         );
-        self.error_cur(&msg);
+        self.error_expected_msg(&msg, Some(what_loc));
     }
 }

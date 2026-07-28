@@ -857,8 +857,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     Some(self.set_location(start, end, node))
                 } else {
                     // C++ 3573-3578: errorExpected(numeric_literal,
-                    // "in type annotation", ...).
-                    self.need(TokenKind::numeric_literal, " in type annotation");
+                    // "in type annotation", "start of annotation", start).
+                    // `start` is real, so this routes through `need_at`.
+                    self.need_at(
+                        TokenKind::numeric_literal,
+                        " in type annotation",
+                        start,
+                    );
                     None
                 }
             }
@@ -910,8 +915,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             paren_count += 1;
         }
 
-        // C++ 3612-3613.
-        if !self.need(TokenKind::identifier, " in typeof type") {
+        // C++ 3612-3613: whatLoc is `startLoc` (the 'typeof' keyword).
+        if !self.need_at(TokenKind::identifier, " in typeof type", start) {
             return None;
         }
 
@@ -934,8 +939,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             if !self.check(TokenKind::identifier)
                 && !self.lexer.token().is_res_word()
             {
-                // errorExpected(identifier, "in qualified typeof type", ...).
-                self.need(TokenKind::identifier, " in qualified typeof type");
+                // flow.cpp:3623-3630: errorExpected(identifier, "in
+                // qualified typeof type", "start of type", startLoc).
+                // `start` is real, so this routes through `need_at`.
+                self.need_at(
+                    TokenKind::identifier,
+                    " in qualified typeof type",
+                    start,
+                );
                 return None;
             }
             // C++ 3631-3636.

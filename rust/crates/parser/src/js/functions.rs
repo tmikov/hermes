@@ -123,8 +123,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // so the identifier is optional and we can make it nullptr.
         // C++ 417-427.
         if is_declaration && !param.has(PARAM_DEFAULT) && opt_id.is_none() {
-            // (errorExpected note args dropped per house style.)
-            self.error_cur("'identifier' expected after 'function'");
+            // C++ 421-427: errorExpected(identifier, "after 'function'",
+            // "location of 'function'", startLoc). `startLoc` is real (the
+            // note text is still dropped per house style).
+            self.error_expected_msg(
+                "'identifier' expected after 'function'",
+                Some(start_loc),
+            );
             return None;
         }
 

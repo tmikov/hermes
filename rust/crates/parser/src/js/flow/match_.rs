@@ -651,7 +651,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 pat = self.set_location(start_loc, self.lexer.prev_token_end(), node);
             } else {
                 // flow.cpp:1248-1301: computed member `[lit]`.
-                let _computed_start_loc =
+                let computed_start_loc =
                     self.advance(GrammarContext::AllowRegExp).start; // Eat `[`
                 let property = match self.cur_kind() {
                     TokenKind::numeric_literal => {
@@ -670,12 +670,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                         lit
                     }
                     _ => {
-                        // flow.cpp:1279-1288.
+                        // flow.cpp:1279-1288: whatLoc is `computedStartLoc`
+                        // (the `[` that opened the computed property).
                         self.error_expected3(
                             TokenKind::numeric_literal,
                             TokenKind::bigint_literal,
                             TokenKind::string_literal,
                             " in match member pattern computed property",
+                            computed_start_loc,
                         );
                         return None;
                     }
@@ -761,10 +763,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let kind = self.lexer.token().get_res_word_or_identifier();
         let start_loc = self.advance(GrammarContext::AllowRegExp).start;
         // flow.cpp:1407-1413: errorExpected(identifier, "in match binding
-        // pattern", ...). The note arg is dropped per house style; note that C++
-        // reports the error but keeps going (no early return).
+        // pattern", "start of binding pattern", startLoc). `startLoc` is
+        // real (the note text is still dropped per house style); note that
+        // C++ reports the error but keeps going (no early return).
         if !self.check(TokenKind::identifier) && !self.lexer.token().is_res_word() {
-            self.error_cur("'identifier' expected in match binding pattern");
+            self.error_expected_msg(
+                "'identifier' expected in match binding pattern",
+                Some(start_loc),
+            );
         }
         // flow.cpp:1414-1416.
         let ident = self.parse_match_binding_identifier_flow()?;
@@ -878,12 +884,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     }
                     // flow.cpp:1508-1518.
                     _ => {
+                        // flow.cpp:1508-1518: whatLoc is `propStartLoc`.
                         self.error_expected4(
                             TokenKind::identifier,
                             TokenKind::string_literal,
                             TokenKind::numeric_literal,
                             TokenKind::bigint_literal,
                             " in match object pattern property key",
+                            prop_start_loc,
                         );
                         return None;
                     }

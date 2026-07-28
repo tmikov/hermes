@@ -536,18 +536,85 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         self.error_cur(&msg);
         false
     }
+
+    /// Report an "expected" diagnostic, mirroring the location/range logic
+    /// of C++ `errorExpected` (JSParserImpl.cpp:175-226) exactly: the
+    /// diagnostic's primary location is always the CURRENT token's start
+    /// (`cur_start()`, a point — never the token's full range). If
+    /// `what_loc` is given and lands on the SAME source line as that point,
+    /// the underline spans `combineIntoRange(what_loc, cur_start())`
+    /// (tildes from `what_loc` through one past the current token's start);
+    /// otherwise the diagnostic is a bare point-caret with NO underline —
+    /// confirmed empirically against hermesc (`try\nxyzLongToken\n` renders
+    /// a lone `^` under the 12-character `xyzLongToken`, not a 12-wide
+    /// underline). In that different-line case C++ additionally emits a
+    /// `note` at `what_loc`; this port drops it, matching the "note dropped
+    /// per house style" convention already used at every `errorExpected`
+    /// call site in this port.
+    pub(super) fn error_expected_msg(
+        &mut self,
+        msg: &str,
+        what_loc: Option<SMLoc>,
+    ) {
+        let err_loc = self.cur_start();
+        let range = match what_loc {
+            Some(w) => {
+                let sm = self.lexer.get_source_mgr();
+                if sm
+                    .find_coords(w)
+                    .is_same_source_line_as(&sm.find_coords(err_loc))
+                {
+                    Some(sm.combine_into_range(w, err_loc))
+                } else {
+                    None
+                }
+            }
+            None => None,
+        };
+        self.lexer.get_source_mgr_mut().error_at(
+            err_loc,
+            range,
+            msg,
+            support::diag::Subsystem::Parser,
+        );
+    }
+
+    /// Like `need`, but for call sites whose C++ `need(kind, where, what,
+    /// whatLoc)` counterpart passes a real `whatLoc` (routed through
+    /// `error_expected_msg` instead of the point-only `error_cur`).
+    pub(super) fn need_at(
+        &mut self,
+        kind: TokenKind,
+        where_: &str,
+        what_loc: SMLoc,
+    ) -> bool {
+        if self.check(kind) {
+            return true;
+        }
+        let msg = format!(
+            "'{}' expected{}",
+            crate::token_kinds::token_kind_str(kind),
+            where_
+        );
+        self.error_expected_msg(&msg, Some(what_loc));
+        false
+    }
     /// Report a "'k1' or 'k2' expected{where_}" error at the current token.
     /// Port of the two-token `errorExpected(k1, k2, where, what, whatLoc)`
     /// convenience wrapper (JSParserImpl.h:455) which forwards to
     /// `errorExpected(ArrayRef<TokenKind>(toks, 2), ...)`. The list-rendering
     /// logic in C++ `errorExpected` (175-195) joins two tokens with " or " and
-    /// appends " expected". The `what`/`whatLoc` note args are dropped per house
-    /// style (see other `errorExpected` call sites in this port).
+    /// appends " expected". `what_loc` is C++'s `whatLoc`, routed through
+    /// `error_expected_msg` for the same-line combined-range behavior; the
+    /// `what` note-text itself is still dropped per house style. Every call
+    /// site audited for S1 task 2 passes a real `whatLoc` in C++, so this
+    /// takes a plain `SMLoc`, not an `Option`.
     pub(super) fn error_expected2(
         &mut self,
         k1: TokenKind,
         k2: TokenKind,
         where_: &str,
+        what_loc: SMLoc,
     ) {
         let msg = format!(
             "'{}' or '{}' expected{}",
@@ -555,20 +622,22 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             crate::token_kinds::token_kind_str(k2),
             where_
         );
-        self.error_cur(&msg);
+        self.error_expected_msg(&msg, Some(what_loc));
     }
 
     /// Report a "'k1', 'k2' or 'k3' expected{where_}" error at the current
     /// token. Port of the three-token `errorExpected` initializer-list call
     /// (e.g. the export-type dispatch at JSParserImpl-flow.cpp:2569-2574); the
     /// C++ list rendering joins all but the last token with ", " and the last
-    /// with " or ". The `what`/`whatLoc` note args are dropped per house style.
+    /// with " or ". `what_loc` is C++'s `whatLoc` (see `error_expected2`); the
+    /// `what` note-text is still dropped per house style.
     pub(super) fn error_expected3(
         &mut self,
         k1: TokenKind,
         k2: TokenKind,
         k3: TokenKind,
         where_: &str,
+        what_loc: SMLoc,
     ) {
         let msg = format!(
             "'{}', '{}' or '{}' expected{}",
@@ -577,15 +646,16 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             crate::token_kinds::token_kind_str(k3),
             where_
         );
-        self.error_cur(&msg);
+        self.error_expected_msg(&msg, Some(what_loc));
     }
 
     /// Report a "'k1', 'k2', 'k3' or 'k4' expected{where_}" error at the
     /// current token. Port of the four-token `errorExpected` initializer-list
     /// call (e.g. the Flow object-type property separator at
     /// JSParserImpl-flow.cpp:4138-4145); the C++ list rendering joins all but
-    /// the last token with ", " and the last with " or ". The `what`/`whatLoc`
-    /// note args are dropped per house style.
+    /// the last token with ", " and the last with " or ". `what_loc` is C++'s
+    /// `whatLoc` (see `error_expected2`); the `what` note-text is still
+    /// dropped per house style.
     pub(super) fn error_expected4(
         &mut self,
         k1: TokenKind,
@@ -593,6 +663,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         k3: TokenKind,
         k4: TokenKind,
         where_: &str,
+        what_loc: SMLoc,
     ) {
         let msg = format!(
             "'{}', '{}', '{}' or '{}' expected{}",
@@ -602,7 +673,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             crate::token_kinds::token_kind_str(k4),
             where_
         );
-        self.error_cur(&msg);
+        self.error_expected_msg(&msg, Some(what_loc));
     }
 
     /// Check the current token is `kind`; if so consume and return true, else
