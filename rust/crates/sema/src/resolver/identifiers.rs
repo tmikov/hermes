@@ -324,10 +324,10 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // (in particular, no second, non-typeof warning is possible).
             // This is why `typeof missing;` in strict mode creates the
             // ambient global for `missing` with no warning — see the
-            // "typeof" test in this file's `tests` module, and the task
-            // report for why this is unit-tested instead of corpus-tested
-            // (the enclosing `UnaryExpression` visit that would have to
-            // route here is S1 T6 scope).
+            // "typeof" test in this file's `tests` module, which pins the
+            // mechanism directly, and `tests/sema_corpus/typeof-strict.js`,
+            // which pins the same behavior end-to-end now that S1 T6's
+            // `UnaryExpression` visit routes here.
             if let Node::UnaryExpression(unary) = p.parent {
                 if unary.operator.get() == self.kw().ident_typeof {
                     self.resolve_identifier(gc, node, true);

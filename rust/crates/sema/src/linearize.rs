@@ -47,9 +47,8 @@ use ast::node_child::NodeLabel;
 /// memory. Port of `ESTree::MAX_NESTED_ASSIGNMENTS` (ESTree.h:1407).
 ///
 /// Read by `visit(AssignmentExpressionNode *)` (SemanticResolver.cpp:442),
-/// which is a later S1 task; defined here with its neighbor so that the two
-/// limits stay together the way the C++ header has them.
-#[allow(dead_code)]
+/// ported in `resolver/expressions.rs`; defined here with its neighbor so
+/// that the two limits stay together the way the C++ header has them.
 pub(crate) const MAX_NESTED_ASSIGNMENTS: u32 = 30000;
 
 /// An arbitrary limit to nested "+/-" binary expressions. We handle them
@@ -57,9 +56,8 @@ pub(crate) const MAX_NESTED_ASSIGNMENTS: u32 = 30000;
 /// consume all our memory. Port of `ESTree::MAX_NESTED_BINARY`
 /// (ESTree.h:1412).
 ///
-/// Read by `visit(BinaryExpressionNode *)` (SemanticResolver.cpp:411), which
-/// is a later S1 task.
-#[allow(dead_code)]
+/// Read by `visit(BinaryExpressionNode *)` (SemanticResolver.cpp:411),
+/// ported in `resolver/expressions.rs`.
 pub(crate) const MAX_NESTED_BINARY: u32 = 30000;
 
 /// A binary-shaped expression node that [`linearize_left`] /
@@ -164,11 +162,6 @@ pub(crate) fn linearize_left<'gc, N: OperatorExpr<'gc>>(
 ///   expression. Ideally it should contain all operators with the same
 ///   precedence, but can also be a single operator like `["="]`, if the
 ///   caller doesn't want to deal with the complexity.
-///
-/// `allow(dead_code)`: its only non-test caller,
-/// `visit(AssignmentExpressionNode *)`, is a later S1 task; it is ported now
-/// so the pair stays together, exactly like the two `MAX_NESTED_*` limits.
-#[allow(dead_code)]
 pub(crate) fn linearize_right<'gc, N: OperatorExpr<'gc>>(
     e: &'gc N,
     ops: &[NodeLabel],

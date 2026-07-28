@@ -7,7 +7,9 @@
 
 //! Port of `hermes::sema::SemanticResolver` (`lib/Sema/SemanticResolver.h`,
 //! `lib/Sema/SemanticResolver.cpp`) — S0 entry path plus S1 T4's identifier
-//! resolution core and S1 T5's declarations (hoisting, validation, blocks).
+//! resolution core, S1 T5's declarations (hoisting, validation, blocks) and
+//! S1 T6's expression visits (constant folding, assignment/update/unary
+//! validation).
 //!
 //! ## What's covered so far
 //!
@@ -24,16 +26,23 @@
 //! `validateDeclarationName`, `visit(VariableDeclarationNode *)` and
 //! `visit(BlockStatementNode *, Node *)` — `var`/`let`/`const` (including
 //! destructuring patterns) hoist, validate against the redeclaration
-//! decision table, and shadow correctly across nested block scopes. Together
-//! this reproduces `hermesc -dump-sema` byte-for-byte for programs made of
+//! decision table, and shadow correctly across nested block scopes. From S1
+//! T6 (`expressions.rs`), `visit(BinaryExpressionNode *, Node **)`,
+//! `visit(AssignmentExpressionNode *)`, `visit(UpdateExpressionNode *)`,
+//! `visit(UnaryExpressionNode *, Node **)`, `validateAssignmentTarget` and
+//! `isLValue` — `+`/`-` and `=` chains are walked iteratively, constants
+//! fold, and assignment/update targets are validated (const, strict
+//! `eval`/`arguments`, the loose-mode `arguments` quirk), together with the
+//! strict `delete`-of-a-variable and `delete super.x` errors. Together this
+//! reproduces `hermesc -dump-sema` byte-for-byte for programs made of
 //! literals, empty statements, bare identifier reads (including through
 //! non-computed member/property positions, which are skipped rather than
-//! resolved), and `var`/`let`/`const` declarations in blocks — which is what
-//! `tests/sema_differential.rs` enforces against the real compiler. Function/
-//! class declarations, catch clauses, imports, and everything else the C++
-//! resolver handles remain later tasks' scope — see `declarations.rs`'s
-//! module doc for exactly which of *its* branches are ported but not yet
-//! corpus-reachable.
+//! resolved), `var`/`let`/`const` declarations in blocks, and the
+//! expression forms above — which is what `tests/sema_differential.rs`
+//! enforces against the real compiler. Function/class declarations, catch
+//! clauses, imports, and everything else the C++ resolver handles remain
+//! later tasks' scope — see `declarations.rs`'s module doc for exactly which
+//! of *its* branches are ported but not yet corpus-reachable.
 //!
 //! Everything not covered is *deliberately absent rather than
 //! approximated*: `visit_node` panics with `sema S1: unhandled node kind
@@ -152,7 +161,10 @@
 //! outermost node as `Changed`. Stopping at the failed fold the way C++ does
 //! would silently discard every fold that already succeeded (they live only
 //! in nodes nothing points at yet). Same shape for
-//! `visit(AssignmentExpressionNode *)`'s chain.
+//! `visit(AssignmentExpressionNode *)`'s chain. Both are implemented in
+//! `expressions.rs` (S1 T6) — see that module's doc for the full mapping,
+//! including why the loop's `folding` flag is the port of C++'s `break` and
+//! why the visit ORDER and recursion-depth accounting still match.
 //!
 //! The recursion-depth protocol the C++ dispatcher implements
 //! (`incRecursionDepth`/`decRecursionDepth` bracketing every dispatched
@@ -207,6 +219,7 @@
 use std::collections::{HashMap, HashSet};
 
 mod declarations;
+mod expressions;
 mod identifiers;
 
 use ast::context::{GCLock, NodeRc};
@@ -777,6 +790,17 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             Node::BlockStatement(_) => {
                 self.visit_block_statement(gc, node, path)
             }
+            // `visit(BinaryExpressionNode*, Node**)` (cpp:405-436),
+            // `visit(AssignmentExpressionNode*)` (cpp:438-462),
+            // `visit(UpdateExpressionNode*)` (cpp:464-473) and
+            // `visit(UnaryExpressionNode*, Node**)` (cpp:475-500) — see
+            // `expressions::*` (S1 T6).
+            Node::BinaryExpression(_) => self.visit_binary_expression(gc, node),
+            Node::AssignmentExpression(_) => {
+                self.visit_assignment_expression(gc, node)
+            }
+            Node::UpdateExpression(_) => self.visit_update_expression(gc, node),
+            Node::UnaryExpression(_) => self.visit_unary_expression(gc, node),
             // Kinds with no `visit()` overload in C++: the generic dispatch
             // visits their children (`ExpressionStatement`'s `_expression`
             // — `_directive` is a NodeString, not a node) and here also
@@ -798,6 +822,19 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // declarations) likewise have no C++ override — see
             // SemanticResolver.cpp's `visit(...)` list, none of which names
             // any of these kinds.
+            //
+            // S1 T6 adds the remaining override-free *expression* kinds,
+            // each checked against the `SemanticResolver::visit` inventory
+            // in SemanticResolver.h:200-304: `ArrayExpression`,
+            // `ConditionalExpression`, `LogicalExpression`,
+            // `SequenceExpression`, `TemplateLiteral` and `TemplateElement`
+            // appear nowhere in it, so C++ reaches them through
+            // `visitESTreeChildren` exactly like this arm does. (Neighbors
+            // that DO have an override — `CallExpression` cpp:1117,
+            // `SpreadElement` cpp:1455, `RegExpLiteral` cpp:821,
+            // `Super` cpp:1086, `MetaProperty` cpp:837,
+            // `YieldExpression`/`AwaitExpression` cpp:1476/1494 — are
+            // deliberately left panicking until their own task ports them.)
             Node::ExpressionStatement(_)
             | Node::EmptyStatement(_)
             | Node::NumericLiteral(_)
@@ -813,6 +850,12 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             | Node::ArrayPattern(_)
             | Node::RestElement(_)
             | Node::AssignmentPattern(_)
+            | Node::ArrayExpression(_)
+            | Node::ConditionalExpression(_)
+            | Node::LogicalExpression(_)
+            | Node::SequenceExpression(_)
+            | Node::TemplateLiteral(_)
+            | Node::TemplateElement(_)
             | Node::Empty(_) => node.visit_children_mut(gc, self),
             _ => panic!(
                 "sema S1: unhandled node kind {} — later tasks",

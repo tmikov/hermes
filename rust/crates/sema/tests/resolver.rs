@@ -393,3 +393,176 @@ fn loose_identifier_reference_becomes_undeclared_global_property() {
     let decl = sem_ctx.decl(sem_ctx.scope(global_scope).decls[0]);
     assert_eq!(decl.kind, DeclKind::UndeclaredGlobalProperty);
 }
+
+// ---- S1 T6: the fold-loop shapes ----------------------------------------
+//
+// `visit(BinaryExpressionNode *, Node **)` (SemanticResolver.cpp:405-436)
+// folds a linearized `+`/`-` chain strictly left-to-right, bottom-up, and
+// STOPS at the first link that fails to fold. These tests pin the three
+// distinguishable outcomes of that loop against the port's rebuild-based
+// mapping (see `resolver/expressions.rs`'s module doc): fully folded,
+// partially folded with a rebuilt spine above the fold, and not folded at
+// all because the *first* link already failed.
+
+/// Resolve `src` and return the expression of its first (and only)
+/// `ExpressionStatement`, keeping the arena alive across the assertions in
+/// `f`.
+fn with_first_expression<R>(src: &str, f: impl FnOnce(&Node) -> R) -> R {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let root = parse(&gc, &mut sm, src);
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    let resolved = resolve_ast(&gc, &mut sem_ctx, &mut sm, root, &[])
+        .unwrap_or_else(|| panic!("resolution failed for: {src}"));
+    let Node::Program(p) = resolved else {
+        unreachable!("resolve_ast returned a non-Program root")
+    };
+    let stmt = p.body.iter().next().expect("empty program body");
+    let Node::ExpressionStatement(es) = stmt else {
+        panic!("first statement is not an ExpressionStatement")
+    };
+    f(es.expression)
+}
+
+/// A fully constant `+`/`-` chain collapses to a single literal: every link
+/// folds, and the last fold's product is what the visit returns (C++ writes
+/// it through `ppNode`, cpp:421).
+#[test]
+fn constant_binary_chain_folds_to_a_single_literal() {
+    with_first_expression("1 + 2 - 3;\n", |e| match e {
+        Node::NumericLiteral(n) => assert_eq!(n.value.get(), 0.0),
+        other => {
+            panic!("expected a folded literal, got {}", other.node_type_str())
+        }
+    });
+}
+
+/// A chain whose *tail* is non-constant folds its constant prefix and keeps
+/// the rest: `1 + 2 + x` becomes `3 + x`. This is the case the port's
+/// rebuild mapping exists for — C++ mutates `list[1]->_left` in place, while
+/// here link 1 must be REBUILT around the folded literal, and that rebuilt
+/// node must be what the visit returns.
+#[test]
+fn partially_constant_binary_chain_folds_its_prefix() {
+    with_first_expression("1 + 2 + x;\n", |e| {
+        let be = e
+            .as_binary_expression()
+            .expect("the outer link must survive as a BinaryExpression");
+        match be.left {
+            Node::NumericLiteral(n) => assert_eq!(n.value.get(), 3.0),
+            other => panic!(
+                "left should be the folded 3, got {}",
+                other.node_type_str()
+            ),
+        }
+        assert!(matches!(be.right, Node::Identifier(_)));
+    });
+}
+
+/// Folding is strictly left-to-right and bottom-up: once a link fails, the
+/// loop stops (C++ `break`, cpp:429), so `x + 1 + 2` folds NOTHING — even
+/// though `1 + 2` "looks" foldable, those two literals are never operands of
+/// the same link. Nothing changed anywhere, so the tree is returned
+/// pointer-identical.
+#[test]
+fn binary_chain_stops_folding_at_the_first_failure() {
+    with_first_expression("x + 1 + 2;\n", |e| {
+        let be = e.as_binary_expression().expect("nothing may fold here");
+        let inner = be
+            .left
+            .as_binary_expression()
+            .expect("the inner link must survive too");
+        assert!(matches!(inner.left, Node::Identifier(_)));
+        assert!(matches!(inner.right, Node::NumericLiteral(_)));
+        assert!(matches!(be.right, Node::NumericLiteral(_)));
+    });
+}
+
+/// A non-`+`/`-` binary goes through the non-linearized path
+/// (cpp:432-435): children visited generically, then a single fold attempt.
+#[test]
+fn non_linearized_binary_still_folds() {
+    with_first_expression("6 * 7;\n", |e| match e {
+        Node::NumericLiteral(n) => assert_eq!(n.value.get(), 42.0),
+        other => {
+            panic!("expected a folded literal, got {}", other.node_type_str())
+        }
+    });
+}
+
+/// `astFoldUnaryExpression` (cpp:499) turns `-5` into a single literal.
+#[test]
+fn unary_minus_on_a_literal_folds() {
+    with_first_expression("-5;\n", |e| match e {
+        Node::NumericLiteral(n) => assert_eq!(n.value.get(), -5.0),
+        other => {
+            panic!("expected a folded literal, got {}", other.node_type_str())
+        }
+    });
+}
+
+/// A fold nested inside an unrelated parent rebuilds the whole spine up to
+/// the root, which is the mechanism `resolve_ast`'s "return the new root"
+/// contract exists for.
+#[test]
+fn a_fold_rebuilds_the_root() {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let root = parse(&gc, &mut sm, "1 + 2;\n");
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    let resolved = resolve_ast(&gc, &mut sem_ctx, &mut sm, root, &[])
+        .expect("resolution failed");
+    assert!(
+        !std::ptr::eq(root, resolved),
+        "a fold must rebuild every ancestor, including the Program"
+    );
+}
+
+/// The whole point of `linearizeLeft` (ESTree.h:1437-1451): a `+`/`-` chain
+/// is walked ITERATIVELY, so its links do not consume recursion depth. A
+/// 2000-link chain is nearly twice `kASTMaxRecursionDepth` (1024) — a
+/// recursive walk would report "Too many nested expressions" and fail —
+/// yet it must resolve cleanly *and* fold end to end.
+#[test]
+fn a_long_binary_chain_is_folded_without_recursing() {
+    /// Comfortably past `AST_MAX_RECURSION_DEPTH` (1024), and far below
+    /// `MAX_NESTED_BINARY` (30000).
+    const LINKS: usize = 2000;
+
+    let src = (0..=LINKS)
+        .map(|i| i.to_string())
+        .collect::<Vec<_>>()
+        .join(" + ")
+        + ";\n";
+    // 0 + 1 + ... + LINKS
+    let expected = (LINKS * (LINKS + 1) / 2) as f64;
+    with_first_expression(&src, |e| match e {
+        Node::NumericLiteral(n) => assert_eq!(n.value.get(), expected),
+        other => panic!(
+            "a constant chain must fold whole, got {}",
+            other.node_type_str()
+        ),
+    });
+}
+
+/// The same for `=` chains and `linearizeRight` (ESTree.h:1464-1477): 2000
+/// nested assignments resolve (and validate every target) without tripping
+/// the recursion limit.
+#[test]
+fn a_long_assignment_chain_does_not_recurse() {
+    const LINKS: usize = 2000;
+
+    let src = "var a;\n".to_string() + &"a = ".repeat(LINKS) + "1;\n";
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let root = parse(&gc, &mut sm, &src);
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    assert!(
+        resolve_ast(&gc, &mut sem_ctx, &mut sm, root, &[]).is_some(),
+        "a linearized `=` chain must not exhaust the recursion budget"
+    );
+    assert_eq!(sm.error_count(), 0);
+}
