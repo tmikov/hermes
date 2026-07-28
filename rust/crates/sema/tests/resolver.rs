@@ -1654,3 +1654,286 @@ fn a_rebuilt_catch_clause_keeps_its_scope() {
         );
     });
 }
+
+// ---- S2 T4: classes ----------------------------------------------------
+//
+// The three synthetic `FunctionInfo`s a class can carry (the implicit
+// constructor and the instance/static elements initializers) live in `Cell`s
+// on the CLASS node, and every one of them is written *after* the class body
+// has been visited or from deep inside it — so a rebuild of the class node
+// (a fold in a field initializer, a rewritten arrow in a method) is exactly
+// the shape that could lose them. The differential sees the ids indirectly
+// (the synthetic functions appear in the `-dump-sema` function tree), but
+// not which class node they are attached to; these tests pin that.
+
+/// The three `ClassLikeDecoration` `Cell`s of a class node, as
+/// `(implicitCtor, instanceElementsInit, staticElementsInit)`.
+fn class_function_infos(
+    node: &Node,
+) -> (Option<ast::SemaId>, Option<ast::SemaId>, Option<ast::SemaId>) {
+    match node {
+        Node::ClassDeclaration(n) => (
+            n.implicit_ctor_function_info.get(),
+            n.instance_elements_init_function_info.get(),
+            n.static_elements_init_function_info.get(),
+        ),
+        Node::ClassExpression(n) => (
+            n.implicit_ctor_function_info.get(),
+            n.instance_elements_init_function_info.get(),
+            n.static_elements_init_function_info.get(),
+        ),
+        _ => panic!("no class decoration on {}", node.node_type_str()),
+    }
+}
+
+/// A class with no explicit constructor gets a synthetic implicit-constructor
+/// `FunctionInfo` (`createImplicitConstructorFunctionInfo`, cpp:3088-3114),
+/// whose `ConstructorKind` is `Base` for a plain class and `Derived` for one
+/// with a superclass, and which owns exactly one (body) scope.
+#[test]
+fn an_implicit_constructor_function_info_is_created_for_a_class_without_one() {
+    with_resolved("class A {}\n", |sem_ctx, resolved| {
+        let class = first_statement(resolved);
+        let (ctor, inst, stat) = class_function_infos(class);
+        assert!(inst.is_none() && stat.is_none());
+        let ctor = FunctionInfoId::from_sema_id(
+            ctor.expect("no implicit constructor FunctionInfo"),
+        );
+        let info = sem_ctx.function(ctor);
+        assert_eq!(
+            info.constructor_kind,
+            sema::sem_context::ConstructorKind::Base
+        );
+        assert!(info.strict, "an implicit constructor is always strict");
+        assert_eq!(info.get_scopes().len(), 1);
+        assert_eq!(info.get_function_body_scope(), info.get_scopes()[0]);
+    });
+}
+
+/// The `hasConstructor` flag (set from `visitFunctionLike`, cpp:1656)
+/// suppresses the implicit constructor, and a `constructor` in a derived
+/// class gets `ConstructorKind::Derived`.
+#[test]
+fn an_explicit_constructor_suppresses_the_implicit_one() {
+    let src = "class A {}\nclass B extends A { constructor() {} }\n";
+    with_resolved(src, |sem_ctx, resolved| {
+        let Node::Program(p) = resolved else {
+            unreachable!("not a Program")
+        };
+        let mut it = p.body.iter();
+        let a = it.next().expect("no class A");
+        let b = it.next().expect("no class B");
+        assert!(
+            class_function_infos(a).0.is_some(),
+            "A has no explicit constructor"
+        );
+        assert!(
+            class_function_infos(b).0.is_none(),
+            "B's explicit constructor must suppress the implicit one"
+        );
+        // The explicit constructor's own FunctionInfo is Derived.
+        let body = b
+            .as_class_declaration()
+            .expect("not a ClassDeclaration")
+            .body
+            .as_class_body()
+            .expect("not a ClassBody");
+        let method = body
+            .body
+            .iter()
+            .next()
+            .expect("empty class body")
+            .as_method_definition()
+            .expect("not a MethodDefinition");
+        let func = method
+            .value
+            .as_function_expression()
+            .expect("method value is not a FunctionExpression");
+        let id = FunctionInfoId::from_sema_id(
+            func.sem_info.get().expect("no semInfo on the constructor"),
+        );
+        assert_eq!(
+            sem_ctx.function(id).constructor_kind,
+            sema::sem_context::ConstructorKind::Derived
+        );
+    });
+}
+
+/// A field initializer that FOLDS rebuilds the `ClassBody` and hence the
+/// class node — the instance-elements-init id was written on the original
+/// node from inside that walk and the implicit-constructor id after it, so
+/// both must be present on the node the resolver RETURNED.
+#[test]
+fn a_rebuilt_class_keeps_its_synthetic_function_infos() {
+    let src = "class C { x = 1 + 2; static y; }\n";
+    with_resolved(src, |sem_ctx, resolved| {
+        let class = first_statement(resolved);
+        let (ctor, inst, stat) = class_function_infos(class);
+        assert!(ctor.is_some(), "the rebuilt class lost implicitCtor");
+        let inst = FunctionInfoId::from_sema_id(
+            inst.expect("the rebuilt class lost instanceElementsInit"),
+        );
+        let stat = FunctionInfoId::from_sema_id(
+            stat.expect("the rebuilt class lost staticElementsInit"),
+        );
+        assert_ne!(inst, stat);
+        // The instance initializer declared `arguments` (cpp:1039); the
+        // static one never ran `declareArguments` (`static y` has no value).
+        assert!(sem_ctx.function(inst).arguments_decl.is_some());
+        assert!(sem_ctx.function(stat).arguments_decl.is_none());
+        // Non-degeneracy: the fold must really have happened.
+        let body = class
+            .as_class_declaration()
+            .expect("not a ClassDeclaration")
+            .body
+            .as_class_body()
+            .expect("not a ClassBody");
+        let prop = body
+            .body
+            .iter()
+            .next()
+            .expect("empty class body")
+            .as_class_property()
+            .expect("not a ClassProperty");
+        assert!(
+            matches!(prop.value, Some(Node::NumericLiteral(_))),
+            "1 + 2 did not fold, so the class was never rebuilt"
+        );
+    });
+}
+
+/// A class declaration carries TWO decls on its one `Identifier`: the
+/// hoisted `Class` declaration decl and the inner `ClassExprName`
+/// expression decl the class body sees (cpp:923-935) — the side-table case.
+#[test]
+fn a_class_declaration_name_carries_both_a_class_and_a_class_expr_name_decl() {
+    with_resolved("class C {}\n", |sem_ctx, resolved| {
+        let class = first_statement(resolved)
+            .as_class_declaration()
+            .expect("not a ClassDeclaration");
+        let id = class
+            .id
+            .expect("no class id")
+            .as_identifier()
+            .expect("class id is not an Identifier");
+        let decl =
+            sem_ctx.get_declaration_decl(id).expect("no declaration decl");
+        let expr = sem_ctx.get_expression_decl(id).expect("no expression decl");
+        assert_ne!(decl, expr);
+        assert_eq!(sem_ctx.decl(decl).kind, DeclKind::Class);
+        assert_eq!(sem_ctx.decl(expr).kind, DeclKind::ClassExprName);
+        // The ClassExprName lives in the class node's own scope.
+        let scope = sema::ids::ScopeId::from_sema_id(
+            class.scope.get().expect("no scope on the class"),
+        );
+        assert_eq!(sem_ctx.decl(expr).scope, Some(scope));
+    });
+}
+
+/// Classes force strict mode on the ENCLOSING function only for the
+/// duration of the class (cpp:919's `SaveAndRestore`): the methods are
+/// strict, the global function goes back to loose.
+#[test]
+fn a_class_forces_strict_mode_only_inside_itself() {
+    with_resolved("class C { m() {} }\n", |sem_ctx, resolved| {
+        assert!(
+            !sem_ctx.function(sem_ctx.get_global_function()).strict,
+            "the global function must be loose again after the class"
+        );
+        let Node::Program(p) = resolved else {
+            unreachable!("not a Program")
+        };
+        assert_eq!(p.strictness.get(), Strictness::NonStrictMode);
+        let class = first_statement(resolved)
+            .as_class_declaration()
+            .expect("not a ClassDeclaration");
+        let method = class
+            .body
+            .as_class_body()
+            .expect("not a ClassBody")
+            .body
+            .iter()
+            .next()
+            .expect("empty class body")
+            .as_method_definition()
+            .expect("not a MethodDefinition");
+        let func = method
+            .value
+            .as_function_expression()
+            .expect("method value is not a FunctionExpression");
+        let id = FunctionInfoId::from_sema_id(
+            func.sem_info.get().expect("no semInfo on the method"),
+        );
+        assert!(sem_ctx.function(id).strict, "a method must be strict");
+        assert_eq!(func.strictness.get(), Strictness::StrictMode);
+    });
+}
+
+/// The `ClassContext` stack: a class nested inside a method of another class
+/// gets its OWN context, so the inner class's explicit constructor must not
+/// suppress the OUTER class's implicit one (C++'s `curClassContext_` linked
+/// list; here `SemanticResolver::class_stack`).
+#[test]
+fn a_nested_class_gets_its_own_class_context() {
+    let src = "class Outer {\n  m() {\n    class Inner extends Outer {\n\
+               \x20     constructor() {}\n    }\n    return Inner;\n  }\n}\n";
+    with_resolved(src, |sem_ctx, resolved| {
+        let outer = first_statement(resolved);
+        assert!(
+            class_function_infos(outer).0.is_some(),
+            "Outer has no explicit constructor of its own"
+        );
+        // Walk to the inner class declaration.
+        let method = outer
+            .as_class_declaration()
+            .expect("not a ClassDeclaration")
+            .body
+            .as_class_body()
+            .expect("not a ClassBody")
+            .body
+            .iter()
+            .next()
+            .expect("empty class body")
+            .as_method_definition()
+            .expect("not a MethodDefinition");
+        let block = method
+            .value
+            .as_function_expression()
+            .expect("method value is not a FunctionExpression")
+            .body
+            .as_block_statement()
+            .expect("method body is not a block");
+        let inner = block.body.iter().next().expect("empty method body");
+        assert!(
+            class_function_infos(inner).0.is_none(),
+            "Inner's explicit constructor must suppress ITS implicit one"
+        );
+        // And Inner's constructor is Derived (it extends Outer), which is
+        // what proves `cur_class_is_derived` read Inner's context, not
+        // Outer's.
+        let ctor = inner
+            .as_class_declaration()
+            .expect("Inner is not a ClassDeclaration")
+            .body
+            .as_class_body()
+            .expect("not a ClassBody")
+            .body
+            .iter()
+            .next()
+            .expect("empty inner class body")
+            .as_method_definition()
+            .expect("not a MethodDefinition");
+        let id = FunctionInfoId::from_sema_id(
+            ctor.value
+                .as_function_expression()
+                .expect("not a FunctionExpression")
+                .sem_info
+                .get()
+                .expect("no semInfo"),
+        );
+        assert_eq!(
+            sem_ctx.function(id).constructor_kind,
+            sema::sem_context::ConstructorKind::Derived
+        );
+    });
+}

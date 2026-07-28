@@ -556,20 +556,21 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
         id: Option<&'gc Node<'gc>>,
         parent: Option<&'gc Node<'gc>>,
     ) -> TransformResult<&'gc Node<'gc>> {
-        let cons_kind = ConstructorKind::None;
-        if matches!(parent, Some(Node::MethodDefinition(_))) {
-            // S2 SEAM (cpp:1652-1661): a `MethodDefinition` parent whose
-            // `_kind` is `constructor` sets `curClassContext_->
-            // hasConstructor` and derives `consKind` from
-            // `curClassContext_->isDerivedClass()`. `ClassContext` belongs
-            // to S2's class work, so rather than guess a `consKind` this
-            // panics. Unreachable today: `MethodDefinition` has no
-            // `visit_node` arm, so it panics as an unhandled kind before it
-            // could visit a child.
-            panic!(
-                "sema S2: MethodDefinition function bodies need \
-                 curClassContext_ (cpp:1652-1661)"
-            );
+        // `dyn_cast_or_null<MethodDefinitionNode>(parent)`: for a class
+        // method the parent IS the `MethodDefinition`, and only its
+        // `constructor` kind makes the function a constructor. S2 T4 filled
+        // this in — the `ClassContext` the two lines below reach is
+        // `classes.rs`'s.
+        let mut cons_kind = ConstructorKind::None;
+        if let Some(Node::MethodDefinition(method)) = parent {
+            if method.kind.get() == self.kw().ident_constructor {
+                self.cur_class_context_mut().has_constructor = true;
+                cons_kind = if self.cur_class_is_derived(gc) {
+                    ConstructorKind::Derived
+                } else {
+                    ConstructorKind::Base
+                };
+            }
         }
 
         let parent_sem_info = self.cur_function_info();

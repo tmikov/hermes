@@ -70,20 +70,31 @@
 //! (`unresolver.rs`, the port of SemanticResolver.h:679-711) over its body,
 //! which is what turns S1 T5's dormant `Catch`/`ES5Catch` redeclaration
 //! rows live — plus `visit(RegExpLiteralNode *)` (`expressions.rs`), whose
-//! regex-engine boundary is documented at its site. Together this
-//! reproduces `hermesc -dump-sema`
+//! regex-engine boundary is documented at its site. From S2 T4
+//! (`classes.rs`), `ClassContext` and
+//! `visit(ClassDeclaration/ClassExpressionNode *)` + `visitClassAsExpr`,
+//! `visit(ClassPropertyNode *)`, `visit(MethodDefinitionNode *, Node *)` and
+//! `visit(SuperNode *, Node *)` — classes get their own scope holding the
+//! inner `ClassExprName` binding (so a class declaration's one `Identifier`
+//! carries two decls), force strict mode on the enclosing function while
+//! they are being visited, and grow up to three SYNTHETIC `FunctionInfo`s
+//! (the implicit constructor and the instance/static elements initializers,
+//! all three recorded in `Cell`s on the class node), which is also what
+//! turns S1 T7's dormant `MethodDefinition` constructor-kind branch live.
+//! Together this reproduces `hermesc -dump-sema`
 //! byte-for-byte for programs made of literals, empty statements, bare
 //! identifier reads (including through non-computed member/property
 //! positions, which are skipped rather than resolved),
 //! `var`/`let`/`const` declarations in blocks, functions of every
 //! parameter shape, arrow functions of every body/parameter shape,
 //! generators and `async` functions, the loop/label/switch statements above
-//! and the expression forms above — which is what
-//! `tests/sema_differential.rs` enforces against the real compiler. Class
-//! declarations, catch clauses, calls (the `eval`/`$SHBuiltin` specials),
-//! `super`, imports, and everything else the C++ resolver handles remain
-//! later tasks' scope — see `declarations.rs`'s, `functions.rs`'s,
-//! `expressions.rs`'s and `statements.rs`'s module docs for exactly which of
+//! and the expression forms above, classes with fields, methods and
+//! `super.x` member access — which is what `tests/sema_differential.rs`
+//! enforces against the real compiler. Private class members, static
+//! blocks, calls (the `eval`/`$SHBuiltin` specials, `super()`), imports,
+//! and everything else the C++ resolver handles remain later tasks' scope —
+//! see `declarations.rs`'s, `functions.rs`'s, `expressions.rs`'s,
+//! `statements.rs`'s and `classes.rs`'s module docs for exactly which of
 //! *their* branches are ported but not yet corpus-reachable.
 //!
 //! Everything not covered is *deliberately absent rather than
@@ -160,6 +171,20 @@
 //!   Same rule, same reason: the write has to land on the node that will be
 //!   returned. See `functions.rs`'s "Rewrite #1" section and
 //!   `a_rewritten_arrow_whose_body_folds_keeps_its_decorations`.
+//!
+//!   **S2 T4: the second real exception, and the widest one.** All three
+//!   `ClassLikeDecoration` `Cell`s are written either from DEEP INSIDE the
+//!   class body walk (the elements-init ids, from
+//!   `visit(ClassPropertyNode *)`) or AFTER it (the implicit-constructor id,
+//!   cpp:949, because it depends on `hasConstructor`, which only the walk can
+//!   set). A fold in a field initializer or a rewritten arrow in a method
+//!   rebuilds the `ClassBody` and hence the class node, so a builder
+//!   snapshotted up front would hand back a class with all three empty —
+//!   silently detaching the synthetic functions IRGen looks for.
+//!   `classes::SemanticResolver::visit_class_as_expr` therefore drives the
+//!   two children by hand and creates the builder only after the last write;
+//!   see `classes.rs`'s module doc and
+//!   `a_rebuilt_class_keeps_its_synthetic_function_infos`.
 //! - **Node identity is not stable across a rebuild.** A rebuilt node is a
 //!   new allocation with a fresh `NodeId` (`NodeMetadata::duplicate`), so
 //!   anything keyed by node identity — a `NodeRc` held in a side table, or a
@@ -266,14 +291,18 @@
 //!   matches the C++ member's lifetime exactly: buffering spans the whole
 //!   resolver, and the flush (stable-sorted by source position) happens on
 //!   destruction, not at the end of `run`.
-//! - **`saveDecls_`, `typed_`, `curClassContext_`** are not ported: nothing
-//!   on this path reads them, and each belongs to a later stage that will
-//!   introduce it with its first use. `canReferenceSuper_` and
+//! - **`saveDecls_` and `typed_`** are not ported: nothing on this path
+//!   reads them, and each belongs to a later stage that will introduce it
+//!   with its first use (`typed_` is a documented `const TYPED: bool =
+//!   false` at each of the three sites that branch on it).
+//!   **`curClassContext_`** was in this list until S2 T4, which ports it as
+//!   the `class_stack` field — see `classes.rs`. `canReferenceSuper_` and
 //!   `forbidAwaitExpression_` are ported as fields (S1 T4 adds all five
 //!   `SemanticResolver.h:79-104` flags together, since later tasks
-//!   save/restore them as one group) but are still unread/unwritten until
-//!   the `SuperNode`/`AwaitExpression` visits that use them land — see their
-//!   field doc comments. `forbidAwaitAsIdentifier_`,
+//!   save/restore them as one group); the visits that first *read* them
+//!   landed later — `forbidAwaitExpression_` in S2 T2
+//!   (`visit(AwaitExpressionNode *)`) and `canReferenceSuper_` in S2 T4
+//!   (`visit(SuperNode *, Node *)`). `forbidAwaitAsIdentifier_`,
 //!   `forbidSpecialArgumentsReference_` and `forbidArgumentsAsIdentifier_`
 //!   are read by `resolveIdentifier` (below) starting with S1 T4.
 //! - **`DebugInfoSetting::ALL`**: the port has no debug-info setting yet, so
@@ -282,6 +311,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+mod classes;
 mod declarations;
 mod expressions;
 mod functions;
@@ -299,6 +329,7 @@ use support::manager::SourceErrorManager;
 use support::persistent_scoped_map::Scope;
 
 use crate::decl_collector::DeclCollector;
+use classes::ClassContext;
 use crate::ids::{DeclId, FunctionInfoId, ScopeId};
 use crate::keywords::Keywords;
 use crate::sem_context::{
@@ -454,6 +485,11 @@ pub struct SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     /// Index into `function_stack` of C++'s `globalFunctionContext_`.
     /// `None` until populated.
     global_function_context: Option<usize>,
+    /// The stack of class contexts; the last one is C++'s
+    /// `curClassContext_` (SemanticResolver.h:63-64). Empty outside a
+    /// class. Pushed/popped by `classes.rs`'s `enter_class`/`exit_class`,
+    /// the port of `ClassContext`'s constructor/destructor.
+    class_stack: Vec<ClassContext>,
     /// The stack of open binding-table scopes, innermost last — the
     /// `bindingScope_` members of the C++ `ScopeRAII` objects currently
     /// alive. Popped from the back by `exit_scope`; note the elements must
@@ -474,9 +510,9 @@ pub struct SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     /// super bindings exist in class field initializer values and static
     /// blocks. Port of `canReferenceSuper_` (SemanticResolver.h:79);
     /// save/restored around every function by `visit_function_like` (S1 T7)
-    /// but not yet *read* — the `SuperNode` visit that reads it is S2,
-    /// hence the `dead_code` allowance.
-    #[allow(dead_code)]
+    /// and, since S2 T4, read by `classes::visit_super` and save/restored
+    /// by `classes::visit_class_property` (`false` for a computed key,
+    /// `true` for a field initializer).
     can_reference_super: bool,
     /// 'await' isn't allowed to be an identifier anywhere in the parameters
     /// of an async arrow function, including the parameters of nested arrow
@@ -546,6 +582,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             global_scope: BindingTableScopePtr::default(),
             function_stack: Vec::new(),
             global_function_context: None,
+            class_stack: Vec::new(),
             binding_scopes: Vec::new(),
             recursion_depth: AST_MAX_RECURSION_DEPTH,
             can_reference_super: false,
@@ -704,6 +741,37 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
         set_node_sem_info(node, sem_info);
         FunctionState {
             was_global_function_context: install_as_global_context,
+        }
+    }
+
+    /// Port of the `FunctionContext(SemanticResolver &, FunctionInfo *)`
+    /// constructor (SemanticResolver.cpp:2994-3002) — the one that adopts an
+    /// ALREADY-CREATED `FunctionInfo` and runs no `DeclCollector`.
+    ///
+    /// Its only caller is `classes.rs`'s `visit(ClassPropertyNode *)`
+    /// (cpp:1034-1038), which pushes a context for one of the class's
+    /// synthetic elements-initializer functions so a field initializer
+    /// resolves as if it were inside that function. Consequently `node` is
+    /// `None` (C++ sets it to `nullptr`) and `decls` is `None`: there is no
+    /// AST node for the synthesized function, hence nothing to collect
+    /// declarations from, and `setSemInfo` is not called on anything.
+    fn enter_function_with_info(
+        &mut self,
+        sem_info: FunctionInfoId,
+    ) -> FunctionState {
+        self.function_stack.push(FunctionContext {
+            sem_info,
+            node: None,
+            label_map: HashMap::new(),
+            current_loop: None,
+            current_loop_or_switch: None,
+            is_formal_params: false,
+            decls: None,
+            promoted_func_decls: HashMap::new(),
+            binding_table_scope_depth: 0,
+        });
+        FunctionState {
+            was_global_function_context: false,
         }
     }
 
@@ -938,6 +1006,22 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             Node::TryStatement(_) => self.visit_try_statement(gc, node),
             Node::CatchClause(_) => self.visit_catch_clause(gc, node),
             Node::RegExpLiteral(_) => self.visit_regexp_literal(gc, node),
+            // `visit(ClassDeclarationNode*)` (cpp:891-907),
+            // `visit(ClassExpressionNode*)` (cpp:909-911) +
+            // `visitClassAsExpr` (cpp:913-950),
+            // `visit(ClassPropertyNode*)` (cpp:1008-1051),
+            // `visit(MethodDefinitionNode*, Node*)` (cpp:1094-1115) and
+            // `visit(SuperNode*, Node*)` (cpp:1086-1092) — see `classes::*`
+            // (S2 T4).
+            Node::ClassDeclaration(_) => {
+                self.visit_class_declaration(gc, node)
+            }
+            Node::ClassExpression(_) => self.visit_class_expression(gc, node),
+            Node::ClassProperty(_) => self.visit_class_property(gc, node),
+            Node::MethodDefinition(_) => {
+                self.visit_method_definition(gc, node)
+            }
+            Node::Super(_) => self.visit_super(path),
             // Kinds with no `visit()` overload in C++: the generic dispatch
             // visits their children (`ExpressionStatement`'s `_expression`
             // — `_directive` is a NodeString, not a node) and here also
@@ -1013,7 +1097,22 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // ESTree.def:187) through `visitESTreeChildren`, exactly like
             // this arm. `DeclCollector` has no override for it either, so it
             // creates no scope.
+            // S2 T4 adds `ClassBody`, the one child kind its class visits
+            // reach that has no override of its own: it appears nowhere in
+            // the SemanticResolver.h:200-304 `visit` inventory, so C++ walks
+            // its `_body` list through `visitESTreeChildren` exactly like
+            // this arm does — which is how each `ClassProperty`/
+            // `MethodDefinition`/`StaticBlock` element gets dispatched. It
+            // also adds `ThisExpression`, which class corpus files need
+            // everywhere (`this.x` in a method or a field initializer):
+            // `ThisExpression` appears nowhere in `lib/Sema/` outside the
+            // FlowChecker (`FlowChecker-expr.cpp:498`), so it has no
+            // `SemanticResolver::visit` override, and it is an
+            // `ESTREE_NODE_0_ARGS` kind (ESTree.def:274) — no children at
+            // all, so this arm is exactly `Unchanged` for it.
             Node::ExpressionStatement(_)
+            | Node::ClassBody(_)
+            | Node::ThisExpression(_)
             | Node::ThrowStatement(_)
             | Node::EmptyStatement(_)
             | Node::NumericLiteral(_)

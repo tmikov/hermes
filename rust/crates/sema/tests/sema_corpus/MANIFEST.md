@@ -42,6 +42,15 @@ else and their rows were corrected. After it the Imported table has 23 rows
 (22 from `test/Sema` + the gap-filler) and the Deferred table 32, i.e.
 22 + 32 = 54. See "S2 Task 3 additions" at the end.
 
+**S2 Task 4** (classes core: `ClassContext`, `visitClassAsExpr`, class
+properties, method definitions, `super`) re-probed the sixteen class-family
+rows and imported three of them (`class-children.js`, `field-init-bindings.js`,
+`reject-super-references.js`); the other thirteen are blocked on S2 T5
+(private names, static blocks) or S2 T6 (`CallExpression`, `super()`) and
+their rows were re-classified accordingly. After it the Imported table has 26
+rows (25 from `test/Sema` + the gap-filler) and the Deferred table 29, i.e.
+25 + 29 = 54. See "S2 Task 4 additions" at the end.
+
 ## Imported (byte-identical vs hermesc)
 
 | File | Note |
@@ -69,6 +78,9 @@ else and their rows were corrected. After it the Imported table has 23 rows
 | `catch-block.js` | **S2 T3** — `try {} catch (e) { let x; }`: the ES5Catch decl and the clause's two nested scopes |
 | `catch-block-destr.js` | **S2 T3** — a destructured catch parameter (plain `Catch` decls) |
 | `catch-block-error.js` | **S2 T3** — the `Catch`-vs-`let` redeclaration error+note pair in the clause's own scope |
+| `class-children.js` | **S2 T4** — the untyped class path: the class scope's `ClassExprName`, the two decls on one `Identifier`, and the three synthetic `FunctionInfo`s a field + a method + no constructor produce |
+| `field-init-bindings.js` | **S2 T4** — field initializers resolving against an enclosing *function*'s scope, so the synthetic initializer functions are that function's children |
+| `reject-super-references.js` | **S2 T4** — every `super not allowed here` shape (`visit(SuperNode *, Node *)`), including the computed-key `canReferenceSuper_ = false` cases and `delete super.x` |
 
 `deep-ast-err.js` is listed in the Deferred table below but is NOT a real S1
 gap: the entire `.js` file is comment lines (its `RUN:` lines generate the
@@ -86,34 +98,31 @@ files in, 54 accounted for below) rather than silently dropped. It is also
 |---|---|---|
 | `arguments-arg-let.js` | `CallExpression` (`print(...)`) | S2 |
 | `break-in-nested-func.js` | loose-mode block-nested `FunctionDeclaration` (`ScopedFunctionPromoter`) | S3 |
-| `class-children.js` | `ClassDeclaration` | S2 |
 | `const-reassignment.js` | `CallExpression` | S2 |
 | `deep-ast-err.js` | vacuous — see note above (not a real S1 gap) | n/a |
 | `diagnode_errors.js` | `CallExpression` | S2 |
 | `disabled-eval.js` | `CallExpression` | S2 |
 | `eval-warn.js` | `CallExpression` | S2 |
-| `field-init-bindings.js` | `ClassDeclaration` | S2 |
-| `field-value-arguments-error.js` | `ClassDeclaration` | S2 |
+| `field-value-arguments-error.js` | private class members (`#f1 = arguments;`) — the class path itself landed in S2 T4, but the file's second half needs `collectDeclaredPrivateIdentifiers`; the non-private half of its subject is covered by the new `error-class-field.js` | S2 T5 |
 | `function-redeclaration-error.js` | loose- AND strict-mode block-nested `FunctionDeclaration` (`ScopedFunctionPromoter`) — re-probed after S2 T3 unblocked its `try`/`catch` clauses; the remaining blocker is the `sema S1: scoped function declarations are S3 scope` assert | S3 |
 | `invalid-args-eval.js` | **not a port gap** — the resolver's loop/`for` support landed in S2 T1 and every diagnostic in this file is produced, with identical text and locations, but two of them collide at the *same* source location (`89:9`: the strict-mode `cannot declare 'arguments'` error and the `was not declared in function "global"` warning). C++'s buffered-message flush uses `std::sort` (`SourceErrorManager.cpp:61-71`), which is NOT stable, so their relative order is unspecified and in practice depends on the whole 24-message array; our `disable_buffering` uses a stable `sort_by_key` (`support/src/manager.rs:903-909`, a documented deviation). Minimized to two messages the two sides agree; only at this file's message count does libstdc++'s introsort reorder the tie. Not faithfully fixable (there is no defined tie order to match), and the file's actual subject is S1's `arguments`/`eval` declaration rules, so the loop-specific rows were extracted into the new `error-for-decl-strict.js` instead | n/a (C++ unstable-sort tie) |
 | `let-arguments-in-arrow.js` | `CallExpression` (arrows landed in S2 T2; `print(...)` remains) | S2 |
-| `private-declaration-dup-error.js` | `ClassDeclaration` | S2 |
-| `private-load-store-error.js` | `ClassDeclaration` | S2 |
-| `private-name-in-extends-error.js` | `ClassDeclaration` | S2 |
-| `private-names.js` | `ClassDeclaration` | S2 |
+| `private-declaration-dup-error.js` | private class members (`collectDeclaredPrivateIdentifiers`, cpp:2143-2261) | S2 T5 |
+| `private-load-store-error.js` | private class members + the `MemberExpression` private-name branches (cpp:1207-1320) | S2 T5 |
+| `private-name-in-extends-error.js` | private class members (`resolvePrivateName`) | S2 T5 |
+| `private-names.js` | private class members (`declarePrivateName`, the private `Decl` kinds) | S2 T5 |
 | `regress-function-promotion-decl.js` | loose-mode block-nested `FunctionDeclaration` (`ScopedFunctionPromoter`) | S3 |
 | `regress-nested-expressions-error.js` | recursion-depth-limit mismatch: hermesc and sema-dump both correctly error `Too many nested expressions/statements/declarations` on the deeply-nested `get<<=get<<=...` chain, but at different columns (hermesc col 3052, sema-dump col 6124) — the two recursion trackers (`JSParserImpl::recursionDepth_`/`SemanticResolver`'s tracker vs our ported ones) increment at different rates per grammar production, so the exact trip point diverges even though both share the same `MAX_RECURSION_DEPTH = 1024`. Same landmine category as the S1 ledger's "parser recursion limit unported" item (S0-era finding, T6 review) — tracked together, not re-derived/fixed here | parser-gap follow-up (recursion-depth-counting parity) |
-| `reject-super-references.js` | `Super` | S2 |
 | `reject-with.js` | `CallExpression` (`print(a)`) — `with` itself landed in S2 T3 (see `error-with.js`) | S2 |
-| `static-initialization-block-error.js` | `ClassDeclaration` | S2 |
-| `static-initialization-block-lazy-error.js` | `ClassDeclaration` | S2 |
-| `static-initialization-block.js` | `ClassDeclaration` | S2 |
-| `super-in-arrow.js` | `ClassDeclaration` | S2 |
-| `super-in-subclass-error.js` | `ClassDeclaration` | S2 |
-| `super-in-subclass.js` | `ClassDeclaration` | S2 |
+| `static-initialization-block-error.js` | `StaticBlock` (cpp:1053-1084) | S2 T5 |
+| `static-initialization-block-lazy-error.js` | `StaticBlock` | S2 T5 |
+| `static-initialization-block.js` | `StaticBlock` | S2 T5 |
+| `super-in-arrow.js` | `CallExpression` (`super()` and `print(...)`) — the class and `super.x` paths landed in S2 T4 | S2 T6 |
+| `super-in-subclass-error.js` | `CallExpression` — its subject IS the `super() call only allowed in derived class constructor` check (cpp:1195-1202) | S2 T6 |
+| `super-in-subclass.js` | `CallExpression` (`super()`) | S2 T6 |
 | `type-alias-children.js` | typed dialect (`-parse-flow` RUN flag; harness has no per-file flags) — WITHOUT the flag, hermesc and sema-dump both hit the identical `';' expected` parse error on `type A = B;`, but that's a coincidental match on a syntax error, not a test of the file's actual subject (TypeAlias children resolution); same vacuous-match category `deep-ast-err.js` was excluded for, so it does not belong in `sema_corpus/` either | dialect-corpus phase |
-| `undeclared-private-name-error.js` | `CallExpression` | S2 |
-| `valid-super-references.js` | `Super` | S2 |
+| `undeclared-private-name-error.js` | `CallExpression` + private names | S2 T5/T6 |
+| `valid-super-references.js` | `CallExpression` (`super()` and `print(...)`) — `super.x` itself landed in S2 T4 | S2 T6 |
 | `var-scope-redeclaration-error.js` | `CallExpression` (`something()`) — `try`/`catch` landed in S2 T3 | S2 |
 | `xmod-errors.js` | `CallExpression` | S2 |
 
@@ -171,6 +180,9 @@ hermesc, 41 are hermesc-failure files).
 
 Final count after S2 Task 3: **107 corpus files matched** (63 succeed on
 hermesc, 44 are hermesc-failure files).
+
+Final count after S2 Task 4: **119 corpus files matched** (68 succeed on
+hermesc, 51 are hermesc-failure files).
 
 ## S2 Task 1 additions
 
@@ -239,7 +251,14 @@ Not corpus-reachable, and documented at their sites rather than curated away:
   generator/async one, which the parser only produces inside class field
   initializers and static blocks (`test/Parser/await-field-error.js`,
   `test/Parser/class-static-block-await-error.js`) — i.e. once S2 T4/T5 land
-  the class visits. `CoverTypedIdentifier` likewise needs `-parse-flow`
+  the class visits. **S2 T4 RESOLVED the `await` half** by importing
+  `test/Parser/await-field-error.js`, and established that the `yield` half is
+  **NOT reachable at all**: the parser rejects `yield` in a class field
+  initializer as `invalid expression` before sema ever sees a
+  `YieldExpression` there (`test/Parser/yield-field-error.js`, also imported,
+  pins that). Whether a static block can reach it is S2 T5's to re-check
+  (`test/Parser/class-static-block-yield-error.js` suggests the parser rejects
+  that too). `CoverTypedIdentifier` likewise needs `-parse-flow`
   (dialect-corpus phase).
 
 ## S2 Task 3 additions
@@ -270,3 +289,43 @@ Not corpus-reachable, and documented at their sites rather than curated away:
 - **The `Unresolver`'s local-`eval` call site** (cpp:1931-1937) is dead in C++
   too (`if (false && lexScope->localEval && ...)`), so only the `with` call
   site exercises the pass, and that one is dump-invisible (above).
+
+## S2 Task 4 additions
+
+Six new files, the three re-probed `test/Sema` imports (`class-children.js`,
+`field-init-bindings.js`, `reject-super-references.js`) and three imports from
+`test/Parser` (the first files this corpus takes from there — the MANIFEST's
+own S2 T2 note named `await-field-error.js` as the pin candidate for a
+diagnostic no `test/Sema` file can reach). Each was verified byte-for-byte
+(stdout, stderr and exit status) against `hermesc -dump-sema` before being
+added:
+
+| File | Covers |
+|---|---|
+| `classes-shapes.js` | every shape `visitClassAsExpr` handles: declarations and expressions, named and anonymous, self-reference through the inner `ClassExprName` decl, every `MethodDefinition` kind (plain, computed, getter, setter, static, static computed, generator, `async`), classes nested in methods and in functions, a class whose only constructor is the SYNTHETIC implicit one vs. one with an explicit constructor (which suppresses it), and a method body that folds (rebuilding the class node) |
+| `class-properties.js` | `visit(ClassPropertyNode *)`: instance-only, static-only, both (in either order, so both creation orders of the two synthetic initializer functions are pinned) and neither; a field with no initializer (which still creates the initializer function in untyped mode but runs no `declareArguments`, so its scope has no `arguments` decl) vs. one with; computed keys resolved in the ENCLOSING context; `this`, an arrow and a fold inside an initializer; fields in a class inside a function; and `arguments` in a computed key, which is legal precisely because no `FunctionContext` is pushed for it |
+| `classes-derived.js` | `extends` of an identifier, a member expression, a folding sequence expression and a class expression; `super.x` in a method, a static method, a getter, a setter, an arrow inside a method, a doubly-nested arrow and a field initializer (`canReferenceSuper_` inheritance, cpp:1027/1675); anonymous and function-local derived classes. `super()` CALLS are deliberately absent — that check is S2 T6 |
+| `error-class-name.js` | class-name errors: duplicate class, `let`-then-class, `class arguments`/`class eval` (reachable at loose global scope only because a class forces strict mode on the enclosing function, cpp:919), the same for a class *expression* name, and assignment/`+=`/`++` to the class name from inside the body — the inner `ClassExprName` decl's const rules |
+| `error-class-decorators.js` | all three `decorators are not supported` sites (cpp:914-916 on the class, cpp:1009-1011 on a `ClassProperty`, cpp:1097-1099 on a `MethodDefinition`), for declarations and expressions, instance and static members, and a class with two decorators (which reports once) |
+| `error-class-field.js` | the two errors a field initializer's flag save/restores produce: `invalid use of 'arguments'` (`forbidSpecialArgumentsReference_`, including through one and two levels of arrow, at global scope and inside a function) and `'await' not in an async function` (`forbidAwaitExpression_`, even inside an `async` function, for instance and static fields) — plus the contrast that `await` in a COMPUTED KEY inside an `async` function is legal, because the key is resolved in the async function's own context |
+| `await-field-error.js` | **S2 T2 pin, from `test/Parser`** — `'await' not in an async function` (cpp:1496), unreachable before the class visits existed |
+| `arguments-field-error.js` | from `test/Parser` — `invalid use of 'arguments'` reaching a field initializer through an arrow, inside a generator |
+| `yield-field-error.js` | from `test/Parser` — evidence that the `'yield' not in a generator function` pin is unreachable (the parser rejects `yield` in a field initializer first) AND the regression pin for this task's parser fix: C++ reports that `invalid expression` through `error(SMLoc, Twine)` (a bare caret), which this port was rendering as an underlined 5-character range |
+
+Not corpus-reachable, and documented rather than curated away:
+
+- **A class expression inside a class field initializer** (`class C { x =
+  class {}; }`) makes **hermesc itself abort** on an assertion in the C++
+  dumper: `SemContext.cpp:478: printFunction: Assertion 'processedCount ==
+  f.getScopes().size() && "not all scopes were visited"' failed`. The inner
+  class's `LexicalScope` is created with `parentFunction = curFunctionInfo()`
+  (the synthetic elements-initializer function) but `parentScope = curScope_`
+  (the OUTER class's scope), so `SemContextDumper`'s recursive scope walk
+  never reaches it from the initializer function's body scope. This port
+  reproduces the bug faithfully — `dump_context.rs`'s matching
+  `assert_eq!(processed_count, ...)` fires with the same message — but the two
+  abort messages can never be byte-identical (one names a C++ source path), so
+  the shape stays out of the corpus. Both `class-properties.js` and
+  `classes-derived.js` were trimmed to avoid it. It is a pre-existing C++
+  defect, NOT a port gap; a release hermesc (no assertions) dumps the
+  incomplete scope tree instead.

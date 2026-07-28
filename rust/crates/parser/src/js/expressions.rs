@@ -4995,7 +4995,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 if self.parse_jsx() {
                     return self.parse_jsx_root();
                 }
-                self.error_cur(
+                // C++ reports at `tok_->getStartLoc()`, i.e. through the
+                // `error(SMLoc, Twine)` overload (JSParserImpl.h:472-474),
+                // NOT `error(Twine)` — so the diagnostic is a bare caret at
+                // the token start with no underlined range
+                // (JSParserImpl.cpp:2699-2702).
+                let loc = self.cur_range().start;
+                self.error_at_loc(
+                    loc,
                     "invalid expression (possible JSX: pass -parse-jsx to parse)",
                 );
                 None
@@ -5003,7 +5010,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
             // default
             _ => {
-                self.error_cur("invalid expression");
+                // `error(tok_->getStartLoc(), "invalid expression")`
+                // (JSParserImpl.cpp:2706) — a point location, see above.
+                let loc = self.cur_range().start;
+                self.error_at_loc(loc, "invalid expression");
                 None
             }
         }
