@@ -61,9 +61,21 @@
 //!   node's `Cell` decorations (`scope`, `sem_info`, `strictness`, ...) into
 //!   the builder when it starts, so annotations written *before* the
 //!   children are visited survive into the rebuilt node, and annotations
-//!   written after would be lost on a node that gets rebuilt. C++'s visit
-//!   order already does this (`visit(ProgramNode *)` sets everything, then
-//!   visits children last), so it costs nothing to keep.
+//!   written after would be lost on a node that gets rebuilt. This is a
+//!   requirement on each ported visit, **not** a universal property of the
+//!   C++: it has been verified for `visit(ProgramNode *)` (which sets
+//!   everything, then visits children last) and holds for the S1 visits, and
+//!   spec §3.4 obligation (b) is the standing audit of every remaining
+//!   visit.
+//!
+//!   **S2 NOTE — known exception.** `visit(SwitchStatementNode *)`
+//!   (SemanticResolver.cpp:520-539) visits `_discriminant` FIRST (:522) and
+//!   only then writes `node->setLabelIndex(...)` (:526). Under this
+//!   mechanism a folded discriminant (`switch (1+2)`) rebuilds the
+//!   `SwitchStatement`, and a naive "snapshot the builder, then write the
+//!   label" would drop `label_index` — a break-target miscompile. The S2
+//!   port must write the label to the REBUILT node (or restructure to
+//!   write-before-children). See spec §3.4 obligation (b).
 //! - **Node identity is not stable across a rebuild.** A rebuilt node is a
 //!   new allocation with a fresh `NodeId` (`NodeMetadata::duplicate`), so
 //!   anything keyed by node identity — a `NodeRc` held in a side table, or a
@@ -74,6 +86,21 @@
 //!   (`Identifier` above all) are never rebuilt — a parent rebuild copies
 //!   the child *pointer* — so the decorations the resolver writes on them,
 //!   and the `NodeRc`s the binding table keeps to them, stay valid.
+//!
+//!   **Backref fixup obligation (spec §3.4 (a)).** The two sema records that
+//!   keep a `NodeRc` to an *interior* node —
+//!   `LexicalScope::hoisted_functions` (`sem_context.rs`) and
+//!   `FunctionInfo::imports` — are not covered by the "leaves are never
+//!   rebuilt" argument: a fold anywhere inside a hoisted
+//!   `FunctionDeclaration` rebuilds it, stranding the recorded `NodeRc` on a
+//!   node that is no longer part of the returned tree. Whenever a node that
+//!   carries `sem_info`/`scope` (or is recorded in `hoisted_functions` /
+//!   `imports`) ends up on a rebuilt spine, the corresponding sema-record
+//!   `NodeRc` must be patched to the new node. Neither list is populated yet
+//!   — `hoisted_functions` lands with `processDeclarations` (S3) and
+//!   `imports` with the module visits (S4) — so the obligation is recorded
+//!   here rather than implemented; whoever first pushes into either list
+//!   owns the fixup.
 //!
 //! A visit that needs to do work *between* two children (C++
 //! `visit(AssignmentExpressionNode *)` validates `_left` before visiting
@@ -97,6 +124,19 @@
 //! generated code uses to map `Removed`/`Expanded` onto a single child is
 //! `pub(crate)` inside `ast`, so such a visit must decide for itself what a
 //! `Removed` child would mean — no resolver visit produces one.
+//!
+//! The same rule has a sharp edge in the *fold loops* over a linearized
+//! operator chain (`visit(BinaryExpressionNode *, Node **)`, cpp:420-429):
+//! C++ folds `list[i]` into `list[i+1]->_left` and `break`s out of the loop
+//! the first time `astFoldBinaryExpression` fails, because every later fold
+//! depends on this one's result. In this port a fold produces a *new* node,
+//! so the loop must keep going after the `break`-equivalent — not to keep
+//! folding, but to keep REBUILDING the remaining links of the chain, each
+//! with the replacement produced below it — and finally return the new
+//! outermost node as `Changed`. Stopping at the failed fold the way C++ does
+//! would silently discard every fold that already succeeded (they live only
+//! in nodes nothing points at yet). Same shape for
+//! `visit(AssignmentExpressionNode *)`'s chain.
 //!
 //! The recursion-depth protocol the C++ dispatcher implements
 //! (`incRecursionDepth`/`decRecursionDepth` bracketing every dispatched
@@ -537,7 +577,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     // ---- RecursionDepthTracker -------------------------------------------
 
     /// Port of `SemanticResolver::recursionDepthExceeded`
-    /// (SemanticResolver.cpp:2758-2761).
+    /// (SemanticResolver.cpp:2759-2762).
     fn recursion_depth_exceeded(&mut self, node: &Node) {
         self.sm.error(
             node.range().end,
