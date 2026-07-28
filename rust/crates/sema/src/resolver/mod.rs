@@ -817,11 +817,25 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // `PrivateName`), that override reduces to
             // `visitESTreeChildren(*this, node)`, i.e. exactly this generic
             // arm. `Property`/`ObjectExpression` have no override at all.
-            // `VariableDeclarator`/`ObjectPattern`/`ArrayPattern`/
-            // `RestElement`/`AssignmentPattern`/`Empty` (S1 T5, destructuring
-            // declarations) likewise have no C++ override — see
-            // SemanticResolver.cpp's `visit(...)` list, none of which names
-            // any of these kinds.
+            // `VariableDeclarator`/`RestElement`/`AssignmentPattern`/`Empty`
+            // (S1 T5, destructuring declarations) likewise have no C++
+            // override — see SemanticResolver.cpp's `visit(...)` list, none
+            // of which names any of these kinds.
+            //
+            // `ObjectPattern`/`ArrayPattern` DO have overrides
+            // (SemanticResolver.h:209-214), inline one-liners that visit
+            // ONLY `_properties`/`_elements` and deliberately SKIP
+            // `_typeAnnotation` — sema does not resolve inside Flow/TS type
+            // annotations. So, exactly like the `MemberExpression` argument
+            // above, they reduce to this generic arm precisely for the
+            // patterns this port can currently produce: ones with no type
+            // annotation. That restriction is self-enforcing rather than
+            // assumed — the generic arm WOULD visit `type_annotation`
+            // (`visit_children_mut`, node.rs), and every type-annotation
+            // node kind is outside the handled set below, so a Flow-typed
+            // pattern hits the honest "unhandled node kind" panic instead
+            // of being silently mis-visited. Whoever ports the type-node
+            // kinds must give these two their own arms first.
             //
             // S1 T6 adds the remaining override-free *expression* kinds,
             // each checked against the `SemanticResolver::visit` inventory

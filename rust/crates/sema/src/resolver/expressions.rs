@@ -181,7 +181,8 @@ fn rebuild_assignment_chain<'gc>(
         }
         child = match b.build(gc) {
             TransformResult::Changed(v) => Some(v),
-            _ => None,
+            TransformResult::Unchanged => None,
+            other => unreachable!("a builder never yields {other:?}"),
         };
     }
     match child {
@@ -196,7 +197,14 @@ fn replacement_of<'gc>(
 ) -> Option<&'gc Node<'gc>> {
     match result {
         TransformResult::Changed(v) => Some(v),
-        _ => None,
+        TransformResult::Unchanged => None,
+        // `Removed`/`Expanded` have no meaning for a required single child
+        // (see `resolver/mod.rs`'s module doc: a hand-driven visit must
+        // decide for itself, and no resolver visit produces one). C++ can't
+        // express them here at all — `visitESTreeNode` takes a `Node *&`.
+        other => unreachable!(
+            "the resolver never removes or expands a child: {other:?}"
+        ),
     }
 }
 
@@ -270,7 +278,8 @@ impl SemanticResolver<'_, '_, '_, '_> {
                 }
                 let (cur, cur_changed) = match b.build(gc) {
                     TransformResult::Changed(v) => (v, true),
-                    _ => (node_of(i), false),
+                    TransformResult::Unchanged => (node_of(i), false),
+                    other => unreachable!("a builder never yields {other:?}"),
                 };
                 if folding {
                     let cur_be = cur.as_binary_expression().expect(
@@ -301,7 +310,10 @@ impl SemanticResolver<'_, '_, '_, '_> {
         }
         let cur = match result {
             TransformResult::Changed(v) => v,
-            _ => node,
+            TransformResult::Unchanged => node,
+            ref other => unreachable!(
+                "the resolver never removes or expands a child: {other:?}"
+            ),
         };
         let cur_be = cur
             .as_binary_expression()
@@ -326,6 +338,14 @@ impl SemanticResolver<'_, '_, '_, '_> {
     /// far*, with the untouched links left as they are — which is precisely
     /// the tree C++'s `return` leaves behind, since it has already written
     /// those same replacements into the nodes it walked past.
+    ///
+    /// Neither exit is reachable today, in either implementation: the depth
+    /// budget can only be spent by the `_left` visit above, and a `_left`
+    /// deep enough to spend 1024 levels never gets past the C++ *parser*,
+    /// which trips its own (much lower, ~127) nesting limit first. The Rust
+    /// parser does not enforce that limit yet — a known parser-side gap
+    /// tracked at the phase level — so these ports are what keep the visit
+    /// honest if a hand-built or future-parser AST ever does reach here.
     pub(super) fn visit_assignment_expression<'gc>(
         &mut self,
         gc: &'gc GCLock,
@@ -367,7 +387,10 @@ impl SemanticResolver<'_, '_, '_, '_> {
                         left_repl[i] = Some(v);
                         v
                     }
-                    _ => e.left(),
+                    TransformResult::Unchanged => e.left(),
+                    other => unreachable!(
+            "the resolver never removes or expands a child: {other:?}"
+        ),
                 };
                 if self.recursion_depth == 0 {
                     return rebuild_assignment_chain(
@@ -397,7 +420,10 @@ impl SemanticResolver<'_, '_, '_, '_> {
                 b.left(v);
                 v
             }
-            _ => assignment.left,
+            TransformResult::Unchanged => assignment.left,
+            other => unreachable!(
+            "the resolver never removes or expands a child: {other:?}"
+        ),
         };
         if self.recursion_depth == 0 {
             return b.build(gc);
@@ -431,7 +457,10 @@ impl SemanticResolver<'_, '_, '_, '_> {
         // here that value lives on the rebuilt node instead.
         let cur = match result {
             TransformResult::Changed(v) => v,
-            _ => node,
+            TransformResult::Unchanged => node,
+            ref other => unreachable!(
+                "the resolver never removes or expands a child: {other:?}"
+            ),
         };
         let argument = cur
             .as_update_expression()
@@ -488,7 +517,10 @@ impl SemanticResolver<'_, '_, '_, '_> {
         }
         let cur = match result {
             TransformResult::Changed(v) => v,
-            _ => node,
+            TransformResult::Unchanged => node,
+            ref other => unreachable!(
+                "the resolver never removes or expands a child: {other:?}"
+            ),
         };
         let cur_ue = cur
             .as_unary_expression()
