@@ -7,34 +7,40 @@
 
 //! Port of `hermes::sema::SemanticResolver` (`lib/Sema/SemanticResolver.h`,
 //! `lib/Sema/SemanticResolver.cpp`) — S0 entry path plus S1 T4's identifier
-//! resolution core.
+//! resolution core and S1 T5's declarations (hoisting, validation, blocks).
 //!
 //! ## What's covered so far
 //!
 //! The S0 *entry path*: the constructor, `run`, `visit(ProgramNode *)` and
 //! everything that path reaches (`scanDirectives`, `processAmbientDecls`,
 //! `ScopeRAII`, the `FunctionContext` constructor that owns a
-//! `DeclCollector`). Plus, from S1 T4, `visit(IdentifierNode *, Node *)`,
+//! `DeclCollector`). From S1 T4, `visit(IdentifierNode *, Node *)`,
 //! `resolveIdentifier`, `checkIdentifierResolved` and `declareArguments` —
 //! identifier reads/writes resolve against the binding table or become
 //! ambient globals, with the strict-mode `UndefinedVariable` warning and the
-//! `await`/`arguments` forbid-flag errors. Together this reproduces
-//! `hermesc -dump-sema` byte-for-byte for programs made of literals, empty
-//! statements, and (S1 T4) bare identifier reads — including through
+//! `await`/`arguments` forbid-flag errors. From S1 T5 (`declarations.rs`),
+//! `extractIdentsFromDecl`/`extractDeclaredIdentsFromID`,
+//! `processDeclarations`, `validateAndDeclareIdentifier`,
+//! `validateDeclarationName`, `visit(VariableDeclarationNode *)` and
+//! `visit(BlockStatementNode *, Node *)` — `var`/`let`/`const` (including
+//! destructuring patterns) hoist, validate against the redeclaration
+//! decision table, and shadow correctly across nested block scopes. Together
+//! this reproduces `hermesc -dump-sema` byte-for-byte for programs made of
+//! literals, empty statements, bare identifier reads (including through
 //! non-computed member/property positions, which are skipped rather than
-//! resolved — which is what `tests/sema_differential.rs` enforces against
-//! the real compiler. Variable *declarations*, member expressions on
-//! private names, functions, and everything else the C++ resolver handles
-//! remain later tasks' scope.
+//! resolved), and `var`/`let`/`const` declarations in blocks — which is what
+//! `tests/sema_differential.rs` enforces against the real compiler. Function/
+//! class declarations, catch clauses, imports, and everything else the C++
+//! resolver handles remain later tasks' scope — see `declarations.rs`'s
+//! module doc for exactly which of *its* branches are ported but not yet
+//! corpus-reachable.
 //!
 //! Everything not covered is *deliberately absent rather than
 //! approximated*: `visit_node` panics with `sema S1: unhandled node kind
-//! ...` for any node kind outside the handled set, and
-//! `process_collected_declarations` panics if the `DeclCollector` actually
-//! collected anything. An honest panic keeps the differential meaningful —
-//! a silently-wrong resolution would look like a passing test on a corpus
-//! that never exercised it. Later tasks replace each panic with the ported
-//! code.
+//! ...` for any node kind outside the handled set. An honest panic keeps
+//! the differential meaningful — a silently-wrong resolution would look
+//! like a passing test on a corpus that never exercised it. Later tasks
+//! replace each panic with the ported code.
 //!
 //! ## The dispatch protocol: `ast::VisitorMut`
 //!
@@ -200,6 +206,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+mod declarations;
 mod identifiers;
 
 use ast::context::{GCLock, NodeRc};
@@ -760,6 +767,16 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // `visit(IdentifierNode*, Node*)` (cpp:277-323) — see
             // `visit_identifier`.
             Node::Identifier(_) => self.visit_identifier(gc, node, path),
+            // `visit(VariableDeclarationNode*)` (cpp:325-403) — see
+            // `declarations::visit_variable_declaration` (S1 T5).
+            Node::VariableDeclaration(_) => {
+                self.visit_variable_declaration(gc, node)
+            }
+            // `visit(BlockStatementNode*, Node*)` (cpp:502-518) — see
+            // `declarations::visit_block_statement` (S1 T5).
+            Node::BlockStatement(_) => {
+                self.visit_block_statement(gc, node, path)
+            }
             // Kinds with no `visit()` overload in C++: the generic dispatch
             // visits their children (`ExpressionStatement`'s `_expression`
             // — `_directive` is a NodeString, not a node) and here also
@@ -776,6 +793,11 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // `PrivateName`), that override reduces to
             // `visitESTreeChildren(*this, node)`, i.e. exactly this generic
             // arm. `Property`/`ObjectExpression` have no override at all.
+            // `VariableDeclarator`/`ObjectPattern`/`ArrayPattern`/
+            // `RestElement`/`AssignmentPattern`/`Empty` (S1 T5, destructuring
+            // declarations) likewise have no C++ override — see
+            // SemanticResolver.cpp's `visit(...)` list, none of which names
+            // any of these kinds.
             Node::ExpressionStatement(_)
             | Node::EmptyStatement(_)
             | Node::NumericLiteral(_)
@@ -785,7 +807,13 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             | Node::MemberExpression(_)
             | Node::OptionalMemberExpression(_)
             | Node::Property(_)
-            | Node::ObjectExpression(_) => node.visit_children_mut(gc, self),
+            | Node::ObjectExpression(_)
+            | Node::VariableDeclarator(_)
+            | Node::ObjectPattern(_)
+            | Node::ArrayPattern(_)
+            | Node::RestElement(_)
+            | Node::AssignmentPattern(_)
+            | Node::Empty(_) => node.visit_children_mut(gc, self),
             _ => panic!(
                 "sema S1: unhandled node kind {} — later tasks",
                 node.node_type_str()
@@ -861,7 +889,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
                     self.global_scope.clone();
             }
 
-            self.process_collected_declarations(node);
+            self.process_collected_declarations(gc, node);
             if !self.sem_ctx.function(self.cur_function_info()).strict {
                 // Promote hoisted functions.
                 //
@@ -898,21 +926,27 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     /// Port of `SemanticResolver::processCollectedDeclarations`
     /// (cpp:2088-2093).
     ///
-    /// S0 stops at the lookup: `processDeclarations` (cpp:2095-2127) and
-    /// everything it calls is S1 scope. Reaching a non-empty list means the
-    /// corpus grew past what this resolver models, so panic rather than
-    /// silently drop the declarations.
-    fn process_collected_declarations(&mut self, scope_node: &Node) {
-        let decls_opt = self
+    /// Clones the looked-up `ScopeDecls` (a `Vec<NodeRc>` — cheap refcount
+    /// bumps, not a deep copy) before calling `process_declarations`: that
+    /// call needs `&mut self` for every declaration it processes, which a
+    /// live borrow of `self.function_context().decls` (where the
+    /// `ScopeDecls` lives) would forbid. `scope_decls_for_node` only ever
+    /// returns non-empty lists (see `DeclCollector::close_scope`), so the
+    /// `Some` branch below is never called with an empty slice.
+    fn process_collected_declarations(
+        &mut self,
+        gc: &GCLock,
+        scope_node: &Node,
+    ) {
+        let decls: Option<Vec<NodeRc>> = self
             .function_context()
             .decls
             .as_ref()
             .expect("FunctionContext without a DeclCollector")
-            .scope_decls_for_node(scope_node.node_id());
-        if decls_opt.is_some() {
-            // `scope_decls_for_node` only ever returns non-empty lists (see
-            // `DeclCollector::close_scope`).
-            panic!("sema S0: declarations are S1 scope");
+            .scope_decls_for_node(scope_node.node_id())
+            .cloned();
+        if let Some(decls) = decls {
+            self.process_declarations(gc, &decls);
         }
     }
 

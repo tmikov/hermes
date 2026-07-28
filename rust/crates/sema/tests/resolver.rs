@@ -334,13 +334,30 @@ fn call_expression_is_not_modeled() {
     resolve("f();");
 }
 
-/// Declaration boundary: a `var` reaches `processCollectedDeclarations`
-/// with a non-empty `ScopeDecls`, which is still unmodeled (variable
-/// declarations are a separate task from identifier resolution).
+/// `var` declarations are now modeled (S1 T5): `var x;` at the top level
+/// declares a `GlobalProperty`, not an `UndeclaredGlobalProperty` — the
+/// behavioral counterpart to the panic-boundary test this replaced.
+///
+/// Deliberately NOT written via the shared `resolve()` helper — see
+/// `loose_identifier_reference_becomes_undeclared_global_property`'s doc
+/// comment below for why: `validateAndDeclareIdentifier`'s new-decl path
+/// stores a `Binding{decl, Some(ident)}` (a live `NodeRc` back to the
+/// declaring `Identifier`), so `resolve()`'s "return `SemContext`, drop
+/// `Context`" shape trips the same `NodeRc`-outlives-`Context` panic.
 #[test]
-#[should_panic(expected = "sema S0: declarations are S1 scope")]
-fn declarations_are_not_modeled() {
-    resolve("var x;");
+fn var_declaration_at_global_scope_is_a_global_property() {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let root = parse(&gc, &mut sm, "var x;\n");
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    resolve_ast(&gc, &mut sem_ctx, &mut sm, root, &[])
+        .expect("resolution failed for: var x;");
+
+    let global_scope = sem_ctx.get_global_scope();
+    assert_eq!(sem_ctx.scope(global_scope).decls.len(), 1);
+    let decl = sem_ctx.decl(sem_ctx.scope(global_scope).decls[0]);
+    assert_eq!(decl.kind, DeclKind::GlobalProperty);
 }
 
 /// A loose-mode identifier reference resolves to a fresh
