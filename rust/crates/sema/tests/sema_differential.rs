@@ -35,6 +35,16 @@
 //! handler at all (a handler-less `SourceErrorManager` silently discards
 //! every message).
 //!
+//! `parse-error.js` (S1 task 2) is hermesc's FAILURE path: a corpus file may
+//! legitimately make hermesc exit nonzero, in which case all three channels
+//! (stdout, stderr, exit status) are still compared byte-for-byte — stdout
+//! empty on both sides, stderr carrying hermesc's driver epilogue
+//! (`Emitted N errors. exiting.\n`, CompilerDriver.cpp:2076-2080) and exit
+//! code 2 (`CompileStatus::ParsingFailed`, CompilerDriver.h:19-38). The
+//! corpus is only required to contain at least one file hermesc SUCCEEDS on
+//! (a non-degeneracy guard: an all-failing corpus would make the stdout/
+//! stderr comparison above vacuous in the success case).
+//!
 //! Skip cleanly when hermesc is absent; set `REQUIRE_DIFFERENTIAL=1` to turn
 //! a missing hermesc into a hard failure (used in CI).
 
@@ -103,6 +113,13 @@ fn run_differential(
         corpus_dir.display()
     );
 
+    // Non-degeneracy guard: a corpus where hermesc fails on every file would
+    // make the success-case byte comparison above vacuous (every file could
+    // "pass" by both sides independently emitting unrelated garbage to
+    // stderr with a matching nonzero exit code). At least one file must
+    // exercise the success path.
+    let mut hermesc_successes = 0usize;
+
     for f in &files {
         let c = Command::new(&hermesc)
             .args(["-dump-sema"])
@@ -110,14 +127,9 @@ fn run_differential(
             .arg(f)
             .output()
             .expect("failed to run hermesc");
-        // Guard against a silent oracle failure (e.g. a future flag rename):
-        // a nonzero hermesc exit would otherwise just empty its stdout.
-        assert!(
-            c.status.success(),
-            "hermesc failed on {}:\n{}",
-            f.display(),
-            String::from_utf8_lossy(&c.stderr)
-        );
+        if c.status.success() {
+            hermesc_successes += 1;
+        }
         let r = Command::new(&sema_dump)
             .args(sema_dump_extra)
             .arg(f)
@@ -150,8 +162,15 @@ fn run_differential(
             f.display()
         );
     }
+    assert!(
+        hermesc_successes > 0,
+        "{} has no file hermesc succeeds on: the success-path byte \
+         comparison would be vacuous",
+        corpus_dir.display()
+    );
     eprintln!(
-        "sema differential ({corpus}): {} corpus files matched",
+        "sema differential ({corpus}): {} corpus files matched \
+         ({hermesc_successes} succeeded on hermesc)",
         files.len()
     );
 }

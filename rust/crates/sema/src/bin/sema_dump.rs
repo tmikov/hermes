@@ -14,12 +14,28 @@
 //!   On success (parsed, no parse errors, resolution succeeded): exactly what
 //!     `sema::dump::sem_dump` emits (which ends in a newline); nothing added,
 //!     exit 0.
-//!   On a parse error or a resolution failure: nothing on stdout, exit 1.
+//!   On a parse error or a resolution failure: nothing on stdout, exit 2.
 //!     Diagnostics (errors AND warnings) go to stderr through the installed
 //!     `StderrHandler`, in hermesc's `file:line:col: kind: message` + source
-//!     line + caret format. Note that a `SourceErrorManager` with no handler
+//!     line + caret format, followed by hermesc's driver epilogue line
+//!     `Emitted N errors. exiting.\n` when N (the error count, not counting
+//!     warnings) is nonzero. Note that a `SourceErrorManager` with no handler
 //!     installed silently DISCARDS every diagnostic, so installing one is
 //!     what makes the differential's stderr comparison meaningful.
+//!
+//!     Both failure modes share this exact epilogue + exit code because in
+//!     `CompilerDriver::compileFileToDisk` they are the SAME check: `parseJS`
+//!     (CompilerDriver.cpp:800-980) returns `nullptr` on either a parser
+//!     failure (early returns while parsing) or a `resolveAST` failure
+//!     (:939-947), and the single caller-side check
+//!     (`if (!ast) { ... } return ParsingFailed;`, CompilerDriver.cpp:2076-
+//!     2080) is what prints the epilogue and picks the exit code — there is
+//!     no separate sema-failure branch. `ParsingFailed == 2`
+//!     (`CompileStatus`, CompilerDriver.h:19-38: `Success` = 0, `InvalidFlags`
+//!     = 1, `ParsingFailed` = 2, ...), and `main` returns `res.status`
+//!     verbatim as the process exit code (hermesc.cpp:49-57). Confirmed
+//!     empirically: `hermesc -dump-sema` on `var 1x;` exits 2 and prints
+//!     `Emitted 2 errors. exiting.\n` after the two diagnostics.
 //!
 //! Args: [--parse-flow] [--parse-component-syntax] [--parse-flow-records]
 //!       [--parse-flow-match] [--parse-ts] [--parse-jsx] [file|-]
@@ -49,6 +65,25 @@ use sema::resolve::resolve_ast;
 use sema::sem_context::SemContext;
 use support::manager::SourceErrorManager;
 use support::render::StderrHandler;
+
+/// Print hermesc's post-`parseJS`-failure epilogue (if there were any
+/// errors) and exit with hermesc's exit code. Port of the single
+/// `if (!ast) { ... } return ParsingFailed;` check in
+/// `CompilerDriver::compileFileToDisk` (CompilerDriver.cpp:2076-2080) that
+/// both a parse failure and a `resolveAST` failure hit (see the module doc).
+/// `N` is only printed when nonzero, matching
+/// `if (auto N = ...getErrorCount()) llvh::errs() << ...` exactly (an
+/// unconditional print would be wrong if a caller ever reached `None`/`false`
+/// without emitting an error).
+fn exit_on_failure(sm: &SourceErrorManager) -> ! {
+    let n = sm.error_count();
+    if n != 0 {
+        eprintln!("Emitted {n} errors. exiting.");
+    }
+    // `CompileStatus::ParsingFailed == 2` (CompilerDriver.h:19-38); `main`
+    // returns `res.status` as the process exit code (hermesc.cpp:57).
+    std::process::exit(2);
+}
 
 /// The parsed command-line options. Built into a [`CommandLine`] then read
 /// back after parsing (the juno `command_line` idiom). This is `ast-dump`'s
@@ -255,8 +290,9 @@ fn main() {
     let root = match parsed {
         Some(root) if sm.error_count() == 0 => root,
         // The diagnostics were printed to stderr as they were produced;
-        // hermesc exits nonzero with no stdout output.
-        _ => std::process::exit(1),
+        // hermesc exits nonzero with no stdout output, after the driver's
+        // epilogue line (see `exit_on_failure`).
+        _ => exit_on_failure(&sm),
     };
 
     let mut sem_ctx = SemContext::new(Keywords::new(&gc));
@@ -267,7 +303,7 @@ fn main() {
         resolve_ast(&gc, &mut sem_ctx, &mut sm, root, &ambient_decls);
     let root = match resolved {
         Some(root) => root,
-        None => std::process::exit(1),
+        None => exit_on_failure(&sm),
     };
 
     let mut out_bytes: Vec<u8> = Vec::new();
