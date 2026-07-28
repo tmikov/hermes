@@ -225,6 +225,16 @@ fn main() {
     // constructor defaults to `printDiagnosticHelper`).
     let output_options = sm.output_options();
     sm.set_handler(Box::new(StderrHandler::new(output_options)));
+    // A bare `SourceErrorManager` is unlimited, but hermesc's driver applies
+    // its `-ferror-limit` option — `init(20)` (CompilerDriver.cpp:555-559) —
+    // with `context->getSourceErrorManager().setErrorLimit(cl::ErrorLimit)`
+    // (CompilerDriver.cpp:1223), before any parsing. Past the limit hermesc
+    // emits `<unknown>:0: error: too many errors emitted` once and drops every
+    // later message, so an unlimited `sema-dump` diverges on any input with
+    // more than 20 errors (`error-limit.js` in the corpus is the pin). This
+    // mirrors only the DEFAULT: hermesc's flag is not modeled here, and 0
+    // (unlimited) is a value the corpus cannot ask for.
+    sm.set_error_limit(20);
 
     let mut ctx = Context::new();
     ctx.set_parse_flow(parse_flow);

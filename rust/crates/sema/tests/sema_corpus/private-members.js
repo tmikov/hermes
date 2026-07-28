@@ -50,6 +50,16 @@ class A {
   // Accessors that stay one-sided.
   get #onlyGetter() {}
   set #onlySetter(v) {}
+  // ...and their STATIC forms, which are the only way to reach the
+  // `PrivateGetter PrivateStatic` / `PrivateSetter PrivateStatic` decl+special
+  // pairs: `declarePrivateName(id, kind, method->_static)` (cpp:2226-2229 →
+  // 2033-2044) sets `Decl::Special::PrivateStatic` for every static private
+  // method or accessor, but a one-sided static accessor is neither upgraded to
+  // `PrivateGetterSetter` (the static pair above) nor a `PrivateMethod`. The
+  // S2 T8 sweep inventoried every decl-kind/special pair in the corpus dumps
+  // and found these two missing.
+  static get #onlyGetterStatic() {}
+  static set #onlySetterStatic(v) {}
 }
 
 // Private names resolve anywhere inside the class, including in members

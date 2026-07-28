@@ -149,10 +149,36 @@ pub fn render_diagnostic(diag: &ResolvedDiagnostic, opts: &OutputOptions) -> Str
         DiagKind::Warning => "warning",
         DiagKind::Note => "note",
     };
-    let mut out = format!(
-        "{}:{}:{}: {}: {}\n",
-        diag.file_name, diag.line, diag.col, kind_str, diag.message
-    );
+    // The location prefix is conditional, exactly as in
+    // `printDiagnosticHelper` (SourceErrorManager.cpp:574-582): an empty
+    // filename prints no prefix at all, `-` prints as `<stdin>`, and the
+    // column is omitted when C++'s `columnNo` is -1. C++ builds that
+    // `columnNo` as `col - 1`, so "no column" is exactly `col == 0` here —
+    // unreachable for a resolved location (columns are 1-based) and what a
+    // location-less message carries. `lineNo` is never -1 in Hermes's use
+    // (`SourceMgr::GetMessage` leaves it 0 for an invalid location,
+    // SourceMgr.cpp:238-298), so it is always printed with the filename;
+    // that is what makes the "too many errors emitted" sentinel print as
+    // `<unknown>:0: error: ...`.
+    let mut out = String::new();
+    if !diag.file_name.is_empty() {
+        if diag.file_name == "-" {
+            out.push_str("<stdin>");
+        } else {
+            out.push_str(&diag.file_name);
+        }
+        out.push(':');
+        out.push_str(&diag.line.to_string());
+        if diag.col != 0 {
+            out.push(':');
+            out.push_str(&diag.col.to_string());
+        }
+        out.push_str(": ");
+    }
+    out.push_str(kind_str);
+    out.push_str(": ");
+    out.push_str(&diag.message);
+    out.push('\n');
     if let Some(src) = &diag.source_line {
         // Convert Option<(u32,u32)> to a one-element or empty slice of
         // (usize, usize) so we can pass it to build_source_and_caret_line.
@@ -207,6 +233,47 @@ impl DiagHandler for StderrHandler {
 mod tests {
     use super::*;
     use crate::diag::{DiagKind, OutputOptions};
+
+    /// `printDiagnosticHelper`'s location prefix is conditional
+    /// (SourceErrorManager.cpp:574-582): the whole prefix is skipped for an
+    /// empty filename, `-` renders as `<stdin>`, and the column is omitted
+    /// when `columnNo == -1` — which is what a location-less diagnostic has,
+    /// since `SMDiagnostic` gets `col - 1` and a location-less message has
+    /// col 0. The "too many errors emitted" sentinel is the one such message
+    /// hermesc actually emits, and it prints as `<unknown>:0: error: ...`
+    /// (`BufferID = "<unknown>"`, SourceMgr.cpp:246; `LineAndCol` defaults to
+    /// {0,0}).
+    #[test]
+    fn header_prefix_is_conditional() {
+        use crate::diag::ResolvedDiagnostic;
+        let base = |file: &str, line: u32, col: u32| ResolvedDiagnostic {
+            kind: DiagKind::Error,
+            file_name: file.into(),
+            line,
+            col,
+            message: "m".into(),
+            source_line: None,
+            range_cols: None,
+        };
+        let opts = OutputOptions::default();
+        // The sentinel's shape: no column, line 0, `<unknown>` filename.
+        assert_eq!(
+            render_diagnostic(&base("<unknown>", 0, 0), &opts),
+            "<unknown>:0: error: m\n"
+        );
+        // An empty filename drops the prefix entirely.
+        assert_eq!(render_diagnostic(&base("", 0, 0), &opts), "error: m\n");
+        // `-` is the stdin buffer name; it renders as `<stdin>`.
+        assert_eq!(
+            render_diagnostic(&base("-", 3, 4), &opts),
+            "<stdin>:3:4: error: m\n"
+        );
+        // The ordinary case is unchanged.
+        assert_eq!(
+            render_diagnostic(&base("t.js", 3, 4), &opts),
+            "t.js:3:4: error: m\n"
+        );
+    }
 
     #[test]
     fn ranged_caret_underline() {

@@ -29,6 +29,22 @@ class AtGlobal {
   d = [arguments, arguments];
 }
 
+// The `typeof` sibling of `error-static-block-typeof-arguments.js`: a bare
+// `typeof arguments` reports the error TWICE at the same location, because
+// `visit(IdentifierNode *, Node *)`'s `typeof` arm (cpp:306) has no early
+// return and falls through to the unconditional `resolveIdentifier(identifier,
+// false)` at cpp:322, while every forbid-flag check in `resolveIdentifier`
+// runs BEFORE its decl-cache early return (cpp:1993-1996). The static-block
+// file pins that shape for `forbidArgumentsAsIdentifier_` (cpp:1986-1991);
+// this class pins it for `forbidSpecialArgumentsReference_` (cpp:1972-1977),
+// whose message is `invalid use of 'arguments'` rather than
+// `... as an identifier` — and which, unlike the other two flags, is keyed on
+// the resolved decl's `Special::Arguments` rather than on the name, so it
+// needs the `declareArguments()` at cpp:1039 to have run.
+class TypeofField {
+  a = typeof arguments;
+}
+
 function inFunction(p) {
   class C {
     a = arguments;

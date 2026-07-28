@@ -16,8 +16,10 @@
 // MemberExpression, its `_object` is the Identifier `$SHBuiltin`, and the
 // member is NOT computed. Then resolveIdentifier(ident, false) must return a
 // decl of kind UndeclaredGlobalProperty (cpp:1161) — libhermes declares
-// `var $SHBuiltin;`, so at global scope it always does (Decl %d.23 in the
-// dump below).
+// `var $SHBuiltin;`, so at global scope it always does (the
+// `Decl %d.27 '$SHBuiltin' UndeclaredGlobalProperty` line in the ambient-
+// globals scope of this file's `-dump-sema` output; this corpus keeps no
+// CHECK lines, the differential compares the two dumps directly).
 //
 // `moduleFactory`/`export`/`import` property names are the CommonJS-module
 // protocol and are NOT exercised here: they are S4 (see xmod-errors.js's

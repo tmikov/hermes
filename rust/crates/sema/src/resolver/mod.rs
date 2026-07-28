@@ -1253,8 +1253,28 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // `DeclCollector` override, and it is an `ESTREE_NODE_0_ARGS`
             // kind (ESTree.def:171), i.e. this arm is exactly `Unchanged`
             // for it.
+            // S2 T8's corpus sweep adds `BigIntLiteral` (ESTree.def:270-272),
+            // `TaggedTemplateExpression` (:483-485) and `ImportExpression`
+            // (:299-302). All three are plain untyped-JS constructs
+            // `hermesc -dump-sema` resolves and dumps happily while this arm
+            // was panicking on them; the sweep found them by running
+            // `sema-dump` over `test/Parser`, `test/IRGen`, `test/BCGen` and
+            // `test/Optimizer`. None appears anywhere in `lib/Sema/` outside
+            // the FlowChecker (`FlowChecker-expr.cpp:1244` handles
+            // `BigIntLiteral` as a *typed* expression), so none has a
+            // `SemanticResolver::visit` override in the
+            // SemanticResolver.h:200-304 inventory and none has a
+            // `DeclCollector` override: C++ reaches `_tag`/`_quasi`,
+            // `_source`/`_options` and (for the `NodeLabel`-only
+            // `BigIntLiteral`) nothing at all through `visitESTreeChildren`,
+            // creating no scope — exactly this arm. Pinned by
+            // `expr-visit-generic-2.js`, which also pins that BigInt operands
+            // are NOT folded (`ASTEval`'s folds only accept `NumericLiteral`).
             Node::ExpressionStatement(_)
             | Node::DebuggerStatement(_)
+            | Node::BigIntLiteral(_)
+            | Node::TaggedTemplateExpression(_)
+            | Node::ImportExpression(_)
             | Node::ClassBody(_)
             | Node::ThisExpression(_)
             | Node::ThrowStatement(_)

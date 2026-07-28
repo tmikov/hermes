@@ -76,6 +76,18 @@ single biggest unlock of the sweep: it re-probed the **sixteen** rows blocked on
 the Imported table has 47 rows (46 from `test/Sema` + the gap-filler) and the
 Deferred table 8, i.e. 46 + 8 = 54. See "S2 Task 6 additions" at the end.
 
+**S2 Task 8** (the round-2 sweep) re-probed all eight remaining Deferred rows —
+**none** unblocked, every stated reason confirmed — and then went at coverage
+from the other end: five exhaustive inventories of the dump's own vocabulary,
+plus a differential run of both binaries over the 1416 `.js` files in the REST
+of `test/` (`Parser`, `IRGen`, `BCGen`, `Optimizer`, `hermes`, `AST`, `Driver`,
+`RA`). That found three node kinds the resolver panicked on, one node kind with
+no coverage, two missing decl-kind/special pairs, an unapplied `-ferror-limit`,
+a wrong `<unknown>:0` render for location-less messages, and a 180-file
+PARSER-side diagnostic-geometry gap (left to the parser track, with numbers).
+See "S2 Task 8: corpus sweep round 2" at the end; the Imported table is
+unchanged at 47 rows and the Deferred table stays at 8, i.e. 46 + 8 = 54.
+
 ## Imported (byte-identical vs hermesc)
 
 | File | Note |
@@ -147,13 +159,13 @@ files in, 54 accounted for below) rather than silently dropped. It is also
 | `function-redeclaration-error.js` | loose- AND strict-mode block-nested `FunctionDeclaration` (`ScopedFunctionPromoter`) — re-probed after S2 T3 unblocked its `try`/`catch` clauses; the remaining blocker is the `sema S1: scoped function declarations are S3 scope` assert | S3 |
 | `invalid-args-eval.js` | **not a port gap** — the resolver's loop/`for` support landed in S2 T1 and every diagnostic in this file is produced, with identical text and locations, but two of them collide at the *same* source location (`89:9`: the strict-mode `cannot declare 'arguments'` error and the `was not declared in function "global"` warning). C++'s buffered-message flush uses `std::sort` (`SourceErrorManager.cpp:61-71`), which is NOT stable, so their relative order is unspecified and in practice depends on the whole 24-message array; our `disable_buffering` uses a stable `sort_by_key` (`support/src/manager.rs:903-909`, a documented deviation). Minimized to two messages the two sides agree; only at this file's message count does libstdc++'s introsort reorder the tie. Not faithfully fixable (there is no defined tie order to match), and the file's actual subject is S1's `arguments`/`eval` declaration rules, so the loop-specific rows were extracted into the new `error-for-decl-strict.js` instead | n/a (C++ unstable-sort tie) |
 | `regress-function-promotion-decl.js` | loose-mode block-nested `FunctionDeclaration` (`ScopedFunctionPromoter`) | S3 |
-| `regress-nested-expressions-error.js` | recursion-depth-limit mismatch: hermesc and sema-dump both correctly error `Too many nested expressions/statements/declarations` on the deeply-nested `get<<=get<<=...` chain, but at different columns (hermesc col 3052, sema-dump col 6124) — the two recursion trackers (`JSParserImpl::recursionDepth_`/`SemanticResolver`'s tracker vs our ported ones) increment at different rates per grammar production, so the exact trip point diverges even though both share the same `MAX_RECURSION_DEPTH = 1024`. Same landmine category as the S1 ledger's "parser recursion limit unported" item (S0-era finding, T6 review) — tracked together, not re-derived/fixed here | parser-gap follow-up (recursion-depth-counting parity) |
+| `regress-nested-expressions-error.js` | recursion-depth-limit mismatch: hermesc and sema-dump both correctly error `Too many nested expressions/statements/declarations` on the deeply-nested `get<<=get<<=...` chain, but at different columns (hermesc col 3052, sema-dump col 6124) — the two recursion trackers (`JSParserImpl::recursionDepth_`/`SemanticResolver`'s tracker vs our ported ones) increment at different rates per grammar production, so the exact trip point diverges even though both share the same `MAX_RECURSION_DEPTH = 1024`. Same landmine category as the S1 ledger's "parser recursion limit unported" item (S0-era finding, T6 review) — tracked together, not re-derived/fixed here. **S2 T8's sweep sharpened it: on `test/hermes/far-environment-access.js` (250-odd nested arrows) hermesc reports the error at 28:510 while `sema-dump` STACK-OVERFLOWS and aborts (SIGABRT/134) before its own tracker trips.** So the gap is not only "a different column": a debug build's frames are big enough that 1024 allowed levels outrun the 8 MB stack, i.e. deep-but-otherwise-valid input crashes instead of diagnosing. Same row, higher severity | parser-gap follow-up (recursion-depth-counting parity + a real crash) |
 | `type-alias-children.js` | typed dialect (`-parse-flow` RUN flag; harness has no per-file flags) — WITHOUT the flag, hermesc and sema-dump both hit the identical `';' expected` parse error on `type A = B;`, but that's a coincidental match on a syntax error, not a test of the file's actual subject (TypeAlias children resolution); same vacuous-match category `deep-ast-err.js` was excluded for, so it does not belong in `sema_corpus/` either | dialect-corpus phase |
 | `xmod-errors.js` | the `$SHBuiltin` CommonJS-module protocol: `visitModuleFactory`/`visitModuleExport`/`visitModuleImport` (cpp:1320-1453), reached from the three property-name branches of rewrite #3 (cpp:1168-1189). `CallExpression` itself landed in S2 T6, which ports those three branches as loud phase-tagged panics — its row was re-classified from "`CallExpression` / S2" accordingly. Every diagnostic in the file (`$SHBuiltin.moduleFactory requires exactly two arguments.` and 17 more) comes from those three functions | S4 modules |
 
 ## Subdirectories (`test/Sema/flow/`, `test/Sema/flow/ffi/`, `test/Sema/lowering/`)
 
-`test/Sema/flow/` (179 files across `flow/` and `flow/ffi/`) and
+`test/Sema/flow/` (178 files across `flow/` and `flow/ffi/`: 173 + 5) and
 `test/Sema/lowering/fastarray-push.js` all require `-typed`/`-parse-flow` (or
 `-parse-ts`) just to parse their Flow/TS type syntax (e.g. `var x:
 number[];`). `sema_differential.rs` has no per-file-flag mechanism (adding one
@@ -212,6 +224,14 @@ hermesc, 51 are hermesc-failure files).
 Final count after S2 Task 5: **134 corpus files matched** (72 succeed on
 hermesc, 62 are hermesc-failure files).
 
+Final count after S2 Task 6: **157 corpus files matched** (86 succeed on
+hermesc, 71 are hermesc-failure files). S2 Task 7 (`CheckImplicitReturn`) added
+no corpus file — the flag it computes is not printed by `-dump-sema`, see the
+S2 Task 8 section.
+
+Final count after S2 Task 8: **160 corpus files matched** (88 succeed on
+hermesc, 72 are hermesc-failure files).
+
 ## S2 Task 1 additions
 
 Eight new files, each verified byte-for-byte (stdout, stderr and exit status)
@@ -269,8 +289,15 @@ Not corpus-reachable, and documented at their sites rather than curated away:
   reinterpret paths. `CallExpression`/`OptionalCallExpression` are whitelisted
   parents that were still deferred when this note was written; **S2 T6
   RESOLVED that** — `calls-shapes.js` now exercises `f(...a)`, `f(1, ...a, 2)`,
-  `f?.(...a)` and `new f(...a)`, so four of the five whitelisted parents are
-  live (`ArrayExpression` is the fifth, covered since S2 T2).
+  `f?.(...a)` and `new f(...a)`. So **all five** whitelisted parents are live:
+  `ArrayExpression`, `ObjectExpression` and `NewExpression` since S2 T2
+  (`spread-shapes.js`'s `[1, ...b, 2]`, `{ p: 1, ...d }` and `new f(...a)`),
+  `CallExpression` and `OptionalCallExpression` since S2 T6. (This sentence
+  used to claim "four of the five ... `ArrayExpression` is the fifth", which
+  double-counted the two call kinds as one and left `ObjectExpression`
+  unnamed; S2 T8 re-derived the coverage from the AST dumps — the
+  `SpreadElement` under `spread-shapes.js`'s `ObjectExpression` is right
+  there in hermesc's output — and corrected the arithmetic.)
 - **`invalid meta property X.Y`** (cpp:868-871). The parser only builds a
   `MetaProperty` after matching `new` `.` `target` / `import` `.` `meta`
   exactly, and reports `'target'/'meta' expected in member expression`
@@ -373,7 +400,7 @@ Not corpus-reachable, and documented rather than curated away:
 
 ## S2 Task 5 additions
 
-Five new files, the five re-probed `test/Sema` imports (`private-names.js`,
+Six new files, the five re-probed `test/Sema` imports (`private-names.js`,
 `private-declaration-dup-error.js`, `private-name-in-extends-error.js`,
 `field-value-arguments-error.js`, `static-initialization-block-error.js`) and
 three more imports from `test/Parser` (following the precedent S2 T4 set — the
@@ -461,3 +488,182 @@ Not corpus-reachable, and documented at their sites rather than curated away:
   defect, not a port gap — so the shape stays out of the corpus and
   `calls.rs`'s `sh_builtin_property_name` reproduces the failing `cast` as an
   explicit panic.
+
+## S2 Task 8: corpus sweep round 2
+
+### Step 1 — the eight remaining Deferred rows, re-probed
+
+Every row in the Deferred table above was re-run through both binaries (raw
+stdout + stderr + exit status). **None unblocked**; each row's stated reason was
+confirmed, not assumed:
+
+| File | Re-probe result |
+|---|---|
+| `break-in-nested-func.js` | panics `scoped function declarations are S3 scope` (`resolver/mod.rs`); hermesc reports `'break' not within a loop or a switch` — still S3 |
+| `deep-ast-err.js` | still a vacuous match (comment-only file); still excluded on purpose |
+| `function-redeclaration-error.js` | panics in `resolver/functions.rs` (same S3 promoter) |
+| `invalid-args-eval.js` | still the SAME single same-location pair at `89:9` and nothing else; C++'s unstable `std::sort` orders the tie the other way. Unchanged, unfixable-by-construction |
+| `regress-function-promotion-decl.js` | panics (S3 promoter) |
+| `regress-nested-expressions-error.js` | still col 3052 vs 6124 — see the row's updated note, which S2 T8 upgraded with a real crash case |
+| `type-alias-children.js` | still a vacuous `';' expected` match without `-parse-flow` |
+| `xmod-errors.js` | panics `$SHBuiltin.moduleFactory needs visitModuleFactory` — S4, as re-classified by S2 T6 |
+
+So the Deferred table is final for S2: 8 rows, all blocked on S3 promotion (3),
+S4 modules (1), the C++ unstable-sort tie (1), the recursion-depth gap (1), a
+dialect flag (1) and the vacuous file (1).
+
+### Step 2 — feature coverage, by exhaustive inventory rather than by eye
+
+The dump is the only thing the differential can see, so coverage was measured on
+the dump's own vocabulary: every corpus file's `hermesc -dump-sema` output was
+collected and inventoried, and each inventory compared against the full set the
+port can produce. Five inventories, five answers:
+
+1. **Node kinds** (the AST half of the dump — 72 distinct labels over the
+   corpus, i.e. 71 node kinds plus the `BinOp` line the `+`/`-` linearizer
+   prints)
+   vs everything `visit_node` handles: exactly ONE handled kind had zero
+   occurrences — `DebuggerStatement`, whitelisted by S2 T7 for
+   `CheckImplicitReturn`'s sake. Closed by the new `debugger-statement.js`.
+   (`WithStatement` and the five `Cover*` kinds are also absent from the AST
+   inventory, but only because every file that reaches them exits 2 before a
+   dump is printed — `error-with.js`/`error-cover-nodes.js` do cover the
+   visits.)
+2. **`Decl::Kind`** (SemContext.h:58-105, 18 kinds): all reachable ones appear.
+   The two absent are `Import` (S4 modules) and `TypedBuiltin` (`typed_`-only,
+   cpp:2630-2639).
+3. **`Decl::Special`** (SemContext.h:110-116): `Arguments` (218 occurrences)
+   and `PrivateStatic` appear; `Eval` appears nowhere — because **nothing in
+   the whole C++ tree ever sets or reads it**. `Decl::Special::Eval` is a dead
+   enumerator whose only mention outside the header is the `CASE(Eval)` line of
+   `printDecl`'s macro (SemContext.cpp:535-545); across `lib/`, only
+   `Special::Arguments` (9 sites) and `Special::PrivateStatic` (5) are ever
+   used. The kind×special
+   PAIRS were then inventoried, which found a real gap:
+   `PrivateGetter PrivateStatic` and `PrivateSetter PrivateStatic` (a
+   one-sided STATIC private accessor — neither upgraded to
+   `PrivateGetterSetter` nor a `PrivateMethod`) had no corpus exercise. Closed
+   by two lines in `private-members.js`.
+4. **The `[D:…]` annotation printer's three branches** (SemResolve.cpp:100-118):
+   `D:E:%d.N` (921 occurrences) and `D:%d.N E:%d.M` (65) are covered; the
+   third — `declD` set with NO `exprD` — is unreachable in the corpus, and so
+   is ` UNR`. Both come from the `Unresolver` (`setExpressionDecl(node,
+   nullptr)` at cpp:3204, `setUnresolvable`), whose only live call site is
+   `with` (cpp:1931-1937's local-`eval` site is `if (false && …)`), and `with`
+   always exits 2 without a dump. That is the same structural blindness
+   `error-with.js`'s row already records; the unit tests are the net.
+5. **Diagnostics**: the 54 distinct `error`/`warning`/`note` messages the
+   resolver can emit were harvested from `resolver/*.rs` and each one grepped
+   for in the corpus's aggregate stderr, regenerated from a clean run. (Two
+   more harvested strings — `Static class properties cannot be named
+   'prototype'` and `constructor method must not be private` — turned out to be
+   PARSER messages, `parser/src/js/classes.rs:1102`/`:1261`, and are not this
+   corpus's business. They only showed up because the first run of this
+   inventory read a scratch directory polluted with dumps of parser test files;
+   that is exactly how a bogus "covered" verdict gets manufactured, so every
+   number in this section comes from the clean regeneration.) Every reachable
+   message is covered; the uncovered ones are exactly the already-documented
+   set (`Invalid regular expression:` — regex engine;
+   `eval() is disabled at runtime` — needs `-enable-eval=false`;
+   `spread operator is not supported`, `invalid meta property X.Y`,
+   `'yield' not in a generator function` — unreachable in this grammar;
+   `typecast not allowed in this context` — `-parse-flow`;
+   `Too many nested expressions…` — the recursion-depth row) **plus one this
+   sweep found undocumented**: `'this' parameter requires typed mode`
+   (cpp:1768-1772). It fires when Flow syntax is parsed but typing is off, i.e.
+   under `-parse-flow` and NOT under `-typed`; in the untyped dialect the
+   parser rejects a `this` parameter first (`identifier, '{' or '[' expected in
+   binding pattern`, probed for functions, methods, arrows and object methods).
+   Dialect-corpus phase, like the other `-parse-flow`-only rows.
+
+Task 7's own feature is invisible here by construction:
+`SemContextDumper::printFunction` (SemContext.cpp:449-480) prints only
+`Func`/`StaticBlock` + strictness + scopes + decls + hoisted functions, and
+`FunctionInfo::mayReachImplicitReturn` (SemContext.h:354) is read only by the
+FlowChecker and IRGen. `tests/check_implicit_return.rs` is its regression net,
+which is why S2 T7 added no corpus file and why `debugger-statement.js` pins
+only the resolver-visible half.
+
+A sixth inventory covered `set_node_scope`'s 15 scope-bearing kinds
+(SemanticResolver.cpp:2931-2932): 11 of them appear with a printed `Scope
+%s.N` in the corpus. The other four never get one from this resolver —
+`FunctionDeclaration`/`ArrowFunctionExpression` because `visitFunctionLike`
+opens the function scope with the node-less `ScopeRAII` (verified: even with a
+non-simple parameter list neither the function node nor its body block carries
+a scope in hermesc's dump), and `ComponentDeclaration`/`HookDeclaration`
+because they are Flow-only.
+
+### Step 3 — the differential run over the REST of `test/`
+
+`test/Sema` was mined out by S1 T8 + S2 T1-T6, so the sweep was pointed at
+every other `.js` file under `test/` that plain `-dump-sema` can consume:
+`test/Parser` (366), `test/IRGen` + `test/BCGen` + `test/Optimizer` (395),
+`test/hermes` + `test/AST` + `test/Driver` + `test/RA` (655) — 1416 files, both
+binaries, three channels. Result after this task's fixes:
+
+| Outcome | Count | What it is |
+|---|---|---|
+| byte-identical | 1203 | every one of the 190 mismatches is a file hermesc FAILS on: not one file that hermesc compiles successfully disagrees |
+| mismatch | 190 | almost all differ in PARSER diagnostic geometry — see below |
+| panic | 23 | S4 modules (`Import`/`Export*` kinds, `$SHBuiltin` module protocol) and the S3 promoter, i.e. the known deferrals |
+
+Two of those are single-file findings worth naming:
+
+- `test/AST/regexp.js` — hermesc exits 2 with `Invalid regular expression:
+  Character class range out of order` (and two more); we exit 0. That is the
+  documented regex-engine deferral (see S2 T3's note), now with an upstream
+  file as its witness.
+- `test/hermes/computed-fn-name.js:71` (`[k("strClass")] = class {};`) — makes
+  **hermesc itself** abort on `SemContext.cpp:478`, exactly the pre-existing
+  C++ defect S2 T4 documented; this port reproduces it with its own
+  `assert_eq!`. Confirmation that the defect is real upstream code, not a
+  contrived shape.
+
+The 190 mismatches are one root cause, and it is **not** in sema: C++'s
+`errorExpected` (JSParserImpl.cpp:175-226) merges the "what" location into the
+error's RANGE when it is on the same source line (`combineIntoRange(whatLoc,
+errorLoc)`), and emits a separate `note:` only when it is not. Many Rust
+`need`/`eat` call sites drop C++'s `what`/`whatLoc` arguments (e.g.
+`functions.rs:411-415` vs `eat(r_paren, …, "start of parameter list",
+lparenLoc)` at JSParserImpl.cpp:657-662), so the range is lost; a few
+hand-rolled sites (`classes.rs:1032`, `:289`, `:108`, `modules.rs:905`) emit
+`error_cur` + an unconditional `note_at` and also drop the quotes C++ puts
+around the token name (`identifier expected in decorator` vs `'identifier'
+expected in decorator`). Classified mechanically: **111** differ in caret/range
+geometry alone, **69** in geometry plus an extra `note:` we emit and C++ folds
+into the range, **4** of those also lose the quotes, and only **9** are
+anything else — of which three are genuinely different parser message text
+(e.g. `unexpected token after yield expression` vs `';' expected`,
+`test/Parser/es6/yield-paren-error.js`), two are the regex-engine and
+recursion-depth rows named above, and the rest are one-off geometry cases. This
+extends the roadmap's
+existing parser follow-up item (a) — which so far only recorded the *dropped
+different-line note* — with the much larger *missing same-line range* half.
+Left to the parser track on purpose: it is a call-site audit across the parser
+with its own differential harness, and no file the sema corpus wants is blocked
+on it.
+
+### What this task added or fixed
+
+| File | Change |
+|---|---|
+| `debugger-statement.js` | **new** — the only handled node kind with zero corpus occurrences (inventory 1) |
+| `expr-visit-generic-2.js` | **new** — `BigIntLiteral`, `TaggedTemplateExpression` and `ImportExpression`: three override-free kinds the resolver PANICKED on (`1n`, `` tag`x${a}` ``, `import("m")`) while hermesc dumps them happily. Found by the Step 3 sweep (10 upstream files), fixed by adding them to `visit_node`'s generic arm with the usual citation, and this file is the pin — including that BigInt operands are NOT folded |
+| `error-limit.js` | **new** — hermesc's driver sets `-ferror-limit` = 20 (CompilerDriver.cpp:555-559, :1223) and `sema-dump` never did, so any input with >20 errors diverged (the corpus's noisiest file stops at 15). Pins the cut-off, the `<unknown>:0: error: too many errors emitted` sentinel, its forced-last position, the post-limit suppression of errors AND warnings, and that the surviving 20th is a DECLARATION-pass error from the file's last line (generation order, not location order) |
+| `private-members.js` | +2 lines: the static one-sided private accessors (inventory 3) |
+| `error-class-field.js` | +1 shape: `class C { a = typeof arguments; }` double-fires `invalid use of 'arguments'`, the `forbidSpecialArgumentsReference_` sibling of `error-static-block-typeof-arguments.js` |
+| `shbuiltin-calls.js` | comment fix: the `$SHBuiltin` ambient decl is `%d.27`, not `%d.23`, and this corpus keeps no CHECK lines ("in the dump below" was false) |
+| `MANIFEST.md` | this section; `flow/**` is 178 files (173 + 5), not 179; S2 T5 added six new files, not five; the `SpreadElement` parent-whitelist note now names all five parents correctly; the missing S2 T6/T7 count lines |
+
+Out-of-corpus fixes the sweep forced (each TDD'd, smallest repro first):
+
+- `sema/src/bin/sema_dump.rs` — apply the driver's error limit (above).
+- `support/src/render.rs` + `support/src/manager.rs` — the location prefix in
+  `printDiagnosticHelper` (SourceErrorManager.cpp:574-582) is conditional: an
+  empty filename prints no prefix, `-` prints as `<stdin>`, and the column is
+  omitted when C++'s `columnNo` is -1 (i.e. `col == 0` here). A location-less
+  message also keeps `SourceMgr::GetMessage`'s `BufferID = "<unknown>"`
+  default (SourceMgr.cpp:246). We were printing `:0:0: error: …` for the
+  sentinel instead of `<unknown>:0: error: …`. Unit-tested in
+  `render.rs::header_prefix_is_conditional`.
+- `sema/src/resolver/mod.rs` — the three node kinds above.

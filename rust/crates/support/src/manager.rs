@@ -1009,9 +1009,16 @@ impl SourceErrorManager {
                     range_cols,
                 }
             }
+            // No location: `SourceMgr::GetMessage` (SourceMgr.cpp:238-298)
+            // never touches the buffers, so the `SMDiagnostic` keeps its
+            // `BufferID = "<unknown>"` default (:246) and its zero-initialized
+            // `LineAndCol`, giving line 0 and (as `col - 1`) column -1. The
+            // renderer's `col == 0` means exactly that -1, i.e. "print no
+            // column". This is the shape of the `too many errors emitted`
+            // sentinel, the only location-less message hermesc emits.
             None => ResolvedDiagnostic {
                 kind: dk,
-                file_name: String::new(),
+                file_name: "<unknown>".to_string(),
                 line: 0,
                 col: 0,
                 message: msg,
