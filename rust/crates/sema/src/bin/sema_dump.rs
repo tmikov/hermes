@@ -260,9 +260,15 @@ fn main() {
     };
 
     let mut sem_ctx = SemContext::new(Keywords::new(&gc));
-    if !resolve_ast(&gc, &mut sem_ctx, &mut sm, root, &ambient_decls) {
-        std::process::exit(1);
-    }
+    // Dump the root resolution RETURNED: the resolver rebuilds the ancestors
+    // of anything it rewrites, so this is the tree carrying the annotations
+    // (`hermesc` mutates in place and can reuse its own pointer).
+    let resolved =
+        resolve_ast(&gc, &mut sem_ctx, &mut sm, root, &ambient_decls);
+    let root = match resolved {
+        Some(root) => root,
+        None => std::process::exit(1),
+    };
 
     let mut out_bytes: Vec<u8> = Vec::new();
     sem_dump(&mut out_bytes, &gc, &sem_ctx, root);

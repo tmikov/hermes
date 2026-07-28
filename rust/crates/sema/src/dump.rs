@@ -117,6 +117,7 @@ use ast::SemaId;
 
 use crate::dump_context::{push_atom, push_indent, push_str, SemContextDumper};
 use crate::ids::{FunctionInfoId, ScopeId};
+use crate::linearize::linearize_left;
 use crate::sem_context::SemContext;
 
 /// Port of `hermes::sema::semDump`'s untyped arm (`SemResolve.cpp:254-270`).
@@ -232,10 +233,10 @@ impl<'p, 'ast, 'ctx> AstPrinter<'p, 'ast, 'ctx> {
         self.enter_generic(node);
 
         let op = bin.operator.get();
-        if op == self.sem_ctx.kw.ident_plus
-            || op == self.sem_ctx.kw.ident_minus
-        {
-            let list = linearize_left(self.sem_ctx, bin);
+        let ops = [self.sem_ctx.kw.ident_plus, self.sem_ctx.kw.ident_minus];
+        if op == ops[0] || op == ops[1] {
+            // cpp:76 — `linearizeLeft(V, {"+", "-"})`.
+            let list = linearize_left(bin, &ops);
 
             self.visit_node(list[0].left);
             for e in &list {
@@ -348,35 +349,6 @@ impl<'gc, 'p, 'ast, 'ctx> Visitor<'gc> for AstPrinter<'p, 'ast, 'ctx> {
         node.visit_children(self);
         self.leave(node);
     }
-}
-
-/// Port of `ESTree::linearizeLeft` (`include/hermes/AST/ESTree.h:1438-1451`),
-/// specialized to `BinaryExpression` restricted to `{+, -}` — the only
-/// instantiation `ASTPrinter` ever uses (cpp:76). The general C++ template
-/// compares `_operator->str()` against an arbitrary `ops` string list; since
-/// the two operators of interest here are always the same interned atoms
-/// `Keywords` hands out, this compares atom identity instead — cheaper, and
-/// exactly equivalent given `+`/`-` are always interned through the same
-/// table (never spelled differently).
-///
-/// Converts `((a + b) - c) + d` into `[a+b, (a+b)-c, ((a+b)-c)+d]`: the
-/// last element is always `e` itself, and the true "leftmost" operand is
-/// reached through `list[0].left`.
-fn linearize_left<'gc>(
-    sem_ctx: &SemContext,
-    mut e: &'gc BinaryExpression<'gc>,
-) -> Vec<&'gc BinaryExpression<'gc>> {
-    let mut list = vec![e];
-    while let Some(left) = e.left.as_binary_expression() {
-        let op = left.operator.get();
-        if op != sem_ctx.kw.ident_plus && op != sem_ctx.kw.ident_minus {
-            break;
-        }
-        e = left;
-        list.push(e);
-    }
-    list.reverse();
-    list
 }
 
 /// The `FunctionInfo` a function-like `root`'s `sem_info` decoration points

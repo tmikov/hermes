@@ -33,19 +33,20 @@ use crate::sem_context::SemContext;
 /// \param ambient_decls parsed files containing global ambient declarations
 ///   to insert into the global scope (C++ passes this by reference and the
 ///   resolver takes its address; an empty slice means "none").
-/// \return false on error.
+/// \return the resolved (possibly new) root, or `None` on error.
 ///
-/// S0's resolver performs no tree rewriting, so this returns `bool` exactly
-/// like C++. The signature change that returns a new root (needed once the
-/// resolver becomes a `VisitorMut` and the first rewrite is ported) is owned
-/// by the S1 plan.
+/// C++ returns `bool` and resolves in place. This port's resolver is a
+/// transforming visitor (see `resolver`'s module doc): rewriting any node
+/// rebuilds its ancestors, so the root that comes out is the one carrying
+/// the resolution results and is what callers must go on to compile or
+/// dump. `None` is C++'s `false`.
 pub fn resolve_ast<'ast>(
     gc: &'ast GCLock,
     sem_ctx: &mut SemContext,
     sm: &mut SourceErrorManager,
     root: &'ast Node<'ast>,
     ambient_decls: &[NodeRc],
-) -> bool {
+) -> Option<&'ast Node<'ast>> {
     // The binding table must be borrowed independently of `sem_ctx` (which
     // the resolver holds by `&mut`) — see `SemContext::binding_table`'s
     // deviation note. Declaring it before `resolver` also makes it outlive

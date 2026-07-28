@@ -26,6 +26,84 @@
 //! a passing test on a corpus that never exercised it. The S1+ tasks replace
 //! each panic with the ported code.
 //!
+//! ## The dispatch protocol: `ast::VisitorMut`
+//!
+//! C++'s resolver is a `RecursiveVisitor` that mutates the AST *in place*:
+//! an overload declared as `visit(NodeType *n, Node **ppNode)` writes
+//! through `ppNode` to replace the current node
+//! (`RecursiveVisitor.h:132-142`; `visit(BinaryExpressionNode *, Node **)`,
+//! SemanticResolver.cpp:405-436, uses it for constant folding). The pointer
+//! it writes to is literally the child field inside the parent node.
+//!
+//! This port's AST is immutable in its structural fields, so the same
+//! capability comes from the `ast` crate's phase-3 transform machinery: the
+//! resolver implements [`ast::visitor::VisitorMut`] and every visit returns
+//! a [`TransformResult`]. `TransformResult::Changed(n)` *is* `*ppNode = n`;
+//! the generated `Node::visit_children_mut` re-runs the per-kind builder and
+//! rebuilds an ancestor only when one of its children changed, so an
+//! unrewritten tree comes back pointer-identical and unchanged subtrees stay
+//! shared. `Removed`/`Expanded`, which C++ can only express by editing an
+//! intrusive `NodeList` (`kEnableNodeListMutation`,
+//! RecursiveVisitor.h:157-161), come for free.
+//!
+//! The trait is implemented directly rather than wrapped in a
+//! sema-private protocol: its `call(gc, node, path)` signature already
+//! carries everything the C++ dispatcher hands a visit overload — the
+//! `GCLock`, the node, and (through `Path`) the parent plus the field of the
+//! parent the node occupies — while `&mut self` carries the resolver state.
+//! Implementing it means every node kind the resolver does *not* override
+//! recurses through the generated `visit_children_mut`, which is the only
+//! rebuild path in the crate; no per-node rebuild is ever hand-written here.
+//!
+//! Two invariants this buys, which every later stage depends on:
+//!
+//! - **Decorate before recursing.** `visit_children_mut` snapshots the
+//!   node's `Cell` decorations (`scope`, `sem_info`, `strictness`, ...) into
+//!   the builder when it starts, so annotations written *before* the
+//!   children are visited survive into the rebuilt node, and annotations
+//!   written after would be lost on a node that gets rebuilt. C++'s visit
+//!   order already does this (`visit(ProgramNode *)` sets everything, then
+//!   visits children last), so it costs nothing to keep.
+//! - **Node identity is not stable across a rebuild.** A rebuilt node is a
+//!   new allocation with a fresh `NodeId` (`NodeMetadata::duplicate`), so
+//!   anything keyed by node identity — a `NodeRc` held in a side table, or a
+//!   `NodeId` key like `DeclCollector::scope_decls_for_node`'s — must be
+//!   consulted *before* that node's children are transformed. Again the C++
+//!   order already does it: `processCollectedDeclarations(node)` runs on
+//!   entry to a scope, before the scope's children are visited. Leaves
+//!   (`Identifier` above all) are never rebuilt — a parent rebuild copies
+//!   the child *pointer* — so the decorations the resolver writes on them,
+//!   and the `NodeRc`s the binding table keeps to them, stay valid.
+//!
+//! A visit that needs to do work *between* two children (C++
+//! `visit(AssignmentExpressionNode *)` validates `_left` before visiting
+//! `_right`, cpp:457-461) cannot use the all-or-nothing
+//! `visit_children_mut`. It uses the same generated builder that
+//! `visit_children_mut` uses, driving one child at a time:
+//!
+//! ```ignore
+//! let builder::Builder::AssignmentExpression(mut b) =
+//!     builder::Builder::from_node(node) else { unreachable!() };
+//! let path = Path::new(node, NodeField::left);
+//! if let TransformResult::Changed(v) = self.call(gc, n.left, Some(path)) {
+//!     b.left(v);
+//! }
+//! // ... work that must happen between the two children ...
+//! b.build(gc)
+//! ```
+//!
+//! `self.call` (not `self.visit_node`) is what keeps the recursion-depth
+//! brackets on the child. The `NodeChild::visit_child_mut` shim that the
+//! generated code uses to map `Removed`/`Expanded` onto a single child is
+//! `pub(crate)` inside `ast`, so such a visit must decide for itself what a
+//! `Removed` child would mean — no resolver visit produces one.
+//!
+//! The recursion-depth protocol the C++ dispatcher implements
+//! (`incRecursionDepth`/`decRecursionDepth` bracketing every dispatched
+//! node, RecursiveVisitor.h:197-232) is ported onto
+//! [`SemanticResolver::call`], which is this port's dispatcher entry: every
+//! child reaches the resolver through it.
+//!
 //! ## Structural deviations from the C++
 //!
 //! - **`ScopeRAII` / `FunctionContext` are explicit push/pop pairs.** Both
@@ -69,7 +147,7 @@ use std::collections::{HashMap, HashSet};
 use ast::context::{GCLock, NodeRc};
 use ast::node::Node;
 use ast::node_child::{NodeLabel, Strictness};
-use ast::visitor::Visitor;
+use ast::visitor::{Path, TransformResult, Visitor, VisitorMut};
 use ast::SemaId;
 use support::diag::{Subsystem, Warning};
 use support::manager::SourceErrorManager;
@@ -297,17 +375,28 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     /// `SemanticResolver::run` (cpp:65-70).
     ///
     /// \param root the top-level program node to run resolution on.
-    /// \return false on error.
-    pub fn run<'ast>(
+    /// \return the (possibly new) root, or `None` on error.
+    ///
+    /// C++ returns a plain `bool` because it mutates in place, and it
+    /// dispatches through `visitESTreeNodeNoReplace`
+    /// (RecursiveVisitor.h:644-652), which asserts the root itself was not
+    /// replaced. Here a rewrite anywhere in the tree rebuilds every ancestor
+    /// up to the root, so the root must be handed back; `None` is C++'s
+    /// `false`. The root node itself is still never *replaced* by a visit —
+    /// only rebuilt — and never removed, hence the `expect` below.
+    pub fn run<'gc>(
         &mut self,
-        gc: &'ast GCLock,
-        root: &'ast Node<'ast>,
-    ) -> bool {
+        gc: &'gc GCLock,
+        root: &'gc Node<'gc>,
+    ) -> Option<&'gc Node<'gc>> {
         if self.sm.error_count() != 0 {
-            return false;
+            return None;
         }
-        self.visit_node(gc, root);
-        self.sm.error_count() == 0
+        let new_root = root.visit_mut(gc, self, None);
+        if self.sm.error_count() != 0 {
+            return None;
+        }
+        Some(new_root.expect("the resolver never removes the root"))
     }
 
     /// True if we are preparing the AST to be compiled by Hermes. Port of
@@ -399,18 +488,18 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
         // `recursion_depth` during the walk (the collector took its own
         // copy), and nothing else emits a diagnostic during it either, so
         // neither the value nor the diagnostic order can differ.
-        let mut depth_exceeded_at: Option<NodeRc> = None;
+        let mut depth_exceeded_at: Option<&'ast Node<'ast>> = None;
         let decls = DeclCollector::run(
             node,
             gc,
             &self.sem_ctx.kw,
             self.recursion_depth,
-            &mut |n| depth_exceeded_at = Some(NodeRc::from_node(gc, n)),
+            &mut |n| depth_exceeded_at = Some(n),
         );
         if let Some(n) = depth_exceeded_at {
             // Inform the resolver that we have gone too deep.
             self.recursion_depth = 0;
-            self.recursion_depth_exceeded(gc, &n);
+            self.recursion_depth_exceeded(n);
         }
 
         self.function_stack.push(FunctionContext {
@@ -445,14 +534,45 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
         }
     }
 
+    // ---- RecursionDepthTracker -------------------------------------------
+
     /// Port of `SemanticResolver::recursionDepthExceeded`
-    /// (SemanticResolver.cpp:2759-2762).
-    fn recursion_depth_exceeded(&mut self, gc: &GCLock, node: &NodeRc) {
-        let end_loc = node.node(gc).range().end;
+    /// (SemanticResolver.cpp:2758-2761).
+    fn recursion_depth_exceeded(&mut self, node: &Node) {
         self.sm.error(
-            end_loc,
+            node.range().end,
             "Too many nested expressions/statements/declarations",
         );
+    }
+
+    /// Port of `RecursionDepthTracker::incRecursionDepth`
+    /// (RecursiveVisitor.h:721-730), which `SemanticResolver` inherits
+    /// (SemanticResolver.h:27-28). It maintains the current AST nesting
+    /// level, and generates an error the first time it exceeds the maximum
+    /// nesting level. Once that happens, it always returns false.
+    ///
+    /// \return true if everything is normal, false if we should not visit
+    ///   the current node.
+    fn inc_recursion_depth(&mut self, node: &Node) -> bool {
+        if self.recursion_depth == 0 {
+            return false;
+        }
+        self.recursion_depth -= 1;
+        if self.recursion_depth == 0 {
+            self.recursion_depth_exceeded(node);
+            return false;
+        }
+        true
+    }
+
+    /// Port of `RecursionDepthTracker::decRecursionDepth`
+    /// (RecursiveVisitor.h:735-738). Once we have reached the maximum
+    /// nesting level, it does nothing. Otherwise it decrements the nesting
+    /// level.
+    fn dec_recursion_depth(&mut self) {
+        if self.recursion_depth != 0 {
+            self.recursion_depth += 1;
+        }
     }
 
     // ---- ScopeRAII -------------------------------------------------------
@@ -521,28 +641,38 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
 
     // ---- Visitors --------------------------------------------------------
 
-    /// Dispatch to the `visit()` overload for `node`'s kind. Port of
-    /// `visitESTreeNodeNoReplace(*this, node)`, whose C++ dispatch is
-    /// generated by the RecursiveVisitor machinery.
+    /// Dispatch to the `visit()` overload for `node`'s kind. Port of the
+    /// `switch (node->getKind())` inside `RecursiveVisitorDispatch::visit`
+    /// (RecursiveVisitor.h:204-229), which C++ generates from
+    /// `ESTree.def`; the recursion-depth brackets around it live in
+    /// [`SemanticResolver::call`], like the C++ dispatcher's.
+    ///
+    /// \param path the field of the parent node `node` occupies, or `None`
+    ///   for the root. C++ passes the bare `parent` pointer; `Path::parent`
+    ///   is the same thing, and no S0 visit reads either.
     ///
     /// S0 only implements the kinds its corpus can produce; see the module
     /// doc for why the fallback is a panic rather than a generic recursion.
-    fn visit_node<'ast>(&mut self, gc: &'ast GCLock, node: &'ast Node<'ast>) {
+    fn visit_node<'gc>(
+        &mut self,
+        gc: &'gc GCLock,
+        node: &'gc Node<'gc>,
+        _path: Option<Path<'gc>>,
+    ) -> TransformResult<&'gc Node<'gc>> {
         match node {
             Node::Program(_) => self.visit_program(gc, node),
-            Node::ExpressionStatement(n) => {
-                // There is no `visit(ExpressionStatementNode *)` overload in
-                // C++; the generic dispatch visits the children, which for
-                // this node is just `_expression` (`_directive` is a
-                // NodeString, not a node).
-                self.visit_node(gc, n.expression);
-            }
-            // Leaves: no `visit()` overload and no children.
-            Node::EmptyStatement(_)
+            // Kinds with no `visit()` overload in C++: the generic dispatch
+            // visits their children (`ExpressionStatement`'s `_expression`
+            // — `_directive` is a NodeString, not a node) and here also
+            // rebuilds the node if any child was replaced. The literals and
+            // `EmptyStatement` have no children at all, so this is exactly
+            // `TransformResult::Unchanged` for them.
+            Node::ExpressionStatement(_)
+            | Node::EmptyStatement(_)
             | Node::NumericLiteral(_)
             | Node::StringLiteral(_)
             | Node::BooleanLiteral(_)
-            | Node::NullLiteral(_) => {}
+            | Node::NullLiteral(_) => node.visit_children_mut(gc, self),
             _ => panic!(
                 "sema S0: unhandled node kind {} — S1+",
                 node.node_type_str()
@@ -555,11 +685,11 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     ///
     /// `node` is the enclosing `Node` (rather than the `Program` payload)
     /// because the ported helpers all take `&Node`.
-    fn visit_program<'ast>(
+    fn visit_program<'gc>(
         &mut self,
-        gc: &'ast GCLock,
-        node: &'ast Node<'ast>,
-    ) {
+        gc: &'gc GCLock,
+        node: &'gc Node<'gc>,
+    ) -> TransformResult<&'gc Node<'gc>> {
         let program = match node {
             Node::Program(p) => p,
             _ => unreachable!("visit_program called on a non-Program node"),
@@ -599,7 +729,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
         }
         self.sem_ctx.function_mut(f).is_program_node = true;
 
-        {
+        let result = {
             let scope_state =
                 self.enter_scope(Some(node), /* functionScope */ true);
             // C++ wraps this assignment in `llvh::SaveAndRestore<...>
@@ -638,13 +768,18 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             }
             self.process_ambient_decls(gc);
             // visitESTreeChildren(*this, node): a Program's only child list
-            // is `_body`.
-            for child in program.body.iter() {
-                self.visit_node(gc, child);
-            }
+            // is `_body`. The generated `visit_children_mut` walks it and
+            // rebuilds `node` if (and only if) an element was replaced —
+            // still inside the scope, exactly where C++ visits the children.
+            // The rebuild copies `node`'s decorations, which is why all of
+            // them are written above, before this line (see the module
+            // doc's "decorate before recursing").
+            let result = node.visit_children_mut(gc, self);
             self.exit_scope(scope_state);
-        }
+            result
+        };
         self.exit_function(func_state);
+        result
     }
 
     /// Port of `SemanticResolver::processCollectedDeclarations`
@@ -793,6 +928,32 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
                 Binding::new(decl, None),
             );
         }
+    }
+}
+
+/// Port of `RecursiveVisitorDispatch::visit`
+/// (RecursiveVisitor.h:197-232) — the dispatcher entry every node the
+/// resolver sees goes through, including the root. It brackets the kind
+/// dispatch with the recursion-depth protocol and, when the depth budget is
+/// spent, returns without visiting `node` at all (C++: `if
+/// (LLVM_UNLIKELY(!v.incRecursionDepth(node))) return;`, which leaves the
+/// node exactly as it was — hence `Unchanged`).
+///
+/// C++'s `afterCaller` (the optional `afterVisit` hook, RecursiveVisitor.h:
+/// 230) has no counterpart: `SemanticResolver` defines no `afterVisit`.
+impl<'gc> VisitorMut<'gc> for SemanticResolver<'_, '_, '_, '_> {
+    fn call(
+        &mut self,
+        gc: &'gc GCLock<'_, '_>,
+        node: &'gc Node<'gc>,
+        path: Option<Path<'gc>>,
+    ) -> TransformResult<&'gc Node<'gc>> {
+        if !self.inc_recursion_depth(node) {
+            return TransformResult::Unchanged;
+        }
+        let result = self.visit_node(gc, node, path);
+        self.dec_recursion_depth();
+        result
     }
 }
 
@@ -947,5 +1108,68 @@ fn set_node_sem_info(node: &Node, sem_info: FunctionInfoId) {
         Node::ComponentDeclaration(n) => n.sem_info.set(id),
         Node::HookDeclaration(n) => n.sem_info.set(id),
         _ => panic!("{} is not a function-like node", node.node_type_str()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ast::context::Context;
+    use ast::node::EmptyStatement;
+    use ast::node_child::NodeMetadata;
+    use support::location::{SMLoc, SMRange};
+
+    /// The `RecursionDepthTracker` protocol, exercised directly (the visits
+    /// that drive it are covered end-to-end by `tests/resolver.rs`): exactly
+    /// `kASTMaxRecursionDepth - 1` levels are allowed, the next one reports
+    /// the error, and from then on every `incRecursionDepth` refuses —
+    /// including after a `decRecursionDepth`, which must not resurrect a
+    /// spent budget (RecursiveVisitor.h:721-738).
+    #[test]
+    fn recursion_depth_tracker_trips_once_at_the_nesting_limit() {
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+        let mut sm = SourceErrorManager::new();
+        let buf = sm.add_buffer_bytes("depth.js", b"x");
+        let loc = SMLoc {
+            source: buf,
+            offset: 0,
+        };
+        let node = gc.alloc(Node::EmptyStatement(EmptyStatement::new(
+            NodeMetadata::new(SMRange {
+                start: loc,
+                end: loc,
+            }),
+        )));
+
+        {
+            let binding_table = sem_ctx.binding_table_rc();
+            let mut resolver = SemanticResolver::new(
+                &binding_table,
+                &mut sem_ctx,
+                &mut sm,
+                &[],
+                /* compile */ true,
+            );
+            for level in 1..AST_MAX_RECURSION_DEPTH {
+                assert!(
+                    resolver.inc_recursion_depth(node),
+                    "nesting level {level} must be allowed"
+                );
+            }
+            assert!(
+                !resolver.inc_recursion_depth(node),
+                "level {AST_MAX_RECURSION_DEPTH} must trip the limit"
+            );
+            assert!(!resolver.inc_recursion_depth(node));
+            resolver.dec_recursion_depth();
+            assert!(
+                !resolver.inc_recursion_depth(node),
+                "a spent budget must stay spent"
+            );
+        }
+        // Reported once, no matter how many refused visits followed.
+        assert_eq!(sm.error_count(), 1);
     }
 }
