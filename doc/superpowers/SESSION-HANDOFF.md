@@ -59,9 +59,12 @@ validation commands, and workflow.
 > 69-file `test/Sema` corpus sweep with `MANIFEST.md`. See the roadmap's Sema row for the full what-shipped detail and the
 > S2/S3 carry-item list (loops/labels/switch, try/catch, classes+private names, the remaining §3.4 rewrites, call specials,
 > `ScopedFunctionPromoter`, plus two tracked parser-phase follow-ups found by the S1 error differentials).
-> **NEXT: S2 — rest of the walk** (labels/break/continue; catch; classes + private names; the four §3.4 rewrites;
-> eval/`arguments`/`with`; strict-mode checks; `mayReachImplicitReturn`); plan to be written just-in-time. Spec:
-> `specs/2026-07-26-sema-untyped-design.md`.
+> **NEXT: EXECUTE the S2 plan — it is already WRITTEN and committed:
+> `plans/2026-07-28-sema-s2-rest-of-walk.md`** (9 tasks: loops/labels/switch; arrows + yield/await/spread/meta; try/catch +
+> with/Unresolver + regexp-deferred; classes/ClassContext; private names + static blocks; call specials incl. the `$SHBuiltin`
+> rewrite; `CheckImplicitReturn`; corpus sweep round 2; docs). Execute it subagent-driven
+> (`superpowers:subagent-driven-development`) — the plan was deliberately written in the S1 session with full context and each
+> task brief is self-contained; do NOT re-plan. Spec: `specs/2026-07-26-sema-untyped-design.md`.
 > The parser proper lives in `rust/crates/parser/src/js/{mod,expressions,statements,functions,classes,modules,jsx}.rs` +
 > **`js/flow/{mod,declarations,types,function_types,object_types,params,match_}.rs`** + **`js/ts/{mod,types,function_types,object_types,
 > declarations,params}.rs`**; the gate is `REQUIRE_DIFFERENTIAL=1 cargo test -p parser --test parser_differential` (build `ast-dump`
