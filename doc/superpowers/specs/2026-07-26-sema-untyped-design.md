@@ -21,7 +21,12 @@ validated against `hermesc -dump-sema`.
 | driver known-globals pre-registration | part of the `sema-dump` bin / a `sema` helper | visible in the dump (`UndeclaredGlobalProperty` list); exact C++ site located at plan time |
 
 **Out of scope — the next component (typed path, reached only under `-typed`):**
-`FlowChecker*`, `FlowContext`, `FlowTypesDumper`, `ASTEval`, `ASTLowering`, `ESTreeClone`.
+`FlowChecker*`, `FlowContext`, `FlowTypesDumper`, `ASTLowering`, `ESTreeClone`.
+
+> **Correction (S1, 2026-07-28):** `ASTEval.cpp` moves to **IN scope** — it does untyped
+> constant folding (`+`/`-` `BinaryExpression` chains, called from the resolver whenever
+> `compile_` is true, independent of `-typed`) and shipped in S1 as `sema/src/ast_eval.rs`.
+> The table above is left as originally written for history; only `ASTEval` was misplaced.
 
 ## 2. Crate layout
 
@@ -106,8 +111,20 @@ ids (`scope` + `sem_info`); `For*`/`Switch` carry `label_index` + `scope`.
 
 ### 3.4 Resolver = transforming visitor (`VisitorMut`)
 
-The C++ resolver mutates the AST in place at exactly four sites (audit for more is a
-plan task):
+> **Correction (S1, 2026-07-28):** the C++ mutation mechanism is more general than "four
+> named sites" — every visit method receives its node via `Node **ppNode` and may
+> overwrite `*ppNode` with a replacement, and the constant folder (§ASTEval, above) uses
+> exactly this generic path, not a special case. So there is a **fifth mutation site in
+> effect**: any constant-foldable `BinaryExpression`/`UnaryExpression` chain gets replaced
+> the same way as the four named rewrites below. This is why T1 shipped the resolver as a
+> direct `ast::VisitorMut` implementation in S1 — one phase earlier than originally planned
+> here — rather than deferring the mechanism until a rewrite-site task needed it: a partial
+> implementation (visitor for reads, ad hoc splicing for the four sites) would have had to
+> be redone once folding's generic replacement showed up in T3/T6. The mechanism landed
+> exactly as designed below; only its timing and the "four sites" framing needed correcting.
+
+The C++ resolver mutates the AST in place at exactly four *named rewrite* sites (beyond
+the generic constant-folding replacement above; audit for more is a plan task):
 
 1. arrow expression-body → block+return (`SemanticResolver.cpp:253`, `compile_ && _expression`)
 2. try/catch/finally → nested try (`:794`, `compile_ && handler && finalizer`)
@@ -197,8 +214,12 @@ contents are the commitment, not the exact split.
   `SemContext` + `Keywords` (133 atoms) + known-globals + `SemContextDumper`; `sema-dump` bin +
   differential harness green (6-file corpus, stdout+stderr+exit status). See the roadmap's Sema
   row for the full what-shipped and the gate command.
-- **S1 — declarations & scopes:** `DeclCollector`; scope creation; var/let/const/
-  function hoisting; parameter scopes; identifier-resolution core.
+- **S1 — declarations & scopes (DONE, 2026-07-28):** resolver-as-`VisitorMut` (T1);
+  hermesc error-epilogue parity (T2); `ASTEval` constant folding (T3); identifier-resolution
+  core (T4); the full redeclaration matrix (T5); expression folds + validation (T6);
+  function/parameter scopes + the §3.4(a) backref fixup (T7); a 69-file corpus sweep with
+  `MANIFEST.md` (T8). See the roadmap's Sema row for the full what-shipped and the gate
+  command; commits `53ddf2e92..77a41ed3e`.
 - **S2 — rest of the walk:** labels/break/continue; catch; classes + private names;
   the four rewrites; eval/`arguments`/`with`; strict-mode checks;
   `mayReachImplicitReturn`.

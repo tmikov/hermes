@@ -48,11 +48,20 @@ validation commands, and workflow.
 > **Sema has no `-dump-ast` analog either — decide its validation oracle during brainstorming.** Open the session with
 > `superpowers:brainstorming`, THEN `writing-plans`. Write each phase plan just-in-time and execute subagent-driven. juno has no parser to crib
 > from (`hparser` is FFI-to-C++); port the C++ directly.
-> **Update (2026-07-26): Sema S0 (foundations) is DONE.** Commits `bd4090d17..7f097b899` on `rust`. Gate (live, green):
+> **Update (2026-07-26): Sema S0 (foundations) is DONE.** Commits `bd4090d17..7f097b899` on `rust`.
+> **Update (2026-07-28): Sema S1 (declarations & scopes) is DONE.** Commits `53ddf2e92..77a41ed3e` on `rust`.
+> Gate (live, green, unchanged since S0):
 > `REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml -p sema --features dump-bin --test sema_differential -- --nocapture`
-> → "sema differential (tests/sema_corpus): 6 corpus files matched". See the roadmap's Sema row for the full what-shipped detail.
-> **NEXT: S1 — declarations & scopes** (`DeclCollector`; scope creation; var/let/const/function hoisting; parameter scopes;
-> identifier-resolution core); plan to be written just-in-time. Spec: `specs/2026-07-26-sema-untyped-design.md`.
+> → "sema differential (tests/sema_corpus): 69 corpus files matched" (42 succeed on hermesc). S1 shipped the resolver as a
+> direct `ast::VisitorMut` implementation (one phase early — the C++'s generic `Node **ppNode` replacement, used by constant
+> folding, needed the mechanism from the start), hermesc error-epilogue parity, `ASTEval` constant folding, identifier
+> resolution, the full declaration/redeclaration matrix, expression fold+validation wiring, function/parameter scopes, and a
+> 69-file `test/Sema` corpus sweep with `MANIFEST.md`. See the roadmap's Sema row for the full what-shipped detail and the
+> S2/S3 carry-item list (loops/labels/switch, try/catch, classes+private names, the remaining §3.4 rewrites, call specials,
+> `ScopedFunctionPromoter`, plus two tracked parser-phase follow-ups found by the S1 error differentials).
+> **NEXT: S2 — rest of the walk** (labels/break/continue; catch; classes + private names; the four §3.4 rewrites;
+> eval/`arguments`/`with`; strict-mode checks; `mayReachImplicitReturn`); plan to be written just-in-time. Spec:
+> `specs/2026-07-26-sema-untyped-design.md`.
 > The parser proper lives in `rust/crates/parser/src/js/{mod,expressions,statements,functions,classes,modules,jsx}.rs` +
 > **`js/flow/{mod,declarations,types,function_types,object_types,params,match_}.rs`** + **`js/ts/{mod,types,function_types,object_types,
 > declarations,params}.rs`**; the gate is `REQUIRE_DIFFERENTIAL=1 cargo test -p parser --test parser_differential` (build `ast-dump`
@@ -96,7 +105,7 @@ validation commands, and workflow.
 **Component status** (see the roadmap table): `SourceErrorManager` ✅ · **JS lexer ✅** ·
 **JSONParser ✅** · **AST ✅ (all 4 phases: GC spine + generated 271-node set + transforming visitor + `ESTreeJSONDumper`)** ·
 **JS Parser ✅ (P0–P8 + Pre/Lazy passes, entire standard-JS + Flow + TypeScript + JSX grammar)** ·
-**Sema 🚧 (S0 foundations DONE; S1 declarations & scopes next)** / IR / Optimizer / BCGen — future.
+**Sema 🚧 (S0 foundations + S1 declarations & scopes DONE; S2 rest-of-the-walk next)** / IR / Optimizer / BCGen — future.
 
 Rust workspace: **`rust/Cargo.toml`** (members: `support`, `parser`, `atom_table`, `unicode`),
 toolchain pinned `rust/rust-toolchain.toml` (1.96.0).
