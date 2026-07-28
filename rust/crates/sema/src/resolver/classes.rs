@@ -201,10 +201,11 @@ pub(super) struct ClassContext {
 /// `collectDeclaredPrivateIdentifiers`'s local `struct PrivateAccessorInfo`
 /// (cpp:2146-2162).
 ///
-/// Deviation: C++ leaves `originalNameDecl` UNINITIALIZED in the
-/// default-constructed (`PrivateAccessorInfo{}`) field/method cases, relying
-/// on `isAccessor == false` to keep it from ever being read. `Option<DeclId>`
-/// spells that out instead, and the one read site `expect`s it.
+/// C++'s `PrivateAccessorInfo{}` is an aggregate, so value-initialization
+/// zero-initializes `originalNameDecl` to `nullptr` in the default
+/// (field/method) cases; `isAccessor == false` keeps it from ever being
+/// read. `Option<DeclId>::None` models that exactly, and the one read site
+/// `expect`s it.
 #[derive(Clone, Copy, Default)]
 struct PrivateAccessorInfo {
     /// The rest of the fields in the struct are only meaningful if

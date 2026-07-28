@@ -127,11 +127,11 @@
 //! corpus-reachable.
 //!
 //! Everything not covered is *deliberately absent rather than
-//! approximated*: `visit_node` panics with `sema S1: unhandled node kind
-//! ...` for any node kind outside the handled set. An honest panic keeps
-//! the differential meaningful — a silently-wrong resolution would look
-//! like a passing test on a corpus that never exercised it. Later tasks
-//! replace each panic with the ported code.
+//! approximated*: `visit_node` panics with `sema: unhandled node kind ...
+//! (S3+/typed phases)` for any node kind outside the handled set. An honest
+//! panic keeps the differential meaningful — a silently-wrong resolution
+//! would look like a passing test on a corpus that never exercised it.
+//! Later tasks replace each panic with the ported code.
 //!
 //! ## The dispatch protocol: `ast::VisitorMut`
 //!
@@ -396,9 +396,8 @@ const DEBUG_INFO_SETTING_ALL: bool = false;
 
 /// Port of `FunctionContext::Label` (SemanticResolver.h:531-538).
 ///
-/// S0 never constructs one — `FunctionContext::label_map` is always empty —
-/// but the type is defined now so S1's label handling drops in without
-/// re-plumbing `FunctionContext`.
+/// Constructed by `resolver/statements.rs`'s `visit_labeled_statement`
+/// (S2 T1) — `FunctionContext::label_map` was always empty before then.
 #[derive(Debug, Clone)]
 pub struct Label {
     /// Where it was declared.
@@ -789,8 +788,10 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     /// constructor (SemanticResolver.cpp:2994-3002) — the one that adopts an
     /// ALREADY-CREATED `FunctionInfo` and runs no `DeclCollector`.
     ///
-    /// Its only caller is `classes.rs`'s `visit(ClassPropertyNode *)`
-    /// (cpp:1034-1038), which pushes a context for one of the class's
+    /// Its callers are `classes.rs`'s `visit_class_property` and
+    /// `visit_class_private_property` (both ports of the corresponding
+    /// `visit(ClassPropertyNode *)`/`visit(ClassPrivatePropertyNode *)`,
+    /// cpp:1034-1038), which push a context for one of the class's
     /// synthetic elements-initializer functions so a field initializer
     /// resolves as if it were inside that function. Consequently `node` is
     /// `None` (C++ sets it to `nullptr`) and `decls` is `None`: there is no
@@ -1303,7 +1304,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             | Node::IfStatement(_)
             | Node::Empty(_) => node.visit_children_mut(gc, self),
             _ => panic!(
-                "sema S1: unhandled node kind {} — later tasks",
+                "sema: unhandled node kind {} (S3+/typed phases)",
                 node.node_type_str()
             ),
         }
@@ -1362,7 +1363,8 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             let scope_state =
                 self.enter_scope(Some(node), /* functionScope */ true);
             // C++ wraps this assignment in `llvh::SaveAndRestore<...>
-            // saveGlobalScope(globalScope_, ...)` (SemanticResolver.cpp:227)
+            // saveGlobalScope(globalScope_, ...)`
+            // (SemanticResolver.cpp:216-217)
             // so `globalScope_` reverts to its enclosing value on return —
             // needed once `visitProgram` can recurse (lazy compilation,
             // direct `eval`). The S0 entry path only ever visits one

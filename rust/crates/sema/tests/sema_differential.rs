@@ -22,9 +22,10 @@
 //! this oracle).
 //!
 //! Flag pairing: none needed. `hermesc -dump-sema` and `sema-dump` both take
-//! the file as their only argument; `-Xstd-globals` (which loads `libhermes`
-//! as the ambient-declaration file) defaults to true on the hermesc side and
-//! is unconditional on ours, and `-strict` defaults to false on both.
+//! the file as their only argument; `-fstd-globals`/`-fno-std-globals`
+//! (which loads `libhermes` as the ambient-declaration file) defaults to
+//! true on the hermesc side and is unconditional on ours, and `-strict`
+//! defaults to false on both.
 //!
 //! The corpus is standard JS only (S0's resolver handles literals, string
 //! literals, empty statements and the directive prologue; anything else

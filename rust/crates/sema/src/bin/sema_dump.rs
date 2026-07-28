@@ -45,8 +45,8 @@
 //! (`libhermes`) as a global-definitions file first
 //! (CompilerDriver.cpp:2001-2008 → `loadGlobalDefinition`, :762-774), parse
 //! the input, then `sema::resolveAST(..., declFileList)` (:940-947) and
-//! `sema::semDump` (:969-974). `-Xstd-globals` defaults to true, so the
-//! libhermes load is unconditional here.
+//! `sema::semDump` (:969-974). `-fstd-globals`/`-fno-std-globals` defaults
+//! to true, so the libhermes load is unconditional here.
 //!
 //! Command-line parsing uses the `command_line` crate (the LLVM-`cl`-style
 //! option parser copied from juno), like `parser`'s `ast-dump`.

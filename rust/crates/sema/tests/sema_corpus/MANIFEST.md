@@ -15,9 +15,9 @@ classification — we always probe with plain `-dump-sema`, because that's the
 only thing `sema_differential.rs` tests and the harness has no per-file-flag
 support (out of scope to add here, per the task brief).
 
-Total top-level files: 54. Imported **as of the S1 Task 8 sweep**: 18 (17 from
+Total top-level files: 54. Imported **as of the S1 Task 8 sweep**: 15 (14 from
 `test/Sema` + 1 new gap-filler, `expr-visit-generic.js`, added in Step 2
-below); deferred: 37 (17 + 37 = 54; counting `deep-ast-err.js`, which is listed
+below); deferred: 40 (14 + 40 = 54; counting `deep-ast-err.js`, which is listed
 but is a vacuous non-gap — see its row's note below). Later tasks move rows out
 of Deferred as they unblock them, so the *live* tables below are the source of
 truth: after S2 Task 2 the Imported table has 20 rows (19 from `test/Sema` + the

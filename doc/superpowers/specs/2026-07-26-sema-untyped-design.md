@@ -200,7 +200,7 @@ All of `SemResolve.h`, per the implement-completely rule:
    - the existing 76-file plain parser corpus;
    - the Flow/TS/JSX corpora under their dialect flags (untyped mode — empirically
      verified `-parse-flow -dump-sema` works);
-   - the 56 `test/Sema/*.js` lit files imported as a `sema_corpus/` seed;
+   - the 54 `test/Sema/*.js` lit files imported as a `sema_corpus/` seed;
    - new files for under-covered areas: scoped-function promotion loose/strict,
      `$SHBuiltin` shadowing, private class names, `with`, generators/async arrows +
      `arguments` capture, label edge cases;
