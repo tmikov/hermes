@@ -920,7 +920,15 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
         // `llvh::isa<MemberExpressionLikeNode>(parent)`: the range
         // `ESTREE_FIRST(MemberExpressionLike, Base)` spans exactly
         // `MemberExpression` and `OptionalMemberExpression`
-        // (ESTree.def:360-373). A `None` path means `Super` is the root of
+        // (ESTree.def:360-373). Only the first is reachable — in C++ just as
+        // much as here, so the `isa<>` range test has a dead sub-case in
+        // both: the parser requires `(`, `[` or `.` immediately after
+        // `super` (`super?.a` is `'(', '[' or '.' expected after 'super'
+        // keyword`), and in `super.a?.b` the `OptionalMemberExpression`
+        // wraps a plain `MemberExpression` whose `_object` is the `Super`.
+        // The range test is kept verbatim rather than narrowed to
+        // `MemberExpression`, because it is the C++'s condition.
+        // A `None` path means `Super` is the root of
         // the walk, which cannot happen (a `Program` is always the root);
         // C++ has no such case at all, since the dispatcher always passes
         // the real parent.

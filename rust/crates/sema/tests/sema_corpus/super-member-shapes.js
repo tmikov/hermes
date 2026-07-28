@@ -6,9 +6,14 @@
  */
 
 // visit(SuperNode *, Node *) (SemanticResolver.cpp:1086-1092) tests
-// isa<MemberExpressionLikeNode>(parent), a range that spans BOTH
-// MemberExpression and OptionalMemberExpression (ESTree.def:360-373) — the
-// latter reached only through `super.a?.b`.
+// isa<MemberExpressionLikeNode>(parent), a range that spans MemberExpression
+// and OptionalMemberExpression (ESTree.def:360-373). Only the
+// MemberExpression half is reachable, in C++ as much as here: the parser
+// requires '(', '[' or '.' immediately after `super` (so `super?.a` is a parse
+// error), and in `super.a?.b` the OptionalMemberExpression wraps a plain
+// MemberExpression whose object is the Super — so a Super's parent is never an
+// OptionalMemberExpression. `super.a?.b` is kept below because it is the
+// closest thing the grammar allows, not because it reaches the other half.
 //
 // canReferenceSuper_ comes from FunctionLikeDecoration::isMethodDefinition
 // (cpp:1675), which the parser sets for OBJECT-literal method shorthand too,

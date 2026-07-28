@@ -1708,6 +1708,25 @@ fn an_implicit_constructor_function_info_is_created_for_a_class_without_one() {
         assert_eq!(info.get_scopes().len(), 1);
         assert_eq!(info.get_function_body_scope(), info.get_scopes()[0]);
     });
+
+    // The `Derived` half of cpp:3097-3099 — `isDerivedClass()` is the only
+    // input, so a derived class with NO explicit constructor is the only
+    // shape that reaches it. Dump-invisible, like the `Base` case above.
+    with_resolved("class A {}\nclass B extends A {}\n", |sem_ctx, resolved| {
+        let Node::Program(p) = resolved else {
+            unreachable!("not a Program")
+        };
+        let b = p.body.iter().nth(1).expect("no class B");
+        let ctor = FunctionInfoId::from_sema_id(
+            class_function_infos(b)
+                .0
+                .expect("B has no implicit constructor FunctionInfo"),
+        );
+        assert_eq!(
+            sem_ctx.function(ctor).constructor_kind,
+            sema::sem_context::ConstructorKind::Derived
+        );
+    });
 }
 
 /// The `hasConstructor` flag (set from `visitFunctionLike`, cpp:1656)
