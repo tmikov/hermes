@@ -26,7 +26,17 @@
 //! See the task report for the two deliberate scope cuts (the C++
 //! `MemberExpression`/`OptionalMemberExpression` overrides' private-name
 //! handling, and the `typeof missing;` corpus file) and why each is safe to
-//! defer.
+//! defer. The first of the two landed in S2 T5 — see
+//! `expressions::visit_member_like_expression`.
+//!
+//! S2 T5 also adds this file's private-name pair, `declarePrivateName`
+//! (cpp:2033-2050) and `resolvePrivateName` (cpp:2052-2066): they live here
+//! because they are `checkIdentifierResolved`'s immediate C++ neighbours and
+//! share its decl-state-machine plumbing, while everything that *calls* them
+//! (the class-body early errors, `visit(PrivateNameNode *)`, the member
+//! restriction checks) lives in `classes.rs` / `expressions.rs`. The `#`
+//! mangling both of them start from is
+//! [`crate::sem_context::private_name_identifier`].
 
 use ast::context::{GCLock, NodeRc};
 use ast::node::{Node, NodeField};
@@ -34,7 +44,9 @@ use ast::visitor::{Path, TransformResult};
 use support::diag::{Subsystem, Warning};
 
 use crate::ids::DeclId;
-use crate::sem_context::{Atom, Binding, DeclKind, DeclSpecial};
+use crate::sem_context::{
+    private_name_identifier, Atom, Binding, DeclKind, DeclSpecial,
+};
 
 use super::SemanticResolver;
 
@@ -45,9 +57,10 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     ///
     /// Called from the function visits (S1 T7, `functions.rs`) at the two
     /// C++ call sites those cover — the temporary-arguments scope
-    /// (cpp:1860) and the function-body declaration (cpp:1923); the other
-    /// two (cpp:994, 1039) belong to S2's class field initializers and
-    /// static blocks.
+    /// (cpp:1860) and the function-body declaration (cpp:1923) — and, since
+    /// S2 T4/T5, from the two class field-initializer visits (cpp:1039 for
+    /// `ClassProperty`, cpp:994 for `ClassPrivateProperty`). Those are all
+    /// four C++ call sites.
     pub(super) fn declare_arguments(&mut self) {
         let func = self.cur_function_info();
         let arguments_name = self.kw().ident_arguments;
@@ -135,6 +148,104 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             Node::Identifier(id) => Some(id.name.get()),
             _ => None,
         }
+    }
+
+    // ---- Private names (S2 T5) --------------------------------------------
+
+    /// Create a new declaration of a private name in the current scope. Port
+    /// of `SemanticResolver::declarePrivateName` (cpp:2033-2050).
+    ///
+    /// \pre An `Identifier` node which has the same `_name` field has not
+    ///   been declared in this same `LexicalScope`.
+    /// \param ident_node the AST node containing the name.
+    /// \param kind the kind of decl to be created.
+    /// \param is_static is only valid for methods / accessors. C++ defaults
+    ///   it to `false` (SemanticResolver.h:412); the field/`PrivateField`
+    ///   call site (cpp:2182) is the one that relies on the default, and
+    ///   passes `false` explicitly here.
+    /// \return the newly created decl.
+    pub(super) fn declare_private_name<'gc>(
+        &mut self,
+        gc: &'gc GCLock,
+        ident_node: &'gc Node<'gc>,
+        kind: DeclKind,
+        is_static: bool,
+    ) -> DeclId {
+        let identifier = ident_node
+            .as_identifier()
+            .expect("declare_private_name: not an Identifier node");
+        let private_name_str =
+            private_name_identifier(gc, identifier.name.get());
+        let cur_scope = self
+            .cur_scope
+            .expect("a private name is always declared in the class scope");
+        let decl = self.sem_ctx.new_decl_in_scope(
+            private_name_str,
+            kind,
+            cur_scope,
+            if is_static {
+                DeclSpecial::PrivateStatic
+            } else {
+                DeclSpecial::NotSpecial
+            },
+        );
+        let res = self.binding_table.try_emplace(
+            private_name_str,
+            Binding::new(decl, Some(NodeRc::from_node(gc, ident_node))),
+        );
+        debug_assert!(
+            res,
+            "cannot re-declare a private name in the same scope."
+        );
+        self.sem_ctx
+            .set_both_decl(ident_node.node_id(), identifier, Some(decl));
+        decl
+    }
+
+    /// Resolve an identifier for a private name to a declaration and record
+    /// the resolution. Port of `SemanticResolver::resolvePrivateName`
+    /// (cpp:2052-2066).
+    ///
+    /// Unlike its sibling `check_identifier_resolved`, this one does NOT test
+    /// `isUnresolvable()`: the C++ doesn't either (a private name is never
+    /// run through the `Unresolver`, which only walks the *variable*
+    /// references inside a `with` body).
+    ///
+    /// \param ident_node the `Identifier` inside a `PrivateName`, or a
+    ///   `ClassPrivateProperty`'s `_key`.
+    /// \return the declaration the private name resolves to, or `None` when
+    ///   no enclosing class declared it. NOTE (unlike the header's wording
+    ///   at SemanticResolver.h:414-417): this function raises no error
+    ///   itself; each caller decides — `visit(PrivateNameNode *)` reports
+    ///   "was not declared in any enclosing class", while the
+    ///   `MemberExpression` branches (cpp:1224-1225) silently skip their
+    ///   extra validation.
+    pub(super) fn resolve_private_name(
+        &mut self,
+        gc: &GCLock,
+        ident_node: &Node,
+    ) -> Option<DeclId> {
+        let identifier = ident_node
+            .as_identifier()
+            .expect("resolve_private_name: not an Identifier node");
+        if let Some(decl) = self.sem_ctx.get_expression_decl(identifier) {
+            return Some(decl);
+        }
+
+        // If we find the binding, assign the associated declaration and
+        // return it.
+        let private_name_str =
+            private_name_identifier(gc, identifier.name.get());
+        if let Some(binding) = self.binding_table.find(&private_name_str) {
+            self.sem_ctx.set_expression_decl(
+                ident_node.node_id(),
+                identifier,
+                Some(binding.decl),
+            );
+            return Some(binding.decl);
+        }
+
+        None
     }
 
     /// Port of `SemanticResolver::resolveIdentifier`

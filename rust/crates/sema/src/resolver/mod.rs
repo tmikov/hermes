@@ -81,6 +81,24 @@
 //! (the implicit constructor and the instance/static elements initializers,
 //! all three recorded in `Cell`s on the class node), which is also what
 //! turns S1 T7's dormant `MethodDefinition` constructor-kind branch live.
+//! From S2 T5, `collectDeclaredPrivateIdentifiers` (cpp:2143-2260),
+//! `declarePrivateName`/`resolvePrivateName` (cpp:2033-2066,
+//! `identifiers.rs`) and the `#` mangling
+//! (`sem_context::private_name_identifier`), plus
+//! `visit(PrivateNameNode *)`, `visit(ClassPrivatePropertyNode *)` and
+//! `visit(StaticBlockNode *)` (`classes.rs`) and
+//! `visit(Member/OptionalMemberExpressionNode *, Node *)`
+//! (`expressions.rs`) — private fields/methods/accessors are declared in the
+//! class scope under their mangled names, the ES2024 15.7.1 duplicate and
+//! accessor-pairing early errors are reported, private member access is
+//! restricted (no `delete`, no `super.#x`, no load from a setter-only name,
+//! no store to a getter-only name or a method), and a static block becomes
+//! its OWN synthetic `is_static_block` `FunctionInfo` with a function-body
+//! scope that `var`s hoist into — which is also what turns S2 T4's dormant
+//! private-instance-method initializer hook (cpp:1109-1111) and
+//! `create_static_block_function_info` live, and what makes S1 T4's
+//! documented `typeof` double-fire quirk reachable (see
+//! `tests/sema_corpus/error-static-block-typeof-arguments.js`).
 //! Together this reproduces `hermesc -dump-sema`
 //! byte-for-byte for programs made of literals, empty statements, bare
 //! identifier reads (including through non-computed member/property
@@ -88,10 +106,10 @@
 //! `var`/`let`/`const` declarations in blocks, functions of every
 //! parameter shape, arrow functions of every body/parameter shape,
 //! generators and `async` functions, the loop/label/switch statements above
-//! and the expression forms above, classes with fields, methods and
-//! `super.x` member access — which is what `tests/sema_differential.rs`
-//! enforces against the real compiler. Private class members, static
-//! blocks, calls (the `eval`/`$SHBuiltin` specials, `super()`), imports,
+//! and the expression forms above, classes with fields, methods,
+//! `super.x` member access, private members and static blocks — which is
+//! what `tests/sema_differential.rs` enforces against the real compiler.
+//! Calls (the `eval`/`$SHBuiltin` specials, `super()`), imports,
 //! and everything else the C++ resolver handles remain later tasks' scope —
 //! see `declarations.rs`'s, `functions.rs`'s, `expressions.rs`'s,
 //! `statements.rs`'s and `classes.rs`'s module docs for exactly which of
@@ -775,6 +793,59 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
         }
     }
 
+    /// Port of the `FunctionContext(SemanticResolver &, StaticBlockNode *,
+    /// FunctionInfo *)` constructor (SemanticResolver.cpp:3004-3023) — the
+    /// one that adopts an already-created `FunctionInfo` (the one
+    /// `ClassContext::createStaticBlockFunctionInfo` just made) AND runs a
+    /// `DeclCollector` over the static block, so that `var`s inside it hoist
+    /// to the block rather than to the enclosing function.
+    ///
+    /// Its only caller is `classes.rs`'s `visit(StaticBlockNode *)`
+    /// (cpp:1062). Like `enter_function_with_info`, `node` is `None` (C++
+    /// sets it to `nullptr` even though it HAS a node — which is why
+    /// `getFunctionName` reports no name for a static block) and
+    /// `setSemInfo` is not called; unlike it, `decls` is populated.
+    fn enter_function_static_block<'ast>(
+        &mut self,
+        gc: &'ast GCLock,
+        node: &'ast Node<'ast>,
+        sem_info: FunctionInfoId,
+    ) -> FunctionState {
+        // Same deviation as `enter_function`'s: C++'s depth-exceeded lambda
+        // mutates the resolver from inside the collector's walk, which this
+        // port cannot do while `&self.sem_ctx.kw` is borrowed, so the two
+        // effects are applied right after the walk. See `enter_function` for
+        // why that is not observable.
+        let mut depth_exceeded_at: Option<&'ast Node<'ast>> = None;
+        let decls = DeclCollector::run(
+            node,
+            gc,
+            &self.sem_ctx.kw,
+            self.recursion_depth,
+            &mut |n| depth_exceeded_at = Some(n),
+        );
+        if let Some(n) = depth_exceeded_at {
+            // Inform the resolver that we have gone too deep.
+            self.recursion_depth = 0;
+            self.recursion_depth_exceeded(n);
+        }
+
+        self.function_stack.push(FunctionContext {
+            sem_info,
+            node: None,
+            label_map: HashMap::new(),
+            current_loop: None,
+            current_loop_or_switch: None,
+            is_formal_params: false,
+            decls: Some(decls),
+            promoted_func_decls: HashMap::new(),
+            binding_table_scope_depth: 0,
+        });
+        FunctionState {
+            was_global_function_context: false,
+        }
+    }
+
     /// Port of `FunctionContext::~FunctionContext`
     /// (SemanticResolver.cpp:3049-3070) plus the call site's
     /// `SaveAndRestore` restore.
@@ -1022,6 +1093,22 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
                 self.visit_method_definition(gc, node)
             }
             Node::Super(_) => self.visit_super(path),
+            // `visit(PrivateNameNode*)` (cpp:952-963),
+            // `visit(ClassPrivatePropertyNode*)` (cpp:965-1006) and
+            // `visit(StaticBlockNode*)` (cpp:1053-1084) — see `classes::*`
+            // (S2 T5); `visit(MemberExpressionNode*, Node*)` (cpp:1207-1253)
+            // and `visit(OptionalMemberExpressionNode*, Node*)`
+            // (cpp:1255-1295), the private-name restriction checks — see
+            // `expressions::visit_member_like_expression` (S2 T5), which
+            // took both kinds out of the override-free generic arm below.
+            Node::PrivateName(_) => self.visit_private_name(gc, node),
+            Node::ClassPrivateProperty(_) => {
+                self.visit_class_private_property(gc, node)
+            }
+            Node::StaticBlock(_) => self.visit_static_block(gc, node),
+            Node::MemberExpression(_) | Node::OptionalMemberExpression(_) => {
+                self.visit_member_like_expression(gc, node, path)
+            }
             // Kinds with no `visit()` overload in C++: the generic dispatch
             // visits their children (`ExpressionStatement`'s `_expression`
             // — `_directive` is a NodeString, not a node) and here also
@@ -1029,15 +1116,13 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // `EmptyStatement` have no children at all, so this is exactly
             // `TransformResult::Unchanged` for them.
             //
-            // `MemberExpression`/`OptionalMemberExpression` DO have a C++
-            // override (cpp:1207-1287), but it only validates a
-            // `PrivateNameNode` `_property` (`resolvePrivateName`, the
-            // `delete`/store/load checks) — classes and private names are
-            // out of scope here, so for any `_property` this port can
-            // currently produce (always an `Identifier`, never a
-            // `PrivateName`), that override reduces to
-            // `visitESTreeChildren(*this, node)`, i.e. exactly this generic
-            // arm. `Property`/`ObjectExpression` have no override at all.
+            // `MemberExpression`/`OptionalMemberExpression` were served by
+            // this arm until S2 T5: their C++ override (cpp:1207-1295) only
+            // validates a `PrivateNameNode` `_property`, so before private
+            // names existed here it reduced to `visitESTreeChildren(*this,
+            // node)`. S2 T5 ported it for real — see
+            // `expressions::visit_member_like_expression`.
+            // `Property`/`ObjectExpression` have no override at all.
             // `VariableDeclarator`/`RestElement`/`AssignmentPattern`/`Empty`
             // (S1 T5, destructuring declarations) likewise have no C++
             // override — see SemanticResolver.cpp's `visit(...)` list, none
@@ -1119,8 +1204,6 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             | Node::StringLiteral(_)
             | Node::BooleanLiteral(_)
             | Node::NullLiteral(_)
-            | Node::MemberExpression(_)
-            | Node::OptionalMemberExpression(_)
             | Node::Property(_)
             | Node::ObjectExpression(_)
             | Node::VariableDeclarator(_)

@@ -1000,3 +1000,39 @@ fn builtin_declarations_and_binding_table_accessors() {
     sc.set_binding_table_global_scope(ptr);
     assert!(!sc.get_binding_table_global_scope().is_null());
 }
+
+/// `private_name_identifier` — the port of
+/// `Context::getPrivateNameIdentifier` (AST/Context.h:389-393), whose whole
+/// body is `getIdentifier(llvh::Twine("#") + str->str())`. It must prepend
+/// exactly one `#`, intern into the SAME table ordinary identifiers use (so
+/// the result compares equal to a hand-interned `"#x"`), and be idempotent in
+/// the sense that equal inputs give equal atoms.
+#[test]
+fn private_name_identifier_prefixes_a_hash() {
+    let mut ctx = Context::new();
+    let gc = GCLock::new(&mut ctx);
+
+    let x = gc.atom_bytes("x");
+    let mangled = sema::sem_context::private_name_identifier(&gc, x);
+    assert_eq!(gc.bytes(mangled), b"#x");
+    // Same atom table as ordinary identifiers, so this is atom equality.
+    assert_eq!(mangled, gc.atom_bytes("#x"));
+    // And distinct from the unmangled name, which is the whole point.
+    assert_ne!(mangled, x);
+
+    // Stable across calls.
+    assert_eq!(mangled, sema::sem_context::private_name_identifier(&gc, x));
+
+    // Only ONE `#` is added: mangling an already-mangled name double-prefixes
+    // rather than being a no-op (nothing does that, but it pins that the
+    // function is a plain prefix, not a normalizer).
+    let twice = sema::sem_context::private_name_identifier(&gc, mangled);
+    assert_eq!(gc.bytes(twice), b"##x");
+
+    // The empty name is not special-cased.
+    let empty = gc.atom_bytes("");
+    assert_eq!(
+        gc.bytes(sema::sem_context::private_name_identifier(&gc, empty)),
+        b"#"
+    );
+}

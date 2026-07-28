@@ -51,6 +51,15 @@ their rows were re-classified accordingly. After it the Imported table has 26
 rows (25 from `test/Sema` + the gap-filler) and the Deferred table 29, i.e.
 25 + 29 = 54. See "S2 Task 4 additions" at the end.
 
+**S2 Task 5** (private names + static blocks) re-probed the nine rows blocked on
+`collectDeclaredPrivateIdentifiers` / `StaticBlock` and imported five of them
+(`private-names.js`, `private-declaration-dup-error.js`,
+`private-name-in-extends-error.js`, `field-value-arguments-error.js`,
+`static-initialization-block-error.js`); the other four turned out to be blocked
+on `CallExpression` (S2 T6) and their rows were re-classified. After it the
+Imported table has 31 rows (30 from `test/Sema` + the gap-filler) and the
+Deferred table 24, i.e. 30 + 24 = 54. See "S2 Task 5 additions" at the end.
+
 ## Imported (byte-identical vs hermesc)
 
 | File | Note |
@@ -81,6 +90,11 @@ rows (25 from `test/Sema` + the gap-filler) and the Deferred table 29, i.e.
 | `class-children.js` | **S2 T4** — the untyped class path: the class scope's `ClassExprName`, the two decls on one `Identifier`, and the three synthetic `FunctionInfo`s a field + a method + no constructor produce |
 | `field-init-bindings.js` | **S2 T4** — field initializers resolving against an enclosing *function*'s scope, so the synthetic initializer functions are that function's children |
 | `reject-super-references.js` | **S2 T4** — every `super not allowed here` shape (`visit(SuperNode *, Node *)`), including the computed-key `canReferenceSuper_ = false` cases and `delete super.x` |
+| `private-names.js` | **S2 T5** — all five private `Decl` kinds, including the `PrivateGetterSetter` a legal accessor pair collapses to |
+| `private-declaration-dup-error.js` | **S2 T5** — five rows of the ES2024 15.7.1 duplicate-private-name matrix plus the static/non-static accessor mismatch |
+| `private-name-in-extends-error.js` | **S2 T5** — `the private name "#foo" was not declared in any enclosing class`: the superclass expression is visited BEFORE the private names are declared (cpp:936-939) |
+| `field-value-arguments-error.js` | **S2 T5** — `invalid use of 'arguments'` in a PRIVATE field initializer (the `ClassPrivateProperty` half of the flag save/restores), which is what kept this file deferred after S2 T4 |
+| `static-initialization-block-error.js` | **S2 T5** — a `let`/`let` redeclaration inside a static block, i.e. the block's own body scope |
 
 `deep-ast-err.js` is listed in the Deferred table below but is NOT a real S1
 gap: the entire `.js` file is comment lines (its `RUN:` lines generate the
@@ -103,25 +117,20 @@ files in, 54 accounted for below) rather than silently dropped. It is also
 | `diagnode_errors.js` | `CallExpression` | S2 |
 | `disabled-eval.js` | `CallExpression` | S2 |
 | `eval-warn.js` | `CallExpression` | S2 |
-| `field-value-arguments-error.js` | private class members (`#f1 = arguments;`) — the class path itself landed in S2 T4, but the file's second half needs `collectDeclaredPrivateIdentifiers`; the non-private half of its subject is covered by the new `error-class-field.js` | S2 T5 |
 | `function-redeclaration-error.js` | loose- AND strict-mode block-nested `FunctionDeclaration` (`ScopedFunctionPromoter`) — re-probed after S2 T3 unblocked its `try`/`catch` clauses; the remaining blocker is the `sema S1: scoped function declarations are S3 scope` assert | S3 |
 | `invalid-args-eval.js` | **not a port gap** — the resolver's loop/`for` support landed in S2 T1 and every diagnostic in this file is produced, with identical text and locations, but two of them collide at the *same* source location (`89:9`: the strict-mode `cannot declare 'arguments'` error and the `was not declared in function "global"` warning). C++'s buffered-message flush uses `std::sort` (`SourceErrorManager.cpp:61-71`), which is NOT stable, so their relative order is unspecified and in practice depends on the whole 24-message array; our `disable_buffering` uses a stable `sort_by_key` (`support/src/manager.rs:903-909`, a documented deviation). Minimized to two messages the two sides agree; only at this file's message count does libstdc++'s introsort reorder the tie. Not faithfully fixable (there is no defined tie order to match), and the file's actual subject is S1's `arguments`/`eval` declaration rules, so the loop-specific rows were extracted into the new `error-for-decl-strict.js` instead | n/a (C++ unstable-sort tie) |
 | `let-arguments-in-arrow.js` | `CallExpression` (arrows landed in S2 T2; `print(...)` remains) | S2 |
-| `private-declaration-dup-error.js` | private class members (`collectDeclaredPrivateIdentifiers`, cpp:2143-2261) | S2 T5 |
-| `private-load-store-error.js` | private class members + the `MemberExpression` private-name branches (cpp:1207-1320) | S2 T5 |
-| `private-name-in-extends-error.js` | private class members (`resolvePrivateName`) | S2 T5 |
-| `private-names.js` | private class members (`declarePrivateName`, the private `Decl` kinds) | S2 T5 |
+| `private-load-store-error.js` | `CallExpression` (`sink(...)`) — the private names and the `MemberExpression`/`OptionalMemberExpression` restriction branches landed in S2 T5, and its whole subject is reproduced call-free by the new `error-private-load-store.js` | S2 T6 |
 | `regress-function-promotion-decl.js` | loose-mode block-nested `FunctionDeclaration` (`ScopedFunctionPromoter`) | S3 |
 | `regress-nested-expressions-error.js` | recursion-depth-limit mismatch: hermesc and sema-dump both correctly error `Too many nested expressions/statements/declarations` on the deeply-nested `get<<=get<<=...` chain, but at different columns (hermesc col 3052, sema-dump col 6124) — the two recursion trackers (`JSParserImpl::recursionDepth_`/`SemanticResolver`'s tracker vs our ported ones) increment at different rates per grammar production, so the exact trip point diverges even though both share the same `MAX_RECURSION_DEPTH = 1024`. Same landmine category as the S1 ledger's "parser recursion limit unported" item (S0-era finding, T6 review) — tracked together, not re-derived/fixed here | parser-gap follow-up (recursion-depth-counting parity) |
 | `reject-with.js` | `CallExpression` (`print(a)`) — `with` itself landed in S2 T3 (see `error-with.js`) | S2 |
-| `static-initialization-block-error.js` | `StaticBlock` (cpp:1053-1084) | S2 T5 |
-| `static-initialization-block-lazy-error.js` | `StaticBlock` | S2 T5 |
-| `static-initialization-block.js` | `StaticBlock` | S2 T5 |
+| `static-initialization-block-lazy-error.js` | `CallExpression` (`print(...)`) — `StaticBlock` landed in S2 T5; its subject (`forbidArgumentsAsIdentifier_` reached through three nested arrows) is covered call-free by the new `error-static-block.js`. Its `RUN:` line also wants `-lazy`, which the harness has no flag support for | S2 T6 |
+| `static-initialization-block.js` | `CallExpression` (`sink(y)`) plus `IfStatement`, which no corpus file has needed yet (it has no `SemanticResolver::visit` override, so it belongs in `visit_node`'s override-free generic arm whenever a file first needs it) — `StaticBlock` itself landed in S2 T5 and its subject is covered by the new `static-blocks.js` | S2 T6 |
 | `super-in-arrow.js` | `CallExpression` (`super()` and `print(...)`) — the class and `super.x` paths landed in S2 T4 | S2 T6 |
 | `super-in-subclass-error.js` | `CallExpression` — its subject IS the `super() call only allowed in derived class constructor` check (cpp:1195-1202) | S2 T6 |
 | `super-in-subclass.js` | `CallExpression` (`super()`) | S2 T6 |
 | `type-alias-children.js` | typed dialect (`-parse-flow` RUN flag; harness has no per-file flags) — WITHOUT the flag, hermesc and sema-dump both hit the identical `';' expected` parse error on `type A = B;`, but that's a coincidental match on a syntax error, not a test of the file's actual subject (TypeAlias children resolution); same vacuous-match category `deep-ast-err.js` was excluded for, so it does not belong in `sema_corpus/` either | dialect-corpus phase |
-| `undeclared-private-name-error.js` | `CallExpression` + private names | S2 T5/T6 |
+| `undeclared-private-name-error.js` | `CallExpression` (`print(...)`) — private names landed in S2 T5 and the same diagnostic is pinned call-free by the new `error-private-load-store.js` | S2 T6 |
 | `valid-super-references.js` | `CallExpression` (`super()` and `print(...)`) — `super.x` itself landed in S2 T4 | S2 T6 |
 | `var-scope-redeclaration-error.js` | `CallExpression` (`something()`) — `try`/`catch` landed in S2 T3 | S2 |
 | `xmod-errors.js` | `CallExpression` | S2 |
@@ -183,6 +192,9 @@ hermesc, 44 are hermesc-failure files).
 
 Final count after S2 Task 4: **120 corpus files matched** (69 succeed on
 hermesc, 51 are hermesc-failure files).
+
+Final count after S2 Task 5: **134 corpus files matched** (72 succeed on
+hermesc, 62 are hermesc-failure files).
 
 ## S2 Task 1 additions
 
@@ -340,3 +352,48 @@ Not corpus-reachable, and documented rather than curated away:
   `classes-derived.js` were trimmed to avoid it. It is a pre-existing C++
   defect, NOT a port gap; a release hermesc (no assertions) dumps the
   incomplete scope tree instead.
+
+## S2 Task 5 additions
+
+Five new files, the five re-probed `test/Sema` imports (`private-names.js`,
+`private-declaration-dup-error.js`, `private-name-in-extends-error.js`,
+`field-value-arguments-error.js`, `static-initialization-block-error.js`) and
+three more imports from `test/Parser` (following the precedent S2 T4 set — the
+`class-static-block-*` files are where the static-block diagnostics live, since
+`test/Sema`'s own static-block files all need `CallExpression`). Each was
+verified byte-for-byte (stdout, stderr and exit status) against
+`hermesc -dump-sema` before being added:
+
+| File | Covers |
+|---|---|
+| `private-members.js` | every legal private-name shape: fields with and without an initializer, instance and static; methods incl. generator and `async`; a getter+setter pair in BOTH declaration orders plus a static pair (so both `PrivateGetterSetter` upgrade orders are pinned); getter-only and setter-only; private access as `this.#x`, `o.#x`, `o?.#x` and the ES2022 `#x in o` check (whose `PrivateName` reaches `visit(PrivateNameNode *)` without a member expression); a member referencing a private name declared LATER in the class (which is the whole reason `collectDeclaredPrivateIdentifiers` runs before the body walk); private fields in nested classes with the same spelling; and the derived-class and class-expression forms |
+| `error-private-dups.js` | the rows of the cpp:2143-2260 early-error matrix that `private-declaration-dup-error.js` does not reach: method+method, setter+setter, accessor-then-field, method-then-field, accessor-then-method, a complete pair plus a third accessor, the static-mismatch rule in the opposite order, and (as the negative control) a legal static getter+static setter pair |
+| `error-private-load-store.js` | every cpp:1207-1295 restriction, written without a `CallExpression` so it is reachable today: load from a setter-only name, store to a getter-only name, store to a method, `delete` on both member kinds — **pinning that the two overloads deliberately report `delete` at DIFFERENT ranges** (`node` vs `parent`) — `super.#y`, an undeclared private name both inside and outside a class, and the four assignment-target shapes where this port's `path.field == left` test could diverge from C++'s `assign->_left == node` pointer comparison (compound assignment, a parenthesized LHS, a linearized `=` chain with a different name per link, and an `UpdateExpression` parent, which is a LOAD) |
+| `static-blocks.js` | `visit(StaticBlockNode *)`: an empty static block, three blocks each hoisting their own `var x` into their own body scope (they would collide if they hoisted to the enclosing function), a `var` hoisted out of a nested block, a block alongside static and instance fields (the shared static-elements-init function), a block as a class's ONLY static element (which still creates that function, cpp:1057), `this`/`super.x`/arrows inside a block, a block inside a class inside a function, a class nested inside a block, private names visible from a block, and a block whose body folds (rebuilding the `StaticBlock` node) |
+| `error-static-block.js` | the diagnostics the four flag save/restores make reachable: `'await' not in an async function` for `await` in a block inside an `async` function, `invalid use of 'arguments' as an identifier` directly and through an arrow, and a `let`/`var` redeclaration in the block's own scope |
+| `error-static-block-typeof-arguments.js` | **PIN for a bug-for-bug quirk.** `class C { static { typeof arguments; } }` reports `invalid use of 'arguments' as an identifier` TWICE at the same location, because `visit(IdentifierNode *, Node *)` has no early return after its `typeof` arm (cpp:304-308 falls through to cpp:322) while `resolveIdentifier`'s two forbid-flag checks run before its decl-cache early return. `forbidArgumentsAsIdentifier_` is only ever set by `visit(StaticBlockNode *)`, so this shape is the only way to reach the double fire — it is the corpus pin S2 T2's report asked S2 T5 to add |
+| `class-static-block-await-error.js` | from `test/Parser` — `'await' not in an async function` inside a static block, contrasted with a legal `await` in the class's `extends` clause of the same async function |
+| `class-static-block-return-error.js` | from `test/Parser` — `'return' not in a function` for a `return` in a static block, at global scope AND inside a function; the diagnostic is the PARSER's (JSParserImpl.cpp:700), which is why sema's `visit(ReturnStatementNode *)` never sees it |
+| `class-static-block-yield-error.js` | from `test/Parser` — the evidence closing S2 T2's open question: `yield` in a static block is `invalid expression` from the parser, so `'yield' not in a generator function` (cpp:1480) is unreachable from there too |
+
+Not corpus-reachable, and documented at their sites rather than curated away:
+
+- **The `@Hermes.overload` duplicate-private-method exemption** (cpp:2197-2200)
+  is `typed_`-only; `TYPED` is a constant `false` in this port, so the `&&`
+  short-circuits and `hermes::findDecorator` is never called. Ported as a panic
+  inside the `if TYPED` that guards it, like the rest of the typed-dialect
+  branches.
+- **The `test262` code-generation setting** (cpp:1221/1265) gates the whole
+  load/store validation block in both member overloads. It is a compiler-driver
+  knob (`hermesc -test262`) this port has no flag for, so it reads the
+  documented `CODE_GENERATION_SETTINGS_TEST262 = false` constant — which is
+  also hermesc's default, i.e. what the corpus compares against.
+- **`'yield' not in a generator function`** (cpp:1480) is now known to be
+  unreachable from a static block too: the parser rejects `yield` there as
+  `invalid expression` (pinned by the imported
+  `class-static-block-yield-error.js`), closing the question S2 T2's note left
+  open. Combined with S2 T4's finding for field initializers, the diagnostic has
+  no reachable source in this dialect at all.
+- **`DebugInfoSetting::ALL`** (cpp:1065-1069) would store the static block's
+  binding-table scope for `eval` of its children. Ported in shape behind
+  `DEBUG_INFO_SETTING_ALL`, exactly like the other two uses of that constant.

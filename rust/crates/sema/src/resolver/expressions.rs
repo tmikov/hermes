@@ -33,6 +33,17 @@
 //! S2 T3 adds `visit(RegExpLiteralNode *)` (cpp:821-835) — a literal, hence
 //! this file rather than `statements.rs`.
 //!
+//! S2 T5 adds `visit(MemberExpressionNode *, Node *)` (cpp:1207-1253) and
+//! `visit(OptionalMemberExpressionNode *, Node *)` (cpp:1255-1295), fused
+//! into one [`SemanticResolver::visit_member_like_expression`] — the two C++
+//! overloads are near-duplicates and that function documents the two places
+//! they genuinely differ. They belong here (rather than in `classes.rs` with
+//! the rest of the private-name work) because they are ordinary expression
+//! visits, and because [`CODE_GENERATION_SETTINGS_TEST262`], which gates
+//! their whole restriction block, is already this module's constant. Before
+//! S2 T5 both kinds were served by `visit_node`'s override-free generic arm,
+//! which was exactly right while no `_property` could be a `PrivateName`.
+//!
 //! ## REGEX-ENGINE DEFERRED
 //!
 //! `visit(RegExpLiteralNode *)` exists for exactly two side effects, and
@@ -186,7 +197,7 @@ use crate::linearize::{
     linearize_left, linearize_right, OperatorExpr, MAX_NESTED_ASSIGNMENTS,
     MAX_NESTED_BINARY,
 };
-use crate::sem_context::{Atom, Constness, DeclSpecial};
+use crate::sem_context::{Atom, Constness, DeclKind, DeclSpecial};
 
 use super::declarations::atom_str;
 use super::functions::is_generator;
@@ -1010,6 +1021,127 @@ impl SemanticResolver<'_, '_, '_, '_> {
         // visitESTreeChildren(*this, regexp): a `RegExpLiteral` has no node
         // children at all (`_pattern`/`_flags` are `NodeLabel`s), so this is
         // unconditionally `Unchanged`.
+        node.visit_children_mut(gc, self)
+    }
+
+    // ---- visit(MemberExpressionNode *, Node *) ---------------------------
+    // ---- visit(OptionalMemberExpressionNode *, Node *) -------------------
+
+    /// Port of `SemanticResolver::visit(ESTree::MemberExpressionNode *node,
+    /// ESTree::Node *parent)` (cpp:1207-1253) and
+    /// `visit(ESTree::OptionalMemberExpressionNode *node, ESTree::Node
+    /// *parent)` (cpp:1255-1295).
+    ///
+    /// The two C++ overloads are near-duplicates; the ONLY differences, both
+    /// preserved below, are:
+    ///
+    /// - the `isa<SuperNode>(node->_object)` / "Cannot lookup private names
+    ///   on super." check exists only on the non-optional overload
+    ///   (cpp:1213-1216). It is not needed on the other one: the parser
+    ///   rejects `super?.` outright (`'(', '[' or '.' expected after 'super'
+    ///   keyword`), so an `OptionalMemberExpression` never has a `Super`
+    ///   object — the same grammar fact that makes `visit(SuperNode *)`'s
+    ///   `OptionalMemberExpression` arm dead (see `classes.rs`).
+    /// - the `delete` diagnostic points at DIFFERENT nodes in the two
+    ///   overloads: `node` for `MemberExpression` (cpp:1219) but `parent`
+    ///   (i.e. the whole `delete ...` expression) for
+    ///   `OptionalMemberExpression` (cpp:1262-1263). Verified against
+    ///   hermesc: `delete o.#x` underlines `o.#x`, `delete o?.#x` underlines
+    ///   `delete o?.#x`. Faithfully reproduced, not unified.
+    ///
+    /// For any `_property` that is not a `PrivateName` — every member
+    /// expression the corpus could reach before this task — the whole body
+    /// reduces to `visitESTreeChildren(*this, node)`, which is what let S1
+    /// route both kinds through `visit_node`'s override-free generic arm.
+    ///
+    /// \param path the parent, as always (C++'s `parent`). `None` cannot
+    ///   happen (a `Program` is always the root); every check below is
+    ///   simply skipped for it, which is also what a null `parent` would do
+    ///   in C++.
+    pub(super) fn visit_member_like_expression<'gc>(
+        &mut self,
+        gc: &'gc GCLock,
+        node: &'gc Node<'gc>,
+        path: Option<Path<'gc>>,
+    ) -> TransformResult<&'gc Node<'gc>> {
+        let (object, property, optional) = match node {
+            Node::MemberExpression(m) => (m.object, m.property, false),
+            Node::OptionalMemberExpression(m) => (m.object, m.property, true),
+            _ => unreachable!(
+                "visit_member_like_expression on a {}",
+                node.node_type_str()
+            ),
+        };
+        if let Node::PrivateName(name) = property {
+            // The following conditions are forbidden by the grammar but it's
+            // harder to enforce in the parser.
+            if !optional && matches!(object, Node::Super(_)) {
+                self.sm.error_range(
+                    node.range(),
+                    "Cannot lookup private names on super.",
+                );
+            }
+            let delete_parent = path.filter(|p| {
+                matches!(p.parent, Node::UnaryExpression(op)
+                    if op.operator.get() == self.kw().ident_delete)
+            });
+            if let Some(p) = delete_parent {
+                // See the doc comment: the two overloads deliberately report
+                // this at different ranges.
+                let range = if optional {
+                    p.parent.range()
+                } else {
+                    node.range()
+                };
+                self.sm
+                    .error_range(range, "Cannot `delete` with a private name.");
+            }
+            if !CODE_GENERATION_SETTINGS_TEST262 {
+                let decl = self.resolve_private_name(gc, name.id);
+                // There is no decl when a nonexistent private name is
+                // referenced, in which case there's no further validation
+                // that can be done here.
+                if let Some(decl) = decl {
+                    // `assign && assign->_left == node`: the `Path` already
+                    // says which field of the parent `node` occupies, so the
+                    // pointer comparison becomes a field test.
+                    let assign_to_this = path.filter(|p| {
+                        matches!(p.parent, Node::AssignmentExpression(_))
+                            && p.field == NodeField::left
+                    });
+                    if let Some(p) = assign_to_this {
+                        // Validate stores of a private name are using a name
+                        // that is eligible for stores.
+                        let kind = self.sem_ctx.decl(decl).kind;
+                        if kind == DeclKind::PrivateGetter {
+                            self.sm.error_range(
+                                p.parent.range(),
+                                "Cannot store to a private name that only \
+                                 defines a getter.",
+                            );
+                        } else if kind == DeclKind::PrivateMethod {
+                            self.sm.error_range(
+                                p.parent.range(),
+                                "Cannot store to a private name that defines \
+                                 a method.",
+                            );
+                        }
+                    } else {
+                        // Validate loads of a private name are using a name
+                        // that is eligible for loads.
+                        if self.sem_ctx.decl(decl).kind
+                            == DeclKind::PrivateSetter
+                        {
+                            self.sm.error_range(
+                                node.range(),
+                                "Cannot load from a private name that only \
+                                 defines a setter.",
+                            );
+                        }
+                    }
+                }
+            }
+        }
         node.visit_children_mut(gc, self)
     }
 }

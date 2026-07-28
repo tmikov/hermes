@@ -51,7 +51,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use ast::context::NodeRc;
+use ast::context::{GCLock, NodeRc};
 use ast::node::{Identifier, Node};
 use ast::{NodeId, SemaId};
 use support::persistent_scoped_map::{PersistentScopedMap, Scope, ScopePtr};
@@ -62,6 +62,30 @@ use crate::keywords::Keywords;
 /// The atom type used throughout sema for identifier/keyword text. Same
 /// type as `ast::node_child::NodeLabel` (both alias `atom_table::AtomBytes`).
 pub type Atom = atom_table::AtomBytes;
+
+/// Get or create the atom for the string *value* of a private name whose
+/// source spelling (the `IdentifierNode::_name` inside a `PrivateNameNode`,
+/// which never includes the `#`) is `name`. Port of
+/// `Context::getPrivateNameIdentifier` (`include/hermes/AST/Context.h:
+/// 389-393`), whose whole body is
+/// `getIdentifier(llvh::Twine("#") + str->str())` — i.e. the mangling is
+/// exactly a `#` prefix, and it interns into the same string table ordinary
+/// identifiers use, which is why a `Decl` named `#x` can never collide with a
+/// JS variable named `x`.
+///
+/// Deviation: C++ hangs this off the AST `Context`, which this port has not
+/// ported as a sema-visible object (see `resolver/mod.rs`'s note on
+/// `astContext_`); the `GCLock` is what owns the atom table here, so it is a
+/// free function in the sema crate taking the lock. Every private-name
+/// consumer (`declarePrivateName`/`resolvePrivateName` today, the FlowChecker
+/// and IRGen later) must go through it so the mangling stays in one place.
+pub fn private_name_identifier(gc: &GCLock, name: Atom) -> Atom {
+    let name_bytes = gc.bytes(name);
+    let mut mangled = Vec::with_capacity(1 + name_bytes.len());
+    mangled.push(b'#');
+    mangled.extend_from_slice(name_bytes);
+    gc.atom_bytes(mangled)
+}
 
 /// Binding between an identifier and its declaration in a scope. Port of
 /// `hermes::sema::Binding` (SemContext.h:28-44).

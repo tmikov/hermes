@@ -5,8 +5,9 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-//! S2 T4: classes — the `ClassContext`, the untyped class-as-expression
-//! path, class properties, method definitions and `super`. A further
+//! S2 T4/T5: classes — the `ClassContext`, the untyped class-as-expression
+//! path, class properties, method definitions, `super`, and (S2 T5) the
+//! private-name early-error machinery plus static blocks. A further
 //! `impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad>` block,
 //! split out of `resolver/mod.rs` the same way `identifiers.rs` (S1 T4),
 //! `declarations.rs` (S1 T5), `expressions.rs` (S1 T6), `functions.rs`
@@ -22,6 +23,17 @@
 //! `visit(SuperNode *, Node *)` (cpp:1086-1092), plus the four `ESTree::`
 //! free functions they reach (`getSuperClass`, `getClassID`, `getClassBody`,
 //! `getDecorators` — `lib/AST/ESTree.cpp:228-277`).
+//!
+//! S2 T5 adds `collectDeclaredPrivateIdentifiers` (cpp:2143-2260),
+//! `visit(PrivateNameNode *)` (cpp:952-963),
+//! `visit(ClassPrivatePropertyNode *)` (cpp:965-1006) and
+//! `visit(StaticBlockNode *)` (cpp:1053-1084). The two halves the private
+//! names need that do NOT live here are `declarePrivateName`/
+//! `resolvePrivateName` (`identifiers.rs`, next to their C++ neighbour
+//! `checkIdentifierResolved`), the `#`-prefix mangling
+//! (`sem_context::private_name_identifier`), and the `MemberExpression`/
+//! `OptionalMemberExpression` restriction checks (cpp:1207-1295,
+//! `expressions.rs`).
 //!
 //! ## Where the synthetic `FunctionInfo` ids live
 //!
@@ -42,9 +54,10 @@
 //! `createStaticBlockFunctionInfo` (cpp:3165-3177) is the fourth creator and
 //! the only one whose id does NOT land on the class: it goes on the
 //! `StaticBlock` node's own `function_info` `Cell` (`StaticBlockDecoration`),
-//! and its `FunctionInfo` is flagged `is_static_block`. It is ported here
-//! (dormant) because it is a `ClassContext` member; its only caller,
-//! `visit(StaticBlockNode *)` (cpp:1053-1084), is S2 T5.
+//! and its `FunctionInfo` is flagged `is_static_block` (which is what makes
+//! the dump print `StaticBlock strict` instead of `Func strict`). It is
+//! ported here because it is a `ClassContext` member; its only caller is
+//! [`SemanticResolver::visit_static_block`] (S2 T5).
 //!
 //! The only thing `ClassContext` itself stores is `has_constructor` (plus
 //! the class node it decorates, and C++'s `prevContext_` — this port's
@@ -105,6 +118,29 @@
 //! assignable. This is precisely the case `SemContext`'s side table exists
 //! for (S0 T4); the dump renders it as `Id 'C' [D:%d.1 E:%d.65 'C']`.
 //!
+//! ## Private names: where the declarations come from
+//!
+//! Private names are declared by `collect_declared_private_identifiers`
+//! (cpp:2143-2260) into the SAME scope as the `ClassExprName`, i.e. the class
+//! node's own scope, under the `#`-mangled name
+//! ([`crate::sem_context::private_name_identifier`]) — which is exactly why a
+//! `#x` can never be confused with, or shadow, an ordinary `x`. It runs
+//! BEFORE the class body is walked (cpp:684 in this port's
+//! `visit_class_as_expr`), which is what lets a member declared early
+//! reference a private name declared late.
+//!
+//! Two properties of that function are easy to lose in a port and are pinned
+//! by `tests/resolver.rs`:
+//!
+//! - A legal getter+setter pair ends up as ONE `Decl`, whose `kind` the
+//!   SECOND accessor MUTATES in place from `PrivateGetter`/`PrivateSetter` to
+//!   `PrivateGetterSetter` (cpp:2255), with both accessors' `Identifier`s
+//!   bound to it via `setBothDecl`. That mutation targets `SemContext` state,
+//!   not a node `Cell`, so it is exempt from the decorate-before-recurse
+//!   invariant — noted at the site.
+//! - Every diagnostic points at the *`Identifier`* inside the private name
+//!   (`id->getSourceRange()`), never at the element or the `#`.
+//!
 //! ## What's dormant
 //!
 //! - **The `typed_` branch of `visit(ClassDeclarationNode *)`**
@@ -113,24 +149,21 @@
 //!   walk). `typed_` is `false` in this port (see [`TYPED`]), so the branch
 //!   is ported in shape only, as a documented panic — typed dialects are
 //!   their own future track.
-//! - **`collect_declared_private_identifiers`** (cpp:2143-2260) is S2 T5's;
-//!   see the seam at
-//!   [`SemanticResolver::collect_declared_private_identifiers`].
-//! - **`create_static_block_function_info`** (cpp:3165-3177) has no caller
-//!   until S2 T5 ports `visit(StaticBlockNode *)`.
-//! - **The private-instance-method hook** in `visit(MethodDefinitionNode *)`
-//!   (cpp:1109-1111) is ported live — it needs nothing but the
-//!   `ClassContext` — but is unreachable until T5, because a class with any
-//!   private element trips the seam above first.
+//! - **The `@Hermes.overload` duplicate-private-method exemption**
+//!   (cpp:2197-2200) is `typed_`-only for the same reason, and is a panic
+//!   inside the `if TYPED` that guards it.
+
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 
 use ast::context::{GCLock, NodeRc};
 use ast::node::{builder, Node, NodeField};
 use ast::visitor::{Path, TransformResult, VisitorMut};
 use ast::SemaId;
 
-use crate::ids::FunctionInfoId;
+use crate::ids::{DeclId, FunctionInfoId};
 use crate::sem_context::{
-    Binding, ConstructorKind, CustomDirectives, DeclKind, FuncIsArrow,
+    Atom, Binding, ConstructorKind, CustomDirectives, DeclKind, FuncIsArrow,
 };
 
 use super::expressions::replacement_of;
@@ -162,6 +195,58 @@ pub(super) struct ClassContext {
     /// the node the visit was ENTERED with, never a rebuilt copy — see the
     /// module doc's decorate-after-children section.
     class_node: NodeRc,
+}
+
+/// Information about a private accessor. Port of
+/// `collectDeclaredPrivateIdentifiers`'s local `struct PrivateAccessorInfo`
+/// (cpp:2146-2162).
+///
+/// Deviation: C++ leaves `originalNameDecl` UNINITIALIZED in the
+/// default-constructed (`PrivateAccessorInfo{}`) field/method cases, relying
+/// on `isAccessor == false` to keep it from ever being read. `Option<DeclId>`
+/// spells that out instead, and the one read site `expect`s it.
+#[derive(Clone, Copy, Default)]
+struct PrivateAccessorInfo {
+    /// The rest of the fields in the struct are only meaningful if
+    /// `is_accessor` is true. Fields & methods will have this as false.
+    is_accessor: bool,
+    is_static: bool,
+    is_getter: bool,
+    is_setter: bool,
+    /// True if the first declaration was a private method decorated with
+    /// `@Hermes.overload`. Subsequent overloaded methods with the same name
+    /// are accepted; non-overload duplicates remain an error.
+    is_overloaded_method: bool,
+    /// In the case of a pair of accessors defined with the same name, we
+    /// should reuse the same decl to define the declaration & expression
+    /// decl of the second accessor. This field stores that original decl for
+    /// the second accessor to find later.
+    original_name_decl: Option<DeclId>,
+}
+
+/// Insert `value` under `key` only if `key` is vacant, leaving an existing
+/// entry untouched. Port of the "only if not already present" semantics
+/// shared by `llvh::DenseMap::try_emplace` and `llvh::DenseMap::insert`,
+/// whose `.second` this returns.
+///
+/// `std::collections::HashMap` has no single-lookup equivalent on stable Rust
+/// (`try_insert` is unstable, and `insert` overwrites), and the `Entry` API
+/// cannot be used inline at the call sites because the borrow it holds on the
+/// map would outlive the `&mut self` resolver calls that follow each insert.
+///
+/// \return true if the insert happened.
+fn insert_if_vacant(
+    map: &mut HashMap<Atom, PrivateAccessorInfo>,
+    key: Atom,
+    value: PrivateAccessorInfo,
+) -> bool {
+    match map.entry(key) {
+        Entry::Occupied(_) => false,
+        Entry::Vacant(e) => {
+            e.insert(value);
+            true
+        }
+    }
 }
 
 /// The state a class entry saves so `exit_class` can restore it. C++ keeps
@@ -523,9 +608,8 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     /// Unlike the three above, the id lands on the `StaticBlock` node's own
     /// `function_info` `Cell` (see the module doc), and no scope is created
     /// here: `visit(StaticBlockNode *)`'s `ScopeRAII{..., /*
-    /// isFunctionBodyScope */ true}` (cpp:1063) makes it. Dormant until S2
-    /// T5 ports that visit, which is this function's only caller.
-    #[allow(dead_code)]
+    /// isFunctionBodyScope */ true}` (cpp:1063) makes it. Its only caller is
+    /// [`Self::visit_static_block`] (S2 T5).
     fn create_static_block_function_info(
         &mut self,
         node: &Node,
@@ -681,7 +765,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             )),
             None => None,
         };
-        self.collect_declared_private_identifiers(node);
+        self.collect_declared_private_identifiers(gc, node);
         // Visit the body node.
         //
         // C++ dyn_casts to pick `CD->_body` vs `CE->_body` purely because
@@ -706,53 +790,413 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
         result
     }
 
-    /// S2 T5 SEAM — port of `SemanticResolver::
-    /// collectDeclaredPrivateIdentifiers` (cpp:2143-2260).
+    /// Port of `SemanticResolver::collectDeclaredPrivateIdentifiers`
+    /// (cpp:2143-2260) — the ES2024 15.7.1 early-error machinery for private
+    /// names, run over the class body BEFORE the body is visited (cpp:684 in
+    /// this port's `visit_class_as_expr`), so that every private reference
+    /// anywhere inside the class — including in a member declared earlier
+    /// than the one it names — resolves.
     ///
-    /// The real function walks the class body and runs the ES2024 15.7.1
-    /// early-error machinery for private names (duplicate fields, duplicate
-    /// methods, getter/setter pairing and the static-mismatch rule), calling
-    /// `declarePrivateName` for each. That whole apparatus — plus
-    /// `resolvePrivateName`, the private `Decl` kinds and the name mangling
-    /// — is Task 5's.
-    ///
-    /// Rather than silently skip it (which would let a class with private
-    /// members resolve as if the names had never been declared, and produce
-    /// a *wrong* dump instead of no dump), this iterates the same class-body
-    /// list the C++ does and panics on the first private element. A class
-    /// with no private members is exactly the `privateDeclarations`-empty
-    /// case, where the C++ loop does nothing observable.
+    /// Declare and validate the class private names. Enforce the rules laid
+    /// out in ES2024 15.7.1 Early Errors: It is a Syntax Error if declared
+    /// private names contains any duplicate entries, unless the name is used
+    /// once for a getter and once for a setter and in no other entries, and
+    /// the getter and setter are either both static or both non-static.
     fn collect_declared_private_identifiers<'gc>(
-        &self,
+        &mut self,
+        gc: &'gc GCLock,
         node: &'gc Node<'gc>,
     ) {
+        // Map a private name to accessor information.
+        let mut private_declarations: HashMap<Atom, PrivateAccessorInfo> =
+            HashMap::new();
+
+        const DEFAULT_DUP_ERR_MSG: &str =
+            "Duplicate private identifier declaration.";
         let body = class_like_body(node)
             .as_class_body()
             .expect("class_like_body checked the kind");
         for elm in body.body.iter() {
-            // `ClassPrivateProperty` is how the parser spells `#x = 1`;
-            // `#m() {}` / `get #x() {}` is a `MethodDefinition` with a
-            // `PrivateName` key (the two cases cpp:2174/2186 test for). The
-            // `ClassProperty` arm is defensive: the parser never gives a
-            // `ClassProperty` a `PrivateName` key, but if it ever did, the
-            // C++ would fall through to `declarePrivateName` never running.
-            let is_private = match elm {
-                Node::ClassPrivateProperty(_) => true,
-                Node::MethodDefinition(m) => {
-                    matches!(m.key, Node::PrivateName(_))
+            if let Node::ClassPrivateProperty(prop) = elm {
+                // C++'s `cast<IdentifierNode>(prop->_key)`: unlike a
+                // `MethodDefinition`, a `ClassPrivateProperty` stores the
+                // bare `Identifier` as its key, with no `PrivateName`
+                // wrapper (ESTree.def:562-565).
+                let id_node = prop.key;
+                let id = id_node
+                    .as_identifier()
+                    .expect("a ClassPrivateProperty key is an Identifier");
+                // If we did not complete the insert, that means something
+                // already exists with this identifier. Fields are not
+                // allowed to be duplicated at all.
+                if !insert_if_vacant(
+                    &mut private_declarations,
+                    id.name.get(),
+                    PrivateAccessorInfo::default(),
+                ) {
+                    self.sm.error_range(id_node.range(), DEFAULT_DUP_ERR_MSG);
+                } else {
+                    self.declare_private_name(
+                        gc,
+                        id_node,
+                        DeclKind::PrivateField,
+                        /* isStatic */ false,
+                    );
                 }
-                Node::ClassProperty(p) => {
-                    matches!(p.key, Node::PrivateName(_))
+                continue;
+            }
+            if let Node::MethodDefinition(method) = elm {
+                let Node::PrivateName(private_name) = method.key else {
+                    continue;
+                };
+                let id_node = private_name.id;
+                let id = id_node
+                    .as_identifier()
+                    .expect("a PrivateName's id is an Identifier");
+                let name = id.name.get();
+                let meth_kind = method.kind.get();
+                if meth_kind == self.kw().ident_method {
+                    // Private methods decorated with @Hermes.overload may
+                    // legally have duplicate names. The FlowChecker
+                    // validates that all overloads of a given name are
+                    // decorated and merges them into a single Field. The
+                    // first overload creates the binding; subsequent
+                    // overloads share it.
+                    //
+                    //   bool isOverload =
+                    //       typed_ &&
+                    //       hermes::findDecorator(
+                    //           method->_decorators,
+                    //           {kw_.identHermes, kw_.identOverload});
+                    //
+                    // `hermes::findDecorator` (`lib/AST/ESTree.cpp`) is part
+                    // of the typed-dialect track, like the rest of the
+                    // decorator machinery; `TYPED` is a constant `false`
+                    // here, so the `&&` short-circuits and the call is
+                    // never made. Ported as a panic rather than a guess, the
+                    // same way `visit_class_declaration`'s typed branch is.
+                    let is_overload = if TYPED {
+                        panic!(
+                            "sema: @Hermes.overload private methods need \
+                             the typed-dialect track (cpp:2197-2200)"
+                        )
+                    } else {
+                        false
+                    };
+                    let inserted = insert_if_vacant(
+                        &mut private_declarations,
+                        name,
+                        PrivateAccessorInfo::default(),
+                    );
+                    if !inserted {
+                        let existing = private_declarations[&name];
+                        if !is_overload || !existing.is_overloaded_method {
+                            self.sm.error_range(
+                                id_node.range(),
+                                DEFAULT_DUP_ERR_MSG,
+                            );
+                        }
+                        // Resolve this private name's identifier to the
+                        // existing decl.
+                        self.resolve_private_name(gc, id_node);
+                    } else {
+                        private_declarations
+                            .get_mut(&name)
+                            .expect("just inserted")
+                            .is_overloaded_method = is_overload;
+                        self.declare_private_name(
+                            gc,
+                            id_node,
+                            DeclKind::PrivateMethod,
+                            method.r#static.get(),
+                        );
+                    }
+                    continue;
                 }
-                _ => false,
-            };
-            if is_private {
-                panic!(
-                    "sema S2 T5: private class members need \
-                     collectDeclaredPrivateIdentifiers (cpp:2143-2260)"
+                debug_assert!(
+                    meth_kind == self.kw().ident_set
+                        || meth_kind == self.kw().ident_get,
+                    "unrecognized method kind."
+                );
+                let is_setter = meth_kind == self.kw().ident_set;
+                let cur_info = PrivateAccessorInfo {
+                    is_accessor: true,
+                    is_static: method.r#static.get(),
+                    is_getter: !is_setter,
+                    is_setter,
+                    is_overloaded_method: false,
+                    original_name_decl: None,
+                };
+                // `DenseMap::insert` never overwrites an existing entry, so
+                // this is the same "insert only if vacant" primitive the two
+                // `try_emplace`es above use.
+                if insert_if_vacant(&mut private_declarations, name, cur_info) {
+                    // We successfully inserted, so there's no possibility
+                    // for an error. Save the decl made here for reuse later
+                    // in the case of a pair of accessors.
+                    let decl = self.declare_private_name(
+                        gc,
+                        id_node,
+                        if is_setter {
+                            DeclKind::PrivateSetter
+                        } else {
+                            DeclKind::PrivateGetter
+                        },
+                        method.r#static.get(),
+                    );
+                    private_declarations
+                        .get_mut(&name)
+                        .expect("just inserted")
+                        .original_name_decl = Some(decl);
+                    continue;
+                }
+                // There is already an private declaration of this
+                // identifier. The only way this can be legal is if it is
+                // also an accessor which is the complement accessor kind of
+                // what we are trying to define here, with the same
+                // static-ness. E.g., if we are trying to define a static
+                // getter, then the only accepted duplicate is a static
+                // setter.
+                let existing_info = private_declarations[&name];
+                if !existing_info.is_accessor
+                    || (cur_info.is_setter && existing_info.is_setter)
+                    || (cur_info.is_getter && existing_info.is_getter)
+                {
+                    self.sm.error_range(id_node.range(), DEFAULT_DUP_ERR_MSG);
+                    continue;
+                }
+                if cur_info.is_static != existing_info.is_static {
+                    self.sm.error_range(
+                        id_node.range(),
+                        "static and non-static private accessor with the \
+                         same name",
+                    );
+                    continue;
+                }
+                // We can only survive through one duplicate declaration on
+                // the same name. After this, we know this private name has
+                // both a setter and getter.
+                let original_name_decl = existing_info
+                    .original_name_decl
+                    .expect("an accessor entry always records its decl");
+                {
+                    let existing_info = private_declarations
+                        .get_mut(&name)
+                        .expect("looked up just above");
+                    existing_info.is_getter = true;
+                    existing_info.is_setter = true;
+                }
+                // NOTE: this MUTATES an already-created `Decl`'s kind
+                // (cpp:2255). It is exempt from `resolver/mod.rs`'s
+                // "decorate before recursing" invariant, which constrains
+                // writes to `Cell` decorations ON AST NODES: a `Decl` lives
+                // in `SemContext`, which no node rebuild ever snapshots or
+                // copies, so the mutation is visible no matter when it
+                // happens.
+                self.sem_ctx.decl_mut(original_name_decl).kind =
+                    DeclKind::PrivateGetterSetter;
+                // Make sure to bind this id node to the correct decl.
+                self.sem_ctx.set_both_decl(
+                    id_node.node_id(),
+                    id,
+                    Some(original_name_decl),
                 );
             }
         }
+    }
+
+    // ---- visit(PrivateNameNode *) ----------------------------------------
+
+    /// Port of `SemanticResolver::visit(ESTree::PrivateNameNode *node)`
+    /// (cpp:952-963).
+    ///
+    /// This is the ONLY place the "was not declared in any enclosing class"
+    /// diagnostic is reported, which is why the `MemberExpression` branches
+    /// (cpp:1224-1225) can silently skip their extra validation when
+    /// `resolvePrivateName` fails: this visit runs on the same
+    /// `PrivateNameNode` right afterwards, from `visitESTreeChildren`.
+    pub(super) fn visit_private_name<'gc>(
+        &mut self,
+        gc: &'gc GCLock,
+        node: &'gc Node<'gc>,
+    ) -> TransformResult<&'gc Node<'gc>> {
+        let private_name = node
+            .as_private_name()
+            .expect("visit_private_name: not a PrivateName");
+        // C++'s `cast<IdentifierNode>(node->_id)`.
+        let identifier_node = private_name.id;
+        let decl = self.resolve_private_name(gc, identifier_node);
+        if decl.is_none() {
+            // Failed to resolve.
+            let name = identifier_node
+                .as_identifier()
+                .expect("a PrivateName's id is an Identifier")
+                .name
+                .get();
+            let name = String::from_utf8_lossy(gc.bytes(name)).into_owned();
+            self.sm.error_range(
+                identifier_node.range(),
+                format!(
+                    "the private name \"#{name}\" was not declared in any \
+                     enclosing class"
+                ),
+            );
+        }
+        // `visitESTreeChildren(*this, node)`: a `PrivateName`'s only child is
+        // `_id`, and `visit(IdentifierNode *, Node *)` returns early for a
+        // `PrivateName` parent (cpp:315-317) — "Identifiers belonging to a
+        // PrivateNameNode are validated in the PrivateNameNode visitor" —
+        // so this can never rebuild anything. It is kept because the C++
+        // keeps it.
+        node.visit_children_mut(gc, self)
+    }
+
+    // ---- visit(ClassPrivatePropertyNode *) -------------------------------
+
+    /// Port of `SemanticResolver::visit(ESTree::ClassPrivatePropertyNode
+    /// *node)` (cpp:965-1006).
+    ///
+    /// The same shape as `visit(ClassPropertyNode *)` (see
+    /// [`Self::visit_class_property`]) minus the computed-key branch: a
+    /// private property's key can never be computed, and — note — the key is
+    /// never VISITED either. It was already declared and bound (with
+    /// `setBothDecl`) by `collect_declared_private_identifiers`, so visiting
+    /// it would only try to resolve `x` as an ordinary variable.
+    pub(super) fn visit_class_private_property<'gc>(
+        &mut self,
+        gc: &'gc GCLock,
+        node: &'gc Node<'gc>,
+    ) -> TransformResult<&'gc Node<'gc>> {
+        let prop = node.as_class_private_property().expect(
+            "visit_class_private_property: not a ClassPrivateProperty",
+        );
+        if self.compile() && !prop.decorators.is_empty() {
+            self.sm
+                .error_range(node.range(), "decorators are not supported");
+        }
+
+        // Visit the init expression, since it needs to be resolved.
+        let mut value_repl = None;
+        if let Some(value) = prop.value {
+            // We visit the initializer expression in the context of a
+            // synthesized method that performs the initializations.
+            // Field initializers can always reference super.
+            let saved_can_ref_super = self.can_reference_super;
+            self.can_reference_super = true;
+            let saved_forbid_await = self.forbid_await_expression;
+            self.forbid_await_expression = true;
+            // ES14.0 15.7.1
+            // It is a Syntax Error if Initializer is present and
+            // ContainsArguments of Initializer is true.
+            let saved_forbid_arguments =
+                self.forbid_special_arguments_reference;
+            self.forbid_special_arguments_reference = true;
+
+            let sem_info = if prop.r#static.get() {
+                self.get_or_create_static_elements_init_function_info(gc)
+            } else {
+                self.get_or_create_instance_elements_init_function_info(gc)
+            };
+            let func_state = self.enter_function_with_info(sem_info);
+            // We need to make sure that the special `arguments` object is
+            // declared so that we can detect usages of it, and correctly
+            // error out since field initializers are not allowed to
+            // reference `arguments`. If we didn't do this then a class in
+            // the global scope would allow a field initializer to reference
+            // `arguments`, since it would treat it as a normal identifier.
+            // This will insert the `arguments` identifer into the binding
+            // table scope which is created by the class declaration /
+            // expression node.
+            self.declare_arguments();
+            value_repl = replacement_of(self.call(
+                gc,
+                value,
+                Some(Path::new(node, NodeField::value)),
+            ));
+            self.exit_function(func_state);
+
+            self.forbid_special_arguments_reference = saved_forbid_arguments;
+            self.forbid_await_expression = saved_forbid_await;
+            self.can_reference_super = saved_can_ref_super;
+        } else if !TYPED {
+            // Create the these initializers even if no value initializer is
+            // present, in untyped mode. Typed classes don't need these
+            // initializers since we know the exact shape and construct it up
+            // front.
+            if prop.r#static.get() {
+                self.get_or_create_static_elements_init_function_info(gc);
+            } else {
+                self.get_or_create_instance_elements_init_function_info(gc);
+            }
+        }
+        build_class_private_property(gc, prop, value_repl)
+    }
+
+    // ---- visit(StaticBlockNode *) ----------------------------------------
+
+    /// Port of `SemanticResolver::visit(ESTree::StaticBlockNode *node)`
+    /// (cpp:1053-1084).
+    ///
+    /// Both `Cell`s this writes on `node` (`function_info`, from
+    /// `create_static_block_function_info`, and `scope`, from `enter_scope`)
+    /// are written BEFORE the children are visited, so the
+    /// "decorate before recursing" invariant holds as stated — a fold or an
+    /// arrow rewrite anywhere in the block rebuilds it and carries both. The
+    /// OTHER decoration this visit causes, the static-elements-init id from
+    /// cpp:1057, lands on the CLASS node instead, and it is
+    /// `visit_class_as_expr` that keeps that one alive across a rebuild (see
+    /// the module doc's decorate-after-children section).
+    pub(super) fn visit_static_block<'gc>(
+        &mut self,
+        gc: &'gc GCLock,
+        node: &'gc Node<'gc>,
+    ) -> TransformResult<&'gc Node<'gc>> {
+        // Initialize the static elements info even though we don't use it as
+        // the function info for the static block itself. IRGen needs this
+        // info to generate IR for any static elements.
+        self.get_or_create_static_elements_init_function_info(gc);
+        // StaticBlockNodes should be treated as if they are actually a
+        // function-level scope. For example, `var` declarations do not get
+        // hoisted up to the function that the class resides in, but rather to
+        // this static block scope.
+        let static_block_info = self.create_static_block_function_info(node);
+        let func_state =
+            self.enter_function_static_block(gc, node, static_block_info);
+        let scope_state =
+            self.enter_scope(Some(node), /* isFunctionBodyScope */ true);
+        self.process_collected_declarations(gc, node);
+        if DEBUG_INFO_SETTING_ALL {
+            // Store the current scope, for compiling children of this static
+            // block node in 'eval'.
+            let ptr = self.binding_table.current_scope();
+            self.sem_ctx
+                .function_mut(static_block_info)
+                .binding_table_scope = ptr;
+        }
+
+        // ES14.0 15.7.1
+        // It is a Syntax Error if ClassStaticBlockStatementList Contains
+        // await is true.
+        let saved_forbid_await = self.forbid_await_expression;
+        self.forbid_await_expression = true;
+        // Using await as an identifier is forbidden.
+        let saved_forbid_await_ident = self.forbid_await_as_identifier;
+        self.forbid_await_as_identifier = true;
+        // Disallow 'arguments' usage as an identifier in static blocks.
+        let saved_forbid_arguments_ident = self.forbid_arguments_as_identifier;
+        self.forbid_arguments_as_identifier = true;
+        // Static blocks can always reference super.
+        let saved_can_ref_super = self.can_reference_super;
+        self.can_reference_super = true;
+        let result = node.visit_children_mut(gc, self);
+        self.can_reference_super = saved_can_ref_super;
+        self.forbid_arguments_as_identifier = saved_forbid_arguments_ident;
+        self.forbid_await_as_identifier = saved_forbid_await_ident;
+        self.forbid_await_expression = saved_forbid_await;
+
+        self.exit_scope(scope_state);
+        self.exit_function(func_state);
+        result
     }
 
     // ---- visit(ClassPropertyNode *) --------------------------------------
@@ -884,8 +1328,8 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
         // If there are private instance methods, we will need to make an
         // instance elements intializer function.
         //
-        // Unreachable until S2 T5: a class with any private element trips
-        // `collect_declared_private_identifiers`'s seam first.
+        // Live as of S2 T5, which is what makes a `PrivateName` key
+        // reachable at all.
         if matches!(method.key, Node::PrivateName(_)) && !method.r#static.get()
         {
             self.get_or_create_instance_elements_init_function_info(gc);
@@ -962,6 +1406,21 @@ fn build_class_property<'gc>(
     if let Some(v) = key {
         b.key(v);
     }
+    if let Some(v) = value {
+        b.value(Some(v));
+    }
+    b.build(gc)
+}
+
+/// Rebuild a `ClassPrivateProperty` with the (possibly) replaced `_value` —
+/// see [`build_class_property`]. There is no `_key` parameter because
+/// `visit(ClassPrivatePropertyNode *)` never visits the key.
+fn build_class_private_property<'gc>(
+    gc: &'gc GCLock,
+    prop: &'gc ast::node::ClassPrivateProperty<'gc>,
+    value: Option<&'gc Node<'gc>>,
+) -> TransformResult<&'gc Node<'gc>> {
+    let mut b = builder::ClassPrivateProperty::from_node(prop);
     if let Some(v) = value {
         b.value(Some(v));
     }

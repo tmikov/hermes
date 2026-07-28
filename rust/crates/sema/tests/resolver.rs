@@ -1968,3 +1968,226 @@ fn a_nested_class_gets_its_own_class_context() {
         );
     });
 }
+
+// ---- S2 T5: private names + static blocks ------------------------------
+
+/// The private-name mangling (`Context::getPrivateNameIdentifier`,
+/// AST/Context.h:389-393) keeps a private `Decl` out of the ordinary
+/// variable namespace: `#x`'s decl name is NOT the `x` its `Identifier` node
+/// carries, so the `var x` in the method below is a completely separate decl.
+/// (The exact `#`-prefixed spelling is pinned by `sem_context.rs`'s
+/// `private_name_identifier_prefixes_a_hash`, which has a `GCLock` to read
+/// atom text with, and end-to-end by the `Decl %d.N '#x' PrivateField` line
+/// the differential compares.)
+#[test]
+fn a_private_field_decl_is_not_the_same_as_a_same_named_variable() {
+    let src = "class C { #x; m() { var x; return this.#x; } }\n";
+    with_resolved(src, |sem_ctx, resolved| {
+        let class = first_statement(resolved);
+        let class_decl =
+            class.as_class_declaration().expect("not a ClassDeclaration");
+        let scope = sema::ids::ScopeId::from_sema_id(
+            class_decl.scope.get().expect("no scope on the class"),
+        );
+        let body = class_decl.body.as_class_body().expect("not a ClassBody");
+        let mut elms = body.body.iter();
+        // The `ClassPrivateProperty`'s key is a bare `Identifier` (no
+        // `PrivateName` wrapper), bound by `declarePrivateName`'s
+        // `setBothDecl`.
+        let key = elms
+            .next()
+            .expect("empty class body")
+            .as_class_private_property()
+            .expect("not a ClassPrivateProperty")
+            .key
+            .as_identifier()
+            .expect("a ClassPrivateProperty key is an Identifier");
+        let private_decl =
+            sem_ctx.get_expression_decl(key).expect("unresolved private name");
+        assert_eq!(sem_ctx.get_declaration_decl(key), Some(private_decl));
+        assert_eq!(sem_ctx.decl(private_decl).kind, DeclKind::PrivateField);
+        assert_eq!(
+            sem_ctx.decl(private_decl).special,
+            sema::sem_context::DeclSpecial::NotSpecial,
+            "a FIELD never gets PrivateStatic (cpp:2182 passes isStatic=false)"
+        );
+        // It lives in the class's own scope, right after the ClassExprName.
+        assert_eq!(sem_ctx.decl(private_decl).scope, Some(scope));
+        assert_eq!(sem_ctx.scope(scope).decls.len(), 2);
+        assert_eq!(sem_ctx.scope(scope).decls[1], private_decl);
+        // The decl's NAME is the mangled one, so it can never be the atom the
+        // `Identifier` node carries.
+        assert_ne!(sem_ctx.decl(private_decl).name, key.name.get());
+    });
+}
+
+/// A legal getter+setter pair collapses onto ONE decl, whose kind was
+/// UPGRADED in place from `PrivateGetter` to `PrivateGetterSetter`
+/// (cpp:2253-2255) — and BOTH accessors' identifier nodes are bound to it
+/// (the `setBothDecl` at cpp:2257). `isStatic` on both halves becomes
+/// `Decl::Special::PrivateStatic`.
+#[test]
+fn a_private_getter_setter_pair_shares_one_upgraded_decl() {
+    let src = "class C { static get #x() {} static set #x(v) {} }\n";
+    with_resolved(src, |sem_ctx, resolved| {
+        let class = first_statement(resolved);
+        let body = class
+            .as_class_declaration()
+            .expect("not a ClassDeclaration")
+            .body
+            .as_class_body()
+            .expect("not a ClassBody");
+        let decls: Vec<sema::ids::DeclId> = body
+            .body
+            .iter()
+            .map(|elm| {
+                let key = elm
+                    .as_method_definition()
+                    .expect("not a MethodDefinition")
+                    .key
+                    .as_private_name()
+                    .expect("key is not a PrivateName")
+                    .id
+                    .as_identifier()
+                    .expect("a PrivateName's id is an Identifier");
+                let decl =
+                    sem_ctx.get_expression_decl(key).expect("unresolved");
+                assert_eq!(
+                    sem_ctx.get_declaration_decl(key),
+                    Some(decl),
+                    "setBothDecl must set both to the same decl"
+                );
+                decl
+            })
+            .collect();
+        assert_eq!(decls.len(), 2);
+        assert_eq!(decls[0], decls[1], "the pair must share one decl");
+        assert_eq!(
+            sem_ctx.decl(decls[0]).kind,
+            DeclKind::PrivateGetterSetter,
+            "the second accessor must upgrade the first's decl in place"
+        );
+        assert_eq!(
+            sem_ctx.decl(decls[0]).special,
+            sema::sem_context::DeclSpecial::PrivateStatic
+        );
+    });
+}
+
+/// A `var` inside a static block hoists to the STATIC BLOCK's own body scope,
+/// not to the function the class lives in (cpp:1058-1064): the block's
+/// `FunctionInfo` is synthetic, flagged `isStaticBlock`, and owns that scope.
+#[test]
+fn a_static_block_hoists_its_vars_into_its_own_function_scope() {
+    let src = "function f() { class C { static { var x; } } }\n";
+    with_resolved(src, |sem_ctx, resolved| {
+        let func = first_statement(resolved);
+        let outer = FunctionInfoId::from_sema_id(
+            func.as_function_declaration()
+                .expect("not a FunctionDeclaration")
+                .sem_info
+                .get()
+                .expect("no semInfo"),
+        );
+        let block = static_block_of_class_in_function_body(func);
+        let info = FunctionInfoId::from_sema_id(
+            block.function_info.get().expect("no functionInfo on the block"),
+        );
+        assert!(sem_ctx.function(info).is_static_block);
+        assert_ne!(info, outer);
+        let scope = sema::ids::ScopeId::from_sema_id(
+            block.scope.get().expect("no scope on the block"),
+        );
+        assert_eq!(sem_ctx.function(info).get_function_body_scope(), scope);
+        // The `var x` decl is in the block's scope, so it is NOT in any of
+        // the enclosing function's.
+        let x_decl = *sem_ctx
+            .scope(scope)
+            .decls
+            .first()
+            .expect("nothing hoisted into the static block");
+        assert_eq!(sem_ctx.scope(scope).decls.len(), 1);
+        assert_eq!(sem_ctx.decl(x_decl).kind, DeclKind::Var);
+        for s in sem_ctx.function(outer).get_scopes() {
+            assert!(
+                !sem_ctx.scope(*s).decls.contains(&x_decl),
+                "a static block's `var` must not hoist to the function"
+            );
+        }
+    });
+}
+
+/// A fold inside a static block rebuilds the `StaticBlock` node, so BOTH of
+/// the `Cell`s `visit(StaticBlockNode *)` writes before recursing (`scope`
+/// from `ScopeRAII` and `function_info` from
+/// `createStaticBlockFunctionInfo`) must be present on the node the resolver
+/// RETURNED. `function_info` is what IRGen looks the block's body up by, and
+/// the differential cannot see it go missing (the dump reaches the
+/// `StaticBlock` `FunctionInfo` through the function tree either way).
+#[test]
+fn a_rebuilt_static_block_keeps_its_scope_and_function_info() {
+    let src = "function f() { class C { static { var x = 1 + 2; } } }\n";
+    with_resolved(src, |sem_ctx, resolved| {
+        let func = first_statement(resolved);
+        let block = static_block_of_class_in_function_body(func);
+        assert!(
+            block.scope.get().is_some(),
+            "the rebuilt static block lost `scope`"
+        );
+        let info = FunctionInfoId::from_sema_id(
+            block
+                .function_info
+                .get()
+                .expect("the rebuilt static block lost `function_info`"),
+        );
+        assert!(sem_ctx.function(info).is_static_block);
+        // Non-degeneracy: the fold must really have happened, i.e. the block
+        // really was rebuilt.
+        let decl = block
+            .body
+            .iter()
+            .next()
+            .expect("empty static block")
+            .as_variable_declaration()
+            .expect("not a VariableDeclaration")
+            .declarations
+            .iter()
+            .next()
+            .expect("no declarators")
+            .as_variable_declarator()
+            .expect("not a VariableDeclarator");
+        assert!(
+            matches!(decl.init, Some(Node::NumericLiteral(_))),
+            "1 + 2 did not fold, so the static block was never rebuilt"
+        );
+    });
+}
+
+/// Walk `function f() { class C { static { ... } } }` down to the
+/// `StaticBlock`.
+fn static_block_of_class_in_function_body<'gc>(
+    func: &'gc Node<'gc>,
+) -> &'gc ast::node::StaticBlock<'gc> {
+    let class = func
+        .as_function_declaration()
+        .expect("not a FunctionDeclaration")
+        .body
+        .as_block_statement()
+        .expect("function body is not a block")
+        .body
+        .iter()
+        .next()
+        .expect("empty function body");
+    class
+        .as_class_declaration()
+        .expect("not a ClassDeclaration")
+        .body
+        .as_class_body()
+        .expect("not a ClassBody")
+        .body
+        .iter()
+        .next()
+        .expect("empty class body")
+        .as_static_block()
+        .expect("not a StaticBlock")
+}
