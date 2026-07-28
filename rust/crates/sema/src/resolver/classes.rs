@@ -125,9 +125,9 @@
 //! node's own scope, under the `#`-mangled name
 //! ([`crate::sem_context::private_name_identifier`]) — which is exactly why a
 //! `#x` can never be confused with, or shadow, an ordinary `x`. It runs
-//! BEFORE the class body is walked (cpp:684 in this port's
-//! `visit_class_as_expr`), which is what lets a member declared early
-//! reference a private name declared late.
+//! BEFORE the class body is walked (cpp:939, and after the superclass
+//! expression), which is what lets a member declared early reference a
+//! private name declared late.
 //!
 //! Two properties of that function are easy to lose in a port and are pinned
 //! by `tests/resolver.rs`:
@@ -792,8 +792,8 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
 
     /// Port of `SemanticResolver::collectDeclaredPrivateIdentifiers`
     /// (cpp:2143-2260) — the ES2024 15.7.1 early-error machinery for private
-    /// names, run over the class body BEFORE the body is visited (cpp:684 in
-    /// this port's `visit_class_as_expr`), so that every private reference
+    /// names, run over the class body BEFORE the body is visited (cpp:939,
+    /// from `visitClassAsExpr`), so that every private reference
     /// anywhere inside the class — including in a member declared earlier
     /// than the one it names — resolves.
     ///
@@ -821,7 +821,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
                 // C++'s `cast<IdentifierNode>(prop->_key)`: unlike a
                 // `MethodDefinition`, a `ClassPrivateProperty` stores the
                 // bare `Identifier` as its key, with no `PrivateName`
-                // wrapper (ESTree.def:562-565).
+                // wrapper (ESTree.def:562-564).
                 let id_node = prop.key;
                 let id = id_node
                     .as_identifier()
@@ -1044,7 +1044,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
         }
         // `visitESTreeChildren(*this, node)`: a `PrivateName`'s only child is
         // `_id`, and `visit(IdentifierNode *, Node *)` returns early for a
-        // `PrivateName` parent (cpp:315-317) — "Identifiers belonging to a
+        // `PrivateName` parent (cpp:316-320) — "Identifiers belonging to a
         // PrivateNameNode are validated in the PrivateNameNode visitor" —
         // so this can never rebuild anything. It is kept because the C++
         // keeps it.

@@ -14,7 +14,7 @@
 // sits inside an async function.
 //
 // forbidArgumentsAsIdentifier_ = true makes resolveIdentifier report
-// "invalid use of 'arguments' as an identifier" (cpp:1993-1997), which is a
+// "invalid use of 'arguments' as an identifier" (cpp:1986-1991), which is a
 // name-based check independent of what (if anything) `arguments` resolves to.
 //
 // `await`/`yield` used as plain identifiers inside a static block are rejected

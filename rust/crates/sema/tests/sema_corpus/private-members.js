@@ -80,6 +80,10 @@ class Init {
   #a = this;
   #b = () => this.#a;
   static #c = Init;
+  // Initializers that FOLD, rebuilding the ClassPrivateProperty (and hence
+  // the ClassBody and the class node) — the dump shows the folded literal.
+  #d = 1 + 2;
+  static #e = 3 + 4;
 }
 
 // Nested classes each get their own private-name scope; the inner class can
