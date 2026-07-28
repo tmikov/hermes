@@ -12,6 +12,7 @@
 #include "llvh/ADT/DenseSet.h"
 
 #include <chrono>
+#include <cmath>
 #include <condition_variable>
 #include <cstdio>
 #include <cstring>
@@ -154,6 +155,126 @@ struct SHConsoleContext {
   }
 };
 
+/// Convert the arguments starting at \p firstArg to strings and write them to
+/// \p os, separated by spaces and followed by a newline. This mirrors the
+/// formatting of the global print(); the VM host shares one implementation via
+/// vm::printArgsToStream(), but that reads the VM native call frame, which a
+/// JSI host function does not have, so the logic is reproduced here.
+///
+/// This library links only hermesvm and jsi, so it cannot use llvh's streams.
+/// print() writes through llvh::outs() and flushes on every call, and so does
+/// this, which keeps the two interleaved in the right order.
+static void printArgsTo(
+    facebook::jsi::Runtime &rt,
+    FILE *os,
+    const facebook::jsi::Value *args,
+    size_t count,
+    size_t firstArg) {
+  for (size_t i = firstArg; i < count; ++i) {
+    if (i != firstArg)
+      std::fputc(' ', os);
+    // JS strings may contain NUL, so write by length rather than as a C string.
+    std::string str = args[i].toString(rt).utf8(rt);
+    std::fwrite(str.data(), 1, str.size(), os);
+  }
+  std::fputc('\n', os);
+  std::fflush(os);
+}
+
+/// The abstract operation ToBoolean, for console.assert's condition.
+static bool toBoolean(
+    facebook::jsi::Runtime &rt,
+    const facebook::jsi::Value &v) {
+  namespace jsi = facebook::jsi;
+  if (v.isUndefined() || v.isNull())
+    return false;
+  if (v.isBool())
+    return v.getBool();
+  if (v.isNumber()) {
+    double d = v.getNumber();
+    return d != 0 && !std::isnan(d);
+  }
+  if (v.isString())
+    return !v.getString(rt).utf8(rt).empty();
+  if (v.isBigInt())
+    return !jsi::BigInt::strictEquals(
+        rt, v.getBigInt(rt), jsi::BigInt::fromInt64(rt, 0));
+  // Objects and symbols are always truthy.
+  return true;
+}
+
+/// Install the console object. log/info/debug write to stdout like print();
+/// warn/error write to stderr; assert reports only when its condition is
+/// falsy. Kept in sync with installConsoleBindings() in lib/ConsoleHost.
+static void initConsoleBindings(facebook::hermes::HermesRuntime &hrt) {
+  namespace jsi = facebook::jsi;
+
+  auto definePropertyFn = hrt.global()
+                              .getProperty(hrt, "Object")
+                              .asObject(hrt)
+                              .getProperty(hrt, "defineProperty")
+                              .asObject(hrt)
+                              .asFunction(hrt);
+
+  jsi::Object descriptor{hrt};
+  descriptor.setProperty(hrt, "enumerable", false);
+  descriptor.setProperty(hrt, "writable", true);
+  descriptor.setProperty(hrt, "configurable", true);
+  auto valueProp = jsi::PropNameID::forAscii(hrt, "value");
+
+  jsi::Object consoleObj{hrt};
+  auto defineConsoleMethod = [&](const char *name, jsi::HostFunctionType fn) {
+    descriptor.setProperty(
+        hrt,
+        valueProp,
+        jsi::Function::createFromHostFunction(
+            hrt, jsi::PropNameID::forAscii(hrt, name), 0, std::move(fn)));
+    definePropertyFn.call(hrt, consoleObj, name, descriptor);
+  };
+
+  auto logFn = [](jsi::Runtime &rt,
+                  const jsi::Value &,
+                  const jsi::Value *args,
+                  size_t count) -> jsi::Value {
+    printArgsTo(rt, stdout, args, count, 0);
+    return jsi::Value::undefined();
+  };
+  auto errorFn = [](jsi::Runtime &rt,
+                    const jsi::Value &,
+                    const jsi::Value *args,
+                    size_t count) -> jsi::Value {
+    printArgsTo(rt, stderr, args, count, 0);
+    return jsi::Value::undefined();
+  };
+  auto assertFn = [](jsi::Runtime &rt,
+                     const jsi::Value &,
+                     const jsi::Value *args,
+                     size_t count) -> jsi::Value {
+    if (count > 0 && toBoolean(rt, args[0]))
+      return jsi::Value::undefined();
+
+    if (count <= 1) {
+      std::fputs("Assertion failed\n", stderr);
+      std::fflush(stderr);
+      return jsi::Value::undefined();
+    }
+
+    std::fputs("Assertion failed: ", stderr);
+    printArgsTo(rt, stderr, args, count, 1);
+    return jsi::Value::undefined();
+  };
+
+  defineConsoleMethod("log", logFn);
+  defineConsoleMethod("info", logFn);
+  defineConsoleMethod("debug", logFn);
+  defineConsoleMethod("warn", errorFn);
+  defineConsoleMethod("error", errorFn);
+  defineConsoleMethod("assert", assertFn);
+
+  descriptor.setProperty(hrt, valueProp, consoleObj);
+  definePropertyFn.call(hrt, hrt.global(), "console", descriptor);
+}
+
 /// Init harness symbols used in the test262 testsuite:
 /// - $test262, with properties:
 ///   - global
@@ -207,12 +328,6 @@ static void initTest262Bindings(facebook::hermes::HermesRuntime &hrt) {
   auto printFunc = global.getProperty(hrt, "print");
   descriptor.setProperty(hrt, valueProp, printFunc);
   definePropertyFn.call(hrt, global, "alert", descriptor);
-
-  // Define console.log.
-  facebook::jsi::Object consoleObj{hrt};
-  definePropertyFn.call(hrt, consoleObj, "log", descriptor);
-  descriptor.setProperty(hrt, valueProp, consoleObj);
-  definePropertyFn.call(hrt, global, "console", descriptor);
 }
 
 /// Register the hermescli global object with loadFile, loadHBC, and
@@ -364,6 +479,7 @@ extern "C" SHERMES_EXPORT SHConsoleContext *init_console_bindings(
   using namespace facebook;
   auto &hrt = *_sh_get_hermes_runtime(shr);
   initTest262Bindings(hrt);
+  initConsoleBindings(hrt);
 
   auto consoleContext = std::make_unique<SHConsoleContext>(
       hrt.evaluateJavaScript(
