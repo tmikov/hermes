@@ -324,19 +324,55 @@ impl DiagHandler for SharedHandler {
     }
 }
 
-/// Resolution boundary: a construct S0 does not model must panic loudly
-/// rather than resolve to something wrong. An identifier reference needs
-/// `visit(IdentifierNode *)` (S1).
+/// Resolution boundary: a construct not yet modeled must panic loudly
+/// rather than resolve to something wrong. Identifier references are now
+/// modeled (S1 T4, `visit(IdentifierNode *)`); a call expression still
+/// needs `visit(CallExpressionNode *)` (S1 T6, function visiting).
 #[test]
-#[should_panic(expected = "sema S0: unhandled node kind Identifier")]
-fn identifier_reference_is_not_modeled() {
-    resolve("x;");
+#[should_panic(expected = "sema S1: unhandled node kind CallExpression")]
+fn call_expression_is_not_modeled() {
+    resolve("f();");
 }
 
 /// Declaration boundary: a `var` reaches `processCollectedDeclarations`
-/// with a non-empty `ScopeDecls`, which is S1 scope.
+/// with a non-empty `ScopeDecls`, which is still unmodeled (variable
+/// declarations are a separate task from identifier resolution).
 #[test]
 #[should_panic(expected = "sema S0: declarations are S1 scope")]
 fn declarations_are_not_modeled() {
     resolve("var x;");
+}
+
+/// A loose-mode identifier reference resolves to a fresh
+/// `UndeclaredGlobalProperty` in the global scope — the behavioral half of
+/// "identifiers are now modeled" that the panic-boundary test above only
+/// proves negatively for a *different* construct.
+///
+/// Deliberately NOT written via the `resolve()` helper above: that helper
+/// moves `SemContext` out to its caller while `Context` (the arena) drops
+/// inside it, which is fine as long as nothing the returned `SemContext`
+/// holds points back into the arena. `resolveIdentifier`'s ambient-global
+/// path is the first thing in this crate that stores a `NodeRc` in a
+/// `Binding` (`Binding{decl, identifier}`, mirroring the C++ exactly), so
+/// returning `sem_ctx` out of a function that then drops `ctx` trips
+/// `Context::drop`'s "NodeRc must not outlive Context" panic — `sem_ctx`
+/// hasn't been dropped yet (it outlives the function), so the `NodeRc`
+/// inside it is still alive when `ctx` goes away. Keeping `ctx` and
+/// `sem_ctx` in the same scope (as `main` in `sema-dump` does) relies on
+/// reverse-declaration-order drop instead, which is sound: `sem_ctx`
+/// (declared after `ctx`) drops first.
+#[test]
+fn loose_identifier_reference_becomes_undeclared_global_property() {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let root = parse(&gc, &mut sm, "x;\n");
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    resolve_ast(&gc, &mut sem_ctx, &mut sm, root, &[])
+        .expect("resolution failed for: x;");
+
+    let global_scope = sem_ctx.get_global_scope();
+    assert_eq!(sem_ctx.scope(global_scope).decls.len(), 1);
+    let decl = sem_ctx.decl(sem_ctx.scope(global_scope).decls[0]);
+    assert_eq!(decl.kind, DeclKind::UndeclaredGlobalProperty);
 }

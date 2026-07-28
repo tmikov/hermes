@@ -6,25 +6,35 @@
  */
 
 //! Port of `hermes::sema::SemanticResolver` (`lib/Sema/SemanticResolver.h`,
-//! `lib/Sema/SemanticResolver.cpp`) — S0 subset.
+//! `lib/Sema/SemanticResolver.cpp`) — S0 entry path plus S1 T4's identifier
+//! resolution core.
 //!
-//! ## What "S0 subset" means
+//! ## What's covered so far
 //!
-//! This is the *entry path* only: the constructor, `run`,
-//! `visit(ProgramNode *)` and everything that path reaches
-//! (`scanDirectives`, `processAmbientDecls`, `ScopeRAII`, the
-//! `FunctionContext` constructor that owns a `DeclCollector`). It is enough
-//! to reproduce `hermesc -dump-sema` byte-for-byte for programs made of
-//! literals and empty statements, which is what `tests/sema_differential.rs`
-//! enforces against the real compiler.
+//! The S0 *entry path*: the constructor, `run`, `visit(ProgramNode *)` and
+//! everything that path reaches (`scanDirectives`, `processAmbientDecls`,
+//! `ScopeRAII`, the `FunctionContext` constructor that owns a
+//! `DeclCollector`). Plus, from S1 T4, `visit(IdentifierNode *, Node *)`,
+//! `resolveIdentifier`, `checkIdentifierResolved` and `declareArguments` —
+//! identifier reads/writes resolve against the binding table or become
+//! ambient globals, with the strict-mode `UndefinedVariable` warning and the
+//! `await`/`arguments` forbid-flag errors. Together this reproduces
+//! `hermesc -dump-sema` byte-for-byte for programs made of literals, empty
+//! statements, and (S1 T4) bare identifier reads — including through
+//! non-computed member/property positions, which are skipped rather than
+//! resolved — which is what `tests/sema_differential.rs` enforces against
+//! the real compiler. Variable *declarations*, member expressions on
+//! private names, functions, and everything else the C++ resolver handles
+//! remain later tasks' scope.
 //!
-//! Everything else is *deliberately absent rather than approximated*:
-//! `visit_node` panics with `sema S0: unhandled node kind ...` for any node
-//! kind outside the handled set, and `process_collected_declarations` panics
-//! if the `DeclCollector` actually collected anything. An honest panic keeps
-//! the differential meaningful — a silently-wrong resolution would look like
-//! a passing test on a corpus that never exercised it. The S1+ tasks replace
-//! each panic with the ported code.
+//! Everything not covered is *deliberately absent rather than
+//! approximated*: `visit_node` panics with `sema S1: unhandled node kind
+//! ...` for any node kind outside the handled set, and
+//! `process_collected_declarations` panics if the `DeclCollector` actually
+//! collected anything. An honest panic keeps the differential meaningful —
+//! a silently-wrong resolution would look like a passing test on a corpus
+//! that never exercised it. Later tasks replace each panic with the ported
+//! code.
 //!
 //! ## The dispatch protocol: `ast::VisitorMut`
 //!
@@ -174,15 +184,23 @@
 //!   matches the C++ member's lifetime exactly: buffering spans the whole
 //!   resolver, and the flush (stable-sorted by source position) happens on
 //!   destruction, not at the end of `run`.
-//! - **`saveDecls_`, `typed_`, `curClassContext_`, `canReferenceSuper_`, the
-//!   four `forbid*` flags** are not ported: nothing on the S0 path reads
-//!   them, and each belongs to a later stage that will introduce it with its
-//!   first use.
+//! - **`saveDecls_`, `typed_`, `curClassContext_`** are not ported: nothing
+//!   on this path reads them, and each belongs to a later stage that will
+//!   introduce it with its first use. `canReferenceSuper_` and
+//!   `forbidAwaitExpression_` are ported as fields (S1 T4 adds all five
+//!   `SemanticResolver.h:79-104` flags together, since later tasks
+//!   save/restore them as one group) but are still unread/unwritten until
+//!   the `SuperNode`/`AwaitExpression` visits that use them land — see their
+//!   field doc comments. `forbidAwaitAsIdentifier_`,
+//!   `forbidSpecialArgumentsReference_` and `forbidArgumentsAsIdentifier_`
+//!   are read by `resolveIdentifier` (below) starting with S1 T4.
 //! - **`DebugInfoSetting::ALL`**: the port has no debug-info setting yet, so
 //!   both tests against it on this path are ported as a documented constant
 //!   `false` — see [`DEBUG_INFO_SETTING_ALL`].
 
 use std::collections::{HashMap, HashSet};
+
+mod identifiers;
 
 use ast::context::{GCLock, NodeRc};
 use ast::node::Node;
@@ -359,6 +377,38 @@ pub struct SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     /// Port of `RecursionDepthTracker::recursionDepth_`
     /// (RecursiveVisitor.h:706).
     recursion_depth: u32,
+
+    // ---- The five S1 T4 forbid/permission flags (SemanticResolver.h:79-104)
+    // ---- see the module doc for why all five are added together.
+    /// Whether this function can currently make super references. When
+    /// entering a function that was defined using method syntax, a super
+    /// binding exists. Arrow functions inherit this flag. The only other
+    /// super bindings exist in class field initializer values and static
+    /// blocks. Port of `canReferenceSuper_` (SemanticResolver.h:79); unread/
+    /// unwritten until the `SuperNode` visit lands.
+    #[allow(dead_code)]
+    can_reference_super: bool,
+    /// 'await' isn't allowed to be an identifier anywhere in the parameters
+    /// of an async arrow function, including the parameters of nested arrow
+    /// functions in the parameter initializers. Ordinarily we'd check for
+    /// this in the parser, but async arrow functions have a reparse step, so
+    /// we avoid revisiting the entire tree by checking in
+    /// `SemanticResolver`. Port of `forbidAwaitAsIdentifier_`
+    /// (SemanticResolver.h:95); read by `resolve_identifier`.
+    forbid_await_as_identifier: bool,
+    /// True if we are forbidding await expressions. Port of
+    /// `forbidAwaitExpression_` (SemanticResolver.h:98); unread/unwritten
+    /// until the `AwaitExpression` visit lands.
+    #[allow(dead_code)]
+    forbid_await_expression: bool,
+    /// True if we are forbidding the reference to the special 'arguments'
+    /// object. Port of `forbidSpecialArgumentsReference_`
+    /// (SemanticResolver.h:101); read by `resolve_identifier`.
+    forbid_special_arguments_reference: bool,
+    /// True if 'arguments' cannot be used as any identifier. Port of
+    /// `forbidArgumentsAsIdentifier_` (SemanticResolver.h:104); read by
+    /// `resolve_identifier`.
+    forbid_arguments_as_identifier: bool,
 }
 
 impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
@@ -408,6 +458,11 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             global_function_context: None,
             binding_scopes: Vec::new(),
             recursion_depth: AST_MAX_RECURSION_DEPTH,
+            can_reference_super: false,
+            forbid_await_as_identifier: false,
+            forbid_await_expression: false,
+            forbid_special_arguments_reference: false,
+            forbid_arguments_as_identifier: false,
         }
     }
 
@@ -689,32 +744,50 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     ///
     /// \param path the field of the parent node `node` occupies, or `None`
     ///   for the root. C++ passes the bare `parent` pointer; `Path::parent`
-    ///   is the same thing, and no S0 visit reads either.
+    ///   is the same thing.
     ///
-    /// S0 only implements the kinds its corpus can produce; see the module
-    /// doc for why the fallback is a panic rather than a generic recursion.
+    /// Only implements the kinds the S0/S1-T4 corpus can produce; see the
+    /// module doc for why the fallback is a panic rather than a generic
+    /// recursion.
     fn visit_node<'gc>(
         &mut self,
         gc: &'gc GCLock,
         node: &'gc Node<'gc>,
-        _path: Option<Path<'gc>>,
+        path: Option<Path<'gc>>,
     ) -> TransformResult<&'gc Node<'gc>> {
         match node {
             Node::Program(_) => self.visit_program(gc, node),
+            // `visit(IdentifierNode*, Node*)` (cpp:277-323) — see
+            // `visit_identifier`.
+            Node::Identifier(_) => self.visit_identifier(gc, node, path),
             // Kinds with no `visit()` overload in C++: the generic dispatch
             // visits their children (`ExpressionStatement`'s `_expression`
             // — `_directive` is a NodeString, not a node) and here also
             // rebuilds the node if any child was replaced. The literals and
             // `EmptyStatement` have no children at all, so this is exactly
             // `TransformResult::Unchanged` for them.
+            //
+            // `MemberExpression`/`OptionalMemberExpression` DO have a C++
+            // override (cpp:1207-1287), but it only validates a
+            // `PrivateNameNode` `_property` (`resolvePrivateName`, the
+            // `delete`/store/load checks) — classes and private names are
+            // out of scope here, so for any `_property` this port can
+            // currently produce (always an `Identifier`, never a
+            // `PrivateName`), that override reduces to
+            // `visitESTreeChildren(*this, node)`, i.e. exactly this generic
+            // arm. `Property`/`ObjectExpression` have no override at all.
             Node::ExpressionStatement(_)
             | Node::EmptyStatement(_)
             | Node::NumericLiteral(_)
             | Node::StringLiteral(_)
             | Node::BooleanLiteral(_)
-            | Node::NullLiteral(_) => node.visit_children_mut(gc, self),
+            | Node::NullLiteral(_)
+            | Node::MemberExpression(_)
+            | Node::OptionalMemberExpression(_)
+            | Node::Property(_)
+            | Node::ObjectExpression(_) => node.visit_children_mut(gc, self),
             _ => panic!(
-                "sema S0: unhandled node kind {} — S1+",
+                "sema S1: unhandled node kind {} — later tasks",
                 node.node_type_str()
             ),
         }
