@@ -20,6 +20,10 @@
 
 #include <memory>
 
+namespace llvh {
+class raw_ostream;
+} // namespace llvh
+
 namespace hermes {
 namespace vm {
 
@@ -79,6 +83,16 @@ CallResult<HermesValue> runRequireCall(
 
 /// The [[ThrowTypeError]] internal function.
 CallResult<HermesValue> throwTypeError(void *, Runtime &runtime);
+
+/// Convert the arguments of the current native frame, starting at \p firstArg,
+/// to strings and write them to \p os separated by spaces and followed by a
+/// newline. This is the formatting used by the global print(); hosts share it
+/// so that their console bindings format identically.
+/// \return ExecutionStatus::EXCEPTION if converting an argument threw.
+ExecutionStatus printArgsToStream(
+    Runtime &runtime,
+    llvh::raw_ostream &os,
+    unsigned firstArg);
 
 enum class TypeErrorKind {
   RestrictedProperty,
