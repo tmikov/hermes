@@ -18,6 +18,10 @@
 //!   (the validator/resolver this crate will host as later tasks land)
 
 pub mod ast_eval;
+// Private for the same reason its C++ counterpart is declared in the internal
+// `lib/Sema/SemanticResolver.h` rather than in `SemResolve.h` — see the
+// module's own doc.
+mod check_implicit_return;
 pub mod decl_collector;
 pub mod dump;
 pub mod dump_context;

@@ -1244,7 +1244,17 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // `SemanticResolver::visit` override, and it is an
             // `ESTREE_NODE_0_ARGS` kind (ESTree.def:274) — no children at
             // all, so this arm is exactly `Unchanged` for it.
+            //
+            // S2 T7 adds `DebuggerStatement`, which the tests for
+            // `check_implicit_return` need in order to reach its
+            // `DebuggerStatement` arm (CheckImplicitReturn.cpp:175). Like
+            // `ThrowStatement`, its only mention anywhere in `lib/Sema/` is
+            // that arm — so no `SemanticResolver::visit` override, no
+            // `DeclCollector` override, and it is an `ESTREE_NODE_0_ARGS`
+            // kind (ESTree.def:171), i.e. this arm is exactly `Unchanged`
+            // for it.
             Node::ExpressionStatement(_)
+            | Node::DebuggerStatement(_)
             | Node::ClassBody(_)
             | Node::ThisExpression(_)
             | Node::ThrowStatement(_)

@@ -100,14 +100,18 @@
 //! - **The lazy-body branch** (cpp:1724-1734) reads the three
 //!   `BlockStatement` `Cell`s the pre-parser sets; nothing in S1 sets them,
 //!   so it is ported but only exercised in S5.
-//! - **`may_reach_implicit_return`** (cpp:1939-1944) is DEFERRED to S2 —
-//!   see the comment at its site.
+//!
+//! S2 T7 fills in the last line of `visitFunctionBodyAfterParamsVisited`
+//! (cpp:1939-1944): the `mayReachImplicitReturn` call, whose analysis lives
+//! in `crate::check_implicit_return`. It runs on the *visited* body rather
+//! than on `node`, for the reason that module's doc gives.
 
 use ast::context::{GCLock, NodeRc};
 use ast::node::{builder, BlockStatement, Node, NodeField, ReturnStatement};
 use ast::node_child::{NodeList, NodeMetadata, Strictness};
 use ast::visitor::{Path, TransformResult, VisitorMut};
 
+use crate::check_implicit_return::may_reach_implicit_return;
 use crate::ids::FunctionInfoId;
 use crate::sem_context::{Binding, ConstructorKind, DeclKind};
 
@@ -1079,13 +1083,22 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
 
         // Finally visit the body.
         let body = function_like_body(node);
-        if let Some(new_body) = replacement_of(self.call(
+        let new_body = replacement_of(self.call(
             gc,
             body,
             Some(Path::new(node, NodeField::body)),
-        )) {
+        ));
+        if let Some(new_body) = new_body {
             b.body(new_body);
         }
+        // C++ reads the body back off `node` below (through
+        // `mayReachImplicitReturn(node)` -> `getBlockStatement(node)`), which
+        // works because it mutated `node->_body` in place. Here the visited
+        // body is whatever the walk above produced, so it is kept in a local
+        // — the rewritten one matters: `check_implicit_return` asserts that
+        // try/catch/finally has already been split into nested `try`s, which
+        // is a rewrite the walk just performed.
+        let visited_body = new_body.unwrap_or(body);
         if self.recursion_depth == 0 {
             self.forbid_await_as_identifier = saved_forbid_await_as_identifier;
             return;
@@ -1115,19 +1128,18 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
         }
 
         // Determine whether the function can run the implicit return.
-        //
-        // DEFERRED to S2 (cpp:1939-1944):
-        //   if (!sm_.getErrorCount())
-        //     curFunctionInfo()->mayReachImplicitReturn =
-        //         mayReachImplicitReturn(node);
-        // `mayReachImplicitReturn` is a whole separate pass
-        // (`lib/Sema/CheckImplicitReturn.cpp:320`) that, as its C++ comment
-        // says, "relies on break and continue being properly resolved" —
-        // i.e. on the label/loop machinery that S2 ports. `FunctionInfo::
-        // mayReachImplicitReturn` keeps its default `true`
-        // (SemContext.h:354), which is the conservative direction (it is
-        // read only by FlowChecker.cpp:1772, also S2), and the field is
-        // invisible to `-dump-sema`, so the differential is unaffected.
+        if self.sm.error_count() == 0 {
+            // CheckImplicitReturn relies on break and continue being
+            // properly resolved, and if there's errors during resolution
+            // they might not be.
+            //
+            // `mayReachImplicitReturn(node)` takes the visited body here
+            // rather than the function-like node — see
+            // `check_implicit_return`'s module doc.
+            let f = self.cur_function_info();
+            self.sem_ctx.function_mut(f).may_reach_implicit_return =
+                may_reach_implicit_return(visited_body);
+        }
 
         self.forbid_await_as_identifier = saved_forbid_await_as_identifier;
     }
