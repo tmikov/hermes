@@ -292,7 +292,8 @@ class HermesRuntimeImpl final : public HermesRuntime,
                                 private IHermesTestHelpers,
                                 private InstallHermesFatalErrorHandler,
                                 private jsi::Instrumentation,
-                                public ISetEventLoopControl
+                                public ISetEventLoopControl,
+                                public ICancelAsyncTimeout
 #ifdef JSI_UNSTABLE
     ,
                                 public jsi::ISerialization,
@@ -1365,6 +1366,7 @@ class HermesRuntimeImpl final : public HermesRuntime,
   void registerForProfiling() override;
   void unregisterForProfiling() override;
   void asyncTriggerTimeout() override;
+  bool asyncCancelTimeout() override;
   void watchTimeLimit(uint32_t timeoutInMs) override;
   void unwatchTimeLimit() override;
   jsi::Value evaluateJavaScriptWithSourceMap(
@@ -1664,6 +1666,8 @@ jsi::ICast *HermesRuntimeImpl::castInterface(const jsi::UUID &interfaceUUID) {
     return static_cast<IHermes *>(this);
   } else if (interfaceUUID == IHermesSHUnit::uuid) {
     return static_cast<IHermesSHUnit *>(this);
+  } else if (interfaceUUID == ICancelAsyncTimeout::uuid) {
+    return static_cast<ICancelAsyncTimeout *>(this);
   }
 #ifdef JSI_UNSTABLE
   else if (interfaceUUID == ISerialization::uuid) {
@@ -1942,6 +1946,17 @@ void HermesRuntimeImpl::asyncTriggerTimeout() {
   // and NoMutatorScope uses non-atomic counters that would race with the
   // main thread. triggerTimeoutAsyncBreak() is already thread-safe.
   runtime_.triggerTimeoutAsyncBreak();
+}
+
+bool HermesRuntimeImpl::asyncCancelTimeout() {
+  // Unlike asyncTriggerTimeout(), this may only be called on the JS thread
+  // (see the IHermes contract), so NoMutatorScope is safe here. That
+  // contract is also what makes the clear below correct: on this thread the
+  // interpreter is either not running or suspended in the native frame that
+  // called us, so it cannot concurrently consume the request in an async
+  // break check.
+  vm::NoMutatorScope noMutatorScope{runtime_};
+  return runtime_.cancelTimeoutAsyncBreak();
 }
 
 void HermesRuntimeImpl::watchTimeLimit(uint32_t timeoutInMs) {
