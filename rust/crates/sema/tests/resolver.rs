@@ -1777,6 +1777,18 @@ fn a_rebuilt_class_keeps_its_synthetic_function_infos() {
             stat.expect("the rebuilt class lost staticElementsInit"),
         );
         assert_ne!(inst, stat);
+        // The `ScopeRAII` decoration (written before the walk) must survive
+        // the same rebuild — unlike the three ids, THIS one the differential
+        // does see (`ClassDeclaration Scope %s.N`).
+        assert!(
+            class
+                .as_class_declaration()
+                .expect("not a ClassDeclaration")
+                .scope
+                .get()
+                .is_some(),
+            "the rebuilt class lost `scope`"
+        );
         // The instance initializer declared `arguments` (cpp:1039); the
         // static one never ran `declareArguments` (`static y` has no value).
         assert!(sem_ctx.function(inst).arguments_decl.is_some());

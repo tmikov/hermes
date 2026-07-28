@@ -181,7 +181,7 @@ hermesc, 41 are hermesc-failure files).
 Final count after S2 Task 3: **107 corpus files matched** (63 succeed on
 hermesc, 44 are hermesc-failure files).
 
-Final count after S2 Task 4: **119 corpus files matched** (68 succeed on
+Final count after S2 Task 4: **120 corpus files matched** (69 succeed on
 hermesc, 51 are hermesc-failure files).
 
 ## S2 Task 1 additions
@@ -292,7 +292,7 @@ Not corpus-reachable, and documented at their sites rather than curated away:
 
 ## S2 Task 4 additions
 
-Six new files, the three re-probed `test/Sema` imports (`class-children.js`,
+Seven new files, the three re-probed `test/Sema` imports (`class-children.js`,
 `field-init-bindings.js`, `reject-super-references.js`) and three imports from
 `test/Parser` (the first files this corpus takes from there — the MANIFEST's
 own S2 T2 note named `await-field-error.js` as the pin candidate for a
@@ -308,6 +308,7 @@ added:
 | `error-class-name.js` | class-name errors: duplicate class, `let`-then-class, `class arguments`/`class eval` (reachable at loose global scope only because a class forces strict mode on the enclosing function, cpp:919), the same for a class *expression* name, and assignment/`+=`/`++` to the class name from inside the body — the inner `ClassExprName` decl's const rules |
 | `error-class-decorators.js` | all three `decorators are not supported` sites (cpp:914-916 on the class, cpp:1009-1011 on a `ClassProperty`, cpp:1097-1099 on a `MethodDefinition`), for declarations and expressions, instance and static members, and a class with two decorators (which reports once) |
 | `error-class-field.js` | the two errors a field initializer's flag save/restores produce: `invalid use of 'arguments'` (`forbidSpecialArgumentsReference_`, including through one and two levels of arrow, at global scope and inside a function) and `'await' not in an async function` (`forbidAwaitExpression_`, even inside an `async` function, for instance and static fields) — plus the contrast that `await` in a COMPUTED KEY inside an `async` function is legal, because the key is resolved in the async function's own context |
+| `super-member-shapes.js` | `visit(SuperNode *, Node *)`'s `isa<MemberExpressionLikeNode>` test on BOTH kinds of the range (`super.a?.b` is the only way to reach `OptionalMemberExpression`), and `canReferenceSuper_` coming from `isMethodDefinition` on OBJECT-literal method shorthand (plain, getter, setter, computed, generator, `async`, and an arrow inside one) — all legal, so it is the non-error counterpart to `reject-super-references.js` |
 | `await-field-error.js` | **S2 T2 pin, from `test/Parser`** — `'await' not in an async function` (cpp:1496), unreachable before the class visits existed |
 | `arguments-field-error.js` | from `test/Parser` — `invalid use of 'arguments'` reaching a field initializer through an arrow, inside a generator |
 | `yield-field-error.js` | from `test/Parser` — evidence that the `'yield' not in a generator function` pin is unreachable (the parser rejects `yield` in a field initializer first) AND the regression pin for this task's parser fix: C++ reports that `invalid expression` through `error(SMLoc, Twine)` (a bare caret), which this port was rendering as an underlined 5-character range |

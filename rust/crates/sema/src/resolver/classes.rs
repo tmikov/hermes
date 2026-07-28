@@ -905,7 +905,8 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     /// Port of `SemanticResolver::visit(ESTree::SuperNode *node,
     /// ESTree::Node *parent)` (cpp:1086-1092).
     ///
-    /// The C++ body neither visits children (a `Super` has none) nor touches
+    /// The C++ body neither visits children (`Super` is an
+    /// `ESTREE_NODE_0_ARGS` kind, ESTree.def:275) nor touches
     /// `node` at all — only `parent` — hence the `Unchanged` and the absent
     /// `node` parameter. `super(...)`'s own check lives in
     /// `visit(CallExpressionNode *)` (cpp:1195-1202), which is S2 T6.
