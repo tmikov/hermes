@@ -111,6 +111,10 @@ struct Options {
     /// independent flag: it does NOT imply (and is not implied by)
     /// `parse_flow`/`parse_ts`.
     parse_jsx: Opt<bool>,
+    /// Maximum number of errors before the rest are suppressed; 0 means
+    /// unlimited. The hermesc `-ferror-limit` flag, with hermesc's own default
+    /// (CompilerDriver.cpp:555-559).
+    ferror_limit: Opt<u32>,
     /// Input path; empty or "-" reads stdin.
     input: Opt<String>,
 }
@@ -173,6 +177,23 @@ impl Options {
                     ..Default::default()
                 },
             ),
+            // Port of hermesc's `-ferror-limit` (CompilerDriver.cpp:555-559),
+            // including its `init(20)` and its "0 means unlimited" contract —
+            // which needs no special-casing on either side: `errorLimit_` 0 is
+            // never equal to a message count that has just been incremented
+            // (SourceErrorManager.cpp:132).
+            ferror_limit: Opt::<u32>::new(
+                cl,
+                OptDesc {
+                    long: Some("ferror-limit"),
+                    init: Some(20),
+                    desc: Some(
+                        "Maximum number of errors (0 means unlimited).",
+                    ),
+                    value_desc: Some("N"),
+                    ..Default::default()
+                },
+            ),
             input: Opt::<String>::new(
                 cl,
                 OptDesc {
@@ -226,15 +247,13 @@ fn main() {
     let output_options = sm.output_options();
     sm.set_handler(Box::new(StderrHandler::new(output_options)));
     // A bare `SourceErrorManager` is unlimited, but hermesc's driver applies
-    // its `-ferror-limit` option — `init(20)` (CompilerDriver.cpp:555-559) —
-    // with `context->getSourceErrorManager().setErrorLimit(cl::ErrorLimit)`
+    // its `-ferror-limit` option (default 20) with
+    // `context->getSourceErrorManager().setErrorLimit(cl::ErrorLimit)`
     // (CompilerDriver.cpp:1223), before any parsing. Past the limit hermesc
     // emits `<unknown>:0: error: too many errors emitted` once and drops every
     // later message, so an unlimited `sema-dump` diverges on any input with
-    // more than 20 errors (`error-limit.js` in the corpus is the pin). This
-    // mirrors only the DEFAULT: hermesc's flag is not modeled here, and 0
-    // (unlimited) is a value the corpus cannot ask for.
-    sm.set_error_limit(20);
+    // more than 20 errors (`error-limit.js` in the corpus is the pin).
+    sm.set_error_limit(*opt.ferror_limit);
 
     let mut ctx = Context::new();
     ctx.set_parse_flow(parse_flow);

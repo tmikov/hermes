@@ -78,7 +78,7 @@ Deferred table 8, i.e. 46 + 8 = 54. See "S2 Task 6 additions" at the end.
 
 **S2 Task 8** (the round-2 sweep) re-probed all eight remaining Deferred rows —
 **none** unblocked, every stated reason confirmed — and then went at coverage
-from the other end: five exhaustive inventories of the dump's own vocabulary,
+from the other end: six exhaustive inventories of the dump's own vocabulary,
 plus a differential run of both binaries over the 1416 `.js` files in the REST
 of `test/` (`Parser`, `IRGen`, `BCGen`, `Optimizer`, `hermes`, `AST`, `Driver`,
 `RA`). That found three node kinds the resolver panicked on, one node kind with
@@ -517,7 +517,9 @@ dialect flag (1) and the vacuous file (1).
 The dump is the only thing the differential can see, so coverage was measured on
 the dump's own vocabulary: every corpus file's `hermesc -dump-sema` output was
 collected and inventoried, and each inventory compared against the full set the
-port can produce. Five inventories, five answers:
+port can produce. Six inventories, six answers (the sixth is stated after the
+list, because it is about the scope decorations rather than the dump's
+vocabulary):
 
 1. **Node kinds** (the AST half of the dump — 72 distinct labels over the
    corpus, i.e. 71 node kinds plus the `BinOp` line the `+`/`-` linearizer
@@ -630,26 +632,34 @@ hand-rolled sites (`classes.rs:1032`, `:289`, `:108`, `modules.rs:905`) emit
 `error_cur` + an unconditional `note_at` and also drop the quotes C++ puts
 around the token name (`identifier expected in decorator` vs `'identifier'
 expected in decorator`). Classified mechanically: **111** differ in caret/range
-geometry alone, **69** in geometry plus an extra `note:` we emit and C++ folds
-into the range, **4** of those also lose the quotes, and only **9** are
-anything else — of which three are genuinely different parser message text
-(e.g. `unexpected token after yield expression` vs `';' expected`,
-`test/Parser/es6/yield-paren-error.js`), two are the regex-engine and
-recursion-depth rows named above, and the rest are one-off geometry cases. This
-extends the roadmap's
+geometry alone and **69** in geometry plus an extra `note:` we emit and C++
+folds into the range (4 of those 69 also lose the quotes — a subset, not a
+third bucket), i.e. **180** share the one root cause. The residual **10** are:
+three genuinely different parser messages (e.g. `unexpected token after yield
+expression` vs `';' expected`, `test/Parser/es6/yield-paren-error.js`), the
+three files belonging to rows named above (`test/AST/regexp.js` for the regex
+engine, plus BOTH stack-overflow files — `test/Parser/nested-expressions.js` and
+`test/hermes/far-environment-access.js` — for the recursion row), and four
+one-off geometry cases, including the REVERSE shape
+(`test/Parser/escaped-this.js`: C++ prints a bare caret where we print a
+range). 111 + 69 + 10 = 190. This
+subsumes the roadmap's
 existing parser follow-up item (a) — which so far only recorded the *dropped
 different-line note* — with the much larger *missing same-line range* half.
 Left to the parser track on purpose: it is a call-site audit across the parser
 with its own differential harness, and no file the sema corpus wants is blocked
-on it.
+on it. **`doc/superpowers/RustPortRoadmap.md`'s "Parser-phase follow-up" bullet
+now carries all of this** (both items rewritten as tracked tasks, with these
+numbers and the representative call sites), so the owning track sees it without
+reading this MANIFEST.
 
 ### What this task added or fixed
 
 | File | Change |
 |---|---|
 | `debugger-statement.js` | **new** — the only handled node kind with zero corpus occurrences (inventory 1) |
-| `expr-visit-generic-2.js` | **new** — `BigIntLiteral`, `TaggedTemplateExpression` and `ImportExpression`: three override-free kinds the resolver PANICKED on (`1n`, `` tag`x${a}` ``, `import("m")`) while hermesc dumps them happily. Found by the Step 3 sweep (10 upstream files), fixed by adding them to `visit_node`'s generic arm with the usual citation, and this file is the pin — including that BigInt operands are NOT folded |
-| `error-limit.js` | **new** — hermesc's driver sets `-ferror-limit` = 20 (CompilerDriver.cpp:555-559, :1223) and `sema-dump` never did, so any input with >20 errors diverged (the corpus's noisiest file stops at 15). Pins the cut-off, the `<unknown>:0: error: too many errors emitted` sentinel, its forced-last position, the post-limit suppression of errors AND warnings, and that the surviving 20th is a DECLARATION-pass error from the file's last line (generation order, not location order) |
+| `expr-visit-generic-2.js` | **new** — `BigIntLiteral`, `TaggedTemplateExpression` and `ImportExpression`: three override-free kinds the resolver PANICKED on (`1n`, `` tag`x${a}` ``, `import("m")`) while hermesc dumps them happily. Found by the Step 3 sweep: **26** upstream files contain one of the three kinds and **25** of them were panicking pre-fix (the 26th, `test/Parser/es6/import-assertions.js`, panics earlier on `ImportDeclaration`, S4). Fixed by adding them to `visit_node`'s generic arm with the usual citation, and this file is the pin — including that BigInt operands are NOT folded |
+| `error-limit.js` | **new** — hermesc's driver sets `-ferror-limit` = 20 (CompilerDriver.cpp:555-559, :1223) and `sema-dump` never did, so any input with >20 errors diverged (the corpus's noisiest other file, `error-private-load-store.js`, stops at 15). Pins the cut-off, the `<unknown>:0: error: too many errors emitted` sentinel, its forced-last position, the post-limit suppression of errors AND warnings, and that the surviving 20th is a DECLARATION-pass error from the file's last line (generation order, not location order) |
 | `private-members.js` | +2 lines: the static one-sided private accessors (inventory 3) |
 | `error-class-field.js` | +1 shape: `class C { a = typeof arguments; }` double-fires `invalid use of 'arguments'`, the `forbidSpecialArgumentsReference_` sibling of `error-static-block-typeof-arguments.js` |
 | `shbuiltin-calls.js` | comment fix: the `$SHBuiltin` ambient decl is `%d.27`, not `%d.23`, and this corpus keeps no CHECK lines ("in the dump below" was false) |
@@ -657,7 +667,11 @@ on it.
 
 Out-of-corpus fixes the sweep forced (each TDD'd, smallest repro first):
 
-- `sema/src/bin/sema_dump.rs` — apply the driver's error limit (above).
+- `sema/src/bin/sema_dump.rs` — apply the driver's error limit (above), as a
+  real `--ferror-limit` option (`init(20)`, 0 = unlimited) rather than a
+  hard-coded 20, so hermesc's escape hatch survives. Cross-checked against
+  `hermesc -dump-sema -ferror-limit=N` at N = 0 (26 errors both sides) and
+  N = 3 (byte-identical).
 - `support/src/render.rs` + `support/src/manager.rs` — the location prefix in
   `printDiagnosticHelper` (SourceErrorManager.cpp:574-582) is conditional: an
   empty filename prints no prefix, `-` prints as `<stdin>`, and the column is
