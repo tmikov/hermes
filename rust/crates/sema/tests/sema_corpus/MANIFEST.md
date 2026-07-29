@@ -757,7 +757,8 @@ full in the files' own header comments:
 | `promotion-catch-destructuring-blocks.js` | **new** — `catch ({ e })` (a destructuring param) maps to `Decl::Kind::Catch`, not `ES5Catch` (cpp:287-294), so — unlike `promotion-blocked-by-let.js`'s `inCatch()` — it DOES block promotion (cpp:212-216) |
 | `promotion-nested-scope-visibility.js` | **new** — a `let` blocks a candidate arbitrarily deep in its own descendant scopes, but stops applying the moment its own block closes: a candidate in a later sibling block promotes normally |
 | `promotion-var-reuse.js` | **new** — the `Var, ScopedFunc` arm of the "when to create a new declaration" switch (cpp:2546-2562) in both source orders (`function` then `var`, `var` then `function`), plus the genuinely cross-scope sub-case (`reuseDeclForNewBinding`, cpp:2554-2561): a second, same-named candidate whose OWN identifier has never been declared before, reached with a `Var`-like decl as the nearest (unshadowed) binding. Derived from the C++, not the brief's sketch — see the file's header comment for the exact mechanics (why a `let` in the SAME block, positioned AFTER the function in source order, produces this instead of just blocking it, the way an enclosing `let` would) |
-| `promotion-var-shadows-promoted.js` | **new** — `visit(VariableDeclarationNode *)`'s `prevIsLexicalBindingOfPromotedFunc` special case (cpp:365-374, feeding the error at cpp:391-401), at both top level and function scope. Derived from the C++, not the brief's `let`-based sketch (a `let` there doesn't even reach this code path — only a `var` does, since the check is gated on `kw_.identVar`) |
+| `promotion-var-shadows-promoted.js` | **new** — `visit(VariableDeclarationNode *)`'s `prevIsLexicalBindingOfPromotedFunc` special case (cpp:365-374, feeding the error at cpp:391-401), at both top level and function scope. Derived from the C++, not the brief's `let`-based sketch (a `let` there doesn't even reach this code path — only a `var` does, since the check is gated on `kw_.identVar`). Its `prevKind` is `ScopedFunction`, which is independently let-like, so this shape alone does not prove the flag is load-bearing — see `promotion-es5catch-var-shadows.js` for that |
+| `promotion-es5catch-var-shadows.js` | **new (review follow-up)** — isolates `prevIsLexicalBindingOfPromotedFunc` as the SOLE cause of the error: with `prevKind == ES5Catch`, the ordinary check at cpp:392 is explicitly excluded (`!= ES5Catch`, the B.3.5 exemption `catch-shapes.js` pins), so only the flag being `true` can fire it. A function promoted from a sibling block, then a nested `var` inside `catch (e) { ... }` with the SAME name |
 | `promotion-es5catch-cross-scope-reuse.js` | **new** — the `ES5Catch` counterpart of `promotion-var-reuse.js`'s cross-scope case: the `ES5Catch, ScopedFunc` arm (cpp:2563-2578, specifically the `promotedFuncDecls` lookup at cpp:2569-2577) — the S1-T5 matrix row that stayed S3-blocked until this task. Needs an outer, already-popped `let` of the same name to make the blocked candidate's nearest binding land on the catch's `ES5Catch` decl rather than the `let` itself; see the file's header comment |
 | `promotion-strict-mode-negative.js` | **new** — the strict-mode gate on both promotion call sites (cpp:224-227, cpp:1906-1910): Annex B.3.3 is loose-mode-only, so a block-nested function keeps its local `ScopedFunction` decl and a same-name reference resolves as an undeclared global instead of a promoted `Var` |
 
@@ -795,3 +796,22 @@ the promoter's `With` arm ever runs. This matches (and reconfirms)
   `promotion-var-shadows-promoted.js` — all genuine `error:`/exit-2 cases,
   not panics). Gate output:
   `sema differential (tests/sema_corpus): 171 corpus files matched (96 succeeded on hermesc)`.
+
+### Review follow-up: `promotion-es5catch-var-shadows.js`
+
+A task review found that the claim above ("the ordinary let-like check
+already fires in this shape") was true only of
+`promotion-var-shadows-promoted.js`, and left
+`prevIsLexicalBindingOfPromotedFunc` (cpp:365-374) unpinned as an
+independent cause: a Rust port that dropped the
+`promotedFuncDecls`/depth computation entirely would still pass all 171
+files. `promotion-es5catch-var-shadows.js` (added in response) closes that
+gap — see its header comment and the table row above. Re-running the gate
+after adding it:
+`sema differential (tests/sema_corpus): 172 corpus files matched (96 succeeded on hermesc)`
+— 171 → **172** files (+1), hermesc-succeeded stays at **96** (the new
+file is an `error:`/exit-2 case on hermesc, same as
+`promotion-var-shadows-promoted.js`, so it adds to the failing side only).
+No Rust-side bug was found: `sema-dump` already matches hermesc
+byte-for-byte on this input — the finding was a corpus gap, not a port
+defect.
