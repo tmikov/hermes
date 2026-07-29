@@ -258,13 +258,20 @@ contents are the commitment, not the exact split.
   C++ call site (`runInScope`, cpp:158) is deferred to S5.
 - **S4 — modules & flavors:** the module visits + rewrite #4 (anonymous `export default
   function`) + the `$SHBuiltin` module protocol; CommonJS wrapping; ambient decls;
-  `FunctionInfo::imports` backref fixup; `resolve_ast_for_parser`; dialect corpora green
-  (which needs per-file flag support in `sema_differential.rs`).
+  `FunctionInfo::imports` backref fixup; `resolve_ast_for_parser`; per-file flag support
+  in `sema_differential.rs` (`// FLAGS:` convention) + the untyped `-parse-flow`
+  resolver paths (`typecast not allowed in this context`, `'this' parameter requires
+  typed mode`), pinned by purpose-written corpus files. The `test/Sema/flow/**` corpus
+  is NOT in S4's scope — see "Not a Sema phase" below.
 - **S5 — lazy + eval entry points** (`resolve_ast_lazy`/`resolve_ast_in_scope`, the third
   `ScopedFunctionPromoter` call site `runInScope` at cpp:158, `visitProgram`'s unported
   `SaveAndRestore` of `globalScope_`); capstone.
 - **Not a Sema phase:** real regular-expression validation, which needs the regex engine
-  (`lib/Regex/`) — a future component of its own.
+  (`lib/Regex/`) — a future component of its own. Likewise the 178 `test/Sema/flow/**`
+  files (incl. `flow/ffi/`): every one runs `-typed` (verified 2026-07-29 — `grep -L
+  typed` matches zero of them), so they exercise the FlowChecker and the resolver's
+  `typed_` branches and gate the separate FlowChecker component, not S4 (an earlier
+  draft of the S4 bullet mis-scoped them here).
 
 ## 7. Deliberate deviations (to record in the roadmap on completion)
 

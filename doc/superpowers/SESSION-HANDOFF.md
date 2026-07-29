@@ -77,8 +77,9 @@ validation commands, and workflow.
 > → "sema differential (tests/sema_corpus): 173 corpus files matched" (97 succeed on hermesc; +1/+1 from the S3
 > final-review follow-up's `promotion-for-family-let-blocker.js`, added after 172/96 was reached).
 > **Read the roadmap's Sema row for the authoritative what-shipped detail and the S4/S5 carry-item list** — S4 modules
-> (+ rewrite #4, the `$SHBuiltin` module protocol, `FunctionInfo::imports`) and "flavors" (typed dialects + the
-> 178 `test/Sema/flow/**` files + the per-file-flag harness debt); S5 lazy/`eval` + the third promotion call site
+> (+ rewrite #4, the `$SHBuiltin` module protocol, `FunctionInfo::imports`) and "flavors" (the untyped `-parse-flow`
+> paths + the per-file-flag harness debt; NOT the 178 `test/Sema/flow/**` files — all `-typed`, FlowChecker-component
+> scope); S5 lazy/`eval` + the third promotion call site
 > `runInScope` (cpp:158); the regex engine as its own future component; the documented landmines (same-location
 > diagnostic ties, now THREE hermesc self-aborts — `class C { x = class {}; }`, `$SHBuiltin.#x()`, and
 > `using x = 1; { function f(){} }`); and the two tracked parser-phase follow-ups the sema sweeps measured (the
@@ -86,8 +87,11 @@ validation commands, and workflow.
 > is silent" wording).
 > **NEXT: S4 — modules & flavors.** `lib/Sema/SemanticResolver.cpp`'s module visits + §3.4 rewrite #4 (anonymous
 > `export default function`) + the `$SHBuiltin.moduleFactory`/`export`/`import` branches + `FunctionInfo::imports`
-> backref + `resolve_ast_for_parser`, plus the typed-dialect/flow corpus (178 `test/Sema/flow/**` files) and the
-> per-file-flag harness debt (`-enable-eval=false`/`-parse-flow`/`-lazy`) they share. **NO S4 plan exists yet** —
+> backref + `resolve_ast_for_parser`, plus the untyped `-parse-flow` resolver paths (`typecast not allowed in this
+> context`, `'this' parameter requires typed mode`) and the per-file-flag harness debt
+> (`-enable-eval=false`/`-parse-flow`/`-lazy`). The 178 `test/Sema/flow/**` files are NOT S4 scope — every one runs
+> `-typed` (verified: zero files without it), so they gate the separate future FlowChecker component. **NO S4 plan
+> exists yet** —
 > open with `superpowers:brainstorming`, THEN `superpowers:writing-plans`, and execute it subagent-driven
 > (`superpowers:subagent-driven-development`). Spec: `specs/2026-07-26-sema-untyped-design.md`; the executed plans
 > are `plans/2026-07-26-sema-s0-foundations.md`, `plans/2026-07-28-sema-s1-declarations-scopes.md`,
