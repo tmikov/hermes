@@ -139,6 +139,9 @@ unchanged at 47 rows and the Deferred table stays at 8, i.e. 46 + 8 = 54.
 | `undeclared-private-name-error.js` | **S2 T6** — `the private name "#x" was not declared in any enclosing class`, as `test/Sema` writes it |
 | `valid-super-references.js` | **S2 T6** — every legal `super.x` shape, including the two field initializers that call an IIFE (which is what needed `CallExpression`) |
 | `var-scope-redeclaration-error.js` | **S2 T6** — `var` redeclaration errors across `try`/`catch` with a call in the body |
+| `break-in-nested-func.js` | **S3 T2** — `break;` inside a loose-mode block-nested `FunctionDeclaration`: the promoter still runs (and would promote `foo`), but `break`'s own loop/switch-nesting check fires first, so this pins that ordering rather than promotion itself |
+| `function-redeclaration-error.js` | **S3 T2** — sixteen redeclaration shapes (`var`/`let`/`Catch`-vs-`function`, strict AND loose, block-nested AND top-level) crossed with the Annex B.3.3 loose-mode exception; several of the loose, block-nested pairs (e.g. `var b2; function b2(){}`) are exactly the `visit(VariableDeclarationNode *)` "already declared" shape `promotion-var-shadows-promoted.js` isolates on its own |
+| `regress-function-promotion-decl.js` | **S3 T2** — the canonical positive case: one block-nested `function inner(){}` promoted to `Var`, alongside a `let foo` sibling that is untouched |
 
 `deep-ast-err.js` is listed in the Deferred table below but is NOT a real S1
 gap: the entire `.js` file is comment lines (its `RUN:` lines generate the
@@ -154,11 +157,8 @@ files in, 54 accounted for below) rather than silently dropped. It is also
 
 | File | Blocking construct | Target phase |
 |---|---|---|
-| `break-in-nested-func.js` | loose-mode block-nested `FunctionDeclaration` (`ScopedFunctionPromoter`) | S3 |
 | `deep-ast-err.js` | vacuous — see note above (not a real S1 gap) | n/a |
-| `function-redeclaration-error.js` | loose- AND strict-mode block-nested `FunctionDeclaration` (`ScopedFunctionPromoter`) — re-probed after S2 T3 unblocked its `try`/`catch` clauses; the remaining blocker is the `sema S1: scoped function declarations are S3 scope` assert | S3 |
 | `invalid-args-eval.js` | **not a port gap** — the resolver's loop/`for` support landed in S2 T1 and every diagnostic in this file is produced, with identical text and locations, but two of them collide at the *same* source location (`89:9`: the strict-mode `cannot declare 'arguments'` error and the `was not declared in function "global"` warning). C++'s buffered-message flush uses `std::sort` (`SourceErrorManager.cpp:61-71`), which is NOT stable, so their relative order is unspecified and in practice depends on the whole 24-message array; our `disable_buffering` uses a stable `sort_by_key` (`support/src/manager.rs:903-909`, a documented deviation). Minimized to two messages the two sides agree; only at this file's message count does libstdc++'s introsort reorder the tie. Not faithfully fixable (there is no defined tie order to match), and the file's actual subject is S1's `arguments`/`eval` declaration rules, so the loop-specific rows were extracted into the new `error-for-decl-strict.js` instead | n/a (C++ unstable-sort tie) |
-| `regress-function-promotion-decl.js` | loose-mode block-nested `FunctionDeclaration` (`ScopedFunctionPromoter`) | S3 |
 | `regress-nested-expressions-error.js` | recursion-depth-limit mismatch: hermesc and sema-dump both correctly error `Too many nested expressions/statements/declarations` on the deeply-nested `get<<=get<<=...` chain, but at different columns (hermesc col 3052, sema-dump col 6124) — the two recursion trackers (`JSParserImpl::recursionDepth_`/`SemanticResolver`'s tracker vs our ported ones) increment at different rates per grammar production, so the exact trip point diverges even though both share the same `MAX_RECURSION_DEPTH = 1024`. Same landmine category as the S1 ledger's "parser recursion limit unported" item (S0-era finding, T6 review) — tracked together, not re-derived/fixed here. **S2 T8's sweep sharpened it: on `test/hermes/far-environment-access.js` (250-odd nested arrows) hermesc reports the error at 28:510 while `sema-dump` STACK-OVERFLOWS and aborts (SIGABRT/134) before its own tracker trips.** So the gap is not only "a different column": a debug build's frames are big enough that 1024 allowed levels outrun the 8 MB stack, i.e. deep-but-otherwise-valid input crashes instead of diagnosing. Same row, higher severity | parser-gap follow-up (recursion-depth-counting parity + a real crash) |
 | `type-alias-children.js` | typed dialect (`-parse-flow` RUN flag; harness has no per-file flags) — WITHOUT the flag, hermesc and sema-dump both hit the identical `';' expected` parse error on `type A = B;`, but that's a coincidental match on a syntax error, not a test of the file's actual subject (TypeAlias children resolution); same vacuous-match category `deep-ast-err.js` was excluded for, so it does not belong in `sema_corpus/` either | dialect-corpus phase |
 | `xmod-errors.js` | the `$SHBuiltin` CommonJS-module protocol: `visitModuleFactory`/`visitModuleExport`/`visitModuleImport` (cpp:1320-1453), reached from the three property-name branches of rewrite #3 (cpp:1168-1189). `CallExpression` itself landed in S2 T6, which ports those three branches as loud phase-tagged panics — its row was re-classified from "`CallExpression` / S2" accordingly. Every diagnostic in the file (`$SHBuiltin.moduleFactory requires exactly two arguments.` and 17 more) comes from those three functions | S4 modules |
@@ -739,3 +739,59 @@ supported" (cpp:329-336). The port reproduces it as a `debug_assert!` at the
 same place, so such a file cannot go in the corpus (the abort exit codes
 differ, 134 vs 101 — same situation as the already-listed
 `class C { x = class {}; }` and `$SHBuiltin.#x()` aborts).
+
+## S3 Task 2 additions (promotion corpus unlock)
+
+S3 Task 2 re-probed and imported the three remaining S3-blocked `test/Sema`
+rows (all re-verified against hermesc, raw stdout/stderr/exit bytes, before
+copying — see the "Imported" table above for their one-line notes) and added
+a six-file feature battery covering the rest of `ScopedFunctionPromoter` and
+its call sites that `promotion-basic.js`/`promotion-blocked-by-let.js` (S3
+T1) didn't already pin. Two bullets from the battery list needed shapes
+derived directly from the C++ (their sketches in the task brief were flagged
+as possibly wrong) rather than the ones suggested; both are documented in
+full in the files' own header comments:
+
+| File | What it pins |
+|---|---|
+| `promotion-catch-destructuring-blocks.js` | **new** — `catch ({ e })` (a destructuring param) maps to `Decl::Kind::Catch`, not `ES5Catch` (cpp:287-294), so — unlike `promotion-blocked-by-let.js`'s `inCatch()` — it DOES block promotion (cpp:212-216) |
+| `promotion-nested-scope-visibility.js` | **new** — a `let` blocks a candidate arbitrarily deep in its own descendant scopes, but stops applying the moment its own block closes: a candidate in a later sibling block promotes normally |
+| `promotion-var-reuse.js` | **new** — the `Var, ScopedFunc` arm of the "when to create a new declaration" switch (cpp:2546-2562) in both source orders (`function` then `var`, `var` then `function`), plus the genuinely cross-scope sub-case (`reuseDeclForNewBinding`, cpp:2554-2561): a second, same-named candidate whose OWN identifier has never been declared before, reached with a `Var`-like decl as the nearest (unshadowed) binding. Derived from the C++, not the brief's sketch — see the file's header comment for the exact mechanics (why a `let` in the SAME block, positioned AFTER the function in source order, produces this instead of just blocking it, the way an enclosing `let` would) |
+| `promotion-var-shadows-promoted.js` | **new** — `visit(VariableDeclarationNode *)`'s `prevIsLexicalBindingOfPromotedFunc` special case (cpp:365-374, feeding the error at cpp:391-401), at both top level and function scope. Derived from the C++, not the brief's `let`-based sketch (a `let` there doesn't even reach this code path — only a `var` does, since the check is gated on `kw_.identVar`) |
+| `promotion-es5catch-cross-scope-reuse.js` | **new** — the `ES5Catch` counterpart of `promotion-var-reuse.js`'s cross-scope case: the `ES5Catch, ScopedFunc` arm (cpp:2563-2578, specifically the `promotedFuncDecls` lookup at cpp:2569-2577) — the S1-T5 matrix row that stayed S3-blocked until this task. Needs an outer, already-popped `let` of the same name to make the blocked candidate's nearest binding land on the catch's `ES5Catch` decl rather than the `let` itself; see the file's header comment |
+| `promotion-strict-mode-negative.js` | **new** — the strict-mode gate on both promotion call sites (cpp:224-227, cpp:1906-1910): Annex B.3.3 is loose-mode-only, so a block-nested function keeps its local `ScopedFunction` decl and a same-name reference resolves as an undeclared global instead of a promoted `Var` |
+
+Two battery bullets did not get a new file:
+
+- **param-name shadowing** (cpp:147-158) and the **`switch`-case-scope
+  candidate** (cpp:47-49) are already pinned by `promotion-basic.js`
+  (`withParam` and `scopes()` respectively) — extending them would have
+  duplicated shapes the seed file already covers, which the task brief
+  explicitly said not to do.
+- **`const`/`class` blockers** (cpp:215's `isKindLetLike`) are already
+  pinned by `promotion-blocked-by-let.js`.
+
+**The `with`-scope arm** (`ScopedFunctionPromoter.cpp:62-64`) was probed and
+confirmed **not corpus-reachable**: `visit(WithStatementNode *)`
+unconditionally reports `with statement is not supported` whenever
+`compile_` is set (SemanticResolver.cpp:757-759), which is true for every
+invocation `sema_differential.rs` makes (there is no per-file flag support
+to turn `compile_` off, per the harness's known limitation). hermesc
+confirms: `with ({}) { function w() {} }` exits 2 with that error before
+the promoter's `With` arm ever runs. This matches (and reconfirms)
+`promotion-basic.js`'s own note about the seventh `visitScope` kind.
+
+### MANIFEST arithmetic
+
+- `test/Sema` top-level sweep: Imported 46 → **49** (+3: the three rows
+  above), Deferred 8 → **5** (-3), 49 + 5 = 54 (unchanged, still fully
+  accounted for).
+- `sema_corpus/` directory / differential gate: 162 → **171** files
+  (+3 imported + 6 new battery files = +9). hermesc-succeeded: 90 → **96**
+  (+6): of the 9 new files, 6 succeed on hermesc
+  (`regress-function-promotion-decl.js` and the five battery files other
+  than `promotion-var-shadows-promoted.js`) and 3 fail on hermesc
+  (`break-in-nested-func.js`, `function-redeclaration-error.js`,
+  `promotion-var-shadows-promoted.js` — all genuine `error:`/exit-2 cases,
+  not panics). Gate output:
+  `sema differential (tests/sema_corpus): 171 corpus files matched (96 succeeded on hermesc)`.
