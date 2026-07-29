@@ -235,6 +235,15 @@ hermesc, 72 are hermesc-failure files).
 Final count after S3 Task 1: **162 corpus files matched** (90 succeed on
 hermesc, 72 are hermesc-failure files).
 
+Final count after S3 Task 2: **172 corpus files matched** (96 succeed on
+hermesc, 76 are hermesc-failure files) — see "S3 Task 2 additions" below for
+the two-step arithmetic (171 then 172) that reaches this number; this line
+was missing from the table and is filled in retroactively by S3 Task 3.
+
+Final count after S3 Task 3: **172 corpus files matched** (96 succeed on
+hermesc, 76 are hermesc-failure files) — unchanged; the upstream re-probe
+(see "S3 Task 3 additions" below) imported no new `test/Sema` files.
+
 ## S2 Task 1 additions
 
 Eight new files, each verified byte-for-byte (stdout, stderr and exit status)
@@ -815,3 +824,132 @@ file is an `error:`/exit-2 case on hermesc, same as
 No Rust-side bug was found: `sema-dump` already matches hermesc
 byte-for-byte on this input — the finding was a corpus gap, not a port
 defect.
+
+## S3 Task 3: upstream re-probe
+
+S3 Task 3 re-ran the exact S2-T8 sweep — both binaries, raw stdout + stderr +
+exit status, no extra flags on either side — over the same 1416 files in the
+same 8 upstream dirs (`test/Parser` 366, `test/IRGen`+`test/BCGen`+
+`test/Optimizer` 395, `test/hermes`+`test/AST`+`test/Driver`+`test/RA` 655),
+now that both S3 `assert!` seams are replaced by the real
+`ScopedFunctionPromoter`. File count re-verified: `find test/{Parser,IRGen,
+BCGen,Optimizer,hermes,AST,Driver,RA} -iname '*.js' | wc -l` = 1416, unchanged
+from S2-T8.
+
+### Result
+
+| Outcome | S2-T8 | S3-T3 | Delta |
+|---|---|---|---|
+| byte-identical | 1203 | **1209** | +6 |
+| mismatch | 190 | **190** | 0 |
+| panic | 23 | **17** | −6 |
+
+1209 + 190 + 17 = 1416 (S2-T8's 1203 + 190 + 23 = 1416, same total, both
+verified before writing this table).
+
+### The +6 / −6 move, named
+
+Re-running the PRE-S3 `sema-dump` (checked out at `5aab87d1d`, the commit
+immediately before S3 Task 1, built in an isolated worktree so the current
+binary was untouched) against the same 1416 files and the same `hermesc`
+found exactly **six** files that hit one of the two old `assert!` seams
+(`"sema S0: scoped function declarations are S3 scope"`,
+`resolver/mod.rs:1387-1397` pre-S3) and nothing else changed bucket:
+
+| File | Pre-S3 | Post-S3 |
+|---|---|---|
+| `test/IRGen/function-promotion.js` | panic (old assert) | identical |
+| `test/IRGen/scoped-func-init.js` | panic (old assert) | identical |
+| `test/Parser/if-function.js` | panic (old assert) | identical |
+| `test/hermes/iterator-close-throw.js` | panic (old assert) | identical |
+| `test/hermes/promoted-function-redeclaration.js` | panic (old assert) | identical |
+| `test/hermes/stack-overflow-apply.js` | panic (old assert) | identical |
+
+All six succeed on hermesc (`hc_code == 0`) and are now byte-identical
+against it.
+
+One reconciliation step was needed to get from a raw exit-status-shape
+classification to the table above. A first automated pass — bucketing by
+whether the Rust side's exit differs from a clean 0/2, i.e. treating any
+`SIGABRT`/`SIGSEGV`/panic-string exit as "panic" — read **1203 / 188 / 25**
+at the pre-S3 commit and **1209 / 188 / 19** post-S3, not matching the
+documented S2-T8 baseline (1203 / 190 / 23) even at the identical pre-S3
+commit. The 2-file gap in both pairs is the same two files each time:
+`test/Parser/nested-expressions.js` and
+`test/hermes/far-environment-access.js` are process aborts on our side
+(`SIGABRT`, Rust's stack-overflow guard-page handler), which the raw pass
+counts as "panic" — but the S2-T8 text's own "residual 10" paragraph
+explicitly places **both** of them inside the 190-mismatch bucket ("both
+hermesc and sema-dump both correctly error … at different columns" /
+"STACK-OVERFLOWS and aborts … before its own tracker trips": a
+recursion-depth-parity landmine where both sides fail, just differently, not
+an unhandled-construct gap). Reclassifying those two into "mismatch" (the
+established convention, applied identically at both commits since both
+commits contain the same 2 files) turns 1203/188/25 into 1203/190/23 — an
+exact match to the documented S2-T8 baseline, confirming the convention and
+validating the tooling — and turns 1209/188/19 into the reported
+**1209/190/17**. No other file's bucket moved for any reason besides the six
+in the table above: the mismatch bucket's file-level membership (190 files
+under the convention) was diffed between the pre-S3 and post-S3 runs and is
+identical.
+
+### Zero S3-attributable panics
+
+The 17-file panic bucket is, exhaustively (each message read, not assumed):
+
+- **16 S4 files** — `mod.rs:1324`'s catch-all (`sema: unhandled node kind
+  X (S3+/typed phases)`) on 9 files, each message read individually: `X =
+  ExportDefaultDeclaration` on `test/AST/es6/export-default-function.js` and
+  `test/Parser/es6/{export-default-async,export-default-class,
+  export-default}.js` plus `test/Parser/flow/component-syntax/
+  component-identifier.js` (not a Flow-only kind — the panic fires on the
+  plain `export default component ...` declaration, before any
+  component-syntax node is reached); `X = ExportAllDeclaration` on
+  `test/Parser/es6/export.js`; `X = ImportDeclaration` on
+  `test/Parser/es6/{import-assertions,import-location,import}.js`. And
+  `calls.rs:312`'s `$SHBuiltin.moduleFactory needs visitModuleFactory
+  (cpp:1320-1366) — S4 modules` panic on 7 files
+  (`test/BCGen/HBC/xmod-requires-opt.js`, `test/Optimizer/xmod-{builtins,
+  require-cse,requires-opt-extension,requires-opt}.js`,
+  `test/hermes/xmod-exec-require{-bad-func,}.js`). Same two call sites,
+  same messages, as `xmod-errors.js`'s already-Deferred row.
+- **1 pre-existing-C++-defect reproduction** — `test/hermes/
+  computed-fn-name.js:71` (`[k("strClass")] = class {};`), the same
+  `SemContext.cpp:478` scope-walk assertion S2 T4 already documented (hermesc
+  itself aborts, exit -6/134; this port's `dump_context.rs` `assert_eq!`
+  fires too, exit 101 — different abort mechanisms, so never byte-identical,
+  but not a port gap).
+
+Zero of the 17 mention `ScopedFunctionPromoter`, `promot`, or anything S3;
+confirmed by `grep -n "scoped function declarations are S3 scope"
+rust/crates/sema/src/` returning nothing (the seam itself is gone from the
+source) and by reading every one of the 17 panic messages above individually
+(no grep-and-trust — each one quoted verbatim).
+
+### Step 2 — the five Deferred `test/Sema` rows, re-probed
+
+Every row in the Deferred table was re-diffed against hermesc (raw
+stdout+stderr+exit):
+
+| File | Re-probe result |
+|---|---|
+| `deep-ast-err.js` | still the vacuous comment-only match; still excluded on purpose |
+| `invalid-args-eval.js` | still the same single same-location tie at `89:9` (`warning: the variable "arguments" was not declared…` vs `error: cannot declare 'arguments' in strict mode`, swapped order) — C++'s unstable `std::sort`, unchanged |
+| `regress-nested-expressions-error.js` | still col 3052 (hermesc) vs col 6124 (sema-dump) — the recursion-depth-parity gap, unchanged |
+| `type-alias-children.js` | still the vacuous `';' expected` match without `-parse-flow` |
+| `xmod-errors.js` | still panics `$SHBuiltin.moduleFactory needs visitModuleFactory` — S4, unchanged |
+
+`test/Sema/lowering/fastarray-push.js` (the one `flow/**`-adjacent file
+outside `flow/`) was also re-probed: still a vacuous `';' expected` match on
+`var x: number[];` without `-parse-flow`, same category as
+`type-alias-children.js`. None of the five Deferred rows, nor the bulk-deferred
+`flow/**`/`lowering/` files, newly unblocked. **No files imported** by this
+task; the `test/Sema` Imported/Deferred counts stay at 49/5 (49 + 5 = 54,
+unchanged from S3 Task 2).
+
+### Step 3 — no fixes needed
+
+Because zero panics traced to the S3 promoter, no TDD repro/fix round was
+required. The gate (`REQUIRE_DIFFERENTIAL=1 cargo test … --test
+sema_differential`) is unchanged at **172 corpus files matched (96 succeeded
+on hermesc)** — no corpus files were added or removed by this task.
