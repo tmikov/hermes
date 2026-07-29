@@ -28,14 +28,16 @@
 //!   than fabricate stand-ins for methods a later stage owns, the branch is
 //!   ported as a `const TYPED: bool = false` guard around an `unreachable!`,
 //!   matching the `DEBUG_INFO_SETTING_ALL` precedent in `mod.rs`.
-//! - **`promotedFuncDecls`** (`FunctionContext::promoted_func_decls`) is
-//!   always empty until S3's `ScopedFunctionPromoter` lands (see
-//!   `resolver/mod.rs`'s struct doc and the S0 assert in
-//!   `process_collected_declarations`'s caller, `visit_program`). Every
-//!   branch that reads it here is ported and reachable by *code path*, but
-//!   is provably a no-op against the always-empty map — see the report for
-//!   the "dormant, not dead" distinction and how each is unit-tested by
-//!   hand-populating the map.
+//! - **`promotedFuncDecls`** (`FunctionContext::promoted_func_decls`) was
+//!   always empty until S3 T1, which lands `ScopedFunctionPromoter`
+//!   (`resolver/promoter.rs`) and the `processPromotedFuncDecls` that fills
+//!   the map (`resolver/mod.rs`). Every branch that reads it here — the
+//!   `Var, ScopedFunc` and `ES5Catch, ScopedFunc` redeclaration rows and the
+//!   two-declarations-per-promoted-function block below — is live as of
+//!   that task; `tests/sema_corpus/promotion-basic.js` and
+//!   `promotion-blocked-by-let.js` exercise them end to end, on top of the
+//!   hand-populated-map unit tests that covered them while the producer was
+//!   still missing.
 //! - **`ClassDeclaration`/`CatchClause`/`ImportDeclaration`** classification
 //!   in `extract_idents_from_decl`/`extract_declared_idents_from_id` is
 //!   ported in full but not corpus-reachable yet: `visit_node` (`mod.rs`)
@@ -50,6 +52,7 @@ use ast::context::{GCLock, NodeRc};
 use ast::node::Node;
 use ast::visitor::TransformResult;
 use support::diag::Subsystem;
+use support::manager::SourceErrorManager;
 
 use crate::ids::{DeclId, ScopeId};
 use crate::sem_context::{Atom, Binding, DeclKind};
@@ -65,6 +68,84 @@ const TYPED: bool = false;
 /// out here since this file needs it at several call sites.
 pub(super) fn atom_str(gc: &GCLock, atom: Atom) -> String {
     String::from_utf8_lossy(gc.bytes(atom)).into_owned()
+}
+
+/// The body of `SemanticResolver::extractDeclaredIdentsFromID`
+/// (SemanticResolver.cpp:2353-2405), as a free function over the only piece
+/// of the resolver it touches. See the forwarding method of the same name
+/// below for why it lives out here.
+pub(super) fn extract_declared_idents_from_id<'gc>(
+    sm: &mut SourceErrorManager,
+    node: Option<&'gc Node<'gc>>,
+    idents: &mut Vec<&'gc Node<'gc>>,
+) -> bool {
+    // The identifier is sometimes optional, in which case it is valid.
+    let node = match node {
+        Some(n) => n,
+        None => return false,
+    };
+
+    if let Node::Identifier(_) = node {
+        idents.push(node);
+        return false;
+    }
+
+    if let Node::Empty(_) = node {
+        return false;
+    }
+
+    if let Node::AssignmentPattern(ap) = node {
+        extract_declared_idents_from_id(sm, Some(ap.left), idents);
+        return true;
+    }
+
+    if let Node::ArrayPattern(arr) = node {
+        let mut contains_expr = false;
+        for elem in arr.elements.iter() {
+            contains_expr |=
+                extract_declared_idents_from_id(sm, Some(elem), idents);
+        }
+        return contains_expr;
+    }
+
+    if let Node::RestElement(re) = node {
+        return extract_declared_idents_from_id(sm, Some(re.argument), idents);
+    }
+
+    if let Node::ObjectPattern(obj) = node {
+        let mut contains_expr = false;
+        for prop_node in obj.properties.iter() {
+            match prop_node {
+                Node::Property(p) => {
+                    contains_expr |= extract_declared_idents_from_id(
+                        sm,
+                        Some(p.value),
+                        idents,
+                    );
+                }
+                Node::RestElement(re) => {
+                    contains_expr |= extract_declared_idents_from_id(
+                        sm,
+                        Some(re.argument),
+                        idents,
+                    );
+                }
+                _ => panic!(
+                    "cast<RestElementNode> failed: unexpected \
+                     ObjectPattern property kind {}",
+                    prop_node.node_type_str()
+                ),
+            }
+        }
+        return contains_expr;
+    }
+
+    if let Node::ComponentParameter(param) = node {
+        return extract_declared_idents_from_id(sm, Some(param.local), idents);
+    }
+
+    sm.error_range(node.range(), "invalid destructuring target");
+    false
 }
 
 impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
@@ -243,79 +324,19 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     /// `AssignmentPattern`'s default value) — the "invalid destructuring
     /// target" error case returns `false`, matching the C++'s implicit
     /// fallthrough.
+    ///
+    /// The body lives in the free function of the same name below, which
+    /// takes only the `&mut SourceErrorManager` this code actually needs.
+    /// S3 T1's `ScopedFunctionPromoter` (`promoter.rs`) calls it while
+    /// holding a shared borrow of the resolver's `DeclCollector`, which a
+    /// `&mut self` receiver would forbid — see that module's doc. Same code,
+    /// one place, two borrow shapes.
     pub(super) fn extract_declared_idents_from_id<'gc>(
         &mut self,
         node: Option<&'gc Node<'gc>>,
         idents: &mut Vec<&'gc Node<'gc>>,
     ) -> bool {
-        // The identifier is sometimes optional, in which case it is valid.
-        let node = match node {
-            Some(n) => n,
-            None => return false,
-        };
-
-        if let Node::Identifier(_) = node {
-            idents.push(node);
-            return false;
-        }
-
-        if let Node::Empty(_) = node {
-            return false;
-        }
-
-        if let Node::AssignmentPattern(ap) = node {
-            self.extract_declared_idents_from_id(Some(ap.left), idents);
-            return true;
-        }
-
-        if let Node::ArrayPattern(arr) = node {
-            let mut contains_expr = false;
-            for elem in arr.elements.iter() {
-                contains_expr |=
-                    self.extract_declared_idents_from_id(Some(elem), idents);
-            }
-            return contains_expr;
-        }
-
-        if let Node::RestElement(re) = node {
-            return self
-                .extract_declared_idents_from_id(Some(re.argument), idents);
-        }
-
-        if let Node::ObjectPattern(obj) = node {
-            let mut contains_expr = false;
-            for prop_node in obj.properties.iter() {
-                match prop_node {
-                    Node::Property(p) => {
-                        contains_expr |= self.extract_declared_idents_from_id(
-                            Some(p.value),
-                            idents,
-                        );
-                    }
-                    Node::RestElement(re) => {
-                        contains_expr |= self.extract_declared_idents_from_id(
-                            Some(re.argument),
-                            idents,
-                        );
-                    }
-                    _ => panic!(
-                        "cast<RestElementNode> failed: unexpected \
-                         ObjectPattern property kind {}",
-                        prop_node.node_type_str()
-                    ),
-                }
-            }
-            return contains_expr;
-        }
-
-        if let Node::ComponentParameter(param) = node {
-            return self
-                .extract_declared_idents_from_id(Some(param.local), idents);
-        }
-
-        self.sm
-            .error_range(node.range(), "invalid destructuring target");
-        false
+        extract_declared_idents_from_id(self.sm, node, idents)
     }
 
     // ---- processCollectedDeclarations / processDeclarations -----------
@@ -377,7 +398,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
 
     /// Port of `SemanticResolver::validateAndDeclareIdentifier`
     /// (SemanticResolver.cpp:2407-2639).
-    fn validate_and_declare_identifier<'gc>(
+    pub(super) fn validate_and_declare_identifier<'gc>(
         &mut self,
         gc: &'gc GCLock,
         kind: DeclKind,

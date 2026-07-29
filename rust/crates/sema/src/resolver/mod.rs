@@ -108,6 +108,17 @@
 //! `MethodDefinition` `ConstructorKind` seam observable and (being a
 //! `SpreadElement` whitelist parent) S2 T2's spread handling reachable in
 //! call arguments.
+//! From S3 T1, `getPromotedScopedFuncDecls` (the whole of
+//! `lib/Sema/ScopedFunctionPromoter.cpp`, ported as `promoter.rs`) and
+//! `processPromotedFuncDecls` (cpp:2129-2141, below) — a loose-mode
+//! function or program containing a block-nested `function f() {}` now runs
+//! the Annex B 3.3 promotion check instead of asserting: the declaration is
+//! declared a SECOND time, in function (`Var`) or global
+//! (`GlobalProperty`) scope, whenever no let-like binding of that name and
+//! no formal parameter of that name is visible from the block. That is what
+//! turns S1 T5's dormant `promotedFuncDecls` redeclaration rows
+//! (`declarations.rs`) live. The THIRD C++ call site, `runInScope`
+//! (cpp:158), belongs to S5's `resolve_ast_in_scope`.
 //! Together this reproduces `hermesc -dump-sema`
 //! byte-for-byte for programs made of literals, empty statements, bare
 //! identifier reads (including through non-computed member/property
@@ -357,6 +368,7 @@ mod declarations;
 mod expressions;
 mod functions;
 mod identifiers;
+mod promoter;
 mod statements;
 mod unresolver;
 
@@ -371,6 +383,7 @@ use support::persistent_scoped_map::Scope;
 
 use crate::decl_collector::DeclCollector;
 use classes::ClassContext;
+use promoter::get_promoted_scoped_func_decls;
 use crate::ids::{DeclId, FunctionInfoId, ScopeId};
 use crate::keywords::Keywords;
 use crate::sem_context::{
@@ -431,7 +444,12 @@ pub struct FunctionContext {
     pub decls: Option<DeclCollector>,
     /// The map of names that have been promoted to function scope by
     /// `promoteScopedFunctionDecls` in this function, mapped to their Var
-    /// declaration in function scope. Always empty in S0.
+    /// declaration in function scope. Filled by
+    /// `process_promoted_func_decls` (S3 T1); empty before that task.
+    ///
+    /// C++'s `DenseMap<UniqueString *, Decl *>` can hold a null `Decl *`;
+    /// this `DeclId` cannot — see `process_promoted_func_decls` for why that
+    /// state is unreachable.
     pub promoted_func_decls: HashMap<Atom, DeclId>,
     /// The depth of the function's scope in the binding table. Populated
     /// when a scope is entered within the function.
@@ -1383,19 +1401,14 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             if !self.sem_ctx.function(self.cur_function_info()).strict {
                 // Promote hoisted functions.
                 //
-                // `getPromotedScopedFuncDecls`/`processPromotedFuncDecls`
-                // are S3 scope. Nothing S0 can parse produces a scoped
-                // function declaration, so assert that rather than silently
-                // skipping the promotion.
-                assert!(
-                    self.function_context()
-                        .decls
-                        .as_ref()
-                        .expect("Program FunctionContext always has decls")
-                        .scoped_func_decls()
-                        .is_empty(),
-                    "sema S0: scoped function declarations are S3 scope"
-                );
+                // S5: the third C++ call site is `runInScope`
+                // (SemanticResolver.cpp:158), the lazy/`eval` entry point —
+                // it promotes BEFORE `processCollectedDeclarations`, not
+                // after. It arrives with `resolve_ast_in_scope`; do not
+                // port it here.
+                let promoted =
+                    get_promoted_scoped_func_decls(self, gc, node);
+                self.process_promoted_func_decls(gc, &promoted);
             }
             self.process_ambient_decls(gc);
             // visitESTreeChildren(*this, node): a Program's only child list
@@ -1437,6 +1450,76 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             .cloned();
         if let Some(decls) = decls {
             self.process_declarations(gc, &decls);
+        }
+    }
+
+    /// Declare all the function declarations in `promoted_func_decls` with
+    /// Var in function scope or GlobalProperty in global scope. Add the
+    /// names to the function context's `promoted_func_decls` list. Port of
+    /// `SemanticResolver::processPromotedFuncDecls`
+    /// (SemanticResolver.h:428-432, cpp:2129-2141).
+    ///
+    /// Takes the `NodeRc`s `get_promoted_scoped_func_decls` returns rather
+    /// than `&Node`s, for the reason `promoter.rs`'s module doc gives, and
+    /// for the same reason `process_declarations` takes a `&[NodeRc]`.
+    ///
+    /// NOTE: this runs AFTER `visit_program`/
+    /// `visit_function_body_after_params_visited` have written their node
+    /// decorations but BEFORE the children are visited, and it writes no
+    /// node `Cell` at all: everything it mutates lives in `SemContext`
+    /// (`Decl`s, the binding table, `promoted_function_decls`) or in the
+    /// `FunctionContext`, none of which a node rebuild ever snapshots or
+    /// copies. It is therefore exempt from this module's "decorate before
+    /// recursing" invariant, which constrains only `Cell` writes on AST
+    /// nodes — same exemption, same reason, as `classes.rs`'s `decl_mut`
+    /// site (classes.rs:990-997).
+    fn process_promoted_func_decls(
+        &mut self,
+        gc: &GCLock,
+        promoted_func_decls: &[NodeRc],
+    ) {
+        // Use GlobalProperty in global scope.
+        let kind = if self.in_global_scope_context() {
+            DeclKind::GlobalProperty
+        } else {
+            DeclKind::Var
+        };
+        for func_decl_rc in promoted_func_decls {
+            let func_decl_node = func_decl_rc.node(gc);
+            let func_decl = match func_decl_node {
+                Node::FunctionDeclaration(fd) => fd,
+                _ => panic!(
+                    "cast<FunctionDeclarationNode> failed: promoted decl is \
+                     a {}",
+                    func_decl_node.node_type_str()
+                ),
+            };
+            let ident_node = func_decl.id.expect(
+                "cast<IdentifierNode>(funcDecl->_id) on a nameless promoted \
+                 function declaration",
+            );
+            self.validate_and_declare_identifier(gc, kind, ident_node);
+            let identifier = ident_node
+                .as_identifier()
+                .expect("a promoted function's id is an Identifier");
+            // C++ stores `semCtx_.getDeclarationDecl(ident)` even when it is
+            // null; `promoted_func_decls` is a `HashMap<Atom, DeclId>` with
+            // no way to express that, so the null is an `expect` instead.
+            // Unreachable: `validateAndDeclareIdentifier` only returns
+            // without setting a declaration decl on a `validateDeclarationName`
+            // failure (all three of its rules are strict-mode-only or
+            // Let/Const-only, and `kind` here is Var/GlobalProperty inside a
+            // `!strict` guard) or on the "already declared" error, which
+            // needs a let-like declaration of the same name visible in this
+            // function — exactly what the promoter refuses to promote past.
+            let decl = self
+                .sem_ctx
+                .get_declaration_decl(identifier)
+                .expect("a promoted function declaration always gets a decl");
+            self.function_context_mut()
+                .promoted_func_decls
+                .entry(identifier.name.get())
+                .or_insert(decl);
         }
     }
 

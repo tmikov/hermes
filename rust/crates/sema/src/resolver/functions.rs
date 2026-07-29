@@ -116,6 +116,7 @@ use crate::ids::FunctionInfoId;
 use crate::sem_context::{Binding, ConstructorKind, DeclKind};
 
 use super::expressions::replacement_of;
+use super::promoter::get_promoted_scoped_func_decls;
 use super::unresolver::Unresolver;
 use super::{
     make_strictness, FoundDirectives, SemanticResolver, DEBUG_INFO_SETTING_ALL,
@@ -257,7 +258,10 @@ fn function_like_params<'gc>(node: &'gc Node<'gc>) -> NodeList<'gc> {
 /// `getBlockStatement` (`lib/AST/ESTree.cpp:58-80`) is the downcasting
 /// variant, which `visitFunctionLikeInFunctionContext` open-codes as
 /// `dyn_cast<BlockStatementNode>(body)` (cpp:1703).
-fn function_like_body<'gc>(node: &'gc Node<'gc>) -> &'gc Node<'gc> {
+///
+/// `pub(super)` rather than private: `promoter.rs` (S3 T1) needs it for
+/// `getBlockStatement(funcNode)` (ScopedFunctionPromoter.cpp:137).
+pub(super) fn function_like_body<'gc>(node: &'gc Node<'gc>) -> &'gc Node<'gc> {
     match node {
         Node::FunctionExpression(n) => n.body,
         Node::ArrowFunctionExpression(n) => n.body,
@@ -1042,20 +1046,8 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
         if block_body.is_some()
             && !self.sem_ctx.function(self.cur_function_info()).strict
         {
-            // `getPromotedScopedFuncDecls`/`processPromotedFuncDecls` are S3
-            // scope, exactly as in `visit_program`. A loose-mode function
-            // containing a block-nested function declaration is therefore
-            // deliberately absent from the S1 corpus; assert that rather
-            // than silently skipping the promotion.
-            assert!(
-                self.function_context()
-                    .decls
-                    .as_ref()
-                    .expect("a function FunctionContext always has decls")
-                    .scoped_func_decls()
-                    .is_empty(),
-                "sema S1: scoped function declarations are S3 scope"
-            );
+            let promoted = get_promoted_scoped_func_decls(self, gc, node);
+            self.process_promoted_func_decls(gc, &promoted);
         }
 
         // Do we need to declare the "arguments" object? Only if we are not

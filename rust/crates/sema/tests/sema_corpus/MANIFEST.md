@@ -232,6 +232,9 @@ S2 Task 8 section.
 Final count after S2 Task 8: **160 corpus files matched** (88 succeed on
 hermesc, 72 are hermesc-failure files).
 
+Final count after S3 Task 1: **162 corpus files matched** (90 succeed on
+hermesc, 72 are hermesc-failure files).
+
 ## S2 Task 1 additions
 
 Eight new files, each verified byte-for-byte (stdout, stderr and exit status)
@@ -681,3 +684,58 @@ Out-of-corpus fixes the sweep forced (each TDD'd, smallest repro first):
   sentinel instead of `<unknown>:0: error: …`. Unit-tested in
   `render.rs::header_prefix_is_conditional`.
 - `sema/src/resolver/mod.rs` — the three node kinds above.
+
+## S3 Task 1 additions (`ScopedFunctionPromoter`)
+
+S3 Task 1 ported `lib/Sema/ScopedFunctionPromoter.cpp` and wired both of its
+in-scope call sites (`visit(ProgramNode *)`, SemanticResolver.cpp:224-227, and
+`visitFunctionBodyAfterParamsVisited`, cpp:1904-1910), replacing the two
+`assert!` seams that fired on any loose-mode function containing a block-nested
+function declaration. It imported no upstream `test/Sema` file — the remaining
+Deferred rows are all blocked on S4/S5 features (modules, per-file harness
+flags, lazy/eval) — and added two new files:
+
+| File | What it pins |
+|---|---|
+| `promotion-basic.js` | **new** — promotion HAPPENS. Both call sites (top level → `GlobalProperty`, inside a function → `Var`), the parameter rule (`processParameters`, cpp:147-158 / ES2022 B.3.2.1 29.a.ii: a formal parameter of the same name blocks), four more of the seven `visitScope` kinds (`Switch`/`For`/`ForIn`/`ForOf`), and that two same-named candidates in sibling blocks both promote onto ONE function-scope decl (`try_emplace`, cpp:2138) |
+| `promotion-blocked-by-let.js` | **new** — promotion is REFUSED. `let`, `const` and `class` each block from the enclosing scope, at top level and inside a function; the `catch (e)` case is the counter-example that must NOT block (`ES5Catch` is skipped, cpp:212-216 / ES14.0 B.3.4), so the function nested inside the catch block IS promoted to `Var` |
+
+Twenty further shapes were probed against hermesc without being imported (they
+add no behavior the two files above don't already pin): restricted global names
+(`{ function undefined() {} }`), `var`-before/after-block, a promoted name in a
+class static block, a strict-mode function (no promotion), an arrow body,
+doubly-nested blocks, a `let` in an ENCLOSING function (does not block — the
+promoter is per-function), generators/`async`, destructured catch params and
+parameters (`Catch` blocks, `ES5Catch` does not), `eval`/`arguments` names, and
+a defaulted parameter. All twenty matched byte-for-byte.
+
+One probe did NOT match, and is a **pre-existing parser landmine, not a sema
+one**: `{ l: function f(){} }` is a parse error ("Function declaration not
+allowed as body of labeled statement") whose caret C++ prints bare where this
+port prints the full range. That is exactly the tracked "missing same-line
+range" half of the parser-phase follow-up recorded in the S2 Task 8 section
+above (and in `doc/superpowers/RustPortRoadmap.md`); it never reaches sema, so
+the file was not imported.
+
+### A new landmine found while porting the promoter
+
+`hermesc` ITSELF aborts (Debug assertion, exit 134) on a `using` declaration
+that shares a function with a promotable block-nested function declaration:
+
+```js
+using x = 1;
+{ function f() {} }
+```
+
+```
+hermesc: lib/Sema/ScopedFunctionPromoter.cpp:260: ... Assertion
+`varDeclaration->_kind == resolver_.keywords().identVar' failed.
+```
+
+`ScopedFunctionPromoter::extractDeclaredIdents` (cpp:255-262) knows only
+`let`/`const`/`var`, and the promoter runs BEFORE
+`visit(VariableDeclarationNode *)` can report "using declarations are not
+supported" (cpp:329-336). The port reproduces it as a `debug_assert!` at the
+same place, so such a file cannot go in the corpus (the abort exit codes
+differ, 134 vs 101 — same situation as the already-listed
+`class C { x = class {}; }` and `$SHBuiltin.#x()` aborts).

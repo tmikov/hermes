@@ -2281,3 +2281,157 @@ fn static_block_of_class_in_function_body<'gc>(
         .as_static_block()
         .expect("not a StaticBlock")
 }
+
+// ---- S3 T1: ScopedFunctionPromoter ------------------------------------
+
+/// A block-nested function declaration at the top level of a loose-mode
+/// PROGRAM is promoted (`getPromotedScopedFuncDecls` +
+/// `processPromotedFuncDecls`, SemanticResolver.cpp:224-227, 2129-2141).
+///
+/// The resulting decl kinds ARE dump-visible (`promotion-basic.js` pins
+/// them); what is not is the `SemContext::promotedFunctionDecls_` side entry
+/// the second, block-scoped declaration lands in — the promoted identifier
+/// prints only its declaration/expression decl.
+#[test]
+fn a_block_nested_function_is_promoted_to_global_scope() {
+    with_resolved("{\n  function f() {}\n}\n", |sem_ctx, resolved| {
+        let block = first_statement(resolved)
+            .as_block_statement()
+            .expect("not a BlockStatement");
+        let id_node = block
+            .body
+            .iter()
+            .next()
+            .expect("empty block")
+            .as_function_declaration()
+            .expect("not a FunctionDeclaration")
+            .id
+            .expect("no function id");
+        let id = id_node.as_identifier().expect("id is not an Identifier");
+
+        // `processPromotedFuncDecls` used GlobalProperty because the
+        // promoting function context is the global scope (cpp:2131-2133),
+        // and that decl — not the block's — is what the name resolves to.
+        let declared =
+            sem_ctx.get_declaration_decl(id).expect("no declaration decl");
+        assert_eq!(sem_ctx.decl(declared).kind, DeclKind::GlobalProperty);
+        assert_eq!(
+            sem_ctx.decl(declared).scope,
+            Some(sem_ctx.get_global_scope())
+        );
+        assert_eq!(sem_ctx.get_expression_decl(id), Some(declared));
+
+        // Visiting the block then created the SECOND declaration, the
+        // block-scoped `ScopedFunction` one, and recorded it in the
+        // `promotedFunctionDecls_` side table keyed by the identifier node
+        // (`validateAndDeclareIdentifier`, cpp:2609-2625).
+        let promoted = sem_ctx
+            .get_promoted_decl(id_node.node_id())
+            .expect("no promoted decl recorded");
+        assert_ne!(promoted, declared);
+        assert_eq!(sem_ctx.decl(promoted).kind, DeclKind::ScopedFunction);
+        let block_scope = sema::ids::ScopeId::from_sema_id(
+            block.scope.get().expect("no scope on the block"),
+        );
+        assert_eq!(sem_ctx.decl(promoted).scope, Some(block_scope));
+    });
+}
+
+/// The same, one function down: `visitFunctionBodyAfterParamsVisited`'s call
+/// site (cpp:1904-1910) promotes into the function body scope with
+/// `Decl::Kind::Var`, not `GlobalProperty`.
+#[test]
+fn a_block_nested_function_inside_a_function_is_promoted_as_var() {
+    let src = "function outer() {\n  {\n    function g() {}\n  }\n}\n";
+    with_resolved(src, |sem_ctx, resolved| {
+        let outer = first_statement(resolved)
+            .as_function_declaration()
+            .expect("not a FunctionDeclaration");
+        let block = outer
+            .body
+            .as_block_statement()
+            .expect("function body is not a block")
+            .body
+            .iter()
+            .next()
+            .expect("empty function body")
+            .as_block_statement()
+            .expect("not a BlockStatement");
+        let id_node = block
+            .body
+            .iter()
+            .next()
+            .expect("empty block")
+            .as_function_declaration()
+            .expect("not a FunctionDeclaration")
+            .id
+            .expect("no function id");
+        let id = id_node.as_identifier().expect("id is not an Identifier");
+
+        let declared =
+            sem_ctx.get_declaration_decl(id).expect("no declaration decl");
+        assert_eq!(sem_ctx.decl(declared).kind, DeclKind::Var);
+        let outer_info = FunctionInfoId::from_sema_id(
+            outer.sem_info.get().expect("no sem_info on `outer`"),
+        );
+        assert_eq!(
+            sem_ctx.decl(declared).scope,
+            Some(sem_ctx.function(outer_info).get_function_body_scope())
+        );
+
+        let promoted = sem_ctx
+            .get_promoted_decl(id_node.node_id())
+            .expect("no promoted decl recorded");
+        assert_eq!(sem_ctx.decl(promoted).kind, DeclKind::ScopedFunction);
+    });
+}
+
+/// A visible let-like declaration with the same name blocks promotion
+/// (ScopedFunctionPromoter.cpp:232-244): the function keeps ONLY its
+/// block-scoped `ScopedFunction` decl and nothing is recorded in the
+/// promoted-decl side table.
+#[test]
+fn a_visible_let_blocks_promotion() {
+    with_resolved("let f;\n{\n  function f() {}\n}\n", |sem_ctx, resolved| {
+        let Node::Program(p) = resolved else {
+            unreachable!("not a Program")
+        };
+        let block = p
+            .body
+            .iter()
+            .nth(1)
+            .expect("program has no second statement")
+            .as_block_statement()
+            .expect("not a BlockStatement");
+        let id_node = block
+            .body
+            .iter()
+            .next()
+            .expect("empty block")
+            .as_function_declaration()
+            .expect("not a FunctionDeclaration")
+            .id
+            .expect("no function id");
+        let id = id_node.as_identifier().expect("id is not an Identifier");
+
+        // The one and only decl for this name is the block-scoped one.
+        let declared =
+            sem_ctx.get_declaration_decl(id).expect("no declaration decl");
+        assert_eq!(sem_ctx.decl(declared).kind, DeclKind::ScopedFunction);
+        let block_scope = sema::ids::ScopeId::from_sema_id(
+            block.scope.get().expect("no scope on the block"),
+        );
+        assert_eq!(sem_ctx.decl(declared).scope, Some(block_scope));
+        assert_eq!(sem_ctx.get_expression_decl(id), Some(declared));
+        // Nothing was promoted, so nothing was recorded.
+        assert_eq!(sem_ctx.get_promoted_decl(id_node.node_id()), None);
+        // Non-degeneracy: the `let` that blocked it really is in the global
+        // scope, so the promoter had something to find.
+        let let_decl = *sem_ctx
+            .scope(sem_ctx.get_global_scope())
+            .decls
+            .first()
+            .expect("global scope has no decls");
+        assert_eq!(sem_ctx.decl(let_decl).kind, DeclKind::Let);
+    });
+}
