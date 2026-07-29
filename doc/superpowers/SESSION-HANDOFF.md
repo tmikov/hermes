@@ -70,12 +70,15 @@ validation commands, and workflow.
 > component; the documented landmines (same-location diagnostic ties, two hermesc self-aborts); and the two tracked
 > parser-phase follow-ups the sema sweeps measured (the 180-file `errorExpected` same-line-range gap, and the recursion
 > stack-overflow crash that disproved the old "ours is silent" wording).
-> **NEXT: S3 — `ScopedFunctionPromoter`** (`lib/Sema/ScopedFunctionPromoter.{h,cpp}`, 37+328 lines): loose-mode block-nested
-> function promotion + `promotedFunctionDecls_`, replacing the two deliberate asserts at `resolver/mod.rs:1395`
-> (`visit_program`) and `resolver/functions.rs:1057` (`visit_function_body_after_params_visited`). **An S3 plan does NOT
-> exist yet** — open with `superpowers:brainstorming`, THEN `superpowers:writing-plans`, and execute it subagent-driven
-> (`superpowers:subagent-driven-development`). Spec: `specs/2026-07-26-sema-untyped-design.md`; the executed plans are
-> `plans/2026-07-26-sema-s0-foundations.md`, `plans/2026-07-28-sema-s1-declarations-scopes.md`,
+> **NEXT: EXECUTE the S3 plan — it is already WRITTEN and committed:
+> `plans/2026-07-29-sema-s3-scoped-function-promoter.md`** (4 tasks: the ScopedFunctionPromoter pass + both seam
+> replacements; the promotion corpus battery + the three unblocked `test/Sema` rows; the upstream re-probe; docs).
+> S3 = `lib/Sema/ScopedFunctionPromoter.{h,cpp}` (37+328 lines): loose-mode block-nested function promotion +
+> `promotedFunctionDecls_`, replacing the two deliberate asserts at `resolver/mod.rs:1395` (`visit_program`) and
+> `resolver/functions.rs:1057` (`visit_function_body_after_params_visited`). Execute it subagent-driven
+> (`superpowers:subagent-driven-development`) — the plan was deliberately written in the S2 session with full context
+> and each task brief is self-contained; do NOT re-plan. Spec: `specs/2026-07-26-sema-untyped-design.md`; the executed
+> plans are `plans/2026-07-26-sema-s0-foundations.md`, `plans/2026-07-28-sema-s1-declarations-scopes.md`,
 > `plans/2026-07-28-sema-s2-rest-of-walk.md`.
 > The parser proper lives in `rust/crates/parser/src/js/{mod,expressions,statements,functions,classes,modules,jsx}.rs` +
 > **`js/flow/{mod,declarations,types,function_types,object_types,params,match_}.rs`** + **`js/ts/{mod,types,function_types,object_types,
