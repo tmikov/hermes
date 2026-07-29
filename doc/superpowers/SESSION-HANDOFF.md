@@ -74,7 +74,8 @@ validation commands, and workflow.
 > module `resolver/promoter.rs`.
 > Gate (live, green):
 > `REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml -p sema --features dump-bin --test sema_differential -- --nocapture`
-> → "sema differential (tests/sema_corpus): 172 corpus files matched" (96 succeed on hermesc).
+> → "sema differential (tests/sema_corpus): 173 corpus files matched" (97 succeed on hermesc; +1/+1 from the S3
+> final-review follow-up's `promotion-for-family-let-blocker.js`, added after 172/96 was reached).
 > **Read the roadmap's Sema row for the authoritative what-shipped detail and the S4/S5 carry-item list** — S4 modules
 > (+ rewrite #4, the `$SHBuiltin` module protocol, `FunctionInfo::imports`) and "flavors" (typed dialects + the
 > 178 `test/Sema/flow/**` files + the per-file-flag harness debt); S5 lazy/`eval` + the third promotion call site

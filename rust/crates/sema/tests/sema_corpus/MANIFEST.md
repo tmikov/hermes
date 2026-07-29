@@ -244,6 +244,10 @@ Final count after S3 Task 3: **172 corpus files matched** (96 succeed on
 hermesc, 76 are hermesc-failure files) — unchanged; the upstream re-probe
 (see "S3 Task 3 additions" below) imported no new `test/Sema` files.
 
+Final count after the S3 final-review follow-up: **173 corpus files
+matched** (97 succeed on hermesc, 76 are hermesc-failure files) — see "S3
+final-review follow-up" below.
+
 ## S2 Task 1 additions
 
 Eight new files, each verified byte-for-byte (stdout, stderr and exit status)
@@ -953,3 +957,67 @@ Because zero panics traced to the S3 promoter, no TDD repro/fix round was
 required. The gate (`REQUIRE_DIFFERENTIAL=1 cargo test … --test
 sema_differential`) is unchanged at **172 corpus files matched (96 succeeded
 on hermesc)** — no corpus files were added or removed by this task.
+
+## S3 final-review follow-up
+
+The final whole-branch review of S3 found four issues, one of which
+(the `For`/`ForIn`/`ForOf` `visitScope` arms) needed a new corpus file;
+the rest were comment-only corrections with no code or dump-visible
+behavior change.
+
+### New file: `promotion-for-family-let-blocker.js`
+
+The reviewer confirmed the port's `ForStatement`/`ForInStatement`/
+`ForOfStatement` arms (`ScopedFunctionPromoter::visit`,
+ScopedFunctionPromoter.cpp:53-61 — each a thin `visitScope(node)` forward,
+same as `BlockStatementNode`'s at cpp:50-52) are CORRECT, but noted that no
+existing corpus file actually exercises them: a `FunctionDeclaration` can
+never be a bare loop body, so the three arms are only observable via a
+`let`-like declaration in the loop HEAD blocking a promotion candidate
+declared in the loop's BODY block — a port that dropped all three arms
+(silently falling back to the default `visit(Node *)`, which still
+recurses into children but never calls `processDeclarations` on the loop's
+own scope) would still pass all 172 existing files.
+
+One new file, with one function per arm, each `let <name>` in the loop head
+and a same-named `function <name>() {}` as the loop body's sole statement.
+Verified with hermesc FIRST (`hermesc -dump-sema`, raw stdout+stderr+exit
+byte comparison against `sema-dump`): exit 0 on both sides, byte-identical;
+all three inner functions stay block-scoped `ScopedFunction` decls (not
+promoted to `Var`/`GlobalProperty`), confirming the blocker is honored.
+
+| File | What it pins |
+|---|---|
+| `promotion-for-family-let-blocker.js` | **new** — the `ForStatement`/`ForInStatement`/`ForOfStatement` `visitScope` arms (cpp:53-61): a `let` in a loop's HEAD scope blocks a same-named `function` candidate declared in the loop's BODY block, one function per arm (`forHead`/`forOfHead`/`forInHead`) |
+
+Gate: `sema differential (tests/sema_corpus): 173 corpus files matched (97
+succeeded on hermesc)` — 172 → **173** files (+1), hermesc-succeeded 96 →
+**97** (+1: the new file is a legal, blocked-promotion shape, not an error
+case).
+
+### Comment-only corrections (no corpus-count change)
+
+- `promotion-es5catch-cross-scope-reuse.js`: the header comment
+  misdescribed its own code, saying `let e;` sits "inside catch(e) in an
+  extra nested block" — it actually sits in the enclosing SIBLING block,
+  outside the `try`/`catch` entirely; the nested block that does exist
+  wraps the candidate `function e(){}` (to dodge the `prevInPrevScope`
+  error, SemanticResolver.cpp:2529-2530), not the `let`. The paragraph was
+  replaced with the correct derivation (matching the task-2 report's own
+  worked example).
+- `rust/crates/sema/src/resolver/mod.rs` (`process_promoted_func_decls`):
+  the expect-unreachability comment enumerated two of
+  `validateAndDeclareIdentifier`'s three early-returns that could leave a
+  declaration decl unset, omitting the "two declarations put" path
+  (cpp:2619-2625). Added: that path's own guard requires
+  `semCtx_.getDeclarationDecl(ident)` to already be non-null, which is
+  impossible for a promoted function's own identifier node being declared
+  for the first time.
+- `promotion-nested-scope-visibility.js`: widened a citation from
+  cpp:160-224 to cpp:160-244 — `processDeclarations`'s promotion decision
+  (the `bindingTable_.lookup` check) is in the back half of the function,
+  cpp:226-244, not just the decl-scanning loop the old range covered.
+- `promotion-var-shadows-promoted.js`: corrected a citation from
+  cpp:376-379 to cpp:376-383 — the `continue`-guard `if` block (the
+  `prevIsLexicalBindingOfPromotedFunc` check plus its body) spans all five
+  lines, not four.

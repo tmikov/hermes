@@ -251,7 +251,10 @@ contents are the commitment, not the exact split.
   corpus battery + the three unblocked `test/Sema` rows (T2); an upstream re-probe over
   the same 1416 `test/` files confirming zero S3-attributable panics (T3). See the
   roadmap's Sema row for the full what-shipped and the gate; commits
-  `36593518b..274fa63b8`, gate 160 → **172** files (96 succeeding on hermesc). The third
+  `36593518b..274fa63b8`, gate 160 → **172** files (96 succeeding on hermesc); a
+  final-review follow-up then added one more corpus file
+  (`promotion-for-family-let-blocker.js`, pinning the `For`/`ForIn`/`ForOf`
+  `visitScope` arms), gate 172 → **173** files (97 succeeding on hermesc). The third
   C++ call site (`runInScope`, cpp:158) is deferred to S5.
 - **S4 — modules & flavors:** the module visits + rewrite #4 (anonymous `export default
   function`) + the `$SHBuiltin` module protocol; CommonJS wrapping; ambient decls;

@@ -1505,13 +1505,18 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // C++ stores `semCtx_.getDeclarationDecl(ident)` even when it is
             // null; `promoted_func_decls` is a `HashMap<Atom, DeclId>` with
             // no way to express that, so the null is an `expect` instead.
-            // Unreachable: `validateAndDeclareIdentifier` only returns
-            // without setting a declaration decl on a `validateDeclarationName`
-            // failure (all three of its rules are strict-mode-only or
-            // Let/Const-only, and `kind` here is Var/GlobalProperty inside a
-            // `!strict` guard) or on the "already declared" error, which
-            // needs a let-like declaration of the same name visible in this
-            // function — exactly what the promoter refuses to promote past.
+            // Unreachable: `validateAndDeclareIdentifier` has three early
+            // returns that could leave the decl unset, none reachable here.
+            // (1) A `validateDeclarationName` failure (all three of its
+            // rules are strict-mode-only or Let/Const-only, and `kind` here
+            // is Var/GlobalProperty inside a `!strict` guard). (2) The
+            // "already declared" error, which needs a let-like declaration
+            // of the same name visible in this function — exactly what the
+            // promoter refuses to promote past. (3) The "two declarations
+            // put" path (cpp:2619-2625), whose guard requires
+            // `semCtx_.getDeclarationDecl(ident)` to already be non-null —
+            // impossible here, since this is the promoted function's own
+            // identifier node, being declared for the first time.
             let decl = self
                 .sem_ctx
                 .get_declaration_decl(identifier)

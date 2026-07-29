@@ -25,7 +25,7 @@
 // (`bindingTable_.put`, not `try_emplace`). So when `var g`'s check runs,
 // `bindingTable_.findWithDepth("g")` finds that `ScopedFunction` decl,
 // whose `.scope` is the block (not the function body scope) — the first
-// `continue`-guard (cpp:376-379) doesn't fire — and `ScopedFunction` is
+// `continue`-guard (cpp:376-383) doesn't fire — and `ScopedFunction` is
 // let-like (`Decl::isKindLetLike`, SemContext.h:144-146: `kind <=
 // ES5Catch`), so the ordinary error condition (cpp:391-393) already fires
 // too. `prevIsLexicalBindingOfPromotedFunc` is independently computed as

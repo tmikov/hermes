@@ -14,16 +14,22 @@
 // like the `Var, ScopedFunc` arm in `promotion-var-reuse.js` — this is the
 // `ES5Catch` counterpart of that file's `crossScopeReuse`.
 //
-// `e` is promoted once from a block that is a sibling of `try`/`catch`
-// (`decl_A`, `Var`). Inside `catch (e) { ... }`, `let e;` sits in an extra
-// nested block (so its OWN declare doesn't same-scope-conflict with the
-// catch param — same trick `promotion-blocked-by-let.js`'s `inCatch()`
-// needs for the opposite, ES5Catch-doesn't-block case) and blocks a SECOND
-// `e` candidate one level deeper. When that second candidate's
-// (never-before-declared) identifier is resolved, the nearest binding is
-// the catch's OWN `ES5Catch` decl — the `let` is further out and doesn't
-// change that — so it matches `prevKind == ES5Catch && kind ==
-// ScopedFunction`, finds `e` already in
+// `e` is promoted once from a block that is a sibling of a SECOND block
+// (`decl_A`, `Var`). That second block holds both `let e;` and the
+// `try`/`catch` as sibling statements — `let e;` is declared BEFORE
+// `try`, in the block enclosing the catch, not inside `catch (e)` itself;
+// nesting it directly inside the catch would conflict, same-scope, with
+// the catch's own `ES5Catch` decl for `e`. This outer `let e;` is still in
+// scope for the PROMOTER's single upfront blocker scan of the whole
+// `catch` subtree, so it correctly blocks the THIRD `e` candidate, one
+// level deeper still (in an extra block nested inside `catch (e) { ... }`
+// — the same trick `promotion-blocked-by-let.js`'s `inCatch()` needs for
+// the opposite, ES5Catch-doesn't-block case). But the REAL resolver walks
+// incrementally: by the time it reaches that same (still undeclared)
+// candidate's identifier, the nearest binding it sees is the catch's OWN
+// `ES5Catch` decl for `e` — the outer `let` has already been shadowed
+// past by the time the resolver enters the catch body. So it matches
+// `prevKind == ES5Catch && kind == ScopedFunction`, finds `e` already in
 // `functionContext()->promotedFuncDecls`, and reuses `decl_A` directly
 // (`reuseDeclForNewBinding = true`), without ever creating its own
 // block-scoped decl and without going through the "two declarations put"
