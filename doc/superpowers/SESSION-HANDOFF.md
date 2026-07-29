@@ -64,22 +64,33 @@ validation commands, and workflow.
 > Gate (live, green):
 > `REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml -p sema --features dump-bin --test sema_differential -- --nocapture`
 > → "sema differential (tests/sema_corpus): 160 corpus files matched" (88 succeed on hermesc).
-> **Read the roadmap's Sema row for the authoritative what-shipped detail and the S3/S4/S5 carry-item list** — S3 promotion;
-> S4 modules (+ rewrite #4, the `$SHBuiltin` module protocol, `FunctionInfo::imports`) and "flavors" (typed dialects + the
-> 178 `test/Sema/flow/**` files + the per-file-flag harness debt); S5 lazy/`eval`; the regex engine as its own future
-> component; the documented landmines (same-location diagnostic ties, two hermesc self-aborts); and the two tracked
-> parser-phase follow-ups the sema sweeps measured (the 180-file `errorExpected` same-line-range gap, and the recursion
-> stack-overflow crash that disproved the old "ours is silent" wording).
-> **NEXT: EXECUTE the S3 plan — it is already WRITTEN and committed:
-> `plans/2026-07-29-sema-s3-scoped-function-promoter.md`** (4 tasks: the ScopedFunctionPromoter pass + both seam
-> replacements; the promotion corpus battery + the three unblocked `test/Sema` rows; the upstream re-probe; docs).
-> S3 = `lib/Sema/ScopedFunctionPromoter.{h,cpp}` (37+328 lines): loose-mode block-nested function promotion +
-> `promotedFunctionDecls_`, replacing the two deliberate asserts at `resolver/mod.rs:1395` (`visit_program`) and
-> `resolver/functions.rs:1057` (`visit_function_body_after_params_visited`). Execute it subagent-driven
-> (`superpowers:subagent-driven-development`) — the plan was deliberately written in the S2 session with full context
-> and each task brief is self-contained; do NOT re-plan. Spec: `specs/2026-07-26-sema-untyped-design.md`; the executed
-> plans are `plans/2026-07-26-sema-s0-foundations.md`, `plans/2026-07-28-sema-s1-declarations-scopes.md`,
-> `plans/2026-07-28-sema-s2-rest-of-walk.md`.
+> **Update (2026-07-29): Sema S3 (`ScopedFunctionPromoter`) is DONE.** Commits `36593518b..274fa63b8` on `rust`. T1:
+> ports all 328 lines of `lib/Sema/ScopedFunctionPromoter.cpp` (+ header) as `resolver/promoter.rs` and replaces both
+> S3 assert seams (`visit_program` cpp:224-227, `visit_function_body_after_params_visited` cpp:1904-1910) with the
+> real promotion + `process_promoted_func_decls` (cpp:2129-2141), making S1 T5's dormant `promotedFuncDecls`
+> redeclaration rows live; the third C++ call site (`runInScope`, cpp:158) is left to S5 with a note at the site. T2:
+> a seven-file promotion corpus battery + the three unblocked `test/Sema` rows. T3: an upstream re-probe over the
+> same 1416-file corpus confirming zero S3-attributable panics (**1209**/190/**17**, was 1203/190/23). New resolver
+> module `resolver/promoter.rs`.
+> Gate (live, green):
+> `REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml -p sema --features dump-bin --test sema_differential -- --nocapture`
+> → "sema differential (tests/sema_corpus): 172 corpus files matched" (96 succeed on hermesc).
+> **Read the roadmap's Sema row for the authoritative what-shipped detail and the S4/S5 carry-item list** — S4 modules
+> (+ rewrite #4, the `$SHBuiltin` module protocol, `FunctionInfo::imports`) and "flavors" (typed dialects + the
+> 178 `test/Sema/flow/**` files + the per-file-flag harness debt); S5 lazy/`eval` + the third promotion call site
+> `runInScope` (cpp:158); the regex engine as its own future component; the documented landmines (same-location
+> diagnostic ties, now THREE hermesc self-aborts — `class C { x = class {}; }`, `$SHBuiltin.#x()`, and
+> `using x = 1; { function f(){} }`); and the two tracked parser-phase follow-ups the sema sweeps measured (the
+> 180-file `errorExpected` same-line-range gap, and the recursion stack-overflow crash that disproved the old "ours
+> is silent" wording).
+> **NEXT: S4 — modules & flavors.** `lib/Sema/SemanticResolver.cpp`'s module visits + §3.4 rewrite #4 (anonymous
+> `export default function`) + the `$SHBuiltin.moduleFactory`/`export`/`import` branches + `FunctionInfo::imports`
+> backref + `resolve_ast_for_parser`, plus the typed-dialect/flow corpus (178 `test/Sema/flow/**` files) and the
+> per-file-flag harness debt (`-enable-eval=false`/`-parse-flow`/`-lazy`) they share. **NO S4 plan exists yet** —
+> open with `superpowers:brainstorming`, THEN `superpowers:writing-plans`, and execute it subagent-driven
+> (`superpowers:subagent-driven-development`). Spec: `specs/2026-07-26-sema-untyped-design.md`; the executed plans
+> are `plans/2026-07-26-sema-s0-foundations.md`, `plans/2026-07-28-sema-s1-declarations-scopes.md`,
+> `plans/2026-07-28-sema-s2-rest-of-walk.md`, `plans/2026-07-29-sema-s3-scoped-function-promoter.md`.
 > The parser proper lives in `rust/crates/parser/src/js/{mod,expressions,statements,functions,classes,modules,jsx}.rs` +
 > **`js/flow/{mod,declarations,types,function_types,object_types,params,match_}.rs`** + **`js/ts/{mod,types,function_types,object_types,
 > declarations,params}.rs`**; the gate is `REQUIRE_DIFFERENTIAL=1 cargo test -p parser --test parser_differential` (build `ast-dump`
@@ -123,7 +134,7 @@ validation commands, and workflow.
 **Component status** (see the roadmap table): `SourceErrorManager` ✅ · **JS lexer ✅** ·
 **JSONParser ✅** · **AST ✅ (all 4 phases: GC spine + generated 271-node set + transforming visitor + `ESTreeJSONDumper`)** ·
 **JS Parser ✅ (P0–P8 + Pre/Lazy passes, entire standard-JS + Flow + TypeScript + JSX grammar)** ·
-**Sema 🚧 (S0 foundations + S1 declarations & scopes + S2 rest-of-the-walk DONE; S3 `ScopedFunctionPromoter` next)** / IR / Optimizer / BCGen — future.
+**Sema 🚧 (S0 foundations + S1 declarations & scopes + S2 rest-of-the-walk + S3 `ScopedFunctionPromoter` DONE; S4 modules & flavors next)** / IR / Optimizer / BCGen — future.
 
 Rust workspace: **`rust/Cargo.toml`** (members: `support`, `parser`, `atom_table`, `unicode`, `ast`, `command_line`, `sema`),
 toolchain pinned `rust/rust-toolchain.toml` (1.96.0).
@@ -176,7 +187,7 @@ Release (`gen-json` bin + `--bench=N`). **C++ source of truth:** `include/hermes
 
 ```bash
 # Rust workspace (do NOT cd; use --manifest-path). Build/test:
-cargo test  --manifest-path rust/Cargo.toml            # whole workspace (722 tests / 42 suites as of Sema S2)
+cargo test  --manifest-path rust/Cargo.toml            # whole workspace (725 tests / 42 suites as of Sema S3)
 cargo test  --manifest-path rust/Cargo.toml -p parser  # lexer + JSONParser crate
 cargo test  --manifest-path rust/Cargo.toml -p ast     # AST: GC arena + generated 271-node model + spine/structural/transform/dump_golden tests
 cargo build --manifest-path rust/Cargo.toml            # expect ZERO warnings

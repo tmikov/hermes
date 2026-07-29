@@ -244,12 +244,22 @@ contents are the commitment, not the exact split.
   moved to S4 with the module visits. See the roadmap's Sema row for the full
   what-shipped and the gate; commits `94b4695f1..dc2fb1661`, gate 69 → **160** files
   (88 succeeding on hermesc).
-- **S3 — `ScopedFunctionPromoter`** + loose-mode promotion + `promotedFunctionDecls_`.
+- **S3 — `ScopedFunctionPromoter` (DONE, 2026-07-29):** all 328 lines of
+  `lib/Sema/ScopedFunctionPromoter.cpp` (+ header) ported as `resolver/promoter.rs` (T1);
+  both S3 assert seams (`visit_program`, `visit_function_body_after_params_visited`)
+  replaced with the real promotion + `process_promoted_func_decls`; a seven-file promotion
+  corpus battery + the three unblocked `test/Sema` rows (T2); an upstream re-probe over
+  the same 1416 `test/` files confirming zero S3-attributable panics (T3). See the
+  roadmap's Sema row for the full what-shipped and the gate; commits
+  `36593518b..274fa63b8`, gate 160 → **172** files (96 succeeding on hermesc). The third
+  C++ call site (`runInScope`, cpp:158) is deferred to S5.
 - **S4 — modules & flavors:** the module visits + rewrite #4 (anonymous `export default
   function`) + the `$SHBuiltin` module protocol; CommonJS wrapping; ambient decls;
   `FunctionInfo::imports` backref fixup; `resolve_ast_for_parser`; dialect corpora green
   (which needs per-file flag support in `sema_differential.rs`).
-- **S5 — lazy + eval entry points; capstone.**
+- **S5 — lazy + eval entry points** (`resolve_ast_lazy`/`resolve_ast_in_scope`, the third
+  `ScopedFunctionPromoter` call site `runInScope` at cpp:158, `visitProgram`'s unported
+  `SaveAndRestore` of `globalScope_`); capstone.
 - **Not a Sema phase:** real regular-expression validation, which needs the regex engine
   (`lib/Regex/`) — a future component of its own.
 
