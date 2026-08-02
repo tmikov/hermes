@@ -256,13 +256,26 @@ contents are the commitment, not the exact split.
   (`promotion-for-family-let-blocker.js`, pinning the `For`/`ForIn`/`ForOf`
   `visitScope` arms), gate 172 → **173** files (97 succeeding on hermesc). The third
   C++ call site (`runInScope`, cpp:158) is deferred to S5.
-- **S4 — modules & flavors:** the module visits + rewrite #4 (anonymous `export default
-  function`) + the `$SHBuiltin` module protocol; CommonJS wrapping; ambient decls;
-  `FunctionInfo::imports` backref fixup; `resolve_ast_for_parser`; per-file flag support
-  in `sema_differential.rs` (`// FLAGS:` convention) + the untyped `-parse-flow`
-  resolver paths (`typecast not allowed in this context`, `'this' parameter requires
-  typed mode`), pinned by purpose-written corpus files. The `test/Sema/flow/**` corpus
-  is NOT in S4's scope — see "Not a Sema phase" below.
+- **S4a — standalone-front-end sema:** the four module visits' SKELETONS (module-mode
+  error paths — note the asymmetric guards: import's error is unconditional, export's
+  is `compile_`-gated — + children traversal + `Decl::Kind::Import` specifier decls);
+  `FunctionInfo::imports` backref fixup (dump-blind, unit-test pinned);
+  `resolve_ast_for_parser` — the `tools/hermes-parser-wasm.cpp` entry, `compile =
+  false`, which makes every ported `compile_` guard live; per-file flag support in
+  `sema_differential.rs` (`// FLAGS:` convention) + the untyped `-parse-flow` resolver
+  paths (`typecast not allowed in this context`, `'this' parameter requires typed
+  mode`), pinned by purpose-written corpus files. The `test/Sema/flow/**` corpus is NOT
+  in S4a's scope — see "Not a Sema phase" below.
+- **S4b — VM modules.** A GENUINELY SEPARATE, much later phase (sequenced near IRGen);
+  the shared "S4" number is renumbering-avoidance only. Scope: the
+  `$SHBuiltin.moduleFactory`/`export`/`import` protocol; `runCommonJSModule`/CJS
+  wrapping; and rewrite #4 (anonymous `export default function` → `FunctionExpression`)
+  — `compile_`-gated, IRGen-serving per its own C++ comment, unreachable from
+  `resolveASTForParser`, and differential-invisible without `-commonjs` (verified
+  2026-08-02: plain mode errors and skips the dump), so its corpus story (`// FLAGS:
+  -commonjs`) also only exists once S4a's harness does. Until S4b, the `$SHBuiltin`
+  module branches keep their loud phase-tagged panics (≤7 of the 16 module-branch
+  upstream-sweep panic files).
 - **S5 — lazy + eval entry points** (`resolve_ast_lazy`/`resolve_ast_in_scope`, the third
   `ScopedFunctionPromoter` call site `runInScope` at cpp:158, `visitProgram`'s unported
   `SaveAndRestore` of `globalScope_`); capstone.
