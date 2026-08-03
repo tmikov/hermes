@@ -103,3 +103,45 @@ tree) to make that contract explicit at the type level.
 untouched — `run` (used only by `resolve_ast`) still returns `None` on
 error, which is correct there (`hermesc` never dumps after a `resolveAST`
 failure either).
+
+## Landmine: anonymous `export default function` under `compile = false` — BOTH dumpers crash
+
+`export default function () {}` can never be added to this corpus, by
+construction, on either side (deferred from S4a T3's review; verified here
+2026-08-03). Under `compile = false` — this pair's whole reason to exist —
+rewrite #4 (`visit_export_default_declaration`, cpp:1526-1544) is
+`compile_`-gated and does not fire, so the anonymous `FunctionDeclaration`
+survives unrewritten. `visit(FunctionDeclarationNode*)`
+(`SemanticResolver.cpp:232-236`, `resolver/functions.rs`'s port) pushes it
+onto the enclosing scope's `hoistedFunctions` UNCONDITIONALLY — the hoist
+does not check for a name — so a null-`_id` function ends up in that list.
+Both dumpers then crash printing it, at the SAME underlying defect: a
+null-id function reaching the `hoistedFunction` printer, which
+unconditionally casts `_id` to an identifier:
+
+- C++ `SemContextDumper::printScope` (`SemContext.cpp:492-493`,
+  `llvh::cast<ESTree::IdentifierNode>(fd->_id)`) hits `isa<> used on a null
+  pointer` (`Casting.h:106`), SIGABRT.
+- Rust `dump_context.rs`'s `print_scope`
+  (`.expect("a hoisted FunctionDeclaration always has an id")`) panics.
+
+Verified directly, both sides, on `export default function () {}\n`:
+
+```
+$ cmake-build-asan/bin/sema-parser-dump anon-default.js
+sema-parser-dump: .../Casting.h:106: ... Assertion `Val && "isa<> used on a
+null pointer"' failed.
+Aborted (core dumped)                                          # exit 134
+
+$ sema-dump --parser-entry anon-default.js
+thread 'main' panicked at crates/sema/src/dump_context.rs:304:18:
+a hoisted FunctionDeclaration always has an id                 # exit 101
+```
+
+Same category as `test/hermes/computed-fn-name.js`
+(`SemContext.cpp:478`'s scope-walk assertion, one of the roadmap's Sema-row
+documented hermesc self-aborts): a pre-existing C++ **dumper** defect,
+faithfully mirrored — not a port gap, and not fixable without hermesc
+itself changing. This exact shape (anonymous default export, dumped under
+`compile = false`) is excluded from this corpus for that reason, same as
+`computed-fn-name.js` is excluded from `tests/sema_corpus`.

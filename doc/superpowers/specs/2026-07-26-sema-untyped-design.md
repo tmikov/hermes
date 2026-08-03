@@ -256,26 +256,34 @@ contents are the commitment, not the exact split.
   (`promotion-for-family-let-blocker.js`, pinning the `For`/`ForIn`/`ForOf`
   `visitScope` arms), gate 172 → **173** files (97 succeeding on hermesc). The third
   C++ call site (`runInScope`, cpp:158) is deferred to S5.
-- **S4a — standalone-front-end sema:** the four module visits' SKELETONS (module-mode
-  error paths — note the asymmetric guards: import's error is unconditional, export's
-  is `compile_`-gated — + children traversal + `Decl::Kind::Import` specifier decls);
-  `FunctionInfo::imports` backref fixup (dump-blind, unit-test pinned);
-  `resolve_ast_for_parser` — the `tools/hermes-parser-wasm.cpp` entry, `compile =
-  false`, which makes every ported `compile_` guard live; per-file flag support in
-  `sema_differential.rs` (`// FLAGS:` convention) + the untyped `-parse-flow` resolver
-  paths (`typecast not allowed in this context`, `'this' parameter requires typed
-  mode`), pinned by purpose-written corpus files. The `test/Sema/flow/**` corpus is NOT
-  in S4a's scope — see "Not a Sema phase" below.
+- **S4a — standalone-front-end sema (DONE, 2026-08-03):** the `// FLAGS:` per-file
+  harness + `-enable-eval`/`-fstd-globals` (T1); the second oracle pair —
+  `resolve_ast_for_parser`/`sema-dump --parser-entry` vs C++
+  `tools/sema-parser-dump/`, `compile = false` (T2); the four module visits
+  (`resolver/modules.rs`) with rewrite #4 ported inline (§4 ruling below) +
+  `FunctionInfo::imports` (T3); the untyped `-parse-flow` battery, including the
+  `TypeCastExpression`/`AsExpression` visits a fix round added (T4); an upstream
+  re-probe confirming zero S4a-attributable panics (T5). See the roadmap's Sema row
+  for the full what-shipped; commits `041959a07..57221f7de`. Gate: driver 173 →
+  **192** files (97 → **103** succeeding on hermesc); new parser-entry gate **7**
+  files (**2** succeeding); upstream sweep 1416 = 1209/190/17 → **1218/190/8**.
+  Spec: `specs/2026-08-03-sema-s4a-design.md`; plan:
+  `plans/2026-08-03-sema-s4a-standalone-frontend.md`.
 - **S4b — VM modules.** A GENUINELY SEPARATE, much later phase (sequenced near IRGen);
   the shared "S4" number is renumbering-avoidance only. Scope: the
   `$SHBuiltin.moduleFactory`/`export`/`import` protocol; `runCommonJSModule`/CJS
-  wrapping; and rewrite #4 (anonymous `export default function` → `FunctionExpression`)
-  — `compile_`-gated, IRGen-serving per its own C++ comment, unreachable from
-  `resolveASTForParser`, and differential-invisible without `-commonjs` (verified
-  2026-08-02: plain mode errors and skips the dump), so its corpus story (`// FLAGS:
-  -commonjs`) also only exists once S4a's harness does. Until S4b, the `$SHBuiltin`
-  module branches keep their loud phase-tagged panics (≤7 of the 16 module-branch
-  upstream-sweep panic files).
+  wrapping; and rewrite #4's **corpus pinning** (a `// FLAGS: -commonjs` battery) —
+  rewrite #4 itself (anonymous `export default function` → `FunctionExpression`)
+  shipped its CODE in S4a (§4 ruling, 2026-08-03, superseding this bullet's
+  earlier 2026-08-02 wording, which placed the code here too): it is inline in
+  `visit_export_default_declaration` (`resolver/modules.rs`), `compile_`-gated
+  exactly like C++, and is oracle-invisible today only because no oracle exercises
+  `-commonjs` yet — not because the code is missing. What's left for S4b is making
+  that distinction (`FunctionExpression` vs
+  `FunctionDeclaration` under `ExportDefaultDeclaration`) dump-visible once CJS
+  wrapping exists. Until S4b, the `$SHBuiltin` module branches keep their loud
+  phase-tagged panics (7 of the 16 module-branch upstream-sweep panic files, per
+  S4a T5's confirmed count).
 - **S5 — lazy + eval entry points** (`resolve_ast_lazy`/`resolve_ast_in_scope`, the third
   `ScopedFunctionPromoter` call site `runInScope` at cpp:158, `visitProgram`'s unported
   `SaveAndRestore` of `globalScope_`); capstone.

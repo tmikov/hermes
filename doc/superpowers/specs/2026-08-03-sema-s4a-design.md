@@ -5,6 +5,11 @@ list; S4a/S4b split decided 2026-08-02, commit `aba3f9341`). **Status of the por
 Sema S0–S3 DONE; gate at 173 corpus files matched (97 succeeding on hermesc); upstream
 sweep 1416 = 1209 identical / 190 mismatch / 17 panic.
 
+**Executed (2026-08-03), commits `041959a07..57221f7de`:** all 6 tasks landed as
+planned; gate 173 → **192** files (97 → **103** succeeding on hermesc), new
+parser-entry gate **7** files (**2** succeeding), upstream sweep → **1218/190/8**
+— see the roadmap's Sema row for the full what-shipped.
+
 ## 1. Goal and boundary
 
 S4a serves the **standalone parser/front-end** (the publication goal): make the

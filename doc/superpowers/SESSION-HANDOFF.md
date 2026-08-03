@@ -76,32 +76,47 @@ validation commands, and workflow.
 > `REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml -p sema --features dump-bin --test sema_differential -- --nocapture`
 > → "sema differential (tests/sema_corpus): 173 corpus files matched" (97 succeed on hermesc; +1/+1 from the S3
 > final-review follow-up's `promotion-for-family-let-blocker.js`, added after 172/96 was reached).
-> **Read the roadmap's Sema row for the authoritative what-shipped detail and the S4a/S4b/S5 carry-item list** —
-> S4a standalone-front-end sema (module visit skeletons + `Decl::Kind::Import` + `FunctionInfo::imports` +
-> `resolve_ast_for_parser`, plus the untyped `-parse-flow` paths + the per-file-flag harness debt; NOT the 178
-> `test/Sema/flow/**` files — all `-typed`, FlowChecker-component scope); S4b VM modules (`$SHBuiltin` protocol +
-> CJS wrapping + rewrite #4 — a genuinely separate much-later phase near IRGen; shared "S4" number is
-> renumbering-avoidance only); S5 lazy/`eval` + the third promotion call site
+> **Update (2026-08-03): Sema S4a (standalone-front-end sema) is DONE.** Commits `041959a07..57221f7de` on
+> `rust`. Six tasks: T1 the `// FLAGS: <hermesc args>` per-file harness (`sema_differential.rs`) + `sema-dump`
+> growing `-enable-eval`/`-fstd-globals`/`-fno-std-globals` (plus an unplanned `command_line` fix so hermesc's
+> single-dash long-option spelling parses) + the `TypeAlias` do-nothing visit; T2 the SECOND differential oracle
+> pair — C++ `tools/sema-parser-dump/` vs `sema-dump --parser-entry`, both driving the new
+> `resolve_ast_for_parser`/`resolveASTForParser` (`SemResolve.cpp:295-306`, `compile = false` — the actual
+> `hermes-parser-wasm.cpp` entry) — plus a fix round making the C++ oracle's stderr colorless and giving the
+> resolver a `run_always` method so "dump despite errors" genuinely works; T3 `resolver/modules.rs` — the four
+> module visits (asymmetric guards preserved: import's error unconditional, export's `compile_`-gated) with §3.4
+> **rewrite #4** (anonymous `export default function` → `FunctionExpression`) ported INLINE, `FunctionInfo::imports`
+> backref, and nine upstream sweep files imported; T4 the untyped `-parse-flow` battery (deriving the real
+> `CoverTypedIdentifierNode`-reaching shape, `(x?: number);`) plus a fix round porting the
+> `TypeCastExpression`/`AsExpression` visits a first pass missed; T5 an upstream re-probe confirming zero
+> S4a-attributable panics (**1218**/190/**8**, was 1209/190/17) and a sweep-tooling landmine (`--release` masks
+> the `computed-fn-name.js` repro — sweep only meaningful with debug builds both sides). New resolver module
+> `resolver/modules.rs`; new C++ tool `tools/sema-parser-dump/`; new corpus `sema_corpus_parser/`.
+> Gates (live, green):
+> `REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml -p sema --features dump-bin --test sema_differential -- --nocapture`
+> → "sema differential (tests/sema_corpus): **192 corpus files matched (103 succeeded on hermesc)**" and
+> "sema differential (tests/sema_corpus_parser): **7 corpus files matched (2 succeeded on the oracle)**" (the
+> second gate is new in S4a). Deferred `test/Sema` rows: 4.
+> **Read the roadmap's Sema row for the authoritative what-shipped detail and the S4b/S5 carry-item list** —
+> S4b VM modules (`$SHBuiltin` protocol + CJS wrapping + rewrite #4's `-commonjs` corpus pinning — the rewrite's
+> CODE already shipped in S4a, per the 2026-08-03 spec §4 ruling; a genuinely separate much-later phase near
+> IRGen; shared "S4" number is renumbering-avoidance only); S5 lazy/`eval` + the third promotion call site
 > `runInScope` (cpp:158); the regex engine as its own future component; the documented landmines (same-location
-> diagnostic ties, now THREE hermesc self-aborts — `class C { x = class {}; }`, `$SHBuiltin.#x()`, and
-> `using x = 1; { function f(){} }`); and the two tracked parser-phase follow-ups the sema sweeps measured (the
-> 180-file `errorExpected` same-line-range gap, and the recursion stack-overflow crash that disproved the old "ours
-> is silent" wording).
-> **NEXT: S4a — standalone-front-end sema.** `lib/Sema/SemanticResolver.cpp`'s module visit SKELETONS (module-mode
-> error paths — import's is unconditional, export's `compile_`-gated — + children + `Decl::Kind::Import` specifier
-> decls) + `FunctionInfo::imports` backref + `resolve_ast_for_parser` (the `hermes-parser-wasm` entry, `compile =
-> false` — makes every ported `compile_` guard live), plus the untyped `-parse-flow` resolver paths (`typecast not
-> allowed in this context`, `'this' parameter requires typed mode`) and the per-file-flag harness debt
-> (`-enable-eval=false`/`-parse-flow`/`-lazy`; `// FLAGS:` convention). NOT S4a: the 178 `test/Sema/flow/**` files
-> (all `-typed` → the future FlowChecker component), and NOT S4a the VM-module machinery — that is **S4b, a
-> genuinely separate much-later phase near IRGen** (`$SHBuiltin.moduleFactory`/`export`/`import`, CJS wrapping,
-> rewrite #4 — `compile_`-gated, IRGen-serving, differential-invisible without `-commonjs`; its `$SHBuiltin`
-> branches keep their loud phase-tagged panics through S4a, ≤7 of the 16 module-branch sweep panic files). The
-> shared "S4" number is renumbering-avoidance only. **NO S4a plan exists yet** —
+> diagnostic ties, THREE hermesc self-aborts — `class C { x = class {}; }`, `$SHBuiltin.#x()`, and
+> `using x = 1; { function f(){} }` — plus a FOURTH found in S4a: the dumper itself aborts on anonymous
+> `export default function(){}` dumped under `compile = false`, `SemContext.cpp:492-493` vs `dump_context.rs:304`,
+> permanently excluded from `sema_corpus_parser`); and the two tracked parser-phase follow-ups the sema sweeps
+> measured (the 180-file `errorExpected` same-line-range gap, and the recursion stack-overflow crash that
+> disproved the old "ours is silent" wording).
+> **NEXT: S5 — lazy + `eval` entry points.** `resolve_ast_lazy`/`resolve_ast_in_scope`, `visitProgram`'s unported
+> `SaveAndRestore` of `globalScope_` (cpp:216-217, only observable once `Program` can recur), and the THIRD
+> `ScopedFunctionPromoter` call site `runInScope` (`SemanticResolver.cpp:158`, promotes BEFORE
+> `processCollectedDeclarations` rather than after); a whole-component capstone. **NO S5 plan exists yet** —
 > open with `superpowers:brainstorming`, THEN `superpowers:writing-plans`, and execute it subagent-driven
 > (`superpowers:subagent-driven-development`). Spec: `specs/2026-07-26-sema-untyped-design.md`; the executed plans
 > are `plans/2026-07-26-sema-s0-foundations.md`, `plans/2026-07-28-sema-s1-declarations-scopes.md`,
-> `plans/2026-07-28-sema-s2-rest-of-walk.md`, `plans/2026-07-29-sema-s3-scoped-function-promoter.md`.
+> `plans/2026-07-28-sema-s2-rest-of-walk.md`, `plans/2026-07-29-sema-s3-scoped-function-promoter.md`,
+> `plans/2026-08-03-sema-s4a-standalone-frontend.md`.
 > The parser proper lives in `rust/crates/parser/src/js/{mod,expressions,statements,functions,classes,modules,jsx}.rs` +
 > **`js/flow/{mod,declarations,types,function_types,object_types,params,match_}.rs`** + **`js/ts/{mod,types,function_types,object_types,
 > declarations,params}.rs`**; the gate is `REQUIRE_DIFFERENTIAL=1 cargo test -p parser --test parser_differential` (build `ast-dump`
@@ -145,7 +160,7 @@ validation commands, and workflow.
 **Component status** (see the roadmap table): `SourceErrorManager` ✅ · **JS lexer ✅** ·
 **JSONParser ✅** · **AST ✅ (all 4 phases: GC spine + generated 271-node set + transforming visitor + `ESTreeJSONDumper`)** ·
 **JS Parser ✅ (P0–P8 + Pre/Lazy passes, entire standard-JS + Flow + TypeScript + JSX grammar)** ·
-**Sema 🚧 (S0 foundations + S1 declarations & scopes + S2 rest-of-the-walk + S3 `ScopedFunctionPromoter` DONE; S4 modules & flavors next)** / IR / Optimizer / BCGen — future.
+**Sema 🚧 (S0 foundations + S1 declarations & scopes + S2 rest-of-the-walk + S3 `ScopedFunctionPromoter` + S4a standalone-front-end sema DONE; S5 lazy/`eval` next, S4b VM modules much later)** / IR / Optimizer / BCGen — future.
 
 Rust workspace: **`rust/Cargo.toml`** (members: `support`, `parser`, `atom_table`, `unicode`, `ast`, `command_line`, `sema`),
 toolchain pinned `rust/rust-toolchain.toml` (1.96.0).
