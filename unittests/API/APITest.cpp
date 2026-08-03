@@ -3748,6 +3748,25 @@ TEST_P(HermesWorkerTest, WorkerInlineOptionForcesSource) {
   EXPECT_TRUE(provider.lastUrl.empty());
 }
 
+TEST_P(HermesWorkerTest, WorkerConfigHookInvoked) {
+  auto signal = std::make_shared<WorkerTestSignal>();
+  TestWorkerSetup provider;
+  provider.signal = signal;
+  provider.onResolve = [](const std::string &, std::string &) {
+    return bufferFromString("__workerRan('ok');");
+  };
+  castInterface<ISetWorkerSetup>(rt.get())->setWorkerSetup(&provider);
+
+  auto worker = eval("var w = new Worker('worker://cfg'); w;").asObject(*rt);
+  // configureWorkerRuntime runs synchronously on the constructor thread, so it
+  // must already be recorded once construction returns.
+  EXPECT_TRUE(provider.configureCalled.load());
+
+  std::string tag;
+  ASSERT_TRUE(signal->wait(tag, 5000));
+  worker.getPropertyAsFunction(*rt, "terminate").callWithThis(*rt, worker);
+}
+
 INSTANTIATE_TEST_CASE_P(
     Runtimes,
     HermesWorkerTest,

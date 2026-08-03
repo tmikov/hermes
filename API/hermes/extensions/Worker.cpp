@@ -588,8 +588,12 @@ void startWorker(
     WorkerScriptSource source,
     IWorkerSetup *provider) {
   auto *api = jsi::castInterface<IHermesRootAPI>(makeHermesRootAPI());
-  // Default config for now; the config hook is added in a later task.
-  auto workerRuntime = api->makeHermesRuntime(::hermes::vm::RuntimeConfig());
+  // Seed a default config; let the integrator adjust it in place.
+  ::hermes::vm::RuntimeConfig workerConfig;
+  if (provider) {
+    provider->configureWorkerRuntime(workerConfig);
+  }
+  auto workerRuntime = api->makeHermesRuntime(workerConfig);
   auto workerState = std::make_shared<WorkerState>(rt, self);
 
   // Propagate the provider to the worker runtime so a nested `new Worker`
