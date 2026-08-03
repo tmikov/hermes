@@ -59,7 +59,8 @@
 //! an entry, so the index stays valid), and patches that slot to the
 //! rebuilt node when — and only when — the visit returns `Changed`. See
 //! `resolver/mod.rs`'s module doc for the general obligation; the other
-//! `NodeRc`-holding record, `FunctionInfo::imports`, is still S4's.
+//! `NodeRc`-holding record, `FunctionInfo::imports`, discharges it the same
+//! way as of S4a T3 (`modules::visit_import_declaration`).
 //!
 //! The differential cannot catch a missed fixup: `SemContextDumper`
 //! prints only `hoistedFunction <name>` (dump_context.rs), and a stale node

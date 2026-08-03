@@ -142,6 +142,36 @@ fn per_file_flags(src: &[u8]) -> Vec<String> {
     }
 }
 
+/// The first-line-only rule is load-bearing, and nothing in the corpus walk
+/// can observe a regression in it: every corpus file carries a `//` header
+/// comment BELOW line 1 explaining what it pins, and several of those
+/// comments quote flag names. If `per_file_flags` ever scanned the whole
+/// file, such a header could silently change the argv of BOTH binaries —
+/// which, being symmetric, would keep the differential green while testing
+/// something other than what the file's own FLAGS line says.
+#[test]
+fn per_file_flags_is_first_line_only() {
+    // Line 1, exact prefix: the flags are taken, whitespace-split, in order.
+    assert_eq!(
+        per_file_flags(b"// FLAGS: -parse-flow -parse-jsx\nvar x = 1;\n"),
+        vec!["-parse-flow".to_string(), "-parse-jsx".to_string()],
+    );
+    // The identical line on line 2 is ordinary source text.
+    assert!(
+        per_file_flags(b"var x = 1;\n// FLAGS: -parse-flow\n").is_empty(),
+        "a FLAGS line below line 1 must be ignored",
+    );
+    // Including the common shape: a header comment block whose SECOND line
+    // mentions the prefix.
+    assert!(
+        per_file_flags(b"// header\n// FLAGS: -parse-flow\nvar x = 1;\n")
+            .is_empty(),
+        "a FLAGS line below line 1 must be ignored even inside a header",
+    );
+    // No FLAGS line at all: flagless, like every pre-harness corpus file.
+    assert!(per_file_flags(b"var x = 1;\n").is_empty());
+}
+
 /// Run every `.js` file in `corpus` through `pair`'s C++ oracle (with
 /// `oracle_extra` appended to the pair's base flags) and `sema-dump` (with
 /// `rust_extra` appended to the pair's base flags), asserting byte-identical

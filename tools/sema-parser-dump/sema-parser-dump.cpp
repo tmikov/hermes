@@ -34,7 +34,7 @@
 ///   nothing extra to wire up, unlike `preparse-dump`, which installs a
 ///   no-op handler specifically to SUPPRESS printing.
 ///
-/// Args: [--parse-flow] <file|->
+/// Args: [--parse-flow|-parse-flow] <file|->
 ///   - means read from stdin.
 ///
 /// No `-ferror-limit`: `SourceErrorManager`'s default is unbounded
@@ -61,7 +61,13 @@ int main(int argc, char **argv) {
   bool parseFlow = false;
   for (int i = 1; i < argc; ++i) {
     const char *arg = argv[i];
-    if (std::strcmp(arg, "--parse-flow") == 0) {
+    // Both spellings: `--parse-flow` (this tool's original) and
+    // `-parse-flow` (hermesc's own spelling, which is what a corpus file's
+    // `// FLAGS:` line carries — the differential harness appends those args
+    // verbatim to BOTH binaries' argv, and the Rust `command_line` parser
+    // accepts either dash count for a `long` option).
+    if (std::strcmp(arg, "--parse-flow") == 0 ||
+        std::strcmp(arg, "-parse-flow") == 0) {
       parseFlow = true;
       continue;
     }
@@ -72,7 +78,8 @@ int main(int argc, char **argv) {
     filePath = arg;
   }
   if (filePath == nullptr) {
-    llvh::errs() << "Usage: " << argv[0] << " [--parse-flow] <file|->\n";
+    llvh::errs() << "Usage: " << argv[0]
+                 << " [--parse-flow|-parse-flow] <file|->\n";
     return 1;
   }
 

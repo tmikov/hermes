@@ -130,11 +130,15 @@
 //! `super.x` member access, private members and static blocks, and calls of
 //! every shape (plain, optional, `new`, `eval`, `$SHBuiltin.prop(...)`,
 //! `super()`) — which is what `tests/sema_differential.rs` enforces against
-//! the real compiler. Imports/exports, the `$SHBuiltin` CommonJS-module
-//! protocol, and everything else the C++ resolver handles remain later
-//! tasks' scope — see `declarations.rs`'s, `functions.rs`'s,
-//! `expressions.rs`'s, `statements.rs`'s, `classes.rs`'s and `calls.rs`'s
-//! module docs for exactly which of *their* branches are ported but not yet
+//! the real compiler. Imports/exports are ported too, as of S4a T3
+//! (`modules.rs`'s four visit arms), but only the `compile = false` tool
+//! pair can dump them, so their pins live in
+//! `tests/sema_corpus_parser` rather than in the driver corpus. The
+//! `$SHBuiltin` CommonJS-module protocol (`calls.rs`'s S4b-tagged panics)
+//! and everything else the C++ resolver handles remain later tasks' scope —
+//! see `declarations.rs`'s, `functions.rs`'s, `expressions.rs`'s,
+//! `statements.rs`'s, `classes.rs`'s and `calls.rs`'s module docs for
+//! exactly which of *their* branches are ported but not yet
 //! corpus-reachable.
 //!
 //! Everything not covered is *deliberately absent rather than

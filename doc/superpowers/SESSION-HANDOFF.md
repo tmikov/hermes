@@ -95,8 +95,9 @@ validation commands, and workflow.
 > Gates (live, green):
 > `REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml -p sema --features dump-bin --test sema_differential -- --nocapture`
 > → "sema differential (tests/sema_corpus): **192 corpus files matched (103 succeeded on hermesc)**" and
-> "sema differential (tests/sema_corpus_parser): **7 corpus files matched (2 succeeded on the oracle)**" (the
-> second gate is new in S4a). Deferred `test/Sema` rows: 4.
+> "sema differential (tests/sema_corpus_parser): **11 corpus files matched (3 succeeded on the oracle)**" (the
+> second gate is new in S4a; 7/2 at the end of T6, 11/3 after the final review's four added pins). Deferred
+> `test/Sema` rows: 4.
 > **Read the roadmap's Sema row for the authoritative what-shipped detail and the S4b/S5 carry-item list** —
 > S4b VM modules (`$SHBuiltin` protocol + CJS wrapping + rewrite #4's `-commonjs` corpus pinning — the rewrite's
 > CODE already shipped in S4a, per the 2026-08-03 spec §4 ruling; a genuinely separate much-later phase near
@@ -105,9 +106,10 @@ validation commands, and workflow.
 > diagnostic ties, THREE hermesc self-aborts — `class C { x = class {}; }`, `$SHBuiltin.#x()`, and
 > `using x = 1; { function f(){} }` — plus a FOURTH found in S4a: the dumper itself aborts on anonymous
 > `export default function(){}` dumped under `compile = false`, `SemContext.cpp:493-494` vs `dump_context.rs:304`,
-> permanently excluded from `sema_corpus_parser`); and the two tracked parser-phase follow-ups the sema sweeps
-> measured (the 180-file `errorExpected` same-line-range gap, and the recursion stack-overflow crash that
-> disproved the old "ours is silent" wording).
+> permanently excluded from `sema_corpus_parser`); and the THREE tracked parser-phase follow-ups (the 180-file
+> `errorExpected` same-line-range gap and the recursion stack-overflow crash that disproved the old "ours is
+> silent" wording, both measured by the sema sweeps; plus, from S4a's final review, Rust `parse()` omitting
+> `JSParserImpl::parse`'s trailing error-count gate, which every caller currently compensates for).
 > **NEXT: S5 — lazy + `eval` entry points.** `resolve_ast_lazy`/`resolve_ast_in_scope`, `visitProgram`'s unported
 > `SaveAndRestore` of `globalScope_` (cpp:216-217, only observable once `Program` can recur), and the THIRD
 > `ScopedFunctionPromoter` call site `runInScope` (`SemanticResolver.cpp:158`, promotes BEFORE

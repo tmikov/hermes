@@ -443,13 +443,24 @@ fn main() {
         parser.parse()
     };
     let root = match parsed {
-        // `--parser-entry`'s oracle (`sema-parser-dump.cpp`) only checks
-        // "is there a parsed AST at all" (`if (!parsedJs)`) before calling
-        // `resolveASTForParser` — it does NOT also require a clean parse,
-        // unlike the driver path below. Mirror that: accept any `Some` here
-        // when `parser_entry`, and let the post-resolution error count alone
-        // decide the exit code (see `exit_parser_entry`).
-        Some(root) if parser_entry || sm.error_count() == 0 => root,
+        // BOTH pairs require a clean parse, and both for the same C++
+        // reason. `JSParserImpl::parse()` (JSParserImpl.cpp:164-172) ends
+        // with
+        //     if (lexer_.getSourceMgr().getErrorCount() != 0)
+        //       return None;
+        // so on the C++ side a nonzero error count after parsing ALWAYS
+        // shows up as a `None`/`nullptr` AST — which is why the parser-entry
+        // oracle's lone `if (!parsedJs) return sm.getErrorCount() != 0 ? 2 :
+        // 0;` (sema-parser-dump.cpp:115-119) suffices there and why hermesc's
+        // `parseJS` needs no separate check either. The Rust `parse()`
+        // (`parser/src/js/mod.rs`, "Port of `JSParserImpl::parse`") omits
+        // that error-count gate and returns `Some` for a RECOVERABLE parse
+        // error (e.g. a strict-mode octal literal), so this call site has to
+        // apply it — otherwise a parsed-with-errors tree would be handed to
+        // resolution and dumped, diverging from both oracles (see
+        // `parse-error-recoverable.js` in `tests/sema_corpus_parser`, the pin
+        // for exactly this).
+        Some(root) if sm.error_count() == 0 => root,
         // The diagnostics were printed to stderr as they were produced;
         // hermesc exits nonzero with no stdout output, after the driver's
         // epilogue line (see `exit_on_failure`) — `--parser-entry` exits the

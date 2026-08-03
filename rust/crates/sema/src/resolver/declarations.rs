@@ -39,14 +39,20 @@
 //!   hand-populated-map unit tests that covered them while the producer was
 //!   still missing.
 //! - **`ClassDeclaration`/`CatchClause`/`ImportDeclaration`** classification
-//!   in `extract_idents_from_decl`/`extract_declared_idents_from_id` is
-//!   ported in full but not corpus-reachable yet: `visit_node` (`mod.rs`)
-//!   has no dispatch arm for those three node kinds (classes are S1 T8+,
-//!   catch clauses and modules are later stages), so a corpus file
-//!   containing one would panic on the "unhandled node kind" boundary
-//!   before ever reaching this code. Unit-tested directly instead (see the
-//!   `tests` module below) by calling `extract_idents_from_decl` on a
-//!   hand-built node, bypassing the full visitor walk.
+//!   in `extract_idents_from_decl`/`extract_declared_idents_from_id` was
+//!   ported in full before any of the three had a `visit_node` (`mod.rs`)
+//!   dispatch arm, and was unit-tested directly (see the `tests` module
+//!   below) by calling `extract_idents_from_decl` on a hand-built node,
+//!   bypassing the full visitor walk. All three are dispatched and
+//!   corpus-pinned now: classes since S1 T8+
+//!   (`tests/sema_corpus/classes-shapes.js`), catch clauses likewise
+//!   (`catch-block.js`), and `ImportDeclaration` since S4a T3's
+//!   `resolver/modules.rs` — pinned by
+//!   `tests/sema_corpus_parser/module-imports.js`, since only the
+//!   `compile = false` tool pair can dump an import (the module-mode error
+//!   is ungated, and `hermesc` never dumps after a `resolveAST` failure).
+//!   The direct unit tests are kept: they still pin the classification in
+//!   isolation from the walk.
 
 use ast::context::{GCLock, NodeRc};
 use ast::node::Node;
@@ -194,7 +200,8 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     /// declared with.
     ///
     /// The `ClassDeclaration`/`CatchClause`/`ImportDeclaration` arms are
-    /// not corpus-reachable yet — see the module doc.
+    /// reached through `visit_node`'s dispatch and corpus-pinned, as well as
+    /// unit-tested directly — see the module doc.
     pub(super) fn extract_idents_from_decl<'gc>(
         &mut self,
         node: &'gc Node<'gc>,
@@ -1032,9 +1039,10 @@ mod tests {
     // ==== extractIdentsFromDecl classification (cpp:2262-2352) =========
     //
     // `FunctionDeclaration`/`ClassDeclaration`/`CatchClause`/
-    // `ImportDeclaration` are not corpus-reachable yet (see the module
-    // doc) — exercised here by calling `extract_idents_from_decl` directly
-    // on a hand-parsed node, bypassing `visit_node`'s dispatch entirely.
+    // `ImportDeclaration` all have `visit_node` dispatch arms and corpus
+    // pins today (see the module doc); these tests still exercise the
+    // classification in isolation, by calling `extract_idents_from_decl`
+    // directly on a hand-parsed node and bypassing that dispatch entirely.
 
     /// A `FunctionDeclaration` at the top level of the (installed-as-global)
     /// function is a `GlobalProperty`, exactly like `var` would be.
@@ -1717,9 +1725,9 @@ mod tests {
 
     /// A non-ES5 `Catch` decl conflicts with a `let` in the catch's OWN
     /// (parameter) scope's child (its body block) — the
-    /// `prevInPrevScope`/`Catch`/`ES5Catch` row (cpp:2525-2530). Catch
-    /// clauses aren't corpus-reachable yet (no `visit(CatchClauseNode*)`),
-    /// so exercised directly.
+    /// `prevInPrevScope`/`Catch`/`ES5Catch` row (cpp:2525-2530). The corpus
+    /// reaches `visit_catch_clause`, but not this particular redeclaration
+    /// row, so it is exercised directly on hand-built decls.
     #[test]
     fn catch_then_let_in_catch_body_is_invalid() {
         let mut ctx = Context::new();
