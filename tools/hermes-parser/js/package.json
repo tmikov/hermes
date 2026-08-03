@@ -43,6 +43,7 @@
     "hermes-eslint",
     "hermes-estree",
     "hermes-parser",
+    "hermes-parser-native",
     "hermes-transform",
     "babel-plugin-syntax-hermes-parser"
   ],
