@@ -139,10 +139,16 @@
 //!
 //! Everything not covered is *deliberately absent rather than
 //! approximated*: `visit_node` panics with `sema: unhandled node kind ...
-//! (S3+/typed phases)` for any node kind outside the handled set. An honest
-//! panic keeps the differential meaningful — a silently-wrong resolution
-//! would look like a passing test on a corpus that never exercised it.
-//! Later tasks replace each panic with the ported code.
+//! (S3+/dialect phases)` for any node kind outside the handled set. An
+//! honest panic keeps the differential meaningful — a silently-wrong
+//! resolution would look like a passing test on a corpus that never
+//! exercised it. Later tasks replace each panic with the ported code.
+//! (The tag was `(S3+/typed phases)` through S4a T4; renamed there because
+//! it had started overclaiming "typed" for the untyped `-parse-flow` gaps
+//! this port already had — `TypeCastExpression`/`AsExpression` were two
+//! such cases, closed by that task's fix review, but the tag's imprecision
+//! for the *next* one outlives them, so "dialect" is the honest umbrella
+//! for "Flow/TS-only, whether or not `-typed`" going forward.)
 //!
 //! ## The dispatch protocol: `ast::VisitorMut`
 //!
@@ -1159,6 +1165,18 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             | Node::CoverInitializer(_)
             | Node::CoverRestElement(_)
             | Node::CoverTypedIdentifier(_) => self.visit_cover_node(node),
+            // `visit(TypeCastExpressionNode *)` (cpp:1591-1594) and
+            // `visit(AsExpressionNode *)` (cpp:1596-1599), both `#if
+            // HERMES_PARSE_FLOW`: "visit the expression, but not the type
+            // annotation" — see `expressions::visit_type_cast_expression`'s
+            // doc for why that is not the override-free generic arm below
+            // (S4a T4 fix-review). Reachable under plain untyped
+            // `-parse-flow`, no `-typed` needed: `(x: number);` and
+            // `x as number;` both resolve at exit 0.
+            Node::TypeCastExpression(_) => {
+                self.visit_type_cast_expression(gc, node)
+            }
+            Node::AsExpression(_) => self.visit_as_expression(gc, node),
             // `visit(WithStatementNode*)` (cpp:757-769),
             // `visit(TryStatementNode*)` (cpp:771-811, rewrite #2) and
             // `visit(CatchClauseNode*)` (cpp:813-819) — see `statements::*`
@@ -1437,7 +1455,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
                 self.visit_export_all_declaration(gc, node)
             }
             _ => panic!(
-                "sema: unhandled node kind {} (S3+/typed phases)",
+                "sema: unhandled node kind {} (S3+/dialect phases)",
                 node.node_type_str()
             ),
         }

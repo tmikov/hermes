@@ -146,6 +146,8 @@ unchanged at 47 rows and the Deferred table stays at 8, i.e. 46 + 8 = 54.
 | `flow-typecast-cover.js` | **S4a T4** — `visit(CoverTypedIdentifierNode *)` (SemanticResolver.cpp:1575-1577, `resolver/expressions.rs:966`). `(x: number)` alone does NOT reach this visit — JSParserImpl.cpp:2633-2640 rewrites a non-optional cover node with a type annotation into a `TypeCastExpressionNode` inside the parenthesized-expression parser itself; the OPTIONAL form (`x?: number`, `_optional = true`) skips that rewrite and survives as a real `CoverTypedIdentifierNode` when it is not consumed as arrow parameters, which is what `(x?: number);` pins. hermesc: exit 2, 1 error |
 | `flow-this-param.js` | **S4a T4** — `declareParams`'s `this`-parameter check (SemanticResolver.cpp:1767-1771, `resolver/functions.rs:897`), gated `compile_ && !typed_`: `function f(this: number) {}` under `-parse-flow` parses (Flow accepts a `this` parameter) but the untyped dialect rejects it in sema. hermesc: exit 2, 1 error |
 | `flow-annotations-benign.js` | **S4a T4** — negative control: parameter, return and variable type annotations under `-parse-flow` resolving completely cleanly — the annotation nodes are never visited as expressions, so they neither perturb declarations nor scopes. hermesc: exit 0, full dump match |
+| `flow-typecast-resolves.js` | **S4a T4 fix review** — `visit(TypeCastExpressionNode *)` (SemanticResolver.cpp:1591-1594, `#if HERMES_PARSE_FLOW`, `resolver/expressions.rs`'s `visit_type_cast_expression`). A **review-found gap**: `(x: number);`, the task brief's original (unverified) sketch for `flow-typecast-cover.js`, does not hit the Cover-node error at all — it is the parser's rewritten `TypeCastExpressionNode` (JSParserImpl.cpp:2633-2640) and resolves cleanly, but that visit had no port and the resolver panicked at the catch-all. Ported and pinned here: `x` is declared first, so the dump shows it resolving through the cast normally ("visit the expression, but not the type annotation"). hermesc: exit 0 |
+| `flow-as-expression.js` | **S4a T4 fix review** — `visit(AsExpressionNode *)` (SemanticResolver.cpp:1596-1599, `#if HERMES_PARSE_FLOW`, `resolver/expressions.rs`'s `visit_as_expression`), the same shape as `flow-typecast-resolves.js` for Flow's `as` operator (`x as number`, JSParserImpl.cpp:4329-4350) — also unconditional on `typed_`, also found panicking during the fix review. hermesc: exit 0 |
 
 `deep-ast-err.js` is listed in the Deferred table below but is NOT a real S1
 gap: the entire `.js` file is comment lines (its `RUN:` lines generate the
@@ -263,6 +265,10 @@ S4a Task 4, same convention as the S3 Task 2/3 pair above.
 Final count after S4a Task 4: **190 corpus files matched** (101 succeed on
 hermesc, 89 are hermesc-failure files) — see "S4a Task 4: the untyped
 `-parse-flow` corpus battery" below.
+
+Final count after S4a Task 4's fix review: **192 corpus files matched** (103
+succeed on hermesc, 89 are hermesc-failure files) — see "S4a Task 4 fix
+review" below.
 
 ## S2 Task 1 additions
 
@@ -1267,3 +1273,60 @@ authored), hermesc-succeeded 100 → **101** (+1: `flow-annotations-benign.js`
 is the only exit-0 file of the three; the other two are error-path pins, like
 every other diagnostic-shape file in this corpus). Arithmetic: 187 + 3 = 190;
 100 + 1 = 101.
+
+## S4a Task 4 fix review
+
+A review of this task found an Important gap: `visit(TypeCastExpressionNode
+*)` (SemanticResolver.cpp:1591-1594) was never ported, even though the
+task's own derivation for `flow-typecast-cover.js` had already shown that
+`(x: number);` — the task brief's original sketch — resolves to exactly this
+node under hermesc (exit 0), not to a `CoverTypedIdentifierNode`. The
+derivation reasoning was used to pick a DIFFERENT, correct corpus shape
+(`(x?: number);`) but the positive shape it ruled out was never itself
+probed against `sema-dump`, so the gap went unverified on the Rust side:
+`sema-dump -parse-flow` on `(x: number);` panicked at `visit_node`'s
+catch-all, `sema: unhandled node kind TypeCastExpression (S3+/typed
+phases)`. The sibling `visit(AsExpressionNode *)` (cpp:1596-1599, Flow's `as`
+operator, also unconditional on `typed_`) was probed on the same reasoning
+and found to have the identical gap (`x as number;` panicked the same way).
+
+Both are now ported in `resolver/expressions.rs`
+(`visit_type_cast_expression`, `visit_as_expression`) and wired into
+`resolver/mod.rs`'s `visit_node` dispatch, faithfully carrying the C++
+comment both share ("Visit the expression, but not the type annotation"):
+each visits only `_expression` through the generated builder (`self.call`
+with `NodeField::expression`, the same one-field-at-a-time pattern
+`visit_assignment_expression` uses, per the module doc's "work between two
+children" section) and leaves `_type_annotation` untouched — mirroring the
+`ObjectPattern`/`ArrayPattern` `_typeAnnotation` skip already documented
+there. `AsConstExpressionNode` (`x as const`) was checked and found to have
+**no** C++ `visit()` override at all (SemanticResolver.h's inventory), so it
+correctly belongs to the generic catch-all/whitelist arm like
+`NewExpression`; it is not ported here because no corpus file reaches it
+(documented at `visit_as_expression`'s doc comment as the pointer for
+whoever's corpus does).
+
+The catch-all panic's tag was also corrected: `(S3+/typed phases)` →
+`(S3+/dialect phases)`, in `resolver/mod.rs` (the module-doc mirror and the
+panic string). The old tag implied every remaining unhandled kind needed
+`-typed`, which was demonstrably false for these two (both fire under plain
+`-parse-flow`) and would mislead the next person chasing a similar gap; "S3+"
+(genuinely-future-phase kinds) and "dialect" (Flow/TS-only kinds, typed or
+not) is the accurate split. Message-only change, no restructuring; the one
+place that quotes the OLD string verbatim (`MANIFEST.md`'s S2 Task 8 section,
+recording what the panic said when that historical sweep ran) is left
+alone, since it is a dated quotation, not live documentation.
+
+Two new corpus files, each hermesc-verified FIRST (raw stdout+stderr+exit,
+`-parse-flow` on both sides) and then confirmed against `sema-dump` directly
+before being added to the gate:
+
+| File | Covers |
+|---|---|
+| `flow-typecast-resolves.js` | `visit(TypeCastExpressionNode *)`. `var x: number; (x: number);` — `x` is declared first so the dump shows a real `[D:E:...]` resolution on the identifier inside the cast, not just an on-the-fly `UndeclaredGlobalProperty`; the type annotation itself is never walked. hermesc: exit 0, full dump match |
+| `flow-as-expression.js` | `visit(AsExpressionNode *)`. `var x = 1; x as number;` — same resolving-identifier shape as the file above, for the `as` operator. hermesc: exit 0, full dump match |
+
+Gate as of the fix: `sema differential (tests/sema_corpus): 192 corpus files
+matched (103 succeeded on hermesc)` — 190 → **192** files (+2, both
+authored, both exit-0), hermesc-succeeded 101 → **103** (+2: both new files
+succeed). Arithmetic: 190 + 2 = 192; 101 + 2 = 103.

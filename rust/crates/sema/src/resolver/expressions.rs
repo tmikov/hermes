@@ -977,6 +977,81 @@ impl SemanticResolver<'_, '_, '_, '_> {
         TransformResult::Unchanged
     }
 
+    // ---- visit(TypeCastExpressionNode *) / visit(AsExpressionNode *) ---
+
+    /// Port of `SemanticResolver::visit(ESTree::TypeCastExpressionNode
+    /// *node)` (SemanticResolver.cpp:1591-1594, `#if HERMES_PARSE_FLOW`; no
+    /// dialect gate here for the same reason `visit_spread_element`'s note
+    /// gives for `CoverTypedIdentifier`).
+    ///
+    /// ```text
+    /// void SemanticResolver::visit(TypeCastExpressionNode *node) {
+    ///   // Visit the expression, but not the type annotation.
+    ///   visitESTreeNode(*this, node->_expression, node);
+    /// }
+    /// ```
+    ///
+    /// `_expression` is the only child visited — deliberately, same as
+    /// `ObjectPattern`/`ArrayPattern`'s `_typeAnnotation` skip
+    /// (`resolver/mod.rs`'s module doc), so the type annotation's own
+    /// `Identifier`s (e.g. `number` in a `GenericTypeAnnotation`) never get
+    /// `[D:E:...]` resolution. `(x: number);` under untyped `-parse-flow`
+    /// reaches this visit directly — no `-typed` is needed, since the C++
+    /// site is unconditional on `typed_`.
+    pub(super) fn visit_type_cast_expression<'gc>(
+        &mut self,
+        gc: &'gc GCLock,
+        node: &'gc Node<'gc>,
+    ) -> TransformResult<&'gc Node<'gc>> {
+        let n = node.as_type_cast_expression().expect(
+            "visit_type_cast_expression: not a TypeCastExpression",
+        );
+        let mut b = builder::TypeCastExpression::from_node(n);
+        if let TransformResult::Changed(v) = self.call(
+            gc,
+            n.expression,
+            Some(Path::new(node, NodeField::expression)),
+        ) {
+            b.expression(v);
+        }
+        b.build(gc)
+    }
+
+    /// Port of `SemanticResolver::visit(ESTree::AsExpressionNode *node)`
+    /// (SemanticResolver.cpp:1596-1599, `#if HERMES_PARSE_FLOW`) — same
+    /// shape and same "visit the expression, not the type annotation"
+    /// comment as [`Self::visit_type_cast_expression`] above. `x as number;`
+    /// under untyped `-parse-flow` (no `-typed`) reaches this visit: the
+    /// parser accepts Flow's `as` operator whenever `getParseFlow()` is set
+    /// (`JSParserImpl.cpp:4329-4350`), independent of `typed_`.
+    ///
+    /// `AsConstExpressionNode` (`x as const`, JSParserImpl.cpp:4331-4344) is
+    /// a sibling node the parser can also produce here, but it has no
+    /// `visit()` override in C++ (SemanticResolver.h's inventory), so it
+    /// falls to the ordinary `visitESTreeChildren` catch-all there — i.e.
+    /// this port's override-free generic arm, exactly like `NewExpression`/
+    /// `ConditionalExpression`. Not ported by this task: no corpus file
+    /// reaches it yet (see `resolver/mod.rs`'s generic-arm whitelist for
+    /// where to add it once one does).
+    pub(super) fn visit_as_expression<'gc>(
+        &mut self,
+        gc: &'gc GCLock,
+        node: &'gc Node<'gc>,
+    ) -> TransformResult<&'gc Node<'gc>> {
+        let n = node
+            .as_as_expression()
+            .expect("visit_as_expression: not an AsExpression");
+        let mut b = builder::AsExpression::from_node(n);
+        if let TransformResult::Changed(v) = self.call(
+            gc,
+            n.expression,
+            Some(Path::new(node, NodeField::expression)),
+        ) {
+            b.expression(v);
+        }
+        b.build(gc)
+    }
+
     // ---- visit(RegExpLiteralNode *) -------------------------------------
 
     /// Port of `SemanticResolver::visit(RegExpLiteralNode *regexp)`
