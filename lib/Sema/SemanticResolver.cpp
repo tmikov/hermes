@@ -1960,10 +1960,11 @@ void SemanticResolver::visitFunctionBodyAfterParamsVisited(
   // Check for local eval and run the unresolver pass in non-strict mode.
   // TODO: enable this when non-strict direct eval is supported.
   LexicalScope *lexScope = curFunctionInfo()->getFunctionBodyScope();
-  if (false && lexScope->localEval && !curFunctionInfo()->strict) {
-    uint32_t depth = lexScope->depth;
-    Unresolver::run(semCtx_, depth, node);
-  }
+  if ((false))
+    if (lexScope->localEval && !curFunctionInfo()->strict) {
+      uint32_t depth = lexScope->depth;
+      Unresolver::run(semCtx_, depth, node);
+    }
 
   // Determine whether the function can run the implicit return.
   if (!sm_.getErrorCount()) {
