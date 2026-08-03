@@ -1321,6 +1321,19 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             | Node::SHBuiltin(_)
             | Node::IfStatement(_)
             | Node::Empty(_) => node.visit_children_mut(gc, self),
+            // `visit(TypeAliasNode *node) { // Do nothing. }`
+            // (SemanticResolver.cpp:1579-1581, `#if HERMES_PARSE_FLOW`): a
+            // TRUE no-op, unlike the arms above — it does NOT call
+            // `visitESTreeChildren`, so `_id`/`_typeParameters`/`_right` are
+            // never visited and never get `[D:E:...]` resolution
+            // annotations in the dump (the file's whole point: "children of
+            // type alias AST node are not resolved as variables"). S4a T1
+            // ports only this one arm (what `type-alias-children.js`
+            // reaches); the neighboring cpp:1583-1596 do-nothing arms
+            // (`TypeParameterDeclarationNode`, `TypeParameterInstantiation
+            // Node`) are unexercised by any corpus file yet and are left to
+            // whichever task's corpus needs them.
+            Node::TypeAlias(_) => TransformResult::Unchanged,
             _ => panic!(
                 "sema: unhandled node kind {} (S3+/typed phases)",
                 node.node_type_str()

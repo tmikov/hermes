@@ -21,11 +21,16 @@
 //! a plain `cargo test` over the workspace stays green (and silently skips
 //! this oracle).
 //!
-//! Flag pairing: none needed. `hermesc -dump-sema` and `sema-dump` both take
-//! the file as their only argument; `-fstd-globals`/`-fno-std-globals`
-//! (which loads `libhermes` as the ambient-declaration file) defaults to
-//! true on the hermesc side and is unconditional on ours, and `-strict`
-//! defaults to false on both.
+//! Flag pairing: `hermesc -dump-sema` and `sema-dump` both take the file as
+//! their only positional argument; `-fstd-globals`/`-fno-std-globals`
+//! (which loads `libhermes` as the ambient-declaration file) and
+//! `-enable-eval` both default to true on both sides, and `-strict` defaults
+//! to false on both. A corpus file may opt into extra flags by making its
+//! FIRST LINE exactly `// FLAGS: <args>` (see `per_file_flags`); the
+//! whitespace-split args are appended, in order, to BOTH binaries' argv
+//! after `hermesc_extra`/`sema_dump_extra` and before the file path itself.
+//! Flagless files (everything predating this harness) behave exactly as
+//! before.
 //!
 //! The corpus is standard JS only (S0's resolver handles literals, string
 //! literals, empty statements and the directive prologue; anything else
@@ -59,6 +64,20 @@ use std::process::Command;
 fn hermesc_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../../cmake-build-asan/bin/hermesc")
+}
+
+/// If the file's first line is `// FLAGS: <args>`, return the args
+/// (whitespace-split). Otherwise return an empty Vec (flagless — the
+/// existing corpus files that predate this harness). Exact-prefix,
+/// first-line-only: a `// FLAGS:` comment anywhere else in the file (e.g. in
+/// a header or body) is not a per-file-flag line and is left alone.
+fn per_file_flags(src: &[u8]) -> Vec<String> {
+    let first = src.split(|&b| b == b'\n').next().unwrap_or(&[]);
+    let Ok(first) = std::str::from_utf8(first) else { return vec![] };
+    match first.strip_prefix("// FLAGS: ") {
+        Some(rest) => rest.split_whitespace().map(String::from).collect(),
+        None => vec![],
+    }
 }
 
 /// Run every `.js` file in `corpus` through hermesc (with `hermesc_extra`
@@ -122,9 +141,14 @@ fn run_differential(
     let mut hermesc_successes = 0usize;
 
     for f in &files {
+        let src = std::fs::read(f)
+            .unwrap_or_else(|e| panic!("failed to read {}: {e}", f.display()));
+        let file_flags = per_file_flags(&src);
+
         let c = Command::new(&hermesc)
             .args(["-dump-sema"])
             .args(hermesc_extra)
+            .args(&file_flags)
             .arg(f)
             .output()
             .expect("failed to run hermesc");
@@ -133,6 +157,7 @@ fn run_differential(
         }
         let r = Command::new(&sema_dump)
             .args(sema_dump_extra)
+            .args(&file_flags)
             .arg(f)
             .output()
             .expect("failed to run sema-dump");

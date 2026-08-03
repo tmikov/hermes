@@ -142,6 +142,7 @@ unchanged at 47 rows and the Deferred table stays at 8, i.e. 46 + 8 = 54.
 | `break-in-nested-func.js` | **S3 T2** — `break;` inside a loose-mode block-nested `FunctionDeclaration`: the promoter still runs (and would promote `foo`), but `break`'s own loop/switch-nesting check fires first, so this pins that ordering rather than promotion itself |
 | `function-redeclaration-error.js` | **S3 T2** — sixteen redeclaration shapes (`var`/`let`/`Catch`-vs-`function`, strict AND loose, block-nested AND top-level) crossed with the Annex B.3.3 loose-mode exception; several of the loose, block-nested pairs (e.g. `var b2; function b2(){}`) are exactly the `visit(VariableDeclarationNode *)` "already declared" shape `promotion-var-shadows-promoted.js` isolates on its own |
 | `regress-function-promotion-decl.js` | **S3 T2** — the canonical positive case: one block-nested `function inner(){}` promoted to `Var`, alongside a `let foo` sibling that is untouched |
+| `type-alias-children.js` | **S4a T1** — **upstream + `// FLAGS: -parse-flow` line prepended, so NOT byte-identical to the upstream source** (only the dump output is byte-for-byte vs hermesc, per this table's usual methodology); with `-parse-flow` actually enabling the Flow grammar, pins `visit(TypeAliasNode *)`'s true no-op (SemanticResolver.cpp:1579-1581, newly ported to `resolver/mod.rs`'s `visit_node`, cited there) — the alias's `_id`/`_right` children are never visited, so `Id 'A'`/`Id 'B'`/`GenericTypeAnnotation` appear in the dump with no `[D:E:...]` resolution annotations, which is the file's whole point ("children of type alias AST node are not resolved as variables") |
 
 `deep-ast-err.js` is listed in the Deferred table below but is NOT a real S1
 gap: the entire `.js` file is comment lines (its `RUN:` lines generate the
@@ -160,7 +161,6 @@ files in, 54 accounted for below) rather than silently dropped. It is also
 | `deep-ast-err.js` | vacuous — see note above (not a real S1 gap) | n/a |
 | `invalid-args-eval.js` | **not a port gap** — the resolver's loop/`for` support landed in S2 T1 and every diagnostic in this file is produced, with identical text and locations, but two of them collide at the *same* source location (`89:9`: the strict-mode `cannot declare 'arguments'` error and the `was not declared in function "global"` warning). C++'s buffered-message flush uses `std::sort` (`SourceErrorManager.cpp:61-71`), which is NOT stable, so their relative order is unspecified and in practice depends on the whole 24-message array; our `disable_buffering` uses a stable `sort_by_key` (`support/src/manager.rs:903-909`, a documented deviation). Minimized to two messages the two sides agree; only at this file's message count does libstdc++'s introsort reorder the tie. Not faithfully fixable (there is no defined tie order to match), and the file's actual subject is S1's `arguments`/`eval` declaration rules, so the loop-specific rows were extracted into the new `error-for-decl-strict.js` instead | n/a (C++ unstable-sort tie) |
 | `regress-nested-expressions-error.js` | recursion-depth-limit mismatch: hermesc and sema-dump both correctly error `Too many nested expressions/statements/declarations` on the deeply-nested `get<<=get<<=...` chain, but at different columns (hermesc col 3052, sema-dump col 6124) — the two recursion trackers (`JSParserImpl::recursionDepth_`/`SemanticResolver`'s tracker vs our ported ones) increment at different rates per grammar production, so the exact trip point diverges even though both share the same `MAX_RECURSION_DEPTH = 1024`. Same landmine category as the S1 ledger's "parser recursion limit unported" item (S0-era finding, T6 review) — tracked together, not re-derived/fixed here. **S2 T8's sweep sharpened it: on `test/hermes/far-environment-access.js` (250-odd nested arrows) hermesc reports the error at 28:510 while `sema-dump` STACK-OVERFLOWS and aborts (SIGABRT/134) before its own tracker trips.** So the gap is not only "a different column": a debug build's frames are big enough that 1024 allowed levels outrun the 8 MB stack, i.e. deep-but-otherwise-valid input crashes instead of diagnosing. Same row, higher severity | parser-gap follow-up (recursion-depth-counting parity + a real crash) |
-| `type-alias-children.js` | typed dialect (`-parse-flow` RUN flag; harness has no per-file flags) — WITHOUT the flag, hermesc and sema-dump both hit the identical `';' expected` parse error on `type A = B;`, but that's a coincidental match on a syntax error, not a test of the file's actual subject (TypeAlias children resolution); same vacuous-match category `deep-ast-err.js` was excluded for, so it does not belong in `sema_corpus/` either | dialect-corpus phase |
 | `xmod-errors.js` | the `$SHBuiltin` CommonJS-module protocol: `visitModuleFactory`/`visitModuleExport`/`visitModuleImport` (cpp:1320-1453), reached from the three property-name branches of rewrite #3 (cpp:1168-1189). `CallExpression` itself landed in S2 T6, which ports those three branches as loud phase-tagged panics — its row was re-classified from "`CallExpression` / S2" accordingly. Every diagnostic in the file (`$SHBuiltin.moduleFactory requires exactly two arguments.` and 17 more) comes from those three functions | S4 modules |
 
 ## Subdirectories (`test/Sema/flow/`, `test/Sema/flow/ffi/`, `test/Sema/lowering/`)
@@ -247,6 +247,10 @@ hermesc, 76 are hermesc-failure files) — unchanged; the upstream re-probe
 Final count after the S3 final-review follow-up: **173 corpus files
 matched** (97 succeed on hermesc, 76 are hermesc-failure files) — see "S3
 final-review follow-up" below.
+
+Final count after S4a Task 1: **176 corpus files matched** (100 succeed on
+hermesc, 76 are hermesc-failure files) — see "S4a Task 1: the `// FLAGS:`
+per-file harness" below.
 
 ## S2 Task 1 additions
 
@@ -1021,3 +1025,92 @@ case).
   cpp:376-379 to cpp:376-383 — the `continue`-guard `if` block (the
   `prevIsLexicalBindingOfPromotedFunc` check plus its body) spans all five
   lines, not four.
+
+## S4a Task 1: the `// FLAGS:` per-file harness
+
+`sema_differential.rs` grew a per-file-flag mechanism (`per_file_flags`): if a
+corpus file's FIRST LINE is exactly `// FLAGS: <args>`, the whitespace-split
+args are appended, in order, to BOTH `hermesc`'s and `sema-dump`'s argv, after
+the per-corpus extras and before the file path. The spellings are hermesc's
+own (single-dash, e.g. `-enable-eval=false`, `-fno-std-globals`), not
+`sema-dump`'s previous double-dash-only convention — the `command_line` crate
+(`rust/crates/command_line/src/parser.rs`) grew a small, backward-compatible
+fix alongside this (`parse_single_dash_arg`, covered by its own
+`test_single_dash_long` unit test): a single leading dash now tries a
+full-long-name lookup FIRST (identical to `--name` handling, including
+`name=value` splitting), falling back to the pre-existing single-character
+short-option grouping (`-i32`, `-m 10`) only when no long name matches —
+mirroring real LLVM `cl`, which treats `-flag` and `--flag` as exact
+synonyms for named options (verified against hermesc directly: `hermesc
+--fno-std-globals -dump-sema` and `hermesc -fno-std-globals -dump-sema`
+produce byte-identical output). Flagless files (everything predating this
+harness) are unaffected either way.
+
+`sema-dump` grew two new options to go with it, modeled on the existing
+`parse_flow`/`ferror-limit` options (`rust/crates/sema/src/bin/sema_dump.rs`):
+
+- `--enable-eval` (hermesc `-enable-eval`, `CompilerRuntimeFlags.h:19-22`): a
+  plain optional-value bool defaulting to true, wired into
+  `ast::Context::enable_eval` (the same field `resolver/calls.rs`'s
+  `visit_call_expression` already read — S2 T6 wired the READ side; this task
+  wires the WRITE side that lets a corpus file actually flip it).
+- `--fstd-globals` / `--fno-std-globals` (hermesc's `CLFlag` pair,
+  `CompilerDriver.cpp:273-278`, both defaulting to true): gates whether
+  `libhermes` is parsed and loaded as the ambient `DeclarationFileListTy` at
+  all (previously unconditional), mirroring `if (cl::StdGlobals) {
+  loadGlobalDefinition(...) }` at `CompilerDriver.cpp:2000-2007`. Ported as
+  two independent `Opt<bool>`s merged in `main()` (`fstd_globals &&
+  !no_std_globals`), NOT as a single option sharing one `OptValue` via
+  `OptDesc::opt_value`: that sharing mechanism exists in the crate but every
+  registered `Opt` unconditionally calls `OptValue::finish()`
+  (`command_line/src/opt.rs:384-385`), and `OptValue::finish()` asserts it is
+  never called twice (`opt.rs:72-78`) — two options sharing one `OptValue`
+  panics there (`finish() must not be called twice`, discovered empirically
+  running the new corpus file). The merge is a deliberate simplification, not
+  a full port of `CLFlag::getValue()`'s last-one-wins position tie-break for
+  when BOTH spellings are given on the same command line — unreachable via
+  this harness's per-file `// FLAGS:` line, which never spells out both for
+  the same file. See the `no_std_globals` field doc for the full citation.
+
+### New files
+
+| File | Covers |
+|---|---|
+| `flags-enable-eval-off.js` | `// FLAGS: -enable-eval=false`; pins the `EvalDisabled` branch of `visit(CallExpressionNode *)` (SemanticResolver.cpp:1147, `resolver/calls.rs:232`'s `else if is_eval` arm) — a direct call to `eval` still resolves the identifier but warns "eval() is disabled at runtime" instead of the enabled branch's `DirectEval` warning. The enabled branch is already pinned by `disabled-eval.js` (S2 T6); this file is what that row's note flagged as unit-tested-only until the harness grew per-file flags |
+| `flags-no-std-globals.js` | `// FLAGS: -fno-std-globals`; pins two things at once: the ambient-decl load being skipped entirely (no 63 `UndeclaredGlobalProperty` decls in the dump) AND that `print` — normally one of those 63 — still resolves as an on-the-fly `UndeclaredGlobalProperty` when there is no ambient decl and no local declaration either |
+
+`type-alias-children.js` (`test/Sema`, formerly a Deferred row) was
+hermesc-verified with its needed `-parse-flow` flag (`hermesc -parse-flow
+-dump-sema type-alias-children.js`: exit 0, full byte output including the
+`TypeAlias`/`GenericTypeAnnotation` tree) then imported with a prepended
+`// FLAGS: -parse-flow` line. With `-parse-flow` actually enabling the Flow
+grammar, `sema-dump` no longer hits the old vacuous `';' expected`
+parse-error match that kept this file Deferred — it now PARSES the file and
+resolves it, which needed one small resolver addition: `resolver/mod.rs`'s
+`visit_node` grew a `Node::TypeAlias(_) => TransformResult::Unchanged` arm,
+porting `SemanticResolver::visit(TypeAliasNode *node) { // Do nothing. }`
+(SemanticResolver.cpp:1579-1581) — a TRUE no-op that does NOT recurse into
+`_id`/`_typeParameters`/`_right` (unlike this port's generic
+`visit_children_mut` catch-all arms), which is exactly why the dump shows
+`Id 'A'`/`Id 'B'`/`GenericTypeAnnotation` with no `[D:E:...]` resolution
+annotations — the file's own stated purpose ("children of type alias AST
+node are not resolved as variables"). Scope check against the plan's global
+constraint ("ONLY the four module-visit arms replace catch-all panics in
+this phase", reserved for Task 3's `Import`/`Export*` arms): resolved as a
+plan-drafting inconsistency, since the user-approved spec's §3.4 explicitly
+authorizes "whatever their surrounding visits need to exist" for the untyped
+`-parse-flow` paths — the plan's own Global Constraints were amended
+(commit 9d2fa2d92) to reflect this, and this one-line, single-citation,
+this-file-only arm is squarely what that authorization covers. The
+neighboring cpp:1583-1596 do-nothing arms (`TypeParameterDeclarationNode`,
+`TypeParameterInstantiationNode`) are NOT ported here — `type-alias-
+children.js` never reaches them (no type parameters in `type A = B;`) — and
+are left for whichever later task's corpus needs them.
+
+Gate as of this task: `sema differential (tests/sema_corpus): 176 corpus
+files matched (100 succeeded on hermesc)` — 173 → **176** files (+3:
+`flags-enable-eval-off.js`, `flags-no-std-globals.js`,
+`type-alias-children.js`), hermesc-succeeded 97 → **100** (+3: all three new
+files are hermesc successes, not error-path pins). Deferred table 5 → **4**
+(`type-alias-children.js`'s row removed; see its new row in "Imported"
+above).

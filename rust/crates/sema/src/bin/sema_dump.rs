@@ -38,15 +38,18 @@
 //!     `Emitted 2 errors. exiting.\n` after the two diagnostics.
 //!
 //! Args: [--parse-flow] [--parse-component-syntax] [--parse-flow-records]
-//!       [--parse-flow-match] [--parse-ts] [--parse-jsx] [file|-]
+//!       [--parse-flow-match] [--parse-ts] [--parse-jsx] [--enable-eval]
+//!       [--fstd-globals] [--fno-std-globals] [--ferror-limit=N] [file|-]
 //!       (omitted or "-" reads stdin)
 //!
 //! This mirrors CompilerDriver's `-dump-sema` path: load the runtime library
-//! (`libhermes`) as a global-definitions file first
-//! (CompilerDriver.cpp:2001-2008 → `loadGlobalDefinition`, :762-774), parse
+//! (`libhermes`) as a global-definitions file first, gated on
+//! `-fstd-globals`/`-fno-std-globals`
+//! (CompilerDriver.cpp:2000-2007 → `loadGlobalDefinition`, :762-774), parse
 //! the input, then `sema::resolveAST(..., declFileList)` (:940-947) and
 //! `sema::semDump` (:969-974). `-fstd-globals`/`-fno-std-globals` defaults
-//! to true, so the libhermes load is unconditional here.
+//! to true, matching `cl::StdGlobals`'s `CLFlag` default
+//! (CompilerDriver.cpp:273-278).
 //!
 //! Command-line parsing uses the `command_line` crate (the LLVM-`cl`-style
 //! option parser copied from juno), like `parser`'s `ast-dump`.
@@ -115,6 +118,33 @@ struct Options {
     /// unlimited. The hermesc `-ferror-limit` flag, with hermesc's own default
     /// (CompilerDriver.cpp:555-559).
     ferror_limit: Opt<u32>,
+    /// Enable support for `eval()` (the hermesc `-enable-eval` flag,
+    /// `CompilerRuntimeFlags.h:19-22`: a plain `cl::opt<bool>` defaulting to
+    /// true, accepting both bare `-enable-eval` and `-enable-eval=false`).
+    /// Wired into `ast::Context::enable_eval` (S2 T6's field), which
+    /// `resolver/calls.rs`'s `visit_call_expression` reads to choose between
+    /// the `DirectEval`/`EvalDisabled` warning branches.
+    enable_eval: Opt<bool>,
+    /// Enable registration of standard globals: the positive spelling of the
+    /// hermesc `-fstd-globals`/`-fno-std-globals` pair (`CompilerDriver.cpp:
+    /// 273-278`: a `CLFlag`, i.e. two `ValueDisallowed` options resolved by
+    /// whichever was given last, defaulting to true when neither is given).
+    /// Defaults to true here too; see `no_std_globals` for the negative
+    /// spelling and `main`'s merge of the two into the effective value.
+    fstd_globals: Opt<bool>,
+    /// The negative spelling, `-fno-std-globals`. Kept as a separate `Opt`
+    /// rather than sharing `fstd_globals`'s storage (the `command_line`
+    /// crate's `OptDesc::opt_value` sharing exists, but each registered
+    /// `Opt` unconditionally calls `OptValue::finish()`
+    /// (`command_line/src/opt.rs:384-385`) via `CommandLine`'s parse-end
+    /// sweep, and `OptValue::finish()` asserts it is never called twice
+    /// (`opt.rs:72-78`) — sharing one `OptValue` between two registered
+    /// options panics there). `main` merges the two fields into the
+    /// effective bool; this is a deliberate simplification, not a full port
+    /// of `CLFlag::getValue()`'s position-based tie-break: it is unreachable
+    /// via this harness's per-file `// FLAGS:` line, which never spells out
+    /// both `-fstd-globals` and `-fno-std-globals` for the same file.
+    no_std_globals: Opt<bool>,
     /// Input path; empty or "-" reads stdin.
     input: Opt<String>,
 }
@@ -194,6 +224,33 @@ impl Options {
                     ..Default::default()
                 },
             ),
+            enable_eval: Opt::<bool>::new_bool(
+                cl,
+                OptDesc {
+                    long: Some("enable-eval"),
+                    init: Some(true),
+                    desc: Some("Enable support for eval()."),
+                    ..Default::default()
+                },
+            ),
+            fstd_globals: Opt::new_flag(
+                cl,
+                OptDesc {
+                    long: Some("fstd-globals"),
+                    desc: Some("Enable registration of standard globals."),
+                    init: Some(true),
+                    ..Default::default()
+                },
+            ),
+            no_std_globals: Opt::new_flag(
+                cl,
+                OptDesc {
+                    long: Some("fno-std-globals"),
+                    desc: Some("Disable registration of standard globals."),
+                    init: Some(false),
+                    ..Default::default()
+                },
+            ),
             input: Opt::<String>::new(
                 cl,
                 OptDesc {
@@ -223,6 +280,12 @@ fn main() {
         || parse_component_syntax
         || parse_flow_records
         || parse_flow_match;
+    // Merge the `-fstd-globals`/`-fno-std-globals` pair; see the
+    // `no_std_globals` field doc for why this is two independent `Opt`s
+    // instead of one shared-storage `CLFlag` pair. `-fno-std-globals` wins
+    // if both are given (not a full port of `CLFlag`'s last-one-wins tie
+    // break — see that doc).
+    let fstd_globals = *opt.fstd_globals && !*opt.no_std_globals;
 
     let input = &*opt.input;
     let bytes = if input.is_empty() || input == "-" {
@@ -269,6 +332,10 @@ fn main() {
     ctx.set_parse_ts(*opt.parse_ts);
     // JSX is an independent flag; do NOT OR it into `parse_flow`/`parse_ts`.
     ctx.set_parse_jsx(*opt.parse_jsx);
+    // The hermesc driver does
+    // `context->setEnableEval(cl::compilerRuntimeFlags.EnableEval)`
+    // (CompilerDriver.cpp:1207) before any parsing.
+    ctx.set_enable_eval(*opt.enable_eval);
     // hermesc's `-strict` defaults to false and `-dump-sema` never sets it;
     // `visit(ProgramNode *)` seeds the global function's strictness from it.
     let gc = ctx.lock();
@@ -276,10 +343,14 @@ fn main() {
     // Load the runtime library, exactly like `loadGlobalDefinition`
     // (CompilerDriver.cpp:762-774): it is parsed BEFORE the input file, into
     // its own buffer, and its Program becomes the single entry of the
-    // ambient `DeclarationFileListTy`.
-    let libhermes_buf_id =
-        sm.add_buffer_bytes("<libhermes>", LIBHERMES.as_bytes());
-    let ambient_decls: Vec<NodeRc> = {
+    // ambient `DeclarationFileListTy` — but ONLY when `-fstd-globals` is
+    // enabled, mirroring `if (cl::StdGlobals) { loadGlobalDefinition(...) }`
+    // (CompilerDriver.cpp:2000-2007): with `-fno-std-globals`, hermesc never
+    // even parses `libhermes`, so `ambient_decls` stays empty and none of
+    // the 63 ambient `UndeclaredGlobalProperty` decls appear in the dump.
+    let ambient_decls: Vec<NodeRc> = if fstd_globals {
+        let libhermes_buf_id =
+            sm.add_buffer_bytes("<libhermes>", LIBHERMES.as_bytes());
         let atoms = &gc.ctx().atom_table;
         let lexer = JSLexer::new(
             libhermes_buf_id,
@@ -295,6 +366,8 @@ fn main() {
         let program = program
             .expect("libhermes must parse: it is a compiled-in constant");
         vec![NodeRc::from_node(&gc, program)]
+    } else {
+        vec![]
     };
     assert_eq!(
         sm.error_count(),

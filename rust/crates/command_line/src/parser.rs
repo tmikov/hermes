@@ -55,7 +55,7 @@ impl Parser<'_> {
             } else if arg.starts_with("--") {
                 self.parse_long_arg(arg.split_at(2).1)?;
             } else if arg.starts_with('-') && arg.len() > 1 {
-                self.parse_short_arg(arg.split_at(1).1)?;
+                self.parse_single_dash_arg(arg.split_at(1).1)?;
             } else {
                 self.parse_positional_arg(arg)?;
             }
@@ -167,6 +167,36 @@ impl Parser<'_> {
         }
     }
 
+    /// Handle a single-leading-dash argument (`arg` is everything after that
+    /// one dash). Real LLVM `cl` treats a lone `-` exactly like `--` for
+    /// full-name option lookups (hermesc accepts both `-parse-flow` and
+    /// `--parse-flow`), reserving single-character grouping (`-i32`, `-m
+    /// 10`) as a fallback tried only when no option's long name matches the
+    /// whole string. Mirror that: try the long-name lookup (identical to
+    /// `parse_long_arg`, including its `name=value` splitting) first, and
+    /// only fall back to `parse_short_arg`'s grouping when it fails, so
+    /// existing single-character short options (`-m 10`, `-i32`, …) keep
+    /// working exactly as before.
+    fn parse_single_dash_arg(&mut self, arg: &str) -> Result<(), String> {
+        let (name, value) = if let Some((name, value)) = arg.split_once('=') {
+            (name, Some(value))
+        } else {
+            (arg, None)
+        };
+
+        if let Some(opt) = self.opts.find_option(name, true) {
+            return match opt.0.parse_value(value, opt.1) {
+                Ok(_) => Ok(()),
+                Err(e) => Err(format!(
+                    "{}: for the -{} option: {}",
+                    self.prog_name, name, e
+                )),
+            };
+        }
+
+        self.parse_short_arg(arg)
+    }
+
     fn parse_short_arg(&mut self, mut arg: &str) -> Result<(), String> {
         debug_assert!(!arg.is_empty());
 
@@ -244,6 +274,52 @@ mod tests {
         p.parse().expect("parse should succeed");
 
         assert_eq!(*max_heap, 10);
+    }
+
+    /// Real LLVM `cl` (and hermesc) accepts a single leading dash as an
+    /// exact synonym for `--` on a full long-name match (`-parse-flow` ==
+    /// `--parse-flow`), only falling back to short-option grouping when no
+    /// long name matches the whole string. `sema_dump.rs`'s `// FLAGS:`
+    /// harness depends on this: a corpus file's FLAGS line is hermesc's own
+    /// single-dash spelling, appended verbatim to both binaries' argv.
+    #[test]
+    fn test_single_dash_long() {
+        let mut options = CommandLine::new("juno");
+
+        let max_heap = Opt::<u32>::new(
+            &mut options,
+            OptDesc {
+                long: Some("max-heap"),
+                ..Default::default()
+            },
+        );
+        let verbose = Opt::<bool>::new_flag(
+            &mut options,
+            OptDesc {
+                long: Some("verbose"),
+                ..Default::default()
+            },
+        );
+        // A single-character short option whose name is not a prefix of any
+        // long name, to confirm grouping still works unaffected.
+        let m = Opt::<u32>::new(
+            &mut options,
+            OptDesc {
+                short: Some("m"),
+                ..Default::default()
+            },
+        );
+
+        let vec1: Vec<String> = "test -max-heap=10 -verbose -m 5"
+            .split_whitespace()
+            .map(|s| s.to_string())
+            .collect();
+        let p = Parser::new(options, &vec1);
+        p.parse().expect("parse should succeed");
+
+        assert_eq!(*max_heap, 10);
+        assert!(*verbose);
+        assert_eq!(*m, 5);
     }
 
     #[test]
