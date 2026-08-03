@@ -47,9 +47,13 @@ typed mode") — T4 is corpus work, not porting.
   added first line); their MANIFEST rows say "upstream + FLAGS line" explicitly.
 - Landmines: `tests/sema_corpus/MANIFEST.md` documents same-location diagnostic-order
   ties and THREE hermesc self-aborts — check it before fighting a mismatch.
-- ONLY the four module-visit arms replace catch-all panics in this phase. The
-  `$SHBuiltin` module branches (`resolver/calls.rs:310-341`) keep their loud
-  S4-tagged panics — they are **S4b**. `-commonjs` is NOT implemented anywhere.
+- ONLY the four module-visit arms — plus any do-nothing or diagnostic-only visits
+  the untyped `-parse-flow` paths require (spec §3.4: "whatever their surrounding
+  visits need to exist"; e.g. the `visit(TypeAliasNode*)` do-nothing at
+  cpp:1579-1581, needed by `type-alias-children.js`) — replace catch-all panics in
+  this phase. The `$SHBuiltin` module branches (`resolver/calls.rs:310-341`) keep
+  their loud S4-tagged panics — they are **S4b**. `-commonjs` is NOT implemented
+  anywhere.
 - TDD per task; full workspace suite before each commit; commits
   `rust(sema): <what>` + trailer
   `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`.
