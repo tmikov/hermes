@@ -29,7 +29,15 @@ namespace hermes {
 /// live in the parser's identifier table and comment and token text point
 /// into the source buffer, both of which are owned by the \c Context that
 /// outlives serialization.
-class StringTable {
+///
+/// Named \c NativeStringTable rather than \c StringTable to avoid colliding
+/// with \c hermes::StringTable (include/hermes/Support/StringTable.h), which
+/// is pulled in transitively by any translation unit that also includes
+/// hermes-parser-native's forked serializer headers (via ESTree.h /
+/// JSParser.h). Both classes live directly in \c namespace \c hermes,
+/// matching the flat-namespace convention already used by the forked
+/// hermes-parser sources.
+class NativeStringTable {
  public:
   /// Add \p str to the table, or return the existing id if already present.
   /// \return the id of the string, counting from zero.

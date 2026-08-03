@@ -14,21 +14,21 @@ using namespace hermes;
 namespace {
 
 TEST(StringTableTest, EmptyTableHasOneOffset) {
-  StringTable table;
+  NativeStringTable table;
   EXPECT_EQ(0u, table.count());
   ASSERT_EQ(1u, table.offsets().size());
   EXPECT_EQ(0u, table.offsets()[0]);
 }
 
 TEST(StringTableTest, InternReturnsSequentialIds) {
-  StringTable table;
+  NativeStringTable table;
   EXPECT_EQ(0u, table.intern("foo"));
   EXPECT_EQ(1u, table.intern("bar"));
   EXPECT_EQ(2u, table.count());
 }
 
 TEST(StringTableTest, InternDeduplicates) {
-  StringTable table;
+  NativeStringTable table;
   EXPECT_EQ(0u, table.intern("foo"));
   EXPECT_EQ(1u, table.intern("bar"));
   EXPECT_EQ(0u, table.intern("foo"));
@@ -37,7 +37,7 @@ TEST(StringTableTest, InternDeduplicates) {
 }
 
 TEST(StringTableTest, OffsetsDelimitStrings) {
-  StringTable table;
+  NativeStringTable table;
   table.intern("alpha");
   table.intern("be");
   ASSERT_EQ(3u, table.offsets().size());
@@ -47,7 +47,7 @@ TEST(StringTableTest, OffsetsDelimitStrings) {
 }
 
 TEST(StringTableTest, HandlesEmptyString) {
-  StringTable table;
+  NativeStringTable table;
   EXPECT_EQ(0u, table.intern(""));
   EXPECT_EQ(1u, table.count());
   EXPECT_EQ(0u, table.offsets()[0]);
@@ -55,7 +55,7 @@ TEST(StringTableTest, HandlesEmptyString) {
 }
 
 TEST(StringTableTest, HandlesEmbeddedNulAndUtf8) {
-  StringTable table;
+  NativeStringTable table;
   llvh::StringRef withNul("a\0b", 3);
   EXPECT_EQ(0u, table.intern(withNul));
   EXPECT_EQ(1u, table.intern("\xC3\xA9"));
