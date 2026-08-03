@@ -8,6 +8,7 @@
 #include "KindHash.h"
 
 #include "gtest/gtest.h"
+#include "llvh/ADT/StringRef.h"
 
 using namespace hermes;
 
@@ -26,7 +27,8 @@ TEST(KindHashTest, IsNotTrivial) {
 
 TEST(KindHashTest, MatchesReferenceImplementation) {
   // Recompute independently over the same list to catch a macro that stopped
-  // expanding. The first three entries are Empty, Metadata, FunctionLikeFirst.
+  // expanding. The first three entries are Empty(), Metadata() and the
+  // FunctionLikeFirst range marker.
   uint32_t h = 0x811C9DC5u;
   auto feed = [&h](const char *s) {
     for (const char *p = s; *p; ++p) {
@@ -36,11 +38,33 @@ TEST(KindHashTest, MatchesReferenceImplementation) {
     h ^= (uint32_t)'\n';
     h *= 16777619u;
   };
-  feed("Empty");
-  feed("Metadata");
+  feed("Empty()");
+  feed("Metadata()");
   feed("FunctionLikeFirst");
-  // The real hash covers all names, so it must differ from this prefix.
+  // The real hash covers all entries, so it must differ from this prefix.
   EXPECT_NE(h, computeKindHash());
+}
+
+TEST(KindHashTest, EntriesCarryFieldNames) {
+  // The hash is only sensitive to a change in an existing node's field list
+  // if the entries actually spell that list out. Pin two representative
+  // shapes: a node with fields, and a range marker without any. If the
+  // ESTREE_NODE_n_ARGS macros regressed to expanding to the bare node name,
+  // these would fail even though every node name is still present.
+  bool sawIdentifier = false;
+  bool sawRangeMarker = false;
+  for (const char *entry : kNodeKindEntries) {
+    llvh::StringRef str{entry};
+    if (str.startswith("Identifier(")) {
+      EXPECT_EQ("Identifier(name,typeAnnotation,optional)", str.str());
+      sawIdentifier = true;
+    }
+    if (str == "FunctionLikeFirst") {
+      sawRangeMarker = true;
+    }
+  }
+  EXPECT_TRUE(sawIdentifier) << "Identifier entry must list its fields";
+  EXPECT_TRUE(sawRangeMarker) << "range markers must contribute a bare name";
 }
 
 } // namespace

@@ -11,6 +11,9 @@
 
 'use strict';
 
-// Hash of the 295 node-kind names in ESTree.def, in order.
+// Hash of the 295 node-kind entries in ESTree.def, in order.
+// Each entry is a node name plus its field names, so this changes when a
+// node is added, removed or reordered *and* when an existing node's field
+// list changes.
 // Must match computeKindHash() in tools/hermes-parser-native/KindHash.h.
-export default 4176004477;
+export default 2417426143;
