@@ -38,6 +38,18 @@ assert.ok(bad.error.length > 0);
 assert.strictEqual(typeof bad.line, 'number');
 assert.strictEqual(typeof bad.column, 'number');
 
+// --- a program that parses but fails semantic validation also returns an
+// error descriptor, not a container. `continue;` outside any loop is valid
+// syntax (the parser builds a ContinueStatement unconditionally) but is
+// rejected by semantic resolution ("'continue' not within a loop"), so this
+// only fails if semantic validation actually runs after parsing. ---
+const semError = addon.parse('continue;', {});
+assert.strictEqual(semError.buffer, undefined);
+assert.strictEqual(typeof semError.error, 'string');
+assert.ok(/continue/.test(semError.error), 'expected a continue-related error');
+assert.strictEqual(typeof semError.line, 'number');
+assert.strictEqual(typeof semError.column, 'number');
+
 // --- the string table holds the identifier exactly once ---
 const withDupes = addon.parse('var foo; foo; foo; foo;', {});
 const h2 = new Uint32Array(withDupes.buffer, 0, 12);

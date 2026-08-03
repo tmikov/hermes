@@ -14,6 +14,8 @@
 #include "hermes/AST/ESTree.h"
 #include "hermes/Parser/FlowHelpers.h"
 #include "hermes/Parser/JSParser.h"
+#include "hermes/Sema/SemContext.h"
+#include "hermes/Sema/SemResolve.h"
 
 #include "llvh/ADT/StringRef.h"
 #include "llvh/Support/MemoryBuffer.h"
@@ -189,6 +191,23 @@ napi_value parse(napi_env env, napi_callback_info info) {
   result.context_ = context;
   result.parser_ = std::move(jsParser);
   serialize(*parsedJs, &sm, result, tokens);
+
+  // Run semantic validation after the AST has been serialized. This mirrors
+  // the reference (tools/hermes-parser/hermes-parser-wasm.cpp): resolution
+  // never changes the already-serialized AST bytes, but it does reject
+  // programs that parse syntactically yet are semantically invalid (e.g.
+  // `continue` outside a loop), which must surface as parse errors too.
+  sema::SemContext semContext{*context};
+  resolveASTForParser(*context, semContext, *parsedJs);
+
+  // Return the first error if any were detected during semantic validation.
+  if (diagHandler.hasError()) {
+    return errorResult(
+        env,
+        diagHandler.getErrorString(),
+        diagHandler.getErrorLine(),
+        diagHandler.getErrorColumn());
+  }
 
   auto container = writeContainer(
       result.programBuffer_, result.positionBuffer_, result.stringTable_);
