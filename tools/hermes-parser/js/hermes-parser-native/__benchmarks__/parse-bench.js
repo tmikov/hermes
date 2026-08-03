@@ -200,19 +200,26 @@ function loadCorpus() {
 // directly: the fork's serializer/deserializer decode each unique string
 // once and cache it, while the wasm reference's deserializer decodes UTF-8
 // on every reference to an identifier. `identifierRepeated` references the
-// same long identifier name twice per line, `identifierUnique` references a
-// same-shaped but distinct identifier twice per line, keeping token count,
-// line count, and near-identical byte size fixed and varying only whether
-// the underlying strings repeat. If interning is doing anything, native
-// should close the gap (or open one) between these two far more than wasm
-// does.
+// same long identifier name on both sides of every line (one distinct
+// identifier, 2*lineCount references total). `identifierUnique` is the
+// control: an `L`/`R`-tagged pair of identifiers per line, so every single
+// occurrence in the whole file — left side and right side, this line and
+// every other line — is textually distinct from every other occurrence.
+// (An earlier version of this control reused the same per-line identifier
+// on both sides of `=`, which still gave native's deduper a same-line
+// repeat to collapse; see the fix note at the bottom of
+// task-12-report.md.) Line count and, to within a couple of characters per
+// identifier, byte size are held fixed between the two corpora; only
+// whether the underlying strings repeat anywhere varies. If interning is
+// doing anything, native's deserialize time should close the gap (or open
+// one) between these two far more than wasm's does.
 function genIdentifierCorpus(lineCount) {
   const base = 'someModuleLevelCounterVariableUsedRepeatedly';
   const repeatedLines = [];
   const uniqueLines = [];
   for (let i = 0; i < lineCount; i++) {
     repeatedLines.push(`${base} = ${base} + 1;`);
-    uniqueLines.push(`${base}${i} = ${base}${i} + 1;`);
+    uniqueLines.push(`${base}L${i} = ${base}R${i} + 1;`);
   }
   return {
     identifierRepeated: repeatedLines.join('\n') + '\n',
@@ -431,22 +438,31 @@ function runBenchmark(
 // Run
 // ---------------------------------------------------------------------------
 
+// Round count: 40, not the original 15. Bumped after this fix's re-measurement
+// ran on a shared, contended machine (other unrelated processes pushed load
+// average past 8 on a 16-core box) and 15 rounds was no longer enough to keep
+// the shared-machine jitter from swamping the signal — see the fix note at
+// the bottom of task-12-report.md. More rounds shrinks standard error
+// (∝ 1/sqrt(n)) without being able to bias the ratio in either direction, so
+// it is a precision fix, not a tuned-for-a-favorable-number change.
+const ROUNDS = 40;
+
 runBenchmark('Bulk corpus (179 real files, mixed JS/Flow/JSX)', corpus, {
   passesPerRound: 3,
   warmupPasses: 5,
-  rounds: 15,
+  rounds: ROUNDS,
 });
 
 runBenchmark(
   'Identifier-heavy, repeated (string-interning target)',
   [identifierCorpus.identifierRepeated],
-  {passesPerRound: 5, warmupPasses: 5, rounds: 15},
+  {passesPerRound: 5, warmupPasses: 5, rounds: ROUNDS},
 );
 
 runBenchmark(
   'Identifier-heavy, unique (interning control)',
   [identifierCorpus.identifierUnique],
-  {passesPerRound: 5, warmupPasses: 5, rounds: 15},
+  {passesPerRound: 5, warmupPasses: 5, rounds: ROUNDS},
 );
 
 console.log('Done.');
