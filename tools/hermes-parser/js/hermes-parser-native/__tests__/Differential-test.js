@@ -38,6 +38,14 @@ const CASES = [
   '"use strict"; with2 = 1;',
   'new.target; import.meta;',
   'const s = "line1\\nline2\\ttab\\\\back";',
+  // Both `new.target` and `import.meta` are also exercised above in a
+  // position where they are early errors (Program top level), which only
+  // proves the two parsers reject invalid input identically. These two
+  // additional cases exercise the two MetaProperty forms actually
+  // succeeding and producing a real MetaProperty node, which nothing else
+  // in this list covers.
+  'function f() { new.target; }',
+  'import.meta;',
 ];
 
 // Parses with the given function, capturing either the resulting AST or the
@@ -92,6 +100,46 @@ describe('native parser matches wasm parser', () => {
     expect(nativeErr.loc).toEqual(wasmErr.loc);
     expect(nativeErr).toBeInstanceOf(SyntaxError);
   });
+
+  // The CASES above all run with every addon flag false/default. These
+  // exercise the remaining ParserOptions that pick different code paths in
+  // the addon (detectFlow, allowReturnOutsideFunction, and the three
+  // experimental-syntax flags) with a small, targeted input per option
+  // rather than a combinatorial matrix.
+  test('matches with flow: detect and an @flow pragma', () => {
+    const source = '/* @flow */\ntype T = number;\nconst x: T = 1;';
+    expect(parseNative(source, {flow: 'detect'})).toEqual(
+      parseWasm(source, {flow: 'detect'}),
+    );
+  });
+
+  test('matches with allowReturnOutsideFunction', () => {
+    const source = 'return 1;';
+    expect(parseNative(source, {allowReturnOutsideFunction: true})).toEqual(
+      parseWasm(source, {allowReturnOutsideFunction: true}),
+    );
+  });
+
+  test('matches with experimental component syntax enabled', () => {
+    const source = 'component Foo(bar: string) { return bar; }';
+    expect(
+      parseNative(source, {enableExperimentalComponentSyntax: true}),
+    ).toEqual(parseWasm(source, {enableExperimentalComponentSyntax: true}));
+  });
+
+  test('matches with experimental flow match syntax enabled', () => {
+    const source = 'const e = match (x) { 1 => 2 };';
+    expect(
+      parseNative(source, {enableExperimentalFlowMatchSyntax: true}),
+    ).toEqual(parseWasm(source, {enableExperimentalFlowMatchSyntax: true}));
+  });
+
+  test('matches with experimental flow record syntax enabled', () => {
+    const source = 'record R { x: number }';
+    expect(
+      parseNative(source, {enableExperimentalFlowRecordSyntax: true}),
+    ).toEqual(parseWasm(source, {enableExperimentalFlowRecordSyntax: true}));
+  });
 });
 
 describe('bulk corpus', () => {
@@ -131,6 +179,14 @@ describe('bulk corpus', () => {
 
   test('parses every source file identically', () => {
     expect(files.length).toBeGreaterThan(10);
+    // `files.length` only counts files discovered on disk, not files that
+    // actually made it through a comparison below (the catch below skips
+    // anything the wasm reference itself can't parse). Track how many were
+    // actually compared and assert it against the discovered count, so this
+    // test cannot quietly degrade into "compared nothing" while still
+    // reporting green. As of writing, the reference parses all of them, so
+    // this equality is not a hypothetical.
+    let compared = 0;
     for (const file of files) {
       const source = fs.readFileSync(file, 'utf8');
       let native;
@@ -142,6 +198,8 @@ describe('bulk corpus', () => {
       }
       native = parseNative(source, {});
       expect({file, ast: native}).toEqual({file, ast: wasm});
+      compared++;
     }
+    expect(compared).toBe(files.length);
   });
 });
