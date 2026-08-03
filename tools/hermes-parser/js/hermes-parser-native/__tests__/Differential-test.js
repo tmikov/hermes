@@ -65,19 +65,19 @@ describe('native parser matches wasm parser', () => {
   test.each(CASES)('%s', source => {
     const native = tryParse(parseNative, source, {});
     const wasm = tryParse(parseWasm, source, {});
-    expect(native).toEqual(wasm);
+    expect(native).toStrictEqual(wasm);
   });
 
   test('matches with tokens enabled', () => {
     const source = 'const x = f(1, "two");';
-    expect(parseNative(source, {tokens: true})).toEqual(
+    expect(parseNative(source, {tokens: true})).toStrictEqual(
       parseWasm(source, {tokens: true}),
     );
   });
 
   test('matches with comments present', () => {
     const source = '// leading\nconst x = 1; /* trailing */';
-    expect(parseNative(source, {})).toEqual(parseWasm(source, {}));
+    expect(parseNative(source, {})).toStrictEqual(parseWasm(source, {}));
   });
 
   test('matches on syntax errors', () => {
@@ -108,37 +108,43 @@ describe('native parser matches wasm parser', () => {
   // rather than a combinatorial matrix.
   test('matches with flow: detect and an @flow pragma', () => {
     const source = '/* @flow */\ntype T = number;\nconst x: T = 1;';
-    expect(parseNative(source, {flow: 'detect'})).toEqual(
+    expect(parseNative(source, {flow: 'detect'})).toStrictEqual(
       parseWasm(source, {flow: 'detect'}),
     );
   });
 
   test('matches with allowReturnOutsideFunction', () => {
     const source = 'return 1;';
-    expect(parseNative(source, {allowReturnOutsideFunction: true})).toEqual(
-      parseWasm(source, {allowReturnOutsideFunction: true}),
-    );
+    expect(
+      parseNative(source, {allowReturnOutsideFunction: true}),
+    ).toStrictEqual(parseWasm(source, {allowReturnOutsideFunction: true}));
   });
 
   test('matches with experimental component syntax enabled', () => {
     const source = 'component Foo(bar: string) { return bar; }';
     expect(
       parseNative(source, {enableExperimentalComponentSyntax: true}),
-    ).toEqual(parseWasm(source, {enableExperimentalComponentSyntax: true}));
+    ).toStrictEqual(
+      parseWasm(source, {enableExperimentalComponentSyntax: true}),
+    );
   });
 
   test('matches with experimental flow match syntax enabled', () => {
     const source = 'const e = match (x) { 1 => 2 };';
     expect(
       parseNative(source, {enableExperimentalFlowMatchSyntax: true}),
-    ).toEqual(parseWasm(source, {enableExperimentalFlowMatchSyntax: true}));
+    ).toStrictEqual(
+      parseWasm(source, {enableExperimentalFlowMatchSyntax: true}),
+    );
   });
 
   test('matches with experimental flow record syntax enabled', () => {
     const source = 'record R { x: number }';
     expect(
       parseNative(source, {enableExperimentalFlowRecordSyntax: true}),
-    ).toEqual(parseWasm(source, {enableExperimentalFlowRecordSyntax: true}));
+    ).toStrictEqual(
+      parseWasm(source, {enableExperimentalFlowRecordSyntax: true}),
+    );
   });
 });
 
@@ -197,7 +203,7 @@ describe('bulk corpus', () => {
         continue; // Skip anything the reference cannot parse.
       }
       native = parseNative(source, {});
-      expect({file, ast: native}).toEqual({file, ast: wasm});
+      expect({file, ast: native}).toStrictEqual({file, ast: wasm});
       compared++;
     }
     expect(compared).toBe(files.length);
