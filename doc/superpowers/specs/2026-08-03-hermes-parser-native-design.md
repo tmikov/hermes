@@ -1,0 +1,346 @@
+# hermes-parser-native: a native-addon fork of hermes-parser
+
+**Date:** 2026-08-03
+**Branch:** `parser-native` (based on `n-api`)
+**Status:** design approved, not yet implemented
+
+## Summary
+
+Fork `hermes-parser` into a sibling npm package, `hermes-parser-native`, that
+reaches the Hermes parser through a Node-API addon instead of a WebAssembly
+blob. The fork lives in-tree beside the original; the original is not modified.
+
+The public JavaScript API is unchanged, so the fork is a drop-in replacement
+that consumers select with a one-line dependency alias.
+
+## Motivation
+
+`hermes-parser` ships the parser as an Emscripten build: `HermesParserWASM.js`
+is 906 KB of JavaScript with the wasm binary base64-inlined as a data URI
+(`SINGLE_FILE=1`), instantiated synchronously through `new WebAssembly.Module`
+(`WASM_ASYNC_COMPILATION=0`).
+
+That has three costs:
+
+1. **It requires WebAssembly.** Any host without it cannot run the parser, and
+   therefore cannot run `hermes-transform`, `hermes-eslint`, or tooling built on
+   them. `hermes-node` is one such host.
+2. **It is large.** Roughly 900 KB of base64 in every install, decoded and
+   compiled on every process start.
+3. **It is slower than native.** The parser runs as wasm rather than as compiled
+   code, and the serialization protocol re-decodes every string on every
+   reference (see "String interning" below).
+
+A native addon removes all three.
+
+## Goals
+
+- A better `hermes-parser` for all Node users: no wasm blob, native parse speed.
+- Byte-identical ASTs to the wasm parser, verified by differential testing.
+- Unchanged public API, so downstream packages need no changes.
+- Works on any Node-API host, including `hermes-node`, as a consequence.
+
+## Non-goals
+
+- Replacing or modifying the existing `hermes-parser` package.
+- Forking `hermes-transform`, `hermes-eslint`, or `hermes-estree`.
+- Windows support in the first release (see "Risks and open items").
+- Changing the AST shape, the ESTree adapters, or any downstream behavior.
+
+## Decisions
+
+| Question | Decision | Rationale |
+| --- | --- | --- |
+| Where the fork lives | In-tree, beside the originals | Reuses existing codegen and CI; `ESTree.def` stays the single source of truth for the node-kind table |
+| Package name | `hermes-parser-native`, unscoped | Upstreamable to Meta; scoped or personal names would block that. Sits alongside the existing unscoped family |
+| Binary distribution | All prebuilds inside the one package | One artifact, one version, nothing to keep in sync; no postinstall, no network at install |
+| AST transfer | Flat buffer with offsets and a string table | Smallest diff; the 295 generated deserializers and every adapter stay untouched; gives a byte-exact reference to validate against |
+| Consumer opt-in | Dependency alias | One line; redirects transitive dependencies too |
+
+### Alternatives considered
+
+**Native construction of ESTree objects via N-API.** Would delete the
+deserializer and eliminate the version-drift hazard outright, since the code
+defining the nodes would also build them. Rejected for now: it trades one memcpy
+plus JIT-friendly JavaScript object construction for hundreds of thousands of
+individual N-API calls per file, it is the largest rewrite of the options, and
+it is the hardest to validate incrementally. Revisit if a benchmark justifies
+it — it can be built on top of this design.
+
+**A self-describing, versioned wire format.** Would let the JavaScript package
+and the C++ parser drift independently. Rejected: a build-time-generated table
+plus a hash guard already covers the failure, and the divergence from upstream
+would be painful to re-sync.
+
+## Layout
+
+Everything is additive. No existing file is modified.
+
+### C++: `tools/hermes-parser-native/`
+
+Fork of `tools/hermes-parser/`.
+
+- `hermes-parser-napi.cpp` — Node-API entry point. Replaces the eight-function
+  C API of `hermes-parser-wasm.cpp` with a single `parse` binding.
+- `HermesParserJSSerializer.{h,cpp}` — forked serializer. The three pointer
+  sites become string-table indices; number padding becomes index-based.
+- `HermesParserDiagHandler.{h,cpp}` — forked verbatim. Diagnostic capture is
+  engine-agnostic.
+- `CMakeLists.txt` — builds the `.node` module.
+
+### JavaScript: `tools/hermes-parser/js/hermes-parser-native/`
+
+Fork of `tools/hermes-parser/js/hermes-parser/`, added to the `workspaces`
+array in `tools/hermes-parser/js/package.json`.
+
+Only two files diverge from the original:
+
+- `HermesParser.js` — loads the addon instead of the Emscripten module. Today
+  the engine arrives through a single lazy `import HermesParserWASMModule from
+  './HermesParserWASM'`, which is the swap point.
+- `HermesParserDeserializer.js` — region-relative views, string-table lookups,
+  and the decode cache.
+
+Everything else — the 295 generated node deserializers, `HermesToESTreeAdapter`,
+`HermesASTAdapter`, and the `traverse/`, `transform/`, `estree/`, `babel/`
+directories — is copied unchanged and regenerated by the same `scripts/gen*.js`
+scripts, driven off the same `ESTree.def`.
+
+`package.json` declares the same single runtime dependency as the original,
+`hermes-estree`, and tracks the monorepo's lockstep version.
+
+### Build: `scripts/build-native.sh`
+
+A new script rather than edits to `build.sh`. Same codegen sequence
+(`genESTreeJSON.js`, `genNodeDeserializers.js`, `genParserVisitorKeys.js`, and
+the rest). Where the original runs `genWasmParser.js` to inject the base64 blob,
+this copies prebuilt `.node` files into `prebuilds/`.
+
+## Wire format
+
+`parse` returns a single `ArrayBuffer` containing a header and four regions, so
+the entire AST crosses the boundary in one call and one copy.
+
+```
+[ header ][ program (u32) ][ positions (u32 x5 per entry) ][ strOffsets (u32) ][ strData (utf8) ]
+```
+
+The header carries a magic value, a format version, the **kind-table hash**, and
+each region's byte offset and length. JavaScript creates typed-array views over
+the regions.
+
+### Program region
+
+Unchanged in structure from the current protocol: a `u32` stream in which each
+node is `kind + 1` followed by its fields. Only string references change.
+
+### Alignment
+
+The program region must begin at an 8-byte-aligned offset so a `Float64Array`
+view can be created over it.
+
+This matters more than it appears. `deserializeNumber`
+(`HermesParserDeserializer.js:115-126`) selects its float index from the
+*parity* of `programBufferIdx`. With region-relative views, parity is preserved,
+and **that function needs no changes at all**.
+
+On the C++ side, padding becomes explicit: pad on `programBuffer_.size() % 2`
+rather than on the address of `programBuffer_.data()`
+(`HermesParserJSSerializer.cpp:52-55`). Identical behavior, minus a silent
+dependency on the allocator returning 8-byte-aligned memory.
+
+### Strings
+
+Today, strings are serialized as a 32-bit pointer into wasm linear memory
+followed by a length. That works only because wasm32 pointers *are* offsets into
+a linear memory that JavaScript has a full view of. Natively the truncation is
+meaningless and JavaScript has no view of the C++ heap.
+
+There are three such sites in `HermesParserJSSerializer.cpp`:
+
+| Line | Payload | Points into |
+| --- | --- | --- |
+| 78 | identifiers and labels (`NodeLabel`) | the parser's identifier table |
+| 190 | comment text | the source buffer |
+| 289 | token text | the source buffer |
+
+All three become a single `u32` string-table index, replacing the `(pointer,
+size)` pair. One mechanism covers all of them. Comments and tokens are opt-in
+features, and string-literal *cooked* values are not source slices, so a table is
+required regardless.
+
+### String table and interning
+
+`strOffsets` holds `n + 1` entries: string *i* occupies
+`strData[offsets[i] .. offsets[i+1]]`. No separate length array.
+
+The native side deduplicates; Hermes already uniques identifiers, so this is
+close to free. JavaScript decodes lazily into an `Array(n)` cache.
+
+This is a real improvement over the current implementation, not just a port.
+Today `deserializeString` (`HermesParserDeserializer.js:136-144`) calls
+`HermesParserDecodeUTF8String` on **every reference**, with no cache: an
+identifier appearing 500 times is UTF-8-decoded 500 times into 500 separate
+JavaScript strings. With the table, each unique string is decoded exactly once
+and every reference shares one string object, which also gives downstream
+consumers `===`-comparable identifiers.
+
+### Version guard
+
+The node-kind protocol is positional and unguarded: C++ emits
+`(uint32_t)node->getKind() + 1` (`HermesParserJSSerializer.cpp:303`), and
+JavaScript indexes a flat 295-entry array. There is no magic number, no version
+field, and no name check anywhere in the current stream. Inserting one node in
+`ESTree.def` shifts every later kind by one and produces a plausible-looking
+wrong AST rather than an error.
+
+The orderings are currently identical across npm `hermes-parser@0.37.0`, the
+`n-api` branch, and `static_h` — this was verified by extracting both tables and
+diffing them — because the JavaScript is generated from `ESTree.def` at build
+time. The guard protects against that invariant breaking silently.
+
+The header carries a hash of the kind-name list, generated into both C++ and
+JavaScript by the existing codegen. JavaScript checks it on first parse.
+
+## Native binding
+
+The headers at `include/hermes/napi/` are Node's stock public headers
+(`SRC_NODE_API_H_` guard, `BUILDING_NODE_EXTENSION` and `dllimport` handling),
+so the addon compiles against what is already in-tree.
+
+### Surface
+
+```c
+parse(source: string, options: object) -> { buffer } | { error, line, column }
+```
+
+`napi_get_value_string_utf8` returns NUL-terminated UTF-8 directly. That deletes
+two things: the JavaScript-side encode-and-copy (`Buffer.from(source, 'utf8')`
+plus `copyToHeap`), and `hermesParse`'s `"Input source must be zero-terminated"`
+guard.
+
+`options` carries the six booleans the current signature takes positionally:
+`flow === 'detect'`, `enableExperimentalComponentSyntax`,
+`enableExperimentalFlowMatchSyntax`, `enableExperimentalFlowRecordSyntax`,
+`tokens`, `allowReturnOutsideFunction`.
+
+### Lifetime
+
+`ParseResult` lives entirely within the call. The container is copied into a
+fresh `napi_create_arraybuffer` and everything is freed before return. No
+external buffers, no finalizers, nothing for the caller to release — the
+`hermesParseResult_free` dance disappears.
+
+This costs one copy. Zero-copy through an external ArrayBuffer is available
+later if a benchmark justifies it.
+
+## Build and packaging
+
+`tools/hermes-parser-native/CMakeLists.txt` builds a `MODULE` library with
+`PREFIX ""` and `SUFFIX ".node"`, linking the same libraries as the wasm target:
+`hermesAST`, `hermesParser`, `hermesSema`, `LLVHSupport`.
+
+On Linux and macOS the `napi_*` symbols are left undefined and resolve from the
+host process at load. That is what allows one binary to work in both Node and
+`hermes-node`. macOS additionally needs `-undefined dynamic_lookup`.
+
+Prebuilt binaries ship inside the package at
+`prebuilds/<platform>-<arch>/hermes-parser.node`, resolved at require time from
+`process.platform` and `process.arch` with a plain `require()`. No `bindings` or
+`node-gyp-build` dependency, so the package's runtime dependencies remain
+exactly what the original's are.
+
+Initial platform matrix:
+
+- `linux-x64`
+- `linux-arm64`
+- `darwin-x64`
+- `darwin-arm64`
+
+## Consumer usage
+
+Because the package name differs, downstream packages that depend on
+`hermes-parser` by name — including `hermes-transform` and `hermes-eslint` —
+are redirected with a dependency alias:
+
+```json
+"resolutions": { "hermes-parser": "npm:hermes-parser-native@0.37.0" }
+```
+
+`resolutions` for Yarn, `overrides` for npm. This was verified against Yarn
+1.22, which honors `npm:` aliases in `resolutions` and correctly redirects
+*transitive* dependencies. No changes to `hermes-transform` or `hermes-eslint`
+are needed.
+
+## Error handling
+
+**Syntax errors keep their exact current shape.** Today `parse` throws
+`new SyntaxError(message)` with `.loc = {line, column}` attached. Node-API has
+no `napi_create_syntax_error` — only `napi_create_error`, `napi_create_type_error`
+and `napi_create_range_error` — so throwing from C++ would produce a plain
+`Error` and silently break `instanceof SyntaxError` for downstream consumers.
+
+The native call therefore *returns* an error descriptor and JavaScript throws,
+constructing the error exactly as `HermesParser.js` does today.
+
+Two new failure modes get explicit messages:
+
+- **Kind-table hash mismatch** — thrown at first parse, naming both the addon's
+  and the JavaScript package's expected hash, instead of misparsing silently.
+- **Missing prebuild** — names `process.platform` and `process.arch` along with
+  the supported set, instead of a bare `MODULE_NOT_FOUND`.
+
+**Known behavioral difference:** a C++ fault that wasm contained as a trap now
+aborts the process. Relatedly, the wasm build sets `-s STACK_SIZE=5MB`
+explicitly, whereas the native addon inherits the host thread stack, so deeply
+nested input may behave differently. This is covered by a test rather than
+assumed either way.
+
+## Testing
+
+The chosen design provides a reference implementation, and the test strategy
+leans on that.
+
+1. **Differential harness.** Parse a corpus with both the wasm and native
+   parsers and `deepEqual` the resulting ASTs. Any divergence is a bug with a
+   known-good answer. Corpus: the repository's own `test/` tree plus real-world
+   `node_modules` sources.
+2. **The existing suite.** The 54 jest test files under
+   `tools/hermes-parser/js/hermes-parser/__tests__/` are copied into the fork.
+   The public API is identical, so they should pass unmodified; any that do not
+   indicate a real divergence.
+3. **Wire-format unit tests.** The hash guard fires on mismatch; repeated
+   identifiers return the *same* JavaScript string object (the interning
+   property); number and alignment parity hold at region boundaries.
+4. **Deep-nesting test.** Establishes actual native stack behavior on deeply
+   nested input.
+5. **Per-platform CI smoke test** for each prebuild.
+6. **Benchmark** comparing native and wasm parse throughput, to keep the
+   performance claim honest and to inform whether the zero-copy and
+   native-construction optimizations are worth pursuing.
+
+## Risks and open items
+
+- **Windows.** The Node-API headers use `__declspec(dllimport)` on Windows, so
+  an addon there must link `node.lib`, which pins the binary to Node and breaks
+  the "runs on any Node-API host" property. Deferred past the first release; it
+  needs a decision about whether to ship a Node-only Windows binary.
+- **Package size.** Bundling every prebuild means every user downloads all
+  platforms' binaries. This is still expected to be far smaller than the current
+  900 KB base64 blob per install, but it should be measured once the first
+  binaries exist.
+- **Upstreaming.** The design assumes Meta may accept this. Naming, copyright
+  headers, and the use of existing codegen scripts all follow from that
+  assumption.
+- **Kind-table drift.** Currently zero across all three trees. The hash guard
+  converts future drift from silent corruption into a clean error, but it does
+  not prevent the drift itself.
+
+## Future work
+
+Deliberately out of scope, listed so the design does not preclude them:
+
+- Zero-copy transfer via an external ArrayBuffer.
+- Native construction of ESTree objects, eliminating the deserializer.
+- Windows support.
+- Forking or aliasing the rest of the package family.
