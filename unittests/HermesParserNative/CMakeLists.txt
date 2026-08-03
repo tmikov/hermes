@@ -5,6 +5,7 @@
 
 set(HermesParserNativeTestSources
   StringTableTest.cpp
+  KindHashTest.cpp
   )
 
 add_hermes_unittest(HermesParserNativeTests
