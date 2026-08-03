@@ -16,13 +16,7 @@ assert.ok(addonPath, 'usage: node smoke.js <path-to-hermes-parser.node>');
 const addon = require(path.resolve(addonPath));
 assert.strictEqual(typeof addon.parse, 'function', 'parse must be exported');
 
-let threw = null;
-try {
-  addon.parse('var x = 1;', {});
-} catch (e) {
-  threw = e;
-}
-assert.ok(threw, 'parse must throw while unimplemented');
-assert.match(threw.message, /not implemented/);
+const result = addon.parse('var x = 1;', {});
+assert.ok(result.buffer instanceof ArrayBuffer, 'parse must return a buffer');
 
 console.log('smoke OK');

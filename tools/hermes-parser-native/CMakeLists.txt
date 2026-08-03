@@ -9,6 +9,15 @@
 # both Node and any other Node-API host.
 add_library(hermes-parser-napi MODULE
   hermes-parser-napi.cpp
+  HermesParserJSSerializer.cpp
+  HermesParserDiagHandler.cpp
+  )
+
+target_link_libraries(hermes-parser-napi
+  hermesAST
+  hermesParser
+  hermesSema
+  LLVHSupport
   )
 
 set_target_properties(hermes-parser-napi PROPERTIES
