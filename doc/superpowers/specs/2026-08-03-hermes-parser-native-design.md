@@ -85,7 +85,20 @@ would be painful to re-sync.
 
 ## Layout
 
-Everything is additive. No existing file is modified.
+Almost everything is additive. `tools/hermes-parser/` itself and the
+WebAssembly parser are left untouched, so they stay usable as a byte-exact
+reference. Six existing files are modified:
+
+- `tools/CMakeLists.txt` and `unittests/CMakeLists.txt` — pull in the new
+  subdirectories.
+- `tools/hermes-parser/js/package.json` — add `hermes-parser-native` to the
+  workspace list.
+- `tools/hermes-parser/.gitignore` — ignore the `prebuilds/` binaries staged
+  by `scripts/build-native.sh`.
+- `lib/Sema/CheckImplicitReturn.cpp` — handle Flow `match` statements, which
+  previously crashed parser-mode semantic resolution. The addon runs
+  resolution after parsing, so this is reachable from the new code path.
+- `unittests/AST/ResolverTest.cpp` — tests for the above.
 
 ### C++: `tools/hermes-parser-native/`
 

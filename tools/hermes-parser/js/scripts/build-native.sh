@@ -62,14 +62,32 @@ rsync -a --include="*/" --include="*.js" --exclude="*" \
 (cd "$JS_DIR" && yarn babel --config-file="$JS_DIR/babel.config.js" "$DIST_DIR" --out-dir="$DIST_DIR")
 
 # Copy prebuilt addons into the package.
+#
+# A package with a missing prebuild is broken on that platform, so a missing
+# one is a hard error by default: otherwise this script can report success
+# while producing a package with no binaries at all. Set
+# HERMES_PARSER_ALLOW_MISSING_PREBUILDS=1 to downgrade it to a warning, which
+# is what a local single-platform build wants.
 rm -rf "$PACKAGE_DIR/prebuilds"
 mkdir -p "$PACKAGE_DIR/prebuilds"
+missing=()
 for target in linux-x64 linux-arm64 darwin-x64 darwin-arm64; do
   if [[ -f "$PREBUILDS_SRC/$target/hermes-parser.node" ]]; then
     mkdir -p "$PACKAGE_DIR/prebuilds/$target"
     cp "$PREBUILDS_SRC/$target/hermes-parser.node" \
       "$PACKAGE_DIR/prebuilds/$target/"
   else
-    echo "WARNING: missing prebuild for $target" 1>&2
+    missing+=("$target")
   fi
 done
+
+if [[ ${#missing[@]} -gt 0 ]]; then
+  if [[ "${HERMES_PARSER_ALLOW_MISSING_PREBUILDS:-0}" == "1" ]]; then
+    echo "WARNING: missing prebuilds: ${missing[*]}" 1>&2
+  else
+    echo "ERROR: missing prebuilds: ${missing[*]}" 1>&2
+    echo "Build them under $PREBUILDS_SRC/<platform>-<arch>/, or set" 1>&2
+    echo "HERMES_PARSER_ALLOW_MISSING_PREBUILDS=1 to package anyway." 1>&2
+    exit 1
+  fi
+fi

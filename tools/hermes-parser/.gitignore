@@ -4,5 +4,8 @@ node_modules
 # Exclude builds
 dist
 
+# Exclude the native addon binaries staged by scripts/build-native.sh
+prebuilds
+
 # Exclude prettier build dir
 js/prettier-hermes-v2-backport/

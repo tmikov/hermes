@@ -23,6 +23,14 @@ describe('packaging', () => {
     expect(pkg.files).toContain('prebuilds');
   });
 
+  // `dist` and `prebuilds` are build outputs and are deliberately not
+  // checked here; these two are checked in, so a published tarball that
+  // declares them must actually contain them.
+  test.each(['LICENSE', 'README.md'])('%s is present in the package', name => {
+    expect(pkg.files).toContain(name);
+    expect(fs.existsSync(path.resolve(__dirname, '..', name))).toBe(true);
+  });
+
   test('no wasm blob is shipped', () => {
     const src = path.resolve(__dirname, '../src');
     const names = fs.readdirSync(src);

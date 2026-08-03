@@ -63,11 +63,15 @@ export function parse(source: string, options: ParserOptions): HermesNode {
   }
 
   if (header[2] !== EXPECTED_KIND_HASH) {
+    // Hex, because that is how the value is read on the C++ side (it is a
+    // raw uint32 word in the container header) and how a hex dump of the
+    // buffer shows it.
     throw new Error(
       'hermes-parser-native: node-kind table mismatch. The native addon ' +
-        `reports hash ${header[2]} but this JavaScript package was ` +
-        `generated for ${EXPECTED_KIND_HASH}. The addon and the JavaScript ` +
-        'package were built from different versions of ESTree.def.',
+        `reports hash 0x${header[2].toString(16)} but this JavaScript ` +
+        `package was generated for 0x${EXPECTED_KIND_HASH.toString(16)}. ` +
+        'The addon and the JavaScript package were built from different ' +
+        'versions of ESTree.def.',
     );
   }
 

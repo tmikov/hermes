@@ -37,5 +37,6 @@ target_compile_definitions(hermes-parser-napi PRIVATE
 
 if (APPLE)
   # Allow napi_* to be resolved by the loading process.
-  target_link_options(hermes-parser-napi PRIVATE "SHELL:-undefined dynamic_lookup")
+  target_link_options(hermes-parser-napi PRIVATE
+    "SHELL:-undefined dynamic_lookup")
 endif ()
