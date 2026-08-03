@@ -970,6 +970,10 @@ Create `unittests/HermesParserNative/SerializerTest.cpp`:
 
 #include "HermesParserJSSerializer.h"
 
+#include <algorithm>
+#include <cstdint>
+#include <cstring>
+
 #include "hermes/AST/Context.h"
 #include "hermes/Parser/JSParser.h"
 #include "gtest/gtest.h"
@@ -1013,30 +1017,46 @@ TEST(SerializerTest, InternsRepeatedIdentifiersOnce) {
   EXPECT_EQ(1u, fooCount) << "identifier must be interned exactly once";
 }
 
-TEST(SerializerTest, PadsNumbersOnIndexParity) {
+TEST(SerializerTest, PadsNumbersToEvenIndex) {
   auto result = parseAndSerialize("1.5;");
 
-  // Every double must land on an even index in the program buffer so that a
-  // Float64Array view over the region can address it.
-  ASSERT_FALSE(result->programBuffer_.empty());
-  EXPECT_EQ(0u, result->programBuffer_.size() % 1)
-      << "sanity: buffer is a u32 vector";
-}
+  // Locate the IEEE-754 halves of 1.5 and assert the pair starts on an even
+  // index, which is what lets a Float64Array view over the region address it.
+  double value = 1.5;
+  uint64_t bits;
+  memcpy(&bits, &value, sizeof(bits));
+  const uint32_t lo = (uint32_t)bits;
+  const uint32_t hi = (uint32_t)(bits >> 32);
 
-TEST(SerializerTest, EmitsZeroForNullStrings) {
-  // A function declaration has a non-null id; a default-exported anonymous
-  // function has a null id, which must serialize as the 0 sentinel.
-  auto named = parseAndSerialize("function f() {}");
-  auto anon = parseAndSerialize("export default function () {}");
-
-  bool namedHasZero = false;
-  for (uint32_t word : named->programBuffer_) {
-    if (word == 0) {
-      namedHasZero = true;
+  const auto &buf = result->programBuffer_;
+  bool found = false;
+  for (size_t i = 0; i + 1 < buf.size(); ++i) {
+    if (buf[i] == lo && buf[i + 1] == hi) {
+      EXPECT_EQ(0u, i % 2) << "double must start on an even index";
+      found = true;
     }
   }
-  EXPECT_TRUE(namedHasZero || !anon->programBuffer_.empty())
-      << "sanity: both programs serialized";
+  EXPECT_TRUE(found) << "1.5 must appear in the program buffer";
+}
+
+TEST(SerializerTest, StringIdsAreBiasedByOne) {
+  auto result = parseAndSerialize("var foo;");
+
+  // Find the table id assigned to "foo".
+  uint32_t fooId = UINT32_MAX;
+  for (uint32_t i = 0; i < result->stringTable_.count(); ++i) {
+    uint32_t start = result->stringTable_.offsets()[i];
+    uint32_t end = result->stringTable_.offsets()[i + 1];
+    if (result->stringTable_.data().substr(start, end - start) == "foo") {
+      fooId = i;
+    }
+  }
+  ASSERT_NE(UINT32_MAX, fooId) << "\"foo\" must be interned";
+
+  // The program buffer must reference it as id + 1, since 0 means null.
+  const auto &buf = result->programBuffer_;
+  EXPECT_NE(std::find(buf.begin(), buf.end(), fooId + 1), buf.end())
+      << "program buffer must reference the string as id + 1";
 }
 
 } // namespace
@@ -2019,8 +2039,8 @@ position loop with `this.positionBuffer[this.positionBufferIdx++]`.
 - [ ] **Step 8: Run the tests to verify they pass**
 
 ```bash
-HERMES_PARSER_NATIVE_ADDON=$PWD/cmake-build-asan/tools/hermes-parser-native/hermes-parser.node \
-  (cd tools/hermes-parser/js; yarn jest hermes-parser-native)
+ADDON=$PWD/cmake-build-asan/tools/hermes-parser-native/hermes-parser.node
+(cd tools/hermes-parser/js; HERMES_PARSER_NATIVE_ADDON=$ADDON yarn jest hermes-parser-native)
 ```
 
 Expected: all 3 tests PASS.
@@ -2139,8 +2159,8 @@ describe('native parser matches wasm parser', () => {
 - [ ] **Step 2: Run it and expect failures to investigate**
 
 ```bash
-HERMES_PARSER_NATIVE_ADDON=$PWD/cmake-build-asan/tools/hermes-parser-native/hermes-parser.node \
-  (cd tools/hermes-parser/js; yarn jest Differential)
+ADDON=$PWD/cmake-build-asan/tools/hermes-parser-native/hermes-parser.node
+(cd tools/hermes-parser/js; HERMES_PARSER_NATIVE_ADDON=$ADDON yarn jest Differential)
 ```
 
 Expected initially: some cases may FAIL. Each failure is a real divergence
@@ -2194,8 +2214,8 @@ describe('bulk corpus', () => {
 - [ ] **Step 4: Run the full differential suite**
 
 ```bash
-HERMES_PARSER_NATIVE_ADDON=$PWD/cmake-build-asan/tools/hermes-parser-native/hermes-parser.node \
-  (cd tools/hermes-parser/js; yarn jest Differential)
+ADDON=$PWD/cmake-build-asan/tools/hermes-parser-native/hermes-parser.node
+(cd tools/hermes-parser/js; HERMES_PARSER_NATIVE_ADDON=$ADDON yarn jest Differential)
 ```
 
 Expected: all PASS.
@@ -2233,8 +2253,8 @@ added files.
 - [ ] **Step 2: Run them**
 
 ```bash
-HERMES_PARSER_NATIVE_ADDON=$PWD/cmake-build-asan/tools/hermes-parser-native/hermes-parser.node \
-  (cd tools/hermes-parser/js; yarn jest hermes-parser-native)
+ADDON=$PWD/cmake-build-asan/tools/hermes-parser-native/hermes-parser.node
+(cd tools/hermes-parser/js; HERMES_PARSER_NATIVE_ADDON=$ADDON yarn jest hermes-parser-native)
 ```
 
 Expected: failures only where a test imports `hermes-parser` by name rather
@@ -2250,8 +2270,8 @@ implementation, not in the test.
 - [ ] **Step 4: Run again to verify they pass**
 
 ```bash
-HERMES_PARSER_NATIVE_ADDON=$PWD/cmake-build-asan/tools/hermes-parser-native/hermes-parser.node \
-  (cd tools/hermes-parser/js; yarn jest hermes-parser-native)
+ADDON=$PWD/cmake-build-asan/tools/hermes-parser-native/hermes-parser.node
+(cd tools/hermes-parser/js; HERMES_PARSER_NATIVE_ADDON=$ADDON yarn jest hermes-parser-native)
 ```
 
 Expected: all PASS.
@@ -2350,8 +2370,8 @@ describe('failure modes', () => {
 - [ ] **Step 2: Run it**
 
 ```bash
-HERMES_PARSER_NATIVE_ADDON=$PWD/cmake-build-asan/tools/hermes-parser-native/hermes-parser.node \
-  (cd tools/hermes-parser/js; yarn jest Failures)
+ADDON=$PWD/cmake-build-asan/tools/hermes-parser-native/hermes-parser.node
+(cd tools/hermes-parser/js; HERMES_PARSER_NATIVE_ADDON=$ADDON yarn jest Failures)
 ```
 
 Expected: all PASS. If the deep-nesting case aborts the process rather than
@@ -2392,8 +2412,8 @@ describe('kind hash guard', () => {
 - [ ] **Step 4: Run again**
 
 ```bash
-HERMES_PARSER_NATIVE_ADDON=$PWD/cmake-build-asan/tools/hermes-parser-native/hermes-parser.node \
-  (cd tools/hermes-parser/js; yarn jest Failures)
+ADDON=$PWD/cmake-build-asan/tools/hermes-parser-native/hermes-parser.node
+(cd tools/hermes-parser/js; HERMES_PARSER_NATIVE_ADDON=$ADDON yarn jest Failures)
 ```
 
 Expected: all PASS.
@@ -2597,8 +2617,8 @@ loader resolves `prebuilds/linux-x64/hermes-parser.node`.
 - [ ] **Step 7: Verify the consumer alias end to end**
 
 ```bash
-mkdir -p /tmp/aliascheck && cd /tmp/aliascheck
-cat > package.json <<'EOF'
+mkdir -p /tmp/aliascheck
+cat > /tmp/aliascheck/package.json <<'EOF'
 {
   "name": "aliascheck",
   "version": "1.0.0",
