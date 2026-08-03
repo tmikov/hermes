@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <type_traits>
 #include <vector>
 
 #include "HermesParserJSSerializer.h"
@@ -17,6 +18,22 @@
 #include "StringTable.h"
 
 namespace hermes {
+
+/// The position region is written by memcpy-ing raw \c PositionResult objects,
+/// and the JavaScript deserializer reads it back as exactly five consecutive
+/// uint32 words per entry (HermesParserDeserializer.fillLocs). Both properties
+/// are pinned here because nothing else on either side enforces them: adding a
+/// field or letting the compiler insert padding would silently shift every
+/// subsequent position, and the container's own bounds checks would still
+/// pass.
+static_assert(
+    sizeof(PositionResult) == 20,
+    "PositionResult must be exactly five uint32 words; the JavaScript "
+    "deserializer reads 5 words per position entry");
+static_assert(
+    std::is_trivially_copyable<PositionResult>::value,
+    "PositionResult is memcpy-ed into the container, so it must be "
+    "trivially copyable");
 
 /// Size of the container header in bytes. Chosen so that the program region,
 /// which immediately follows, starts 8-byte aligned. The JavaScript
@@ -77,8 +94,10 @@ inline std::vector<uint8_t> writeContainer(
     memcpy(buf.data() + positionOffset, positions.data(), positionBytes);
   }
   if (strOffsetsBytes != 0) {
-    memcpy(buf.data() + strOffsetsOffset, strings.offsets().data(),
-           strOffsetsBytes);
+    memcpy(
+        buf.data() + strOffsetsOffset,
+        strings.offsets().data(),
+        strOffsetsBytes);
   }
   if (strDataBytes != 0) {
     memcpy(buf.data() + strDataOffset, strings.data().data(), strDataBytes);

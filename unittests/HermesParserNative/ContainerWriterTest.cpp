@@ -84,8 +84,10 @@ TEST(ContainerWriterTest, StringOffsetArrayHasCountPlusOneEntries) {
   ASSERT_EQ(2u, count);
 
   std::vector<uint32_t> offsets(count + 1);
-  memcpy(offsets.data(), buf.data() + strOffsetsOffset,
-         (count + 1) * sizeof(uint32_t));
+  memcpy(
+      offsets.data(),
+      buf.data() + strOffsetsOffset,
+      (count + 1) * sizeof(uint32_t));
   EXPECT_EQ(0u, offsets[0]);
   EXPECT_EQ(5u, offsets[1]);
   EXPECT_EQ(7u, offsets[2]);

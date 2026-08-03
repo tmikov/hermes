@@ -126,8 +126,7 @@ napi_value parse(napi_env env, napi_callback_info info) {
   }
   std::vector<char> source(sourceLen + 1, '\0');
   if (napi_get_value_string_utf8(
-          env, argv[0], source.data(), source.size(), &sourceLen) !=
-      napi_ok) {
+          env, argv[0], source.data(), source.size(), &sourceLen) != napi_ok) {
     napi_throw_error(env, nullptr, "failed to read source");
     return nullptr;
   }
@@ -143,12 +142,16 @@ napi_value parse(napi_env env, napi_callback_info info) {
   const bool allowReturnOutsideFunction =
       boolOption(env, argv[1], "allowReturnOutsideFunction");
 
-  ParseResult result;
-
   // Set up custom diagnostic handler for error reporting.
   auto context = std::make_shared<Context>();
   auto &sm = context->getSourceErrorManager();
   const auto &diagHandler = HermesParserDiagHandler(sm);
+
+  // Declared after \c diagHandler so that it is destroyed first. \c result
+  // owns the parser and a reference to the context, whose destructors run
+  // against the SourceErrorManager that \c diagHandler is registered on; the
+  // handler must therefore still be alive at that point.
+  ParseResult result;
 
   auto fileBuf = llvh::MemoryBuffer::getMemBuffer(
       llvh::StringRef{source.data(), sourceLen});
@@ -235,8 +238,8 @@ napi_value parse(napi_env env, napi_callback_info info) {
 /// Module initializer. Registers `parse` on the exports object.
 napi_value init(napi_env env, napi_value exports) {
   napi_value fn;
-  if (napi_create_function(env, "parse", NAPI_AUTO_LENGTH, parse, nullptr,
-                           &fn) != napi_ok) {
+  if (napi_create_function(
+          env, "parse", NAPI_AUTO_LENGTH, parse, nullptr, &fn) != napi_ok) {
     napi_throw_error(env, nullptr, "failed to create the parse function");
     return nullptr;
   }

@@ -84,13 +84,19 @@ class ParseResult {
   std::vector<uint32_t> programBuffer_;
   /// Buffer containing serialized source positions
   std::vector<PositionResult> positionBuffer_;
-  /// Deduplicated table of every string referenced by the program buffer.
-  NativeStringTable stringTable_;
 
   // Keep references to parser and context as they should last until
   // parse result is freed.
   std::shared_ptr<Context> context_{nullptr};
   std::unique_ptr<parser::JSParser> parser_{nullptr};
+
+  /// Deduplicated table of every string referenced by the program buffer.
+  ///
+  /// Declared after \c context_ and \c parser_ so that it is destroyed
+  /// *before* them. Its keys are \c StringRef s pointing into the identifier
+  /// table and the source buffer, both owned by the \c Context; see the
+  /// lifetime requirement documented on NativeStringTable in StringTable.h.
+  NativeStringTable stringTable_;
 };
 
 void serialize(
