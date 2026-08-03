@@ -463,26 +463,17 @@ fn main() {
         // Dump unconditionally, even if resolution reported errors — the
         // whole point of `--parser-entry`, mirroring
         // `tools/sema-parser-dump/sema-parser-dump.cpp`'s OUTPUT CONTRACT.
-        //
-        // CAVEAT (known, currently-unexercised gap): if resolution reports
-        // an error ANYWHERE in the tree, `resolve_ast_for_parser` returns
-        // `None` and the fully-computed rewritten tree is discarded (see
-        // `SemanticResolver::run`'s doc — unlike C++, which mutates in
-        // place, so the partially-annotated tree survives a `false`
-        // return). This port has no way to recover that tree, so on `None`
-        // nothing is dumped even though the C++ oracle would still print
-        // one. Every file in the live `tests/sema_corpus_parser` resolves
-        // with zero errors, so this gap is not hit by the current gate.
-        if let Some(resolved_root) =
-            resolve_ast_for_parser(&gc, &mut sem_ctx, &mut sm, root)
-        {
-            let mut out_bytes: Vec<u8> = Vec::new();
-            sem_dump(&mut out_bytes, &gc, &sem_ctx, resolved_root);
-            let stdout = io::stdout();
-            let mut out = stdout.lock();
-            out.write_all(&out_bytes).unwrap();
-            out.flush().ok();
-        }
+        // `resolve_ast_for_parser` always hands back a tree to dump (see its
+        // doc and `SemanticResolver::run_always`'s) — there is no `Option`
+        // to unwrap here, unlike the driver path below.
+        let resolved_root =
+            resolve_ast_for_parser(&gc, &mut sem_ctx, &mut sm, root);
+        let mut out_bytes: Vec<u8> = Vec::new();
+        sem_dump(&mut out_bytes, &gc, &sem_ctx, resolved_root);
+        let stdout = io::stdout();
+        let mut out = stdout.lock();
+        out.write_all(&out_bytes).unwrap();
+        out.flush().ok();
         exit_parser_entry(&sm);
     }
 

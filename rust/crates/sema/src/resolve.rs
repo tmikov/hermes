@@ -73,14 +73,21 @@ pub fn resolve_ast<'ast>(
 /// /* saveDecls */ nullptr, /* compile */ false}`.
 ///
 /// \param root the top-level `Program` node.
-/// \return the resolved (possibly new) root, or `None` on error — see
-///   [`resolve_ast`]'s doc for why this differs from C++'s in-place `bool`.
+/// \return the (possibly rebuilt) root, ALWAYS — never `None`, unlike
+///   [`resolve_ast`]. This is deliberate: `resolveASTForParser`'s only
+///   caller, `hermes-parser-wasm.cpp:104`, ignores its `bool` return value
+///   and always serializes/dumps whatever `root` ends up holding (checking
+///   for errors via a separate diagnostic-handler query, not the return
+///   value) — so callers here must do the same: check `sm.error_count()`
+///   independently if they need to know whether resolution succeeded. See
+///   [`crate::resolver::SemanticResolver::run_always`]'s doc for why this
+///   needs a different resolver method than [`resolve_ast`] uses.
 pub fn resolve_ast_for_parser<'ast>(
     gc: &'ast GCLock,
     sem_ctx: &mut SemContext,
     sm: &mut SourceErrorManager,
     root: &'ast Node<'ast>,
-) -> Option<&'ast Node<'ast>> {
+) -> &'ast Node<'ast> {
     let binding_table = sem_ctx.binding_table_rc();
     let mut resolver = SemanticResolver::new(
         &binding_table,
@@ -89,5 +96,5 @@ pub fn resolve_ast_for_parser<'ast>(
         /* ambient_decls */ &[],
         /* compile */ false,
     );
-    resolver.run(gc, root)
+    resolver.run_always(gc, root)
 }

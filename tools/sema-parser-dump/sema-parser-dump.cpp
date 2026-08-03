@@ -46,6 +46,7 @@
 #include "hermes/Parser/JSParser.h"
 #include "hermes/Sema/SemContext.h"
 #include "hermes/Sema/SemResolve.h"
+#include "hermes/Support/OSCompat.h"
 #include "hermes/Support/SourceErrorManager.h"
 
 #include "llvh/Support/MemoryBuffer.h"
@@ -87,6 +88,22 @@ int main(int argc, char **argv) {
   if (parseFlow)
     ctx.setParseFlow(ParseFlowSetting::ALL);
   SourceErrorManager &sm = ctx.getSourceErrorManager();
+  // `SourceErrorOutputOptions::showColors` defaults to `true`
+  // (SourceErrorManager.h:35), but the Rust renderer this tool is an
+  // oracle for has no color support at all (`support/src/render.rs`) — it
+  // always emits plain text. Match hermesc's own
+  // `guessErrorOutputOptions()` (CompilerDriver.cpp:776-791), which asks
+  // `oscompat::should_color(STDERR_FILENO)` rather than hardcoding either
+  // way: under the differential harness, stderr is a pipe (not a tty), so
+  // this evaluates to `false` on both sides, keeping stderr colorless and
+  // byte-comparable; interactively (a real tty) this tool colorizes like
+  // hermesc does. `preferredMaxErrorWidth` is left at its `UnlimitedWidth`
+  // default, which is what `guessErrorOutputOptions()` also produces for a
+  // non-tty stderr (and `cl::MaxDiagnosticWidth` defaults to 0, i.e. "don't
+  // override").
+  SourceErrorOutputOptions outputOptions;
+  outputOptions.showColors = oscompat::should_color(STDERR_FILENO);
+  sm.setOutputOptions(outputOptions);
 
   uint32_t bufId = sm.addNewSourceBuffer(std::move(fileBufOrErr.get()));
 

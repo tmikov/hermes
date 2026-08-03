@@ -679,6 +679,47 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
         Some(new_root.expect("the resolver never removes the root"))
     }
 
+    /// Run semantic resolution and return the (possibly rebuilt) root
+    /// REGARDLESS of whether resolution reported errors. For callers that
+    /// must dump the tree even after errors — currently only
+    /// `resolve_ast_for_parser`, the `compile = false` port of
+    /// `resolveASTForParser` (`SemResolve.cpp:295-306`), whose C++ oracle
+    /// (`tools/sema-parser-dump`) always dumps because `SemanticResolver`
+    /// mutates the AST in place: `SemanticResolver::run`
+    /// (`SemanticResolver.cpp:65-70`) has the SAME two `sm_.getErrorCount()`
+    /// gates as [`Self::run`] below, but they only affect its `bool` return
+    /// value — the caller's `root` pointer is unaffected either way, so it
+    /// can always be handed to `semDump`.
+    ///
+    /// This port's resolver is a transforming visitor instead (see the
+    /// module doc): a rewrite anywhere in the tree rebuilds every ancestor,
+    /// so [`Self::run`] must hand back the rebuilt root — and folds that
+    /// together with success/failure into a single `Option`, because its
+    /// only caller ([`crate::resolve::resolve_ast`], the `compile = true`
+    /// driver path) never needs the tree on failure (`hermesc` never dumps
+    /// after a `resolveAST` failure either — see `resolve_ast`'s doc). This
+    /// method exists SEPARATELY, rather than changing [`Self::run`]'s
+    /// contract, so that driver-path behavior is untouched.
+    ///
+    /// \return the ORIGINAL `root` if the entry gate fires (mirroring C++,
+    ///   which never starts visiting in that case either, so nothing is
+    ///   rebuilt there — `SemanticResolver.cpp:66-67`); otherwise the
+    ///   rebuilt tree from the walk, whether or not it reported errors.
+    ///   Callers that need to know whether resolution itself succeeded
+    ///   must check `sm.error_count()` afterwards (as the C++ tool does —
+    ///   it ignores `resolveASTForParser`'s bool return entirely).
+    pub fn run_always<'gc>(
+        &mut self,
+        gc: &'gc GCLock,
+        root: &'gc Node<'gc>,
+    ) -> &'gc Node<'gc> {
+        if self.sm.error_count() != 0 {
+            return root;
+        }
+        root.visit_mut(gc, self, None)
+            .expect("the resolver never removes the root")
+    }
+
     /// True if we are preparing the AST to be compiled by Hermes. Port of
     /// the `compile_` field (SemanticResolver.h:84); an accessor here so
     /// that S1, which is where the flag is first *read*, doesn't have to
