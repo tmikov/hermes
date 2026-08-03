@@ -24,6 +24,17 @@ const SUPPORTED = [
  *
  * The path can be overridden with HERMES_PARSER_NATIVE_ADDON, which the
  * in-tree test setup uses to point at a freshly built binary.
+ *
+ * Resolution order:
+ *  1. HERMES_PARSER_NATIVE_ADDON, if set.
+ *  2. prebuilds/<platform>-<arch>/hermes-parser.node, the packaged binary.
+ *  3. The in-repo development build at
+ *     cmake-build-debug/tools/hermes-parser-native/hermes-parser.node,
+ *     resolved relative to this package's location. This is a
+ *     development-only fallback: it only exists in a source checkout of the
+ *     hermes repo (not in a published npm package) and lets the rest of the
+ *     workspace's test suite run against a locally built addon without every
+ *     test needing to set HERMES_PARSER_NATIVE_ADDON itself.
  */
 function loadAddon() {
   const override = process.env.HERMES_PARSER_NATIVE_ADDON;
@@ -33,30 +44,41 @@ function loadAddon() {
   }
 
   const target = `${process.platform}-${process.arch}`;
-  if (!SUPPORTED.includes(target)) {
-    throw new Error(
-      `hermes-parser-native: no prebuilt addon for ${target}. ` +
-        `Supported platforms: ${SUPPORTED.join(', ')}.`,
-    );
-  }
 
-  const addonPath = path.join(
+  const prebuiltPath = path.join(
     __dirname,
     '..',
     'prebuilds',
     target,
     'hermes-parser.node',
   );
+  const devBuildPath = path.join(
+    __dirname,
+    '..', // hermes-parser-native
+    '..', // js
+    '..', // hermes-parser
+    '..', // tools
+    '..', // repo root
+    'cmake-build-debug',
+    'tools',
+    'hermes-parser-native',
+    'hermes-parser.node',
+  );
 
-  try {
-    /* $FlowFixMe[unsupported-syntax] dynamic require by design */
-    return require(addonPath);
-  } catch (e) {
-    throw new Error(
-      `hermes-parser-native: failed to load the prebuilt addon for ${target} ` +
-        `at ${addonPath}: ${e.message}`,
-    );
+  for (const candidate of [prebuiltPath, devBuildPath]) {
+    try {
+      /* $FlowFixMe[unsupported-syntax] dynamic require by design */
+      return require(candidate);
+    } catch (e) {
+      // Not present at this location; fall through to the next candidate.
+    }
   }
+
+  throw new Error(
+    `hermes-parser-native: no prebuilt addon for ${target}. ` +
+      `Supported platforms: ${SUPPORTED.join(', ')}. Checked ${prebuiltPath} ` +
+      `and the development build fallback ${devBuildPath}.`,
+  );
 }
 
 module.exports = loadAddon;
