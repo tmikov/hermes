@@ -119,7 +119,7 @@ Both dumpers then crash printing it, at the SAME underlying defect: a
 null-id function reaching the `hoistedFunction` printer, which
 unconditionally casts `_id` to an identifier:
 
-- C++ `SemContextDumper::printScope` (`SemContext.cpp:492-493`,
+- C++ `SemContextDumper::printScope` (`SemContext.cpp:493-494`,
   `llvh::cast<ESTree::IdentifierNode>(fd->_id)`) hits `isa<> used on a null
   pointer` (`Casting.h:106`), SIGABRT.
 - Rust `dump_context.rs`'s `print_scope`

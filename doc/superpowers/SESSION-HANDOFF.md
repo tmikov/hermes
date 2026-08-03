@@ -86,7 +86,7 @@ validation commands, and workflow.
 > resolver a `run_always` method so "dump despite errors" genuinely works; T3 `resolver/modules.rs` — the four
 > module visits (asymmetric guards preserved: import's error unconditional, export's `compile_`-gated) with §3.4
 > **rewrite #4** (anonymous `export default function` → `FunctionExpression`) ported INLINE, `FunctionInfo::imports`
-> backref, and nine upstream sweep files imported; T4 the untyped `-parse-flow` battery (deriving the real
+> backref, and 11 corpus files (2 authored module-error pins + 9 upstream sweep imports); T4 the untyped `-parse-flow` battery (deriving the real
 > `CoverTypedIdentifierNode`-reaching shape, `(x?: number);`) plus a fix round porting the
 > `TypeCastExpression`/`AsExpression` visits a first pass missed; T5 an upstream re-probe confirming zero
 > S4a-attributable panics (**1218**/190/**8**, was 1209/190/17) and a sweep-tooling landmine (`--release` masks
@@ -104,7 +104,7 @@ validation commands, and workflow.
 > `runInScope` (cpp:158); the regex engine as its own future component; the documented landmines (same-location
 > diagnostic ties, THREE hermesc self-aborts — `class C { x = class {}; }`, `$SHBuiltin.#x()`, and
 > `using x = 1; { function f(){} }` — plus a FOURTH found in S4a: the dumper itself aborts on anonymous
-> `export default function(){}` dumped under `compile = false`, `SemContext.cpp:492-493` vs `dump_context.rs:304`,
+> `export default function(){}` dumped under `compile = false`, `SemContext.cpp:493-494` vs `dump_context.rs:304`,
 > permanently excluded from `sema_corpus_parser`); and the two tracked parser-phase follow-ups the sema sweeps
 > measured (the 180-file `errorExpected` same-line-range gap, and the recursion stack-overflow crash that
 > disproved the old "ours is silent" wording).
