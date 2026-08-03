@@ -5,8 +5,9 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-//! Port of `hermes::sema::resolveAST` (`lib/Sema/SemResolve.cpp:159-191`) —
-//! the public entry point that drives [`crate::resolver::SemanticResolver`].
+//! Port of `hermes::sema::resolveAST` (`lib/Sema/SemResolve.cpp:159-191`) and
+//! `resolveASTForParser` (`cpp:295-306`) — the two public entry points that
+//! drive [`crate::resolver::SemanticResolver`].
 //!
 //! Only the untyped arm is ported. The `flowContext` parameter and the
 //! `#if HERMES_PARSE_FLOW` block it guards (`FlowChecker::run` + `lowerAST`,
@@ -58,6 +59,35 @@ pub fn resolve_ast<'ast>(
         sm,
         ambient_decls,
         /* compile */ true,
+    );
+    resolver.run(gc, root)
+}
+
+/// Perform semantic resolution of the entire AST, without preparing the AST
+/// for compilation. Port of `resolveASTForParser` (`SemResolve.cpp:295-306`)
+/// — the entry point `hermes-parser-wasm.cpp:104` uses. Unlike [`resolve_ast`]
+/// this will not error on features we can parse but not compile, transform
+/// the AST, or perform compilation-specific validation (`compile = false`);
+/// it also never takes ambient declarations, matching the C++ constructor
+/// call `SemanticResolver{astContext, semCtx, /* ambientDecls */ nullptr,
+/// /* saveDecls */ nullptr, /* compile */ false}`.
+///
+/// \param root the top-level `Program` node.
+/// \return the resolved (possibly new) root, or `None` on error — see
+///   [`resolve_ast`]'s doc for why this differs from C++'s in-place `bool`.
+pub fn resolve_ast_for_parser<'ast>(
+    gc: &'ast GCLock,
+    sem_ctx: &mut SemContext,
+    sm: &mut SourceErrorManager,
+    root: &'ast Node<'ast>,
+) -> Option<&'ast Node<'ast>> {
+    let binding_table = sem_ctx.binding_table_rc();
+    let mut resolver = SemanticResolver::new(
+        &binding_table,
+        sem_ctx,
+        sm,
+        /* ambient_decls */ &[],
+        /* compile */ false,
     );
     resolver.run(gc, root)
 }

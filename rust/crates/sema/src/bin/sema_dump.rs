@@ -39,8 +39,8 @@
 //!
 //! Args: [--parse-flow] [--parse-component-syntax] [--parse-flow-records]
 //!       [--parse-flow-match] [--parse-ts] [--parse-jsx] [--enable-eval]
-//!       [--fstd-globals] [--fno-std-globals] [--ferror-limit=N] [file|-]
-//!       (omitted or "-" reads stdin)
+//!       [--fstd-globals] [--fno-std-globals] [--ferror-limit=N]
+//!       [--parser-entry] [file|-] (omitted or "-" reads stdin)
 //!
 //! This mirrors CompilerDriver's `-dump-sema` path: load the runtime library
 //! (`libhermes`) as a global-definitions file first, gated on
@@ -50,6 +50,21 @@
 //! `sema::semDump` (:969-974). `-fstd-globals`/`-fno-std-globals` defaults
 //! to true, matching `cl::StdGlobals`'s `CLFlag` default
 //! (CompilerDriver.cpp:273-278).
+//!
+//! `--parser-entry` switches to a SEPARATE entry point that mirrors the C++
+//! `tools/sema-parser-dump/sema-parser-dump.cpp` oracle instead: resolve via
+//! `sema::resolve_ast_for_parser` (port of `resolveASTForParser`,
+//! `SemResolve.cpp:295-306`, the `compile = false` entry point
+//! `hermes-parser-wasm.cpp:104` uses) and dump the result UNCONDITIONALLY,
+//! even when resolution reported errors — unlike the driver path above,
+//! which never dumps on a `resolveAST` failure. Three consequences, ported
+//! from the C++ tool's own OUTPUT CONTRACT: no ambient decls are ever loaded
+//! (`resolveASTForParser` takes none), no `-ferror-limit` is applied (the
+//! C++ tool never sets one, so the `SourceErrorManager` stays unbounded),
+//! and on failure there is no "Emitted N errors. exiting." epilogue (the
+//! C++ tool never prints one) — see [`exit_parser_entry`] vs
+//! [`exit_on_failure`]. The other dialect/eval flags above still apply
+//! normally in this mode.
 //!
 //! Command-line parsing uses the `command_line` crate (the LLVM-`cl`-style
 //! option parser copied from juno), like `parser`'s `ast-dump`.
@@ -64,7 +79,7 @@ use parser::lexer::{GrammarContext, JSLexer};
 use sema::dump::sem_dump;
 use sema::keywords::Keywords;
 use sema::libhermes::LIBHERMES;
-use sema::resolve::resolve_ast;
+use sema::resolve::{resolve_ast, resolve_ast_for_parser};
 use sema::sem_context::SemContext;
 use support::manager::SourceErrorManager;
 use support::render::StderrHandler;
@@ -86,6 +101,15 @@ fn exit_on_failure(sm: &SourceErrorManager) -> ! {
     // `CompileStatus::ParsingFailed == 2` (CompilerDriver.h:19-38); `main`
     // returns `res.status` as the process exit code (hermesc.cpp:57).
     std::process::exit(2);
+}
+
+/// Exit with `sema-parser-dump`'s (the C++ tool's) exit-code contract:
+/// `sm.getErrorCount() != 0 ? 2 : 0`, with no epilogue text. Used by
+/// `--parser-entry` instead of [`exit_on_failure`], which prints hermesc's
+/// driver epilogue — the C++ oracle for this mode
+/// (`tools/sema-parser-dump/sema-parser-dump.cpp`) never prints one.
+fn exit_parser_entry(sm: &SourceErrorManager) -> ! {
+    std::process::exit(if sm.error_count() != 0 { 2 } else { 0 });
 }
 
 /// The parsed command-line options. Built into a [`CommandLine`] then read
@@ -145,6 +169,9 @@ struct Options {
     /// via this harness's per-file `// FLAGS:` line, which never spells out
     /// both `-fstd-globals` and `-fno-std-globals` for the same file.
     no_std_globals: Opt<bool>,
+    /// Switch to the `resolveASTForParser` (`compile = false`) entry point
+    /// and its "dump unconditionally" output contract — see the module doc.
+    parser_entry: Opt<bool>,
     /// Input path; empty or "-" reads stdin.
     input: Opt<String>,
 }
@@ -251,6 +278,18 @@ impl Options {
                     ..Default::default()
                 },
             ),
+            parser_entry: Opt::new_flag(
+                cl,
+                OptDesc {
+                    long: Some("parser-entry"),
+                    desc: Some(
+                        "Resolve via resolveASTForParser (compile = false) \
+                         and dump unconditionally, mirroring the \
+                         sema-parser-dump C++ oracle.",
+                    ),
+                    ..Default::default()
+                },
+            ),
             input: Opt::<String>::new(
                 cl,
                 OptDesc {
@@ -286,6 +325,7 @@ fn main() {
     // if both are given (not a full port of `CLFlag`'s last-one-wins tie
     // break — see that doc).
     let fstd_globals = *opt.fstd_globals && !*opt.no_std_globals;
+    let parser_entry = *opt.parser_entry;
 
     let input = &*opt.input;
     let bytes = if input.is_empty() || input == "-" {
@@ -316,7 +356,14 @@ fn main() {
     // emits `<unknown>:0: error: too many errors emitted` once and drops every
     // later message, so an unlimited `sema-dump` diverges on any input with
     // more than 20 errors (`error-limit.js` in the corpus is the pin).
-    sm.set_error_limit(*opt.ferror_limit);
+    //
+    // `--parser-entry` skips this: its C++ oracle
+    // (`tools/sema-parser-dump/sema-parser-dump.cpp`) has no `-ferror-limit`
+    // flag at all and never calls `setErrorLimit`, so the manager stays at
+    // its default (unbounded) there too.
+    if !parser_entry {
+        sm.set_error_limit(*opt.ferror_limit);
+    }
 
     let mut ctx = Context::new();
     ctx.set_parse_flow(parse_flow);
@@ -348,7 +395,13 @@ fn main() {
     // (CompilerDriver.cpp:2000-2007): with `-fno-std-globals`, hermesc never
     // even parses `libhermes`, so `ambient_decls` stays empty and none of
     // the 63 ambient `UndeclaredGlobalProperty` decls appear in the dump.
-    let ambient_decls: Vec<NodeRc> = if fstd_globals {
+    //
+    // `--parser-entry` never loads it, full stop: `resolveASTForParser`
+    // (`SemResolve.cpp:295-306`) takes no `ambientDecls` parameter at all —
+    // see `resolve_ast_for_parser`'s doc.
+    let ambient_decls: Vec<NodeRc> = if parser_entry {
+        vec![]
+    } else if fstd_globals {
         let libhermes_buf_id =
             sm.add_buffer_bytes("<libhermes>", LIBHERMES.as_bytes());
         let atoms = &gc.ctx().atom_table;
@@ -390,12 +443,48 @@ fn main() {
         parser.parse()
     };
     let root = match parsed {
-        Some(root) if sm.error_count() == 0 => root,
+        // `--parser-entry`'s oracle (`sema-parser-dump.cpp`) only checks
+        // "is there a parsed AST at all" (`if (!parsedJs)`) before calling
+        // `resolveASTForParser` — it does NOT also require a clean parse,
+        // unlike the driver path below. Mirror that: accept any `Some` here
+        // when `parser_entry`, and let the post-resolution error count alone
+        // decide the exit code (see `exit_parser_entry`).
+        Some(root) if parser_entry || sm.error_count() == 0 => root,
         // The diagnostics were printed to stderr as they were produced;
         // hermesc exits nonzero with no stdout output, after the driver's
-        // epilogue line (see `exit_on_failure`).
+        // epilogue line (see `exit_on_failure`) — `--parser-entry` exits the
+        // same way but without that epilogue (see `exit_parser_entry`).
+        _ if parser_entry => exit_parser_entry(&sm),
         _ => exit_on_failure(&sm),
     };
+
+    if parser_entry {
+        let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+        // Dump unconditionally, even if resolution reported errors — the
+        // whole point of `--parser-entry`, mirroring
+        // `tools/sema-parser-dump/sema-parser-dump.cpp`'s OUTPUT CONTRACT.
+        //
+        // CAVEAT (known, currently-unexercised gap): if resolution reports
+        // an error ANYWHERE in the tree, `resolve_ast_for_parser` returns
+        // `None` and the fully-computed rewritten tree is discarded (see
+        // `SemanticResolver::run`'s doc — unlike C++, which mutates in
+        // place, so the partially-annotated tree survives a `false`
+        // return). This port has no way to recover that tree, so on `None`
+        // nothing is dumped even though the C++ oracle would still print
+        // one. Every file in the live `tests/sema_corpus_parser` resolves
+        // with zero errors, so this gap is not hit by the current gate.
+        if let Some(resolved_root) =
+            resolve_ast_for_parser(&gc, &mut sem_ctx, &mut sm, root)
+        {
+            let mut out_bytes: Vec<u8> = Vec::new();
+            sem_dump(&mut out_bytes, &gc, &sem_ctx, resolved_root);
+            let stdout = io::stdout();
+            let mut out = stdout.lock();
+            out.write_all(&out_bytes).unwrap();
+            out.flush().ok();
+        }
+        exit_parser_entry(&sm);
+    }
 
     let mut sem_ctx = SemContext::new(Keywords::new(&gc));
     // Dump the root resolution RETURNED: the resolver rebuilds the ancestors
