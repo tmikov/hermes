@@ -117,6 +117,10 @@ class JSI_EXPORT IWorkerSetup : public jsi::ICast {
   /// shared_ptr is released. On failure returns nullptr and sets \p error to a
   /// human-readable message. Called on the worker thread; must NOT perform
   /// operations on the worker runtime.
+  /// resolveScript runs synchronously on the worker thread before the script is
+  /// evaluated; a blocking implementation therefore blocks the worker's
+  /// terminate()/teardown (which joins the worker thread). Bound any I/O
+  /// accordingly.
   virtual std::shared_ptr<const jsi::Buffer> resolveScript(
       const std::string& url,
       std::string& error) = 0;

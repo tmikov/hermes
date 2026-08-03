@@ -519,6 +519,19 @@ void WorkerNativeState::startWorkerThread(
           "Encountered JSINativeException while running Worker script.");
       setTerminationState(workerState, *workerRuntime, false);
       return;
+    } catch (const std::exception &e) {
+      ::hermes::hermesLog(
+          "HermesWorker",
+          "Encountered C++ exception while starting Worker: %s",
+          e.what());
+      setTerminationState(workerState, *workerRuntime, false);
+      return;
+    } catch (...) {
+      ::hermes::hermesLog(
+          "HermesWorker",
+          "Encountered unknown exception while starting Worker.");
+      setTerminationState(workerState, *workerRuntime, false);
+      return;
     }
 
     std::unique_lock<std::mutex> lock(workerState->stateMutex);
@@ -546,6 +559,27 @@ void WorkerNativeState::startWorkerThread(
               *workerRuntime, std::move(message), onMessageFunc);
         } catch (const jsi::JSError &error) {
           postError(*workerRuntime, error.value(), workerState);
+        } catch (const jsi::JSINativeException &) {
+          ::hermes::hermesLog(
+              "HermesWorker",
+              "Encountered JSINativeException while processing Worker "
+              "message.");
+          setTerminationState(workerState, *workerRuntime, false);
+          return;
+        } catch (const std::exception &e) {
+          ::hermes::hermesLog(
+              "HermesWorker",
+              "Encountered C++ exception while processing Worker message: %s",
+              e.what());
+          setTerminationState(workerState, *workerRuntime, false);
+          return;
+        } catch (...) {
+          ::hermes::hermesLog(
+              "HermesWorker",
+              "Encountered unknown exception while processing Worker "
+              "message.");
+          setTerminationState(workerState, *workerRuntime, false);
+          return;
         }
       }
       lock.lock();

@@ -3656,11 +3656,25 @@ TEST_P(HermesWorkerTest, WorkerFromUrlBytecode) {
   std::string tag;
   ASSERT_TRUE(signal->wait(tag, 5000));
   EXPECT_EQ(tag, "bc-ok");
-  // Verifies a worker runs from a custom, externally-owned jsi::Buffer
-  // subclass (TrackedBuffer), not just a StringBuffer — the resolver may
-  // return a memory-mapped/externally-owned buffer.
 
+  // The buffer is retained for the worker runtime's life (referenced, not
+  // copied), so it is still alive right after the worker has run.
+  EXPECT_FALSE(destroyed->load());
+
+  // Drop all references to the worker and collect, so the worker runtime — and
+  // thus the resolver's buffer — is destroyed. Poll with GC because NativeState
+  // finalizers (which join the worker thread) may run asynchronously.
   worker.getPropertyAsFunction(*rt, "terminate").callWithThis(*rt, worker);
+  worker = Object(*rt); // drop the local handle
+  eval("w = undefined;"); // drop the global reference
+  bool released = false;
+  for (int i = 0; i < 100 && !released; ++i) {
+    rt->instrumentation().collectGarbage("test");
+    released = destroyed->load();
+    if (!released)
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  EXPECT_TRUE(released);
 }
 
 TEST_P(HermesWorkerTest, WorkerFromUrlResolverFailure) {
@@ -3717,6 +3731,23 @@ TEST_P(HermesWorkerTest, WorkerResolverEmptyBufferDeliversTypeError) {
       "TypeError");
 
   eval("__w2.terminate();");
+}
+
+TEST_P(HermesWorkerTest, WorkerResolverThrowsCppException) {
+  auto signal = std::make_shared<WorkerTestSignal>();
+  TestWorkerSetup provider;
+  provider.signal = signal;
+  provider.onResolve = [](const std::string &,
+                          std::string &) -> std::shared_ptr<const Buffer> {
+    throw std::runtime_error("resolver blew up");
+  };
+  castInterface<ISetWorkerSetup>(rt.get())->setWorkerSetup(&provider);
+
+  // Must not crash the process; the script must not run.
+  auto worker = eval("var w = new Worker('worker://boom'); w;").asObject(*rt);
+  std::string tag;
+  EXPECT_FALSE(signal->wait(tag, 500));
+  worker.getPropertyAsFunction(*rt, "terminate").callWithThis(*rt, worker);
 }
 
 TEST_P(HermesWorkerTest, WorkerInlineOptionForcesSource) {
