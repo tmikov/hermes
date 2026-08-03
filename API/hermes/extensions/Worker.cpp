@@ -9,7 +9,9 @@
 #include "Worker.h"
 #include "Intrinsics.h"
 #include "hermes/Public/RuntimeConfig.h"
+#include "hermes/Support/Base64.h"
 #include "hermes/hermes.h"
+#include "llvh/ADT/StringRef.h"
 #include "llvh/Support/Compiler.h"
 #include "llvh/Support/ErrorHandling.h"
 
@@ -626,6 +628,106 @@ void startWorker(
   workerNativeState->startWorkerThread(std::move(source), provider);
 }
 
+/// Percent-decode \p in into \p out. Returns false on a malformed escape.
+bool percentDecode(llvh::StringRef in, std::string &out) {
+  out.clear();
+  auto hex = [](char c) -> int {
+    if (c >= '0' && c <= '9')
+      return c - '0';
+    if (c >= 'a' && c <= 'f')
+      return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F')
+      return c - 'A' + 10;
+    return -1;
+  };
+  for (size_t i = 0; i < in.size(); ++i) {
+    if (in[i] == '%') {
+      if (i + 2 >= in.size())
+        return false;
+      int hi = hex(in[i + 1]), lo = hex(in[i + 2]);
+      if (hi < 0 || lo < 0)
+        return false;
+      out.push_back(static_cast<char>((hi << 4) | lo));
+      i += 2;
+    } else {
+      out.push_back(in[i]);
+    }
+  }
+  return true;
+}
+
+/// If \p url is a data: URL, decode its payload into \p out and return true.
+/// Return false if \p url is not a data: URL. Throw a TypeError (via
+/// throwTypeError) for a malformed data: URL. Format:
+/// data:[<mediatype>][;base64],<payload>
+bool decodeDataUrl(jsi::Runtime &rt, const std::string &url, std::string &out) {
+  llvh::StringRef ref(url);
+  // Strip any URL fragment: everything from the first literal '#'. A literal
+  // '#' in the body must be percent-encoded (%23), which is preserved because
+  // it is not a literal '#'.
+  size_t hash = ref.find('#');
+  if (hash != llvh::StringRef::npos) {
+    ref = ref.take_front(hash);
+  }
+  // The URL scheme is case-insensitive (RFC 3986); accept e.g. "DATA:".
+  if (!ref.startswith_lower("data:"))
+    return false;
+  ref = ref.drop_front(5); // after "data:" (5 chars regardless of case)
+  size_t comma = ref.find(',');
+  if (comma == llvh::StringRef::npos) {
+    throwTypeError(rt, "Malformed data: URL (missing comma)");
+  }
+  llvh::StringRef meta = ref.take_front(comma);
+  llvh::StringRef payload = ref.drop_front(comma + 1);
+  // Per the WHATWG data: URL processor, percent-decode the body first (for both
+  // plain and base64 URLs).
+  if (!percentDecode(payload, out)) {
+    throwTypeError(rt, "Malformed data: URL payload");
+  }
+  // An empty body decodes to empty bytes; skip base64 (hermes::base64Decode
+  // must not be called with empty input) and let the caller report the empty
+  // worker TypeError.
+  if (out.empty()) {
+    return true;
+  }
+  // The ";base64" token is case-insensitive per RFC 2397. For base64 URLs,
+  // base64-decode the (already percent-decoded) body with the vetted Support
+  // decoder.
+  if (meta.endswith_lower(";base64")) {
+    llvh::Optional<std::string> b64 = ::hermes::base64Decode(out);
+    if (!b64) {
+      throwTypeError(rt, "Malformed data: URL payload");
+    }
+    out = std::move(*b64);
+  }
+  return true;
+}
+
+/// Build a WorkerScriptSource from a string argument \p str per the option
+/// flags and whether a \p provider is present.
+WorkerScriptSource sourceFromString(
+    jsi::Runtime &rt,
+    std::string str,
+    bool inlineFlag,
+    bool allowData,
+    IWorkerSetup *provider) {
+  WorkerScriptSource source;
+  std::string decoded;
+  if (!inlineFlag && allowData && decodeDataUrl(rt, str, decoded)) {
+    if (decoded.empty()) {
+      throwTypeError(rt, "Cannot create Worker from empty data: URL");
+    }
+    source.eagerBuffer =
+        std::make_shared<jsi::StringBuffer>(std::move(decoded));
+  } else if (provider && !inlineFlag) {
+    source.url = std::move(str);
+    source.needsResolve = true;
+  } else {
+    source.eagerBuffer = std::make_shared<jsi::StringBuffer>(std::move(str));
+  }
+  return source;
+}
+
 jsi::Value initializeWorker(
     jsi::Runtime &rt,
     const jsi::Value &,
@@ -636,19 +738,13 @@ jsi::Value initializeWorker(
   auto self = args[0].asObject(rt);
   const jsi::Value &input = args[1];
   bool inlineFlag = args[2].getBool();
-  (void)args[3]; // allowData: consumed in a later task.
+  bool allowData = args[3].getBool();
 
   IWorkerSetup *provider = getWorkerSetup(rt);
 
   if (input.isString()) {
-    std::string str = input.asString(rt).utf8(rt);
-    WorkerScriptSource source;
-    if (provider && !inlineFlag) {
-      source.url = std::move(str);
-      source.needsResolve = true;
-    } else {
-      source.eagerBuffer = std::make_shared<jsi::StringBuffer>(std::move(str));
-    }
+    WorkerScriptSource source = sourceFromString(
+        rt, input.asString(rt).utf8(rt), inlineFlag, allowData, provider);
     startWorker(rt, std::move(self), std::move(source), provider);
     return jsi::Value::undefined();
   }
@@ -680,14 +776,8 @@ jsi::Value initializeWorker(
       // Symbol.toPrimitive), matching the web's USVString coercion, so an RN
       // URL is used as its href. Reclassify the result as a string.
       std::string str = input.toString(rt).utf8(rt);
-      WorkerScriptSource source;
-      if (provider && !inlineFlag) {
-        source.url = std::move(str);
-        source.needsResolve = true;
-      } else {
-        source.eagerBuffer =
-            std::make_shared<jsi::StringBuffer>(std::move(str));
-      }
+      WorkerScriptSource source =
+          sourceFromString(rt, std::move(str), inlineFlag, allowData, provider);
       startWorker(rt, std::move(self), std::move(source), provider);
       return jsi::Value::undefined();
     }

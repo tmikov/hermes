@@ -3791,6 +3791,180 @@ TEST_P(HermesWorkerTest, WorkerFromUrlObjectCoercion) {
   EXPECT_THROW(eval("new Worker(true);"), JSError);
 }
 
+// Test-only base64 encoder (standard alphabet) for building data: URLs.
+static std::string base64EncodeForTest(const std::string &in) {
+  static const char kTable[] =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  std::string out;
+  size_t i = 0;
+  for (; i + 3 <= in.size(); i += 3) {
+    uint32_t n =
+        (uint8_t(in[i]) << 16) | (uint8_t(in[i + 1]) << 8) | uint8_t(in[i + 2]);
+    out.push_back(kTable[(n >> 18) & 63]);
+    out.push_back(kTable[(n >> 12) & 63]);
+    out.push_back(kTable[(n >> 6) & 63]);
+    out.push_back(kTable[n & 63]);
+  }
+  if (i + 1 == in.size()) {
+    uint32_t n = uint8_t(in[i]) << 16;
+    out.push_back(kTable[(n >> 18) & 63]);
+    out.push_back(kTable[(n >> 12) & 63]);
+    out.push_back('=');
+    out.push_back('=');
+  } else if (i + 2 == in.size()) {
+    uint32_t n = (uint8_t(in[i]) << 16) | (uint8_t(in[i + 1]) << 8);
+    out.push_back(kTable[(n >> 18) & 63]);
+    out.push_back(kTable[(n >> 12) & 63]);
+    out.push_back(kTable[(n >> 6) & 63]);
+    out.push_back('=');
+  }
+  return out;
+}
+
+TEST_P(HermesWorkerTest, WorkerFromDataUrl) {
+  auto signal = std::make_shared<WorkerTestSignal>();
+  TestWorkerSetup provider;
+  provider.signal = signal;
+  provider.onResolve = [](const std::string &, std::string &error) {
+    ADD_FAILURE() << "resolver must not be called for allowData data: URL";
+    error = "unexpected";
+    return std::shared_ptr<const Buffer>(nullptr);
+  };
+  castInterface<ISetWorkerSetup>(rt.get())->setWorkerSetup(&provider);
+
+  // Percent-encoded (non-base64) data: URL, source.
+  auto worker = eval(
+                    "var w = new Worker("
+                    "'data:text/javascript,__workerRan(%22data-ok%22)%3B',"
+                    "{allowData: true}); w;")
+                    .asObject(*rt);
+  std::string tag;
+  ASSERT_TRUE(signal->wait(tag, 5000));
+  EXPECT_EQ(tag, "data-ok");
+  worker.getPropertyAsFunction(*rt, "terminate").callWithThis(*rt, worker);
+  EXPECT_TRUE(provider.lastUrl.empty());
+}
+
+TEST_P(HermesWorkerTest, WorkerDataUrlSchemeCaseInsensitive) {
+  auto signal = std::make_shared<WorkerTestSignal>();
+  TestWorkerSetup provider;
+  provider.signal = signal;
+  provider.onResolve = [](const std::string &, std::string &error) {
+    ADD_FAILURE() << "resolver must not be called for allowData data: URL";
+    error = "unexpected";
+    return std::shared_ptr<const Buffer>(nullptr);
+  };
+  castInterface<ISetWorkerSetup>(rt.get())->setWorkerSetup(&provider);
+
+  // The URL scheme is case-insensitive (RFC 3986); "DATA:" must be decoded.
+  auto worker = eval(
+                    "var w = new Worker("
+                    "'DATA:text/javascript,__workerRan(%22up-ok%22)%3B',"
+                    "{allowData: true}); w;")
+                    .asObject(*rt);
+  std::string tag;
+  ASSERT_TRUE(signal->wait(tag, 5000));
+  EXPECT_EQ(tag, "up-ok");
+  worker.getPropertyAsFunction(*rt, "terminate").callWithThis(*rt, worker);
+  EXPECT_TRUE(provider.lastUrl.empty());
+}
+
+TEST_P(HermesWorkerTest, WorkerDataUrlFragmentStripped) {
+  auto signal = std::make_shared<WorkerTestSignal>();
+  TestWorkerSetup provider;
+  provider.signal = signal;
+  castInterface<ISetWorkerSetup>(rt.get())->setWorkerSetup(&provider);
+
+  // '#ignored' is a URL fragment and must be excluded from the body; the
+  // percent-encoded %23 is a literal '#' and stays in the decoded source.
+  auto worker =
+      eval(
+          "var w = new Worker("
+          "'data:text/javascript,__workerRan(%22a%23b%22)%3B#ignored',"
+          "{allowData: true}); w;")
+          .asObject(*rt);
+  std::string tag;
+  ASSERT_TRUE(signal->wait(tag, 5000));
+  EXPECT_EQ(tag, "a#b");
+  worker.getPropertyAsFunction(*rt, "terminate").callWithThis(*rt, worker);
+}
+
+TEST_P(HermesWorkerTest, WorkerDataUrlRequiresAllowData) {
+  TestWorkerSetup provider;
+  provider.signal = std::make_shared<WorkerTestSignal>();
+  provider.onResolve = [](const std::string &url, std::string &) {
+    // Without allowData, a data: URL is just a URL handed to the resolver.
+    EXPECT_EQ(url.rfind("data:", 0), 0u);
+    return bufferFromString("__workerRan('via-resolver');");
+  };
+  castInterface<ISetWorkerSetup>(rt.get())->setWorkerSetup(&provider);
+
+  auto worker =
+      eval("var w = new Worker('data:text/javascript,1'); w;").asObject(*rt);
+  std::string tag;
+  ASSERT_TRUE(provider.signal->wait(tag, 5000));
+  EXPECT_EQ(tag, "via-resolver");
+  worker.getPropertyAsFunction(*rt, "terminate").callWithThis(*rt, worker);
+}
+
+TEST_P(HermesWorkerTest, WorkerDataUrlBase64Bytecode) {
+  // A base64 data: URL carrying bytecode still runs (magic-number path).
+  std::string bytecode;
+  ASSERT_TRUE(hermes::compileJS("__workerRan('data-bc');", bytecode));
+  std::string b64 = base64EncodeForTest(bytecode);
+  std::string url = "data:application/octet-stream;base64," + b64;
+
+  auto signal = std::make_shared<WorkerTestSignal>();
+  TestWorkerSetup provider;
+  provider.signal = signal;
+  castInterface<ISetWorkerSetup>(rt.get())->setWorkerSetup(&provider);
+
+  rt->global().setProperty(*rt, "__dataUrl", String::createFromUtf8(*rt, url));
+  auto worker =
+      eval("var w = new Worker(__dataUrl, {allowData:true}); w;").asObject(*rt);
+  std::string tag;
+  ASSERT_TRUE(signal->wait(tag, 5000));
+  EXPECT_EQ(tag, "data-bc");
+  worker.getPropertyAsFunction(*rt, "terminate").callWithThis(*rt, worker);
+}
+
+TEST_P(HermesWorkerTest, WorkerDataUrlBase64PercentEncoded) {
+  // Per WHATWG, a base64 data: URL body is percent-decoded before base64
+  // decoding, so percent-escaped '=' padding (%3D) must be accepted.
+  auto signal = std::make_shared<WorkerTestSignal>();
+  TestWorkerSetup provider;
+  provider.signal = signal;
+  castInterface<ISetWorkerSetup>(rt.get())->setWorkerSetup(&provider);
+
+  std::string src = "__workerRan('pct-b64');";
+  std::string b64 = base64EncodeForTest(src);
+  std::string escaped;
+  for (char c : b64)
+    escaped += (c == '=') ? std::string("%3D") : std::string(1, c);
+  std::string url = "data:text/javascript;base64," + escaped;
+
+  rt->global().setProperty(*rt, "__u", String::createFromUtf8(*rt, url));
+  auto worker =
+      eval("var w = new Worker(__u, {allowData: true}); w;").asObject(*rt);
+  std::string tag;
+  ASSERT_TRUE(signal->wait(tag, 5000));
+  EXPECT_EQ(tag, "pct-b64");
+  worker.getPropertyAsFunction(*rt, "terminate").callWithThis(*rt, worker);
+}
+
+TEST_P(HermesWorkerTest, WorkerMalformedDataUrlThrows) {
+  castInterface<ISetWorkerSetup>(rt.get())->setWorkerSetup(nullptr);
+  // Missing comma.
+  EXPECT_THROW(
+      eval("new Worker('data:text/javascript', {allowData:true});"), JSError);
+  // Bad base64.
+  EXPECT_THROW(
+      eval("new Worker('data:;base64,@@@@', {allowData:true});"), JSError);
+  // Empty base64 payload must throw (not abort): hermes::base64Decode must not
+  // be called with empty input.
+  EXPECT_THROW(eval("new Worker('data:;base64,', {allowData:true});"), JSError);
+}
+
 INSTANTIATE_TEST_CASE_P(
     Runtimes,
     HermesWorkerTest,
