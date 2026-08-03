@@ -11,6 +11,8 @@
 #include "hermes/AST/ESTree.h"
 #include "hermes/Parser/JSParser.h"
 
+#include "StringTable.h"
+
 namespace hermes {
 
 /// General category for token, based off esprima's token types.
@@ -82,6 +84,8 @@ class ParseResult {
   std::vector<uint32_t> programBuffer_;
   /// Buffer containing serialized source positions
   std::vector<PositionResult> positionBuffer_;
+  /// Deduplicated table of every string referenced by the program buffer.
+  NativeStringTable stringTable_;
 
   // Keep references to parser and context as they should last until
   // parse result is freed.

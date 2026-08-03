@@ -49,9 +49,13 @@ class HermesParserJSSerializer {
   void serializeNode(NodeNumber num) {
     // HEAPF64 requires doubles aligned on 8 byte boundaries but we are using a
     // buffer of 4 byte values, so add 4 byte padding if necessary.
-    std::uintptr_t ptr = reinterpret_cast<std::uintptr_t>(
-        result_.programBuffer_.data() + result_.programBuffer_.size());
-    if (ptr % 8) {
+    //
+    // Padding is decided by the index within the buffer rather than by the
+    // address of the buffer's storage. The consumer creates its Float64Array
+    // view over the program region, so only the region-relative parity
+    // matters, and this avoids depending on the allocator returning 8-byte
+    // aligned memory.
+    if (result_.programBuffer_.size() % 2) {
       result_.programBuffer_.emplace_back(0);
     }
 
@@ -64,19 +68,16 @@ class HermesParserJSSerializer {
     result_.programBuffer_.emplace_back((uint32_t)(bytes >> 32));
   }
 
-  /// Strings are serialized as a 4-byte pointer into the heap, followed
-  /// by their size as a 4-byte integer. The size is only present if the
-  /// pointer is non-null.
+  /// Strings are serialized as a single 4-byte string-table id, biased by one
+  /// so that zero can represent a null string.
   void serializeNode(NodeLabel label) {
     if (label == nullptr) {
       result_.programBuffer_.emplace_back(0);
       return;
     }
 
-    auto str = label->str();
-
-    result_.programBuffer_.emplace_back((uint32_t)str.begin());
-    result_.programBuffer_.emplace_back((uint32_t)str.size());
+    result_.programBuffer_.emplace_back(
+        result_.stringTable_.intern(label->str()) + 1);
   }
 
   /// Node lists are serialized as a 4-byte integer denoting the number of
@@ -187,8 +188,8 @@ class HermesParserJSSerializer {
       serializeLoc(comment.getSourceRange());
 
       auto value = comment.getString();
-      result_.programBuffer_.emplace_back((uint32_t)value.begin());
-      result_.programBuffer_.emplace_back((uint32_t)value.size());
+      result_.programBuffer_.emplace_back(
+          result_.stringTable_.intern(value) + 1);
     }
   }
 
@@ -286,9 +287,10 @@ class HermesParserJSSerializer {
     serializeLoc(range);
 
     const char *start = range.Start.getPointer();
-    result_.programBuffer_.emplace_back((uint32_t)start);
     result_.programBuffer_.emplace_back(
-        (uint32_t)(range.End.getPointer() - start));
+        result_.stringTable_.intern(
+            llvh::StringRef(start, (size_t)(range.End.getPointer() - start))) +
+        1);
   }
 
   /// AST nodes are serialized as a 4-byte node kind, followed by a 4-byte

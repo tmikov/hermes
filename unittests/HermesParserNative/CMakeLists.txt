@@ -7,6 +7,9 @@ set(HermesParserNativeTestSources
   StringTableTest.cpp
   KindHashTest.cpp
   ContainerWriterTest.cpp
+  SerializerTest.cpp
+  ../../tools/hermes-parser-native/HermesParserJSSerializer.cpp
+  ../../tools/hermes-parser-native/HermesParserDiagHandler.cpp
   )
 
 add_hermes_unittest(HermesParserNativeTests
@@ -18,5 +21,8 @@ target_include_directories(HermesParserNativeTests PRIVATE
   )
 
 target_link_libraries(HermesParserNativeTests
+  hermesAST
+  hermesParser
+  hermesSema
   LLVHSupport
   )
