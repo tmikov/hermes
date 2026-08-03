@@ -2451,7 +2451,7 @@ void SemanticResolver::validateAndDeclareIdentifier(
   // I am willing to live with this sacrifice.
   // Aliasing of "arguments" becomes especially iffy when type annotations are
   // added.
-  if (false) {
+  if ((false)) {
     // Redeclaration of `arguments` in non-strict mode is allowed at the
     // function level, so we don't need to declare a new variable.
     if (!curFunctionInfo()->strict && ident->_name == kw_.identArguments &&
