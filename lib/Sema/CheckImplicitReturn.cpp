@@ -149,6 +149,12 @@ class CheckImplicitReturn {
         return checkTerminationTryStatement(
             llvh::cast<ESTree::TryStatementNode>(node));
 
+#if HERMES_PARSE_FLOW
+      case ESTree::NodeKind::MatchStatement:
+        return checkTerminationMatchStatement(
+            llvh::cast<ESTree::MatchStatementNode>(node));
+#endif
+
       case ESTree::NodeKind::ReturnStatement:
         // Explicit return will always prevent implicit return.
         return TerminationResult::makeMustTerminate();
@@ -313,6 +319,31 @@ class CheckImplicitReturn {
 
     return result;
   }
+
+#if HERMES_PARSE_FLOW
+  // \return the termination result of a Flow 'match' statement.
+  // A match statement is not a break target in Hermes: SemanticResolver never
+  // records it in currentLoopOrSwitch, so a 'break' inside a case body always
+  // refers to an enclosing loop or switch. Consequently there is no label to
+  // remove here, and the labels targeted by the case bodies are simply unioned
+  // so that such breaks are propagated to the enclosing construct.
+  TerminationResult checkTerminationMatchStatement(
+      ESTree::MatchStatementNode *node) {
+    TerminationResult result{};
+    for (ESTree::Node &child : node->_cases) {
+      auto *matchCase = llvh::cast<ESTree::MatchStatementCaseNode>(&child);
+      // Cases don't fall through, so every body is checked independently.
+      auto caseRes = checkTermination(matchCase->_body);
+      result.targetLabels.insert(
+          caseRes.targetLabels.begin(), caseRes.targetLabels.end());
+    }
+    // Conservatively assume the match statement can complete normally:
+    // exhaustiveness is not checked here, so it is possible that no case
+    // matches and execution continues with the next statement.
+    result.targetLabels.insert(TerminationResult::kNextStatementLabel);
+    return result;
+  }
+#endif
 };
 
 } // namespace

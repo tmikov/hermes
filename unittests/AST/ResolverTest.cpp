@@ -301,4 +301,62 @@ TEST(ResolverTest, SourceVisibilityTest) {
   }
 }
 
+#if HERMES_PARSE_FLOW
+
+/// Parse \p src with Flow and Flow 'match' syntax enabled, run parser-mode
+/// semantic resolution on it, and \return the value of mayReachImplicitReturn
+/// computed for the first FunctionDeclaration in the program.
+/// Fails the current test if parsing or resolution fails, or if the program
+/// contains no function declaration.
+static bool firstFunctionMayReachImplicitReturn(llvh::StringRef src) {
+  Context ctx;
+  ctx.setParseFlow(ParseFlowSetting::ALL);
+  ctx.setParseFlowMatch(true);
+  sema::SemContext semCtx(ctx);
+  DiagContext diag(ctx);
+  JSParser parser(ctx, src);
+  auto parsed = parser.parse();
+  EXPECT_TRUE(parsed.hasValue());
+  if (!parsed.hasValue())
+    return false;
+
+  EXPECT_TRUE(sema::resolveASTForParser(ctx, semCtx, *parsed));
+  EXPECT_EQ(0, diag.getErrCountClear());
+
+  for (ESTree::Node &node : llvh::cast<ESTree::ProgramNode>(*parsed)->_body) {
+    if (auto *func = llvh::dyn_cast<ESTree::FunctionDeclarationNode>(&node))
+      return func->getSemInfo()->mayReachImplicitReturn;
+  }
+  ADD_FAILURE() << "no function declaration found";
+  return false;
+}
+
+/// A Flow 'match' statement must not crash CheckImplicitReturn, and since
+/// exhaustiveness is not checked, the match must be treated as able to
+/// complete normally even when every case returns.
+TEST(ResolverTest, MatchStatementImplicitReturnTest) {
+  // Every case returns, but the match may still match nothing.
+  EXPECT_TRUE(firstFunctionMayReachImplicitReturn(
+      "function f(x) { match (x) { 1 => { return 1; } _ => { return 2; } } }"));
+  // A case which completes normally obviously continues past the match.
+  EXPECT_TRUE(firstFunctionMayReachImplicitReturn(
+      "function f(x) { match (x) { 1 => { g(); } } }"));
+  // A return after the match still terminates the function.
+  EXPECT_FALSE(firstFunctionMayReachImplicitReturn(
+      "function f(x) { match (x) { 1 => { return 1; } } return 2; }"));
+}
+
+/// A 'break' inside a match case body targets the enclosing labeled statement,
+/// so the labels targeted by the case bodies must be propagated out of the
+/// match statement.
+TEST(ResolverTest, MatchStatementBreakLabelTest) {
+  // Without the match, 'lbl' would definitely terminate via the return, but
+  // 'break lbl' makes the statement after the labeled block reachable.
+  EXPECT_TRUE(firstFunctionMayReachImplicitReturn(
+      "function f(x) { lbl: { match (x) { 1 => { break lbl; } }"
+      " return 1; } }"));
+}
+
+#endif // HERMES_PARSE_FLOW
+
 } // anonymous namespace
