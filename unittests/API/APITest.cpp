@@ -3531,8 +3531,6 @@ worker;
 }
 
 TEST_P(HermesWorkerTest, WorkerFromBinaryErrors) {
-  // Non-buffer, non-string argument.
-  EXPECT_THROW(eval("new Worker({});"), JSError);
   // Empty binary input.
   EXPECT_THROW(eval("new Worker(new ArrayBuffer(0));"), JSError);
   EXPECT_THROW(eval("new Worker(new Uint8Array(0));"), JSError);
@@ -3765,6 +3763,32 @@ TEST_P(HermesWorkerTest, WorkerConfigHookInvoked) {
   std::string tag;
   ASSERT_TRUE(signal->wait(tag, 5000));
   worker.getPropertyAsFunction(*rt, "terminate").callWithThis(*rt, worker);
+}
+
+TEST_P(HermesWorkerTest, WorkerFromUrlObjectCoercion) {
+  auto signal = std::make_shared<WorkerTestSignal>();
+  TestWorkerSetup provider;
+  provider.signal = signal;
+  provider.onResolve = [](const std::string &url, std::string &) {
+    EXPECT_EQ(url, "worker://obj");
+    return bufferFromString("__workerRan('obj-ok');");
+  };
+  castInterface<ISetWorkerSetup>(rt.get())->setWorkerSetup(&provider);
+
+  // A URL-like object stringifies to its href and is treated as a URL.
+  auto worker = eval(
+                    "var u = { toString() { return 'worker://obj'; } };"
+                    "var w = new Worker(u); w;")
+                    .asObject(*rt);
+
+  std::string tag;
+  ASSERT_TRUE(signal->wait(tag, 5000));
+  EXPECT_EQ(tag, "obj-ok");
+  worker.getPropertyAsFunction(*rt, "terminate").callWithThis(*rt, worker);
+
+  // Non-string, non-object primitives still throw.
+  EXPECT_THROW(eval("new Worker(123);"), JSError);
+  EXPECT_THROW(eval("new Worker(true);"), JSError);
 }
 
 INSTANTIATE_TEST_CASE_P(

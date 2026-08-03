@@ -676,9 +676,20 @@ jsi::Value initializeWorker(
           dataViewByteOffset(rt, obj),
           dataViewByteLength(rt, obj));
     } else {
-      throwTypeError(
-          rt,
-          "Worker script must be a string, ArrayBuffer, TypedArray, or DataView");
+      // Non-buffer object: coerce to string via ToString (invokes toString /
+      // Symbol.toPrimitive), matching the web's USVString coercion, so an RN
+      // URL is used as its href. Reclassify the result as a string.
+      std::string str = input.toString(rt).utf8(rt);
+      WorkerScriptSource source;
+      if (provider && !inlineFlag) {
+        source.url = std::move(str);
+        source.needsResolve = true;
+      } else {
+        source.eagerBuffer =
+            std::make_shared<jsi::StringBuffer>(std::move(str));
+      }
+      startWorker(rt, std::move(self), std::move(source), provider);
+      return jsi::Value::undefined();
     }
     WorkerScriptSource source;
     source.eagerBuffer = std::make_shared<jsi::StringBuffer>(std::move(bytes));
