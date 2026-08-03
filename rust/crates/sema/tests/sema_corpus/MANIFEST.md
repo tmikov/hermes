@@ -143,6 +143,9 @@ unchanged at 47 rows and the Deferred table stays at 8, i.e. 46 + 8 = 54.
 | `function-redeclaration-error.js` | **S3 T2** — sixteen redeclaration shapes (`var`/`let`/`Catch`-vs-`function`, strict AND loose, block-nested AND top-level) crossed with the Annex B.3.3 loose-mode exception; several of the loose, block-nested pairs (e.g. `var b2; function b2(){}`) are exactly the `visit(VariableDeclarationNode *)` "already declared" shape `promotion-var-shadows-promoted.js` isolates on its own |
 | `regress-function-promotion-decl.js` | **S3 T2** — the canonical positive case: one block-nested `function inner(){}` promoted to `Var`, alongside a `let foo` sibling that is untouched |
 | `type-alias-children.js` | **S4a T1** — **upstream + `// FLAGS: -parse-flow` line prepended, so NOT byte-identical to the upstream source** (only the dump output is byte-for-byte vs hermesc, per this table's usual methodology); with `-parse-flow` actually enabling the Flow grammar, pins `visit(TypeAliasNode *)`'s true no-op (SemanticResolver.cpp:1579-1581, newly ported to `resolver/mod.rs`'s `visit_node`, cited there) — the alias's `_id`/`_right` children are never visited, so `Id 'A'`/`Id 'B'`/`GenericTypeAnnotation` appear in the dump with no `[D:E:...]` resolution annotations, which is the file's whole point ("children of type alias AST node are not resolved as variables") |
+| `flow-typecast-cover.js` | **S4a T4** — `visit(CoverTypedIdentifierNode *)` (SemanticResolver.cpp:1575-1577, `resolver/expressions.rs:966`). `(x: number)` alone does NOT reach this visit — JSParserImpl.cpp:2633-2640 rewrites a non-optional cover node with a type annotation into a `TypeCastExpressionNode` inside the parenthesized-expression parser itself; the OPTIONAL form (`x?: number`, `_optional = true`) skips that rewrite and survives as a real `CoverTypedIdentifierNode` when it is not consumed as arrow parameters, which is what `(x?: number);` pins. hermesc: exit 2, 1 error |
+| `flow-this-param.js` | **S4a T4** — `declareParams`'s `this`-parameter check (SemanticResolver.cpp:1767-1771, `resolver/functions.rs:897`), gated `compile_ && !typed_`: `function f(this: number) {}` under `-parse-flow` parses (Flow accepts a `this` parameter) but the untyped dialect rejects it in sema. hermesc: exit 2, 1 error |
+| `flow-annotations-benign.js` | **S4a T4** — negative control: parameter, return and variable type annotations under `-parse-flow` resolving completely cleanly — the annotation nodes are never visited as expressions, so they neither perturb declarations nor scopes. hermesc: exit 0, full dump match |
 
 `deep-ast-err.js` is listed in the Deferred table below but is NOT a real S1
 gap: the entire `.js` file is comment lines (its `RUN:` lines generate the
@@ -251,6 +254,15 @@ final-review follow-up" below.
 Final count after S4a Task 1: **176 corpus files matched** (100 succeed on
 hermesc, 76 are hermesc-failure files) — see "S4a Task 1: the `// FLAGS:`
 per-file harness" below.
+
+Final count after S4a Task 3: **187 corpus files matched** (100 succeed on
+hermesc, 87 are hermesc-failure files) — see "S4a Task 3: the module visits"
+below; this line was missing from the table and is filled in retroactively by
+S4a Task 4, same convention as the S3 Task 2/3 pair above.
+
+Final count after S4a Task 4: **190 corpus files matched** (101 succeed on
+hermesc, 89 are hermesc-failure files) — see "S4a Task 4: the untyped
+`-parse-flow` corpus battery" below.
 
 ## S2 Task 1 additions
 
@@ -1231,3 +1243,27 @@ authored in Step 2, 9 imported in Step 4), hermesc-succeeded **100**,
 UNCHANGED, because all eleven new files are error-path pins (hermesc exit 2
 on every one: a module declaration without `-commonjs` is always an error).
 Arithmetic: 176 + 2 + 9 = 187; 100 + 0 + 0 = 100.
+
+## S4a Task 4: the untyped `-parse-flow` corpus battery
+
+Three new files, each hermesc-verified FIRST (raw stdout+stderr+exit, `-parse-
+flow` on both sides) before being added. Both diagnostics this battery targets
+were already ported before this task — `visit(CoverTypedIdentifierNode *)`
+(SemanticResolver.cpp:1575-1577, `resolver/expressions.rs:966`, ported
+unconditionally even though the C++ site is `#if HERMES_PARSE_FLOW`, per the
+single-node-set precedent) and the `this`-parameter check inside
+`declareParams` (cpp:1767-1771, `resolver/functions.rs:897`, gated `compile_
+&& !typed_`) — so this task is pure corpus work, no resolver changes.
+
+| File | Covers |
+|---|---|
+| `flow-typecast-cover.js` | `visit(CoverTypedIdentifierNode *)`. The task brief's sketch shape, `(x: number);`, does **not** reach this visit: JSParserImpl.cpp:2633-2640 converts a non-optional cover node carrying a type annotation into a `TypeCastExpressionNode` right inside the parenthesized-expression parser (`cover->_right && !cover->_optional`), before sema ever runs. The OPTIONAL form does — `x?: number` parses `?` first (`tryParseCoverTypedIdentifierNode(test, /*optional=*/true)`, cpp:4517-4528), so `_optional = true` skips that rewrite and the cover node survives as the parenthesized expression's value when it is not consumed as arrow parameters. `(x?: number);` verified directly against hermesc: `error: typecast not allowed in this context`, caret+range over `x?: number` (10 columns, matching the node's `test`-start-to-prev-token-end range from `tryParseCoverTypedIdentifierNode`), exit 2. Non-optional `(x: number);` was probed too, confirming it takes the `TypeCastExpressionNode` path instead and does not exercise this visit — not used, since it would test the wrong node |
+| `flow-this-param.js` | The `this`-parameter check. `function f(this: number) {}` — Flow's parser accepts a `this` parameter (typing the receiver), but `typed_` is always false in this untyped-dialect port, so `compile_ && !typed_` fires. Contrast: without `-parse-flow`, the parser itself rejects `this` in a binding position first (`identifier, '{' or '[' expected in binding pattern`, per MANIFEST's S2 Task 8 note), so `-parse-flow` is required to reach this diagnostic at all. hermesc: exit 2, 1 error at the parameter's range |
+| `flow-annotations-benign.js` | Negative control, pinning that ordinary annotations don't perturb resolution: `function f(x: number): number { return x; } var y: string;` resolves with the exact same `SemContext`/AST dump shape (decls, scopes, `[D:E:...]` annotations on `f`, `x` and `y`) that the equivalent untyped file would produce — the `TypeAnnotation`/`GenericTypeAnnotation` subtrees are simply never visited as expressions. hermesc: exit 0, full dump byte-for-byte |
+
+Gate as of this task: `sema differential (tests/sema_corpus): 190 corpus
+files matched (101 succeeded on hermesc)` — 187 → **190** files (+3, all
+authored), hermesc-succeeded 100 → **101** (+1: `flow-annotations-benign.js`
+is the only exit-0 file of the three; the other two are error-path pins, like
+every other diagnostic-shape file in this corpus). Arithmetic: 187 + 3 = 190;
+100 + 1 = 101.
