@@ -31,6 +31,17 @@ That has three costs:
    code, and the serialization protocol re-decodes every string on every
    reference (see "String interning" below).
 
+   **Measured outcome (see the Task 12 benchmark):** only the second half of
+   this held up. Against a Release build on a 179-file corpus the fork is
+   **1.11x** the wasm package's end-to-end throughput, and splitting the phases
+   shows the gain is **entirely** JavaScript-side deserialization — the wasm
+   parse itself is at parity, within noise. On corpora with heavy identifier
+   repetition the deserialization win grows to 1.9x-4.3x, confirming the string
+   table is the mechanism; on those same corpora native parse-and-serialize
+   runs 5-15% *slower* than wasm. The honest summary is that this fork buys
+   WebAssembly independence and a better deserialization protocol, not raw
+   parsing speed.
+
 A native addon removes all three.
 
 ## Goals
@@ -325,10 +336,16 @@ leans on that.
   an addon there must link `node.lib`, which pins the binary to Node and breaks
   the "runs on any Node-API host" property. Deferred past the first release; it
   needs a decision about whether to ship a Node-only Windows binary.
-- **Package size.** Bundling every prebuild means every user downloads all
-  platforms' binaries. This is still expected to be far smaller than the current
-  900 KB base64 blob per install, but it should be measured once the first
-  binaries exist.
+- **Package size — MEASURED, and the original estimate was wrong.** Bundling
+  every prebuild means every user downloads all platforms' binaries. This
+  design document originally assumed that would still be "far smaller than the
+  current 900 KB base64 blob". It is not. A Release, stripped linux-x64 addon
+  is 2.01 MB (780 KB gzipped), so four platforms come to roughly **8.0 MB
+  unpacked / 3.1 MB packed**, against the wasm package's **423.7 KB packed** —
+  about 7x larger to install. Per-platform `optionalDependencies` would be
+  ~780 KB per user, smaller than the incumbent. The bundled layout was kept
+  deliberately after measurement; switching later is a packaging-only change,
+  since the loader already resolves prebuilds by platform.
 - **Upstreaming.** The design assumes Meta may accept this. Naming, copyright
   headers, and the use of existing codegen scripts all follow from that
   assumption.
