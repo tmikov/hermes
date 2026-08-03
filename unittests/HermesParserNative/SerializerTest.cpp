@@ -7,7 +7,6 @@
 
 #include "HermesParserJSSerializer.h"
 
-#include <algorithm>
 #include <cstdint>
 #include <cstring>
 
@@ -85,24 +84,65 @@ TEST(SerializerTest, PadsNumbersToEvenIndex) {
   EXPECT_TRUE(found) << "1.5 must appear in the program buffer";
 }
 
+/// \return the table id of \p str in \p table, or UINT32_MAX if absent.
+uint32_t findStringId(const NativeStringTable &table, llvh::StringRef str) {
+  for (uint32_t i = 0; i < table.count(); ++i) {
+    uint32_t start = table.offsets()[i];
+    uint32_t end = table.offsets()[i + 1];
+    if (llvh::StringRef(table.data()).substr(start, end - start) == str) {
+      return i;
+    }
+  }
+  return UINT32_MAX;
+}
+
+/// \return the wire word for a non-null node of kind \p kind.
+uint32_t kindWord(ESTree::NodeKind kind) {
+  return (uint32_t)kind + 1;
+}
+
 TEST(SerializerTest, StringIdsAreBiasedByOne) {
   auto result = parseAndSerialize("var foo;");
 
-  // Find the table id assigned to "foo".
-  uint32_t fooId = UINT32_MAX;
-  for (uint32_t i = 0; i < result->stringTable_.count(); ++i) {
-    uint32_t start = result->stringTable_.offsets()[i];
-    uint32_t end = result->stringTable_.offsets()[i + 1];
-    if (result->stringTable_.data().substr(start, end - start) == "foo") {
-      fooId = i;
-    }
-  }
+  const uint32_t varId = findStringId(result->stringTable_, "var");
+  const uint32_t fooId = findStringId(result->stringTable_, "foo");
+  ASSERT_NE(UINT32_MAX, varId) << "\"var\" must be interned";
   ASSERT_NE(UINT32_MAX, fooId) << "\"foo\" must be interned";
+  // VariableDeclaration serializes its `kind` label before its declarations,
+  // so "var" takes id 0 and "foo" takes a non-zero id. That matters: with
+  // fooId == 0 the biased and unbiased words would be 0 and 1, and 1 occurs
+  // all over the buffer, so the assertion below could not distinguish them.
+  ASSERT_NE(0u, fooId) << "\"foo\" must not be the first interned string";
 
-  // The program buffer must reference it as id + 1, since 0 means null.
+  // Walk the program buffer the way HermesParserDeserializer does instead of
+  // searching it: every node is a kind word (NodeKind + 1) followed by a loc
+  // id, followed by its ESTree.def fields in declaration order. The
+  // structural words are asserted along the way so that a layout change
+  // fails here loudly rather than silently moving the slot being checked.
   const auto &buf = result->programBuffer_;
-  EXPECT_NE(std::find(buf.begin(), buf.end(), fooId + 1), buf.end())
-      << "program buffer must reference the string as id + 1";
+  ASSERT_LE(12u, buf.size())
+      << "program buffer is too short to hold `var foo;`";
+
+  size_t i = 0;
+  ++i; // Program loc id.
+  ASSERT_EQ(1u, buf[i++]) << "Program body must hold one statement";
+
+  ASSERT_EQ(kindWord(ESTree::NodeKind::VariableDeclaration), buf[i++]);
+  ++i; // VariableDeclaration loc id.
+  EXPECT_EQ(varId + 1, buf[i++]) << "VariableDeclaration.kind is \"var\"";
+  ASSERT_EQ(1u, buf[i++]) << "must declare exactly one declarator";
+
+  ASSERT_EQ(kindWord(ESTree::NodeKind::VariableDeclarator), buf[i++]);
+  ++i; // VariableDeclarator loc id.
+  ASSERT_EQ(0u, buf[i++]) << "VariableDeclarator.init is null";
+
+  ASSERT_EQ(kindWord(ESTree::NodeKind::Identifier), buf[i++]);
+  ++i; // Identifier loc id.
+
+  // Identifier.name: the one word this test is about.
+  EXPECT_EQ(fooId + 1, buf[i])
+      << "Identifier.name must be the string-table id biased by one, since "
+         "zero denotes a null string";
 }
 
 } // namespace

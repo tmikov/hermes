@@ -320,7 +320,14 @@ static bool firstFunctionMayReachImplicitReturn(llvh::StringRef src) {
   if (!parsed.hasValue())
     return false;
 
-  EXPECT_TRUE(sema::resolveASTForParser(ctx, semCtx, *parsed));
+  // Must stop the helper, not just record a failure: getSemInfo() below
+  // returns nullptr when resolution did not run, and dereferencing it would
+  // crash instead of failing the test (the assert that would catch it is
+  // compiled out under NDEBUG).
+  if (!sema::resolveASTForParser(ctx, semCtx, *parsed)) {
+    ADD_FAILURE() << "semantic resolution failed";
+    return false;
+  }
   EXPECT_EQ(0, diag.getErrCountClear());
 
   for (ESTree::Node &node : llvh::cast<ESTree::ProgramNode>(*parsed)->_body) {
@@ -341,9 +348,14 @@ TEST(ResolverTest, MatchStatementImplicitReturnTest) {
   // A case which completes normally obviously continues past the match.
   EXPECT_TRUE(firstFunctionMayReachImplicitReturn(
       "function f(x) { match (x) { 1 => { g(); } } }"));
-  // A return after the match still terminates the function.
-  EXPECT_FALSE(firstFunctionMayReachImplicitReturn(
-      "function f(x) { match (x) { 1 => { return 1; } } return 2; }"));
+  // An unlabeled 'break' in a case body targets the enclosing loop, so it has
+  // to be propagated out of the match statement. A do-while body always runs,
+  // so the only way past the loop is that break: if the match dropped it (or
+  // reported that it must terminate) the trailing 'return 1' would make the
+  // function look unable to fall through, and this would be false.
+  EXPECT_TRUE(firstFunctionMayReachImplicitReturn(
+      "function f(x) { do { match (x) { 1 => { break; } } return 1; }"
+      " while (true); }"));
 }
 
 /// A 'break' inside a match case body targets the enclosing labeled statement,
