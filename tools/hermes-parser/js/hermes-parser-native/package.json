@@ -1,13 +1,13 @@
 {
   "name": "hermes-parser-native",
   "version": "0.37.0",
-  "description": "A JavaScript parser built from the Hermes engine",
+  "description": "A JavaScript parser built from the Hermes engine, as a native addon",
   "main": "dist/index.js",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/facebook/hermes.git",
-    "directory": "tools/hermes-parser/js/hermes-parser"
+    "directory": "tools/hermes-parser/js/hermes-parser-native"
   },
   "dependencies": {
     "hermes-estree": "0.37.0"
@@ -20,7 +20,8 @@
   },
   "files": [
     "dist",
-    "LICENCE",
+    "prebuilds",
+    "LICENSE",
     "README.md"
   ]
 }

@@ -1,5 +1,5 @@
-# hermes-parser
-A JavaScript parser built from the Hermes engine's parser compiled to WebAssembly. Can parse ES6, Flow, and JSX syntax.
+# hermes-parser-native
+A JavaScript parser built from the Hermes engine's parser, exposed as a Node-API native addon. Can parse ES6, Flow, and JSX syntax.
 
 ## API
 The Hermes parser exposes a single `parse(code, [options])` function, where `code` is the source code to parse as a string, and `options` is an optional object that may contain the following properties:
