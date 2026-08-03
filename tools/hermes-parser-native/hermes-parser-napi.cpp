@@ -78,6 +78,7 @@ napi_value errorResult(
     uint32_t column) {
   napi_value obj;
   if (napi_create_object(env, &obj) != napi_ok) {
+    napi_throw_error(env, nullptr, "failed to allocate error result object");
     return nullptr;
   }
   setString(env, obj, "error", message);
@@ -105,6 +106,7 @@ napi_value parse(napi_env env, napi_callback_info info) {
   size_t argc = 2;
   napi_value argv[2];
   if (napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr) != napi_ok) {
+    napi_throw_error(env, nullptr, "failed to read call arguments");
     return nullptr;
   }
   if (argc < 2) {
@@ -223,6 +225,7 @@ napi_value parse(napi_env env, napi_callback_info info) {
 
   napi_value obj;
   if (napi_create_object(env, &obj) != napi_ok) {
+    napi_throw_error(env, nullptr, "failed to allocate result object");
     return nullptr;
   }
   napi_set_named_property(env, obj, "buffer", arrayBuffer);
@@ -234,9 +237,11 @@ napi_value init(napi_env env, napi_value exports) {
   napi_value fn;
   if (napi_create_function(env, "parse", NAPI_AUTO_LENGTH, parse, nullptr,
                            &fn) != napi_ok) {
+    napi_throw_error(env, nullptr, "failed to create the parse function");
     return nullptr;
   }
   if (napi_set_named_property(env, exports, "parse", fn) != napi_ok) {
+    napi_throw_error(env, nullptr, "failed to export the parse function");
     return nullptr;
   }
   return exports;
