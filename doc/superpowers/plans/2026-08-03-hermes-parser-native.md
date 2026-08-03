@@ -24,7 +24,22 @@
 - **Never modify** anything under `tools/hermes-parser/` except `tools/hermes-parser/js/package.json` (adding one workspace entry) and new files under `tools/hermes-parser/js/hermes-parser-native/` and `tools/hermes-parser/js/scripts/`.
 - **Package name:** `hermes-parser-native`, unscoped. **Version:** `0.37.0` (monorepo lockstep). **Runtime dependencies:** exactly one, `hermes-estree`.
 - **Platform matrix:** `linux-x64`, `linux-arm64`, `darwin-x64`, `darwin-arm64`. Windows is out of scope.
-- **Build directory:** `cmake-build-asan` unless a task says otherwise.
+- **Build directories.** Two, deliberately:
+  - `cmake-build-asan` — for the C++ gtest unit tests (Tasks 2-5). This is
+    where the memory-safety risk lives (raw pointers, `memcpy`), and ASan
+    works normally for a native executable.
+  - `cmake-build-debug` — for the `.node` addon whenever Node loads it
+    (Tasks 1, 6-12). An ASan-instrumented shared module **cannot be
+    `dlopen`'d by a non-ASan `node`**; it fails with `undefined symbol:
+    __asan_option_detect_stack_use_after_return`. This is CLAUDE.md's
+    "specific reason not to" carve-out, not a casual opt-out. Do not work
+    around it with `LD_PRELOAD`.
+
+  Configure the non-ASan directory once with:
+  ```bash
+  cmake -B cmake-build-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+    -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+  ```
 - The AST produced must be `deepEqual` to the wasm parser's for all inputs.
 
 ---
@@ -117,7 +132,7 @@ console.log('smoke OK');
 - [ ] **Step 2: Run it to verify it fails**
 
 ```bash
-node tools/hermes-parser-native/__tests__/smoke.js cmake-build-asan/tools/hermes-parser-native/hermes-parser.node
+node tools/hermes-parser-native/__tests__/smoke.js cmake-build-debug/tools/hermes-parser-native/hermes-parser.node
 ```
 
 Expected: FAIL — `Cannot find module` (nothing built yet).
@@ -207,10 +222,10 @@ NAPI_MODULE(NODE_GYP_MODULE_NAME, init)
 - [ ] **Step 5: Build it**
 
 ```bash
-cmake --build cmake-build-asan --target hermes-parser-napi
+cmake --build cmake-build-debug --target hermes-parser-napi
 ```
 
-Expected: produces `cmake-build-asan/tools/hermes-parser-native/hermes-parser.node`.
+Expected: produces `cmake-build-debug/tools/hermes-parser-native/hermes-parser.node`.
 
 If the build directory does not exist yet:
 
@@ -224,7 +239,7 @@ cmake -B cmake-build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug \
 - [ ] **Step 6: Run the test to verify it passes**
 
 ```bash
-node tools/hermes-parser-native/__tests__/smoke.js cmake-build-asan/tools/hermes-parser-native/hermes-parser.node
+node tools/hermes-parser-native/__tests__/smoke.js cmake-build-debug/tools/hermes-parser-native/hermes-parser.node
 ```
 
 Expected: `smoke OK`.
@@ -1288,7 +1303,7 @@ console.log('container OK');
 
 ```bash
 node tools/hermes-parser-native/__tests__/container.js \
-  cmake-build-asan/tools/hermes-parser-native/hermes-parser.node
+  cmake-build-debug/tools/hermes-parser-native/hermes-parser.node
 ```
 
 Expected: FAIL — the addon throws `not implemented`.
@@ -1518,9 +1533,9 @@ reference for how these flags are applied.
 - [ ] **Step 5: Build and run the test**
 
 ```bash
-cmake --build cmake-build-asan --target hermes-parser-napi && \
+cmake --build cmake-build-debug --target hermes-parser-napi && \
 node tools/hermes-parser-native/__tests__/container.js \
-  cmake-build-asan/tools/hermes-parser-native/hermes-parser.node
+  cmake-build-debug/tools/hermes-parser-native/hermes-parser.node
 ```
 
 Expected: `container OK`.
@@ -1539,9 +1554,9 @@ Run both:
 
 ```bash
 node tools/hermes-parser-native/__tests__/smoke.js \
-  cmake-build-asan/tools/hermes-parser-native/hermes-parser.node && \
+  cmake-build-debug/tools/hermes-parser-native/hermes-parser.node && \
 node tools/hermes-parser-native/__tests__/container.js \
-  cmake-build-asan/tools/hermes-parser-native/hermes-parser.node
+  cmake-build-debug/tools/hermes-parser-native/hermes-parser.node
 ```
 
 Expected: `smoke OK` then `container OK`.
@@ -2039,7 +2054,7 @@ position loop with `this.positionBuffer[this.positionBufferIdx++]`.
 - [ ] **Step 8: Run the tests to verify they pass**
 
 ```bash
-ADDON=$PWD/cmake-build-asan/tools/hermes-parser-native/hermes-parser.node
+ADDON=$PWD/cmake-build-debug/tools/hermes-parser-native/hermes-parser.node
 (cd tools/hermes-parser/js; HERMES_PARSER_NATIVE_ADDON=$ADDON yarn jest hermes-parser-native)
 ```
 
@@ -2159,7 +2174,7 @@ describe('native parser matches wasm parser', () => {
 - [ ] **Step 2: Run it and expect failures to investigate**
 
 ```bash
-ADDON=$PWD/cmake-build-asan/tools/hermes-parser-native/hermes-parser.node
+ADDON=$PWD/cmake-build-debug/tools/hermes-parser-native/hermes-parser.node
 (cd tools/hermes-parser/js; HERMES_PARSER_NATIVE_ADDON=$ADDON yarn jest Differential)
 ```
 
@@ -2214,7 +2229,7 @@ describe('bulk corpus', () => {
 - [ ] **Step 4: Run the full differential suite**
 
 ```bash
-ADDON=$PWD/cmake-build-asan/tools/hermes-parser-native/hermes-parser.node
+ADDON=$PWD/cmake-build-debug/tools/hermes-parser-native/hermes-parser.node
 (cd tools/hermes-parser/js; HERMES_PARSER_NATIVE_ADDON=$ADDON yarn jest Differential)
 ```
 
@@ -2253,7 +2268,7 @@ added files.
 - [ ] **Step 2: Run them**
 
 ```bash
-ADDON=$PWD/cmake-build-asan/tools/hermes-parser-native/hermes-parser.node
+ADDON=$PWD/cmake-build-debug/tools/hermes-parser-native/hermes-parser.node
 (cd tools/hermes-parser/js; HERMES_PARSER_NATIVE_ADDON=$ADDON yarn jest hermes-parser-native)
 ```
 
@@ -2270,7 +2285,7 @@ implementation, not in the test.
 - [ ] **Step 4: Run again to verify they pass**
 
 ```bash
-ADDON=$PWD/cmake-build-asan/tools/hermes-parser-native/hermes-parser.node
+ADDON=$PWD/cmake-build-debug/tools/hermes-parser-native/hermes-parser.node
 (cd tools/hermes-parser/js; HERMES_PARSER_NATIVE_ADDON=$ADDON yarn jest hermes-parser-native)
 ```
 
@@ -2370,7 +2385,7 @@ describe('failure modes', () => {
 - [ ] **Step 2: Run it**
 
 ```bash
-ADDON=$PWD/cmake-build-asan/tools/hermes-parser-native/hermes-parser.node
+ADDON=$PWD/cmake-build-debug/tools/hermes-parser-native/hermes-parser.node
 (cd tools/hermes-parser/js; HERMES_PARSER_NATIVE_ADDON=$ADDON yarn jest Failures)
 ```
 
@@ -2412,7 +2427,7 @@ describe('kind hash guard', () => {
 - [ ] **Step 4: Run again**
 
 ```bash
-ADDON=$PWD/cmake-build-asan/tools/hermes-parser-native/hermes-parser.node
+ADDON=$PWD/cmake-build-debug/tools/hermes-parser-native/hermes-parser.node
 (cd tools/hermes-parser/js; HERMES_PARSER_NATIVE_ADDON=$ADDON yarn jest Failures)
 ```
 
@@ -2604,7 +2619,7 @@ finds it without the environment override:
 
 ```bash
 mkdir -p /tmp/prebuilds/linux-x64
-cp cmake-build-asan/tools/hermes-parser-native/hermes-parser.node \
+cp cmake-build-debug/tools/hermes-parser-native/hermes-parser.node \
   /tmp/prebuilds/linux-x64/
 tools/hermes-parser/js/scripts/build-native.sh \
   "$PWD/include" /tmp/prebuilds
@@ -2732,7 +2747,7 @@ console.log(`native is ${(wasmMs / nativeMs).toFixed(2)}x the wasm throughput`);
 - [ ] **Step 2: Run it**
 
 ```bash
-HERMES_PARSER_NATIVE_ADDON=$PWD/cmake-build-asan/tools/hermes-parser-native/hermes-parser.node \
+HERMES_PARSER_NATIVE_ADDON=$PWD/cmake-build-debug/tools/hermes-parser-native/hermes-parser.node \
   node tools/hermes-parser/js/hermes-parser-native/__benchmarks__/parse-bench.js
 ```
 
