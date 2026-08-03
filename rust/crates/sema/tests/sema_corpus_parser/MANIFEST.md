@@ -1,4 +1,4 @@
-# `tests/sema_corpus_parser` corpus (S4a Task 2)
+# `tests/sema_corpus_parser` corpus (S4a Tasks 2-3)
 
 Companion corpus to `tests/sema_corpus/MANIFEST.md`, but for a DIFFERENT
 oracle pair: the C++ `tools/sema-parser-dump/sema-parser-dump.cpp` tool vs
@@ -15,9 +15,11 @@ vs `sema-dump --parser-entry <file>` (no extra flags — matching what
 global constraint that every corpus file is verified against the C++ side
 FIRST with the raw stdout+stderr+exit triple.
 
-`read_dir` in `run_differential` is non-recursive, so the `pending/`
-subdirectory below is automatically excluded from the walk — no extra
-filtering code needed.
+`read_dir` in `run_differential` is non-recursive, so a `pending/`
+subdirectory is automatically excluded from the walk — no extra filtering
+code needed. As of S4a Task 3 the Pending table is empty and the directory is
+gone (git does not track empty directories); the mechanism is documented here
+for whoever needs it next.
 
 ## Imported (live differential gate)
 
@@ -27,21 +29,28 @@ filtering code needed.
 | `error-break-outside-loop.js` | `break;`. Proves "dump despite errors": resolution reports `'break' not within a loop or a switch` (a genuine post-walk `sm_.getErrorCount() != 0` from `SemanticResolver::run`/`run_always`'s SECOND gate, `SemanticResolver.cpp:69` / `resolver/mod.rs`), yet BOTH tools still print the full dump (`Func loose`/`Scope %s.1`/`BreakStatement`) and exit 2. Verified byte-identical: 77 bytes stdout both sides, matching stderr, exit 2 both sides. |
 | `error-arrow-rewrite-then-error.js` | `var f = (a) => a + 1;\nbreak;`. Same post-walk gate as above, but AFTER a real rewrite (arrow-function processing, S2 rewrite #1) has already mutated the tree — proves `run_always`'s rebuilt-tree-on-error path carries the rewrite through, not just the original unmodified nodes. Verified byte-identical: 481 bytes stdout both sides, matching stderr, exit 2 both sides. |
 | `error-continue-outside-loop.js` | `function f(){ continue; }`. Same post-walk gate, nested one function deep (`continue` outside a loop inside a function body, not at Program scope) — proves the dump-despite-error path also works when the error site is below the top-level function context. Verified byte-identical: 310 bytes stdout both sides, matching stderr, exit 2 both sides. |
+| `compile-false-basics.js` | `export default function f(){}`. **S4a Task 3** — moved in from `pending/`. Pins TWO `compile_`-gated behaviors of `visit(ExportDefaultDeclarationNode *)` at once (cpp:1519-1547): no `'export' statement requires module mode` error is emitted (cpp:1520 is `compile_ &&`), and **rewrite #4 does not fire** (cpp:1526 likewise) — the dump shows `ExportDefaultDeclaration` → `FunctionDeclaration`, not the `FunctionExpression` the rewrite would have produced. Verified byte-identical: exit 0 both sides, full dump, empty stderr. This is the corpus's SECOND hermesc-analogue success file |
+| `module-imports.js` | `import d, {a as b} from 'm'; import * as ns from 'n';`. **S4a Task 3** — the other side of the module-mode asymmetry: the import error is NOT `compile_`-gated (cpp:876-879), so both declarations error even here, and the tool dumps anyway. That dump is what the DRIVER corpus can never show (hermesc skips the dump on a `resolveAST` failure), so this file is the only pin for `extractIdentsFromDecl`'s `ImportDeclaration` arm (cpp:2334-2347): `Decl %d.N Import` for `d` (`ImportDefaultSpecifier`), `b` (`ImportSpecifier` `_local`) and `ns` (`ImportNamespaceSpecifier`), plus — proving the specifier children walk really runs — `a` (the `ImportSpecifier`'s `_imported`) resolving as an ordinary `UndeclaredGlobalProperty`. Verified byte-identical: exit 2 both sides, matching stdout and stderr |
 | `error-invalid-assignment-lvalue.js` | `1 = 2;`. Also the post-walk gate (`ResolverTest.cpp`'s `TestBadAssignmentLValue` confirms "invalid assignment left-hand side" is a `sema::resolveAST`-time check on an already-cleanly-parsed tree, not a parser diagnostic) — see "Gate classification" below for why this file does NOT exercise the entry gate, correcting an initial (hedged, "verify yourself") classification from code review. Verified byte-identical: 165 bytes stdout both sides, matching stderr, exit 2 both sides. |
 
 ## Pending (excluded from the walk — `pending/` subdirectory)
 
-| File | Blocked on | Target phase |
-|---|---|---|
-| `compile-false-basics.js` | `export default function f(){}`. On the C++ side this pins that NO module-mode error is emitted under `compile = false` (the export gate is `compile_ &&`, cpp:1511) — verified: `sema-parser-dump compile-false-basics.js` exits 0 with a full dump (`ExportDefaultDeclaration` → `FunctionDeclaration`). On the Rust side `sema-dump --parser-entry` PANICS: `resolver/mod.rs`'s catch-all hits `Node::ExportDefaultDeclaration`, which is one of the four module-visit arms explicitly reserved for S4a Task 3 (per the plan's global constraints: "ONLY the four module-visit arms replace catch-all panics in this phase"). Move to the parent directory (out of `pending/`) once Task 3 lands `Import`/`Export*` visits. | S4a Task 3 |
+Empty as of S4a Task 3. The one row that lived here,
+`compile-false-basics.js`, was blocked on `resolver/mod.rs`'s catch-all
+panicking for `Node::ExportDefaultDeclaration`; Task 3 landed the four
+module-visit arms (`resolver/modules.rs`) and the file moved into the live
+table above.
 
 ## Gate
 
-`sema differential (tests/sema_corpus_parser): 5 corpus files matched (1
-succeeded on the oracle)` — as of this task's fix round. The non-degeneracy
-guard in `run_differential` (at least one oracle success) is satisfied by
-`plain.js`; the other four are all legitimate error-path pins (oracle exit 2),
-same convention as `tests/sema_corpus/parse-error.js`.
+`sema differential (tests/sema_corpus_parser): 7 corpus files matched (2
+succeeded on the oracle)` — 5 → **7** files (+2: `module-imports.js`,
+authored by S4a Task 3, and `compile-false-basics.js`, moved in from
+`pending/`), oracle-succeeded 1 → **2** (+1: `compile-false-basics.js` is an
+exit-0 file; `module-imports.js` is an error-path pin). The non-degeneracy
+guard in `run_differential` (at least one oracle success) is satisfied twice
+over; the other five are all legitimate error-path pins (oracle exit 2), same
+convention as `tests/sema_corpus/parse-error.js`.
 
 ## `SemanticResolver::run`'s two gates, and which files hit which
 

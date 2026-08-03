@@ -1114,3 +1114,120 @@ files matched (100 succeeded on hermesc)` — 173 → **176** files (+3:
 files are hermesc successes, not error-path pins). Deferred table 5 → **4**
 (`type-alias-children.js`'s row removed; see its new row in "Imported"
 above).
+
+## S4a Task 3: the module visits
+
+`resolver/modules.rs` ports the four ES-module declaration visits —
+`visit(ImportDeclarationNode *)` (SemanticResolver.cpp:874-890),
+`visit(ExportNamedDeclarationNode *)` (cpp:1510-1517),
+`visit(ExportDefaultDeclarationNode *)` (cpp:1519-1547, carrying **rewrite
+#4**) and `visit(ExportAllDeclarationNode *)` (cpp:1549-1554) — replacing
+`visit_node`'s catch-all panic for those four kinds, per the plan's global
+constraint that ONLY these four arms may do so in this phase. The
+`$SHBuiltin` CommonJS-module protocol (`calls.rs`'s three phase-tagged
+panics) is untouched: it is S4b, together with `-commonjs` itself, which is
+implemented nowhere in this port. Six module-SPECIFIER kinds
+(`ImportSpecifier`, `ImportDefaultSpecifier`, `ImportNamespaceSpecifier`,
+`ImportAttribute`, `ExportSpecifier`, `ExportNamespaceSpecifier`) joined
+`visit_node`'s override-free generic arm at the same time — none of them
+appears in the SemanticResolver.h:200-304 `visit` inventory or in
+DeclCollector.h:81-99, so C++ reaches their children through
+`visitESTreeChildren`, exactly like that arm; they are the children the four
+new visits walk into.
+
+Two C++ quirks are preserved bug-for-bug and flagged in `modules.rs`:
+
+- **`ExportAllDeclaration`'s message wording** (cpp:1552-1553) is `'export'
+  statement requires **CommonJS** module mode`, where the Named and Default
+  visits — same gate, same condition — say plain `'export' statement
+  requires module mode`. Pinned by `module-export-plain.js` (all three in
+  one file) and by upstream `export.js`.
+- **Rewrite #4 hard-codes `/* async */ false`** (cpp:1538) instead of
+  `funcDecl->_async`, so an anonymous `export default async function () {}`
+  loses its async flag on the rewritten `FunctionExpression`. Not
+  dump-visible without `-commonjs`; pinned by the unit test
+  `export_default_anonymous_function_is_rewritten_to_an_expression`.
+
+A third asymmetry, also preserved: the IMPORT error (cpp:876-879) is NOT
+`compile_`-gated while all three export errors are, so an `import` errors
+even under `resolveASTForParser`. Both sides of that are pinned in the
+parser-entry corpus (`sema_corpus_parser/MANIFEST.md`).
+
+`FunctionInfo::imports` (cpp:887) is now populated, which discharges spec
+§3.4 (a)'s second and last backref-fixup obligation (`hoisted_functions` was
+the first, S1 T7). The list is dump-blind — `SemContextDumper.cpp` never
+mentions it, and neither does this port's `dump_context.rs` — so the
+differential cannot see it at all; the unit tests
+`import_declarations_are_recorded_on_the_function_info` and
+`import_backref_is_untouched_without_a_rebuild` in `tests/resolver.rs` are
+its only pin, asserting list CONTENT (node identity against the returned
+tree, in order) rather than just length.
+
+### New files (Step 2 — authored)
+
+| File | Covers |
+|---|---|
+| `module-import-plain.js` | `import {a} from 'm';`. The import visit's module-mode error, which is NOT `compile_`-gated (cpp:876-879) — the bug-for-bug asymmetry against the exports. hermesc: exit 2, 1 error, no dump (the post-walk gate). Verified against `hermesc -dump-sema` FIRST, raw stdout+stderr+exit |
+| `module-export-plain.js` | All three export visits in one file, including the ExportAll **message-wording quirk** (`CommonJS module mode` vs `module mode`) side by side with the other two. Its `export default function () {}` also drives rewrite #4 through the walk under `compile_ = true` — dump-invisible here (hermesc skips the dump on a `resolveAST` failure, CompilerDriver.cpp:960-974), so what it pins is that the rewritten subtree still resolves cleanly. hermesc: exit 2, 3 errors. Verified FIRST |
+
+### New files (Step 4 — the S3-T3 sweep's module panic bucket)
+
+The S3-T3 re-probe left a 17-file panic bucket: 9 files on `mod.rs`'s
+catch-all for a module kind, 7 on `calls.rs`'s `$SHBuiltin.moduleFactory`
+panic, and `computed-fn-name.js`'s pre-existing-C++-defect reproduction. All
+**nine** module files became byte-identical with this task and are imported
+below, each hermesc-verified FIRST (raw stdout+stderr+exit, no extra flags on
+either side — none needs a `// FLAGS:` line, so each is a byte-identical
+upstream copy). The other eight are untouched and stay out, exactly as the
+global constraints require.
+
+| File | Upstream | Covers |
+|---|---|---|
+| `import.js` | `test/Parser/es6/import.js` | Eight `import` forms — bare, namespace, named, renamed, trailing comma, reserved-word-as-imported-name, default, default + namespace. 8 module-mode errors, exit 2 |
+| `import-location.js` | `test/Parser/es6/import-location.js` | `import {foo, bar as baz} from 'other';` — one error, exit 2 |
+| `import-assertions.js` | `test/Parser/es6/import-assertions.js` | The `import assertions are not supported` error and its `compile_ && !_attributes.empty()` gate (cpp:881-885): `import 'foo.js' with {}` reports ONE error (empty attributes), every `with {...}` form reports TWO at the same location, module-mode first. Also carries `import('foo', 1)` (`ImportExpression`, S2 T8). 13 errors, exit 2 |
+| `export.js` | `test/Parser/es6/export.js` | The widest export file: `export *` (the **CommonJS-wording** message), `export * as bar` (`ExportNamespaceSpecifier`), `export default function myFun()` (NAMED — rewrite #4 does not fire), `export var/function/let/const`, `export {}`/`{x}`/`{y,}`/`{a as b, c, last}`. 11 errors (one per `export` line, none of them the assertions kind), exit 2 |
+| `export-default.js` | `test/Parser/es6/export-default.js` | `export default 2 + 2;` — the non-function default export (rewrite #4's `dyn_cast` fails), 1 error, exit 2 |
+| `export-default-class.js` | `test/Parser/es6/export-default-class.js` | `export default class {}` — anonymous CLASS default export: another kind rewrite #4 must leave alone, 1 error, exit 2 |
+| `export-default-async.js` | `test/Parser/es6/export-default-async.js` | `export default async function foo() {}` — NAMED async, so the `/* async */ false` quirk does not fire (it needs the anonymous form); 1 error, exit 2 |
+| `export-default-function.js` | `test/AST/es6/export-default-function.js` | `'use strict'; export default function() {}` — the ANONYMOUS form, i.e. the one input in the whole upstream tree that actually fires rewrite #4. Its own `RUN:` line uses `-dump-transformed-ast -commonjs`, which this port does not implement (S4b); imported at the flagless S4a shape, where hermesc reports the module-mode error and skips the dump, so what it pins here is that the rewritten subtree resolves without incident under a strict-mode program. 1 error, exit 2 |
+| `component-identifier.js` | `test/Parser/flow/component-syntax/component-identifier.js` | `export default component + 1;` — `component` used purely as an IDENTIFIER, so the file parses identically with and without `-parse-flow` (checked both ways) and reaches the export visit either way; imported flagless. Not a vacuous parse-error match: hermesc reports exactly the one `'export'` error, at 52:3. 1 error, exit 2 |
+
+### Sweep result
+
+The full S2-T8/S3-T3 sweep was re-run with the same tooling — both binaries,
+raw stdout + stderr + exit status, no extra flags on either side — over the
+same 1416 files in the same 8 upstream dirs (count re-verified: `find
+test/{Parser,IRGen,BCGen,Optimizer,hermes,AST,Driver,RA} -iname '*.js' | wc
+-l` = 1416):
+
+| Outcome | S2-T8 | S3-T3 | S4a-T3 | Delta vs S3-T3 |
+|---|---|---|---|---|
+| byte-identical | 1203 | 1209 | **1218** | +9 |
+| mismatch | 190 | 190 | **190** | 0 |
+| panic | 23 | 17 | **8** | −9 |
+
+1218 + 190 + 8 = 1416. The raw exit-shape pass reads 1218 / 188 / 10; the two
+extra "panics" are `test/Parser/nested-expressions.js` and
+`test/hermes/far-environment-access.js`, the two stack-overflow `SIGABRT`
+files the S3-T3 section already places in the mismatch bucket (the
+recursion-depth-parity landmine, where both sides fail differently). Applying
+that same established convention gives the 190 / 8 above — the identical
+reconciliation S3-T3 documents, and the only one applied.
+
+The residual 8 panics are, exhaustively (each message read, not assumed):
+seven `calls.rs` `$SHBuiltin.moduleFactory needs visitModuleFactory
+(cpp:1320-1366) — S4 modules` files (`test/BCGen/HBC/xmod-requires-opt.js`,
+`test/Optimizer/xmod-{builtins,require-cse,requires-opt-extension,
+requires-opt}.js`, `test/hermes/xmod-exec-require{-bad-func,}.js`) plus
+`test/hermes/computed-fn-name.js`'s `not all scopes were visited` assertion
+(the pre-existing C++ defect reproduction). **Zero** catch-all "unhandled
+node kind" panics remain in the sweep. `test/Sema/xmod-errors.js` (the
+Deferred row) still panics the same way, unchanged.
+
+Gate as of this task: `sema differential (tests/sema_corpus): 187 corpus
+files matched (100 succeeded on hermesc)` — 176 → **187** files (+11: 2
+authored in Step 2, 9 imported in Step 4), hermesc-succeeded **100**,
+UNCHANGED, because all eleven new files are error-path pins (hermesc exit 2
+on every one: a module declaration without `-commonjs` is always an error).
+Arithmetic: 176 + 2 + 9 = 187; 100 + 0 + 0 = 100.

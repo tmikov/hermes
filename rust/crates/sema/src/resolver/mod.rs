@@ -264,8 +264,15 @@
 //!   index it pushed into and rewrites that slot when the visit returns
 //!   `Changed` — see `functions.rs`'s module doc for the mechanism and for
 //!   why only a unit test (not the differential) can catch a regression.
-//!   `FunctionInfo::imports` is still unpopulated; the module visits (S4)
-//!   that first push into it own the same fixup.
+//!   `FunctionInfo::imports` is populated as of S4a T3 (`visit(
+//!   ImportDeclarationNode *)`, cpp:887) and DISCHARGES the obligation
+//!   there too, by the same mechanism: `modules::visit_import_declaration`
+//!   remembers the `FunctionInfo` and index it pushed into and rewrites
+//!   that slot when the children walk returns `Changed` — see `modules.rs`'s
+//!   module doc, and `import_backref_is_untouched_without_a_rebuild` in
+//!   `tests/resolver.rs` for the unit test that pins it (the differential
+//!   is blind: `imports` is never dumped). With both records covered, spec
+//!   §3.4 (a) is fully discharged.
 //!
 //! A visit that needs to do work *between* two children (C++
 //! `visit(AssignmentExpressionNode *)` validates `_left` before visiting
@@ -368,6 +375,7 @@ mod declarations;
 mod expressions;
 mod functions;
 mod identifiers;
+mod modules;
 mod promoter;
 mod statements;
 mod unresolver;
@@ -1330,7 +1338,36 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // creating no scope — exactly this arm. Pinned by
             // `expr-visit-generic-2.js`, which also pins that BigInt operands
             // are NOT folded (`ASTEval`'s folds only accept `NumericLiteral`).
+            //
+            // S4a T3 adds the SIX module-specifier kinds the four module
+            // visits below reach as children — `ImportSpecifier`,
+            // `ImportDefaultSpecifier`, `ImportNamespaceSpecifier`,
+            // `ImportAttribute` (ESTree.def:597-611),
+            // `ExportSpecifier` and `ExportNamespaceSpecifier`
+            // (ESTree.def:625-632). Same argument as `ClassBody`'s above:
+            // none of the six appears in the SemanticResolver.h:200-304
+            // `visit` inventory (which names ONLY `ImportDeclarationNode`
+            // and the three `Export*DeclarationNode`s, at :256 and
+            // :280-282), so C++ reaches each one's children —
+            // `_imported`/`_local`, `_local`, `_local`, `_key`/`_value`,
+            // `_exported`/`_local`, `_exported` — through
+            // `visitESTreeChildren`, exactly like this arm. Neither does
+            // any of the six have a `DeclCollector` override
+            // (DeclCollector.h:81-99 names only `ImportDeclarationNode` of
+            // the ten module kinds), so none creates a scope. This is
+            // observable in the parser-entry corpus:
+            // `module-imports.js`'s dump resolves an `ImportSpecifier`'s
+            // `_imported` as an ordinary identifier (`Id 'a'
+            // [D:E:%d.4 'a']`, an `UndeclaredGlobalProperty`) alongside its
+            // `_local`'s `Import` decl — precisely because the children walk
+            // reaches both.
             Node::ExpressionStatement(_)
+            | Node::ImportSpecifier(_)
+            | Node::ImportDefaultSpecifier(_)
+            | Node::ImportNamespaceSpecifier(_)
+            | Node::ImportAttribute(_)
+            | Node::ExportSpecifier(_)
+            | Node::ExportNamespaceSpecifier(_)
             | Node::DebuggerStatement(_)
             | Node::BigIntLiteral(_)
             | Node::TaggedTemplateExpression(_)
@@ -1375,6 +1412,30 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // Node`) are unexercised by any corpus file yet and are left to
             // whichever task's corpus needs them.
             Node::TypeAlias(_) => TransformResult::Unchanged,
+            // The four ES-module declaration visits (S4a T3):
+            // `visit(ImportDeclarationNode *)` (cpp:874-890),
+            // `visit(ExportNamedDeclarationNode *)` (cpp:1510-1517),
+            // `visit(ExportDefaultDeclarationNode *)` (cpp:1519-1547, which
+            // carries rewrite #4) and `visit(ExportAllDeclarationNode *)`
+            // (cpp:1549-1554) — see `modules.rs`, including the two
+            // bug-for-bug quirks it preserves (the `ExportAll` message
+            // wording and rewrite #4's `/* async */ false`) and the
+            // `FunctionInfo::imports` backref fixup. The `$SHBuiltin`
+            // CommonJS-module protocol (`calls.rs`'s three phase-tagged
+            // panics) is deliberately NOT part of this: it is S4b, together
+            // with `-commonjs` itself.
+            Node::ImportDeclaration(_) => {
+                self.visit_import_declaration(gc, node)
+            }
+            Node::ExportNamedDeclaration(_) => {
+                self.visit_export_named_declaration(gc, node)
+            }
+            Node::ExportDefaultDeclaration(_) => {
+                self.visit_export_default_declaration(gc, node)
+            }
+            Node::ExportAllDeclaration(_) => {
+                self.visit_export_all_declaration(gc, node)
+            }
             _ => panic!(
                 "sema: unhandled node kind {} (S3+/typed phases)",
                 node.node_type_str()

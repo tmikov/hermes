@@ -2435,3 +2435,345 @@ fn a_visible_let_blocks_promotion() {
         assert_eq!(sem_ctx.decl(let_decl).kind, DeclKind::Let);
     });
 }
+
+// ---- S4a T3: the module visits (`resolver/modules.rs`) -----------------
+//
+// The differential pins the DUMP of every module shape in the corpus, but
+// two things below it cannot see: `FunctionInfo::imports` (dump-blind
+// everywhere — `SemContextDumper.cpp` never mentions it, and neither does
+// this port's `dump_context.rs`), and rewrite #4's rebuilt
+// `FunctionExpression`, which under `compile = true` always sits behind an
+// `'export' statement requires module mode` error, and `hermesc` never dumps
+// after a `resolveAST` failure (CompilerDriver.cpp:960-974). These tests are
+// the only pin for both.
+
+/// Resolve `root` through the ERROR-TOLERANT resolver entry
+/// (`SemanticResolver::run_always`) at an explicit `compile` setting.
+///
+/// [`resolve_ast`] cannot serve these tests: every module declaration is an
+/// error under `compile = true`, so it would hand back `None` — and the
+/// rewritten tree with it. `resolve::resolve_ast_for_parser` hands the tree
+/// back unconditionally but only at `compile = false`, where rewrite #4
+/// deliberately does not fire. This is exactly that function's body with
+/// `compile` lifted to a parameter.
+fn resolve_always<'gc>(
+    gc: &'gc GCLock,
+    sem_ctx: &mut SemContext,
+    sm: &mut SourceErrorManager,
+    root: &'gc Node<'gc>,
+    compile: bool,
+) -> &'gc Node<'gc> {
+    let binding_table = sem_ctx.binding_table_rc();
+    let mut resolver = sema::resolver::SemanticResolver::new(
+        &binding_table,
+        sem_ctx,
+        sm,
+        /* ambient_decls */ &[],
+        compile,
+    );
+    resolver.run_always(gc, root)
+}
+
+/// \return the `FunctionInfoId` of the global function, i.e. the one
+/// `visit(ProgramNode *)` created.
+fn global_function(sem_ctx: &SemContext) -> FunctionInfoId {
+    sem_ctx.scope(sem_ctx.get_global_scope()).parent_function
+}
+
+/// **`FunctionInfo::imports` content** (cpp:887).
+///
+/// Every `ImportDeclaration` is pushed onto `curFunctionInfo()->imports`, in
+/// source order, and each recorded `NodeRc` must name the very node that is
+/// in the tree the resolver RETURNED — not a stale copy. The list is
+/// dump-blind, so this is its only pin.
+///
+/// The `var x = 1 + 2;` tail is deliberate: the fold rebuilds the
+/// `BinaryExpression` and therefore the whole `Program` spine, so the
+/// assertions below run against a REBUILT root (asserted, so the test cannot
+/// pass vacuously) — which is what proves the recorded `NodeRc`s survive an
+/// ancestor rebuild.
+#[test]
+fn import_declarations_are_recorded_on_the_function_info() {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let src = "import d, {a as b} from 'm';\nimport * as ns from 'n';\n\
+               var x = 1 + 2;\n";
+    let root = parse(&gc, &mut sm, src);
+    let original_root_id = root.node_id();
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    let resolved =
+        resolve_always(&gc, &mut sem_ctx, &mut sm, root, /* compile */ true);
+
+    // One error per import, and nothing else.
+    assert_eq!(sm.error_count(), 2, "one 'import' error per declaration");
+    // Non-degeneracy: the trailing fold must really have rebuilt the spine,
+    // otherwise "survives an ancestor rebuild" proves nothing.
+    assert_ne!(
+        resolved.node_id(),
+        original_root_id,
+        "the `1 + 2` fold must have rebuilt the Program"
+    );
+
+    let Node::Program(p) = resolved else {
+        unreachable!("not a Program")
+    };
+    let in_tree: Vec<&Node> = p
+        .body
+        .iter()
+        .filter(|n| matches!(n, Node::ImportDeclaration(_)))
+        .collect();
+    assert_eq!(in_tree.len(), 2, "two ImportDeclarations in the tree");
+
+    let imports = &sem_ctx.function(global_function(&sem_ctx)).imports;
+    assert_eq!(imports.len(), 2, "one entry per ImportDeclaration");
+    // CONTENT, not just length: the same nodes, in the same order.
+    assert_eq!(
+        imports[0].node(&gc).node_id(),
+        in_tree[0].node_id(),
+        "imports[0] is not the first ImportDeclaration in the tree"
+    );
+    assert_eq!(
+        imports[1].node(&gc).node_id(),
+        in_tree[1].node_id(),
+        "imports[1] is not the second ImportDeclaration in the tree"
+    );
+
+    // And the specifiers really did declare their locals as `Import` — the
+    // `extractIdentsFromDecl` arm (cpp:2334-2347) this visit makes reachable.
+    let kinds: Vec<DeclKind> = sem_ctx
+        .scope(sem_ctx.get_global_scope())
+        .decls
+        .iter()
+        .map(|&d| sem_ctx.decl(d).kind)
+        .collect();
+    assert_eq!(
+        kinds.iter().filter(|&&k| k == DeclKind::Import).count(),
+        3,
+        "`d`, `b` and `ns` are Import decls"
+    );
+}
+
+/// The `FunctionInfo::imports` backref fixup (spec §3.4 (a)) must NOT fire
+/// spuriously: an `ImportDeclaration` whose children walk changes nothing
+/// stays pointer-identical, and the recorded entry with it.
+///
+/// This is the shape the fixup's `Changed` branch is defensive against but
+/// can never see today: an `ImportDeclaration`'s only children are
+/// specifiers (whose own children are `Identifier` leaves), a `StringLiteral`
+/// source and `ImportAttribute`s (literal key/value pairs) — nothing the
+/// resolver rewrites or folds. The branch is kept anyway because the
+/// obligation is structural, not shape-specific; if a later phase ever gives
+/// an import a foldable child, this test is what will start exercising the
+/// other side of it.
+#[test]
+fn import_backref_is_untouched_without_a_rebuild() {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let root = parse(&gc, &mut sm, "import {a} from 'm';\n");
+    let original_id = first_statement(root).node_id();
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    let resolved =
+        resolve_always(&gc, &mut sem_ctx, &mut sm, root, /* compile */ true);
+
+    assert_eq!(first_statement(resolved).node_id(), original_id);
+    let imports = &sem_ctx.function(global_function(&sem_ctx)).imports;
+    assert_eq!(imports.len(), 1);
+    assert_eq!(imports[0].node(&gc).node_id(), original_id);
+}
+
+/// **Rewrite #4** (cpp:1525-1544): an ANONYMOUS `export default function`
+/// becomes a `FunctionExpression` "for cleaner IRGen", carrying the
+/// declaration's `_id`/`_params`/`_body`/`_typeParameters`/`_returnType`/
+/// `_predicate`/`_generator`, its strictness and its location.
+///
+/// Also pins the C++ QUIRK at cpp:1538: the rewritten node is built with a
+/// literal `/* async */ false` rather than `funcDecl->_async`, so
+/// `export default async function () {}` comes out NON-async. Preserved
+/// bug-for-bug — if this assertion ever "fails" because someone made the
+/// port propagate `_async`, the port has diverged from C++, not been fixed.
+#[test]
+fn export_default_anonymous_function_is_rewritten_to_an_expression() {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let src = "export default async function (a) { return a; }\n";
+    let root = parse(&gc, &mut sm, src);
+    let decl_before = root
+        .as_program()
+        .expect("not a Program")
+        .body
+        .iter()
+        .next()
+        .expect("empty program")
+        .as_export_default_declaration()
+        .expect("not an ExportDefaultDeclaration")
+        .declaration;
+    let decl_range_before = decl_before.range();
+    assert!(
+        decl_before
+            .as_function_declaration()
+            .expect("parsed as a FunctionDeclaration")
+            .r#async
+            .get(),
+        "non-degeneracy: the source really is `async`"
+    );
+
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    let resolved =
+        resolve_always(&gc, &mut sem_ctx, &mut sm, root, /* compile */ true);
+    assert_eq!(sm.error_count(), 1, "the 'export' module-mode error");
+
+    let export = first_statement(resolved)
+        .as_export_default_declaration()
+        .expect("the rewrite must keep an ExportDefaultDeclaration");
+    let func = export
+        .declaration
+        .as_function_expression()
+        .expect("rewrite #4 must replace the FunctionDeclaration");
+    assert!(func.id.is_none(), "the anonymous `_id` is carried over");
+    assert_eq!(func.params.iter().count(), 1, "`_params` carried over");
+    assert!(
+        matches!(func.body, Node::BlockStatement(_)),
+        "`_body` carried over"
+    );
+    assert!(func.type_parameters.is_none());
+    assert!(func.return_type.is_none());
+    assert!(func.predicate.is_none());
+    assert!(!func.generator.get(), "`_generator` carried over");
+    // QUIRK (cpp:1538), asserted so it can never be "fixed" by accident.
+    assert!(
+        !func.r#async.get(),
+        "rewrite #4 hard-codes `/* async */ false` (cpp:1538) — an anonymous \
+         `export default async function` loses its async flag"
+    );
+    // copyLocationFrom(funcDecl) (cpp:1540).
+    let range = func.metadata.range.get();
+    assert_eq!(range.start, decl_range_before.start);
+    assert_eq!(range.end, decl_range_before.end);
+    // The function was still resolved as a function: `visitFunctionLike`
+    // ran on the REBUILT node, so it carries a `sem_info` and a strictness.
+    assert!(func.sem_info.get().is_some(), "the rewritten node was visited");
+    assert_ne!(func.strictness.get(), Strictness::NotSet);
+}
+
+/// Rewrite #4 fires ONLY for an anonymous function declaration: a NAMED
+/// `export default function f() {}` keeps its `FunctionDeclaration`
+/// (cpp:1526 `!funcDecl->_id`).
+#[test]
+fn export_default_named_function_is_not_rewritten() {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let root = parse(&gc, &mut sm, "export default function f() {}\n");
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    let resolved =
+        resolve_always(&gc, &mut sem_ctx, &mut sm, root, /* compile */ true);
+    assert!(
+        matches!(
+            first_statement(resolved)
+                .as_export_default_declaration()
+                .expect("not an ExportDefaultDeclaration")
+                .declaration,
+            Node::FunctionDeclaration(_)
+        ),
+        "a NAMED default export keeps its FunctionDeclaration"
+    );
+}
+
+/// The other half of cpp:1525's `dyn_cast<FunctionDeclarationNode>`: a
+/// non-function default export is untouched by rewrite #4 (it is still
+/// visited, and here still folded, but never turned into a
+/// `FunctionExpression`).
+#[test]
+fn export_default_non_function_is_not_rewritten() {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let root = parse(&gc, &mut sm, "export default 1 + 2;\n");
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    let resolved =
+        resolve_always(&gc, &mut sem_ctx, &mut sm, root, /* compile */ true);
+    assert!(
+        matches!(
+            first_statement(resolved)
+                .as_export_default_declaration()
+                .expect("not an ExportDefaultDeclaration")
+                .declaration,
+            // Folded by ASTEval, but still not a FunctionExpression.
+            Node::NumericLiteral(_)
+        ),
+        "a non-function default export is untouched by rewrite #4"
+    );
+}
+
+/// Under `compile = false` (`resolveASTForParser`) rewrite #4 does NOT fire
+/// (cpp:1526 is `compile_ &&`) and NO `'export'` error is reported
+/// (cpp:1520). Half of the bug-for-bug asymmetry; the import half is the
+/// next test.
+#[test]
+fn compile_false_skips_the_export_error_and_the_rewrite() {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let root = parse(&gc, &mut sm, "export default function () {}\n");
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    let resolved =
+        resolve_always(&gc, &mut sem_ctx, &mut sm, root, /* compile */ false);
+    assert_eq!(sm.error_count(), 0, "no 'export' error at compile = false");
+    assert!(
+        matches!(
+            first_statement(resolved)
+                .as_export_default_declaration()
+                .expect("not an ExportDefaultDeclaration")
+                .declaration,
+            Node::FunctionDeclaration(_)
+        ),
+        "rewrite #4 is compile_-gated and must not have fired"
+    );
+}
+
+/// The other half of the asymmetry: an `import` in the same position STILL
+/// errors at `compile = false`, because cpp:876-879 is not `compile_`-gated
+/// the way cpp:1511/1520/1550 are.
+#[test]
+fn compile_false_still_errors_on_imports() {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let root = parse(&gc, &mut sm, "import {a} from 'm';\n");
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    resolve_always(&gc, &mut sem_ctx, &mut sm, root, /* compile */ false);
+    assert_eq!(
+        sm.error_count(),
+        1,
+        "the import error is NOT compile_-gated (cpp:876-879)"
+    );
+}
+
+/// The import-assertions error is gated on `compile_ && !_attributes.empty()`
+/// (cpp:881-885): an attribute-less import reports only the module-mode
+/// error, one with attributes reports both — at the same location, in that
+/// order.
+#[test]
+fn import_attributes_add_a_second_error_only_when_present() {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let log: Rc<RefCell<Vec<String>>> = Rc::default();
+    sm.set_handler(Box::new(SharedHandler(Rc::clone(&log))));
+    let src = "import 'a.js';\nimport 'b.js' with {type: 'json'};\n";
+    let root = parse(&gc, &mut sm, src);
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    resolve_always(&gc, &mut sem_ctx, &mut sm, root, /* compile */ true);
+
+    assert_eq!(
+        *log.borrow(),
+        vec![
+            "'import' statement requires module mode".to_string(),
+            "'import' statement requires module mode".to_string(),
+            "import assertions are not supported".to_string(),
+        ]
+    );
+}
