@@ -8,6 +8,7 @@
 #ifndef HERMES_TOOLS_HERMESPARSERNATIVE_STRINGTABLE_H
 #define HERMES_TOOLS_HERMESPARSERNATIVE_STRINGTABLE_H
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
