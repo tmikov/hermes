@@ -966,8 +966,12 @@ The behavioral heart of the fork. Three pointer sites become string-table ids; n
 - Modify: `unittests/HermesParserNative/CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: `hermes::StringTable` (Task 2).
-- Produces: `ParseResult` gains a public `StringTable stringTable_;`. Every
+- Consumes: `hermes::NativeStringTable` (Task 2). NOTE: the class is
+  `NativeStringTable`, not `StringTable` — it would otherwise collide with
+  core Hermes's `hermes::StringTable` (include/hermes/Support/StringTable.h:105),
+  which reaches this translation unit via `JSParser.h` -> `JSLexer.h`.
+  The header file name is still `StringTable.h`.
+- Produces: `ParseResult` gains a public `NativeStringTable stringTable_;`. Every
   string-valued field in the program buffer is now a single `u32`: `0` means
   null, and any other value `v` means string id `v - 1`.
 
@@ -1129,7 +1133,7 @@ and add this member to `class ParseResult`, immediately after
 
 ```cpp
   /// Deduplicated table of every string referenced by the program buffer.
-  StringTable stringTable_;
+  NativeStringTable stringTable_;
 ```
 
 - [ ] **Step 5: Change number padding to index parity**
@@ -2796,7 +2800,7 @@ guessed at:
    setup there does not compile as written, the container test in Task 6 covers
    the same behavior through the addon and is the authoritative check.
 
-**Type consistency.** `StringTable::intern/data/offsets/count` are used
+**Type consistency.** `NativeStringTable::intern/data/offsets/count` are used
 consistently in Tasks 2, 4, 5. `writeContainer(program, positions, strings)`
 has the same signature in Tasks 4 and 6. `computeKindHash()` matches between
 Task 3 and its JavaScript twin in Task 7. The header field indices used in
