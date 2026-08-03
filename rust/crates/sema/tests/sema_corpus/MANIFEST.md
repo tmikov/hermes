@@ -270,6 +270,12 @@ Final count after S4a Task 4's fix review: **192 corpus files matched** (103
 succeed on hermesc, 89 are hermesc-failure files) — see "S4a Task 4 fix
 review" below.
 
+Final count after S4a Task 5: **unchanged at 192 corpus files matched** (103
+succeed on hermesc, 89 are hermesc-failure files) — the upstream re-probe
+imported no new `test/Sema` row (all four remaining Deferred rows stayed
+blocked on their existing reasons) and fixed no code (zero S4a-attributable
+panics were found). See "S4a Task 5: upstream re-probe" below.
+
 ## S2 Task 1 additions
 
 Eight new files, each verified byte-for-byte (stdout, stderr and exit status)
@@ -1330,3 +1336,135 @@ Gate as of the fix: `sema differential (tests/sema_corpus): 192 corpus files
 matched (103 succeeded on hermesc)` — 190 → **192** files (+2, both
 authored, both exit-0), hermesc-succeeded 101 → **103** (+2: both new files
 succeed). Arithmetic: 190 + 2 = 192; 101 + 2 = 103.
+
+## S4a Task 5: upstream re-probe
+
+S4a Task 5 re-ran the exact S2-T8/S3-T3 sweep — both binaries, raw stdout +
+stderr + exit status, no extra flags on either side — over the same 1416
+files in the same 8 upstream dirs (`test/Parser` 366,
+`test/IRGen`+`test/BCGen`+`test/Optimizer` 395,
+`test/hermes`+`test/AST`+`test/Driver`+`test/RA` 655), now that S4a Tasks 1-4
+have landed the module visits, the `// FLAGS:` harness and the
+`TypeCastExpression`/`AsExpression` visits. File count re-verified: `find
+test/{Parser,IRGen,BCGen,Optimizer,hermes,AST,Driver,RA} -iname '*.js' | wc
+-l` = 1416, unchanged. Both binaries were plain debug builds (`cargo build
+--manifest-path rust/Cargo.toml -p sema --features dump-bin`, no
+`--release`; `hermesc` is the prebuilt ASan+Debug binary) — load-bearing, see
+the note under "Zero S4a-attributable panics" below.
+
+### Result
+
+| Outcome | S2-T8 | S3-T3 | S4a-T5 | Delta vs S3-T3 |
+|---|---|---|---|---|
+| byte-identical | 1203 | 1209 | **1218** | +9 |
+| mismatch | 190 | 190 | **190** | 0 |
+| panic | 23 | 17 | **8** | −9 |
+
+1218 + 190 + 8 = 1416 (S3-T3's 1209 + 190 + 17 = 1416, same total). This
+matches the PREVIEW S4a-T3's own report recorded (1218/190/8) exactly,
+**confirming** — by the formal run, not by assumption — the brief's
+expectation that T4's `TypeCastExpression`/`AsExpression` visits do not move
+any flagless-sweep bucket: the sweep passes no flags to either binary, and
+`TypeCastExpressionNode`/`AsExpressionNode` can only be produced by the
+parser's `l_paren`/`as`-operator rewrites when Flow parsing is enabled
+(`JSParserImpl.cpp:2633-2640`, `:4329-4350`, both `#if HERMES_PARSE_FLOW`,
+re-derived by S4a T4's own report) — structurally unreachable from any
+upstream file parsed without `-parse-flow`.
+
+### The +9 / −9 move, named
+
+The moved set is exactly the **nine** files S4a Task 3's own "Step 4" table
+already names and imports into this corpus — no other file's bucket changed.
+Each was independently re-checked against `identical.txt` from this task's
+sweep:
+
+| File | S3-T3 | S4a-T5 |
+|---|---|---|
+| `test/Parser/es6/import.js` | panic (`mod.rs` catch-all, `ImportDeclaration`) | identical |
+| `test/Parser/es6/import-location.js` | panic (`mod.rs` catch-all, `ImportDeclaration`) | identical |
+| `test/Parser/es6/import-assertions.js` | panic (`mod.rs` catch-all, `ImportDeclaration`) | identical |
+| `test/Parser/es6/export.js` | panic (`mod.rs` catch-all, `ExportAllDeclaration`) | identical |
+| `test/Parser/es6/export-default.js` | panic (`mod.rs` catch-all, `ExportDefaultDeclaration`) | identical |
+| `test/Parser/es6/export-default-class.js` | panic (`mod.rs` catch-all, `ExportDefaultDeclaration`) | identical |
+| `test/Parser/es6/export-default-async.js` | panic (`mod.rs` catch-all, `ExportDefaultDeclaration`) | identical |
+| `test/AST/es6/export-default-function.js` | panic (`mod.rs` catch-all, `ExportDefaultDeclaration`) | identical |
+| `test/Parser/flow/component-syntax/component-identifier.js` | panic (`mod.rs` catch-all, `ExportDefaultDeclaration`) | identical |
+
+These are precisely the "16 S4 files" sub-bucket of nine `mod.rs`-catch-all
+panics S3-T3's own "Zero S3-attributable panics" section enumerated (the
+other seven of that "16" were already the `calls.rs` `$SHBuiltin` panics,
+which stay put — see below). **No identical-but-not-imported module files
+exist**: 1218 − 1209 = 9, matching the nine above one-for-one, and the
+mismatch bucket's total is unchanged (190 = 190), so no file entered or left
+it either. (Full file-level mismatch-set diffing the way S3-T3 did against
+an adjacent pre/post commit pair was not repeated here — S4a T1-T4 touched no
+diagnostic-geometry code, only added dispatch arms for previously-panicking
+kinds, so there is no mechanism by which a mismatch-bucket file could change
+shape; the unchanged total count is the expected, and sufficient, evidence.)
+
+### Zero S4a-attributable panics
+
+The residual 8-file panic bucket is, exhaustively (each message read, not
+assumed, from this task's own `panic.txt`):
+
+- **7 `calls.rs:312` `$SHBuiltin.moduleFactory needs visitModuleFactory
+  (cpp:1320-1366) — S4 modules` panics** — `test/BCGen/HBC/
+  xmod-requires-opt.js`, `test/Optimizer/xmod-{builtins,require-cse,
+  requires-opt-extension,requires-opt}.js`,
+  `test/hermes/xmod-exec-require{-bad-func,}.js`. Untouched by design: the
+  global constraints reserve the `$SHBuiltin` module branches for S4b.
+- **1 pre-existing-C++-defect reproduction** — `test/hermes/
+  computed-fn-name.js`, the same `SemContext.cpp:478` scope-walk assertion
+  S2 T4/S3 T3 already documented. This one is **debug-build-only on both
+  sides**: hermesc's assertion and this port's `dump_context.rs:241`
+  `debug_assert_eq!` are both compiled out of release builds (the "a release
+  hermesc (no assertions) dumps the incomplete scope tree instead" note
+  already on file, above). A first pass of this sweep was run against a
+  `--release` `sema-dump` by mistake and read **1218/190/7** with
+  `computed-fn-name.js` sorted into `identical` (both sides exit 0, full
+  dump, byte-identical) instead of `panic` — silently masking the
+  known-defect reproduction rather than fixing anything. Rebuilding
+  `sema-dump` as a plain debug binary (matching the brief's
+  `cargo build`-no-`--release` instruction and `hermesc`'s own ASan+Debug
+  build) restored the expected 1218/190/8. Flagged here as a sweep-tooling
+  landmine for whoever reruns this: **the sweep is only meaningful with
+  debug builds on both sides**, because at least one landmine
+  (`computed-fn-name.js`) is itself gated on assertions being compiled in.
+
+**Zero** of the 8 panics are attributable to S4a: none mention a module kind
+this phase's visits should handle, and the eighth is a documented,
+faithfully-reproduced upstream C++ defect, not a port gap. No fix was
+needed.
+
+### Step 1: the four remaining Deferred rows, re-probed
+
+Every row in the "Deferred" table above was re-run through both binaries
+(raw stdout + stderr + exit status, `hermesc -dump-sema` vs `sema-dump`,
+debug builds). **None unblocked**; each row's stated reason was confirmed,
+not assumed:
+
+| File | Re-probe result |
+|---|---|
+| `deep-ast-err.js` | still a vacuous match (comment-only file, both exit 0, byte-identical); still excluded on purpose, not a real gap |
+| `invalid-args-eval.js` | still the SAME single same-location diagnostic-order tie at `89:9` (`the variable "arguments" was not declared` warning vs `cannot declare 'arguments' in strict mode` error) — the two sides emit the identical set of messages, only in the opposite relative order, because C++'s `std::sort` over the buffered-message array is unstable and this port's `sort_by_key` is stable. Unchanged, unfixable-by-construction (`support/src/manager.rs:903-909`'s documented deviation) |
+| `regress-nested-expressions-error.js` | still `10:3052` (hermesc) vs `10:6124` (sema-dump) — the same recursion-depth-counting-rate mismatch, re-verified with a fresh diff of both stderrs. Unchanged; tracked as the parser-track recursion-depth-parity follow-up, not this phase's to fix |
+| `xmod-errors.js` | still panics identically: `sema: $SHBuiltin.moduleFactory needs visitModuleFactory (cpp:1320-1366) — S4 modules` at `calls.rs:312`, same call site as the seven upstream `xmod-*.js` files above. **Confirmed still blocked — S4b**, exactly as the brief requires |
+
+No upstream `test/Sema` row newly matches (all four are still the same
+established gaps: a C++ unstable-sort tie, a recursion-depth-counting
+mismatch, an S4b module-protocol dependency, and a vacuous comment-only
+file), so **Step 2 imports nothing**.
+
+### Gate (unchanged)
+
+`REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml -p sema
+--features dump-bin --test sema_differential -- --nocapture`:
+`sema differential (tests/sema_corpus): 192 corpus files matched (103
+succeeded on hermesc)`, `sema differential (tests/sema_corpus_parser): 7
+corpus files matched (2 succeeded on the oracle)` — both exactly as before
+this task, since Step 2 imported nothing and no code changed. Full workspace
+`cargo test --workspace`: all suites green (no `FAILED`, no cargo
+`error[`/`warning:`, in either the `--features sema/dump-bin` or plain
+config); `cargo clippy -p sema --all-targets --features dump-bin` emits
+nothing for `sema` (the workspace's other warnings remain the pre-existing
+ones in `parser`, untouched, same as every prior task's note).
