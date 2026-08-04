@@ -22,6 +22,13 @@
 //! - `tests/parser_corpus_flow`: Flow type syntax; hermesc gets `-parse-flow`
 //!   and ast-dump gets `--parse-flow` (phase P5).
 //!
+//! The error side of the recursion-depth boundary (the "Too many nested …"
+//! diagnostics) is deliberately not pinned in this corpus — it is profile-
+//! sensitive the same way `sema_differential.rs`'s BUILD-PROFILE PAIRING note
+//! describes, and is pinned instead by `sema_corpus/nested-expressions.js`
+//! and `parser/tests/recursion_depth_limit.rs`; the clean side alone lives
+//! here, in `parser_corpus/nested-parens-limit.js`.
+//!
 //! Skip cleanly when hermesc is absent; set `REQUIRE_DIFFERENTIAL=1` to turn a
 //! missing hermesc into a hard failure (used in CI).
 

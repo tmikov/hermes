@@ -6,6 +6,11 @@
  */
 
 //! JSONParser: recursive-descent parser driving JSLexer.
+//!
+//! No recursion-depth limit, matching C++ `JSONParser` (`lib/Parser/
+//! JSONParser.cpp`): `parseValue`/`parseArray`/`parseObject` have no
+//! `CHECK_RECURSION` analog on either side, so pathologically deep input
+//! overflows the stack on both — parity by absence.
 
 use atom_table::AtomTable;
 use support::diag::Subsystem;

@@ -9,7 +9,7 @@ validation commands, and workflow.
 > **phases P0 (foundations + `parser_differential` gate), P1 (value expressions), P2 (statements & declarations), P3 (functions, classes,
 > arrows, async/generators, methods, `super`, `yield`, decorators), P4 (modules), P5 (the FLOW TYPE GRAMMAR + declarative integration),
 > P6 (the REST OF FLOW), P7 (ALL of TYPESCRIPT), and P8 (JSX) are DONE**, byte-for-byte vs `hermesc -dump-ast` (+ the matching
-> hidden/dialect flag) over a **76-file plain + 42 Flow + 8 component + 5 records + 7 match + 20 TS + 6 JSX + 1 flow·JSX corpus**, each
+> hidden/dialect flag) over a **77-file plain + 42 Flow + 8 component + 5 records + 7 match + 20 TS + 6 JSX + 1 flow·JSX corpus**, each
 > sub-task two-stage reviewed (spec w/ adversarial diffing + quality) + a whole-phase capstone, zero warnings, zero new clippy lints,
 > `generated_idempotent` green (P6, P7 AND P8 added NO AST nodes). **The parser now handles the ENTIRE standard-ECMAScript grammar + ALL of
 > Flow + ALL of TypeScript + JSX** — Flow's type grammar (P5) + ambiguous-expression grammar + `enum`/`component`/`hook`/`record`/`match`/
@@ -37,7 +37,7 @@ validation commands, and workflow.
 > `2026-06-19-js-parser-p8-jsx.md`.
 > **NEXT: Sema** (scope resolution + FlowChecker) — the Parser is now COMPLETE. The Pre/Lazy open design question (how to validate
 > lazy parsing when `-dump-ast` is blind to it) was resolved in `specs/2026-06-28-pre-lazy-passes-design.md`: TWO oracles — Oracle B (a C++
-> `tools/preparse-dump/` tool + Rust bin + byte-for-byte `preparse_differential` of the `PreParsedBufferInfo` side-table vs hermesc, 13+76 files)
+> `tools/preparse-dump/` tool + Rust bin + byte-for-byte `preparse_differential` of the `PreParsedBufferInfo` side-table vs hermesc, 13+77 files)
 > and Oracle A (Rust-only `lazy_reparse` proving deferred bodies reparse to the eager hermesc-verified AST). Both shipped; the capstone caught a
 > real flag-attribution bug a corpus-gated differential alone would miss (default-param arrows — `SaveFunctionState` was built before params
 > instead of after; cpp:510). **PreParse scoped reclamation is also DONE (2026-07-15):** the `AllocationScope` discipline is now ported —
@@ -94,7 +94,7 @@ validation commands, and workflow.
 > `resolver/modules.rs`; new C++ tool `tools/sema-parser-dump/`; new corpus `sema_corpus_parser/`.
 > Gates (live, green):
 > `REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml -p sema --features dump-bin --test sema_differential -- --nocapture`
-> → "sema differential (tests/sema_corpus): **192 corpus files matched (103 succeeded on hermesc)**" and
+> → "sema differential (tests/sema_corpus): **196 corpus files matched (103 succeeded on hermesc)**" and
 > "sema differential (tests/sema_corpus_parser): **11 corpus files matched (3 succeeded on the oracle)**" (the
 > second gate is new in S4a; 7/2 at the end of T6, 11/3 after the final review's four added pins). Deferred
 > `test/Sema` rows: 4.
