@@ -284,9 +284,16 @@ contents are the commitment, not the exact split.
   wrapping exists. Until S4b, the `$SHBuiltin` module branches keep their loud
   phase-tagged panics (7 of the 16 module-branch upstream-sweep panic files, per
   S4a T5's confirmed count).
+- **Whole-Sema capstone (pre-S5) DONE (2026-08-04):** a whole-component review across
+  S0–S4a, run deliberately before S5 for the publication handoff. APPROVED WITH FIXES
+  (0 Critical/2 Important/3 Minor, plus a same-day re-review closeout of 4 further
+  Minors + 1 guard pin); caught a ten-shape untyped `-parse-flow` gap (driver gate
+  196/103 → **200/107**), a false compile-premise at the `$SHBuiltin` seam, and a
+  `sema-dump` CLI exit-code bug. See the roadmap's Sema row for the full breakdown.
 - **S5 — lazy + eval entry points** (`resolve_ast_lazy`/`resolve_ast_in_scope`, the third
   `ScopedFunctionPromoter` call site `runInScope` at cpp:158, `visitProgram`'s unported
-  `SaveAndRestore` of `globalScope_`); capstone.
+  `SaveAndRestore` of `globalScope_`); a DELTA capstone (not from-scratch — the
+  whole-Sema capstone above already covers S0–S4a), scoped to what S5 itself adds.
 - **Not a Sema phase:** real regular-expression validation, which needs the regex engine
   (`lib/Regex/`) — a future component of its own. Likewise the 178 `test/Sema/flow/**`
   files (incl. `flow/ffi/`): every one runs `-typed` (verified 2026-07-29 — `grep -L

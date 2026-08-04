@@ -115,6 +115,25 @@ validation commands, and workflow.
 > omitted `JSParserImpl::parse`'s trailing error-count gate (every caller compensated for it), now ports the gate
 > verbatim (`JSParserImpl.cpp:168-172`) — the compensating checks in `sema-dump` and `ast-dump` stay as redundant
 > defense in depth.
+> **Update (2026-08-04): whole-Sema capstone (pre-S5) is DONE.** Commits `e31c1a1d8` (fixes) +
+> `502ac85c3` (re-review closeout) on `rust`. A whole-component review across S0–S4a, run
+> deliberately BEFORE S5, for the publication handoff. Verdict **APPROVED WITH FIXES** (first
+> pass: 0 Critical/2 Important/3 Minor; the re-review closeout: 4 further Minors + 1 guard pin,
+> same day). Verified: a completeness mapping of `SemanticResolver.h`'s **~62** `visit()`
+> overloads plus every other public surface, zero silent drops; structural fidelity clean —
+> templates stayed generic, RAII ported as explicit save/restore, every unported seam loud and
+> correctly phase-tagged. Caught: (F1) ten reachable untyped `-parse-flow` shapes panicking
+> where hermesc exits 0 — fixed, driver gate 196/103 → **200/107**; (F2) `calls.rs`'s
+> `$SHBuiltin.moduleFactory` seam comment's false compile-premise — corrected; landmine (v)
+> below (`sema-parser-dump`'s `with (o) { x; }` self-abort) — documented, deliberately not
+> mirrored; (F3) `sema-dump`'s CLI usage-error exit code (0 → 1, matching hermesc). The
+> re-review closeout then re-verified the fix commit's own citations against the C++ (not the
+> review's own list, itself partially drifted), found `TypeParameterDeclaration`
+> reachable-and-load-bearing rather than "unreachable in practice", fixed three further
+> citation/shape drifts, held the gate at 200/107, and added a `flow_range_size_is_97` unit pin
+> (the `keywords.rs` `count_is_133` precedent). **S5 gets a delta-capstone, not a from-scratch
+> one** — this capstone already covers S0–S4a end to end. See the roadmap's Sema row for the
+> full breakdown.
 > **NEXT: S5 — lazy + `eval` entry points.** `resolve_ast_lazy`/`resolve_ast_in_scope`, `visitProgram`'s unported
 > `SaveAndRestore` of `globalScope_` (cpp:216-217, only observable once `Program` can recur), and the THIRD
 > `ScopedFunctionPromoter` call site `runInScope` (`SemanticResolver.cpp:158`, promotes BEFORE
