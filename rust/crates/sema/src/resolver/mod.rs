@@ -1456,11 +1456,18 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // where hermesc resolves. Pinned by
             // `sema_corpus/flow-type-args.js`.
             // `TypeParameterDeclaration` is the *declaration* list
-            // (`function f<T>(){}`); the function/class visits hand-drive
-            // their children and never dispatch it, so it stays unreachable
-            // in practice — but the C++ arm exists, so the port carries it
-            // rather than leaving a hole for a future dispatcher change to
-            // fall through.
+            // (`function f<T>(){}`, `interface J<T>{}`, `declare class
+            // DC<V>{}`, `opaque type OT<W> = …`). The function/class visits
+            // hand-drive their children and never dispatch it — but the
+            // Flow-STATEMENT parents (`InterfaceDeclaration`, `DeclareClass`,
+            // `OpaqueType`, …) reach it through their own `typeParameters`
+            // field via the override-free range arm further down, so it IS
+            // reachable in practice, just not from every parent. And it is
+            // load-bearing, not merely carried for completeness: because the
+            // visit is a TRUE no-op, a type parameter's `bound`/`default`
+            // never gets resolved even though the enclosing body does —
+            // pinned by `sema_corpus/flow-interface-enum.js`'s `interface
+            // J<T: typeof host, U = typeof host> { b: typeof host }`.
             Node::TypeAlias(_)
             | Node::TypeParameterDeclaration(_)
             | Node::TypeParameterInstantiation(_) => TransformResult::Unchanged,
@@ -1498,7 +1505,9 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // The whole `#if HERMES_PARSE_FLOW` block of the header's
             // inventory (SemanticResolver.h:289-298) names exactly eight
             // Flow kinds, and only FIVE of them are inside the AST's `Flow`
-            // range (ESTree.def:852-1275, `NodeKind::_Flow_First
+            // range (ESTree.def:854-1272, the `ESTREE_FIRST(Flow, Base)`/
+            // `ESTREE_LAST(Flow)` markers inside the `#if HERMES_PARSE_FLOW`
+            // block at :852-1274; `NodeKind::_Flow_First
             // .._Flow_Last`): `TypeAlias`, `TypeParameterDeclaration`,
             // `TypeParameterInstantiation`, `TypeCastExpression` and
             // `AsExpression` — all five have their own arms ABOVE this one,
@@ -2113,5 +2122,20 @@ mod tests {
         }
         // Reported once, no matter how many refused visits followed.
         assert_eq!(sm.error_count(), 1);
+    }
+
+    /// Pin for the `n if n.is_flow()` range arm above: the AST's Flow
+    /// section (`ESTree.def:854-1272`, `ESTREE_FIRST(Flow, Base)`..
+    /// `ESTREE_LAST(Flow)`) currently generates 97 `NodeKind` sentinels
+    /// between `_Flow_First` and `_Flow_Last` — the same precedent as
+    /// `keywords.rs`'s `count_is_133`. If a future `.def` change adds or
+    /// removes a Flow kind, this trips loudly instead of silently changing
+    /// which kinds fall into the range arm.
+    #[test]
+    fn flow_range_size_is_97() {
+        use ast::node::NodeKind;
+        let count =
+            NodeKind::_Flow_Last as u32 - NodeKind::_Flow_First as u32 - 1;
+        assert_eq!(count, 97);
     }
 }

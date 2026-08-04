@@ -1618,7 +1618,8 @@ track — is where they belong. Three C++-prescribed mechanisms were missing:
    the interface's `Id 'I'`, the enum's `Id 'E'` and the interface body's
    property keys as ordinary `UndeclaredGlobalProperty` identifiers.
    `resolver/mod.rs` now carries ONE arm for the whole `NodeKind::_Flow_First
-   .._Flow_Last` range (the AST's Flow section, ESTree.def:852-1275), placed
+   .._Flow_Last` range (the AST's Flow section, ESTree.def:854-1272, inside
+   the `#if HERMES_PARSE_FLOW` block at :852-1274), placed
    after the five in-range kinds that DO have overrides (`TypeAlias`,
    `TypeParameterDeclaration`, `TypeParameterInstantiation`,
    `TypeCastExpression`, `AsExpression`). The range spelling is deliberate
@@ -1632,9 +1633,9 @@ track — is where they belong. Three C++-prescribed mechanisms were missing:
 
 | File | Covers |
 |---|---|
-| `flow-type-args.js` | `f<number>(1)`, `new C<number>()`, `f?.<number>(1)` — all three `TypeParameterInstantiation` parents. The do-nothing visit is visible in the dump: the callees `f`/`C` resolve, the `number` inside the type arguments does NOT (no `[D:E:...]`). hermesc: exit 0 |
+| `flow-type-args.js` | `f<Foo>(1)`, `new C<Bar>()`, `f?.<Baz>(1)` — all three `TypeParameterInstantiation` parents. The do-nothing visit is visible in the dump: the callees `f`/`C` resolve, `Foo`/`Bar`/`Baz` inside the type arguments do NOT (no `[D:E:...]`); a `GenericTypeAnnotation` `_id` is used rather than `number`'s childless `NumberTypeAnnotation` because the latter can't distinguish walked from unwalked. hermesc: exit 0 |
 | `flow-pattern-annot.js` | annotated destructuring in five shapes — `var {a}: Obj`, `var [b]: Arr`, an annotated object pattern as a function PARAMETER (reached from `declareParams`' walk, not a variable declaration), a nested pattern, and one with a default. Every binding resolves; `Obj`/`Arr` get no annotation because the type annotation is never visited. hermesc: exit 0 |
-| `flow-interface-enum.js` | `interface I { x: number }` and `enum E { A, B }`, deliberately next to a `type A = number;` so the dump shows the CONTRAST between the children walk (`I`, `E`, and the body's `x` all resolve) and `TypeAlias`'s do-nothing visit (`A` gets nothing). hermesc: exit 0 |
+| `flow-interface-enum.js` | `interface I { x: number }` and `enum E { A, B }`, deliberately next to a `type A = number;` so the dump shows the CONTRAST between the children walk (`I`, `E`, and the body's `x` all resolve) and `TypeAlias`'s do-nothing visit (`A` gets nothing); plus `interface J<T: typeof host, U = typeof host> { b: typeof host }` pinning `TypeParameterDeclaration`'s own do-nothing visit — `host` in `T`/`U` never resolves even though the body's `host` does. hermesc: exit 0 |
 | `flow-declare-opaque.js` | `opaque type B = string;` next to `type A = string;` — near-identical syntax with OPPOSITE dispatch, so a port that lumped `OpaqueType` in with `TypeAlias` fails right here — plus `declare var dv: number;` and `declare function df(): void;` for the `Declare*` family. hermesc: exit 0 |
 
 `flow-annotations-benign.js` was not re-verified-and-changed but its header

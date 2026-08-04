@@ -15,7 +15,7 @@
 //! ported here. Their absence is compile-time loud (there is simply no
 //! function to call, and `sema-dump` has no flag that would want one), but
 //! the convention in this port is a pointer at the code site — the same one
-//! `resolver/mod.rs:1544` and `:1558` use for the S5 items' internals:
+//! `resolver/mod.rs:1601` and `:1621` use for the S5 items' internals:
 //!
 //! - **`resolveASTLazy`** (`SemResolve.h:66`) and **`resolveASTInScope`**
 //!   (`:78`) — lazy compilation and `eval`, i.e. **S5**. They need

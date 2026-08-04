@@ -13,18 +13,24 @@
 //
 // Because the visit is a TRUE no-op (it does not call
 // `visitESTreeChildren`), the identifiers inside the type arguments are
-// never resolved: `number` here is a `GenericTypeAnnotation`'s `_id` and
-// gets NO `[D:E:...]` annotation in the dump, exactly like
+// never resolved. `Foo`/`Bar`/`Baz` are `GenericTypeAnnotation`'s `_id`s and
+// get NO `[D:E:...]` annotation in the dump, exactly like
 // `type-alias-children.js`'s `_right`. The callees `f`/`C` around them DO
 // resolve, which is what makes this a real test rather than a vacuous one.
 //
-// The sibling `visit(TypeParameterDeclarationNode *)` (cpp:1583-1585) is not
-// pinned here and cannot be: the function and class visits hand-drive their
-// children and never dispatch a type-parameter DECLARATION list — see
-// `mod.rs`'s arm, which carries it anyway because C++ does.
+// The shape is `GenericTypeAnnotation`, not `number`/`NumberTypeAnnotation`:
+// a `NumberTypeAnnotation` is childless either way, so `f<number>(1)` cannot
+// tell a walked argument from an unwalked one — `Foo` et al. can, because an
+// unwalked `Id 'Foo'` prints with no `[D:E:...]` while a walked one (as an
+// `UndeclaredGlobalProperty`) would carry one.
+//
+// The sibling `visit(TypeParameterDeclarationNode *)` (cpp:1583-1585) is a
+// different node (the type-parameter DECLARATION list, not this
+// instantiation list) and is pinned separately, in
+// `flow-interface-enum.js`.
 function f(x) { return x; }
 function C() {}
 
-f<number>(1);
-new C<number>();
-f?.<number>(1);
+f<Foo>(1);
+new C<Bar>();
+f?.<Baz>(1);
