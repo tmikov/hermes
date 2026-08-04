@@ -245,8 +245,17 @@ const wasmDeserTimer = instrumentDeserializer(WASM_DIST);
 const nativeAdapterTimer = instrumentAdapters(NATIVE_DIST);
 const wasmAdapterTimer = instrumentAdapters(WASM_DIST);
 
-// Optional C++-side phase attribution, present only in an addon built with
-// the phase-timing probes and only active when the env var was set at load.
+// Optional C++-side phase attribution. The shipped addon carries no timing
+// probes: they are measurement scaffolding and were stripped from
+// tools/hermes-parser-native/hermes-parser-napi.cpp. The `parser-native-phase-
+// timing` branch still has them, so building the addon from that branch and
+// setting HERMES_PARSER_NATIVE_PHASE_TIMING=1 re-enables this section. With a
+// stripped addon everything else in this benchmark runs unchanged and only the
+// phase split is skipped.
+const kPhaseTimingHint =
+  'build the addon from the `parser-native-phase-timing` branch and set ' +
+  'HERMES_PARSER_NATIVE_PHASE_TIMING=1';
+
 const phaseNames = [
   'sourceIn',
   'contextInit',
@@ -260,12 +269,13 @@ const phaseNames = [
 ];
 const phaseTimingAvailable =
   typeof addonModule.getPhaseTimings === 'function' &&
+  typeof addonModule.resetPhaseTimings === 'function' &&
   addonModule.getPhaseTimings().enabled === true;
 console.log(
   `native phase timing : ${
     phaseTimingAvailable
       ? 'ENABLED (addon reports per-phase C++ times)'
-      : 'not available (addon lacks probes or env var unset)'
+      : `not available (${kPhaseTimingHint})`
   }`,
 );
 console.log('');
@@ -974,7 +984,14 @@ function phaseAttribution(label, corpus, parse = s => nativeRaw(s, {})) {
   console.log('');
 }
 
-if (phaseTimingAvailable) {
+if (!phaseTimingAvailable) {
+  console.log('=== Native C++ phase attribution ===');
+  console.log(
+    '  skipped: this addon has no phase-timing probes. To get the split, ' +
+      `${kPhaseTimingHint}.`,
+  );
+  console.log('');
+} else {
   phaseAttribution('plain corpus, raw path, 3 passes', plainClass.allThree);
   phaseAttribution('flow corpus, raw path, 3 passes', flowCorpus);
   // The index.js path additionally defaults `flow` to 'detect', which makes
