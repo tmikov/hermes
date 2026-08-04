@@ -910,10 +910,33 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         allocated
     }
 
-    /// Parse the whole program. Entry point for the parser.
-    /// Port of `JSParserImpl::parse` / `parseProgram` (lines 355-381).
+    /// Parse the whole program. Entry point for the parser (and, on the C++
+    /// side, of the PreParse pass too — `JSParserImpl::preParseBuffer`,
+    /// `JSParserImpl.cpp:7539`, calls this same `parse()`; `parseLazyFunction`
+    /// is a separate entry with no such gate and is unaffected).
+    /// Port of `JSParserImpl::parse` (JSParserImpl.cpp:164-172):
+    /// ```cpp
+    /// Optional<ESTree::ProgramNode *> JSParserImpl::parse() {
+    ///   PerfSection parsing("Parsing JavaScript");
+    ///   tok_ = lexer_.advance();
+    ///   auto res = parseProgram();
+    ///   if (!res)
+    ///     return None;
+    ///   if (lexer_.getSourceMgr().getErrorCount() != 0)
+    ///     return None;
+    ///   return res.getValue();
+    /// }
+    /// ```
+    /// `tok_ = lexer_.advance()` is done by the lexer's own construction
+    /// (see `Self::new`'s doc); the tail gate is ported here: even when
+    /// `parseProgram` recovers and returns a tree, a nonzero error count
+    /// (e.g. a strict-mode octal literal) discards it.
     pub fn parse(&mut self) -> Option<&'gc Node<'gc>> {
-        self.parse_program()
+        let res = self.parse_program()?;
+        if self.lexer.get_source_mgr().error_count() != 0 {
+            return None;
+        }
+        Some(res)
     }
 
     /// Parse a `Program` node. Port of `JSParserImpl::parseProgram` (355-373).
@@ -1051,6 +1074,42 @@ mod tests {
         } else {
             panic!("expected Program");
         }
+    }
+
+    /// `parse()`'s tail gate (`JSParserImpl.cpp:168-172`): a RECOVERABLE
+    /// parse error (the lexer reports it but `parseProgram` still returns a
+    /// tree) must still make `parse()` return `None`, mirroring
+    /// `if (lexer_.getSourceMgr().getErrorCount() != 0) return None;`.
+    /// `"use strict"; var x = 010;` is exactly this shape: `010` is a legacy
+    /// octal literal, which the lexer rejects under strict mode as a
+    /// recoverable error (parsing continues) — see
+    /// `sema_corpus_parser/parse-error-recoverable.js`, the same input used
+    /// as the end-to-end pin for this gate.
+    #[test]
+    fn parse_returns_none_on_recoverable_error() {
+        use ast::context::Context;
+        use support::manager::SourceErrorManager;
+
+        let mut sm = SourceErrorManager::new();
+        let buf_id =
+            sm.add_buffer_bytes("input", b"\"use strict\"; var x = 010;\n");
+        let mut ctx = Context::new();
+        let gc = ctx.lock();
+        let atoms = &gc.ctx().atom_table;
+        let lexer = crate::lexer::JSLexer::new(
+            buf_id,
+            &mut sm,
+            atoms,
+            crate::lexer::GrammarContext::AllowRegExp,
+        );
+        let mut parser = JSParserImpl::new(&gc, lexer);
+        let program = parser.parse();
+        assert!(parser.error_count_pub() > 0, "octal literal must error");
+        assert!(
+            program.is_none(),
+            "parse() must return None once the source has errors, even \
+             though parseProgram() itself recovered and built a tree"
+        );
     }
 
     #[test]
@@ -2908,7 +2967,11 @@ mod tests {
 
     /// Top-level `return x;` is an illegal location for `return` (not in a
     /// function), so it reports the "'return' not in a function" error, but
-    /// the parser still keeps parsing and produces a valid Program.
+    /// `parseProgram` itself still keeps parsing and produces a valid
+    /// Program (called directly here, bypassing `parse()`'s tail gate, to
+    /// exercise the recovery in isolation — the gate itself, which turns
+    /// this same recoverable error into `parse()` returning `None`, is
+    /// `parse_returns_none_on_recoverable_error`, above).
     #[test]
     fn return_outside_function_reports_error_but_parses() {
         use ast::context::Context;
@@ -2925,7 +2988,7 @@ mod tests {
             crate::lexer::GrammarContext::AllowRegExp,
         );
         let mut parser = JSParserImpl::new(&gc, lexer);
-        let program = parser.parse().expect("return still parses");
+        let program = parser.parse_program().expect("return still parses");
         assert!(
             parser.error_count_pub() >= 1,
             "top-level return reports an error"

@@ -452,14 +452,13 @@ fn main() {
         // shows up as a `None`/`nullptr` AST — which is why the parser-entry
         // oracle's lone `if (!parsedJs) return sm.getErrorCount() != 0 ? 2 :
         // 0;` (sema-parser-dump.cpp:115-119) suffices there and why hermesc's
-        // `parseJS` needs no separate check either. The Rust `parse()`
-        // (`parser/src/js/mod.rs`, "Port of `JSParserImpl::parse`") omits
-        // that error-count gate and returns `Some` for a RECOVERABLE parse
-        // error (e.g. a strict-mode octal literal), so this call site has to
-        // apply it — otherwise a parsed-with-errors tree would be handed to
-        // resolution and dumped, diverging from both oracles (see
-        // `parse-error-recoverable.js` in `tests/sema_corpus_parser`, the pin
-        // for exactly this).
+        // `parseJS` needs no separate check either. The Rust `parser.parse()`
+        // (`parser/src/js/mod.rs`, "Port of `JSParserImpl::parse`") now
+        // ports that same tail gate, so `sm.error_count() == 0` here is
+        // always true when `parsed` is `Some` — this guard is redundant
+        // defense in depth, not a compensation for a missing check anymore
+        // (see `parse-error-recoverable.js` in `tests/sema_corpus_parser`,
+        // originally the pin for the gap, kept as a pin for the gate itself).
         Some(root) if sm.error_count() == 0 => root,
         // The diagnostics were printed to stderr as they were produced;
         // hermesc exits nonzero with no stdout output, after the driver's

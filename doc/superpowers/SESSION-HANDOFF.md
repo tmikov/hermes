@@ -111,8 +111,10 @@ validation commands, and workflow.
 > 2026-08-04**: site parity was verified 1:1 rather than fixed, and the real defects were a `>` vs `>=`
 > off-by-one plus the limit constants (the ASan oracle takes C++'s `HERMES_LIMIT_STACK_DEPTH` branch, 128/512,
 > against the port's hardcoded 1024/1024 — now `cfg!(debug_assertions)`-selected), which also closed both
-> stack-overflow crashes (sweep 1218/190/8 → 1220/188/8); plus, from S4a's final review, Rust `parse()` omitting
-> `JSParserImpl::parse`'s trailing error-count gate, which every caller currently compensates for.
+> stack-overflow crashes (sweep 1218/190/8 → 1220/188/8); plus (c) **CLOSED 2026-08-04**: Rust `parse()`, which had
+> omitted `JSParserImpl::parse`'s trailing error-count gate (every caller compensated for it), now ports the gate
+> verbatim (`JSParserImpl.cpp:168-172`) — the compensating checks in `sema-dump` and `ast-dump` stay as redundant
+> defense in depth.
 > **NEXT: S5 — lazy + `eval` entry points.** `resolve_ast_lazy`/`resolve_ast_in_scope`, `visitProgram`'s unported
 > `SaveAndRestore` of `globalScope_` (cpp:216-217, only observable once `Program` can recur), and the THIRD
 > `ScopedFunctionPromoter` call site `runInScope` (`SemanticResolver.cpp:158`, promotes BEFORE

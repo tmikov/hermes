@@ -35,7 +35,7 @@ mechanism is documented here for whoever needs it next.
 | `compile-false-basics.js` | `export default function f(){}`. **S4a Task 3** — moved in from `pending/`. Pins TWO `compile_`-gated behaviors of `visit(ExportDefaultDeclarationNode *)` at once (cpp:1519-1547): no `'export' statement requires module mode` error is emitted (cpp:1520 is `compile_ &&`), and **rewrite #4 does not fire** (cpp:1526 likewise) — the dump shows `ExportDefaultDeclaration` → `FunctionDeclaration`, not the `FunctionExpression` the rewrite would have produced. Verified byte-identical: exit 0 both sides, full dump, empty stderr. This is the corpus's SECOND hermesc-analogue success file |
 | `module-imports.js` | `import d, {a as b} from 'm'; import * as ns from 'n';`. **S4a Task 3** — the other side of the module-mode asymmetry: the import error is NOT `compile_`-gated (cpp:876-879), so both declarations error even here, and the tool dumps anyway. That dump is what the DRIVER corpus can never show (hermesc skips the dump on a `resolveAST` failure), so this file is the only pin for `extractIdentsFromDecl`'s `ImportDeclaration` arm (cpp:2334-2347): `Decl %d.N Import` for `d` (`ImportDefaultSpecifier`), `b` (`ImportSpecifier` `_local`) and `ns` (`ImportNamespaceSpecifier`), plus — proving the specifier children walk really runs — `a` (the `ImportSpecifier`'s `_imported`) resolving as an ordinary `UndeclaredGlobalProperty`. Verified byte-identical: exit 2 both sides, matching stdout and stderr |
 | `error-invalid-assignment-lvalue.js` | `1 = 2;`. Also the post-walk gate (`ResolverTest.cpp`'s `TestBadAssignmentLValue` confirms "invalid assignment left-hand side" is a `sema::resolveAST`-time check on an already-cleanly-parsed tree, not a parser diagnostic) — see "Gate classification" below for why this file does NOT exercise the entry gate, correcting an initial (hedged, "verify yourself") classification from code review. Verified byte-identical: 165 bytes stdout both sides, matching stderr, exit 2 both sides. |
-| `parse-error-recoverable.js` | `"use strict"; var x = 010;`. **S4a final review.** A RECOVERABLE parse error: the lexer reports the strict-mode octal and `parseProgram()` still returns a tree, which `JSParserImpl::parse` then discards via its trailing `if (lexer_.getSourceMgr().getErrorCount() != 0) return None;` (`JSParserImpl.cpp:170-171`) — so the tool's `if (!parsedJs)` (`sema-parser-dump.cpp:115-119`) fires: nothing dumped, exit 2. The Rust `parse()` has no such gate and returns `Some` here, so `sema-dump` must apply the error-count check at its own call site; before it did, `--parser-entry` handed the unresolved tree to `sem_dump` and panicked indexing an empty `SemContext` (`sem_context.rs:845`, exit 101). This file is the pin for that. Verified byte-identical: 0 bytes stdout both sides, 151 bytes stderr both sides, exit 2 both sides. |
+| `parse-error-recoverable.js` | `"use strict"; var x = 010;`. **S4a final review.** A RECOVERABLE parse error: the lexer reports the strict-mode octal and `parseProgram()` still returns a tree, which `JSParserImpl::parse` then discards via its trailing `if (lexer_.getSourceMgr().getErrorCount() != 0) return None;` (`JSParserImpl.cpp:170-171`) — so the tool's `if (!parsedJs)` (`sema-parser-dump.cpp:115-119`) fires: nothing dumped, exit 2. At the time, the Rust `parse()` had no such gate and returned `Some` here, so `sema-dump` had to apply the error-count check at its own call site; before it did, `--parser-entry` handed the unresolved tree to `sem_dump` and panicked indexing an empty `SemContext` (`sem_context.rs:845`, exit 101). This file is the pin for that fix — and, since parser-phase follow-up (c), for `parse()`'s own `cpp:168-172` gate too, which now makes the same `Some`/nonzero-error-count case unreachable at the source. Verified byte-identical: 0 bytes stdout both sides, 151 bytes stderr both sides, exit 2 both sides. |
 | `parse-error-no-ast.js` | `var 1x;`. **S4a final review.** The OTHER no-AST path: a HARD parse error, where `parseProgram()` cannot build a tree at all and `parse()` returns through `if (!res) return None;` (`JSParserImpl.cpp:168-169`) rather than the error-count arm above. Pins that both tools stay silent on stdout, print both diagnostics (the lexer's `invalid numeric literal` and the declaration parser's `'identifier' expected in declaration`) in the same order, and exit 2 — with no `Emitted N errors. exiting.` epilogue on either side (that is the DRIVER pair's contract, not this one's). Verified byte-identical: 0 bytes stdout both sides, 242 bytes stderr both sides, exit 2 both sides. |
 | `import-assertions-compile-false.js` | `import 'b.js' with {type:'json'};`. **S4a final review.** (Named apart from the driver corpus's own upstream `import-assertions.js`, which pins the TRUE side of the same gate.) The FALSE side of the `compile_` gate on the import-assertions error (cpp:882-885, `if (compile_ && !importDecl->_attributes.empty())`): the attribute list here is non-empty, yet under `compile = false` the "import assertions are not supported" error is NOT emitted — the only diagnostic is the ungated module-mode one from cpp:876-880. `module-imports.js` cannot see this (no attributes there), so a port that dropped the `compile_ &&` half would pass the whole corpus without this file. The dump also shows the `ImportAttribute` subtree being walked: its key `type` resolves as an ordinary `UndeclaredGlobalProperty`. Verified byte-identical: 242 bytes stdout both sides, 183 bytes stderr both sides, exit 2 both sides. |
 | `flow-annotations.js` | `// FLAGS: -parse-flow` + `function f(x: number): number { return x; } var y = f(1);`. **S4a final review.** The corpus's only FLAGS-bearing file and its only Flow file: the sole exercise of the C++ tool's `if (parseFlow) ctx.setParseFlow(ParseFlowSetting::ALL)` branch, which was dead before it (spec §5 called for a flow seed here; it never shipped). The type annotations parse into type nodes the resolver walks past without declaring anything, so the dump is the same shape the untyped version would give (`f`/`y` `GlobalProperty`, `x` `Parameter`). The same review taught the C++ tool the `-parse-flow` spelling alongside `--parse-flow` — the FLAGS line is appended verbatim to BOTH binaries' argv, and hermesc's own spelling is the single dash. Resolves clean, so this is also an oracle-success file. Verified byte-identical: 630 bytes stdout both sides, empty stderr both sides, exit 0 both sides. |
@@ -86,23 +86,26 @@ there is no `libhermes`-parse step to fail either), `sm.getErrorCount()` is
 0 at that call site whenever it is reached at all, and C++'s entry gate
 cannot fire through this tool's call path.
 
-**That argument is about the C++ side only** — an earlier revision of this
-paragraph claimed "the entry gate can never fire", full stop, and was
-wrong about the Rust side. The Rust `parse()` (`parser/src/js/mod.rs`) does
-NOT port the `cpp:170-171` error-count check: on a recoverable parse error
-it returns `Some` with a nonzero `sm.error_count()`, which — before S4a's
-final review — walked straight into `resolve_ast_for_parser`, fired
-`run_always`'s ENTRY gate (returning the original, unresolved root) and
-then panicked in `sem_dump` indexing an empty `SemContext`, while the C++
-tool printed the diagnostic and exited 2 with no dump.
-`parse-error-recoverable.js` is the pin for the fix: `sema-dump` now
-applies the error-count gate at its own call site, on BOTH entry points,
-so the Rust entry gate is once again unreachable through this tool pair —
-by the caller's contract rather than by `parse()`'s. Whether `parse()`
-should carry the gate itself is tracked as parser-phase follow-up (c) in
-`doc/superpowers/RustPortRoadmap.md`. `run_always`'s first branch stays
-correctly ported for faithfulness and for any future caller that feeds it a
-`SourceErrorManager` with preexisting errors.
+**The same argument now holds on the Rust side too.** Before S4a's final
+review, the Rust `parse()` (`parser/src/js/mod.rs`) did NOT port the
+`cpp:170-171` error-count check: on a recoverable parse error it returned
+`Some` with a nonzero `sm.error_count()`, which walked straight into
+`resolve_ast_for_parser`, fired `run_always`'s ENTRY gate (returning the
+original, unresolved root) and then panicked in `sem_dump` indexing an
+empty `SemContext`, while the C++ tool printed the diagnostic and exited 2
+with no dump. `parse-error-recoverable.js` is the pin for that first fix:
+`sema-dump` was given the error-count check at its own call site, on BOTH
+entry points. Parser-phase follow-up (c) in
+`doc/superpowers/RustPortRoadmap.md` has since closed the gap at the
+source: `parse()` itself now ports the `cpp:168-172` tail gate, so it is
+IMPOSSIBLE — by `parse()`'s own contract, exactly like the C++ paragraph
+above — for `parse()` to return `Some(&Node)` while `sm.error_count() != 0`.
+The Rust entry gate is therefore unreachable through this tool pair for the
+same reason the C++ one is. `sema-dump`'s two call-site checks stay in
+place as redundant defense in depth (their comments say so), and
+`run_always`'s first branch stays correctly ported for faithfulness and for
+any future caller that feeds it a `SourceErrorManager` with preexisting
+errors.
 
 (One review round initially guessed `1 = 2;`/"invalid assignment left-hand
 side" fires the entry gate, reasoning it might be a parser-level check; it

@@ -221,6 +221,12 @@ fn main() {
     let stdout = io::stdout();
     let mut out = stdout.lock();
     match result {
+        // `parser.parse()` (`JSParserImpl.cpp:164-172`'s tail gate, ported
+        // in `parser/src/js/mod.rs`) already returns `None` whenever
+        // `sm.error_count() != 0`, so this guard is redundant defense in
+        // depth, not a compensation for a missing check — kept because it
+        // mirrors the driver-level check every other caller makes and costs
+        // nothing.
         Some(program) if sm.error_count() == 0 => {
             let mode = if include_empty {
                 ESTreeDumpMode::DumpAll
