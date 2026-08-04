@@ -18,6 +18,14 @@ TEST(KindHashTest, IsStableAcrossCalls) {
   EXPECT_EQ(computeKindHash(), computeKindHash());
 }
 
+TEST(KindHashTest, CachedAccessorMatchesComputation) {
+  // writeContainer() stamps the container header with kindHash() rather than
+  // recomputing the hash on every parse. The cached value must be the one the
+  // JavaScript side's independent computation is checked against.
+  EXPECT_EQ(computeKindHash(), kindHash());
+  EXPECT_EQ(kindHash(), kindHash());
+}
+
 TEST(KindHashTest, IsNotTrivial) {
   uint32_t hash = computeKindHash();
   EXPECT_NE(0u, hash);

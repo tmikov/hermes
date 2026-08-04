@@ -73,7 +73,7 @@ inline std::vector<uint8_t> writeContainer(
   const uint32_t header[] = {
       kContainerMagic,
       kContainerVersion,
-      computeKindHash(),
+      kindHash(),
       programOffset,
       (uint32_t)program.size(),
       positionOffset,

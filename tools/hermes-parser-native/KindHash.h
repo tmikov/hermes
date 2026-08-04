@@ -100,6 +100,11 @@ static const char *const kNodeKindEntries[] = {
 /// tools/hermes-parser/js/scripts/genKindHash.js computes the same value by
 /// parsing ESTree.def directly. The two implementations are deliberately
 /// independent: they agree only if both really see the same definitions.
+///
+/// This walks every entry on every call. The result is a constant of the
+/// build, so callers on a hot path must use \c kindHash() instead; this
+/// function exists to be the definition of that constant, and for the tests
+/// which check that recomputing it is stable.
 inline uint32_t computeKindHash() {
   uint32_t hash = 0x811C9DC5u;
   const auto feedByte = [&hash](unsigned char c) {
@@ -114,6 +119,15 @@ inline uint32_t computeKindHash() {
     feedByte((unsigned char)'\n');
   }
 
+  return hash;
+}
+
+/// \return the same value as \c computeKindHash(), computed once per process.
+/// The hash depends only on ESTree.def as it was compiled in, so hashing all
+/// ~300 entries again on every parse() call is pure waste. Initialization of
+/// the local static is thread-safe, and every thread observes the same value.
+inline uint32_t kindHash() {
+  static const uint32_t hash = computeKindHash();
   return hash;
 }
 
