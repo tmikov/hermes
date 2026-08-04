@@ -82,7 +82,21 @@ impl CommandLine {
         match self.parse(&args) {
             Err(e) => {
                 eprintln!("{}", e);
-                exit(0);
+                // A command-line USAGE error must exit nonzero. LLVM's
+                // `cl::ParseCommandLineOptions` ends its error path with
+                // `exit(1)` (`CommandLine.cpp`, the `ErrorParsing` tail), and
+                // hermesc inherits that: `hermesc --bogus-option x.js` prints
+                // `Unknown command line argument ...` and exits **1** (an
+                // exit of 2 would mean "compiled, but with diagnostics").
+                //
+                // This used to be `exit(0)`, which made every binary built on
+                // this crate report SUCCESS on a malformed command line — the
+                // whole-Sema capstone review found it as `sema-dump
+                // -ferror-limit 2 file.js` printing "option requires a value"
+                // and exiting 0, which a scripted differential sweep would
+                // count as a pass. `--help` below keeps `exit(0)`, also
+                // matching LLVM.
+                exit(1);
             }
             Ok(CommandLineIntent::Help(s)) => {
                 println!("{}", s);

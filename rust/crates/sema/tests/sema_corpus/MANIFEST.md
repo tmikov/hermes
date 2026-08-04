@@ -1585,3 +1585,89 @@ error-path pins (hermesc exit 2 on each). Arithmetic: 192 + 4 = 196;
 succeeded on the oracle)` — unchanged, nothing imported there. Parser track:
 `parser differential (tests/parser_corpus): 77 corpus files matched` — 76 →
 **77** (+1, `nested-parens-limit.js`); the seven dialect corpora unchanged.
+
+## Whole-Sema capstone fixes (2026-08-04): the untyped `-parse-flow` surface
+
+The whole-Sema capstone review (verdict APPROVED WITH FIXES; 0 Critical,
+2 Important, 3 Minor) found that S4a's untyped-`-parse-flow` claim was
+materially incomplete: **ten reachable shapes** panicked at
+`resolver/mod.rs`'s catch-all where hermesc exits 0 with a full dump. All ten
+are `-parse-flow` only (no `-typed`), so this corpus — not the typed-dialect
+track — is where they belong. Three C++-prescribed mechanisms were missing:
+
+1. **`visit(TypeParameterInstantiationNode *)`** (SemanticResolver.cpp:
+   1587-1589) — a do-nothing visit, exactly like the `TypeAlias` one next to
+   it. Reachable through three parents' children walks: `CallExpression`,
+   `NewExpression` and `OptionalCallExpression`. Its sibling
+   `visit(TypeParameterDeclarationNode *)` (cpp:1583-1585) was ported at the
+   same time for completeness even though the function/class visits
+   hand-drive their children and never dispatch it.
+2. **The `ObjectPattern`/`ArrayPattern` overrides** (SemanticResolver.h:
+   209-214). Both had been served by `visit_node`'s override-free generic
+   arm, on the argument that they reduce to it for patterns with no type
+   annotation — true until untyped `-parse-flow` made ANNOTATED destructuring
+   reachable (`var {a}: Obj = ...`, `function g({a}: Obj) {}`), at which
+   point the generic arm's `type_annotation` walk became a real divergence.
+   Ported for real in `resolver/declarations.rs` (`visit_object_pattern` /
+   `visit_array_pattern`), visiting only `_properties`/`_elements`.
+3. **The override-free Flow node range.** `InterfaceDeclaration`,
+   `EnumDeclaration`, `OpaqueType` and the `Declare*` family appear NOWHERE
+   in SemanticResolver.h's `visit` inventory, so C++ reaches them through the
+   header's default `visit(ESTree::Node *node) { visitESTreeChildren(*this,
+   node); }` (:191-193) — which is observable, not assumed: hermesc resolves
+   the interface's `Id 'I'`, the enum's `Id 'E'` and the interface body's
+   property keys as ordinary `UndeclaredGlobalProperty` identifiers.
+   `resolver/mod.rs` now carries ONE arm for the whole `NodeKind::_Flow_First
+   .._Flow_Last` range (the AST's Flow section, ESTree.def:852-1275), placed
+   after the five in-range kinds that DO have overrides (`TypeAlias`,
+   `TypeParameterDeclaration`, `TypeParameterInstantiation`,
+   `TypeCastExpression`, `AsExpression`). The range spelling is deliberate
+   and argued at the site: enumerating ~90 kinds would only invite the next
+   gap of this exact shape. `ComponentDeclaration`/`HookDeclaration` are
+   OUTSIDE that range (they are function-like statement nodes needing
+   `visitFunctionLike`) and correctly keep falling through to the panic —
+   they need `-parse-component-syntax` and are a dialect phase.
+
+### Four new files, one concern each
+
+| File | Covers |
+|---|---|
+| `flow-type-args.js` | `f<number>(1)`, `new C<number>()`, `f?.<number>(1)` — all three `TypeParameterInstantiation` parents. The do-nothing visit is visible in the dump: the callees `f`/`C` resolve, the `number` inside the type arguments does NOT (no `[D:E:...]`). hermesc: exit 0 |
+| `flow-pattern-annot.js` | annotated destructuring in five shapes — `var {a}: Obj`, `var [b]: Arr`, an annotated object pattern as a function PARAMETER (reached from `declareParams`' walk, not a variable declaration), a nested pattern, and one with a default. Every binding resolves; `Obj`/`Arr` get no annotation because the type annotation is never visited. hermesc: exit 0 |
+| `flow-interface-enum.js` | `interface I { x: number }` and `enum E { A, B }`, deliberately next to a `type A = number;` so the dump shows the CONTRAST between the children walk (`I`, `E`, and the body's `x` all resolve) and `TypeAlias`'s do-nothing visit (`A` gets nothing). hermesc: exit 0 |
+| `flow-declare-opaque.js` | `opaque type B = string;` next to `type A = string;` — near-identical syntax with OPPOSITE dispatch, so a port that lumped `OpaqueType` in with `TypeAlias` fails right here — plus `declare var dv: number;` and `declare function df(): void;` for the `Declare*` family. hermesc: exit 0 |
+
+`flow-annotations-benign.js` was not re-verified-and-changed but its header
+comment was corrected: it claimed `TypeAnnotation`/`GenericTypeAnnotation`
+"are not on `visit_node`'s dispatch", which the new Flow-range arm makes
+false. The FILE's behavior is unchanged and still byte-identical — the
+annotations there hang off an `Identifier`, whose visit does not walk its
+children, so they are never dispatched on that path at all.
+
+### `// FLAGS:` harness note — value-taking options must use `=`
+
+hermesc (via LLVM `cl`) accepts both `-ferror-limit=2` and the
+space-separated `-ferror-limit 2`; the `command_line` crate this port's
+binaries use only ever reads a value out of the SAME argv element, so only
+the `=` form works on the Rust side. Since `per_file_flags` appends the FLAGS
+line VERBATIM to both binaries' argv, a space-form spelling would have
+hermesc apply the option while `sema-dump` died on it — comparing two
+different runs rather than reporting a mismatch. **Always spell them with
+`=`.** (The capstone's finding F3 was the related exit code: a usage error
+used to `exit(0)`, i.e. report success with no dump; `command_line`'s
+`parse_env_args` now exits 1, matching LLVM's `ParseCommandLineOptions` and
+hermesc's own exit 1 on a bad option. Closing the space-form spelling gap
+itself is a `command_line`-crate port item, not a Sema one.)
+
+### Gate
+
+`sema differential (tests/sema_corpus): 200 corpus files matched (107
+succeeded on the oracle)` — 196 → **200** (+4, all authored above),
+hermesc-succeeded 103 → **107** (all four are exit-0 files, the first
+success-path additions since S4a T4's fix review). Arithmetic:
+196 + 4 = 200; 103 + 4 = 107.
+`sema differential (tests/sema_corpus_parser): 11 corpus files matched (3
+succeeded on the oracle)` — unchanged; the capstone's parser-pair findings
+(F2's `$SHBuiltin` `compile = false` semantics and the `with` debug-abort
+landmine) are documented in that corpus's MANIFEST rather than pinned, both
+because their shapes still panic or abort on one side.

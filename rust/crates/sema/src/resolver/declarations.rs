@@ -20,14 +20,19 @@
 //!
 //! ## What's dormant
 //!
-//! - **`typed_`** is always `false` in this port (typed-mode/FlowChecker
-//!   integration is S2 scope — see `resolver/mod.rs`'s module doc). The
-//!   `processDeclarations` builtin-skip branch it guards (cpp:2108-2121)
-//!   additionally needs `hasBuiltinDirective`/`hasBuiltinDecoration`
-//!   (cpp:2816-2836), which are themselves unported S2 helpers — so rather
-//!   than fabricate stand-ins for methods a later stage owns, the branch is
-//!   ported as a `const TYPED: bool = false` guard around an `unreachable!`,
-//!   matching the `DEBUG_INFO_SETTING_ALL` precedent in `mod.rs`.
+//! - **`typed_`** is always `false` in this port. Typed mode is the
+//!   **FlowChecker component**, which is out of Sema's scope entirely — not
+//!   a later Sema phase (parent spec §1 "Out of scope", §6 "Not a Sema
+//!   phase"); see `resolver/mod.rs`'s module doc. The `processDeclarations`
+//!   builtin-skip branch `typed_` guards (cpp:2108-2121) additionally needs
+//!   `hasBuiltinDirective`/`hasBuiltinDecoration` (cpp:2816-2836), whose
+//!   only caller is that branch and which therefore belong to the same
+//!   component — so rather than fabricate stand-ins for methods another
+//!   component owns, the branch is ported as a `const TYPED: bool = false`
+//!   guard around an `unreachable!`, matching the `DEBUG_INFO_SETTING_ALL`
+//!   precedent in `mod.rs`. (An earlier revision called both of these "S2
+//!   scope"/"unported S2 helpers"; S2 is long done and shipped neither, and
+//!   never could have — the capstone review corrected the tags.)
 //! - **`promotedFuncDecls`** (`FunctionContext::promoted_func_decls`) was
 //!   always empty until S3 T1, which lands `ScopedFunctionPromoter`
 //!   (`resolver/promoter.rs`) and the `processPromotedFuncDecls` that fills
@@ -55,7 +60,7 @@
 //!   isolation from the walk.
 
 use ast::context::{GCLock, NodeRc};
-use ast::node::Node;
+use ast::node::{builder, Node, NodeField};
 use ast::visitor::TransformResult;
 use support::diag::Subsystem;
 use support::manager::SourceErrorManager;
@@ -947,6 +952,70 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
         let result = node.visit_children_mut(gc, self);
         self.exit_scope(scope_state);
         result
+    }
+
+    // ---- visit(ObjectPatternNode *) / visit(ArrayPatternNode *) ---------
+
+    /// Port of `SemanticResolver::visit(ESTree::ObjectPatternNode *node,
+    /// ESTree::Node *parent)` (SemanticResolver.h:209-211), an inline
+    /// one-liner in the header:
+    ///
+    /// ```text
+    /// void visit(ESTree::ObjectPatternNode *node, ESTree::Node *parent) {
+    ///   visitESTreeNodeList(*this, node->_properties, node);
+    /// }
+    /// ```
+    ///
+    /// The point of the override is what it does NOT do: `ObjectPattern` has
+    /// two children in the AST — `properties` and `typeAnnotation`
+    /// (ESTree.def:646-650) — and this visits only the first, so sema never
+    /// descends into the Flow/TS type annotation of an annotated
+    /// destructuring pattern (`var {a}: Obj = ...`,
+    /// `function g({a}: Obj) {}`). The generic children walk WOULD descend
+    /// into it, which is exactly the divergence the whole-Sema capstone
+    /// review found (finding F1): under untyped `-parse-flow` those shapes
+    /// are reachable and hermesc resolves them, while this port panicked at
+    /// `mod.rs`'s catch-all. Pinned by `sema_corpus/flow-pattern-annot.js`.
+    ///
+    /// Note that C++ takes (and ignores) a `parent` — this port's dispatcher
+    /// only passes a `Path` to the visits that read it, so it is omitted.
+    pub(super) fn visit_object_pattern<'gc>(
+        &mut self,
+        gc: &'gc GCLock,
+        node: &'gc Node<'gc>,
+    ) -> TransformResult<&'gc Node<'gc>> {
+        let n = node
+            .as_object_pattern()
+            .expect("visit_object_pattern: not an ObjectPattern");
+        let mut b = builder::ObjectPattern::from_node(n);
+        if let Some(properties) =
+            self.visit_node_list(gc, n.properties, node, NodeField::properties)
+        {
+            b.properties(properties);
+        }
+        b.build(gc)
+    }
+
+    /// Port of `SemanticResolver::visit(ESTree::ArrayPatternNode *node,
+    /// ESTree::Node *parent)` (SemanticResolver.h:212-214) — the same
+    /// header one-liner for `_elements`, and the same skip of
+    /// `typeAnnotation` (ESTree.def:652-656). See
+    /// [`Self::visit_object_pattern`] for the full argument.
+    pub(super) fn visit_array_pattern<'gc>(
+        &mut self,
+        gc: &'gc GCLock,
+        node: &'gc Node<'gc>,
+    ) -> TransformResult<&'gc Node<'gc>> {
+        let n = node
+            .as_array_pattern()
+            .expect("visit_array_pattern: not an ArrayPattern");
+        let mut b = builder::ArrayPattern::from_node(n);
+        if let Some(elements) =
+            self.visit_node_list(gc, n.elements, node, NodeField::elements)
+        {
+            b.elements(elements);
+        }
+        b.build(gc)
     }
 }
 

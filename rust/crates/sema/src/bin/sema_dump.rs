@@ -68,6 +68,31 @@
 //!
 //! Command-line parsing uses the `command_line` crate (the LLVM-`cl`-style
 //! option parser copied from juno), like `parser`'s `ast-dump`.
+//!
+//! ## One `command_line`-vs-LLVM-`cl` spelling difference, and its exit code
+//!
+//! LLVM's `cl` accepts BOTH `-ferror-limit=2` and the space-separated
+//! `-ferror-limit 2` for a value-taking option; hermesc therefore takes
+//! either. The `command_line` crate's parser (`parser.rs`'s
+//! `parse_long_arg`/`parse_single_dash_arg`) only ever reads the value out of
+//! the SAME argv element, so **only the `=` form works here** — the space
+//! form is rejected with "option requires a value". Closing that is a
+//! `command_line`-crate port item, not a Sema one, and is deliberately left
+//! alone here.
+//!
+//! What the whole-Sema capstone review flagged (finding F3) was not the
+//! spelling but the exit code: `command_line`'s `parse_env_args` printed the
+//! usage error and then called `exit(0)`, so `sema-dump -ferror-limit 2
+//! file.js` produced no dump yet reported SUCCESS — invisible to a scripted
+//! differential sweep. That is fixed at the source (`command_line`'s
+//! `cl.rs`, now `exit(1)`, matching LLVM's `ParseCommandLineOptions` error
+//! path and hermesc's own exit 1 on a bad option).
+//!
+//! Practical consequence for the corpus harness: a `// FLAGS:` line must
+//! spell value-taking options with `=`. `sema_differential` appends the line
+//! verbatim to BOTH binaries' argv, so a space-form spelling would make
+//! hermesc apply the option while `sema-dump` died on it — a comparison of
+//! two different runs rather than a mismatch.
 
 use std::io::{self, Read, Write};
 

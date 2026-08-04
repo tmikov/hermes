@@ -6,8 +6,31 @@
  */
 
 //! Port of `hermes::sema::resolveAST` (`lib/Sema/SemResolve.cpp:159-191`) and
-//! `resolveASTForParser` (`cpp:295-306`) — the two public entry points that
-//! drive [`crate::resolver::SemanticResolver`].
+//! `resolveASTForParser` (`cpp:295-306`) — the two `SemResolve.h` entry
+//! points this crate has.
+//!
+//! ## The other `SemResolve.h` entries, and where they went
+//!
+//! `SemResolve.h` declares three more resolver entries, none of which is
+//! ported here. Their absence is compile-time loud (there is simply no
+//! function to call, and `sema-dump` has no flag that would want one), but
+//! the convention in this port is a pointer at the code site — the same one
+//! `resolver/mod.rs:1544` and `:1558` use for the S5 items' internals:
+//!
+//! - **`resolveASTLazy`** (`SemResolve.h:66`) and **`resolveASTInScope`**
+//!   (`:78`) — lazy compilation and `eval`, i.e. **S5**. They need
+//!   `SemanticResolver::runLazy`/`runInScope` (SemanticResolver.h:146/158),
+//!   `FunctionContext`'s lazy constructor, the parent/child `SemContext`
+//!   tree and its shared binding table — all documented absent at
+//!   `resolver/mod.rs`'s and `sem_context.rs`'s module docs.
+//! - **`resolveCommonJSAST`** (`:86`, plus the inline overload at `:93`) —
+//!   the `-commonjs` entry, i.e. **S4b**, together with
+//!   `SemanticResolver::runCommonJSModule` (`SemanticResolver.h:166`) and
+//!   the three `$SHBuiltin` module branches that panic in
+//!   `resolver/calls.rs`.
+//!
+//! `semDump` (`:111`) is the fourth non-resolver entry and IS ported, in
+//! [`crate::dump`].
 //!
 //! Only the untyped arm is ported. The `flowContext` parameter and the
 //! `#if HERMES_PARSE_FLOW` block it guards (`FlowChecker::run` + `lowerAST`,

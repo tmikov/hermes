@@ -303,12 +303,38 @@ impl SemanticResolver<'_, '_, '_, '_> {
                         //   return;
                         //
                         // The panic is unconditional even though the C++ call
-                        // is guarded by `compile_`: `compile` is `true` on
-                        // every entry into this port's resolver
-                        // (`resolve::resolve_ast`, resolve.rs:60), so the
-                        // guard cannot change anything, and the `return`
-                        // (which skips the children walk) is S4's to port
-                        // together with the call it guards.
+                        // is guarded by `compile_`. That is a deliberate,
+                        // spec-sanctioned deviation (parent spec §1: "the
+                        // `$SHBuiltin` branches ... keep their loud
+                        // phase-tagged panics" through S4a), NOT an argument
+                        // that the guard is dead — `compile` is `false` on
+                        // one of this port's two entries,
+                        // `resolve::resolve_ast_for_parser` (resolve.rs:97),
+                        // and the parser oracle pair reaches this branch. An
+                        // earlier version of this comment claimed `compile`
+                        // was `true` on every entry; S4a T2 made that false.
+                        //
+                        // **For S4b**: the capstone review probed hermesc's
+                        // `compile = false` behavior for all three branches,
+                        // because it is not obvious from the code and is
+                        // observable through the parser pair
+                        // (`sema-parser-dump` vs `sema-dump --parser-entry`):
+                        //
+                        // - `moduleFactory`: exit 0 with a full dump, and the
+                        //   children are NOT walked — the `return` at
+                        //   cpp:1176 is OUTSIDE the `if (compile_)`, so with
+                        //   `compile_ == false` the call is skipped but the
+                        //   `return` still fires. Dropping either the
+                        //   `if (compile_)` gate or the unconditional
+                        //   children-skipping `return` is a bug the parser
+                        //   pair will catch.
+                        // - `export`: exit 0 with a dump; `visitESTreeChildren`
+                        //   and `visitModuleExport` both run UNGATED by
+                        //   `compile_` (cpp:1182-1187).
+                        // - `import`: exit 2 with a dump; `visitModuleImport`
+                        //   runs UNGATED (cpp:1188-1189) and there is no
+                        //   `return`, so the branch falls through to the
+                        //   children walk.
                         panic!(
                             "sema: $SHBuiltin.moduleFactory needs \
                              visitModuleFactory (cpp:1320-1366) — S4 modules"

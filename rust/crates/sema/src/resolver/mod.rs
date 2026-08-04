@@ -1264,20 +1264,13 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // override — see SemanticResolver.cpp's `visit(...)` list, none
             // of which names any of these kinds.
             //
-            // `ObjectPattern`/`ArrayPattern` DO have overrides
-            // (SemanticResolver.h:209-214), inline one-liners that visit
-            // ONLY `_properties`/`_elements` and deliberately SKIP
-            // `_typeAnnotation` — sema does not resolve inside Flow/TS type
-            // annotations. So, exactly like the `MemberExpression` argument
-            // above, they reduce to this generic arm precisely for the
-            // patterns this port can currently produce: ones with no type
-            // annotation. That restriction is self-enforcing rather than
-            // assumed — the generic arm WOULD visit `type_annotation`
-            // (`visit_children_mut`, node.rs), and every type-annotation
-            // node kind is outside the handled set below, so a Flow-typed
-            // pattern hits the honest "unhandled node kind" panic instead
-            // of being silently mis-visited. Whoever ports the type-node
-            // kinds must give these two their own arms first.
+            // `ObjectPattern`/`ArrayPattern` used to be served by this arm,
+            // because their C++ overrides reduce to it for patterns with no
+            // type annotation — the only ones this port could produce before
+            // untyped `-parse-flow` existed. The capstone review found that
+            // restriction had stopped being self-enforcing (annotated
+            // patterns are reachable and were panicking where hermesc
+            // resolves), so both now have their own arms below.
             //
             // S1 T6 adds the remaining override-free *expression* kinds,
             // each checked against the `SemanticResolver::visit` inventory
@@ -1422,8 +1415,6 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             | Node::Property(_)
             | Node::ObjectExpression(_)
             | Node::VariableDeclarator(_)
-            | Node::ObjectPattern(_)
-            | Node::ArrayPattern(_)
             | Node::RestElement(_)
             | Node::AssignmentPattern(_)
             | Node::ArrayExpression(_)
@@ -1438,19 +1429,41 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             | Node::SHBuiltin(_)
             | Node::IfStatement(_)
             | Node::Empty(_) => node.visit_children_mut(gc, self),
-            // `visit(TypeAliasNode *node) { // Do nothing. }`
-            // (SemanticResolver.cpp:1579-1581, `#if HERMES_PARSE_FLOW`): a
-            // TRUE no-op, unlike the arms above — it does NOT call
-            // `visitESTreeChildren`, so `_id`/`_typeParameters`/`_right` are
-            // never visited and never get `[D:E:...]` resolution
-            // annotations in the dump (the file's whole point: "children of
-            // type alias AST node are not resolved as variables"). S4a T1
-            // ports only this one arm (what `type-alias-children.js`
-            // reaches); the neighboring cpp:1583-1596 do-nothing arms
-            // (`TypeParameterDeclarationNode`, `TypeParameterInstantiation
-            // Node`) are unexercised by any corpus file yet and are left to
-            // whichever task's corpus needs them.
-            Node::TypeAlias(_) => TransformResult::Unchanged,
+            // The two pattern overrides, SemanticResolver.h:209-214 — inline
+            // header one-liners that visit ONLY `_properties`/`_elements`
+            // and deliberately SKIP `_typeAnnotation`. They served the
+            // generic arm above until the capstone review found annotated
+            // destructuring (`var {a}: Obj = ...`) reachable under untyped
+            // `-parse-flow`; see `declarations.rs`'s two visits.
+            Node::ObjectPattern(_) => self.visit_object_pattern(gc, node),
+            Node::ArrayPattern(_) => self.visit_array_pattern(gc, node),
+            // The three Flow do-nothing visits, all `#if HERMES_PARSE_FLOW`:
+            // `visit(TypeAliasNode *)` (SemanticResolver.cpp:1579-1581),
+            // `visit(TypeParameterDeclarationNode *)` (cpp:1583-1585) and
+            // `visit(TypeParameterInstantiationNode *)` (cpp:1587-1589).
+            // Each has an empty body — a TRUE no-op, unlike the generic arm
+            // above: it does NOT call `visitESTreeChildren`, so the
+            // children are never visited and never get `[D:E:...]`
+            // resolution annotations in the dump. For `TypeAlias` that is
+            // `type-alias-children.js`'s whole point ("children of type
+            // alias AST node are not resolved as variables").
+            //
+            // `TypeParameterInstantiation` is the type-argument list of a
+            // call/`new`/optional call (`f<number>(1)`, `new C<number>()`,
+            // `f?.<number>(1)`) — reachable under untyped `-parse-flow`
+            // through those three nodes' children walks, and one of the ten
+            // shapes the capstone review (finding F1) found panicking here
+            // where hermesc resolves. Pinned by
+            // `sema_corpus/flow-type-args.js`.
+            // `TypeParameterDeclaration` is the *declaration* list
+            // (`function f<T>(){}`); the function/class visits hand-drive
+            // their children and never dispatch it, so it stays unreachable
+            // in practice — but the C++ arm exists, so the port carries it
+            // rather than leaving a hole for a future dispatcher change to
+            // fall through.
+            Node::TypeAlias(_)
+            | Node::TypeParameterDeclaration(_)
+            | Node::TypeParameterInstantiation(_) => TransformResult::Unchanged,
             // The four ES-module declaration visits (S4a T3):
             // `visit(ImportDeclarationNode *)` (cpp:874-890),
             // `visit(ExportNamedDeclarationNode *)` (cpp:1510-1517),
@@ -1475,6 +1488,56 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             Node::ExportAllDeclaration(_) => {
                 self.visit_export_all_declaration(gc, node)
             }
+            // The rest of the Flow node range: `visit(ESTree::Node *node) {
+            // visitESTreeChildren(*this, node); }` (SemanticResolver.h:
+            // 191-193), C++'s default for every kind with no `visit()`
+            // overload of its own — same mechanism as the override-free
+            // generic arm far above, expressed as a range test because the
+            // range is where the argument is uniform.
+            //
+            // The whole `#if HERMES_PARSE_FLOW` block of the header's
+            // inventory (SemanticResolver.h:289-298) names exactly eight
+            // Flow kinds, and only FIVE of them are inside the AST's `Flow`
+            // range (ESTree.def:852-1275, `NodeKind::_Flow_First
+            // .._Flow_Last`): `TypeAlias`, `TypeParameterDeclaration`,
+            // `TypeParameterInstantiation`, `TypeCastExpression` and
+            // `AsExpression` — all five have their own arms ABOVE this one,
+            // so they never reach it. The other three are outside the
+            // range: `CoverTypedIdentifier` is a `Cover*` node (handled by
+            // `visit_cover_node`), and `ComponentDeclaration`/
+            // `HookDeclaration` are function-like statement nodes that need
+            // `visitFunctionLike` — they keep falling through to the panic
+            // below, which is correct: they require
+            // `-parse-component-syntax` and are a dialect phase.
+            //
+            // Everything else in the range — the type-annotation universe
+            // (`TypeAnnotation`, `GenericTypeAnnotation`,
+            // `ObjectTypeAnnotation`, …), the Flow statement kinds
+            // (`InterfaceDeclaration`, `OpaqueType`, `EnumDeclaration` and
+            // its bodies/members, the whole `Declare*` family) and the
+            // component/record kinds — appears NOWHERE in the header's
+            // `visit` inventory, so C++ reaches each one's children through
+            // `visitESTreeChildren`, exactly like this arm. That is
+            // observable rather than assumed: hermesc's dump for
+            // `interface I { x: number }` resolves the interface's own `Id
+            // 'I'` (and the property keys inside its body) as ordinary
+            // `UndeclaredGlobalProperty` identifiers, which only the
+            // children walk can produce.
+            //
+            // The capstone review (finding F1) found the four Flow
+            // statement kinds panicking here where hermesc resolves them;
+            // `sema_corpus/flow-interface-enum.js` and
+            // `flow-declare-opaque.js` pin them. The arm is written as the
+            // range rather than as those four kinds for the same reason
+            // C++ writes a default: the rule is "no override ⇒ walk the
+            // children", and enumerating ~90 kinds would only invite the
+            // next gap of this exact shape.
+            //
+            // `DeclCollector` needs no counterpart: it already has the two
+            // Flow arms C++ gives it (`TypeAlias`, `InterfaceDeclaration`
+            // — DeclCollector.h:95-99, `decl_collector.rs:445-447`), and
+            // every other Flow kind is likewise a plain children walk there.
+            n if n.is_flow() => node.visit_children_mut(gc, self),
             _ => panic!(
                 "sema: unhandled node kind {} (S3+/dialect phases)",
                 node.node_type_str()

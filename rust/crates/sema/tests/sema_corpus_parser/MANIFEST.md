@@ -131,6 +131,59 @@ untouched — `run` (used only by `resolve_ast`) still returns `None` on
 error, which is correct there (`hermesc` never dumps after a `resolveAST`
 failure either).
 
+## For S4b: what the `$SHBuiltin` branches do under `compile = false`
+
+Recorded by the whole-Sema capstone review (2026-08-04, finding F2), because
+this pair is the ONLY way to observe it and the answers are not obvious from
+`SemanticResolver.cpp:1168-1189`. The three `$SHBuiltin` property branches
+of rewrite #3 keep their loud S4b panics in `resolver/calls.rs` through S4a
+(spec-sanctioned), so none of these shapes can be a corpus file yet — but
+whoever lands S4b should make them into three, and should know the answers
+first:
+
+| Input (single statement) | `sema-parser-dump` | What the C++ actually does |
+|---|---|---|
+| `$SHBuiltin.moduleFactory(0, function(exports){ var inner = 1; });` | exit 0, full dump | `if (compile_) visitModuleFactory(node); return;` — the `return` at cpp:1176 is **outside** the `if`, so under `compile = false` the call is skipped **and the children walk is still skipped**. Observable: the inner `Id 'exports'`/`Id 'inner'` carry NO `[D:E:...]` annotation |
+| `var v = 1; $SHBuiltin.export("n", v);` | exit 0, full dump | `visitESTreeChildren` + `visitModuleExport` both run **ungated** by `compile_` (cpp:1182-1187). Observable: the argument `Id 'v'` DOES resolve |
+| `$SHBuiltin.import("m");` | exit 2 + dump | `visitModuleImport` runs **ungated** (cpp:1188-1189) and there is no `return`, so the branch falls through to the children walk; the arity error comes from `visitModuleImport` itself |
+
+The trap this closes: an earlier `calls.rs` comment justified the
+unconditional `moduleFactory` panic by asserting `compile` is `true` on every
+entry into this port's resolver. S4a T2 made that false
+(`resolve_ast_for_parser`, `resolve.rs:97`), and an implementer who believed
+it could reasonably drop the `if (compile_)` gate, the children-skipping
+`return`, or both. The comment is corrected at the site
+(`resolver/calls.rs`), which is where an S4b implementer will be reading.
+
+## Landmine: `with (o) { x; }` — a DEBUG `sema-parser-dump` aborts, and this port deliberately does not
+
+Also from the capstone review; roadmap landmine (v). `with` is a
+`compile_`-gated error, so the DRIVER pair never dumps a `with` body and
+never sees this — only this pair does:
+
+```
+$ cmake-build-asan/bin/sema-parser-dump with.js          # `with (o) { x; }`
+sema-parser-dump: .../include/hermes/Sema/SemContext.h:559:
+  ... Assertion `!node->isUnresolvable() && "Attempt to read decl for
+  unresolvable identifier"' failed.
+Aborted (core dumped)                                          # exit 134
+
+$ sema-dump --parser-entry with.js
+... Id 'x' UNR                                                 # exit 0
+```
+
+The dumper's `enter(IdentifierNode *)` (`SemResolve.cpp:96-102`) calls
+`getExpressionDecl` unconditionally, right after `getDeclarationDecl`, and
+`Unresolver::visit` (`SemanticResolver.cpp:3192-3206`) has marked `x`
+unresolvable. Unlike the landmine below (and the `computed-fn-name.js` one
+in the driver corpus), this port does **not** mirror the abort: the assert is
+compiled out under `NDEBUG`, and in that build the call provably returns
+`nullptr` (the `Unresolver` always clears the have-expression-decl bit first
+via `setExpressionDecl(node, nullptr)`), so reproducing the *value* is
+reproducing real Release hermesc. `dump.rs:82-101` argues the deviation in
+full. The shape stays out of this corpus because there is no C++ output to
+compare against in a debug build.
+
 ## Landmine: anonymous `export default function` under `compile = false` — BOTH dumpers crash
 
 `export default function () {}` can never be added to this corpus, by
