@@ -755,11 +755,16 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 LevelResult::Error => return None,
                 LevelResult::Terminal(n) => break n,
                 LevelResult::Continue => {
-                    // C++ line 6513: stack.size() > MAX_NESTED_ASSIGNMENTS guard.
+                    // C++ line 6513: stack.size() > MAX_NESTED_ASSIGNMENTS
+                    // guard, whose body (cpp:6514) is a bare
+                    // `recursionDepthExceeded()` call — so the diagnostic is
+                    // that function's: `error(tok_->getStartLoc(), ...)`
+                    // (cpp:348-352), the point overload
+                    // (JSParserImpl.h:472-474), rendering a bare caret.
                     if stack.len() > MAX_NESTED_ASSIGNMENTS {
-                        let range = self.cur_range();
-                        self.error_at(
-                            range,
+                        let loc = self.cur_start();
+                        self.error_at_loc(
+                            loc,
                             "Too many nested expressions/statements/declarations",
                         );
                         return None;
@@ -3102,9 +3107,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // errors unless the POST-increment depth is still
             // `< MAX_RECURSION_DEPTH`. Same boundary as `check_recursion`.
             if new_depth >= super::MAX_RECURSION_DEPTH {
-                let range = self.cur_range();
-                self.error_at(
-                    range,
+                // Point location, not a range — `recursionDepthCheck()` routes
+                // to `recursionDepthExceeded` (cpp:348-352), which uses the
+                // `error(SMLoc, Twine)` overload (JSParserImpl.h:472-474).
+                let loc = self.cur_start();
+                self.error_at_loc(
+                    loc,
                     "Too many nested expressions/statements/declarations",
                 );
                 // Restore before returning.

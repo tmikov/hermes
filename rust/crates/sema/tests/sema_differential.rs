@@ -71,7 +71,7 @@
 //!   1. The recursion limits are profile-selected on BOTH sides. The C++
 //!      oracles are ASan builds, so they take the `HERMES_LIMIT_STACK_DEPTH`
 //!      branch (`Support/Compiler.h:106-110`): parser limit 128
-//!      (`JSParserImpl.h:189-200`), resolver limit 512
+//!      (`JSParserImpl.h:189-202`), resolver limit 512
 //!      (`RecursiveVisitor.h:686-692`). The Rust side mirrors that branch
 //!      under `cfg!(debug_assertions)` and takes C++'s release values
 //!      (1024/1024) otherwise. So a `--release` `sema-dump` differentialed

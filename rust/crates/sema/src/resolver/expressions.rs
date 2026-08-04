@@ -412,11 +412,14 @@ impl SemanticResolver<'_, '_, '_, '_> {
     ///
     /// Neither exit is reachable today, in either implementation: the depth
     /// budget can only be spent by the `_left` visit above, and a `_left`
-    /// deep enough to spend 1024 levels never gets past the C++ *parser*,
-    /// which trips its own (much lower, ~127) nesting limit first. The Rust
-    /// parser does not enforce that limit yet — a known parser-side gap
-    /// tracked at the phase level — so these ports are what keep the visit
-    /// honest if a hand-built or future-parser AST ever does reach here.
+    /// deep enough to spend the whole budget never gets past the *parser* —
+    /// on either side. Both parsers trip their own, much lower nesting limit
+    /// first (`MAX_RECURSION_DEPTH`, ~127 usable levels in the builds that
+    /// take the `HERMES_LIMIT_STACK_DEPTH` branch), and the Rust port
+    /// enforces it at exactly the same productions and the same boundary as
+    /// C++ — verified site-by-site and by ladder in the 2026-08-04
+    /// recursion-parity pass. So these ports are what keep the visit honest
+    /// if a hand-built AST ever does reach here.
     pub(super) fn visit_assignment_expression<'gc>(
         &mut self,
         gc: &'gc GCLock,

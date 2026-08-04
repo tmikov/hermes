@@ -1490,12 +1490,26 @@ exactly:
 - **896** = 1024 − 128. `cmake-build-asan/bin/hermesc` is an AddressSanitizer
   build, so `HERMES_LIMIT_STACK_DEPTH` is defined
   (`include/hermes/Support/Compiler.h:106-110`) and the oracle's limits are
-  `JSParserImpl::MAX_RECURSION_DEPTH` = **128** (`JSParserImpl.h:189-200`) and
+  `JSParserImpl::MAX_RECURSION_DEPTH` = **128** (`JSParserImpl.h:189-202`) and
   `ESTree::kASTMaxRecursionDepth` = **512** (`RecursiveVisitor.h:686-692`),
   not the 1024/1024 the port had hardcoded.
 - **1** = an off-by-one: C++ `recursionDepthCheck()` (`JSParserImpl.h:699-704`)
   errors unless the POST-increment depth is still `< MAX`, i.e. at `>=`; the
   port tested `>`.
+
+A third, independent divergence was found in this task's review and fixed with
+it: the diagnostic's **caret geometry**. All three Rust emitters of
+`Too many nested expressions/statements/declarations` (`js/mod.rs`'s
+`check_recursion`, the member-chain loop site, and the
+`MAX_NESTED_ASSIGNMENTS` guard) reported the current token's RANGE, but every
+one of them corresponds to C++ `recursionDepthExceeded`
+(`JSParserImpl.cpp:348-352` — the loop site reaches it via
+`recursionDepthCheck()`, the assignment guard calls it directly at
+`cpp:6514`), which uses `error(tok_->getStartLoc(), …)`, the `error(SMLoc,
+Twine)` overload (`JSParserImpl.h:472-474`). Same message, same `line:col`,
+different rendering: a bare `^` versus `^~~~~` on any trip token wider than
+one character. Fixed at all three sites; pinned by the two new corpus files
+below.
 
 Both are fixed. The limits are now profile-selected on the Rust side
 (`cfg!(debug_assertions)` → 128/512, matching the branch the ASan oracle
@@ -1510,12 +1524,14 @@ its own tracker trips") was the direct consequence of the same defect: a
 1024-level budget that an unoptimized build's frames cannot afford. With the
 debug limit at 512 it diagnoses instead, at hermesc's own `28:510`.
 
-### New files (2)
+### New files (4)
 
 | File | Source | Note |
 |---|---|---|
 | `nested-expressions.js` | `test/Parser/nested-expressions.js`, verbatim | the PARSER limit's error side: both sides `12:46: error: Too many nested expressions/statements/declarations`, exit 2, all three channels byte-identical. Was a sweep mismatch (SIGABRT on our side); now identical |
 | `regress-nested-expressions-error.js` | `test/Sema/regress-nested-expressions-error.js`, verbatim | the RESOLVER limit's error side: both sides `10:3052`, exit 2, byte-identical. The `get<<=…` chain never touches the parser's counter at all — `parseAssignmentExpression` is iterative over an explicit stack (`JSParserImpl.cpp:6496-6522`) — so the old `3052`-vs-`6124` gap was entirely `kASTMaxRecursionDepth` 512-vs-1024 |
+| `nested-unary-multichar-limit.js` | authored | the diagnostic's caret GEOMETRY on the `check_recursion` emitter: 126 `typeof` levels tripping on the 5-character identifier `xyzzy`. C++ `recursionDepthExceeded` (`JSParserImpl.cpp:348-352`) reports through `error(tok_->getStartLoc(), …)` — the `error(SMLoc, Twine)` overload (`JSParserImpl.h:472-474`) — so the caret is bare (`^`), NOT the token's underlined range (`^~~~~`). Every earlier pin trips on a one-character token, where the two are indistinguishable |
+| `nested-tagged-template-limit.js` | authored | the same geometry on the OTHER emitter: the member-chain loop's per-link increment (`JSParserImpl.cpp:3527-3535`), 127 tagged-template links tripping on a whole `` `beta` `` token |
 
 The clean side of the boundary is pinned on the parser track instead, where
 the differential can compare a SUCCESS dump: `parser/tests/parser_corpus/
@@ -1560,10 +1576,11 @@ confirmation that the convention was describing exactly these two files.
 
 `REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml -p sema
 --features dump-bin --test sema_differential -- --nocapture`:
-`sema differential (tests/sema_corpus): 194 corpus files matched (103
-succeeded on the oracle)` — 192 → **194** (+2, both imported above),
-hermesc-succeeded **103** UNCHANGED, because both new files are error-path
-pins (hermesc exit 2 on each). Arithmetic: 192 + 2 = 194; 103 + 0 = 103.
+`sema differential (tests/sema_corpus): 196 corpus files matched (103
+succeeded on the oracle)` — 192 → **196** (+4: two imported and two authored
+above), hermesc-succeeded **103** UNCHANGED, because all four new files are
+error-path pins (hermesc exit 2 on each). Arithmetic: 192 + 4 = 196;
+103 + 0 = 103.
 `sema differential (tests/sema_corpus_parser): 11 corpus files matched (3
 succeeded on the oracle)` — unchanged, nothing imported there. Parser track:
 `parser differential (tests/parser_corpus): 77 corpus files matched` — 76 →

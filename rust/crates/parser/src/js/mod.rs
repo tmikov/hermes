@@ -99,7 +99,7 @@ impl Param {
 }
 
 /// Self-explanatory: the maximum depth of parser recursion. Port of
-/// `JSParserImpl::MAX_RECURSION_DEPTH` (JSParserImpl.h:189-200), whose C++
+/// `JSParserImpl::MAX_RECURSION_DEPTH` (JSParserImpl.h:189-202), whose C++
 /// `#ifdef` ladder is:
 /// ```text
 ///   HERMES_LIMIT_STACK_DEPTH                            -> 128
@@ -756,8 +756,17 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // production.
         if depth >= MAX_RECURSION_DEPTH {
             // Don't leave it incremented.
-            let range = self.cur_range();
-            self.error_at(range, "Too many nested expressions/statements/declarations");
+            // Point location, NOT the token's range: C++
+            // `recursionDepthExceeded` (JSParserImpl.cpp:348-352) calls
+            // `error(tok_->getStartLoc(), ...)`, i.e. the `error(SMLoc,
+            // Twine)` overload (JSParserImpl.h:472-474), which renders a bare
+            // caret. Passing the range would underline the whole token
+            // (`^~~~~` instead of `^`) on any multi-character trip token.
+            let loc = self.cur_start();
+            self.error_at_loc(
+                loc,
+                "Too many nested expressions/statements/declarations",
+            );
             return None;
         }
         self.recursion_depth.set(depth);

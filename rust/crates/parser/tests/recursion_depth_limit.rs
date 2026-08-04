@@ -11,8 +11,8 @@
 //! declarations`, with the diagnostic rendered byte-for-byte the way the
 //! oracle renders it.
 //!
-//! Two things can move that boundary, and both were real bugs found by the
-//! recursion-parity audit (2026-08-04):
+//! Three things can move what this file pins, and all three were real bugs
+//! found by the recursion-parity audit (2026-08-04):
 //!
 //!   - the comparison in `check_recursion`: C++ increments first, then
 //!     `recursionDepthCheck()` (JSParserImpl.h:699-704) errors unless the
@@ -20,6 +20,9 @@
 //!     test must be `>=`, not `>`. A `>` allows one extra level and shifts
 //!     every recursion error by one production.
 //!   - `MAX_RECURSION_DEPTH` itself.
+//!   - the diagnostic's caret geometry — point vs range; see
+//!     [`at_the_limit_renders_a_bare_caret_on_a_wide_token`], the only test
+//!     here whose trip token is wider than one character.
 //!
 //! `#![cfg(debug_assertions)]`: `MAX_RECURSION_DEPTH` is profile-selected
 //! (128 in debug, mirroring the C++ `HERMES_LIMIT_STACK_DEPTH` branch that
@@ -27,9 +30,11 @@
 //! constant's doc in `js/mod.rs`). The exact depths below therefore only hold
 //! in the debug profile, which is the profile `cargo test` uses and the one
 //! every differential gate runs. The corpus files
-//! `parser/tests/parser_corpus/nested-parens-limit.js` (clean side) and
-//! `sema/tests/sema_corpus/nested-expressions.js` (error side) pin the same
-//! boundary against the real oracles.
+//! `parser/tests/parser_corpus/nested-parens-limit.js` (clean side),
+//! `sema/tests/sema_corpus/nested-expressions.js` (error side) and
+//! `sema/tests/sema_corpus/nested-{unary-multichar,tagged-template}-limit.js`
+//! (the geometry, on both emitters) pin the same behavior against the real
+//! oracles.
 #![cfg(debug_assertions)]
 
 use ast::context::Context;
@@ -51,6 +56,14 @@ fn paren_ladder(n: usize) -> String {
         s.push_str(")\n");
     }
     s
+}
+
+/// `N` `typeof` levels applied to a MULTI-CHARACTER identifier, one token per
+/// line. Same depth accounting as [`paren_ladder`], but the token the limit
+/// trips on is 5 characters wide, which is what makes the caret geometry
+/// observable (see [`at_the_limit_renders_a_bare_caret_on_a_wide_token`]).
+fn typeof_ladder(n: usize) -> String {
+    "typeof\n".repeat(n) + "xyzzy;\n"
 }
 
 /// Parse `src` and return `(parsed_ok, rendered_diagnostics)`.
@@ -128,6 +141,37 @@ fn at_the_limit_reports_the_recursion_error_impl() {
         "nested-parens.js:127:1: error: Too many nested expressions/\
          statements/declarations\n\
          1\n\
+         ^\n"
+    );
+}
+
+/// The trip token's WIDTH must not reach the rendering: C++
+/// `recursionDepthExceeded` (JSParserImpl.cpp:348-352) reports through
+/// `error(tok_->getStartLoc(), …)`, the `error(SMLoc, Twine)` overload
+/// (JSParserImpl.h:472-474), which renders a bare `^` — not the token's range,
+/// which would underline it (`^~~~~`). Every other pin in this file and in the
+/// parser corpus trips on a one-character token, where the two renderings are
+/// indistinguishable; this one trips on `xyzzy`.
+///
+/// Verified byte-for-byte against `cmake-build-asan/bin/hermesc -dump-ast` on
+/// the same source.
+#[test]
+fn at_the_limit_renders_a_bare_caret_on_a_wide_token() {
+    on_a_big_stack(at_the_limit_renders_a_bare_caret_on_a_wide_token_impl);
+}
+
+fn at_the_limit_renders_a_bare_caret_on_a_wide_token_impl() {
+    let (ok, rendered) = parse(&typeof_ladder(125));
+    assert!(ok, "125 nested `typeof` must parse");
+    assert_eq!(rendered, "", "125 nested `typeof` must emit no diagnostic");
+
+    let (ok, rendered) = parse(&typeof_ladder(126));
+    assert!(!ok, "126 nested `typeof` must fail to parse");
+    assert_eq!(
+        rendered,
+        "nested-parens.js:127:1: error: Too many nested expressions/\
+         statements/declarations\n\
+         xyzzy;\n\
          ^\n"
     );
 }
