@@ -31,16 +31,31 @@ That has three costs:
    code, and the serialization protocol re-decodes every string on every
    reference (see "String interning" below).
 
-   **Measured outcome (see the Task 12 benchmark):** only the second half of
-   this held up. Against a Release build on a 179-file corpus the fork is
-   **1.11x** the wasm package's end-to-end throughput, and splitting the phases
-   shows the gain is **entirely** JavaScript-side deserialization — the wasm
-   parse itself is at parity, within noise. On corpora with heavy identifier
-   repetition the deserialization win grows to 1.9x-4.3x, confirming the string
-   table is the mechanism; on those same corpora native parse-and-serialize
-   runs 5-15% *slower* than wasm. The honest summary is that this fork buys
-   WebAssembly independence and a better deserialization protocol, not raw
-   parsing speed.
+   **Measured outcome.** An earlier version of this paragraph reported 1.11x
+   end-to-end against the wasm package over a 179-file corpus and described the
+   parse itself as at parity. That measured the whole pipeline and reported it
+   as parser performance, and the corpus aggregate was dominated by fixed
+   per-call cost: the median file is 2.2 KB against roughly 54 µs of per-call
+   overhead. `@babel/parser` 7.28.3 also fails on 5 of the 6 large Flow files
+   in that corpus, so corpus-wide Babel ratios were partly measuring Babel
+   skipping the hard inputs.
+
+   Remeasured on one 66 KB real-world file, Release/Clang, engine side only:
+
+   - `JSParser::parse()` alone runs at **151 MB/s**; `@babel/parser` totals
+     **20 MB/s**. The parser is about **7.6x** Babel.
+   - The full C++ side — parse, sema, serialize, container assembly, copy out —
+     runs at **40.9 MB/s**, about 2x Babel. The same file measures 14.8 MB/s
+     corpus-wide, which is the fixed-cost effect above.
+   - Splitting that C++ side: serialize **42.6%**, parse **27.2%**, sema
+     **13.7%**, copyOut 6.8%, sourceIn 4.8%. Serialization costs 57% more than
+     parsing, so the fork's overhead is dominated by getting the AST out rather
+     than by producing it.
+   - Native vs wasm engine side on that file: 42.7 MB/s vs 45.7 MB/s.
+     Subtracting `container` and `copyOut`, work the wasm path does not do
+     because JavaScript reads its linear memory directly, gives 44.9 vs 45.7 —
+     parity within noise. Why compiled native code only matches wasm here is
+     not yet explained.
 
 A native addon removes all three.
 
