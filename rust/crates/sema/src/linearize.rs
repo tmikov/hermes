@@ -14,7 +14,8 @@
 //! right-nested `a = b = c = ...` chains a real program can contain are
 //! walked *iteratively* rather than recursively, which is why their limit is
 //! `MAX_NESTED_*` (30000) rather than the recursive
-//! `ESTree::kASTMaxRecursionDepth` (1024).
+//! `ESTree::kASTMaxRecursionDepth` (512 or 1024 depending on build
+//! configuration — see `resolver::AST_MAX_RECURSION_DEPTH`).
 //!
 //! ## Deviations from the C++
 //!

@@ -106,10 +106,13 @@ validation commands, and workflow.
 > diagnostic ties, THREE hermesc self-aborts — `class C { x = class {}; }`, `$SHBuiltin.#x()`, and
 > `using x = 1; { function f(){} }` — plus a FOURTH found in S4a: the dumper itself aborts on anonymous
 > `export default function(){}` dumped under `compile = false`, `SemContext.cpp:493-494` vs `dump_context.rs:304`,
-> permanently excluded from `sema_corpus_parser`); and the THREE tracked parser-phase follow-ups (the 180-file
-> `errorExpected` same-line-range gap and the recursion stack-overflow crash that disproved the old "ours is
-> silent" wording, both measured by the sema sweeps; plus, from S4a's final review, Rust `parse()` omitting
-> `JSParserImpl::parse`'s trailing error-count gate, which every caller currently compensates for).
+> permanently excluded from `sema_corpus_parser`); and the THREE tracked parser-phase follow-ups — the 180-file
+> `errorExpected` same-line-range gap (open, measured by the sema sweeps); the recursion-depth gap **CLOSED
+> 2026-08-04**: site parity was verified 1:1 rather than fixed, and the real defects were a `>` vs `>=`
+> off-by-one plus the limit constants (the ASan oracle takes C++'s `HERMES_LIMIT_STACK_DEPTH` branch, 128/512,
+> against the port's hardcoded 1024/1024 — now `cfg!(debug_assertions)`-selected), which also closed both
+> stack-overflow crashes (sweep 1218/190/8 → 1220/188/8); plus, from S4a's final review, Rust `parse()` omitting
+> `JSParserImpl::parse`'s trailing error-count gate, which every caller currently compensates for.
 > **NEXT: S5 — lazy + `eval` entry points.** `resolve_ast_lazy`/`resolve_ast_in_scope`, `visitProgram`'s unported
 > `SaveAndRestore` of `globalScope_` (cpp:216-217, only observable once `Program` can recur), and the THIRD
 > `ScopedFunctionPromoter` call site `runInScope` (`SemanticResolver.cpp:158`, promotes BEFORE

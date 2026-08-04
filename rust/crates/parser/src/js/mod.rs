@@ -98,8 +98,34 @@ impl Param {
     }
 }
 
-/// Maximum recursion depth, mirroring the non-MSVC default in JSParserImpl.h.
-const MAX_RECURSION_DEPTH: u32 = 1024;
+/// Self-explanatory: the maximum depth of parser recursion. Port of
+/// `JSParserImpl::MAX_RECURSION_DEPTH` (JSParserImpl.h:189-200), whose C++
+/// `#ifdef` ladder is:
+/// ```text
+///   HERMES_LIMIT_STACK_DEPTH                            -> 128
+///   _MSC_VER && HERMES_SLOW_DEBUG                       -> 128
+///   _MSC_VER && __clang__ && !NDEBUG                    -> 128
+///   _MSC_VER                                            -> 512
+///   otherwise                                           -> 1024
+/// ```
+/// `HERMES_LIMIT_STACK_DEPTH` is defined for AddressSanitizer/UBSan builds
+/// (Support/Compiler.h:106-110), because those builds' stack frames are fat
+/// enough that 1024 parser levels outrun the stack.
+///
+/// RUST MAPPING: Rust has no stable `cfg(sanitize = ...)`, so we key off
+/// `debug_assertions`, which lines the two configurations up the way they are
+/// actually used: a DEBUG (unoptimized) Rust build has the same fat frames as
+/// an ASan C++ build — it stack-overflows around 350 parser levels — and the
+/// project's standard oracle (`cmake-build-asan/bin/hermesc`, see CLAUDE.md)
+/// is exactly that ASan build, so debug-vs-ASan is the pairing every
+/// differential gate runs. A RELEASE Rust build gets C++'s release value.
+///
+/// CAVEAT: the corollary is that a RELEASE Rust build differentialed against
+/// the ASan `hermesc` mismatches on deep-nesting inputs (1024 vs 128) — the
+/// tools must be paired by profile. Debug-vs-ASan and release-vs-release both
+/// agree; crossing them does not.
+const MAX_RECURSION_DEPTH: u32 =
+    if cfg!(debug_assertions) { 128 } else { 1024 };
 
 /// RAII guard for the recursion depth counter. Decrements on Drop so that
 /// every `check_recursion` call site is balanced even on early return.
@@ -723,7 +749,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// freely use `&mut self` for parse calls while the guard is alive.
     pub(super) fn check_recursion(&mut self) -> Option<RecursionGuard> {
         let depth = self.recursion_depth.get() + 1;
-        if depth > MAX_RECURSION_DEPTH {
+        // `>=`, not `>`: C++ increments first, then `recursionDepthCheck()`
+        // (JSParserImpl.h:699-704) reports the error unless the POST-increment
+        // depth is still `< MAX_RECURSION_DEPTH`. Using `>` here would allow
+        // one extra nesting level and shift every recursion error by one
+        // production.
+        if depth >= MAX_RECURSION_DEPTH {
             // Don't leave it incremented.
             let range = self.cur_range();
             self.error_at(range, "Too many nested expressions/statements/declarations");

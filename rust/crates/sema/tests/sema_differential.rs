@@ -66,6 +66,23 @@
 //! on (a non-degeneracy guard: an all-failing corpus would make the stdout/
 //! stderr comparison above vacuous in the success case).
 //!
+//! BUILD-PROFILE PAIRING (load-bearing, two independent reasons):
+//!
+//!   1. The recursion limits are profile-selected on BOTH sides. The C++
+//!      oracles are ASan builds, so they take the `HERMES_LIMIT_STACK_DEPTH`
+//!      branch (`Support/Compiler.h:106-110`): parser limit 128
+//!      (`JSParserImpl.h:189-200`), resolver limit 512
+//!      (`RecursiveVisitor.h:686-692`). The Rust side mirrors that branch
+//!      under `cfg!(debug_assertions)` and takes C++'s release values
+//!      (1024/1024) otherwise. So a `--release` `sema-dump` differentialed
+//!      against the ASan oracles MISMATCHES on deep-nesting inputs — e.g.
+//!      `nested-expressions.js` and `regress-nested-expressions-error.js`
+//!      in this corpus. Debug-vs-ASan (what `cargo test` runs) and
+//!      release-vs-release both agree; crossing them does not.
+//!   2. `--release` also silently masks the `computed-fn-name.js` upstream
+//!      C++ defect reproduction, whose assertions are compiled out — see the
+//!      sweep-tooling note in `sema_corpus/MANIFEST.md`.
+//!
 //! Skip cleanly when the oracle binary is absent; set
 //! `REQUIRE_DIFFERENTIAL=1` to turn a missing oracle into a hard failure
 //! (used in CI).

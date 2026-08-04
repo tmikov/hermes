@@ -409,11 +409,28 @@ use crate::sem_context::{
     CustomDirectives, DeclKind, SemContext, SourceVisibility,
 };
 
-/// Port of `ESTree::kASTMaxRecursionDepth` (RecursiveVisitor.h:686-692) for
-/// the non-`HERMES_LIMIT_STACK_DEPTH`, non-MSVC configuration this port
-/// targets; the initial value of `RecursionDepthTracker::recursionDepth_`
-/// (RecursiveVisitor.h:712-713).
-const AST_MAX_RECURSION_DEPTH: u32 = 1024;
+/// Port of `ESTree::kASTMaxRecursionDepth` (RecursiveVisitor.h:686-692); the
+/// initial value of `RecursionDepthTracker::recursionDepth_`
+/// (RecursiveVisitor.h:712-713), which `SemanticResolver` derives from
+/// (SemanticResolver.h:28). The C++ `#if` is:
+/// ```text
+///   HERMES_LIMIT_STACK_DEPTH || _MSC_VER  -> 512
+///   otherwise                             -> 1024
+/// ```
+/// `HERMES_LIMIT_STACK_DEPTH` is defined for AddressSanitizer/UBSan builds
+/// (Support/Compiler.h:106-110).
+///
+/// RUST MAPPING: same reasoning as the parser's `MAX_RECURSION_DEPTH` (see
+/// `parser::js::MAX_RECURSION_DEPTH`) — Rust has no stable
+/// `cfg(sanitize = ...)`, so `debug_assertions` stands in: a debug Rust build
+/// has ASan-sized frames and is what the differential gates pair against the
+/// ASan `hermesc`/`sema-parser-dump` oracles; a release build gets C++'s
+/// release value.
+///
+/// CAVEAT: a RELEASE Rust build differentialed against the ASan oracles
+/// mismatches on deep-nesting inputs (1024 vs 512). Pair the tools by profile.
+const AST_MAX_RECURSION_DEPTH: u32 =
+    if cfg!(debug_assertions) { 512 } else { 1024 };
 
 /// Port of `astContext_.getDebugInfoSetting() == DebugInfoSetting::ALL`.
 ///

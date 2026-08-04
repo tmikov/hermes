@@ -592,8 +592,25 @@ fn lazy_corpus_reparse_equivalence() {
 /// are silently skipped by the check_file logic; we assert that at least 10
 /// body comparisons actually happened across all thresholds so a mass-rename
 /// cannot silently hollow out the test.
+///
+/// Runs on a thread with an enlarged stack: this is the only test that parses
+/// the standard corpus IN-PROCESS (`preparse_differential` and
+/// `parser_differential` shell out, so their parses get a process main
+/// thread's 8 MiB), and
+/// `nested-parens-limit.js` is deliberately 125 levels deep — one below the
+/// recursion limit — which is more unoptimized recursive-descent frames than
+/// the 2 MiB the test harness gives a test thread.
 #[test]
 fn parser_corpus_reparse_equivalence() {
+    std::thread::Builder::new()
+        .stack_size(32 * 1024 * 1024)
+        .spawn(parser_corpus_reparse_equivalence_impl)
+        .expect("failed to spawn the corpus-reparse thread")
+        .join()
+        .expect("the corpus-reparse thread panicked");
+}
+
+fn parser_corpus_reparse_equivalence_impl() {
     let files = corpus_files("tests/parser_corpus");
     assert!(!files.is_empty(), "parser corpus is empty");
     let mut total_files = 0usize;

@@ -240,7 +240,7 @@ fn unrewritten_resolution_returns_the_same_root() {
 
 /// The recursion-depth protocol (`RecursiveVisitor.h`'s
 /// `incRecursionDepth`/`decRecursionDepth`, bracketing every dispatched
-/// node): an AST nested deeper than `kASTMaxRecursionDepth` (1024) reports
+/// node): an AST nested deeper than `kASTMaxRecursionDepth` reports
 /// `recursionDepthExceeded`'s error exactly once and fails resolution,
 /// instead of overflowing the stack.
 ///
@@ -253,12 +253,12 @@ fn unrewritten_resolution_returns_the_same_root() {
 /// A parsed source string can't stand in either: the parser has its own
 /// (lower) nesting limit and would reject it first.
 ///
-/// Runs on a thread with an enlarged stack: 1024 levels of *unoptimized*
-/// `visit_children`/`visit_node` frames (the generated dispatch matches on
-/// every node kind, so a debug-build frame is large) exceed the 2 MiB the
-/// test harness gives a test thread. That is a debug-build property of this
-/// traversal, not of the limit — which is exactly what the limit is there to
-/// keep bounded.
+/// Runs on a thread with an enlarged stack: several hundred levels of
+/// *unoptimized* `visit_children`/`visit_node` frames (the generated dispatch
+/// matches on every node kind, so a debug-build frame is large) exceed the
+/// 2 MiB the test harness gives a test thread. That is a debug-build
+/// property of this traversal, not of the limit — which is exactly what the
+/// limit is there to keep bounded.
 #[test]
 fn too_deeply_nested_ast_reports_the_recursion_limit() {
     std::thread::Builder::new()
@@ -270,8 +270,12 @@ fn too_deeply_nested_ast_reports_the_recursion_limit() {
 }
 
 fn too_deeply_nested_ast_reports_the_recursion_limit_impl() {
-    /// Comfortably past `ESTree::kASTMaxRecursionDepth` == 1024
-    /// (`include/hermes/AST/RecursiveVisitor.h:686-692`).
+    /// Comfortably past `AST_MAX_RECURSION_DEPTH` — the port of
+    /// `ESTree::kASTMaxRecursionDepth`
+    /// (`include/hermes/AST/RecursiveVisitor.h:686-692`), which is
+    /// profile-selected: 512 in debug (the `HERMES_LIMIT_STACK_DEPTH` branch
+    /// the ASan oracle build takes), 1024 in release. 1100 is past both, so
+    /// this test pins the limit's behavior in either profile.
     const DEPTH: usize = 1100;
 
     let mut ctx = Context::new();
@@ -609,13 +613,14 @@ fn a_fold_rebuilds_the_root() {
 
 /// The whole point of `linearizeLeft` (ESTree.h:1437-1451): a `+`/`-` chain
 /// is walked ITERATIVELY, so its links do not consume recursion depth. A
-/// 2000-link chain is nearly twice `kASTMaxRecursionDepth` (1024) — a
+/// 2000-link chain is several times `kASTMaxRecursionDepth` (512 in debug,
+/// 1024 in release) — a
 /// recursive walk would report "Too many nested expressions" and fail —
 /// yet it must resolve cleanly *and* fold end to end.
 #[test]
 fn a_long_binary_chain_is_folded_without_recursing() {
-    /// Comfortably past `AST_MAX_RECURSION_DEPTH` (1024), and far below
-    /// `MAX_NESTED_BINARY` (30000).
+    /// Comfortably past `AST_MAX_RECURSION_DEPTH` in either build profile
+    /// (512 debug / 1024 release), and far below `MAX_NESTED_BINARY` (30000).
     const LINKS: usize = 2000;
 
     let src = (0..=LINKS)

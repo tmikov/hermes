@@ -3098,7 +3098,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // ++recursionDepth_; if (LLVM_UNLIKELY(recursionDepthCheck())) return None;
             let new_depth = self.recursion_depth.get() + 1;
             self.recursion_depth.set(new_depth);
-            if new_depth > super::MAX_RECURSION_DEPTH {
+            // `>=`, not `>`: `recursionDepthCheck()` (JSParserImpl.h:699-704)
+            // errors unless the POST-increment depth is still
+            // `< MAX_RECURSION_DEPTH`. Same boundary as `check_recursion`.
+            if new_depth >= super::MAX_RECURSION_DEPTH {
                 let range = self.cur_range();
                 self.error_at(
                     range,

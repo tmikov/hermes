@@ -165,7 +165,6 @@ files in, 54 accounted for below) rather than silently dropped. It is also
 |---|---|---|
 | `deep-ast-err.js` | vacuous — see note above (not a real S1 gap) | n/a |
 | `invalid-args-eval.js` | **not a port gap** — the resolver's loop/`for` support landed in S2 T1 and every diagnostic in this file is produced, with identical text and locations, but two of them collide at the *same* source location (`89:9`: the strict-mode `cannot declare 'arguments'` error and the `was not declared in function "global"` warning). C++'s buffered-message flush uses `std::sort` (`SourceErrorManager.cpp:61-71`), which is NOT stable, so their relative order is unspecified and in practice depends on the whole 24-message array; our `disable_buffering` uses a stable `sort_by_key` (`support/src/manager.rs:903-909`, a documented deviation). Minimized to two messages the two sides agree; only at this file's message count does libstdc++'s introsort reorder the tie. Not faithfully fixable (there is no defined tie order to match), and the file's actual subject is S1's `arguments`/`eval` declaration rules, so the loop-specific rows were extracted into the new `error-for-decl-strict.js` instead | n/a (C++ unstable-sort tie) |
-| `regress-nested-expressions-error.js` | recursion-depth-limit mismatch: hermesc and sema-dump both correctly error `Too many nested expressions/statements/declarations` on the deeply-nested `get<<=get<<=...` chain, but at different columns (hermesc col 3052, sema-dump col 6124) — the two recursion trackers (`JSParserImpl::recursionDepth_`/`SemanticResolver`'s tracker vs our ported ones) increment at different rates per grammar production, so the exact trip point diverges even though both share the same `MAX_RECURSION_DEPTH = 1024`. Same landmine category as the S1 ledger's "parser recursion limit unported" item (S0-era finding, T6 review) — tracked together, not re-derived/fixed here. **S2 T8's sweep sharpened it: on `test/hermes/far-environment-access.js` (250-odd nested arrows) hermesc reports the error at 28:510 while `sema-dump` STACK-OVERFLOWS and aborts (SIGABRT/134) before its own tracker trips.** So the gap is not only "a different column": a debug build's frames are big enough that 1024 allowed levels outrun the 8 MB stack, i.e. deep-but-otherwise-valid input crashes instead of diagnosing. Same row, higher severity | parser-gap follow-up (recursion-depth-counting parity + a real crash) |
 | `xmod-errors.js` | the `$SHBuiltin` CommonJS-module protocol: `visitModuleFactory`/`visitModuleExport`/`visitModuleImport` (cpp:1320-1453), reached from the three property-name branches of rewrite #3 (cpp:1168-1189). `CallExpression` itself landed in S2 T6, which ports those three branches as loud phase-tagged panics — its row was re-classified from "`CallExpression` / S2" accordingly. Every diagnostic in the file (`$SHBuiltin.moduleFactory requires exactly two arguments.` and 17 more) comes from those three functions | S4 modules |
 
 ## Subdirectories (`test/Sema/flow/`, `test/Sema/flow/ffi/`, `test/Sema/lowering/`)
@@ -1468,3 +1467,104 @@ this task, since Step 2 imported nothing and no code changed. Full workspace
 config); `cargo clippy -p sema --all-targets --features dump-bin` emits
 nothing for `sema` (the workspace's other warnings remain the pre-existing
 ones in `parser`, untouched, same as every prior task's note).
+
+## Parser-track T1 (recursion-depth parity): the recursion row, closed
+
+The parser track's recursion-parity task landed the fix the Deferred
+`regress-nested-expressions-error.js` row had been waiting on since S1, so
+that row is now **Imported** (Deferred 4 → **3**) together with a second
+upstream witness. Two corrections to what this MANIFEST previously recorded,
+both measured, not assumed:
+
+**1. The row's stated cause was wrong.** The row said the two sides'
+recursion trackers "increment at different rates per grammar production …
+even though both share the same `MAX_RECURSION_DEPTH = 1024`". They do not
+share it, and the rates were never different. T1's audit mapped all 20
+`CHECK_RECURSION` sites (`JSParserImpl.cpp` 17 + `JSParserImpl-ts.cpp` 3) plus
+the per-chain-link increment at `JSParserImpl.cpp:3527-3535` to their Rust
+productions **in both directions**: every site present, at the same scope,
+none missing, none extra. Across 34 nesting ladders the trip points differed
+by a CONSTANT 897 levels — a fixed offset, not a rate — which decomposes
+exactly:
+
+- **896** = 1024 − 128. `cmake-build-asan/bin/hermesc` is an AddressSanitizer
+  build, so `HERMES_LIMIT_STACK_DEPTH` is defined
+  (`include/hermes/Support/Compiler.h:106-110`) and the oracle's limits are
+  `JSParserImpl::MAX_RECURSION_DEPTH` = **128** (`JSParserImpl.h:189-200`) and
+  `ESTree::kASTMaxRecursionDepth` = **512** (`RecursiveVisitor.h:686-692`),
+  not the 1024/1024 the port had hardcoded.
+- **1** = an off-by-one: C++ `recursionDepthCheck()` (`JSParserImpl.h:699-704`)
+  errors unless the POST-increment depth is still `< MAX`, i.e. at `>=`; the
+  port tested `>`.
+
+Both are fixed. The limits are now profile-selected on the Rust side
+(`cfg!(debug_assertions)` → 128/512, matching the branch the ASan oracle
+takes; 1024/1024 otherwise, matching a C++ release build), so **the harness
+now depends on build-profile pairing for a second reason** — see the
+BUILD-PROFILE PAIRING note in `sema_differential.rs`'s module doc, next to the
+existing `--release` masking gotcha.
+
+**2. `test/hermes/far-environment-access.js` no longer crashes.** The row's
+S2-T8 upgrade ("`sema-dump` STACK-OVERFLOWS and aborts (SIGABRT/134) before
+its own tracker trips") was the direct consequence of the same defect: a
+1024-level budget that an unoptimized build's frames cannot afford. With the
+debug limit at 512 it diagnoses instead, at hermesc's own `28:510`.
+
+### New files (2)
+
+| File | Source | Note |
+|---|---|---|
+| `nested-expressions.js` | `test/Parser/nested-expressions.js`, verbatim | the PARSER limit's error side: both sides `12:46: error: Too many nested expressions/statements/declarations`, exit 2, all three channels byte-identical. Was a sweep mismatch (SIGABRT on our side); now identical |
+| `regress-nested-expressions-error.js` | `test/Sema/regress-nested-expressions-error.js`, verbatim | the RESOLVER limit's error side: both sides `10:3052`, exit 2, byte-identical. The `get<<=…` chain never touches the parser's counter at all — `parseAssignmentExpression` is iterative over an explicit stack (`JSParserImpl.cpp:6496-6522`) — so the old `3052`-vs-`6124` gap was entirely `kASTMaxRecursionDepth` 512-vs-1024 |
+
+The clean side of the boundary is pinned on the parser track instead, where
+the differential can compare a SUCCESS dump: `parser/tests/parser_corpus/
+nested-parens-limit.js` (125 nested parens = N*−1 for that shape; 126 errors
+on both sides), plus `parser/tests/recursion_depth_limit.rs`, which pins both
+sides of the boundary and the rendered diagnostic without needing an oracle
+present.
+
+### Sweep re-count
+
+Same 1416 files, same 8 upstream dirs, same method (both binaries, raw stdout
++ stderr + exit status, no extra flags, **debug builds on both sides** — the
+`--release` landmine documented under S4a-T5's "Zero S4a-attributable panics"
+now has a second, unrelated way to lie, see above). File count re-verified:
+`find test/{Parser,IRGen,BCGen,Optimizer,hermes,AST,Driver,RA} -iname '*.js'
+| wc -l` = 1416, unchanged.
+
+| Outcome | S3-T3 | S4a-T5 | parser-T1 | Delta vs S4a-T5 |
+|---|---|---|---|---|
+| byte-identical | 1209 | 1218 | **1220** | +2 |
+| mismatch | 190 | 190 | **188** | −2 |
+| panic | 17 | 8 | **8** | 0 |
+
+1220 + 188 + 8 = 1416. The moved set is exactly the **two** files this row
+always named — `test/Parser/nested-expressions.js` and
+`test/hermes/far-environment-access.js` — each independently confirmed in this
+run's `identical.txt`. No other file's bucket changed: the panic bucket is
+byte-for-byte the same 8 files as S4a-T5 (seven `calls.rs:312`
+`$SHBuiltin.moduleFactory` S4b files plus `test/hermes/computed-fn-name.js`'s
+pre-existing-C++-defect reproduction), and mismatch 190 − 2 = 188 accounts for
+the rest.
+
+One tooling note worth recording: S4a-T5's raw pass needed a reconciliation
+step, because the two files above aborted (`SIGABRT`) on our side and a raw
+exit-shape bucketing calls that "panic", so the convention was to reclassify
+them into "mismatch". **That reconciliation is now moot** — they exit 2 like
+the oracle — so this run's raw pass reads 1220 / 188 / 8 directly, with no
+convention applied. The two numbers agreeing without the fixup is independent
+confirmation that the convention was describing exactly these two files.
+
+### Gate
+
+`REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml -p sema
+--features dump-bin --test sema_differential -- --nocapture`:
+`sema differential (tests/sema_corpus): 194 corpus files matched (103
+succeeded on the oracle)` — 192 → **194** (+2, both imported above),
+hermesc-succeeded **103** UNCHANGED, because both new files are error-path
+pins (hermesc exit 2 on each). Arithmetic: 192 + 2 = 194; 103 + 0 = 103.
+`sema differential (tests/sema_corpus_parser): 11 corpus files matched (3
+succeeded on the oracle)` — unchanged, nothing imported there. Parser track:
+`parser differential (tests/parser_corpus): 77 corpus files matched` — 76 →
+**77** (+1, `nested-parens-limit.js`); the seven dialect corpora unchanged.
