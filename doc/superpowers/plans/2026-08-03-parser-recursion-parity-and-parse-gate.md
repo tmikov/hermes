@@ -87,13 +87,23 @@ N=100 and N=200; Rust ast-dump exits 0 at N=200 and SIGABRTs (134) at N=400.
   record the divergence as RED. Also run
   `test/Parser/nested-expressions.js` through both parser binaries and
   record the current divergence.
-- [ ] **Step 3:** Fix the missing/extra sites per the audit (including the
-  cpp:3527-3535 per-chain-link increment — port its `SaveAndRestore` shape
-  faithfully with the established save/restore idiom). After each fix batch,
-  re-run the ladder: DONE when hermesc and ast-dump error at the same N*
-  boundary (N*-1 clean both, N* errors both, byte-identical) and
+- [ ] **Step 3 (AMENDED 2026-08-04 after the Step-1 audit falsified the
+  site-parity premise — all 20+loop sites already map 1:1, both directions):**
+  The real fixes, both measured decisive: (a) the `>` vs `>=` off-by-one —
+  `check_recursion` (js/mod.rs:726) and the loop site must error at `>=` like
+  C++ `recursionDepthCheck()` (JSParserImpl.h:699-704); (b) the limit
+  constants — Rust hardcodes 1024/1024 but the ASan oracle build defines
+  `HERMES_LIMIT_STACK_DEPTH` → C++ uses parser 128 (JSParserImpl.h:190-200)
+  and resolver 512 (RecursiveVisitor.h:686-692). **User ruling (2026-08-04):
+  select via `cfg!(debug_assertions)`** — 128/512 in debug (pairs with the
+  project's standard ASan oracle), 1024/1024 in release (C++ release
+  behavior), with the mismatch caveat documented in the harness beside the
+  existing `--release` gotcha. DONE when hermesc and ast-dump error at the
+  same N* boundary (N*-1 clean both, N* errors both, byte-identical) and
   `test/Parser/nested-expressions.js` is byte-identical through the parser
   differential pair. Import `nested-expressions.js` into the parser corpus.
+  The Step-1 audit table ships in the report as the fidelity proof that no
+  site changes were needed.
 - [ ] **Step 4: Sema side.** Verify the resolver tracker
   (`resolver/mod.rs:577-579,663` `AST_MAX_RECURSION_DEPTH`) against the C++
   `SemanticResolver` limit (find its value in the C++ — SemanticResolver.h or
