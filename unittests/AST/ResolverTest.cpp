@@ -301,17 +301,25 @@ TEST(ResolverTest, SourceVisibilityTest) {
   }
 }
 
-#if HERMES_PARSE_FLOW
-
-/// Parse \p src with Flow and Flow 'match' syntax enabled, run parser-mode
-/// semantic resolution on it, and \return the value of mayReachImplicitReturn
-/// computed for the first FunctionDeclaration in the program.
+/// Parse \p src, run parser-mode semantic resolution on it, and \return the
+/// value of mayReachImplicitReturn computed for the first FunctionDeclaration
+/// in the program. Flow syntax, including 'match', is enabled when \p flow is
+/// set; only the Flow tests need it.
+///
+/// Parser mode matters here: it is the mode the node addon and the wasm
+/// parser use, and SemanticResolver skips several AST rewrites in it, so
+/// CheckImplicitReturn sees shapes that never reach it during compilation.
+///
 /// Fails the current test if parsing or resolution fails, or if the program
 /// contains no function declaration.
-static bool firstFunctionMayReachImplicitReturn(llvh::StringRef src) {
+static bool firstFunctionMayReachImplicitReturn(
+    llvh::StringRef src,
+    bool flow = false) {
   Context ctx;
-  ctx.setParseFlow(ParseFlowSetting::ALL);
-  ctx.setParseFlowMatch(true);
+  if (flow) {
+    ctx.setParseFlow(ParseFlowSetting::ALL);
+    ctx.setParseFlowMatch(true);
+  }
   sema::SemContext semCtx(ctx);
   DiagContext diag(ctx);
   JSParser parser(ctx, src);
@@ -338,16 +346,60 @@ static bool firstFunctionMayReachImplicitReturn(llvh::StringRef src) {
   return false;
 }
 
+/// In parser mode SemanticResolver does not split "try B catch H finally F"
+/// into nested try statements, so CheckImplicitReturn must handle a node that
+/// carries both a handler and a finalizer. Ignoring the finalizer -- which is
+/// what the code did once the assert was compiled out -- gives wrong answers
+/// whenever the finalizer itself redirects control flow.
+TEST(ResolverTest, TryCatchFinallyImplicitReturnTest) {
+  // Plain fallthrough: nothing terminates, so the function falls off its end.
+  EXPECT_TRUE(firstFunctionMayReachImplicitReturn(
+      "function f() { try { g(); } catch (e) { h(); } finally { i(); } }"));
+  // The try may throw and the catch completes normally.
+  EXPECT_TRUE(firstFunctionMayReachImplicitReturn(
+      "function f() { try { return 1; } catch (e) { h(); } finally { i(); } }"));
+  // Try and catch both return and the finalizer completes normally, so
+  // control never reaches the end of the function.
+  EXPECT_FALSE(firstFunctionMayReachImplicitReturn(
+      "function f() { try { return 1; } catch (e) { return 2; }"
+      " finally { i(); } }"));
+  // A 'return' in the finalizer overrides however the protected part
+  // completed, so this function cannot fall through either. Reading only the
+  // handler would report that it can, because the catch falls through.
+  EXPECT_FALSE(firstFunctionMayReachImplicitReturn(
+      "function f() { try { g(); } catch (e) { h(); } finally { return 1; } }"));
+}
+
+/// A 'break' out of the finalizer redirects control to after the labeled
+/// statement, so the finalizer's target labels must be propagated even when
+/// the protected part and its handler both terminate.
+TEST(ResolverTest, TryCatchFinallyBreakLabelTest) {
+  // Without the 'break lbl' the labeled block would definitely terminate, so
+  // the statement after it -- and hence the end of the function -- would be
+  // unreachable.
+  EXPECT_TRUE(firstFunctionMayReachImplicitReturn(
+      "function f() { lbl: { try { return 1; } catch (e) { return 2; }"
+      " finally { break lbl; } } }"));
+  // A finalizer that only sometimes breaks reaches both the label and its own
+  // next statement, so it neither terminates nor unconditionally continues.
+  EXPECT_TRUE(firstFunctionMayReachImplicitReturn(
+      "function f(x) { lbl: { try { return 1; } catch (e) { return 2; }"
+      " finally { if (x) break lbl; } } }"));
+}
+
+#if HERMES_PARSE_FLOW
+
 /// A Flow 'match' statement must not crash CheckImplicitReturn, and since
 /// exhaustiveness is not checked, the match must be treated as able to
 /// complete normally even when every case returns.
 TEST(ResolverTest, MatchStatementImplicitReturnTest) {
   // Every case returns, but the match may still match nothing.
   EXPECT_TRUE(firstFunctionMayReachImplicitReturn(
-      "function f(x) { match (x) { 1 => { return 1; } _ => { return 2; } } }"));
+      "function f(x) { match (x) { 1 => { return 1; } _ => { return 2; } } }",
+      /* flow */ true));
   // A case which completes normally obviously continues past the match.
   EXPECT_TRUE(firstFunctionMayReachImplicitReturn(
-      "function f(x) { match (x) { 1 => { g(); } } }"));
+      "function f(x) { match (x) { 1 => { g(); } } }", /* flow */ true));
   // An unlabeled 'break' in a case body targets the enclosing loop, so it has
   // to be propagated out of the match statement. A do-while body always runs,
   // so the only way past the loop is that break: if the match dropped it (or
@@ -355,7 +407,8 @@ TEST(ResolverTest, MatchStatementImplicitReturnTest) {
   // function look unable to fall through, and this would be false.
   EXPECT_TRUE(firstFunctionMayReachImplicitReturn(
       "function f(x) { do { match (x) { 1 => { break; } } return 1; }"
-      " while (true); }"));
+      " while (true); }",
+      /* flow */ true));
 }
 
 /// A 'break' inside a match case body targets the enclosing labeled statement,
@@ -366,7 +419,8 @@ TEST(ResolverTest, MatchStatementBreakLabelTest) {
   // 'break lbl' makes the statement after the labeled block reachable.
   EXPECT_TRUE(firstFunctionMayReachImplicitReturn(
       "function f(x) { lbl: { match (x) { 1 => { break lbl; } }"
-      " return 1; } }"));
+      " return 1; } }",
+      /* flow */ true));
 }
 
 #endif // HERMES_PARSE_FLOW
