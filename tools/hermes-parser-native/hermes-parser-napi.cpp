@@ -214,17 +214,26 @@ napi_value parse(napi_env env, napi_callback_info info) {
         diagHandler.getErrorColumn());
   }
 
-  auto container = writeContainer(
+  // Size the container first, then write it straight into the ArrayBuffer's
+  // storage. Going through an intermediate std::vector would cost an extra
+  // full copy of the result plus a zero-fill of a buffer that is then
+  // completely overwritten.
+  const ContainerLayout layout = containerLayout(
       result.programBuffer_, result.positionBuffer_, result.stringTable_);
 
   void *data = nullptr;
   napi_value arrayBuffer;
-  if (napi_create_arraybuffer(env, container.size(), &data, &arrayBuffer) !=
+  if (napi_create_arraybuffer(env, layout.total, &data, &arrayBuffer) !=
       napi_ok) {
     napi_throw_error(env, nullptr, "failed to allocate result buffer");
     return nullptr;
   }
-  memcpy(data, container.data(), container.size());
+  writeContainerInto(
+      data,
+      layout,
+      result.programBuffer_,
+      result.positionBuffer_,
+      result.stringTable_);
 
   napi_value obj;
   if (napi_create_object(env, &obj) != napi_ok) {

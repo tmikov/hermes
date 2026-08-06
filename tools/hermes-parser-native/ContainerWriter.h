@@ -48,61 +48,116 @@ static constexpr uint32_t kContainerMagic = 0x484D5052;
 /// Version of the container layout. Bump on any incompatible change.
 static constexpr uint32_t kContainerVersion = 1;
 
-/// Serialize \p program, \p positions and \p strings into a single
-/// self-contained buffer. See the header table in the design spec for the
-/// field layout.
-inline std::vector<uint8_t> writeContainer(
+/// The byte offsets and sizes of every container region, derived from the
+/// sizes of the three inputs. Computed by \c containerLayout() so that the
+/// destination buffer can be allocated before anything is written into it.
+struct ContainerLayout {
+  /// Byte size of the program region.
+  uint32_t programBytes;
+  /// Byte size of the position region.
+  uint32_t positionBytes;
+  /// Byte size of the string offset table.
+  uint32_t strOffsetsBytes;
+  /// Byte size of the string data blob.
+  uint32_t strDataBytes;
+  /// Byte offset of the program region from the start of the container.
+  uint32_t programOffset;
+  /// Byte offset of the position region.
+  uint32_t positionOffset;
+  /// Byte offset of the string offset table.
+  uint32_t strOffsetsOffset;
+  /// Byte offset of the string data blob.
+  uint32_t strDataOffset;
+  /// Total byte size of the container.
+  uint32_t total;
+};
+
+/// \return the region offsets and the total byte size the container for
+/// \p program, \p positions and \p strings will occupy. The regions are laid
+/// out back to back with no gaps, so \c total is exactly the number of bytes
+/// \c writeContainerInto() writes.
+inline ContainerLayout containerLayout(
     const std::vector<uint32_t> &program,
     const std::vector<PositionResult> &positions,
     const NativeStringTable &strings) {
-  const uint32_t programBytes = (uint32_t)(program.size() * sizeof(uint32_t));
-  const uint32_t positionBytes =
-      (uint32_t)(positions.size() * sizeof(PositionResult));
-  const uint32_t strOffsetsBytes =
-      (uint32_t)(strings.offsets().size() * sizeof(uint32_t));
-  const uint32_t strDataBytes = (uint32_t)strings.data().size();
+  ContainerLayout l;
+  l.programBytes = (uint32_t)(program.size() * sizeof(uint32_t));
+  l.positionBytes = (uint32_t)(positions.size() * sizeof(PositionResult));
+  l.strOffsetsBytes = (uint32_t)(strings.offsets().size() * sizeof(uint32_t));
+  l.strDataBytes = (uint32_t)strings.data().size();
 
-  const uint32_t programOffset = kHeaderSize;
-  const uint32_t positionOffset = programOffset + programBytes;
-  const uint32_t strOffsetsOffset = positionOffset + positionBytes;
-  const uint32_t strDataOffset = strOffsetsOffset + strOffsetsBytes;
-  const uint32_t total = strDataOffset + strDataBytes;
+  l.programOffset = kHeaderSize;
+  l.positionOffset = l.programOffset + l.programBytes;
+  l.strOffsetsOffset = l.positionOffset + l.positionBytes;
+  l.strDataOffset = l.strOffsetsOffset + l.strOffsetsBytes;
+  l.total = l.strDataOffset + l.strDataBytes;
+  return l;
+}
 
-  std::vector<uint8_t> buf(total, 0);
+/// Serialize \p program, \p positions and \p strings into \p dst, which must
+/// point at \c containerLayout(...).total writable bytes and is passed as
+/// \p layout to save recomputing it. See the header table in the design spec
+/// for the field layout.
+///
+/// Every one of those bytes is written exactly once: the header covers
+/// [0, kHeaderSize) and the four regions tile [kHeaderSize, total)
+/// contiguously, so \p dst does not need to be zero-initialized first. That
+/// is the whole point of this entry point - it lets the caller write straight
+/// into an ArrayBuffer instead of filling a zeroed vector and copying it.
+inline void writeContainerInto(
+    void *dst,
+    const ContainerLayout &layout,
+    const std::vector<uint32_t> &program,
+    const std::vector<PositionResult> &positions,
+    const NativeStringTable &strings) {
+  uint8_t *const buf = (uint8_t *)dst;
 
   const uint32_t header[] = {
       kContainerMagic,
       kContainerVersion,
       kindHash(),
-      programOffset,
+      layout.programOffset,
       (uint32_t)program.size(),
-      positionOffset,
+      layout.positionOffset,
       (uint32_t)positions.size(),
-      strOffsetsOffset,
+      layout.strOffsetsOffset,
       strings.count(),
-      strDataOffset,
-      strDataBytes,
+      layout.strDataOffset,
+      layout.strDataBytes,
       0,
   };
   static_assert(sizeof(header) == kHeaderSize, "header size mismatch");
-  memcpy(buf.data(), header, sizeof(header));
+  memcpy(buf, header, sizeof(header));
 
-  if (programBytes != 0) {
-    memcpy(buf.data() + programOffset, program.data(), programBytes);
+  if (layout.programBytes != 0) {
+    memcpy(buf + layout.programOffset, program.data(), layout.programBytes);
   }
-  if (positionBytes != 0) {
-    memcpy(buf.data() + positionOffset, positions.data(), positionBytes);
+  if (layout.positionBytes != 0) {
+    memcpy(buf + layout.positionOffset, positions.data(), layout.positionBytes);
   }
-  if (strOffsetsBytes != 0) {
+  if (layout.strOffsetsBytes != 0) {
     memcpy(
-        buf.data() + strOffsetsOffset,
+        buf + layout.strOffsetsOffset,
         strings.offsets().data(),
-        strOffsetsBytes);
+        layout.strOffsetsBytes);
   }
-  if (strDataBytes != 0) {
-    memcpy(buf.data() + strDataOffset, strings.data().data(), strDataBytes);
+  if (layout.strDataBytes != 0) {
+    memcpy(
+        buf + layout.strDataOffset, strings.data().data(), layout.strDataBytes);
   }
+}
 
+/// Serialize \p program, \p positions and \p strings into a freshly allocated
+/// buffer. A convenience wrapper over \c containerLayout() and
+/// \c writeContainerInto() for callers that do not have a destination of
+/// their own; the addon writes directly into the result ArrayBuffer instead.
+inline std::vector<uint8_t> writeContainer(
+    const std::vector<uint32_t> &program,
+    const std::vector<PositionResult> &positions,
+    const NativeStringTable &strings) {
+  const ContainerLayout layout = containerLayout(program, positions, strings);
+  std::vector<uint8_t> buf(layout.total);
+  writeContainerInto(buf.data(), layout, program, positions, strings);
   return buf;
 }
 

@@ -93,4 +93,35 @@ TEST(ContainerWriterTest, StringOffsetArrayHasCountPlusOneEntries) {
   EXPECT_EQ(7u, offsets[2]);
 }
 
+/// \c writeContainerInto() writes into memory the caller supplies, which for
+/// the addon is a fresh ArrayBuffer whose contents are unspecified. Poison the
+/// destination first and require that not one byte survives: anything left
+/// over would be an uninitialized byte handed to JavaScript. Also require the
+/// result to match \c writeContainer() exactly, so the two entry points cannot
+/// drift apart.
+TEST(ContainerWriterTest, WriteIntoCoversEveryByteOfPoisonedBuffer) {
+  NativeStringTable strings;
+  strings.intern("alpha");
+  strings.intern("be");
+  // Seven bytes of string data, so the container's total size is not a
+  // multiple of four and the tail is the most likely place for a gap.
+  std::vector<uint32_t> program{7, 8, 9, 10, 11};
+  std::vector<PositionResult> positions;
+  positions.emplace_back(3, PositionInfo::Kind::Start, 10, 20, 30);
+  positions.emplace_back(4, PositionInfo::Kind::End, 11, 21, 31);
+
+  const ContainerLayout layout = containerLayout(program, positions, strings);
+  // 48 header + 20 program + 40 positions + 12 offsets + 7 data. Deliberately
+  // not a multiple of four.
+  ASSERT_EQ(127u, layout.total);
+
+  std::vector<uint8_t> poisoned(layout.total, 0xAA);
+  writeContainerInto(poisoned.data(), layout, program, positions, strings);
+
+  const std::vector<uint8_t> expected =
+      writeContainer(program, positions, strings);
+  ASSERT_EQ(expected.size(), poisoned.size());
+  EXPECT_EQ(expected, poisoned);
+}
+
 } // namespace
