@@ -296,6 +296,50 @@ Initial platform matrix:
 - `darwin-x64`
 - `darwin-arm64`
 
+### Prebuilds must be built with ThinLTO
+
+`hermesAST`, `hermesParser` and `hermesSema` are separate static libraries, so
+an ordinary Release build gives the addon no cross-library inlining at all.
+The WebAssembly parser gets that for free — Emscripten's `-O3` links with
+whole-program LTO by default — which is part of why the two builds ran neck and
+neck on the engine side. Turning ThinLTO on for the whole dependency chain is
+worth 4-5% end to end and about the same on the engine side, measured on
+`HermesParserNodeDeserializers.js` (65.5 KB) with Clang 18 on Linux x64.
+
+Configure the build directory the prebuilds come out of with:
+
+```
+cmake -B <builddir> -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
+  -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON
+```
+
+This is a property of the build recipe, not of the CMake files, and
+deliberately so. `CMAKE_INTERPROCEDURAL_OPTIMIZATION` has to reach the
+dependency libraries to buy anything; setting `INTERPROCEDURAL_OPTIMIZATION` on
+the `hermes-parser-napi` target alone does nothing, and setting it on
+`hermesParser` and friends in their own `CMakeLists.txt` would silently change
+how the compiler, the VM and every other tool are built. It also needs an
+archiver and linker that understand LLVM bitcode, which is a property of the
+machine rather than of the source tree: on Ubuntu the stock `ar` and `ld` pick
+up the plugin from `/usr/lib/bfd-plugins` automatically, but where they do not,
+point CMake at the LLVM tools explicitly:
+
+```
+  -DCMAKE_AR=$(llvm-config --bindir)/llvm-ar \
+  -DCMAKE_RANLIB=$(llvm-config --bindir)/llvm-ranlib \
+  -DCMAKE_NM=$(llvm-config --bindir)/llvm-nm
+```
+
+ThinLTO costs nothing to build from scratch here — 20.6 s versus 21.5 s wall
+for the addon and its dependencies on 16 cores, because the compile step emits
+bitcode instead of doing codegen and the link step parallelizes the codegen it
+deferred. Incremental relinking after touching one file is slower, 3.5 s versus
+1.9 s, which is why this is documented as the packaging recipe rather than
+recommended for day-to-day development builds. The resulting binary is also
+less than half the size (1.14 MB versus 2.48 MB), because LTO lets the linker
+drop the parts of the linked libraries the addon never reaches.
+
 ## Consumer usage
 
 Because the package name differs, downstream packages that depend on
