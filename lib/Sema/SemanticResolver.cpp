@@ -1535,7 +1535,7 @@ void SemanticResolver::visit(ESTree::ExportDefaultDeclarationNode *node) {
           funcDecl->_returnType,
           funcDecl->_predicate,
           funcDecl->_generator,
-          /* async */ false);
+          funcDecl->_async);
       funcExpr->strictness = funcDecl->strictness;
       funcExpr->copyLocationFrom(funcDecl);
 
