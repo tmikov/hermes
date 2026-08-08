@@ -21,17 +21,19 @@ describe('failure modes', () => {
     delete process.env.HERMES_PARSER_NATIVE_ADDON;
     Object.defineProperty(process, 'platform', {value: 'sunos'});
 
-    // HermesParserAddon.js has a THIRD candidate beyond HERMES_PARSER_NATIVE_ADDON
-    // and prebuilds/<platform>-<arch>/: an in-repo development fallback at
-    // cmake-build-debug/tools/hermes-parser-native/hermes-parser.node,
-    // computed relative to HermesParserAddon.js and independent of
-    // process.platform. In this checkout that file exists (it's what the
-    // test harness itself builds and runs against), so simply stubbing
-    // process.platform is not enough to reach the "unsupported platform"
-    // error: the loader would silently succeed via that fallback instead.
-    // Mock the fallback's exact resolved path so requiring it fails the
-    // same way it would in a published npm package (where the fallback
-    // path never exists), forcing the loader through to the real error.
+    // HermesParserAddon.js checks an in-repo development fallback *before*
+    // prebuilds/<platform>-<arch>/: cmake-build-debug/tools/hermes-parser-native/
+    // hermes-parser.node, computed relative to HermesParserAddon.js and
+    // independent of process.platform. In this checkout that file exists
+    // (it's what the test harness itself builds and runs against), so
+    // simply stubbing process.platform is not enough to reach the
+    // "unsupported platform" error: the loader would silently succeed via
+    // that fallback instead (before ever getting to the platform-keyed
+    // prebuilds/ candidate that 'sunos' is meant to defeat). Mock the
+    // fallback's exact resolved path so requiring it fails the same way it
+    // would in a published npm package (where the fallback path never
+    // exists), forcing the loader through to the platform check and on to
+    // the real error.
     const devBuildPath = path.join(
       __dirname,
       '..', // hermes-parser-native

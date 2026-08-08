@@ -53,6 +53,7 @@ const ALLOWED = {
     modified: [],
     // Tests of behaviour that only exists in the native package.
     onlyInFork: [
+      'AddonResolutionOrder-test.js',
       'Differential-test.js',
       'Failures-test.js',
       'ForkDrift-test.js',

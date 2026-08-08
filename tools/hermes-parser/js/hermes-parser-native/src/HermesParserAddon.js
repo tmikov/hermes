@@ -27,14 +27,22 @@ const SUPPORTED = [
  *
  * Resolution order:
  *  1. HERMES_PARSER_NATIVE_ADDON, if set.
- *  2. prebuilds/<platform>-<arch>/hermes-parser.node, the packaged binary.
- *  3. The in-repo development build at
+ *  2. The in-repo development build at
  *     cmake-build-debug/tools/hermes-parser-native/hermes-parser.node,
- *     resolved relative to this package's location. This is a
- *     development-only fallback: it only exists in a source checkout of the
- *     hermes repo (not in a published npm package) and lets the rest of the
- *     workspace's test suite run against a locally built addon without every
- *     test needing to set HERMES_PARSER_NATIVE_ADDON itself.
+ *     resolved relative to this package's location. This is checked
+ *     *before* the packaged prebuild so that a source checkout always picks
+ *     up the binary you are actively iterating on: prebuilds/ is gitignored
+ *     and untracked, so nothing rebuilds it automatically, and a stale
+ *     prebuild left over from an earlier build can otherwise silently take
+ *     precedence over a freshly rebuilt dev addon (this has already caused
+ *     jest to keep exercising a pre-fix binary until someone noticed and
+ *     manually refreshed the prebuild). This path only exists in a source
+ *     checkout of the hermes repo -- not in a published npm package, where
+ *     `require()`-ing it always fails -- so it lets the rest of the
+ *     workspace's test suite run against a locally built addon without
+ *     every test needing to set HERMES_PARSER_NATIVE_ADDON itself, and it
+ *     never affects a published package's resolution.
+ *  3. prebuilds/<platform>-<arch>/hermes-parser.node, the packaged binary.
  */
 function loadAddon() {
   const override = process.env.HERMES_PARSER_NATIVE_ADDON;
@@ -45,13 +53,6 @@ function loadAddon() {
 
   const target = `${process.platform}-${process.arch}`;
 
-  const prebuiltPath = path.join(
-    __dirname,
-    '..',
-    'prebuilds',
-    target,
-    'hermes-parser.node',
-  );
   const devBuildPath = path.join(
     __dirname,
     '..', // hermes-parser-native
@@ -64,8 +65,15 @@ function loadAddon() {
     'hermes-parser-native',
     'hermes-parser.node',
   );
+  const prebuiltPath = path.join(
+    __dirname,
+    '..',
+    'prebuilds',
+    target,
+    'hermes-parser.node',
+  );
 
-  for (const candidate of [prebuiltPath, devBuildPath]) {
+  for (const candidate of [devBuildPath, prebuiltPath]) {
     try {
       /* $FlowFixMe[unsupported-syntax] dynamic require by design */
       return require(candidate);
@@ -76,8 +84,8 @@ function loadAddon() {
 
   throw new Error(
     `hermes-parser-native: no prebuilt addon for ${target}. ` +
-      `Supported platforms: ${SUPPORTED.join(', ')}. Checked ${prebuiltPath} ` +
-      `and the development build fallback ${devBuildPath}.`,
+      `Supported platforms: ${SUPPORTED.join(', ')}. Checked the development ` +
+      `build fallback ${devBuildPath} and ${prebuiltPath}.`,
   );
 }
 
