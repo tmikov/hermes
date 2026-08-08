@@ -94,10 +94,11 @@ validation commands, and workflow.
 > `resolver/modules.rs`; new C++ tool `tools/sema-parser-dump/`; new corpus `sema_corpus_parser/`.
 > Gates (live, green):
 > `REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml -p sema --features dump-bin --test sema_differential -- --nocapture`
-> → "sema differential (tests/sema_corpus): **196 corpus files matched (103 succeeded on hermesc)**" and
+> → "sema differential (tests/sema_corpus): **212 corpus files matched (108 succeeded on hermesc)**" and
 > "sema differential (tests/sema_corpus_parser): **11 corpus files matched (3 succeeded on the oracle)**" (the
-> second gate is new in S4a; 7/2 at the end of T6, 11/3 after the final review's four added pins). Deferred
-> `test/Sema` rows: 4.
+> second gate is new in S4a; the driver progression past S4a's 196/103: 200/107 capstone fixes → 202/107
+> errorExpected T1 → 205/107 → 208/107 T3 → **212/108** the errorExpected final fix wave). Deferred
+> `test/Sema` rows: 3 (`regress-nested-expressions-error.js` was imported by the recursion-parity fix).
 > **Read the roadmap's Sema row for the authoritative what-shipped detail and the S4b/S5 carry-item list** —
 > S4b VM modules (`$SHBuiltin` protocol + CJS wrapping + rewrite #4's `-commonjs` corpus pinning — the rewrite's
 > CODE already shipped in S4a, per the 2026-08-03 spec §4 ruling; a genuinely separate much-later phase near
@@ -173,8 +174,16 @@ validation commands, and workflow.
 > panic bucket unchanged (still the same 7 `$SHBuiltin` S4b files + `computed-fn-name.js`). The
 > final 3 mismatches are each individually classified, pre-existing, and NOT `errorExpected`
 > geometry (regex-engine validation; the deliberate "notes dropped per house style" convention;
-> and the collect-scope leak's sibling error-recovery gap). Sema driver gate 202/107 → **208/107**
-> (+6 corpus imports across the original pass and the review fix round, all error-path).
+> and the collect-scope leak's sibling error-recovery gap). Sema driver gate 202/107 → 208/107
+> (+6 corpus imports across the original pass and the review fix round, all error-path), then
+> → **212/108** in the final-review fix wave (commits `64655ed8a` + `288b9aaca`): the
+> `CoverTypedParameters::No` header-default fix (`expressions.rs` yield-argument site vs
+> cpp:4674-4678 — `function* f() { (yield a: number); }` under `-parse-flow` parsed by hermesc but
+> rejected by the port until fixed; `yield-typed-argument.js` is the new exit-0 pin) + CI pins for
+> the yield-check and `in_decl` fixes (`for-of-error.js`, `yield-paren-error.js`,
+> `error-in-decl-rest-property.js`) + a citation batch; and `CppDefectsFound.md` gained item 11
+> (the flow-match `JSLexer.h:160` assert — hermesc aborts, the port panics at the identical
+> assertion, bug-for-bug parity even in crashing).
 > **Two NEW parser-phase follow-ups found along the way, both OPEN** (see the roadmap's
 > Parser-phase follow-up section for full detail): the **collect-scope leak** (`expressions.rs:
 > 444-461` closes the flow generic-arrow retry's message-collection scope BEFORE the retry, vs
