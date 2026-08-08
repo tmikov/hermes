@@ -1154,39 +1154,43 @@ void SemanticResolver::visit(ESTree::CallExpressionNode *node) {
   // This allows typechecker/IRGen to simply match on SHBuiltinNode.
   if (auto *methodCallee =
           llvh::dyn_cast<ESTree::MemberExpressionNode>(node->_callee)) {
+    // Note that the property of a non-computed member expression can also be
+    // a PrivateNameNode, not just an identifier. A private property is never
+    // a builtin access, so in that case $SHBuiltin is left alone and is
+    // reported as an invalid use when the identifier itself is visited.
+    auto *propIdent =
+        llvh::dyn_cast<ESTree::IdentifierNode>(methodCallee->_property);
     if (auto *ident =
             llvh::dyn_cast<ESTree::IdentifierNode>(methodCallee->_object)) {
-      if (ident->_name == kw_.identSHBuiltin && !methodCallee->_computed) {
+      if (ident->_name == kw_.identSHBuiltin && !methodCallee->_computed &&
+          propIdent) {
         Decl *decl = resolveIdentifier(ident, false);
         if (decl && decl->kind == sema::Decl::Kind::UndeclaredGlobalProperty) {
           auto *shBuiltin = new (astContext_) ESTree::SHBuiltinNode();
           shBuiltin->copyLocationFrom(methodCallee->_object);
           methodCallee->_object = shBuiltin;
         }
-        if (auto *propIdent =
-                llvh::cast<ESTree::IdentifierNode>(methodCallee->_property)) {
-          if (propIdent->_name == kw_.identModuleFactory) {
-            // This visits its children explicitly (with a module context
-            // set), so we return after it.
-            // The require optimization should only be validated when we are
-            // actually attempting to parse this code for compilation. Before
-            // that point, the SH builtin call may still be incomplete.
-            if (compile_)
-              visitModuleFactory(node);
+        if (propIdent->_name == kw_.identModuleFactory) {
+          // This visits its children explicitly (with a module context
+          // set), so we return after it.
+          // The require optimization should only be validated when we are
+          // actually attempting to parse this code for compilation. Before
+          // that point, the SH builtin call may still be incomplete.
+          if (compile_)
+            visitModuleFactory(node);
+          return;
+        } else if (propIdent->_name == kw_.identExport) {
+          // In this case, we must visit the children first, to ensure that
+          // the exported name is resolved before we call visitModuleExport.
+          // Therefore, we return explicitly after, so we don't visit the
+          // children again below.
+          visitESTreeChildren(*this, node);
+          if (LLVM_UNLIKELY(recursionDepth_ == 0))
             return;
-          } else if (propIdent->_name == kw_.identExport) {
-            // In this case, we must visit the children first, to ensure that
-            // the exported name is resolved before we call visitModuleExport.
-            // Therefore, we return explicitly after, so we don't visit the
-            // children again below.
-            visitESTreeChildren(*this, node);
-            if (LLVM_UNLIKELY(recursionDepth_ == 0))
-              return;
-            visitModuleExport(node);
-            return;
-          } else if (propIdent->_name == kw_.identImport) {
-            visitModuleImport(node);
-          }
+          visitModuleExport(node);
+          return;
+        } else if (propIdent->_name == kw_.identImport) {
+          visitModuleImport(node);
         }
       }
     }
