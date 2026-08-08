@@ -673,6 +673,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     // note-text is still dropped per house style).
                     self.error_expected_msg(
                         "'identifier' expected in declaration",
+                        None,
                         Some(decl_loc),
                     );
                     return None;
@@ -1760,6 +1761,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 TokenKind::semi,
                 TokenKind::rw_in,
                 " inside 'for'",
+                None,
                 start_loc,
             );
             None
@@ -1856,6 +1858,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     TokenKind::rw_case,
                     TokenKind::rw_default,
                     " inside 'switch'",
+                    None,
                     start_loc,
                 );
                 return None;
@@ -1939,8 +1942,16 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         assert!(self.check(TokenKind::rw_try));
         let start_loc = self.advance(GrammarContext::AllowRegExp).start;
 
-        // C++ 2371-2375: whatLoc is `startLoc` (the 'try' keyword).
-        if !self.need_at(TokenKind::l_brace, " after 'try'", start_loc) {
+        // C++ 2371: need(l_brace, "after 'try'", "location of 'try'",
+        // startLoc). `startLoc` is the 'try' keyword, so when the offending
+        // token is on a later line the diagnostic is followed by a
+        // "location of 'try'" note pointing back at it.
+        if !self.need_at(
+            TokenKind::l_brace,
+            " after 'try'",
+            Some("location of 'try'"),
+            start_loc,
+        ) {
             return None;
         }
         let try_body = self.parse_block(
@@ -1973,6 +1984,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                                 // house style).
                                 self.error_expected_msg(
                                     "'identifier' expected inside catch list",
+                                    None,
                                     Some(handler_start_loc),
                                 );
                                 return None;
@@ -1996,6 +2008,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             if !self.need_at(
                 TokenKind::l_brace,
                 " after 'catch(...)'",
+                None,
                 handler_start_loc,
             ) {
                 return None;
@@ -2025,6 +2038,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             if !self.need_at(
                 TokenKind::l_brace,
                 " after 'finally'",
+                None,
                 finally_loc,
             ) {
                 return None;
@@ -2044,6 +2058,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 TokenKind::rw_catch,
                 TokenKind::rw_finally,
                 " after 'try' block",
+                None,
                 start_loc,
             );
             return None;

@@ -2915,6 +2915,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 // house style).
                 self.error_expected_msg(
                     "'(', '[' or '.' expected after 'super' keyword",
+                    None,
                     Some(start_loc),
                 );
                 return None;
@@ -4974,10 +4975,18 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     }
                 }
 
-                if !self.eat(
+                // C++ 2655-2660: eat(r_paren, AllowDiv, "at end of
+                // parenthesized expression", "started here", startLoc).
+                // `startLoc` is the '(' — real, so on a one-line
+                // `var a = (1 + 2;` the diagnostic underlines the whole
+                // `(1 + 2;` span, and on a multi-line one it gets a
+                // "started here" note at the '('.
+                if !self.eat_at(
                     TokenKind::r_paren,
                     GrammarContext::AllowDiv,
                     " at end of parenthesized expression",
+                    Some("started here"),
+                    start_loc,
                 ) {
                     return None;
                 }

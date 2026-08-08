@@ -278,6 +278,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // text is still dropped per house style).
             self.error_expected_msg(
                 "'identifier' expected after 'component'",
+                None,
                 Some(start),
             );
             return None;
@@ -690,6 +691,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // is still dropped per house style).
             self.error_expected_msg(
                 "'identifier' expected after 'hook'",
+                None,
                 Some(start),
             );
             return None;
@@ -806,6 +808,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // text is still dropped per house style).
             self.error_expected_msg(
                 "'identifier' expected after 'record'",
+                None,
                 Some(start),
             );
             return None;
@@ -1569,6 +1572,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 // text is still dropped per house style).
                 self.error_expected_msg(
                     "'identifier' expected in var declaration",
+                    None,
                     Some(start),
                 );
                 return None;
@@ -1608,6 +1612,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 TokenKind::rw_function,
                 TokenKind::rw_class,
                 " in declared type",
+                None,
                 start,
             );
             return None;
@@ -2480,6 +2485,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             TokenKind::l_brace,
             TokenKind::identifier,
             " in export type declaration",
+            None,
             start_loc,
         );
         None
@@ -2508,7 +2514,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // "start of declaration", start). `start` is real, so this routes
         // through `need_at` for the same-line combined-range caret (the
         // note text is still dropped per house style).
-        if !self.need_at(TokenKind::identifier, " in enum declaration", start) {
+        if !self.need_at(
+            TokenKind::identifier,
+            " in enum declaration",
+            None,
+            start,
+        ) {
             return None;
         }
         // C++ 5162-5166.
@@ -2884,6 +2895,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     self.need_at(
                         TokenKind::numeric_literal,
                         " in negated enum member initializer",
+                        None,
                         id.range().start,
                     );
                     return None;
@@ -2971,6 +2983,6 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             token_kind_str(TokenKind::numeric_literal),
             token_kind_str(TokenKind::bigint_literal),
         );
-        self.error_expected_msg(&msg, Some(what_loc));
+        self.error_expected_msg(&msg, None, Some(what_loc));
     }
 }

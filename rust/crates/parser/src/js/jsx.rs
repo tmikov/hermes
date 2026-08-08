@@ -811,6 +811,6 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             crate::token_kinds::token_kind_str(TokenKind::identifier),
             where_,
         );
-        self.error_expected_msg(&msg, what_loc);
+        self.error_expected_msg(&msg, None, what_loc);
     }
 }

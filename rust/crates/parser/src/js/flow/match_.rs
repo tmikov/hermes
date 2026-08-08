@@ -677,6 +677,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                             TokenKind::bigint_literal,
                             TokenKind::string_literal,
                             " in match member pattern computed property",
+                            None,
                             computed_start_loc,
                         );
                         return None;
@@ -769,6 +770,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         if !self.check(TokenKind::identifier) && !self.lexer.token().is_res_word() {
             self.error_expected_msg(
                 "'identifier' expected in match binding pattern",
+                None,
                 Some(start_loc),
             );
         }
@@ -891,6 +893,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                             TokenKind::numeric_literal,
                             TokenKind::bigint_literal,
                             " in match object pattern property key",
+                            None,
                             prop_start_loc,
                         );
                         return None;

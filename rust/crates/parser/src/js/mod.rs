@@ -549,7 +549,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     /// Check the current token is `kind`; if not, report an error and return
-    /// false. Port of `need`.
+    /// false. Port of `need` (JSParserImpl.cpp:228-238) as invoked by the C++
+    /// call sites that pass no hint, i.e. `need(kind, where, nullptr,
+    /// SMLoc{})`. Sites whose C++ counterpart passes a real `what`/`whatLoc`
+    /// use `need_at` instead.
     pub(super) fn need(&mut self, kind: TokenKind, where_: &str) -> bool {
         if self.check(kind) {
             return true;
@@ -559,30 +562,54 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             crate::token_kinds::token_kind_str(kind),
             where_
         );
-        self.error_cur(&msg);
+        self.error_expected_msg(&msg, None, None);
         false
     }
 
-    /// Report an "expected" diagnostic, mirroring the location/range logic
-    /// of C++ `errorExpected` (JSParserImpl.cpp:175-226) exactly: the
-    /// diagnostic's primary location is always the CURRENT token's start
-    /// (`cur_start()`, a point — never the token's full range). If
-    /// `what_loc` is given and lands on the SAME source line as that point,
-    /// the underline spans `combineIntoRange(what_loc, cur_start())`
-    /// (tildes from `what_loc` through one past the current token's start);
-    /// otherwise the diagnostic is a bare point-caret with NO underline —
-    /// confirmed empirically against hermesc (`try\nxyzLongToken\n` renders
-    /// a lone `^` under the 12-character `xyzLongToken`, not a 12-wide
-    /// underline). In that different-line case C++ additionally emits a
-    /// `note` at `what_loc`; this port drops it, matching the "note dropped
-    /// per house style" convention already used at every `errorExpected`
-    /// call site in this port.
+    /// The geometry half of C++ `errorExpected` (JSParserImpl.cpp:201-225).
+    /// `msg` is the already-built message — the token-list + `where` half
+    /// (cpp:180-199), which each caller below formats itself; `what` and
+    /// `what_loc` are C++'s nullable `what` / `whatLoc`.
+    ///
+    /// The diagnostic's primary location is always the CURRENT token's start
+    /// (`cur_start()`, a point — never the token's full range), matching
+    /// `SMLoc errorLoc = tok_->getStartLoc()` (cpp:201).
+    ///
+    /// C++ decodes the two coordinates only when `whatLoc.isValid()`
+    /// (cpp:207-210); otherwise both `SourceCoords` stay default-constructed
+    /// (`bufId == 0`) and `isSameSourceLineAs` — which requires
+    /// `isValid()` on the receiver — returns false. This port spells "not
+    /// provided" as `None` rather than an invalid `SMLoc`, because its
+    /// `SMLoc` has no invalid sentinel at all: `SourceId` wraps a
+    /// `NonZeroU32` (support/src/location.rs:8), so every `SMLoc` names a
+    /// real buffer and `Option<SMLoc>` IS this port's validity convention
+    /// (the same one `SourceErrorManager::error_at` already uses for its
+    /// range). Consequently the C++ `whatCoords.isValid()` guard on the note
+    /// (cpp:223) collapses into the same `Some`.
+    ///
+    /// `find_coords` is the port of `findBufferLineAndLoc`
+    /// (support/src/manager.rs:248-256; C++ SourceErrorManager.cpp:333-341),
+    /// i.e. the *translating* lookup that `errorExpected` calls — not the
+    /// untranslated `find_untranslated_coords`.
+    ///
+    /// The two arms:
+    /// * same line — emit one diagnostic whose underline spans
+    ///   `combineIntoRange(whatLoc, errorLoc)`, so the tildes run from
+    ///   `what_loc` through one past the error point (cpp:212-219).
+    /// * different lines, or no `whatLoc` — emit a bare point-caret error
+    ///   with NO underline, then a `note` carrying `what` at `what_loc` if
+    ///   both were provided (cpp:220-225).
     pub(super) fn error_expected_msg(
         &mut self,
         msg: &str,
+        what: Option<&str>,
         what_loc: Option<SMLoc>,
     ) {
         let err_loc = self.cur_start();
+        // cpp:205-212. `None` short-circuits exactly like the invalid
+        // `whatCoords` does: `isSameSourceLineAs` is false, so we take the
+        // second arm. When the lines match, cpp:212-219 shows both as one
+        // combined range.
         let range = match what_loc {
             Some(w) => {
                 let sm = self.lexer.get_source_mgr();
@@ -597,21 +624,36 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
             None => None,
         };
+        let same_line = range.is_some();
         self.lexer.get_source_mgr_mut().error_at(
             err_loc,
             range,
             msg,
             support::diag::Subsystem::Parser,
         );
+        // cpp:223-224: the note only exists on the different-line arm, and
+        // only when both `what` and a (valid) `whatLoc` were provided.
+        if !same_line {
+            if let (Some(what), Some(w)) = (what, what_loc) {
+                self.lexer.get_source_mgr_mut().note_at(
+                    w,
+                    None,
+                    what,
+                    support::diag::Subsystem::Parser,
+                );
+            }
+        }
     }
 
     /// Like `need`, but for call sites whose C++ `need(kind, where, what,
-    /// whatLoc)` counterpart passes a real `whatLoc` (routed through
-    /// `error_expected_msg` instead of the point-only `error_cur`).
+    /// whatLoc)` counterpart passes a real `whatLoc`. `what` is C++'s
+    /// nullable hint text, shown as a `note` at `what_loc` when the two
+    /// locations land on different source lines.
     pub(super) fn need_at(
         &mut self,
         kind: TokenKind,
         where_: &str,
+        what: Option<&str>,
         what_loc: SMLoc,
     ) -> bool {
         if self.check(kind) {
@@ -622,7 +664,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             crate::token_kinds::token_kind_str(kind),
             where_
         );
-        self.error_expected_msg(&msg, Some(what_loc));
+        self.error_expected_msg(&msg, what, Some(what_loc));
         false
     }
     /// Report a "'k1' or 'k2' expected{where_}" error at the current token.
@@ -631,15 +673,16 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// `errorExpected(ArrayRef<TokenKind>(toks, 2), ...)`. The list-rendering
     /// logic in C++ `errorExpected` (175-195) joins two tokens with " or " and
     /// appends " expected". `what_loc` is C++'s `whatLoc`, routed through
-    /// `error_expected_msg` for the same-line combined-range behavior; the
-    /// `what` note-text itself is still dropped per house style. Every call
-    /// site audited for S1 task 2 passes a real `whatLoc` in C++, so this
-    /// takes a plain `SMLoc`, not an `Option`.
+    /// `error_expected_msg`, which owns both geometry arms. Every call site
+    /// audited for S1 task 2 passes a real `whatLoc` in C++, so this takes a
+    /// plain `SMLoc`, not an `Option`; `what` stays nullable, mirroring the
+    /// C++ `const char *`.
     pub(super) fn error_expected2(
         &mut self,
         k1: TokenKind,
         k2: TokenKind,
         where_: &str,
+        what: Option<&str>,
         what_loc: SMLoc,
     ) {
         let msg = format!(
@@ -648,21 +691,22 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             crate::token_kinds::token_kind_str(k2),
             where_
         );
-        self.error_expected_msg(&msg, Some(what_loc));
+        self.error_expected_msg(&msg, what, Some(what_loc));
     }
 
     /// Report a "'k1', 'k2' or 'k3' expected{where_}" error at the current
     /// token. Port of the three-token `errorExpected` initializer-list call
     /// (e.g. the export-type dispatch at JSParserImpl-flow.cpp:2569-2574); the
     /// C++ list rendering joins all but the last token with ", " and the last
-    /// with " or ". `what_loc` is C++'s `whatLoc` (see `error_expected2`); the
-    /// `what` note-text is still dropped per house style.
+    /// with " or ". `what`/`what_loc` are C++'s `what`/`whatLoc` (see
+    /// `error_expected2`).
     pub(super) fn error_expected3(
         &mut self,
         k1: TokenKind,
         k2: TokenKind,
         k3: TokenKind,
         where_: &str,
+        what: Option<&str>,
         what_loc: SMLoc,
     ) {
         let msg = format!(
@@ -672,16 +716,17 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             crate::token_kinds::token_kind_str(k3),
             where_
         );
-        self.error_expected_msg(&msg, Some(what_loc));
+        self.error_expected_msg(&msg, what, Some(what_loc));
     }
 
     /// Report a "'k1', 'k2', 'k3' or 'k4' expected{where_}" error at the
     /// current token. Port of the four-token `errorExpected` initializer-list
     /// call (e.g. the Flow object-type property separator at
     /// JSParserImpl-flow.cpp:4138-4145); the C++ list rendering joins all but
-    /// the last token with ", " and the last with " or ". `what_loc` is C++'s
-    /// `whatLoc` (see `error_expected2`); the `what` note-text is still
-    /// dropped per house style.
+    /// the last token with ", " and the last with " or ". `what`/`what_loc`
+    /// are C++'s `what`/`whatLoc` (see `error_expected2`).
+    // The four tokens plus `where`/`what`/`whatLoc` are the C++ signature.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn error_expected4(
         &mut self,
         k1: TokenKind,
@@ -689,6 +734,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         k3: TokenKind,
         k4: TokenKind,
         where_: &str,
+        what: Option<&str>,
         what_loc: SMLoc,
     ) {
         let msg = format!(
@@ -699,11 +745,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             crate::token_kinds::token_kind_str(k4),
             where_
         );
-        self.error_expected_msg(&msg, Some(what_loc));
+        self.error_expected_msg(&msg, what, Some(what_loc));
     }
 
     /// Check the current token is `kind`; if so consume and return true, else
-    /// report an error and return false. Port of `eat`.
+    /// report an error and return false. Port of `eat`
+    /// (JSParserImpl.cpp:240-251) as invoked by the C++ call sites that pass
+    /// no hint, i.e. `eat(kind, gc, where, nullptr, SMLoc{})`. Sites whose
+    /// C++ counterpart passes a real `what`/`whatLoc` use `eat_at`.
     pub(super) fn eat(
         &mut self,
         kind: TokenKind,
@@ -711,6 +760,25 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         where_: &str,
     ) -> bool {
         if self.need(kind, where_) {
+            self.advance(grammar_context);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Like `eat`, but for call sites whose C++ `eat(kind, gc, where, what,
+    /// whatLoc)` counterpart passes a real `whatLoc`. Port of the same
+    /// `eat` (JSParserImpl.cpp:240-251), which simply forwards to `need`.
+    pub(super) fn eat_at(
+        &mut self,
+        kind: TokenKind,
+        grammar_context: GrammarContext,
+        where_: &str,
+        what: Option<&str>,
+        what_loc: SMLoc,
+    ) -> bool {
+        if self.need_at(kind, where_, what, what_loc) {
             self.advance(grammar_context);
             true
         } else {

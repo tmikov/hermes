@@ -1672,3 +1672,33 @@ succeeded on the oracle)` — unchanged; the capstone's parser-pair findings
 (F2's `$SHBuiltin` `compile = false` semantics and the `with` debug-abort
 landmine) are documented in that corpus's MANIFEST rather than pinned, both
 because their shapes still panic or abort on one side.
+
+---
+
+## errorExpected geometry (Task 1) additions
+
+C++ `JSParserImpl::errorExpected` (JSParserImpl.cpp:175-226) has two
+rendering arms that the port had dropped, keeping only the message text.
+Both are now ported, and both get a corpus file whose three channels
+(stdout, stderr, exit status) were captured from
+`cmake-build-asan/bin/hermesc -dump-sema` BEFORE the fix — each file failed
+the differential at that point, on stderr.
+
+| File | Covers |
+|---|---|
+| `error-expected-same-line.js` | The same-line arm (cpp:212-219). `var a = (1 + 2;` — `whatLoc` (the `(`, from the parenthesized-expression `eat` at cpp:2655-2660) shares line 1 with the offending `;`, so hermesc emits ONE diagnostic underlined with `combineIntoRange(whatLoc, errorLoc)`: `~~~~~~^` starting at the `(`. Pre-fix the port rendered a bare `^` (identical text, line:col and exit status — stderr geometry only). hermesc: exit 2 |
+| `error-expected-cross-line-note.js` | The different-line arm (cpp:220-225). `try` on line 1, `xyz;` on line 2 — `whatLoc` (the `try`, from the `need` at cpp:2371) is on an earlier line than the error, so hermesc emits a bare point-caret error AND a second `note: location of 'try'` diagnostic at `whatLoc`. Pre-fix the port emitted the error but no note at all. hermesc: exit 2 |
+
+Both files are one-liner reproducers rather than `test/Sema` imports (the
+same footing as `parse-error.js`, the S1 errorExpected gap-filler): the
+shapes being pinned are two-token geometries, and any extra source would
+only add unrelated dump output between the port and the oracle.
+
+### Gate
+
+`sema differential (tests/sema_corpus): 202 corpus files matched (107
+succeeded on the oracle)` — 200 → **202** (+2, both authored above),
+hermesc-succeeded **107 unchanged** (both new files are error files, exit 2).
+Arithmetic: 200 + 2 = 202; 107 + 0 = 107.
+`sema differential (tests/sema_corpus_parser): 11 corpus files matched (3
+succeeded on the oracle)` — unchanged.

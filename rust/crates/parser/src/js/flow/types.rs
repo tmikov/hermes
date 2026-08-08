@@ -862,6 +862,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     self.need_at(
                         TokenKind::numeric_literal,
                         " in type annotation",
+                        None,
                         start,
                     );
                     None
@@ -916,7 +917,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         // C++ 3612-3613: whatLoc is `startLoc` (the 'typeof' keyword).
-        if !self.need_at(TokenKind::identifier, " in typeof type", start) {
+        if !self.need_at(TokenKind::identifier, " in typeof type", None, start)
+        {
             return None;
         }
 
@@ -945,6 +947,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 self.need_at(
                     TokenKind::identifier,
                     " in qualified typeof type",
+                    None,
                     start,
                 );
                 return None;

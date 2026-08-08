@@ -128,6 +128,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // note text is still dropped per house style).
             self.error_expected_msg(
                 "'identifier' expected after 'function'",
+                None,
                 Some(start_loc),
             );
             return None;

@@ -296,6 +296,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 self.need_at(
                     TokenKind::identifier,
                     " in qualified generic type name",
+                    None,
                     start,
                 );
                 return None;

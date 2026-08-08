@@ -272,7 +272,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     // "start of property", start). `start` is real, so this
                     // routes through `need_at` (the note text is still
                     // dropped per house style).
-                    self.need_at(TokenKind::identifier, " in property", start);
+                    self.need_at(
+                        TokenKind::identifier,
+                        " in property",
+                        None,
+                        start,
+                    );
                     return None;
                 }
             }

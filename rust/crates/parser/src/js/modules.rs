@@ -374,6 +374,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                             // is still dropped per house style).
                             self.error_expected_msg(
                                 "'identifier' expected in import clause",
+                                None,
                                 Some(start_loc),
                             );
                             return None;
@@ -416,6 +417,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         if !self.need_at(
             TokenKind::l_brace,
             " in import specifier clause",
+            None,
             start_loc,
         ) {
             return Some((specifiers, kind));
@@ -460,6 +462,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 // house style).
                 self.error_expected_msg(
                     "'identifier' expected in namespace import",
+                    None,
                     Some(start_loc),
                 );
                 return None;
@@ -636,6 +639,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                         // C++ 6994-6999: whatLoc is `importLoc`.
                         self.error_expected_msg(
                             "'identifier' expected in import specifier",
+                            None,
                             Some(import_loc),
                         );
                         return None;
@@ -676,6 +680,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                         // C++ 7017-7022: whatLoc is `importLoc`.
                         self.error_expected_msg(
                             "'identifier' expected in import specifier",
+                            None,
                             Some(import_loc),
                         );
                         return None;
@@ -717,6 +722,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     // C++ 7041-7046: whatLoc is `importLoc`.
                     self.error_expected_msg(
                         "'identifier' expected in import specifier",
+                        None,
                         Some(import_loc),
                     );
                     return None;
@@ -746,6 +752,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                         // C++ 7060-7065: whatLoc is `importLoc`.
                         self.error_expected_msg(
                             "'identifier' expected in import specifier",
+                            None,
                             Some(import_loc),
                         );
                         return None;
@@ -779,6 +786,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 // is real (the note text is still dropped per house style).
                 self.error_expected_msg(
                     "'identifier' expected in import specifier",
+                    None,
                     Some(import_loc),
                 );
                 return None;
@@ -809,6 +817,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     // is still dropped per house style).
                     self.error_expected_msg(
                         "'identifier' expected in import specifier",
+                        None,
                         Some(import_loc),
                     );
                     return None;
@@ -903,6 +912,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     // real (the note text is still dropped per house style).
                     self.error_expected_msg(
                         "identifier expected in export clause",
+                        None,
                         Some(start_loc),
                     );
                     return None;
@@ -1307,6 +1317,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // (the note text is still dropped per house style).
             self.error_expected_msg(
                 "identifier expected in export clause",
+                None,
                 Some(export_loc),
             );
             return None;
@@ -1353,6 +1364,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 // still dropped per house style).
                 self.error_expected_msg(
                     "identifier expected in export clause",
+                    None,
                     Some(export_loc),
                 );
                 return None;

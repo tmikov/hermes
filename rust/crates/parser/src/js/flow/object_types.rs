@@ -190,6 +190,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     TokenKind::r_brace,
                     TokenKind::piper_brace,
                     " after property",
+                    None,
                     start,
                 );
                 return false;
@@ -290,6 +291,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     self.need_at(
                         TokenKind::identifier,
                         " in internal slot",
+                        None,
                         start,
                     );
                     return false;
@@ -611,6 +613,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             TokenKind::colon,
             TokenKind::question,
             " in property type annotation",
+            None,
             start,
         );
         false
