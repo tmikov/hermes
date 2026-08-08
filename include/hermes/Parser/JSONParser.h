@@ -633,6 +633,25 @@ class JSONParser {
   JSLexer lexer_;
   SourceErrorManager &sm_;
 
+  /// The current depth of value nesting during parsing.
+  unsigned recursionDepth_{0};
+
+  /// The maximum depth of value nesting, to avoid stack overflow on deeply
+  /// nested input. The values match JSParserImpl::MAX_RECURSION_DEPTH.
+  static constexpr unsigned MAX_RECURSION_DEPTH =
+#ifdef HERMES_LIMIT_STACK_DEPTH
+      128
+#elif defined(_MSC_VER) && defined(HERMES_SLOW_DEBUG)
+      128
+#elif defined(_MSC_VER) && defined(__clang__) && !defined(NDEBUG)
+      128
+#elif defined(_MSC_VER)
+      512
+#else
+      1024
+#endif
+      ;
+
  public:
   JSONParser(
       JSONFactory &factory,
@@ -668,7 +687,10 @@ class JSONParser {
   }
 
  private:
+  /// Check and update the recursion depth, then parse any JSON value.
   llvh::Optional<JSONValue *> parseValue();
+  /// Parse any JSON value, assuming the recursion depth has been checked.
+  llvh::Optional<JSONValue *> parseValueImpl();
   llvh::Optional<JSONValue *> parseArray();
   llvh::Optional<JSONValue *> parseObject();
 };
