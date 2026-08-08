@@ -414,8 +414,16 @@ function runBinaryAB() {
   };
 
   for (const arm of [
-    {label: 'engine-side only (addon.parse)', fn: engineOnly, read: r => r.buffer.byteLength},
-    {label: 'end-to-end (addon.parse + deserialize)', fn: e2e, read: a => a.type.length},
+    {
+      label: 'engine-side only (addon.parse)',
+      fn: engineOnly,
+      read: r => r.buffer.byteLength,
+    },
+    {
+      label: 'end-to-end (addon.parse + deserialize)',
+      fn: e2e,
+      read: a => a.type.length,
+    },
   ]) {
     let checksum = 0;
     for (const variant of variants) {
@@ -482,7 +490,12 @@ try {
 console.log('=== Environment ===');
 console.log(`node        : ${process.version} (V8 ${process.versions.v8})`);
 console.log(`cpu         : ${os.cpus()[0].model} x${os.cpus().length}`);
-console.log(`loadavg     : ${os.loadavg().map(x => x.toFixed(2)).join(' ')}`);
+console.log(
+  `loadavg     : ${os
+    .loadavg()
+    .map(x => x.toFixed(2))
+    .join(' ')}`,
+);
 console.log(`git commit  : ${gitCommit}`);
 console.log(`input       : ${INPUT_PATH} (${SOURCE_BYTES} bytes)`);
 console.log(`rotate      : ${ROTATE}`);
