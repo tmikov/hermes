@@ -1410,6 +1410,7 @@ JSParserImpl::parseMatchBindingPatternFlow() {
         "in match binding pattern",
         "start of binding pattern",
         startLoc);
+    return None;
   }
   auto optIdent = parseMatchBindingIdentifierFlow();
   if (!optIdent)
