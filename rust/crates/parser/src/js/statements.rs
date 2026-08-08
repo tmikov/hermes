@@ -887,8 +887,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 // grammar as well, so all FunctionDeclarations are disallowed as
                 // labeled items, except via an AnnexB extension which is
                 // unsupported in Hermes.
-                self.error_at(
-                    func.range(),
+                // Point location, NOT `func`'s range: C++ (cpp:1653-1655)
+                // calls `error(optFunc.getValue()->getSourceRange().Start,
+                // ...)` — the `error(SMLoc, Twine)` overload — so the caret
+                // is bare, not an underline over the whole declaration.
+                self.error_at_loc(
+                    func.range().start,
                     "Function declaration not allowed as body of labeled statement",
                 );
                 func
@@ -1314,15 +1318,19 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             let func_decl = function
                 .as_function_declaration()
                 .expect("parseFunctionDeclaration returns a FunctionDeclaration");
+            // Point location, NOT `function`'s range: C++ (cpp:1716-1723)
+            // calls `error((*optFunction)->getStartLoc(), ...)` — the
+            // `error(SMLoc, Twine)` overload — for both checks, so the caret
+            // is bare rather than underlining the whole declaration.
             if self.lexer.is_strict_mode() {
-                self.error_at(
-                    function.range(),
+                self.error_at_loc(
+                    function.range().start,
                     "In strict mode, functions cannot be declared in if statements",
                 );
             }
             if func_decl.generator.get() || func_decl.r#async.get() {
-                self.error_at(
-                    function.range(),
+                self.error_at_loc(
+                    function.range().start,
                     "Functions in if statements cannot be generator/async",
                 );
             }
@@ -2203,7 +2211,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return true;
         }
         if !optional {
-            self.error_cur("';' expected");
+            // Point location, NOT the current token's range: C++ `eatSemi`
+            // (JSParserImpl.cpp:336) calls `error(tok_->getStartLoc(), ...)`,
+            // i.e. the `error(SMLoc, Twine)` overload (JSParserImpl.h:
+            // 472-474), which renders a bare caret. `error_cur` underlines
+            // the whole token (`^~~~` instead of `^`) on any multi-character
+            // token following the missing `;`.
+            let loc = self.cur_start();
+            self.error_at_loc(loc, "';' expected");
         }
         false
     }
@@ -2504,7 +2519,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 match self.parse_binding_identifier(param) {
                     Some(ident) => ident,
                     None => {
-                        self.error_cur(
+                        // Point location, NOT the current token's range:
+                        // C++ (cpp:1374-1376) calls `error(tok_->
+                        // getStartLoc(), ...)` — the `error(SMLoc, Twine)`
+                        // overload — so the caret is bare.
+                        self.error_at_loc(
+                            self.cur_start(),
                             "identifier, '{' or '[' expected in binding pattern",
                         );
                         return None;

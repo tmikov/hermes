@@ -106,8 +106,9 @@ validation commands, and workflow.
 > diagnostic ties, THREE hermesc self-aborts — `class C { x = class {}; }`, `$SHBuiltin.#x()`, and
 > `using x = 1; { function f(){} }` — plus a FOURTH found in S4a: the dumper itself aborts on anonymous
 > `export default function(){}` dumped under `compile = false`, `SemContext.cpp:493-494` vs `dump_context.rs:304`,
-> permanently excluded from `sema_corpus_parser`); and the THREE tracked parser-phase follow-ups — the 180-file
-> `errorExpected` same-line-range gap (open, measured by the sema sweeps); the recursion-depth gap **CLOSED
+> permanently excluded from `sema_corpus_parser`); and the THREE tracked parser-phase follow-ups, ALL NOW
+> CLOSED — the 180-file `errorExpected` same-line-range/cross-line-note gap, **CLOSED 2026-08-08** (see the
+> Update below); the recursion-depth gap **CLOSED
 > 2026-08-04**: site parity was verified 1:1 rather than fixed, and the real defects were a `>` vs `>=`
 > off-by-one plus the limit constants (the ASan oracle takes C++'s `HERMES_LIMIT_STACK_DEPTH` branch, 128/512,
 > against the port's hardcoded 1024/1024 — now `cfg!(debug_assertions)`-selected), which also closed both
@@ -143,6 +144,36 @@ validation commands, and workflow.
 > are `plans/2026-07-26-sema-s0-foundations.md`, `plans/2026-07-28-sema-s1-declarations-scopes.md`,
 > `plans/2026-07-28-sema-s2-rest-of-walk.md`, `plans/2026-07-29-sema-s3-scoped-function-promoter.md`,
 > `plans/2026-08-03-sema-s4a-standalone-frontend.md`.
+> **Update (2026-08-08): parser-track follow-up (a) — `errorExpected` geometry — is DONE, closing
+> the last of the THREE tracked parser-phase follow-ups (all now closed).** Plan
+> `plans/2026-08-08-parser-error-expected-geometry.md`, three tasks, commits `db8c7d2d1..` on
+> `rust` (T1 `df3c2418e`, T2 `42d5c7e3e`+fix round `df60e8e1e`, T3 this session). C++
+> `errorExpected` (`JSParserImpl.cpp:175-226`) has two rendering arms (same-line
+> `combineIntoRange` underline; cross-line bare caret + a separate `note:`) that the port had
+> dropped entirely, keeping message text only. T1 ported both arms; T2 restored `where`/`what`/
+> `whatLoc` at all **246** real C++ call sites across the base grammar + Flow + TS + JSX, plus one
+> missed site found on review (oracle-unreachable, pinned with a unit test instead of a corpus
+> file). T3 re-ran the full 1416-file upstream sweep from the 1220/188/8 baseline: T1+T2 alone
+> collapsed 117 files (188 → 71); classifying the 71 individually (not assuming they were all
+> already-known residuals) surfaced **7 more genuine bugs** — `error(SMLoc, Twine)` POINT-location
+> calls mis-ported as ranges (or the reverse) at call sites that never go through `errorExpected`
+> at all (`eatSemi` alone: 58 of the 71), so T2's sweep had no reason to catch them; fixing all 7
+> collapsed 71 → 5. Final sweep: **1403 / 5 / 8** (was 1220/188/8), zero regressions at any step,
+> panic bucket unchanged (still the same 7 `$SHBuiltin` S4b files + `computed-fn-name.js`). The
+> final 5 mismatches are each individually classified, pre-existing, and NOT `errorExpected`
+> geometry (regex-engine validation; a `for`-head `yield` parsing-logic gap, 2 files; the
+> deliberate "notes dropped per house style" convention; and the collect-scope leak's sibling
+> error-recovery gap). Sema driver gate 202/107 → **205/107** (+3 corpus imports, all error-path).
+> **Two NEW parser-phase follow-ups found along the way, both OPEN** (see the roadmap's
+> Parser-phase follow-up section for full detail): the **collect-scope leak** (`expressions.rs:
+> 444-461` closes the flow generic-arrow retry's message-collection scope BEFORE the retry, vs
+> C++'s single `CollectMessagesRAII` spanning both attempts, cpp:6288-6332 — the port emits
+> diagnostics C++ silently discards; structurally un-pinnable by a differential corpus file) and
+> **EOF-snippet rendering** (a diagnostic located past end-of-buffer renders an empty source line +
+> bare caret in the port where hermesc prints no snippet at all — independent of `errorExpected`,
+> reachable from any past-EOF error or note). Full detail, per-fix citations, and the corpus
+> arithmetic: `rust/crates/sema/tests/sema_corpus/MANIFEST.md`'s "errorExpected geometry (Task 3)"
+> section and the roadmap's Parser-phase follow-up bullets.
 > The parser proper lives in `rust/crates/parser/src/js/{mod,expressions,statements,functions,classes,modules,jsx}.rs` +
 > **`js/flow/{mod,declarations,types,function_types,object_types,params,match_}.rs`** + **`js/ts/{mod,types,function_types,object_types,
 > declarations,params}.rs`**; the gate is `REQUIRE_DIFFERENTIAL=1 cargo test -p parser --test parser_differential` (build `ast-dump`

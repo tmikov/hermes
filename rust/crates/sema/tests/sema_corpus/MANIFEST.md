@@ -1702,3 +1702,145 @@ hermesc-succeeded **107 unchanged** (both new files are error files, exit 2).
 Arithmetic: 200 + 2 = 202; 107 + 0 = 107.
 `sema differential (tests/sema_corpus_parser): 11 corpus files matched (3
 succeeded on the oracle)` — unchanged.
+
+## errorExpected geometry (Task 3) — sweep re-count
+
+Full re-run of the S2-T8/S3-T3/S4a-T5 upstream sweep methodology (both
+binaries, raw stdout+stderr+exit status, no extra flags, debug builds on
+both sides, over the same 1416 `.js` files in `test/{Parser,IRGen,BCGen,
+Optimizer,hermes,AST,Driver,RA}`) now that Task 1 (both `errorExpected`
+rendering arms) and Task 2 (all 246 C++ call sites restored) have landed.
+File count re-verified: `find test/{Parser,IRGen,BCGen,Optimizer,hermes,AST,
+Driver,RA} -iname '*.js' | wc -l` = 1416, unchanged.
+
+Baseline going into this task (the pre-existing `parser-T1` row already in
+this table, `db8c7d2d1`): **1220 / 188 / 8**. First re-run, T1+T2 already
+applied: **1337 / 71 / 8** — 117 files moved mismatch → identical, panic
+bucket byte-for-byte the same 8 files, zero regressions (every file
+byte-identical before Task 1 stayed byte-identical; no file moved into
+mismatch or panic). 1220 + 117 = 1337; 188 − 117 = 71.
+
+### Classifying the 71: one dominant new bug, not "small residue"
+
+The task's own self-review notes guessed the residue would land near ~8
+files. Classifying all 71 individually instead surfaced a real,
+well-understood, previously-undiscovered defect family: **`error(SMLoc,
+Twine)` call sites — C++'s POINT-location overload (JSParserImpl.h:472-474,
+bare caret, no underline) — mis-ported as the RANGE overload** (the current
+token's or a node's full extent underlined). This is the same rendering
+confusion `errorExpected`'s own two arms are about, but at call sites that
+never go through `errorExpected`/`need`/`eat` at all, so Task 2's 246-site
+sweep had no reason to touch them. Per-message breakdown of the 71 (one
+`hermesc` stderr first-line grouping):
+
+| Count | hermesc first line |
+|---|---|
+| 57 | `error: ';' expected` |
+| 2 | `error: unexpected token after yield expression` |
+| 2 | `error: identifier, '{' or '[' expected in binding pattern` |
+| 1 each | the remaining 10 (warning + 9 distinct error messages) |
+
+**Fixed, 7 call sites, all verified against the C++ signature and rebuilt
+against the full sweep after each fix (zero regressions at every step):**
+
+1. **`eat_semi`** (`parser/src/js/statements.rs`, was `error_cur`, now
+   `error_at_loc(self.cur_start(), ...)`) — C++ `eatSemi`
+   (JSParserImpl.cpp:336) calls `error(tok_->getStartLoc(), "';' expected")`,
+   the point overload. Single highest-value fix in the sweep: 71 → 13
+   (58 files, the 57 `';' expected` files plus one `identifier, '{' or '['
+   expected in binding pattern` file whose actual diff was on a later
+   `eatSemi`-produced line, not its first diagnostic).
+2. **`parse_binding_element`**'s no-identifier branch (`statements.rs`, was
+   `error_cur`, now `error_at_loc(self.cur_start(), ...)`) — C++
+   (JSParserImpl.cpp:1374-1376) calls `error(tok_->getStartLoc(), ...)`.
+   Fixed 3 files: `test/IRGen/flow/function-prototype-call.js`,
+   `test/Parser/flow/this-param.js`, `test/Parser/escaped-this.js`.
+3. **The labeled-`FunctionDeclaration` check** (`statements.rs`, was
+   `error_at(func.range(), ...)`, now `error_at_loc(func.range().start,
+   ...)`) — C++ (JSParserImpl.cpp:1653-1655) calls
+   `error(optFunc.getValue()->getSourceRange().Start, ...)`. Fixed
+   `test/Parser/es6/generator-error.js`.
+4. **The if-statement function-declaration checks** (`statements.rs`, both
+   the strict-mode and the generator/async check, were `error_at(function
+   .range(), ...)`, now `error_at_loc(function.range().start, ...)`) — C++
+   (JSParserImpl.cpp:1716-1723) calls `error((*optFunction)->getStartLoc(),
+   ...)` for both. Fixed `test/Parser/if-function-error.js` (2 diagnostics)
+   and `test/Parser/if-function-gen-error.js`.
+5. **The post-assignment-expression check** (`expressions.rs`, was
+   `error_at(range, ...)` with `range = self.cur_range()`, now
+   `error_at_loc(self.cur_start(), ...)`) — C++ (JSParserImpl.cpp:6535-6536)
+   calls `error(tok_->getStartLoc(), ...)`. Fixed
+   `test/Parser/regress-assign-end-error.js`.
+6. **"invalid destructuring target"** (`expressions.rs`, a hand-inlined
+   `combineIntoRange` that ended the range AT the key's start instead of one
+   past it, now routed through the real `combine_into_range` helper
+   (`support/src/manager.rs:411`, itself already correct)) — C++
+   (JSParserImpl.cpp:6095-6098) is `SourceErrorManager::combineIntoRange
+   (propNode->getStartLoc(), propNode->_key->getStartLoc())`, and
+   `combineIntoRange` (header:601-607) always extends the end one byte past
+   its later argument; the hand-inlined version dropped that `+1`, off-by-one
+   shortening the underline by one character. Fixed
+   `test/Parser/destr-assignment2.js`.
+7. **"location of optional chain"** (`expressions.rs`'s tagged-template
+   optional-chain check, was `note_at(expr.range().start, None, ...)`, now
+   `note_at(expr_range.start, Some(expr_range), ...)`) — C++ (cpp:3576)
+   calls `sm_.note(expr->getSourceRange(), ...)`, passing the whole RANGE,
+   not a bare point — the reverse mistake from 1-5 above (a range collapsed
+   to a point, not a point expanded to a range). Doesn't flip
+   `test/Parser/optional-chaining-error.js` out of mismatch (see below), but
+   is independently a real, now-fixed defect confirmed via an isolated
+   two-statement repro (`a?.b.c\n\`abc\`;` alone) matching hermesc exactly
+   after the fix.
+
+Items 1-5 fixed 8 files together (item 6 fixed 1, item 7 fixed 0 directly);
+combined with item 1's 58: 71 → 13 → **5**. 1337 + 66 = 1403 (identical);
+71 − 66 = 5 (mismatch). Panic bucket unchanged (byte-for-byte the same 8
+files) at every intermediate step.
+
+### The final 5: individually classified, none is errorExpected-geometry
+
+| File | hermesc first line | Classification |
+|---|---|---|
+| `test/AST/regexp.js` | `Invalid regular expression: ...` | **Pre-existing, out of component scope.** Needs the regex engine (`lib/Regex/`), not yet ported; already documented (this file's own "S2 Task 3 additions" section above, "REGEX-ENGINE DEFERRED"). |
+| `test/Parser/es6/for-of-error.js` | `unexpected token after yield expression` (ours: `';' or 'in' expected inside 'for'`) | **Pre-existing parser-logic gap, not geometry.** `for (yield x in y;;) {}` reaches C++'s dedicated `yield`-as-assignment-expression branch (JSParserImpl.cpp:6257-6266, gated on `paramYield_`); the port's `for`-head disambiguation takes a different path entirely, so the two sides diverge on MESSAGE, not just rendering. Already named in the roadmap's follow-up (a) ("three further files differ in genuine message text"). Needs its own investigation of `for`-loop head parsing, not a caret fix — out of this task's scope. |
+| `test/Parser/es6/import-error.js` | (extra `note: first usage of name` on hermesc's side only) | **Pre-existing, deliberate.** `parser/src/js/modules.rs:519-520,548` documents dropping C++'s `sm_.note(insertRes.first->second->getSourceRange(), "first usage of name")` (cpp:6923-6924) "per house style" — the same established, intentional convention documented at `jsx.rs:172,303` for other unconditional `sm_.note` companions to a plain `error()` call. Not part of the `errorExpected`/`need`/`eat` geometry this plan restores (T2's own report lists this exact file's call site as one of "5 remaining comments... verified accurate"). |
+| `test/Parser/es6/yield-paren-error.js` | `unexpected token after yield expression` (ours: `';' expected`) | Same root cause and classification as `for-of-error.js` above — the `paramYield_`-gated yield-as-assignment-expression branch not being reached on this input either. |
+| `test/Parser/optional-chaining-error.js` | (missing a second `error`+`note` pair entirely, `28:1`/`29:1`) | **Pre-existing, already documented in-code as a deliberate deviation.** `expressions.rs`'s tagged-template-in-optional-chain branch (fixed for geometry above, item 7) has a standing comment: C++ (cpp:3566-3577) emits the diagnostic and CONTINUES, building a `TaggedTemplateExpression` anyway (error recovery), so `parseStatementList` reaches the file's SECOND `a?.b.c` / `` `abc` `` statement and fires the same diagnostic there too; this port instead `return None`s, aborting the whole statement (and, transitively, the rest of the file — no further statements are attempted), which is why hermesc emits 4 diagnostics and the port emits 3. The comment ties this to "the broader error-recovery fidelity work" — a real, sizable, pre-existing gap (matching C++'s error-and-continue shape generally, not just this one call site), correctly out of scope for a geometry-only sweep. |
+
+None of the 5 is an `errorExpected`-geometry miss (Task 2 did not skip a
+site for any of them); each has an independent, individually-verified root
+cause, none newly introduced by this task, and every fix above was
+regression-checked against the full 1416-file sweep before moving to the
+next.
+
+### New corpus imports (Step 2)
+
+Three upstream files, chosen to represent the three fix waves above,
+byte-verified against `hermesc -dump-sema` (no flags) before import — all
+copied verbatim, all `hermesc` exit 2 (error-path pins):
+
+| File | Source | Note |
+|---|---|---|
+| `decorator-error.js` | `test/Parser/decorator-error.js`, verbatim | T1/T2 delta — a real `need`/`errorExpected` call site (`"in decorator"`, JSParserImpl.cpp:4727) exercising the same-line `combineIntoRange` arm Task 1 restored, on a genuine upstream file rather than a synthetic one-liner |
+| `method-type-error.js` | `test/Parser/method-type-error.js`, verbatim | T1/T2 delta — a different `need`/`errorExpected` call site (`"in method definition"`, cpp:3197/3219/5542/5573), same arm, different production |
+| `if-function-gen-error.js` | `test/Parser/if-function-gen-error.js`, verbatim | T3 delta — pins fix #4 above (`error(SMLoc, Twine)` point-vs-range at the if-statement generator/async check), independent of `errorExpected` entirely |
+
+#### Gate
+
+`sema differential (tests/sema_corpus): 205 corpus files matched (107
+succeeded on the oracle)` — 202 → **205** (+3, all three imports above),
+hermesc-succeeded **107 unchanged** (all three are error-path files, exit
+2). Arithmetic: 202 + 3 = 205; 107 + 0 = 107.
+`sema differential (tests/sema_corpus_parser): 11 corpus files matched (3
+succeeded on the oracle)` — unchanged; nothing imported there.
+Parser differential (`tests/parser_corpus`): 77 corpus files matched —
+unchanged; nothing imported there (the error-path corpus home is the sema
+corpus per the global constraints).
+
+### Final sweep count
+
+**1403 / 5 / 8** (was 1220 / 188 / 8 going into this task). 1403 + 5 + 8 =
+1416. Full workspace suite green throughout (`cargo test --manifest-path
+rust/Cargo.toml --workspace`); zero new clippy lints (before/after warning
+counts identical, verified via `git stash`/`git stash pop` around a clippy
+run on the two touched files).

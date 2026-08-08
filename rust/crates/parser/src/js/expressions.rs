@@ -816,11 +816,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         while let Some(top) = stack.pop() {
             // C++ line 6529: checkEndAssignmentExpression() guard.
             if !self.check_end_assignment_expression(OfEndsAssignment::Yes) {
-                let range = self.cur_range();
-                self.error_at(
-                    range,
-                    "unexpected token after assignment expression",
-                );
+                // Point location, NOT the current token's range: C++
+                // (cpp:6535-6536) calls `error(tok_->getStartLoc(), ...)` —
+                // the `error(SMLoc, Twine)` overload — so the caret is bare.
+                let loc = self.cur_start();
+                self.error_at_loc(loc, "unexpected token after assignment expression");
                 return None;
             }
             let end = self.lexer.prev_token_end();
@@ -1590,11 +1590,16 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // Kind must be "init".
             if prop.kind.get() != init_kind {
                 // Combine the start of the property with the start of the key
-                // (mirrors C++ `SourceErrorManager::combineIntoRange`).
-                let err_range = support::location::SMRange {
-                    start: node.range().start,
-                    end: prop.key.range().start,
-                };
+                // (JSParserImpl.cpp:6095-6098: `SourceErrorManager::
+                // combineIntoRange(propNode->getStartLoc(),
+                // propNode->_key->getStartLoc())`). Must go through the real
+                // `combine_into_range` (end = key start + 1, header:601-607),
+                // NOT a manual span ending AT the key's start — that drops
+                // the key's own first character from the underline.
+                let err_range = self
+                    .lexer
+                    .get_source_mgr()
+                    .combine_into_range(node.range().start, prop.key.range().start);
                 self.error_at(err_range, "invalid destructuring target");
                 continue;
             }
@@ -3204,10 +3209,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                         range,
                         "invalid use of tagged template literal in optional chain",
                     );
-                    // Note the location of the optional chain.
+                    // Note the location of the optional chain. C++
+                    // (cpp:3576) passes `expr->getSourceRange()` — the whole
+                    // range, not a bare point — to `sm_.note`, so the
+                    // underline spans `expr`, not just a caret at its start.
+                    let expr_range = expr.range();
                     self.lexer.get_source_mgr_mut().note_at(
-                        expr.range().start,
-                        None,
+                        expr_range.start,
+                        Some(expr_range),
                         "location of optional chain",
                         support::diag::Subsystem::Parser,
                     );
