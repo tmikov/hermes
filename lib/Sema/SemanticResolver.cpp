@@ -984,6 +984,11 @@ void SemanticResolver::visit(ClassPrivatePropertyNode *node) {
         node->_static
             ? curClassContext_->getOrCreateStaticElementsInitFunctionInfo()
             : curClassContext_->getOrCreateInstanceElementsInitFunctionInfo());
+    // Make the initializer function's body scope current, so any scopes
+    // created by the initializer expression (e.g. by a class expression) are
+    // parented in it, matching the runtime environment chain.
+    llvh::SaveAndRestore<LexicalScope *> oldScope{
+        curScope_, curFunctionInfo()->getFunctionBodyScope()};
     // We need to make sure that the special `arguments` object is declared so
     // that we can detect usages of it, and correctly error out since field
     // initializers are not allowed to reference `arguments`. If we didn't do
@@ -1036,6 +1041,11 @@ void SemanticResolver::visit(ESTree::ClassPropertyNode *node) {
         node->_static
             ? curClassContext_->getOrCreateStaticElementsInitFunctionInfo()
             : curClassContext_->getOrCreateInstanceElementsInitFunctionInfo());
+    // Make the initializer function's body scope current, so any scopes
+    // created by the initializer expression (e.g. by a class expression) are
+    // parented in it, matching the runtime environment chain.
+    llvh::SaveAndRestore<LexicalScope *> oldScope{
+        curScope_, curFunctionInfo()->getFunctionBodyScope()};
     declareArguments();
     visitESTreeNode(*this, node->_value, node);
   } else if (!typed_) {
