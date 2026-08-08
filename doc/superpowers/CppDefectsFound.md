@@ -6,8 +6,9 @@ capstone). Every item below was reproduced against real binaries; commands and
 observed output are verbatim.
 
 **Build config for repros:** `cmake-build-asan` (Debug + ASan, the repo's default
-dev build — `CLAUDE.md`). Items 1–5 are assertion failures, visible only in
-assert-enabled builds; Release builds pass through them (with the noted behavior).
+dev build — `CLAUDE.md`). Items 1–5 and 11 are assertion failures, visible only
+in assert-enabled builds; Release builds pass through them (with the noted
+behavior).
 Items 2–3 use the in-repo oracle tool `tools/sema-parser-dump/` (build:
 `cmake --build cmake-build-asan --target sema-parser-dump`), which drives the
 public `resolveASTForParser` + `semDump` entries — the crashes are in those
@@ -242,6 +243,42 @@ sits in the corpus's Deferred list as unfixable-by-construction.
 
 ---
 
+## 11. Flow `match` binding pattern: bad-token diagnostic then abort
+
+**Severity:** debug-abort on invalid input (hermesc reports a real error first,
+then aborts instead of exiting cleanly).
+
+```bash
+printf 'const e = match (x) { const [y]: 2 };\n' > /tmp/bug11.js
+cmake-build-asan/bin/hermesc -parse-flow -Xparse-flow-match -dump-ast /tmp/bug11.js
+# => /tmp/bug11.js:1:29: error: 'identifier' expected in match binding pattern
+#    const e = match (x) { const [y]: 2 };
+#                          ~~~~~~^
+#    hermesc: include/hermes/Parser/JSLexer.h:160:
+#    hermes::UniqueString *hermes::parser::Token::getResWordOrIdentifier() const:
+#    Assertion `getKind() == TokenKind::identifier || isResWord()' failed.
+#    SIGABRT, exit 134
+```
+
+**Root cause:** after the match binding-pattern parser reports "'identifier'
+expected in match binding pattern" for the current (non-identifier, non-
+reserved-word) token, some caller on the error-recovery path still calls
+`Token::getResWordOrIdentifier()` on that same token without checking `check
+(identifier)`/`isResWord()` first, so the assert at `JSLexer.h:160` fires on
+the very next line. Release builds skip the assert and read `ident_`
+uninitialized/stale for that token kind (untested — no release `hermesc`
+build was available for this repro).
+
+**Port pin:** `token.rs:133`'s `debug_assert!` panics identically on the same
+input (`--parse-flow --parse-flow-match /tmp/bug11.js`, `ast-dump` binary) —
+bug-for-bug parity, not an independent port bug. Exact panic:
+`assertion failed: self.kind == TokenKind::identifier || self.is_res_word()`.
+If the C++ side is fixed (guarding the call, or having the binding-pattern
+parser bail out before reaching it), mirror the fix in the Rust match-pattern
+parser rather than relaxing the `debug_assert!`.
+
+---
+
 ## Summary table
 
 | # | Input | Effect | Site | Release behavior |
@@ -255,3 +292,4 @@ sits in the corpus's Deferred list as unfixable-by-construction.
 | 7 | deep JSON | stack overflow | JSONParser.cpp | same |
 | 8 | export outside module mode | wording | cpp:1511/1553 | same |
 | 9 | same-location diagnostics | unstable order | SourceErrorManager.cpp:61-71 | same |
+| 11 | `match` binding pattern, bad token | abort | JSLexer.h:160 | untested |
