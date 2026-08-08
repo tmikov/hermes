@@ -563,9 +563,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                         self.advance(GrammarContext::AllowDiv);
                         lit
                     }
-                    // flow.cpp:1344-1346.
+                    // flow.cpp:1344-1346. Point location, NOT the current
+                    // token's range: C++ calls `error(tok_->getStartLoc(),
+                    // ...)` — the `error(SMLoc, Twine)` overload.
                     _ => {
-                        self.error_cur("invalid match unary pattern argument");
+                        self.error_at_loc(
+                            self.cur_start(),
+                            "invalid match unary pattern argument",
+                        );
                         return None;
                     }
                 };
@@ -605,9 +610,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // flow.cpp:1382-1383.
             TokenKind::l_square => self.parse_match_array_pattern_flow(),
 
-            // flow.cpp:1385-1387.
+            // flow.cpp:1385-1387. Point location, NOT the current token's
+            // range: C++ calls `error(tok_->getStartLoc(), ...)` — the
+            // `error(SMLoc, Twine)` overload.
             _ => {
-                self.error_cur("invalid match pattern");
+                self.error_at_loc(self.cur_start(), "invalid match pattern");
                 None
             }
         }

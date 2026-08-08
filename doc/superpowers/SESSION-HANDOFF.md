@@ -158,12 +158,23 @@ validation commands, and workflow.
 > already-known residuals) surfaced **7 more genuine bugs** — `error(SMLoc, Twine)` POINT-location
 > calls mis-ported as ranges (or the reverse) at call sites that never go through `errorExpected`
 > at all (`eatSemi` alone: 58 of the 71), so T2's sweep had no reason to catch them; fixing all 7
-> collapsed 71 → 5. Final sweep: **1403 / 5 / 8** (was 1220/188/8), zero regressions at any step,
+> collapsed 71 → 5. **A whole-branch review then found the point-vs-range class was NOT actually
+> closed**: reproducing T2's mechanical audit for the ~150 remaining plain `error(...)` sites (not
+> just corpus-visible ones) found **16 more** mismatches with zero corpus visibility (Flow
+> `declare`/async-hook/async-component/opaque-type/export-from, two match-pattern checks, the
+> Flow/TS "unexpected token in type annotation" checks), plus a **missing check** (cpp:6263-6266,
+> four dropped lines — `yield x in y;;`/`yield()e=` fell through to the wrong diagnostic entirely)
+> that un-misclassified two files the original pass had wrongly filed as "pre-existing", plus a
+> **dropped parameter** (`reparse_assignment_pattern`'s `in_decl` never threaded into the array/
+> object pattern reparse helpers — silently disabled an entire C++ validation branch for every
+> `in_decl=true` nested pattern, e.g. `({...a.b}) => 1` reported the wrong error). All fixed;
+> every one of the seven original fixes now has a durable CI-visible pin. Final sweep:
+> **1405 / 3 / 8** (was 1220/188/8), zero regressions at any step,
 > panic bucket unchanged (still the same 7 `$SHBuiltin` S4b files + `computed-fn-name.js`). The
-> final 5 mismatches are each individually classified, pre-existing, and NOT `errorExpected`
-> geometry (regex-engine validation; a `for`-head `yield` parsing-logic gap, 2 files; the
-> deliberate "notes dropped per house style" convention; and the collect-scope leak's sibling
-> error-recovery gap). Sema driver gate 202/107 → **205/107** (+3 corpus imports, all error-path).
+> final 3 mismatches are each individually classified, pre-existing, and NOT `errorExpected`
+> geometry (regex-engine validation; the deliberate "notes dropped per house style" convention;
+> and the collect-scope leak's sibling error-recovery gap). Sema driver gate 202/107 → **208/107**
+> (+6 corpus imports across the original pass and the review fix round, all error-path).
 > **Two NEW parser-phase follow-ups found along the way, both OPEN** (see the roadmap's
 > Parser-phase follow-up section for full detail): the **collect-scope leak** (`expressions.rs:
 > 444-461` closes the flow generic-arrow retry's message-collection scope BEFORE the retry, vs

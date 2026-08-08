@@ -957,9 +957,21 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let start_loc = self.advance(GrammarContext::AllowRegExp).start;
 
         if self.lexer.is_new_line_before_current_token() {
-            self.error_cur("'throw' argument must be on the same line");
-            // C++ also emits sm_.note(startLoc, "location of the 'throw'");
-            // message-note fidelity is a tracked carry-forward.
+            // Point location, NOT the current token's range: C++
+            // (cpp:2348) calls `error(tok_->getStartLoc(), ...)` — the
+            // `error(SMLoc, Twine)` overload. It also emits a companion
+            // note at the (point) `startLoc` (cpp:2349), previously dropped
+            // here — both restored now.
+            self.error_at_loc(
+                self.cur_start(),
+                "'throw' argument must be on the same line",
+            );
+            self.lexer.get_source_mgr_mut().note_at(
+                start_loc,
+                None,
+                "location of the 'throw'",
+                support::diag::Subsystem::Parser,
+            );
             return None;
         }
 
@@ -2814,7 +2826,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let elem = match self.parse_binding_identifier(param) {
             Some(ident) => ident,
             None => {
-                self.error_cur(
+                // Point location, NOT the current token's range: C++
+                // (cpp:1577-1579) calls `error(tok_->getStartLoc(), ...)` —
+                // the `error(SMLoc, Twine)` overload — so the caret is bare.
+                self.error_at_loc(
+                    self.cur_start(),
                     "identifier expected after '...' in object pattern",
                 );
                 return None;

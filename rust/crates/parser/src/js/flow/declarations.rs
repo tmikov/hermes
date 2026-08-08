@@ -1557,7 +1557,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         if self.check_name(b"opaque") {
             self.advance(GrammarContext::AllowRegExp);
             if !self.check_name(b"type") {
-                self.error_cur("'type' required in opaque type declaration");
+                // Point location, NOT the current token's range: C++
+                // (flow.cpp:100-101) calls `error(tok_->getStartLoc(), ...)`
+                // — the `error(SMLoc, Twine)` overload.
+                self.error_at_loc(
+                    self.cur_start(),
+                    "'type' required in opaque type declaration",
+                );
                 return None;
             }
             self.advance(GrammarContext::Type);
@@ -1589,7 +1595,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             && self.check_unescaped_name(b"async")
             && self.check_async_hook_flow()
         {
-            self.error_cur(
+            // Point location, NOT the current token's range: C++
+            // (flow.cpp:122-124) calls `error(tok_->getStartLoc(), ...)` —
+            // the `error(SMLoc, Twine)` overload.
+            self.error_at_loc(
+                self.cur_start(),
                 "`async` is not supported for declared hooks. \
                  Use `declare hook` instead.",
             );
@@ -1602,7 +1612,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             && self.check_unescaped_name(b"async")
             && self.check_async_component_flow()
         {
-            self.error_cur(
+            // Point location, NOT the current token's range: C++
+            // (flow.cpp:132-134) calls `error(tok_->getStartLoc(), ...)` —
+            // the `error(SMLoc, Twine)` overload.
+            self.error_at_loc(
+                self.cur_start(),
                 "`async` is not supported for declared components. \
                  Use `declare component` instead.",
             );
@@ -2259,7 +2273,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 && self.check_unescaped_name(b"async")
                 && self.check_async_hook_flow()
             {
-                self.error_cur(
+                // Point location, NOT the current token's range: C++
+                // (flow.cpp:2607-2609) calls `error(tok_->getStartLoc(),
+                // ...)` — the `error(SMLoc, Twine)` overload.
+                self.error_at_loc(
+                    self.cur_start(),
                     "`async` is not supported for declared hooks. \
                      Use `declare hook` instead.",
                 );
@@ -2272,7 +2290,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 && self.check_unescaped_name(b"async")
                 && self.check_async_component_flow()
             {
-                self.error_cur(
+                // Point location, NOT the current token's range: C++
+                // (flow.cpp:2623-2625) calls `error(tok_->getStartLoc(),
+                // ...)` — the `error(SMLoc, Twine)` overload.
+                self.error_at_loc(
+                    self.cur_start(),
                     "`async` is not supported for declared components. \
                      Use `declare component` instead.",
                 );
@@ -2335,7 +2357,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             && self.check_unescaped_name(b"async")
             && self.check_async_hook_flow()
         {
-            self.error_cur(
+            // Point location, NOT the current token's range: C++
+            // (flow.cpp:2696-2698) calls `error(tok_->getStartLoc(), ...)`
+            // — the `error(SMLoc, Twine)` overload.
+            self.error_at_loc(
+                self.cur_start(),
                 "`async` is not supported for declared hooks. \
                  Use `declare hook` instead.",
             );
@@ -2353,7 +2379,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             && self.check_unescaped_name(b"async")
             && self.check_async_component_flow()
         {
-            self.error_cur(
+            // Point location, NOT the current token's range: C++
+            // (flow.cpp:2724-2726) calls `error(tok_->getStartLoc(), ...)`
+            // — the `error(SMLoc, Twine)` overload.
+            self.error_at_loc(
+                self.cur_start(),
                 "`async` is not supported for declared components. \
                  Use `declare component` instead.",
             );
@@ -2417,7 +2447,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         if self.check_name(b"opaque") {
             self.advance(GrammarContext::Type);
             if !self.check_name(b"type") {
-                self.error_cur("'type' required in opaque type declaration");
+                // Point location, NOT the current token's range: C++
+                // (flow.cpp:2798-2799) calls `error(tok_->getStartLoc(),
+                // ...)` — the `error(SMLoc, Twine)` overload.
+                self.error_at_loc(
+                    self.cur_start(),
+                    "'type' required in opaque type declaration",
+                );
                 return None;
             }
             self.advance(GrammarContext::Type);
@@ -2446,7 +2482,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // C++ 2837-2854: `declare export * from 'foo'`.
         if self.check_and_eat(TokenKind::star, GrammarContext::Type) {
             if !self.check_name(b"from") {
-                self.error_cur(
+                // Point location, NOT the current token's range: C++
+                // (flow.cpp:2840-2841) calls `error(tok_->getStartLoc(),
+                // ...)` — the `error(SMLoc, Twine)` overload.
+                self.error_at_loc(
+                    self.cur_start(),
                     "expected 'from' clause in export declaration",
                 );
                 return None;

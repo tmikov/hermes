@@ -1792,8 +1792,9 @@ against the full sweep after each fix (zero regressions at every step):**
    two-statement repro (`a?.b.c\n\`abc\`;` alone) matching hermesc exactly
    after the fix.
 
-Items 1-5 fixed 8 files together (item 6 fixed 1, item 7 fixed 0 directly);
-combined with item 1's 58: 71 → 13 → **5**. 1337 + 66 = 1403 (identical);
+Item 1 fixed 58 files alone (71 → 13). Items 2-5 fixed 7 more files together
+(3 + 1 + 2 + 1); item 6 is the 8th file. Item 7 fixed 0 files directly (see
+the residual table below). 13 − 8 = **5**. 1337 + 66 = 1403 (identical);
 71 − 66 = 5 (mismatch). Panic bucket unchanged (byte-for-byte the same 8
 files) at every intermediate step.
 
@@ -1812,6 +1813,14 @@ site for any of them); each has an independent, individually-verified root
 cause, none newly introduced by this task, and every fix above was
 regression-checked against the full 1416-file sweep before moving to the
 next.
+
+**CORRECTION (see the "Fix report (post-review)" appendix below):** the
+`for-of-error.js`/`yield-paren-error.js` rows above are WRONG — a
+whole-branch review found the actual cause was four missing lines
+(cpp:6263-6266), not an unrelated pre-existing `for`-head parsing gap. Both
+are fixed and no longer residual; the table above is kept as-written for
+the historical record of what this task's first pass concluded, corrected
+in place by Finding 2 of the fix report.
 
 ### New corpus imports (Step 2)
 
@@ -1837,10 +1846,213 @@ Parser differential (`tests/parser_corpus`): 77 corpus files matched —
 unchanged; nothing imported there (the error-path corpus home is the sema
 corpus per the global constraints).
 
-### Final sweep count
+### Sweep count after this pass
 
 **1403 / 5 / 8** (was 1220 / 188 / 8 going into this task). 1403 + 5 + 8 =
 1416. Full workspace suite green throughout (`cargo test --manifest-path
 rust/Cargo.toml --workspace`); zero new clippy lints (before/after warning
 counts identical, verified via `git stash`/`git stash pop` around a clippy
-run on the two touched files).
+run on the two touched files). **Superseded by the fix report below** — a
+whole-branch review found the point-vs-range class was not actually closed
+(4 reviewer-probed sites plus a dozen same-shape candidates the sweep never
+exercised), plus a genuinely missing check and a silently-dropped parameter.
+
+## Fix report (post-review)
+
+The whole-branch review of this task ran the SAME kind of mechanical
+call-site audit Task 2 used for `errorExpected` — but for plain `error(...)`
+calls, which the sweep above can only catch when an upstream `.js` file
+happens to exercise them. It found four Important issues.
+
+### FINDING 1 — the point-vs-range class was not closed
+
+Reproduced Task 2's method: extracted the first argument of every plain
+`error(...)` call (i.e. NOT `errorExpected`/`need`/`eat`, which Task 2
+already audited) across all four `JSParserImpl*.cpp` files, classified each
+as C++'s POINT overload (`error(SMLoc, Twine)`) or RANGE overload
+(`error(SMRange, Twine)` / `error(Twine)` current-token-range /
+`combineIntoRange(...)`), then found and inspected the Rust counterpart of
+every one of the **153** real call sites (2 more are `sm_.error(...)` calls
+internal to `errorExpected`'s own body, not audited sites). Automated
+matching by message text plus manual resolution of every ambiguous/no-match
+case (bare-name argument variables checked against their declarations, e.g.
+`awaitRng`/`identRng`/`startRange` are all `SMRange`; `start`/`startLoc`/
+`errorLoc`/`clauseStartLoc`/`dotdotdotLoc` are all `SMLoc`).
+
+**16 more divergent sites found and fixed** (all `error_cur`, i.e. the
+current token's RANGE, where C++'s classification is POINT):
+
+| C++ site | Rust site | Message |
+|---|---|---|
+| JSParserImpl.cpp:1579 | statements.rs (`parse_binding_rest_property`) | "identifier expected after '...' in object pattern" |
+| JSParserImpl.cpp:2348 | statements.rs (`parse_throw_statement`) | "'throw' argument must be on the same line" (also restored the companion `sm_.note(startLoc, "location of the 'throw'")`, previously dropped entirely — cpp:2349) |
+| JSParserImpl.cpp:6878 | modules.rs (`parse_name_space_import`) | "'as' expected" (the site's own comment actively asserted `error_cur` was correct here — it wasn't; comment corrected) |
+| JSParserImpl-flow.cpp:101, 2799 | flow/declarations.rs (`parse_declare_flow`, `parse_declare_export_flow`) | "'type' required in opaque type declaration" (2 call sites, same message) |
+| JSParserImpl-flow.cpp:123, 2606, 2695 | flow/declarations.rs (3 call sites) | "\`async\` is not supported for declared hooks..." |
+| JSParserImpl-flow.cpp:133, 2622, 2723 | flow/declarations.rs (3 call sites) | "\`async\` is not supported for declared components..." |
+| JSParserImpl-flow.cpp:2841 | flow/declarations.rs (`parse_declare_export_flow`) | "expected 'from' clause in export declaration" |
+| JSParserImpl-flow.cpp:1345 | flow/match_.rs (`parse_match_unary_pattern_flow`) | "invalid match unary pattern argument" |
+| JSParserImpl-flow.cpp:1386 | flow/match_.rs (`parse_match_pattern_flow`) | "invalid match pattern" |
+| JSParserImpl-flow.cpp:3599, JSParserImpl-ts.cpp:1055 | flow/types.rs, ts/types.rs | "unexpected token in type annotation" (2 sites, same message, one per dialect) |
+
+Verified none of these files' fixes were false positives: every automated
+"FLAG" was cross-checked by reading the actual C++ source at the cited line
+(not just trusting the message-text match), and spot-checked a sample
+against a live `hermesc`/`sema-dump` comparison with the correct dialect
+flags (`--parse-flow --parse-component-syntax --parse-flow-match`) after
+discovering `sema-dump --help`'s real flag spelling (double-dash, not the
+`hermesc -X...` spelling used in ad hoc probes). All spot checks matched
+byte-for-byte on the error path (successful-parse dump-format mismatches
+in the probes were an artifact of comparing `-dump-ast` against `-dump-sema`
+on VALID input, not a real divergence — the two dump modes agree there is
+no error, which is all that matters off the error path).
+
+Also found and fixed, in the same audit, a genuinely different class of bug
+that Finding 1's method surfaced as a side effect — not a rendering
+mismatch but a **dropped parameter silently disabling a whole validation
+branch**: `reparse_assignment_pattern`'s `in_decl: bool` parameter (port of
+C++ `reparseAssignmentPattern`'s `inDecl`) was accepted but never threaded
+into either `reparse_array_assignment_pattern` or
+`reparse_object_assignment_pattern` (both hardcoded `false` at their own
+recursive calls, and neither function even had an `in_decl` parameter to
+receive it). C++ threads `inDecl` through both (cpp:5918, 5921,
+6010/6032/6122), so the object-pattern rest-property check
+("identifier expected in parameter list" — cpp:6079-6086, entirely absent
+from the port) and the whole `in_decl=true` path through EVERY nested
+array/object sub-pattern were unreachable. Confirmed reachable and wrong
+before the fix: `({...a.b}) => 1` (an arrow parameter list) reported
+"invalid destructuring target" instead of "identifier expected in parameter
+list"; `([...a.b]) => 1` reported nothing wrong for the rest argument at
+all where it should report "identifier or pattern expected". Both now
+match hermesc exactly. Fixed by adding `in_decl: bool` to both functions'
+signatures, threading it through every recursive call, and porting the
+missing rest-property check.
+
+None of these 16 (nor the `in_decl` fix) moved any upstream `.js` file out
+of the sweep's mismatch bucket — none is exercised by the 1416-file corpus
+at all, which is exactly why Task 2's mechanical site-by-site reconciliation
+(not corpus mismatches) is the right verification method here, same as it
+was for `errorExpected` itself.
+
+### FINDING 2 — `for-of-error.js`/`yield-paren-error.js` were misclassified, not pre-existing
+
+The residual table's classification of these two files as "a pre-existing
+parser-logic gap... needs its own investigation of `for`-loop head parsing"
+was wrong — the missing piece was four lines. C++ `parseAssignmentExpression`
+(cpp:6257-6268) has a `yieldExpr->_argument && !checkEndAssignmentExpression()`
+guard AFTER a successful `parseYieldExpression` call: if the yield had an
+argument and the current token can't end an assignment expression, it's an
+error ("unexpected token after yield expression"), not a successful yield.
+The port's `paramYield_`-gated yield branch (expressions.rs, `parse_
+assignment_expression`'s `run_level` closure) had the yield-detection and
+the `parseYieldExpression` call (cpp:6256-6262) but silently dropped
+cpp:6263-6266 — every successful yield parse became `Terminal` unconditionally,
+so a malformed continuation like `yield x in y;;` (inside a `for` head) or
+`yield()e=` fell through to whatever OTHER parse path came next, producing
+a different, wrong diagnostic. Ported the four lines faithfully (`check_
+end_assignment_expression(OfEndsAssignment::Yes)`, already used at the
+existing post-assignment-expression check for the same default), gated on
+the returned `YieldExpression` node's `argument.is_some()`. Both files now
+match hermesc exactly (verified byte-for-byte) and the full sweep confirms
+no other file regressed. Imported neither file into the sema corpus (see
+Step 2 below for what WAS imported) since both are already covered
+end-to-end by the sweep itself; the fix is small enough that the two-line
+"before"/"after" diff plus the sweep's zero-regression confirmation is
+sufficient evidence.
+
+### FINDING 3 — six of the seven original fixes had no CI-visible pin
+
+Beyond the sweep (a manual process, not a committed gate), only
+`if-function-gen-error.js` (imported in Step 2) covered any of the seven
+fixes from the original pass. Closed the gap two ways:
+
+**Three more upstream files imported** (hermesc-verified byte-identical on
+all three channels, all exit 2, all copied verbatim) — all three happen to
+pin `eat_semi` (item 1) from three distinct grammatical contexts, which is
+exactly why they're useful as regression pins even though they share one
+root cause:
+
+| File | Source | Pins |
+|---|---|---|
+| `declare-error.js` | `test/Parser/declare-error.js` | `eat_semi` after a bare `declare` identifier (no `-parse-flow`, so `declare` is just an identifier) |
+| `await-get-error.js` | `test/Parser/await-get-error.js` | `eat_semi` after `await` used as an identifier inside a non-async getter |
+| `using-declaration-pattern-error.js` | `test/Parser/using-declaration-pattern-error.js` | `eat_semi` after a `using` declaration's destructuring pattern |
+
+Gate: `sema differential (tests/sema_corpus): 208 corpus files matched (107
+succeeded on the oracle)` — 205 → **208** (+3, all imports above),
+hermesc-succeeded **107 unchanged** (all exit 2). Arithmetic: 205 + 3 = 208;
+107 + 0 = 107. `sema_corpus_parser` and the parser differential both
+unchanged (nothing imported there).
+
+**Five new oracle-free unit tests** added to
+`rust/crates/parser/tests/error_expected_range.rs` (hermesc-verified
+byte-for-byte before being written), covering the fixes an upstream import
+can't reach or that the reviewer called out by name:
+
+- `binding_element_no_identifier_is_a_bare_caret` — item 2 (`parse_binding_element`).
+- `labeled_function_declaration_is_a_bare_caret` — item 3 (labeled `FunctionDeclaration`).
+- `unexpected_token_after_assignment_expression_is_a_bare_caret` — item 5.
+- `invalid_destructuring_target_combines_start_through_key_start_plus_one` — item 6 (the `combineIntoRange` off-by-one), named explicitly in the review.
+- `optional_chain_tagged_template_note_underlines_the_whole_chain` — item 7 (the note-range fix), named explicitly in the review.
+
+Every one of the original seven fixes now has a durable, CI-visible pin —
+either a sema-corpus import or a unit test — not just the manual sweep.
+
+### FINDING 4 — the roadmap's bug-for-bug sentence was self-contradictory
+
+`doc/superpowers/RustPortRoadmap.md`'s follow-up (a) bullet claimed the
+remaining deviations were "ONLY" two named classes, then listed four more
+in the very next sentence. Reworded to enumerate the actual remaining set
+without the false "only" — see the roadmap for the corrected text, which
+now also reflects this fix report's updated numbers (1405/3/8, not
+1403/5/8) and the two files this report un-misclassified.
+
+### Sweep count after the fix report
+
+Full re-run, same method: **1405 / 3 / 8** (was 1403 / 5 / 8 before this
+fix report; 1220 / 188 / 8 at the start of the whole task). 1405 + 3 + 8 =
+1416. The 2 files that moved (`test/Parser/es6/for-of-error.js`,
+`test/Parser/es6/yield-paren-error.js`) are exactly Finding 2's fix, both
+independently confirmed; zero other files moved (the Finding 1 audit's 16
+sites + the `in_decl` fix are correctness/geometry improvements with no
+sweep-visible file, as expected — see Finding 1 above). Panic bucket
+unchanged (byte-for-byte the same 8 files) throughout.
+
+**The final 3 residual files** (down from 5; `for-of-error.js` and
+`yield-paren-error.js` removed by Finding 2, `import-error.js` re-verified
+unchanged): `test/AST/regexp.js` (regex-engine deferral), `test/Parser/
+es6/import-error.js` (the deliberate "notes dropped per house style"
+convention), and `test/Parser/optional-chaining-error.js` (the collect-scope
+leak's sibling error-recovery gap — the same `return None`-vs-C++-continues
+deviation, see the roadmap's tracked follow-up). All three individually
+classified, none is `errorExpected`-geometry, all pre-existing and
+independently confirmed non-regressions.
+
+### Gates after the fix report (all green)
+
+```
+cargo build --manifest-path rust/Cargo.toml --workspace --all-targets
+  → 0 warnings
+cargo clippy --manifest-path rust/Cargo.toml -p parser --all-targets
+  → warning count identical before/after (git stash/pop verified)
+cargo test --manifest-path rust/Cargo.toml --workspace
+  → all suites green, 0 failed (including 6 new tests in
+    error_expected_range.rs, now 9/9)
+REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml -p sema \
+    --features dump-bin --test sema_differential -- --nocapture
+  → "208 corpus files matched (107 succeeded on the oracle)" (driver)
+  → "11 corpus files matched (3 succeeded on the oracle)" (parser-entry)
+REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml -p parser \
+    --test parser_differential
+  → 8/8 green, 77 plain + all dialect corpora unchanged
+```
+
+### Files touched by the fix report
+
+`rust/crates/parser/src/js/{statements,expressions,modules}.rs`,
+`rust/crates/parser/src/js/flow/{declarations,match_,types}.rs`,
+`rust/crates/parser/src/js/ts/types.rs`, `rust/crates/parser/tests/
+error_expected_range.rs` (5 new tests), `rust/crates/sema/tests/
+sema_corpus/{declare-error,await-get-error,using-declaration-pattern-error}.js`
+(new, verbatim upstream imports), this MANIFEST, `doc/superpowers/
+RustPortRoadmap.md`, `doc/superpowers/SESSION-HANDOFF.md`.

@@ -464,12 +464,15 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let start_loc = self.advance(GrammarContext::AllowRegExp).start;
 
         // `as` is a contextual identifier (escape-insensitive). C++ 6877-6880:
-        // `if (!checkAndEat(asIdent_)) error(tok_->getStartLoc(), ...)` — reports
-        // at the CURRENT token start, which is what `error_cur` does.
+        // `if (!checkAndEat(asIdent_)) error(tok_->getStartLoc(), ...)` — the
+        // `error(SMLoc, Twine)` POINT overload, a bare caret with no
+        // underline. `error_cur` is the wrong helper here: it underlines the
+        // whole current token (`error(const Twine&)`, cpp:482-484's
+        // no-location overload), not a bare caret.
         if self.check_name(b"as") {
             self.advance(GrammarContext::AllowRegExp);
         } else {
-            self.error_cur("'as' expected");
+            self.error_at_loc(self.cur_start(), "'as' expected");
             return None;
         }
 

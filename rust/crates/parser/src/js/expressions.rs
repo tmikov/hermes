@@ -382,11 +382,21 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             //       tok_->getResWordOrIdentifier() == yieldIdent_) {
             //     auto ret = parseYieldExpression(param);
             //     if (!ret) return None;
-            //     return *ret;
+            //     ESTree::YieldExpressionNode *yieldExpr = *ret;
+            //     if (yieldExpr->_argument &&
+            //         !checkEndAssignmentExpression()) {
+            //       error(tok_->getStartLoc(), "unexpected token after yield
+            //             expression");
+            //       return None;
+            //     }
+            //     return yieldExpr;
             //   }
             // A successful yield expression is the completed level result; we
             // return it as `Terminal` (the same channel the closure uses to hand
-            // back a finished expression).
+            // back a finished expression) — UNLESS it had an argument and the
+            // current token can't end an assignment expression (cpp:6263-6266),
+            // e.g. `yield 1 2` — a token the yield's own argument parse didn't
+            // consume and that doesn't terminate the enclosing expression.
             // ----------------------------------------------------------------
             if this.param_yield.get()
                 && (this.check(TokenKind::rw_yield)
@@ -398,7 +408,29 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                             == b"yield"))
             {
                 return match this.parse_yield_expression(cur_param) {
-                    Some(node) => LevelResult::Terminal(node),
+                    Some(node) => {
+                        let has_argument = matches!(
+                            node,
+                            Node::YieldExpression(y) if y.argument.is_some()
+                        );
+                        if has_argument
+                            && !this.check_end_assignment_expression(
+                                OfEndsAssignment::Yes,
+                            )
+                        {
+                            // Point location, NOT the current token's range:
+                            // C++ (cpp:6264) calls `error(tok_->
+                            // getStartLoc(), ...)` — the `error(SMLoc,
+                            // Twine)` overload.
+                            let loc = this.cur_start();
+                            this.error_at_loc(
+                                loc,
+                                "unexpected token after yield expression",
+                            );
+                            return LevelResult::Error;
+                        }
+                        LevelResult::Terminal(node)
+                    }
                     None => LevelResult::Error,
                 };
             }
@@ -658,8 +690,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // foobar;`), hermesc renders NOTHING for this diagnostic — it fires
             // while still inside the enclosing `CollectMessagesRAII` scope
             // (cpp:6292, opened for the type-param-head speculative retry) and
-            // is discarded on scope exit, since only the retry's SUCCESS path
-            // calls `setDiscardMessages(false)`. Verified directly:
+            // is discarded on scope exit, since only the FIRST attempt's
+            // SUCCESS path (cpp:6306-6309) calls `setDiscardMessages(false)`
+            // — the retry itself (this diagnostic's own path) never does, even
+            // when it succeeds. Verified directly:
             // `hermesc -dump-ast -dump-source-location=both -parse-flow` on
             // that input exits 2 with EMPTY stdout/stderr. The Rust port's own
             // `begin_collecting`/`end_collecting` pairing around the retry
@@ -820,7 +854,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 // (cpp:6535-6536) calls `error(tok_->getStartLoc(), ...)` —
                 // the `error(SMLoc, Twine)` overload — so the caret is bare.
                 let loc = self.cur_start();
-                self.error_at_loc(loc, "unexpected token after assignment expression");
+                self.error_at_loc(
+                    loc,
+                    "unexpected token after assignment expression",
+                );
                 return None;
             }
             let end = self.lexer.prev_token_end();
@@ -1332,10 +1369,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // Only enter the reparse branches when the node has no parentheses.
         if node.metadata().parens.get() == 0 {
             if let Node::ArrayExpression(aen) = node {
-                return self.reparse_array_assignment_pattern(aen);
+                return self.reparse_array_assignment_pattern(aen, in_decl);
             }
             if let Node::ObjectExpression(oen) = node {
-                return self.reparse_object_assignment_pattern(oen);
+                return self.reparse_object_assignment_pattern(oen, in_decl);
             }
             if let Node::Identifier(ident) = node {
                 // Validation emits errors but does not prevent progress.
@@ -1447,9 +1484,18 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// `JSParserImpl::reparseArrayAsignmentPattern` (lines 5990-6052).
     ///
     /// Builds a fresh `ArrayPattern` with freshly-reparsed elements.
+    ///
+    /// `in_decl` MUST be threaded into both recursive
+    /// `reparse_assignment_pattern` calls below (cpp:6010, 6032 both pass
+    /// the caller's `inDecl` verbatim, NOT `false`) — dropping it here would
+    /// silently disable the "identifier or pattern expected" catch-all
+    /// (this function's own top-level `if (inDecl)` arm, reached via
+    /// recursion) for every element nested inside an array pattern reached
+    /// with `in_decl=true` (e.g. arrow-function parameters).
     fn reparse_array_assignment_pattern(
         &mut self,
         aen: &'gc ArrayExpression<'gc>,
+        in_decl: bool,
     ) -> Option<&'gc Node<'gc>> {
         // Intern the "=" operator label once.
         let equal_op = self.gc.ctx().atom_table.atom_bytes(b"=");
@@ -1476,7 +1522,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     self.error_at(range, "rest element must be last");
                     continue;
                 }
-                let arg = self.reparse_assignment_pattern(spread.argument, false)?;
+                let arg =
+                    self.reparse_assignment_pattern(spread.argument, in_decl)?;
                 let rest_end = elem.range().end;
                 let rest_start = elem.range().start;
                 let rest = Node::RestElement(RestElement::new(
@@ -1504,7 +1551,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 };
 
             // Reparse sub_elem recursively.
-            match self.reparse_assignment_pattern(sub_elem, false) {
+            match self.reparse_assignment_pattern(sub_elem, in_decl) {
                 Some(reparsed) => sub_elem = reparsed,
                 None => continue,
             }
@@ -1539,9 +1586,19 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// `JSParserImpl::reparseObjectAssignmentPattern` (lines 6054-6151).
     ///
     /// Builds a fresh `ObjectPattern` with freshly-reparsed properties.
+    ///
+    /// `in_decl` MUST be threaded into the property-value recursive
+    /// `reparse_assignment_pattern` call below (cpp:6122 passes the caller's
+    /// `inDecl` verbatim) and gates the rest-property identifier check
+    /// (cpp:6079-6086) — dropping it (as an earlier version of this port did)
+    /// silently disables both for every object pattern reached with
+    /// `in_decl=true` (e.g. arrow-function parameters: `({...a.b}) => 1`
+    /// should report "identifier expected in parameter list", not fall
+    /// through to a later, unrelated check).
     fn reparse_object_assignment_pattern(
         &mut self,
         oen: &'gc ObjectExpression<'gc>,
+        in_decl: bool,
     ) -> Option<&'gc Node<'gc>> {
         // Intern the "=" and "init" atoms once.
         let equal_op = self.gc.ctx().atom_table.atom_bytes(b"=");
@@ -1564,9 +1621,20 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     continue;
                 }
                 // NOTE: per spec, the rest argument is NOT recursively reparsed
-                // (see #if 0 block in C++). We just wrap the argument directly.
-                // For non-decl (`in_decl=false`, the only P1 caller), just wrap.
+                // (see #if 0 block in C++, cpp:6069-6073). The live `#else` arm
+                // (cpp:6075-6086) just wraps the argument directly, but when
+                // `in_decl` is set it first requires the argument to be a bare
+                // identifier (parameters can't destructure through a rest
+                // property's own sub-pattern).
                 let rest_arg = spread.argument;
+                if in_decl && !matches!(rest_arg, Node::Identifier(_)) {
+                    let range = rest_arg.range();
+                    self.error_at(
+                        range,
+                        "identifier expected in parameter list",
+                    );
+                    continue;
+                }
                 let rest_range = node.range();
                 let rest = Node::RestElement(RestElement::new(
                     NodeMetadata::new(self.dummy_range()),
@@ -1596,10 +1664,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 // `combine_into_range` (end = key start + 1, header:601-607),
                 // NOT a manual span ending AT the key's start — that drops
                 // the key's own first character from the underline.
-                let err_range = self
-                    .lexer
-                    .get_source_mgr()
-                    .combine_into_range(node.range().start, prop.key.range().start);
+                let err_range = self.lexer.get_source_mgr().combine_into_range(
+                    node.range().start,
+                    prop.key.range().start,
+                );
                 self.error_at(err_range, "invalid destructuring target");
                 continue;
             }
@@ -1644,7 +1712,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 };
 
             // Recursively reparse the value.
-            match self.reparse_assignment_pattern(value, false) {
+            match self.reparse_assignment_pattern(value, in_decl) {
                 Some(reparsed) => value = reparsed,
                 None => continue,
             }

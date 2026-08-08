@@ -134,10 +134,11 @@ fn different_line_emits_a_note_at_what_loc() {
 /// still inside the `CollectMessagesRAII` scope opened for the type-param
 /// speculative retry (JSParserImpl.cpp:6292; `parseAssignmentExpression`,
 /// the flow-typed-arrow-head backtrack), and that scope's destructor
-/// discards every message on this path (only the retry's success path calls
-/// `setDiscardMessages(false)`). A corpus/differential file compares actual
-/// hermesc stderr byte-for-byte, so it cannot pin a rendering hermesc itself
-/// never produces.
+/// discards every message on this path (only the FIRST attempt's success
+/// path, cpp:6306-6309, calls `setDiscardMessages(false)` — the retry
+/// itself never does, even when it succeeds). A corpus/differential file
+/// compares actual hermesc stderr byte-for-byte, so it cannot pin a
+/// rendering hermesc itself never produces.
 ///
 /// The second message below ("type parameters must be used...", the
 /// pre-existing port of cpp:6329-6330) is real, deterministic output of the
@@ -172,5 +173,95 @@ fn flow_generic_arrow_missing_fat_arrow_combines_into_range() {
          arrow function expression\n\
          const f = <T>(x: T) foobar;\n          \
          ^~~\n"
+    );
+}
+
+/// `parseBindingElement`'s no-identifier branch (JSParserImpl.cpp:1374-1376):
+/// `error(tok_->getStartLoc(), "identifier, '{' or '[' expected in binding
+/// pattern")` is the POINT overload — a bare caret, not the current token's
+/// underlined range. Verified byte-for-byte against `hermesc -dump-ast`.
+#[test]
+fn binding_element_no_identifier_is_a_bare_caret() {
+    assert_eq!(
+        render_parse_errors("binding-this.js", "function f(this) {}\n"),
+        "binding-this.js:1:12: error: identifier, '{' or '[' expected in \
+         binding pattern\n\
+         function f(this) {}\n           \
+         ^\n"
+    );
+}
+
+/// The labeled-`FunctionDeclaration` check (JSParserImpl.cpp:1653-1655):
+/// `error(optFunc.getValue()->getSourceRange().Start, ...)` is the POINT
+/// overload (a `.Start` member access on a range, not the range itself) —
+/// a bare caret, not an underline over the whole labeled declaration.
+/// Verified byte-for-byte against `hermesc -dump-ast`.
+#[test]
+fn labeled_function_declaration_is_a_bare_caret() {
+    assert_eq!(
+        render_parse_errors("labeled-fn.js", "a: function *labeled() {}\n"),
+        "labeled-fn.js:1:4: error: Function declaration not allowed as \
+         body of labeled statement\n\
+         a: function *labeled() {}\n   \
+         ^\n"
+    );
+}
+
+/// The post-assignment-expression check (JSParserImpl.cpp:6535-6536):
+/// `error(tok_->getStartLoc(), "unexpected token after assignment
+/// expression")` is the POINT overload — a bare caret, not the current
+/// token's underlined range. Verified byte-for-byte against
+/// `hermesc -dump-ast`.
+#[test]
+fn unexpected_token_after_assignment_expression_is_a_bare_caret() {
+    assert_eq!(
+        render_parse_errors("assign-end.js", "\"\",p=B\"\";\n"),
+        "assign-end.js:1:7: error: unexpected token after assignment \
+         expression\n\
+         \"\",p=B\"\";\n      \
+         ^\n"
+    );
+}
+
+/// "invalid destructuring target" (`reparseObjectAssignmentPattern`,
+/// JSParserImpl.cpp:6095-6098): the underline is `SourceErrorManager::
+/// combineIntoRange(propNode->getStartLoc(), propNode->_key->getStartLoc())`
+/// — from the property's own start through ONE PAST the key's start (`+1`,
+/// header:601-607), i.e. `get b` (5 chars: `g`,`e`,`t`,` `,`b`), not `get `
+/// (4 chars, the off-by-one this test guards against: an earlier version of
+/// this port hand-inlined `combineIntoRange` and dropped the `+1`, ending
+/// the range AT the key's start instead of one past it). Verified
+/// byte-for-byte against `hermesc -dump-ast`.
+#[test]
+fn invalid_destructuring_target_combines_start_through_key_start_plus_one() {
+    assert_eq!(
+        render_parse_errors(
+            "destr.js",
+            "({a : x = 10, get b() {}} = x)\n"
+        ),
+        "destr.js:1:15: error: invalid destructuring target\n\
+         ({a : x = 10, get b() {}} = x)\n              \
+         ^~~~~\n"
+    );
+}
+
+/// "location of optional chain" note (the tagged-template-in-optional-chain
+/// check, JSParserImpl.cpp:3573-3576): `sm_.note(expr->getSourceRange(),
+/// "location of optional chain")` passes the WHOLE range of `expr` (the
+/// optional-chain member expression), not a bare point — an earlier version
+/// of this port passed `None` for the range (collapsing it to a point,
+/// `^` instead of `^~~~~~`), the reverse of every other fix in this file.
+/// Verified byte-for-byte against `hermesc -dump-ast`.
+#[test]
+fn optional_chain_tagged_template_note_underlines_the_whole_chain() {
+    assert_eq!(
+        render_parse_errors("optchain.js", "a?.b.c`abc`;\n"),
+        "optchain.js:1:7: error: invalid use of tagged template literal in \
+         optional chain\n\
+         a?.b.c`abc`;\n      \
+         ^~~~~\n\
+         optchain.js:1:1: note: location of optional chain\n\
+         a?.b.c`abc`;\n\
+         ^~~~~~\n"
     );
 }

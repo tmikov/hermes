@@ -905,7 +905,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     // C++ 3593-3597.
                     return self.parse_generic_type_flow();
                 }
-                self.error_cur("unexpected token in type annotation");
+                // Point location, NOT the current token's range: C++
+                // (flow.cpp:3599) calls `error(tok_->getStartLoc(), ...)` —
+                // the `error(SMLoc, Twine)` overload.
+                self.error_at_loc(
+                    self.cur_start(),
+                    "unexpected token in type annotation",
+                );
                 None
             }
         }
