@@ -28,27 +28,20 @@ enum class TokenType {
   JSXText
 };
 
-/// A reference to the start or end position of a source location.
+/// Holder for the kind of a source position, kept as a struct so that the
+/// enumerators keep naming which end of a range they refer to.
 struct PositionInfo {
+  /// Which end of a source range a position refers to.
   enum class Kind { Start, End };
-
-  Kind kind;
-
-  /// The location itself in the source text.
-  const char *ptr;
-
-  /// ID of the source location this position is associated with.
-  uint32_t locId;
-
-  PositionInfo(Kind kind, const char *ptr, uint32_t locId)
-      : kind(kind), ptr(ptr), locId(locId) {}
-
-  /// Order by position in source text.
-  bool operator<(const PositionInfo &x) const {
-    return ptr < x.ptr;
-  }
 };
 
+/// One resolved endpoint of a source range, as written into the position
+/// buffer.
+///
+/// Entries appear in the order the serializer walks the AST: both endpoints
+/// of loc 0, then both endpoints of loc 1, and so on. The consumer indexes
+/// them by \c locId (HermesParserDeserializer.fillLocs), so nothing requires
+/// any particular order of them.
 struct PositionResult {
   /// ID of the source location this position is associated with.
   uint32_t locId;

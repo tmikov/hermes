@@ -5,9 +5,11 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+#include "llvh/ADT/Optional.h"
 #include "llvh/Support/MemoryBuffer.h"
 
 #include "HermesParserJSSerializer.h"
+#include "SourcePositionMap.h"
 
 namespace hermes {
 
@@ -17,7 +19,15 @@ using namespace parser;
 class HermesParserJSSerializer {
   SourceErrorManager *sm_{nullptr};
   ParseResult &result_;
-  std::vector<PositionInfo> positions_;
+
+  /// Start of the source buffer every serialized location points into. Set
+  /// by \c serializeProgram() before anything is serialized.
+  const char *bufferStart_{nullptr};
+
+  /// Resolves source pointers to (line, column, UTF-16 offset). Built once
+  /// from the source buffer before the AST walk, so that each location can
+  /// be resolved as it is encountered instead of being buffered and sorted.
+  llvh::Optional<SourcePositionMap> positionMap_;
 
   /// Used to generate unique IDs for each source location.
   uint32_t nextLocId_ = 0;
@@ -27,6 +37,11 @@ class HermesParserJSSerializer {
       : sm_(sm), result_(result) {}
 
   void serializeProgram(ProgramNode *programNode, bool tokens) {
+    const llvh::MemoryBuffer *buffer =
+        sm_->findBufferForLoc(programNode->getStartLoc());
+    bufferStart_ = buffer->getBufferStart();
+    positionMap_.emplace(buffer->getBuffer());
+
     serializeLoc(programNode->getSourceRange());
     serializeNode(programNode->_body);
     serializeComments();
@@ -34,11 +49,17 @@ class HermesParserJSSerializer {
     if (tokens) {
       serializeTokens();
     }
-
-    serializeSourcePositions(programNode);
   }
 
  private:
+  /// \return \p ptr as the 4-byte heap address the JavaScript side reads. The
+  /// heap is 32-bit, so the value is exact there; the explicit truncation
+  /// exists so that this file can also be compiled by a 64-bit host compiler,
+  /// as the unit tests do.
+  static uint32_t serializePointer(const char *ptr) {
+    return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ptr));
+  }
+
   /// Booleans are serialized as a single 4-byte integer.
   void serializeNode(NodeBoolean val) {
     result_.programBuffer_.emplace_back(val);
@@ -75,7 +96,7 @@ class HermesParserJSSerializer {
 
     auto str = label->str();
 
-    result_.programBuffer_.emplace_back((uint32_t)str.begin());
+    result_.programBuffer_.emplace_back(serializePointer(str.begin()));
     result_.programBuffer_.emplace_back((uint32_t)str.size());
   }
 
@@ -88,85 +109,30 @@ class HermesParserJSSerializer {
     }
   }
 
-  /// Calculate line, column, and overall offset for every position encountered
-  /// in the AST and fill the buffer of calculated positions.
+  /// Resolve \p ptr, which points into the source buffer, and append it to
+  /// the position buffer as the \p kind endpoint of loc \p locId.
   ///
-  /// Note that these source locations are meant to be consumed from JS, so they
-  /// are calculated as indices into a JS string. This means that a single
-  /// "column" corresponds to a single UTF-16 code unit, so code points of at
-  /// most U+FFFF count as one "column" whereas code points above U+FFFF count
-  /// as two "columns" since they take two UTF-16 code units to represent.
-  void serializeSourcePositions(ProgramNode *programNode) {
-    result_.positionBuffer_.reserve(positions_.size());
-
-    // Sort all positions by their order in the source text
-    std::sort(positions_.begin(), positions_.end());
-    auto positionsIt = positions_.begin();
-    auto positionsEnd = positions_.end();
-
-    const llvh::MemoryBuffer *buffer =
-        sm_->findBufferForLoc(programNode->getStartLoc());
-    const char *ptr = buffer->getBufferStart();
-
-    unsigned line = 1;
-    unsigned col = 0;
-    unsigned offset = 0;
-
-    // Iterate through both sorted positions and source text to calculate the
-    // line, column, and offset for each position in JS.
-    while (positionsIt < positionsEnd) {
-      auto nextLoc = positionsIt->ptr;
-      while (ptr < nextLoc) {
-        char ch = *ptr;
-        if (ch == '\n') {
-          // Newline character translates to one UTF-16 code unit
-          ++offset;
-          ++line;
-          col = 0;
-
-          ++ptr;
-        } else if ((unsigned char)ch < 128) {
-          // One byte UTF-8 code point, translates to one UTF-16 code unit
-          ++offset;
-          ++col;
-
-          ++ptr;
-        } else if ((ch & 0xE0) == 0xC0) {
-          // Two byte UTF-8 code point, translates to one UTF-16 code unit
-          ++offset;
-          ++col;
-
-          ptr += 2;
-        } else if ((ch & 0xF0) == 0xE0) {
-          // Three byte UTF-8 code point, translates to one UTF-16 code unit
-          ++offset;
-          ++col;
-
-          ptr += 3;
-        } else {
-          // Four byte UTF-8 code point, corresponds to code points above U+FFFF
-          // which translate to two UTF-16 code units.
-          offset += 2;
-          col += 2;
-
-          ptr += 4;
-        }
-      }
-
-      result_.positionBuffer_.emplace_back(
-          positionsIt->locId, positionsIt->kind, line, col, offset);
-
-      ++positionsIt;
-    }
+  /// Note that these source locations are meant to be consumed from JS, so
+  /// they are calculated as indices into a JS string. This means that a
+  /// single "column" corresponds to a single UTF-16 code unit, so code points
+  /// of at most U+FFFF count as one "column" whereas code points above U+FFFF
+  /// count as two "columns" since they take two UTF-16 code units to
+  /// represent. \c SourcePositionMap does that conversion.
+  void
+  serializePosition(PositionInfo::Kind kind, const char *ptr, uint32_t locId) {
+    const SourcePositionMap::Position pos =
+        positionMap_->lookup((uint32_t)(ptr - bufferStart_));
+    result_.positionBuffer_.emplace_back(
+        locId, kind, pos.line, pos.column, pos.offset);
   }
 
-  /// Save references to the start and end positions so they can be calculated
-  /// later. Write a new 4-byte loc ID to the program buffer to uniquely
-  /// identify this loc.
+  /// Resolve the start and end positions of \p rng into the position buffer.
+  /// Write a new 4-byte loc ID to the program buffer to uniquely identify
+  /// this loc.
   void serializeLoc(SMRange rng) {
-    positions_.emplace_back(
+    serializePosition(
         PositionInfo::Kind::Start, rng.Start.getPointer(), nextLocId_);
-    positions_.emplace_back(
+    serializePosition(
         PositionInfo::Kind::End, rng.End.getPointer(), nextLocId_);
 
     result_.programBuffer_.emplace_back(nextLocId_++);
@@ -187,7 +153,7 @@ class HermesParserJSSerializer {
       serializeLoc(comment.getSourceRange());
 
       auto value = comment.getString();
-      result_.programBuffer_.emplace_back((uint32_t)value.begin());
+      result_.programBuffer_.emplace_back(serializePointer(value.begin()));
       result_.programBuffer_.emplace_back((uint32_t)value.size());
     }
   }
@@ -286,7 +252,7 @@ class HermesParserJSSerializer {
     serializeLoc(range);
 
     const char *start = range.Start.getPointer();
-    result_.programBuffer_.emplace_back((uint32_t)start);
+    result_.programBuffer_.emplace_back(serializePointer(start));
     result_.programBuffer_.emplace_back(
         (uint32_t)(range.End.getPointer() - start));
   }
