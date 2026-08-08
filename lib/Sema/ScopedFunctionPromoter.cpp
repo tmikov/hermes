@@ -252,13 +252,17 @@ Decl::Kind ScopedFunctionPromoter::extractDeclaredIdents(
       resolver_.extractDeclaredIdentsFromID(
           cast<VariableDeclaratorNode>(declarator)._id, idents);
     }
-    if (varDeclaration->_kind == resolver_.keywords().identLet) {
-      return Decl::Kind::Let;
-    } else if (varDeclaration->_kind == resolver_.keywords().identConst) {
-      return Decl::Kind::Const;
-    } else {
-      assert(varDeclaration->_kind == resolver_.keywords().identVar);
+    if (varDeclaration->_kind == resolver_.keywords().identVar) {
       return Decl::Kind::Var;
+    } else if (varDeclaration->_kind == resolver_.keywords().identLet) {
+      return Decl::Kind::Let;
+    } else {
+      // `const`, `using` and `await using` are all lexically scoped and
+      // block function promotion the same way. Note that `using`
+      // declarations reach this point even though they are not supported
+      // yet, because the promoter runs before the resolver reports them.
+      // This mirrors SemanticResolver::extractIdentsFromDecl().
+      return Decl::Kind::Const;
     }
   }
 
