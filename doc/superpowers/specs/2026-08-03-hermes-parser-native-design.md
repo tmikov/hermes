@@ -173,6 +173,24 @@ the regions.
 Unchanged in structure from the current protocol: a `u32` stream in which each
 node is `kind + 1` followed by its fields. Only string references change.
 
+### Position region
+
+Five `u32` per entry — loc id, kind, line, column, UTF-16 offset — and two
+entries per loc, one for each end of its range. The consumer indexes them by
+loc id (`HermesParserDeserializer.fillLocs`), so **the region's order carries
+no meaning**; entries are written in the order the serializer walks the AST.
+
+Upstream sorts them by address instead, because it resolves them all at the
+end with a single forward scan of the source and that scan must never rewind.
+That sort is `O(P log P)` in the number of positions and was the single most
+expensive symbol in this engine's profile — 17% of it on a 8.7 MB input,
+three times the cost of the scan it enables. `SourcePositionMap`
+(`tools/hermes-parser-native/SourcePositionMap.h`) replaces it: one `O(N)`
+pass over the source builds a line table, plus a multi-byte-character table
+that stays empty for the pure-ASCII sources that dominate in practice, and
+each position is then resolved on its own as the walk reaches it. Content is
+unchanged, entry for entry; only the order they are written in is.
+
 ### Alignment
 
 The program region must begin at an 8-byte-aligned offset so a `Float64Array`

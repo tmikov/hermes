@@ -8,6 +8,7 @@ set(HermesParserNativeTestSources
   KindHashTest.cpp
   ContainerWriterTest.cpp
   SerializerTest.cpp
+  SourcePositionMapTest.cpp
   ../../tools/hermes-parser-native/HermesParserJSSerializer.cpp
   ../../tools/hermes-parser-native/HermesParserDiagHandler.cpp
   )
