@@ -91,3 +91,14 @@ if [[ ${#missing[@]} -gt 0 ]]; then
     exit 1
   fi
 fi
+
+# Record which sources this dist was built from, plus the identity of the
+# prebuilt addons packaged alongside it.
+#
+# dist/ is gitignored and nothing regenerates it automatically, so an edit to
+# src/ leaves dist/ silently serving the old code to everything that loads
+# the package by path. __tests__/DistFreshness-test.js re-hashes src/ against
+# this manifest and fails if they have diverged. Written last, on purpose: a
+# build that dies before this point leaves no manifest, and a missing
+# manifest is reported as stale rather than as up to date.
+node "$THIS_DIR/distManifest.js" "$PACKAGE_DIR"

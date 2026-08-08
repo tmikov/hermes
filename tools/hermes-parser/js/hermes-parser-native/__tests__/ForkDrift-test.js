@@ -55,6 +55,7 @@ const ALLOWED = {
     onlyInFork: [
       'AddonResolutionOrder-test.js',
       'Differential-test.js',
+      'DistFreshness-test.js',
       'Failures-test.js',
       'ForkDrift-test.js',
       'Native-test.js',
