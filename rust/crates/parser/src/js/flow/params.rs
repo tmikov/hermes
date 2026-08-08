@@ -54,10 +54,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         // C++ 4706-4713.
         let end = self.cur_range().end;
-        if !self.eat(
+        if !self.eat_at(
             TokenKind::greater,
             GrammarContext::Type,
             " at end of type parameters",
+            Some("start of type parameters"),
+            start,
         ) {
             return None;
         }
@@ -239,10 +241,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // C++ 4833-4840: `end` is the `>` token's end, captured before
         // consuming it with the caller's trailing grammar context.
         let end = self.cur_range().end;
-        if !self.eat(
+        if !self.eat_at(
             TokenKind::greater,
             trailing_grammar_context,
             " at end of type parameters",
+            Some("start of type parameters"),
+            start,
         ) {
             return None;
         }
@@ -291,12 +295,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             {
                 // flow.cpp:5020-5027: errorExpected(identifier, "in
                 // qualified generic type name", "start of type name",
-                // start). `start` is real, so this routes through
-                // `need_at`.
+                // start).
                 self.need_at(
                     TokenKind::identifier,
                     " in qualified generic type name",
-                    None,
+                    Some("start of type name"),
                     start,
                 );
                 return None;

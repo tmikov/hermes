@@ -302,7 +302,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         // C++ 3839-3844.
-        if !self.need(TokenKind::l_paren, " in function type annotation") {
+        if !self.need_at(
+            TokenKind::l_paren,
+            " in function type annotation",
+            Some("start of annotation"),
+            start,
+        ) {
             return None;
         }
 
@@ -316,7 +321,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         )?;
 
         // C++ 3854-3859.
-        if !self.need(TokenKind::equalgreater, " in function type annotation") {
+        if !self.need_at(
+            TokenKind::equalgreater,
+            " in function type annotation",
+            Some("start of annotation"),
+            start,
+        ) {
             return None;
         }
 
@@ -444,20 +454,24 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         // C++ 3992-3998.
-        if !self.eat(
+        if !self.eat_at(
             TokenKind::r_paren,
             GrammarContext::Type,
             " at end of function annotation parameters",
+            Some("start of parameters"),
+            start,
         ) {
             return None;
         }
 
         // C++ 4000-4012.
         if is_function {
-            if !self.eat(
+            if !self.eat_at(
                 TokenKind::equalgreater,
                 GrammarContext::Type,
                 " in function type annotation",
+                Some("start of function"),
+                start,
             ) {
                 return None;
             }
@@ -527,10 +541,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         )?;
 
         // C++ 4862-4868.
-        if !self.eat(
+        if !self.eat_at(
             TokenKind::colon,
             GrammarContext::Type,
             " in function type annotation",
+            Some("start of annotation"),
+            start,
         ) {
             return None;
         }
@@ -570,7 +586,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     ) -> Option<Option<&'gc Node<'gc>>> {
         debug_assert!(self.check(TokenKind::l_paren));
         // C++ 4887.
-        self.advance(GrammarContext::Type);
+        let start = self.advance(GrammarContext::Type).start;
 
         let mut rest: Option<&'gc Node<'gc>> = None;
         *this_constraint = None;
@@ -630,10 +646,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         // C++ 4935-4941.
-        if !self.eat(
+        if !self.eat_at(
             TokenKind::r_paren,
             GrammarContext::Type,
             " at end of function annotation parameters",
+            Some("start of parameters"),
+            start,
         ) {
             return None;
         }
@@ -694,10 +712,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             name = Some(self.reparse_type_annotation_as_identifier_flow(left)?);
             optional =
                 self.check_and_eat(TokenKind::question, GrammarContext::Type);
-            if !self.eat(
+            if !self.eat_at(
                 TokenKind::colon,
                 GrammarContext::Type,
                 " in function parameter type annotation",
+                Some("start of parameter"),
+                start,
             ) {
                 return None;
             }
@@ -741,10 +761,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             )?;
             // C++ 5085-5092.
             let end = self.cur_range().end;
-            if !self.eat(
+            if !self.eat_at(
                 TokenKind::r_paren,
                 GrammarContext::Type,
                 " in declared predicate",
+                Some("start of predicate"),
+                checks_rng.start,
             ) {
                 return None;
             }

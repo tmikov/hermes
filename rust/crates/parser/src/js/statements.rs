@@ -669,11 +669,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     // C++ 1244-1250: errorExpected(identifier, "in
                     // declaration", "declaration started here", declLoc).
                     // `declLoc` is real, so route through `error_expected_msg`
-                    // for the same-line combined-range caret (the `what`
-                    // note-text is still dropped per house style).
+                    // for the same-line combined-range caret; on the
+                    // different-line arm "declaration started here" surfaces
+                    // as a note at `declLoc`.
                     self.error_expected_msg(
                         "'identifier' expected in declaration",
-                        None,
+                        Some("declaration started here"),
                         Some(decl_loc),
                     );
                     return None;
@@ -1024,7 +1025,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return Some(self.set_location(start_loc, end_loc, node));
         }
 
-        if !self.need(TokenKind::identifier, " after 'break'") {
+        // C++ 2138-2143: need(identifier, "after 'break'", "location of
+        // 'break'", startLoc).
+        if !self.need_at(
+            TokenKind::identifier,
+            " after 'break'",
+            Some("location of 'break'"),
+            start_loc,
+        ) {
             return None;
         }
         let id = self.make_label_identifier();
@@ -1061,7 +1069,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return Some(self.set_location(start_loc, end_loc, node));
         }
 
-        if !self.need(TokenKind::identifier, " after 'continue'") {
+        // C++ 2106-2111: need(identifier, "after 'continue'", "location of
+        // 'continue'", startLoc).
+        if !self.need_at(
+            TokenKind::identifier,
+            " after 'continue'",
+            Some("location of 'continue'"),
+            start_loc,
+        ) {
             return None;
         }
         let id = self.make_label_identifier();
@@ -1105,20 +1120,31 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         assert!(self.check(TokenKind::rw_with));
         let start_loc = self.advance(GrammarContext::AllowRegExp).start;
 
-        if !self.eat(
+        // C++ 2188: SMLoc lparenLoc = tok_->getStartLoc(), captured before
+        // the '(' eat below and reused by the ')' eat's whatLoc.
+        let lparen_loc = self.cur_start();
+        // C++ 2189-2195: eat(l_paren, "after 'with'", "location of 'with'",
+        // startLoc).
+        if !self.eat_at(
             TokenKind::l_paren,
             GrammarContext::AllowRegExp,
             " after 'with'",
+            Some("location of 'with'"),
+            start_loc,
         ) {
             return None;
         }
 
         let object = self.parse_expression(PARAM_IN, CoverTypedParameters::Yes)?;
 
-        if !self.eat(
+        // C++ 2201-2207: eat(r_paren, "after 'with (...'", "location of
+        // '('", lparenLoc).
+        if !self.eat_at(
             TokenKind::r_paren,
             GrammarContext::AllowRegExp,
             " after 'with (...'",
+            Some("location of '('"),
+            lparen_loc,
         ) {
             return None;
         }
@@ -1179,8 +1205,15 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         ));
         let body = self.set_location(start_loc, end_loc, node);
 
-        // C++ 997-1003.
-        if !self.eat(TokenKind::r_brace, grammar_context, " at end of block") {
+        // C++ 997-1003: eat(r_brace, grammarContext, "at end of block",
+        // "block starts here", startLoc).
+        if !self.eat_at(
+            TokenKind::r_brace,
+            grammar_context,
+            " at end of block",
+            Some("block starts here"),
+            start_loc,
+        ) {
             return None;
         }
 
@@ -1200,20 +1233,29 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         assert!(self.check(TokenKind::rw_if));
         let start_loc = self.advance(GrammarContext::AllowRegExp).start;
 
-        // C++ 1684-1691.
-        if !self.eat(
+        // C++ 1684: SMLoc condLoc = tok_->getStartLoc(), captured before the
+        // '(' eat below and reused by the ')' eat's whatLoc.
+        let cond_loc = self.cur_start();
+        // C++ 1685-1691: eat(l_paren, "after 'if'", "location of 'if'",
+        // startLoc).
+        if !self.eat_at(
             TokenKind::l_paren,
             GrammarContext::AllowRegExp,
             " after 'if'",
+            Some("location of 'if'"),
+            start_loc,
         ) {
             return None;
         }
         let test = self.parse_expression(PARAM_IN, CoverTypedParameters::Yes)?;
-        // C++ 1695-1701.
-        if !self.eat(
+        // C++ 1695-1701: eat(r_paren, "at end of 'if' condition", "'if'
+        // condition starts here", condLoc).
+        if !self.eat_at(
             TokenKind::r_paren,
             GrammarContext::AllowRegExp,
             " at end of 'if' condition",
+            Some("'if' condition starts here"),
+            cond_loc,
         ) {
             return None;
         }
@@ -1309,20 +1351,26 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         assert!(self.check(TokenKind::rw_while));
         let start_loc = self.advance(GrammarContext::AllowRegExp).start;
 
-        // C++ 1769-1775.
-        if !self.eat(
+        // C++ 1769-1775: eat(l_paren, "after 'while'", "location of
+        // 'while'", startLoc).
+        if !self.eat_at(
             TokenKind::l_paren,
             GrammarContext::AllowRegExp,
             " after 'while'",
+            Some("location of 'while'"),
+            start_loc,
         ) {
             return None;
         }
         let test = self.parse_expression(PARAM_IN, CoverTypedParameters::Yes)?;
-        // C++ 1779-1785.
-        if !self.eat(
+        // C++ 1779-1785: eat(r_paren, "at end of 'while' condition",
+        // "location of 'while'", startLoc).
+        if !self.eat_at(
             TokenKind::r_paren,
             GrammarContext::AllowRegExp,
             " at end of 'while' condition",
+            Some("location of 'while'"),
+            start_loc,
         ) {
             return None;
         }
@@ -1354,29 +1402,41 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         let body = self.parse_statement(param.get(PARAM_RETURN))?;
 
-        // C++ 1807-1814.
-        if !self.eat(
+        // C++ 1807: SMLoc whileLoc = tok_->getStartLoc(), captured before
+        // the 'while' eat below and reused by the '(' / ')' eats' whatLoc.
+        let while_loc = self.cur_start();
+        // C++ 1808-1814: eat(rw_while, "at end of 'do-while'", "'do-while'
+        // starts here", startLoc).
+        if !self.eat_at(
             TokenKind::rw_while,
             GrammarContext::AllowRegExp,
             " at end of 'do-while'",
+            Some("'do-while' starts here"),
+            start_loc,
         ) {
             return None;
         }
 
-        // C++ 1816-1822.
-        if !self.eat(
+        // C++ 1816-1822: eat(l_paren, "after 'do-while'", "location of
+        // 'while'", whileLoc).
+        if !self.eat_at(
             TokenKind::l_paren,
             GrammarContext::AllowRegExp,
             " after 'do-while'",
+            Some("location of 'while'"),
+            while_loc,
         ) {
             return None;
         }
         let test = self.parse_expression(PARAM_IN, CoverTypedParameters::Yes)?;
-        // C++ 1826-1832.
-        if !self.eat(
+        // C++ 1826-1832: eat(r_paren, "at end of 'do-while' condition",
+        // "location of 'while'", whileLoc).
+        if !self.eat_at(
             TokenKind::r_paren,
             GrammarContext::AllowRegExp,
             " at end of 'do-while' condition",
+            Some("location of 'while'"),
+            while_loc,
         ) {
             return None;
         }
@@ -1422,13 +1482,17 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             await_kw = true;
         }
 
-        // C++ 1854-1861.
+        // C++ 1854: SMLoc lparenLoc = tok_->getStartLoc(), captured before
+        // the '(' eat below and reused by the later `eat` calls' whatLoc.
         let lparen_loc = self.cur_start();
-        let _ = lparen_loc; // note-location for the later `eat` calls; notes dropped per house style.
-        if !self.eat(
+        // C++ 1855-1861: eat(l_paren, "after 'for'", "location of 'for'",
+        // startLoc).
+        if !self.eat_at(
             TokenKind::l_paren,
             GrammarContext::AllowRegExp,
             " after 'for'",
+            Some("location of 'for'"),
+            start_loc,
         ) {
             return None;
         }
@@ -1647,11 +1711,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 self.parse_assignment_expression(PARAM_IN, false, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)
             };
 
-            // C++ 2006-2012.
-            if !self.eat(
+            // C++ 2006-2012: eat(r_paren, "after 'for(... in/of ...'",
+            // "location of '('", lparenLoc).
+            if !self.eat_at(
                 TokenKind::r_paren,
                 GrammarContext::AllowRegExp,
                 " after 'for(... in/of ...'",
+                Some("location of '('"),
+                lparen_loc,
             ) {
                 return None;
             }
@@ -1716,11 +1783,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 Some(self.parse_expression(PARAM_IN, CoverTypedParameters::Yes)?)
             };
 
-            // C++ 2051-2057.
-            if !self.eat(
+            // C++ 2051-2057: eat(semi, "after 'for( ... ; ...'", "location
+            // of '('", lparenLoc).
+            if !self.eat_at(
                 TokenKind::semi,
                 GrammarContext::AllowRegExp,
                 " after 'for( ... ; ...'",
+                Some("location of '('"),
+                lparen_loc,
             ) {
                 return None;
             }
@@ -1732,11 +1802,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 Some(self.parse_expression(PARAM_IN, CoverTypedParameters::Yes)?)
             };
 
-            // C++ 2067-2073.
-            if !self.eat(
+            // C++ 2067-2073: eat(r_paren, "after 'for( ... ; ... ; ...'",
+            // "location of '('", lparenLoc).
+            if !self.eat_at(
                 TokenKind::r_paren,
                 GrammarContext::AllowRegExp,
                 " after 'for( ... ; ... ; ...'",
+                Some("location of '('"),
+                lparen_loc,
             ) {
                 return None;
             }
@@ -1756,12 +1829,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             ));
             Some(self.set_location(start_loc, body_end, node))
         } else {
-            // C++ 2084-2091: whatLoc is `startLoc` (the 'for' keyword).
+            // C++ 2084-2091: errorExpected(semi, rw_in, "inside 'for'",
+            // "location of the 'for'", startLoc).
             self.error_expected2(
                 TokenKind::semi,
                 TokenKind::rw_in,
                 " inside 'for'",
-                None,
+                Some("location of the 'for'"),
                 start_loc,
             );
             None
@@ -1781,31 +1855,46 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         assert!(self.check(TokenKind::rw_switch));
         let start_loc = self.advance(GrammarContext::AllowRegExp).start;
 
-        // C++ 2225-2232.
-        if !self.eat(
+        // C++ 2225: SMLoc lparenLoc = tok_->getStartLoc(), captured before
+        // the '(' eat below and reused by the ')' eat's whatLoc.
+        let lparen_loc = self.cur_start();
+        // C++ 2226-2232: eat(l_paren, "after 'switch'", "location of
+        // 'switch'", startLoc).
+        if !self.eat_at(
             TokenKind::l_paren,
             GrammarContext::AllowRegExp,
             " after 'switch'",
+            Some("location of 'switch'"),
+            start_loc,
         ) {
             return None;
         }
 
         let discriminant = self.parse_expression(PARAM_IN, CoverTypedParameters::Yes)?;
 
-        // C++ 2238-2244.
-        if !self.eat(
+        // C++ 2238-2244: eat(r_paren, "after 'switch (...'", "location of
+        // '('", lparenLoc).
+        if !self.eat_at(
             TokenKind::r_paren,
             GrammarContext::AllowRegExp,
             " after 'switch (...'",
+            Some("location of '('"),
+            lparen_loc,
         ) {
             return None;
         }
 
-        // C++ 2246-2253.
-        if !self.eat(
+        // C++ 2246: SMLoc lbraceLoc = tok_->getStartLoc(), captured before
+        // the '{' eat below and reused by the closing '}' eat's whatLoc.
+        let lbrace_loc = self.cur_start();
+        // C++ 2247-2253: eat(l_brace, "after 'switch (...)'", "'switch'
+        // starts here", startLoc).
+        if !self.eat_at(
             TokenKind::l_brace,
             GrammarContext::AllowRegExp,
             " after 'switch (...)'",
+            Some("'switch' starts here"),
+            start_loc,
         ) {
             return None;
         }
@@ -1853,12 +1942,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     default_location = Some(clause_start_loc);
                 }
             } else {
-                // C++ 2283-2291: whatLoc is `startLoc` (the 'switch' keyword).
+                // C++ 2284-2290: errorExpected(rw_case, rw_default, "inside
+                // 'switch'", "location of 'switch'", startLoc).
                 self.error_expected2(
                     TokenKind::rw_case,
                     TokenKind::rw_default,
                     " inside 'switch'",
-                    None,
+                    Some("location of 'switch'"),
                     start_loc,
                 );
                 return None;
@@ -1866,11 +1956,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
             // save the location in case the clause is empty. C++ 2293-2294.
             let colon_loc = self.lexer.token().end_loc();
-            // C++ 2295-2301.
-            if !self.eat(
+            // C++ 2295-2301: eat(colon, "after 'case ...' or 'default'",
+            // "location of 'case'/'default'", caseLoc).
+            if !self.eat_at(
                 TokenKind::colon,
                 GrammarContext::AllowRegExp,
                 " after 'case ...' or 'default'",
+                Some("location of 'case'/'default'"),
+                case_loc,
             ) {
                 return None;
             }
@@ -1907,15 +2000,17 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     node,
                 ));
             }
-            let _ = case_loc;
         }
 
-        // C++ 2326-2333.
+        // C++ 2326-2333: eat(r_brace, "at end of 'switch' statement",
+        // "location of '{'", lbraceLoc).
         let end_loc = self.lexer.token().end_loc();
-        if !self.eat(
+        if !self.eat_at(
             TokenKind::r_brace,
             GrammarContext::AllowRegExp,
             " at end of 'switch' statement",
+            Some("location of '{'"),
+            lbrace_loc,
         ) {
             return None;
         }
@@ -1979,12 +2074,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                             None => {
                                 // C++ 2393-2399: errorExpected(identifier,
                                 // "inside catch list", "location of
-                                // 'catch'", handlerStartLoc) — `whatLoc` is
-                                // real (the note-text is still dropped per
-                                // house style).
+                                // 'catch'", handlerStartLoc).
                                 self.error_expected_msg(
                                     "'identifier' expected inside catch list",
-                                    None,
+                                    Some("location of 'catch'"),
                                     Some(handler_start_loc),
                                 );
                                 return None;
@@ -1993,22 +2086,25 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     },
                 );
 
-                // C++ 2404-2410.
-                if !self.eat(
+                // C++ 2404-2410: eat(r_paren, "after 'catch (...'",
+                // "location of 'catch'", handlerStartLoc).
+                if !self.eat_at(
                     TokenKind::r_paren,
                     GrammarContext::AllowRegExp,
                     " after 'catch (...'",
+                    Some("location of 'catch'"),
+                    handler_start_loc,
                 ) {
                     return None;
                 }
             }
 
-            // C++ 2413-2421: whatLoc is `handlerStartLoc` (the 'catch'
-            // keyword).
+            // C++ 2413-2418: need(l_brace, "after 'catch(...)'", "location
+            // of 'catch'", handlerStartLoc).
             if !self.need_at(
                 TokenKind::l_brace,
                 " after 'catch(...)'",
-                None,
+                Some("location of 'catch'"),
                 handler_start_loc,
             ) {
                 return None;
@@ -2034,11 +2130,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let finally_loc = self.lexer.token().start_loc();
         if self.check_and_eat(TokenKind::rw_finally, GrammarContext::AllowRegExp)
         {
-            // C++ 2433-2437: whatLoc is `finallyLoc` (the 'finally' keyword).
+            // C++ 2433-2437: need(l_brace, "after 'finally'", "location of
+            // 'finally'", finallyLoc).
             if !self.need_at(
                 TokenKind::l_brace,
                 " after 'finally'",
-                None,
+                Some("location of 'finally'"),
                 finally_loc,
             ) {
                 return None;
@@ -2051,14 +2148,15 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             finally_handler = Some(finally_body);
         }
 
-        // At least one handler must be present. C++ 2446-2455: whatLoc is
-        // `startLoc` (the 'try' keyword).
+        // At least one handler must be present. C++ 2447-2454:
+        // errorExpected(rw_catch, rw_finally, "after 'try' block", "location
+        // of 'try'", startLoc).
         if catch_handler.is_none() && finally_handler.is_none() {
             self.error_expected2(
                 TokenKind::rw_catch,
                 TokenKind::rw_finally,
                 " after 'try' block",
-                None,
+                Some("location of 'try'"),
                 start_loc,
             );
             return None;
@@ -2354,11 +2452,15 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // C++ 1335-1341. Closing eat uses AllowDiv.
-        if !self.eat(
+        // C++ 1335-1341: eat(r_square, AllowDiv, "at end of array binding
+        // pattern '[...'", "location of '['", startLoc). Closing eat uses
+        // AllowDiv.
+        if !self.eat_at(
             TokenKind::r_square,
             GrammarContext::AllowDiv,
             " at end of array binding pattern '[...'",
+            Some("location of '['"),
+            start_loc,
         ) {
             return None;
         }
@@ -2525,11 +2627,15 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // C++ 1466-1472. Closing eat uses AllowDiv.
-        if !self.eat(
+        // C++ 1466-1472: eat(r_brace, AllowDiv, "at end of object binding
+        // pattern '{...'", "location of '{'", startLoc). Closing eat uses
+        // AllowDiv.
+        if !self.eat_at(
             TokenKind::r_brace,
             GrammarContext::AllowDiv,
             " at end of object binding pattern '{...'",
+            Some("location of '{'"),
+            start_loc,
         ) {
             return None;
         }

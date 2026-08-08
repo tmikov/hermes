@@ -106,10 +106,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         // C++ 1959-1966: the record-expression `}` is eaten in AllowDiv.
         let end_loc = self.cur_range().end;
-        if !self.eat(
+        if !self.eat_at(
             TokenKind::r_brace,
             GrammarContext::AllowDiv,
             " at end of record expression '{...'",
+            Some("location of '{'"),
+            properties_start_loc,
         ) {
             return None;
         }

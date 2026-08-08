@@ -1119,10 +1119,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let _save_args_param_await = self.save_param_await(force_async);
 
         // C++ 5836-5842.
-        if !self.eat(
+        if !self.eat_at(
             TokenKind::equalgreater,
             GrammarContext::AllowRegExp,
             " in arrow function expression",
+            Some("start of arrow function"),
+            start_loc,
         ) {
             return None;
         }
@@ -1787,12 +1789,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         };
 
         // Eat ':' — required after '... ? ...'.
-        if !self.eat(
+        if !self.eat_at(
             TokenKind::colon,
             GrammarContext::AllowRegExp,
-            "in conditional expression after '... ? ...'",
+            " in conditional expression after '... ? ...'",
+            Some("location of '?'"),
+            question_range.start,
         ) {
-            let _ = question_range; // referenced only for the C++ error note
             return None;
         }
 
@@ -2501,17 +2504,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     let opt_type = self.parse_type_annotation_ts(None)?;
                     // C++ 4170-4172: the closing `>` is eaten in AllowRegExp —
                     // the ONE place a TS `>` is not consumed in Type context.
-                    if !self.eat(
+                    if !self.eat_at(
                         TokenKind::greater,
                         GrammarContext::AllowRegExp,
-                        "in type assertion",
+                        " in type assertion",
+                        Some("start of assertion"),
+                        start_loc,
                     ) {
-                        self.lexer.get_source_mgr_mut().note_at(
-                            start_loc,
-                            None,
-                            "start of assertion",
-                            support::diag::Subsystem::Parser,
-                        );
                         return None;
                     }
                     let _guard = self.check_recursion()?;
@@ -2911,12 +2910,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             ) {
                 // C++ 3436-3440: errorExpected({l_paren, l_square, period},
                 // "after 'super' keyword", "location of 'super'", startLoc).
-                // `startLoc` is real (the note text is still dropped per
-                // house style).
-                self.error_expected_msg(
-                    "'(', '[' or '.' expected after 'super' keyword",
-                    None,
-                    Some(start_loc),
+                self.error_expected3(
+                    TokenKind::l_paren,
+                    TokenKind::l_square,
+                    TokenKind::period,
+                    " after 'super' keyword",
+                    Some("location of 'super'"),
+                    start_loc,
                 );
                 return None;
             }
@@ -2994,10 +2994,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
                 // ImportCall must be a call with an AssignmentExpression as the
                 // argument.
-                if !self.eat(
+                if !self.eat_at(
                     TokenKind::l_paren,
                     GrammarContext::AllowRegExp,
-                    "in import call",
+                    " in import call",
+                    Some("location of 'import'"),
+                    start_loc,
                 ) {
                     return None;
                 }
@@ -3024,10 +3026,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
                 // Capture the `)` END before eating it (C++ 3496).
                 let end_loc = self.lexer.token().end_loc();
-                if !self.eat(
+                if !self.eat_at(
                     TokenKind::r_paren,
                     GrammarContext::AllowRegExp,
-                    "in import call",
+                    " in import call",
+                    Some("location of 'import'"),
+                    start_loc,
                 ) {
                     return None;
                 }
@@ -3282,18 +3286,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         // Consume the closing `)`.
         let end_loc = self.lexer.token().end_loc();
-        if !self.eat(
+        if !self.eat_at(
             TokenKind::r_paren,
             GrammarContext::AllowDiv,
-            "at end of function call",
+            " at end of function call",
+            Some("location of '('"),
+            l_paren_start,
         ) {
-            // Emit a note pointing to the opening `(`.
-            self.lexer.get_source_mgr_mut().note_at(
-                l_paren_start,
-                None,
-                "location of '('",
-                support::diag::Subsystem::Parser,
-            );
             return None;
         }
 
@@ -3355,17 +3354,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         let end_loc = self.lexer.token().end_loc();
-        if !self.eat(
+        if !self.eat_at(
             TokenKind::r_square,
             GrammarContext::AllowDiv,
-            "at end of array literal '[...'",
+            " at end of array literal '[...'",
+            Some("location of '['"),
+            start_loc,
         ) {
-            self.lexer.get_source_mgr_mut().note_at(
-                start_loc,
-                None,
-                "location of '['",
-                support::diag::Subsystem::Parser,
-            );
             return None;
         }
 
@@ -3468,17 +3463,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         let end_loc = self.lexer.token().end_loc();
-        if !self.eat(
+        if !self.eat_at(
             TokenKind::r_brace,
             GrammarContext::AllowDiv,
-            " at end of object literal '{'",
+            " at end of object literal '{...'",
+            Some("location of '{'"),
+            start_loc,
         ) {
-            self.lexer.get_source_mgr_mut().note_at(
-                start_loc,
-                None,
-                "location of '{'",
-                support::diag::Subsystem::Parser,
-            );
             return None;
         }
 
@@ -3602,13 +3593,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 // Computed key: `[expr]`.
                 let start_loc = self.advance(GrammarContext::AllowRegExp).start;
                 let opt_expr = self.parse_assignment_expression(PARAM_IN, false, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
-                if !self.need(TokenKind::r_square, " at end of computed property key") {
-                    self.lexer.get_source_mgr_mut().note_at(
-                        start_loc,
-                        None,
-                        "start of property key",
-                        support::diag::Subsystem::Parser,
-                    );
+                if !self.need_at(
+                    TokenKind::r_square,
+                    " at end of computed property key",
+                    Some("start of property key"),
+                    start_loc,
+                ) {
                     return None;
                 }
                 self.advance(GrammarContext::AllowRegExp);
@@ -3774,30 +3764,22 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 let opt_key = self.parse_property_name()?;
 
                 let paren_loc = self.lexer.token().start_loc();
-                if !self.eat(
+                if !self.eat_at(
                     TokenKind::l_paren,
                     GrammarContext::AllowRegExp,
                     " in getter declaration",
+                    Some("start of getter declaration"),
+                    start_loc,
                 ) {
-                    self.lexer.get_source_mgr_mut().note_at(
-                        start_loc,
-                        None,
-                        "start of getter declaration",
-                        support::diag::Subsystem::Parser,
-                    );
                     return None;
                 }
-                if !self.eat(
+                if !self.eat_at(
                     TokenKind::r_paren,
                     GrammarContext::AllowRegExp,
                     " in empty getter parameter list",
+                    Some("start of getter declaration"),
+                    start_loc,
                 ) {
-                    self.lexer.get_source_mgr_mut().note_at(
-                        start_loc,
-                        None,
-                        "start of getter declaration",
-                        support::diag::Subsystem::Parser,
-                    );
                     return None;
                 }
 
@@ -3815,13 +3797,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 // await-contextual.
                 let _guard_yield = self.save_param_yield(false);
                 let _guard_await = self.save_param_await(false);
-                if !self.need(TokenKind::l_brace, " in getter declaration") {
-                    self.lexer.get_source_mgr_mut().note_at(
-                        start_loc,
-                        None,
-                        "start of getter declaration",
-                        support::diag::Subsystem::Parser,
-                    );
+                if !self.need_at(
+                    TokenKind::l_brace,
+                    " in getter declaration",
+                    Some("start of getter declaration"),
+                    start_loc,
+                ) {
                     return None;
                 }
                 let block = self.parse_function_body(
@@ -3942,26 +3923,27 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 let _guard_await = self.save_param_await(false);
 
                 let paren_loc = self.lexer.token().start_loc();
-                self.eat(
+                // C++ 2996-3000: return value intentionally ignored — the
+                // `eat` still needs the real what/whatLoc so a failed-eat
+                // diagnostic here matches the C++ rendering.
+                self.eat_at(
                     TokenKind::l_paren,
                     GrammarContext::AllowRegExp,
                     " in setter declaration",
+                    Some("start of setter declaration"),
+                    start_loc,
                 );
 
                 // PropertySetParameterList -> FormalParameter -> BindingElement.
                 let param = self.parse_binding_element(Param::default())?;
 
-                if !self.eat(
+                if !self.eat_at(
                     TokenKind::r_paren,
                     GrammarContext::AllowRegExp,
                     " at end of setter parameter list",
+                    Some("start of setter declaration"),
+                    start_loc,
                 ) {
-                    self.lexer.get_source_mgr_mut().note_at(
-                        start_loc,
-                        None,
-                        "start of setter declaration",
-                        support::diag::Subsystem::Parser,
-                    );
                     return None;
                 }
 
@@ -3975,13 +3957,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     )?);
                 }
 
-                if !self.need(TokenKind::l_brace, " in setter declaration") {
-                    self.lexer.get_source_mgr_mut().note_at(
-                        start_loc,
-                        None,
-                        "start of setter declaration",
-                        support::diag::Subsystem::Parser,
-                    );
+                if !self.need_at(
+                    TokenKind::l_brace,
+                    " in setter declaration",
+                    Some("start of setter declaration"),
+                    start_loc,
+                ) {
                     return None;
                 }
                 let block = self.parse_function_body(
@@ -4227,13 +4208,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
             // (
             let paren_loc = self.lexer.token().start_loc();
-            if !self.need(TokenKind::l_paren, " in method definition") {
-                self.lexer.get_source_mgr_mut().note_at(
-                    start_loc,
-                    None,
-                    "start of method definition",
-                    support::diag::Subsystem::Parser,
-                );
+            if !self.need_at(
+                TokenKind::l_paren,
+                " in method definition",
+                Some("start of method definition"),
+                start_loc,
+            ) {
                 return None;
             }
 
@@ -4252,13 +4232,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 )?);
             }
 
-            if !self.need(TokenKind::l_brace, " in method definition") {
-                self.lexer.get_source_mgr_mut().note_at(
-                    start_loc,
-                    None,
-                    "start of method definition",
-                    support::diag::Subsystem::Parser,
-                );
+            if !self.need_at(
+                TokenKind::l_brace,
+                " in method definition",
+                Some("start of method definition"),
+                start_loc,
+            ) {
                 return None;
             }
             let body = self.parse_function_body(
@@ -4291,17 +4270,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             );
         } else {
             // `: value` — standard property (C++ 3246-3259).
-            if !self.eat(
+            if !self.eat_at(
                 TokenKind::colon,
                 GrammarContext::AllowRegExp,
                 " in property initialization",
+                Some("start of property initialization"),
+                start_loc,
             ) {
-                self.lexer.get_source_mgr_mut().note_at(
-                    start_loc,
-                    None,
-                    "start of property initialization",
-                    support::diag::Subsystem::Parser,
-                );
                 return None;
             }
             value = self.parse_assignment_expression(PARAM_IN, false, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
@@ -4359,17 +4334,15 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             let _guard = self.check_recursion()?;
             let prop_expr = self.parse_expression(PARAM_IN, CoverTypedParameters::Yes)?;
             let end_loc = self.lexer.token().end_loc();
-            if !self.eat(
+            if !self.eat_at(
                 TokenKind::r_square,
                 GrammarContext::AllowDiv,
-                "at end of member expression '[...'",
+                " at end of member expression '[...'",
+                // NOTE: "iof" is a verbatim-preserved typo from the C++
+                // source (JSParserImpl.cpp:3670).
+                Some("location iof '['"),
+                punc_loc,
             ) {
-                self.lexer.get_source_mgr_mut().note_at(
-                    punc_loc,
-                    None,
-                    "location of '['",
-                    support::diag::Subsystem::Parser,
-                );
                 return None;
             }
             if optional || seen_optional_chain {
@@ -4411,16 +4384,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             if !self.check2(TokenKind::identifier, TokenKind::private_identifier)
                 && !self.lexer.token().is_res_word()
             {
-                if !self.need(
+                if !self.need_at(
                     TokenKind::identifier,
-                    "after '.' or '?.' in member expression",
+                    " after '.' or '?.' in member expression",
+                    Some("start of member expression"),
+                    object_loc,
                 ) {
-                    self.lexer.get_source_mgr_mut().note_at(
-                        object_loc,
-                        None,
-                        "start of member expression",
-                        support::diag::Subsystem::Parser,
-                    );
                     return None;
                 }
             }
@@ -4480,16 +4449,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let mut type_args: Option<&'gc Node<'gc>> = None;
         if self.parse_flow() && self.check(TokenKind::less) {
             type_args = Some(self.parse_type_args_flow(GrammarContext::Type)?);
-            if !self.need(
+            if !self.need_at(
                 TokenKind::l_paren,
-                "after type arguments in optional call",
+                " after type arguments in optional call",
+                Some("start of optional call"),
+                object_loc,
             ) {
-                self.lexer.get_source_mgr_mut().note_at(
-                    object_loc,
-                    None,
-                    "start of optional call",
-                    support::diag::Subsystem::Parser,
-                );
                 return None;
             }
         }
@@ -4497,16 +4462,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // sibling `#if HERMES_PARSE_TS` block, likewise unambiguous after `?.`.
         if self.parse_ts() && self.check(TokenKind::less) {
             type_args = Some(self.parse_ts_type_arguments()?);
-            if !self.need(
+            if !self.need_at(
                 TokenKind::l_paren,
-                "after type arguments in optional call",
+                " after type arguments in optional call",
+                Some("start of optional call"),
+                object_loc,
             ) {
-                self.lexer.get_source_mgr_mut().note_at(
-                    object_loc,
-                    None,
-                    "start of optional call",
-                    support::diag::Subsystem::Parser,
-                );
                 return None;
             }
         }
@@ -5121,8 +5082,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 return None;
             }
             // Consume the template_head/template_middle token.
-            // C++ `subStart = advance().Start` (subStart is only used for the
-            // error note; we capture it but don't need it for a fatal-less path).
+            // C++ `subStart = advance().Start` — used as the `whatLoc` of the
+            // "at end of substition in template literal" errorExpected call
+            // below if the substitution's closing '}' is missing.
             let sub_start = self.advance(GrammarContext::AllowRegExp).start;
 
             // Parse the substitution expression.
@@ -5133,16 +5095,21 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             };
             expressions.push(opt_expr);
 
-            // The } terminating the expression must be present.
+            // The } terminating the expression must be present. C++ 3389-3396
+            // calls `errorExpected` directly here (not `need`) since the
+            // `!check(r_brace)` guard already established the failure.
+            // NOTE: "substition" is a verbatim-preserved typo from the C++
+            // where-string (JSParserImpl.cpp:3394).
             if !self.check(TokenKind::r_brace) {
-                if !self.need(TokenKind::r_brace, " at end of substitution in template literal") {
-                    self.lexer.get_source_mgr_mut().note_at(
-                        sub_start,
-                        None,
-                        "start of substitution",
-                        support::diag::Subsystem::Parser,
-                    );
-                }
+                let msg = format!(
+                    "'{}' expected at end of substition in template literal",
+                    crate::token_kinds::token_kind_str(TokenKind::r_brace)
+                );
+                self.error_expected_msg(
+                    &msg,
+                    Some("start of substitution"),
+                    Some(sub_start),
+                );
                 return None;
             }
 

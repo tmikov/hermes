@@ -131,10 +131,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     return Some(id);
                 }
                 // C++ 3055-3062.
-                if !self.eat(
+                if !self.eat_at(
                     TokenKind::question,
                     GrammarContext::Type,
                     " in render type annotation",
+                    Some("start of render type"),
+                    start_loc,
                 ) {
                     return None;
                 }
@@ -184,6 +186,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     fn parse_conditional_type_annotation_flow(
         &mut self,
     ) -> Option<&'gc Node<'gc>> {
+        // C++ 3097.
+        let start = self.cur_start();
         // C++ 3098: conditional types are allowed while parsing the check
         // type.
         let _guard = self.save_allow_conditional_type(true);
@@ -204,10 +208,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }?;
 
         // C++ 3117-3123.
-        if !self.eat(
+        if !self.eat_at(
             TokenKind::question,
             GrammarContext::Type,
             " in conditional type",
+            Some("start of type"),
+            start,
         ) {
             return None;
         }
@@ -217,10 +223,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             self.parse_type_annotation_flow(None, AllowAnonFunctionType::Yes)?;
 
         // C++ 3128-3134.
-        if !self.eat(
+        if !self.eat_at(
             TokenKind::colon,
             GrammarContext::Type,
             " in conditional type",
+            Some("start of type"),
+            start,
         ) {
             return None;
         }
@@ -386,10 +394,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 seen_optional_indexed_access || optional;
 
             // C++ 3260-3266.
-            if !self.eat(
+            if !self.eat_at(
                 TokenKind::l_square,
                 GrammarContext::Type,
                 " in indexed access type or postfix array type syntax",
+                Some("start of a type"),
+                start,
             ) {
                 return None;
             }
@@ -415,7 +425,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     None,
                     AllowAnonFunctionType::Yes,
                 )?;
-                if !self.need(TokenKind::r_square, " in indexed access type") {
+                if !self.need_at(
+                    TokenKind::r_square,
+                    " in indexed access type",
+                    Some("start of type"),
+                    start,
+                ) {
                     return None;
                 }
                 // Once a `?.[` has been seen, all the enclosing accesses
@@ -487,7 +502,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             TokenKind::rw_interface => {
                 self.advance(GrammarContext::Type);
                 let mut extends: Vec<&'gc Node<'gc>> = Vec::new();
-                let body = self.parse_interface_tail_flow(&mut extends)?;
+                let body =
+                    self.parse_interface_tail_flow(start, &mut extends)?;
                 // The end location is the body node's end.
                 let end = body.metadata().range.get().end;
                 let node = Node::InterfaceTypeAnnotation(
@@ -664,8 +680,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                         // rw_interface).
                         self.advance(GrammarContext::Type);
                         let mut extends: Vec<&'gc Node<'gc>> = Vec::new();
-                        let body =
-                            self.parse_interface_tail_flow(&mut extends)?;
+                        let body = self
+                            .parse_interface_tail_flow(start, &mut extends)?;
                         // The end location is the body node's end.
                         let end = body.metadata().range.get().end;
                         let node = Node::InterfaceTypeAnnotation(
@@ -858,11 +874,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 } else {
                     // C++ 3573-3578: errorExpected(numeric_literal,
                     // "in type annotation", "start of annotation", start).
-                    // `start` is real, so this routes through `need_at`.
                     self.need_at(
                         TokenKind::numeric_literal,
                         " in type annotation",
-                        None,
+                        Some("start of annotation"),
                         start,
                     );
                     None
@@ -917,8 +932,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         // C++ 3612-3613: whatLoc is `startLoc` (the 'typeof' keyword).
-        if !self.need_at(TokenKind::identifier, " in typeof type", None, start)
-        {
+        if !self.need_at(
+            TokenKind::identifier,
+            " in typeof type",
+            Some("start of type"),
+            start,
+        ) {
             return None;
         }
 
@@ -943,11 +962,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             {
                 // flow.cpp:3623-3630: errorExpected(identifier, "in
                 // qualified typeof type", "start of type", startLoc).
-                // `start` is real, so this routes through `need_at`.
                 self.need_at(
                     TokenKind::identifier,
                     " in qualified typeof type",
-                    None,
+                    Some("start of type"),
                     start,
                 );
                 return None;
@@ -985,10 +1003,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // C++ 3643-3651: close the wrapping parens, recording them on the
         // (possibly qualified) identifier node.
         for _ in 0..paren_count {
-            if !self.eat(
+            if !self.eat_at(
                 TokenKind::r_paren,
                 GrammarContext::Type,
                 " in typeof type",
+                Some("start of type"),
+                start,
             ) {
                 return None;
             }
@@ -1057,7 +1077,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         // C++ 3700-3705.
-        if !self.need(TokenKind::r_square, " at end of tuple type annotation") {
+        if !self.need_at(
+            TokenKind::r_square,
+            " at end of tuple type annotation",
+            Some("start of tuple"),
+            start,
+        ) {
             return None;
         }
 
@@ -1174,10 +1199,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 self.check_and_eat(TokenKind::question, GrammarContext::Type);
 
             // C++ 3785-3792.
-            if !self.eat(
+            if !self.eat_at(
                 TokenKind::colon,
                 GrammarContext::Type,
                 " in labeled tuple type element",
+                Some("location of tuple"),
+                start,
             ) {
                 return None;
             }
@@ -1324,9 +1351,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         // C++ 577-583.
-        if !self.need(
+        if !self.need_at(
             TokenKind::l_paren,
             " at start of component parameter list",
+            Some("component type annotation starts here"),
+            start,
         ) {
             return None;
         }
@@ -1370,7 +1399,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     ) -> Option<Option<&'gc Node<'gc>>> {
         // C++ 609-613.
         debug_assert!(self.check(TokenKind::l_paren));
-        self.advance(GrammarContext::Type);
+        let lparen_loc = self.advance(GrammarContext::Type).start;
         let mut rest: Option<&'gc Node<'gc>> = None;
 
         // C++ 616-635.
@@ -1392,10 +1421,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         // C++ 637-645.
-        if !self.eat(
+        if !self.eat_at(
             TokenKind::r_paren,
             GrammarContext::Type,
             " at end of component type parameter list",
+            Some("start of component type parameter list"),
+            lparen_loc,
         ) {
             return None;
         }
@@ -1431,10 +1462,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             name = Some(self.reparse_type_annotation_as_identifier_flow(left)?);
             optional =
                 self.check_and_eat(TokenKind::question, GrammarContext::Type);
-            if !self.eat(
+            if !self.eat_at(
                 TokenKind::colon,
                 GrammarContext::Type,
                 " in component parameter type annotation",
+                Some("start of parameter"),
+                start,
             ) {
                 return None;
             }
@@ -1524,10 +1557,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         // C++ 745-753.
-        if !self.eat(
+        if !self.eat_at(
             TokenKind::colon,
             GrammarContext::Type,
             " in component type parameter",
+            Some("start of parameter"),
+            param_start,
         ) {
             return None;
         }

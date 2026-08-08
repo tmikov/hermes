@@ -78,8 +78,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         &mut self,
         start: SMLoc,
     ) -> Option<&'gc Node<'gc>> {
-        // C++ 539-541.
-        if !self.need(TokenKind::identifier, " in type alias") {
+        // C++ 539-541: what/whatLoc = "start of type alias" / `start`.
+        if !self.need_at(
+            TokenKind::identifier,
+            " in type alias",
+            Some("start of type alias"),
+            start,
+        ) {
             return None;
         }
 
@@ -100,8 +105,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             type_params = Some(self.parse_ts_type_parameters()?);
         }
 
-        // C++ 558-564.
-        if !self.eat(TokenKind::equal, GrammarContext::Type, " in type alias") {
+        // C++ 558-564: what/whatLoc = "start of type alias" / `start`.
+        if !self.eat_at(
+            TokenKind::equal,
+            GrammarContext::Type,
+            " in type alias",
+            Some("start of type alias"),
+            start,
+        ) {
             return None;
         }
 
@@ -146,7 +157,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         if !self.check(TokenKind::identifier)
             && !self.lexer.token().is_res_word()
         {
-            self.need(TokenKind::identifier, " in interface declaration");
+            // C++ 585-589: bare `errorExpected` (not `need`), since `check`
+            // was already tested above. what/whatLoc = "start of interface"
+            // / `start`.
+            self.error_expected_msg(
+                "'identifier' expected in interface declaration",
+                Some("start of interface"),
+                Some(start),
+            );
             return None;
         }
 
@@ -228,11 +246,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // C++ 633.
         let body_start = self.cur_start();
 
-        // C++ 635-641.
-        if !self.eat(
+        // C++ 635-641: what/whatLoc = "start of interface" / `start`.
+        if !self.eat_at(
             TokenKind::l_brace,
             GrammarContext::Type,
             " in interface declaration",
+            Some("start of interface"),
+            start,
         ) {
             return None;
         }
@@ -250,11 +270,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // C++ 659-665.
-        if !self.eat(
+        // C++ 659-665: what/whatLoc = "start of object type" / `start`.
+        if !self.eat_at(
             TokenKind::r_brace,
             GrammarContext::Type,
             " at end of object type",
+            Some("start of object type"),
+            start,
         ) {
             return None;
         }
@@ -294,16 +316,25 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let name = match self.parse_binding_identifier(Param::default()) {
             Some(name) => name,
             None => {
-                self.need(TokenKind::identifier, " in enum declaration");
+                // C++ 685-689: bare `errorExpected` (not `need`), since
+                // `parseBindingIdentifier` already failed. what/whatLoc =
+                // "start of enum" / `start`.
+                self.error_expected_msg(
+                    "'identifier' expected in enum declaration",
+                    Some("start of enum"),
+                    Some(start),
+                );
                 return None;
             }
         };
 
-        // C++ 691-697.
-        if !self.eat(
+        // C++ 691-697: what/whatLoc = "start of enum" / `start`.
+        if !self.eat_at(
             TokenKind::l_brace,
             GrammarContext::Type,
             " in enum declaration",
+            Some("start of enum"),
+            start,
         ) {
             return None;
         }
@@ -318,11 +349,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // C++ 711-717.
-        if !self.eat(
+        // C++ 711-717: what/whatLoc = "start of enum" / `start`.
+        if !self.eat_at(
             TokenKind::r_brace,
             GrammarContext::Type,
             " in enum declaration",
+            Some("start of enum"),
+            start,
         ) {
             return None;
         }
@@ -350,7 +383,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let name = match self.parse_binding_identifier(Param::default()) {
             Some(name) => name,
             None => {
-                self.need(TokenKind::identifier, " in enum member");
+                // C++ 730-734: bare `errorExpected` (not `need`), since
+                // `parseBindingIdentifier` already failed. what/whatLoc =
+                // "start of member" / `start`.
+                self.error_expected_msg(
+                    "'identifier' expected in enum member",
+                    Some("start of member"),
+                    Some(start),
+                );
                 return None;
             }
         };
@@ -396,16 +436,25 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let name = match self.parse_ts_qualified_name() {
             Some(name) => name,
             None => {
-                self.need(TokenKind::identifier, " in namespace declaration");
+                // C++ 756-762: bare `errorExpected` (not `need`), since
+                // `parseTSQualifiedName` already failed. what/whatLoc =
+                // "start of namespace" / `start`.
+                self.error_expected_msg(
+                    "'identifier' expected in namespace declaration",
+                    Some("start of namespace"),
+                    Some(start),
+                );
                 return None;
             }
         };
 
-        // C++ 765-771.
-        if !self.eat(
+        // C++ 765-771: what/whatLoc = "start of namespace" / `start`.
+        if !self.eat_at(
             TokenKind::l_brace,
             GrammarContext::Type,
             " in namespace declaration",
+            Some("start of namespace"),
+            start,
         ) {
             return None;
         }
@@ -422,11 +471,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // C++ 782-788.
-        if !self.eat(
+        // C++ 782-788: what/whatLoc = "start of namespace" / `start`.
+        if !self.eat_at(
             TokenKind::r_brace,
             GrammarContext::Type,
             " in namespace declaration",
+            Some("start of namespace"),
+            start,
         ) {
             return None;
         }

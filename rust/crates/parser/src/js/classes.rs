@@ -88,29 +88,27 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // ^
             let paren_loc = self.advance(GrammarContext::AllowRegExp).start;
             let inner = self.parse_expression(PARAM_IN, CoverTypedParameters::Yes)?;
-            if !self.eat(
+            // C++ 4712-4718: eat(r_paren, AllowDiv, "at end of decorator
+            // expression", "location of '('", parenLoc).
+            if !self.eat_at(
                 TokenKind::r_paren,
                 GrammarContext::AllowDiv,
                 " at end of decorator expression",
+                Some("location of '('"),
+                paren_loc,
             ) {
-                self.lexer.get_source_mgr_mut().note_at(
-                    paren_loc,
-                    None,
-                    "location of '('",
-                    support::diag::Subsystem::Parser,
-                );
                 return None;
             }
             expr = inner;
         } else {
             // Must be identifier (start of DecoratorMemberExpression).
             if !self.check(TokenKind::identifier) && !self.lexer.token().is_res_word() {
-                self.error_cur("identifier expected in decorator");
-                self.lexer.get_source_mgr_mut().note_at(
-                    start_loc,
-                    None,
-                    "location of '@'",
-                    support::diag::Subsystem::Parser,
+                // C++ 4723-4725: errorExpected(identifier, "in decorator",
+                // "location of '@'", startLoc).
+                self.error_expected_msg(
+                    "'identifier' expected in decorator",
+                    Some("location of '@'"),
+                    Some(start_loc),
                 );
                 return None;
             }
@@ -154,12 +152,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     );
                     self.advance(GrammarContext::AllowDiv);
                 } else {
-                    self.error_cur("identifier expected after '.' in decorator");
-                    self.lexer.get_source_mgr_mut().note_at(
-                        start_loc,
-                        None,
-                        "location of '@'",
-                        support::diag::Subsystem::Parser,
+                    // C++ 4756-4761: errorExpected(identifier, "after '.' in
+                    // decorator", "location of '@'", startLoc).
+                    self.error_expected_msg(
+                        "'identifier' expected after '.' in decorator",
+                        Some("location of '@'"),
+                        Some(start_loc),
                     );
                     return None;
                 }
@@ -253,13 +251,15 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 return None;
             }
 
-            if !self.eat(TokenKind::rw_class, GrammarContext::AllowRegExp, " in class") {
-                self.lexer.get_source_mgr_mut().note_at(
-                    start_loc,
-                    None,
-                    "start of class",
-                    support::diag::Subsystem::Parser,
-                );
+            // C++ 4805-4811: eat(rw_class, AllowRegExp, "in class", "start
+            // of class", startLoc).
+            if !self.eat_at(
+                TokenKind::rw_class,
+                GrammarContext::AllowRegExp,
+                " in class",
+                Some("start of class"),
+                start_loc,
+            ) {
                 return None;
             }
         } else {
@@ -274,24 +274,24 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             match self.parse_binding_identifier(Param::default()) {
                 Some(n) => name = Some(n),
                 None => {
-                    self.error_cur("identifier expected in class declaration");
-                    self.lexer.get_source_mgr_mut().note_at(
-                        start_loc,
-                        None,
-                        "location of 'class'",
-                        support::diag::Subsystem::Parser,
+                    // C++ 4826-4831: errorExpected(identifier, "in class
+                    // declaration", "location of 'class'", startLoc).
+                    self.error_expected_msg(
+                        "'identifier' expected in class declaration",
+                        Some("location of 'class'"),
+                        Some(start_loc),
                     );
                     return None;
                 }
             }
         } else if !param.has(PARAM_DEFAULT) {
             // Identifier is required unless we have +Default parameter.
-            self.error_cur("identifier expected after 'class'");
-            self.lexer.get_source_mgr_mut().note_at(
-                start_loc,
-                None,
-                "location of 'class'",
-                support::diag::Subsystem::Parser,
+            // C++ 4833-4838: errorExpected(identifier, "after 'class'",
+            // "location of 'class'", startLoc).
+            self.error_expected_msg(
+                "'identifier' expected after 'class'",
+                Some("location of 'class'"),
+                Some(start_loc),
             );
             return None;
         }
@@ -350,13 +350,15 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 return None;
             }
 
-            if !self.eat(TokenKind::rw_class, GrammarContext::AllowRegExp, " in class") {
-                self.lexer.get_source_mgr_mut().note_at(
-                    start,
-                    None,
-                    "start of class",
-                    support::diag::Subsystem::Parser,
-                );
+            // C++ 4890-4896: eat(rw_class, AllowRegExp, "in class", "start
+            // of class", start).
+            if !self.eat_at(
+                TokenKind::rw_class,
+                GrammarContext::AllowRegExp,
+                " in class",
+                Some("start of class"),
+                start,
+            ) {
                 return None;
             }
         } else {
@@ -380,12 +382,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             match self.parse_binding_identifier(Param::default()) {
                 Some(n) => name = Some(n),
                 None => {
-                    self.error_cur("identifier expected in class expression");
-                    self.lexer.get_source_mgr_mut().note_at(
-                        start,
-                        None,
-                        "location of 'class'",
-                        support::diag::Subsystem::Parser,
+                    // C++ 4912-4917: errorExpected(identifier, "in class
+                    // expression", "location of 'class'", start).
+                    self.error_expected_msg(
+                        "'identifier' expected in class expression",
+                        Some("location of 'class'"),
+                        Some(start),
                     );
                     return None;
                 }
@@ -465,13 +467,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 };
             if has_implements {
                 while !self.check(TokenKind::l_brace) {
-                    if !self.need(TokenKind::identifier, " in class 'implements'") {
-                        self.lexer.get_source_mgr_mut().note_at(
-                            start_loc,
-                            None,
-                            "start of class",
-                            support::diag::Subsystem::Parser,
-                        );
+                    // C++ 4995-5000: need(identifier, "in class
+                    // 'implements'", "start of class", startLoc).
+                    if !self.need_at(
+                        TokenKind::identifier,
+                        " in class 'implements'",
+                        Some("start of class"),
+                        start_loc,
+                    ) {
                         return None;
                     }
                     let impl_node = self.parse_class_implements_flow()?;
@@ -485,13 +488,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
         let implements = NodeList::from_iter(self.gc, implements);
 
-        if !self.need(TokenKind::l_brace, " in class definition") {
-            self.lexer.get_source_mgr_mut().note_at(
-                start_loc,
-                None,
-                "start of class",
-                support::diag::Subsystem::Parser,
-            );
+        // C++ 5024-5029: need(l_brace, "in class definition", "start of
+        // class", startLoc).
+        if !self.need_at(
+            TokenKind::l_brace,
+            " in class definition",
+            Some("start of class"),
+            start_loc,
+        ) {
             return None;
         }
 
@@ -549,13 +553,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        if !self.need(TokenKind::r_brace, " at end of class definition") {
-            self.lexer.get_source_mgr_mut().note_at(
-                start_loc,
-                None,
-                "start of class",
-                support::diag::Subsystem::Parser,
-            );
+        // C++ 5068-5073: need(r_brace, "at end of class definition", "start
+        // of class", startLoc).
+        if !self.need_at(
+            TokenKind::r_brace,
+            " at end of class definition",
+            Some("start of class"),
+            start_loc,
+        ) {
             return None;
         }
         let end = self.advance(GrammarContext::AllowRegExp).end;
@@ -868,17 +873,15 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     return None;
                 }
             }
-            if !self.eat(
+            // C++ 5331-5337: eat(r_brace, AllowRegExp, "at end of static
+            // block", "static block starts here", braceLoc).
+            if !self.eat_at(
                 TokenKind::r_brace,
                 GrammarContext::AllowRegExp,
                 " at end of static block",
+                Some("static block starts here"),
+                brace_loc,
             ) {
-                self.lexer.get_source_mgr_mut().note_at(
-                    brace_loc,
-                    None,
-                    "static block starts here",
-                    support::diag::Subsystem::Parser,
-                );
                 return None;
             }
 
@@ -1028,13 +1031,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 }
             }
             // ASI is allowed for separating class elements.
+            // C++ 5432-5438: errorExpected(semi, "after class property",
+            // "start of class property", startRange.Start).
             if !self.eat_semi(true) && type_annotation.is_none() {
-                self.error_cur("';' expected after class property");
-                self.lexer.get_source_mgr_mut().note_at(
-                    start_range.start,
-                    None,
-                    "start of class property",
-                    support::diag::Subsystem::Parser,
+                self.error_expected_msg(
+                    "';' expected after class property",
+                    Some("start of class property"),
+                    Some(start_range.start),
                 );
                 return None;
             }
@@ -1134,13 +1137,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             type_params = Some(self.parse_type_params_flow()?);
         }
 
-        if !self.need(TokenKind::l_paren, " in method definition") {
-            self.lexer.get_source_mgr_mut().note_at(
-                start_loc,
-                None,
-                "start of method definition",
-                support::diag::Subsystem::Parser,
-            );
+        // C++ 5502-5507: need(l_paren, "in method definition", "start of
+        // method definition", startLoc).
+        if !self.need_at(
+            TokenKind::l_paren,
+            " in method definition",
+            Some("start of method definition"),
+            start_loc,
+        ) {
             return None;
         }
         let mut args: Vec<&'gc Node<'gc>> = Vec::new();
@@ -1167,13 +1171,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             )?);
         }
 
-        if !self.need(TokenKind::l_brace, " in method definition") {
-            self.lexer.get_source_mgr_mut().note_at(
-                start_loc,
-                None,
-                "start of method definition",
-                support::diag::Subsystem::Parser,
-            );
+        // C++ 5540-5545: need(l_brace, "in method definition", "start of
+        // method definition", startLoc).
+        if !self.need_at(
+            TokenKind::l_brace,
+            " in method definition",
+            Some("start of method definition"),
+            start_loc,
+        ) {
             return None;
         }
 

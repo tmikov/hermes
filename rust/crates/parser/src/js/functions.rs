@@ -124,11 +124,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // C++ 417-427.
         if is_declaration && !param.has(PARAM_DEFAULT) && opt_id.is_none() {
             // C++ 421-427: errorExpected(identifier, "after 'function'",
-            // "location of 'function'", startLoc). `startLoc` is real (the
-            // note text is still dropped per house style).
+            // "location of 'function'", startLoc).
             self.error_expected_msg(
                 "'identifier' expected after 'function'",
-                None,
+                Some("location of 'function'"),
                 Some(start_loc),
             );
             return None;
@@ -145,8 +144,19 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         // (
-        // C++ 449-457.
-        if !self.need(TokenKind::l_paren, " at start of function parameter list") {
+        // C++ 449-457: need(l_paren, "at start of function parameter list",
+        // isDeclaration ? "function declaration starts here" : "function
+        // expression starts here", startLoc).
+        if !self.need_at(
+            TokenKind::l_paren,
+            " at start of function parameter list",
+            Some(if is_declaration {
+                "function declaration starts here"
+            } else {
+                "function expression starts here"
+            }),
+            start_loc,
+        ) {
             return None;
         }
 
@@ -187,14 +197,23 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         // {
-        // C++ 500-508.
-        if !self.need(
+        // C++ 500-508: need(l_brace, isDeclaration ? "in function
+        // declaration" : "in function expression", isDeclaration ? "start
+        // of function declaration" : "start of function expression",
+        // startLoc).
+        if !self.need_at(
             TokenKind::l_brace,
             if is_declaration {
                 " in function declaration"
             } else {
                 " in function expression"
             },
+            Some(if is_declaration {
+                "start of function declaration"
+            } else {
+                "start of function expression"
+            }),
+            start_loc,
         ) {
             return None;
         }
@@ -348,7 +367,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             "FormalParameters must start with '('"
         );
         // (
-        self.advance(GrammarContext::AllowRegExp);
+        let lparen_loc = self.advance(GrammarContext::AllowRegExp).start;
 
         // The first parameter can be 'this' in Flow and TypeScript.
         // C++ 607-633.
@@ -357,12 +376,15 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             let this_param_start = self.advance(GrammarContext::AllowRegExp).start;
 
             let annot_start = self.cur_start();
-            if !self.eat(
+            // C++ 622-628: eat(colon, Type, "in 'this' type annotation",
+            // "start of 'this'", thisParamStart).
+            if !self.eat_at(
                 TokenKind::colon,
                 GrammarContext::Type,
                 " in 'this' type annotation",
+                Some("start of 'this'"),
+                this_param_start,
             ) {
-                // (eat note args "start of 'this'" dropped per house style.)
                 return false;
             }
 
@@ -408,11 +430,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         // )
-        // C++ 656-664.
-        self.eat(
+        // C++ 656-664: eat(r_paren, AllowRegExp, "at end of function
+        // parameter list", "start of parameter list", lparenLoc).
+        self.eat_at(
             TokenKind::r_paren,
             GrammarContext::AllowRegExp,
             " at end of function parameter list",
+            Some("start of parameter list"),
+            lparen_loc,
         )
     }
 

@@ -62,8 +62,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // C++ 6619-6625. note arg dropped per house style.
-        if !self.need(TokenKind::string_literal, " after 'from'") {
+        // C++ 6619-6625: what = "location of 'from'", whatLoc = startLoc.
+        if !self.need_at(
+            TokenKind::string_literal,
+            " after 'from'",
+            Some("location of 'from'"),
+            start_loc,
+        ) {
             return None;
         }
 
@@ -92,16 +97,18 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         attributes: &mut Vec<&'gc Node<'gc>>,
     ) -> bool {
         debug_assert!(self.check(TokenKind::rw_with));
-        let _start = self.advance(GrammarContext::AllowRegExp).start;
+        let start = self.advance(GrammarContext::AllowRegExp).start;
 
         // with { }
         // with { WithEntries ,[opt] }
         //      ^
-        // C++ 6644-6650. note arg dropped per house style.
-        if !self.eat(
+        // C++ 6644-6650: what = "start of assertion", whatLoc = start.
+        if !self.eat_at(
             TokenKind::l_brace,
             GrammarContext::AllowRegExp,
             " in import assertion",
+            Some("start of assertion"),
+            start,
         ) {
             return false;
         }
@@ -122,8 +129,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 key = self.set_location(tok_start, tok_end, node);
                 self.advance(GrammarContext::AllowRegExp);
             } else {
-                // note arg dropped per house style.
-                if !self.need(TokenKind::identifier, " in import assertion") {
+                // C++ 6659-6665: what = "start of assertion", whatLoc = start.
+                if !self.need_at(
+                    TokenKind::identifier,
+                    " in import assertion",
+                    Some("start of assertion"),
+                    start,
+                ) {
                     return false;
                 }
                 let tok_start = self.lexer.token().start_loc();
@@ -139,19 +151,26 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 self.advance(GrammarContext::AllowRegExp);
             }
 
-            // C++ 6678-6684. note arg dropped per house style.
-            if !self.eat(
+            // C++ 6678-6684: what = "start of assertion", whatLoc = start.
+            if !self.eat_at(
                 TokenKind::colon,
                 GrammarContext::AllowRegExp,
                 " in import assertion",
+                Some("start of assertion"),
+                start,
             ) {
                 return false;
             }
 
             // AssertionKey : StringLiteral
             //                ^
-            // C++ 6689-6694. note arg dropped per house style.
-            if !self.need(TokenKind::string_literal, " in import assertion") {
+            // C++ 6689-6694: what = "start of assertion", whatLoc = start.
+            if !self.need_at(
+                TokenKind::string_literal,
+                " in import assertion",
+                Some("start of assertion"),
+                start,
+            ) {
                 return false;
             }
 
@@ -189,11 +208,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         // with { AssertEntries ,[opt] }
         //                              ^
-        // C++ 6711-6717. note arg dropped per house style.
-        if !self.eat(
+        // C++ 6711-6717: what = "start of assertion", whatLoc = start.
+        if !self.eat_at(
             TokenKind::r_brace,
             GrammarContext::AllowRegExp,
             " in import assertion",
+            Some("start of assertion"),
+            start,
         ) {
             return false;
         }
@@ -370,11 +391,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                         None => {
                             // C++ 6823-6829: errorExpected(identifier, "in
                             // import clause", "start of import clause",
-                            // startLoc). `start_loc` is real (the note text
-                            // is still dropped per house style).
+                            // startLoc).
                             self.error_expected_msg(
                                 "'identifier' expected in import clause",
-                                None,
+                                Some("start of import clause"),
                                 Some(start_loc),
                             );
                             return None;
@@ -409,15 +429,15 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return Some((specifiers, kind));
         }
 
-        // NamedImports is the only remaining possibility. C++ 6860-6866:
-        // whatLoc is `startLoc` (the note text is still dropped per house
-        // style). NOTE: when the brace is missing C++ returns the
-        // accumulated kind WITHOUT propagating an error-None, so we
-        // replicate that and return the accumulated specifiers.
+        // NamedImports is the only remaining possibility. C++ 6860-6866: what
+        // = "location of import specifiers", whatLoc = startLoc. NOTE: when
+        // the brace is missing C++ returns the accumulated kind WITHOUT
+        // propagating an error-None, so we replicate that and return the
+        // accumulated specifiers.
         if !self.need_at(
             TokenKind::l_brace,
             " in import specifier clause",
-            None,
+            Some("location of import specifiers"),
             start_loc,
         ) {
             return Some((specifiers, kind));
@@ -458,11 +478,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             None => {
                 // C++ 6884-6889: errorExpected(identifier, "in namespace
                 // import", "location of namespace import", startLoc).
-                // `start_loc` is real (the note text is still dropped per
-                // house style).
                 self.error_expected_msg(
                     "'identifier' expected in namespace import",
-                    None,
+                    Some("location of namespace import"),
                     Some(start_loc),
                 );
                 return None;
@@ -541,12 +559,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // C++ 6931-6938: NOTE grammar context AllowDiv. note arg dropped per
-        // house style.
-        if !self.eat(
+        // C++ 6931-6938: NOTE grammar context AllowDiv. what = "location of
+        // '{'", whatLoc = startLoc.
+        if !self.eat_at(
             TokenKind::r_brace,
             GrammarContext::AllowDiv,
             " at end of named imports",
+            Some("location of '{'"),
+            start_loc,
         ) {
             return false;
         }
@@ -636,10 +656,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     if !self.check(TokenKind::identifier)
                         && !self.lexer.token().is_res_word()
                     {
-                        // C++ 6994-6999: whatLoc is `importLoc`.
+                        // C++ 6994-6999: what = "specifiers start", whatLoc
+                        // = importLoc.
                         self.error_expected_msg(
                             "'identifier' expected in import specifier",
-                            None,
+                            Some("specifiers start"),
                             Some(import_loc),
                         );
                         return None;
@@ -677,10 +698,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     if !self.check(TokenKind::identifier)
                         && !self.lexer.token().is_res_word()
                     {
-                        // C++ 7017-7022: whatLoc is `importLoc`.
+                        // C++ 7017-7022: what = "specifiers start", whatLoc
+                        // = importLoc.
                         self.error_expected_msg(
                             "'identifier' expected in import specifier",
-                            None,
+                            Some("specifiers start"),
                             Some(import_loc),
                         );
                         return None;
@@ -719,10 +741,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 if !self.check(TokenKind::identifier)
                     && !self.lexer.token().is_res_word()
                 {
-                    // C++ 7041-7046: whatLoc is `importLoc`.
+                    // C++ 7041-7046: what = "specifiers start", whatLoc =
+                    // importLoc.
                     self.error_expected_msg(
                         "'identifier' expected in import specifier",
-                        None,
+                        Some("specifiers start"),
                         Some(import_loc),
                     );
                     return None;
@@ -749,10 +772,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     if !self.check(TokenKind::identifier)
                         && !self.lexer.token().is_res_word()
                     {
-                        // C++ 7060-7065: whatLoc is `importLoc`.
+                        // C++ 7060-7065: what = "specifiers start", whatLoc
+                        // = importLoc.
                         self.error_expected_msg(
                             "'identifier' expected in import specifier",
-                            None,
+                            Some("specifiers start"),
                             Some(import_loc),
                         );
                         return None;
@@ -782,11 +806,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 && !self.lexer.token().is_res_word()
             {
                 // C++ 7079-7084: errorExpected(identifier, "in import
-                // specifier", "specifiers start", importLoc). `import_loc`
-                // is real (the note text is still dropped per house style).
+                // specifier", "specifiers start", importLoc).
                 self.error_expected_msg(
                     "'identifier' expected in import specifier",
-                    None,
+                    Some("specifiers start"),
                     Some(import_loc),
                 );
                 return None;
@@ -813,11 +836,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 if !self.check(TokenKind::identifier)
                     && !self.lexer.token().is_res_word()
                 {
-                    // C++ 7097-7102: whatLoc is `importLoc` (the note text
-                    // is still dropped per house style).
+                    // C++ 7097-7102: what = "specifiers start", whatLoc =
+                    // importLoc.
                     self.error_expected_msg(
                         "'identifier' expected in import specifier",
-                        None,
+                        Some("specifiers start"),
                         Some(import_loc),
                     );
                     return None;
@@ -908,11 +931,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     && !self.lexer.token().is_res_word()
                 {
                     // C++ 7144-7149: errorExpected(identifier, "in export
-                    // clause", "start of export", startLoc). `start_loc` is
-                    // real (the note text is still dropped per house style).
+                    // clause", "start of export", startLoc).
                     self.error_expected_msg(
-                        "identifier expected in export clause",
-                        None,
+                        "'identifier' expected in export clause",
+                        Some("start of export"),
                         Some(start_loc),
                     );
                     return None;
@@ -1286,12 +1308,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // C++ 7401-7406: NOTE grammar context AllowDiv. note arg dropped per
-        // house style.
-        self.eat(
+        // C++ 7401-7406: NOTE grammar context AllowDiv. what = "location of
+        // export", whatLoc = startLoc.
+        self.eat_at(
             TokenKind::r_brace,
             GrammarContext::AllowDiv,
             " at end of export clause",
+            Some("location of export"),
+            start_loc,
         )
     }
 
@@ -1313,11 +1337,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             && !self.lexer.token().is_res_word()
         {
             // C++ 7419-7424: errorExpected(identifier, "in export clause",
-            // "location of export clause", exportLoc). `export_loc` is real
-            // (the note text is still dropped per house style).
+            // "location of export clause", exportLoc).
             self.error_expected_msg(
-                "identifier expected in export clause",
-                None,
+                "'identifier' expected in export clause",
+                Some("location of export clause"),
                 Some(export_loc),
             );
             return None;
@@ -1360,11 +1383,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             if !self.check(TokenKind::identifier)
                 && !self.lexer.token().is_res_word()
             {
-                // C++ 7447-7452: whatLoc is `exportLoc` (the note text is
-                // still dropped per house style).
+                // C++ 7447-7452: what = "location of export clause",
+                // whatLoc = exportLoc.
                 self.error_expected_msg(
-                    "identifier expected in export clause",
-                    None,
+                    "'identifier' expected in export clause",
+                    Some("location of export clause"),
                     Some(export_loc),
                 );
                 return None;

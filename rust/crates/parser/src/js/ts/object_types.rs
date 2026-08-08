@@ -49,11 +49,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // C++ 1212-1218.
-        if !self.eat(
+        // C++ 1212-1218: errorExpected's `what`/`whatLoc` cite this object
+        // type's opening `{` via `start`.
+        if !self.eat_at(
             TokenKind::r_brace,
             GrammarContext::Type,
             " at end of object type",
+            Some("start of object type"),
+            start,
         ) {
             return None;
         }
@@ -142,11 +145,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 None,
             )?;
 
-            // C++ 1276-1282.
-            if !self.eat(
+            // C++ 1276-1282: errorExpected's `what`/`whatLoc` cite this
+            // member's start via `start`.
+            if !self.eat_at(
                 TokenKind::r_square,
                 GrammarContext::Type,
                 " at end of computed property type",
+                Some("start of property"),
+                start,
             ) {
                 return None;
             }
@@ -156,8 +162,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 optional = true;
             }
         } else {
-            // C++ 1288-1295.
-            if !self.need(TokenKind::identifier, " in property") {
+            // C++ 1288-1295: errorExpected's `what`/`whatLoc` cite this
+            // member's start via `start`.
+            if !self.need_at(
+                TokenKind::identifier,
+                " in property",
+                Some("start of property"),
+                start,
+            ) {
                 return None;
             }
             let key_range = self.cur_range();
@@ -268,15 +280,25 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             match self.parse_binding_identifier(Param::default()) {
                 Some(key) => params.push(key),
                 None => {
-                    // C++ 1371-1374: errorExpected(identifier, "in property",
-                    // "start of property", start). `start` is real, so this
-                    // routes through `need_at` (the note text is still
-                    // dropped per house style).
-                    self.need_at(
-                        TokenKind::identifier,
-                        " in property",
-                        None,
-                        start,
+                    // C++ 1371-1374: a bare `errorExpected(identifier, "in
+                    // property", "start of property", start)` call, NOT
+                    // guarded by `need`/`eat` (parseBindingIdentifier already
+                    // consumed/rejected the token), so this routes directly
+                    // through `error_expected_msg` rather than `need_at` —
+                    // `need_at` would only report when the current token
+                    // isn't `identifier`, which doesn't match C++'s
+                    // unconditional call here.
+                    let msg = format!(
+                        "'{}' expected{}",
+                        crate::token_kinds::token_kind_str(
+                            TokenKind::identifier
+                        ),
+                        " in property"
+                    );
+                    self.error_expected_msg(
+                        &msg,
+                        Some("start of property"),
+                        Some(start),
                     );
                     return None;
                 }
@@ -287,11 +309,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // C++ 1382-1388.
-        if !self.eat(
+        // C++ 1382-1388: errorExpected's `what`/`whatLoc` cite this index
+        // signature's opening `[` via `start`.
+        if !self.eat_at(
             TokenKind::r_square,
             GrammarContext::Type,
             " at end of indexer type annotation",
+            Some("start of indexer"),
+            start,
         ) {
             return None;
         }

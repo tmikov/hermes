@@ -274,11 +274,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // C++ 241-252: components always require a name identifier.
         let Some(id) = self.parse_binding_identifier(Param::default()) else {
             // C++ 245-251: errorExpected(identifier, "after 'component'",
-            // "location of 'component'", start). `start` is real (the note
-            // text is still dropped per house style).
+            // "location of 'component'", start).
             self.error_expected_msg(
                 "'identifier' expected after 'component'",
-                None,
+                Some("location of 'component'"),
                 Some(start),
             );
             return None;
@@ -291,9 +290,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         // C++ 263-269.
-        if !self.need(
+        if !self.need_at(
             TokenKind::l_paren,
             " at start of component parameter list",
+            Some("component declaration starts here"),
+            start,
         ) {
             return None;
         }
@@ -342,7 +343,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         // C++ 303-309.
-        if !self.need(TokenKind::l_brace, " in component declaration") {
+        if !self.need_at(
+            TokenKind::l_brace,
+            " in component declaration",
+            Some("start of component declaration"),
+            start,
+        ) {
             return None;
         }
 
@@ -388,7 +394,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     ) -> bool {
         // C++ 335-338.
         debug_assert!(self.check(TokenKind::l_paren));
-        self.advance(GrammarContext::AllowRegExp);
+        let lparen_loc = self.advance(GrammarContext::AllowRegExp).start;
 
         // C++ 340-360.
         while !self.check(TokenKind::r_paren) {
@@ -418,10 +424,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         // C++ 362-372.
-        self.eat(
+        self.eat_at(
             TokenKind::r_paren,
             GrammarContext::AllowRegExp,
             " at end of component parameter list",
+            Some("start of component parameter list"),
+            lparen_loc,
         )
     }
 
@@ -601,24 +609,26 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         if self.lexer.check_following_character(b'?') {
             // C++ 492-502.
             let start = self.advance(GrammarContext::Type).start;
-            if !self.eat(
+            if !self.eat_at(
                 TokenKind::question,
                 GrammarContext::Type,
                 " in render type annotation",
+                Some("start of render type"),
+                start,
             ) {
-                let _ = start;
                 return None;
             }
             operator = b"renders?";
         } else if self.lexer.check_following_character(b'*') {
             // C++ 503-513.
             let start = self.advance(GrammarContext::Type).start;
-            if !self.eat(
+            if !self.eat_at(
                 TokenKind::star,
                 GrammarContext::Type,
                 " in render type annotation",
+                Some("start of render type"),
+                start,
             ) {
-                let _ = start;
                 return None;
             }
             operator = b"renders*";
@@ -687,11 +697,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // C++ 787-795: hooks always require a name identifier.
         let Some(id) = self.parse_binding_identifier(Param::default()) else {
             // C++ 791-794: errorExpected(identifier, "after 'hook'",
-            // "location of 'hook'", start). `start` is real (the note text
-            // is still dropped per house style).
+            // "location of 'hook'", start).
             self.error_expected_msg(
                 "'identifier' expected after 'hook'",
-                None,
+                Some("location of 'hook'"),
                 Some(start),
             );
             return None;
@@ -704,7 +713,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         // C++ 806-812.
-        if !self.need(TokenKind::l_paren, " at start of hook parameter list") {
+        if !self.need_at(
+            TokenKind::l_paren,
+            " at start of hook parameter list",
+            Some("hook declaration starts here"),
+            start,
+        ) {
             return None;
         }
 
@@ -739,7 +753,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         // C++ 837-843.
-        if !self.need(TokenKind::l_brace, " in hook declaration") {
+        if !self.need_at(
+            TokenKind::l_brace,
+            " in hook declaration",
+            Some("start of hook declaration"),
+            start,
+        ) {
             return None;
         }
 
@@ -804,11 +823,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // C++ 1634-1640.
         let Some(id) = self.parse_binding_identifier(Param::default()) else {
             // C++ 1637-1639: errorExpected(identifier, "after 'record'",
-            // "location of 'record'", start). `start` is real (the note
-            // text is still dropped per house style).
+            // "location of 'record'", start).
             self.error_expected_msg(
                 "'identifier' expected after 'record'",
-                None,
+                Some("location of 'record'"),
                 Some(start),
             );
             return None;
@@ -826,7 +844,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             self.advance(GrammarContext::Type);
             // C++ 1655-1666: a do-while.
             loop {
-                if !self.need(TokenKind::identifier, " in record 'implements'") {
+                if !self.need_at(
+                    TokenKind::identifier,
+                    " in record 'implements'",
+                    Some("start of declaration"),
+                    start,
+                ) {
                     return None;
                 }
                 let implements =
@@ -839,7 +862,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         // C++ 1669-1675.
-        if !self.need(TokenKind::l_brace, " in record declaration") {
+        if !self.need_at(
+            TokenKind::l_brace,
+            " in record declaration",
+            Some("start of record declaration"),
+            start,
+        ) {
             return None;
         }
 
@@ -849,9 +877,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         // C++ 1681-1879.
         while !self.check(TokenKind::r_brace) {
-            // C++ 1682-1689.
+            // C++ 1682-1689: errorExpected(r_brace, "in record body",
+            // "start of record body", bodyStart).
             if self.check(TokenKind::eof) {
-                self.error_at_loc(body_start, "'}' expected in record body");
+                self.error_expected_msg(
+                    "'}' expected in record body",
+                    Some("start of record body"),
+                    Some(body_start),
+                );
                 return None;
             }
 
@@ -980,10 +1013,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 // C++ 1788-1797: a trailing `,` is required unless `}`/eof
                 // follows.
                 if !self.check2(TokenKind::r_brace, TokenKind::eof)
-                    && !self.eat(
+                    && !self.eat_at(
                         TokenKind::comma,
                         GrammarContext::AllowRegExp,
                         " after property",
+                        Some("start of property"),
+                        prop_start_loc,
                     )
                 {
                     return None;
@@ -996,9 +1031,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     method_type_params = Some(self.parse_type_params_flow()?);
                 }
 
-                // C++ 1808-1815.
+                // C++ 1808-1815: errorExpected(l_paren, "in method
+                // parameters", "start of method", propStartLoc).
                 if !self.check(TokenKind::l_paren) {
-                    self.error_cur("'(' expected in method parameters");
+                    self.error_expected_msg(
+                        "'(' expected in method parameters",
+                        Some("start of method"),
+                        Some(prop_start_loc),
+                    );
                     return None;
                 }
 
@@ -1021,9 +1061,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     )?);
                 }
 
-                // C++ 1830-1837.
+                // C++ 1830-1837: errorExpected(l_brace, "in method body",
+                // "start of method", propStartLoc).
                 if !self.check(TokenKind::l_brace) {
-                    self.error_cur("'{' expected in method body");
+                    self.error_expected_msg(
+                        "'{' expected in method body",
+                        Some("start of method"),
+                        Some(prop_start_loc),
+                    );
                     return None;
                 }
 
@@ -1083,10 +1128,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         // C++ 1881-1888.
-        if !self.eat(
+        if !self.eat_at(
             TokenKind::r_brace,
             GrammarContext::AllowRegExp,
             " in record body",
+            Some("start of record body"),
+            body_start,
         ) {
             return None;
         }
@@ -1190,7 +1237,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         kind: TypeAliasKind,
     ) -> Option<&'gc Node<'gc>> {
         // C++ 1984-1987.
-        if !self.need(TokenKind::identifier, " in type alias") {
+        if !self.need_at(
+            TokenKind::identifier,
+            " in type alias",
+            Some("start of type alias"),
+            start,
+        ) {
             return None;
         }
 
@@ -1246,8 +1298,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // C++ 2028-2042: DeclareOpaque has no `= T` right side.
         let mut right: Option<&'gc Node<'gc>> = None;
         if kind != TypeAliasKind::DeclareOpaque {
-            if !self.eat(TokenKind::equal, GrammarContext::Type, " in type alias")
-            {
+            if !self.eat_at(
+                TokenKind::equal,
+                GrammarContext::Type,
+                " in type alias",
+                Some("start of type alias"),
+                start,
+            ) {
                 return None;
             }
             right = Some(
@@ -1342,7 +1399,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let start = self.advance(GrammarContext::Type).start;
 
         // C++ 2078-2084.
-        if !self.need(TokenKind::identifier, " in interface declaration") {
+        if !self.need_at(
+            TokenKind::identifier,
+            " in interface declaration",
+            Some("start of interface"),
+            start,
+        ) {
             return None;
         }
 
@@ -1365,7 +1427,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         // C++ 2101-2104.
         let mut extends: Vec<&'gc Node<'gc>> = Vec::new();
-        let body = self.parse_interface_tail_flow(&mut extends)?;
+        let body = self.parse_interface_tail_flow(start, &mut extends)?;
 
         // C++ 2106-2117: the end location is the body node's end.
         let end = body.metadata().range.get().end;
@@ -1394,11 +1456,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// declarations and `interface` type annotations, pushing the
     /// `InterfaceExtends` entries into `extends` and returning the
     /// `ObjectTypeAnnotation` body. Port of
-    /// `JSParserImpl::parseInterfaceTailFlow` (flow.cpp:2120-2141; the C++
-    /// also takes the interface's start location, used only for the error
-    /// notes that the Rust `need` does not carry).
+    /// `JSParserImpl::parseInterfaceTailFlow` (flow.cpp:2120-2141). `start`
+    /// is the interface's start location, passed through unchanged from C++
+    /// as the real `whatLoc`/`what="location of interface"` hint on both
+    /// `need` calls below (cpp:2125-2129, 2136).
     pub(super) fn parse_interface_tail_flow(
         &mut self,
+        start: SMLoc,
         extends: &mut Vec<&'gc Node<'gc>>,
     ) -> Option<&'gc Node<'gc>> {
         // C++ 2123: a bare `checkAndEat` — the default GrammarContext
@@ -1407,7 +1471,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         {
             // C++ 2124-2134: a do-while.
             loop {
-                if !self.need(TokenKind::identifier, " in extends clause") {
+                if !self.need_at(
+                    TokenKind::identifier,
+                    " in extends clause",
+                    Some("location of interface"),
+                    start,
+                ) {
                     return None;
                 }
                 if !self.parse_interface_extends(extends) {
@@ -1421,7 +1490,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         // C++ 2136-2137.
-        if !self.need(TokenKind::l_brace, " in interface") {
+        if !self.need_at(
+            TokenKind::l_brace,
+            " in interface",
+            Some("location of interface"),
+            start,
+        ) {
             return None;
         }
 
@@ -1568,11 +1642,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             let Some(id) = self.parse_binding_identifier(Param::default())
             else {
                 // C++ 158-165: errorExpected(identifier, "in var declaration",
-                // "start of declaration", start). `start` is real (the note
-                // text is still dropped per house style).
+                // "start of declaration", start).
                 self.error_expected_msg(
                     "'identifier' expected in var declaration",
-                    None,
+                    Some("start of declaration"),
                     Some(start),
                 );
                 return None;
@@ -1612,7 +1685,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 TokenKind::rw_function,
                 TokenKind::rw_class,
                 " in declared type",
-                None,
+                Some("start of declare"),
                 start,
             );
             return None;
@@ -1653,7 +1726,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         self.advance(GrammarContext::Type);
 
         // C++ 2164-2169.
-        if !self.need(TokenKind::identifier, " in declare function type") {
+        if !self.need_at(
+            TokenKind::identifier,
+            " in declare function type",
+            Some("location of declare"),
+            start,
+        ) {
             return None;
         }
 
@@ -1671,7 +1749,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         // C++ 2184-2189.
-        if !self.need(TokenKind::l_paren, " in declare function type") {
+        if !self.need_at(
+            TokenKind::l_paren,
+            " in declare function type",
+            Some("location of declare"),
+            start,
+        ) {
             return None;
         }
 
@@ -1685,10 +1768,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         )?;
 
         // C++ 2198-2204.
-        if !self.eat(
+        if !self.eat_at(
             TokenKind::colon,
             GrammarContext::Type,
             " in declare function type",
+            Some("location of declare"),
+            start,
         ) {
             return None;
         }
@@ -1819,10 +1904,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             self.advance(GrammarContext::Type);
 
             let annot_start = self.cur_start();
-            if !self.eat(
+            if !self.eat_at(
                 TokenKind::colon,
                 GrammarContext::Type,
                 " in module.exports declaration",
+                Some("start of declaration"),
+                start,
             ) {
                 return None;
             }
@@ -1856,7 +1943,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             ));
             id = self.set_location(str_range.start, str_range.end, node);
         } else {
-            if !self.need(TokenKind::identifier, " in module declaration") {
+            if !self.need_at(
+                TokenKind::identifier,
+                " in module declaration",
+                Some("start of declaration"),
+                start,
+            ) {
                 return None;
             }
             let id_range = self.cur_range();
@@ -1872,10 +1964,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         // C++ 2321-2330.
         let body_start = self.cur_start();
-        if !self.eat(
+        if !self.eat_at(
             TokenKind::l_brace,
             GrammarContext::Type,
             " in module declaration",
+            Some("start of declaration"),
+            start,
         ) {
             return None;
         }
@@ -1925,7 +2019,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         self.advance(GrammarContext::Type);
 
         // C++ 2357-2368.
-        if !self.need(TokenKind::identifier, " in namespace declaration") {
+        if !self.need_at(
+            TokenKind::identifier,
+            " in namespace declaration",
+            Some("start of declaration"),
+            start,
+        ) {
             return None;
         }
         let id_range = self.cur_range();
@@ -1940,10 +2039,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         // C++ 2372-2379.
         let body_start = self.cur_start();
-        if !self.eat(
+        if !self.eat_at(
             TokenKind::l_brace,
             GrammarContext::Type,
             " in namespace declaration",
+            Some("start of declaration"),
+            start,
         ) {
             return None;
         }
@@ -2009,7 +2110,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         start: SMLoc,
     ) -> Option<&'gc Node<'gc>> {
         // C++ 2408-2420.
-        if !self.need(TokenKind::identifier, " in class declaration") {
+        if !self.need_at(
+            TokenKind::identifier,
+            " in class declaration",
+            Some("start of declaration"),
+            start,
+        ) {
             return None;
         }
         let id_range = self.cur_range();
@@ -2032,7 +2138,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let mut extends: Vec<&'gc Node<'gc>> = Vec::new();
         if self.check_and_eat(TokenKind::rw_extends, GrammarContext::AllowRegExp)
         {
-            if !self.need(TokenKind::identifier, " in class 'extends'") {
+            if !self.need_at(
+                TokenKind::identifier,
+                " in class 'extends'",
+                Some("start of declaration"),
+                start,
+            ) {
                 return None;
             }
             if !self.parse_interface_extends(&mut extends) {
@@ -2045,7 +2156,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         if self.check_name(b"mixins") {
             self.advance(GrammarContext::AllowRegExp);
             loop {
-                if !self.need(TokenKind::identifier, " in class 'mixins'") {
+                if !self.need_at(
+                    TokenKind::identifier,
+                    " in class 'mixins'",
+                    Some("start of declaration"),
+                    start,
+                ) {
                     return None;
                 }
                 if !self.parse_interface_extends(&mut mixins) {
@@ -2062,7 +2178,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         if self.check_and_eat(TokenKind::rw_implements, GrammarContext::AllowRegExp)
         {
             loop {
-                if !self.need(TokenKind::identifier, " in class 'implements'") {
+                if !self.need_at(
+                    TokenKind::identifier,
+                    " in class 'implements'",
+                    Some("start of declaration"),
+                    start,
+                ) {
                     return None;
                 }
                 let impl_node = self.parse_class_implements_flow()?;
@@ -2074,7 +2195,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         // C++ 2472-2484.
-        if !self.need(TokenKind::l_brace, " in declared class") {
+        if !self.need_at(
+            TokenKind::l_brace,
+            " in declared class",
+            Some("start of declaration"),
+            start,
+        ) {
             return None;
         }
         let body = self.parse_object_type_annotation_flow(
@@ -2259,7 +2385,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             let var_start = self.advance(GrammarContext::Type).start;
             let Some(id) = self.parse_binding_identifier(Param::default())
             else {
-                self.error_cur("'identifier' expected in var declaration");
+                // C++ 2767-2774: errorExpected(identifier, "in var
+                // declaration", "start of declaration", start).
+                self.error_expected_msg(
+                    "'identifier' expected in var declaration",
+                    Some("start of declaration"),
+                    Some(start),
+                );
                 return None;
             };
             if self.identifier_type_annotation(id).is_none() {
@@ -2337,7 +2469,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         // C++ 2856-2880: `declare export { ... } [from]`.
-        if !self.need(TokenKind::l_brace, " in export specifier") {
+        if !self.need_at(
+            TokenKind::l_brace,
+            " in export specifier",
+            Some("start of declare"),
+            start,
+        ) {
             return None;
         }
         let mut specifiers: Vec<&'gc Node<'gc>> = Vec::new();
@@ -2478,14 +2615,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         // C++ 2569-2574: errorExpected(star, l_brace, identifier,
-        // "in export type declaration", ..., startLoc). whatLoc is real
-        // (`startLoc`); the note-text is still dropped per house style.
+        // "in export type declaration", "start of export", startLoc).
         self.error_expected3(
             TokenKind::star,
             TokenKind::l_brace,
             TokenKind::identifier,
             " in export type declaration",
-            None,
+            Some("start of export"),
             start_loc,
         );
         None
@@ -2511,13 +2647,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         self.advance(GrammarContext::AllowRegExp);
 
         // C++ 5154-5161: errorExpected(identifier, "in enum declaration",
-        // "start of declaration", start). `start` is real, so this routes
-        // through `need_at` for the same-line combined-range caret (the
-        // note text is still dropped per house style).
+        // "start of declaration", start).
         if !self.need_at(
             TokenKind::identifier,
             " in enum declaration",
-            None,
+            Some("start of declaration"),
             start,
         ) {
             return None;
@@ -2562,7 +2696,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         // C++ 5187-5192.
-        if !self.need(TokenKind::l_brace, " in enum declaration") {
+        if !self.need_at(
+            TokenKind::l_brace,
+            " in enum declaration",
+            Some("start of declaration"),
+            start,
+        ) {
             return None;
         }
 
@@ -2627,7 +2766,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 break;
             }
             // C++ 5228-5233.
-            if !self.need(TokenKind::identifier, " in enum declaration") {
+            if !self.need_at(
+                TokenKind::identifier,
+                " in enum declaration",
+                Some("start of declaration"),
+                start,
+            ) {
                 return None;
             }
 
@@ -2719,10 +2863,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         // C++ 5294-5301.
         let end = self.lexer.token().end_loc();
-        if !self.eat(
+        if !self.eat_at(
             TokenKind::r_brace,
             GrammarContext::AllowRegExp,
             " in enum body",
+            Some("start of body"),
+            start,
         ) {
             return None;
         }
@@ -2887,15 +3033,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     );
                 } else {
                     // C++ 5390-5396: errorExpected(numeric_literal,
-                    // "in negated enum member initializer", ...,
-                    // id->getStartLoc()). whatLoc is real (`id`'s start), so
-                    // this routes through `need_at` (note text still dropped
-                    // per house style). `need_at` reports at the current
-                    // token without consuming, matching errorExpected.
+                    // "in negated enum member initializer",
+                    // "start of negated enum member", id->getStartLoc()).
+                    // `need_at` reports at the current token without
+                    // consuming, matching errorExpected.
                     self.need_at(
                         TokenKind::numeric_literal,
                         " in negated enum member initializer",
-                        None,
+                        Some("start of negated enum member"),
                         id.range().start,
                     );
                     return None;
@@ -2946,8 +3091,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 );
             } else {
                 // C++ 5412-5422: errorExpected over the five literal token
-                // kinds, whatLoc = id->getStartLoc() (real; the note text
-                // is still dropped per house style).
+                // kinds, whatLoc = id->getStartLoc() (real).
                 self.error_expected_enum_member_init(id.range().start);
                 return None;
             }
@@ -2968,7 +3112,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Report the five-token `errorExpected` for an enum member initializer
     /// (`true`, `false`, a string, a number, or a bigint). Port of the
-    /// initializer-list `errorExpected` at flow.cpp:5412-5422 (whatLoc =
+    /// initializer-list `errorExpected` at flow.cpp:5412-5422 (where =
+    /// "in enum member initializer", what = "start of enum member", whatLoc =
     /// `id->getStartLoc()`, real). The Rust `error_expected*` family tops
     /// out at four tokens, so render the five-token list directly to stay
     /// byte-faithful to the C++ message, routed through `error_expected_msg`
@@ -2983,6 +3128,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             token_kind_str(TokenKind::numeric_literal),
             token_kind_str(TokenKind::bigint_literal),
         );
-        self.error_expected_msg(&msg, None, Some(what_loc));
+        self.error_expected_msg(
+            &msg,
+            Some("start of enum member"),
+            Some(what_loc),
+        );
     }
 }

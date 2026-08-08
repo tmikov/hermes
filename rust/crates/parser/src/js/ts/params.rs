@@ -50,12 +50,15 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // C++ 817-824.
+        // C++ 817-824: errorExpected's `what`/`whatLoc` cite this
+        // parameter list's opening `<` via `start`.
         let end = self.cur_range().end;
-        if !self.eat(
+        if !self.eat_at(
             TokenKind::greater,
             GrammarContext::Type,
             " at end of type parameters",
+            Some("start of type parameters"),
+            start,
         ) {
             return None;
         }
@@ -79,7 +82,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // C++ 833.
         let start = self.cur_start();
 
-        // C++ 835-836.
+        // C++ 835-836: need(identifier, "in type parameter", nullptr, {})
+        // — this is a genuine no-hint call site in C++ (one of the 7 in the
+        // whole codebase); there is no `what`/`whatLoc` to restore.
         if !self.need(TokenKind::identifier, " in type parameter") {
             return None;
         }
@@ -140,12 +145,15 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // C++ 1176-1183.
+        // C++ 1176-1183: errorExpected's `what`/`whatLoc` cite this
+        // argument list's opening `<` via `start`.
         let end = self.cur_range().end;
-        if !self.eat(
+        if !self.eat_at(
             TokenKind::greater,
             GrammarContext::Type,
             " at end of type parameters",
+            Some("start of type parameters"),
+            start,
         ) {
             return None;
         }

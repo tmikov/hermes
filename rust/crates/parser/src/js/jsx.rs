@@ -241,7 +241,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         // C++ 152-154.
         let end = self.cur_range().end;
-        if !self.need(TokenKind::greater, " at end of JSX tag") {
+        if !self.need_at(
+            TokenKind::greater,
+            " at end of JSX tag",
+            Some("start of tag"),
+            start,
+        ) {
             return None;
         }
 
@@ -377,9 +382,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     // C++ 243-256: { JSXChildExpression }
                     //                 ^
                     let child_expr = self.parse_jsx_child_expression(start)?;
-                    if !self.need(
+                    if !self.need_at(
                         TokenKind::r_brace,
                         " in JSX child expression",
+                        Some("start of expression"),
+                        start,
                     ) {
                         return None;
                     }
@@ -388,7 +395,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 // C++ 257.
                 self.lexer.advance_in_jsx_child();
             } else {
-                // C++ 259-267: JSXText handled by the lexer.
+                // C++ 259-267: JSXText handled by the lexer. C++ 260 passes
+                // `nullptr, {}` — a genuine no-hint site — so this stays the
+                // plain `need(kind, where)` form; there is no note to
+                // restore here.
                 if !self.need(TokenKind::jsx_text, " in JSX child expression")
                 {
                     return None;
@@ -469,10 +479,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // { ... AssignmentExpression }
         //   ^
         // C++ 296-302.
-        if !self.eat(
+        if !self.eat_at(
             TokenKind::dotdotdot,
             GrammarContext::AllowRegExp,
             " in JSX spread attribute",
+            Some("location of attribute"),
+            start,
         ) {
             return None;
         }
@@ -488,10 +500,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         // C++ 308-315.
         let end = self.cur_range().end;
-        if !self.eat(
+        if !self.eat_at(
             TokenKind::r_brace,
             GrammarContext::AllowJSXIdentifier,
             " in JSX spread attribute",
+            Some("location of attribute"),
+            start,
         ) {
             return None;
         }
@@ -559,7 +573,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // { AssignmentExpression }
             // ^
             // C++ 349-377.
-            if !self.need(TokenKind::l_brace, " in JSX attribute") {
+            if !self.need_at(
+                TokenKind::l_brace,
+                " in JSX attribute",
+                Some("location of attribute"),
+                start,
+            ) {
                 return None;
             }
             // C++ 359: default (AllowRegExp) context.
@@ -574,10 +593,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             )?;
 
             let value_end = self.cur_range().end;
-            if !self.eat(
+            if !self.eat_at(
                 TokenKind::r_brace,
                 GrammarContext::AllowJSXIdentifier,
                 " in JSX attribute",
+                Some("location of attribute"),
+                start,
             ) {
                 return None;
             }
@@ -637,7 +658,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let name = self.parse_jsx_element_name(AllowJSXMemberExpression::Yes)?;
 
         // C++ 406-411.
-        if !self.need(TokenKind::greater, " at end of JSX closing tag") {
+        if !self.need_at(
+            TokenKind::greater,
+            " at end of JSX closing tag",
+            Some("start of tag"),
+            start,
+        ) {
             return None;
         }
 
@@ -675,8 +701,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         if !self.check(TokenKind::identifier)
             && !self.lexer.token().is_res_word()
         {
-            // C++ 430: "as JSX element name", whatLoc = nullptr, {}.
-            self.error_expected_jsx_element_name("as JSX element name", None);
+            // C++ 430: "as JSX element name", what = nullptr, whatLoc = {}
+            // — a genuine no-hint site; no note to restore.
+            self.error_expected_jsx_element_name(
+                "as JSX element name",
+                None,
+                None,
+            );
             return None;
         }
 
@@ -699,9 +730,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             if !self.check(TokenKind::identifier)
                 && !self.lexer.token().is_res_word()
             {
-                // C++ 446-450: "in JSX element name", whatLoc = `start`.
+                // C++ 446-450: "in JSX element name", what = "start of JSX
+                // element name", whatLoc = `start`.
                 self.error_expected_jsx_element_name(
                     "in JSX element name",
+                    Some("start of JSX element name"),
                     Some(start),
                 );
                 return None;
@@ -739,9 +772,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             if !self.check(TokenKind::identifier)
                 && !self.lexer.token().is_res_word()
             {
-                // C++ 472-476: "in JSX element name", whatLoc = `start`.
+                // C++ 472-476: "in JSX element name", what = "start of JSX
+                // element name", whatLoc = `start`.
                 self.error_expected_jsx_element_name(
                     "in JSX element name",
+                    Some("start of JSX element name"),
                     Some(start),
                 );
                 return None;
@@ -793,17 +828,20 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         Some(name)
     }
 
-    /// Emit the C++ `errorExpected(TokenKind::identifier, where_, ...)`
-    /// diagnostic for a JSX element name. The C++ uses two distinct `where_`
-    /// strings AND two distinct `whatLoc`s: `"as JSX element name"` at the
-    /// leading name (jsx.cpp:430) passes `nullptr, {}` (no location — the
-    /// caller passes `None`), while the `:`/`.` continuation sites
-    /// (jsx.cpp:446-450 / 472-476, `"in JSX element name"`) pass a real
-    /// `start` (the caller passes `Some(start)`). Rendered via the same
-    /// "'<tok>' expected <where>" idiom as `need`/`error_expected*`.
+    /// Emit the C++ `errorExpected(TokenKind::identifier, where_, what,
+    /// whatLoc)` diagnostic for a JSX element name. The C++ uses two
+    /// distinct `where_` strings AND two distinct `what`/`whatLoc` pairs:
+    /// `"as JSX element name"` at the leading name (jsx.cpp:430) passes
+    /// `nullptr, {}` — no hint at all, so the caller passes `None, None`.
+    /// The `:`/`.` continuation sites (jsx.cpp:446-450 / 472-476,
+    /// `"in JSX element name"`) pass a real hint, `"start of JSX element
+    /// name"` at `start`, so the caller passes `Some("start of JSX element
+    /// name"), Some(start)`. Rendered via the same "'<tok>' expected <where>"
+    /// idiom as `need`/`error_expected*`.
     fn error_expected_jsx_element_name(
         &mut self,
         where_: &str,
+        what: Option<&str>,
         what_loc: Option<SMLoc>,
     ) {
         let msg = format!(
@@ -811,6 +849,6 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             crate::token_kinds::token_kind_str(TokenKind::identifier),
             where_,
         );
-        self.error_expected_msg(&msg, None, what_loc);
+        self.error_expected_msg(&msg, what, what_loc);
     }
 }

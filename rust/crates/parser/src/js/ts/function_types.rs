@@ -198,21 +198,27 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // C++ 345-351.
-        if !self.eat(
+        // C++ 345-351: errorExpected's `what`/`whatLoc` cite this
+        // parameter list's opening `(` via `start`.
+        if !self.eat_at(
             TokenKind::r_paren,
             GrammarContext::Type,
             " at end of function type parameters",
+            Some("start of parameters"),
+            start,
         ) {
             return None;
         }
 
-        // C++ 353-365.
+        // C++ 353-365: errorExpected's `what`/`whatLoc` cite this
+        // function type's start via `start`.
         if is_function {
-            if !self.eat(
+            if !self.eat_at(
                 TokenKind::equalgreater,
                 GrammarContext::Type,
                 " in function type",
+                Some("start of function"),
+                start,
             ) {
                 return None;
             }
@@ -269,7 +275,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// object-type call/method signatures.
     pub(super) fn parse_ts_function_type_params(
         &mut self,
-        _start: SMLoc,
+        start: SMLoc,
         params: &mut Vec<&'gc Node<'gc>>,
     ) -> bool {
         // C++ 394.
@@ -290,11 +296,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // C++ 408-414.
-        if !self.eat(
+        // C++ 408-414: errorExpected's `what`/`whatLoc` cite this
+        // parameter list's opening `(` via `start`.
+        if !self.eat_at(
             TokenKind::r_paren,
             GrammarContext::Type,
             " at end of function type parameters",
+            Some("start of parameters"),
+            start,
         ) {
             return false;
         }

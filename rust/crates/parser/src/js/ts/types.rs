@@ -108,8 +108,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             if self.check(TokenKind::less) {
                 type_params = Some(self.parse_ts_type_parameters()?);
             }
-            // C++ 62-67.
-            if !self.need(TokenKind::l_paren, " in constructor type") {
+            // C++ 62-67: what/whatLoc = "start of type" / `start`.
+            if !self.need_at(
+                TokenKind::l_paren,
+                " in constructor type",
+                Some("start of type"),
+                start,
+            ) {
                 return None;
             }
             // C++ 68-72.
@@ -121,8 +126,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         } else if self.check(TokenKind::less) {
             // C++ 73-83: generic function type `<T>(...) => U`.
             let type_params = self.parse_ts_type_parameters()?;
-            // C++ 77-78.
-            if !self.need(TokenKind::l_paren, " in function type") {
+            // C++ 77-78: what/whatLoc = "start of type" / `start`.
+            if !self.need_at(
+                TokenKind::l_paren,
+                " in function type",
+                Some("start of type"),
+                start,
+            ) {
                 return None;
             }
             // C++ 79-83.
@@ -140,21 +150,25 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         if self.check_and_eat(TokenKind::rw_extends, GrammarContext::Type) {
             // C++ 94-96.
             let opt_check = self.parse_type_annotation_ts(None)?;
-            // C++ 97-103.
-            if !self.eat(
+            // C++ 97-103: what/whatLoc = "start of type" / `start`.
+            if !self.eat_at(
                 TokenKind::question,
                 GrammarContext::Type,
                 " in conditional type",
+                Some("start of type"),
+                start,
             ) {
                 return None;
             }
 
-            // C++ 105-114.
+            // C++ 105-114: what/whatLoc = "start of type" / `start`.
             let opt_true = self.parse_type_annotation_ts(None)?;
-            if !self.eat(
+            if !self.eat_at(
                 TokenKind::colon,
                 GrammarContext::Type,
                 " in conditional type",
+                Some("start of type"),
+                start,
             ) {
                 return None;
             }
@@ -280,8 +294,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // C++ 210-215.
-        if !self.need(TokenKind::r_square, " at end of tuple type annotation") {
+        // C++ 210-215: what/whatLoc = "start of tuple" / `start`.
+        if !self.need_at(
+            TokenKind::r_square,
+            " at end of tuple type annotation",
+            Some("start of tuple"),
+            start,
+        ) {
             return None;
         }
 
@@ -320,10 +339,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             } else {
                 // C++ 882-897: indexed-access type.
                 let index_type = self.parse_type_annotation_ts(None)?;
-                if !self.eat(
+                // C++ 886-891: what/whatLoc = "start of type" / `start`.
+                if !self.eat_at(
                     TokenKind::r_square,
                     GrammarContext::Type,
                     " in indexed access type",
+                    Some("start of type"),
+                    start,
                 ) {
                     return None;
                 }
@@ -600,11 +622,18 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         // C++ 1092-1111.
         while self.check_and_eat(TokenKind::period, GrammarContext::Type) {
-            // C++ 1093-1100.
+            // C++ 1093-1100: bare `errorExpected` (not `need`), since `check`
+            // was already tested above. what/whatLoc = "start of type name" /
+            // `id_range.start` — the same point C++'s function-entry `start`
+            // names (the first identifier token's start).
             if !self.check(TokenKind::identifier)
                 && !self.lexer.token().is_res_word()
             {
-                self.need(TokenKind::identifier, " in qualified type name");
+                self.error_expected_msg(
+                    "'identifier' expected in qualified type name",
+                    Some("start of type name"),
+                    Some(id_range.start),
+                );
                 return None;
             }
             // C++ 1101-1106.
@@ -645,11 +674,17 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         debug_assert!(self.check(TokenKind::rw_typeof));
         let start = self.advance(GrammarContext::Type).start;
 
-        // C++ 1120-1124.
+        // C++ 1120-1124: bare `errorExpected` (not `need`), since the
+        // condition already tested `check`. what/whatLoc = "start of type
+        // query" / `start`.
         if !(self.lexer.token().is_res_word()
             || self.check(TokenKind::identifier))
         {
-            self.need(TokenKind::identifier, " in type query");
+            self.error_expected_msg(
+                "'identifier' expected in type query",
+                Some("start of type query"),
+                Some(start),
+            );
             return None;
         }
 
@@ -667,11 +702,18 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         // C++ 1133-1152.
         while self.check_and_eat(TokenKind::period, GrammarContext::Type) {
-            // C++ 1134-1141.
+            // C++ 1134-1141: bare `errorExpected` (not `need`), since `check`
+            // was already tested above. what/whatLoc = "start of type name" /
+            // `start` — this function's own `start` (the `typeof` keyword),
+            // not `id_range.start`.
             if !self.check(TokenKind::identifier)
                 && !self.lexer.token().is_res_word()
             {
-                self.need(TokenKind::identifier, " in qualified type name");
+                self.error_expected_msg(
+                    "'identifier' expected in qualified type name",
+                    Some("start of type name"),
+                    Some(start),
+                );
                 return None;
             }
             // C++ 1142-1147.

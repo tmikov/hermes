@@ -553,6 +553,26 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// call sites that pass no hint, i.e. `need(kind, where, nullptr,
     /// SMLoc{})`. Sites whose C++ counterpart passes a real `what`/`whatLoc`
     /// use `need_at` instead.
+    ///
+    /// END-STATE INVARIANT (S3 geometry-restoration sweep, verified by full
+    /// call-site audit against JSParserImpl.cpp/-flow.cpp/-ts.cpp/-jsx.cpp):
+    /// there are exactly 7 no-hint (`nullptr, {}`) sites in the whole C++
+    /// parser — flow.cpp:1232, 3461, 4855; jsx.cpp:260; ts.cpp:835 (five
+    /// genuine `need` calls) plus flow.cpp:4774 and jsx.cpp:430 (two direct
+    /// `errorExpected` calls with no `need`/`eat` guard, because their C++
+    /// condition is compound — e.g. `!check(identifier) &&
+    /// !tok_->isResWord()` — not a single-token `check`). This function is
+    /// called at exactly 6 real call sites: the 5 genuine `need` sites plus
+    /// flow.cpp:4774, which behaves identically to a `need(identifier,
+    /// where)` call even though C++ spells it as a manual check +
+    /// `errorExpected` (see `flow/params.rs::parse_type_param_flow`). The
+    /// 7th (jsx.cpp:430) keeps its compound-condition shape and is ported
+    /// via the dedicated `jsx.rs::error_expected_jsx_element_name` wrapper
+    /// (passing `None, None`), not through this function — matching how
+    /// every OTHER compound-condition direct `errorExpected` call in this
+    /// crate routes through `error_expected_msg` rather than `need`/`eat`.
+    /// There are zero no-hint `eat` sites in C++ (see `eat_at`'s doc), so
+    /// there is no plain `eat` counterpart to this function.
     pub(super) fn need(&mut self, kind: TokenKind, where_: &str) -> bool {
         if self.check(kind) {
             return true;
@@ -749,27 +769,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     /// Check the current token is `kind`; if so consume and return true, else
-    /// report an error and return false. Port of `eat`
-    /// (JSParserImpl.cpp:240-251) as invoked by the C++ call sites that pass
-    /// no hint, i.e. `eat(kind, gc, where, nullptr, SMLoc{})`. Sites whose
-    /// C++ counterpart passes a real `what`/`whatLoc` use `eat_at`.
-    pub(super) fn eat(
-        &mut self,
-        kind: TokenKind,
-        grammar_context: GrammarContext,
-        where_: &str,
-    ) -> bool {
-        if self.need(kind, where_) {
-            self.advance(grammar_context);
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Like `eat`, but for call sites whose C++ `eat(kind, gc, where, what,
-    /// whatLoc)` counterpart passes a real `whatLoc`. Port of the same
-    /// `eat` (JSParserImpl.cpp:240-251), which simply forwards to `need`.
+    /// report an error and return false. Port of `eat` (JSParserImpl.cpp:
+    /// 240-251). Unlike `need`, EVERY C++ `eat` call site across the whole
+    /// parser (JSParserImpl.cpp/-flow.cpp/-ts.cpp/-jsx.cpp) passes a real
+    /// `whatLoc` — none of the 7 no-hint (`nullptr, {}`) sites is an `eat`
+    /// call — so there is no plain-`eat` counterpart here; every site uses
+    /// `eat_at`. Port of the same `eat`, which simply forwards to `need_at`.
     pub(super) fn eat_at(
         &mut self,
         kind: TokenKind,

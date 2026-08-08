@@ -76,7 +76,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         // C++ 4066-4073.
         let end = self.cur_range().end;
-        if !self.eat(
+        if !self.eat_at(
             if exact {
                 TokenKind::piper_brace
             } else {
@@ -84,6 +84,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             },
             GrammarContext::Type,
             " at end of exact object type annotation",
+            Some("start of object"),
+            start,
         ) {
             return None;
         }
@@ -190,7 +192,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     TokenKind::r_brace,
                     TokenKind::piper_brace,
                     " after property",
-                    None,
+                    Some("start of property"),
                     start,
                 );
                 return false;
@@ -291,7 +293,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     self.need_at(
                         TokenKind::identifier,
                         " in internal slot",
-                        None,
+                        Some("start of internal slot"),
                         start,
                     );
                     return false;
@@ -312,17 +314,21 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 self.advance(GrammarContext::Type);
 
                 // C++ 4219-4232.
-                if !self.eat(
+                if !self.eat_at(
                     TokenKind::r_square,
                     GrammarContext::Type,
                     " at end of internal slot",
+                    Some("start of internal slot"),
+                    start,
                 ) {
                     return false;
                 }
-                if !self.eat(
+                if !self.eat_at(
                     TokenKind::r_square,
                     GrammarContext::Type,
                     " at end of internal slot",
+                    Some("start of internal slot"),
+                    start,
                 ) {
                     return false;
                 }
@@ -357,10 +363,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                         TokenKind::question,
                         GrammarContext::Type,
                     );
-                    if !self.eat(
+                    if !self.eat_at(
                         TokenKind::colon,
                         GrammarContext::Type,
                         " in type annotation",
+                        Some("start of annotation"),
+                        start,
                     ) {
                         return false;
                     }
@@ -613,7 +621,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             TokenKind::colon,
             TokenKind::question,
             " in property type annotation",
-            None,
+            Some("start of properties"),
             start,
         );
         false
@@ -635,10 +643,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let optional =
             self.check_and_eat(TokenKind::question, GrammarContext::Type);
         // C++ 4451-4457.
-        if !self.eat(
+        if !self.eat_at(
             TokenKind::colon,
             GrammarContext::Type,
             " in type property",
+            Some("start of property"),
+            start,
         ) {
             return None;
         }
@@ -780,10 +790,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             .parse_type_annotation_flow(None, AllowAnonFunctionType::Yes)?;
 
         // C++ 4570-4576.
-        if !self.eat(
+        if !self.eat_at(
             TokenKind::r_square,
             GrammarContext::Type,
             " in mapped type",
+            Some("start of mapped type"),
+            start,
         ) {
             return None;
         }
@@ -794,19 +806,23 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // NodeString.
         let mut optional: NodeString = INVALID_ATOM_BYTES;
         if self.check_and_eat(TokenKind::plus, GrammarContext::Type) {
-            if !self.eat(
+            if !self.eat_at(
                 TokenKind::question,
                 GrammarContext::Type,
                 " in mapped type",
+                Some("start of mapped type"),
+                start,
             ) {
                 return None;
             }
             optional = self.lexer.get_identifier(b"PlusOptional");
         } else if self.check_and_eat(TokenKind::minus, GrammarContext::Type) {
-            if !self.eat(
+            if !self.eat_at(
                 TokenKind::question,
                 GrammarContext::Type,
                 " in mapped type",
+                Some("start of mapped type"),
+                start,
             ) {
                 return None;
             }
@@ -817,10 +833,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         // C++ 4603-4609.
-        if !self.eat(
+        if !self.eat_at(
             TokenKind::colon,
             GrammarContext::Type,
             " in mapped type",
+            Some("start of mapped type"),
+            start,
         ) {
             return None;
         }
@@ -866,13 +884,24 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         // C++ 4643-4649.
-        if !self.eat(TokenKind::r_square, GrammarContext::Type, " in indexer")
-        {
+        if !self.eat_at(
+            TokenKind::r_square,
+            GrammarContext::Type,
+            " in indexer",
+            Some("start of indexer"),
+            start,
+        ) {
             return None;
         }
 
         // C++ 4651-4657.
-        if !self.eat(TokenKind::colon, GrammarContext::Type, " in indexer") {
+        if !self.eat_at(
+            TokenKind::colon,
+            GrammarContext::Type,
+            " in indexer",
+            Some("start of indexer"),
+            start,
+        ) {
             return None;
         }
 
