@@ -467,7 +467,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // `if (!checkAndEat(asIdent_)) error(tok_->getStartLoc(), ...)` — the
         // `error(SMLoc, Twine)` POINT overload, a bare caret with no
         // underline. `error_cur` is the wrong helper here: it underlines the
-        // whole current token (`error(const Twine&)`, cpp:482-484's
+        // whole current token (`error(const Twine&)`, JSParserImpl.h:482-484's
         // no-location overload), not a bare caret.
         if self.check_name(b"as") {
             self.advance(GrammarContext::AllowRegExp);

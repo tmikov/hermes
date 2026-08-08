@@ -261,10 +261,17 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let delegate =
             self.check_and_eat(TokenKind::star, GrammarContext::AllowRegExp);
 
-        // C++ 4674-4680: parse the argument. The simplified Rust signature only
-        // takes `param`, so the C++ eagerly/AllowTypedArrowFunction/
-        // CoverTypedParameters args are not threaded.
-        let arg = self.parse_assignment_expression(param.get(PARAM_IN), false, AllowTypedArrowFunction::Yes, CoverTypedParameters::Yes, None)?;
+        // C++ 4674-4680: parse the argument, forcing eagerly=false and
+        // overriding CoverTypedParameters to No (the ambient
+        // cover-typed-parameters cover grammar doesn't apply inside a yield
+        // argument).
+        let arg = self.parse_assignment_expression(
+            param.get(PARAM_IN),
+            false,
+            AllowTypedArrowFunction::Yes,
+            CoverTypedParameters::No,
+            None,
+        )?;
 
         // C++ 4682-4685: setLocation(yieldLoc, getPrevTokenEndLoc(), node).
         let end = self.lexer.prev_token_end();
@@ -1486,12 +1493,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Builds a fresh `ArrayPattern` with freshly-reparsed elements.
     ///
     /// `in_decl` MUST be threaded into both recursive
-    /// `reparse_assignment_pattern` calls below (cpp:6010, 6032 both pass
+    /// `reparse_assignment_pattern` calls below (cpp:6012, 6034 both pass
     /// the caller's `inDecl` verbatim, NOT `false`) — dropping it here would
     /// silently disable the "identifier or pattern expected" catch-all
-    /// (this function's own top-level `if (inDecl)` arm, reached via
-    /// recursion) for every element nested inside an array pattern reached
-    /// with `in_decl=true` (e.g. arrow-function parameters).
+    /// (`reparse_assignment_pattern`'s own top-level `if (inDecl)` arm,
+    /// ~line 1437, reached via recursion) for every element nested inside an
+    /// array pattern reached with `in_decl=true` (e.g. arrow-function
+    /// parameters).
     fn reparse_array_assignment_pattern(
         &mut self,
         aen: &'gc ArrayExpression<'gc>,
@@ -1588,10 +1596,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Builds a fresh `ObjectPattern` with freshly-reparsed properties.
     ///
     /// `in_decl` MUST be threaded into the property-value recursive
-    /// `reparse_assignment_pattern` call below (cpp:6122 passes the caller's
-    /// `inDecl` verbatim) and gates the rest-property identifier check
-    /// (cpp:6079-6086) — dropping it (as an earlier version of this port did)
-    /// silently disables both for every object pattern reached with
+    /// `reparse_assignment_pattern` call below (cpp:6128 passes the caller's
+    /// `inDecl` verbatim) and gates the rest-property identifier check —
+    /// the live `#else` arm at cpp:6080-6087 (NOT the dead `#if 0` arm
+    /// starting at cpp:6074) — dropping it (as an earlier version of this
+    /// port did) silently disables both for every object pattern reached with
     /// `in_decl=true` (e.g. arrow-function parameters: `({...a.b}) => 1`
     /// should report "identifier expected in parameter list", not fall
     /// through to a later, unrelated check).

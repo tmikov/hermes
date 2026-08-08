@@ -2036,7 +2036,7 @@ cargo build --manifest-path rust/Cargo.toml --workspace --all-targets
 cargo clippy --manifest-path rust/Cargo.toml -p parser --all-targets
   → warning count identical before/after (git stash/pop verified)
 cargo test --manifest-path rust/Cargo.toml --workspace
-  → all suites green, 0 failed (including 6 new tests in
+  → all suites green, 0 failed (including 5 new tests in
     error_expected_range.rs, now 9/9)
 REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml -p sema \
     --features dump-bin --test sema_differential -- --nocapture

@@ -2827,7 +2827,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             Some(ident) => ident,
             None => {
                 // Point location, NOT the current token's range: C++
-                // (cpp:1577-1579) calls `error(tok_->getStartLoc(), ...)` —
+                // (cpp:1579-1581) calls `error(tok_->getStartLoc(), ...)` —
                 // the `error(SMLoc, Twine)` overload — so the caret is bare.
                 self.error_at_loc(
                     self.cur_start(),
