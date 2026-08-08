@@ -649,13 +649,44 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 };
             }
 
-            // Flow typeParams error (C++ 6468-6477): generic type parameters were
-            // parsed but no `=>` arrow follows.
-            if type_params.is_some() {
-                let range = this.cur_range();
-                this.error_at(
-                    range,
-                    "'=>' expected in generic arrow function",
+            // Flow typeParams error (C++ 6468-6477): generic type parameters
+            // were parsed but no `=>` arrow follows. C++:
+            // errorExpected(equalgreater, "in generic arrow function",
+            // "start of function", typeParams->getStartLoc()).
+            //
+            // Reachability note: on the natural repro (`const f = <T>(x: T)
+            // foobar;`), hermesc renders NOTHING for this diagnostic — it fires
+            // while still inside the enclosing `CollectMessagesRAII` scope
+            // (cpp:6292, opened for the type-param-head speculative retry) and
+            // is discarded on scope exit, since only the retry's SUCCESS path
+            // calls `setDiscardMessages(false)`. Verified directly:
+            // `hermesc -dump-ast -dump-source-location=both -parse-flow` on
+            // that input exits 2 with EMPTY stdout/stderr. The Rust port's own
+            // `begin_collecting`/`end_collecting` pairing around the retry
+            // (this function, ~line 444-461) closes and discards the FIRST
+            // attempt's collection scope before the retry even starts, rather
+            // than keeping one collection scope open across the whole
+            // speculative block the way the single C++ RAII object does — so,
+            // unlike C++, this diagnostic (and the sibling "type parameters
+            // must be used..." error a few lines up) is NOT collected at all
+            // when it fires and reaches the handler directly. That ordering
+            // bug is pre-existing (predates this call site's restoration) and
+            // out of scope here — tracked by this comment pending a proper
+            // backlog entry; fixing it is a `begin_collecting`/`end_collecting`
+            // restructure, not a geometry change. Because hermesc discards the
+            // message, a corpus/differential file cannot pin this rendering;
+            // it is pinned instead by an oracle-free unit test
+            // (`tests/error_expected_range.rs`).
+            if let Some(tp) = type_params {
+                this.error_expected_msg(
+                    &format!(
+                        "'{}' expected in generic arrow function",
+                        crate::token_kinds::token_kind_str(
+                            TokenKind::equalgreater
+                        )
+                    ),
+                    Some("start of function"),
+                    Some(tp.range().start),
                 );
                 return LevelResult::Error;
             }

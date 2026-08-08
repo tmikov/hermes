@@ -704,7 +704,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // C++ 430: "as JSX element name", what = nullptr, whatLoc = {}
             // — a genuine no-hint site; no note to restore.
             self.error_expected_jsx_element_name(
-                "as JSX element name",
+                " as JSX element name",
                 None,
                 None,
             );
@@ -733,7 +733,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 // C++ 446-450: "in JSX element name", what = "start of JSX
                 // element name", whatLoc = `start`.
                 self.error_expected_jsx_element_name(
-                    "in JSX element name",
+                    " in JSX element name",
                     Some("start of JSX element name"),
                     Some(start),
                 );
@@ -775,7 +775,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 // C++ 472-476: "in JSX element name", what = "start of JSX
                 // element name", whatLoc = `start`.
                 self.error_expected_jsx_element_name(
-                    "in JSX element name",
+                    " in JSX element name",
                     Some("start of JSX element name"),
                     Some(start),
                 );
@@ -836,8 +836,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// The `:`/`.` continuation sites (jsx.cpp:446-450 / 472-476,
     /// `"in JSX element name"`) pass a real hint, `"start of JSX element
     /// name"` at `start`, so the caller passes `Some("start of JSX element
-    /// name"), Some(start)`. Rendered via the same "'<tok>' expected <where>"
-    /// idiom as `need`/`error_expected*`.
+    /// name"), Some(start)`. Rendered via the same "'<tok>' expected<where_>"
+    /// idiom as `need`/`error_expected*` — like those, `where_` itself must
+    /// carry the leading space (C++'s `errorExpected` inserts it via
+    /// `ss << " " << where`); callers pass `" as JSX element name"`/`" in
+    /// JSX element name"`, not the bare C++ literal.
     fn error_expected_jsx_element_name(
         &mut self,
         where_: &str,
@@ -845,7 +848,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         what_loc: Option<SMLoc>,
     ) {
         let msg = format!(
-            "'{}' expected {}",
+            "'{}' expected{}",
             crate::token_kinds::token_kind_str(TokenKind::identifier),
             where_,
         );
