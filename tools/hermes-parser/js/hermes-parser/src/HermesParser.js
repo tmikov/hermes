@@ -35,7 +35,7 @@ function initHermesParserWASM() {
     return;
   }
 
-  HermesParserWASM = HermesParserWASMModule({
+  const wasmModule = {
     /**
      * The emscripten version of `quit` unconditionally assigns the `status` to
      * `process.exitCode` which overrides any pre-existing code that has been
@@ -45,7 +45,35 @@ function initHermesParserWASM() {
     quit(_status: number, toThrow: Error) {
       throw toThrow;
     },
-  });
+  };
+
+  // The emscripten `-sMODULARIZE` factory used to return the module object
+  // itself. Since emscripten 4.0.12 it always returns a Promise, even when
+  // `-sWASM_ASYNC_COMPILATION=0` makes instantiation fully synchronous
+  // (emscripten ChangeLog 4.0.12, emscripten-core/emscripten#24727).
+  //
+  // The factory populates the object it is handed, and this module is built
+  // with `-sSINGLE_FILE=1 -sWASM_ASYNC_COMPILATION=0` and has no run
+  // dependencies, so that object is completely initialized by the time the
+  // factory returns. Using it instead of the return value keeps `parse()`
+  // synchronous under both old and new emscripten.
+  const factoryResult = HermesParserWASMModule(wasmModule);
+  if (typeof factoryResult?.then === 'function') {
+    // Nothing awaits this promise, so report a rejected initialization rather
+    // than leaving it unhandled.
+    factoryResult.then(undefined, (error: mixed) => {
+      // eslint-disable-next-line no-console
+      console.error('HermesParserWASM failed to initialize:', error);
+    });
+  }
+
+  if (typeof wasmModule.cwrap !== 'function') {
+    throw new Error(
+      'HermesParserWASM did not initialize synchronously. It must be built ' +
+        'with `-sSINGLE_FILE=1 -sWASM_ASYNC_COMPILATION=0`.',
+    );
+  }
+  HermesParserWASM = wasmModule;
 
   hermesParse = HermesParserWASM.cwrap('hermesParse', 'number', [
     'number',

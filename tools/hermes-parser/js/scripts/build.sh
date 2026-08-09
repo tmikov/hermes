@@ -36,7 +36,15 @@ export SKIP_HERMES_PARSER_OVERRIDE=1
 # Yarn install all packages
 yarn install
 
-# Use internal FB build or pass path to WASM parser as first command line argument
+# Use internal FB build or pass path to WASM parser as first command line argument.
+#
+# Outside the internal build there is no script that produces one, so it has to
+# be built and passed in explicitly:
+#
+#   source /path/to/emsdk/emsdk_env.sh
+#   emcmake cmake -B build-wasm -G Ninja -DCMAKE_BUILD_TYPE=Release
+#   cmake --build build-wasm --target hermes-parser-wasm
+#   ./build.sh "$PWD/build-wasm/bin/hermes-parser-wasm.js"
 FB_BUILD_WASM_PARSER="$THIS_DIR/facebook/buildWasmParser.sh"
 if [[ -f "$1" ]]; then
   WASM_PARSER="$1"
@@ -47,12 +55,18 @@ else
   exit 1
 fi
 
-# Use internal FB build or pass path to include path as second command line argument
+# Use internal FB build or pass path to include path as second command line
+# argument. In an open-source checkout the headers genESTreeJSON.js needs
+# (hermes/AST/NodeKinds.def and friends) are just the repository's include
+# directory, so default to that rather than failing.
 FB_GET_INCLUDE_PATH="$THIS_DIR/facebook/getIncludePath.sh"
+REPO_INCLUDE_PATH="$THIS_DIR/../../../../include"
 if [[ -d "$2" ]]; then
   INCLUDE_PATH="$2"
 elif [[ -f "$FB_GET_INCLUDE_PATH" ]]; then
   INCLUDE_PATH=$("$FB_GET_INCLUDE_PATH")
+elif [[ -d "$REPO_INCLUDE_PATH" ]]; then
+  INCLUDE_PATH="$REPO_INCLUDE_PATH"
 else
   echo "Failed to get include path" 1>&2
   exit 1
