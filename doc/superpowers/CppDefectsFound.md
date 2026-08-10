@@ -19,6 +19,17 @@ explicit pin that *asserts the buggy behavior* (so silent drift is caught). If a
 defect is fixed in C++, flip the corresponding pin (named per item) in the same
 change.
 
+**Update (2026-08-10):** all 11 items were fixed upstream on the 2026-08-08
+branch, then cherry-picked into this branch (11 upstream commits, Task 1 of
+`doc/superpowers/plans/2026-08-10-cpp-defect-fixes-propagation.md`) and
+mirrored into the Rust port across four Rust tasks the same day (parser:
+JSX/match/JSON; resolver: promoter/dead-code/async-export/export-wording;
+resolver: `$SHBuiltin`/field-init scope; dumper + stable-sort note
+retirement). Every pin below is flipped; see each item's `Fixed upstream`/
+`Pin flipped` lines and the summary table. This document is kept as the
+historical record of what the port's own differential testing found — do not
+delete the original analyses.
+
 ---
 
 ## 1. `using` declaration + block-nested function aborts the promoter
@@ -42,6 +53,14 @@ scope containing both a `using` declaration and a block-scoped function trips it
 
 **Port pin:** `rust/crates/sema/src/resolver/promoter.rs` mirrors with a
 `debug_assert!` (release treats it as `Var`, matching Release C++).
+
+**Fixed upstream:** `4ad67c992` (2026-08-08 branch), cherry-picked to `rust`
+2026-08-10 as `e4408f849`.
+**Pin flipped:** `promoter.rs`'s `extract_declared_idents` no longer asserts
+`kind == ident_var`; it now branches `var`/`let`/else-lexical (matching the
+C++ fix's own branch order), so `using`/`await using` return `Const` instead
+of aborting. Live corpus pin: `using-scoped-fn-promotion.js`. Rust mirror
+commit `044b815d1` (Task 3 of the propagation plan).
 
 ---
 
@@ -71,6 +90,14 @@ the dump), which is why it survived.
 ("a hoisted FunctionDeclaration always has an id"); the parser-corpus MANIFEST
 carries the landmine row.
 
+**Fixed upstream:** `918158cb0` (2026-08-08 branch), cherry-picked to `rust`
+2026-08-10 as `179fb8ca3`.
+**Pin flipped:** `dump_context.rs`'s `print_scope` no longer `.expect()`s a
+hoisted `FunctionDeclaration`'s id; on `None` it now prints `*default*`,
+matching the C++ fix's `SemContext.cpp:493-501`. Live corpus pin (previously
+excluded, now imported): `sema_corpus_parser/anon-export-default.js`. Rust
+mirror commit `400f108ae` (Task 5 of the propagation plan).
+
 ---
 
 ## 3. `with(o){x;}` + `resolveASTForParser` + `semDump` → unresolvable-decl assert
@@ -95,6 +122,19 @@ unresolvable identifiers. Release C++ returns null and the dumper prints ` UNR`
 
 **Port pin:** the Rust dumper deliberately reproduces the *Release* behavior;
 deviation argued at `rust/crates/sema/src/dump.rs:82-101`.
+
+**Fixed upstream:** `918158cb0` (2026-08-08 branch), cherry-picked to `rust`
+2026-08-10 as `179fb8ca3` — same commit as item 2 (two hunks, one file).
+**Pin flipped:** no Rust code change was needed (`dump.rs`'s
+`enter_identifier` already checked `unresolvable` before calling
+`get_expression_decl`); what changed is that the deviation is now
+**retired** — `918158cb0` taught the C++ dumper the same guard
+(`SemResolve.cpp:99-106`), so debug C++ now matches release C++ matches this
+port, and the "deliberately reproduces Release behavior" argument at
+`dump.rs:82-101` is rewritten to record the guard as *matching* upstream,
+not diverging from it. Live corpus pin (previously excluded, now imported):
+`sema_corpus_parser/with-statement.js`. Rust mirror commit `400f108ae`
+(Task 5).
 
 ---
 
@@ -121,6 +161,18 @@ list (S2). The Rust side reproduces the mismatch class via its own
 `debug_assert_eq!` at `rust/crates/sema/src/dump_context.rs:241` (see also the
 `--release` masking note in the MANIFEST).
 
+**Fixed upstream:** `b351e1184` (2026-08-08 branch), cherry-picked to `rust`
+2026-08-10 as `48d221fb2`.
+**Pin flipped:** `resolver/classes.rs`'s `visit_class_private_property` and
+`visit_class_property` now save/restore `cur_scope` to the initializer
+function's body scope (matching the C++ fix's `SaveAndRestore`) around the
+value visit, so a class expression in a field initializer's scope is created
+under the initializer function, not the enclosing class. Live corpus pin
+(previously excluded, now imported): `class-field-class-expr.js`; also
+un-broke the pre-existing upstream sweep witness
+`test/hermes/computed-fn-name.js` (moved from the sweep's panic bucket to
+byte-identical). Rust mirror commit `7f8fd8f17` (Task 4).
+
 ---
 
 ## 5. `$SHBuiltin.#x()` aborts on a `PrivateName` property
@@ -140,6 +192,17 @@ expression's property may be a `PrivateName`.
 
 **Port pin:** `calls.rs`'s `sh_builtin_property_name` reproduces the failing cast
 as an explicit panic (documented in the MANIFEST, S2 T6).
+
+**Fixed upstream:** `07efab88d` (2026-08-08 branch), cherry-picked to `rust`
+2026-08-10 as `416aafcd2`.
+**Pin flipped:** `sh_builtin_property_name` now returns `Option<Atom>`
+instead of panicking (`Node::Identifier(id) => Some(...)`, `_ => None`), and
+the call site hoists the check into the recognition condition (`&&
+prop_ident.is_some()`), mirroring the C++ fix's `dyn_cast` restructuring —
+so `$SHBuiltin.#x()` now falls through to the pre-existing `invalid use of
+$SHBuiltin` diagnostic instead of asserting. Live corpus pin (previously
+excluded, now imported): `shbuiltin-private-name.js`. Rust mirror commit
+`7f8fd8f17` (Task 4).
 
 ---
 
@@ -175,6 +238,17 @@ intended to be forwarded, which it is at cpp:1537).
 *buggy* `async == false` outcome with a non-degeneracy check — flip it together
 with the C++ fix.
 
+**Fixed upstream:** `6b59daf0d` (2026-08-08 branch), cherry-picked to `rust`
+2026-08-10 as `4a0fe2bfd`.
+**Pin flipped:** `resolver/modules.rs`'s rewrite #4 now passes
+`func_decl.r#async.get()` instead of a literal `false` when building the
+`FunctionExpression`. `tests/resolver.rs`'s
+`export_default_anonymous_function_is_rewritten_to_an_expression` now
+asserts `async == true` (the correct, non-buggy outcome), and a new
+companion test, `export_default_anonymous_non_async_function_stays_non_async`,
+pins the other side of the forwarding. Live corpus pin:
+`export-default-anon-async.js`. Rust mirror commit `044b815d1` (Task 3).
+
 ---
 
 ## 7. Compiler-side `JSONParser` has no recursion limit
@@ -196,6 +270,16 @@ maps/metadata — not the runtime `JSON.parse`.)
 **Port pin:** parity-by-absence, documented in
 `rust/crates/parser/src/json/parser.rs` module doc; if C++ gains a limit, port it.
 
+**Fixed upstream:** `b21856de4` (2026-08-08 branch), cherry-picked to `rust`
+2026-08-10 as `0b8bbd1fc`.
+**Pin flipped:** `json/parser.rs` gained a `recursion_depth: u32` field and
+`parse_value` is now a depth-checking wrapper around the old body
+(`parse_value_impl`) — `error("Too many nested JSON values")` at the limit,
+mirroring the C++ fix's split. `MAX_RECURSION_DEPTH` is profile-selected
+(128 debug/ASan, 1024 release), matching `JSParserImpl::MAX_RECURSION_DEPTH`'s
+own `#ifdef` ladder. Live gate: `parser/tests/json_corpus/err_deep_nesting.json`
+(json differential corpus 16 → 17). Rust mirror commit `ad4d7eb68` (Task 2).
+
 ---
 
 ## 8. Export diagnostics: inconsistent wording
@@ -210,6 +294,15 @@ cmake-build-asan/bin/hermesc -dump-sema /tmp/bug8.js
 `ExportNamed`/`ExportDefault` (cpp:1511/1520) say "module mode";
 `ExportAll` (cpp:1553) says "CommonJS module mode". Cosmetic; the port preserves
 both strings exactly (`resolver/modules.rs`).
+
+**Fixed upstream:** `f90a83146` (2026-08-08 branch), cherry-picked to `rust`
+2026-08-10 as `4193b558a`.
+**Pin flipped:** `resolver/modules.rs`'s `visit_export_all_declaration` now
+emits `"'export' statement requires module mode"`, byte-identical to the
+Named/Default sites — the "CommonJS module mode" spelling is gone. The two
+files this un-diverged, `export.js` and `module-export-plain.js`, re-green
+with no corpus-content change (verified byte-identical against the oracle
+before and after). Rust mirror commit `044b815d1` (Task 3).
 
 ---
 
@@ -226,6 +319,18 @@ order. Fix would be `std::stable_sort`. The port uses a stable sort (documented
 deviation, `rust/crates/support/src/manager.rs:903-909`), which is why the file
 sits in the corpus's Deferred list as unfixable-by-construction.
 
+**Fixed upstream:** `5f313a13a` (2026-08-08 branch), cherry-picked to `rust`
+2026-08-10 as `7805e2103`.
+**Pin flipped:** no Rust code change was needed — `manager.rs`'s
+`sort_by_key` was already stable, so the "documented deviation" was really a
+one-sided divergence (C++ unstable, Rust stable) that happened to agree on
+this file's tie. The comment at `manager.rs:903-914` is rewritten to record
+the divergence as **retired**: `5f313a13a` changed C++ to
+`std::stable_sort`, so both sides now break same-location ties in emission
+order by construction, not by luck. `test/Sema/invalid-args-eval.js` is
+imported into the corpus (previously Deferred). Rust mirror commit
+`400f108ae` (Task 5).
+
 ---
 
 ## 10. Dead code / stale docs (no repro needed — code reading)
@@ -235,11 +340,26 @@ sits in the corpus's Deferred list as unfixable-by-construction.
   "are deleted from their own scope and added to the function scope") describes
   behavior the implementation does not have. Port carries the structure with a
   `DEAD in C++ too` comment (`resolver/promoter.rs`).
+  **Fixed upstream:** `9232443cf` (2026-08-08 branch), cherry-picked to `rust`
+  2026-08-10 as `ffcdbdd52`. **Pin flipped:** both halves removed —
+  `promoter.rs`'s write-only `new_decls`/`ScopeDecls::new()`/two `push`
+  sites are gone, and the module doc's header quote now ends with the
+  corrected upstream sentence. Rust mirror commit `044b815d1` (Task 3).
 - **`SemanticResolver.cpp:1931-1937`:** `if (false && localEval)` — permanently
-  dead branch (the port's `unresolver.rs` documents it).
+  dead branch (the port's `unresolver.rs` documents it). **Not part of the
+  11 upstream fixes** — this dead branch is untouched by the 2026-08-08
+  cherry-picks and remains dead in both C++ and Rust.
 - **`JSParserImpl-jsx.cpp:493`:** the `isa<MemberExpressionNode>` check is dead —
   `JSXMemberExpression` derives from the `JSX` base, not `MemberExpression`
   (found in parser phase P8; mirrored harmlessly).
+  **Fixed upstream:** `37520ccef` (2026-08-08 branch), cherry-picked to
+  `rust` 2026-08-10 as `51035e8c2`. **Pin flipped:** `jsx.rs`'s
+  `parse_jsx_element_name` now matches `Node::JSXMemberExpression(_)`
+  instead of the always-false `Node::MemberExpression(_)`, mirroring the
+  C++ one-line fix — a JSX attribute name that is a member expression
+  (`<foo a.b="1">`) is now correctly rejected. New unit test
+  `jsx_member_expression_attribute_name_is_rejected`. Rust mirror commit
+  `ad4d7eb68` (Task 2).
 
 ---
 
@@ -277,19 +397,42 @@ If the C++ side is fixed (guarding the call, or having the binding-pattern
 parser bail out before reaching it), mirror the fix in the Rust match-pattern
 parser rather than relaxing the `debug_assert!`.
 
+**Fixed upstream:** `550aafe33` (2026-08-08 branch), cherry-picked to `rust`
+2026-08-10 as `bfeeb404f`.
+**Pin flipped:** `match_.rs`'s `parse_match_binding_pattern_flow` now
+`return`s `None` right after reporting the diagnostic, mirroring the C++
+fix's early return — the caller never reaches
+`get_res_word_or_identifier`/`token.rs:133`'s `debug_assert!` on that token,
+so the `debug_assert!` itself is **unchanged** (it stays a faithful port of
+`JSLexer.h:160` and must not be relaxed; only the caller stopped reaching
+it, exactly as upstream). New unit test
+`match_binding_pattern_without_identifier_recovers_cleanly`; live corpus pin
+`sema_corpus/flow-match-pattern-binding-error.js`. Rust mirror commit
+`ad4d7eb68` (Task 2).
+
 ---
 
 ## Summary table
 
-| # | Input | Effect | Site | Release behavior |
-|---|-------|--------|------|------------------|
-| 1 | `using` + block fn | abort | ScopedFunctionPromoter.cpp:255-262 | treated as `var` |
-| 2 | anon export default via parser entry + dump | abort | SemContext.cpp:493-494 | crash (null deref) or UB — untested |
-| 3 | `with` via parser entry + dump | abort | SemContext.h:559 | prints ` UNR`, fine |
-| 4 | `class C { x = class {}; }` | abort | SemContext.cpp:478 | dump silently wrong/partial — untested |
-| 5 | `$SHBuiltin.#x()` | abort | SemanticResolver.cpp:1166-1167 | UB cast — untested |
-| 6 | anon `export default async function` (`-commonjs`) | **wrong semantics** | SemanticResolver.cpp:1538 | same (not assert-gated) |
-| 7 | deep JSON | stack overflow | JSONParser.cpp | same |
-| 8 | export outside module mode | wording | cpp:1511/1553 | same |
-| 9 | same-location diagnostics | unstable order | SourceErrorManager.cpp:61-71 | same |
-| 11 | `match` binding pattern, bad token | abort | JSLexer.h:160 | untested |
+**Status (2026-08-10): all 11 items fixed upstream and mirrored into the Rust
+port.** See `doc/superpowers/plans/2026-08-10-cpp-defect-fixes-propagation.md`
+for the propagation plan and each item above for its `Fixed upstream`/
+`Pin flipped` lines.
+
+| # | Input | Effect | Site | Release behavior | Fixed upstream (in-tree) |
+|---|-------|--------|------|------------------|---------------------------|
+| 1 | `using` + block fn | abort | ScopedFunctionPromoter.cpp:255-262 | treated as `var` | `4ad67c992` (`e4408f849`) |
+| 2 | anon export default via parser entry + dump | abort | SemContext.cpp:493-494 | crash (null deref) or UB — untested | `918158cb0` (`179fb8ca3`) |
+| 3 | `with` via parser entry + dump | abort | SemContext.h:559 | prints ` UNR`, fine | `918158cb0` (`179fb8ca3`) |
+| 4 | `class C { x = class {}; }` | abort | SemContext.cpp:478 | dump silently wrong/partial — untested | `b351e1184` (`48d221fb2`) |
+| 5 | `$SHBuiltin.#x()` | abort | SemanticResolver.cpp:1166-1167 | UB cast — untested | `07efab88d` (`416aafcd2`) |
+| 6 | anon `export default async function` (`-commonjs`) | **wrong semantics** | SemanticResolver.cpp:1538 | same (not assert-gated) | `6b59daf0d` (`4a0fe2bfd`) |
+| 7 | deep JSON | stack overflow | JSONParser.cpp | same | `b21856de4` (`0b8bbd1fc`) |
+| 8 | export outside module mode | wording | cpp:1511/1553 | same | `f90a83146` (`4193b558a`) |
+| 9 | same-location diagnostics | unstable order | SourceErrorManager.cpp:61-71 | same | `5f313a13a` (`7805e2103`) |
+| 10a | `ScopedFunctionPromoter` dead `newDecls` | dead code | ScopedFunctionPromoter.cpp:174-206 | same | `9232443cf` (`ffcdbdd52`) |
+| 10c | `JSParserImpl-jsx.cpp:493` dead `isa<MemberExpressionNode>` | dead code (was harmless) | jsx.cpp:493 | same | `37520ccef` (`51035e8c2`) |
+| 11 | `match` binding pattern, bad token | abort | JSLexer.h:160 | untested | `550aafe33` (`bfeeb404f`) |
+
+(Item 10b, `SemanticResolver.cpp:1931-1937`'s `if (false && localEval)`, is
+not part of the 11 fixes and remains open/dead in both languages.)

@@ -94,20 +94,22 @@ validation commands, and workflow.
 > `resolver/modules.rs`; new C++ tool `tools/sema-parser-dump/`; new corpus `sema_corpus_parser/`.
 > Gates (live, green):
 > `REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml -p sema --features dump-bin --test sema_differential -- --nocapture`
-> → "sema differential (tests/sema_corpus): **212 corpus files matched (108 succeeded on hermesc)**" and
-> "sema differential (tests/sema_corpus_parser): **11 corpus files matched (3 succeeded on the oracle)**" (the
+> → "sema differential (tests/sema_corpus): **219 corpus files matched (109 succeeded on hermesc)**" and
+> "sema differential (tests/sema_corpus_parser): **13 corpus files matched (5 succeeded on the oracle)**" (the
 > second gate is new in S4a; the driver progression past S4a's 196/103: 200/107 capstone fixes → 202/107
-> errorExpected T1 → 205/107 → 208/107 T3 → **212/108** the errorExpected final fix wave). Deferred
-> `test/Sema` rows: 3 (`regress-nested-expressions-error.js` was imported by the recursion-parity fix).
+> errorExpected T1 → 205/107 → 208/107 T3 → 212/108 the errorExpected final fix wave → **219/109** after the
+> 2026-08-10 C++ defect-fix propagation, see the Update below; parser-entry progression 7/2 → 11/3 →
+> **13/5** in the same propagation). Deferred `test/Sema` rows: 2 (`regress-nested-expressions-error.js` was
+> imported by the recursion-parity fix; `invalid-args-eval.js` was imported by the propagation's Task 5).
 > **Read the roadmap's Sema row for the authoritative what-shipped detail and the S4b/S5 carry-item list** —
 > S4b VM modules (`$SHBuiltin` protocol + CJS wrapping + rewrite #4's `-commonjs` corpus pinning — the rewrite's
 > CODE already shipped in S4a, per the 2026-08-03 spec §4 ruling; a genuinely separate much-later phase near
 > IRGen; shared "S4" number is renumbering-avoidance only); S5 lazy/`eval` + the third promotion call site
-> `runInScope` (cpp:158); the regex engine as its own future component; the documented landmines (same-location
-> diagnostic ties, THREE hermesc self-aborts — `class C { x = class {}; }`, `$SHBuiltin.#x()`, and
-> `using x = 1; { function f(){} }` — plus a FOURTH found in S4a: the dumper itself aborts on anonymous
-> `export default function(){}` dumped under `compile = false`, `SemContext.cpp:493-494` vs `dump_context.rs:304`,
-> permanently excluded from `sema_corpus_parser`); and the THREE tracked parser-phase follow-ups, ALL NOW
+> `runInScope` (cpp:158); the regex engine as its own future component; the documented landmines — same-location
+> diagnostic ties, THREE hermesc self-aborts (`class C { x = class {}; }`, `$SHBuiltin.#x()`, and
+> `using x = 1; { function f(){} }`), and a FOURTH found in S4a (the dumper itself aborting on anonymous
+> `export default function(){}` dumped under `compile = false`, `SemContext.cpp:493-494` vs `dump_context.rs:304`)
+> — **ALL FOUR CLOSED 2026-08-10** by the C++ defect-fix propagation (see the Update below); and the THREE tracked parser-phase follow-ups, ALL NOW
 > CLOSED — the 180-file `errorExpected` same-line-range/cross-line-note gap, **CLOSED 2026-08-08** (see the
 > Update below); the recursion-depth gap **CLOSED
 > 2026-08-04**: site parity was verified 1:1 rather than fixed, and the real defects were a `>` vs `>=`
@@ -170,7 +172,7 @@ validation commands, and workflow.
 > object pattern reparse helpers — silently disabled an entire C++ validation branch for every
 > `in_decl=true` nested pattern, e.g. `({...a.b}) => 1` reported the wrong error). All fixed;
 > every one of the seven original fixes now has a durable CI-visible pin. Final sweep:
-> **1405 / 3 / 8** (was 1220/188/8), zero regressions at any step,
+> 1405 / 3 / 8 (was 1220/188/8), zero regressions at any step,
 > panic bucket unchanged (still the same 7 `$SHBuiltin` S4b files + `computed-fn-name.js`). The
 > final 3 mismatches are each individually classified, pre-existing, and NOT `errorExpected`
 > geometry (regex-engine validation; the deliberate "notes dropped per house style" convention;
@@ -194,6 +196,20 @@ validation commands, and workflow.
 > reachable from any past-EOF error or note). Full detail, per-fix citations, and the corpus
 > arithmetic: `rust/crates/sema/tests/sema_corpus/MANIFEST.md`'s "errorExpected geometry (Task 3)"
 > section and the roadmap's Parser-phase follow-up bullets.
+> **Update (2026-08-10): C++ defect-fix propagation is DONE** — plan
+> `plans/2026-08-10-cpp-defect-fixes-propagation.md`. All 11 C++ defects the port's own differential
+> testing had found (`CppDefectsFound.md`) were fixed upstream on the 2026-08-08 branch; Task 1
+> cherry-picked all 11 commits onto `rust` (three auto-merged cleanly in `SemanticResolver.cpp`) and
+> rebuilt the C++ oracles, then Tasks 2-5 mirrored every fix into the Rust port and flipped every pin
+> (parser: JSX attribute member-expression, flow match-binding-pattern recovery, JSON recursion limit;
+> resolver: promoter `using` crash + dead code, anonymous `export default async function` forwarding
+> `async`, export diagnostic wording, `$SHBuiltin.#privateName()` rejection, field-initializer class-
+> expression scope parenting; dumper: parser-entry `*default*`/`UNR` crashes, stable-sort divergence
+> note retirement). Driver gate 212/108 → **219/109**; parser-entry gate 11/3 → **13/5**; parser crate
+> tests 395 → **399**; JSON differential 16 → **17**; the 1416-file/8-dir upstream sweep (now 1418 files)
+> 1405/3/8 → **1408/3/7** (zero new residuals; `computed-fn-name.js` moved from the panic bucket to
+> byte-identical as a side effect of the field-init scope fix). See `CppDefectsFound.md` for the
+> per-defect `Fixed upstream`/`Pin flipped` ledger and the roadmap's dedicated paragraph for full detail.
 > The parser proper lives in `rust/crates/parser/src/js/{mod,expressions,statements,functions,classes,modules,jsx}.rs` +
 > **`js/flow/{mod,declarations,types,function_types,object_types,params,match_}.rs`** + **`js/ts/{mod,types,function_types,object_types,
 > declarations,params}.rs`**; the gate is `REQUIRE_DIFFERENTIAL=1 cargo test -p parser --test parser_differential` (build `ast-dump`
@@ -290,7 +306,7 @@ Release (`gen-json` bin + `--bench=N`). **C++ source of truth:** `include/hermes
 
 ```bash
 # Rust workspace (do NOT cd; use --manifest-path). Build/test:
-cargo test  --manifest-path rust/Cargo.toml            # whole workspace (725 tests / 42 suites as of Sema S3)
+cargo test  --manifest-path rust/Cargo.toml            # whole workspace (758 tests / 44 suites as of the 2026-08-10 C++ defect-fix propagation)
 cargo test  --manifest-path rust/Cargo.toml -p parser  # lexer + JSONParser crate
 cargo test  --manifest-path rust/Cargo.toml -p ast     # AST: GC arena + generated 271-node model + spine/structural/transform/dump_golden tests
 cargo build --manifest-path rust/Cargo.toml            # expect ZERO warnings
