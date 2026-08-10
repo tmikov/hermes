@@ -425,7 +425,10 @@ Not corpus-reachable, and documented rather than curated away:
   in the C++ `isa<>` range test too, so the condition is ported verbatim
   rather than narrowed; `classes.rs`'s `visit_super` says so at the site.
 
-- **A class expression inside a class field initializer** (`class C { x =
+- **A class expression inside a class field initializer** — *SUPERSEDED:
+  fixed upstream in `b351e1184` and mirrored here; see "C++ defect-fix
+  propagation, Task 4" at the end of this file. The shape below is now the
+  corpus file `class-field-class-expr.js`.* (`class C { x =
   class {}; }`) makes **hermesc itself abort** on an assertion in the C++
   dumper: `SemContext.cpp:478: printFunction: Assertion 'processedCount ==
   f.getScopes().size() && "not all scopes were visited"' failed`. The inner
@@ -524,7 +527,10 @@ Not corpus-reachable, and documented at their sites rather than curated away:
   three are loud phase-tagged panics, pinned by
   `shbuiltin_{module_factory,export,import}_is_not_modeled` in
   `tests/resolver.rs`.
-- **`$SHBuiltin.#x(...)`** inside a class declaring `#x` makes the C++ assert:
+- **`$SHBuiltin.#x(...)`** — *SUPERSEDED: fixed upstream in `07efab88d` and
+  mirrored here; see "C++ defect-fix propagation, Task 4" at the end of this
+  file. The shape below is now the corpus file `shbuiltin-private-name.js`.*
+  Inside a class declaring `#x` it makes the C++ assert:
   cpp:1166-1167 uses `llvh::cast<IdentifierNode>(methodCallee->_property)`, but a
   non-computed member expression's property may also be a `PrivateName`. Same
   category as S2 T4's `class C { x = class {}; }` finding — a pre-existing C++
@@ -2204,3 +2210,132 @@ test result: ok. 3 passed; 0 failed
 ```
 
 Task 2's interim redness is gone: `sema_differential_s0` is GREEN again.
+
+---
+
+## C++ defect-fix propagation, Task 4 (resolver mirrors) — 2 new imports
+
+Two more upstream sema-side fixes cherry-picked in Task 1 were mirrored in
+the port: `07efab88d` ("Fix crash on `$SHBuiltin.#privateName()`") and
+`b351e1184` ("Fix scope parenting of class expressions in field
+initializers"). Both shipped a `test/Sema` regression test and both landed
+here.
+
+| File | Source | Fix pinned |
+|---|---|---|
+| `shbuiltin-private-name.js` | `test/Sema/shbuiltin-private-name.js`, **verbatim** (its lit `RUN:`/`CHECK:` lines are inert JS comments; its own RUN line is plain `-dump-sema`, so no `// FLAGS:` line is needed) | `07efab88d` — cpp:1166-1167 `cast<IdentifierNode>`'d the member expression's property, but a non-computed member expression's property can be a `PrivateNameNode`. The `cast` is now a `dyn_cast` whose result ALSO gates the whole `$SHBuiltin` recognition, so `$SHBuiltin.#x()` leaves the identifier alone and it is reported once as `invalid use of $SHBuiltin` from `visit(IdentifierNode *)` |
+| `class-field-class-expr.js` | `test/Sema/class-field-class-expr.js`, **verbatim** (its RUN line is `%shermes -dump-sema -fno-std-globals`, so its inert `CHECK:` lines are the no-std-globals dump; the harness runs it at the corpus default WITH std globals, which is why no `// FLAGS:` line was added — the same shape `field-init-bindings.js` has been imported at since S2 T4) | `b351e1184` — `visit(ClassPropertyNode *)` / `visit(ClassPrivatePropertyNode *)` now wrap the initializer VALUE visit in `SaveAndRestore<LexicalScope *>{curScope_, curFunctionInfo()->getFunctionBodyScope()}`, analogous to `visit(StaticBlockNode *)`. A class expression in a field initializer therefore parents its scope in the synthesized initializer function's body scope instead of the enclosing class's scope |
+
+Both were byte-verified BEFORE import, all three channels, exactly as the
+harness compares them (`hermesc -dump-sema f` vs `sema-dump f`):
+
+- `shbuiltin-private-name.js`: stdout empty on both sides, stderr identical
+  (the `invalid use of $SHBuiltin` error plus hermesc's driver epilogue),
+  exit 2 on both.
+- `class-field-class-expr.js`: stdout identical (the full 97-line dump,
+  including `ClassExpression Scope %s.4` / `%s.7`), stderr empty on both,
+  exit 0 on both.
+
+### Port-side changes
+
+- `resolver/calls.rs` — `sh_builtin_property_name` returns `Option<Atom>`
+  instead of panicking on a non-`Identifier` property, and the `$SHBuiltin`
+  recognition is gated on `prop_ident.is_some()`, mirroring `07efab88d`'s
+  restructured control flow (the property `dyn_cast` is hoisted above the
+  object test, exactly as in the C++).
+- `resolver/classes.rs` — both class-property visits save/restore
+  `cur_scope` around the initializer value visit, restoring it BEFORE
+  `exit_function` (C++'s `SaveAndRestore` is declared after the
+  `FunctionContext`, so it is destroyed first).
+
+### Non-degeneracy of both pins (measured, then reverted)
+
+- With the pre-fix explicit panic restored in `calls.rs`, `sema-dump`
+  panics on `shbuiltin-private-name.js` (`sema: $SHBuiltin.<PrivateName> —
+  C++ 'cast<IdentifierNode>' ... asserts on this shape`, exit 101) against
+  the oracle's exit 2, and `tests/resolver.rs`'s
+  `shbuiltin_private_name_is_rejected_not_asserted` fails with that panic.
+- With the `cur_scope` save/restore removed from `classes.rs`, `sema-dump`
+  aborts on `class-field-class-expr.js` on `dump_context.rs`'s
+  `debug_assert_eq!` (`left: 1, right: 2`, "not all scopes were visited",
+  exit 101), the differential's `sema_differential_s0` reports a stdout
+  mismatch for that file, and `tests/resolver.rs`'s
+  `field_initializer_scopes_are_parented_in_the_initializer_function` fails
+  with `left: Some(ScopeId(1)), right: Some(ScopeId(2))` — the class
+  expression's scope hanging off the enclosing class scope instead of the
+  initializer function's body scope.
+
+The dumper's `processed == scopes.len()` invariant was NOT weakened; the
+`debug_assert_eq!` at `dump_context.rs:241` is untouched and now holds
+naturally.
+
+### Dump-shape impact on the pre-existing corpus (checked file by file)
+
+`b351e1184`'s mirror changes `parentScope` for scopes created inside a field
+initializer, which is dump-visible. Every corpus file's `sema-dump` stdout
+was captured with the mirror reverted and again with it applied, and the two
+sets compared: **exactly one file's dump changed — the newly imported
+`class-field-class-expr.js`.** All the pre-existing class-field files
+(`field-init-bindings.js`, `class-properties.js`, `classes-derived.js`,
+`error-class-field.js`, `arguments-field-error.js`, `await-field-error.js`,
+`yield-field-error.js`, …) are byte-for-byte unchanged and still match the
+(also-changed) oracle. That is expected: the fix only moves scopes CREATED by
+the initializer expression, and a class expression is the only such creator
+those files lack.
+
+`class-properties.js` and `classes-derived.js` were "trimmed to avoid" this
+shape by S2 T4 (see that section). They were deliberately left as they are:
+the shape now has its own dedicated upstream regression file, and re-widening
+two settled corpus files is not something this fix requires.
+
+### The two landmine bullets above are closed
+
+The S2 T4 "Not corpus-reachable" list carried two bullets that this task
+retires (both are now marked SUPERSEDED in place, kept for the history):
+
+- "A class expression inside a class field initializer … the shape stays out
+  of the corpus" — it is `class-field-class-expr.js` now.
+- "`$SHBuiltin.#x(...)` … the shape stays out of the corpus and `calls.rs`'s
+  `sh_builtin_property_name` reproduces the failing `cast` as an explicit
+  panic" — it is `shbuiltin-private-name.js` now, and there is no panic left
+  to reproduce.
+
+### The `computed-fn-name.js` sweep landmine is closed
+
+The S2 T8 / S3 T3 / S4a T5 sweep sections all recorded
+`test/hermes/computed-fn-name.js:71` (`[k("strClass")] = class {};`) as the
+one file in the ~1400-file `test/` sweep where **hermesc itself** aborted on
+`SemContext.cpp:478` and this port aborted on its own `debug_assert_eq!` —
+"different abort mechanisms, so never byte-identical". Re-probed after this
+task's mirror: **exit 0 on both sides, stdout 18461/18461 bytes
+byte-identical, stderr empty on both.** The next full sweep should move it
+out of the `panic` bucket into `identical` (and the "the sweep is only
+meaningful with debug builds on both sides" note loses its only witness). It
+was NOT imported into the corpus: `class-field-class-expr.js` is the minimal
+upstream pin for the same defect.
+
+### Deferred rows re-probed (3 of 3)
+
+| File | Re-probe result |
+|---|---|
+| `deep-ast-err.js` | unchanged — still a vacuous match (comment-only file, both exit 0, both channels 0 bytes); still excluded on purpose |
+| `xmod-errors.js` | unchanged — still panics at `calls.rs` (`$SHBuiltin.moduleFactory needs visitModuleFactory`), oracle exit 2 vs 101. **Still S4b.** Note this is the row most plausibly touched by `07efab88d`, and it is not: `moduleFactory` IS an identifier property, so the new `dyn_cast` gate passes and the branch is reached exactly as before |
+| `invalid-args-eval.js` | unchanged from Task 3's re-probe — byte-identical on all three channels (stdout 0/0, stderr 3037/3037, exit 2/2) by construction since `5f313a13a`'s stable sort. Still assigned to **Task 5**, which imports it |
+
+Neither fix unblocks any Deferred row.
+
+### Gate
+
+Corpus size **216 → 218** (+2, both imports above); oracle successes
+**108 → 109** (+1: `class-field-class-expr.js` exits 0;
+`shbuiltin-private-name.js` is an error-path file, exit 2). Arithmetic:
+216 + 2 = 218; 108 + 1 = 109.
+
+`REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml -p sema
+--features dump-bin --test sema_differential -- --nocapture`:
+
+```
+sema differential (tests/sema_corpus): 218 corpus files matched (109 succeeded on the oracle)
+sema differential (tests/sema_corpus_parser): 11 corpus files matched (3 succeeded on the oracle)
+test result: ok. 3 passed; 0 failed
+```

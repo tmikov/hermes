@@ -2805,3 +2805,126 @@ fn import_attributes_add_a_second_error_only_when_present() {
         ]
     );
 }
+
+// ---- C++ defect-fix mirrors (upstream `07efab88d`, `b351e1184`) --------
+//
+// Both fixes have a corpus file (`shbuiltin-private-name.js`,
+// `class-field-class-expr.js`), but the differential only proves the two
+// sides AGREE. These two pin what each fix actually changed, by name.
+
+/// Upstream `07efab88d` ("Fix crash on `$SHBuiltin.#privateName()`"): the
+/// property of a non-computed member expression can be a `PrivateName`, which
+/// the `cast<IdentifierNode>` at cpp:1166-1167 used to assert on (and which
+/// this port reproduced as an explicit panic). A private property is never a
+/// builtin access, so `$SHBuiltin` is left alone and reported exactly once as
+/// an ordinary invalid use when the identifier itself is visited.
+///
+/// Mirrors `test/Sema/shbuiltin-private-name.js`; a `#[should_panic]` test
+/// used to be impossible to write here only because the panic was the bug.
+#[test]
+fn shbuiltin_private_name_is_rejected_not_asserted() {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let log: Rc<RefCell<Vec<String>>> = Rc::default();
+    sm.set_handler(Box::new(SharedHandler(Rc::clone(&log))));
+    let src = "class C {\n  #x;\n  m() {\n    $SHBuiltin.#x();\n  }\n}\n";
+    let root = parse(&gc, &mut sm, src);
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    // `resolve_ast` (not `resolve_always`): the resolution FAILS, which is
+    // the point — before the fix it panicked instead.
+    assert!(
+        resolve_ast(&gc, &mut sem_ctx, &mut sm, root, &[]).is_none(),
+        "resolution must fail, not panic"
+    );
+    assert_eq!(
+        *log.borrow(),
+        vec!["invalid use of $SHBuiltin".to_string()],
+        "exactly one ordinary invalid-use error"
+    );
+}
+
+/// The three module property names still take their branches: the
+/// `dyn_cast` gate `07efab88d` added must not have disabled the rewrite for
+/// an ordinary identifier property. (`shbuiltin_module_factory_is_not_modeled`
+/// above covers `moduleFactory`; this is the non-module rewrite itself,
+/// which the corpus's `shbuiltin-calls.js` also pins through the dump.)
+#[test]
+fn shbuiltin_identifier_property_still_rewrites() {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let root = parse(&gc, &mut sm, "$SHBuiltin.foo(1);\n");
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    let resolved = resolve_ast(&gc, &mut sem_ctx, &mut sm, root, &[])
+        .expect("resolution must succeed");
+    assert_eq!(sm.error_count(), 0, "no invalid-use error: it was rewritten");
+    let callee = first_statement(resolved)
+        .as_expression_statement()
+        .expect("not an ExpressionStatement")
+        .expression
+        .as_call_expression()
+        .expect("not a CallExpression")
+        .callee;
+    assert!(
+        matches!(
+            callee
+                .as_member_expression()
+                .expect("not a MemberExpression")
+                .object,
+            Node::SHBuiltin(_)
+        ),
+        "rewrite #3 must still fire for an identifier property"
+    );
+}
+
+/// Upstream `b351e1184` ("Fix scope parenting of class expressions in field
+/// initializers"): a scope created by a field initializer's VALUE belongs to
+/// the synthesized elements-initializer function, so it must be parented in
+/// that function's body scope — not in the enclosing class's scope, which
+/// belongs to the outer function.
+///
+/// This is exactly the invariant the dumper's per-function scope walk relies
+/// on (`dump_context.rs`'s `processed == scopes.len()` assert, port of
+/// `SemContext.cpp:478`), and it is asserted directly here so a regression
+/// names the broken link rather than tripping an assert three layers away.
+#[test]
+fn field_initializer_scopes_are_parented_in_the_initializer_function() {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let src = "class C {\n  x = class {};\n  static y = class {};\n}\n";
+    let root = parse(&gc, &mut sm, src);
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    assert!(resolve_ast(&gc, &mut sem_ctx, &mut sm, root, &[]).is_some());
+
+    // Apart from the global function (whose second scope is the class
+    // declaration's), the two synthesized initializer functions are the only
+    // ones with more than one scope: their body scope plus the class
+    // expression's.
+    let global = global_function(&sem_ctx);
+    let multi: Vec<FunctionInfoId> = (0..sem_ctx.functions_len())
+        .map(|i| FunctionInfoId::from_sema_id(ast::SemaId(i as u32)))
+        .filter(|&f| f != global && sem_ctx.function(f).get_scopes().len() > 1)
+        .collect();
+    assert_eq!(
+        multi.len(),
+        2,
+        "the instance and static elements-init functions"
+    );
+    for f in multi {
+        let info = sem_ctx.function(f);
+        let body = info.get_function_body_scope();
+        let scopes = info.get_scopes().to_vec();
+        assert_eq!(scopes.len(), 2, "body scope + the class expression's");
+        assert_eq!(scopes[0], body, "scopes[0] is the body scope");
+        assert_eq!(
+            sem_ctx.scope(scopes[1]).parent_scope,
+            Some(body),
+            "the class expression's scope must hang off the initializer \
+             function's body scope, not the enclosing class scope"
+        );
+        // ... and the body scope itself still hangs off the class scope.
+        assert_ne!(sem_ctx.scope(body).parent_scope, None);
+    }
+}

@@ -166,25 +166,24 @@ pub(super) fn register_local_eval(
     }
 }
 
-/// The `_name` of a `$SHBuiltin.<prop>` member expression's `_property`.
-/// Port of `llvh::cast<ESTree::IdentifierNode>(methodCallee->_property)`
-/// (cpp:1166-1167).
+/// The `_name` of a `$SHBuiltin.<prop>` member expression's `_property`,
+/// when that property is an identifier at all. Port of
+/// `llvh::dyn_cast<ESTree::IdentifierNode>(methodCallee->_property)`
+/// (cpp:1160-1161, as of upstream `07efab88d`).
 ///
-/// C++ uses `cast`, not `dyn_cast`, so the enclosing `if (auto *propIdent =
-/// ...)` is always taken and a non-`Identifier` `_property` is an assertion
-/// failure — which `$SHBuiltin.#x()` inside a class declaring `#x` really
-/// does trigger (the `_property` is a `PrivateName`; a non-computed member
-/// expression's property can be either). That is a pre-existing C++ defect,
-/// not a port gap, so a failing `cast` is reproduced as an explicit panic
-/// rather than quietly widened into a `dyn_cast`.
-fn sh_builtin_property_name(node: &Node) -> Atom {
+/// C++ used to `cast` here, so the enclosing `if (auto *propIdent = ...)` was
+/// always taken and a non-`Identifier` `_property` was an assertion failure —
+/// which `$SHBuiltin.#x()` inside a class declaring `#x` really did trigger
+/// (the `_property` is a `PrivateName`; a non-computed member expression's
+/// property can be either). Upstream `07efab88d` ("Fix crash on
+/// `$SHBuiltin.#privateName()`") turned it into a `dyn_cast` whose result also
+/// gates the whole rewrite, so a private property leaves `$SHBuiltin` alone and
+/// the identifier is reported as an `invalid use of $SHBuiltin` when it is
+/// visited, like any other non-builtin use. This port mirrors that.
+fn sh_builtin_property_name(node: &Node) -> Option<Atom> {
     match node {
-        Node::Identifier(id) => id.name.get(),
-        _ => panic!(
-            "sema: $SHBuiltin.<{}> — C++ `cast<IdentifierNode>` \
-             (SemanticResolver.cpp:1167) asserts on this shape",
-            node.node_type_str()
-        ),
+        Node::Identifier(id) => Some(id.name.get()),
+        _ => None,
     }
 }
 
@@ -261,9 +260,16 @@ impl SemanticResolver<'_, '_, '_, '_> {
         // module doc's "Rewrite #3".
         let mut rewritten: Option<&'gc Node<'gc>> = None;
         if let Node::MemberExpression(method_callee) = call.callee {
+            // Note that the property of a non-computed member expression can
+            // also be a PrivateNameNode, not just an identifier. A private
+            // property is never a builtin access, so in that case $SHBuiltin
+            // is left alone and is reported as an invalid use when the
+            // identifier itself is visited.
+            let prop_ident = sh_builtin_property_name(method_callee.property);
             if let Node::Identifier(ident) = method_callee.object {
                 if ident.name.get() == self.kw().ident_sh_builtin
                     && !method_callee.computed.get()
+                    && prop_ident.is_some()
                 {
                     // `resolveIdentifier` never returns null (cpp:1967-2031
                     // ends in an unconditional `return decl;` after creating
@@ -289,8 +295,13 @@ impl SemanticResolver<'_, '_, '_, '_> {
                         cb.callee(mb.build_forced(gc));
                         rewritten = Some(cb.build_forced(gc));
                     }
-                    let prop_name =
-                        sh_builtin_property_name(method_callee.property);
+                    // C++ writes the `dyn_cast` result into the SAME
+                    // condition (`&& propIdent`) and then dereferences it
+                    // here; edition 2021 has no let-chains, so the test above
+                    // is `is_some()` and the value is taken back out here.
+                    let Some(prop_name) = prop_ident else {
+                        unreachable!("gated on `prop_ident.is_some()` above")
+                    };
                     if prop_name == self.kw().ident_module_factory {
                         // This visits its children explicitly (with a module
                         // context set), so we return after it.

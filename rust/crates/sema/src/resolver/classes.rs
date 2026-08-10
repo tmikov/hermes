@@ -1099,6 +1099,21 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
                 self.get_or_create_instance_elements_init_function_info(gc)
             };
             let func_state = self.enter_function_with_info(sem_info);
+            // Make the initializer function's body scope current, so any
+            // scopes created by the initializer expression (e.g. by a class
+            // expression) are parented in it, matching the runtime
+            // environment chain. Upstream `b351e1184` ("Fix scope parenting
+            // of class expressions in field initializers"):
+            //   llvh::SaveAndRestore<LexicalScope *> oldScope{
+            //       curScope_, curFunctionInfo()->getFunctionBodyScope()};
+            // Its restore runs BEFORE the `FunctionContext`'s (reverse
+            // declaration order), hence the ordering below.
+            let old_scope = self.cur_scope;
+            self.cur_scope = Some(
+                self.sem_ctx
+                    .function(self.cur_function_info())
+                    .get_function_body_scope(),
+            );
             // We need to make sure that the special `arguments` object is
             // declared so that we can detect usages of it, and correctly
             // error out since field initializers are not allowed to
@@ -1114,6 +1129,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
                 value,
                 Some(Path::new(node, NodeField::value)),
             ));
+            self.cur_scope = old_scope;
             self.exit_function(func_state);
 
             self.forbid_special_arguments_reference = saved_forbid_arguments;
@@ -1257,6 +1273,21 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
                 self.get_or_create_instance_elements_init_function_info(gc)
             };
             let func_state = self.enter_function_with_info(sem_info);
+            // Make the initializer function's body scope current, so any
+            // scopes created by the initializer expression (e.g. by a class
+            // expression) are parented in it, matching the runtime
+            // environment chain. Upstream `b351e1184` ("Fix scope parenting
+            // of class expressions in field initializers"):
+            //   llvh::SaveAndRestore<LexicalScope *> oldScope{
+            //       curScope_, curFunctionInfo()->getFunctionBodyScope()};
+            // Its restore runs BEFORE the `FunctionContext`'s (reverse
+            // declaration order), hence the ordering below.
+            let old_scope = self.cur_scope;
+            self.cur_scope = Some(
+                self.sem_ctx
+                    .function(self.cur_function_info())
+                    .get_function_body_scope(),
+            );
             // We need to make sure that the special `arguments` object is
             // declared so that we can detect usages of it, and correctly
             // error out since field initializers are not allowed to
@@ -1272,6 +1303,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
                 value,
                 Some(Path::new(node, NodeField::value)),
             ));
+            self.cur_scope = old_scope;
             self.exit_function(func_state);
 
             self.forbid_special_arguments_reference = saved_forbid_arguments;
