@@ -98,7 +98,7 @@ use std::io::{self, Read, Write};
 
 use ast::context::{Context, NodeRc};
 use ast::node::Node;
-use command_line::{CommandLine, Opt, OptDesc};
+use command_line::{CommandLine, Hidden, Opt, OptDesc};
 use parser::js::JSParserImpl;
 use parser::lexer::{GrammarContext, JSLexer};
 use sema::dump::sem_dump;
@@ -155,6 +155,18 @@ struct Options {
     /// Enable Flow `match` expressions/statements (hermesc
     /// `-Xparse-flow-match`). Implies `parse_flow`.
     parse_flow_match: Opt<bool>,
+    /// Alias for [`Self::parse_flow_match`] spelled the way hermesc spells
+    /// it, so a corpus file's `// FLAGS:` line — which
+    /// `sema_differential.rs` appends VERBATIM to both binaries' argv — can
+    /// name the flag once for both. It must be written `--Xparse-flow-match`
+    /// (double dash): `command_line`'s single-dash path treats `-X...` as a
+    /// short option `X` with an attached value, while LLVM's `cl` accepts
+    /// either spelling, so the double-dash form is the one both sides
+    /// understand. The other two hidden `-Xparse-*` flags
+    /// (`-Xparse-component-syntax`, `-Xparse-flow-records`) can gain the same
+    /// alias the same way when a corpus file needs them. Hidden, exactly like
+    /// hermesc's own `-X` flags.
+    xparse_flow_match: Opt<bool>,
     /// Enable TypeScript type parsing (the hermesc `-parse-ts` flag). TS and
     /// Flow are mutually-exclusive dialects, so this does NOT imply
     /// `parse_flow`.
@@ -240,6 +252,18 @@ impl Options {
                     desc: Some(
                         "Enable Flow match syntax (implies --parse-flow).",
                     ),
+                    ..Default::default()
+                },
+            ),
+            xparse_flow_match: Opt::new_flag(
+                cl,
+                OptDesc {
+                    long: Some("Xparse-flow-match"),
+                    desc: Some(
+                        "Alias for --parse-flow-match, spelled the hermesc \
+                         way (use the double-dash form).",
+                    ),
+                    hidden: Hidden::Yes,
                     ..Default::default()
                 },
             ),
@@ -336,7 +360,7 @@ fn main() {
 
     let parse_component_syntax = *opt.parse_component_syntax;
     let parse_flow_records = *opt.parse_flow_records;
-    let parse_flow_match = *opt.parse_flow_match;
+    let parse_flow_match = *opt.parse_flow_match || *opt.xparse_flow_match;
     // hermesc's hidden `-Xparse-*` flags imply `-parse-flow`; mirror that,
     // and `-parse-flow` itself defaults to `ParseFlowSetting::ALL`
     // (ambiguous on).

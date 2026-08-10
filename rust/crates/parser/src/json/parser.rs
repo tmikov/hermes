@@ -7,10 +7,13 @@
 
 //! JSONParser: recursive-descent parser driving JSLexer.
 //!
-//! No recursion-depth limit, matching C++ `JSONParser` (`lib/Parser/
-//! JSONParser.cpp`): `parseValue`/`parseArray`/`parseObject` have no
-//! `CHECK_RECURSION` analog on either side, so pathologically deep input
-//! overflows the stack on both — parity by absence.
+//! Value nesting is depth-limited, matching C++ `JSONParser` (`lib/Parser/
+//! JSONParser.cpp:202-212`, `JSONParser.h:636-651`): `parse_value` checks
+//! [`MAX_RECURSION_DEPTH`] and reports "Too many nested JSON values" instead
+//! of overflowing the native stack. Historically NEITHER side had a limit
+//! (parity by absence, and both died on e.g. 100000 `[`); upstream added one
+//! in `b21856de4` ("Add a recursion limit to the compiler-side JSONParser")
+//! and this is the mirror of that fix.
 
 use atom_table::AtomTable;
 use support::diag::Subsystem;
@@ -27,11 +30,26 @@ use super::{JSONFactory, JSONValue};
 /// JSON grammar uses `/` as division (never regexp).
 const CTX: GrammarContext = GrammarContext::AllowDiv;
 
+/// The maximum depth of value nesting, to avoid stack overflow on deeply
+/// nested input. Port of `JSONParser::MAX_RECURSION_DEPTH`
+/// (JSONParser.h:638-651), whose `#ifdef` ladder is the same one as
+/// `JSParserImpl::MAX_RECURSION_DEPTH` ("The values match
+/// JSParserImpl::MAX_RECURSION_DEPTH"), so the Rust mapping is the same too:
+/// key off `debug_assertions`, which pairs a DEBUG Rust build with the
+/// project's standard ASan C++ oracle (both take the 128 branch) and a
+/// RELEASE Rust build with C++'s release value. See
+/// `crate::js::MAX_RECURSION_DEPTH` for the full ladder and the
+/// profile-pairing caveat.
+const MAX_RECURSION_DEPTH: u32 = if cfg!(debug_assertions) { 128 } else { 1024 };
+
 /// Port of `JSONParser` (JSONParser.h:630). Drives `JSLexer`; errors go through
 /// the lexer's single `&mut SourceErrorManager`.
 pub struct JSONParser<'a> {
     factory: &'a JSONFactory<'a>,
     lexer: JSLexer<'a>,
+    /// The current depth of value nesting during parsing. Port of
+    /// `JSONParser::recursionDepth_` (JSONParser.h:637).
+    recursion_depth: u32,
 }
 
 impl<'a> JSONParser<'a> {
@@ -46,7 +64,11 @@ impl<'a> JSONParser<'a> {
     ) -> JSONParser<'a> {
         let lexer =
             JSLexer::new_with_convert_surrogates(buf_id, sm, atoms, CTX, convert_surrogates);
-        JSONParser { factory, lexer }
+        JSONParser {
+            factory,
+            lexer,
+            recursion_depth: 0,
+        }
     }
 
     /// Returns the number of errors reported so far (via the shared
@@ -86,8 +108,22 @@ impl<'a> JSONParser<'a> {
         Some(res)
     }
 
-    /// Parse a single JSON value. Port of JSONParser.cpp:202.
+    /// Check and update the recursion depth, then parse any JSON value. Port of
+    /// `JSONParser::parseValue` (JSONParser.cpp:202-212).
     fn parse_value(&mut self) -> Option<&'a JSONValue<'a>> {
+        if self.recursion_depth >= MAX_RECURSION_DEPTH {
+            self.error("Too many nested JSON values");
+            return None;
+        }
+        self.recursion_depth += 1;
+        let res = self.parse_value_impl();
+        self.recursion_depth -= 1;
+        res
+    }
+
+    /// Parse any JSON value, assuming the recursion depth has been checked.
+    /// Port of `JSONParser::parseValueImpl` (JSONParser.cpp:214).
+    fn parse_value_impl(&mut self) -> Option<&'a JSONValue<'a>> {
         let mut needs_negation = false;
         match self.cur().kind() {
             TokenKind::string_literal => {

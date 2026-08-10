@@ -810,15 +810,16 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // C++ 493-496: a JSXMemberExpression is invalid where only a plain
         // name/namespaced-name is allowed (e.g. attribute names).
         //
-        // FAITHFUL-PORT NOTE: the C++ checks `isa<ESTree::MemberExpressionNode>`,
-        // NOT `JSXMemberExpressionNode` — and `JSXMemberExpression` derives from
-        // the `JSX` base, not `MemberExpression` (ESTree.def:782-785). So this
-        // `isa<>` is ALWAYS false here (the only nodes built above are
-        // `JSXIdentifier`/`JSXNamespacedName`/`JSXMemberExpression`), making the
-        // C++ check effectively dead — the diagnostic never fires. We mirror the
-        // C++ exactly by matching `Node::MemberExpression` (never produced by
-        // this function), so the behavior stays byte-for-byte identical.
-        if matches!(name, Node::MemberExpression(_))
+        // HISTORY: the C++ used to check `isa<ESTree::MemberExpressionNode>`,
+        // which is ALWAYS false here — `JSXMemberExpression` derives from the
+        // `JSX` base, not `MemberExpression` (ESTree.def:782-785), and the only
+        // nodes built above are `JSXIdentifier`/`JSXNamespacedName`/
+        // `JSXMemberExpression` — so the diagnostic never fired and
+        // `<foo a.b="1"/>` was accepted. The port mirrored that dead check;
+        // upstream fixed it in `37520ccef` ("Fix rejection of member
+        // expressions as JSX attribute names") by testing
+        // `JSXMemberExpressionNode`, and this is the mirror of that fix.
+        if matches!(name, Node::JSXMemberExpression(_))
             && allow_jsx_member_expression == AllowJSXMemberExpression::No
         {
             let range = name.metadata().range.get();

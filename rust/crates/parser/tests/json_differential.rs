@@ -7,6 +7,15 @@
 
 //! Byte-for-byte differential: parse each corpus file with the C++
 //! `json-parse-dump` oracle and the Rust `json-parse-dump`, compare stdout.
+//!
+//! `err_deep_nesting.json` pins the value-nesting limit both sides gained in
+//! upstream `b21856de4` (see `json/parser.rs`'s module doc). Its 2000 levels
+//! are past the limit in EVERY build profile — 128 for an ASan C++ /
+//! debug Rust build, 1024 for a release one — so, unlike the JS parser's
+//! recursion boundary, this file is profile-INSENSITIVE and safe to keep in
+//! a differential corpus: all four pairings produce the same `ERROR 1`. The
+//! exact trip depth is pinned instead by
+//! `parser/tests/upstream_defect_fixes.rs`.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};

@@ -788,15 +788,26 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // flow.cpp:1405-1406.
         let kind = self.lexer.token().get_res_word_or_identifier();
         let start_loc = self.advance(GrammarContext::AllowRegExp).start;
-        // flow.cpp:1407-1413: errorExpected(identifier, "in match binding
-        // pattern", "start of binding pattern", startLoc). `startLoc` is
-        // real; C++ reports the error but keeps going (no early return).
+        // flow.cpp:1407-1414: errorExpected(identifier, "in match binding
+        // pattern", "start of binding pattern", startLoc), then bail out.
+        // `startLoc` is real.
+        //
+        // HISTORY: C++ used to report the error and keep going, so
+        // `parseMatchBindingIdentifierFlow` read the identifier off the
+        // current (non-identifier, non-reserved-word) token and tripped
+        // `Token::getResWordOrIdentifier`'s assert (JSLexer.h:160) — the port
+        // mirrored that as the `debug_assert!` in
+        // `Token::get_res_word_or_identifier` (token.rs:133), which panicked
+        // on the same input (defect 11 in CppDefectsFound.md). Upstream fixed
+        // it in `550aafe33` ("Fix crash after reporting a bad match binding
+        // pattern") by returning `None` here; this is the mirror of that fix.
         if !self.check(TokenKind::identifier) && !self.lexer.token().is_res_word() {
             self.error_expected_msg(
                 "'identifier' expected in match binding pattern",
                 Some("start of binding pattern"),
                 Some(start_loc),
             );
+            return None;
         }
         // flow.cpp:1414-1416.
         let ident = self.parse_match_binding_identifier_flow()?;

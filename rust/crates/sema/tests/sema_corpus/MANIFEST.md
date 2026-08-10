@@ -2056,3 +2056,57 @@ error_expected_range.rs` (5 new tests), `rust/crates/sema/tests/
 sema_corpus/{declare-error,await-get-error,using-declaration-pattern-error}.js`
 (new, verbatim upstream imports), this MANIFEST, `doc/superpowers/
 RustPortRoadmap.md`, `doc/superpowers/SESSION-HANDOFF.md`.
+
+---
+
+## C++ defect-fix propagation, Task 2 (parser mirrors) — 2 new imports
+
+The three parser-side upstream fixes cherry-picked in Task 1 each shipped a
+C++ test. Two of them are parser *error* files, and the error-path corpus
+home is this one (`parser_corpus` holds only clean-parse files — its
+harness compares `ast-dump` stdout, and `ast-dump`'s error contract is the
+single line `ERROR <n>`, so it cannot pin a diagnostic's text or geometry;
+see `parser_differential.rs`'s module doc, which already routes the
+recursion-limit error side here for the same reason). The third fix
+(`b21856de4`, the JSON recursion limit) has no JS-source form at all and is
+pinned by unit tests only.
+
+| File | Source | Fix pinned |
+|---|---|---|
+| `jsx-error-attr-member.js` | `test/Parser/jsx-error-attr-member.js` (body verbatim; lit `RUN:`/`CHECK:` lines replaced by the header comment + `// FLAGS:` line) | `37520ccef` — `parseJSXElementName` checked `MemberExpressionNode`, never true for a JSX name, so `<foo a.b="1"/>` was accepted; now `unexpected member expression` |
+| `flow-match-pattern-binding-error.js` | `test/Parser/flow/match/pattern-binding-error.js`, same treatment | `550aafe33` — after `'identifier' expected in match binding pattern` the parser fell through into `parseMatchBindingIdentifierFlow` and asserted (defect 11); now it returns `None` and recovers |
+
+Both were byte-verified BEFORE import, all three channels, exactly as the
+harness compares them (`hermesc -dump-sema <FLAGS> f` vs `sema-dump <FLAGS>
+f`): stdout empty on both sides (0 bytes), stderr identical (188 and 257
+bytes respectively — the rendered error plus `Emitted 1 errors. exiting.`),
+exit 2 on both. Their unit-level twins are the first two tests in
+`parser/tests/upstream_defect_fixes.rs`.
+
+### `// FLAGS:` harness note — the hermesc `-Xparse-*` spelling
+
+`flow-match-pattern-binding-error.js` needs `-Xparse-flow-match`, and the
+FLAGS line goes VERBATIM to both binaries, which did not share a spelling
+for it: hermesc names the flag `Xparse-flow-match`, `sema-dump` named it
+`parse-flow-match`. Resolved by giving `sema-dump` a hidden alias under
+hermesc's long name (`sema_dump.rs`, `xparse_flow_match`), and writing the
+flag `--Xparse-flow-match` with TWO dashes — LLVM `cl` accepts either dash
+count, while `command_line`'s single-dash path would read `-X` as a short
+option with an attached value. The other two hidden `-Xparse-*` flags can
+gain the same alias when a corpus file needs them.
+
+### Gate
+
+Corpus size **212 → 214** (+2, both imports above); oracle successes **108
+unchanged** (both are error-path files, exit 2). Arithmetic: 212 + 2 = 214;
+108 + 0 = 108.
+
+`sema_differential_s0` itself is RED at the end of Task 2, for reasons that
+are none of Task 2's: exactly 2 files mismatch, `export.js` and
+`module-export-plain.js`, both on `4193b558a` ("Use consistent wording for
+export-requires-module-mode errors"), which Task 3 mirrors (plan item
+T3S4). Verified by replicating the harness comparison over all 214 files
+without the first-mismatch abort: 214 compared, 2 mismatches (those two),
+108 oracle successes — i.e. both new imports pass, and nothing else
+regressed. `sema_parser_differential` (11 files) and the whole
+`parser_differential` suite (8/8) are green.
