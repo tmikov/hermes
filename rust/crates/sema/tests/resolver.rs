@@ -28,7 +28,7 @@ use parser::lexer::{GrammarContext, JSLexer};
 use sema::dump::sem_dump;
 use sema::ids::FunctionInfoId;
 use sema::keywords::Keywords;
-use sema::resolve::resolve_ast;
+use sema::resolve::{resolve_ast, resolve_ast_for_parser};
 use sema::sem_context::{DeclKind, SemContext};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -2927,4 +2927,65 @@ fn field_initializer_scopes_are_parented_in_the_initializer_function() {
         // ... and the body scope itself still hangs off the class scope.
         assert_ne!(sem_ctx.scope(body).parent_scope, None);
     }
+}
+
+// ---- Upstream `918158cb0`: the parser-entry dumper's two crash shapes ----
+//
+// `resolveASTForParser` skips compile-only errors and AST rewrites, so
+// `semDump` sees two shapes that cannot occur when compiling. Upstream
+// `918158cb0` taught the C++ dumper both; these two tests pin the Rust
+// mirrors. The differential corpus (`tests/sema_corpus_parser/`) compares
+// the full dumps against `sema-parser-dump` byte-for-byte —
+// `with-statement.js` and `anon-export-default.js` — but only when the C++
+// oracle is present, so these are the unconditional pins.
+
+/// Parse and resolve `src` through the PARSER entry point
+/// (`compile = false`), then `sem_dump` the resolved root. \return the dump.
+fn parser_entry_dump(src: &str) -> String {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let root = parse(&gc, &mut sm, src);
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    // Infallible by contract: `resolve_ast_for_parser` always hands back a
+    // tree, errors or not (the C++ tool dumps unconditionally too).
+    let resolved = resolve_ast_for_parser(&gc, &mut sem_ctx, &mut sm, root);
+    let mut out = Vec::new();
+    sem_dump(&mut out, &gc, &sem_ctx, resolved);
+    String::from_utf8(out).expect("dump is not UTF-8")
+}
+
+/// `with` is a `compile_`-gated error, so this shape is reachable ONLY
+/// through the parser entry: the body's identifiers are marked unresolvable
+/// and the dumper must not call `get_expression_decl` on them (its
+/// precondition). It prints ` UNR` instead — which is what a release C++
+/// build always did, and, since `918158cb0` guarded the call the same way,
+/// what a debug one does too.
+#[test]
+fn parser_entry_dumps_with_body_identifiers_as_unr() {
+    let dumped = parser_entry_dump("with (o) { x; }\n");
+    assert!(dumped.contains("Id 'x' UNR\n"), "{dumped}");
+    // Not merely absent-and-silent: the `with`'s own object is OUTSIDE the
+    // Unresolver's root, so it still prints its decl. A dumper that dropped
+    // the annotation wholesale would pass the line above.
+    assert!(dumped.contains("Id 'o' [D:E:"), "{dumped}");
+}
+
+/// An anonymous `export default function` is rewritten to a
+/// `FunctionExpression` only when compiling, so under the parser entry a
+/// hoisted `FunctionDeclaration` can have a null id. `printScope` prints
+/// `*default*` for it rather than casting unconditionally (`918158cb0`);
+/// this port's `print_scope` used to `.expect()` and panic here.
+#[test]
+fn parser_entry_dumps_anonymous_export_default_as_default() {
+    let dumped = parser_entry_dump("export default function () {}\n");
+    assert!(dumped.contains("hoistedFunction *default*\n"), "{dumped}");
+}
+
+/// The named counterpart still prints its own name — `*default*` is the
+/// null-id case only, not a blanket replacement.
+#[test]
+fn parser_entry_dumps_named_export_default_by_name() {
+    let dumped = parser_entry_dump("export default function f() {}\n");
+    assert!(dumped.contains("hoistedFunction f\n"), "{dumped}");
 }

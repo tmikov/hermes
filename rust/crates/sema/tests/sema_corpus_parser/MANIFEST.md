@@ -1,4 +1,4 @@
-# `tests/sema_corpus_parser` corpus (S4a Tasks 2-3 + final review)
+# `tests/sema_corpus_parser` corpus (S4a Tasks 2-3 + final review; C++ defect-fix propagation Task 5)
 
 Companion corpus to `tests/sema_corpus/MANIFEST.md`, but for a DIFFERENT
 oracle pair: the C++ `tools/sema-parser-dump/sema-parser-dump.cpp` tool vs
@@ -38,6 +38,8 @@ mechanism is documented here for whoever needs it next.
 | `parse-error-recoverable.js` | `"use strict"; var x = 010;`. **S4a final review.** A RECOVERABLE parse error: the lexer reports the strict-mode octal and `parseProgram()` still returns a tree, which `JSParserImpl::parse` then discards via its trailing `if (lexer_.getSourceMgr().getErrorCount() != 0) return None;` (`JSParserImpl.cpp:170-171`) — so the tool's `if (!parsedJs)` (`sema-parser-dump.cpp:115-119`) fires: nothing dumped, exit 2. At the time, the Rust `parse()` had no such gate and returned `Some` here, so `sema-dump` had to apply the error-count check at its own call site; before it did, `--parser-entry` handed the unresolved tree to `sem_dump` and panicked indexing an empty `SemContext` (`sem_context.rs:845`, exit 101). This file is the pin for that fix — and, since parser-phase follow-up (c), for `parse()`'s own `cpp:168-172` gate too, which now makes the same `Some`/nonzero-error-count case unreachable at the source. Verified byte-identical: 0 bytes stdout both sides, 151 bytes stderr both sides, exit 2 both sides. |
 | `parse-error-no-ast.js` | `var 1x;`. **S4a final review.** The OTHER no-AST path: a HARD parse error, where `parseProgram()` cannot build a tree at all and `parse()` returns through `if (!res) return None;` (`JSParserImpl.cpp:168-169`) rather than the error-count arm above. Pins that both tools stay silent on stdout, print both diagnostics (the lexer's `invalid numeric literal` and the declaration parser's `'identifier' expected in declaration`) in the same order, and exit 2 — with no `Emitted N errors. exiting.` epilogue on either side (that is the DRIVER pair's contract, not this one's). Verified byte-identical: 0 bytes stdout both sides, 242 bytes stderr both sides, exit 2 both sides. |
 | `import-assertions-compile-false.js` | `import 'b.js' with {type:'json'};`. **S4a final review.** (Named apart from the driver corpus's own upstream `import-assertions.js`, which pins the TRUE side of the same gate.) The FALSE side of the `compile_` gate on the import-assertions error (cpp:882-885, `if (compile_ && !importDecl->_attributes.empty())`): the attribute list here is non-empty, yet under `compile = false` the "import assertions are not supported" error is NOT emitted — the only diagnostic is the ungated module-mode one from cpp:876-880. `module-imports.js` cannot see this (no attributes there), so a port that dropped the `compile_ &&` half would pass the whole corpus without this file. The dump also shows the `ImportAttribute` subtree being walked: its key `type` resolves as an ordinary `UndeclaredGlobalProperty`. Verified byte-identical: 242 bytes stdout both sides, 183 bytes stderr both sides, exit 2 both sides. |
+| `with-statement.js` | `with (o) { x; }`. **Task 5 (defect-fix propagation).** Was the corpus's first landmine (see below): `Unresolver::visit` (`SemanticResolver.cpp:3192-3206`) marks the body's `x` unresolvable, and a DEBUG `sema-parser-dump` aborted on `getExpressionDecl`'s `assert(!node->isUnresolvable())` (`SemContext.h:559-561`) while this port printed ` UNR` — release C++'s behavior. Upstream `918158cb0` made the C++ dumper guard the call (`SemResolve.cpp:99-106`), so debug now matches release and both match the port. `with` is a `compile_`-gated error, so the DRIVER corpus can never dump a `with` body: this is the only pin for the ` UNR` flag reaching a dump at all, and for the `with` object staying resolved (`Id 'o' [D:E:…]`) because it lies outside the `Unresolver`'s root. Verified byte-identical: 312 bytes stdout both sides, empty stderr both sides, exit 0 both sides — an oracle-success file |
+| `anon-export-default.js` | `export default function () {}`. **Task 5 (defect-fix propagation).** The corpus's second landmine, and the other half of `918158cb0`. Rewrite #4 (`SemanticResolver.cpp:1526-1544`) is `compile_`-gated, so under this pair the anonymous `FunctionDeclaration` is never rewritten to a `FunctionExpression`; `visit(FunctionDeclarationNode*)` hoists it unconditionally (the hoist does not check for a name), so a null-`_id` function reaches the `hoistedFunction` printer. Both dumpers used to crash there — C++ on `llvh::cast`'s null check, this port on `print_scope`'s `.expect` — and both now print `hoistedFunction *default*` (`SemContext.cpp:493-501` / `dump_context.rs`'s `print_scope`). Verified byte-identical: 258 bytes stdout both sides, empty stderr both sides, exit 0 both sides — also an oracle-success file. `compile-false-basics.js` is its NAMED counterpart, which keeps printing `hoistedFunction f`, so `*default*` cannot be a blanket replacement |
 | `flow-annotations.js` | `// FLAGS: -parse-flow` + `function f(x: number): number { return x; } var y = f(1);`. **S4a final review.** The corpus's only FLAGS-bearing file and its only Flow file: the sole exercise of the C++ tool's `if (parseFlow) ctx.setParseFlow(ParseFlowSetting::ALL)` branch, which was dead before it (spec §5 called for a flow seed here; it never shipped). The type annotations parse into type nodes the resolver walks past without declaring anything, so the dump is the same shape the untyped version would give (`f`/`y` `GlobalProperty`, `x` `Parameter`). The same review taught the C++ tool the `-parse-flow` spelling alongside `--parse-flow` — the FLAGS line is appended verbatim to BOTH binaries' argv, and hermesc's own spelling is the single dash. Resolves clean, so this is also an oracle-success file. Verified byte-identical: 630 bytes stdout both sides, empty stderr both sides, exit 0 both sides. |
 
 ## Pending (excluded from the walk — `pending/` subdirectory)
@@ -50,15 +52,22 @@ table above.
 
 ## Gate
 
-`sema differential (tests/sema_corpus_parser): 11 corpus files matched (3
-succeeded on the oracle)` — 7 → **11** files (+4, all from S4a's final
-review: `parse-error-recoverable.js`, `parse-error-no-ast.js`,
+`sema differential (tests/sema_corpus_parser): 13 corpus files matched (5
+succeeded on the oracle)`.
+
+History: 7 → **11** files (+4, all from S4a's final review:
+`parse-error-recoverable.js`, `parse-error-no-ast.js`,
 `import-assertions-compile-false.js`, `flow-annotations.js`),
-oracle-succeeded 2 → **3**
-(+1: `flow-annotations.js` is an exit-0 file; the other three are
-error-path pins). The non-degeneracy guard in `run_differential` (at least
-one oracle success) is satisfied three times over; the remaining eight are
-all legitimate error-path pins (oracle exit 2), same convention as
+oracle-succeeded 2 → **3** (+1: `flow-annotations.js` is an exit-0 file; the
+other three are error-path pins). Then 11 → **13** files (+2, Task 5 of the
+C++ defect-fix propagation plan: `with-statement.js`,
+`anon-export-default.js` — the two shapes upstream `918158cb0` unblocked),
+oracle-succeeded 3 → **5** (+2: BOTH new files resolve clean and exit 0 on
+both sides). Arithmetic: 11 + 2 = 13; 3 + 2 = 5.
+
+The non-degeneracy guard in `run_differential` (at least one oracle success)
+is satisfied five times over; the remaining eight are all legitimate
+error-path pins (oracle exit 2), same convention as
 `tests/sema_corpus/parse-error.js`.
 
 ## `SemanticResolver::run`'s two gates, and which files hit which
@@ -155,7 +164,13 @@ it could reasonably drop the `if (compile_)` gate, the children-skipping
 `return`, or both. The comment is corrected at the site
 (`resolver/calls.rs`), which is where an S4b implementer will be reading.
 
-## Landmine: `with (o) { x; }` — a DEBUG `sema-parser-dump` aborts, and this port deliberately does not
+## CLOSED landmine: `with (o) { x; }` — a DEBUG `sema-parser-dump` used to abort
+
+**Closed by upstream `918158cb0`** ("Fix semDump crashes on ASTs resolved for
+a parser"), mirrored by Task 5 of the C++ defect-fix propagation plan. The
+shape is a live corpus file now — `with-statement.js` in the table above,
+oracle exit 0, byte-identical. The section is kept for the history; what
+follows describes the state BEFORE that fix.
 
 Also from the capstone review; roadmap landmine (v). `with` is a
 `compile_`-gated error, so the DRIVER pair never dumps a `with` body and
@@ -176,17 +191,28 @@ The dumper's `enter(IdentifierNode *)` (`SemResolve.cpp:96-102`) calls
 `getExpressionDecl` unconditionally, right after `getDeclarationDecl`, and
 `Unresolver::visit` (`SemanticResolver.cpp:3192-3206`) has marked `x`
 unresolvable. Unlike the landmine below (and the `computed-fn-name.js` one
-in the driver corpus), this port does **not** mirror the abort: the assert is
+in the driver corpus), this port did **not** mirror the abort: the assert is
 compiled out under `NDEBUG`, and in that build the call provably returns
 `nullptr` (the `Unresolver` always clears the have-expression-decl bit first
 via `setExpressionDecl(node, nullptr)`), so reproducing the *value* is
-reproducing real Release hermesc. `dump.rs:82-101` argues the deviation in
-full. The shape stays out of this corpus because there is no C++ output to
-compare against in a debug build.
+reproducing real Release hermesc. `dump.rs`'s "getExpressionDecl on an
+unresolvable identifier" section argues it in full (and now records that the
+divergence is retired). The shape stayed out of this corpus only because
+there was no C++ output to compare against in a debug build; `918158cb0`
+gave it one, and the C++ dumper now guards the call exactly the way this
+port always did.
 
-## Landmine: anonymous `export default function` under `compile = false` — BOTH dumpers crash
+## CLOSED landmine: anonymous `export default function` under `compile = false` — BOTH dumpers used to crash
 
-`export default function () {}` can never be added to this corpus, by
+**Closed by upstream `918158cb0`**, mirrored by Task 5 of the C++ defect-fix
+propagation plan: the C++ `printScope` and this port's `print_scope` both
+print `hoistedFunction *default*` for a null-id hoisted function instead of
+casting/unwrapping unconditionally. The shape is a live corpus file now —
+`anon-export-default.js` in the table above, oracle exit 0, byte-identical.
+The section is kept for the history; what follows describes the state BEFORE
+that fix.
+
+`export default function () {}` could not be added to this corpus, by
 construction, on either side (deferred from S4a T3's review; verified here
 2026-08-03). Under `compile = false` — this pair's whole reason to exist —
 rewrite #4 (`visit_export_default_declaration`, cpp:1526-1544) is
@@ -222,6 +248,9 @@ Same category as `test/hermes/computed-fn-name.js`
 (`SemContext.cpp:478`'s scope-walk assertion, one of the roadmap's Sema-row
 documented hermesc self-aborts): a pre-existing C++ **dumper** defect,
 faithfully mirrored — not a port gap, and not fixable without hermesc
-itself changing. This exact shape (anonymous default export, dumped under
-`compile = false`) is excluded from this corpus for that reason, same as
-`computed-fn-name.js` is excluded from `tests/sema_corpus`.
+itself changing. The last clause is what changed: hermesc DID change
+(`918158cb0`), so the shape is a corpus file now rather than an excluded
+landmine. (`computed-fn-name.js`'s own defect was likewise closed upstream,
+by `b351e1184`; see `tests/sema_corpus/MANIFEST.md`, which records it as
+re-matching but keeps the minimal `class-field-class-expr.js` as the pin
+instead of importing the 18 KB original.)

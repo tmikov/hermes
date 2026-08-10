@@ -291,21 +291,26 @@ impl SemContextDumper {
         for fd in &scope.hoisted_functions {
             push_indent(out, level + 1);
             push_str(out, "hoistedFunction ");
-            // C++: `cast<IdentifierNode>(fd->_id)->_name->str()` — an
-            // unconditional cast, since a hoisted function always has a
-            // name. Faithfully unwrap rather than silently skip.
             let node = fd.node(env.gc);
             let func_decl = node.as_function_declaration().expect(
                 "SemContext::hoistedFunctions entries are always \
                  FunctionDeclaration nodes",
             );
-            let id_node = func_decl
-                .id
-                .expect("a hoisted FunctionDeclaration always has an id");
-            let ident = id_node
-                .as_identifier()
-                .expect("FunctionDeclaration.id is always an Identifier");
-            push_atom(out, env.gc, ident.name.get());
+            // An anonymous `export default function` is only rewritten to a
+            // FunctionExpression when compiling, so when resolving on behalf
+            // of a parser (`resolve_ast_for_parser`) a hoisted function may
+            // have no name. Mirrors upstream `918158cb0`, which replaced the
+            // unconditional `cast<IdentifierNode>(fd->_id)` with this
+            // null check (`SemContext.cpp:493-501`).
+            match func_decl.id {
+                Some(id_node) => {
+                    let ident = id_node
+                        .as_identifier()
+                        .expect("FunctionDeclaration.id is an Identifier");
+                    push_atom(out, env.gc, ident.name.get());
+                }
+                None => push_str(out, "*default*"),
+            }
             out.push(b'\n');
         }
     }

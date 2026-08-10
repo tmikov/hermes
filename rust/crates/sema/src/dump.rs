@@ -81,24 +81,31 @@
 //!
 //! ## `getExpressionDecl` on an unresolvable identifier
 //!
-//! `enter(IdentifierNode*)` (cpp:101-102) calls `getExpressionDecl`
+//! `enter(IdentifierNode*)` (cpp:101-102) used to call `getExpressionDecl`
 //! unconditionally, right after `getDeclarationDecl` — even when the
 //! identifier `isUnresolvable()`. C++'s `getExpressionDecl` has
 //! `assert(!node->isUnresolvable())` (SemContext.h:559-561), which is
 //! compiled out in `NDEBUG`/Release builds; in that configuration the call
-//! is harmless, because the *only* call site that ever marks an identifier
+//! was harmless, because the *only* call site that ever marks an identifier
 //! unresolvable (`Unresolver::visit`, `SemanticResolver.cpp:3192-3206`)
 //! always clears the "have expression decl" bit first via
 //! `setExpressionDecl(node, nullptr)` — so `getExpressionDecl` would
-//! return `nullptr` there regardless of the assert. This port's
-//! `SemContext::get_expression_decl` (`sem_context.rs`) uses `assert!`,
-//! which Rust never compiles out, so calling it unconditionally here would
-//! panic on exactly that (rare, `with`-shadowing) case instead of quietly
-//! returning `None` the way a Release C++ build does. `enter_identifier`
-//! below checks `unresolvable` first and substitutes `None` in that case —
-//! reproducing the *value* a Release C++ build produces, without the
-//! panic a literal transcription would introduce in every Rust build
-//! configuration.
+//! return `nullptr` there regardless of the assert. A debug C++ build,
+//! however, aborted; the shape is reachable only through
+//! `resolveASTForParser` (identifiers inside `with` — `with` is a
+//! `compile_`-gated error on the driver path).
+//!
+//! This port's `SemContext::get_expression_decl` (`sem_context.rs`) uses
+//! `assert!`, which Rust never compiles out, so `enter_identifier` below
+//! checks `unresolvable` first and substitutes `None` — reproducing the
+//! *value* a Release C++ build produces. That used to be a documented
+//! divergence from a debug C++ build (which aborted); it is one no longer.
+//! Upstream `918158cb0` made the C++ dumper guard the call the same way
+//! (`sema::Decl *exprD = V->isUnresolvable() ? nullptr :
+//! semCtx_.getExpressionDecl(V);`, `SemResolve.cpp:99-106`), so debug now
+//! matches release upstream and both match this port: `with(o){x;}` dumps
+//! `Id 'x' UNR` on every side, in every build configuration. It is a live
+//! differential corpus file — `sema_corpus_parser/with-statement.js`.
 //!
 //! ## `should_visit` and `TypeAnnotation`
 //!
@@ -266,9 +273,9 @@ impl<'p, 'ast, 'ctx> AstPrinter<'p, 'ast, 'ctx> {
         self.out.push(b'\'');
 
         let decl_d = self.sem_ctx.get_declaration_decl(ident);
-        // See the module doc's "getExpressionDecl on an unresolvable
-        // identifier" section for why this doesn't call
-        // `get_expression_decl` unconditionally the way cpp:102 does.
+        // Guarding on `unresolvable` matches cpp:99-106 since upstream
+        // `918158cb0`; see the module doc's "getExpressionDecl on an
+        // unresolvable identifier" section.
         let expr_d = if ident.unresolvable.get() {
             None
         } else {

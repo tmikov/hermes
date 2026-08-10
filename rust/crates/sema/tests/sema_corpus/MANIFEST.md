@@ -148,6 +148,7 @@ unchanged at 47 rows and the Deferred table stays at 8, i.e. 46 + 8 = 54.
 | `flow-annotations-benign.js` | **S4a T4** — negative control: parameter, return and variable type annotations under `-parse-flow` resolving completely cleanly — the annotation nodes are never visited as expressions, so they neither perturb declarations nor scopes. hermesc: exit 0, full dump match |
 | `flow-typecast-resolves.js` | **S4a T4 fix review** — `visit(TypeCastExpressionNode *)` (SemanticResolver.cpp:1591-1594, `#if HERMES_PARSE_FLOW`, `resolver/expressions.rs`'s `visit_type_cast_expression`). A **review-found gap**: `(x: number);`, the task brief's original (unverified) sketch for `flow-typecast-cover.js`, does not hit the Cover-node error at all — it is the parser's rewritten `TypeCastExpressionNode` (JSParserImpl.cpp:2633-2640) and resolves cleanly, but that visit had no port and the resolver panicked at the catch-all. Ported and pinned here: `x` is declared first, so the dump shows it resolving through the cast normally ("visit the expression, but not the type annotation"). hermesc: exit 0 |
 | `flow-as-expression.js` | **S4a T4 fix review** — `visit(AsExpressionNode *)` (SemanticResolver.cpp:1596-1599, `#if HERMES_PARSE_FLOW`, `resolver/expressions.rs`'s `visit_as_expression`), the same shape as `flow-typecast-resolves.js` for Flow's `as` operator (`x as number`, JSParserImpl.cpp:4329-4350) — also unconditional on `typed_`, also found panicking during the fix review. hermesc: exit 0 |
+| `invalid-args-eval.js` | **Task 5 (defect-fix propagation)** — the S1 `arguments`/`eval` declaration rules, upstream verbatim. Deferred since S1 on a same-location diagnostic-order tie at `89:9` (the strict-mode `cannot declare 'arguments'` error and the `was not declared in function "global"` warning), which C++'s `std::sort` over the buffered-message array left unspecified. Upstream `5f313a13a` made that a `std::stable_sort` (`SourceErrorManager.cpp:60-73`), matching this port's stable `sort_by_key` in `disable_buffering` (`support/src/manager.rs`), so both sides now break the tie in emission order and the match is by construction. hermesc: exit 2 (error-path file, not an oracle success) |
 
 `deep-ast-err.js` is listed in the Deferred table below but is NOT a real S1
 gap: the entire `.js` file is comment lines (its `RUN:` lines generate the
@@ -164,7 +165,6 @@ files in, 54 accounted for below) rather than silently dropped. It is also
 | File | Blocking construct | Target phase |
 |---|---|---|
 | `deep-ast-err.js` | vacuous — see note above (not a real S1 gap) | n/a |
-| `invalid-args-eval.js` | **not a port gap, and no longer a divergence** — the resolver's loop/`for` support landed in S2 T1 and every diagnostic in this file is produced, with identical text and locations. Two of them collide at the *same* source location (`89:9`: the strict-mode `cannot declare 'arguments'` error and the `was not declared in function "global"` warning). This row used to say the tie was unspecified because C++'s buffered-message flush used an unstable `std::sort`; that is no longer true. Upstream `5f313a13a` (in-tree `7805e2103`, "Sort buffered diagnostics with a stable sort") changed it to `std::stable_sort` (`SourceErrorManager.cpp:60-73`), which matches the port's stable `sort_by_key` in `disable_buffering` (`support/src/manager.rs:905-909`). Both sides now break same-location ties in emission order, so the ordering is deterministic by construction, and the file byte-matches on all three channels (stdout, stderr, exit). Import is **deferred to Task 5** of the C++ defect-fix propagation plan, which owns `5f313a13a` and will import this file alongside retiring `manager.rs`'s now-obsolete divergence note | Task 5 (defect-fix propagation) |
 | `xmod-errors.js` | the `$SHBuiltin` CommonJS-module protocol: `visitModuleFactory`/`visitModuleExport`/`visitModuleImport` (cpp:1320-1453), reached from the three property-name branches of rewrite #3 (cpp:1168-1189). `CallExpression` itself landed in S2 T6, which ports those three branches as loud phase-tagged panics — its row was re-classified from "`CallExpression` / S2" accordingly. Every diagnostic in the file (`$SHBuiltin.moduleFactory requires exactly two arguments.` and 17 more) comes from those three functions | S4 modules |
 
 ## Subdirectories (`test/Sema/flow/`, `test/Sema/flow/ffi/`, `test/Sema/lowering/`)
@@ -2189,7 +2189,7 @@ quirk any more:
 |---|---|
 | `deep-ast-err.js` | unchanged — still a vacuous match (comment-only file, both exit 0, byte-identical); still excluded on purpose |
 | `xmod-errors.js` | unchanged — still panics at `calls.rs:312` (`$SHBuiltin.moduleFactory needs visitModuleFactory`), oracle exit 2 vs 101. **Still S4b** |
-| `invalid-args-eval.js` | **now byte-identical on all three channels** (stdout 0/0, stderr 3037/3037, exit 2/2), and deterministically so. The `89:9` same-location tie is no longer unspecified on the C++ side: upstream `5f313a13a` (in-tree `7805e2103`) replaced the buffered-message `std::sort` with `std::stable_sort` (`SourceErrorManager.cpp:60-73`), so both sides now keep same-location messages in emission order — the match is by construction, not coincidence. NOT imported here anyway: the plan assigns `5f313a13a` to **Task 5**, which will import this file together with retiring the (now-obsolete) stable-sort divergence note in `support/src/manager.rs`. The Deferred row was rewritten to say this instead of the old unstable-`std::sort` reason |
+| `invalid-args-eval.js` | **now byte-identical on all three channels** (stdout 0/0, stderr 3037/3037, exit 2/2), and deterministically so. The `89:9` same-location tie is no longer unspecified on the C++ side: upstream `5f313a13a` (in-tree `7805e2103`) replaced the buffered-message `std::sort` with `std::stable_sort` (`SourceErrorManager.cpp:60-73`), so both sides now keep same-location messages in emission order — the match is by construction, not coincidence. NOT imported here anyway: the plan assigns `5f313a13a` to **Task 5**, which will import this file together with retiring the (now-obsolete) stable-sort divergence note in `support/src/manager.rs`. The Deferred row was rewritten to say this instead of the old unstable-`std::sort` reason. (Discharged: Task 5 imported it — the file is in the Imported table now.) |
 
 None of the three is a promoter/`using`/export-default row, so no row was
 unblocked BY these fixes.
@@ -2320,7 +2320,7 @@ upstream pin for the same defect.
 |---|---|
 | `deep-ast-err.js` | unchanged — still a vacuous match (comment-only file, both exit 0, both channels 0 bytes); still excluded on purpose |
 | `xmod-errors.js` | unchanged — still panics at `calls.rs` (`$SHBuiltin.moduleFactory needs visitModuleFactory`), oracle exit 2 vs 101. **Still S4b.** Note this is the row most plausibly touched by `07efab88d`, and it is not: `moduleFactory` IS an identifier property, so the new `dyn_cast` gate passes and the branch is reached exactly as before |
-| `invalid-args-eval.js` | unchanged from Task 3's re-probe — byte-identical on all three channels (stdout 0/0, stderr 3037/3037, exit 2/2) by construction since `5f313a13a`'s stable sort. Still assigned to **Task 5**, which imports it |
+| `invalid-args-eval.js` | unchanged from Task 3's re-probe — byte-identical on all three channels (stdout 0/0, stderr 3037/3037, exit 2/2) by construction since `5f313a13a`'s stable sort. Still assigned to **Task 5**, which imports it. (Discharged: Task 5 imported it — the file is in the Imported table now.) |
 
 Neither fix unblocks any Deferred row.
 
@@ -2337,5 +2337,69 @@ Corpus size **216 → 218** (+2, both imports above); oracle successes
 ```
 sema differential (tests/sema_corpus): 218 corpus files matched (109 succeeded on the oracle)
 sema differential (tests/sema_corpus_parser): 11 corpus files matched (3 succeeded on the oracle)
+test result: ok. 3 passed; 0 failed
+```
+
+## Task 5 (defect-fix propagation): `918158cb0` + `5f313a13a`
+
+Both upstream fixes this task mirrors land on the DUMPERS, not the resolver,
+so neither changes what any existing corpus file resolves to.
+
+- `918158cb0` ("Fix semDump crashes on ASTs resolved for a parser") is
+  entirely a `resolveASTForParser` shape — see
+  `sema_corpus_parser/MANIFEST.md`, which is where its two new files went.
+  Nothing in this (driver, `compile = true`) corpus can reach either shape:
+  `with` is a `compile_`-gated error and an anonymous `export default
+  function` is rewritten to a `FunctionExpression` before the dump.
+- `5f313a13a` ("Sort buffered diagnostics with a stable sort") retires the
+  last reason `invalid-args-eval.js` was Deferred; see below.
+
+### New import: `invalid-args-eval.js` (upstream `test/Sema/`, verbatim)
+
+Oracle-verified raw bytes before importing, exactly as the global constraint
+requires:
+
+```
+hermesc -dump-sema test/Sema/invalid-args-eval.js   -> exit 2, stdout 0 B, stderr 3037 B
+sema-dump          test/Sema/invalid-args-eval.js   -> exit 2, stdout 0 B, stderr 3037 B
+cmp: stdout identical, stderr identical
+```
+
+Deferred since S1 (three separate re-probes recorded it as matching but
+"unspecified on the C++ side"), because the `89:9` same-location tie between
+the strict-mode `cannot declare 'arguments'` error and the `was not declared
+in function "global"` warning had no defined order in C++: `std::sort` over
+the buffered-message array is not stable, so which of the two came out first
+depended on the whole 24-message array. `5f313a13a` changed that to
+`std::stable_sort`, which is what `disable_buffering`'s `sort_by_key` in
+`support/src/manager.rs` has always been — so both sides now keep
+same-location messages in emission order and the match is by construction,
+not coincidence. `manager.rs`'s comment at the sort was rewritten to record
+that the divergence is retired (and to cite `5f313a13a`), instead of leaving
+a reader to rediscover the history from this MANIFEST.
+
+Its Deferred row moved into the Imported table; the Task 3 and Task 4
+re-probe rows that forward-referenced Task 5 are annotated as discharged.
+
+### Deferred rows re-probed (2 of 2)
+
+| File | Re-probe result |
+|---|---|
+| `deep-ast-err.js` | unchanged — still a vacuous match (comment-only file, both exit 0, both channels 0 bytes); still excluded on purpose |
+| `xmod-errors.js` | unchanged — still panics in `calls.rs` (`$SHBuiltin.moduleFactory needs visitModuleFactory`), oracle exit 2 vs 101. **Still S4b.** Neither dumper fix touches the resolver, so this row could not move |
+
+### Gate
+
+Corpus size **218 → 219** (+1, `invalid-args-eval.js`); oracle successes
+**109 unchanged** — hermesc exits **2** on it (probed above), so it lands in
+the error-path bucket, not the success bucket. Arithmetic: 218 + 1 = 219;
+109 + 0 = 109.
+
+`REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml -p sema
+--features dump-bin --test sema_differential -- --nocapture`:
+
+```
+sema differential (tests/sema_corpus): 219 corpus files matched (109 succeeded on the oracle)
+sema differential (tests/sema_corpus_parser): 13 corpus files matched (5 succeeded on the oracle)
 test result: ok. 3 passed; 0 failed
 ```

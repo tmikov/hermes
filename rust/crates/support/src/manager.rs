@@ -902,6 +902,16 @@ impl SourceErrorManager {
         let notes = std::mem::take(&mut self.buffered_notes);
         // Build a sorted index.  Located messages sort by (source-index, offset);
         // the sentinel (loc == None) sorts last via the leading 0/1 discriminant.
+        //
+        // `sort_by_key` is a STABLE sort, so two messages emitted at the same
+        // location keep their emission order.  This used to be a documented
+        // divergence: C++ sorted the buffered messages with `std::sort`, whose
+        // tie order is unspecified, so a same-location pair could come out
+        // either way (in practice depending on the total buffered count).
+        // Upstream `5f313a13a` ("Sort buffered diagnostics with a stable
+        // sort") changed it to `std::stable_sort`
+        // (`SourceErrorManager.cpp:60-73`), so both sides now break
+        // same-location ties in emission order and the divergence is retired.
         let mut order: Vec<usize> = (0..msgs.len()).collect();
         order.sort_by_key(|&i| match msgs[i].data.loc {
             Some(l) => (0u8, l.source.index(), l.offset),
