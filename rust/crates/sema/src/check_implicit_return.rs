@@ -14,7 +14,7 @@
 //! puts everything else in an anonymous namespace, so this module is private
 //! to the crate and only [`may_reach_implicit_return`] is `pub(crate)`. Its
 //! single caller is `resolver::functions`'s port of
-//! `visitFunctionBodyAfterParamsVisited` (cpp:1939-1944).
+//! `visitFunctionBodyAfterParamsVisited` (cpp:1953-1958).
 //!
 //! ## What the analysis is
 //!
@@ -41,7 +41,7 @@
 //!   `mayReachImplicitReturn(FunctionLikeNode *root)` starts with
 //!   `getBlockStatement(root)` (lib/AST/ESTree.cpp:58-81). It can, because
 //!   C++ mutates the AST in place, so `root->_body` is up to date by the
-//!   time the resolver reaches cpp:1939. This port rebuilds nodes instead
+//!   time the resolver reaches cpp:1953. This port rebuilds nodes instead
 //!   (see `resolver`'s module doc), and the function-like node the resolver
 //!   still holds at that point carries the *pre-visit* body — which for a
 //!   `try`/`catch`/`finally` has not been split into nested `try`s yet and

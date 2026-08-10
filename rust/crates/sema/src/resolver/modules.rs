@@ -15,9 +15,9 @@
 //!
 //! Ports `SemanticResolver::visit(ImportDeclarationNode *)`
 //! (SemanticResolver.cpp:874-890),
-//! `visit(ExportNamedDeclarationNode *)` (cpp:1510-1517),
-//! `visit(ExportDefaultDeclarationNode *)` (cpp:1519-1547) and
-//! `visit(ExportAllDeclarationNode *)` (cpp:1549-1554).
+//! `visit(ExportNamedDeclarationNode *)` (cpp:1524-1531),
+//! `visit(ExportDefaultDeclarationNode *)` (cpp:1533-1561) and
+//! `visit(ExportAllDeclarationNode *)` (cpp:1563-1568).
 //!
 //! ## No CommonJS-module support in this port
 //!
@@ -34,7 +34,7 @@
 //! ## One bug-for-bug quirk, preserved and flagged
 //!
 //! 1. **The import error is NOT `compile_`-gated** (cpp:876-879), while all
-//!    three export errors ARE (cpp:1511, 1520, 1550). So under the
+//!    three export errors ARE (cpp:1525, 1534, 1564). So under the
 //!    `compile = false` entry point (`resolveASTForParser`,
 //!    `resolve::resolve_ast_for_parser`) an `import` still errors and an
 //!    `export` does not — an asymmetry with no stated rationale in the C++.
@@ -50,7 +50,7 @@
 //! ## Rewrite #4: `export default function () {}` (spec §3.4)
 //!
 //! `visit(ExportDefaultDeclarationNode *)` mutates its own child in place
-//! (`node->_declaration = funcExpr;`, cpp:1543) and only then runs
+//! (`node->_declaration = funcExpr;`, cpp:1557) and only then runs
 //! `visitESTreeChildren` over the mutated node. Structural fields are
 //! immutable in this port, so — exactly like rewrite #1 (the arrow's
 //! expression body, `functions.rs`) and rewrite #3 (`$SHBuiltin.prop(...)`,
@@ -64,7 +64,7 @@
 //! the same tail `calls::visit_call_expression` needs for rewrite #3.
 //!
 //! No decorate-before-recurse exception here (`resolver/mod.rs`'s module
-//! doc): the visit writes no `Cell` of its own. `strictness` (cpp:1539) is a
+//! doc): the visit writes no `Cell` of its own. `strictness` (cpp:1553) is a
 //! `Cell` COPY off the declaration made while building the replacement,
 //! before anything recurses — and it is `Strictness::NotSet` at that point
 //! either way, since `visitFunctionLike` is what eventually sets it, on the
@@ -138,7 +138,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     /// ImportDeclarationNode *)` (DeclCollector.cpp:124-127 /
     /// `decl_collector.rs`), whose `addToCur` puts the whole declaration in
     /// the enclosing scope's list; `extractIdentsFromDecl`'s
-    /// `ImportDeclaration` arm (cpp:2334-2347 /
+    /// `ImportDeclaration` arm (cpp:2348-2361 /
     /// `declarations::extract_idents_from_decl`) then maps each specifier's
     /// `_local` to a `DeclKind::Import` decl when the scope is processed.
     /// Both sides of that were ported in S1; this visit is what first makes
@@ -197,7 +197,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     // ---- visit(ExportNamedDeclarationNode *) ----------------------------
 
     /// Port of `SemanticResolver::visit(ESTree::ExportNamedDeclarationNode
-    /// *node)` (SemanticResolver.cpp:1510-1517).
+    /// *node)` (SemanticResolver.cpp:1524-1531).
     pub(super) fn visit_export_named_declaration<'gc>(
         &mut self,
         gc: &'gc GCLock,
@@ -219,7 +219,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     // ---- visit(ExportDefaultDeclarationNode *) --------------------------
 
     /// Port of `SemanticResolver::visit(ESTree::ExportDefaultDeclarationNode
-    /// *node)` (SemanticResolver.cpp:1519-1547), **rewrite #4** included —
+    /// *node)` (SemanticResolver.cpp:1533-1561), **rewrite #4** included —
     /// see the module doc for why the rewrite allocates new nodes instead of
     /// mutating this one.
     pub(super) fn visit_export_default_declaration<'gc>(
@@ -240,7 +240,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             );
         }
 
-        // `rewritten_node` is C++'s `node` after the mutation at cpp:1543:
+        // `rewritten_node` is C++'s `node` after the mutation at cpp:1557:
         // the children walk below reads the declaration off it, exactly as
         // C++'s `visitESTreeChildren(*this, node)` does.
         let mut rewritten = false;
@@ -252,7 +252,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
                 // change it to a FunctionExpression node for cleaner IRGen.
                 let func_expr = gc.alloc(Node::FunctionExpression(
                     FunctionExpression::new(
-                        // funcExpr->copyLocationFrom(funcDecl) (cpp:1540),
+                        // funcExpr->copyLocationFrom(funcDecl) (cpp:1554),
                         // hoisted into the constructor — see
                         // `copy_location_from`'s doc.
                         copy_location_from(export.declaration),
@@ -269,7 +269,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
                         func_decl.return_type,
                         func_decl.predicate,
                         func_decl.generator.get(),
-                        // `funcDecl->_async` (cpp:1538). This used to be a
+                        // `funcDecl->_async` (cpp:1552). This used to be a
                         // literal `false`, so an anonymous `export default
                         // async function () {}` lost its async flag on the
                         // rewritten node; fixed upstream in `6b59daf0d`.
@@ -313,7 +313,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     // ---- visit(ExportAllDeclarationNode *) ------------------------------
 
     /// Port of `SemanticResolver::visit(ESTree::ExportAllDeclarationNode
-    /// *node)` (SemanticResolver.cpp:1549-1554).
+    /// *node)` (SemanticResolver.cpp:1563-1568).
     pub(super) fn visit_export_all_declaration<'gc>(
         &mut self,
         gc: &'gc GCLock,

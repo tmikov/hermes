@@ -557,13 +557,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// END-STATE INVARIANT (S3 geometry-restoration sweep, verified by full
     /// call-site audit against JSParserImpl.cpp/-flow.cpp/-ts.cpp/-jsx.cpp):
     /// there are exactly 7 no-hint (`nullptr, {}`) sites in the whole C++
-    /// parser — flow.cpp:1232, 3461, 4855; jsx.cpp:260; ts.cpp:835 (five
-    /// genuine `need` calls) plus flow.cpp:4774 and jsx.cpp:430 (two direct
+    /// parser — flow.cpp:1232, 3462, 4856; jsx.cpp:260; ts.cpp:835 (five
+    /// genuine `need` calls) plus flow.cpp:4775 and jsx.cpp:430 (two direct
     /// `errorExpected` calls with no `need`/`eat` guard, because their C++
     /// condition is compound — e.g. `!check(identifier) &&
     /// !tok_->isResWord()` — not a single-token `check`). This function is
     /// called at exactly 6 real call sites: the 5 genuine `need` sites plus
-    /// flow.cpp:4774, which behaves identically to a `need(identifier,
+    /// flow.cpp:4775, which behaves identically to a `need(identifier,
     /// where)` call even though C++ spells it as a manual check +
     /// `errorExpected` (see `flow/params.rs::parse_type_param_flow`). The
     /// 7th (jsx.cpp:430) keeps its compound-condition shape and is ported
@@ -716,7 +716,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Report a "'k1', 'k2' or 'k3' expected{where_}" error at the current
     /// token. Port of the three-token `errorExpected` initializer-list call
-    /// (e.g. the export-type dispatch at JSParserImpl-flow.cpp:2569-2574); the
+    /// (e.g. the export-type dispatch at JSParserImpl-flow.cpp:2570-2575); the
     /// C++ list rendering joins all but the last token with ", " and the last
     /// with " or ". `what`/`what_loc` are C++'s `what`/`whatLoc` (see
     /// `error_expected2`).
@@ -742,7 +742,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Report a "'k1', 'k2', 'k3' or 'k4' expected{where_}" error at the
     /// current token. Port of the four-token `errorExpected` initializer-list
     /// call (e.g. the Flow object-type property separator at
-    /// JSParserImpl-flow.cpp:4138-4145); the C++ list rendering joins all but
+    /// JSParserImpl-flow.cpp:4139-4146); the C++ list rendering joins all but
     /// the last token with ", " and the last with " or ". `what`/`what_loc`
     /// are C++'s `what`/`whatLoc` (see `error_expected2`).
     // The four tokens plus `where`/`what`/`whatLoc` are the C++ signature.
@@ -871,7 +871,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Set `allow_anon_function_type` to `new_val`, returning a guard that
     /// restores the old value on Drop. Port of the
     /// `llvh::SaveAndRestore<bool>(allowAnonFunctionType_, new)` in
-    /// `parseTypeAnnotationFlow` (JSParserImpl-flow.cpp:3080-3082).
+    /// `parseTypeAnnotationFlow` (JSParserImpl-flow.cpp:3081-3083).
     pub(super) fn save_allow_anon_function_type(
         &self,
         new_val: bool,
@@ -887,7 +887,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Set `allow_conditional_type` to `new_val`, returning a guard that
     /// restores the old value on Drop. Port of the
     /// `llvh::SaveAndRestore<bool>(allowConditionalType_, ...)` uses in the
-    /// Flow type grammar (e.g. JSParserImpl-flow.cpp:3098).
+    /// Flow type grammar (e.g. JSParserImpl-flow.cpp:3099).
     pub(super) fn save_allow_conditional_type(
         &self,
         new_val: bool,
@@ -2220,7 +2220,7 @@ mod tests {
     }
 
     // P5 capstone: Flow `export type` and export-kind detection
-    // (C++ JSParserImpl.cpp:7133-7137, 7361-7368; flow.cpp:2498-2575).
+    // (C++ JSParserImpl.cpp:7133-7137, 7361-7368; flow.cpp:2499-2576).
 
     /// Helper: parse `src` with Flow enabled, expect one top-level
     /// `ExportNamedDeclaration`, and assert its `exportKind` atom is `kind`.
@@ -2245,7 +2245,7 @@ mod tests {
 
     /// `export type A = ...;` routes through
     /// `parse_export_type_declaration_flow` (C++ 7133-7137 →
-    /// flow.cpp:2557-2566) and gets exportKind `type`.
+    /// flow.cpp:2558-2567) and gets exportKind `type`.
     #[test]
     fn flow_export_type_alias_kind_is_type() {
         assert_flow_export_kind(b"export type A = number;", b"type");
@@ -2284,7 +2284,7 @@ mod tests {
     }
 
     /// The `export type {…}` / `export type *` specifier/re-export forms of
-    /// parseExportTypeDeclarationFlow (flow.cpp:2503-2556) are ported in P6.6
+    /// parseExportTypeDeclarationFlow (flow.cpp:2504-2557) are ported in P6.6
     /// and carry exportKind `type`.
     #[test]
     fn flow_export_type_clause_and_star_have_type_kind() {

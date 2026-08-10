@@ -2117,8 +2117,8 @@ unchanged** (both are error-path files, exit 2). Arithmetic: 212 + 2 = 214;
 
 `sema_differential_s0` itself is RED at the end of Task 2, for reasons that
 are none of Task 2's: exactly 2 files mismatch, `export.js` and
-`module-export-plain.js`, both on `4193b558a` ("Use consistent wording for
-export-requires-module-mode errors"), which Task 3 mirrors (plan item
+`module-export-plain.js`, both on upstream `f90a83146` (in-tree `4193b558a`,
+"Use consistent wording for export-requires-module-mode errors"), which Task 3 mirrors (plan item
 T3S4). Verified by replicating the harness comparison over all 214 files
 without the first-mismatch abort: 214 compared, 2 mismatches (those two),
 108 oracle successes — i.e. both new imports pass, and nothing else
@@ -2189,7 +2189,7 @@ quirk any more:
 |---|---|
 | `deep-ast-err.js` | unchanged — still a vacuous match (comment-only file, both exit 0, byte-identical); still excluded on purpose |
 | `xmod-errors.js` | unchanged — still panics at `calls.rs:312` (`$SHBuiltin.moduleFactory needs visitModuleFactory`), oracle exit 2 vs 101. **Still S4b** |
-| `invalid-args-eval.js` | **now byte-identical on all three channels** (stdout 0/0, stderr 3037/3037, exit 2/2), and deterministically so. The `89:9` same-location tie is no longer unspecified on the C++ side: upstream `5f313a13a` (in-tree `7805e2103`) replaced the buffered-message `std::sort` with `std::stable_sort` (`SourceErrorManager.cpp:60-73`), so both sides now keep same-location messages in emission order — the match is by construction, not coincidence. NOT imported here anyway: the plan assigns `5f313a13a` to **Task 5**, which will import this file together with retiring the (now-obsolete) stable-sort divergence note in `support/src/manager.rs`. The Deferred row was rewritten to say this instead of the old unstable-`std::sort` reason. (Discharged: Task 5 imported it — the file is in the Imported table now.) |
+| `invalid-args-eval.js` | **now byte-identical on all three channels** (stdout 0/0, stderr 2467/2467, exit 2/2), and deterministically so. The `89:9` same-location tie is no longer unspecified on the C++ side: upstream `5f313a13a` (in-tree `7805e2103`) replaced the buffered-message `std::sort` with `std::stable_sort` (`SourceErrorManager.cpp:60-73`), so both sides now keep same-location messages in emission order — the match is by construction, not coincidence. NOT imported here anyway: the plan assigns `5f313a13a` to **Task 5**, which will import this file together with retiring the (now-obsolete) stable-sort divergence note in `support/src/manager.rs`. The Deferred row was rewritten to say this instead of the old unstable-`std::sort` reason. (Discharged: Task 5 imported it — the file is in the Imported table now.) |
 
 None of the three is a promoter/`using`/export-default row, so no row was
 unblocked BY these fixes.
@@ -2320,7 +2320,7 @@ upstream pin for the same defect.
 |---|---|
 | `deep-ast-err.js` | unchanged — still a vacuous match (comment-only file, both exit 0, both channels 0 bytes); still excluded on purpose |
 | `xmod-errors.js` | unchanged — still panics at `calls.rs` (`$SHBuiltin.moduleFactory needs visitModuleFactory`), oracle exit 2 vs 101. **Still S4b.** Note this is the row most plausibly touched by `07efab88d`, and it is not: `moduleFactory` IS an identifier property, so the new `dyn_cast` gate passes and the branch is reached exactly as before |
-| `invalid-args-eval.js` | unchanged from Task 3's re-probe — byte-identical on all three channels (stdout 0/0, stderr 3037/3037, exit 2/2) by construction since `5f313a13a`'s stable sort. Still assigned to **Task 5**, which imports it. (Discharged: Task 5 imported it — the file is in the Imported table now.) |
+| `invalid-args-eval.js` | unchanged from Task 3's re-probe — byte-identical on all three channels (stdout 0/0, stderr 2467/2467, exit 2/2) by construction since `5f313a13a`'s stable sort. Still assigned to **Task 5**, which imports it. (Discharged: Task 5 imported it — the file is in the Imported table now.) |
 
 Neither fix unblocks any Deferred row.
 
@@ -2360,8 +2360,8 @@ Oracle-verified raw bytes before importing, exactly as the global constraint
 requires:
 
 ```
-hermesc -dump-sema test/Sema/invalid-args-eval.js   -> exit 2, stdout 0 B, stderr 3037 B
-sema-dump          test/Sema/invalid-args-eval.js   -> exit 2, stdout 0 B, stderr 3037 B
+hermesc -dump-sema test/Sema/invalid-args-eval.js   -> exit 2, stdout 0 B, stderr 2467 B
+sema-dump          test/Sema/invalid-args-eval.js   -> exit 2, stdout 0 B, stderr 2467 B
 cmp: stdout identical, stderr identical
 ```
 

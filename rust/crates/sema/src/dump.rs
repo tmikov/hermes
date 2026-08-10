@@ -87,7 +87,7 @@
 //! `assert(!node->isUnresolvable())` (SemContext.h:559-561), which is
 //! compiled out in `NDEBUG`/Release builds; in that configuration the call
 //! was harmless, because the *only* call site that ever marks an identifier
-//! unresolvable (`Unresolver::visit`, `SemanticResolver.cpp:3192-3206`)
+//! unresolvable (`Unresolver::visit`, `SemanticResolver.cpp:3206-3220`)
 //! always clears the "have expression decl" bit first via
 //! `setExpressionDecl(node, nullptr)` — so `getExpressionDecl` would
 //! return `nullptr` there regardless of the assert. A debug C++ build,

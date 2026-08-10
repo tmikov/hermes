@@ -53,7 +53,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     // -----------------------------------------------------------------------
 
     /// Whether `expr` followed by the current `{` forms a `record` expression.
-    /// Port of `JSParserImpl::checkRecordExpressionFlow` (flow.cpp:1929-1946).
+    /// Port of `JSParserImpl::checkRecordExpressionFlow` (flow.cpp:1930-1947).
     ///
     /// The current token must be `{` with no newline before it; `expr` must be
     /// either an Identifier with a non-empty name whose first character is NOT
@@ -87,7 +87,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse a `record` expression body — `Constructor[<TypeArgs>] { props }` —
     /// with the cursor at `{`. Port of
-    /// `JSParserImpl::parseRecordExpressionFlow` (flow.cpp:1948-1979).
+    /// `JSParserImpl::parseRecordExpressionFlow` (flow.cpp:1949-1980).
     pub(in crate::js) fn parse_record_expression_flow(
         &mut self,
         start_loc: SMLoc,

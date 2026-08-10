@@ -5,7 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-//! S2 T6: `visit(CallExpressionNode *)` (SemanticResolver.cpp:1117-1205) —
+//! S2 T6: `visit(CallExpressionNode *)` (SemanticResolver.cpp:1127-1219) —
 //! the three "call specials" the C++ resolver folds into one override, plus
 //! the static helper one of them needs. A sibling `impl<'bt, 'sc, 'sm, 'ad>
 //! SemanticResolver<'bt, 'sc, 'sm, 'ad>` block, split into its own file for
@@ -16,13 +16,13 @@
 //! rewrite.
 //!
 //! Ports `SemanticResolver::visit(ESTree::CallExpressionNode *node)`
-//! (cpp:1117-1205) and `SemanticResolver::registerLocalEval`
-//! (cpp:2835-2843, declared `static` at SemanticResolver.h:501-503).
+//! (cpp:1127-1219) and `SemanticResolver::registerLocalEval`
+//! (cpp:2849-2857, declared `static` at SemanticResolver.h:501-503).
 //!
 //! The visit does three unrelated things in sequence, and `visit_node`
 //! dispatches `CallExpression` — and ONLY `CallExpression` — here:
 //!
-//! 1. **Direct `eval()` detection** (cpp:1118-1151). A call whose callee is
+//! 1. **Direct `eval()` detection** (cpp:1128-1161). A call whose callee is
 //!    the bare identifier `eval` is a *direct* eval. Whether it "looks like"
 //!    the real global `eval` is decided by the binding: unbound, or bound to
 //!    a global-scope `UndeclaredGlobalProperty`/`GlobalProperty`, means yes.
@@ -36,8 +36,8 @@
 //!    outside sema and outside this port. With `eval` disabled the warning
 //!    becomes `EvalDisabled` and no scope is marked.
 //! 2. **Rewrite #3: `$SHBuiltin.prop(...)` → `SHBuiltin` node**
-//!    (cpp:1153-1193). See the section below.
-//! 3. **The `super()` check** (cpp:1195-1202): a `super()` call is only
+//!    (cpp:1163-1207). See the section below.
+//! 3. **The `super()` check** (cpp:1209-1216): a `super()` call is only
 //!    legal when the nearest non-arrow enclosing function is a *derived*
 //!    class constructor.
 //!
@@ -78,7 +78,7 @@
 //! `methodCallee` IS `node->_callee`, so after that assignment the same
 //! `CallExpressionNode` the visit was handed has a `MemberExpression` callee
 //! whose `_object` is an `SHBuiltinNode`, and `visitESTreeChildren(*this,
-//! node)` at cpp:1204 walks *that*. Structural fields are immutable here, so
+//! node)` at cpp:1218 walks *that*. Structural fields are immutable here, so
 //! the port rebuilds instead: a new `MemberExpression` (through the
 //! generated builder, so `computed` — a `Cell` decoration — is carried
 //! over) and then a new `CallExpression` around it. Everything after the
@@ -118,17 +118,17 @@
 //!   because the second call hits the decl cache).
 //!
 //! The three module-related property names (`moduleFactory`, `export`,
-//! `import`, cpp:1168-1189) are the `$SHBuiltin` CommonJS-module protocol
+//! `import`, cpp:1183-1204) are the `$SHBuiltin` CommonJS-module protocol
 //! and belong to **S4** (the module visits). They are ported as loud
 //! phase-tagged panics rather than approximated. One subtlety recorded here
-//! for whoever lands S4: the `export` branch (cpp:1177-1186) visits the
+//! for whoever lands S4: the `export` branch (cpp:1192-1201) visits the
 //! children FIRST and only then calls `visitModuleExport(node)`, because the
 //! exported name must already be resolved — in this port "visit the
 //! children" means `visit_children_mut`, which may hand back a *rebuilt*
 //! call node, and it is that rebuilt node `visitModuleExport` must be given
-//! (and returned as `Changed`). The `moduleFactory` branch (cpp:1168-1176)
+//! (and returned as `Changed`). The `moduleFactory` branch (cpp:1183-1191)
 //! and the `export` branch both `return` without falling through to
-//! cpp:1204, while the `import` branch (cpp:1187-1189) DOES fall through.
+//! cpp:1218, while the `import` branch (cpp:1202-1204) DOES fall through.
 
 use ast::context::GCLock;
 use ast::node::{builder, Node, SHBuiltin};
@@ -143,7 +143,7 @@ use super::SemanticResolver;
 
 /// Mark \p scope and every one of its ancestor scopes as users of local
 /// `eval()`. Port of `SemanticResolver::registerLocalEval`
-/// (SemanticResolver.cpp:2835-2843).
+/// (SemanticResolver.cpp:2849-2857).
 ///
 /// C++ declares this `static` (SemanticResolver.h:503) — it touches no
 /// resolver state — so it is a free function here rather than a method,
@@ -169,7 +169,7 @@ pub(super) fn register_local_eval(
 /// The `_name` of a `$SHBuiltin.<prop>` member expression's `_property`,
 /// when that property is an identifier at all. Port of
 /// `llvh::dyn_cast<ESTree::IdentifierNode>(methodCallee->_property)`
-/// (cpp:1160-1161, as of upstream `07efab88d`).
+/// (cpp:1171-1172, as of upstream `07efab88d`).
 ///
 /// C++ used to `cast` here, so the enclosing `if (auto *propIdent = ...)` was
 /// always taken and a non-`Identifier` `_property` was an assertion failure —
@@ -189,7 +189,7 @@ fn sh_builtin_property_name(node: &Node) -> Option<Atom> {
 
 impl SemanticResolver<'_, '_, '_, '_> {
     /// Port of `SemanticResolver::visit(ESTree::CallExpressionNode *node)`
-    /// (SemanticResolver.cpp:1117-1205). See the module doc for the three
+    /// (SemanticResolver.cpp:1127-1219). See the module doc for the three
     /// things it does, for rewrite #3's mechanics and for why
     /// `OptionalCallExpression`/`NewExpression` are not routed here.
     pub(super) fn visit_call_expression<'gc>(
@@ -271,7 +271,7 @@ impl SemanticResolver<'_, '_, '_, '_> {
                     && !method_callee.computed.get()
                     && prop_ident.is_some()
                 {
-                    // `resolveIdentifier` never returns null (cpp:1967-2031
+                    // `resolveIdentifier` never returns null (cpp:1981-2045
                     // ends in an unconditional `return decl;` after creating
                     // an ambient global), which is why this port's
                     // `resolve_identifier` returns a plain `DeclId` and C++'s
@@ -333,7 +333,7 @@ impl SemanticResolver<'_, '_, '_, '_> {
                         //
                         // - `moduleFactory`: exit 0 with a full dump, and the
                         //   children are NOT walked — the `return` at
-                        //   cpp:1176 is OUTSIDE the `if (compile_)`, so with
+                        //   cpp:1191 is OUTSIDE the `if (compile_)`, so with
                         //   `compile_ == false` the call is skipped but the
                         //   `return` still fires. Dropping either the
                         //   `if (compile_)` gate or the unconditional
@@ -341,14 +341,14 @@ impl SemanticResolver<'_, '_, '_, '_> {
                         //   pair will catch.
                         // - `export`: exit 0 with a dump; `visitESTreeChildren`
                         //   and `visitModuleExport` both run UNGATED by
-                        //   `compile_` (cpp:1182-1187).
+                        //   `compile_` (cpp:1197-1202).
                         // - `import`: exit 2 with a dump; `visitModuleImport`
-                        //   runs UNGATED (cpp:1188-1189) and there is no
+                        //   runs UNGATED (cpp:1203-1204) and there is no
                         //   `return`, so the branch falls through to the
                         //   children walk.
                         panic!(
                             "sema: $SHBuiltin.moduleFactory needs \
-                             visitModuleFactory (cpp:1320-1366) — S4 modules"
+                             visitModuleFactory (cpp:1334-1380) — S4 modules"
                         );
                     } else if prop_name == self.kw().ident_export {
                         // In this case, we must visit the children first, to
@@ -367,7 +367,7 @@ impl SemanticResolver<'_, '_, '_, '_> {
                         // `visit_children_mut` returned, not this one.
                         panic!(
                             "sema: $SHBuiltin.export needs visitModuleExport \
-                             (cpp:1368-1413) — S4 modules"
+                             (cpp:1382-1427) — S4 modules"
                         );
                     } else if prop_name == self.kw().ident_import {
                         //   visitModuleImport(node);
@@ -375,7 +375,7 @@ impl SemanticResolver<'_, '_, '_, '_> {
                         // children walk below)
                         panic!(
                             "sema: $SHBuiltin.import needs visitModuleImport \
-                             (cpp:1415-1453) — S4 modules"
+                             (cpp:1429-1467) — S4 modules"
                         );
                     }
                 }

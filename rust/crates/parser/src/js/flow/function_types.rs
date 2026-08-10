@@ -32,7 +32,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse a function return type annotation, which may be a plain type or
     /// a type predicate (`asserts x [is T]`, `implies x is T`, `x is T`).
-    /// Port of `parseReturnTypeAnnotationFlow` (flow.cpp:2883-3009).
+    /// Port of `parseReturnTypeAnnotationFlow` (flow.cpp:2884-3010).
     ///
     /// \param wrapped_start like `parse_type_annotation_flow`'s: if `Some`,
     ///   the result is wrapped in a `TypeAnnotation` node.
@@ -229,7 +229,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse the `=> ReturnType` tail of a function type whose parameters
     /// have already been parsed. Port of
-    /// `parseFunctionTypeAnnotationWithParamsFlow` (flow.cpp:3865-3897).
+    /// `parseFunctionTypeAnnotationWithParamsFlow` (flow.cpp:3866-3898).
     pub(super) fn parse_function_type_annotation_with_params_flow(
         &mut self,
         start: SMLoc,
@@ -280,14 +280,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse a (possibly generic) function type annotation
     /// `<T>(params) => R`. Port of `parseFunctionTypeAnnotationFlow`
-    /// (flow.cpp:3823-3825).
+    /// (flow.cpp:3824-3826).
     pub(super) fn parse_function_type_annotation_flow(&mut self) -> Option<&'gc Node<'gc>> {
         self.parse_function_or_hook_type_annotation_flow(false)
     }
 
     /// Parse a function (or, P6, hook) type annotation with the current token
     /// at `<` or `(`. Port of `parseFunctionOrHookTypeAnnotationFlow`
-    /// (flow.cpp:3827-3863). `hook` is threaded like the C++ bool; the only
+    /// (flow.cpp:3828-3864). `hook` is threaded like the C++ bool; the only
     /// P5 caller passes false (`parseHookTypeAnnotationFlow` is P6).
     pub(super) fn parse_function_or_hook_type_annotation_flow(
         &mut self,
@@ -347,7 +347,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse a parenthesized group type `(T)` or a parenthesized function
     /// type `(params) => R`, with the current token at `(`. Port of
-    /// `parseFunctionOrGroupTypeAnnotationFlow` (flow.cpp:3899-4032).
+    /// `parseFunctionOrGroupTypeAnnotationFlow` (flow.cpp:3900-4033).
     pub(super) fn parse_function_or_group_type_annotation_flow(
         &mut self,
     ) -> Option<&'gc Node<'gc>> {
@@ -521,7 +521,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// current `(` (used by object-type methods, accessors, call properties,
     /// and internal slots — the return type follows a `:`, not `=>`). Returns
     /// a `FunctionTypeAnnotation` node. Port of
-    /// `parseMethodishTypeAnnotationFlow` (flow.cpp:4848-4879).
+    /// `parseMethodishTypeAnnotationFlow` (flow.cpp:4849-4880).
     pub(super) fn parse_methodish_type_annotation_flow(
         &mut self,
         start: SMLoc,
@@ -577,7 +577,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// optional rest parameter is returned (the C++ returns
     /// `Optional<FunctionTypeParamNode*>` — outer `None` here means an error
     /// was reported, inner `None` means no rest parameter). Port of
-    /// `parseFunctionTypeAnnotationParamsFlow` (flow.cpp:4881-4944).
+    /// `parseFunctionTypeAnnotationParamsFlow` (flow.cpp:4882-4945).
     pub(super) fn parse_function_type_annotation_params_flow(
         &mut self,
         params: &mut Vec<&'gc Node<'gc>>,
@@ -665,7 +665,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse one hook-type parameter. Identical to a function-type parameter
     /// except that a `this` constraint is rejected. Port of
-    /// `JSParserImpl::parseHookTypeAnnotationParamFlow` (flow.cpp:4946-4955).
+    /// `JSParserImpl::parseHookTypeAnnotationParamFlow` (flow.cpp:4947-4956).
     fn parse_hook_type_annotation_param_flow(
         &mut self,
     ) -> Option<&'gc Node<'gc>> {
@@ -684,7 +684,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse one function-type parameter, which is either a bare type or a
     /// named `name[?]: T`. Port of `parseFunctionTypeAnnotationParamFlow`
-    /// (flow.cpp:4957-5005).
+    /// (flow.cpp:4958-5006).
     fn parse_function_type_annotation_param_flow(
         &mut self,
     ) -> Option<&'gc Node<'gc>> {
@@ -743,7 +743,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse a `%checks` / `%checks(expr)` predicate, with the current token
     /// at the `%checks` identifier (lexed as a single identifier in Type
-    /// grammar context). Port of `parsePredicateFlow` (flow.cpp:5078-5098).
+    /// grammar context). Port of `parsePredicateFlow` (flow.cpp:5079-5099).
     pub(in crate::js) fn parse_predicate_flow(
         &mut self,
     ) -> Option<&'gc Node<'gc>> {

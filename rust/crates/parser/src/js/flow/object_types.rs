@@ -34,7 +34,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     // -----------------------------------------------------------------------
 
     /// Parse an object type annotation, with the current token at `{` or
-    /// `{|`. Port of `parseObjectTypeAnnotationFlow` (flow.cpp:4034-4085).
+    /// `{|`. Port of `parseObjectTypeAnnotationFlow` (flow.cpp:4035-4086).
     pub(super) fn parse_object_type_annotation_flow(
         &mut self,
         allow_proto_property: AllowProtoProperty,
@@ -106,7 +106,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Parse the members of an object type into the four out-lists, leaving
     /// the closing `}`/`|}` as the current token. Returns false if an error
     /// was reported. Port of `parseObjectTypePropertiesFlow`
-    /// (flow.cpp:4087-4151).
+    /// (flow.cpp:4088-4152).
     #[allow(clippy::too_many_arguments)] // faithful to the C++ signature.
     fn parse_object_type_properties_flow(
         &mut self,
@@ -205,7 +205,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Parse one object-type member (property, method, accessor, call
     /// property, indexer, mapped type, or internal slot), pushing it into the
     /// appropriate out-list. Returns false if an error was reported. Port of
-    /// `parsePropertyTypeAnnotationFlow` (flow.cpp:4153-4439).
+    /// `parsePropertyTypeAnnotationFlow` (flow.cpp:4154-4440).
     fn parse_property_type_annotation_flow(
         &mut self,
         allow_proto_property: AllowProtoProperty,
@@ -628,7 +628,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     /// Parse the `[?] : T` tail of a plain object-type property. Port of
-    /// `parseTypePropertyFlow` (flow.cpp:4441-4472).
+    /// `parseTypePropertyFlow` (flow.cpp:4442-4473).
     fn parse_type_property_flow(
         &mut self,
         start: SMLoc,
@@ -673,7 +673,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     /// Parse the `<T>(params): R` tail of an object-type method property.
-    /// Port of `parseMethodTypePropertyFlow` (flow.cpp:4474-4510).
+    /// Port of `parseMethodTypePropertyFlow` (flow.cpp:4475-4511).
     fn parse_method_type_property_flow(
         &mut self,
         start: SMLoc,
@@ -709,7 +709,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse the `(params): R` tail of an object-type accessor property,
     /// checking the accessor arity. Port of `parseGetOrSetTypePropertyFlow`
-    /// (flow.cpp:4512-4550).
+    /// (flow.cpp:4513-4551).
     fn parse_get_or_set_type_property_flow(
         &mut self,
         start: SMLoc,
@@ -759,7 +759,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse the rest of a mapped type member `[K in T][+?/-?/?]: V`, with
     /// `left` the already-parsed key and `in` consumed. Port of
-    /// `parseTypeMappedTypePropertyFlow` (flow.cpp:4552-4620).
+    /// `parseTypeMappedTypePropertyFlow` (flow.cpp:4553-4621).
     fn parse_type_mapped_type_property_flow(
         &mut self,
         start: SMLoc,
@@ -863,7 +863,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse the rest of an indexer member `[id: K]: V` / `[K]: V`, with
     /// `left` the already-parsed bracket contents (or its `id` part). Port of
-    /// `parseTypeIndexerPropertyFlow` (flow.cpp:4622-4669).
+    /// `parseTypeIndexerPropertyFlow` (flow.cpp:4623-4670).
     fn parse_type_indexer_property_flow(
         &mut self,
         start: SMLoc,
@@ -922,7 +922,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     /// Parse an object-type call property `<T>(params): R`. Port of
-    /// `parseTypeCallPropertyFlow` (flow.cpp:4671-4688).
+    /// `parseTypeCallPropertyFlow` (flow.cpp:4672-4689).
     fn parse_type_call_property_flow(
         &mut self,
         start: SMLoc,

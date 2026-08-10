@@ -11,10 +11,10 @@
 //! file's module doc for why a child module sees `mod.rs`'s private fields.
 //!
 //! Ports `SemanticResolver::extractIdentsFromDecl` (SemanticResolver.cpp:
-//! 2262-2352), `extractDeclaredIdentsFromID` (cpp:2353-2405),
-//! `processDeclarations` (cpp:2095-2127, replacing `mod.rs`'s S0 guard in
+//! 2262-2352), `extractDeclaredIdentsFromID` (cpp:2367-2419),
+//! `processDeclarations` (cpp:2109-2141, replacing `mod.rs`'s S0 guard in
 //! `process_collected_declarations`), `validateAndDeclareIdentifier`
-//! (cpp:2407-2639), `validateDeclarationName` (cpp:2641-2677),
+//! (cpp:2421-2653), `validateDeclarationName` (cpp:2655-2691),
 //! `visit(VariableDeclarationNode *)` (cpp:325-403) and
 //! `visit(BlockStatementNode *, Node *)` (cpp:502-518).
 //!
@@ -24,8 +24,8 @@
 //!   **FlowChecker component**, which is out of Sema's scope entirely — not
 //!   a later Sema phase (parent spec §1 "Out of scope", §6 "Not a Sema
 //!   phase"); see `resolver/mod.rs`'s module doc. The `processDeclarations`
-//!   builtin-skip branch `typed_` guards (cpp:2108-2121) additionally needs
-//!   `hasBuiltinDirective`/`hasBuiltinDecoration` (cpp:2816-2836), whose
+//!   builtin-skip branch `typed_` guards (cpp:2122-2135) additionally needs
+//!   `hasBuiltinDirective`/`hasBuiltinDecoration` (cpp:2830-2850), whose
 //!   only caller is that branch and which therefore belong to the same
 //!   component — so rather than fabricate stand-ins for methods another
 //!   component owns, the branch is ported as a `const TYPED: bool = false`
@@ -82,7 +82,7 @@ pub(super) fn atom_str(gc: &GCLock, atom: Atom) -> String {
 }
 
 /// The body of `SemanticResolver::extractDeclaredIdentsFromID`
-/// (SemanticResolver.cpp:2353-2405), as a free function over the only piece
+/// (SemanticResolver.cpp:2367-2419), as a free function over the only piece
 /// of the resolver it touches. See the forwarding method of the same name
 /// below for why it lives out here.
 pub(super) fn extract_declared_idents_from_id<'gc>(
@@ -164,7 +164,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
 
     /// \return the function-body scope of the function owning `scope`. Port
     /// of the repeated `scope->parentFunction->getFunctionBodyScope()`
-    /// idiom (cpp:354, 377, 2449).
+    /// idiom (cpp:354, 377, 2463).
     fn function_body_scope_of(&self, scope: ScopeId) -> ScopeId {
         let parent_function = self.sem_ctx.scope(scope).parent_function;
         self.sem_ctx
@@ -176,7 +176,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     /// body scope (as opposed to some scope nested inside it). Port of the
     /// repeated `curScope_ == curScope_->parentFunction->
     /// getFunctionBodyScope()` / `curScope_ == curFunctionInfo()->
-    /// getFunctionBodyScope()` idiom (cpp:287, 353-354, 2449).
+    /// getFunctionBodyScope()` idiom (cpp:287, 353-354, 2463).
     fn cur_scope_is_function_body_scope(&self) -> bool {
         let cur = self.cur_scope.expect("no active scope");
         cur == self.function_body_scope_of(cur)
@@ -199,7 +199,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     // ---- extractIdentsFromDecl / extractDeclaredIdentsFromID ----------
 
     /// Port of `SemanticResolver::extractIdentsFromDecl`
-    /// (SemanticResolver.cpp:2262-2352). Appends every declared
+    /// (SemanticResolver.cpp:2276-2366). Appends every declared
     /// `Identifier` node reachable from `node`'s binding pattern(s) to
     /// `idents` and returns the `Decl::Kind` `node` as a whole should be
     /// declared with.
@@ -330,7 +330,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 
     /// Port of `SemanticResolver::extractDeclaredIdentsFromID`
-    /// (SemanticResolver.cpp:2353-2405). Appends every `Identifier` in the
+    /// (SemanticResolver.cpp:2367-2419). Appends every `Identifier` in the
     /// binding pattern `node` to `idents`. \return whether `node` contains
     /// an expression that isn't purely a binding pattern (an
     /// `AssignmentPattern`'s default value) — the "invalid destructuring
@@ -354,7 +354,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     // ---- processCollectedDeclarations / processDeclarations -----------
 
     /// Port of `SemanticResolver::processDeclarations`
-    /// (SemanticResolver.cpp:2095-2127).
+    /// (SemanticResolver.cpp:2109-2141).
     ///
     /// Takes an owned slice rather than borrowing straight from the
     /// `DeclCollector` (whose `ScopeDecls` lives behind
@@ -374,7 +374,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // TypeAlias/TSTypeAliasDeclaration are type-only declarations;
             // they don't participate in value binding. Port of the `#if
             // HERMES_PARSE_FLOW`/`#if HERMES_PARSE_TS`-guarded `continue`s
-            // (cpp:2097-2104) — this port's single node set always
+            // (cpp:2111-2118) — this port's single node set always
             // includes both dialects (see the crate doc), so both checks
             // apply unconditionally.
             if matches!(
@@ -396,7 +396,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             if TYPED {
                 unreachable!(
                     "typed-mode builtin-function skip is S2 scope \
-                     (cpp:2108-2121)"
+                     (cpp:2122-2135)"
                 );
             }
 
@@ -409,7 +409,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     // ---- validateAndDeclareIdentifier ----------------------------------
 
     /// Port of `SemanticResolver::validateAndDeclareIdentifier`
-    /// (SemanticResolver.cpp:2407-2639).
+    /// (SemanticResolver.cpp:2421-2653).
     pub(super) fn validate_and_declare_identifier<'gc>(
         &mut self,
         gc: &'gc GCLock,
@@ -745,7 +745,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 
     /// Port of `SemanticResolver::validateDeclarationName`
-    /// (SemanticResolver.cpp:2641-2677).
+    /// (SemanticResolver.cpp:2655-2691).
     pub(super) fn validate_declaration_name(
         &mut self,
         gc: &GCLock,
@@ -1105,7 +1105,7 @@ mod tests {
         )))
     }
 
-    // ==== extractIdentsFromDecl classification (cpp:2262-2352) =========
+    // ==== extractIdentsFromDecl classification (cpp:2276-2366) =========
     //
     // `FunctionDeclaration`/`ClassDeclaration`/`CatchClause`/
     // `ImportDeclaration` all have `visit_node` dispatch arms and corpus
@@ -1426,7 +1426,7 @@ mod tests {
 
     /// A node that isn't one of the five recognized declaration kinds
     /// reports "unsuppported declaration kind" (verbatim C++ typo,
-    /// cpp:2349) and returns the dummy `Decl::Kind::Var`.
+    /// cpp:2363) and returns the dummy `Decl::Kind::Var`.
     #[test]
     fn unsupported_declaration_kind_reports_error() {
         let mut ctx = Context::new();
@@ -1465,12 +1465,12 @@ mod tests {
         assert_eq!(sm.error_count(), 1);
     }
 
-    // ==== extractDeclaredIdentsFromID (cpp:2353-2405) ===================
+    // ==== extractDeclaredIdentsFromID (cpp:2367-2419) ===================
 
     /// A pattern-position node that isn't `Identifier`/`Empty`/
     /// `AssignmentPattern`/`ArrayPattern`/`RestElement`/`ObjectPattern`/
     /// `ComponentParameter` reports "invalid destructuring target"
-    /// (cpp:2403) and returns `false` (no `containsExpr`).
+    /// (cpp:2417) and returns `false` (no `containsExpr`).
     #[test]
     fn invalid_destructuring_target_reports_error() {
         let mut ctx = Context::new();
@@ -1510,7 +1510,7 @@ mod tests {
         assert_eq!(sm.error_count(), 1);
     }
 
-    // ==== validateDeclarationName (cpp:2641-2677) =======================
+    // ==== validateDeclarationName (cpp:2655-2691) =======================
 
     /// Strict mode: `arguments`/`eval` can never be declared, regardless of
     /// `Decl::Kind`.
@@ -1696,7 +1696,7 @@ mod tests {
         assert_eq!(sm.error_count(), 2);
     }
 
-    // ==== validateAndDeclareIdentifier (cpp:2407-2639) ==================
+    // ==== validateAndDeclareIdentifier (cpp:2421-2653) ==================
     //
     // These build the "previous declaration" state by hand (a `Decl` plus
     // a `binding_table` entry) rather than by parsing+declaring real source,
@@ -1794,7 +1794,7 @@ mod tests {
 
     /// A non-ES5 `Catch` decl conflicts with a `let` in the catch's OWN
     /// (parameter) scope's child (its body block) — the
-    /// `prevInPrevScope`/`Catch`/`ES5Catch` row (cpp:2525-2530). The corpus
+    /// `prevInPrevScope`/`Catch`/`ES5Catch` row (cpp:2539-2544). The corpus
     /// reaches `visit_catch_clause`, but not this particular redeclaration
     /// row, so it is exercised directly on hand-built decls.
     #[test]
@@ -2019,7 +2019,7 @@ mod tests {
     /// `Var, ScopedFunc` in DIFFERENT scopes, with the name already present
     /// in `promotedFuncDecls` (S3, always empty until `ScopedFunctionPromoter`
     /// lands — see the module doc): the redeclaration matrix's "reuse the
-    /// promoted decl" branch (cpp:2548-2562) fires instead of declaring a
+    /// promoted decl" branch (cpp:2562-2576) fires instead of declaring a
     /// fresh one, and the new binding points at the REUSED decl.
     #[test]
     fn var_then_scoped_function_reuses_promoted_decl_in_different_scope() {
@@ -2119,7 +2119,7 @@ mod tests {
     }
 
     /// The standalone "promoted function involves two declarations"
-    /// side-table branch (cpp:2609-2625): when the SAME identifier node
+    /// side-table branch (cpp:2623-2639): when the SAME identifier node
     /// already carries a "declaration decl" (as it would after
     /// `processPromotedFuncDecls` ran on it, S3) AND its name is in
     /// `promotedFuncDecls`, a NEW decl is created in the current

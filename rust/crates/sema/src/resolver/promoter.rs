@@ -25,7 +25,7 @@
 //! Nothing is deleted from any scope and nothing is added to the function
 //! scope here — `getPromotedScopedFuncDecls` only *returns* the promotable
 //! list, and the caller (`SemanticResolver::processPromotedFuncDecls`,
-//! cpp:2129-2141) declares the names in the function/global scope while the
+//! cpp:2143-2155) declares the names in the function/global scope while the
 //! block's own `ScopedFunction` declaration survives. The header used to
 //! promise otherwise, and `processDeclarations` used to carry a write-only
 //! `newDecls` local as the last vestige of it; both were removed upstream in
@@ -179,7 +179,7 @@ impl<'ast, 'd, 'sc, 'sm, 'tb>
         } else {
             // `getBlockStatement(funcNode)` (lib/AST/ESTree.cpp:58-81). Both
             // ported call sites guard on the body being a `BlockStatement`
-            // (cpp:1905's `if (blockBody)`; a `Program` took the branch
+            // (cpp:1919's `if (blockBody)`; a `Program` took the branch
             // above), which is what makes the `cast` safe there and this
             // `debug_assert` a restatement of it rather than a new rule.
             let body = function_like_body(func_node);
@@ -332,7 +332,7 @@ impl<'ast, 'd, 'sc, 'sm, 'tb>
     /// `ScopedFunctionPromoter::extractDeclaredIdents` (cpp:90-97, 238-306).
     ///
     /// This is deliberately NOT
-    /// `SemanticResolver::extract_idents_from_decl` (cpp:2262-2352,
+    /// `SemanticResolver::extract_idents_from_decl` (cpp:2276-2366,
     /// `declarations.rs`): C++ keeps the two apart and the kind mapping
     /// differs — here a `FunctionDeclaration` is *always* `ScopedFunction`,
     /// while the resolver's version maps a top-level one to `Var`/

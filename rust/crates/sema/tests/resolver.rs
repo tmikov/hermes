@@ -2903,6 +2903,14 @@ fn field_initializer_scopes_are_parented_in_the_initializer_function() {
     // ones with more than one scope: their body scope plus the class
     // expression's.
     let global = global_function(&sem_ctx);
+    let global_scopes = sem_ctx.function(global).get_scopes().to_vec();
+    assert_eq!(
+        global_scopes.len(),
+        2,
+        "the global program scope + class C's own (private-names) scope"
+    );
+    let class_c_scope = global_scopes[1];
+
     let multi: Vec<FunctionInfoId> = (0..sem_ctx.functions_len())
         .map(|i| FunctionInfoId::from_sema_id(ast::SemaId(i as u32)))
         .filter(|&f| f != global && sem_ctx.function(f).get_scopes().len() > 1)
@@ -2924,8 +2932,18 @@ fn field_initializer_scopes_are_parented_in_the_initializer_function() {
             "the class expression's scope must hang off the initializer \
              function's body scope, not the enclosing class scope"
         );
-        // ... and the body scope itself still hangs off the class scope.
-        assert_ne!(sem_ctx.scope(body).parent_scope, None);
+        // ... and the body scope itself still hangs off class C's own
+        // scope: `get_or_create_{instance,static}_elements_init_function_info`
+        // creates the elements-init function's body scope with `self.cur_scope`
+        // as parent, and `self.cur_scope` at that point is class C's own
+        // scope (entered by `visit_class_as_expr` while processing class C,
+        // before either field is visited) — not the outer (global) scope.
+        assert_eq!(
+            sem_ctx.scope(body).parent_scope,
+            Some(class_c_scope),
+            "the elements-init function's body scope must hang off class \
+             C's own scope, not the global scope"
+        );
     }
 }
 

@@ -16,16 +16,16 @@
 //! (SemanticResolver.cpp:405-436), `visit(AssignmentExpressionNode *)`
 //! (cpp:438-462), `visit(UpdateExpressionNode *)` (cpp:464-473),
 //! `visit(UnaryExpressionNode *, Node **)` (cpp:475-500),
-//! `validateAssignmentTarget` (cpp:2679-2711) and `isLValue`
-//! (cpp:2713-2757).
+//! `validateAssignmentTarget` (cpp:2693-2725) and `isLValue`
+//! (cpp:2727-2771).
 //!
 //! S2 T2 adds the remaining small expression visits, all of them pure
 //! validation over the current resolver state (none allocates or rewrites
-//! anything): `visit(YieldExpressionNode *)` (cpp:1476-1492),
-//! `visit(AwaitExpressionNode *)` (cpp:1494-1508) — the resolver's only
+//! anything): `visit(YieldExpressionNode *)` (cpp:1490-1506),
+//! `visit(AwaitExpressionNode *)` (cpp:1508-1522) — the resolver's only
 //! reader of `forbidAwaitExpression_` — `visit(SpreadElementNode *, Node *)`
-//! (cpp:1455-1467), `visit(MetaPropertyNode *)` (cpp:837-872) and the five
-//! `visit(Cover*Node *)` overloads (cpp:1558-1577). Three of those error
+//! (cpp:1469-1481), `visit(MetaPropertyNode *)` (cpp:837-872) and the five
+//! `visit(Cover*Node *)` overloads (cpp:1572-1591). Three of those error
 //! paths are defensive in the C++ too (no parse can reach them): see
 //! `visit_spread_element`'s and `visit_meta_property`'s doc comments for the
 //! parser evidence.
@@ -33,8 +33,8 @@
 //! S2 T3 adds `visit(RegExpLiteralNode *)` (cpp:821-835) — a literal, hence
 //! this file rather than `statements.rs`.
 //!
-//! S2 T5 adds `visit(MemberExpressionNode *, Node *)` (cpp:1207-1253) and
-//! `visit(OptionalMemberExpressionNode *, Node *)` (cpp:1255-1295), fused
+//! S2 T5 adds `visit(MemberExpressionNode *, Node *)` (cpp:1221-1267) and
+//! `visit(OptionalMemberExpressionNode *, Node *)` (cpp:1269-1309), fused
 //! into one [`SemanticResolver::visit_member_like_expression`] — the two C++
 //! overloads are near-duplicates and that function documents the two places
 //! they genuinely differ. They belong here (rather than in `classes.rs` with
@@ -205,7 +205,7 @@ use super::SemanticResolver;
 
 /// Port of `astContext_.getCodeGenerationSettings().test262`
 /// (`include/hermes/AST/Context.h`), read by `visit(UnaryExpressionNode *)`
-/// (SemanticResolver.cpp:485) and `isLValue` (cpp:2721).
+/// (SemanticResolver.cpp:485) and `isLValue` (cpp:2735).
 ///
 /// `CodeGenerationSettings` is a compiler-driver knob (`hermesc -test262`),
 /// not something sema computes, and this port has no driver flag that could
@@ -608,7 +608,7 @@ impl SemanticResolver<'_, '_, '_, '_> {
     // ---- validateAssignmentTarget / isLValue ---------------------------
 
     /// Port of `SemanticResolver::validateAssignmentTarget`
-    /// (SemanticResolver.cpp:2679-2711).
+    /// (SemanticResolver.cpp:2693-2725).
     ///
     /// C++'s `return validateAssignmentTarget(...)` on a `void` function is
     /// a tail call written for brevity; here each is a call followed by a
@@ -726,7 +726,7 @@ impl SemanticResolver<'_, '_, '_, '_> {
     // ---- visit(YieldExpressionNode *) ----------------------------------
 
     /// Port of `SemanticResolver::visit(ESTree::YieldExpressionNode *node)`
-    /// (SemanticResolver.cpp:1476-1492).
+    /// (SemanticResolver.cpp:1490-1506).
     pub(super) fn visit_yield_expression<'gc>(
         &mut self,
         gc: &'gc GCLock,
@@ -766,13 +766,13 @@ impl SemanticResolver<'_, '_, '_, '_> {
     // ---- visit(AwaitExpressionNode *) ----------------------------------
 
     /// Port of `SemanticResolver::visit(ESTree::AwaitExpressionNode
-    /// *awaitExpr)` (SemanticResolver.cpp:1494-1508). cpp:1495 is the ONLY
+    /// *awaitExpr)` (SemanticResolver.cpp:1508-1522). cpp:1509 is the ONLY
     /// read of `forbidAwaitExpression_` anywhere in the C++ resolver, which
     /// is why the flag has been write-only in this port since S1 T7 wired
-    /// `visitFunctionLikeInFunctionContext`'s save/restore (cpp:1831-1832).
+    /// `visitFunctionLikeInFunctionContext`'s save/restore (cpp:1845-1846).
     /// Three more writers exist — `visit(ClassPrivatePropertyNode *)`
-    /// (cpp:976), `visit(ClassPropertyNode *)` (cpp:1028) and
-    /// `visit(StaticBlockNode *)` (cpp:1074), each forcing it to `true` — and
+    /// (cpp:976), `visit(ClassPropertyNode *)` (cpp:1033) and
+    /// `visit(StaticBlockNode *)` (cpp:1084), each forcing it to `true` — and
     /// they are S2 T4/T5's; those are also the only paths that
     /// can make the error below fire, since the parser will not build an
     /// `AwaitExpression` outside an async function otherwise (see
@@ -803,7 +803,7 @@ impl SemanticResolver<'_, '_, '_, '_> {
     // ---- visit(SpreadElementNode *, Node *) ----------------------------
 
     /// Port of `SemanticResolver::visit(ESTree::SpreadElementNode *node,
-    /// Node *parent)` (SemanticResolver.cpp:1455-1467).
+    /// Node *parent)` (SemanticResolver.cpp:1469-1481).
     ///
     /// The `RecordExpressionProperties` arm is `#if HERMES_PARSE_FLOW` in
     /// C++; this port has a single, unconditional node set (the `ast` crate
@@ -926,7 +926,7 @@ impl SemanticResolver<'_, '_, '_, '_> {
     // ---- the Cover visits ----------------------------------------------
 
     /// Port of the four (five, with the Flow one) `visit(Cover*Node *)`
-    /// overloads (SemanticResolver.cpp:1558-1577). The parser produces a
+    /// overloads (SemanticResolver.cpp:1572-1591). The parser produces a
     /// `Cover*` node when a construct is only legal as part of something it
     /// turned out not to be part of — most often arrow parameters — and
     /// leaves rejecting it to sema, which is this function.
@@ -983,7 +983,7 @@ impl SemanticResolver<'_, '_, '_, '_> {
     // ---- visit(TypeCastExpressionNode *) / visit(AsExpressionNode *) ---
 
     /// Port of `SemanticResolver::visit(ESTree::TypeCastExpressionNode
-    /// *node)` (SemanticResolver.cpp:1591-1594, `#if HERMES_PARSE_FLOW`; no
+    /// *node)` (SemanticResolver.cpp:1605-1608, `#if HERMES_PARSE_FLOW`; no
     /// dialect gate here for the same reason `visit_spread_element`'s note
     /// gives for `CoverTypedIdentifier`).
     ///
@@ -1021,7 +1021,7 @@ impl SemanticResolver<'_, '_, '_, '_> {
     }
 
     /// Port of `SemanticResolver::visit(ESTree::AsExpressionNode *node)`
-    /// (SemanticResolver.cpp:1596-1599, `#if HERMES_PARSE_FLOW`) — same
+    /// (SemanticResolver.cpp:1610-1613, `#if HERMES_PARSE_FLOW`) — same
     /// shape and same "visit the expression, not the type annotation"
     /// comment as [`Self::visit_type_cast_expression`] above. `x as number;`
     /// under untyped `-parse-flow` (no `-typed`) reaches this visit: the
@@ -1106,24 +1106,24 @@ impl SemanticResolver<'_, '_, '_, '_> {
     // ---- visit(OptionalMemberExpressionNode *, Node *) -------------------
 
     /// Port of `SemanticResolver::visit(ESTree::MemberExpressionNode *node,
-    /// ESTree::Node *parent)` (cpp:1207-1253) and
+    /// ESTree::Node *parent)` (cpp:1221-1267) and
     /// `visit(ESTree::OptionalMemberExpressionNode *node, ESTree::Node
-    /// *parent)` (cpp:1255-1295).
+    /// *parent)` (cpp:1269-1309).
     ///
     /// The two C++ overloads are near-duplicates; the ONLY differences, both
     /// preserved below, are:
     ///
     /// - the `isa<SuperNode>(node->_object)` / "Cannot lookup private names
     ///   on super." check exists only on the non-optional overload
-    ///   (cpp:1213-1216). It is not needed on the other one: the parser
+    ///   (cpp:1227-1230). It is not needed on the other one: the parser
     ///   rejects `super?.` outright (`'(', '[' or '.' expected after 'super'
     ///   keyword`), so an `OptionalMemberExpression` never has a `Super`
     ///   object — the same grammar fact that makes `visit(SuperNode *)`'s
     ///   `OptionalMemberExpression` arm dead (see `classes.rs`).
     /// - the `delete` diagnostic points at DIFFERENT nodes in the two
-    ///   overloads: `node` for `MemberExpression` (cpp:1219) but `parent`
+    ///   overloads: `node` for `MemberExpression` (cpp:1233) but `parent`
     ///   (i.e. the whole `delete ...` expression) for
-    ///   `OptionalMemberExpression` (cpp:1262-1263). Verified against
+    ///   `OptionalMemberExpression` (cpp:1276-1277). Verified against
     ///   hermesc: `delete o.#x` underlines `o.#x`, `delete o?.#x` underlines
     ///   `delete o?.#x`. Faithfully reproduced, not unified.
     ///
@@ -1432,7 +1432,7 @@ mod tests {
         }
     }
 
-    /// The loose-mode `arguments` quirk (cpp:2745-2751): the *special*
+    /// The loose-mode `arguments` quirk (cpp:2759-2765): the *special*
     /// `arguments` decl is rejected even in loose mode, where the spec would
     /// allow it. Not reachable from the S1 corpus (the special decl is
     /// created by `declareArguments`, which needs the function visits), so

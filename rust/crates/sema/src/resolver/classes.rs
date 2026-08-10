@@ -15,24 +15,24 @@
 //! doc for why a child module sees `mod.rs`'s private fields and helpers.
 //!
 //! Ports `hermes::sema::ClassContext` (declared at SemanticResolver.h:
-//! 630-677, defined at SemanticResolver.cpp:3081-3181),
+//! 630-677, defined at SemanticResolver.cpp:3095-3195),
 //! `SemanticResolver::visit(ClassDeclarationNode *)` (cpp:891-907),
 //! `visit(ClassExpressionNode *)` (cpp:909-911), `visitClassAsExpr`
-//! (cpp:913-950), `visit(ClassPropertyNode *)` (cpp:1008-1051),
-//! `visit(MethodDefinitionNode *, Node *)` (cpp:1094-1115) and
-//! `visit(SuperNode *, Node *)` (cpp:1086-1092), plus the four `ESTree::`
+//! (cpp:913-950), `visit(ClassPropertyNode *)` (cpp:1013-1061),
+//! `visit(MethodDefinitionNode *, Node *)` (cpp:1104-1125) and
+//! `visit(SuperNode *, Node *)` (cpp:1096-1102), plus the four `ESTree::`
 //! free functions they reach (`getSuperClass`, `getClassID`, `getClassBody`,
 //! `getDecorators` — `lib/AST/ESTree.cpp:228-277`).
 //!
-//! S2 T5 adds `collectDeclaredPrivateIdentifiers` (cpp:2143-2260),
+//! S2 T5 adds `collectDeclaredPrivateIdentifiers` (cpp:2157-2274),
 //! `visit(PrivateNameNode *)` (cpp:952-963),
-//! `visit(ClassPrivatePropertyNode *)` (cpp:965-1006) and
-//! `visit(StaticBlockNode *)` (cpp:1053-1084). The two halves the private
+//! `visit(ClassPrivatePropertyNode *)` (cpp:965-1011) and
+//! `visit(StaticBlockNode *)` (cpp:1063-1094). The two halves the private
 //! names need that do NOT live here are `declarePrivateName`/
 //! `resolvePrivateName` (`identifiers.rs`, next to their C++ neighbour
 //! `checkIdentifierResolved`), the `#`-prefix mangling
 //! (`sem_context::private_name_identifier`), and the `MemberExpression`/
-//! `OptionalMemberExpression` restriction checks (cpp:1207-1295,
+//! `OptionalMemberExpression` restriction checks (cpp:1221-1309,
 //! `expressions.rs`).
 //!
 //! ## Where the synthetic `FunctionInfo` ids live
@@ -43,15 +43,15 @@
 //! `ClassLikeDecoration` fields (`ESTree.h:409-425`,
 //! `gen_nodes.py`'s `ClassLikeDecoration`), **not** in the `ClassContext`:
 //!
-//! - `createImplicitConstructorFunctionInfo` (cpp:3088-3114) writes
+//! - `createImplicitConstructorFunctionInfo` (cpp:3102-3128) writes
 //!   `implicit_ctor_function_info`; its `ConstructorKind` is `Derived` if the
 //!   class has a superclass, else `Base`.
-//! - `getOrCreateInstanceElementsInitFunctionInfo` (cpp:3116-3138) writes
+//! - `getOrCreateInstanceElementsInitFunctionInfo` (cpp:3130-3152) writes
 //!   `instance_elements_init_function_info`; `ConstructorKind::None`.
-//! - `getOrCreateStaticElementsInitFunctionInfo` (cpp:3140-3163) writes
+//! - `getOrCreateStaticElementsInitFunctionInfo` (cpp:3154-3177) writes
 //!   `static_elements_init_function_info`; `ConstructorKind::None`.
 //!
-//! `createStaticBlockFunctionInfo` (cpp:3165-3177) is the fourth creator and
+//! `createStaticBlockFunctionInfo` (cpp:3179-3191) is the fourth creator and
 //! the only one whose id does NOT land on the class: it goes on the
 //! `StaticBlock` node's own `function_info` `Cell` (`StaticBlockDecoration`),
 //! and its `FunctionInfo` is flagged `is_static_block` (which is what makes
@@ -121,7 +121,7 @@
 //! ## Private names: where the declarations come from
 //!
 //! Private names are declared by `collect_declared_private_identifiers`
-//! (cpp:2143-2260) into the SAME scope as the `ClassExprName`, i.e. the class
+//! (cpp:2157-2274) into the SAME scope as the `ClassExprName`, i.e. the class
 //! node's own scope, under the `#`-mangled name
 //! ([`crate::sem_context::private_name_identifier`]) — which is exactly why a
 //! `#x` can never be confused with, or shadow, an ordinary `x`. It runs
@@ -134,7 +134,7 @@
 //!
 //! - A legal getter+setter pair ends up as ONE `Decl`, whose `kind` the
 //!   SECOND accessor MUTATES in place from `PrivateGetter`/`PrivateSetter` to
-//!   `PrivateGetterSetter` (cpp:2255), with both accessors' `Identifier`s
+//!   `PrivateGetterSetter` (cpp:2269), with both accessors' `Identifier`s
 //!   bound to it via `setBothDecl`. That mutation targets `SemContext` state,
 //!   not a node `Cell`, so it is exempt from the decorate-before-recurse
 //!   invariant — noted at the site.
@@ -150,7 +150,7 @@
 //!   is ported in shape only, as a documented panic — typed dialects are
 //!   their own future track.
 //! - **The `@Hermes.overload` duplicate-private-method exemption**
-//!   (cpp:2197-2200) is `typed_`-only for the same reason, and is a panic
+//!   (cpp:2211-2214) is `typed_`-only for the same reason, and is a panic
 //!   inside the `if TYPED` that guards it.
 
 use std::collections::hash_map::Entry;
@@ -173,7 +173,7 @@ use super::{SemanticResolver, DEBUG_INFO_SETTING_ALL};
 /// this port, matching `declarations.rs`'s and `functions.rs`'s constants of
 /// the same name (typed dialects are their own future track). Read by
 /// `visit(ClassDeclarationNode *)` (cpp:892), `visit(ClassPropertyNode *)`
-/// (cpp:1041) and `visit(MethodDefinitionNode *, Node *)` (cpp:1097).
+/// (cpp:1051) and `visit(MethodDefinitionNode *, Node *)` (cpp:1107).
 const TYPED: bool = false;
 
 /// Port of `hermes::sema::ClassContext` (SemanticResolver.h:630-677).
@@ -199,7 +199,7 @@ pub(super) struct ClassContext {
 
 /// Information about a private accessor. Port of
 /// `collectDeclaredPrivateIdentifiers`'s local `struct PrivateAccessorInfo`
-/// (cpp:2146-2162).
+/// (cpp:2160-2176).
 ///
 /// C++'s `PrivateAccessorInfo{}` is an aggregate, so value-initialization
 /// zero-initializes `originalNameDecl` to `nullptr` in the default
@@ -314,7 +314,7 @@ fn class_like_has_decorators(node: &Node) -> bool {
 }
 
 /// Read `ClassLikeDecoration::implicitCtorFunctionInfo`, for the assert in
-/// `create_implicit_constructor_function_info` (cpp:3094).
+/// `create_implicit_constructor_function_info` (cpp:3108).
 fn class_like_implicit_ctor(node: &Node) -> Option<SemaId> {
     match node {
         Node::ClassExpression(n) => n.implicit_ctor_function_info.get(),
@@ -324,7 +324,7 @@ fn class_like_implicit_ctor(node: &Node) -> Option<SemaId> {
 }
 
 /// Port of `classDecoration->implicitCtorFunctionInfo = implicitCtor`
-/// (cpp:3113).
+/// (cpp:3127).
 fn set_class_like_implicit_ctor(node: &Node, info: FunctionInfoId) {
     let id = Some(info.sema_id());
     match node {
@@ -334,7 +334,7 @@ fn set_class_like_implicit_ctor(node: &Node, info: FunctionInfoId) {
     }
 }
 
-/// Read `ClassLikeDecoration::instanceElementsInitFunctionInfo` (cpp:3118).
+/// Read `ClassLikeDecoration::instanceElementsInitFunctionInfo` (cpp:3132).
 fn class_like_instance_elements_init(node: &Node) -> Option<SemaId> {
     match node {
         Node::ClassExpression(n) => {
@@ -348,7 +348,7 @@ fn class_like_instance_elements_init(node: &Node) -> Option<SemaId> {
 }
 
 /// Port of `classDecoration->instanceElementsInitFunctionInfo = ...`
-/// (cpp:3135).
+/// (cpp:3149).
 fn set_class_like_instance_elements_init(node: &Node, info: FunctionInfoId) {
     let id = Some(info.sema_id());
     match node {
@@ -362,7 +362,7 @@ fn set_class_like_instance_elements_init(node: &Node, info: FunctionInfoId) {
     }
 }
 
-/// Read `ClassLikeDecoration::staticElementsInitFunctionInfo` (cpp:3142).
+/// Read `ClassLikeDecoration::staticElementsInitFunctionInfo` (cpp:3156).
 fn class_like_static_elements_init(node: &Node) -> Option<SemaId> {
     match node {
         Node::ClassExpression(n) => n.static_elements_init_function_info.get(),
@@ -372,7 +372,7 @@ fn class_like_static_elements_init(node: &Node) -> Option<SemaId> {
 }
 
 /// Port of `classDecoration->staticElementsInitFunctionInfo = ...`
-/// (cpp:3160).
+/// (cpp:3174).
 fn set_class_like_static_elements_init(node: &Node, info: FunctionInfoId) {
     let id = Some(info.sema_id());
     match node {
@@ -427,7 +427,7 @@ fn build_class_replacement<'gc>(
 impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     // ---- ClassContext ----------------------------------------------------
 
-    /// Port of `ClassContext::ClassContext` (SemanticResolver.cpp:3081-3086).
+    /// Port of `ClassContext::ClassContext` (SemanticResolver.cpp:3095-3100).
     fn enter_class<'gc>(
         &mut self,
         gc: &'gc GCLock,
@@ -440,7 +440,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
         ClassState
     }
 
-    /// Port of `ClassContext::~ClassContext` (cpp:3179-3181).
+    /// Port of `ClassContext::~ClassContext` (cpp:3193-3195).
     fn exit_class(&mut self, _state: ClassState) {
         self.class_stack.pop().expect("no active class context");
     }
@@ -454,7 +454,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 
     /// Mutable form of [`Self::cur_class_context`] — the port of
-    /// `curClassContext_->hasConstructor = true` (cpp:1656), whose only
+    /// `curClassContext_->hasConstructor = true` (cpp:1670), whose only
     /// writer is `functions.rs`'s `visit_function_like`.
     pub(super) fn cur_class_context_mut(&mut self) -> &mut ClassContext {
         self.class_stack.last_mut().expect("no active class context")
@@ -464,7 +464,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     /// Port of `ClassContext::isDerivedClass` (SemanticResolver.h:659-662).
     ///
     /// `pub(super)` because `functions.rs`'s `visit_function_like` reads it
-    /// for the constructor kind (cpp:1657).
+    /// for the constructor kind (cpp:1671).
     pub(super) fn cur_class_is_derived(&self, gc: &GCLock) -> bool {
         // It's a derived class if it has a super class node.
         let class_node_rc = self.cur_class_context().class_node.clone();
@@ -484,7 +484,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 
     /// Port of `ClassContext::createImplicitConstructorFunctionInfo`
-    /// (cpp:3088-3114).
+    /// (cpp:3102-3128).
     ///
     /// May only be called after the body of the current class has been
     /// visited, and `has_constructor` is valid. If the current class has no
@@ -529,7 +529,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 
     /// Port of `ClassContext::getOrCreateInstanceElementsInitFunctionInfo`
-    /// (cpp:3116-3138). On first call, creates a `FunctionInfo` for an
+    /// (cpp:3130-3152). On first call, creates a `FunctionInfo` for an
     /// implicit function to do the instance elements initializations. On
     /// subsequent calls, return that `FunctionInfo`.
     fn get_or_create_instance_elements_init_function_info(
@@ -549,7 +549,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 
     /// Port of `ClassContext::getOrCreateStaticElementsInitFunctionInfo`
-    /// (cpp:3140-3163) — get or create a synthetic function information for
+    /// (cpp:3154-3177) — get or create a synthetic function information for
     /// the static elements initializer of a class.
     fn get_or_create_static_elements_init_function_info(
         &mut self,
@@ -571,7 +571,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 
     /// The body the two `getOrCreate...ElementsInitFunctionInfo` getters
-    /// share (cpp:3119-3134 and cpp:3143-3159 are the same code up to the
+    /// share (cpp:3133-3148 and cpp:3157-3173 are the same code up to the
     /// local variable's name and the decoration field it lands in — this
     /// port factors it out rather than duplicating it, since the two C++
     /// bodies are textually identical).
@@ -603,13 +603,13 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 
     /// Port of `ClassContext::createStaticBlockFunctionInfo`
-    /// (cpp:3165-3177) — create a synthetic function information for a
+    /// (cpp:3179-3191) — create a synthetic function information for a
     /// static initialization block.
     ///
     /// Unlike the three above, the id lands on the `StaticBlock` node's own
     /// `function_info` `Cell` (see the module doc), and no scope is created
     /// here: `visit(StaticBlockNode *)`'s `ScopeRAII{..., /*
-    /// isFunctionBodyScope */ true}` (cpp:1063) makes it. Its only caller is
+    /// isFunctionBodyScope */ true}` (cpp:1073) makes it. Its only caller is
     /// [`Self::visit_static_block`] (S2 T5).
     fn create_static_block_function_info(
         &mut self,
@@ -792,7 +792,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 
     /// Port of `SemanticResolver::collectDeclaredPrivateIdentifiers`
-    /// (cpp:2143-2260) — the ES2024 15.7.1 early-error machinery for private
+    /// (cpp:2157-2274) — the ES2024 15.7.1 early-error machinery for private
     /// names, run over the class body BEFORE the body is visited (cpp:939,
     /// from `visitClassAsExpr`), so that every private reference
     /// anywhere inside the class — including in a member declared earlier
@@ -879,7 +879,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
                     let is_overload = if TYPED {
                         panic!(
                             "sema: @Hermes.overload private methods need \
-                             the typed-dialect track (cpp:2197-2200)"
+                             the typed-dialect track (cpp:2211-2214)"
                         )
                     } else {
                         false
@@ -988,7 +988,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
                     existing_info.is_setter = true;
                 }
                 // NOTE: this MUTATES an already-created `Decl`'s kind
-                // (cpp:2255). It is exempt from `resolver/mod.rs`'s
+                // (cpp:2269). It is exempt from `resolver/mod.rs`'s
                 // "decorate before recursing" invariant, which constrains
                 // writes to `Cell` decorations ON AST NODES: a `Decl` lives
                 // in `SemContext`, which no node rebuild ever snapshots or
@@ -1013,7 +1013,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     ///
     /// This is the ONLY place the "was not declared in any enclosing class"
     /// diagnostic is reported, which is why the `MemberExpression` branches
-    /// (cpp:1224-1225) can silently skip their extra validation when
+    /// (cpp:1238-1239) can silently skip their extra validation when
     /// `resolvePrivateName` fails: this visit runs on the same
     /// `PrivateNameNode` right afterwards, from `visitESTreeChildren`.
     pub(super) fn visit_private_name<'gc>(
@@ -1055,7 +1055,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     // ---- visit(ClassPrivatePropertyNode *) -------------------------------
 
     /// Port of `SemanticResolver::visit(ESTree::ClassPrivatePropertyNode
-    /// *node)` (cpp:965-1006).
+    /// *node)` (cpp:965-1011).
     ///
     /// The same shape as `visit(ClassPropertyNode *)` (see
     /// [`Self::visit_class_property`]) minus the computed-key branch: a
@@ -1152,7 +1152,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     // ---- visit(StaticBlockNode *) ----------------------------------------
 
     /// Port of `SemanticResolver::visit(ESTree::StaticBlockNode *node)`
-    /// (cpp:1053-1084).
+    /// (cpp:1063-1094).
     ///
     /// Both `Cell`s this writes on `node` (`function_info`, from
     /// `create_static_block_function_info`, and `scope`, from `enter_scope`)
@@ -1160,7 +1160,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     /// "decorate before recursing" invariant holds as stated — a fold or an
     /// arrow rewrite anywhere in the block rebuilds it and carries both. The
     /// OTHER decoration this visit causes, the static-elements-init id from
-    /// cpp:1057, lands on the CLASS node instead, and it is
+    /// cpp:1067, lands on the CLASS node instead, and it is
     /// `visit_class_as_expr` that keeps that one alive across a rebuild (see
     /// the module doc's decorate-after-children section).
     pub(super) fn visit_static_block<'gc>(
@@ -1219,7 +1219,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     // ---- visit(ClassPropertyNode *) --------------------------------------
 
     /// Port of `SemanticResolver::visit(ESTree::ClassPropertyNode *node)`
-    /// (cpp:1008-1051).
+    /// (cpp:1013-1061).
     pub(super) fn visit_class_property<'gc>(
         &mut self,
         gc: &'gc GCLock,
@@ -1326,7 +1326,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     // ---- visit(MethodDefinitionNode *, Node *) ---------------------------
 
     /// Port of `SemanticResolver::visit(ESTree::MethodDefinitionNode *node,
-    /// ESTree::Node *parent)` (cpp:1094-1115). `parent` is unused by the
+    /// ESTree::Node *parent)` (cpp:1104-1125). `parent` is unused by the
     /// C++ body (it exists only because the dispatcher's two-argument
     /// overload was chosen), so it is not a parameter here.
     pub(super) fn visit_method_definition<'gc>(
@@ -1352,7 +1352,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             ));
         }
         // NOTE: this check is deliberately OUTSIDE the `if` above in the C++
-        // (cpp:1104-1105) — a spent depth budget skips the body even for a
+        // (cpp:1114-1115) — a spent depth budget skips the body even for a
         // non-computed key.
         if self.recursion_depth == 0 {
             return build_method_definition(gc, method, key_repl, None);
@@ -1380,13 +1380,13 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     // ---- visit(SuperNode *, Node *) --------------------------------------
 
     /// Port of `SemanticResolver::visit(ESTree::SuperNode *node,
-    /// ESTree::Node *parent)` (cpp:1086-1092).
+    /// ESTree::Node *parent)` (cpp:1096-1102).
     ///
     /// The C++ body neither visits children (`Super` is an
     /// `ESTREE_NODE_0_ARGS` kind, ESTree.def:275) nor touches
     /// `node` at all — only `parent` — hence the `Unchanged` and the absent
     /// `node` parameter. `super(...)`'s own check lives in
-    /// `visit(CallExpressionNode *)` (cpp:1195-1202) — `calls.rs`, S2 T6 —
+    /// `visit(CallExpressionNode *)` (cpp:1209-1216) — `calls.rs`, S2 T6 —
     /// which is exactly why a `CallExpression` parent is NOT in the
     /// `MemberExpressionLike` range tested below.
     pub(super) fn visit_super<'gc>(

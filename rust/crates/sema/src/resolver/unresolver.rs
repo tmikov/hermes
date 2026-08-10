@@ -6,7 +6,7 @@
  */
 
 //! S2 T3: port of `hermes::sema::Unresolver` — declared at
-//! SemanticResolver.h:679-711, defined at SemanticResolver.cpp:3186-3210.
+//! SemanticResolver.h:679-711, defined at SemanticResolver.cpp:3200-3224.
 //!
 //! "Visitor pass for marking variables as Unresolvable based on local
 //! `eval()` or `with`" (SemanticResolver.h:679-680).
@@ -29,7 +29,7 @@
 //!   `curScope_->depth + 1` and the `with`'s BODY as the root, so
 //!   declarations made *inside* the `with` (depth >= that) keep their
 //!   resolution while everything from the enclosing scope outwards loses it.
-//! - `visitFunctionBodyAfterParamsVisited` (cpp:1931-1937) — the local-`eval`
+//! - `visitFunctionBodyAfterParamsVisited` (cpp:1945-1951) — the local-`eval`
 //!   case, which C++ itself disables: the condition is literally `if (false
 //!   && lexScope->localEval && !curFunctionInfo()->strict)` behind a `TODO:
 //!   enable this when non-strict direct eval is supported`. `functions.rs`
@@ -80,7 +80,7 @@ pub(super) struct Unresolver<'sc> {
 impl Unresolver<'_> {
     /// Mark all declarations that are at a lower depth than \p depth as
     /// unresolvable, starting at \p root. Port of `Unresolver::run`
-    /// (SemanticResolver.cpp:3186-3190).
+    /// (SemanticResolver.cpp:3200-3204).
     ///
     /// No `GCLock` is threaded through, unlike every resolver visit: this
     /// pass allocates nothing and only reads and re-decorates existing
@@ -97,7 +97,7 @@ impl Unresolver<'_> {
     }
 
     /// Port of `Unresolver::visit(ESTree::IdentifierNode *node)`
-    /// (SemanticResolver.cpp:3192-3210).
+    /// (SemanticResolver.cpp:3206-3224).
     ///
     /// `node` is the enclosing `Node` because `set_expression_decl` needs its
     /// `NodeId` (C++ keys the same side table by the node pointer it already

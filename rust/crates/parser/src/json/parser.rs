@@ -54,7 +54,7 @@ pub struct JSONParser<'a> {
 
 impl<'a> JSONParser<'a> {
     /// Construct a `JSONParser` over the source buffer identified by `buf_id` in
-    /// `sm`. Port of `JSONParser::JSONParser` (JSONParser.h:641-653).
+    /// `sm`. Port of `JSONParser::JSONParser` (JSONParser.h:660-672).
     pub fn new(
         factory: &'a JSONFactory<'a>,
         buf_id: SourceId,
@@ -77,7 +77,7 @@ impl<'a> JSONParser<'a> {
         self.lexer.get_source_mgr().error_count()
     }
 
-    /// Report an error at the current token's range. Port of JSONParser.h:666.
+    /// Report an error at the current token's range. Port of JSONParser.h:685.
     fn error(&mut self, msg: impl Into<String>) {
         let range: SMRange = self.lexer.token().source_range();
         self.lexer.get_source_mgr_mut().error_at(
@@ -122,7 +122,7 @@ impl<'a> JSONParser<'a> {
     }
 
     /// Parse any JSON value, assuming the recursion depth has been checked.
-    /// Port of `JSONParser::parseValueImpl` (JSONParser.cpp:214).
+    /// Port of `JSONParser::parseValueImpl` (JSONParser.cpp:213).
     fn parse_value_impl(&mut self) -> Option<&'a JSONValue<'a>> {
         let mut needs_negation = false;
         match self.cur().kind() {
@@ -179,7 +179,7 @@ impl<'a> JSONParser<'a> {
         Some(res)
     }
 
-    /// JSONParser.cpp:249 — parse `[ ... ]` (the `[` already consumed).
+    /// JSONParser.cpp:260 — parse `[ ... ]` (the `[` already consumed).
     fn parse_array(&mut self) -> Option<&'a JSONValue<'a>> {
         let mut storage: Vec<&'a JSONValue<'a>> = Vec::new();
         if self.cur().kind() != TokenKind::r_square {
@@ -204,7 +204,7 @@ impl<'a> JSONParser<'a> {
         Some(self.factory.new_array(&storage))
     }
 
-    /// JSONParser.cpp:278 — parse `{ ... }` (the `{` already consumed).
+    /// JSONParser.cpp:289 — parse `{ ... }` (the `{` already consumed).
     fn parse_object(&mut self) -> Option<&'a JSONValue<'a>> {
         let mut pairs: Vec<Prop<'a>> = Vec::new();
         if self.cur().kind() != TokenKind::r_brace {

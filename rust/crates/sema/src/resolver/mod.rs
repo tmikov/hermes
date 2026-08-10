@@ -81,8 +81,8 @@
 //! (the implicit constructor and the instance/static elements initializers,
 //! all three recorded in `Cell`s on the class node), which is also what
 //! turns S1 T7's dormant `MethodDefinition` constructor-kind branch live.
-//! From S2 T5, `collectDeclaredPrivateIdentifiers` (cpp:2143-2260),
-//! `declarePrivateName`/`resolvePrivateName` (cpp:2033-2066,
+//! From S2 T5, `collectDeclaredPrivateIdentifiers` (cpp:2157-2274),
+//! `declarePrivateName`/`resolvePrivateName` (cpp:2047-2080,
 //! `identifiers.rs`) and the `#` mangling
 //! (`sem_context::private_name_identifier`), plus
 //! `visit(PrivateNameNode *)`, `visit(ClassPrivatePropertyNode *)` and
@@ -95,12 +95,12 @@
 //! no store to a getter-only name or a method), and a static block becomes
 //! its OWN synthetic `is_static_block` `FunctionInfo` with a function-body
 //! scope that `var`s hoist into — which is also what turns S2 T4's dormant
-//! private-instance-method initializer hook (cpp:1109-1111) and
+//! private-instance-method initializer hook (cpp:1119-1121) and
 //! `create_static_block_function_info` live, and what makes S1 T4's
 //! documented `typeof` double-fire quirk reachable (see
 //! `tests/sema_corpus/error-static-block-typeof-arguments.js`).
-//! From S2 T6, `visit(CallExpressionNode *)` (cpp:1117-1205) and
-//! `registerLocalEval` (cpp:2835-2843, `calls.rs`) — a direct call to
+//! From S2 T6, `visit(CallExpressionNode *)` (cpp:1127-1219) and
+//! `registerLocalEval` (cpp:2849-2857, `calls.rs`) — a direct call to
 //! `eval()` warns and marks its whole scope chain as a local-`eval` user,
 //! **spec §3.4 rewrite #3** turns `$SHBuiltin.prop(...)` into a call whose
 //! callee's object is an `SHBuiltin` node, and `super()` outside a derived
@@ -110,7 +110,7 @@
 //! call arguments.
 //! From S3 T1, `getPromotedScopedFuncDecls` (the whole of
 //! `lib/Sema/ScopedFunctionPromoter.cpp`, ported as `promoter.rs`) and
-//! `processPromotedFuncDecls` (cpp:2129-2141, below) — a loose-mode
+//! `processPromotedFuncDecls` (cpp:2143-2155, below) — a loose-mode
 //! function or program containing a block-nested `function f() {}` now runs
 //! the Annex B 3.3 promotion check instead of asserting: the declaration is
 //! declared a SECOND time, in function (`Var`) or global
@@ -237,7 +237,7 @@
 //!   `a_rebuilt_class_keeps_its_synthetic_function_infos`.
 //!
 //!   **S2 T6 audit result: no exception.** `visit(CallExpressionNode *)`
-//!   (cpp:1117-1205) writes NO decoration at all — `CallExpression` has no
+//!   (cpp:1127-1219) writes NO decoration at all — `CallExpression` has no
 //!   `Cell` fields — and rewrite #3's other rebuilt node, the callee
 //!   `MemberExpression`, carries only `computed`, which the generated
 //!   builder's `from_node` copies. The one thing that visit does have to get
@@ -437,7 +437,7 @@ const AST_MAX_RECURSION_DEPTH: u32 =
 /// `DebugInfoSetting` (`include/hermes/AST/Context.h`) is not ported yet — it
 /// is a compiler-driver knob (`-g3`), not something sema computes — and
 /// nothing on the S0 path can set it, so both uses on this path (`ScopeRAII`,
-/// SemanticResolver.cpp:2934-2936; `visit(ProgramNode *)`, cpp:219-221) test
+/// SemanticResolver.cpp:2948-2950; `visit(ProgramNode *)`, cpp:219-221) test
 /// this constant instead. The `if` statements are kept in the exact shape of
 /// the C++ code so that porting the real setting later is a one-line change.
 const DEBUG_INFO_SETTING_ALL: bool = false;
@@ -498,7 +498,7 @@ struct FoundDirectives<'ast> {
     /// node (not just a flag) because C++ points a diagnostic at it — see
     /// `visitFunctionLikeInFunctionContext`'s "'use strict' not allowed
     /// inside function with non-simple parameter list" error
-    /// (SemanticResolver.cpp:1748-1751).
+    /// (SemanticResolver.cpp:1762-1765).
     use_strict_node: Option<&'ast Node<'ast>>,
     /// The strongest source-visibility directive seen.
     source_visibility: SourceVisibility,
@@ -508,8 +508,8 @@ struct FoundDirectives<'ast> {
     no_inline: bool,
     /// Whether a "builtin" directive was seen. Copied into
     /// `FunctionInfo::custom_directives.builtin` by
-    /// `visitFunctionLikeInFunctionContext` (cpp:1716); also read by
-    /// `hasBuiltinDirective` (cpp:2816-2824), which is S2 scope.
+    /// `visitFunctionLikeInFunctionContext` (cpp:1730); also read by
+    /// `hasBuiltinDirective` (cpp:2830-2838), which is S2 scope.
     builtin: bool,
 }
 
@@ -812,7 +812,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
 
     /// Port of the `FunctionContext` constructor that creates a brand new
     /// `FunctionInfo` and a `DeclCollector` for `node`
-    /// (SemanticResolver.cpp:2963-2992), fused with the `SaveAndRestore` of
+    /// (SemanticResolver.cpp:2977-3006), fused with the `SaveAndRestore` of
     /// `globalFunctionContext_` its S0-reachable call site wraps it in
     /// (cpp:203).
     ///
@@ -836,7 +836,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             strict,
             custom_directives,
         );
-        // C++'s depth-exceeded lambda (cpp:2985-2989) mutates the resolver
+        // C++'s depth-exceeded lambda (cpp:2999-3003) mutates the resolver
         // from inside the collector's walk. That closure cannot borrow
         // `self` mutably here (the `kw` argument already borrows it), so it
         // only records the offending node and the two effects are applied
@@ -879,13 +879,13 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 
     /// Port of the `FunctionContext(SemanticResolver &, FunctionInfo *)`
-    /// constructor (SemanticResolver.cpp:2994-3002) — the one that adopts an
+    /// constructor (SemanticResolver.cpp:3008-3016) — the one that adopts an
     /// ALREADY-CREATED `FunctionInfo` and runs no `DeclCollector`.
     ///
     /// Its callers are `classes.rs`'s `visit_class_property` and
     /// `visit_class_private_property` (both ports of the corresponding
     /// `visit(ClassPropertyNode *)`/`visit(ClassPrivatePropertyNode *)`,
-    /// cpp:1034-1038), which push a context for one of the class's
+    /// cpp:1039-1043), which push a context for one of the class's
     /// synthetic elements-initializer functions so a field initializer
     /// resolves as if it were inside that function. Consequently `node` is
     /// `None` (C++ sets it to `nullptr`) and `decls` is `None`: there is no
@@ -912,14 +912,14 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 
     /// Port of the `FunctionContext(SemanticResolver &, StaticBlockNode *,
-    /// FunctionInfo *)` constructor (SemanticResolver.cpp:3004-3023) — the
+    /// FunctionInfo *)` constructor (SemanticResolver.cpp:3018-3037) — the
     /// one that adopts an already-created `FunctionInfo` (the one
     /// `ClassContext::createStaticBlockFunctionInfo` just made) AND runs a
     /// `DeclCollector` over the static block, so that `var`s inside it hoist
     /// to the block rather than to the enclosing function.
     ///
     /// Its only caller is `classes.rs`'s `visit(StaticBlockNode *)`
-    /// (cpp:1062). Like `enter_function_with_info`, `node` is `None` (C++
+    /// (cpp:1072). Like `enter_function_with_info`, `node` is `None` (C++
     /// sets it to `nullptr` even though it HAS a node — which is why
     /// `getFunctionName` reports no name for a static block) and
     /// `setSemInfo` is not called; unlike it, `decls` is populated.
@@ -965,7 +965,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 
     /// Port of `FunctionContext::~FunctionContext`
-    /// (SemanticResolver.cpp:3049-3070) plus the call site's
+    /// (SemanticResolver.cpp:3063-3084) plus the call site's
     /// `SaveAndRestore` restore.
     fn exit_function(&mut self, state: FunctionState) {
         self.function_stack
@@ -979,7 +979,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     // ---- RecursionDepthTracker -------------------------------------------
 
     /// Port of `SemanticResolver::recursionDepthExceeded`
-    /// (SemanticResolver.cpp:2759-2762).
+    /// (SemanticResolver.cpp:2773-2776).
     fn recursion_depth_exceeded(&mut self, node: &Node) {
         self.sm.error(
             node.range().end,
@@ -1021,7 +1021,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
 
     /// Create a binding scope and push a semantic scope. Port of
     /// `SemanticResolver::ScopeRAII::ScopeRAII`
-    /// (SemanticResolver.cpp:2919-2944); the C++ member-initializer list
+    /// (SemanticResolver.cpp:2933-2958); the C++ member-initializer list
     /// runs before the constructor body, so the binding scope is pushed
     /// first.
     ///
@@ -1067,7 +1067,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
 
     /// Pops the created scope. Port of
     /// `SemanticResolver::ScopeRAII::~ScopeRAII`
-    /// (SemanticResolver.cpp:2945-2947) plus the implicit destruction of the
+    /// (SemanticResolver.cpp:2959-2961) plus the implicit destruction of the
     /// `bindingScope_` member (which, being declared last, is destroyed
     /// first).
     fn exit_scope(&mut self, state: ScopeState) {
@@ -1130,7 +1130,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             Node::UnaryExpression(_) => self.visit_unary_expression(gc, node),
             // `visit(FunctionDeclarationNode*, Node*)` (cpp:233-243),
             // `visit(FunctionExpressionNode*, Node*)` (cpp:244-248) and
-            // `visit(ReturnStatementNode*)` (cpp:1469-1475) — see
+            // `visit(ReturnStatementNode*)` (cpp:1483-1489) — see
             // `functions::*` (S1 T7); `visit(ArrowFunctionExpressionNode*,
             // Node*)` (cpp:249-275), which carries rewrite #1 — see
             // `functions::visit_arrow_function_expression` (S2 T2).
@@ -1169,11 +1169,11 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             Node::ContinueStatement(_) => {
                 self.visit_continue_statement(gc, node)
             }
-            // `visit(YieldExpressionNode*)` (cpp:1476-1492),
-            // `visit(AwaitExpressionNode*)` (cpp:1494-1508),
-            // `visit(SpreadElementNode*, Node*)` (cpp:1455-1467),
+            // `visit(YieldExpressionNode*)` (cpp:1490-1506),
+            // `visit(AwaitExpressionNode*)` (cpp:1508-1522),
+            // `visit(SpreadElementNode*, Node*)` (cpp:1469-1481),
             // `visit(MetaPropertyNode*)` (cpp:837-872) and the five
-            // `visit(Cover*Node*)` overloads (cpp:1558-1577) — see
+            // `visit(Cover*Node*)` overloads (cpp:1572-1591) — see
             // `expressions::*` (S2 T2).
             Node::YieldExpression(_) => self.visit_yield_expression(gc, node),
             Node::AwaitExpression(_) => self.visit_await_expression(gc, node),
@@ -1186,8 +1186,8 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             | Node::CoverInitializer(_)
             | Node::CoverRestElement(_)
             | Node::CoverTypedIdentifier(_) => self.visit_cover_node(node),
-            // `visit(TypeCastExpressionNode *)` (cpp:1591-1594) and
-            // `visit(AsExpressionNode *)` (cpp:1596-1599), both `#if
+            // `visit(TypeCastExpressionNode *)` (cpp:1605-1608) and
+            // `visit(AsExpressionNode *)` (cpp:1610-1613), both `#if
             // HERMES_PARSE_FLOW`: "visit the expression, but not the type
             // annotation" — see `expressions::visit_type_cast_expression`'s
             // doc for why that is not the override-free generic arm below
@@ -1210,9 +1210,9 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // `visit(ClassDeclarationNode*)` (cpp:891-907),
             // `visit(ClassExpressionNode*)` (cpp:909-911) +
             // `visitClassAsExpr` (cpp:913-950),
-            // `visit(ClassPropertyNode*)` (cpp:1008-1051),
-            // `visit(MethodDefinitionNode*, Node*)` (cpp:1094-1115) and
-            // `visit(SuperNode*, Node*)` (cpp:1086-1092) — see `classes::*`
+            // `visit(ClassPropertyNode*)` (cpp:1013-1061),
+            // `visit(MethodDefinitionNode*, Node*)` (cpp:1104-1125) and
+            // `visit(SuperNode*, Node*)` (cpp:1096-1102) — see `classes::*`
             // (S2 T4).
             Node::ClassDeclaration(_) => {
                 self.visit_class_declaration(gc, node)
@@ -1224,11 +1224,11 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             }
             Node::Super(_) => self.visit_super(path),
             // `visit(PrivateNameNode*)` (cpp:952-963),
-            // `visit(ClassPrivatePropertyNode*)` (cpp:965-1006) and
-            // `visit(StaticBlockNode*)` (cpp:1053-1084) — see `classes::*`
-            // (S2 T5); `visit(MemberExpressionNode*, Node*)` (cpp:1207-1253)
+            // `visit(ClassPrivatePropertyNode*)` (cpp:965-1011) and
+            // `visit(StaticBlockNode*)` (cpp:1063-1094) — see `classes::*`
+            // (S2 T5); `visit(MemberExpressionNode*, Node*)` (cpp:1221-1267)
             // and `visit(OptionalMemberExpressionNode*, Node*)`
-            // (cpp:1255-1295), the private-name restriction checks — see
+            // (cpp:1269-1309), the private-name restriction checks — see
             // `expressions::visit_member_like_expression` (S2 T5), which
             // took both kinds out of the override-free generic arm below.
             Node::PrivateName(_) => self.visit_private_name(gc, node),
@@ -1239,7 +1239,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             Node::MemberExpression(_) | Node::OptionalMemberExpression(_) => {
                 self.visit_member_like_expression(gc, node, path)
             }
-            // `visit(CallExpressionNode*)` (cpp:1117-1205) — the direct-`eval`
+            // `visit(CallExpressionNode*)` (cpp:1127-1219) — the direct-`eval`
             // detection, rewrite #3 (`$SHBuiltin.prop(...)` → `SHBuiltin`) and
             // the `super()` check; see `calls::visit_call_expression` (S2 T6),
             // whose module doc also records why `OptionalCallExpression` and
@@ -1253,7 +1253,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // `TransformResult::Unchanged` for them.
             //
             // `MemberExpression`/`OptionalMemberExpression` were served by
-            // this arm until S2 T5: their C++ override (cpp:1207-1295) only
+            // this arm until S2 T5: their C++ override (cpp:1221-1309) only
             // validates a `PrivateNameNode` `_property`, so before private
             // names existed here it reduced to `visitESTreeChildren(*this,
             // node)`. S2 T5 ported it for real — see
@@ -1279,10 +1279,10 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // `SequenceExpression`, `TemplateLiteral` and `TemplateElement`
             // appear nowhere in it, so C++ reaches them through
             // `visitESTreeChildren` exactly like this arm does. (Neighbors
-            // that DO have an override — `CallExpression` cpp:1117,
-            // `SpreadElement` cpp:1455, `RegExpLiteral` cpp:821,
-            // `Super` cpp:1086, `MetaProperty` cpp:837,
-            // `YieldExpression`/`AwaitExpression` cpp:1476/1494 — are
+            // that DO have an override — `CallExpression` cpp:1127,
+            // `SpreadElement` cpp:1469, `RegExpLiteral` cpp:821,
+            // `Super` cpp:1096, `MetaProperty` cpp:837,
+            // `YieldExpression`/`AwaitExpression` cpp:1490/1508 — are
             // deliberately left panicking until their own task ports them.)
             //
             // S2 T1 adds `SwitchCase`, the only child kind its statement
@@ -1296,14 +1296,14 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // two `MemberExpressionLike` kinds do), so C++ reaches its
             // `_callee`/`_arguments` through `visitESTreeChildren`. It is
             // here because it is one of the five parents
-            // `visit(SpreadElementNode *)` whitelists (cpp:1460) and the only
+            // `visit(SpreadElementNode *)` whitelists (cpp:1474) and the only
             // one of them the corpus could reach before S2 T6. Its Flow-only
             // `_typeArguments` child is self-enforcing in exactly the way
             // `ObjectPattern`'s `_typeAnnotation` is, above.
             //
             // S2 T6 adds `OptionalCallExpression` — the sibling of the ONE
             // call-family kind that does have an override (`CallExpression`,
-            // cpp:1117, now `calls::visit_call_expression`). It is a sibling,
+            // cpp:1127, now `calls::visit_call_expression`). It is a sibling,
             // not a subclass: ESTree.def:304-319 makes both children of the
             // `CallExpressionLike` GROUP, so `visit(CallExpressionNode *)` is
             // not viable for it and C++ picks the catch-all `visit(Node *)`
@@ -1438,9 +1438,9 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             Node::ObjectPattern(_) => self.visit_object_pattern(gc, node),
             Node::ArrayPattern(_) => self.visit_array_pattern(gc, node),
             // The three Flow do-nothing visits, all `#if HERMES_PARSE_FLOW`:
-            // `visit(TypeAliasNode *)` (SemanticResolver.cpp:1579-1581),
-            // `visit(TypeParameterDeclarationNode *)` (cpp:1583-1585) and
-            // `visit(TypeParameterInstantiationNode *)` (cpp:1587-1589).
+            // `visit(TypeAliasNode *)` (SemanticResolver.cpp:1593-1595),
+            // `visit(TypeParameterDeclarationNode *)` (cpp:1597-1599) and
+            // `visit(TypeParameterInstantiationNode *)` (cpp:1601-1603).
             // Each has an empty body — a TRUE no-op, unlike the generic arm
             // above: it does NOT call `visitESTreeChildren`, so the
             // children are never visited and never get `[D:E:...]`
@@ -1473,10 +1473,10 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             | Node::TypeParameterInstantiation(_) => TransformResult::Unchanged,
             // The four ES-module declaration visits (S4a T3):
             // `visit(ImportDeclarationNode *)` (cpp:874-890),
-            // `visit(ExportNamedDeclarationNode *)` (cpp:1510-1517),
-            // `visit(ExportDefaultDeclarationNode *)` (cpp:1519-1547, which
+            // `visit(ExportNamedDeclarationNode *)` (cpp:1524-1531),
+            // `visit(ExportDefaultDeclarationNode *)` (cpp:1533-1561, which
             // carries rewrite #4) and `visit(ExportAllDeclarationNode *)`
-            // (cpp:1549-1554) — see `modules.rs`, including the two
+            // (cpp:1563-1568) — see `modules.rs`, including the two
             // bug-for-bug quirks it preserves (the `ExportAll` message
             // wording and rewrite #4's `/* async */ false`) and the
             // `FunctionInfo::imports` backref fixup. The `$SHBuiltin`
@@ -1653,7 +1653,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 
     /// Port of `SemanticResolver::processCollectedDeclarations`
-    /// (cpp:2088-2093).
+    /// (cpp:2102-2107).
     ///
     /// Clones the looked-up `ScopeDecls` (a `Vec<NodeRc>` — cheap refcount
     /// bumps, not a deep copy) before calling `process_declarations`: that
@@ -1683,7 +1683,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     /// Var in function scope or GlobalProperty in global scope. Add the
     /// names to the function context's `promoted_func_decls` list. Port of
     /// `SemanticResolver::processPromotedFuncDecls`
-    /// (SemanticResolver.h:428-432, cpp:2129-2141).
+    /// (SemanticResolver.h:428-432, cpp:2143-2155).
     ///
     /// Takes the `NodeRc`s `get_promoted_scoped_func_decls` returns rather
     /// than `&Node`s, for the reason `promoter.rs`'s module doc gives, and
@@ -1739,7 +1739,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // "already declared" error, which needs a let-like declaration
             // of the same name visible in this function — exactly what the
             // promoter refuses to promote past. (3) The "two declarations
-            // put" path (cpp:2619-2625), whose guard requires
+            // put" path (cpp:2633-2639), whose guard requires
             // `semCtx_.getDeclarationDecl(ident)` to already be non-null —
             // impossible here, since this is the promoted function's own
             // identifier node, being declared for the first time.
@@ -1755,7 +1755,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 
     /// Scan the directive prologue of `body`. Port of
-    /// `SemanticResolver::scanDirectives` (cpp:2764-2814).
+    /// `SemanticResolver::scanDirectives` (cpp:2778-2828).
     ///
     /// The C++ `else if (directive == X) { if (cond) ... }` chain is written
     /// here as `else if (directive == X && cond)`. That is equivalent: the
@@ -1837,7 +1837,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 
     /// Declare the list of ambient decls that was passed to the constructor.
-    /// Port of `SemanticResolver::processAmbientDecls` (cpp:2846-2917).
+    /// Port of `SemanticResolver::processAmbientDecls` (cpp:2860-2931).
     fn process_ambient_decls(&mut self, gc: &GCLock) {
         assert!(
             !self.global_scope.is_null(),
@@ -1863,7 +1863,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
         }
     }
 
-    /// Port of the `declareAmbientGlobal` lambda (cpp:2897-2906).
+    /// Port of the `declareAmbientGlobal` lambda (cpp:2911-2920).
     ///
     /// \param name the `_name` of the `IdentifierNode` being declared; C++
     ///   takes the node and casts it, but the name is all it uses.
@@ -1939,7 +1939,7 @@ impl Drop for SemanticResolver<'_, '_, '_, '_> {
 
 /// This visitor struct collects declarations within a single closure without
 /// descending into child closures. Port of `processAmbientDecls`'s local
-/// `struct DeclHoisting` (cpp:2856-2895); its `enter`/`leave` are empty and
+/// `struct DeclHoisting` (cpp:2870-2909); its `enter`/`leave` are empty and
 /// its `shouldVisit` is the body of `visit_node` below.
 ///
 /// C++ collects the `VariableDeclaratorNode *`/`FunctionDeclarationNode *`
@@ -2019,7 +2019,7 @@ fn make_strictness(strict: bool) -> Strictness {
 }
 
 /// Port of `scopeNode->setScope(scope)` in `ScopeRAII`
-/// (SemanticResolver.cpp:2931-2932), i.e.
+/// (SemanticResolver.cpp:2945-2946), i.e.
 /// `ESTree::ScopeDecorationBase::setScope`. Enumerates the same 15
 /// scope-bearing node kinds as `sema::dump`'s `node_scope`.
 fn set_node_scope(node: &Node, scope: ScopeId) {
@@ -2046,7 +2046,7 @@ fn set_node_scope(node: &Node, scope: ScopeId) {
     }
 }
 
-/// Port of `node->setSemInfo(semInfo)` (SemanticResolver.cpp:2991), i.e.
+/// Port of `node->setSemInfo(semInfo)` (SemanticResolver.cpp:3005), i.e.
 /// `ESTree::FunctionLikeDecoration::setSemInfo`. Enumerates the same six
 /// function-like node kinds as `sema::dump`'s `function_like_sem_info`.
 fn set_node_sem_info(node: &Node, sem_info: FunctionInfoId) {

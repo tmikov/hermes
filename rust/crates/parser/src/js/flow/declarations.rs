@@ -791,7 +791,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     // -----------------------------------------------------------------------
 
     /// Whether the current token starts a `record` declaration. Port of
-    /// `JSParserImpl::checkRecordDeclarationFlow` (flow.cpp:1618-1628). MUST be
+    /// `JSParserImpl::checkRecordDeclarationFlow` (flow.cpp:1619-1629). MUST be
     /// idempotent (it is called from the parse side, which reparses the token
     /// on a match), so the lookahead passes no expected token.
     pub(in crate::js) fn check_record_declaration_flow(&mut self) -> bool {
@@ -811,7 +811,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse a `record` declaration, with the cursor at `record` and `start` at
     /// the start of the declaration. Port of
-    /// `JSParserImpl::parseRecordDeclarationFlow` (flow.cpp:1630-1901).
+    /// `JSParserImpl::parseRecordDeclarationFlow` (flow.cpp:1631-1902).
     pub(in crate::js) fn parse_record_declaration_flow(
         &mut self,
         start: SMLoc,
@@ -1162,7 +1162,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     /// The `isModifierKeyword` lambda from `parseRecordDeclarationFlow`
-    /// (flow.cpp:1691-1706): a `static`/`async` token is a modifier (rather
+    /// (flow.cpp:1692-1707): a `static`/`async` token is a modifier (rather
     /// than a property name) only if the FOLLOWING token is not one of
     /// `:`/`<`/`(`/`}`/eof. Idempotent (`lookahead1(None)`).
     fn is_record_modifier_keyword(&mut self) -> bool {
@@ -1186,7 +1186,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Parse one entry of a `record` `implements` clause: an Identifier with
     /// optional `<typeArgs>`, wrapped in a `RecordDeclarationImplements`. Port
     /// of `JSParserImpl::parseRecordDeclarationImplementsFlow`
-    /// (flow.cpp:1903-1927).
+    /// (flow.cpp:1904-1928).
     fn parse_record_declaration_implements_flow(
         &mut self,
     ) -> Option<&'gc Node<'gc>> {
@@ -1228,7 +1228,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse a type alias, with `type` already consumed and `start` at the
     /// start of the declaration. Port of `JSParserImpl::parseTypeAliasFlow`
-    /// (flow.cpp:1981-2071). All four `TypeAliasKind` paths are implemented;
+    /// (flow.cpp:1982-2072). All four `TypeAliasKind` paths are implemented;
     /// the `Declare`/`DeclareOpaque` kinds become reachable with the
     /// `declare` statement routing (parseDeclareFLow) in P6.
     pub(super) fn parse_type_alias_flow(
@@ -1380,7 +1380,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Parse an interface declaration, with the current token at the
     /// `interface` keyword (`rw_interface` in strict mode, a plain identifier
     /// spelled "interface" in loose mode). Port of
-    /// `JSParserImpl::parseInterfaceDeclarationFlow` (flow.cpp:2073-2118).
+    /// `JSParserImpl::parseInterfaceDeclarationFlow` (flow.cpp:2074-2119).
     ///
     /// \param declare_start if `Some`, this is a `declare interface` and the
     ///   resulting `DeclareInterface` node spans from it (the `declare`
@@ -1456,7 +1456,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// declarations and `interface` type annotations, pushing the
     /// `InterfaceExtends` entries into `extends` and returning the
     /// `ObjectTypeAnnotation` body. Port of
-    /// `JSParserImpl::parseInterfaceTailFlow` (flow.cpp:2120-2141). `start`
+    /// `JSParserImpl::parseInterfaceTailFlow` (flow.cpp:2121-2142). `start`
     /// is the interface's start location, passed through unchanged from C++
     /// as the real `whatLoc`/`what="location of interface"` hint on both
     /// `need` calls below (cpp:2125-2129, 2136).
@@ -1511,7 +1511,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Parse one entry of an interface `extends` clause: a generic type
     /// reference, unwrapped into an `InterfaceExtends` node spanning the same
     /// range, pushed onto `extends`. Returns false if an error was reported.
-    /// Port of `JSParserImpl::parseInterfaceExtends` (flow.cpp:2143-2157; the
+    /// Port of `JSParserImpl::parseInterfaceExtends` (flow.cpp:2144-2158; the
     /// C++ also takes an unused start location).
     fn parse_interface_extends(
         &mut self,
@@ -1710,7 +1710,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     /// The `(*optIdent)->_typeAnnotation` access on a parsed binding identifier
-    /// (C++ flow.cpp:166 / 2775). Returns the identifier's type annotation if it
+    /// (C++ flow.cpp:166 / 2776). Returns the identifier's type annotation if it
     /// has one (only `IdentifierNode`s carry one).
     fn identifier_type_annotation(
         &self,
@@ -1730,7 +1730,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// at the `function`/`hook` keyword and `start` at `declare`. The parsed
     /// signature is attached to the id's type annotation, then wrapped in a
     /// `DeclareFunction(id, predicate)` (or `DeclareHook(id)`). Port of
-    /// `JSParserImpl::parseDeclareFunctionOrHookFlow` (flow.cpp:2159-2258).
+    /// `JSParserImpl::parseDeclareFunctionOrHookFlow` (flow.cpp:2160-2259).
     fn parse_declare_function_or_hook_flow(
         &mut self,
         start: SMLoc,
@@ -1876,7 +1876,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
     }
 
-    /// `declare function`. Port of `parseDeclareFunctionFlow` (flow.cpp:2260).
+    /// `declare function`. Port of `parseDeclareFunctionFlow` (flow.cpp:2261).
     fn parse_declare_function_flow(
         &mut self,
         start: SMLoc,
@@ -1885,7 +1885,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         self.parse_declare_function_or_hook_flow(start, false)
     }
 
-    /// `declare hook`. Port of `parseDeclareHookFlow` (flow.cpp:2265).
+    /// `declare hook`. Port of `parseDeclareHookFlow` (flow.cpp:2266).
     fn parse_declare_hook_flow(
         &mut self,
         start: SMLoc,
@@ -1900,7 +1900,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse `declare module ...`, with the cursor at `module` and `start` at
     /// `declare`. Port of `JSParserImpl::parseDeclareModuleFlow`
-    /// (flow.cpp:2270-2349).
+    /// (flow.cpp:2271-2350).
     fn parse_declare_module_flow(
         &mut self,
         start: SMLoc,
@@ -2023,7 +2023,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse `declare namespace ...`, with the cursor at `namespace` and `start`
     /// at `declare`. Port of `JSParserImpl::parseDeclareNamespaceFlow`
-    /// (flow.cpp:2351-2398).
+    /// (flow.cpp:2352-2399).
     fn parse_declare_namespace_flow(
         &mut self,
         start: SMLoc,
@@ -2097,7 +2097,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse `declare class ...`, with the cursor at `class` and `start` at
     /// `declare`. Port of `JSParserImpl::parseDeclareClassFlow`
-    /// (flow.cpp:2400-2496).
+    /// (flow.cpp:2401-2497).
     fn parse_declare_class_flow(
         &mut self,
         start: SMLoc,
@@ -2243,7 +2243,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse `declare export ...`, with the cursor at `export` and `start` at
     /// `declare`. Port of `JSParserImpl::parseDeclareExportFlow`
-    /// (flow.cpp:2577-2881).
+    /// (flow.cpp:2578-2882).
     fn parse_declare_export_flow(
         &mut self,
         start: SMLoc,
@@ -2274,7 +2274,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 && self.check_async_hook_flow()
             {
                 // Point location, NOT the current token's range: C++
-                // (flow.cpp:2607-2609) calls `error(tok_->getStartLoc(),
+                // (flow.cpp:2608-2610) calls `error(tok_->getStartLoc(),
                 // ...)` — the `error(SMLoc, Twine)` overload.
                 self.error_at_loc(
                     self.cur_start(),
@@ -2291,7 +2291,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 && self.check_async_component_flow()
             {
                 // Point location, NOT the current token's range: C++
-                // (flow.cpp:2623-2625) calls `error(tok_->getStartLoc(),
+                // (flow.cpp:2624-2626) calls `error(tok_->getStartLoc(),
                 // ...)` — the `error(SMLoc, Twine)` overload.
                 self.error_at_loc(
                     self.cur_start(),
@@ -2358,7 +2358,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             && self.check_async_hook_flow()
         {
             // Point location, NOT the current token's range: C++
-            // (flow.cpp:2696-2698) calls `error(tok_->getStartLoc(), ...)`
+            // (flow.cpp:2697-2699) calls `error(tok_->getStartLoc(), ...)`
             // — the `error(SMLoc, Twine)` overload.
             self.error_at_loc(
                 self.cur_start(),
@@ -2380,7 +2380,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             && self.check_async_component_flow()
         {
             // Point location, NOT the current token's range: C++
-            // (flow.cpp:2724-2726) calls `error(tok_->getStartLoc(), ...)`
+            // (flow.cpp:2725-2727) calls `error(tok_->getStartLoc(), ...)`
             // — the `error(SMLoc, Twine)` overload.
             self.error_at_loc(
                 self.cur_start(),
@@ -2448,7 +2448,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             self.advance(GrammarContext::Type);
             if !self.check_name(b"type") {
                 // Point location, NOT the current token's range: C++
-                // (flow.cpp:2798-2799) calls `error(tok_->getStartLoc(),
+                // (flow.cpp:2799-2800) calls `error(tok_->getStartLoc(),
                 // ...)` — the `error(SMLoc, Twine)` overload.
                 self.error_at_loc(
                     self.cur_start(),
@@ -2483,7 +2483,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         if self.check_and_eat(TokenKind::star, GrammarContext::Type) {
             if !self.check_name(b"from") {
                 // Point location, NOT the current token's range: C++
-                // (flow.cpp:2840-2841) calls `error(tok_->getStartLoc(),
+                // (flow.cpp:2841-2842) calls `error(tok_->getStartLoc(),
                 // ...)` — the `error(SMLoc, Twine)` overload.
                 self.error_at_loc(
                     self.cur_start(),
@@ -2569,7 +2569,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse the tail of `export type ...` with the cursor at `type` and
     /// `start_loc` at `export`. Port of
-    /// `JSParserImpl::parseExportTypeDeclarationFlow` (flow.cpp:2498-2575).
+    /// `JSParserImpl::parseExportTypeDeclarationFlow` (flow.cpp:2499-2576).
     pub(in crate::js) fn parse_export_type_declaration_flow(
         &mut self,
         start_loc: SMLoc,
@@ -2580,7 +2580,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let type_ident = self.gc.ctx().atom_table.atom_bytes(b"type");
 
         if self.check_and_eat(TokenKind::star, GrammarContext::AllowRegExp) {
-            // export type * FromClause; (flow.cpp:2503-2518).
+            // export type * FromClause; (flow.cpp:2504-2519).
             let source = self.parse_from_clause()?;
             if !self.eat_semi(false) {
                 return None;
@@ -2598,7 +2598,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         if self.check(TokenKind::l_brace) {
-            // export type ExportClause [FromClause]; (flow.cpp:2520-2556).
+            // export type ExportClause [FromClause]; (flow.cpp:2521-2557).
             let mut specifiers: Vec<&'gc Node<'gc>> = Vec::new();
             let mut invalids: Vec<SMRange> = Vec::new();
             if !self.parse_export_clause(&mut specifiers, &mut invalids) {
@@ -2673,7 +2673,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse a Flow `enum` declaration, with the cursor at `enum` and `start`
     /// at the start of the declaration. Port of
-    /// `JSParserImpl::parseEnumDeclarationFlow` (flow.cpp:5148-5205).
+    /// `JSParserImpl::parseEnumDeclarationFlow` (flow.cpp:5149-5206).
     ///
     /// \param declare whether this is a `declare enum` (the `declare` routing
     ///   that passes `true` lands in P6.6).
@@ -2773,7 +2773,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Parse the `{ ... }` body of an enum, with the cursor at `{`. `opt_kind`
     /// is the explicit kind from `of <kind>` (if any) and `explicit_type_start`
     /// is the location of that explicit type (if any). Port of
-    /// `JSParserImpl::parseEnumBodyFlow` (flow.cpp:5207-5352).
+    /// `JSParserImpl::parseEnumBodyFlow` (flow.cpp:5208-5353).
     fn parse_enum_body_flow(
         &mut self,
         opt_kind: Option<EnumKind>,
@@ -2980,7 +2980,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     // -----------------------------------------------------------------------
 
     /// Parse one enum member, with the cursor at the member's identifier. Port
-    /// of `JSParserImpl::parseEnumMemberFlow` (flow.cpp:5354-5432).
+    /// of `JSParserImpl::parseEnumMemberFlow` (flow.cpp:5355-5433).
     fn parse_enum_member_flow(&mut self) -> Option<&'gc Node<'gc>> {
         // C++ 5355-5360.
         debug_assert!(self.check(TokenKind::identifier));
@@ -3152,7 +3152,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Report the five-token `errorExpected` for an enum member initializer
     /// (`true`, `false`, a string, a number, or a bigint). Port of the
-    /// initializer-list `errorExpected` at flow.cpp:5412-5422 (where =
+    /// initializer-list `errorExpected` at flow.cpp:5413-5423 (where =
     /// "in enum member initializer", what = "start of enum member", whatLoc =
     /// `id->getStartLoc()`, real). The Rust `error_expected*` family tops
     /// out at four tokens, so render the five-token list directly to stay

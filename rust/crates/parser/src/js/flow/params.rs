@@ -30,7 +30,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Parse a type-parameter declaration `<T, U: B, ...>`, with the current
     /// token at `<`. At least one parameter is required (empty `<>` is an
     /// error); a trailing comma is allowed. Port of `parseTypeParamsFlow`
-    /// (flow.cpp:4690-4719).
+    /// (flow.cpp:4691-4720).
     pub(in crate::js) fn parse_type_params_flow(
         &mut self,
     ) -> Option<&'gc Node<'gc>> {
@@ -75,7 +75,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     /// Parse a single type parameter `[const] [variance] name [: B|extends B]
-    /// [= D]`. Port of `parseTypeParamFlow` (flow.cpp:4721-4814).
+    /// [= D]`. Port of `parseTypeParamFlow` (flow.cpp:4722-4815).
     fn parse_type_param_flow(&mut self) -> Option<&'gc Node<'gc>> {
         let start = self.cur_start();
         // C++ 4723-4728.
@@ -144,7 +144,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // `<out: T>`, `<in extends T>`, `<out = T>`, `<X, in, Y>`.
             name = kind;
         } else {
-            // flow.cpp:4774: errorExpected(identifier, "in type parameter",
+            // flow.cpp:4775: errorExpected(identifier, "in type parameter",
             // nullptr, {}) — VERIFIED whatLoc-less in C++ (unlike its
             // sibling below), so the plain `need` (no location) is correct
             // as-is.
@@ -214,7 +214,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// \param trailing_grammar_context the grammar context with which the
     ///   closing `>` is consumed (the C++ parameter defaults to Type, per
     ///   JSParserImpl.h:1506-1508; Rust callers pass it explicitly).
-    /// Port of `parseTypeArgsFlow` (flow.cpp:4816-4846).
+    /// Port of `parseTypeArgsFlow` (flow.cpp:4817-4847).
     pub(in crate::js) fn parse_type_args_flow(
         &mut self,
         trailing_grammar_context: GrammarContext,
@@ -267,7 +267,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse a (possibly qualified) generic type reference
     /// `Foo.Bar<Args>`, with the current token at the first identifier or
-    /// reserved word. Port of `parseGenericTypeFlow` (flow.cpp:5007-5050).
+    /// reserved word. Port of `parseGenericTypeFlow` (flow.cpp:5008-5051).
     pub(super) fn parse_generic_type_flow(&mut self) -> Option<&'gc Node<'gc>> {
         debug_assert!(
             self.check(TokenKind::identifier)
@@ -293,7 +293,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             if !self.check(TokenKind::identifier)
                 && !self.lexer.token().is_res_word()
             {
-                // flow.cpp:5020-5027: errorExpected(identifier, "in
+                // flow.cpp:5021-5028: errorExpected(identifier, "in
                 // qualified generic type name", "start of type name",
                 // start).
                 self.need_at(
@@ -357,7 +357,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Parse one entry of a class `implements` clause: `Name` or
     /// `Name<TypeArgs>`, with the current token at the identifier (an
     /// identifier ONLY — no reserved word, per the C++ assert). Port of
-    /// `JSParserImpl::parseClassImplementsFlow` (flow.cpp:5052-5076).
+    /// `JSParserImpl::parseClassImplementsFlow` (flow.cpp:5053-5077).
     pub(in crate::js) fn parse_class_implements_flow(
         &mut self,
     ) -> Option<&'gc Node<'gc>> {

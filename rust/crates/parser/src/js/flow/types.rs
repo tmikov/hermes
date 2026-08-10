@@ -47,7 +47,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     // -----------------------------------------------------------------------
 
     /// Parse a type annotation.
-    /// Port of `JSParserImpl::parseTypeAnnotationFlow` (flow.cpp:3078-3094).
+    /// Port of `JSParserImpl::parseTypeAnnotationFlow` (flow.cpp:3079-3095).
     ///
     /// \param wrapped_start if `Some`, the result is wrapped in a
     ///   `TypeAnnotation` node spanning from it to the previous token's end
@@ -89,7 +89,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse a type annotation that may be used where a colon could follow
     /// (e.g. a possibly-labeled tuple element or function parameter). Port of
-    /// `parseTypeAnnotationBeforeColonFlow` (flow.cpp:3011-3076).
+    /// `parseTypeAnnotationBeforeColonFlow` (flow.cpp:3012-3077).
     pub(super) fn parse_type_annotation_before_colon_flow(
         &mut self,
     ) -> Option<&'gc Node<'gc>> {
@@ -163,7 +163,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Build a `GenericTypeAnnotation` whose id is the current token's keyword
     /// identifier (a `component`/`hook`/`renders` contextual keyword used as a
     /// labelled-element name). Helper for the label-disambiguation paths of
-    /// `parseTypeAnnotationBeforeColonFlow` (flow.cpp:3023-3032 / 3040-3049).
+    /// `parseTypeAnnotationBeforeColonFlow` (flow.cpp:3024-3033 / 3041-3050).
     /// Does NOT advance — the caller advances after.
     fn make_keyword_generic_type(&mut self) -> &'gc Node<'gc> {
         let range = self.cur_range();
@@ -182,7 +182,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         self.set_location(range.start, range.end, generic)
     }
 
-    /// Port of `parseConditionalTypeAnnotationFlow` (flow.cpp:3096-3145).
+    /// Port of `parseConditionalTypeAnnotationFlow` (flow.cpp:3097-3146).
     fn parse_conditional_type_annotation_flow(
         &mut self,
     ) -> Option<&'gc Node<'gc>> {
@@ -255,7 +255,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         ))
     }
 
-    /// Port of `parseUnionTypeAnnotationFlow` (flow.cpp:3147-3174).
+    /// Port of `parseUnionTypeAnnotationFlow` (flow.cpp:3148-3175).
     pub(super) fn parse_union_type_annotation_flow(
         &mut self,
     ) -> Option<&'gc Node<'gc>> {
@@ -283,7 +283,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         Some(self.set_location(start, self.lexer.prev_token_end(), node))
     }
 
-    /// Port of `parseIntersectionTypeAnnotationFlow` (flow.cpp:3176-3204).
+    /// Port of `parseIntersectionTypeAnnotationFlow` (flow.cpp:3177-3205).
     fn parse_intersection_type_annotation_flow(
         &mut self,
     ) -> Option<&'gc Node<'gc>> {
@@ -316,7 +316,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     /// Port of `parseAnonFunctionWithoutParensTypeAnnotationFlow`
-    /// (flow.cpp:3206-3230).
+    /// (flow.cpp:3207-3231).
     fn parse_anon_function_without_parens_type_annotation_flow(
         &mut self,
     ) -> Option<&'gc Node<'gc>> {
@@ -354,7 +354,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         Some(param)
     }
 
-    /// Port of `parsePrefixTypeAnnotationFlow` (flow.cpp:3232-3244).
+    /// Port of `parsePrefixTypeAnnotationFlow` (flow.cpp:3233-3245).
     pub(super) fn parse_prefix_type_annotation_flow(&mut self) -> Option<&'gc Node<'gc>> {
         let start = self.cur_start();
         // C++ 3234-3242: nullable `?T` (right-recursive, so `??T` nests).
@@ -374,7 +374,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         self.parse_postfix_type_annotation_flow()
     }
 
-    /// Port of `parsePostfixTypeAnnotationFlow` (flow.cpp:3246-3303).
+    /// Port of `parsePostfixTypeAnnotationFlow` (flow.cpp:3247-3304).
     fn parse_postfix_type_annotation_flow(&mut self) -> Option<&'gc Node<'gc>> {
         let start = self.cur_start();
         let mut result = self.parse_primary_type_annotation_flow()?;
@@ -467,7 +467,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     // -----------------------------------------------------------------------
 
     /// Parse a primary type annotation. Port of
-    /// `JSParserImpl::parsePrimaryTypeAnnotationFlow` (flow.cpp:3305-3602).
+    /// `JSParserImpl::parsePrimaryTypeAnnotationFlow` (flow.cpp:3306-3603).
     fn parse_primary_type_annotation_flow(&mut self) -> Option<&'gc Node<'gc>> {
         let start = self.cur_start();
         match self.cur_kind() {
@@ -906,7 +906,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     return self.parse_generic_type_flow();
                 }
                 // Point location, NOT the current token's range: C++
-                // (flow.cpp:3599) calls `error(tok_->getStartLoc(), ...)` —
+                // (flow.cpp:3600) calls `error(tok_->getStartLoc(), ...)` —
                 // the `error(SMLoc, Twine)` overload.
                 self.error_at_loc(
                     self.cur_start(),
@@ -923,7 +923,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse a `typeof X.Y<Args>` type annotation, with the current token at
     /// `typeof`. Port of `parseTypeofTypeAnnotationFlow`
-    /// (flow.cpp:3604-3666).
+    /// (flow.cpp:3605-3667).
     fn parse_typeof_type_annotation_flow(&mut self) -> Option<&'gc Node<'gc>> {
         debug_assert!(self.check(TokenKind::rw_typeof));
         // C++ 3606: a bare `advance()` — the default GrammarContext
@@ -966,7 +966,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             if !self.check(TokenKind::identifier)
                 && !self.lexer.token().is_res_word()
             {
-                // flow.cpp:3623-3630: errorExpected(identifier, "in
+                // flow.cpp:3624-3631: errorExpected(identifier, "in
                 // qualified typeof type", "start of type", startLoc).
                 self.need_at(
                     TokenKind::identifier,
@@ -1045,7 +1045,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     // -----------------------------------------------------------------------
 
     /// Parse a tuple type annotation, with the current token at `[`.
-    /// Port of `parseTupleTypeAnnotationFlow` (flow.cpp:3668-3712).
+    /// Port of `parseTupleTypeAnnotationFlow` (flow.cpp:3669-3713).
     fn parse_tuple_type_annotation_flow(&mut self) -> Option<&'gc Node<'gc>> {
         debug_assert!(self.check(TokenKind::l_square));
         // C++ 3670.
@@ -1105,7 +1105,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Parse one tuple type element, with `start` at the element's start
     /// (including a leading `...`, already consumed iff
     /// `starts_with_dotdotdot`). Port of `parseTupleElementFlow`
-    /// (flow.cpp:3714-3814).
+    /// (flow.cpp:3715-3815).
     fn parse_tuple_element_flow(
         &mut self,
         start: SMLoc,
@@ -1254,7 +1254,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Map a type-annotation node back to the identifier atom it would have
     /// parsed as, reporting "identifier expected" at the node if impossible.
-    /// Port of `reparseTypeAnnotationAsIdFlow` (flow.cpp:5100-5133).
+    /// Port of `reparseTypeAnnotationAsIdFlow` (flow.cpp:5101-5134).
     ///
     /// NOTE: BooleanTypeAnnotation maps to "boolean" even when the source
     /// spelled it `bool` — the C++ maps both spellings to booleanIdent_ the
@@ -1309,7 +1309,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Reparse a type-annotation node as an `Identifier` node spanning the
     /// original node's source range. Port of
-    /// `reparseTypeAnnotationAsIdentifierFlow` (flow.cpp:5135-5146).
+    /// `reparseTypeAnnotationAsIdentifierFlow` (flow.cpp:5136-5147).
     pub(super) fn reparse_type_annotation_as_identifier_flow(
         &mut self,
         type_annotation: &'gc Node<'gc>,
@@ -1593,7 +1593,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     // -----------------------------------------------------------------------
 
     /// Parse a `hook(params) => R` TYPE annotation, with the cursor at `hook`.
-    /// Port of `JSParserImpl::parseHookTypeAnnotationFlow` (flow.cpp:3816-3821).
+    /// Port of `JSParserImpl::parseHookTypeAnnotationFlow` (flow.cpp:3817-3822).
     pub(super) fn parse_hook_type_annotation_flow(
         &mut self,
     ) -> Option<&'gc Node<'gc>> {
