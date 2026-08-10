@@ -31,7 +31,7 @@
 //! below), each marked `// S4b: && !use_cjs_modules` at the site so that
 //! whoever adds CJS support has the exact condition to restore.
 //!
-//! ## Two bug-for-bug quirks, preserved and flagged
+//! ## One bug-for-bug quirk, preserved and flagged
 //!
 //! 1. **The import error is NOT `compile_`-gated** (cpp:876-879), while all
 //!    three export errors ARE (cpp:1511, 1520, 1550). So under the
@@ -41,13 +41,11 @@
 //!    Pinned from BOTH sides by the parser-entry corpus:
 //!    `module-imports.js` (errors under `compile = false`) and
 //!    `compile-false-basics.js` (does not).
-//! 2. **Rewrite #4 drops the `async` flag** (cpp:1538): the synthesized
-//!    `FunctionExpression` is constructed with a literal `/* async */
-//!    false` instead of `funcDecl->_async`, so `export default async
-//!    function () {}` — the ANONYMOUS form, the only one the rewrite fires
-//!    on — silently becomes a non-async function expression. Preserved
-//!    verbatim below with the same `/* async */ false` spelling; never
-//!    "fixed".
+//!
+//! Two further quirks this port used to pin have since been FIXED upstream
+//! and the fixes mirrored here: rewrite #4 dropping the `async` flag
+//! (`6b59daf0d`) and `ExportAllDeclaration` spelling its error "CommonJS
+//! module mode" while the other two say plain "module mode" (`f90a83146`).
 //!
 //! ## Rewrite #4: `export default function () {}` (spec §3.4)
 //!
@@ -223,8 +221,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     /// Port of `SemanticResolver::visit(ESTree::ExportDefaultDeclarationNode
     /// *node)` (SemanticResolver.cpp:1519-1547), **rewrite #4** included —
     /// see the module doc for why the rewrite allocates new nodes instead of
-    /// mutating this one, and for the `/* async */ false` quirk it carries
-    /// over verbatim.
+    /// mutating this one.
     pub(super) fn visit_export_default_declaration<'gc>(
         &mut self,
         gc: &'gc GCLock,
@@ -272,13 +269,11 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
                         func_decl.return_type,
                         func_decl.predicate,
                         func_decl.generator.get(),
-                        // QUIRK (cpp:1538), preserved bug-for-bug: the C++
-                        // passes a literal `false` rather than
-                        // `funcDecl->_async`, so an anonymous `export
-                        // default async function () {}` loses its async flag
-                        // on the rewritten node. Never "fix" this — see the
-                        // module doc's quirk 2.
-                        /* async */ false,
+                        // `funcDecl->_async` (cpp:1538). This used to be a
+                        // literal `false`, so an anonymous `export default
+                        // async function () {}` lost its async flag on the
+                        // rewritten node; fixed upstream in `6b59daf0d`.
+                        func_decl.r#async.get(),
                     ),
                 ));
                 // funcExpr->strictness = funcDecl->strictness;
@@ -327,15 +322,14 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
         // if (compile_ && !astContext_.getUseCJSModules())
         // S4b: `&& !self.use_cjs_modules()`.
         if self.compile() {
-            // QUIRK (cpp:1552-1553), preserved bug-for-bug: the message
-            // says "CommonJS module mode" here while the two export visits
-            // above — same gate, same condition, same phrasing otherwise —
-            // say plain "module mode". Reproduced exactly; never unify the
-            // two spellings. Pinned by `module-export-plain.js`, which
-            // exercises all three messages in one file.
+            // This message used to say "CommonJS module mode" while the two
+            // export visits above — same gate, same condition, same phrasing
+            // otherwise — said plain "module mode"; unified upstream in
+            // `f90a83146`. `module-export-plain.js` exercises all three
+            // messages in one file.
             self.sm.error_range(
                 node.range(),
-                "'export' statement requires CommonJS module mode",
+                "'export' statement requires module mode",
             );
         }
 

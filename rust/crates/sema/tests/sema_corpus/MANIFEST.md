@@ -759,6 +759,10 @@ the file was not imported.
 
 ### A new landmine found while porting the promoter
 
+> **SUPERSEDED** — fixed upstream in `4ad67c992` and mirrored here; see "C++
+> defect-fix propagation, Task 3" at the end of this file. The shape below is
+> now the corpus file `using-scoped-fn-promotion.js`.
+
 `hermesc` ITSELF aborts (Debug assertion, exit 134) on a `using` declaration
 that shares a function with a promotable block-nested function declaration:
 
@@ -1159,6 +1163,10 @@ DeclCollector.h:81-99, so C++ reaches their children through
 new visits walk into.
 
 Two C++ quirks are preserved bug-for-bug and flagged in `modules.rs`:
+
+> **SUPERSEDED** — both quirks were fixed upstream (`f90a83146`, `6b59daf0d`)
+> and mirrored here; see "C++ defect-fix propagation, Task 3" at the end of
+> this file. The third asymmetry below (import's ungated error) still holds.
 
 - **`ExportAllDeclaration`'s message wording** (cpp:1552-1553) is `'export'
   statement requires **CommonJS** module mode`, where the Named and Default
@@ -2110,3 +2118,89 @@ without the first-mismatch abort: 214 compared, 2 mismatches (those two),
 108 oracle successes — i.e. both new imports pass, and nothing else
 regressed. `sema_parser_differential` (11 files) and the whole
 `parser_differential` suite (8/8) are green.
+
+---
+
+## C++ defect-fix propagation, Task 3 (resolver mirrors) — 2 new imports
+
+Four upstream sema-side fixes cherry-picked in Task 1 were mirrored in the
+port: `4ad67c992` (promoter `using` crash), `9232443cf` (promoter dead
+code), `6b59daf0d` (anonymous `export default async function` losing its
+`async` flag) and `f90a83146` (the ExportAll error wording). Two of them
+shipped a C++ test; both are `test/Sema` files and both landed here.
+
+| File | Source | Fix pinned |
+|---|---|---|
+| `using-scoped-fn-promotion.js` | `test/Sema/using-scoped-fn-promotion.js`, **verbatim** (its lit `RUN:`/`CHECK:` lines are inert JS comments; no `// FLAGS:` line needed — its own RUN line is plain `-dump-sema`) | `4ad67c992` — `ScopedFunctionPromoter::extractDeclaredIdents` asserted a `VariableDeclaration`'s kind is `let`/`const`/`var`, so a `using` declaration sharing a scope with a promotable block-nested function aborted the promoter before the resolver could reject `using`. Now `var` → `Decl::Kind::Var` and EVERY other kind → `Decl::Kind::Const` |
+| `export-default-anon-async.js` | `test/Sema/export-default-anon-async.js`, **verbatim** | `6b59daf0d` — rewrite #4 passed a literal `/* async */ false` instead of `funcDecl->_async`. Its own RUN line is `-commonjs -dump-transformed-ast`, which this port does not implement (S4b), so it is imported at the flagless shape: hermesc reports the module-mode error and skips the dump, exit 2, and what it pins here is that the rewritten subtree resolves without incident |
+
+Both were byte-verified BEFORE import, all three channels, exactly as the
+harness compares them (`hermesc -dump-sema f` vs `sema-dump f`): stdout
+empty on both sides (0 bytes), stderr identical (341 and 219 bytes), exit 2
+on both. `-commonjs` was probed too and rejected as an import shape:
+`sema-dump` has no such flag (`Unknown command line argument -c`), which is
+the documented S4b gap, not a new one.
+
+**Non-degeneracy of `using-scoped-fn-promotion.js`** (the pin really can
+fail): with the pre-fix `debug_assert!(kind == ident_var)` temporarily
+restored in `promoter.rs`, `sema-dump` panics on this exact corpus file
+(`assertion failed: kind == self.sem_ctx.kw.ident_var`, exit 101) against
+the oracle's exit 2 — measured, then reverted.
+
+### The landmine section above is closed
+
+"A new landmine found while porting the promoter" (the `using x = 1;
+{ function f() {} }` abort, exit 134 in C++ / 101 here) recorded that such a
+file "cannot go in the corpus". `4ad67c992` fixed it upstream and this task
+mirrored it, so that shape IS in the corpus now — it is
+`using-scoped-fn-promotion.js`. The section is kept for the history; read it
+together with this one.
+
+### The two `modules.rs` quirks in the S4a T3 section are closed
+
+That section records two bug-for-bug quirks: the ExportAll `CommonJS module
+mode` wording and rewrite #4's hard-coded `/* async */ false`. Both were
+fixed upstream (`f90a83146`, `6b59daf0d`) and mirrored here, so neither is a
+quirk any more:
+
+- All three export visits now emit `'export' statement requires module
+  mode`. `module-export-plain.js` and upstream `export.js` were the two RED
+  files at the end of Task 2 and both re-match with **no corpus-file content
+  change** — the oracle moved, the port followed. (`module-export-plain.js`'s
+  header comment was rewritten to describe the unified wording, preserving
+  its line count so the pinned diagnostic geometry on lines 12-14 is
+  untouched; re-verified byte-identical afterwards.)
+- Rewrite #4 now forwards `funcDecl->_async`. Its unit pin
+  `export_default_anonymous_function_is_rewritten_to_an_expression`
+  (`tests/resolver.rs`) was flipped from `async == false` to `async == true`,
+  and a second test,
+  `export_default_anonymous_non_async_function_stays_non_async`, pins the
+  other side so the fix cannot be "re-fixed" into the opposite literal.
+
+### Deferred rows re-probed (3 of 3)
+
+| File | Re-probe result |
+|---|---|
+| `deep-ast-err.js` | unchanged — still a vacuous match (comment-only file, both exit 0, byte-identical); still excluded on purpose |
+| `xmod-errors.js` | unchanged — still panics at `calls.rs:312` (`$SHBuiltin.moduleFactory needs visitModuleFactory`), oracle exit 2 vs 101. **Still S4b** |
+| `invalid-args-eval.js` | **now byte-identical on all three channels** (stdout 0/0, stderr 3037/3037, exit 2/2) — the `89:9` same-location tie happens to land the same way on both sides today. NOT imported: the C++ order is genuinely unspecified (`std::sort` over the buffered-message array, `SourceErrorManager.cpp:61-71`), so a gate on it would be a gate on libstdc++'s introsort for this particular array size. Recorded, not pinned; the row stays Deferred with its reason intact |
+
+None of the three is a promoter/`using`/export-default row, so no row was
+unblocked BY these fixes.
+
+### Gate
+
+Corpus size **214 → 216** (+2, both imports above); oracle successes **108
+unchanged** (both new files are error-path, exit 2). Arithmetic:
+214 + 2 = 216; 108 + 0 = 108.
+
+`REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml -p sema
+--features dump-bin --test sema_differential -- --nocapture`:
+
+```
+sema differential (tests/sema_corpus): 216 corpus files matched (108 succeeded on the oracle)
+sema differential (tests/sema_corpus_parser): 11 corpus files matched (3 succeeded on the oracle)
+test result: ok. 3 passed; 0 failed
+```
+
+Task 2's interim redness is gone: `sema_differential_s0` is GREEN again.

@@ -16,23 +16,20 @@
 //! declarations. Then it visits all scopes recursively, maintaining a scoped
 //! table of let-like declarations with matching names. When it encounters a
 //! block-scoped function declaration, it checks whether a matching let-like
-//! declaration is visible. If not, it is safe to promote."
-//! (ScopedFunctionPromoter.h:17-26.)
+//! declaration is visible. If not, it is safe to promote.
 //!
-//! ## The header's last sentence is stale
+//! The input is the list of block-scoped function declarations collected in
+//! the current function. \return the ones that can be safely promoted."
+//! (ScopedFunctionPromoter.h:16-28.)
 //!
-//! `ScopedFunctionPromoter.h:28-30` closes with "The input is a list of
-//! block-scoped function function declarations. The ones that can be promoted
-//! are deleted from their own scope and added to the function scope." The
-//! current
-//! implementation does NEITHER: nothing is deleted from any scope, and
-//! nothing is added to the function scope here — `getPromotedScopedFuncDecls`
-//! only *returns* the promotable list, and the caller
-//! (`SemanticResolver::processPromotedFuncDecls`, cpp:2129-2141) declares the
-//! names in the function/global scope while the block's own `ScopedFunction`
-//! declaration survives. The vestige of the "deleted from their own scope"
-//! half is `processDeclarations`'s `newDecls` local, which is built and never
-//! read — see the DEAD-code note at its site.
+//! Nothing is deleted from any scope and nothing is added to the function
+//! scope here — `getPromotedScopedFuncDecls` only *returns* the promotable
+//! list, and the caller (`SemanticResolver::processPromotedFuncDecls`,
+//! cpp:2129-2141) declares the names in the function/global scope while the
+//! block's own `ScopedFunction` declaration survives. The header used to
+//! promise otherwise, and `processDeclarations` used to carry a write-only
+//! `newDecls` local as the last vestige of it; both were removed upstream in
+//! `9232443cf` and this port follows.
 //!
 //! ## Deviations
 //!
@@ -245,22 +242,6 @@ impl<'ast, 'd, 'sc, 'sm, 'tb>
         // clear it if we want to).
         let mut found_decls: Vec<&NodeRc> = Vec::new();
 
-        // New decls with the promoted functions removed.
-        // Populated with non-candidate declarations in the first loop,
-        // and non-promoted candidate declarations in the second loop.
-        //
-        // DEAD in C++ too (cpp:174-206): `newDecls` is filled in and then
-        // never read — the enclosing function returns without consuming it,
-        // and no other member touches it. It is the last trace of the
-        // behavior `ScopedFunctionPromoter.h:28-30` still describes ("The
-        // ones that can be promoted are deleted from their own scope"), which
-        // the implementation no longer has. Transcribed rather than dropped,
-        // with C++'s own comment, on the S2 T3 precedent for C++'s dead
-        // `if (false && localEval)` branch (functions.rs:1103-1120): the day
-        // the header's promise is honored, this is the line that changes.
-        // (C++'s second loop never pushes into it either — see below.)
-        let mut new_decls: ScopeDecls = ScopeDecls::new();
-
         for node_ref in decls {
             // C++ opens with `Node *node = nodeRef; if (!node) continue;`,
             // guarding against an entry a (never-implemented) removal pass
@@ -282,13 +263,9 @@ impl<'ast, 'd, 'sc, 'sm, 'tb>
                     // We encountered one of the candidate declarations.
                     // Add it to the found_decls list and move on.
                     found_decls.push(node_ref);
-                } else {
-                    new_decls.push(node_ref.clone());
                 }
                 continue;
             }
-
-            new_decls.push(node_ref.clone());
 
             // Extract idents, report errors.
             idents.clear();
@@ -378,22 +355,23 @@ impl<'ast, 'd, 'sc, 'sm, 'tb>
                 extract_declared_idents_from_id(self.sm, Some(vd.id), idents);
             }
             let kind = var_declaration.kind.get();
-            return if kind == self.sem_ctx.kw.ident_let {
-                DeclKind::Let
-            } else if kind == self.sem_ctx.kw.ident_const {
-                DeclKind::Const
-            } else {
-                // C++ LANDMINE, reproduced exactly: a `using`/`await using`
-                // declaration reaches here (the `DeclCollector` collects it
-                // like any other `VariableDeclaration`) and trips this
-                // assert BEFORE `visit(VariableDeclarationNode *)` gets to
-                // report "using declarations are not supported"
-                // (cpp:329-336). A Debug hermesc aborts on
-                // `using x = 1; { function f() {} }`; a Release one silently
-                // treats it as `Var`. Left as-is — see the MANIFEST's
-                // landmine list.
-                debug_assert!(kind == self.sem_ctx.kw.ident_var);
+            return if kind == self.sem_ctx.kw.ident_var {
                 DeclKind::Var
+            } else if kind == self.sem_ctx.kw.ident_let {
+                DeclKind::Let
+            } else {
+                // `const`, `using` and `await using` are all lexically scoped
+                // and block function promotion the same way. Note that
+                // `using` declarations reach this point even though they are
+                // not supported yet, because the promoter runs before the
+                // resolver reports them. This mirrors
+                // SemanticResolver::extractIdentsFromDecl().
+                //
+                // The pinned C++ landmine here — an assert that the kind is
+                // `var` once it is neither `let` nor `const`, which aborted a
+                // Debug hermesc on `using x = 1; { function f() {} }` — was
+                // fixed upstream in `4ad67c992`.
+                DeclKind::Const
             };
         }
 

@@ -2593,11 +2593,10 @@ fn import_backref_is_untouched_without_a_rebuild() {
 /// declaration's `_id`/`_params`/`_body`/`_typeParameters`/`_returnType`/
 /// `_predicate`/`_generator`, its strictness and its location.
 ///
-/// Also pins the C++ QUIRK at cpp:1538: the rewritten node is built with a
-/// literal `/* async */ false` rather than `funcDecl->_async`, so
-/// `export default async function () {}` comes out NON-async. Preserved
-/// bug-for-bug — if this assertion ever "fails" because someone made the
-/// port propagate `_async`, the port has diverged from C++, not been fixed.
+/// Also pins cpp:1538 forwarding `funcDecl->_async`: the rewritten node of
+/// `export default async function () {}` stays async. This used to be a
+/// literal `/* async */ false`, which silently dropped the flag; fixed
+/// upstream in `6b59daf0d`.
 #[test]
 fn export_default_anonymous_function_is_rewritten_to_an_expression() {
     let mut ctx = Context::new();
@@ -2647,11 +2646,11 @@ fn export_default_anonymous_function_is_rewritten_to_an_expression() {
     assert!(func.return_type.is_none());
     assert!(func.predicate.is_none());
     assert!(!func.generator.get(), "`_generator` carried over");
-    // QUIRK (cpp:1538), asserted so it can never be "fixed" by accident.
+    // cpp:1538 forwards `funcDecl->_async` (`6b59daf0d`).
     assert!(
-        !func.r#async.get(),
-        "rewrite #4 hard-codes `/* async */ false` (cpp:1538) — an anonymous \
-         `export default async function` loses its async flag"
+        func.r#async.get(),
+        "rewrite #4 must carry `_async` over (cpp:1538) — an anonymous \
+         `export default async function` stays async"
     );
     // copyLocationFrom(funcDecl) (cpp:1540).
     let range = func.metadata.range.get();
@@ -2661,6 +2660,30 @@ fn export_default_anonymous_function_is_rewritten_to_an_expression() {
     // ran on the REBUILT node, so it carries a `sem_info` and a strictness.
     assert!(func.sem_info.get().is_some(), "the rewritten node was visited");
     assert_ne!(func.strictness.get(), Strictness::NotSet);
+}
+
+/// The other side of the `_async` forwarding above: a NON-async anonymous
+/// `export default function () {}` must still come out non-async, i.e. the
+/// fix in `6b59daf0d` forwards the flag rather than hard-coding the other
+/// literal.
+#[test]
+fn export_default_anonymous_non_async_function_stays_non_async() {
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let src = "export default function (a) { return a; }\n";
+    let root = parse(&gc, &mut sm, src);
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    let resolved =
+        resolve_always(&gc, &mut sem_ctx, &mut sm, root, /* compile */ true);
+
+    let func = first_statement(resolved)
+        .as_export_default_declaration()
+        .expect("the rewrite must keep an ExportDefaultDeclaration")
+        .declaration
+        .as_function_expression()
+        .expect("rewrite #4 must replace the FunctionDeclaration");
+    assert!(!func.r#async.get(), "`_async` was false and stays false");
 }
 
 /// Rewrite #4 fires ONLY for an anonymous function declaration: a NAMED
