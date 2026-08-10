@@ -20,7 +20,7 @@
 //!
 //! The input is the list of block-scoped function declarations collected in
 //! the current function. \return the ones that can be safely promoted."
-//! (ScopedFunctionPromoter.h:16-28.)
+//! (ScopedFunctionPromoter.h:17-29.)
 //!
 //! Nothing is deleted from any scope and nothing is added to the function
 //! scope here — `getPromotedScopedFuncDecls` only *returns* the promotable
@@ -224,7 +224,7 @@ impl<'ast, 'd, 'sc, 'sm, 'tb>
 
     /// Process the declarations in a scope. This is the core of the
     /// algorithm, it updates the binding tables, etc. Port of
-    /// `ScopedFunctionPromoter::processDeclarations` (cpp:86-88, 160-245).
+    /// `ScopedFunctionPromoter::processDeclarations` (cpp:86-88, 160-236).
     fn process_declarations(&mut self, scope: &Node) {
         // Copy the shared reference out of `self` first: the `ScopeDecls`
         // borrow below must not keep `*self` borrowed, since the loop needs
@@ -329,7 +329,7 @@ impl<'ast, 'd, 'sc, 'sm, 'tb>
     /// `idents`. \return the declaration kind of the node. Function
     /// declarations are always returned as `ScopedFunction`, so they can be
     /// distinguished. Port of
-    /// `ScopedFunctionPromoter::extractDeclaredIdents` (cpp:90-97, 247-311).
+    /// `ScopedFunctionPromoter::extractDeclaredIdents` (cpp:90-97, 238-306).
     ///
     /// This is deliberately NOT
     /// `SemanticResolver::extract_idents_from_decl` (cpp:2262-2352,
