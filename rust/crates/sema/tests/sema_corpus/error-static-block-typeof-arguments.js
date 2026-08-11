@@ -13,12 +13,12 @@
 // FALLS THROUGH to the unconditional `resolveIdentifier(identifier, false)` at
 // cpp:322. The second call is normally a no-op — the first one already cached a
 // decl on the node, so `checkIdentifierResolved` returns early — but the two
-// forbid-flag checks in `resolveIdentifier` (cpp:1976-1991) run BEFORE that
-// early return (cpp:1993-1996) and are keyed on the identifier's NAME, not on
+// forbid-flag checks in `resolveIdentifier` (cpp:1990-2005) run BEFORE that
+// early return (cpp:2007-2010) and are keyed on the identifier's NAME, not on
 // the decl. So a forbidden name under `typeof` reports its diagnostic TWICE.
 //
 // `forbidArgumentsAsIdentifier_` is only ever set by visit(StaticBlockNode *)
-// (cpp:1079-1080), which is what makes this shape the sole way to reach the
+// (cpp:1089-1090), which is what makes this shape the sole way to reach the
 // double fire: hermesc prints "invalid use of 'arguments' as an identifier"
 // two times at the same location, and so must we.
 //

@@ -5,9 +5,9 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-// visit(CallExpressionNode *) (SemanticResolver.cpp:1117-1205) for every call
+// visit(CallExpressionNode *) (SemanticResolver.cpp:1127-1219) for every call
 // shape that hits NONE of its three specials, i.e. the plain
-// `visitESTreeChildren(*this, node)` tail at cpp:1204 — plus the two
+// `visitESTreeChildren(*this, node)` tail at cpp:1218 — plus the two
 // neighbouring kinds that have no override at all and go through
 // visit_node's generic arm:
 // OptionalCallExpression and NewExpression (see calls.rs's module doc for the
@@ -47,7 +47,7 @@ f?.()();
 f()?.();
 
 // Spread arguments: CallExpression/OptionalCallExpression/NewExpression are
-// three of the five parents visit(SpreadElementNode *) whitelists (cpp:1460).
+// three of the five parents visit(SpreadElementNode *) whitelists (cpp:1474).
 f(...a);
 f(1, ...a, 2);
 f?.(...a);

@@ -7,7 +7,7 @@
 
 // S3 T2 battery: the strict-mode gate on BOTH promotion call sites
 // (`visit(ProgramNode *)`, SemanticResolver.cpp:224-227, and
-// `visitFunctionBodyAfterParamsVisited`, cpp:1906-1910 — both wrapped in
+// `visitFunctionBodyAfterParamsVisited`, cpp:1920-1924 — both wrapped in
 // `if (!curFunctionInfo()->strict)`). Annex B.3.3 is a sloppy-mode-only
 // legacy compatibility hack; strict mode never promotes block-nested
 // function declarations, so `f` keeps ONLY its block-scoped

@@ -7,7 +7,7 @@
 
 // Every catch-parameter shape SemanticResolver::visit(CatchClauseNode *)
 // (SemanticResolver.cpp:813-819) has to declare, and the two Decl kinds
-// extractIdentsFromDecl picks between (cpp:2321-2331): a *simple* binding is
+// extractIdentsFromDecl picks between (cpp:2335-2345): a *simple* binding is
 // ES5Catch (ES10 B.3.5), anything destructured is a plain Catch.
 
 // Simple binding -> ES5Catch.

@@ -1,5 +1,5 @@
 // FLAGS: -parse-flow
-// `visit(CoverTypedIdentifierNode *)` (SemanticResolver.cpp:1575-1577,
+// `visit(CoverTypedIdentifierNode *)` (SemanticResolver.cpp:1589-1591,
 // `resolver/expressions.rs:966`, ported unconditionally per the
 // single-node-set precedent even though the C++ site is
 // `#if HERMES_PARSE_FLOW`). A `CoverTypedIdentifierNode` is the parser's

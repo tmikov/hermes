@@ -6,7 +6,7 @@
  */
 
 // `super() call only allowed in derived class constructor`
-// (SemanticResolver.cpp:1195-1202). The diagnostic covers the WHOLE call
+// (SemanticResolver.cpp:1209-1216). The diagnostic covers the WHOLE call
 // (node->getSourceRange(), i.e. including the argument list), not just the
 // `super` keyword.
 //

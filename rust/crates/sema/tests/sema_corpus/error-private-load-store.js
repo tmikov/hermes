@@ -5,8 +5,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-// Every restriction visit(MemberExpressionNode *, Node *) (cpp:1207-1253) and
-// visit(OptionalMemberExpressionNode *, Node *) (cpp:1255-1295) enforce on a
+// Every restriction visit(MemberExpressionNode *, Node *) (cpp:1221-1267) and
+// visit(OptionalMemberExpressionNode *, Node *) (cpp:1269-1309) enforce on a
 // PrivateName property, plus the "not declared in any enclosing class" error
 // from visit(PrivateNameNode *) (cpp:952-963).
 //
@@ -15,8 +15,8 @@
 // deferred to S2 T6.
 //
 // NOTE the deliberate range difference between the two overloads' `delete`
-// diagnostic: MemberExpression reports at `node` (cpp:1219, so `o.#x`), while
-// OptionalMemberExpression reports at `parent` (cpp:1262-1263, so the whole
+// diagnostic: MemberExpression reports at `node` (cpp:1233, so `o.#x`), while
+// OptionalMemberExpression reports at `parent` (cpp:1276-1277, so the whole
 // `delete o?.#x`). Both are pinned below.
 
 class A {
@@ -44,7 +44,7 @@ class A {
   }
 
   static assignmentShapes(o) {
-    // The C++ test is `assign->_left == node` (cpp:1227-1228), which this
+    // The C++ test is `assign->_left == node` (cpp:1241-1242), which this
     // port spells as "the parent is an AssignmentExpression AND we are its
     // `left` field". These are the shapes where the two could diverge:
     //
@@ -74,7 +74,7 @@ class A {
 
   superLookup() {
     // "Cannot lookup private names on super." — the check that exists only on
-    // the non-optional overload (cpp:1213-1216); the parser rejects `super?.`
+    // the non-optional overload (cpp:1227-1230); the parser rejects `super?.`
     // outright, so the optional overload can never see a Super object.
     super.#y;
   }

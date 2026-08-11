@@ -6,7 +6,7 @@
  */
 
 // The direct-eval detection in visit(CallExpressionNode *)
-// (SemanticResolver.cpp:1118-1151). `eval` is declared by libhermes as
+// (SemanticResolver.cpp:1128-1161). `eval` is declared by libhermes as
 // `function eval() {}`, so it is bound in the GLOBAL scope with kind
 // UndeclaredGlobalProperty: `isEval` is true and every direct call below gets
 // the Warning::DirectEval "Direct call to eval(), but lexical scope is not
@@ -44,7 +44,7 @@ class C {
 }
 
 // NOT direct calls, hence NO warning and no registerLocalEval:
-//  - the callee is a member expression, not a bare identifier (cpp:1119)
+//  - the callee is a member expression, not a bare identifier (cpp:1129)
 var o = { eval: f };
 o.eval("8");
 //  - OptionalCallExpression has no visit override at all (see calls.rs)

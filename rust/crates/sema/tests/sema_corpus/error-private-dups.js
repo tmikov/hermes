@@ -6,7 +6,7 @@
  */
 
 // The rows of collectDeclaredPrivateIdentifiers's early-error matrix
-// (SemanticResolver.cpp:2143-2260) that the imported
+// (SemanticResolver.cpp:2157-2274) that the imported
 // private-declaration-dup-error.js does NOT cover. ES2024 15.7.1: declared
 // private names may not contain duplicates, unless the name is used once for
 // a getter and once for a setter, in no other entries, and both are static or
@@ -15,24 +15,24 @@
 // Note the diagnostic locations: every "Duplicate private identifier
 // declaration." points at the *Identifier* inside the private name (so at
 // `a`, not at `#a` and not at `get`), because C++ reports
-// id->getSourceRange() (cpp:2180/2205/2241) — the same node for all three
+// id->getSourceRange() (cpp:2194/2219/2255) — the same node for all three
 // element kinds.
 
-// Method + method (cpp:2201-2208: no @Hermes.overload in untyped mode, so the
+// Method + method (cpp:2215-2222: no @Hermes.overload in untyped mode, so the
 // second one is an error and its identifier is resolved to the first's decl).
 class MethodDup {
   #a() {}
   #a() {}
 }
 
-// Setter + setter (cpp:2239-2240's `isSetter && existingInfo.isSetter` arm —
+// Setter + setter (cpp:2253-2254's `isSetter && existingInfo.isSetter` arm —
 // the getter+getter counterpart of the imported file's DupAccessors).
 class SetterDup {
   set #b(v) {}
   set #b(v) {}
 }
 
-// Accessor, then a field with the same name: the field branch (cpp:2178-2180)
+// Accessor, then a field with the same name: the field branch (cpp:2192-2194)
 // errors on ANY existing entry, accessor or not.
 class AccessorThenField {
   get #c() {}
@@ -45,7 +45,7 @@ class MethodThenField {
   #d;
 }
 
-// Accessor, then a method: the method branch (cpp:2203-2208) errors and then
+// Accessor, then a method: the method branch (cpp:2217-2222) errors and then
 // resolves the identifier onto the accessor's decl.
 class AccessorThenMethod {
   set #e(v) {}
@@ -61,7 +61,7 @@ class PairPlusOne {
   get #f() {}
 }
 
-// The static-mismatch rule (cpp:2244-2249), in the opposite order from the
+// The static-mismatch rule (cpp:2258-2263), in the opposite order from the
 // imported file's: a static getter first, then a non-static setter.
 class StaticMismatch {
   static get #g() {}

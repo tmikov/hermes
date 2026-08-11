@@ -5,12 +5,12 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-// The negative half of the direct-eval detection (cpp:1121-1131): `isEval` is
+// The negative half of the direct-eval detection (cpp:1131-1141): `isEval` is
 // only true when the binding for `eval` is either ABSENT or a global-scope
 // UndeclaredGlobalProperty/GlobalProperty decl. Every call below therefore
 // warns about nothing, even though it IS a direct call to something named
 // `eval` — and
-// registerLocalEval still runs for all of them (cpp:1141 is unconditional
+// registerLocalEval still runs for all of them (cpp:1151 is unconditional
 // inside the enable-eval branch), which is the warning/marking asymmetry
 // noted in calls.rs's module doc.
 //
@@ -46,6 +46,6 @@ try { } catch (eval) { eval("6"); }
 
 // The QUIRK, pinned deliberately: a global `var eval` produces a
 // GlobalProperty decl whose scope IS the global scope, which is one of the two
-// kinds cpp:1127-1128 accepts — so this one DOES warn, unlike every case above.
+// kinds cpp:1137-1138 accepts — so this one DOES warn, unlike every case above.
 var eval;
 eval("7");

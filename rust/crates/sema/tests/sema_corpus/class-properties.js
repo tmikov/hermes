@@ -5,16 +5,16 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-// visit(ClassPropertyNode *) (SemanticResolver.cpp:1008-1051): the two
-// synthetic elements-initializer FunctionInfos (cpp:3116-3163) and the
+// visit(ClassPropertyNode *) (SemanticResolver.cpp:1013-1061): the two
+// synthetic elements-initializer FunctionInfos (cpp:3130-3177) and the
 // FunctionContext a field initializer is resolved inside.
 //
 // Each getter is exercised on its own and together: a class with only
 // instance fields gets ONE extra `Func strict`, one with only static fields
 // gets one, one with both gets two (instance first, in visit order). A field
 // with NO initializer still creates the initializer function in untyped mode
-// (cpp:1041-1050) but does NOT run declareArguments, so its scope has no
-// 'arguments' decl — while any field WITH an initializer adds one (cpp:1039).
+// (cpp:1051-1060) but does NOT run declareArguments, so its scope has no
+// 'arguments' decl — while any field WITH an initializer adds one (cpp:1049).
 
 var key = 'k';
 var outerVar = 1;
@@ -54,7 +54,7 @@ class NoFields {
 }
 
 // Computed keys are resolved in the ENCLOSING context (no FunctionContext is
-// pushed for them, cpp:1014-1020), so `key` resolves to the global property
+// pushed for them, cpp:1019-1025), so `key` resolves to the global property
 // and `arguments` inside one is an ordinary reference.
 class Computed {
   [key] = outerVar;

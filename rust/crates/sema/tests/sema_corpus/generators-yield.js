@@ -1,4 +1,4 @@
-// visit(YieldExpressionNode *) (cpp:1476-1492) inside a real generator: no
+// visit(YieldExpressionNode *) (cpp:1490-1506) inside a real generator: no
 // error, and the argument (and the delegate form) resolve normally.
 function* g() {
   var x = yield;

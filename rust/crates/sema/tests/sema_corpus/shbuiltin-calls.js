@@ -6,16 +6,16 @@
  */
 
 // REWRITE #3: `$SHBuiltin.<prop>(...)` becomes a call whose callee's
-// `_object` is an SHBuiltinNode (SemanticResolver.cpp:1153-1165). The dump
+// `_object` is an SHBuiltinNode (SemanticResolver.cpp:1163-1182). The dump
 // shows it directly:
 // the `Id '$SHBuiltin'` line the parser produced is replaced by a bare
 // `SHBuiltin` line, with no `[D:E:...]` annotation — that is the whole
 // observable effect of the rewrite.
 //
-// Preconditions, all three required (cpp:1155-1159): the callee is a
+// Preconditions, all three required (cpp:1165-1176): the callee is a
 // MemberExpression, its `_object` is the Identifier `$SHBuiltin`, and the
 // member is NOT computed. Then resolveIdentifier(ident, false) must return a
-// decl of kind UndeclaredGlobalProperty (cpp:1161) — libhermes declares
+// decl of kind UndeclaredGlobalProperty (cpp:1178) — libhermes declares
 // `var $SHBuiltin;`, so at global scope it always does (the
 // `Decl %d.27 '$SHBuiltin' UndeclaredGlobalProperty` line in the ambient-
 // globals scope of this file's `-dump-sema` output; this corpus keeps no

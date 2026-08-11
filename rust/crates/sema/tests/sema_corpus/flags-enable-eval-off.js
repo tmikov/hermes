@@ -1,6 +1,6 @@
 // FLAGS: -enable-eval=false
 // Pins the `EvalDisabled` branch of `visit(CallExpressionNode *)`
-// (SemanticResolver.cpp:1147, `resolver/calls.rs:232`'s `else if is_eval`
+// (SemanticResolver.cpp:1157, `resolver/calls.rs:232`'s `else if is_eval`
 // arm): with eval support turned off, a direct call to the global `eval`
 // still resolves the identifier but warns "eval() is disabled at runtime"
 // instead of registering a local eval / warning about lexical scope. The

@@ -1,7 +1,7 @@
 // Async arrows: `await` is allowed in the body (forbidAwaitExpression_ is
 // false inside an async function) and `await` is forbidden as an identifier
 // anywhere in an async arrow's parameters (the `visitParams` lambda,
-// cpp:1804-1819).
+// cpp:1818-1833).
 var a = async x => await x;
 var b = async (x, y) => { return await x + await y; };
 async function outer() {

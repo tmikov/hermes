@@ -7,10 +7,10 @@
 
 // Every class shape the untyped visitClassAsExpr path handles
 // (SemanticResolver.cpp:913-950): declarations and expressions, named and
-// anonymous, and every MethodDefinition kind (cpp:1094-1115). A class with no
+// anonymous, and every MethodDefinition kind (cpp:1104-1125). A class with no
 // explicit constructor gets a synthetic implicit-constructor FunctionInfo
-// (cpp:3088-3114) which shows up as an extra `Func strict` with one scope;
-// an explicit constructor suppresses it (cpp:1656).
+// (cpp:3102-3128) which shows up as an extra `Func strict` with one scope;
+// an explicit constructor suppresses it (cpp:1670).
 
 // No constructor: the implicit one is created after the body is visited.
 class Empty {}
@@ -22,7 +22,7 @@ class WithCtor {
   }
 }
 
-// Every method kind. Only the computed keys are resolved (cpp:1102-1103);
+// Every method kind. Only the computed keys are resolved (cpp:1112-1113);
 // the others are left as bare Ids with no decl.
 var keyName = 'computed';
 class Methods {

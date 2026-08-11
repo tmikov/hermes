@@ -5,19 +5,19 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-// visit(StaticBlockNode *) (SemanticResolver.cpp:1053-1084). A static block is
+// visit(StaticBlockNode *) (SemanticResolver.cpp:1063-1094). A static block is
 // treated as a function-level scope of its own:
 //   - it gets a SYNTHETIC FunctionInfo of its own
-//     (ClassContext::createStaticBlockFunctionInfo, cpp:3165-3177), which the
+//     (ClassContext::createStaticBlockFunctionInfo, cpp:3179-3191), which the
 //     SemContext dump labels `StaticBlock` rather than `Func` because
 //     FunctionInfo::isStaticBlock is set; the id is stored on the StaticBlock
 //     node, not on the class.
 //   - it ALSO forces the class's static-elements-init FunctionInfo into
-//     existence (cpp:1057) even though the block doesn't use it, because IRGen
+//     existence (cpp:1067) even though the block doesn't use it, because IRGen
 //     needs it for any static elements.
-//   - its ScopeRAII is a function BODY scope (cpp:1063), so `var`s inside the
+//   - its ScopeRAII is a function BODY scope (cpp:1073), so `var`s inside the
 //     block hoist to the block and NOT to the function the class lives in.
-//   - `super` may always be referenced inside it (cpp:1082).
+//   - `super` may always be referenced inside it (cpp:1092).
 
 // An EMPTY static block still gets its own StaticBlock FunctionInfo and its
 // own (empty) body scope, and still forces the static-elements-init function
@@ -60,7 +60,7 @@ class B {
 }
 
 // A static block that is the ONLY static element still creates the
-// static-elements-init function (cpp:1057) — visible as an extra `Func strict`
+// static-elements-init function (cpp:1067) — visible as an extra `Func strict`
 // with an empty scope.
 class C {
   inst = 1;

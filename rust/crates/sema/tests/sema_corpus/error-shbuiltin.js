@@ -15,7 +15,7 @@
 // Note there is exactly ONE error per surviving `$SHBuiltin`, including in the
 // one shape below that visit(CallExpressionNode *) DID call resolveIdentifier
 // on (the shadowed `let $SHBuiltin` — the only one whose callee is a
-// non-computed MemberExpression, cpp:1160): the second call hits the decl cache
+// non-computed MemberExpression, cpp:1177): the second call hits the decl cache
 // in checkIdentifierResolved, and the error only ever comes from the identifier
 // visit.
 
@@ -24,10 +24,10 @@ $SHBuiltin;
 $SHBuiltin.foo;
 var a = $SHBuiltin;
 
-// A call, but the callee is not a MemberExpression (cpp:1155-1156).
+// A call, but the callee is not a MemberExpression (cpp:1165-1166).
 $SHBuiltin(1);
 
-// A member call, but COMPUTED (cpp:1159).
+// A member call, but COMPUTED (cpp:1175).
 $SHBuiltin["foo"](1);
 $SHBuiltin[a](1);
 
@@ -45,7 +45,7 @@ $SHBuiltin?.foo(1);
 new $SHBuiltin.foo(1);
 
 // `$SHBuiltin` shadowed by a local declaration, so resolveIdentifier returns a
-// Let decl rather than an UndeclaredGlobalProperty one (cpp:1161) — the
+// Let decl rather than an UndeclaredGlobalProperty one (cpp:1178) — the
 // declaration itself is a second `invalid use of $SHBuiltin`, since the
 // identifier visit sees every occurrence.
 function shadowed() {

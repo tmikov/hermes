@@ -7,8 +7,8 @@
 
 // S3 T2 battery: the `ES5Catch, ScopedFunc` arm of
 // `validateAndDeclareIdentifier`'s "when to create a new declaration"
-// switch (SemanticResolver.cpp:2563-2578, specifically the
-// `promotedFuncDecls` lookup at cpp:2569-2577). `ES5Catch` never blocks
+// switch (SemanticResolver.cpp:2577-2592, specifically the
+// `promotedFuncDecls` lookup at cpp:2583-2591). `ES5Catch` never blocks
 // promotion (ScopedFunctionPromoter.cpp:203-207), so a `catch (e)` and a
 // same-named promoted function can end up needing to share a decl exactly
 // like the `Var, ScopedFunc` arm in `promotion-var-reuse.js` — this is the
@@ -33,7 +33,7 @@
 // `functionContext()->promotedFuncDecls`, and reuses `decl_A` directly
 // (`reuseDeclForNewBinding = true`), without ever creating its own
 // block-scoped decl and without going through the "two declarations put"
-// special case (cpp:2611-2620), because `getDeclarationDecl` was never set
+// special case (cpp:2625-2634), because `getDeclarationDecl` was never set
 // for this identifier in the first place.
 
 function outer() {

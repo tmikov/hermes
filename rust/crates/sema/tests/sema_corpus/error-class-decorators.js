@@ -7,8 +7,8 @@
 
 // The three `decorators are not supported` sites the class visits carry, all
 // guarded by compile_: on the class itself (SemanticResolver.cpp:914-916, via
-// ESTree::getDecorators), on a ClassProperty (cpp:1009-1011) and on a
-// MethodDefinition (cpp:1097-1099). Each error points at the whole decorated
+// ESTree::getDecorators), on a ClassProperty (cpp:1014-1016) and on a
+// MethodDefinition (cpp:1107-1109). Each error points at the whole decorated
 // node's range, and the decorator expressions themselves are never resolved.
 
 @dec

@@ -5,7 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-// visit(SuperNode *, Node *) (SemanticResolver.cpp:1086-1092) tests
+// visit(SuperNode *, Node *) (SemanticResolver.cpp:1096-1102) tests
 // isa<MemberExpressionLikeNode>(parent), a range that spans MemberExpression
 // and OptionalMemberExpression (ESTree.def:360-373). Only the
 // MemberExpression half is reachable, in C++ as much as here: the parser
@@ -16,7 +16,7 @@
 // closest thing the grammar allows, not because it reaches the other half.
 //
 // canReferenceSuper_ comes from FunctionLikeDecoration::isMethodDefinition
-// (cpp:1675), which the parser sets for OBJECT-literal method shorthand too,
+// (cpp:1689), which the parser sets for OBJECT-literal method shorthand too,
 // not just class methods — so none of these is an error. The error shapes all
 // live in reject-super-references.js.
 

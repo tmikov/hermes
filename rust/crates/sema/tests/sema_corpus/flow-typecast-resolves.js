@@ -1,5 +1,5 @@
 // FLAGS: -parse-flow
-// `visit(TypeCastExpressionNode *)` (SemanticResolver.cpp:1591-1594, `#if
+// `visit(TypeCastExpressionNode *)` (SemanticResolver.cpp:1605-1608, `#if
 // HERMES_PARSE_FLOW`, `resolver/expressions.rs`'s
 // `visit_type_cast_expression`, added by S4a T4's fix review). Reachable
 // under plain untyped `-parse-flow` — no `-typed` needed, the C++ site is

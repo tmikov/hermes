@@ -1,4 +1,4 @@
-// "'yield' not allowed in a formal parameter" (cpp:1483-1489):
+// "'yield' not allowed in a formal parameter" (cpp:1497-1503):
 // isFormalParams is set by visitParams while the parameter initializers are
 // visited.
 function* g(x = yield 1) {}

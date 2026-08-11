@@ -1,5 +1,5 @@
 // FLAGS: -parse-flow
-// `visit(AsExpressionNode *)` (SemanticResolver.cpp:1596-1599, `#if
+// `visit(AsExpressionNode *)` (SemanticResolver.cpp:1610-1613, `#if
 // HERMES_PARSE_FLOW`, `resolver/expressions.rs`'s `visit_as_expression`,
 // added by S4a T4's fix review) — the same "visit the expression, but not
 // the type annotation" shape as `flow-typecast-resolves.js`'s

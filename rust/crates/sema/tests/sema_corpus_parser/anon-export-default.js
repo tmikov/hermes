@@ -1,6 +1,6 @@
 // An anonymous `export default function` is rewritten to a
 // FunctionExpression only when compiling (rewrite #4,
-// SemanticResolver.cpp:1526-1544, gated on compile_), so under this pair's
+// SemanticResolver.cpp:1533-1561, gated on compile_), so under this pair's
 // compile = false entry point the FunctionDeclaration survives with a null
 // _id -- and visit(FunctionDeclarationNode*) hoists it unconditionally, so a
 // nameless function reaches the hoistedFunction printer. Upstream 918158cb0

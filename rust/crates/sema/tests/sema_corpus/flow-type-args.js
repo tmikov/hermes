@@ -1,6 +1,6 @@
 // FLAGS: -parse-flow
 // Capstone fix (finding F1) — `visit(TypeParameterInstantiationNode *)`
-// (SemanticResolver.cpp:1587-1589, `#if HERMES_PARSE_FLOW`), a do-nothing
+// (SemanticResolver.cpp:1601-1603, `#if HERMES_PARSE_FLOW`), a do-nothing
 // visit like `visit(TypeAliasNode *)` next to it.
 //
 // The node is a call's/`new`'s type-ARGUMENT list, and it is reachable under
@@ -24,7 +24,7 @@
 // unwalked `Id 'Foo'` prints with no `[D:E:...]` while a walked one (as an
 // `UndeclaredGlobalProperty`) would carry one.
 //
-// The sibling `visit(TypeParameterDeclarationNode *)` (cpp:1583-1585) is a
+// The sibling `visit(TypeParameterDeclarationNode *)` (cpp:1597-1599) is a
 // different node (the type-parameter DECLARATION list, not this
 // instantiation list) and is pinned separately, in
 // `flow-interface-enum.js`.

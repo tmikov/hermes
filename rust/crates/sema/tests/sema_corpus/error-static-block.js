@@ -6,15 +6,15 @@
  */
 
 // The diagnostics visit(StaticBlockNode *)'s four flag save/restores
-// (SemanticResolver.cpp:1071-1082) make reachable.
+// (SemanticResolver.cpp:1081-1092) make reachable.
 //
 // ES14.0 15.7.1: it is a Syntax Error if ClassStaticBlockStatementList Contains
 // await is true — forbidAwaitExpression_ = true, so visit(AwaitExpressionNode *)
-// reports "'await' not in an async function" (cpp:1496) even though the class
+// reports "'await' not in an async function" (cpp:1510) even though the class
 // sits inside an async function.
 //
 // forbidArgumentsAsIdentifier_ = true makes resolveIdentifier report
-// "invalid use of 'arguments' as an identifier" (cpp:1986-1991), which is a
+// "invalid use of 'arguments' as an identifier" (cpp:2000-2005), which is a
 // name-based check independent of what (if anything) `arguments` resolves to.
 //
 // `await`/`yield` used as plain identifiers inside a static block are rejected

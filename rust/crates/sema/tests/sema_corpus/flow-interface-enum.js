@@ -31,7 +31,7 @@ interface I { x: number }
 enum E { A, B }
 
 // `TypeParameterDeclaration` (`visit(TypeParameterDeclarationNode *)`,
-// cpp:1583-1585) — a true no-op like `TypeAlias`'s above, but reached from a
+// cpp:1597-1599) — a true no-op like `TypeAlias`'s above, but reached from a
 // DIFFERENT parent than `flow-type-args.js`'s `TypeParameterInstantiation`
 // pin: `InterfaceDeclaration`'s own `typeParameters` field, walked by the
 // override-free Flow range arm this file's `I`/`E` already exercise. `T`'s

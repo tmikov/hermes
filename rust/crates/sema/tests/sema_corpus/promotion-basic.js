@@ -10,10 +10,10 @@
 //
 // - The top-level `{ function f() {} }` goes through `visit(ProgramNode *)`
 //   (SemanticResolver.cpp:224-227), so the promoted decl kind is
-//   `GlobalProperty` (`processPromotedFuncDecls`, cpp:2131-2133 —
+//   `GlobalProperty` (`processPromotedFuncDecls`, cpp:2146-2147 —
 //   `functionContext()->isGlobalScope()`).
 // - The one inside `outer` goes through
-//   `visitFunctionBodyAfterParamsVisited` (cpp:1904-1910), so the promoted
+//   `visitFunctionBodyAfterParamsVisited` (cpp:1918-1924), so the promoted
 //   decl kind is `Var`.
 //
 // Both promote: nothing let-like with the same name is visible in the
@@ -34,7 +34,7 @@
 // (the seventh, `With`, cannot appear: `visit(WithStatementNode *)` reports
 // "with statement is not supported" and hermesc exits before dumping).
 // `twice` pins that two candidates with the SAME name both promote and that
-// the `promotedFuncDecls` map keeps the FIRST one (`try_emplace`, cpp:2138).
+// the `promotedFuncDecls` map keeps the FIRST one (`try_emplace`, cpp:2152).
 
 {
   function f() {}
