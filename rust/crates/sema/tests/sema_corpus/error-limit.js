@@ -15,8 +15,8 @@
 // noisiest other file (`error-private-load-store.js`) stops at 15.
 //
 // This file has 26 errors, so it pins all four observable halves of
-// `countAndGenMessage` (SourceErrorManager.cpp:124-136) + `message`
-// (:172-190):
+// `countAndGenMessage` (SourceErrorManager.cpp:125-137) + `message`
+// (:173-191):
 //
 //  1. exactly the first 20 GENERATED errors are reported;
 //  2. GENERATED, not first-by-location: the 20th survivor is the
@@ -29,12 +29,12 @@
 //     was written — line 77, last of the 20 — when the buffer is flushed;
 //  3. `<unknown>:0: error: too many errors emitted` is appended exactly once,
 //     with an invalid location, and the buffered flush's comparator keeps it
-//     LAST regardless of that location sort (SourceErrorManager.cpp:61-71);
+//     LAST regardless of that location sort (SourceErrorManager.cpp:62-72);
 //  4. once `errorLimitReached_` is set, `message()` drops EVERYTHING — the
 //     six `break`s past the cut and the `undeclaredGlobalAfterTheLimit`
 //     warning. Its surviving `note: previous declaration` is the contrast: a
 //     note is attached to its primary message when that message is buffered
-//     (`doGenMessage`, :138-155), so it rides along with an error that DID
+//     (`doGenMessage`, :139-156), so it rides along with an error that DID
 //     make the cut.
 //
 // The sentinel is not counted as a message (it goes straight to

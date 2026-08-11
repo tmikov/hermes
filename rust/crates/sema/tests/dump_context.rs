@@ -6,7 +6,7 @@
  */
 
 //! Golden test for `sema::dump_context::SemContextDumper`, ported from
-//! `lib/Sema/SemContext.cpp:415-563`. Hand-builds a `SemContext` (no
+//! `lib/Sema/SemContext.cpp:415-570`. Hand-builds a `SemContext` (no
 //! parser) and asserts the exact multi-line text the C++ `printSemContext`
 //! would produce for the equivalent structure.
 

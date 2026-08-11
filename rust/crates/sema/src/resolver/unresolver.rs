@@ -40,7 +40,7 @@
 //!
 //! `unresolvable` IS printed — `sema::dump` appends ` UNR` to the
 //! identifier line and suppresses the `[...]` decl bracket
-//! (SemResolve.cpp:121-122, `dump.rs`'s `enter_identifier`) — but the
+//! (SemResolve.cpp:125-126, `dump.rs`'s `enter_identifier`) — but the
 //! differential cannot see it through a `with`, because
 //! `visit(WithStatementNode *)` reports "with statement is not supported"
 //! whenever `compile_` is set and hermesc then exits before dumping anything

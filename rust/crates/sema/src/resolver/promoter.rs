@@ -109,10 +109,10 @@ struct ScopedFunctionPromoter<'ast, 'g_ast, 'g_ctx, 'd, 'sc, 'sm, 'tb> {
     gc: &'ast GCLock<'g_ast, 'g_ctx>,
     /// `resolver_.functionContext()->decls` (cpp:123, 162).
     decls: &'d DeclCollector,
-    /// `resolver_.keywords()` (cpp:255-260) and the parameter scope
+    /// `resolver_.keywords()` (cpp:246-251) and the parameter scope
     /// (cpp:148); see the module doc on splitting `resolver_`.
     sem_ctx: &'sc SemContext,
-    /// Everything `extractDeclaredIdentsFromID` needs (cpp:252, 266, ...).
+    /// Everything `extractDeclaredIdentsFromID` needs (cpp:243, 261, ...).
     sm: &'sm mut SourceErrorManager,
 
     /// The result list of promoted function declarations. Port of
@@ -409,7 +409,7 @@ impl<'ast, 'd, 'sc, 'sm, 'tb>
         }
 
         // C++'s final block is an unconditional `cast<ImportDeclarationNode>`
-        // (cpp:296-297): any other node kind aborts there, so it does here
+        // (cpp:292): any other node kind aborts there, so it does here
         // too. Unreachable for `DeclCollector`-collected scope decls — the
         // collector only ever records the kinds handled above plus
         // `ImportDeclaration` and the two type aliases `processDeclarations`
@@ -492,7 +492,7 @@ impl<'ast> Visitor<'ast>
 }
 
 /// `cast<IdentifierNode>(node)->_name`, the idiom C++ open-codes at cpp:128
-/// and 238. It also stands in for the plain `idNode->_name` of cpp:220, where
+/// and 229. It also stands in for the plain `idNode->_name` of cpp:211, where
 /// C++ already holds an `IdentifierNode *` because `extractDeclaredIdents`
 /// fills a `SmallVectorImpl<IdentifierNode *>`; this port's `idents` is a
 /// `Vec<&Node>` (the shape `extract_declared_idents_from_id` appends to), so
@@ -505,7 +505,7 @@ fn identifier_name(node: &Node) -> Atom {
 }
 
 /// Port of `hermes::sema::getPromotedScopedFuncDecls`
-/// (ScopedFunctionPromoter.h:31-33, cpp:315-325).
+/// (ScopedFunctionPromoter.h:30-32, cpp:310-320).
 ///
 /// \return the list of promoted function declarations — every entry is a
 ///   `FunctionDeclaration` node the caller must declare in function (or

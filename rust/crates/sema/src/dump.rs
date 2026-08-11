@@ -6,7 +6,7 @@
  */
 
 //! Port of `hermes::sema::ASTPrinter` and the untyped arm of `semDump`
-//! (`lib/Sema/SemResolve.cpp:20-157,254-293`). Byte-exact text dumper (the
+//! (`lib/Sema/SemResolve.cpp:20-161,258-297`). Byte-exact text dumper (the
 //! `-dump-sema` AST half, paired with Task 5's `SemContextDumper` for the
 //! `SemContext` half) that the differential oracle depends on — every
 //! space, quote, and (see below) quirk is transcribed straight from the
@@ -66,7 +66,7 @@
 //! generic `shouldVisit(Node*) { return !parentLinearized_; }` override),
 //! so both calls are no-ops; `leave` unconditionally resets the flag to
 //! `false` for every `BinaryExpression`, linearized or not (matching
-//! `leave(BinaryExpressionNode*)`, cpp:129-133).
+//! `leave(BinaryExpressionNode*)`, cpp:133-137).
 //!
 //! **Quirk, reproduced on purpose:** inside the loop that prints each
 //! `BinOp` line (cpp:79-84), the C++ prints `list[0]->_operator->str()`
@@ -102,7 +102,7 @@
 //! divergence from a debug C++ build (which aborted); it is one no longer.
 //! Upstream `918158cb0` made the C++ dumper guard the call the same way
 //! (`sema::Decl *exprD = V->isUnresolvable() ? nullptr :
-//! semCtx_.getExpressionDecl(V);`, `SemResolve.cpp:99-106`), so debug now
+//! semCtx_.getExpressionDecl(V);`, `SemResolve.cpp:99-110`), so debug now
 //! matches release upstream and both match this port: `with(o){x;}` dumps
 //! `Id 'x' UNR` on every side, in every build configuration. It is a live
 //! differential corpus file — `sema_corpus_parser/with-statement.js`.
@@ -127,8 +127,8 @@ use crate::ids::{FunctionInfoId, ScopeId};
 use crate::linearize::linearize_left;
 use crate::sem_context::SemContext;
 
-/// Port of `hermes::sema::semDump`'s untyped arm (`SemResolve.cpp:254-270`).
-/// The typed/`FlowContext` arm (cpp:271-292) is deferred to the
+/// Port of `hermes::sema::semDump`'s untyped arm (`SemResolve.cpp:258-274`).
+/// The typed/`FlowContext` arm (cpp:275-296) is deferred to the
 /// FlowChecker component, per the task brief — this crate has no
 /// `FlowContext` yet.
 ///
@@ -141,7 +141,7 @@ pub fn sem_dump<'n, 'ast, 'ctx>(
     root: &'n Node<'n>,
 ) {
     // "If the root is a function-like node, start the dump from its
-    // FunctionInfo." (cpp:260-263)
+    // FunctionInfo." (cpp:264-267)
     let root_func =
         function_like_sem_info(root).map(FunctionInfoId::from_sema_id);
 
@@ -160,7 +160,7 @@ pub fn sem_dump<'n, 'ast, 'ctx>(
     printer.run(root);
 }
 
-/// Port of `hermes::sema::ASTPrinter` (`SemResolve.cpp:20-157`), untyped
+/// Port of `hermes::sema::ASTPrinter` (`SemResolve.cpp:20-161`), untyped
 /// arm only (no `flowDumper_`/`flowContext_` — see the module doc). See
 /// the module doc for how this maps onto the C++ `ESTreeVisit`
 /// `shouldVisit`/`enter`/`leave` protocol.
@@ -196,7 +196,7 @@ impl<'p, 'ast, 'ctx> AstPrinter<'p, 'ast, 'ctx> {
     /// Dispatches to the `enter` overload matching `node`'s kind, mirroring
     /// C++ overload resolution on `enter(BinaryExpressionNode*)`,
     /// `enter(IdentifierNode*)`, and the generic `enter(Node*)` fallback
-    /// (cpp:62-125).
+    /// (cpp:62-129).
     fn enter<'n>(&mut self, node: &'n Node<'n>) {
         match node {
             Node::BinaryExpression(bin) => {
@@ -219,7 +219,7 @@ impl<'p, 'ast, 'ctx> AstPrinter<'p, 'ast, 'ctx> {
         self.out.push(b'\n');
     }
 
-    /// Port of `printScopeRef` (cpp:136-143).
+    /// Port of `printScopeRef` (cpp:140-147).
     fn print_scope_ref(&mut self, node: &Node) {
         if let Some(scope) = node_scope(node) {
             self.out.push(b' ');
@@ -264,7 +264,7 @@ impl<'p, 'ast, 'ctx> AstPrinter<'p, 'ast, 'ctx> {
         }
     }
 
-    /// Port of `enter(ESTree::IdentifierNode *V)` (cpp:96-125).
+    /// Port of `enter(ESTree::IdentifierNode *V)` (cpp:96-129).
     fn enter_identifier(&mut self, ident: &Identifier) {
         self.depth += 1;
         push_indent(self.out, self.depth - 1);
@@ -273,7 +273,7 @@ impl<'p, 'ast, 'ctx> AstPrinter<'p, 'ast, 'ctx> {
         self.out.push(b'\'');
 
         let decl_d = self.sem_ctx.get_declaration_decl(ident);
-        // Guarding on `unresolvable` matches cpp:99-106 since upstream
+        // Guarding on `unresolvable` matches cpp:99-110 since upstream
         // `918158cb0`; see the module doc's "getExpressionDecl on an
         // unresolvable identifier" section.
         let expr_d = if ident.unresolvable.get() {
@@ -284,27 +284,27 @@ impl<'p, 'ast, 'ctx> AstPrinter<'p, 'ast, 'ctx> {
 
         if decl_d.is_some() || expr_d.is_some() {
             push_str(self.out, " [");
-            // Matches the C++ if/else-if/else (cpp:103-118) branch by
+            // Matches the C++ if/else-if/else (cpp:107-122) branch by
             // branch, via exhaustive destructuring instead of
             // `Option::unwrap`/`expect` (an earlier version used those and
             // clippy correctly couldn't prove them sound from a separate
             // `if decl_d.is_none() || ...` check higher up).
             match (decl_d, expr_d) {
-                // "!declD" half of cpp:105.
+                // "!declD" half of cpp:109.
                 (None, Some(e)) => {
                     push_str(self.out, "D:E:");
                     self.sem_dumper.print_decl_ref(
                         self.out, self.gc, self.sem_ctx, e, true,
                     );
                 }
-                // "declD == exprD" half of cpp:105.
+                // "declD == exprD" half of cpp:109.
                 (Some(d), Some(e)) if d == e => {
                     push_str(self.out, "D:E:");
                     self.sem_dumper.print_decl_ref(
                         self.out, self.gc, self.sem_ctx, e, true,
                     );
                 }
-                // cpp:108-112: declD and exprD both present and distinct.
+                // cpp:112-116: declD and exprD both present and distinct.
                 (Some(d), Some(e)) => {
                     push_str(self.out, "D:");
                     self.sem_dumper.print_decl_ref(
@@ -315,7 +315,7 @@ impl<'p, 'ast, 'ctx> AstPrinter<'p, 'ast, 'ctx> {
                         self.out, self.gc, self.sem_ctx, e, true,
                     );
                 }
-                // cpp:113-118: "the only remaining case", declD && !exprD.
+                // cpp:117-122: "the only remaining case", declD && !exprD.
                 (Some(d), None) => {
                     push_str(self.out, "D:");
                     self.sem_dumper.print_decl_ref(
@@ -334,9 +334,9 @@ impl<'p, 'ast, 'ctx> AstPrinter<'p, 'ast, 'ctx> {
         self.out.push(b'\n');
     }
 
-    /// Port of the generic `leave(ESTree::Node *V)` (cpp:126-128) plus
+    /// Port of the generic `leave(ESTree::Node *V)` (cpp:130-132) plus
     /// `leave(ESTree::BinaryExpressionNode *V)`'s extra flag reset
-    /// (cpp:129-133).
+    /// (cpp:133-137).
     fn leave(&mut self, node: &Node) {
         self.depth -= 1;
         if matches!(node, Node::BinaryExpression(_)) {
@@ -361,7 +361,7 @@ impl<'gc, 'p, 'ast, 'ctx> Visitor<'gc> for AstPrinter<'p, 'ast, 'ctx> {
 /// The `FunctionInfo` a function-like `root`'s `sem_info` decoration points
 /// at, or `None` if `root` isn't function-like. Port of the
 /// `llvh::dyn_cast<ESTree::FunctionLikeNode>(root)` + `getSemInfo()` guard
-/// at the top of `semDump` (cpp:261-263); enumerates the 6 node kinds that
+/// at the top of `semDump` (cpp:265-267); enumerates the 6 node kinds that
 /// carry a `sem_info` Cell (`rust/crates/ast/src/node.rs`; grep
 /// `sem_info: Cell<Option<SemaId>>` — `Program` counts, since
 /// `ESTREE_NODE_1_ARGS(Program, FunctionLike, ...)` makes it a
@@ -380,7 +380,7 @@ fn function_like_sem_info(node: &Node) -> Option<SemaId> {
 
 /// The scope a scope-bearing node decorates, if any. Port of
 /// `ESTree::getDecoration<ScopeDecorationBase>(n)` + `getScope()`
-/// (cpp:136-142): enumerates the 15 node kinds that carry a `scope` Cell
+/// (cpp:140-146): enumerates the 15 node kinds that carry a `scope` Cell
 /// (`rust/crates/ast/src/node.rs`; grep `scope: Cell<Option<SemaId>>`).
 fn node_scope(node: &Node) -> Option<SemaId> {
     match node {

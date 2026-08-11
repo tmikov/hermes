@@ -33,7 +33,7 @@ pub struct MessageData {
 
 /// A buffered top-level message (non-note) plus the contiguous slice of its
 /// attached notes stored in `buffered_notes`.
-/// Port of `BufferedMessage` in `SourceErrorManager.cpp:26-83`.
+/// Port of `BufferedMessage` in `SourceErrorManager.cpp:26-84`.
 struct BufferedMessage {
     data: MessageData,
     /// Index into `buffered_notes` where this message's notes begin.
@@ -98,7 +98,7 @@ pub struct SourceErrorManager {
     /// Reference count for buffering. While > 0, generated messages are stored
     /// instead of dispatched; `disable_buffering` decrements and flushes when
     /// it reaches 0. Port of `bufferingEnabled_` and the `enableBuffering` /
-    /// `disableBuffering` pair in `SourceErrorManager.cpp:26-83`.
+    /// `disableBuffering` pair in `SourceErrorManager.cpp:26-84`.
     ///
     /// # Rust vs C++ design note
     /// The C++ uses an RAII guard (`SaveAndBufferMessages`) for the same
@@ -215,7 +215,7 @@ impl SourceErrorManager {
     }
 }
 
-/// Port of `SourceErrorManager.cpp:255` `adjustSourceLocation`. If `offset`
+/// Port of `SourceErrorManager.cpp:256` `adjustSourceLocation`. If `offset`
 /// points at a '\r' or a UTF-8 continuation byte, walk backward (not past
 /// `line_start`) until a normal byte, so the column reflects the start of the
 /// character. A no-op for normal (token-start) locations.
@@ -257,7 +257,7 @@ impl SourceErrorManager {
 
     /// Return the 1-based line span `[start, end)` for `line` in buffer `buf`
     /// as an `SMRange`, after LF and CR trimming. Matches the line-span branch of
-    /// `findForCoordsImpl` (cpp:356-397). Returns `None` if `line` is out of range.
+    /// `findForCoordsImpl` (cpp:357-398). Returns `None` if `line` is out of range.
     pub fn find_smrange_for_line(&self, buf: SourceId, line: u32) -> Option<SMRange> {
         let entry = &self.entries[buf.index() as usize];
         entry.buffer.with_line_index(|idx, bytes| {
@@ -271,7 +271,7 @@ impl SourceErrorManager {
             let mut start = ls;
             let mut end = ls + lf_trimmed;
             // Trim lone CR at start/end to handle \r, \r\n, \n\r line endings.
-            // Port of cpp:391-394.
+            // Port of cpp:392-395.
             if start < end && bytes[start as usize] == b'\r' {
                 start += 1;
             }
@@ -292,7 +292,7 @@ impl SourceErrorManager {
     }
 
     /// Resolve a `SourceCoords` (buffer + 1-based line + 1-based col) to an
-    /// `SMLoc`. Port of `findSMLocFromCoords` / `findForCoordsImpl` (cpp:396-438).
+    /// `SMLoc`. Port of `findSMLocFromCoords` / `findForCoordsImpl` (cpp:397-439).
     /// Returns `None` if the line is out of range or the column is past the line.
     pub fn find_smloc_from_coords(&self, coords: SourceCoords) -> Option<SMLoc> {
         let buf = coords.buf;
@@ -309,14 +309,14 @@ impl SourceErrorManager {
             let lf_trimmed = raw.len() as u32 - if raw.ends_with(b"\n") { 1 } else { 0 };
             let mut start = ls;
             let mut end = ls + lf_trimmed;
-            // CR trim — port of cpp:391-394.
+            // CR trim — port of cpp:392-395.
             if start < end && bytes[start as usize] == b'\r' {
                 start += 1;
             }
             if start < end && bytes[(end - 1) as usize] == b'\r' {
                 end -= 1;
             }
-            // Special case: empty line — port of cpp:401-406.
+            // Special case: empty line — port of cpp:402-407.
             if start == end {
                 if col <= 1 {
                     return Some(SMLoc {
@@ -326,12 +326,12 @@ impl SourceErrorManager {
                 }
                 return None;
             }
-            // Detect presence of any non-ASCII byte — port of cpp:408-415.
+            // Detect presence of any non-ASCII byte — port of cpp:409-416.
             let has_non_ascii = bytes[start as usize..end as usize]
                 .iter()
                 .any(|&b| b & 0x80 != 0);
             if !has_non_ascii {
-                // ASCII fast path — port of cpp:418-425.
+                // ASCII fast path — port of cpp:419-426.
                 if col > end - start {
                     return None;
                 }
@@ -341,7 +341,7 @@ impl SourceErrorManager {
                 });
             }
             // UTF-8 path: scan code points, skipping continuation bytes.
-            // Port of cpp:428-436.
+            // Port of cpp:429-437.
             let mut column: u32 = 0;
             let mut offset = start;
             while offset < end {
@@ -414,7 +414,7 @@ impl SourceErrorManager {
 
     /// Convert the exclusive end of `range` to an inclusive location by
     /// subtracting one. If the range is empty (start == end), returns the start
-    /// unchanged. Port of `convertEndToLocation` (cpp:669-675).
+    /// unchanged. Port of `convertEndToLocation` (cpp:670-676).
     pub fn convert_end_to_location(range: SMRange) -> SMLoc {
         if range.start == range.end {
             range.start
@@ -436,7 +436,7 @@ impl SourceErrorManager {
 
     /// Format `coords` as `"name:line:col"`, where `name` prefers the buffer's
     /// source URL over its file name (matching C++ `dumpCoords`, which uses
-    /// `getSourceUrl`). Port of `dumpCoords(OS, SourceCoords)` (cpp:108-116).
+    /// `getSourceUrl`). Port of `dumpCoords(OS, SourceCoords)` (cpp:109-117).
     pub fn dump_coords(&self, coords: SourceCoords) -> String {
         format!(
             "{}:{}:{}",
@@ -447,7 +447,7 @@ impl SourceErrorManager {
     }
 
     /// Resolve `loc` to coordinates and format as `"filename:line:col"`.
-    /// Port of `dumpCoords(OS, SMLoc)` (cpp:118-122).
+    /// Port of `dumpCoords(OS, SMLoc)` (cpp:119-123).
     pub fn dump_coords_loc(&self, loc: SMLoc) -> String {
         let coords = self.find_coords(loc);
         self.dump_coords(coords)
@@ -747,7 +747,7 @@ impl SourceErrorManager {
 
     /// Central dispatch. Port of `SourceErrorManager::message` +
     /// `countAndGenMessage`. Subsystem suppression is checked first (port of
-    /// `cpp:180-187`), before the error-limit check, matching C++ ordering.
+    /// `cpp:181-188`), before the error-limit check, matching C++ ordering.
     fn emit(
         &mut self,
         mut dk: DiagKind,
@@ -758,7 +758,7 @@ impl SourceErrorManager {
         msg: String,
     ) {
         // Suppress messages from the suppressed subsystem (or all, if
-        // Unspecified). Port of SourceErrorManager.cpp:180-187.
+        // Unspecified). Port of SourceErrorManager.cpp:181-188.
         // Note: suppressed messages do NOT update `last_message_suppressed`,
         // matching C++ behavior — they just return.
         if let Some(s) = self.suppressed_messages {
@@ -785,7 +785,7 @@ impl SourceErrorManager {
         }
         // If a collector is active, capture the (already-filtered) message
         // instead of generating it. Port of the externalMessageBuffer_ check
-        // (cpp:206-209). Collected messages are NOT counted at collect time;
+        // (cpp:207-210). Collected messages are NOT counted at collect time;
         // they are replayed through count_and_gen in end_collecting.
         if let Some(collector) = self.message_collector.as_mut() {
             collector.push(MessageData {
@@ -828,7 +828,7 @@ impl SourceErrorManager {
     /// directly to the handler.  Notes are attached to the last buffered
     /// non-note message; if no such message exists yet, the note becomes a
     /// standalone buffered message (edge case, matches C++).
-    /// Port of `doGenMessage` in `SourceErrorManager.cpp:124-155`.
+    /// Port of `doGenMessage` in `SourceErrorManager.cpp:125-156`.
     fn do_gen_message(
         &mut self,
         dk: DiagKind,
@@ -910,7 +910,7 @@ impl SourceErrorManager {
         // either way (in practice depending on the total buffered count).
         // Upstream `5f313a13a` ("Sort buffered diagnostics with a stable
         // sort") changed it to `std::stable_sort`
-        // (`SourceErrorManager.cpp:60-73`), so both sides now break
+        // (`SourceErrorManager.cpp:60-74`), so both sides now break
         // same-location ties in emission order and the divergence is retired.
         let mut order: Vec<usize> = (0..msgs.len()).collect();
         order.sort_by_key(|&i| match msgs[i].data.loc {
@@ -993,7 +993,7 @@ impl SourceErrorManager {
                 });
                 // Compute range columns relative to the source line, if the
                 // range is in the same buffer as the location.
-                // Port of SourceErrorManager.cpp:157-170 (caret/tilde fill).
+                // Port of SourceErrorManager.cpp:158-171 (caret/tilde fill).
                 let range_cols = range.filter(|r| r.start.source == loc.source).map(|r| {
                     // Byte offset of the first character of this line.
                     let line_start = loc.offset - (coords.col - 1);

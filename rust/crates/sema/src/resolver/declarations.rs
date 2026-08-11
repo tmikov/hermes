@@ -11,7 +11,7 @@
 //! file's module doc for why a child module sees `mod.rs`'s private fields.
 //!
 //! Ports `SemanticResolver::extractIdentsFromDecl` (SemanticResolver.cpp:
-//! 2262-2352), `extractDeclaredIdentsFromID` (cpp:2367-2419),
+//! 2276-2366), `extractDeclaredIdentsFromID` (cpp:2367-2419),
 //! `processDeclarations` (cpp:2109-2141, replacing `mod.rs`'s S0 guard in
 //! `process_collected_declarations`), `validateAndDeclareIdentifier`
 //! (cpp:2421-2653), `validateDeclarationName` (cpp:2655-2691),

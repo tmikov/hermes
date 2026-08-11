@@ -150,7 +150,7 @@ pub fn render_diagnostic(diag: &ResolvedDiagnostic, opts: &OutputOptions) -> Str
         DiagKind::Note => "note",
     };
     // The location prefix is conditional, exactly as in
-    // `printDiagnosticHelper` (SourceErrorManager.cpp:574-582): an empty
+    // `printDiagnosticHelper` (SourceErrorManager.cpp:575-583): an empty
     // filename prints no prefix at all, `-` prints as `<stdin>`, and the
     // column is omitted when C++'s `columnNo` is -1. C++ builds that
     // `columnNo` as `col - 1`, so "no column" is exactly `col == 0` here —
@@ -235,7 +235,7 @@ mod tests {
     use crate::diag::{DiagKind, OutputOptions};
 
     /// `printDiagnosticHelper`'s location prefix is conditional
-    /// (SourceErrorManager.cpp:574-582): the whole prefix is skipped for an
+    /// (SourceErrorManager.cpp:575-583): the whole prefix is skipped for an
     /// empty filename, `-` renders as `<stdin>`, and the column is omitted
     /// when `columnNo == -1` — which is what a location-less diagnostic has,
     /// since `SMDiagnostic` gets `col - 1` and a location-less message has

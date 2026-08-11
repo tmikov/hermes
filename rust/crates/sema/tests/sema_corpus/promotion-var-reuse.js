@@ -8,7 +8,7 @@
 // S3 T2 battery: the `Var, ScopedFunc` arm of
 // `validateAndDeclareIdentifier`'s "when to create a new declaration"
 // switch (SemanticResolver.cpp:2546-2562). `var` never blocks promotion
-// (cpp:215's `!isKindLetLike(Var)`), so wherever a `var` and a promoted
+// (cpp:206's `!isKindLetLike(Var)`), so wherever a `var` and a promoted
 // function share a name, they end up sharing ONE `Decl` rather than
 // conflicting.
 //

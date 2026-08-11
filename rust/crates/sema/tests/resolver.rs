@@ -2392,7 +2392,7 @@ fn a_block_nested_function_inside_a_function_is_promoted_as_var() {
 }
 
 /// A visible let-like declaration with the same name blocks promotion
-/// (ScopedFunctionPromoter.cpp:232-244): the function keeps ONLY its
+/// (ScopedFunctionPromoter.cpp:223-235): the function keeps ONLY its
 /// block-scoped `ScopedFunction` decl and nothing is recorded in the
 /// promoted-decl side table.
 #[test]

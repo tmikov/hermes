@@ -173,7 +173,9 @@ validation commands, and workflow.
 > `in_decl=true` nested pattern, e.g. `({...a.b}) => 1` reported the wrong error). All fixed;
 > every one of the seven original fixes now has a durable CI-visible pin. Final sweep:
 > 1405 / 3 / 8 (was 1220/188/8), zero regressions at any step,
-> panic bucket unchanged (still the same 7 `$SHBuiltin` S4b files + `computed-fn-name.js`). The
+> panic bucket unchanged (still the same 7 `$SHBuiltin` S4b files + `computed-fn-name.js`).
+> **Update (2026-08-10):** the C++ defect-fix propagation re-ran this sweep and found
+> **1408 / 3 / 7** (1418 files — see the Update further below for detail). The
 > final 3 mismatches are each individually classified, pre-existing, and NOT `errorExpected`
 > geometry (regex-engine validation; the deliberate "notes dropped per house style" convention;
 > and the collect-scope leak's sibling error-recovery gap). Sema driver gate 202/107 → 208/107
@@ -184,8 +186,9 @@ validation commands, and workflow.
 > rejected by the port until fixed; `yield-typed-argument.js` is the new exit-0 pin) + CI pins for
 > the yield-check and `in_decl` fixes (`for-of-error.js`, `yield-paren-error.js`,
 > `error-in-decl-rest-property.js`) + a citation batch; and `CppDefectsFound.md` gained item 11
-> (the flow-match `JSLexer.h:160` assert — hermesc aborts, the port panics at the identical
-> assertion, bug-for-bug parity even in crashing).
+> (the flow-match `JSLexer.h:160` assert — hermesc aborted, the port panicked at the identical
+> assertion, bug-for-bug parity even in crashing; **closed 2026-08-10** by the C++ defect-fix
+> propagation's Task 2, upstream `550aafe33` — see the Update below).
 > **Two NEW parser-phase follow-ups found along the way, both OPEN** (see the roadmap's
 > Parser-phase follow-up section for full detail): the **collect-scope leak** (`expressions.rs:
 > 444-461` closes the flow generic-arrow retry's message-collection scope BEFORE the retry, vs

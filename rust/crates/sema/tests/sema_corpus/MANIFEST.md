@@ -15,6 +15,17 @@ classification — we always probe with plain `-dump-sema`, because that's the
 only thing `sema_differential.rs` tests and the harness has no per-file-flag
 support (out of scope to add here, per the task brief).
 
+**Citation note (added 2026-08-10):** the 2026-08-10 C++ defect-fix propagation
+cherry-picked 11 upstream commits that shifted line numbers in several C++ files
+(`ScopedFunctionPromoter.{h,cpp}`, `SemContext.cpp`, `SemResolve.cpp`,
+`SemanticResolver.cpp`, `SourceErrorManager.cpp`, `JSONParser.{h,cpp}`,
+`JSParserImpl-flow.cpp`). Historical entries below (sweep-history sections,
+dated task write-ups) are kept as originally written per this file's own
+"kept for the history" convention, so any `cpp:NNNN`/`SemanticResolver.cpp:NNNN`
+citation inside a section dated before 2026-08-10 references the PRE-cherry-pick
+tree, not the current one — do not "fix" those in place. Only the live
+Imported/Deferred tables' current reasons are kept synced to the current tree.
+
 Total top-level files: 54. Imported **as of the S1 Task 8 sweep**: 15 (14 from
 `test/Sema` + 1 new gap-filler, `expr-visit-generic.js`, added in Step 2
 below); deferred: 40 (14 + 40 = 54; counting `deep-ast-err.js`, which is listed
@@ -148,7 +159,7 @@ unchanged at 47 rows and the Deferred table stays at 8, i.e. 46 + 8 = 54.
 | `flow-annotations-benign.js` | **S4a T4** — negative control: parameter, return and variable type annotations under `-parse-flow` resolving completely cleanly — the annotation nodes are never visited as expressions, so they neither perturb declarations nor scopes. hermesc: exit 0, full dump match |
 | `flow-typecast-resolves.js` | **S4a T4 fix review** — `visit(TypeCastExpressionNode *)` (SemanticResolver.cpp:1591-1594, `#if HERMES_PARSE_FLOW`, `resolver/expressions.rs`'s `visit_type_cast_expression`). A **review-found gap**: `(x: number);`, the task brief's original (unverified) sketch for `flow-typecast-cover.js`, does not hit the Cover-node error at all — it is the parser's rewritten `TypeCastExpressionNode` (JSParserImpl.cpp:2633-2640) and resolves cleanly, but that visit had no port and the resolver panicked at the catch-all. Ported and pinned here: `x` is declared first, so the dump shows it resolving through the cast normally ("visit the expression, but not the type annotation"). hermesc: exit 0 |
 | `flow-as-expression.js` | **S4a T4 fix review** — `visit(AsExpressionNode *)` (SemanticResolver.cpp:1596-1599, `#if HERMES_PARSE_FLOW`, `resolver/expressions.rs`'s `visit_as_expression`), the same shape as `flow-typecast-resolves.js` for Flow's `as` operator (`x as number`, JSParserImpl.cpp:4329-4350) — also unconditional on `typed_`, also found panicking during the fix review. hermesc: exit 0 |
-| `invalid-args-eval.js` | **Task 5 (defect-fix propagation)** — the S1 `arguments`/`eval` declaration rules, upstream verbatim. Deferred since S1 on a same-location diagnostic-order tie at `89:9` (the strict-mode `cannot declare 'arguments'` error and the `was not declared in function "global"` warning), which C++'s `std::sort` over the buffered-message array left unspecified. Upstream `5f313a13a` made that a `std::stable_sort` (`SourceErrorManager.cpp:60-73`), matching this port's stable `sort_by_key` in `disable_buffering` (`support/src/manager.rs`), so both sides now break the tie in emission order and the match is by construction. hermesc: exit 2 (error-path file, not an oracle success) |
+| `invalid-args-eval.js` | **Task 5 (defect-fix propagation)** — the S1 `arguments`/`eval` declaration rules, upstream verbatim. Deferred since S1 on a same-location diagnostic-order tie at `89:9` (the strict-mode `cannot declare 'arguments'` error and the `was not declared in function "global"` warning), which C++'s `std::sort` over the buffered-message array left unspecified. Upstream `5f313a13a` made that a `std::stable_sort` (`SourceErrorManager.cpp:60-74`), matching this port's stable `sort_by_key` in `disable_buffering` (`support/src/manager.rs`), so both sides now break the tie in emission order and the match is by construction. hermesc: exit 2 (error-path file, not an oracle success) |
 
 `deep-ast-err.js` is listed in the Deferred table below but is NOT a real S1
 gap: the entire `.js` file is comment lines (its `RUN:` lines generate the
@@ -165,7 +176,7 @@ files in, 54 accounted for below) rather than silently dropped. It is also
 | File | Blocking construct | Target phase |
 |---|---|---|
 | `deep-ast-err.js` | vacuous — see note above (not a real S1 gap) | n/a |
-| `xmod-errors.js` | the `$SHBuiltin` CommonJS-module protocol: `visitModuleFactory`/`visitModuleExport`/`visitModuleImport` (cpp:1320-1453), reached from the three property-name branches of rewrite #3 (cpp:1168-1189). `CallExpression` itself landed in S2 T6, which ports those three branches as loud phase-tagged panics — its row was re-classified from "`CallExpression` / S2" accordingly. Every diagnostic in the file (`$SHBuiltin.moduleFactory requires exactly two arguments.` and 17 more) comes from those three functions | S4 modules |
+| `xmod-errors.js` | the `$SHBuiltin` CommonJS-module protocol: `visitModuleFactory`/`visitModuleExport`/`visitModuleImport` (cpp:1334-1467), reached from the three property-name branches of rewrite #3 (cpp:1183-1204). `CallExpression` itself landed in S2 T6, which ports those three branches as loud phase-tagged panics — its row was re-classified from "`CallExpression` / S2" accordingly. Every diagnostic in the file (`$SHBuiltin.moduleFactory requires exactly two arguments.` and 17 more) comes from those three functions | S4 modules |
 
 ## Subdirectories (`test/Sema/flow/`, `test/Sema/flow/ffi/`, `test/Sema/lowering/`)
 

@@ -5,7 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-//! Port of `hermes::sema::SemContextDumper` (`lib/Sema/SemContext.cpp:415-563`,
+//! Port of `hermes::sema::SemContextDumper` (`lib/Sema/SemContext.cpp:415-570`,
 //! declared `include/hermes/Sema/SemContext.h:694-756`). This is the
 //! byte-exact text dumper the differential oracle depends on
 //! (`hermesc -dump-sema` output), so every space and quote below is
@@ -372,7 +372,7 @@ impl SemContextDumper {
 }
 
 /// Port of `ind(level)` (cpp:15-17): `level * 4` spaces. `pub(crate)`
-/// because `dump::ASTPrinter` (SemResolve.cpp:20-157) uses the exact same
+/// because `dump::ASTPrinter` (SemResolve.cpp:20-161) uses the exact same
 /// indentation convention and reuses this helper rather than duplicating
 /// it.
 pub(crate) fn push_indent(out: &mut Vec<u8>, level: u32) {

@@ -6,7 +6,7 @@
  */
 
 // S3 T2 battery: nested-scope visibility of a `let` blocker
-// (`ScopedFunctionPromoter::processDeclarations`, cpp:160-244, and its
+// (`ScopedFunctionPromoter::processDeclarations`, cpp:160-235, and its
 // `bindingTable_` scoping via `visitScope`, cpp:141-145). The promoter's
 // binding table follows the SAME push/pop discipline as the AST's lexical
 // scopes, so a `let` blocks a candidate found ANYWHERE in its descendant

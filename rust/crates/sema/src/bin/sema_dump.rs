@@ -54,7 +54,7 @@
 //! `--parser-entry` switches to a SEPARATE entry point that mirrors the C++
 //! `tools/sema-parser-dump/sema-parser-dump.cpp` oracle instead: resolve via
 //! `sema::resolve_ast_for_parser` (port of `resolveASTForParser`,
-//! `SemResolve.cpp:295-306`, the `compile = false` entry point
+//! `SemResolve.cpp:299-310`, the `compile = false` entry point
 //! `hermes-parser-wasm.cpp:104` uses) and dump the result UNCONDITIONALLY,
 //! even when resolution reported errors — unlike the driver path above,
 //! which never dumps on a `resolveAST` failure. Three consequences, ported
@@ -287,7 +287,7 @@ impl Options {
             // including its `init(20)` and its "0 means unlimited" contract —
             // which needs no special-casing on either side: `errorLimit_` 0 is
             // never equal to a message count that has just been incremented
-            // (SourceErrorManager.cpp:132).
+            // (SourceErrorManager.cpp:133).
             ferror_limit: Opt::<u32>::new(
                 cl,
                 OptDesc {
@@ -446,7 +446,7 @@ fn main() {
     // the 63 ambient `UndeclaredGlobalProperty` decls appear in the dump.
     //
     // `--parser-entry` never loads it, full stop: `resolveASTForParser`
-    // (`SemResolve.cpp:295-306`) takes no `ambientDecls` parameter at all —
+    // (`SemResolve.cpp:299-310`) takes no `ambientDecls` parameter at all —
     // see `resolve_ast_for_parser`'s doc.
     let ambient_decls: Vec<NodeRc> = if parser_entry {
         vec![]

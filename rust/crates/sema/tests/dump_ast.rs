@@ -6,7 +6,7 @@
  */
 
 //! Golden tests for `sema::dump::sem_dump` / `ASTPrinter`, ported from
-//! `lib/Sema/SemResolve.cpp:20-157,254-293`. Hand-builds `SemContext` +
+//! `lib/Sema/SemResolve.cpp:20-161,258-297`. Hand-builds `SemContext` +
 //! ESTree trees (no parser) and asserts the exact multi-line text the C++
 //! `semDump` would produce for the equivalent structure. Every test goes
 //! through `sem_dump` — the only public entry point (`ASTPrinter` itself
@@ -187,7 +187,7 @@ Program Scope %s.1
     assert_eq!(String::from_utf8(out).unwrap(), expected);
 }
 
-/// `Id 'x' [D:E:%d.N 'x']`: `declD == exprD` (SemResolve.cpp:105-107).
+/// `Id 'x' [D:E:%d.N 'x']`: `declD == exprD` (SemResolve.cpp:109-111).
 #[test]
 fn identifier_decl_equals_expr_prints_d_e_colon() {
     let mut ctx = Context::new();
@@ -223,7 +223,7 @@ Id 'x' [D:E:%d.1 'x']
 }
 
 /// `Id 'z' [D:%d.N E:%d.M 'name']`: `declD != exprD`, both present
-/// (SemResolve.cpp:108-112). `declD` prints without its name (`printName
+/// (SemResolve.cpp:112-116). `declD` prints without its name (`printName
 /// = false`), `exprD` prints with it.
 #[test]
 fn identifier_decl_differs_from_expr_prints_d_and_e() {
@@ -270,7 +270,7 @@ Id 'z' [D:%d.2 E:%d.1 'a']
 }
 
 /// `Id 'q' [D:%d.N 'name']`: `declD` only, no `exprD`
-/// (SemResolve.cpp:113-118, the "only remaining case").
+/// (SemResolve.cpp:117-122, the "only remaining case").
 #[test]
 fn identifier_decl_only_prints_d_only() {
     let mut ctx = Context::new();
@@ -306,7 +306,7 @@ Id 'q' [D:%d.1 'onlyDecl']
 
 /// An unresolvable identifier with no recorded decl at all: no `[...]`
 /// bracket (neither `declD` nor `exprD` is present), just the ` UNR` suffix
-/// (SemResolve.cpp:121-122). Also exercises the deviation documented in
+/// (SemResolve.cpp:125-126). Also exercises the deviation documented in
 /// `sema::dump`'s module doc: `get_expression_decl` is never called on an
 /// unresolvable identifier, so this doesn't hit that function's `assert!`.
 #[test]

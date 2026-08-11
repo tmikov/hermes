@@ -718,7 +718,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     /// REGARDLESS of whether resolution reported errors. For callers that
     /// must dump the tree even after errors — currently only
     /// `resolve_ast_for_parser`, the `compile = false` port of
-    /// `resolveASTForParser` (`SemResolve.cpp:295-306`), whose C++ oracle
+    /// `resolveASTForParser` (`SemResolve.cpp:299-310`), whose C++ oracle
     /// (`tools/sema-parser-dump`) always dumps because `SemanticResolver`
     /// mutates the AST in place: `SemanticResolver::run`
     /// (`SemanticResolver.cpp:65-70`) has the SAME two `sm_.getErrorCount()`

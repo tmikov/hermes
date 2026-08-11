@@ -608,7 +608,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// (cpp:223) collapses into the same `Some`.
     ///
     /// `find_coords` is the port of `findBufferLineAndLoc`
-    /// (support/src/manager.rs:248-256; C++ SourceErrorManager.cpp:333-341),
+    /// (support/src/manager.rs:248-256; C++ SourceErrorManager.cpp:334-342),
     /// i.e. the *translating* lookup that `errorExpected` calls — not the
     /// untranslated `find_untranslated_coords`.
     ///

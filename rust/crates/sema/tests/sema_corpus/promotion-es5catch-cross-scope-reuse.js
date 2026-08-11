@@ -9,7 +9,7 @@
 // `validateAndDeclareIdentifier`'s "when to create a new declaration"
 // switch (SemanticResolver.cpp:2563-2578, specifically the
 // `promotedFuncDecls` lookup at cpp:2569-2577). `ES5Catch` never blocks
-// promotion (ScopedFunctionPromoter.cpp:212-216), so a `catch (e)` and a
+// promotion (ScopedFunctionPromoter.cpp:203-207), so a `catch (e)` and a
 // same-named promoted function can end up needing to share a decl exactly
 // like the `Var, ScopedFunc` arm in `promotion-var-reuse.js` — this is the
 // `ES5Catch` counterpart of that file's `crossScopeReuse`.

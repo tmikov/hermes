@@ -14,7 +14,7 @@
 //!     the driver path, `compile = true` (`sema::resolveAST`).
 //!   - `sema_parser_differential`: `sema-parser-dump` vs `sema-dump
 //!     --parser-entry` — the `compile = false` path (`sema::
-//!     resolveASTForParser`, `SemResolve.cpp:295-306`), which has no
+//!     resolveASTForParser`, `SemResolve.cpp:299-310`), which has no
 //!     driver-path coverage because `hermesc -dump-sema` always resolves
 //!     with `compile = true` and skips the dump on error
 //!     (`CompilerDriver.cpp:960-974`).
@@ -323,7 +323,7 @@ fn sema_differential_s0() {
 }
 
 /// Differential for the `compile = false` entry point (`resolveASTForParser`,
-/// `SemResolve.cpp:295-306`): `sema-parser-dump` vs `sema-dump
+/// `SemResolve.cpp:299-310`): `sema-parser-dump` vs `sema-dump
 /// --parser-entry` over `tests/sema_corpus_parser`. See the module doc for
 /// why this needs a separate oracle from `sema_differential_s0`.
 #[test]

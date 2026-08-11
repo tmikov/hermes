@@ -5,8 +5,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-//! Port of `hermes::sema::resolveAST` (`lib/Sema/SemResolve.cpp:159-191`) and
-//! `resolveASTForParser` (`cpp:295-306`) — the two `SemResolve.h` entry
+//! Port of `hermes::sema::resolveAST` (`lib/Sema/SemResolve.cpp:163-195`) and
+//! `resolveASTForParser` (`cpp:299-310`) — the two `SemResolve.h` entry
 //! points this crate has.
 //!
 //! ## The other `SemResolve.h` entries, and where they went
@@ -34,13 +34,13 @@
 //!
 //! Only the untyped arm is ported. The `flowContext` parameter and the
 //! `#if HERMES_PARSE_FLOW` block it guards (`FlowChecker::run` + `lowerAST`,
-//! cpp:178-188) belong to the FlowChecker component, which this crate does
+//! cpp:182-192) belong to the FlowChecker component, which this crate does
 //! not have; `declCollectorMap` exists in C++ only to hand the resolver's
 //! `DeclCollector`s to that checker (`flowContext ? &declCollectorMap :
 //! nullptr`), so it is not ported either. The `typed` resolver argument it
 //! feeds (`flowContext != nullptr`) is therefore always false.
 //!
-//! `PerfSection validation("Resolving JavaScript global AST")` (cpp:165) is
+//! `PerfSection validation("Resolving JavaScript global AST")` (cpp:169) is
 //! not ported: there is no `PerfSection` in this tree.
 
 use ast::context::{GCLock, NodeRc};
@@ -50,7 +50,7 @@ use support::manager::SourceErrorManager;
 use crate::resolver::SemanticResolver;
 use crate::sem_context::SemContext;
 
-/// Resolve the entire AST. Port of `resolveAST` (cpp:159-191), untyped arm.
+/// Resolve the entire AST. Port of `resolveAST` (cpp:163-195), untyped arm.
 ///
 /// \param sem_ctx the result of resolution is stored here.
 /// \param root the top-level `Program` node.
@@ -87,7 +87,7 @@ pub fn resolve_ast<'ast>(
 }
 
 /// Perform semantic resolution of the entire AST, without preparing the AST
-/// for compilation. Port of `resolveASTForParser` (`SemResolve.cpp:295-306`)
+/// for compilation. Port of `resolveASTForParser` (`SemResolve.cpp:299-310`)
 /// — the entry point `hermes-parser-wasm.cpp:104` uses. Unlike [`resolve_ast`]
 /// this will not error on features we can parse but not compile, transform
 /// the AST, or perform compilation-specific validation (`compile = false`);
