@@ -246,8 +246,10 @@ with the C++ fix.
 `export_default_anonymous_function_is_rewritten_to_an_expression` now
 asserts `async == true` (the correct, non-buggy outcome), and a new
 companion test, `export_default_anonymous_non_async_function_stays_non_async`,
-pins the other side of the forwarding. Live corpus pin:
-`export-default-anon-async.js`. Rust mirror commit `044b815d1` (Task 3).
+pins both sides of the async forwarding. The corpus file
+`export-default-anon-async.js` (run flagless) exercises the plain-mode
+export-error path, while the async-forwarding fix is pinned by these
+two unit tests. Rust mirror commit `044b815d1` (Task 3).
 
 ---
 
