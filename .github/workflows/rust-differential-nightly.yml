@@ -56,19 +56,21 @@ jobs:
             -DCMAKE_CXX_FLAGS="-O1" \
             -DCMAKE_C_FLAGS="-O1"
 
-      # The oracles are C++ binaries: `hermesc` for the AST differential,
-      # `json-parse-dump` for the JSON one, `preparse-dump` for the pre-parse
-      # side table, `js-lexer-dump` for the lexer. (`ast-dump` is the *Rust*
-      # driver, not a CMake target.)
+      # The oracles are C++ binaries: `hermesc` for the AST differential and
+      # for sema's driver path (`-dump-sema`), `json-parse-dump` for the JSON
+      # one, `preparse-dump` for the pre-parse side table, `js-lexer-dump` for
+      # the lexer, `sema-parser-dump` for sema's parser-entry path
+      # (`resolveASTForParser`, which hermesc cannot reach). (`ast-dump` and
+      # `sema-dump` are *Rust* drivers, not CMake targets.)
       - name: Build C++ oracle targets
         run: >-
           cmake --build cmake-build-asan --target
-          hermesc json-parse-dump preparse-dump js-lexer-dump
+          hermesc json-parse-dump preparse-dump js-lexer-dump sema-parser-dump
 
       # The Rust drivers live in the unpublished `tools` crate; each
       # differential test builds the one it needs on demand (see
       # rust/crates/parser/tests/common/mod.rs).
-      - name: Run differential tests
+      - name: Run parser differential tests
         env:
           REQUIRE_DIFFERENTIAL: "1"
         run: >-
@@ -79,3 +81,17 @@ jobs:
           --test json_differential
           --test preparse_differential
           --test differential
+
+      # A separate invocation because `--test <name>` resolves per package:
+      # `sema_differential` lives in `hermes-sema`, so it cannot join the
+      # `-p hermes-parser` command above. This is the sema crate's entire
+      # correctness claim (the 219-file corpus + the parser-entry corpus), so
+      # it must run in CI alongside the parser ones.
+      - name: Run sema differential tests
+        env:
+          REQUIRE_DIFFERENTIAL: "1"
+        run: >-
+          cargo test
+          --manifest-path rust/Cargo.toml
+          -p hermes-sema
+          --test sema_differential

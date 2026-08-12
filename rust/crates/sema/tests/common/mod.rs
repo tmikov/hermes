@@ -11,7 +11,9 @@
 //! This file is kept BYTE-IDENTICAL in `rust/crates/parser/tests/common/mod.rs`
 //! and `rust/crates/sema/tests/common/mod.rs` — both crates' differentials need
 //! it, and a `tests/` helper cannot be shared across packages without adding a
-//! crate for it. `diff` the two after touching either.
+//! crate for it. `diff` the two after touching either; the identity is also
+//! enforced by `common_helper_copies_are_byte_identical` in the unpublished
+//! `tools` crate (`rust/crates/tools/tests/common_copies_identical.rs`).
 //!
 //! Those drivers live in the unpublished `tools` crate, not in the crate under
 //! test, so Cargo's `CARGO_BIN_EXE_<name>` — which is only defined for binaries

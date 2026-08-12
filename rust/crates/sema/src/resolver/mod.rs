@@ -459,7 +459,7 @@ const DEBUG_INFO_SETTING_ALL: bool = false;
 /// Constructed by `resolver/statements.rs`'s `visit_labeled_statement`
 /// (S2 T1) — `FunctionContext::label_map` was always empty before then.
 #[derive(Debug, Clone)]
-pub struct Label {
+pub(crate) struct Label {
     /// Where it was declared.
     pub declaration_node: NodeRc,
     /// Statement targeted by the label. It is either a LoopStatement or a
@@ -472,7 +472,7 @@ pub struct Label {
 /// C++'s `resolver_`/`prevContext_` fields implement the intrusive context
 /// stack; here the stack is `SemanticResolver::function_stack` and those two
 /// fields are not needed. See the module doc for the RAII deviation.
-pub struct FunctionContext {
+pub(crate) struct FunctionContext {
     /// The associated seminfo object.
     pub sem_info: FunctionInfoId,
     /// The AST node of the function. `None` for the contexts created by the
@@ -532,7 +532,7 @@ struct FoundDirectives<'ast> {
 /// `persistent_scoped_map::Scope` borrows the table and so cannot be moved
 /// into a value the caller holds).
 #[must_use = "every enter_scope must be paired with exit_scope"]
-pub struct ScopeState {
+pub(crate) struct ScopeState {
     /// Old `LexicalScope` to restore on pop.
     old_scope: Option<ScopeId>,
 }
@@ -541,7 +541,7 @@ pub struct ScopeState {
 /// keeps this in `FunctionContext::prevContext_` plus the `SaveAndRestore`
 /// of `globalFunctionContext_` at the call site (cpp:203).
 #[must_use = "every enter_function must be paired with exit_function"]
-pub struct FunctionState {
+pub(crate) struct FunctionState {
     /// Whether this context was installed as `globalFunctionContext_` and
     /// therefore must be uninstalled.
     was_global_function_context: bool,
