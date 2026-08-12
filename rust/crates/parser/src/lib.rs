@@ -8,7 +8,33 @@
 //! are opt-in through the same `ast::context::Context` flags as in the C++
 //! (`parse_flow` and its four extension flags, `parse_ts`, `parse_jsx`).
 //!
+//! # Quickstart
+//!
+//! ```
+//! use ast::node::Node;
+//! use parser::{parse, ParseFlags};
+//!
+//! let flags = ParseFlags::default();
+//! let mut parsed = parse("1 + 2;", flags).expect("parse error");
+//!
+//! // The AST lives in an arena owned by `parsed`; read it under a lock.
+//! let statements = parsed.with_program(|_gc, program| match program {
+//!     Node::Program(p) => p.body.iter().count(),
+//!     _ => unreachable!("the root of a parse is always a Program"),
+//! });
+//! assert_eq!(statements, 1);
+//!
+//! // Or dump it the way `hermesc -dump-ast` does.
+//! let json = parsed.to_estree_json(false);
+//! assert!(json.starts_with(r#"{"type":"Program""#));
+//! ```
+//!
 //! The pieces a consumer touches:
+//! - [`parse`] / [`parse_named`] returning [`ParsedJS`] — the convenience
+//!   façade in [`facade`], which assembles an `ast::context::Context`, a
+//!   `SourceErrorManager`, a [`lexer::JSLexer`] and a [`js::JSParserImpl`]
+//!   into one call. It adds no behavior; anything it does not expose is
+//!   reachable by driving those pieces directly.
 //! - [`js::JSParserImpl`] — the recursive-descent parser; `new` + `parse`
 //!   returns the `Program` node, or `None` after a reported error.
 //! - [`lexer::JSLexer`] — the lexer, usable on its own; it reports through a
@@ -34,6 +60,7 @@
 #![warn(missing_docs)]
 
 pub mod cursor;
+pub mod facade;
 pub mod html_entities;
 pub mod js;
 pub mod json;
@@ -42,3 +69,5 @@ pub mod number;
 pub mod token;
 pub mod token_kinds;
 pub mod utf8;
+
+pub use facade::{parse, parse_named, ParseError, ParseFlags, ParsedJS};
