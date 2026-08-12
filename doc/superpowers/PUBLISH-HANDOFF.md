@@ -35,14 +35,17 @@ bins into an unpublished `tools` crate (removes the `command_line` publish block
 
 - Independent **MIT** crate, published **in-place from `rust/`** in the `tmikov/hermes`
   fork. No separate repo. Upstream merge is orthogonal.
-- Family: **`hermes-parser` + `hermes-ast`** (stable public API) + `hermes-support` /
-  `hermes-atom-table` / `hermes-unicode` / `hermes-command-line` (support crates).
-  `tools` + `comparison` stay `publish = false`.
+- Family: **SEVEN crates.** `hermes-parser` + `hermes-ast` + `hermes-sema`
+  carry the stable public API; `hermes-support` / `hermes-atom-table` /
+  `hermes-unicode` / `hermes-command-line` are support crates. `tools` +
+  `comparison` stay `publish = false`.
   (`command_line` was published as `hermes-command-line` on 2026-08-12 — scope
   extension; it is dependency-free and not in `hermes-parser`'s closure.
   `sema` was published as `hermes-sema` the same day — same scope extension,
   on the grounds that without it the port has no full front-end
-  functionality; its `sema-dump` bin moved into `tools`.)
+  functionality; its `sema-dump` bin moved into `tools`. `hermes-sema`'s
+  guarantee is partial: stable core (`resolve` façade, `resolve` module,
+  `sem_context`, `ids`) + seven advanced / port-internal modules.)
 - Provenance wording (verbatim, everywhere): "A Rust port of the Hermes front-end by
   Tzvetan Mikov, the architect of Hermes. Not an official Meta project and not
   supported by Meta." Do **not** emphasize the word "unofficial."
@@ -103,10 +106,13 @@ raw OXC parse-vs-parse number; it makes the port look ~2× slower for doing more
 - C++ (only if touching the differential/tools): configure with Clang —
   `cmake -B cmake-build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
   -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++`.
-- Publish dependency order (Task 10): `hermes-unicode` → `hermes-atom-table` →
-  `hermes-support` → `hermes-ast` → `hermes-parser`, with `hermes-sema` anywhere
-  after `hermes-ast`. `hermes-command-line` has no dependencies, so its position
-  is free.
+- Publish dependency order (seven crates): `hermes-unicode` →
+  `hermes-atom-table` → `hermes-command-line` → `hermes-support` →
+  `hermes-ast` → `hermes-parser` → `hermes-sema`. `hermes-command-line` has
+  no dependencies at all, so its position is free — it is listed third only
+  to keep the leaf crates together. `hermes-sema` must come LAST: its
+  `resolve` façade takes a `hermes_parser::ParsedJS`, so it depends on
+  `hermes-parser` (a normal dependency, not a dev-dependency).
 
 ## Launch runbook (as of 2026-08-12 — Tasks 3,4,5,6,10 complete, final review APPROVED)
 
@@ -124,13 +130,13 @@ Only the manual, irreversible steps remain:
    ```bash
    cargo login <token>
    cargo publish --manifest-path rust/Cargo.toml \
-     -p hermes-unicode -p hermes-atom-table -p hermes-support \
-     -p hermes-ast -p hermes-parser -p hermes-sema -p hermes-command-line
+     -p hermes-unicode -p hermes-atom-table -p hermes-command-line \
+     -p hermes-support -p hermes-ast -p hermes-parser -p hermes-sema
    ```
-   Every crate to publish must be named explicitly — an omitted `-p` is
-   silently skipped, not an error.
+   All SEVEN must be named explicitly — an omitted `-p` is silently skipped,
+   not an error.
    cargo stages them in dependency order and waits for index propagation.
-   Verify each on crates.io and that docs.rs builds parser/ast.
+   Verify each on crates.io and that docs.rs builds parser/ast/sema.
 3. **Post-publish checklist:** re-point the crate READMEs' pinned
    `blob/rust1/` links if the branch is renamed/merged (needs a patch release
    — decide branch fate first if that matters); trigger

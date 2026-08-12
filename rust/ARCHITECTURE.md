@@ -106,8 +106,9 @@ The lexer, JSON parser, and JS parser, consuming `support` + `atom_table` +
 
 ### `sema`
 
-Semantic analysis, consuming only `ast` + `support` + `atom_table` — the same
-layering C++ `lib/Sema` has:
+Semantic analysis. The analysis proper consumes only `ast` + `support` +
+`atom_table` — the same layering C++ `lib/Sema` has — and one module,
+`facade.rs`, sits on top of `parser`:
 - `decl_collector.rs` — port of `DeclCollector.{h,cpp}`: per-scope declaration
   grouping.
 - `resolver/` — port of `SemanticResolver.{h,cpp}` (scope tree, bindings,
@@ -117,8 +118,14 @@ layering C++ `lib/Sema` has:
   (`ScopedFunctionPromoter`) and `unresolver`.
 - `sem_context.rs` — port of `SemContext.h`'s `Decl` / `LexicalScope` /
   `FunctionInfo` records, id-indexed instead of pointer-linked.
-- `resolve.rs` — the two entry points, `resolve_ast` (`compile = true`) and
-  `resolve_ast_for_parser` (`compile = false`).
+- `resolve.rs` — the two low-level entry points, `resolve_ast`
+  (`compile = true`) and `resolve_ast_for_parser` (`compile = false`), which
+  take an arena and a root node.
+- `facade.rs` — the one-call `resolve` / `resolve_for_parser` /
+  `resolve_for_compile` over `hermes_parser::ParsedJS`, re-exported from the
+  crate root. It consumes the `ParsedJS` by value and returns a `ResolvedJS`
+  owning the arena, the *rewritten* root and the `SemContext`, because the
+  resolver is a transforming visitor and the incoming root goes stale.
 - `dump.rs` / `dump_context.rs` — the `semDump` / `SemContextDumper` ports the
   differential compares byte-for-byte.
 
@@ -292,6 +299,7 @@ hermesc (C++ oracle) ← differential tests only
          └──→ atom_table
 
     sema ──→ ast, support, atom_table
+         └──→ parser (the `resolve` façade only)
 
     tools ──→ parser, sema, ast, support, atom_table
          └──→ command_line (CLI flags, no logic)
@@ -301,12 +309,16 @@ hermesc (C++ oracle) ← differential tests only
 `unicode`. The `ast` crate depends on `support` and `atom_table`. The `parser`
 crate depends on all of the above — and on nothing else: the CLI drivers and
 their `command_line` dependency live in the unpublished `tools` crate, so the
-published library is a pure library. The `sema` crate sits beside `parser`
-rather than above it, consuming only the AST — the same layering C++
-`lib/Sema` has; it takes `parser` as a dev-dependency only, because its tests
-build trees by parsing source. The `hermes-command-line` crate is a thin
-CLI argument helper; it is published because the drivers are built on it, but
-nothing in `hermes-parser`'s dependency closure needs it.
+published library is a pure library. The **analysis** in `sema` sits beside
+`parser` rather than above it, consuming only the AST — the same layering C++
+`lib/Sema` has, and nothing under `resolver/`, `dump*` or `sem_context` names
+a parser type. `sema`'s `parser` dependency is a normal (not dev-)dependency
+because of one module, `facade.rs`: the `resolve` façade takes a
+`hermes_parser::ParsedJS` as its input, and its compile path parses the
+ambient global declarations into that same arena. So `hermes-sema` is the
+last crate in the publication order. The `hermes-command-line` crate is a
+thin CLI argument helper; it is published because the drivers are built on
+it, but nothing in `hermes-parser`'s dependency closure needs it.
 
 ---
 

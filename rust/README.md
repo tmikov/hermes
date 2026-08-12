@@ -121,6 +121,50 @@ fn main() {
 Flow extension flags (`component`/`hook`, `record`, `match`). On failure,
 `parse` returns a `ParseError` carrying the diagnostics.
 
+### Resolve the names: parse + semantic analysis
+
+Parsing gives you a tree; semantic analysis tells you what the names in it
+mean. That is the second crate, and the second dependency:
+
+```toml
+[dependencies]
+hermes-parser = "0.1"
+hermes-sema = "0.1"
+```
+
+Those two are enough for a complete front end — `hermes-sema` takes
+`hermes-parser`'s `ParsedJS` directly, and both re-export the AST crate.
+
+```rust
+use hermes_parser::{parse, ParseFlags};
+
+fn main() {
+    let src = r#"let greeting = "hi"; print(greeting);"#;
+    let parsed = parse(src, ParseFlags::default()).expect("parse error");
+    let mut resolved = hermes_sema::resolve(parsed).expect("resolve error");
+
+    // What each name in the global scope turned out to be.
+    resolved.with_program(|gc, _root, sem| {
+        for &id in &sem.scope(sem.get_global_scope()).decls {
+            let decl = sem.decl(id);
+            let name = String::from_utf8_lossy(gc.bytes(decl.name));
+            println!("{name}\t{:?}", decl.kind);
+        }
+    });
+    // greeting  Let
+    // print     UndeclaredGlobalProperty
+}
+```
+
+`resolve` **consumes** the `ParsedJS`: the resolver is a transforming visitor,
+so the root that comes out is a different node than the one that went in, and
+the returned `ResolvedJS` owns the arena, the rewritten tree and the
+`SemContext`. `ResolvedJS::into_parsed` hands the `ParsedJS` back when you want
+the ESTree JSON dumper afterwards, and `ResolvedJS::to_sema_dump` prints the
+`hermesc -dump-sema` text. `resolve_for_parser` and `resolve_for_compile` pick
+the two C++ entry points explicitly; see
+[`crates/sema/README.md`](crates/sema/README.md) for which to use.
+
 `parse()` is a convenience façade over the low-level API — `Context`,
 `SourceErrorManager`, `JSLexer`, `JSParserImpl` — which stays public for
 callers that need lazy parsing, a custom diagnostic handler, or one arena

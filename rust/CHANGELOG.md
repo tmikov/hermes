@@ -145,6 +145,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Two of the five C++ resolver entry points: `resolve_ast` (`resolveAST`,
   `compile = true`, ambient declaration files, AST rewrites) and
   `resolve_ast_for_parser` (`resolveASTForParser`, `compile = false`).
+- A one-call façade over `hermes-parser`'s `ParsedJS`, matching
+  `hermes_parser::parse`'s ergonomics: `resolve` (the parser path plus the
+  error check C++ callers make by hand), `resolve_for_parser` and
+  `resolve_for_compile`, returning a `ResolvedJS` that owns the arena, the
+  rewritten root and the `SemContext`. `hermes-parser` + `hermes-sema` are
+  therefore the only two dependencies a full front end needs.
 - Not yet ported, and loud rather than silent where reached: the `$SHBuiltin`
   module protocol (`visitModuleFactory`/`visitModuleExport`/`visitModuleImport`
   and `resolveCommonJSAST`) — the three branches in `resolver/calls.rs` panic
