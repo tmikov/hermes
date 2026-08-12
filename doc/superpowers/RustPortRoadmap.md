@@ -651,7 +651,8 @@ covers what juno already provides.
 
 ## Benchmark (first datapoint) — 2026-06-02
 
-**Generator:** `rust/crates/parser/src/bin/gen_json.rs` (`gen-json` binary in the `parser` crate).
+**Generator:** `rust/crates/tools/src/bin/gen_json.rs` (`gen-json` binary in the `tools` crate;
+it lived in `parser` until the bins moved out of the publishable library).
 Deterministic (index-derived, no RNG); record shape:
 `{"id":<i>,"name":"item-<i>","price":<f>,"active":<bool>,"tags":["a","b","c"],"nested":{"x":<i>,"y":<i*2>}}`
 where `price = i / 7.0` (2 decimal places), `active = i % 2 == 0`.
@@ -674,8 +675,8 @@ plus no optimisation; it is **not** a fair baseline and is included only for com
 To reproduce:
 ```bash
 # Build tools
-cargo build --manifest-path rust/Cargo.toml -p parser --release --bin gen-json
-cargo build --manifest-path rust/Cargo.toml -p parser --release --bin json-parse-dump
+cargo build --manifest-path rust/Cargo.toml -p tools --release --bin gen-json
+cargo build --manifest-path rust/Cargo.toml -p tools --release --bin json-parse-dump
 cmake -B cmake-build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build cmake-build-release --target json-parse-dump
 

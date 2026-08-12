@@ -42,8 +42,8 @@ Version numbers and release dates will be set at launch.
 - `number_to_string` — ECMAScript `Number::toString`, shortest-decimal via Rust
   `{:e}`.
 - Byte-for-byte differential validated against the real `json-parse-dump` C++
-  oracle (16-file corpus including astral, lone-surrogate, hidden-class-shape,
-  number edge cases, and 6 error cases).
+  oracle (17-file corpus including astral, lone-surrogate, hidden-class-shape,
+  number edge cases, and 7 error cases).
 - JSON parse throughput within ~1.5% of C++ Release build on an 11.6 MB corpus.
 
 #### AST (`hermes-ast`)
@@ -65,7 +65,7 @@ Version numbers and release dates will be set at launch.
   and declarations, functions/classes/arrows/async/generators/methods/`super`/
   `yield`/decorators, modules (`import`/`export` + `import()`/`import.meta`).
 - Byte-for-byte differential validated against `hermesc -dump-ast` over a
-  76-file plain-JS corpus.
+  77-file plain-JS corpus.
 
 #### JS parser — Flow type grammar (`hermes-parser`, P5)
 - Full Flow annotation hierarchy: conditional, union, intersection, anonymous
@@ -97,11 +97,46 @@ Version numbers and release dates will be set at launch.
 - Byte-for-byte differential over component (8 files), records (5), match (7)
   corpora.
 
-#### JS parser — TypeScript (`hermes-parser`, P7 — in progress)
-- Type annotations: primary types, type references, type parameters and
-  arguments, conditional types, type predicates.
-- Function/constructor/parenthesized types; parameter properties.
-- Work in progress; TS parsing is off by default.
+#### JS parser — TypeScript (`hermes-parser`, P7)
+- Complete port of `JSParserImpl-ts.cpp` (27 TS methods) plus its 26
+  integration sites in `JSParserImpl.cpp`.
+- Type annotations: primary types, type references, qualified names, type
+  queries, tuples, union/intersection/postfix, conditional types, type
+  predicates, type parameters and arguments.
+- Function/constructor/parenthesized types; parameter properties; object types
+  (call/method/property/index signatures); interface (with heritage), enum and
+  namespace declarations.
+- Expression and module integration: type args on call/`new`/`?.`, `<Type>`
+  casts, `as`/`as const`, typed arrows, `import type`, member modifiers.
+- Off by default; enabled with the `parse_ts` `Context` flag (`-parse-ts` on
+  hermesc, `--parse-ts` on `ast-dump`), mutually exclusive with Flow, and it
+  does not leak into plain-JS or Flow parsing.
+- Byte-for-byte differential over a 20-file TypeScript corpus.
+
+#### JS parser — JSX (`hermes-parser`, P8)
+- Complete port of `JSParserImpl-jsx.cpp` (12 methods + `tagNamesMatch`):
+  elements, fragments, children, namespaced and member-expression tag names,
+  attributes including spread, expression containers (including empty `{}`),
+  closing-tag matching, and the opening-tag Flow `<TypeArgs>` production.
+- The `jsx_depth` counter + `JsxDepthGuard` driving the lexer-mode switch
+  between JSX-text mode and JS mode.
+- Off by default; enabled with the `parse_jsx` `Context` flag, independent of
+  the Flow and TS flags, and it does not leak into other dialects.
+- Byte-for-byte differential over a 6-file JSX corpus plus a 1-file JSX/Flow
+  corpus.
+
+#### Pre-parse and lazy-parse passes (`hermes-parser`)
+- The three-pass `ParserPass{FullParse,PreParse,LazyParse}` machinery, the
+  `PreParsedFunctionInfo`/`PreParsedBufferInfo` side table, the preemptive-
+  compilation threshold, the `SaveFunctionState` guard, and on-demand
+  `parse_lazy_function` (the 5-kind demand dispatch).
+- Arena reclamation: `support::Deque::truncate`/`iter_from` plus a
+  `GCLock`-scoped `ast::AllocationScope`, porting the C++ `AllocationScope`
+  discipline.
+- Two complementary oracles, since `-dump-ast` is blind to lazy parsing:
+  byte-for-byte `preparse_differential` of the side table against a C++
+  `tools/preparse-dump/` oracle (152 corpus files), and a `lazy_reparse` test
+  proving deferred bodies reparse to the eager, hermesc-verified AST.
 
 #### Support (`hermes-support`)
 - `SourceErrorManager` façade: `SourceBuffer` (lazy line index), offset-based
@@ -130,8 +165,7 @@ Version numbers and release dates will be set at launch.
 
 ### Not yet available
 
-- TypeScript parsing (full grammar) — P7 in progress.
-- JSX parsing — planned.
-- Pre-parse and lazy-parse passes — planned.
-- `hermes-sema`, `hermes-ir`, `hermes-optimizer`, `hermes-bcgen` — future
-  components in the port roadmap.
+- Semantic analysis: ported in-tree as the unpublished `sema` crate, but not
+  part of this publication — a `hermes-sema` crate is future work.
+- `hermes-ir`, `hermes-optimizer`, `hermes-bcgen` — future components in the
+  port roadmap.

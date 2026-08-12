@@ -4,3 +4,6 @@ version = "0.1.0"
 authors = ["Facebook"]
 edition = "2018"
 license = "MIT"
+# Internal-only: a Meta-authored helper with a generic name. Never publish it —
+# only support/atom_table/unicode/ast/parser go to crates.io.
+publish = false

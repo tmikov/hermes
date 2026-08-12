@@ -56,11 +56,14 @@ jobs:
             -DCMAKE_CXX_FLAGS="-O1" \
             -DCMAKE_C_FLAGS="-O1"
 
-      # The oracles are C++ binaries: `hermesc` for the AST differential and
-      # `json-parse-dump` for the JSON one. (`ast-dump` is the *Rust* driver,
-      # not a CMake target.)
+      # The oracles are C++ binaries: `hermesc` for the AST differential,
+      # `json-parse-dump` for the JSON one, `preparse-dump` for the pre-parse
+      # side table, `js-lexer-dump` for the lexer. (`ast-dump` is the *Rust*
+      # driver, not a CMake target.)
       - name: Build C++ oracle targets
-        run: cmake --build cmake-build-asan --target hermesc json-parse-dump
+        run: >-
+          cmake --build cmake-build-asan --target
+          hermesc json-parse-dump preparse-dump js-lexer-dump
 
       # The Rust drivers live in the unpublished `tools` crate; each
       # differential test builds the one it needs on demand (see
@@ -74,3 +77,5 @@ jobs:
           -p parser
           --test parser_differential
           --test json_differential
+          --test preparse_differential
+          --test differential
