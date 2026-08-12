@@ -5,6 +5,7 @@ use crate::context::GCLock;
 /// Read-only visitor. Implementors override `visit_node`; the default recurses.
 /// (Unchanged from phase 1 — used by the GC marker in `context.rs`.)
 pub trait Visitor<'gc> {
+    /// Called once for `node`. The default recurses into its children.
     fn visit_node(&mut self, node: &'gc Node<'gc>) {
         node.visit_children(self);
     }
@@ -14,11 +15,14 @@ pub trait Visitor<'gc> {
 /// the parent it occupies. Mirrors juno's `Path`.
 #[derive(Debug, Copy, Clone)]
 pub struct Path<'gc> {
+    /// The node that owns the field being visited.
     pub parent: &'gc Node<'gc>,
+    /// Which structural child field of `parent` the visited node occupies.
     pub field: NodeField,
 }
 
 impl<'gc> Path<'gc> {
+    /// Build a path from a parent node and one of its child fields.
     pub fn new(parent: &'gc Node<'gc>, field: NodeField) -> Path<'gc> {
         Path { parent, field }
     }
@@ -43,6 +47,8 @@ pub enum TransformResult<T> {
 /// A typical impl matches specific nodes and otherwise recurses+rebuilds via
 /// `node.visit_children_mut(ctx, self)`.
 pub trait VisitorMut<'gc> {
+    /// Visit `node`, reached via `path` (`None` at the root), and return how
+    /// it should be transformed.
     fn call(
         &mut self,
         ctx: &'gc GCLock<'_, '_>,

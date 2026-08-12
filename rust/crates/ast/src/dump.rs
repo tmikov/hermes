@@ -36,16 +36,23 @@ pub enum ESTreeDumpMode {
 /// Which location info to dump. Mirrors `LocationDumpMode`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum LocationDumpMode {
+    /// Dump no locations.
     None,
+    /// Only output locations: line and column.
     Loc,
+    /// Only output byte ranges.
     Range,
+    /// Output both locations and byte ranges.
     LocAndRange,
 }
 
 /// Whether to include the `"raw"` property where available. Mirrors `ESTreeRawProp`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ESTreeRawProp {
+    /// Omit `"raw"`.
     Exclude,
+    /// Emit `"raw"` where available — today `NumericLiteral`, and only when
+    /// the dumper has a `SourceErrorManager` to read the source text from.
     Include,
 }
 

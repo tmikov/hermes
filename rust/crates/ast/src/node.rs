@@ -17,303 +17,603 @@ use crate::visitor::{Path, TransformResult, Visitor, VisitorMut};
 use crate::NodeId;
 use crate::SemaId;
 
+/// The kind discriminant of an AST node.
+///
+/// Mirrors the C++ `NodeKind` enum: `#[repr(u32)]`, `ESTree.def` order,
+/// with `_Name_First`/`_Last` sentinels interleaved so the `Node::is_*`
+/// range predicates are two integer comparisons.
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NodeKind {
+    /// The kind of [`Empty`].
     Empty,
+    /// The kind of [`Metadata`].
     Metadata,
+    /// Exclusive lower bound of the `FunctionLike` range.
     _FunctionLike_First,
+    /// The kind of [`Program`].
     Program,
+    /// The kind of [`FunctionExpression`].
     FunctionExpression,
+    /// The kind of [`ArrowFunctionExpression`].
     ArrowFunctionExpression,
+    /// The kind of [`FunctionDeclaration`].
     FunctionDeclaration,
+    /// The kind of [`ComponentDeclaration`].
     ComponentDeclaration,
+    /// The kind of [`HookDeclaration`].
     HookDeclaration,
+    /// Exclusive upper bound of the `FunctionLike` range.
     _FunctionLike_Last,
+    /// Exclusive lower bound of the `Statement` range.
     _Statement_First,
+    /// The kind of [`MatchStatement`].
     MatchStatement,
+    /// Exclusive lower bound of the `LoopStatement` range.
     _LoopStatement_First,
+    /// The kind of [`WhileStatement`].
     WhileStatement,
+    /// The kind of [`DoWhileStatement`].
     DoWhileStatement,
+    /// The kind of [`ForInStatement`].
     ForInStatement,
+    /// The kind of [`ForOfStatement`].
     ForOfStatement,
+    /// The kind of [`ForStatement`].
     ForStatement,
+    /// Exclusive upper bound of the `LoopStatement` range.
     _LoopStatement_Last,
+    /// The kind of [`DebuggerStatement`].
     DebuggerStatement,
+    /// The kind of [`EmptyStatement`].
     EmptyStatement,
+    /// The kind of [`BlockStatement`].
     BlockStatement,
+    /// The kind of [`StaticBlock`].
     StaticBlock,
+    /// The kind of [`BreakStatement`].
     BreakStatement,
+    /// The kind of [`ContinueStatement`].
     ContinueStatement,
+    /// The kind of [`ThrowStatement`].
     ThrowStatement,
+    /// The kind of [`ReturnStatement`].
     ReturnStatement,
+    /// The kind of [`WithStatement`].
     WithStatement,
+    /// The kind of [`SwitchStatement`].
     SwitchStatement,
+    /// The kind of [`LabeledStatement`].
     LabeledStatement,
+    /// The kind of [`ExpressionStatement`].
     ExpressionStatement,
+    /// The kind of [`TryStatement`].
     TryStatement,
+    /// The kind of [`IfStatement`].
     IfStatement,
+    /// Exclusive upper bound of the `Statement` range.
     _Statement_Last,
+    /// The kind of [`NullLiteral`].
     NullLiteral,
+    /// The kind of [`BooleanLiteral`].
     BooleanLiteral,
+    /// The kind of [`StringLiteral`].
     StringLiteral,
+    /// The kind of [`NumericLiteral`].
     NumericLiteral,
+    /// The kind of [`RegExpLiteral`].
     RegExpLiteral,
+    /// The kind of [`BigIntLiteral`].
     BigIntLiteral,
+    /// The kind of [`ThisExpression`].
     ThisExpression,
+    /// The kind of [`Super`].
     Super,
+    /// The kind of [`SequenceExpression`].
     SequenceExpression,
+    /// The kind of [`ObjectExpression`].
     ObjectExpression,
+    /// The kind of [`ArrayExpression`].
     ArrayExpression,
+    /// The kind of [`SpreadElement`].
     SpreadElement,
+    /// The kind of [`NewExpression`].
     NewExpression,
+    /// The kind of [`YieldExpression`].
     YieldExpression,
+    /// The kind of [`AwaitExpression`].
     AwaitExpression,
+    /// The kind of [`ImportExpression`].
     ImportExpression,
+    /// Exclusive lower bound of the `CallExpressionLike` range.
     _CallExpressionLike_First,
+    /// The kind of [`CallExpression`].
     CallExpression,
+    /// The kind of [`OptionalCallExpression`].
     OptionalCallExpression,
+    /// Exclusive upper bound of the `CallExpressionLike` range.
     _CallExpressionLike_Last,
+    /// The kind of [`AssignmentExpression`].
     AssignmentExpression,
+    /// The kind of [`UnaryExpression`].
     UnaryExpression,
+    /// The kind of [`UpdateExpression`].
     UpdateExpression,
+    /// Exclusive lower bound of the `MemberExpressionLike` range.
     _MemberExpressionLike_First,
+    /// The kind of [`MemberExpression`].
     MemberExpression,
+    /// The kind of [`OptionalMemberExpression`].
     OptionalMemberExpression,
+    /// Exclusive upper bound of the `MemberExpressionLike` range.
     _MemberExpressionLike_Last,
+    /// The kind of [`LogicalExpression`].
     LogicalExpression,
+    /// The kind of [`ConditionalExpression`].
     ConditionalExpression,
+    /// The kind of [`BinaryExpression`].
     BinaryExpression,
+    /// The kind of [`Directive`].
     Directive,
+    /// The kind of [`DirectiveLiteral`].
     DirectiveLiteral,
+    /// The kind of [`Identifier`].
     Identifier,
+    /// The kind of [`PrivateName`].
     PrivateName,
+    /// The kind of [`MetaProperty`].
     MetaProperty,
+    /// The kind of [`SwitchCase`].
     SwitchCase,
+    /// The kind of [`CatchClause`].
     CatchClause,
+    /// The kind of [`VariableDeclarator`].
     VariableDeclarator,
+    /// The kind of [`VariableDeclaration`].
     VariableDeclaration,
+    /// The kind of [`TemplateLiteral`].
     TemplateLiteral,
+    /// The kind of [`TaggedTemplateExpression`].
     TaggedTemplateExpression,
+    /// The kind of [`TemplateElement`].
     TemplateElement,
+    /// The kind of [`Property`].
     Property,
+    /// The kind of [`Decorator`].
     Decorator,
+    /// Exclusive lower bound of the `ClassLike` range.
     _ClassLike_First,
+    /// The kind of [`ClassDeclaration`].
     ClassDeclaration,
+    /// The kind of [`ClassExpression`].
     ClassExpression,
+    /// Exclusive upper bound of the `ClassLike` range.
     _ClassLike_Last,
+    /// The kind of [`ClassBody`].
     ClassBody,
+    /// The kind of [`ClassProperty`].
     ClassProperty,
+    /// The kind of [`ClassPrivateProperty`].
     ClassPrivateProperty,
+    /// The kind of [`MethodDefinition`].
     MethodDefinition,
+    /// The kind of [`ImportDeclaration`].
     ImportDeclaration,
+    /// The kind of [`ImportSpecifier`].
     ImportSpecifier,
+    /// The kind of [`ImportDefaultSpecifier`].
     ImportDefaultSpecifier,
+    /// The kind of [`ImportNamespaceSpecifier`].
     ImportNamespaceSpecifier,
+    /// The kind of [`ImportAttribute`].
     ImportAttribute,
+    /// The kind of [`ExportNamedDeclaration`].
     ExportNamedDeclaration,
+    /// The kind of [`ExportSpecifier`].
     ExportSpecifier,
+    /// The kind of [`ExportNamespaceSpecifier`].
     ExportNamespaceSpecifier,
+    /// The kind of [`ExportDefaultDeclaration`].
     ExportDefaultDeclaration,
+    /// The kind of [`ExportAllDeclaration`].
     ExportAllDeclaration,
+    /// Exclusive lower bound of the `Pattern` range.
     _Pattern_First,
+    /// The kind of [`ObjectPattern`].
     ObjectPattern,
+    /// The kind of [`ArrayPattern`].
     ArrayPattern,
+    /// The kind of [`RestElement`].
     RestElement,
+    /// The kind of [`AssignmentPattern`].
     AssignmentPattern,
+    /// Exclusive upper bound of the `Pattern` range.
     _Pattern_Last,
+    /// The kind of [`MatchStatementCase`].
     MatchStatementCase,
+    /// The kind of [`MatchExpression`].
     MatchExpression,
+    /// The kind of [`MatchExpressionCase`].
     MatchExpressionCase,
+    /// Exclusive lower bound of the `MatchPattern` range.
     _MatchPattern_First,
+    /// The kind of [`MatchWildcardPattern`].
     MatchWildcardPattern,
+    /// The kind of [`MatchLiteralPattern`].
     MatchLiteralPattern,
+    /// The kind of [`MatchUnaryPattern`].
     MatchUnaryPattern,
+    /// The kind of [`MatchIdentifierPattern`].
     MatchIdentifierPattern,
+    /// The kind of [`MatchBindingPattern`].
     MatchBindingPattern,
+    /// The kind of [`MatchObjectPattern`].
     MatchObjectPattern,
+    /// The kind of [`MatchArrayPattern`].
     MatchArrayPattern,
+    /// The kind of [`MatchOrPattern`].
     MatchOrPattern,
+    /// The kind of [`MatchAsPattern`].
     MatchAsPattern,
+    /// The kind of [`MatchMemberPattern`].
     MatchMemberPattern,
+    /// The kind of [`MatchInstancePattern`].
     MatchInstancePattern,
+    /// Exclusive upper bound of the `MatchPattern` range.
     _MatchPattern_Last,
+    /// The kind of [`MatchObjectPatternProperty`].
     MatchObjectPatternProperty,
+    /// The kind of [`MatchInstanceObjectPattern`].
     MatchInstanceObjectPattern,
+    /// The kind of [`MatchRestPattern`].
     MatchRestPattern,
+    /// Exclusive lower bound of the `JSX` range.
     _JSX_First,
+    /// The kind of [`JSXIdentifier`].
     JSXIdentifier,
+    /// The kind of [`JSXMemberExpression`].
     JSXMemberExpression,
+    /// The kind of [`JSXNamespacedName`].
     JSXNamespacedName,
+    /// The kind of [`JSXEmptyExpression`].
     JSXEmptyExpression,
+    /// The kind of [`JSXExpressionContainer`].
     JSXExpressionContainer,
+    /// The kind of [`JSXSpreadChild`].
     JSXSpreadChild,
+    /// The kind of [`JSXOpeningElement`].
     JSXOpeningElement,
+    /// The kind of [`JSXClosingElement`].
     JSXClosingElement,
+    /// The kind of [`JSXAttribute`].
     JSXAttribute,
+    /// The kind of [`JSXSpreadAttribute`].
     JSXSpreadAttribute,
+    /// The kind of [`JSXStringLiteral`].
     JSXStringLiteral,
+    /// The kind of [`JSXText`].
     JSXText,
+    /// The kind of [`JSXElement`].
     JSXElement,
+    /// The kind of [`JSXFragment`].
     JSXFragment,
+    /// The kind of [`JSXOpeningFragment`].
     JSXOpeningFragment,
+    /// The kind of [`JSXClosingFragment`].
     JSXClosingFragment,
+    /// Exclusive upper bound of the `JSX` range.
     _JSX_Last,
+    /// Exclusive lower bound of the `Flow` range.
     _Flow_First,
+    /// The kind of [`ExistsTypeAnnotation`].
     ExistsTypeAnnotation,
+    /// The kind of [`EmptyTypeAnnotation`].
     EmptyTypeAnnotation,
+    /// The kind of [`StringTypeAnnotation`].
     StringTypeAnnotation,
+    /// The kind of [`NumberTypeAnnotation`].
     NumberTypeAnnotation,
+    /// The kind of [`StringLiteralTypeAnnotation`].
     StringLiteralTypeAnnotation,
+    /// The kind of [`NumberLiteralTypeAnnotation`].
     NumberLiteralTypeAnnotation,
+    /// The kind of [`BigIntLiteralTypeAnnotation`].
     BigIntLiteralTypeAnnotation,
+    /// The kind of [`BooleanTypeAnnotation`].
     BooleanTypeAnnotation,
+    /// The kind of [`BooleanLiteralTypeAnnotation`].
     BooleanLiteralTypeAnnotation,
+    /// The kind of [`NullLiteralTypeAnnotation`].
     NullLiteralTypeAnnotation,
+    /// The kind of [`SymbolTypeAnnotation`].
     SymbolTypeAnnotation,
+    /// The kind of [`AnyTypeAnnotation`].
     AnyTypeAnnotation,
+    /// The kind of [`MixedTypeAnnotation`].
     MixedTypeAnnotation,
+    /// The kind of [`BigIntTypeAnnotation`].
     BigIntTypeAnnotation,
+    /// The kind of [`VoidTypeAnnotation`].
     VoidTypeAnnotation,
+    /// The kind of [`NeverTypeAnnotation`].
     NeverTypeAnnotation,
+    /// The kind of [`UnknownTypeAnnotation`].
     UnknownTypeAnnotation,
+    /// The kind of [`UndefinedTypeAnnotation`].
     UndefinedTypeAnnotation,
+    /// The kind of [`FunctionTypeAnnotation`].
     FunctionTypeAnnotation,
+    /// The kind of [`HookTypeAnnotation`].
     HookTypeAnnotation,
+    /// The kind of [`FunctionTypeParam`].
     FunctionTypeParam,
+    /// The kind of [`ComponentTypeAnnotation`].
     ComponentTypeAnnotation,
+    /// The kind of [`ComponentTypeParameter`].
     ComponentTypeParameter,
+    /// The kind of [`NullableTypeAnnotation`].
     NullableTypeAnnotation,
+    /// The kind of [`QualifiedTypeIdentifier`].
     QualifiedTypeIdentifier,
+    /// The kind of [`TypeofTypeAnnotation`].
     TypeofTypeAnnotation,
+    /// The kind of [`KeyofTypeAnnotation`].
     KeyofTypeAnnotation,
+    /// The kind of [`TypeOperator`].
     TypeOperator,
+    /// The kind of [`QualifiedTypeofIdentifier`].
     QualifiedTypeofIdentifier,
+    /// The kind of [`TupleTypeAnnotation`].
     TupleTypeAnnotation,
+    /// The kind of [`TupleTypeSpreadElement`].
     TupleTypeSpreadElement,
+    /// The kind of [`TupleTypeLabeledElement`].
     TupleTypeLabeledElement,
+    /// The kind of [`ArrayTypeAnnotation`].
     ArrayTypeAnnotation,
+    /// The kind of [`InferTypeAnnotation`].
     InferTypeAnnotation,
+    /// The kind of [`UnionTypeAnnotation`].
     UnionTypeAnnotation,
+    /// The kind of [`IntersectionTypeAnnotation`].
     IntersectionTypeAnnotation,
+    /// The kind of [`GenericTypeAnnotation`].
     GenericTypeAnnotation,
+    /// The kind of [`IndexedAccessType`].
     IndexedAccessType,
+    /// The kind of [`OptionalIndexedAccessType`].
     OptionalIndexedAccessType,
+    /// The kind of [`ConditionalTypeAnnotation`].
     ConditionalTypeAnnotation,
+    /// The kind of [`TypePredicate`].
     TypePredicate,
+    /// The kind of [`InterfaceTypeAnnotation`].
     InterfaceTypeAnnotation,
+    /// The kind of [`TypeAlias`].
     TypeAlias,
+    /// The kind of [`OpaqueType`].
     OpaqueType,
+    /// The kind of [`InterfaceDeclaration`].
     InterfaceDeclaration,
+    /// The kind of [`DeclareTypeAlias`].
     DeclareTypeAlias,
+    /// The kind of [`DeclareOpaqueType`].
     DeclareOpaqueType,
+    /// The kind of [`DeclareInterface`].
     DeclareInterface,
+    /// The kind of [`DeclareClass`].
     DeclareClass,
+    /// The kind of [`DeclareFunction`].
     DeclareFunction,
+    /// The kind of [`DeclareHook`].
     DeclareHook,
+    /// The kind of [`DeclareComponent`].
     DeclareComponent,
+    /// The kind of [`DeclareVariable`].
     DeclareVariable,
+    /// The kind of [`DeclareEnum`].
     DeclareEnum,
+    /// The kind of [`DeclareExportDeclaration`].
     DeclareExportDeclaration,
+    /// The kind of [`DeclareExportAllDeclaration`].
     DeclareExportAllDeclaration,
+    /// The kind of [`DeclareModule`].
     DeclareModule,
+    /// The kind of [`DeclareNamespace`].
     DeclareNamespace,
+    /// The kind of [`DeclareModuleExports`].
     DeclareModuleExports,
+    /// The kind of [`InterfaceExtends`].
     InterfaceExtends,
+    /// The kind of [`ClassImplements`].
     ClassImplements,
+    /// The kind of [`TypeAnnotation`].
     TypeAnnotation,
+    /// The kind of [`ObjectTypeAnnotation`].
     ObjectTypeAnnotation,
+    /// The kind of [`ObjectTypeProperty`].
     ObjectTypeProperty,
+    /// The kind of [`ObjectTypeSpreadProperty`].
     ObjectTypeSpreadProperty,
+    /// The kind of [`ObjectTypeInternalSlot`].
     ObjectTypeInternalSlot,
+    /// The kind of [`ObjectTypeCallProperty`].
     ObjectTypeCallProperty,
+    /// The kind of [`ObjectTypeIndexer`].
     ObjectTypeIndexer,
+    /// The kind of [`ObjectTypeMappedTypeProperty`].
     ObjectTypeMappedTypeProperty,
+    /// The kind of [`Variance`].
     Variance,
+    /// The kind of [`TypeParameterDeclaration`].
     TypeParameterDeclaration,
+    /// The kind of [`TypeParameter`].
     TypeParameter,
+    /// The kind of [`TypeParameterInstantiation`].
     TypeParameterInstantiation,
+    /// The kind of [`TypeCastExpression`].
     TypeCastExpression,
+    /// The kind of [`AsExpression`].
     AsExpression,
+    /// The kind of [`AsConstExpression`].
     AsConstExpression,
+    /// The kind of [`InferredPredicate`].
     InferredPredicate,
+    /// The kind of [`DeclaredPredicate`].
     DeclaredPredicate,
+    /// The kind of [`EnumDeclaration`].
     EnumDeclaration,
+    /// The kind of [`EnumStringBody`].
     EnumStringBody,
+    /// The kind of [`EnumNumberBody`].
     EnumNumberBody,
+    /// The kind of [`EnumBigIntBody`].
     EnumBigIntBody,
+    /// The kind of [`EnumBooleanBody`].
     EnumBooleanBody,
+    /// The kind of [`EnumSymbolBody`].
     EnumSymbolBody,
+    /// The kind of [`EnumDefaultedMember`].
     EnumDefaultedMember,
+    /// The kind of [`EnumStringMember`].
     EnumStringMember,
+    /// The kind of [`EnumNumberMember`].
     EnumNumberMember,
+    /// The kind of [`EnumBigIntMember`].
     EnumBigIntMember,
+    /// The kind of [`EnumBooleanMember`].
     EnumBooleanMember,
+    /// The kind of [`ComponentParameter`].
     ComponentParameter,
+    /// The kind of [`RecordDeclaration`].
     RecordDeclaration,
+    /// The kind of [`RecordDeclarationImplements`].
     RecordDeclarationImplements,
+    /// The kind of [`RecordDeclarationBody`].
     RecordDeclarationBody,
+    /// The kind of [`RecordDeclarationProperty`].
     RecordDeclarationProperty,
+    /// The kind of [`RecordDeclarationStaticProperty`].
     RecordDeclarationStaticProperty,
+    /// The kind of [`RecordExpression`].
     RecordExpression,
+    /// The kind of [`RecordExpressionProperties`].
     RecordExpressionProperties,
+    /// Exclusive upper bound of the `Flow` range.
     _Flow_Last,
+    /// Exclusive lower bound of the `TS` range.
     _TS_First,
+    /// The kind of [`TSTypeAnnotation`].
     TSTypeAnnotation,
+    /// The kind of [`TSAnyKeyword`].
     TSAnyKeyword,
+    /// The kind of [`TSNumberKeyword`].
     TSNumberKeyword,
+    /// The kind of [`TSBooleanKeyword`].
     TSBooleanKeyword,
+    /// The kind of [`TSStringKeyword`].
     TSStringKeyword,
+    /// The kind of [`TSSymbolKeyword`].
     TSSymbolKeyword,
+    /// The kind of [`TSVoidKeyword`].
     TSVoidKeyword,
+    /// The kind of [`TSUndefinedKeyword`].
     TSUndefinedKeyword,
+    /// The kind of [`TSUnknownKeyword`].
     TSUnknownKeyword,
+    /// The kind of [`TSNeverKeyword`].
     TSNeverKeyword,
+    /// The kind of [`TSBigIntKeyword`].
     TSBigIntKeyword,
+    /// The kind of [`TSThisType`].
     TSThisType,
+    /// The kind of [`TSLiteralType`].
     TSLiteralType,
+    /// The kind of [`TSIndexedAccessType`].
     TSIndexedAccessType,
+    /// The kind of [`TSArrayType`].
     TSArrayType,
+    /// The kind of [`TSTypeReference`].
     TSTypeReference,
+    /// The kind of [`TSQualifiedName`].
     TSQualifiedName,
+    /// The kind of [`TSFunctionType`].
     TSFunctionType,
+    /// The kind of [`TSConstructorType`].
     TSConstructorType,
+    /// The kind of [`TSTypePredicate`].
     TSTypePredicate,
+    /// The kind of [`TSTupleType`].
     TSTupleType,
+    /// The kind of [`TSTypeAssertion`].
     TSTypeAssertion,
+    /// The kind of [`TSAsExpression`].
     TSAsExpression,
+    /// The kind of [`TSParameterProperty`].
     TSParameterProperty,
+    /// The kind of [`TSTypeAliasDeclaration`].
     TSTypeAliasDeclaration,
+    /// The kind of [`TSInterfaceDeclaration`].
     TSInterfaceDeclaration,
+    /// The kind of [`TSInterfaceHeritage`].
     TSInterfaceHeritage,
+    /// The kind of [`TSInterfaceBody`].
     TSInterfaceBody,
+    /// The kind of [`TSEnumDeclaration`].
     TSEnumDeclaration,
+    /// The kind of [`TSEnumMember`].
     TSEnumMember,
+    /// The kind of [`TSModuleDeclaration`].
     TSModuleDeclaration,
+    /// The kind of [`TSModuleBlock`].
     TSModuleBlock,
+    /// The kind of [`TSModuleMember`].
     TSModuleMember,
+    /// The kind of [`TSTypeParameterDeclaration`].
     TSTypeParameterDeclaration,
+    /// The kind of [`TSTypeParameter`].
     TSTypeParameter,
+    /// The kind of [`TSTypeParameterInstantiation`].
     TSTypeParameterInstantiation,
+    /// The kind of [`TSUnionType`].
     TSUnionType,
+    /// The kind of [`TSIntersectionType`].
     TSIntersectionType,
+    /// The kind of [`TSTypeQuery`].
     TSTypeQuery,
+    /// The kind of [`TSConditionalType`].
     TSConditionalType,
+    /// The kind of [`TSTypeLiteral`].
     TSTypeLiteral,
+    /// The kind of [`TSPropertySignature`].
     TSPropertySignature,
+    /// The kind of [`TSMethodSignature`].
     TSMethodSignature,
+    /// The kind of [`TSIndexSignature`].
     TSIndexSignature,
+    /// The kind of [`TSCallSignatureDeclaration`].
     TSCallSignatureDeclaration,
+    /// The kind of [`TSModifiers`].
     TSModifiers,
+    /// Exclusive upper bound of the `TS` range.
     _TS_Last,
+    /// Exclusive lower bound of the `Cover` range.
     _Cover_First,
+    /// The kind of [`CoverEmptyArgs`].
     CoverEmptyArgs,
+    /// The kind of [`CoverTrailingComma`].
     CoverTrailingComma,
+    /// The kind of [`CoverInitializer`].
     CoverInitializer,
+    /// The kind of [`CoverRestElement`].
     CoverRestElement,
+    /// The kind of [`CoverTypedIdentifier`].
     CoverTypedIdentifier,
+    /// Exclusive upper bound of the `Cover` range.
     _Cover_Last,
+    /// The kind of [`SHBuiltin`].
     SHBuiltin,
+    /// The kind of [`ImplicitCheckedCast`].
     ImplicitCheckedCast,
 }
 
@@ -321,118 +621,225 @@ pub enum NodeKind {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
 pub enum NodeField {
+    /// The `alternate` child field.
     alternate,
+    /// The `argument` child field.
     argument,
+    /// The `arguments` child field.
     arguments,
+    /// The `attributes` child field.
     attributes,
+    /// The `base` child field.
     base,
+    /// The `block` child field.
     block,
+    /// The `body` child field.
     body,
+    /// The `bound` child field.
     bound,
+    /// The `call_properties` child field.
     call_properties,
+    /// The `callee` child field.
     callee,
+    /// The `cases` child field.
     cases,
+    /// The `check_type` child field.
     check_type,
+    /// The `children` child field.
     children,
+    /// The `closing_element` child field.
     closing_element,
+    /// The `closing_fragment` child field.
     closing_fragment,
+    /// The `consequent` child field.
     consequent,
+    /// The `constraint` child field.
     constraint,
+    /// The `declaration` child field.
     declaration,
+    /// The `declarations` child field.
     declarations,
+    /// The `decorators` child field.
     decorators,
+    /// The `default` child field.
     default,
+    /// The `default_value` child field.
     default_value,
+    /// The `discriminant` child field.
     discriminant,
+    /// The `element_type` child field.
     element_type,
+    /// The `element_types` child field.
     element_types,
+    /// The `elements` child field.
     elements,
+    /// The `exported` child field.
     exported,
+    /// The `expr_name` child field.
     expr_name,
+    /// The `expression` child field.
     expression,
+    /// The `expressions` child field.
     expressions,
+    /// The `extends` child field.
     extends,
+    /// The `extends_type` child field.
     extends_type,
+    /// The `false_type` child field.
     false_type,
+    /// The `finalizer` child field.
     finalizer,
+    /// The `guard` child field.
     guard,
+    /// The `handler` child field.
     handler,
+    /// The `id` child field.
     id,
+    /// The `implements` child field.
     implements,
+    /// The `impltype` child field.
     impltype,
+    /// The `imported` child field.
     imported,
+    /// The `index_type` child field.
     index_type,
+    /// The `indexers` child field.
     indexers,
+    /// The `init` child field.
     init,
+    /// The `initializer` child field.
     initializer,
+    /// The `internal_slots` child field.
     internal_slots,
+    /// The `key` child field.
     key,
+    /// The `key_tparam` child field.
     key_tparam,
+    /// The `label` child field.
     label,
+    /// The `left` child field.
     left,
+    /// The `literal` child field.
     literal,
+    /// The `local` child field.
     local,
+    /// The `lower_bound` child field.
     lower_bound,
+    /// The `members` child field.
     members,
+    /// The `meta` child field.
     meta,
+    /// The `mixins` child field.
     mixins,
+    /// The `name` child field.
     name,
+    /// The `namespace` child field.
     namespace,
+    /// The `object` child field.
     object,
+    /// The `object_type` child field.
     object_type,
+    /// The `opening_element` child field.
     opening_element,
+    /// The `opening_fragment` child field.
     opening_fragment,
+    /// The `options` child field.
     options,
+    /// The `param` child field.
     param,
+    /// The `parameter` child field.
     parameter,
+    /// The `parameter_name` child field.
     parameter_name,
+    /// The `parameters` child field.
     parameters,
+    /// The `params` child field.
     params,
+    /// The `pattern` child field.
     pattern,
+    /// The `patterns` child field.
     patterns,
+    /// The `predicate` child field.
     predicate,
+    /// The `prop_type` child field.
     prop_type,
+    /// The `properties` child field.
     properties,
+    /// The `property` child field.
     property,
+    /// The `qualification` child field.
     qualification,
+    /// The `quasi` child field.
     quasi,
+    /// The `quasis` child field.
     quasis,
+    /// The `record_constructor` child field.
     record_constructor,
+    /// The `renders_type` child field.
     renders_type,
+    /// The `rest` child field.
     rest,
+    /// The `return_type` child field.
     return_type,
+    /// The `right` child field.
     right,
+    /// The `source` child field.
     source,
+    /// The `source_type` child field.
     source_type,
+    /// The `specifiers` child field.
     specifiers,
+    /// The `super_class` child field.
     super_class,
+    /// The `super_type_arguments` child field.
     super_type_arguments,
+    /// The `supertype` child field.
     supertype,
+    /// The `tag` child field.
     tag,
+    /// The `target` child field.
     target,
+    /// The `target_constructor` child field.
     target_constructor,
+    /// The `test` child field.
     test,
+    /// The `this` child field.
     this,
+    /// The `true_type` child field.
     true_type,
+    /// The `ts_modifiers` child field.
     ts_modifiers,
+    /// The `type_annotation` child field.
     type_annotation,
+    /// The `type_arguments` child field.
     type_arguments,
+    /// The `type_name` child field.
     type_name,
+    /// The `type_parameter` child field.
     type_parameter,
+    /// The `type_parameters` child field.
     type_parameters,
+    /// The `types` child field.
     types,
+    /// The `update` child field.
     update,
+    /// The `upper_bound` child field.
     upper_bound,
+    /// The `value` child field.
     value,
+    /// The `variance` child field.
     variance,
 }
 
+/// The `Empty` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct Empty<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> Empty<'gc> {
+    /// Build `Empty` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -442,12 +849,15 @@ impl<'gc> Empty<'gc> {
     }
 }
 
+/// The `Metadata` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct Metadata<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> Metadata<'gc> {
+    /// Build `Metadata` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -457,19 +867,32 @@ impl<'gc> Metadata<'gc> {
     }
 }
 
+/// The `Program` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct Program<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `body` property.
     pub body: NodeList<'gc>,
+    /// Sema: the lexical scope created by this node, if any.
     pub scope: Cell<Option<SemaId>>,
+    /// Sema: `FunctionInfo` for this function.
     pub sem_info: Cell<Option<SemaId>>,
+    /// Sema: strict-mode state of this function.
     pub strictness: Cell<Strictness>,
+    /// Whether this function is a method definition (getters and setters
+    /// included) rather than a `function`. Used for lazy reparsing.
     pub is_method_definition: Cell<bool>,
+    /// Decorations attached to this function by `Hermes.decorate(...)`
+    /// calls in typed mode; each entry wraps a decoration expression.
     pub decorations: Cell<NodeList<'gc>>,
+    /// An always-empty parameter list, for uniformity with functions.
     pub dummy_param_list: Cell<NodeList<'gc>>,
 }
 impl<'gc> Program<'gc> {
+    /// Build `Program` from its metadata and `ESTree.def` fields.
+    /// Decoration fields start at their defaults.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         body: NodeList<'gc>,
@@ -487,25 +910,44 @@ impl<'gc> Program<'gc> {
     }
 }
 
+/// The `FunctionExpression` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct FunctionExpression<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: Option<&'gc Node<'gc>>,
+    /// ESTree `params` property.
     pub params: NodeList<'gc>,
+    /// ESTree `body` property.
     pub body: &'gc Node<'gc>,
+    /// ESTree `typeParameters` property.
     pub type_parameters: Option<&'gc Node<'gc>>,
+    /// ESTree `returnType` property.
     pub return_type: Option<&'gc Node<'gc>>,
+    /// ESTree `predicate` property.
     pub predicate: Option<&'gc Node<'gc>>,
+    /// ESTree `generator` property.
     pub generator: Cell<bool>,
+    /// ESTree `async` property.
     pub r#async: Cell<bool>,
+    /// Sema: the lexical scope created by this node, if any.
     pub scope: Cell<Option<SemaId>>,
+    /// Sema: `FunctionInfo` for this function.
     pub sem_info: Cell<Option<SemaId>>,
+    /// Sema: strict-mode state of this function.
     pub strictness: Cell<Strictness>,
+    /// Whether this function is a method definition (getters and setters
+    /// included) rather than a `function`. Used for lazy reparsing.
     pub is_method_definition: Cell<bool>,
+    /// Decorations attached to this function by `Hermes.decorate(...)`
+    /// calls in typed mode; each entry wraps a decoration expression.
     pub decorations: Cell<NodeList<'gc>>,
 }
 impl<'gc> FunctionExpression<'gc> {
+    /// Build `FunctionExpression` from its metadata and `ESTree.def` fields.
+    /// Decoration fields start at their defaults.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: Option<&'gc Node<'gc>>,
@@ -536,24 +978,43 @@ impl<'gc> FunctionExpression<'gc> {
     }
 }
 
+/// The `ArrowFunctionExpression` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ArrowFunctionExpression<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `params` property.
     pub params: NodeList<'gc>,
+    /// ESTree `body` property.
     pub body: &'gc Node<'gc>,
+    /// ESTree `typeParameters` property.
     pub type_parameters: Option<&'gc Node<'gc>>,
+    /// ESTree `returnType` property.
     pub return_type: Option<&'gc Node<'gc>>,
+    /// ESTree `predicate` property.
     pub predicate: Option<&'gc Node<'gc>>,
+    /// ESTree `expression` property.
     pub expression: Cell<bool>,
+    /// ESTree `async` property.
     pub r#async: Cell<bool>,
+    /// Sema: the lexical scope created by this node, if any.
     pub scope: Cell<Option<SemaId>>,
+    /// Sema: `FunctionInfo` for this function.
     pub sem_info: Cell<Option<SemaId>>,
+    /// Sema: strict-mode state of this function.
     pub strictness: Cell<Strictness>,
+    /// Whether this function is a method definition (getters and setters
+    /// included) rather than a `function`. Used for lazy reparsing.
     pub is_method_definition: Cell<bool>,
+    /// Decorations attached to this function by `Hermes.decorate(...)`
+    /// calls in typed mode; each entry wraps a decoration expression.
     pub decorations: Cell<NodeList<'gc>>,
 }
 impl<'gc> ArrowFunctionExpression<'gc> {
+    /// Build `ArrowFunctionExpression` from its metadata and `ESTree.def`
+    /// fields.
+    /// Decoration fields start at their defaults.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         params: NodeList<'gc>,
@@ -582,25 +1043,44 @@ impl<'gc> ArrowFunctionExpression<'gc> {
     }
 }
 
+/// The `FunctionDeclaration` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct FunctionDeclaration<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: Option<&'gc Node<'gc>>,
+    /// ESTree `params` property.
     pub params: NodeList<'gc>,
+    /// ESTree `body` property.
     pub body: &'gc Node<'gc>,
+    /// ESTree `typeParameters` property.
     pub type_parameters: Option<&'gc Node<'gc>>,
+    /// ESTree `returnType` property.
     pub return_type: Option<&'gc Node<'gc>>,
+    /// ESTree `predicate` property.
     pub predicate: Option<&'gc Node<'gc>>,
+    /// ESTree `generator` property.
     pub generator: Cell<bool>,
+    /// ESTree `async` property.
     pub r#async: Cell<bool>,
+    /// Sema: the lexical scope created by this node, if any.
     pub scope: Cell<Option<SemaId>>,
+    /// Sema: `FunctionInfo` for this function.
     pub sem_info: Cell<Option<SemaId>>,
+    /// Sema: strict-mode state of this function.
     pub strictness: Cell<Strictness>,
+    /// Whether this function is a method definition (getters and setters
+    /// included) rather than a `function`. Used for lazy reparsing.
     pub is_method_definition: Cell<bool>,
+    /// Decorations attached to this function by `Hermes.decorate(...)`
+    /// calls in typed mode; each entry wraps a decoration expression.
     pub decorations: Cell<NodeList<'gc>>,
 }
 impl<'gc> FunctionDeclaration<'gc> {
+    /// Build `FunctionDeclaration` from its metadata and `ESTree.def` fields.
+    /// Decoration fields start at their defaults.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: Option<&'gc Node<'gc>>,
@@ -631,23 +1111,40 @@ impl<'gc> FunctionDeclaration<'gc> {
     }
 }
 
+/// The `ComponentDeclaration` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ComponentDeclaration<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `params` property.
     pub params: NodeList<'gc>,
+    /// ESTree `body` property.
     pub body: &'gc Node<'gc>,
+    /// ESTree `typeParameters` property.
     pub type_parameters: Option<&'gc Node<'gc>>,
+    /// ESTree `rendersType` property.
     pub renders_type: Option<&'gc Node<'gc>>,
+    /// ESTree `async` property.
     pub r#async: Cell<bool>,
+    /// Sema: the lexical scope created by this node, if any.
     pub scope: Cell<Option<SemaId>>,
+    /// Sema: `FunctionInfo` for this function.
     pub sem_info: Cell<Option<SemaId>>,
+    /// Sema: strict-mode state of this function.
     pub strictness: Cell<Strictness>,
+    /// Whether this function is a method definition (getters and setters
+    /// included) rather than a `function`. Used for lazy reparsing.
     pub is_method_definition: Cell<bool>,
+    /// Decorations attached to this function by `Hermes.decorate(...)`
+    /// calls in typed mode; each entry wraps a decoration expression.
     pub decorations: Cell<NodeList<'gc>>,
 }
 impl<'gc> ComponentDeclaration<'gc> {
+    /// Build `ComponentDeclaration` from its metadata and `ESTree.def` fields.
+    /// Decoration fields start at their defaults.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -674,23 +1171,40 @@ impl<'gc> ComponentDeclaration<'gc> {
     }
 }
 
+/// The `HookDeclaration` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct HookDeclaration<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `params` property.
     pub params: NodeList<'gc>,
+    /// ESTree `body` property.
     pub body: &'gc Node<'gc>,
+    /// ESTree `typeParameters` property.
     pub type_parameters: Option<&'gc Node<'gc>>,
+    /// ESTree `returnType` property.
     pub return_type: Option<&'gc Node<'gc>>,
+    /// ESTree `async` property.
     pub r#async: Cell<bool>,
+    /// Sema: the lexical scope created by this node, if any.
     pub scope: Cell<Option<SemaId>>,
+    /// Sema: `FunctionInfo` for this function.
     pub sem_info: Cell<Option<SemaId>>,
+    /// Sema: strict-mode state of this function.
     pub strictness: Cell<Strictness>,
+    /// Whether this function is a method definition (getters and setters
+    /// included) rather than a `function`. Used for lazy reparsing.
     pub is_method_definition: Cell<bool>,
+    /// Decorations attached to this function by `Hermes.decorate(...)`
+    /// calls in typed mode; each entry wraps a decoration expression.
     pub decorations: Cell<NodeList<'gc>>,
 }
 impl<'gc> HookDeclaration<'gc> {
+    /// Build `HookDeclaration` from its metadata and `ESTree.def` fields.
+    /// Decoration fields start at their defaults.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -717,14 +1231,19 @@ impl<'gc> HookDeclaration<'gc> {
     }
 }
 
+/// The `MatchStatement` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct MatchStatement<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `argument` property.
     pub argument: &'gc Node<'gc>,
+    /// ESTree `cases` property.
     pub cases: NodeList<'gc>,
 }
 impl<'gc> MatchStatement<'gc> {
+    /// Build `MatchStatement` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         argument: &'gc Node<'gc>,
@@ -738,15 +1257,22 @@ impl<'gc> MatchStatement<'gc> {
     }
 }
 
+/// The `WhileStatement` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct WhileStatement<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `body` property.
     pub body: &'gc Node<'gc>,
+    /// ESTree `test` property.
     pub test: &'gc Node<'gc>,
+    /// Sema: label index; `INVALID_LABEL` until set.
     pub label_index: Cell<u32>,
 }
 impl<'gc> WhileStatement<'gc> {
+    /// Build `WhileStatement` from its metadata and `ESTree.def` fields.
+    /// Decoration fields start at their defaults.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         body: &'gc Node<'gc>,
@@ -761,15 +1287,22 @@ impl<'gc> WhileStatement<'gc> {
     }
 }
 
+/// The `DoWhileStatement` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct DoWhileStatement<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `body` property.
     pub body: &'gc Node<'gc>,
+    /// ESTree `test` property.
     pub test: &'gc Node<'gc>,
+    /// Sema: label index; `INVALID_LABEL` until set.
     pub label_index: Cell<u32>,
 }
 impl<'gc> DoWhileStatement<'gc> {
+    /// Build `DoWhileStatement` from its metadata and `ESTree.def` fields.
+    /// Decoration fields start at their defaults.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         body: &'gc Node<'gc>,
@@ -784,17 +1317,26 @@ impl<'gc> DoWhileStatement<'gc> {
     }
 }
 
+/// The `ForInStatement` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ForInStatement<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `left` property.
     pub left: &'gc Node<'gc>,
+    /// ESTree `right` property.
     pub right: &'gc Node<'gc>,
+    /// ESTree `body` property.
     pub body: &'gc Node<'gc>,
+    /// Sema: label index; `INVALID_LABEL` until set.
     pub label_index: Cell<u32>,
+    /// Sema: the lexical scope created by this node, if any.
     pub scope: Cell<Option<SemaId>>,
 }
 impl<'gc> ForInStatement<'gc> {
+    /// Build `ForInStatement` from its metadata and `ESTree.def` fields.
+    /// Decoration fields start at their defaults.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         left: &'gc Node<'gc>,
@@ -812,18 +1354,28 @@ impl<'gc> ForInStatement<'gc> {
     }
 }
 
+/// The `ForOfStatement` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ForOfStatement<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `left` property.
     pub left: &'gc Node<'gc>,
+    /// ESTree `right` property.
     pub right: &'gc Node<'gc>,
+    /// ESTree `body` property.
     pub body: &'gc Node<'gc>,
+    /// ESTree `await` property.
     pub r#await: Cell<bool>,
+    /// Sema: label index; `INVALID_LABEL` until set.
     pub label_index: Cell<u32>,
+    /// Sema: the lexical scope created by this node, if any.
     pub scope: Cell<Option<SemaId>>,
 }
 impl<'gc> ForOfStatement<'gc> {
+    /// Build `ForOfStatement` from its metadata and `ESTree.def` fields.
+    /// Decoration fields start at their defaults.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         left: &'gc Node<'gc>,
@@ -843,18 +1395,28 @@ impl<'gc> ForOfStatement<'gc> {
     }
 }
 
+/// The `ForStatement` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ForStatement<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `init` property.
     pub init: Option<&'gc Node<'gc>>,
+    /// ESTree `test` property.
     pub test: Option<&'gc Node<'gc>>,
+    /// ESTree `update` property.
     pub update: Option<&'gc Node<'gc>>,
+    /// ESTree `body` property.
     pub body: &'gc Node<'gc>,
+    /// Sema: label index; `INVALID_LABEL` until set.
     pub label_index: Cell<u32>,
+    /// Sema: the lexical scope created by this node, if any.
     pub scope: Cell<Option<SemaId>>,
 }
 impl<'gc> ForStatement<'gc> {
+    /// Build `ForStatement` from its metadata and `ESTree.def` fields.
+    /// Decoration fields start at their defaults.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         init: Option<&'gc Node<'gc>>,
@@ -874,12 +1436,15 @@ impl<'gc> ForStatement<'gc> {
     }
 }
 
+/// The `DebuggerStatement` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct DebuggerStatement<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> DebuggerStatement<'gc> {
+    /// Build `DebuggerStatement` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -889,12 +1454,15 @@ impl<'gc> DebuggerStatement<'gc> {
     }
 }
 
+/// The `EmptyStatement` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct EmptyStatement<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> EmptyStatement<'gc> {
+    /// Build `EmptyStatement` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -904,21 +1472,36 @@ impl<'gc> EmptyStatement<'gc> {
     }
 }
 
+/// The `BlockStatement` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct BlockStatement<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `body` property.
     pub body: NodeList<'gc>,
+    /// ESTree `implicit` property.
     pub implicit: Cell<bool>,
+    /// Sema: the lexical scope created by this node, if any.
     pub scope: Cell<Option<SemaId>>,
+    /// The source buffer id in which this block was found.
     pub buffer_id: Cell<u32>,
+    /// True if this is a function body pruned while pre-parsing.
     pub is_lazy_function_body: Cell<bool>,
+    /// For a lazy block, the `Yield` param to restore when parsed eagerly.
     pub param_yield: Cell<bool>,
+    /// For a lazy block, the `Await` param to restore when parsed eagerly.
     pub param_await: Cell<bool>,
+    /// Whether this function contains an arrow function. Read by lazy
+    /// compilation to populate the `FunctionInfo`.
     pub contains_arrow_functions: Cell<bool>,
+    /// Conservative estimate of whether an arrow function here may use
+    /// `arguments`, so a non-arrow function must eagerly capture it.
     pub may_contain_arrow_functions_using_arguments: Cell<bool>,
 }
 impl<'gc> BlockStatement<'gc> {
+    /// Build `BlockStatement` from its metadata and `ESTree.def` fields.
+    /// Decoration fields start at their defaults.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         body: NodeList<'gc>,
@@ -939,15 +1522,22 @@ impl<'gc> BlockStatement<'gc> {
     }
 }
 
+/// The `StaticBlock` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct StaticBlock<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `body` property.
     pub body: NodeList<'gc>,
+    /// Sema: the lexical scope created by this node, if any.
     pub scope: Cell<Option<SemaId>>,
+    /// Sema: `FunctionInfo` for this static block.
     pub function_info: Cell<Option<SemaId>>,
 }
 impl<'gc> StaticBlock<'gc> {
+    /// Build `StaticBlock` from its metadata and `ESTree.def` fields.
+    /// Decoration fields start at their defaults.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         body: NodeList<'gc>,
@@ -961,14 +1551,20 @@ impl<'gc> StaticBlock<'gc> {
     }
 }
 
+/// The `BreakStatement` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct BreakStatement<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `label` property.
     pub label: Option<&'gc Node<'gc>>,
+    /// Sema: label index; `INVALID_LABEL` until set.
     pub label_index: Cell<u32>,
 }
 impl<'gc> BreakStatement<'gc> {
+    /// Build `BreakStatement` from its metadata and `ESTree.def` fields.
+    /// Decoration fields start at their defaults.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         label: Option<&'gc Node<'gc>>,
@@ -981,14 +1577,20 @@ impl<'gc> BreakStatement<'gc> {
     }
 }
 
+/// The `ContinueStatement` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ContinueStatement<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `label` property.
     pub label: Option<&'gc Node<'gc>>,
+    /// Sema: label index; `INVALID_LABEL` until set.
     pub label_index: Cell<u32>,
 }
 impl<'gc> ContinueStatement<'gc> {
+    /// Build `ContinueStatement` from its metadata and `ESTree.def` fields.
+    /// Decoration fields start at their defaults.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         label: Option<&'gc Node<'gc>>,
@@ -1001,13 +1603,17 @@ impl<'gc> ContinueStatement<'gc> {
     }
 }
 
+/// The `ThrowStatement` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ThrowStatement<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `argument` property.
     pub argument: &'gc Node<'gc>,
 }
 impl<'gc> ThrowStatement<'gc> {
+    /// Build `ThrowStatement` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         argument: &'gc Node<'gc>,
@@ -1019,13 +1625,17 @@ impl<'gc> ThrowStatement<'gc> {
     }
 }
 
+/// The `ReturnStatement` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ReturnStatement<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `argument` property.
     pub argument: Option<&'gc Node<'gc>>,
 }
 impl<'gc> ReturnStatement<'gc> {
+    /// Build `ReturnStatement` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         argument: Option<&'gc Node<'gc>>,
@@ -1037,14 +1647,19 @@ impl<'gc> ReturnStatement<'gc> {
     }
 }
 
+/// The `WithStatement` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct WithStatement<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `object` property.
     pub object: &'gc Node<'gc>,
+    /// ESTree `body` property.
     pub body: &'gc Node<'gc>,
 }
 impl<'gc> WithStatement<'gc> {
+    /// Build `WithStatement` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         object: &'gc Node<'gc>,
@@ -1058,16 +1673,24 @@ impl<'gc> WithStatement<'gc> {
     }
 }
 
+/// The `SwitchStatement` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct SwitchStatement<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `discriminant` property.
     pub discriminant: &'gc Node<'gc>,
+    /// ESTree `cases` property.
     pub cases: NodeList<'gc>,
+    /// Sema: label index; `INVALID_LABEL` until set.
     pub label_index: Cell<u32>,
+    /// Sema: the lexical scope created by this node, if any.
     pub scope: Cell<Option<SemaId>>,
 }
 impl<'gc> SwitchStatement<'gc> {
+    /// Build `SwitchStatement` from its metadata and `ESTree.def` fields.
+    /// Decoration fields start at their defaults.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         discriminant: &'gc Node<'gc>,
@@ -1083,15 +1706,22 @@ impl<'gc> SwitchStatement<'gc> {
     }
 }
 
+/// The `LabeledStatement` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct LabeledStatement<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `label` property.
     pub label: &'gc Node<'gc>,
+    /// ESTree `body` property.
     pub body: &'gc Node<'gc>,
+    /// Sema: label index; `INVALID_LABEL` until set.
     pub label_index: Cell<u32>,
 }
 impl<'gc> LabeledStatement<'gc> {
+    /// Build `LabeledStatement` from its metadata and `ESTree.def` fields.
+    /// Decoration fields start at their defaults.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         label: &'gc Node<'gc>,
@@ -1106,14 +1736,19 @@ impl<'gc> LabeledStatement<'gc> {
     }
 }
 
+/// The `ExpressionStatement` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ExpressionStatement<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `expression` property.
     pub expression: &'gc Node<'gc>,
+    /// ESTree `directive` property.
     pub directive: Cell<NodeString>,
 }
 impl<'gc> ExpressionStatement<'gc> {
+    /// Build `ExpressionStatement` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         expression: &'gc Node<'gc>,
@@ -1127,15 +1762,21 @@ impl<'gc> ExpressionStatement<'gc> {
     }
 }
 
+/// The `TryStatement` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TryStatement<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `block` property.
     pub block: &'gc Node<'gc>,
+    /// ESTree `handler` property.
     pub handler: Option<&'gc Node<'gc>>,
+    /// ESTree `finalizer` property.
     pub finalizer: Option<&'gc Node<'gc>>,
 }
 impl<'gc> TryStatement<'gc> {
+    /// Build `TryStatement` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         block: &'gc Node<'gc>,
@@ -1151,15 +1792,21 @@ impl<'gc> TryStatement<'gc> {
     }
 }
 
+/// The `IfStatement` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct IfStatement<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `test` property.
     pub test: &'gc Node<'gc>,
+    /// ESTree `consequent` property.
     pub consequent: &'gc Node<'gc>,
+    /// ESTree `alternate` property.
     pub alternate: Option<&'gc Node<'gc>>,
 }
 impl<'gc> IfStatement<'gc> {
+    /// Build `IfStatement` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         test: &'gc Node<'gc>,
@@ -1175,12 +1822,15 @@ impl<'gc> IfStatement<'gc> {
     }
 }
 
+/// The `NullLiteral` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct NullLiteral<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> NullLiteral<'gc> {
+    /// Build `NullLiteral` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -1190,13 +1840,17 @@ impl<'gc> NullLiteral<'gc> {
     }
 }
 
+/// The `BooleanLiteral` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct BooleanLiteral<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `value` property.
     pub value: Cell<bool>,
 }
 impl<'gc> BooleanLiteral<'gc> {
+    /// Build `BooleanLiteral` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         value: bool,
@@ -1208,13 +1862,17 @@ impl<'gc> BooleanLiteral<'gc> {
     }
 }
 
+/// The `StringLiteral` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct StringLiteral<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `value` property.
     pub value: Cell<NodeString>,
 }
 impl<'gc> StringLiteral<'gc> {
+    /// Build `StringLiteral` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         value: NodeString,
@@ -1226,13 +1884,17 @@ impl<'gc> StringLiteral<'gc> {
     }
 }
 
+/// The `NumericLiteral` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct NumericLiteral<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `value` property.
     pub value: Cell<f64>,
 }
 impl<'gc> NumericLiteral<'gc> {
+    /// Build `NumericLiteral` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         value: f64,
@@ -1244,14 +1906,19 @@ impl<'gc> NumericLiteral<'gc> {
     }
 }
 
+/// The `RegExpLiteral` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct RegExpLiteral<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `pattern` property.
     pub pattern: Cell<NodeLabel>,
+    /// ESTree `flags` property.
     pub flags: Cell<NodeLabel>,
 }
 impl<'gc> RegExpLiteral<'gc> {
+    /// Build `RegExpLiteral` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         pattern: NodeLabel,
@@ -1265,13 +1932,17 @@ impl<'gc> RegExpLiteral<'gc> {
     }
 }
 
+/// The `BigIntLiteral` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct BigIntLiteral<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `bigint` property.
     pub bigint: Cell<NodeLabel>,
 }
 impl<'gc> BigIntLiteral<'gc> {
+    /// Build `BigIntLiteral` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         bigint: NodeLabel,
@@ -1283,12 +1954,15 @@ impl<'gc> BigIntLiteral<'gc> {
     }
 }
 
+/// The `ThisExpression` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ThisExpression<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> ThisExpression<'gc> {
+    /// Build `ThisExpression` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -1298,12 +1972,15 @@ impl<'gc> ThisExpression<'gc> {
     }
 }
 
+/// The `Super` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct Super<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> Super<'gc> {
+    /// Build `Super` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -1313,13 +1990,17 @@ impl<'gc> Super<'gc> {
     }
 }
 
+/// The `SequenceExpression` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct SequenceExpression<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `expressions` property.
     pub expressions: NodeList<'gc>,
 }
 impl<'gc> SequenceExpression<'gc> {
+    /// Build `SequenceExpression` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         expressions: NodeList<'gc>,
@@ -1331,13 +2012,17 @@ impl<'gc> SequenceExpression<'gc> {
     }
 }
 
+/// The `ObjectExpression` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ObjectExpression<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `properties` property.
     pub properties: NodeList<'gc>,
 }
 impl<'gc> ObjectExpression<'gc> {
+    /// Build `ObjectExpression` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         properties: NodeList<'gc>,
@@ -1349,14 +2034,19 @@ impl<'gc> ObjectExpression<'gc> {
     }
 }
 
+/// The `ArrayExpression` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ArrayExpression<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `elements` property.
     pub elements: NodeList<'gc>,
+    /// ESTree `trailingComma` property.
     pub trailing_comma: Cell<bool>,
 }
 impl<'gc> ArrayExpression<'gc> {
+    /// Build `ArrayExpression` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         elements: NodeList<'gc>,
@@ -1370,13 +2060,17 @@ impl<'gc> ArrayExpression<'gc> {
     }
 }
 
+/// The `SpreadElement` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct SpreadElement<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `argument` property.
     pub argument: &'gc Node<'gc>,
 }
 impl<'gc> SpreadElement<'gc> {
+    /// Build `SpreadElement` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         argument: &'gc Node<'gc>,
@@ -1388,15 +2082,21 @@ impl<'gc> SpreadElement<'gc> {
     }
 }
 
+/// The `NewExpression` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct NewExpression<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `callee` property.
     pub callee: &'gc Node<'gc>,
+    /// ESTree `typeArguments` property.
     pub type_arguments: Option<&'gc Node<'gc>>,
+    /// ESTree `arguments` property.
     pub arguments: NodeList<'gc>,
 }
 impl<'gc> NewExpression<'gc> {
+    /// Build `NewExpression` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         callee: &'gc Node<'gc>,
@@ -1412,14 +2112,19 @@ impl<'gc> NewExpression<'gc> {
     }
 }
 
+/// The `YieldExpression` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct YieldExpression<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `argument` property.
     pub argument: Option<&'gc Node<'gc>>,
+    /// ESTree `delegate` property.
     pub delegate: Cell<bool>,
 }
 impl<'gc> YieldExpression<'gc> {
+    /// Build `YieldExpression` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         argument: Option<&'gc Node<'gc>>,
@@ -1433,13 +2138,17 @@ impl<'gc> YieldExpression<'gc> {
     }
 }
 
+/// The `AwaitExpression` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct AwaitExpression<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `argument` property.
     pub argument: &'gc Node<'gc>,
 }
 impl<'gc> AwaitExpression<'gc> {
+    /// Build `AwaitExpression` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         argument: &'gc Node<'gc>,
@@ -1451,14 +2160,19 @@ impl<'gc> AwaitExpression<'gc> {
     }
 }
 
+/// The `ImportExpression` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ImportExpression<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `source` property.
     pub source: &'gc Node<'gc>,
+    /// ESTree `options` property.
     pub options: Option<&'gc Node<'gc>>,
 }
 impl<'gc> ImportExpression<'gc> {
+    /// Build `ImportExpression` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         source: &'gc Node<'gc>,
@@ -1472,15 +2186,21 @@ impl<'gc> ImportExpression<'gc> {
     }
 }
 
+/// The `CallExpression` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct CallExpression<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `callee` property.
     pub callee: &'gc Node<'gc>,
+    /// ESTree `typeArguments` property.
     pub type_arguments: Option<&'gc Node<'gc>>,
+    /// ESTree `arguments` property.
     pub arguments: NodeList<'gc>,
 }
 impl<'gc> CallExpression<'gc> {
+    /// Build `CallExpression` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         callee: &'gc Node<'gc>,
@@ -1496,16 +2216,24 @@ impl<'gc> CallExpression<'gc> {
     }
 }
 
+/// The `OptionalCallExpression` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct OptionalCallExpression<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `callee` property.
     pub callee: &'gc Node<'gc>,
+    /// ESTree `typeArguments` property.
     pub type_arguments: Option<&'gc Node<'gc>>,
+    /// ESTree `arguments` property.
     pub arguments: NodeList<'gc>,
+    /// ESTree `optional` property.
     pub optional: Cell<bool>,
 }
 impl<'gc> OptionalCallExpression<'gc> {
+    /// Build `OptionalCallExpression` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         callee: &'gc Node<'gc>,
@@ -1523,15 +2251,21 @@ impl<'gc> OptionalCallExpression<'gc> {
     }
 }
 
+/// The `AssignmentExpression` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct AssignmentExpression<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `operator` property.
     pub operator: Cell<NodeLabel>,
+    /// ESTree `left` property.
     pub left: &'gc Node<'gc>,
+    /// ESTree `right` property.
     pub right: &'gc Node<'gc>,
 }
 impl<'gc> AssignmentExpression<'gc> {
+    /// Build `AssignmentExpression` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         operator: NodeLabel,
@@ -1547,15 +2281,21 @@ impl<'gc> AssignmentExpression<'gc> {
     }
 }
 
+/// The `UnaryExpression` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct UnaryExpression<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `operator` property.
     pub operator: Cell<NodeLabel>,
+    /// ESTree `argument` property.
     pub argument: &'gc Node<'gc>,
+    /// ESTree `prefix` property.
     pub prefix: Cell<bool>,
 }
 impl<'gc> UnaryExpression<'gc> {
+    /// Build `UnaryExpression` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         operator: NodeLabel,
@@ -1571,15 +2311,21 @@ impl<'gc> UnaryExpression<'gc> {
     }
 }
 
+/// The `UpdateExpression` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct UpdateExpression<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `operator` property.
     pub operator: Cell<NodeLabel>,
+    /// ESTree `argument` property.
     pub argument: &'gc Node<'gc>,
+    /// ESTree `prefix` property.
     pub prefix: Cell<bool>,
 }
 impl<'gc> UpdateExpression<'gc> {
+    /// Build `UpdateExpression` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         operator: NodeLabel,
@@ -1595,15 +2341,21 @@ impl<'gc> UpdateExpression<'gc> {
     }
 }
 
+/// The `MemberExpression` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct MemberExpression<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `object` property.
     pub object: &'gc Node<'gc>,
+    /// ESTree `property` property.
     pub property: &'gc Node<'gc>,
+    /// ESTree `computed` property.
     pub computed: Cell<bool>,
 }
 impl<'gc> MemberExpression<'gc> {
+    /// Build `MemberExpression` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         object: &'gc Node<'gc>,
@@ -1619,16 +2371,24 @@ impl<'gc> MemberExpression<'gc> {
     }
 }
 
+/// The `OptionalMemberExpression` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct OptionalMemberExpression<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `object` property.
     pub object: &'gc Node<'gc>,
+    /// ESTree `property` property.
     pub property: &'gc Node<'gc>,
+    /// ESTree `computed` property.
     pub computed: Cell<bool>,
+    /// ESTree `optional` property.
     pub optional: Cell<bool>,
 }
 impl<'gc> OptionalMemberExpression<'gc> {
+    /// Build `OptionalMemberExpression` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         object: &'gc Node<'gc>,
@@ -1646,15 +2406,21 @@ impl<'gc> OptionalMemberExpression<'gc> {
     }
 }
 
+/// The `LogicalExpression` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct LogicalExpression<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `left` property.
     pub left: &'gc Node<'gc>,
+    /// ESTree `right` property.
     pub right: &'gc Node<'gc>,
+    /// ESTree `operator` property.
     pub operator: Cell<NodeLabel>,
 }
 impl<'gc> LogicalExpression<'gc> {
+    /// Build `LogicalExpression` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         left: &'gc Node<'gc>,
@@ -1670,15 +2436,21 @@ impl<'gc> LogicalExpression<'gc> {
     }
 }
 
+/// The `ConditionalExpression` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ConditionalExpression<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `test` property.
     pub test: &'gc Node<'gc>,
+    /// ESTree `alternate` property.
     pub alternate: &'gc Node<'gc>,
+    /// ESTree `consequent` property.
     pub consequent: &'gc Node<'gc>,
 }
 impl<'gc> ConditionalExpression<'gc> {
+    /// Build `ConditionalExpression` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         test: &'gc Node<'gc>,
@@ -1694,15 +2466,21 @@ impl<'gc> ConditionalExpression<'gc> {
     }
 }
 
+/// The `BinaryExpression` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct BinaryExpression<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `left` property.
     pub left: &'gc Node<'gc>,
+    /// ESTree `right` property.
     pub right: &'gc Node<'gc>,
+    /// ESTree `operator` property.
     pub operator: Cell<NodeLabel>,
 }
 impl<'gc> BinaryExpression<'gc> {
+    /// Build `BinaryExpression` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         left: &'gc Node<'gc>,
@@ -1718,13 +2496,17 @@ impl<'gc> BinaryExpression<'gc> {
     }
 }
 
+/// The `Directive` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct Directive<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `value` property.
     pub value: &'gc Node<'gc>,
 }
 impl<'gc> Directive<'gc> {
+    /// Build `Directive` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         value: &'gc Node<'gc>,
@@ -1736,13 +2518,17 @@ impl<'gc> Directive<'gc> {
     }
 }
 
+/// The `DirectiveLiteral` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct DirectiveLiteral<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `value` property.
     pub value: Cell<NodeString>,
 }
 impl<'gc> DirectiveLiteral<'gc> {
+    /// Build `DirectiveLiteral` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         value: NodeString,
@@ -1754,18 +2540,30 @@ impl<'gc> DirectiveLiteral<'gc> {
     }
 }
 
+/// The `Identifier` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct Identifier<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `name` property.
     pub name: Cell<NodeLabel>,
+    /// ESTree `typeAnnotation` property.
     pub type_annotation: Option<&'gc Node<'gc>>,
+    /// ESTree `optional` property.
     pub optional: Cell<bool>,
+    /// Sema: unresolvable because of an enclosing `eval` or `with`.
     pub unresolvable: Cell<bool>,
+    /// Sema: how to read `decl` — the `BitHave*` bits of `ESTree.h`'s
+    /// `IdentifierDecoration`.
     pub decl_state: Cell<u8>,
+    /// Sema: the declaration this identifier resolves to; `None` until a
+    /// resolution is recorded.
     pub decl: Cell<Option<SemaId>>,
 }
 impl<'gc> Identifier<'gc> {
+    /// Build `Identifier` from its metadata and `ESTree.def` fields.
+    /// Decoration fields start at their defaults.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         name: NodeLabel,
@@ -1784,13 +2582,17 @@ impl<'gc> Identifier<'gc> {
     }
 }
 
+/// The `PrivateName` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct PrivateName<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
 }
 impl<'gc> PrivateName<'gc> {
+    /// Build `PrivateName` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -1802,14 +2604,19 @@ impl<'gc> PrivateName<'gc> {
     }
 }
 
+/// The `MetaProperty` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct MetaProperty<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `meta` property.
     pub meta: &'gc Node<'gc>,
+    /// ESTree `property` property.
     pub property: &'gc Node<'gc>,
 }
 impl<'gc> MetaProperty<'gc> {
+    /// Build `MetaProperty` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         meta: &'gc Node<'gc>,
@@ -1823,14 +2630,19 @@ impl<'gc> MetaProperty<'gc> {
     }
 }
 
+/// The `SwitchCase` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct SwitchCase<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `test` property.
     pub test: Option<&'gc Node<'gc>>,
+    /// ESTree `consequent` property.
     pub consequent: NodeList<'gc>,
 }
 impl<'gc> SwitchCase<'gc> {
+    /// Build `SwitchCase` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         test: Option<&'gc Node<'gc>>,
@@ -1844,15 +2656,22 @@ impl<'gc> SwitchCase<'gc> {
     }
 }
 
+/// The `CatchClause` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct CatchClause<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `param` property.
     pub param: Option<&'gc Node<'gc>>,
+    /// ESTree `body` property.
     pub body: &'gc Node<'gc>,
+    /// Sema: the lexical scope created by this node, if any.
     pub scope: Cell<Option<SemaId>>,
 }
 impl<'gc> CatchClause<'gc> {
+    /// Build `CatchClause` from its metadata and `ESTree.def` fields.
+    /// Decoration fields start at their defaults.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         param: Option<&'gc Node<'gc>>,
@@ -1867,14 +2686,19 @@ impl<'gc> CatchClause<'gc> {
     }
 }
 
+/// The `VariableDeclarator` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct VariableDeclarator<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `init` property.
     pub init: Option<&'gc Node<'gc>>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
 }
 impl<'gc> VariableDeclarator<'gc> {
+    /// Build `VariableDeclarator` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         init: Option<&'gc Node<'gc>>,
@@ -1888,14 +2712,19 @@ impl<'gc> VariableDeclarator<'gc> {
     }
 }
 
+/// The `VariableDeclaration` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct VariableDeclaration<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `kind` property.
     pub kind: Cell<NodeLabel>,
+    /// ESTree `declarations` property.
     pub declarations: NodeList<'gc>,
 }
 impl<'gc> VariableDeclaration<'gc> {
+    /// Build `VariableDeclaration` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         kind: NodeLabel,
@@ -1909,14 +2738,19 @@ impl<'gc> VariableDeclaration<'gc> {
     }
 }
 
+/// The `TemplateLiteral` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TemplateLiteral<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `quasis` property.
     pub quasis: NodeList<'gc>,
+    /// ESTree `expressions` property.
     pub expressions: NodeList<'gc>,
 }
 impl<'gc> TemplateLiteral<'gc> {
+    /// Build `TemplateLiteral` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         quasis: NodeList<'gc>,
@@ -1930,14 +2764,20 @@ impl<'gc> TemplateLiteral<'gc> {
     }
 }
 
+/// The `TaggedTemplateExpression` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TaggedTemplateExpression<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `tag` property.
     pub tag: &'gc Node<'gc>,
+    /// ESTree `quasi` property.
     pub quasi: &'gc Node<'gc>,
 }
 impl<'gc> TaggedTemplateExpression<'gc> {
+    /// Build `TaggedTemplateExpression` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         tag: &'gc Node<'gc>,
@@ -1951,15 +2791,21 @@ impl<'gc> TaggedTemplateExpression<'gc> {
     }
 }
 
+/// The `TemplateElement` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TemplateElement<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `tail` property.
     pub tail: Cell<bool>,
+    /// ESTree `cooked` property.
     pub cooked: Cell<NodeString>,
+    /// ESTree `raw` property.
     pub raw: Cell<NodeLabel>,
 }
 impl<'gc> TemplateElement<'gc> {
+    /// Build `TemplateElement` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         tail: bool,
@@ -1975,18 +2821,27 @@ impl<'gc> TemplateElement<'gc> {
     }
 }
 
+/// The `Property` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct Property<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `key` property.
     pub key: &'gc Node<'gc>,
+    /// ESTree `value` property.
     pub value: &'gc Node<'gc>,
+    /// ESTree `kind` property.
     pub kind: Cell<NodeLabel>,
+    /// ESTree `computed` property.
     pub computed: Cell<bool>,
+    /// ESTree `method` property.
     pub method: Cell<bool>,
+    /// ESTree `shorthand` property.
     pub shorthand: Cell<bool>,
 }
 impl<'gc> Property<'gc> {
+    /// Build `Property` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         key: &'gc Node<'gc>,
@@ -2008,13 +2863,17 @@ impl<'gc> Property<'gc> {
     }
 }
 
+/// The `Decorator` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct Decorator<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `expression` property.
     pub expression: &'gc Node<'gc>,
 }
 impl<'gc> Decorator<'gc> {
+    /// Build `Decorator` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         expression: &'gc Node<'gc>,
@@ -2026,23 +2885,41 @@ impl<'gc> Decorator<'gc> {
     }
 }
 
+/// The `ClassDeclaration` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ClassDeclaration<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: Option<&'gc Node<'gc>>,
+    /// ESTree `typeParameters` property.
     pub type_parameters: Option<&'gc Node<'gc>>,
+    /// ESTree `superClass` property.
     pub super_class: Option<&'gc Node<'gc>>,
+    /// ESTree `superTypeArguments` property.
     pub super_type_arguments: Option<&'gc Node<'gc>>,
+    /// ESTree `implements` property.
     pub implements: NodeList<'gc>,
+    /// ESTree `decorators` property.
     pub decorators: NodeList<'gc>,
+    /// ESTree `body` property.
     pub body: &'gc Node<'gc>,
+    /// Sema: the lexical scope created by this node, if any.
     pub scope: Cell<Option<SemaId>>,
+    /// Sema: `FunctionInfo` of the synthetic implicit constructor, if the
+    /// class has one.
     pub implicit_ctor_function_info: Cell<Option<SemaId>>,
+    /// Sema: `FunctionInfo` of the synthetic function that initializes the
+    /// instance elements, if the class needs one.
     pub instance_elements_init_function_info: Cell<Option<SemaId>>,
+    /// Sema: `FunctionInfo` of the synthetic function that runs the static
+    /// field initializers, if the class has any.
     pub static_elements_init_function_info: Cell<Option<SemaId>>,
 }
 impl<'gc> ClassDeclaration<'gc> {
+    /// Build `ClassDeclaration` from its metadata and `ESTree.def` fields.
+    /// Decoration fields start at their defaults.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: Option<&'gc Node<'gc>>,
@@ -2070,23 +2947,41 @@ impl<'gc> ClassDeclaration<'gc> {
     }
 }
 
+/// The `ClassExpression` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ClassExpression<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: Option<&'gc Node<'gc>>,
+    /// ESTree `typeParameters` property.
     pub type_parameters: Option<&'gc Node<'gc>>,
+    /// ESTree `superClass` property.
     pub super_class: Option<&'gc Node<'gc>>,
+    /// ESTree `superTypeArguments` property.
     pub super_type_arguments: Option<&'gc Node<'gc>>,
+    /// ESTree `implements` property.
     pub implements: NodeList<'gc>,
+    /// ESTree `decorators` property.
     pub decorators: NodeList<'gc>,
+    /// ESTree `body` property.
     pub body: &'gc Node<'gc>,
+    /// Sema: the lexical scope created by this node, if any.
     pub scope: Cell<Option<SemaId>>,
+    /// Sema: `FunctionInfo` of the synthetic implicit constructor, if the
+    /// class has one.
     pub implicit_ctor_function_info: Cell<Option<SemaId>>,
+    /// Sema: `FunctionInfo` of the synthetic function that initializes the
+    /// instance elements, if the class needs one.
     pub instance_elements_init_function_info: Cell<Option<SemaId>>,
+    /// Sema: `FunctionInfo` of the synthetic function that runs the static
+    /// field initializers, if the class has any.
     pub static_elements_init_function_info: Cell<Option<SemaId>>,
 }
 impl<'gc> ClassExpression<'gc> {
+    /// Build `ClassExpression` from its metadata and `ESTree.def` fields.
+    /// Decoration fields start at their defaults.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: Option<&'gc Node<'gc>>,
@@ -2114,13 +3009,17 @@ impl<'gc> ClassExpression<'gc> {
     }
 }
 
+/// The `ClassBody` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ClassBody<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `body` property.
     pub body: NodeList<'gc>,
 }
 impl<'gc> ClassBody<'gc> {
+    /// Build `ClassBody` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         body: NodeList<'gc>,
@@ -2132,22 +3031,35 @@ impl<'gc> ClassBody<'gc> {
     }
 }
 
+/// The `ClassProperty` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ClassProperty<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `key` property.
     pub key: &'gc Node<'gc>,
+    /// ESTree `value` property.
     pub value: Option<&'gc Node<'gc>>,
+    /// ESTree `computed` property.
     pub computed: Cell<bool>,
+    /// ESTree `static` property.
     pub r#static: Cell<bool>,
+    /// ESTree `decorators` property.
     pub decorators: NodeList<'gc>,
+    /// ESTree `declare` property.
     pub declare: Cell<bool>,
+    /// ESTree `optional` property.
     pub optional: Cell<bool>,
+    /// ESTree `variance` property.
     pub variance: Option<&'gc Node<'gc>>,
+    /// ESTree `typeAnnotation` property.
     pub type_annotation: Option<&'gc Node<'gc>>,
+    /// ESTree `tsModifiers` property.
     pub ts_modifiers: Option<&'gc Node<'gc>>,
 }
 impl<'gc> ClassProperty<'gc> {
+    /// Build `ClassProperty` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         key: &'gc Node<'gc>,
@@ -2177,21 +3089,33 @@ impl<'gc> ClassProperty<'gc> {
     }
 }
 
+/// The `ClassPrivateProperty` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ClassPrivateProperty<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `key` property.
     pub key: &'gc Node<'gc>,
+    /// ESTree `value` property.
     pub value: Option<&'gc Node<'gc>>,
+    /// ESTree `static` property.
     pub r#static: Cell<bool>,
+    /// ESTree `decorators` property.
     pub decorators: NodeList<'gc>,
+    /// ESTree `declare` property.
     pub declare: Cell<bool>,
+    /// ESTree `optional` property.
     pub optional: Cell<bool>,
+    /// ESTree `variance` property.
     pub variance: Option<&'gc Node<'gc>>,
+    /// ESTree `typeAnnotation` property.
     pub type_annotation: Option<&'gc Node<'gc>>,
+    /// ESTree `tsModifiers` property.
     pub ts_modifiers: Option<&'gc Node<'gc>>,
 }
 impl<'gc> ClassPrivateProperty<'gc> {
+    /// Build `ClassPrivateProperty` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         key: &'gc Node<'gc>,
@@ -2219,18 +3143,27 @@ impl<'gc> ClassPrivateProperty<'gc> {
     }
 }
 
+/// The `MethodDefinition` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct MethodDefinition<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `key` property.
     pub key: &'gc Node<'gc>,
+    /// ESTree `value` property.
     pub value: &'gc Node<'gc>,
+    /// ESTree `kind` property.
     pub kind: Cell<NodeLabel>,
+    /// ESTree `computed` property.
     pub computed: Cell<bool>,
+    /// ESTree `static` property.
     pub r#static: Cell<bool>,
+    /// ESTree `decorators` property.
     pub decorators: NodeList<'gc>,
 }
 impl<'gc> MethodDefinition<'gc> {
+    /// Build `MethodDefinition` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         key: &'gc Node<'gc>,
@@ -2252,16 +3185,23 @@ impl<'gc> MethodDefinition<'gc> {
     }
 }
 
+/// The `ImportDeclaration` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ImportDeclaration<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `specifiers` property.
     pub specifiers: NodeList<'gc>,
+    /// ESTree `source` property.
     pub source: &'gc Node<'gc>,
+    /// ESTree `attributes` property.
     pub attributes: NodeList<'gc>,
+    /// ESTree `importKind` property.
     pub import_kind: Cell<NodeLabel>,
 }
 impl<'gc> ImportDeclaration<'gc> {
+    /// Build `ImportDeclaration` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         specifiers: NodeList<'gc>,
@@ -2279,15 +3219,21 @@ impl<'gc> ImportDeclaration<'gc> {
     }
 }
 
+/// The `ImportSpecifier` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ImportSpecifier<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `imported` property.
     pub imported: &'gc Node<'gc>,
+    /// ESTree `local` property.
     pub local: &'gc Node<'gc>,
+    /// ESTree `importKind` property.
     pub import_kind: Cell<NodeLabel>,
 }
 impl<'gc> ImportSpecifier<'gc> {
+    /// Build `ImportSpecifier` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         imported: &'gc Node<'gc>,
@@ -2303,13 +3249,18 @@ impl<'gc> ImportSpecifier<'gc> {
     }
 }
 
+/// The `ImportDefaultSpecifier` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ImportDefaultSpecifier<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `local` property.
     pub local: &'gc Node<'gc>,
 }
 impl<'gc> ImportDefaultSpecifier<'gc> {
+    /// Build `ImportDefaultSpecifier` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         local: &'gc Node<'gc>,
@@ -2321,13 +3272,18 @@ impl<'gc> ImportDefaultSpecifier<'gc> {
     }
 }
 
+/// The `ImportNamespaceSpecifier` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ImportNamespaceSpecifier<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `local` property.
     pub local: &'gc Node<'gc>,
 }
 impl<'gc> ImportNamespaceSpecifier<'gc> {
+    /// Build `ImportNamespaceSpecifier` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         local: &'gc Node<'gc>,
@@ -2339,14 +3295,19 @@ impl<'gc> ImportNamespaceSpecifier<'gc> {
     }
 }
 
+/// The `ImportAttribute` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ImportAttribute<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `key` property.
     pub key: &'gc Node<'gc>,
+    /// ESTree `value` property.
     pub value: &'gc Node<'gc>,
 }
 impl<'gc> ImportAttribute<'gc> {
+    /// Build `ImportAttribute` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         key: &'gc Node<'gc>,
@@ -2360,16 +3321,24 @@ impl<'gc> ImportAttribute<'gc> {
     }
 }
 
+/// The `ExportNamedDeclaration` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ExportNamedDeclaration<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `declaration` property.
     pub declaration: Option<&'gc Node<'gc>>,
+    /// ESTree `specifiers` property.
     pub specifiers: NodeList<'gc>,
+    /// ESTree `source` property.
     pub source: Option<&'gc Node<'gc>>,
+    /// ESTree `exportKind` property.
     pub export_kind: Cell<NodeLabel>,
 }
 impl<'gc> ExportNamedDeclaration<'gc> {
+    /// Build `ExportNamedDeclaration` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         declaration: Option<&'gc Node<'gc>>,
@@ -2387,14 +3356,19 @@ impl<'gc> ExportNamedDeclaration<'gc> {
     }
 }
 
+/// The `ExportSpecifier` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ExportSpecifier<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `exported` property.
     pub exported: &'gc Node<'gc>,
+    /// ESTree `local` property.
     pub local: &'gc Node<'gc>,
 }
 impl<'gc> ExportSpecifier<'gc> {
+    /// Build `ExportSpecifier` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         exported: &'gc Node<'gc>,
@@ -2408,13 +3382,18 @@ impl<'gc> ExportSpecifier<'gc> {
     }
 }
 
+/// The `ExportNamespaceSpecifier` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ExportNamespaceSpecifier<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `exported` property.
     pub exported: &'gc Node<'gc>,
 }
 impl<'gc> ExportNamespaceSpecifier<'gc> {
+    /// Build `ExportNamespaceSpecifier` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         exported: &'gc Node<'gc>,
@@ -2426,13 +3405,18 @@ impl<'gc> ExportNamespaceSpecifier<'gc> {
     }
 }
 
+/// The `ExportDefaultDeclaration` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ExportDefaultDeclaration<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `declaration` property.
     pub declaration: &'gc Node<'gc>,
 }
 impl<'gc> ExportDefaultDeclaration<'gc> {
+    /// Build `ExportDefaultDeclaration` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         declaration: &'gc Node<'gc>,
@@ -2444,14 +3428,19 @@ impl<'gc> ExportDefaultDeclaration<'gc> {
     }
 }
 
+/// The `ExportAllDeclaration` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ExportAllDeclaration<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `source` property.
     pub source: &'gc Node<'gc>,
+    /// ESTree `exportKind` property.
     pub export_kind: Cell<NodeLabel>,
 }
 impl<'gc> ExportAllDeclaration<'gc> {
+    /// Build `ExportAllDeclaration` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         source: &'gc Node<'gc>,
@@ -2465,14 +3454,19 @@ impl<'gc> ExportAllDeclaration<'gc> {
     }
 }
 
+/// The `ObjectPattern` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ObjectPattern<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `properties` property.
     pub properties: NodeList<'gc>,
+    /// ESTree `typeAnnotation` property.
     pub type_annotation: Option<&'gc Node<'gc>>,
 }
 impl<'gc> ObjectPattern<'gc> {
+    /// Build `ObjectPattern` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         properties: NodeList<'gc>,
@@ -2486,14 +3480,19 @@ impl<'gc> ObjectPattern<'gc> {
     }
 }
 
+/// The `ArrayPattern` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ArrayPattern<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `elements` property.
     pub elements: NodeList<'gc>,
+    /// ESTree `typeAnnotation` property.
     pub type_annotation: Option<&'gc Node<'gc>>,
 }
 impl<'gc> ArrayPattern<'gc> {
+    /// Build `ArrayPattern` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         elements: NodeList<'gc>,
@@ -2507,13 +3506,17 @@ impl<'gc> ArrayPattern<'gc> {
     }
 }
 
+/// The `RestElement` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct RestElement<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `argument` property.
     pub argument: &'gc Node<'gc>,
 }
 impl<'gc> RestElement<'gc> {
+    /// Build `RestElement` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         argument: &'gc Node<'gc>,
@@ -2525,14 +3528,19 @@ impl<'gc> RestElement<'gc> {
     }
 }
 
+/// The `AssignmentPattern` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct AssignmentPattern<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `left` property.
     pub left: &'gc Node<'gc>,
+    /// ESTree `right` property.
     pub right: &'gc Node<'gc>,
 }
 impl<'gc> AssignmentPattern<'gc> {
+    /// Build `AssignmentPattern` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         left: &'gc Node<'gc>,
@@ -2546,15 +3554,21 @@ impl<'gc> AssignmentPattern<'gc> {
     }
 }
 
+/// The `MatchStatementCase` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct MatchStatementCase<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `pattern` property.
     pub pattern: &'gc Node<'gc>,
+    /// ESTree `body` property.
     pub body: &'gc Node<'gc>,
+    /// ESTree `guard` property.
     pub guard: Option<&'gc Node<'gc>>,
 }
 impl<'gc> MatchStatementCase<'gc> {
+    /// Build `MatchStatementCase` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         pattern: &'gc Node<'gc>,
@@ -2570,14 +3584,19 @@ impl<'gc> MatchStatementCase<'gc> {
     }
 }
 
+/// The `MatchExpression` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct MatchExpression<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `argument` property.
     pub argument: &'gc Node<'gc>,
+    /// ESTree `cases` property.
     pub cases: NodeList<'gc>,
 }
 impl<'gc> MatchExpression<'gc> {
+    /// Build `MatchExpression` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         argument: &'gc Node<'gc>,
@@ -2591,15 +3610,21 @@ impl<'gc> MatchExpression<'gc> {
     }
 }
 
+/// The `MatchExpressionCase` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct MatchExpressionCase<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `pattern` property.
     pub pattern: &'gc Node<'gc>,
+    /// ESTree `body` property.
     pub body: &'gc Node<'gc>,
+    /// ESTree `guard` property.
     pub guard: Option<&'gc Node<'gc>>,
 }
 impl<'gc> MatchExpressionCase<'gc> {
+    /// Build `MatchExpressionCase` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         pattern: &'gc Node<'gc>,
@@ -2615,12 +3640,15 @@ impl<'gc> MatchExpressionCase<'gc> {
     }
 }
 
+/// The `MatchWildcardPattern` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct MatchWildcardPattern<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> MatchWildcardPattern<'gc> {
+    /// Build `MatchWildcardPattern` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -2630,13 +3658,17 @@ impl<'gc> MatchWildcardPattern<'gc> {
     }
 }
 
+/// The `MatchLiteralPattern` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct MatchLiteralPattern<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `literal` property.
     pub literal: &'gc Node<'gc>,
 }
 impl<'gc> MatchLiteralPattern<'gc> {
+    /// Build `MatchLiteralPattern` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         literal: &'gc Node<'gc>,
@@ -2648,14 +3680,19 @@ impl<'gc> MatchLiteralPattern<'gc> {
     }
 }
 
+/// The `MatchUnaryPattern` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct MatchUnaryPattern<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `argument` property.
     pub argument: &'gc Node<'gc>,
+    /// ESTree `operator` property.
     pub operator: Cell<NodeLabel>,
 }
 impl<'gc> MatchUnaryPattern<'gc> {
+    /// Build `MatchUnaryPattern` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         argument: &'gc Node<'gc>,
@@ -2669,13 +3706,18 @@ impl<'gc> MatchUnaryPattern<'gc> {
     }
 }
 
+/// The `MatchIdentifierPattern` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct MatchIdentifierPattern<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
 }
 impl<'gc> MatchIdentifierPattern<'gc> {
+    /// Build `MatchIdentifierPattern` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -2687,14 +3729,19 @@ impl<'gc> MatchIdentifierPattern<'gc> {
     }
 }
 
+/// The `MatchBindingPattern` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct MatchBindingPattern<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `kind` property.
     pub kind: Cell<NodeLabel>,
 }
 impl<'gc> MatchBindingPattern<'gc> {
+    /// Build `MatchBindingPattern` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -2708,14 +3755,19 @@ impl<'gc> MatchBindingPattern<'gc> {
     }
 }
 
+/// The `MatchObjectPattern` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct MatchObjectPattern<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `properties` property.
     pub properties: NodeList<'gc>,
+    /// ESTree `rest` property.
     pub rest: Option<&'gc Node<'gc>>,
 }
 impl<'gc> MatchObjectPattern<'gc> {
+    /// Build `MatchObjectPattern` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         properties: NodeList<'gc>,
@@ -2729,14 +3781,19 @@ impl<'gc> MatchObjectPattern<'gc> {
     }
 }
 
+/// The `MatchArrayPattern` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct MatchArrayPattern<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `elements` property.
     pub elements: NodeList<'gc>,
+    /// ESTree `rest` property.
     pub rest: Option<&'gc Node<'gc>>,
 }
 impl<'gc> MatchArrayPattern<'gc> {
+    /// Build `MatchArrayPattern` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         elements: NodeList<'gc>,
@@ -2750,13 +3807,17 @@ impl<'gc> MatchArrayPattern<'gc> {
     }
 }
 
+/// The `MatchOrPattern` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct MatchOrPattern<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `patterns` property.
     pub patterns: NodeList<'gc>,
 }
 impl<'gc> MatchOrPattern<'gc> {
+    /// Build `MatchOrPattern` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         patterns: NodeList<'gc>,
@@ -2768,14 +3829,19 @@ impl<'gc> MatchOrPattern<'gc> {
     }
 }
 
+/// The `MatchAsPattern` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct MatchAsPattern<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `pattern` property.
     pub pattern: &'gc Node<'gc>,
+    /// ESTree `target` property.
     pub target: &'gc Node<'gc>,
 }
 impl<'gc> MatchAsPattern<'gc> {
+    /// Build `MatchAsPattern` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         pattern: &'gc Node<'gc>,
@@ -2789,14 +3855,19 @@ impl<'gc> MatchAsPattern<'gc> {
     }
 }
 
+/// The `MatchMemberPattern` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct MatchMemberPattern<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `base` property.
     pub base: &'gc Node<'gc>,
+    /// ESTree `property` property.
     pub property: &'gc Node<'gc>,
 }
 impl<'gc> MatchMemberPattern<'gc> {
+    /// Build `MatchMemberPattern` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         base: &'gc Node<'gc>,
@@ -2810,14 +3881,19 @@ impl<'gc> MatchMemberPattern<'gc> {
     }
 }
 
+/// The `MatchInstancePattern` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct MatchInstancePattern<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `targetConstructor` property.
     pub target_constructor: &'gc Node<'gc>,
+    /// ESTree `properties` property.
     pub properties: &'gc Node<'gc>,
 }
 impl<'gc> MatchInstancePattern<'gc> {
+    /// Build `MatchInstancePattern` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         target_constructor: &'gc Node<'gc>,
@@ -2831,15 +3907,22 @@ impl<'gc> MatchInstancePattern<'gc> {
     }
 }
 
+/// The `MatchObjectPatternProperty` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct MatchObjectPatternProperty<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `key` property.
     pub key: &'gc Node<'gc>,
+    /// ESTree `pattern` property.
     pub pattern: &'gc Node<'gc>,
+    /// ESTree `shorthand` property.
     pub shorthand: Cell<bool>,
 }
 impl<'gc> MatchObjectPatternProperty<'gc> {
+    /// Build `MatchObjectPatternProperty` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         key: &'gc Node<'gc>,
@@ -2855,14 +3938,20 @@ impl<'gc> MatchObjectPatternProperty<'gc> {
     }
 }
 
+/// The `MatchInstanceObjectPattern` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct MatchInstanceObjectPattern<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `properties` property.
     pub properties: NodeList<'gc>,
+    /// ESTree `rest` property.
     pub rest: Option<&'gc Node<'gc>>,
 }
 impl<'gc> MatchInstanceObjectPattern<'gc> {
+    /// Build `MatchInstanceObjectPattern` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         properties: NodeList<'gc>,
@@ -2876,13 +3965,17 @@ impl<'gc> MatchInstanceObjectPattern<'gc> {
     }
 }
 
+/// The `MatchRestPattern` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct MatchRestPattern<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `argument` property.
     pub argument: Option<&'gc Node<'gc>>,
 }
 impl<'gc> MatchRestPattern<'gc> {
+    /// Build `MatchRestPattern` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         argument: Option<&'gc Node<'gc>>,
@@ -2894,13 +3987,17 @@ impl<'gc> MatchRestPattern<'gc> {
     }
 }
 
+/// The `JSXIdentifier` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct JSXIdentifier<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `name` property.
     pub name: Cell<NodeLabel>,
 }
 impl<'gc> JSXIdentifier<'gc> {
+    /// Build `JSXIdentifier` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         name: NodeLabel,
@@ -2912,14 +4009,19 @@ impl<'gc> JSXIdentifier<'gc> {
     }
 }
 
+/// The `JSXMemberExpression` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct JSXMemberExpression<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `object` property.
     pub object: &'gc Node<'gc>,
+    /// ESTree `property` property.
     pub property: &'gc Node<'gc>,
 }
 impl<'gc> JSXMemberExpression<'gc> {
+    /// Build `JSXMemberExpression` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         object: &'gc Node<'gc>,
@@ -2933,14 +4035,19 @@ impl<'gc> JSXMemberExpression<'gc> {
     }
 }
 
+/// The `JSXNamespacedName` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct JSXNamespacedName<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `namespace` property.
     pub namespace: &'gc Node<'gc>,
+    /// ESTree `name` property.
     pub name: &'gc Node<'gc>,
 }
 impl<'gc> JSXNamespacedName<'gc> {
+    /// Build `JSXNamespacedName` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         namespace: &'gc Node<'gc>,
@@ -2954,12 +4061,15 @@ impl<'gc> JSXNamespacedName<'gc> {
     }
 }
 
+/// The `JSXEmptyExpression` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct JSXEmptyExpression<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> JSXEmptyExpression<'gc> {
+    /// Build `JSXEmptyExpression` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -2969,13 +4079,18 @@ impl<'gc> JSXEmptyExpression<'gc> {
     }
 }
 
+/// The `JSXExpressionContainer` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct JSXExpressionContainer<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `expression` property.
     pub expression: &'gc Node<'gc>,
 }
 impl<'gc> JSXExpressionContainer<'gc> {
+    /// Build `JSXExpressionContainer` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         expression: &'gc Node<'gc>,
@@ -2987,13 +4102,17 @@ impl<'gc> JSXExpressionContainer<'gc> {
     }
 }
 
+/// The `JSXSpreadChild` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct JSXSpreadChild<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `expression` property.
     pub expression: &'gc Node<'gc>,
 }
 impl<'gc> JSXSpreadChild<'gc> {
+    /// Build `JSXSpreadChild` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         expression: &'gc Node<'gc>,
@@ -3005,16 +4124,23 @@ impl<'gc> JSXSpreadChild<'gc> {
     }
 }
 
+/// The `JSXOpeningElement` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct JSXOpeningElement<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `name` property.
     pub name: &'gc Node<'gc>,
+    /// ESTree `attributes` property.
     pub attributes: NodeList<'gc>,
+    /// ESTree `selfClosing` property.
     pub self_closing: Cell<bool>,
+    /// ESTree `typeArguments` property.
     pub type_arguments: Option<&'gc Node<'gc>>,
 }
 impl<'gc> JSXOpeningElement<'gc> {
+    /// Build `JSXOpeningElement` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         name: &'gc Node<'gc>,
@@ -3032,13 +4158,17 @@ impl<'gc> JSXOpeningElement<'gc> {
     }
 }
 
+/// The `JSXClosingElement` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct JSXClosingElement<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `name` property.
     pub name: &'gc Node<'gc>,
 }
 impl<'gc> JSXClosingElement<'gc> {
+    /// Build `JSXClosingElement` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         name: &'gc Node<'gc>,
@@ -3050,14 +4180,19 @@ impl<'gc> JSXClosingElement<'gc> {
     }
 }
 
+/// The `JSXAttribute` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct JSXAttribute<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `name` property.
     pub name: &'gc Node<'gc>,
+    /// ESTree `value` property.
     pub value: Option<&'gc Node<'gc>>,
 }
 impl<'gc> JSXAttribute<'gc> {
+    /// Build `JSXAttribute` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         name: &'gc Node<'gc>,
@@ -3071,13 +4206,17 @@ impl<'gc> JSXAttribute<'gc> {
     }
 }
 
+/// The `JSXSpreadAttribute` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct JSXSpreadAttribute<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `argument` property.
     pub argument: &'gc Node<'gc>,
 }
 impl<'gc> JSXSpreadAttribute<'gc> {
+    /// Build `JSXSpreadAttribute` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         argument: &'gc Node<'gc>,
@@ -3089,14 +4228,19 @@ impl<'gc> JSXSpreadAttribute<'gc> {
     }
 }
 
+/// The `JSXStringLiteral` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct JSXStringLiteral<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `value` property.
     pub value: Cell<NodeString>,
+    /// ESTree `raw` property.
     pub raw: Cell<NodeLabel>,
 }
 impl<'gc> JSXStringLiteral<'gc> {
+    /// Build `JSXStringLiteral` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         value: NodeString,
@@ -3110,14 +4254,19 @@ impl<'gc> JSXStringLiteral<'gc> {
     }
 }
 
+/// The `JSXText` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct JSXText<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `value` property.
     pub value: Cell<NodeString>,
+    /// ESTree `raw` property.
     pub raw: Cell<NodeLabel>,
 }
 impl<'gc> JSXText<'gc> {
+    /// Build `JSXText` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         value: NodeString,
@@ -3131,15 +4280,21 @@ impl<'gc> JSXText<'gc> {
     }
 }
 
+/// The `JSXElement` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct JSXElement<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `openingElement` property.
     pub opening_element: &'gc Node<'gc>,
+    /// ESTree `children` property.
     pub children: NodeList<'gc>,
+    /// ESTree `closingElement` property.
     pub closing_element: Option<&'gc Node<'gc>>,
 }
 impl<'gc> JSXElement<'gc> {
+    /// Build `JSXElement` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         opening_element: &'gc Node<'gc>,
@@ -3155,15 +4310,21 @@ impl<'gc> JSXElement<'gc> {
     }
 }
 
+/// The `JSXFragment` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct JSXFragment<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `openingFragment` property.
     pub opening_fragment: &'gc Node<'gc>,
+    /// ESTree `children` property.
     pub children: NodeList<'gc>,
+    /// ESTree `closingFragment` property.
     pub closing_fragment: &'gc Node<'gc>,
 }
 impl<'gc> JSXFragment<'gc> {
+    /// Build `JSXFragment` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         opening_fragment: &'gc Node<'gc>,
@@ -3179,12 +4340,15 @@ impl<'gc> JSXFragment<'gc> {
     }
 }
 
+/// The `JSXOpeningFragment` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct JSXOpeningFragment<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> JSXOpeningFragment<'gc> {
+    /// Build `JSXOpeningFragment` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -3194,12 +4358,15 @@ impl<'gc> JSXOpeningFragment<'gc> {
     }
 }
 
+/// The `JSXClosingFragment` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct JSXClosingFragment<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> JSXClosingFragment<'gc> {
+    /// Build `JSXClosingFragment` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -3209,12 +4376,15 @@ impl<'gc> JSXClosingFragment<'gc> {
     }
 }
 
+/// The `ExistsTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ExistsTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> ExistsTypeAnnotation<'gc> {
+    /// Build `ExistsTypeAnnotation` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -3224,12 +4394,15 @@ impl<'gc> ExistsTypeAnnotation<'gc> {
     }
 }
 
+/// The `EmptyTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct EmptyTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> EmptyTypeAnnotation<'gc> {
+    /// Build `EmptyTypeAnnotation` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -3239,12 +4412,15 @@ impl<'gc> EmptyTypeAnnotation<'gc> {
     }
 }
 
+/// The `StringTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct StringTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> StringTypeAnnotation<'gc> {
+    /// Build `StringTypeAnnotation` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -3254,12 +4430,15 @@ impl<'gc> StringTypeAnnotation<'gc> {
     }
 }
 
+/// The `NumberTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct NumberTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> NumberTypeAnnotation<'gc> {
+    /// Build `NumberTypeAnnotation` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -3269,14 +4448,20 @@ impl<'gc> NumberTypeAnnotation<'gc> {
     }
 }
 
+/// The `StringLiteralTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct StringLiteralTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `value` property.
     pub value: Cell<NodeString>,
+    /// ESTree `raw` property.
     pub raw: Cell<NodeString>,
 }
 impl<'gc> StringLiteralTypeAnnotation<'gc> {
+    /// Build `StringLiteralTypeAnnotation` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         value: NodeString,
@@ -3290,14 +4475,20 @@ impl<'gc> StringLiteralTypeAnnotation<'gc> {
     }
 }
 
+/// The `NumberLiteralTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct NumberLiteralTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `value` property.
     pub value: Cell<f64>,
+    /// ESTree `raw` property.
     pub raw: Cell<NodeLabel>,
 }
 impl<'gc> NumberLiteralTypeAnnotation<'gc> {
+    /// Build `NumberLiteralTypeAnnotation` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         value: f64,
@@ -3311,13 +4502,18 @@ impl<'gc> NumberLiteralTypeAnnotation<'gc> {
     }
 }
 
+/// The `BigIntLiteralTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct BigIntLiteralTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `raw` property.
     pub raw: Cell<NodeLabel>,
 }
 impl<'gc> BigIntLiteralTypeAnnotation<'gc> {
+    /// Build `BigIntLiteralTypeAnnotation` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         raw: NodeLabel,
@@ -3329,12 +4525,15 @@ impl<'gc> BigIntLiteralTypeAnnotation<'gc> {
     }
 }
 
+/// The `BooleanTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct BooleanTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> BooleanTypeAnnotation<'gc> {
+    /// Build `BooleanTypeAnnotation` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -3344,14 +4543,20 @@ impl<'gc> BooleanTypeAnnotation<'gc> {
     }
 }
 
+/// The `BooleanLiteralTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct BooleanLiteralTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `value` property.
     pub value: Cell<bool>,
+    /// ESTree `raw` property.
     pub raw: Cell<NodeLabel>,
 }
 impl<'gc> BooleanLiteralTypeAnnotation<'gc> {
+    /// Build `BooleanLiteralTypeAnnotation` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         value: bool,
@@ -3365,12 +4570,16 @@ impl<'gc> BooleanLiteralTypeAnnotation<'gc> {
     }
 }
 
+/// The `NullLiteralTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct NullLiteralTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> NullLiteralTypeAnnotation<'gc> {
+    /// Build `NullLiteralTypeAnnotation` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -3380,12 +4589,15 @@ impl<'gc> NullLiteralTypeAnnotation<'gc> {
     }
 }
 
+/// The `SymbolTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct SymbolTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> SymbolTypeAnnotation<'gc> {
+    /// Build `SymbolTypeAnnotation` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -3395,12 +4607,15 @@ impl<'gc> SymbolTypeAnnotation<'gc> {
     }
 }
 
+/// The `AnyTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct AnyTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> AnyTypeAnnotation<'gc> {
+    /// Build `AnyTypeAnnotation` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -3410,12 +4625,15 @@ impl<'gc> AnyTypeAnnotation<'gc> {
     }
 }
 
+/// The `MixedTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct MixedTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> MixedTypeAnnotation<'gc> {
+    /// Build `MixedTypeAnnotation` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -3425,12 +4643,15 @@ impl<'gc> MixedTypeAnnotation<'gc> {
     }
 }
 
+/// The `BigIntTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct BigIntTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> BigIntTypeAnnotation<'gc> {
+    /// Build `BigIntTypeAnnotation` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -3440,12 +4661,15 @@ impl<'gc> BigIntTypeAnnotation<'gc> {
     }
 }
 
+/// The `VoidTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct VoidTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> VoidTypeAnnotation<'gc> {
+    /// Build `VoidTypeAnnotation` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -3455,12 +4679,15 @@ impl<'gc> VoidTypeAnnotation<'gc> {
     }
 }
 
+/// The `NeverTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct NeverTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> NeverTypeAnnotation<'gc> {
+    /// Build `NeverTypeAnnotation` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -3470,12 +4697,15 @@ impl<'gc> NeverTypeAnnotation<'gc> {
     }
 }
 
+/// The `UnknownTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct UnknownTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> UnknownTypeAnnotation<'gc> {
+    /// Build `UnknownTypeAnnotation` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -3485,12 +4715,16 @@ impl<'gc> UnknownTypeAnnotation<'gc> {
     }
 }
 
+/// The `UndefinedTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct UndefinedTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> UndefinedTypeAnnotation<'gc> {
+    /// Build `UndefinedTypeAnnotation` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -3500,17 +4734,26 @@ impl<'gc> UndefinedTypeAnnotation<'gc> {
     }
 }
 
+/// The `FunctionTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct FunctionTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `params` property.
     pub params: NodeList<'gc>,
+    /// ESTree `this` property.
     pub this: Option<&'gc Node<'gc>>,
+    /// ESTree `returnType` property.
     pub return_type: &'gc Node<'gc>,
+    /// ESTree `rest` property.
     pub rest: Option<&'gc Node<'gc>>,
+    /// ESTree `typeParameters` property.
     pub type_parameters: Option<&'gc Node<'gc>>,
 }
 impl<'gc> FunctionTypeAnnotation<'gc> {
+    /// Build `FunctionTypeAnnotation` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         params: NodeList<'gc>,
@@ -3530,16 +4773,23 @@ impl<'gc> FunctionTypeAnnotation<'gc> {
     }
 }
 
+/// The `HookTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct HookTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `params` property.
     pub params: NodeList<'gc>,
+    /// ESTree `returnType` property.
     pub return_type: &'gc Node<'gc>,
+    /// ESTree `rest` property.
     pub rest: Option<&'gc Node<'gc>>,
+    /// ESTree `typeParameters` property.
     pub type_parameters: Option<&'gc Node<'gc>>,
 }
 impl<'gc> HookTypeAnnotation<'gc> {
+    /// Build `HookTypeAnnotation` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         params: NodeList<'gc>,
@@ -3557,15 +4807,21 @@ impl<'gc> HookTypeAnnotation<'gc> {
     }
 }
 
+/// The `FunctionTypeParam` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct FunctionTypeParam<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `name` property.
     pub name: Option<&'gc Node<'gc>>,
+    /// ESTree `typeAnnotation` property.
     pub type_annotation: &'gc Node<'gc>,
+    /// ESTree `optional` property.
     pub optional: Cell<bool>,
 }
 impl<'gc> FunctionTypeParam<'gc> {
+    /// Build `FunctionTypeParam` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         name: Option<&'gc Node<'gc>>,
@@ -3581,16 +4837,24 @@ impl<'gc> FunctionTypeParam<'gc> {
     }
 }
 
+/// The `ComponentTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ComponentTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `params` property.
     pub params: NodeList<'gc>,
+    /// ESTree `rest` property.
     pub rest: Option<&'gc Node<'gc>>,
+    /// ESTree `typeParameters` property.
     pub type_parameters: Option<&'gc Node<'gc>>,
+    /// ESTree `rendersType` property.
     pub renders_type: Option<&'gc Node<'gc>>,
 }
 impl<'gc> ComponentTypeAnnotation<'gc> {
+    /// Build `ComponentTypeAnnotation` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         params: NodeList<'gc>,
@@ -3608,15 +4872,22 @@ impl<'gc> ComponentTypeAnnotation<'gc> {
     }
 }
 
+/// The `ComponentTypeParameter` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ComponentTypeParameter<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `name` property.
     pub name: Option<&'gc Node<'gc>>,
+    /// ESTree `typeAnnotation` property.
     pub type_annotation: &'gc Node<'gc>,
+    /// ESTree `optional` property.
     pub optional: Cell<bool>,
 }
 impl<'gc> ComponentTypeParameter<'gc> {
+    /// Build `ComponentTypeParameter` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         name: Option<&'gc Node<'gc>>,
@@ -3632,13 +4903,18 @@ impl<'gc> ComponentTypeParameter<'gc> {
     }
 }
 
+/// The `NullableTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct NullableTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `typeAnnotation` property.
     pub type_annotation: &'gc Node<'gc>,
 }
 impl<'gc> NullableTypeAnnotation<'gc> {
+    /// Build `NullableTypeAnnotation` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         type_annotation: &'gc Node<'gc>,
@@ -3650,14 +4926,20 @@ impl<'gc> NullableTypeAnnotation<'gc> {
     }
 }
 
+/// The `QualifiedTypeIdentifier` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct QualifiedTypeIdentifier<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `qualification` property.
     pub qualification: &'gc Node<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
 }
 impl<'gc> QualifiedTypeIdentifier<'gc> {
+    /// Build `QualifiedTypeIdentifier` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         qualification: &'gc Node<'gc>,
@@ -3671,14 +4953,19 @@ impl<'gc> QualifiedTypeIdentifier<'gc> {
     }
 }
 
+/// The `TypeofTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TypeofTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `argument` property.
     pub argument: &'gc Node<'gc>,
+    /// ESTree `typeArguments` property.
     pub type_arguments: Option<&'gc Node<'gc>>,
 }
 impl<'gc> TypeofTypeAnnotation<'gc> {
+    /// Build `TypeofTypeAnnotation` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         argument: &'gc Node<'gc>,
@@ -3692,13 +4979,17 @@ impl<'gc> TypeofTypeAnnotation<'gc> {
     }
 }
 
+/// The `KeyofTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct KeyofTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `argument` property.
     pub argument: &'gc Node<'gc>,
 }
 impl<'gc> KeyofTypeAnnotation<'gc> {
+    /// Build `KeyofTypeAnnotation` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         argument: &'gc Node<'gc>,
@@ -3710,14 +5001,19 @@ impl<'gc> KeyofTypeAnnotation<'gc> {
     }
 }
 
+/// The `TypeOperator` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TypeOperator<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `operator` property.
     pub operator: Cell<NodeLabel>,
+    /// ESTree `typeAnnotation` property.
     pub type_annotation: &'gc Node<'gc>,
 }
 impl<'gc> TypeOperator<'gc> {
+    /// Build `TypeOperator` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         operator: NodeLabel,
@@ -3731,14 +5027,20 @@ impl<'gc> TypeOperator<'gc> {
     }
 }
 
+/// The `QualifiedTypeofIdentifier` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct QualifiedTypeofIdentifier<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `qualification` property.
     pub qualification: &'gc Node<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
 }
 impl<'gc> QualifiedTypeofIdentifier<'gc> {
+    /// Build `QualifiedTypeofIdentifier` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         qualification: &'gc Node<'gc>,
@@ -3752,14 +5054,19 @@ impl<'gc> QualifiedTypeofIdentifier<'gc> {
     }
 }
 
+/// The `TupleTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TupleTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `elementTypes` property.
     pub element_types: NodeList<'gc>,
+    /// ESTree `inexact` property.
     pub inexact: Cell<bool>,
 }
 impl<'gc> TupleTypeAnnotation<'gc> {
+    /// Build `TupleTypeAnnotation` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         element_types: NodeList<'gc>,
@@ -3773,14 +5080,20 @@ impl<'gc> TupleTypeAnnotation<'gc> {
     }
 }
 
+/// The `TupleTypeSpreadElement` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TupleTypeSpreadElement<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `label` property.
     pub label: Option<&'gc Node<'gc>>,
+    /// ESTree `typeAnnotation` property.
     pub type_annotation: &'gc Node<'gc>,
 }
 impl<'gc> TupleTypeSpreadElement<'gc> {
+    /// Build `TupleTypeSpreadElement` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         label: Option<&'gc Node<'gc>>,
@@ -3794,16 +5107,24 @@ impl<'gc> TupleTypeSpreadElement<'gc> {
     }
 }
 
+/// The `TupleTypeLabeledElement` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TupleTypeLabeledElement<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `label` property.
     pub label: &'gc Node<'gc>,
+    /// ESTree `elementType` property.
     pub element_type: &'gc Node<'gc>,
+    /// ESTree `optional` property.
     pub optional: Cell<bool>,
+    /// ESTree `variance` property.
     pub variance: Option<&'gc Node<'gc>>,
 }
 impl<'gc> TupleTypeLabeledElement<'gc> {
+    /// Build `TupleTypeLabeledElement` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         label: &'gc Node<'gc>,
@@ -3821,13 +5142,17 @@ impl<'gc> TupleTypeLabeledElement<'gc> {
     }
 }
 
+/// The `ArrayTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ArrayTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `elementType` property.
     pub element_type: &'gc Node<'gc>,
 }
 impl<'gc> ArrayTypeAnnotation<'gc> {
+    /// Build `ArrayTypeAnnotation` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         element_type: &'gc Node<'gc>,
@@ -3839,13 +5164,17 @@ impl<'gc> ArrayTypeAnnotation<'gc> {
     }
 }
 
+/// The `InferTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct InferTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `typeParameter` property.
     pub type_parameter: &'gc Node<'gc>,
 }
 impl<'gc> InferTypeAnnotation<'gc> {
+    /// Build `InferTypeAnnotation` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         type_parameter: &'gc Node<'gc>,
@@ -3857,13 +5186,17 @@ impl<'gc> InferTypeAnnotation<'gc> {
     }
 }
 
+/// The `UnionTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct UnionTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `types` property.
     pub types: NodeList<'gc>,
 }
 impl<'gc> UnionTypeAnnotation<'gc> {
+    /// Build `UnionTypeAnnotation` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         types: NodeList<'gc>,
@@ -3875,13 +5208,18 @@ impl<'gc> UnionTypeAnnotation<'gc> {
     }
 }
 
+/// The `IntersectionTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct IntersectionTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `types` property.
     pub types: NodeList<'gc>,
 }
 impl<'gc> IntersectionTypeAnnotation<'gc> {
+    /// Build `IntersectionTypeAnnotation` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         types: NodeList<'gc>,
@@ -3893,14 +5231,19 @@ impl<'gc> IntersectionTypeAnnotation<'gc> {
     }
 }
 
+/// The `GenericTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct GenericTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `typeParameters` property.
     pub type_parameters: Option<&'gc Node<'gc>>,
 }
 impl<'gc> GenericTypeAnnotation<'gc> {
+    /// Build `GenericTypeAnnotation` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -3914,14 +5257,19 @@ impl<'gc> GenericTypeAnnotation<'gc> {
     }
 }
 
+/// The `IndexedAccessType` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct IndexedAccessType<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `objectType` property.
     pub object_type: &'gc Node<'gc>,
+    /// ESTree `indexType` property.
     pub index_type: &'gc Node<'gc>,
 }
 impl<'gc> IndexedAccessType<'gc> {
+    /// Build `IndexedAccessType` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         object_type: &'gc Node<'gc>,
@@ -3935,15 +5283,22 @@ impl<'gc> IndexedAccessType<'gc> {
     }
 }
 
+/// The `OptionalIndexedAccessType` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct OptionalIndexedAccessType<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `objectType` property.
     pub object_type: &'gc Node<'gc>,
+    /// ESTree `indexType` property.
     pub index_type: &'gc Node<'gc>,
+    /// ESTree `optional` property.
     pub optional: Cell<bool>,
 }
 impl<'gc> OptionalIndexedAccessType<'gc> {
+    /// Build `OptionalIndexedAccessType` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         object_type: &'gc Node<'gc>,
@@ -3959,16 +5314,24 @@ impl<'gc> OptionalIndexedAccessType<'gc> {
     }
 }
 
+/// The `ConditionalTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ConditionalTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `checkType` property.
     pub check_type: &'gc Node<'gc>,
+    /// ESTree `extendsType` property.
     pub extends_type: &'gc Node<'gc>,
+    /// ESTree `trueType` property.
     pub true_type: &'gc Node<'gc>,
+    /// ESTree `falseType` property.
     pub false_type: &'gc Node<'gc>,
 }
 impl<'gc> ConditionalTypeAnnotation<'gc> {
+    /// Build `ConditionalTypeAnnotation` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         check_type: &'gc Node<'gc>,
@@ -3986,15 +5349,21 @@ impl<'gc> ConditionalTypeAnnotation<'gc> {
     }
 }
 
+/// The `TypePredicate` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TypePredicate<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `parameterName` property.
     pub parameter_name: &'gc Node<'gc>,
+    /// ESTree `typeAnnotation` property.
     pub type_annotation: Option<&'gc Node<'gc>>,
+    /// ESTree `kind` property.
     pub kind: Cell<NodeString>,
 }
 impl<'gc> TypePredicate<'gc> {
+    /// Build `TypePredicate` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         parameter_name: &'gc Node<'gc>,
@@ -4010,14 +5379,20 @@ impl<'gc> TypePredicate<'gc> {
     }
 }
 
+/// The `InterfaceTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct InterfaceTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `extends` property.
     pub extends: NodeList<'gc>,
+    /// ESTree `body` property.
     pub body: Option<&'gc Node<'gc>>,
 }
 impl<'gc> InterfaceTypeAnnotation<'gc> {
+    /// Build `InterfaceTypeAnnotation` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         extends: NodeList<'gc>,
@@ -4031,15 +5406,21 @@ impl<'gc> InterfaceTypeAnnotation<'gc> {
     }
 }
 
+/// The `TypeAlias` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TypeAlias<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `typeParameters` property.
     pub type_parameters: Option<&'gc Node<'gc>>,
+    /// ESTree `right` property.
     pub right: &'gc Node<'gc>,
 }
 impl<'gc> TypeAlias<'gc> {
+    /// Build `TypeAlias` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -4055,18 +5436,27 @@ impl<'gc> TypeAlias<'gc> {
     }
 }
 
+/// The `OpaqueType` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct OpaqueType<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `typeParameters` property.
     pub type_parameters: Option<&'gc Node<'gc>>,
+    /// ESTree `impltype` property.
     pub impltype: &'gc Node<'gc>,
+    /// ESTree `lowerBound` property.
     pub lower_bound: Option<&'gc Node<'gc>>,
+    /// ESTree `upperBound` property.
     pub upper_bound: Option<&'gc Node<'gc>>,
+    /// ESTree `supertype` property.
     pub supertype: Option<&'gc Node<'gc>>,
 }
 impl<'gc> OpaqueType<'gc> {
+    /// Build `OpaqueType` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -4088,16 +5478,23 @@ impl<'gc> OpaqueType<'gc> {
     }
 }
 
+/// The `InterfaceDeclaration` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct InterfaceDeclaration<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `typeParameters` property.
     pub type_parameters: Option<&'gc Node<'gc>>,
+    /// ESTree `extends` property.
     pub extends: NodeList<'gc>,
+    /// ESTree `body` property.
     pub body: &'gc Node<'gc>,
 }
 impl<'gc> InterfaceDeclaration<'gc> {
+    /// Build `InterfaceDeclaration` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -4115,15 +5512,21 @@ impl<'gc> InterfaceDeclaration<'gc> {
     }
 }
 
+/// The `DeclareTypeAlias` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct DeclareTypeAlias<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `typeParameters` property.
     pub type_parameters: Option<&'gc Node<'gc>>,
+    /// ESTree `right` property.
     pub right: &'gc Node<'gc>,
 }
 impl<'gc> DeclareTypeAlias<'gc> {
+    /// Build `DeclareTypeAlias` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -4139,18 +5542,27 @@ impl<'gc> DeclareTypeAlias<'gc> {
     }
 }
 
+/// The `DeclareOpaqueType` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct DeclareOpaqueType<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `typeParameters` property.
     pub type_parameters: Option<&'gc Node<'gc>>,
+    /// ESTree `impltype` property.
     pub impltype: Option<&'gc Node<'gc>>,
+    /// ESTree `lowerBound` property.
     pub lower_bound: Option<&'gc Node<'gc>>,
+    /// ESTree `upperBound` property.
     pub upper_bound: Option<&'gc Node<'gc>>,
+    /// ESTree `supertype` property.
     pub supertype: Option<&'gc Node<'gc>>,
 }
 impl<'gc> DeclareOpaqueType<'gc> {
+    /// Build `DeclareOpaqueType` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -4172,16 +5584,23 @@ impl<'gc> DeclareOpaqueType<'gc> {
     }
 }
 
+/// The `DeclareInterface` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct DeclareInterface<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `typeParameters` property.
     pub type_parameters: Option<&'gc Node<'gc>>,
+    /// ESTree `extends` property.
     pub extends: NodeList<'gc>,
+    /// ESTree `body` property.
     pub body: &'gc Node<'gc>,
 }
 impl<'gc> DeclareInterface<'gc> {
+    /// Build `DeclareInterface` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -4199,18 +5618,27 @@ impl<'gc> DeclareInterface<'gc> {
     }
 }
 
+/// The `DeclareClass` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct DeclareClass<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `typeParameters` property.
     pub type_parameters: Option<&'gc Node<'gc>>,
+    /// ESTree `extends` property.
     pub extends: NodeList<'gc>,
+    /// ESTree `implements` property.
     pub implements: NodeList<'gc>,
+    /// ESTree `mixins` property.
     pub mixins: NodeList<'gc>,
+    /// ESTree `body` property.
     pub body: &'gc Node<'gc>,
 }
 impl<'gc> DeclareClass<'gc> {
+    /// Build `DeclareClass` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -4232,14 +5660,19 @@ impl<'gc> DeclareClass<'gc> {
     }
 }
 
+/// The `DeclareFunction` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct DeclareFunction<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `predicate` property.
     pub predicate: Option<&'gc Node<'gc>>,
 }
 impl<'gc> DeclareFunction<'gc> {
+    /// Build `DeclareFunction` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -4253,13 +5686,17 @@ impl<'gc> DeclareFunction<'gc> {
     }
 }
 
+/// The `DeclareHook` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct DeclareHook<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
 }
 impl<'gc> DeclareHook<'gc> {
+    /// Build `DeclareHook` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -4271,17 +5708,25 @@ impl<'gc> DeclareHook<'gc> {
     }
 }
 
+/// The `DeclareComponent` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct DeclareComponent<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `params` property.
     pub params: NodeList<'gc>,
+    /// ESTree `rest` property.
     pub rest: Option<&'gc Node<'gc>>,
+    /// ESTree `typeParameters` property.
     pub type_parameters: Option<&'gc Node<'gc>>,
+    /// ESTree `rendersType` property.
     pub renders_type: Option<&'gc Node<'gc>>,
 }
 impl<'gc> DeclareComponent<'gc> {
+    /// Build `DeclareComponent` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -4301,14 +5746,19 @@ impl<'gc> DeclareComponent<'gc> {
     }
 }
 
+/// The `DeclareVariable` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct DeclareVariable<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `kind` property.
     pub kind: Cell<NodeLabel>,
 }
 impl<'gc> DeclareVariable<'gc> {
+    /// Build `DeclareVariable` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -4322,14 +5772,19 @@ impl<'gc> DeclareVariable<'gc> {
     }
 }
 
+/// The `DeclareEnum` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct DeclareEnum<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `body` property.
     pub body: &'gc Node<'gc>,
 }
 impl<'gc> DeclareEnum<'gc> {
+    /// Build `DeclareEnum` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -4343,16 +5798,24 @@ impl<'gc> DeclareEnum<'gc> {
     }
 }
 
+/// The `DeclareExportDeclaration` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct DeclareExportDeclaration<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `declaration` property.
     pub declaration: Option<&'gc Node<'gc>>,
+    /// ESTree `specifiers` property.
     pub specifiers: NodeList<'gc>,
+    /// ESTree `source` property.
     pub source: Option<&'gc Node<'gc>>,
+    /// ESTree `default` property.
     pub default: Cell<bool>,
 }
 impl<'gc> DeclareExportDeclaration<'gc> {
+    /// Build `DeclareExportDeclaration` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         declaration: Option<&'gc Node<'gc>>,
@@ -4370,13 +5833,18 @@ impl<'gc> DeclareExportDeclaration<'gc> {
     }
 }
 
+/// The `DeclareExportAllDeclaration` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct DeclareExportAllDeclaration<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `source` property.
     pub source: &'gc Node<'gc>,
 }
 impl<'gc> DeclareExportAllDeclaration<'gc> {
+    /// Build `DeclareExportAllDeclaration` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         source: &'gc Node<'gc>,
@@ -4388,14 +5856,19 @@ impl<'gc> DeclareExportAllDeclaration<'gc> {
     }
 }
 
+/// The `DeclareModule` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct DeclareModule<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `body` property.
     pub body: &'gc Node<'gc>,
 }
 impl<'gc> DeclareModule<'gc> {
+    /// Build `DeclareModule` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -4409,14 +5882,19 @@ impl<'gc> DeclareModule<'gc> {
     }
 }
 
+/// The `DeclareNamespace` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct DeclareNamespace<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `body` property.
     pub body: &'gc Node<'gc>,
 }
 impl<'gc> DeclareNamespace<'gc> {
+    /// Build `DeclareNamespace` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -4430,13 +5908,17 @@ impl<'gc> DeclareNamespace<'gc> {
     }
 }
 
+/// The `DeclareModuleExports` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct DeclareModuleExports<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `typeAnnotation` property.
     pub type_annotation: &'gc Node<'gc>,
 }
 impl<'gc> DeclareModuleExports<'gc> {
+    /// Build `DeclareModuleExports` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         type_annotation: &'gc Node<'gc>,
@@ -4448,14 +5930,19 @@ impl<'gc> DeclareModuleExports<'gc> {
     }
 }
 
+/// The `InterfaceExtends` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct InterfaceExtends<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `typeParameters` property.
     pub type_parameters: Option<&'gc Node<'gc>>,
 }
 impl<'gc> InterfaceExtends<'gc> {
+    /// Build `InterfaceExtends` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -4469,14 +5956,19 @@ impl<'gc> InterfaceExtends<'gc> {
     }
 }
 
+/// The `ClassImplements` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ClassImplements<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `typeParameters` property.
     pub type_parameters: Option<&'gc Node<'gc>>,
 }
 impl<'gc> ClassImplements<'gc> {
+    /// Build `ClassImplements` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -4490,13 +5982,17 @@ impl<'gc> ClassImplements<'gc> {
     }
 }
 
+/// The `TypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `typeAnnotation` property.
     pub type_annotation: &'gc Node<'gc>,
 }
 impl<'gc> TypeAnnotation<'gc> {
+    /// Build `TypeAnnotation` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         type_annotation: &'gc Node<'gc>,
@@ -4508,18 +6004,27 @@ impl<'gc> TypeAnnotation<'gc> {
     }
 }
 
+/// The `ObjectTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ObjectTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `properties` property.
     pub properties: NodeList<'gc>,
+    /// ESTree `indexers` property.
     pub indexers: NodeList<'gc>,
+    /// ESTree `callProperties` property.
     pub call_properties: NodeList<'gc>,
+    /// ESTree `internalSlots` property.
     pub internal_slots: NodeList<'gc>,
+    /// ESTree `inexact` property.
     pub inexact: Cell<bool>,
+    /// ESTree `exact` property.
     pub exact: Cell<bool>,
 }
 impl<'gc> ObjectTypeAnnotation<'gc> {
+    /// Build `ObjectTypeAnnotation` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         properties: NodeList<'gc>,
@@ -4541,20 +6046,31 @@ impl<'gc> ObjectTypeAnnotation<'gc> {
     }
 }
 
+/// The `ObjectTypeProperty` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ObjectTypeProperty<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `key` property.
     pub key: &'gc Node<'gc>,
+    /// ESTree `value` property.
     pub value: &'gc Node<'gc>,
+    /// ESTree `method` property.
     pub method: Cell<bool>,
+    /// ESTree `optional` property.
     pub optional: Cell<bool>,
+    /// ESTree `static` property.
     pub r#static: Cell<bool>,
+    /// ESTree `proto` property.
     pub proto: Cell<bool>,
+    /// ESTree `variance` property.
     pub variance: Option<&'gc Node<'gc>>,
+    /// ESTree `kind` property.
     pub kind: Cell<NodeLabel>,
 }
 impl<'gc> ObjectTypeProperty<'gc> {
+    /// Build `ObjectTypeProperty` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         key: &'gc Node<'gc>,
@@ -4580,13 +6096,18 @@ impl<'gc> ObjectTypeProperty<'gc> {
     }
 }
 
+/// The `ObjectTypeSpreadProperty` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ObjectTypeSpreadProperty<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `argument` property.
     pub argument: &'gc Node<'gc>,
 }
 impl<'gc> ObjectTypeSpreadProperty<'gc> {
+    /// Build `ObjectTypeSpreadProperty` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         argument: &'gc Node<'gc>,
@@ -4598,17 +6119,26 @@ impl<'gc> ObjectTypeSpreadProperty<'gc> {
     }
 }
 
+/// The `ObjectTypeInternalSlot` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ObjectTypeInternalSlot<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `value` property.
     pub value: &'gc Node<'gc>,
+    /// ESTree `optional` property.
     pub optional: Cell<bool>,
+    /// ESTree `static` property.
     pub r#static: Cell<bool>,
+    /// ESTree `method` property.
     pub method: Cell<bool>,
 }
 impl<'gc> ObjectTypeInternalSlot<'gc> {
+    /// Build `ObjectTypeInternalSlot` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -4628,14 +6158,20 @@ impl<'gc> ObjectTypeInternalSlot<'gc> {
     }
 }
 
+/// The `ObjectTypeCallProperty` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ObjectTypeCallProperty<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `value` property.
     pub value: &'gc Node<'gc>,
+    /// ESTree `static` property.
     pub r#static: Cell<bool>,
 }
 impl<'gc> ObjectTypeCallProperty<'gc> {
+    /// Build `ObjectTypeCallProperty` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         value: &'gc Node<'gc>,
@@ -4649,17 +6185,25 @@ impl<'gc> ObjectTypeCallProperty<'gc> {
     }
 }
 
+/// The `ObjectTypeIndexer` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ObjectTypeIndexer<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: Option<&'gc Node<'gc>>,
+    /// ESTree `key` property.
     pub key: &'gc Node<'gc>,
+    /// ESTree `value` property.
     pub value: &'gc Node<'gc>,
+    /// ESTree `static` property.
     pub r#static: Cell<bool>,
+    /// ESTree `variance` property.
     pub variance: Option<&'gc Node<'gc>>,
 }
 impl<'gc> ObjectTypeIndexer<'gc> {
+    /// Build `ObjectTypeIndexer` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: Option<&'gc Node<'gc>>,
@@ -4679,17 +6223,26 @@ impl<'gc> ObjectTypeIndexer<'gc> {
     }
 }
 
+/// The `ObjectTypeMappedTypeProperty` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ObjectTypeMappedTypeProperty<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `keyTparam` property.
     pub key_tparam: &'gc Node<'gc>,
+    /// ESTree `propType` property.
     pub prop_type: &'gc Node<'gc>,
+    /// ESTree `sourceType` property.
     pub source_type: &'gc Node<'gc>,
+    /// ESTree `variance` property.
     pub variance: Option<&'gc Node<'gc>>,
+    /// ESTree `optional` property.
     pub optional: Cell<NodeString>,
 }
 impl<'gc> ObjectTypeMappedTypeProperty<'gc> {
+    /// Build `ObjectTypeMappedTypeProperty` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         key_tparam: &'gc Node<'gc>,
@@ -4709,13 +6262,17 @@ impl<'gc> ObjectTypeMappedTypeProperty<'gc> {
     }
 }
 
+/// The `Variance` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct Variance<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `kind` property.
     pub kind: Cell<NodeLabel>,
 }
 impl<'gc> Variance<'gc> {
+    /// Build `Variance` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         kind: NodeLabel,
@@ -4727,13 +6284,18 @@ impl<'gc> Variance<'gc> {
     }
 }
 
+/// The `TypeParameterDeclaration` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TypeParameterDeclaration<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `params` property.
     pub params: NodeList<'gc>,
 }
 impl<'gc> TypeParameterDeclaration<'gc> {
+    /// Build `TypeParameterDeclaration` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         params: NodeList<'gc>,
@@ -4745,18 +6307,27 @@ impl<'gc> TypeParameterDeclaration<'gc> {
     }
 }
 
+/// The `TypeParameter` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TypeParameter<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `name` property.
     pub name: Cell<NodeLabel>,
+    /// ESTree `const` property.
     pub r#const: Cell<bool>,
+    /// ESTree `bound` property.
     pub bound: Option<&'gc Node<'gc>>,
+    /// ESTree `variance` property.
     pub variance: Option<&'gc Node<'gc>>,
+    /// ESTree `default` property.
     pub default: Option<&'gc Node<'gc>>,
+    /// ESTree `usesExtendsBound` property.
     pub uses_extends_bound: Cell<bool>,
 }
 impl<'gc> TypeParameter<'gc> {
+    /// Build `TypeParameter` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         name: NodeLabel,
@@ -4778,13 +6349,18 @@ impl<'gc> TypeParameter<'gc> {
     }
 }
 
+/// The `TypeParameterInstantiation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TypeParameterInstantiation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `params` property.
     pub params: NodeList<'gc>,
 }
 impl<'gc> TypeParameterInstantiation<'gc> {
+    /// Build `TypeParameterInstantiation` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         params: NodeList<'gc>,
@@ -4796,14 +6372,19 @@ impl<'gc> TypeParameterInstantiation<'gc> {
     }
 }
 
+/// The `TypeCastExpression` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TypeCastExpression<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `expression` property.
     pub expression: &'gc Node<'gc>,
+    /// ESTree `typeAnnotation` property.
     pub type_annotation: &'gc Node<'gc>,
 }
 impl<'gc> TypeCastExpression<'gc> {
+    /// Build `TypeCastExpression` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         expression: &'gc Node<'gc>,
@@ -4817,14 +6398,19 @@ impl<'gc> TypeCastExpression<'gc> {
     }
 }
 
+/// The `AsExpression` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct AsExpression<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `expression` property.
     pub expression: &'gc Node<'gc>,
+    /// ESTree `typeAnnotation` property.
     pub type_annotation: &'gc Node<'gc>,
 }
 impl<'gc> AsExpression<'gc> {
+    /// Build `AsExpression` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         expression: &'gc Node<'gc>,
@@ -4838,13 +6424,17 @@ impl<'gc> AsExpression<'gc> {
     }
 }
 
+/// The `AsConstExpression` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct AsConstExpression<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `expression` property.
     pub expression: &'gc Node<'gc>,
 }
 impl<'gc> AsConstExpression<'gc> {
+    /// Build `AsConstExpression` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         expression: &'gc Node<'gc>,
@@ -4856,12 +6446,15 @@ impl<'gc> AsConstExpression<'gc> {
     }
 }
 
+/// The `InferredPredicate` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct InferredPredicate<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> InferredPredicate<'gc> {
+    /// Build `InferredPredicate` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -4871,13 +6464,17 @@ impl<'gc> InferredPredicate<'gc> {
     }
 }
 
+/// The `DeclaredPredicate` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct DeclaredPredicate<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `value` property.
     pub value: &'gc Node<'gc>,
 }
 impl<'gc> DeclaredPredicate<'gc> {
+    /// Build `DeclaredPredicate` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         value: &'gc Node<'gc>,
@@ -4889,14 +6486,19 @@ impl<'gc> DeclaredPredicate<'gc> {
     }
 }
 
+/// The `EnumDeclaration` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct EnumDeclaration<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `body` property.
     pub body: &'gc Node<'gc>,
 }
 impl<'gc> EnumDeclaration<'gc> {
+    /// Build `EnumDeclaration` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -4910,15 +6512,21 @@ impl<'gc> EnumDeclaration<'gc> {
     }
 }
 
+/// The `EnumStringBody` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct EnumStringBody<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `members` property.
     pub members: NodeList<'gc>,
+    /// ESTree `explicitType` property.
     pub explicit_type: Cell<bool>,
+    /// ESTree `hasUnknownMembers` property.
     pub has_unknown_members: Cell<bool>,
 }
 impl<'gc> EnumStringBody<'gc> {
+    /// Build `EnumStringBody` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         members: NodeList<'gc>,
@@ -4934,15 +6542,21 @@ impl<'gc> EnumStringBody<'gc> {
     }
 }
 
+/// The `EnumNumberBody` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct EnumNumberBody<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `members` property.
     pub members: NodeList<'gc>,
+    /// ESTree `explicitType` property.
     pub explicit_type: Cell<bool>,
+    /// ESTree `hasUnknownMembers` property.
     pub has_unknown_members: Cell<bool>,
 }
 impl<'gc> EnumNumberBody<'gc> {
+    /// Build `EnumNumberBody` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         members: NodeList<'gc>,
@@ -4958,15 +6572,21 @@ impl<'gc> EnumNumberBody<'gc> {
     }
 }
 
+/// The `EnumBigIntBody` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct EnumBigIntBody<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `members` property.
     pub members: NodeList<'gc>,
+    /// ESTree `explicitType` property.
     pub explicit_type: Cell<bool>,
+    /// ESTree `hasUnknownMembers` property.
     pub has_unknown_members: Cell<bool>,
 }
 impl<'gc> EnumBigIntBody<'gc> {
+    /// Build `EnumBigIntBody` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         members: NodeList<'gc>,
@@ -4982,15 +6602,21 @@ impl<'gc> EnumBigIntBody<'gc> {
     }
 }
 
+/// The `EnumBooleanBody` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct EnumBooleanBody<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `members` property.
     pub members: NodeList<'gc>,
+    /// ESTree `explicitType` property.
     pub explicit_type: Cell<bool>,
+    /// ESTree `hasUnknownMembers` property.
     pub has_unknown_members: Cell<bool>,
 }
 impl<'gc> EnumBooleanBody<'gc> {
+    /// Build `EnumBooleanBody` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         members: NodeList<'gc>,
@@ -5006,14 +6632,19 @@ impl<'gc> EnumBooleanBody<'gc> {
     }
 }
 
+/// The `EnumSymbolBody` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct EnumSymbolBody<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `members` property.
     pub members: NodeList<'gc>,
+    /// ESTree `hasUnknownMembers` property.
     pub has_unknown_members: Cell<bool>,
 }
 impl<'gc> EnumSymbolBody<'gc> {
+    /// Build `EnumSymbolBody` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         members: NodeList<'gc>,
@@ -5027,13 +6658,17 @@ impl<'gc> EnumSymbolBody<'gc> {
     }
 }
 
+/// The `EnumDefaultedMember` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct EnumDefaultedMember<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
 }
 impl<'gc> EnumDefaultedMember<'gc> {
+    /// Build `EnumDefaultedMember` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -5045,14 +6680,19 @@ impl<'gc> EnumDefaultedMember<'gc> {
     }
 }
 
+/// The `EnumStringMember` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct EnumStringMember<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `init` property.
     pub init: &'gc Node<'gc>,
 }
 impl<'gc> EnumStringMember<'gc> {
+    /// Build `EnumStringMember` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -5066,14 +6706,19 @@ impl<'gc> EnumStringMember<'gc> {
     }
 }
 
+/// The `EnumNumberMember` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct EnumNumberMember<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `init` property.
     pub init: &'gc Node<'gc>,
 }
 impl<'gc> EnumNumberMember<'gc> {
+    /// Build `EnumNumberMember` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -5087,14 +6732,19 @@ impl<'gc> EnumNumberMember<'gc> {
     }
 }
 
+/// The `EnumBigIntMember` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct EnumBigIntMember<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `init` property.
     pub init: &'gc Node<'gc>,
 }
 impl<'gc> EnumBigIntMember<'gc> {
+    /// Build `EnumBigIntMember` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -5108,14 +6758,19 @@ impl<'gc> EnumBigIntMember<'gc> {
     }
 }
 
+/// The `EnumBooleanMember` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct EnumBooleanMember<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `init` property.
     pub init: &'gc Node<'gc>,
 }
 impl<'gc> EnumBooleanMember<'gc> {
+    /// Build `EnumBooleanMember` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -5129,15 +6784,21 @@ impl<'gc> EnumBooleanMember<'gc> {
     }
 }
 
+/// The `ComponentParameter` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ComponentParameter<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `name` property.
     pub name: &'gc Node<'gc>,
+    /// ESTree `local` property.
     pub local: &'gc Node<'gc>,
+    /// ESTree `shorthand` property.
     pub shorthand: Cell<bool>,
 }
 impl<'gc> ComponentParameter<'gc> {
+    /// Build `ComponentParameter` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         name: &'gc Node<'gc>,
@@ -5153,16 +6814,23 @@ impl<'gc> ComponentParameter<'gc> {
     }
 }
 
+/// The `RecordDeclaration` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct RecordDeclaration<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `typeParameters` property.
     pub type_parameters: Option<&'gc Node<'gc>>,
+    /// ESTree `implements` property.
     pub implements: NodeList<'gc>,
+    /// ESTree `body` property.
     pub body: &'gc Node<'gc>,
 }
 impl<'gc> RecordDeclaration<'gc> {
+    /// Build `RecordDeclaration` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -5180,14 +6848,20 @@ impl<'gc> RecordDeclaration<'gc> {
     }
 }
 
+/// The `RecordDeclarationImplements` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct RecordDeclarationImplements<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `typeArguments` property.
     pub type_arguments: Option<&'gc Node<'gc>>,
 }
 impl<'gc> RecordDeclarationImplements<'gc> {
+    /// Build `RecordDeclarationImplements` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -5201,13 +6875,17 @@ impl<'gc> RecordDeclarationImplements<'gc> {
     }
 }
 
+/// The `RecordDeclarationBody` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct RecordDeclarationBody<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `elements` property.
     pub elements: NodeList<'gc>,
 }
 impl<'gc> RecordDeclarationBody<'gc> {
+    /// Build `RecordDeclarationBody` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         elements: NodeList<'gc>,
@@ -5219,15 +6897,22 @@ impl<'gc> RecordDeclarationBody<'gc> {
     }
 }
 
+/// The `RecordDeclarationProperty` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct RecordDeclarationProperty<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `key` property.
     pub key: &'gc Node<'gc>,
+    /// ESTree `typeAnnotation` property.
     pub type_annotation: &'gc Node<'gc>,
+    /// ESTree `defaultValue` property.
     pub default_value: Option<&'gc Node<'gc>>,
 }
 impl<'gc> RecordDeclarationProperty<'gc> {
+    /// Build `RecordDeclarationProperty` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         key: &'gc Node<'gc>,
@@ -5243,15 +6928,22 @@ impl<'gc> RecordDeclarationProperty<'gc> {
     }
 }
 
+/// The `RecordDeclarationStaticProperty` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct RecordDeclarationStaticProperty<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `key` property.
     pub key: &'gc Node<'gc>,
+    /// ESTree `typeAnnotation` property.
     pub type_annotation: &'gc Node<'gc>,
+    /// ESTree `value` property.
     pub value: &'gc Node<'gc>,
 }
 impl<'gc> RecordDeclarationStaticProperty<'gc> {
+    /// Build `RecordDeclarationStaticProperty` from its metadata and
+    /// `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         key: &'gc Node<'gc>,
@@ -5267,15 +6959,21 @@ impl<'gc> RecordDeclarationStaticProperty<'gc> {
     }
 }
 
+/// The `RecordExpression` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct RecordExpression<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `recordConstructor` property.
     pub record_constructor: &'gc Node<'gc>,
+    /// ESTree `typeArguments` property.
     pub type_arguments: Option<&'gc Node<'gc>>,
+    /// ESTree `properties` property.
     pub properties: &'gc Node<'gc>,
 }
 impl<'gc> RecordExpression<'gc> {
+    /// Build `RecordExpression` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         record_constructor: &'gc Node<'gc>,
@@ -5291,13 +6989,18 @@ impl<'gc> RecordExpression<'gc> {
     }
 }
 
+/// The `RecordExpressionProperties` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct RecordExpressionProperties<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `properties` property.
     pub properties: NodeList<'gc>,
 }
 impl<'gc> RecordExpressionProperties<'gc> {
+    /// Build `RecordExpressionProperties` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         properties: NodeList<'gc>,
@@ -5309,13 +7012,17 @@ impl<'gc> RecordExpressionProperties<'gc> {
     }
 }
 
+/// The `TSTypeAnnotation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSTypeAnnotation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `typeAnnotation` property.
     pub type_annotation: &'gc Node<'gc>,
 }
 impl<'gc> TSTypeAnnotation<'gc> {
+    /// Build `TSTypeAnnotation` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         type_annotation: &'gc Node<'gc>,
@@ -5327,12 +7034,15 @@ impl<'gc> TSTypeAnnotation<'gc> {
     }
 }
 
+/// The `TSAnyKeyword` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSAnyKeyword<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> TSAnyKeyword<'gc> {
+    /// Build `TSAnyKeyword` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -5342,12 +7052,15 @@ impl<'gc> TSAnyKeyword<'gc> {
     }
 }
 
+/// The `TSNumberKeyword` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSNumberKeyword<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> TSNumberKeyword<'gc> {
+    /// Build `TSNumberKeyword` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -5357,12 +7070,15 @@ impl<'gc> TSNumberKeyword<'gc> {
     }
 }
 
+/// The `TSBooleanKeyword` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSBooleanKeyword<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> TSBooleanKeyword<'gc> {
+    /// Build `TSBooleanKeyword` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -5372,12 +7088,15 @@ impl<'gc> TSBooleanKeyword<'gc> {
     }
 }
 
+/// The `TSStringKeyword` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSStringKeyword<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> TSStringKeyword<'gc> {
+    /// Build `TSStringKeyword` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -5387,12 +7106,15 @@ impl<'gc> TSStringKeyword<'gc> {
     }
 }
 
+/// The `TSSymbolKeyword` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSSymbolKeyword<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> TSSymbolKeyword<'gc> {
+    /// Build `TSSymbolKeyword` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -5402,12 +7124,15 @@ impl<'gc> TSSymbolKeyword<'gc> {
     }
 }
 
+/// The `TSVoidKeyword` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSVoidKeyword<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> TSVoidKeyword<'gc> {
+    /// Build `TSVoidKeyword` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -5417,12 +7142,15 @@ impl<'gc> TSVoidKeyword<'gc> {
     }
 }
 
+/// The `TSUndefinedKeyword` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSUndefinedKeyword<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> TSUndefinedKeyword<'gc> {
+    /// Build `TSUndefinedKeyword` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -5432,12 +7160,15 @@ impl<'gc> TSUndefinedKeyword<'gc> {
     }
 }
 
+/// The `TSUnknownKeyword` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSUnknownKeyword<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> TSUnknownKeyword<'gc> {
+    /// Build `TSUnknownKeyword` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -5447,12 +7178,15 @@ impl<'gc> TSUnknownKeyword<'gc> {
     }
 }
 
+/// The `TSNeverKeyword` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSNeverKeyword<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> TSNeverKeyword<'gc> {
+    /// Build `TSNeverKeyword` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -5462,12 +7196,15 @@ impl<'gc> TSNeverKeyword<'gc> {
     }
 }
 
+/// The `TSBigIntKeyword` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSBigIntKeyword<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> TSBigIntKeyword<'gc> {
+    /// Build `TSBigIntKeyword` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -5477,12 +7214,15 @@ impl<'gc> TSBigIntKeyword<'gc> {
     }
 }
 
+/// The `TSThisType` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSThisType<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> TSThisType<'gc> {
+    /// Build `TSThisType` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -5492,13 +7232,17 @@ impl<'gc> TSThisType<'gc> {
     }
 }
 
+/// The `TSLiteralType` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSLiteralType<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `literal` property.
     pub literal: &'gc Node<'gc>,
 }
 impl<'gc> TSLiteralType<'gc> {
+    /// Build `TSLiteralType` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         literal: &'gc Node<'gc>,
@@ -5510,14 +7254,19 @@ impl<'gc> TSLiteralType<'gc> {
     }
 }
 
+/// The `TSIndexedAccessType` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSIndexedAccessType<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `objectType` property.
     pub object_type: &'gc Node<'gc>,
+    /// ESTree `indexType` property.
     pub index_type: &'gc Node<'gc>,
 }
 impl<'gc> TSIndexedAccessType<'gc> {
+    /// Build `TSIndexedAccessType` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         object_type: &'gc Node<'gc>,
@@ -5531,13 +7280,17 @@ impl<'gc> TSIndexedAccessType<'gc> {
     }
 }
 
+/// The `TSArrayType` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSArrayType<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `elementType` property.
     pub element_type: &'gc Node<'gc>,
 }
 impl<'gc> TSArrayType<'gc> {
+    /// Build `TSArrayType` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         element_type: &'gc Node<'gc>,
@@ -5549,14 +7302,19 @@ impl<'gc> TSArrayType<'gc> {
     }
 }
 
+/// The `TSTypeReference` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSTypeReference<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `typeName` property.
     pub type_name: &'gc Node<'gc>,
+    /// ESTree `typeParameters` property.
     pub type_parameters: Option<&'gc Node<'gc>>,
 }
 impl<'gc> TSTypeReference<'gc> {
+    /// Build `TSTypeReference` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         type_name: &'gc Node<'gc>,
@@ -5570,14 +7328,19 @@ impl<'gc> TSTypeReference<'gc> {
     }
 }
 
+/// The `TSQualifiedName` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSQualifiedName<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `left` property.
     pub left: &'gc Node<'gc>,
+    /// ESTree `right` property.
     pub right: Option<&'gc Node<'gc>>,
 }
 impl<'gc> TSQualifiedName<'gc> {
+    /// Build `TSQualifiedName` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         left: &'gc Node<'gc>,
@@ -5591,15 +7354,21 @@ impl<'gc> TSQualifiedName<'gc> {
     }
 }
 
+/// The `TSFunctionType` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSFunctionType<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `params` property.
     pub params: NodeList<'gc>,
+    /// ESTree `returnType` property.
     pub return_type: &'gc Node<'gc>,
+    /// ESTree `typeParameters` property.
     pub type_parameters: Option<&'gc Node<'gc>>,
 }
 impl<'gc> TSFunctionType<'gc> {
+    /// Build `TSFunctionType` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         params: NodeList<'gc>,
@@ -5615,15 +7384,21 @@ impl<'gc> TSFunctionType<'gc> {
     }
 }
 
+/// The `TSConstructorType` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSConstructorType<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `params` property.
     pub params: NodeList<'gc>,
+    /// ESTree `returnType` property.
     pub return_type: &'gc Node<'gc>,
+    /// ESTree `typeParameters` property.
     pub type_parameters: Option<&'gc Node<'gc>>,
 }
 impl<'gc> TSConstructorType<'gc> {
+    /// Build `TSConstructorType` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         params: NodeList<'gc>,
@@ -5639,14 +7414,19 @@ impl<'gc> TSConstructorType<'gc> {
     }
 }
 
+/// The `TSTypePredicate` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSTypePredicate<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `parameterName` property.
     pub parameter_name: &'gc Node<'gc>,
+    /// ESTree `typeAnnotation` property.
     pub type_annotation: &'gc Node<'gc>,
 }
 impl<'gc> TSTypePredicate<'gc> {
+    /// Build `TSTypePredicate` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         parameter_name: &'gc Node<'gc>,
@@ -5660,13 +7440,17 @@ impl<'gc> TSTypePredicate<'gc> {
     }
 }
 
+/// The `TSTupleType` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSTupleType<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `elementTypes` property.
     pub element_types: NodeList<'gc>,
 }
 impl<'gc> TSTupleType<'gc> {
+    /// Build `TSTupleType` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         element_types: NodeList<'gc>,
@@ -5678,14 +7462,19 @@ impl<'gc> TSTupleType<'gc> {
     }
 }
 
+/// The `TSTypeAssertion` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSTypeAssertion<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `typeAnnotation` property.
     pub type_annotation: &'gc Node<'gc>,
+    /// ESTree `expression` property.
     pub expression: &'gc Node<'gc>,
 }
 impl<'gc> TSTypeAssertion<'gc> {
+    /// Build `TSTypeAssertion` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         type_annotation: &'gc Node<'gc>,
@@ -5699,14 +7488,19 @@ impl<'gc> TSTypeAssertion<'gc> {
     }
 }
 
+/// The `TSAsExpression` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSAsExpression<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `expression` property.
     pub expression: &'gc Node<'gc>,
+    /// ESTree `typeAnnotation` property.
     pub type_annotation: &'gc Node<'gc>,
 }
 impl<'gc> TSAsExpression<'gc> {
+    /// Build `TSAsExpression` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         expression: &'gc Node<'gc>,
@@ -5720,17 +7514,25 @@ impl<'gc> TSAsExpression<'gc> {
     }
 }
 
+/// The `TSParameterProperty` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSParameterProperty<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `parameter` property.
     pub parameter: &'gc Node<'gc>,
+    /// ESTree `accessibility` property.
     pub accessibility: Cell<NodeLabel>,
+    /// ESTree `readonly` property.
     pub readonly: Cell<bool>,
+    /// ESTree `static` property.
     pub r#static: Cell<bool>,
+    /// ESTree `export` property.
     pub export: Cell<bool>,
 }
 impl<'gc> TSParameterProperty<'gc> {
+    /// Build `TSParameterProperty` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         parameter: &'gc Node<'gc>,
@@ -5750,15 +7552,22 @@ impl<'gc> TSParameterProperty<'gc> {
     }
 }
 
+/// The `TSTypeAliasDeclaration` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSTypeAliasDeclaration<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `typeParameters` property.
     pub type_parameters: Option<&'gc Node<'gc>>,
+    /// ESTree `typeAnnotation` property.
     pub type_annotation: &'gc Node<'gc>,
 }
 impl<'gc> TSTypeAliasDeclaration<'gc> {
+    /// Build `TSTypeAliasDeclaration` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -5774,16 +7583,24 @@ impl<'gc> TSTypeAliasDeclaration<'gc> {
     }
 }
 
+/// The `TSInterfaceDeclaration` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSInterfaceDeclaration<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `body` property.
     pub body: &'gc Node<'gc>,
+    /// ESTree `extends` property.
     pub extends: NodeList<'gc>,
+    /// ESTree `typeParameters` property.
     pub type_parameters: Option<&'gc Node<'gc>>,
 }
 impl<'gc> TSInterfaceDeclaration<'gc> {
+    /// Build `TSInterfaceDeclaration` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -5801,14 +7618,19 @@ impl<'gc> TSInterfaceDeclaration<'gc> {
     }
 }
 
+/// The `TSInterfaceHeritage` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSInterfaceHeritage<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `expression` property.
     pub expression: &'gc Node<'gc>,
+    /// ESTree `typeParameters` property.
     pub type_parameters: Option<&'gc Node<'gc>>,
 }
 impl<'gc> TSInterfaceHeritage<'gc> {
+    /// Build `TSInterfaceHeritage` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         expression: &'gc Node<'gc>,
@@ -5822,13 +7644,17 @@ impl<'gc> TSInterfaceHeritage<'gc> {
     }
 }
 
+/// The `TSInterfaceBody` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSInterfaceBody<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `body` property.
     pub body: NodeList<'gc>,
 }
 impl<'gc> TSInterfaceBody<'gc> {
+    /// Build `TSInterfaceBody` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         body: NodeList<'gc>,
@@ -5840,14 +7666,19 @@ impl<'gc> TSInterfaceBody<'gc> {
     }
 }
 
+/// The `TSEnumDeclaration` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSEnumDeclaration<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `members` property.
     pub members: NodeList<'gc>,
 }
 impl<'gc> TSEnumDeclaration<'gc> {
+    /// Build `TSEnumDeclaration` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -5861,14 +7692,19 @@ impl<'gc> TSEnumDeclaration<'gc> {
     }
 }
 
+/// The `TSEnumMember` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSEnumMember<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `initializer` property.
     pub initializer: Option<&'gc Node<'gc>>,
 }
 impl<'gc> TSEnumMember<'gc> {
+    /// Build `TSEnumMember` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -5882,14 +7718,19 @@ impl<'gc> TSEnumMember<'gc> {
     }
 }
 
+/// The `TSModuleDeclaration` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSModuleDeclaration<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `body` property.
     pub body: &'gc Node<'gc>,
 }
 impl<'gc> TSModuleDeclaration<'gc> {
+    /// Build `TSModuleDeclaration` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -5903,13 +7744,17 @@ impl<'gc> TSModuleDeclaration<'gc> {
     }
 }
 
+/// The `TSModuleBlock` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSModuleBlock<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `body` property.
     pub body: NodeList<'gc>,
 }
 impl<'gc> TSModuleBlock<'gc> {
+    /// Build `TSModuleBlock` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         body: NodeList<'gc>,
@@ -5921,14 +7766,19 @@ impl<'gc> TSModuleBlock<'gc> {
     }
 }
 
+/// The `TSModuleMember` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSModuleMember<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `id` property.
     pub id: &'gc Node<'gc>,
+    /// ESTree `initializer` property.
     pub initializer: Option<&'gc Node<'gc>>,
 }
 impl<'gc> TSModuleMember<'gc> {
+    /// Build `TSModuleMember` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         id: &'gc Node<'gc>,
@@ -5942,13 +7792,18 @@ impl<'gc> TSModuleMember<'gc> {
     }
 }
 
+/// The `TSTypeParameterDeclaration` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSTypeParameterDeclaration<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `params` property.
     pub params: NodeList<'gc>,
 }
 impl<'gc> TSTypeParameterDeclaration<'gc> {
+    /// Build `TSTypeParameterDeclaration` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         params: NodeList<'gc>,
@@ -5960,15 +7815,21 @@ impl<'gc> TSTypeParameterDeclaration<'gc> {
     }
 }
 
+/// The `TSTypeParameter` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSTypeParameter<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `name` property.
     pub name: &'gc Node<'gc>,
+    /// ESTree `constraint` property.
     pub constraint: Option<&'gc Node<'gc>>,
+    /// ESTree `default` property.
     pub default: Option<&'gc Node<'gc>>,
 }
 impl<'gc> TSTypeParameter<'gc> {
+    /// Build `TSTypeParameter` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         name: &'gc Node<'gc>,
@@ -5984,13 +7845,18 @@ impl<'gc> TSTypeParameter<'gc> {
     }
 }
 
+/// The `TSTypeParameterInstantiation` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSTypeParameterInstantiation<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `params` property.
     pub params: NodeList<'gc>,
 }
 impl<'gc> TSTypeParameterInstantiation<'gc> {
+    /// Build `TSTypeParameterInstantiation` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         params: NodeList<'gc>,
@@ -6002,13 +7868,17 @@ impl<'gc> TSTypeParameterInstantiation<'gc> {
     }
 }
 
+/// The `TSUnionType` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSUnionType<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `types` property.
     pub types: NodeList<'gc>,
 }
 impl<'gc> TSUnionType<'gc> {
+    /// Build `TSUnionType` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         types: NodeList<'gc>,
@@ -6020,13 +7890,17 @@ impl<'gc> TSUnionType<'gc> {
     }
 }
 
+/// The `TSIntersectionType` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSIntersectionType<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `types` property.
     pub types: NodeList<'gc>,
 }
 impl<'gc> TSIntersectionType<'gc> {
+    /// Build `TSIntersectionType` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         types: NodeList<'gc>,
@@ -6038,13 +7912,17 @@ impl<'gc> TSIntersectionType<'gc> {
     }
 }
 
+/// The `TSTypeQuery` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSTypeQuery<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `exprName` property.
     pub expr_name: &'gc Node<'gc>,
 }
 impl<'gc> TSTypeQuery<'gc> {
+    /// Build `TSTypeQuery` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         expr_name: &'gc Node<'gc>,
@@ -6056,16 +7934,23 @@ impl<'gc> TSTypeQuery<'gc> {
     }
 }
 
+/// The `TSConditionalType` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSConditionalType<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `checkType` property.
     pub check_type: &'gc Node<'gc>,
+    /// ESTree `extendsType` property.
     pub extends_type: &'gc Node<'gc>,
+    /// ESTree `trueType` property.
     pub true_type: &'gc Node<'gc>,
+    /// ESTree `falseType` property.
     pub false_type: &'gc Node<'gc>,
 }
 impl<'gc> TSConditionalType<'gc> {
+    /// Build `TSConditionalType` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         check_type: &'gc Node<'gc>,
@@ -6083,13 +7968,17 @@ impl<'gc> TSConditionalType<'gc> {
     }
 }
 
+/// The `TSTypeLiteral` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSTypeLiteral<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `members` property.
     pub members: NodeList<'gc>,
 }
 impl<'gc> TSTypeLiteral<'gc> {
+    /// Build `TSTypeLiteral` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         members: NodeList<'gc>,
@@ -6101,20 +7990,31 @@ impl<'gc> TSTypeLiteral<'gc> {
     }
 }
 
+/// The `TSPropertySignature` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSPropertySignature<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `key` property.
     pub key: &'gc Node<'gc>,
+    /// ESTree `typeAnnotation` property.
     pub type_annotation: Option<&'gc Node<'gc>>,
+    /// ESTree `initializer` property.
     pub initializer: Option<&'gc Node<'gc>>,
+    /// ESTree `optional` property.
     pub optional: Cell<bool>,
+    /// ESTree `computed` property.
     pub computed: Cell<bool>,
+    /// ESTree `readonly` property.
     pub readonly: Cell<bool>,
+    /// ESTree `static` property.
     pub r#static: Cell<bool>,
+    /// ESTree `export` property.
     pub export: Cell<bool>,
 }
 impl<'gc> TSPropertySignature<'gc> {
+    /// Build `TSPropertySignature` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         key: &'gc Node<'gc>,
@@ -6140,16 +8040,23 @@ impl<'gc> TSPropertySignature<'gc> {
     }
 }
 
+/// The `TSMethodSignature` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSMethodSignature<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `key` property.
     pub key: &'gc Node<'gc>,
+    /// ESTree `params` property.
     pub params: NodeList<'gc>,
+    /// ESTree `returnType` property.
     pub return_type: Option<&'gc Node<'gc>>,
+    /// ESTree `computed` property.
     pub computed: Cell<bool>,
 }
 impl<'gc> TSMethodSignature<'gc> {
+    /// Build `TSMethodSignature` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         key: &'gc Node<'gc>,
@@ -6167,14 +8074,19 @@ impl<'gc> TSMethodSignature<'gc> {
     }
 }
 
+/// The `TSIndexSignature` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSIndexSignature<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `parameters` property.
     pub parameters: NodeList<'gc>,
+    /// ESTree `typeAnnotation` property.
     pub type_annotation: Option<&'gc Node<'gc>>,
 }
 impl<'gc> TSIndexSignature<'gc> {
+    /// Build `TSIndexSignature` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         parameters: NodeList<'gc>,
@@ -6188,14 +8100,20 @@ impl<'gc> TSIndexSignature<'gc> {
     }
 }
 
+/// The `TSCallSignatureDeclaration` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSCallSignatureDeclaration<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `params` property.
     pub params: NodeList<'gc>,
+    /// ESTree `returnType` property.
     pub return_type: Option<&'gc Node<'gc>>,
 }
 impl<'gc> TSCallSignatureDeclaration<'gc> {
+    /// Build `TSCallSignatureDeclaration` from its metadata and `ESTree.def`
+    /// fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         params: NodeList<'gc>,
@@ -6209,14 +8127,19 @@ impl<'gc> TSCallSignatureDeclaration<'gc> {
     }
 }
 
+/// The `TSModifiers` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct TSModifiers<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `accessibility` property.
     pub accessibility: Cell<NodeLabel>,
+    /// ESTree `readonly` property.
     pub readonly: Cell<bool>,
 }
 impl<'gc> TSModifiers<'gc> {
+    /// Build `TSModifiers` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         accessibility: NodeLabel,
@@ -6230,12 +8153,15 @@ impl<'gc> TSModifiers<'gc> {
     }
 }
 
+/// The `CoverEmptyArgs` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct CoverEmptyArgs<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> CoverEmptyArgs<'gc> {
+    /// Build `CoverEmptyArgs` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -6245,12 +8171,15 @@ impl<'gc> CoverEmptyArgs<'gc> {
     }
 }
 
+/// The `CoverTrailingComma` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct CoverTrailingComma<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> CoverTrailingComma<'gc> {
+    /// Build `CoverTrailingComma` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -6260,13 +8189,17 @@ impl<'gc> CoverTrailingComma<'gc> {
     }
 }
 
+/// The `CoverInitializer` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct CoverInitializer<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `init` property.
     pub init: &'gc Node<'gc>,
 }
 impl<'gc> CoverInitializer<'gc> {
+    /// Build `CoverInitializer` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         init: &'gc Node<'gc>,
@@ -6278,13 +8211,17 @@ impl<'gc> CoverInitializer<'gc> {
     }
 }
 
+/// The `CoverRestElement` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct CoverRestElement<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `rest` property.
     pub rest: &'gc Node<'gc>,
 }
 impl<'gc> CoverRestElement<'gc> {
+    /// Build `CoverRestElement` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         rest: &'gc Node<'gc>,
@@ -6296,15 +8233,21 @@ impl<'gc> CoverRestElement<'gc> {
     }
 }
 
+/// The `CoverTypedIdentifier` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct CoverTypedIdentifier<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `left` property.
     pub left: &'gc Node<'gc>,
+    /// ESTree `right` property.
     pub right: Option<&'gc Node<'gc>>,
+    /// ESTree `optional` property.
     pub optional: Cell<bool>,
 }
 impl<'gc> CoverTypedIdentifier<'gc> {
+    /// Build `CoverTypedIdentifier` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         left: &'gc Node<'gc>,
@@ -6320,12 +8263,15 @@ impl<'gc> CoverTypedIdentifier<'gc> {
     }
 }
 
+/// The `SHBuiltin` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct SHBuiltin<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
 }
 impl<'gc> SHBuiltin<'gc> {
+    /// Build `SHBuiltin` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
     ) -> Self {
@@ -6335,13 +8281,17 @@ impl<'gc> SHBuiltin<'gc> {
     }
 }
 
+/// The `ImplicitCheckedCast` AST node.
 #[derive(Debug)]
 #[repr(C)]
 pub struct ImplicitCheckedCast<'gc> {
+    /// Source range, debug location, paren count, and node id.
     pub metadata: NodeMetadata<'gc>,
+    /// ESTree `argument` property.
     pub argument: &'gc Node<'gc>,
 }
 impl<'gc> ImplicitCheckedCast<'gc> {
+    /// Build `ImplicitCheckedCast` from its metadata and `ESTree.def` fields.
     pub fn new(
         metadata: NodeMetadata<'gc>,
         argument: &'gc Node<'gc>,
@@ -6353,283 +8303,561 @@ impl<'gc> ImplicitCheckedCast<'gc> {
     }
 }
 
+/// An AST node: one arm per `ESTree.def` node kind.
+///
+/// `#[repr(C)]`, and each arm's payload struct is named after the arm,
+/// so a deep `match` compiles to a single dispatch. Nodes live in the
+/// [`crate::context::Context`] arena and are handed out as `&'gc Node`
+/// for as long as a [`crate::context::GCLock`] is held.
 #[derive(Debug)]
 #[repr(C)]
 pub enum Node<'gc> {
+    /// A [`Empty`] node.
     Empty(Empty<'gc>),
+    /// A [`Metadata`] node.
     Metadata(Metadata<'gc>),
+    /// A [`Program`] node.
     Program(Program<'gc>),
+    /// A [`FunctionExpression`] node.
     FunctionExpression(FunctionExpression<'gc>),
+    /// A [`ArrowFunctionExpression`] node.
     ArrowFunctionExpression(ArrowFunctionExpression<'gc>),
+    /// A [`FunctionDeclaration`] node.
     FunctionDeclaration(FunctionDeclaration<'gc>),
+    /// A [`ComponentDeclaration`] node.
     ComponentDeclaration(ComponentDeclaration<'gc>),
+    /// A [`HookDeclaration`] node.
     HookDeclaration(HookDeclaration<'gc>),
+    /// A [`MatchStatement`] node.
     MatchStatement(MatchStatement<'gc>),
+    /// A [`WhileStatement`] node.
     WhileStatement(WhileStatement<'gc>),
+    /// A [`DoWhileStatement`] node.
     DoWhileStatement(DoWhileStatement<'gc>),
+    /// A [`ForInStatement`] node.
     ForInStatement(ForInStatement<'gc>),
+    /// A [`ForOfStatement`] node.
     ForOfStatement(ForOfStatement<'gc>),
+    /// A [`ForStatement`] node.
     ForStatement(ForStatement<'gc>),
+    /// A [`DebuggerStatement`] node.
     DebuggerStatement(DebuggerStatement<'gc>),
+    /// A [`EmptyStatement`] node.
     EmptyStatement(EmptyStatement<'gc>),
+    /// A [`BlockStatement`] node.
     BlockStatement(BlockStatement<'gc>),
+    /// A [`StaticBlock`] node.
     StaticBlock(StaticBlock<'gc>),
+    /// A [`BreakStatement`] node.
     BreakStatement(BreakStatement<'gc>),
+    /// A [`ContinueStatement`] node.
     ContinueStatement(ContinueStatement<'gc>),
+    /// A [`ThrowStatement`] node.
     ThrowStatement(ThrowStatement<'gc>),
+    /// A [`ReturnStatement`] node.
     ReturnStatement(ReturnStatement<'gc>),
+    /// A [`WithStatement`] node.
     WithStatement(WithStatement<'gc>),
+    /// A [`SwitchStatement`] node.
     SwitchStatement(SwitchStatement<'gc>),
+    /// A [`LabeledStatement`] node.
     LabeledStatement(LabeledStatement<'gc>),
+    /// A [`ExpressionStatement`] node.
     ExpressionStatement(ExpressionStatement<'gc>),
+    /// A [`TryStatement`] node.
     TryStatement(TryStatement<'gc>),
+    /// A [`IfStatement`] node.
     IfStatement(IfStatement<'gc>),
+    /// A [`NullLiteral`] node.
     NullLiteral(NullLiteral<'gc>),
+    /// A [`BooleanLiteral`] node.
     BooleanLiteral(BooleanLiteral<'gc>),
+    /// A [`StringLiteral`] node.
     StringLiteral(StringLiteral<'gc>),
+    /// A [`NumericLiteral`] node.
     NumericLiteral(NumericLiteral<'gc>),
+    /// A [`RegExpLiteral`] node.
     RegExpLiteral(RegExpLiteral<'gc>),
+    /// A [`BigIntLiteral`] node.
     BigIntLiteral(BigIntLiteral<'gc>),
+    /// A [`ThisExpression`] node.
     ThisExpression(ThisExpression<'gc>),
+    /// A [`Super`] node.
     Super(Super<'gc>),
+    /// A [`SequenceExpression`] node.
     SequenceExpression(SequenceExpression<'gc>),
+    /// A [`ObjectExpression`] node.
     ObjectExpression(ObjectExpression<'gc>),
+    /// A [`ArrayExpression`] node.
     ArrayExpression(ArrayExpression<'gc>),
+    /// A [`SpreadElement`] node.
     SpreadElement(SpreadElement<'gc>),
+    /// A [`NewExpression`] node.
     NewExpression(NewExpression<'gc>),
+    /// A [`YieldExpression`] node.
     YieldExpression(YieldExpression<'gc>),
+    /// A [`AwaitExpression`] node.
     AwaitExpression(AwaitExpression<'gc>),
+    /// A [`ImportExpression`] node.
     ImportExpression(ImportExpression<'gc>),
+    /// A [`CallExpression`] node.
     CallExpression(CallExpression<'gc>),
+    /// A [`OptionalCallExpression`] node.
     OptionalCallExpression(OptionalCallExpression<'gc>),
+    /// A [`AssignmentExpression`] node.
     AssignmentExpression(AssignmentExpression<'gc>),
+    /// A [`UnaryExpression`] node.
     UnaryExpression(UnaryExpression<'gc>),
+    /// A [`UpdateExpression`] node.
     UpdateExpression(UpdateExpression<'gc>),
+    /// A [`MemberExpression`] node.
     MemberExpression(MemberExpression<'gc>),
+    /// A [`OptionalMemberExpression`] node.
     OptionalMemberExpression(OptionalMemberExpression<'gc>),
+    /// A [`LogicalExpression`] node.
     LogicalExpression(LogicalExpression<'gc>),
+    /// A [`ConditionalExpression`] node.
     ConditionalExpression(ConditionalExpression<'gc>),
+    /// A [`BinaryExpression`] node.
     BinaryExpression(BinaryExpression<'gc>),
+    /// A [`Directive`] node.
     Directive(Directive<'gc>),
+    /// A [`DirectiveLiteral`] node.
     DirectiveLiteral(DirectiveLiteral<'gc>),
+    /// A [`Identifier`] node.
     Identifier(Identifier<'gc>),
+    /// A [`PrivateName`] node.
     PrivateName(PrivateName<'gc>),
+    /// A [`MetaProperty`] node.
     MetaProperty(MetaProperty<'gc>),
+    /// A [`SwitchCase`] node.
     SwitchCase(SwitchCase<'gc>),
+    /// A [`CatchClause`] node.
     CatchClause(CatchClause<'gc>),
+    /// A [`VariableDeclarator`] node.
     VariableDeclarator(VariableDeclarator<'gc>),
+    /// A [`VariableDeclaration`] node.
     VariableDeclaration(VariableDeclaration<'gc>),
+    /// A [`TemplateLiteral`] node.
     TemplateLiteral(TemplateLiteral<'gc>),
+    /// A [`TaggedTemplateExpression`] node.
     TaggedTemplateExpression(TaggedTemplateExpression<'gc>),
+    /// A [`TemplateElement`] node.
     TemplateElement(TemplateElement<'gc>),
+    /// A [`Property`] node.
     Property(Property<'gc>),
+    /// A [`Decorator`] node.
     Decorator(Decorator<'gc>),
+    /// A [`ClassDeclaration`] node.
     ClassDeclaration(ClassDeclaration<'gc>),
+    /// A [`ClassExpression`] node.
     ClassExpression(ClassExpression<'gc>),
+    /// A [`ClassBody`] node.
     ClassBody(ClassBody<'gc>),
+    /// A [`ClassProperty`] node.
     ClassProperty(ClassProperty<'gc>),
+    /// A [`ClassPrivateProperty`] node.
     ClassPrivateProperty(ClassPrivateProperty<'gc>),
+    /// A [`MethodDefinition`] node.
     MethodDefinition(MethodDefinition<'gc>),
+    /// A [`ImportDeclaration`] node.
     ImportDeclaration(ImportDeclaration<'gc>),
+    /// A [`ImportSpecifier`] node.
     ImportSpecifier(ImportSpecifier<'gc>),
+    /// A [`ImportDefaultSpecifier`] node.
     ImportDefaultSpecifier(ImportDefaultSpecifier<'gc>),
+    /// A [`ImportNamespaceSpecifier`] node.
     ImportNamespaceSpecifier(ImportNamespaceSpecifier<'gc>),
+    /// A [`ImportAttribute`] node.
     ImportAttribute(ImportAttribute<'gc>),
+    /// A [`ExportNamedDeclaration`] node.
     ExportNamedDeclaration(ExportNamedDeclaration<'gc>),
+    /// A [`ExportSpecifier`] node.
     ExportSpecifier(ExportSpecifier<'gc>),
+    /// A [`ExportNamespaceSpecifier`] node.
     ExportNamespaceSpecifier(ExportNamespaceSpecifier<'gc>),
+    /// A [`ExportDefaultDeclaration`] node.
     ExportDefaultDeclaration(ExportDefaultDeclaration<'gc>),
+    /// A [`ExportAllDeclaration`] node.
     ExportAllDeclaration(ExportAllDeclaration<'gc>),
+    /// A [`ObjectPattern`] node.
     ObjectPattern(ObjectPattern<'gc>),
+    /// A [`ArrayPattern`] node.
     ArrayPattern(ArrayPattern<'gc>),
+    /// A [`RestElement`] node.
     RestElement(RestElement<'gc>),
+    /// A [`AssignmentPattern`] node.
     AssignmentPattern(AssignmentPattern<'gc>),
+    /// A [`MatchStatementCase`] node.
     MatchStatementCase(MatchStatementCase<'gc>),
+    /// A [`MatchExpression`] node.
     MatchExpression(MatchExpression<'gc>),
+    /// A [`MatchExpressionCase`] node.
     MatchExpressionCase(MatchExpressionCase<'gc>),
+    /// A [`MatchWildcardPattern`] node.
     MatchWildcardPattern(MatchWildcardPattern<'gc>),
+    /// A [`MatchLiteralPattern`] node.
     MatchLiteralPattern(MatchLiteralPattern<'gc>),
+    /// A [`MatchUnaryPattern`] node.
     MatchUnaryPattern(MatchUnaryPattern<'gc>),
+    /// A [`MatchIdentifierPattern`] node.
     MatchIdentifierPattern(MatchIdentifierPattern<'gc>),
+    /// A [`MatchBindingPattern`] node.
     MatchBindingPattern(MatchBindingPattern<'gc>),
+    /// A [`MatchObjectPattern`] node.
     MatchObjectPattern(MatchObjectPattern<'gc>),
+    /// A [`MatchArrayPattern`] node.
     MatchArrayPattern(MatchArrayPattern<'gc>),
+    /// A [`MatchOrPattern`] node.
     MatchOrPattern(MatchOrPattern<'gc>),
+    /// A [`MatchAsPattern`] node.
     MatchAsPattern(MatchAsPattern<'gc>),
+    /// A [`MatchMemberPattern`] node.
     MatchMemberPattern(MatchMemberPattern<'gc>),
+    /// A [`MatchInstancePattern`] node.
     MatchInstancePattern(MatchInstancePattern<'gc>),
+    /// A [`MatchObjectPatternProperty`] node.
     MatchObjectPatternProperty(MatchObjectPatternProperty<'gc>),
+    /// A [`MatchInstanceObjectPattern`] node.
     MatchInstanceObjectPattern(MatchInstanceObjectPattern<'gc>),
+    /// A [`MatchRestPattern`] node.
     MatchRestPattern(MatchRestPattern<'gc>),
+    /// A [`JSXIdentifier`] node.
     JSXIdentifier(JSXIdentifier<'gc>),
+    /// A [`JSXMemberExpression`] node.
     JSXMemberExpression(JSXMemberExpression<'gc>),
+    /// A [`JSXNamespacedName`] node.
     JSXNamespacedName(JSXNamespacedName<'gc>),
+    /// A [`JSXEmptyExpression`] node.
     JSXEmptyExpression(JSXEmptyExpression<'gc>),
+    /// A [`JSXExpressionContainer`] node.
     JSXExpressionContainer(JSXExpressionContainer<'gc>),
+    /// A [`JSXSpreadChild`] node.
     JSXSpreadChild(JSXSpreadChild<'gc>),
+    /// A [`JSXOpeningElement`] node.
     JSXOpeningElement(JSXOpeningElement<'gc>),
+    /// A [`JSXClosingElement`] node.
     JSXClosingElement(JSXClosingElement<'gc>),
+    /// A [`JSXAttribute`] node.
     JSXAttribute(JSXAttribute<'gc>),
+    /// A [`JSXSpreadAttribute`] node.
     JSXSpreadAttribute(JSXSpreadAttribute<'gc>),
+    /// A [`JSXStringLiteral`] node.
     JSXStringLiteral(JSXStringLiteral<'gc>),
+    /// A [`JSXText`] node.
     JSXText(JSXText<'gc>),
+    /// A [`JSXElement`] node.
     JSXElement(JSXElement<'gc>),
+    /// A [`JSXFragment`] node.
     JSXFragment(JSXFragment<'gc>),
+    /// A [`JSXOpeningFragment`] node.
     JSXOpeningFragment(JSXOpeningFragment<'gc>),
+    /// A [`JSXClosingFragment`] node.
     JSXClosingFragment(JSXClosingFragment<'gc>),
+    /// A [`ExistsTypeAnnotation`] node.
     ExistsTypeAnnotation(ExistsTypeAnnotation<'gc>),
+    /// A [`EmptyTypeAnnotation`] node.
     EmptyTypeAnnotation(EmptyTypeAnnotation<'gc>),
+    /// A [`StringTypeAnnotation`] node.
     StringTypeAnnotation(StringTypeAnnotation<'gc>),
+    /// A [`NumberTypeAnnotation`] node.
     NumberTypeAnnotation(NumberTypeAnnotation<'gc>),
+    /// A [`StringLiteralTypeAnnotation`] node.
     StringLiteralTypeAnnotation(StringLiteralTypeAnnotation<'gc>),
+    /// A [`NumberLiteralTypeAnnotation`] node.
     NumberLiteralTypeAnnotation(NumberLiteralTypeAnnotation<'gc>),
+    /// A [`BigIntLiteralTypeAnnotation`] node.
     BigIntLiteralTypeAnnotation(BigIntLiteralTypeAnnotation<'gc>),
+    /// A [`BooleanTypeAnnotation`] node.
     BooleanTypeAnnotation(BooleanTypeAnnotation<'gc>),
+    /// A [`BooleanLiteralTypeAnnotation`] node.
     BooleanLiteralTypeAnnotation(BooleanLiteralTypeAnnotation<'gc>),
+    /// A [`NullLiteralTypeAnnotation`] node.
     NullLiteralTypeAnnotation(NullLiteralTypeAnnotation<'gc>),
+    /// A [`SymbolTypeAnnotation`] node.
     SymbolTypeAnnotation(SymbolTypeAnnotation<'gc>),
+    /// A [`AnyTypeAnnotation`] node.
     AnyTypeAnnotation(AnyTypeAnnotation<'gc>),
+    /// A [`MixedTypeAnnotation`] node.
     MixedTypeAnnotation(MixedTypeAnnotation<'gc>),
+    /// A [`BigIntTypeAnnotation`] node.
     BigIntTypeAnnotation(BigIntTypeAnnotation<'gc>),
+    /// A [`VoidTypeAnnotation`] node.
     VoidTypeAnnotation(VoidTypeAnnotation<'gc>),
+    /// A [`NeverTypeAnnotation`] node.
     NeverTypeAnnotation(NeverTypeAnnotation<'gc>),
+    /// A [`UnknownTypeAnnotation`] node.
     UnknownTypeAnnotation(UnknownTypeAnnotation<'gc>),
+    /// A [`UndefinedTypeAnnotation`] node.
     UndefinedTypeAnnotation(UndefinedTypeAnnotation<'gc>),
+    /// A [`FunctionTypeAnnotation`] node.
     FunctionTypeAnnotation(FunctionTypeAnnotation<'gc>),
+    /// A [`HookTypeAnnotation`] node.
     HookTypeAnnotation(HookTypeAnnotation<'gc>),
+    /// A [`FunctionTypeParam`] node.
     FunctionTypeParam(FunctionTypeParam<'gc>),
+    /// A [`ComponentTypeAnnotation`] node.
     ComponentTypeAnnotation(ComponentTypeAnnotation<'gc>),
+    /// A [`ComponentTypeParameter`] node.
     ComponentTypeParameter(ComponentTypeParameter<'gc>),
+    /// A [`NullableTypeAnnotation`] node.
     NullableTypeAnnotation(NullableTypeAnnotation<'gc>),
+    /// A [`QualifiedTypeIdentifier`] node.
     QualifiedTypeIdentifier(QualifiedTypeIdentifier<'gc>),
+    /// A [`TypeofTypeAnnotation`] node.
     TypeofTypeAnnotation(TypeofTypeAnnotation<'gc>),
+    /// A [`KeyofTypeAnnotation`] node.
     KeyofTypeAnnotation(KeyofTypeAnnotation<'gc>),
+    /// A [`TypeOperator`] node.
     TypeOperator(TypeOperator<'gc>),
+    /// A [`QualifiedTypeofIdentifier`] node.
     QualifiedTypeofIdentifier(QualifiedTypeofIdentifier<'gc>),
+    /// A [`TupleTypeAnnotation`] node.
     TupleTypeAnnotation(TupleTypeAnnotation<'gc>),
+    /// A [`TupleTypeSpreadElement`] node.
     TupleTypeSpreadElement(TupleTypeSpreadElement<'gc>),
+    /// A [`TupleTypeLabeledElement`] node.
     TupleTypeLabeledElement(TupleTypeLabeledElement<'gc>),
+    /// A [`ArrayTypeAnnotation`] node.
     ArrayTypeAnnotation(ArrayTypeAnnotation<'gc>),
+    /// A [`InferTypeAnnotation`] node.
     InferTypeAnnotation(InferTypeAnnotation<'gc>),
+    /// A [`UnionTypeAnnotation`] node.
     UnionTypeAnnotation(UnionTypeAnnotation<'gc>),
+    /// A [`IntersectionTypeAnnotation`] node.
     IntersectionTypeAnnotation(IntersectionTypeAnnotation<'gc>),
+    /// A [`GenericTypeAnnotation`] node.
     GenericTypeAnnotation(GenericTypeAnnotation<'gc>),
+    /// A [`IndexedAccessType`] node.
     IndexedAccessType(IndexedAccessType<'gc>),
+    /// A [`OptionalIndexedAccessType`] node.
     OptionalIndexedAccessType(OptionalIndexedAccessType<'gc>),
+    /// A [`ConditionalTypeAnnotation`] node.
     ConditionalTypeAnnotation(ConditionalTypeAnnotation<'gc>),
+    /// A [`TypePredicate`] node.
     TypePredicate(TypePredicate<'gc>),
+    /// A [`InterfaceTypeAnnotation`] node.
     InterfaceTypeAnnotation(InterfaceTypeAnnotation<'gc>),
+    /// A [`TypeAlias`] node.
     TypeAlias(TypeAlias<'gc>),
+    /// A [`OpaqueType`] node.
     OpaqueType(OpaqueType<'gc>),
+    /// A [`InterfaceDeclaration`] node.
     InterfaceDeclaration(InterfaceDeclaration<'gc>),
+    /// A [`DeclareTypeAlias`] node.
     DeclareTypeAlias(DeclareTypeAlias<'gc>),
+    /// A [`DeclareOpaqueType`] node.
     DeclareOpaqueType(DeclareOpaqueType<'gc>),
+    /// A [`DeclareInterface`] node.
     DeclareInterface(DeclareInterface<'gc>),
+    /// A [`DeclareClass`] node.
     DeclareClass(DeclareClass<'gc>),
+    /// A [`DeclareFunction`] node.
     DeclareFunction(DeclareFunction<'gc>),
+    /// A [`DeclareHook`] node.
     DeclareHook(DeclareHook<'gc>),
+    /// A [`DeclareComponent`] node.
     DeclareComponent(DeclareComponent<'gc>),
+    /// A [`DeclareVariable`] node.
     DeclareVariable(DeclareVariable<'gc>),
+    /// A [`DeclareEnum`] node.
     DeclareEnum(DeclareEnum<'gc>),
+    /// A [`DeclareExportDeclaration`] node.
     DeclareExportDeclaration(DeclareExportDeclaration<'gc>),
+    /// A [`DeclareExportAllDeclaration`] node.
     DeclareExportAllDeclaration(DeclareExportAllDeclaration<'gc>),
+    /// A [`DeclareModule`] node.
     DeclareModule(DeclareModule<'gc>),
+    /// A [`DeclareNamespace`] node.
     DeclareNamespace(DeclareNamespace<'gc>),
+    /// A [`DeclareModuleExports`] node.
     DeclareModuleExports(DeclareModuleExports<'gc>),
+    /// A [`InterfaceExtends`] node.
     InterfaceExtends(InterfaceExtends<'gc>),
+    /// A [`ClassImplements`] node.
     ClassImplements(ClassImplements<'gc>),
+    /// A [`TypeAnnotation`] node.
     TypeAnnotation(TypeAnnotation<'gc>),
+    /// A [`ObjectTypeAnnotation`] node.
     ObjectTypeAnnotation(ObjectTypeAnnotation<'gc>),
+    /// A [`ObjectTypeProperty`] node.
     ObjectTypeProperty(ObjectTypeProperty<'gc>),
+    /// A [`ObjectTypeSpreadProperty`] node.
     ObjectTypeSpreadProperty(ObjectTypeSpreadProperty<'gc>),
+    /// A [`ObjectTypeInternalSlot`] node.
     ObjectTypeInternalSlot(ObjectTypeInternalSlot<'gc>),
+    /// A [`ObjectTypeCallProperty`] node.
     ObjectTypeCallProperty(ObjectTypeCallProperty<'gc>),
+    /// A [`ObjectTypeIndexer`] node.
     ObjectTypeIndexer(ObjectTypeIndexer<'gc>),
+    /// A [`ObjectTypeMappedTypeProperty`] node.
     ObjectTypeMappedTypeProperty(ObjectTypeMappedTypeProperty<'gc>),
+    /// A [`Variance`] node.
     Variance(Variance<'gc>),
+    /// A [`TypeParameterDeclaration`] node.
     TypeParameterDeclaration(TypeParameterDeclaration<'gc>),
+    /// A [`TypeParameter`] node.
     TypeParameter(TypeParameter<'gc>),
+    /// A [`TypeParameterInstantiation`] node.
     TypeParameterInstantiation(TypeParameterInstantiation<'gc>),
+    /// A [`TypeCastExpression`] node.
     TypeCastExpression(TypeCastExpression<'gc>),
+    /// A [`AsExpression`] node.
     AsExpression(AsExpression<'gc>),
+    /// A [`AsConstExpression`] node.
     AsConstExpression(AsConstExpression<'gc>),
+    /// A [`InferredPredicate`] node.
     InferredPredicate(InferredPredicate<'gc>),
+    /// A [`DeclaredPredicate`] node.
     DeclaredPredicate(DeclaredPredicate<'gc>),
+    /// A [`EnumDeclaration`] node.
     EnumDeclaration(EnumDeclaration<'gc>),
+    /// A [`EnumStringBody`] node.
     EnumStringBody(EnumStringBody<'gc>),
+    /// A [`EnumNumberBody`] node.
     EnumNumberBody(EnumNumberBody<'gc>),
+    /// A [`EnumBigIntBody`] node.
     EnumBigIntBody(EnumBigIntBody<'gc>),
+    /// A [`EnumBooleanBody`] node.
     EnumBooleanBody(EnumBooleanBody<'gc>),
+    /// A [`EnumSymbolBody`] node.
     EnumSymbolBody(EnumSymbolBody<'gc>),
+    /// A [`EnumDefaultedMember`] node.
     EnumDefaultedMember(EnumDefaultedMember<'gc>),
+    /// A [`EnumStringMember`] node.
     EnumStringMember(EnumStringMember<'gc>),
+    /// A [`EnumNumberMember`] node.
     EnumNumberMember(EnumNumberMember<'gc>),
+    /// A [`EnumBigIntMember`] node.
     EnumBigIntMember(EnumBigIntMember<'gc>),
+    /// A [`EnumBooleanMember`] node.
     EnumBooleanMember(EnumBooleanMember<'gc>),
+    /// A [`ComponentParameter`] node.
     ComponentParameter(ComponentParameter<'gc>),
+    /// A [`RecordDeclaration`] node.
     RecordDeclaration(RecordDeclaration<'gc>),
+    /// A [`RecordDeclarationImplements`] node.
     RecordDeclarationImplements(RecordDeclarationImplements<'gc>),
+    /// A [`RecordDeclarationBody`] node.
     RecordDeclarationBody(RecordDeclarationBody<'gc>),
+    /// A [`RecordDeclarationProperty`] node.
     RecordDeclarationProperty(RecordDeclarationProperty<'gc>),
+    /// A [`RecordDeclarationStaticProperty`] node.
     RecordDeclarationStaticProperty(RecordDeclarationStaticProperty<'gc>),
+    /// A [`RecordExpression`] node.
     RecordExpression(RecordExpression<'gc>),
+    /// A [`RecordExpressionProperties`] node.
     RecordExpressionProperties(RecordExpressionProperties<'gc>),
+    /// A [`TSTypeAnnotation`] node.
     TSTypeAnnotation(TSTypeAnnotation<'gc>),
+    /// A [`TSAnyKeyword`] node.
     TSAnyKeyword(TSAnyKeyword<'gc>),
+    /// A [`TSNumberKeyword`] node.
     TSNumberKeyword(TSNumberKeyword<'gc>),
+    /// A [`TSBooleanKeyword`] node.
     TSBooleanKeyword(TSBooleanKeyword<'gc>),
+    /// A [`TSStringKeyword`] node.
     TSStringKeyword(TSStringKeyword<'gc>),
+    /// A [`TSSymbolKeyword`] node.
     TSSymbolKeyword(TSSymbolKeyword<'gc>),
+    /// A [`TSVoidKeyword`] node.
     TSVoidKeyword(TSVoidKeyword<'gc>),
+    /// A [`TSUndefinedKeyword`] node.
     TSUndefinedKeyword(TSUndefinedKeyword<'gc>),
+    /// A [`TSUnknownKeyword`] node.
     TSUnknownKeyword(TSUnknownKeyword<'gc>),
+    /// A [`TSNeverKeyword`] node.
     TSNeverKeyword(TSNeverKeyword<'gc>),
+    /// A [`TSBigIntKeyword`] node.
     TSBigIntKeyword(TSBigIntKeyword<'gc>),
+    /// A [`TSThisType`] node.
     TSThisType(TSThisType<'gc>),
+    /// A [`TSLiteralType`] node.
     TSLiteralType(TSLiteralType<'gc>),
+    /// A [`TSIndexedAccessType`] node.
     TSIndexedAccessType(TSIndexedAccessType<'gc>),
+    /// A [`TSArrayType`] node.
     TSArrayType(TSArrayType<'gc>),
+    /// A [`TSTypeReference`] node.
     TSTypeReference(TSTypeReference<'gc>),
+    /// A [`TSQualifiedName`] node.
     TSQualifiedName(TSQualifiedName<'gc>),
+    /// A [`TSFunctionType`] node.
     TSFunctionType(TSFunctionType<'gc>),
+    /// A [`TSConstructorType`] node.
     TSConstructorType(TSConstructorType<'gc>),
+    /// A [`TSTypePredicate`] node.
     TSTypePredicate(TSTypePredicate<'gc>),
+    /// A [`TSTupleType`] node.
     TSTupleType(TSTupleType<'gc>),
+    /// A [`TSTypeAssertion`] node.
     TSTypeAssertion(TSTypeAssertion<'gc>),
+    /// A [`TSAsExpression`] node.
     TSAsExpression(TSAsExpression<'gc>),
+    /// A [`TSParameterProperty`] node.
     TSParameterProperty(TSParameterProperty<'gc>),
+    /// A [`TSTypeAliasDeclaration`] node.
     TSTypeAliasDeclaration(TSTypeAliasDeclaration<'gc>),
+    /// A [`TSInterfaceDeclaration`] node.
     TSInterfaceDeclaration(TSInterfaceDeclaration<'gc>),
+    /// A [`TSInterfaceHeritage`] node.
     TSInterfaceHeritage(TSInterfaceHeritage<'gc>),
+    /// A [`TSInterfaceBody`] node.
     TSInterfaceBody(TSInterfaceBody<'gc>),
+    /// A [`TSEnumDeclaration`] node.
     TSEnumDeclaration(TSEnumDeclaration<'gc>),
+    /// A [`TSEnumMember`] node.
     TSEnumMember(TSEnumMember<'gc>),
+    /// A [`TSModuleDeclaration`] node.
     TSModuleDeclaration(TSModuleDeclaration<'gc>),
+    /// A [`TSModuleBlock`] node.
     TSModuleBlock(TSModuleBlock<'gc>),
+    /// A [`TSModuleMember`] node.
     TSModuleMember(TSModuleMember<'gc>),
+    /// A [`TSTypeParameterDeclaration`] node.
     TSTypeParameterDeclaration(TSTypeParameterDeclaration<'gc>),
+    /// A [`TSTypeParameter`] node.
     TSTypeParameter(TSTypeParameter<'gc>),
+    /// A [`TSTypeParameterInstantiation`] node.
     TSTypeParameterInstantiation(TSTypeParameterInstantiation<'gc>),
+    /// A [`TSUnionType`] node.
     TSUnionType(TSUnionType<'gc>),
+    /// A [`TSIntersectionType`] node.
     TSIntersectionType(TSIntersectionType<'gc>),
+    /// A [`TSTypeQuery`] node.
     TSTypeQuery(TSTypeQuery<'gc>),
+    /// A [`TSConditionalType`] node.
     TSConditionalType(TSConditionalType<'gc>),
+    /// A [`TSTypeLiteral`] node.
     TSTypeLiteral(TSTypeLiteral<'gc>),
+    /// A [`TSPropertySignature`] node.
     TSPropertySignature(TSPropertySignature<'gc>),
+    /// A [`TSMethodSignature`] node.
     TSMethodSignature(TSMethodSignature<'gc>),
+    /// A [`TSIndexSignature`] node.
     TSIndexSignature(TSIndexSignature<'gc>),
+    /// A [`TSCallSignatureDeclaration`] node.
     TSCallSignatureDeclaration(TSCallSignatureDeclaration<'gc>),
+    /// A [`TSModifiers`] node.
     TSModifiers(TSModifiers<'gc>),
+    /// A [`CoverEmptyArgs`] node.
     CoverEmptyArgs(CoverEmptyArgs<'gc>),
+    /// A [`CoverTrailingComma`] node.
     CoverTrailingComma(CoverTrailingComma<'gc>),
+    /// A [`CoverInitializer`] node.
     CoverInitializer(CoverInitializer<'gc>),
+    /// A [`CoverRestElement`] node.
     CoverRestElement(CoverRestElement<'gc>),
+    /// A [`CoverTypedIdentifier`] node.
     CoverTypedIdentifier(CoverTypedIdentifier<'gc>),
+    /// A [`SHBuiltin`] node.
     SHBuiltin(SHBuiltin<'gc>),
+    /// A [`ImplicitCheckedCast`] node.
     ImplicitCheckedCast(ImplicitCheckedCast<'gc>),
 }
 
 impl<'gc> Node<'gc> {
+    /// This node's [`NodeKind`].
     pub fn kind(&self) -> NodeKind {
         match self {
             Node::Empty(_) => NodeKind::Empty,
@@ -6906,6 +9134,7 @@ impl<'gc> Node<'gc> {
         }
     }
 
+    /// This node's metadata, common to every kind.
     pub fn metadata(&self) -> &NodeMetadata<'gc> {
         match self {
             Node::Empty(n) => &n.metadata,
@@ -7182,1158 +9411,1466 @@ impl<'gc> Node<'gc> {
         }
     }
 
+    /// This node's arena identity (see [`NodeId`]).
     pub fn node_id(&self) -> NodeId {
         self.metadata().id.get()
     }
 
+    /// This node's source range.
     pub fn range(&self) -> support::location::SMRange {
         self.metadata().range.get()
     }
 
+    /// Whether this node's kind is in the `FunctionLike` range.
     pub fn is_function_like(&self) -> bool {
         let k = self.kind() as u32;
         (NodeKind::_FunctionLike_First as u32) < k && k < (NodeKind::_FunctionLike_Last as u32)
     }
 
+    /// Whether this node's kind is in the `Statement` range.
     pub fn is_statement(&self) -> bool {
         let k = self.kind() as u32;
         (NodeKind::_Statement_First as u32) < k && k < (NodeKind::_Statement_Last as u32)
     }
 
+    /// Whether this node's kind is in the `LoopStatement` range.
     pub fn is_loop_statement(&self) -> bool {
         let k = self.kind() as u32;
         (NodeKind::_LoopStatement_First as u32) < k && k < (NodeKind::_LoopStatement_Last as u32)
     }
 
+    /// Whether this node's kind is in the `CallExpressionLike` range.
     pub fn is_call_expression_like(&self) -> bool {
         let k = self.kind() as u32;
         (NodeKind::_CallExpressionLike_First as u32) < k && k < (NodeKind::_CallExpressionLike_Last as u32)
     }
 
+    /// Whether this node's kind is in the `MemberExpressionLike` range.
     pub fn is_member_expression_like(&self) -> bool {
         let k = self.kind() as u32;
         (NodeKind::_MemberExpressionLike_First as u32) < k && k < (NodeKind::_MemberExpressionLike_Last as u32)
     }
 
+    /// Whether this node's kind is in the `ClassLike` range.
     pub fn is_class_like(&self) -> bool {
         let k = self.kind() as u32;
         (NodeKind::_ClassLike_First as u32) < k && k < (NodeKind::_ClassLike_Last as u32)
     }
 
+    /// Whether this node's kind is in the `Pattern` range.
     pub fn is_pattern(&self) -> bool {
         let k = self.kind() as u32;
         (NodeKind::_Pattern_First as u32) < k && k < (NodeKind::_Pattern_Last as u32)
     }
 
+    /// Whether this node's kind is in the `MatchPattern` range.
     pub fn is_match_pattern(&self) -> bool {
         let k = self.kind() as u32;
         (NodeKind::_MatchPattern_First as u32) < k && k < (NodeKind::_MatchPattern_Last as u32)
     }
 
+    /// Whether this node's kind is in the `JSX` range.
     pub fn is_jsx(&self) -> bool {
         let k = self.kind() as u32;
         (NodeKind::_JSX_First as u32) < k && k < (NodeKind::_JSX_Last as u32)
     }
 
+    /// Whether this node's kind is in the `Flow` range.
     pub fn is_flow(&self) -> bool {
         let k = self.kind() as u32;
         (NodeKind::_Flow_First as u32) < k && k < (NodeKind::_Flow_Last as u32)
     }
 
+    /// Whether this node's kind is in the `TS` range.
     pub fn is_ts(&self) -> bool {
         let k = self.kind() as u32;
         (NodeKind::_TS_First as u32) < k && k < (NodeKind::_TS_Last as u32)
     }
 
+    /// Whether this node's kind is in the `Cover` range.
     pub fn is_cover(&self) -> bool {
         let k = self.kind() as u32;
         (NodeKind::_Cover_First as u32) < k && k < (NodeKind::_Cover_Last as u32)
     }
 
+    /// The payload if this is a [`Empty`], `None` otherwise.
     pub fn as_empty(&self) -> Option<&Empty<'gc>> {
         if let Node::Empty(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`Metadata`], `None` otherwise.
     pub fn as_metadata(&self) -> Option<&Metadata<'gc>> {
         if let Node::Metadata(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`Program`], `None` otherwise.
     pub fn as_program(&self) -> Option<&Program<'gc>> {
         if let Node::Program(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`FunctionExpression`], `None` otherwise.
     pub fn as_function_expression(&self) -> Option<&FunctionExpression<'gc>> {
         if let Node::FunctionExpression(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ArrowFunctionExpression`], `None` otherwise.
     pub fn as_arrow_function_expression(&self) -> Option<&ArrowFunctionExpression<'gc>> {
         if let Node::ArrowFunctionExpression(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`FunctionDeclaration`], `None` otherwise.
     pub fn as_function_declaration(&self) -> Option<&FunctionDeclaration<'gc>> {
         if let Node::FunctionDeclaration(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ComponentDeclaration`], `None` otherwise.
     pub fn as_component_declaration(&self) -> Option<&ComponentDeclaration<'gc>> {
         if let Node::ComponentDeclaration(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`HookDeclaration`], `None` otherwise.
     pub fn as_hook_declaration(&self) -> Option<&HookDeclaration<'gc>> {
         if let Node::HookDeclaration(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`MatchStatement`], `None` otherwise.
     pub fn as_match_statement(&self) -> Option<&MatchStatement<'gc>> {
         if let Node::MatchStatement(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`WhileStatement`], `None` otherwise.
     pub fn as_while_statement(&self) -> Option<&WhileStatement<'gc>> {
         if let Node::WhileStatement(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`DoWhileStatement`], `None` otherwise.
     pub fn as_do_while_statement(&self) -> Option<&DoWhileStatement<'gc>> {
         if let Node::DoWhileStatement(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ForInStatement`], `None` otherwise.
     pub fn as_for_in_statement(&self) -> Option<&ForInStatement<'gc>> {
         if let Node::ForInStatement(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ForOfStatement`], `None` otherwise.
     pub fn as_for_of_statement(&self) -> Option<&ForOfStatement<'gc>> {
         if let Node::ForOfStatement(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ForStatement`], `None` otherwise.
     pub fn as_for_statement(&self) -> Option<&ForStatement<'gc>> {
         if let Node::ForStatement(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`DebuggerStatement`], `None` otherwise.
     pub fn as_debugger_statement(&self) -> Option<&DebuggerStatement<'gc>> {
         if let Node::DebuggerStatement(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`EmptyStatement`], `None` otherwise.
     pub fn as_empty_statement(&self) -> Option<&EmptyStatement<'gc>> {
         if let Node::EmptyStatement(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`BlockStatement`], `None` otherwise.
     pub fn as_block_statement(&self) -> Option<&BlockStatement<'gc>> {
         if let Node::BlockStatement(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`StaticBlock`], `None` otherwise.
     pub fn as_static_block(&self) -> Option<&StaticBlock<'gc>> {
         if let Node::StaticBlock(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`BreakStatement`], `None` otherwise.
     pub fn as_break_statement(&self) -> Option<&BreakStatement<'gc>> {
         if let Node::BreakStatement(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ContinueStatement`], `None` otherwise.
     pub fn as_continue_statement(&self) -> Option<&ContinueStatement<'gc>> {
         if let Node::ContinueStatement(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ThrowStatement`], `None` otherwise.
     pub fn as_throw_statement(&self) -> Option<&ThrowStatement<'gc>> {
         if let Node::ThrowStatement(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ReturnStatement`], `None` otherwise.
     pub fn as_return_statement(&self) -> Option<&ReturnStatement<'gc>> {
         if let Node::ReturnStatement(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`WithStatement`], `None` otherwise.
     pub fn as_with_statement(&self) -> Option<&WithStatement<'gc>> {
         if let Node::WithStatement(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`SwitchStatement`], `None` otherwise.
     pub fn as_switch_statement(&self) -> Option<&SwitchStatement<'gc>> {
         if let Node::SwitchStatement(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`LabeledStatement`], `None` otherwise.
     pub fn as_labeled_statement(&self) -> Option<&LabeledStatement<'gc>> {
         if let Node::LabeledStatement(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ExpressionStatement`], `None` otherwise.
     pub fn as_expression_statement(&self) -> Option<&ExpressionStatement<'gc>> {
         if let Node::ExpressionStatement(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TryStatement`], `None` otherwise.
     pub fn as_try_statement(&self) -> Option<&TryStatement<'gc>> {
         if let Node::TryStatement(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`IfStatement`], `None` otherwise.
     pub fn as_if_statement(&self) -> Option<&IfStatement<'gc>> {
         if let Node::IfStatement(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`NullLiteral`], `None` otherwise.
     pub fn as_null_literal(&self) -> Option<&NullLiteral<'gc>> {
         if let Node::NullLiteral(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`BooleanLiteral`], `None` otherwise.
     pub fn as_boolean_literal(&self) -> Option<&BooleanLiteral<'gc>> {
         if let Node::BooleanLiteral(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`StringLiteral`], `None` otherwise.
     pub fn as_string_literal(&self) -> Option<&StringLiteral<'gc>> {
         if let Node::StringLiteral(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`NumericLiteral`], `None` otherwise.
     pub fn as_numeric_literal(&self) -> Option<&NumericLiteral<'gc>> {
         if let Node::NumericLiteral(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`RegExpLiteral`], `None` otherwise.
     pub fn as_reg_exp_literal(&self) -> Option<&RegExpLiteral<'gc>> {
         if let Node::RegExpLiteral(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`BigIntLiteral`], `None` otherwise.
     pub fn as_big_int_literal(&self) -> Option<&BigIntLiteral<'gc>> {
         if let Node::BigIntLiteral(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ThisExpression`], `None` otherwise.
     pub fn as_this_expression(&self) -> Option<&ThisExpression<'gc>> {
         if let Node::ThisExpression(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`Super`], `None` otherwise.
     pub fn as_super(&self) -> Option<&Super<'gc>> {
         if let Node::Super(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`SequenceExpression`], `None` otherwise.
     pub fn as_sequence_expression(&self) -> Option<&SequenceExpression<'gc>> {
         if let Node::SequenceExpression(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ObjectExpression`], `None` otherwise.
     pub fn as_object_expression(&self) -> Option<&ObjectExpression<'gc>> {
         if let Node::ObjectExpression(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ArrayExpression`], `None` otherwise.
     pub fn as_array_expression(&self) -> Option<&ArrayExpression<'gc>> {
         if let Node::ArrayExpression(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`SpreadElement`], `None` otherwise.
     pub fn as_spread_element(&self) -> Option<&SpreadElement<'gc>> {
         if let Node::SpreadElement(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`NewExpression`], `None` otherwise.
     pub fn as_new_expression(&self) -> Option<&NewExpression<'gc>> {
         if let Node::NewExpression(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`YieldExpression`], `None` otherwise.
     pub fn as_yield_expression(&self) -> Option<&YieldExpression<'gc>> {
         if let Node::YieldExpression(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`AwaitExpression`], `None` otherwise.
     pub fn as_await_expression(&self) -> Option<&AwaitExpression<'gc>> {
         if let Node::AwaitExpression(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ImportExpression`], `None` otherwise.
     pub fn as_import_expression(&self) -> Option<&ImportExpression<'gc>> {
         if let Node::ImportExpression(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`CallExpression`], `None` otherwise.
     pub fn as_call_expression(&self) -> Option<&CallExpression<'gc>> {
         if let Node::CallExpression(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`OptionalCallExpression`], `None` otherwise.
     pub fn as_optional_call_expression(&self) -> Option<&OptionalCallExpression<'gc>> {
         if let Node::OptionalCallExpression(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`AssignmentExpression`], `None` otherwise.
     pub fn as_assignment_expression(&self) -> Option<&AssignmentExpression<'gc>> {
         if let Node::AssignmentExpression(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`UnaryExpression`], `None` otherwise.
     pub fn as_unary_expression(&self) -> Option<&UnaryExpression<'gc>> {
         if let Node::UnaryExpression(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`UpdateExpression`], `None` otherwise.
     pub fn as_update_expression(&self) -> Option<&UpdateExpression<'gc>> {
         if let Node::UpdateExpression(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`MemberExpression`], `None` otherwise.
     pub fn as_member_expression(&self) -> Option<&MemberExpression<'gc>> {
         if let Node::MemberExpression(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`OptionalMemberExpression`], `None` otherwise.
     pub fn as_optional_member_expression(&self) -> Option<&OptionalMemberExpression<'gc>> {
         if let Node::OptionalMemberExpression(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`LogicalExpression`], `None` otherwise.
     pub fn as_logical_expression(&self) -> Option<&LogicalExpression<'gc>> {
         if let Node::LogicalExpression(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ConditionalExpression`], `None` otherwise.
     pub fn as_conditional_expression(&self) -> Option<&ConditionalExpression<'gc>> {
         if let Node::ConditionalExpression(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`BinaryExpression`], `None` otherwise.
     pub fn as_binary_expression(&self) -> Option<&BinaryExpression<'gc>> {
         if let Node::BinaryExpression(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`Directive`], `None` otherwise.
     pub fn as_directive(&self) -> Option<&Directive<'gc>> {
         if let Node::Directive(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`DirectiveLiteral`], `None` otherwise.
     pub fn as_directive_literal(&self) -> Option<&DirectiveLiteral<'gc>> {
         if let Node::DirectiveLiteral(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`Identifier`], `None` otherwise.
     pub fn as_identifier(&self) -> Option<&Identifier<'gc>> {
         if let Node::Identifier(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`PrivateName`], `None` otherwise.
     pub fn as_private_name(&self) -> Option<&PrivateName<'gc>> {
         if let Node::PrivateName(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`MetaProperty`], `None` otherwise.
     pub fn as_meta_property(&self) -> Option<&MetaProperty<'gc>> {
         if let Node::MetaProperty(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`SwitchCase`], `None` otherwise.
     pub fn as_switch_case(&self) -> Option<&SwitchCase<'gc>> {
         if let Node::SwitchCase(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`CatchClause`], `None` otherwise.
     pub fn as_catch_clause(&self) -> Option<&CatchClause<'gc>> {
         if let Node::CatchClause(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`VariableDeclarator`], `None` otherwise.
     pub fn as_variable_declarator(&self) -> Option<&VariableDeclarator<'gc>> {
         if let Node::VariableDeclarator(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`VariableDeclaration`], `None` otherwise.
     pub fn as_variable_declaration(&self) -> Option<&VariableDeclaration<'gc>> {
         if let Node::VariableDeclaration(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TemplateLiteral`], `None` otherwise.
     pub fn as_template_literal(&self) -> Option<&TemplateLiteral<'gc>> {
         if let Node::TemplateLiteral(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TaggedTemplateExpression`], `None` otherwise.
     pub fn as_tagged_template_expression(&self) -> Option<&TaggedTemplateExpression<'gc>> {
         if let Node::TaggedTemplateExpression(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TemplateElement`], `None` otherwise.
     pub fn as_template_element(&self) -> Option<&TemplateElement<'gc>> {
         if let Node::TemplateElement(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`Property`], `None` otherwise.
     pub fn as_property(&self) -> Option<&Property<'gc>> {
         if let Node::Property(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`Decorator`], `None` otherwise.
     pub fn as_decorator(&self) -> Option<&Decorator<'gc>> {
         if let Node::Decorator(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ClassDeclaration`], `None` otherwise.
     pub fn as_class_declaration(&self) -> Option<&ClassDeclaration<'gc>> {
         if let Node::ClassDeclaration(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ClassExpression`], `None` otherwise.
     pub fn as_class_expression(&self) -> Option<&ClassExpression<'gc>> {
         if let Node::ClassExpression(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ClassBody`], `None` otherwise.
     pub fn as_class_body(&self) -> Option<&ClassBody<'gc>> {
         if let Node::ClassBody(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ClassProperty`], `None` otherwise.
     pub fn as_class_property(&self) -> Option<&ClassProperty<'gc>> {
         if let Node::ClassProperty(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ClassPrivateProperty`], `None` otherwise.
     pub fn as_class_private_property(&self) -> Option<&ClassPrivateProperty<'gc>> {
         if let Node::ClassPrivateProperty(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`MethodDefinition`], `None` otherwise.
     pub fn as_method_definition(&self) -> Option<&MethodDefinition<'gc>> {
         if let Node::MethodDefinition(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ImportDeclaration`], `None` otherwise.
     pub fn as_import_declaration(&self) -> Option<&ImportDeclaration<'gc>> {
         if let Node::ImportDeclaration(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ImportSpecifier`], `None` otherwise.
     pub fn as_import_specifier(&self) -> Option<&ImportSpecifier<'gc>> {
         if let Node::ImportSpecifier(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ImportDefaultSpecifier`], `None` otherwise.
     pub fn as_import_default_specifier(&self) -> Option<&ImportDefaultSpecifier<'gc>> {
         if let Node::ImportDefaultSpecifier(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ImportNamespaceSpecifier`], `None` otherwise.
     pub fn as_import_namespace_specifier(&self) -> Option<&ImportNamespaceSpecifier<'gc>> {
         if let Node::ImportNamespaceSpecifier(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ImportAttribute`], `None` otherwise.
     pub fn as_import_attribute(&self) -> Option<&ImportAttribute<'gc>> {
         if let Node::ImportAttribute(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ExportNamedDeclaration`], `None` otherwise.
     pub fn as_export_named_declaration(&self) -> Option<&ExportNamedDeclaration<'gc>> {
         if let Node::ExportNamedDeclaration(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ExportSpecifier`], `None` otherwise.
     pub fn as_export_specifier(&self) -> Option<&ExportSpecifier<'gc>> {
         if let Node::ExportSpecifier(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ExportNamespaceSpecifier`], `None` otherwise.
     pub fn as_export_namespace_specifier(&self) -> Option<&ExportNamespaceSpecifier<'gc>> {
         if let Node::ExportNamespaceSpecifier(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ExportDefaultDeclaration`], `None` otherwise.
     pub fn as_export_default_declaration(&self) -> Option<&ExportDefaultDeclaration<'gc>> {
         if let Node::ExportDefaultDeclaration(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ExportAllDeclaration`], `None` otherwise.
     pub fn as_export_all_declaration(&self) -> Option<&ExportAllDeclaration<'gc>> {
         if let Node::ExportAllDeclaration(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ObjectPattern`], `None` otherwise.
     pub fn as_object_pattern(&self) -> Option<&ObjectPattern<'gc>> {
         if let Node::ObjectPattern(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ArrayPattern`], `None` otherwise.
     pub fn as_array_pattern(&self) -> Option<&ArrayPattern<'gc>> {
         if let Node::ArrayPattern(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`RestElement`], `None` otherwise.
     pub fn as_rest_element(&self) -> Option<&RestElement<'gc>> {
         if let Node::RestElement(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`AssignmentPattern`], `None` otherwise.
     pub fn as_assignment_pattern(&self) -> Option<&AssignmentPattern<'gc>> {
         if let Node::AssignmentPattern(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`MatchStatementCase`], `None` otherwise.
     pub fn as_match_statement_case(&self) -> Option<&MatchStatementCase<'gc>> {
         if let Node::MatchStatementCase(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`MatchExpression`], `None` otherwise.
     pub fn as_match_expression(&self) -> Option<&MatchExpression<'gc>> {
         if let Node::MatchExpression(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`MatchExpressionCase`], `None` otherwise.
     pub fn as_match_expression_case(&self) -> Option<&MatchExpressionCase<'gc>> {
         if let Node::MatchExpressionCase(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`MatchWildcardPattern`], `None` otherwise.
     pub fn as_match_wildcard_pattern(&self) -> Option<&MatchWildcardPattern<'gc>> {
         if let Node::MatchWildcardPattern(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`MatchLiteralPattern`], `None` otherwise.
     pub fn as_match_literal_pattern(&self) -> Option<&MatchLiteralPattern<'gc>> {
         if let Node::MatchLiteralPattern(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`MatchUnaryPattern`], `None` otherwise.
     pub fn as_match_unary_pattern(&self) -> Option<&MatchUnaryPattern<'gc>> {
         if let Node::MatchUnaryPattern(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`MatchIdentifierPattern`], `None` otherwise.
     pub fn as_match_identifier_pattern(&self) -> Option<&MatchIdentifierPattern<'gc>> {
         if let Node::MatchIdentifierPattern(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`MatchBindingPattern`], `None` otherwise.
     pub fn as_match_binding_pattern(&self) -> Option<&MatchBindingPattern<'gc>> {
         if let Node::MatchBindingPattern(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`MatchObjectPattern`], `None` otherwise.
     pub fn as_match_object_pattern(&self) -> Option<&MatchObjectPattern<'gc>> {
         if let Node::MatchObjectPattern(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`MatchArrayPattern`], `None` otherwise.
     pub fn as_match_array_pattern(&self) -> Option<&MatchArrayPattern<'gc>> {
         if let Node::MatchArrayPattern(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`MatchOrPattern`], `None` otherwise.
     pub fn as_match_or_pattern(&self) -> Option<&MatchOrPattern<'gc>> {
         if let Node::MatchOrPattern(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`MatchAsPattern`], `None` otherwise.
     pub fn as_match_as_pattern(&self) -> Option<&MatchAsPattern<'gc>> {
         if let Node::MatchAsPattern(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`MatchMemberPattern`], `None` otherwise.
     pub fn as_match_member_pattern(&self) -> Option<&MatchMemberPattern<'gc>> {
         if let Node::MatchMemberPattern(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`MatchInstancePattern`], `None` otherwise.
     pub fn as_match_instance_pattern(&self) -> Option<&MatchInstancePattern<'gc>> {
         if let Node::MatchInstancePattern(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`MatchObjectPatternProperty`], `None`
+    /// otherwise.
     pub fn as_match_object_pattern_property(&self) -> Option<&MatchObjectPatternProperty<'gc>> {
         if let Node::MatchObjectPatternProperty(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`MatchInstanceObjectPattern`], `None`
+    /// otherwise.
     pub fn as_match_instance_object_pattern(&self) -> Option<&MatchInstanceObjectPattern<'gc>> {
         if let Node::MatchInstanceObjectPattern(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`MatchRestPattern`], `None` otherwise.
     pub fn as_match_rest_pattern(&self) -> Option<&MatchRestPattern<'gc>> {
         if let Node::MatchRestPattern(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`JSXIdentifier`], `None` otherwise.
     pub fn as_jsx_identifier(&self) -> Option<&JSXIdentifier<'gc>> {
         if let Node::JSXIdentifier(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`JSXMemberExpression`], `None` otherwise.
     pub fn as_jsx_member_expression(&self) -> Option<&JSXMemberExpression<'gc>> {
         if let Node::JSXMemberExpression(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`JSXNamespacedName`], `None` otherwise.
     pub fn as_jsx_namespaced_name(&self) -> Option<&JSXNamespacedName<'gc>> {
         if let Node::JSXNamespacedName(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`JSXEmptyExpression`], `None` otherwise.
     pub fn as_jsx_empty_expression(&self) -> Option<&JSXEmptyExpression<'gc>> {
         if let Node::JSXEmptyExpression(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`JSXExpressionContainer`], `None` otherwise.
     pub fn as_jsx_expression_container(&self) -> Option<&JSXExpressionContainer<'gc>> {
         if let Node::JSXExpressionContainer(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`JSXSpreadChild`], `None` otherwise.
     pub fn as_jsx_spread_child(&self) -> Option<&JSXSpreadChild<'gc>> {
         if let Node::JSXSpreadChild(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`JSXOpeningElement`], `None` otherwise.
     pub fn as_jsx_opening_element(&self) -> Option<&JSXOpeningElement<'gc>> {
         if let Node::JSXOpeningElement(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`JSXClosingElement`], `None` otherwise.
     pub fn as_jsx_closing_element(&self) -> Option<&JSXClosingElement<'gc>> {
         if let Node::JSXClosingElement(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`JSXAttribute`], `None` otherwise.
     pub fn as_jsx_attribute(&self) -> Option<&JSXAttribute<'gc>> {
         if let Node::JSXAttribute(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`JSXSpreadAttribute`], `None` otherwise.
     pub fn as_jsx_spread_attribute(&self) -> Option<&JSXSpreadAttribute<'gc>> {
         if let Node::JSXSpreadAttribute(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`JSXStringLiteral`], `None` otherwise.
     pub fn as_jsx_string_literal(&self) -> Option<&JSXStringLiteral<'gc>> {
         if let Node::JSXStringLiteral(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`JSXText`], `None` otherwise.
     pub fn as_jsx_text(&self) -> Option<&JSXText<'gc>> {
         if let Node::JSXText(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`JSXElement`], `None` otherwise.
     pub fn as_jsx_element(&self) -> Option<&JSXElement<'gc>> {
         if let Node::JSXElement(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`JSXFragment`], `None` otherwise.
     pub fn as_jsx_fragment(&self) -> Option<&JSXFragment<'gc>> {
         if let Node::JSXFragment(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`JSXOpeningFragment`], `None` otherwise.
     pub fn as_jsx_opening_fragment(&self) -> Option<&JSXOpeningFragment<'gc>> {
         if let Node::JSXOpeningFragment(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`JSXClosingFragment`], `None` otherwise.
     pub fn as_jsx_closing_fragment(&self) -> Option<&JSXClosingFragment<'gc>> {
         if let Node::JSXClosingFragment(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ExistsTypeAnnotation`], `None` otherwise.
     pub fn as_exists_type_annotation(&self) -> Option<&ExistsTypeAnnotation<'gc>> {
         if let Node::ExistsTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`EmptyTypeAnnotation`], `None` otherwise.
     pub fn as_empty_type_annotation(&self) -> Option<&EmptyTypeAnnotation<'gc>> {
         if let Node::EmptyTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`StringTypeAnnotation`], `None` otherwise.
     pub fn as_string_type_annotation(&self) -> Option<&StringTypeAnnotation<'gc>> {
         if let Node::StringTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`NumberTypeAnnotation`], `None` otherwise.
     pub fn as_number_type_annotation(&self) -> Option<&NumberTypeAnnotation<'gc>> {
         if let Node::NumberTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`StringLiteralTypeAnnotation`], `None`
+    /// otherwise.
     pub fn as_string_literal_type_annotation(&self) -> Option<&StringLiteralTypeAnnotation<'gc>> {
         if let Node::StringLiteralTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`NumberLiteralTypeAnnotation`], `None`
+    /// otherwise.
     pub fn as_number_literal_type_annotation(&self) -> Option<&NumberLiteralTypeAnnotation<'gc>> {
         if let Node::NumberLiteralTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`BigIntLiteralTypeAnnotation`], `None`
+    /// otherwise.
     pub fn as_big_int_literal_type_annotation(&self) -> Option<&BigIntLiteralTypeAnnotation<'gc>> {
         if let Node::BigIntLiteralTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`BooleanTypeAnnotation`], `None` otherwise.
     pub fn as_boolean_type_annotation(&self) -> Option<&BooleanTypeAnnotation<'gc>> {
         if let Node::BooleanTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`BooleanLiteralTypeAnnotation`], `None`
+    /// otherwise.
     pub fn as_boolean_literal_type_annotation(&self) -> Option<&BooleanLiteralTypeAnnotation<'gc>> {
         if let Node::BooleanLiteralTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`NullLiteralTypeAnnotation`], `None`
+    /// otherwise.
     pub fn as_null_literal_type_annotation(&self) -> Option<&NullLiteralTypeAnnotation<'gc>> {
         if let Node::NullLiteralTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`SymbolTypeAnnotation`], `None` otherwise.
     pub fn as_symbol_type_annotation(&self) -> Option<&SymbolTypeAnnotation<'gc>> {
         if let Node::SymbolTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`AnyTypeAnnotation`], `None` otherwise.
     pub fn as_any_type_annotation(&self) -> Option<&AnyTypeAnnotation<'gc>> {
         if let Node::AnyTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`MixedTypeAnnotation`], `None` otherwise.
     pub fn as_mixed_type_annotation(&self) -> Option<&MixedTypeAnnotation<'gc>> {
         if let Node::MixedTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`BigIntTypeAnnotation`], `None` otherwise.
     pub fn as_big_int_type_annotation(&self) -> Option<&BigIntTypeAnnotation<'gc>> {
         if let Node::BigIntTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`VoidTypeAnnotation`], `None` otherwise.
     pub fn as_void_type_annotation(&self) -> Option<&VoidTypeAnnotation<'gc>> {
         if let Node::VoidTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`NeverTypeAnnotation`], `None` otherwise.
     pub fn as_never_type_annotation(&self) -> Option<&NeverTypeAnnotation<'gc>> {
         if let Node::NeverTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`UnknownTypeAnnotation`], `None` otherwise.
     pub fn as_unknown_type_annotation(&self) -> Option<&UnknownTypeAnnotation<'gc>> {
         if let Node::UnknownTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`UndefinedTypeAnnotation`], `None` otherwise.
     pub fn as_undefined_type_annotation(&self) -> Option<&UndefinedTypeAnnotation<'gc>> {
         if let Node::UndefinedTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`FunctionTypeAnnotation`], `None` otherwise.
     pub fn as_function_type_annotation(&self) -> Option<&FunctionTypeAnnotation<'gc>> {
         if let Node::FunctionTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`HookTypeAnnotation`], `None` otherwise.
     pub fn as_hook_type_annotation(&self) -> Option<&HookTypeAnnotation<'gc>> {
         if let Node::HookTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`FunctionTypeParam`], `None` otherwise.
     pub fn as_function_type_param(&self) -> Option<&FunctionTypeParam<'gc>> {
         if let Node::FunctionTypeParam(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ComponentTypeAnnotation`], `None` otherwise.
     pub fn as_component_type_annotation(&self) -> Option<&ComponentTypeAnnotation<'gc>> {
         if let Node::ComponentTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ComponentTypeParameter`], `None` otherwise.
     pub fn as_component_type_parameter(&self) -> Option<&ComponentTypeParameter<'gc>> {
         if let Node::ComponentTypeParameter(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`NullableTypeAnnotation`], `None` otherwise.
     pub fn as_nullable_type_annotation(&self) -> Option<&NullableTypeAnnotation<'gc>> {
         if let Node::NullableTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`QualifiedTypeIdentifier`], `None` otherwise.
     pub fn as_qualified_type_identifier(&self) -> Option<&QualifiedTypeIdentifier<'gc>> {
         if let Node::QualifiedTypeIdentifier(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TypeofTypeAnnotation`], `None` otherwise.
     pub fn as_typeof_type_annotation(&self) -> Option<&TypeofTypeAnnotation<'gc>> {
         if let Node::TypeofTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`KeyofTypeAnnotation`], `None` otherwise.
     pub fn as_keyof_type_annotation(&self) -> Option<&KeyofTypeAnnotation<'gc>> {
         if let Node::KeyofTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TypeOperator`], `None` otherwise.
     pub fn as_type_operator(&self) -> Option<&TypeOperator<'gc>> {
         if let Node::TypeOperator(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`QualifiedTypeofIdentifier`], `None`
+    /// otherwise.
     pub fn as_qualified_typeof_identifier(&self) -> Option<&QualifiedTypeofIdentifier<'gc>> {
         if let Node::QualifiedTypeofIdentifier(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TupleTypeAnnotation`], `None` otherwise.
     pub fn as_tuple_type_annotation(&self) -> Option<&TupleTypeAnnotation<'gc>> {
         if let Node::TupleTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TupleTypeSpreadElement`], `None` otherwise.
     pub fn as_tuple_type_spread_element(&self) -> Option<&TupleTypeSpreadElement<'gc>> {
         if let Node::TupleTypeSpreadElement(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TupleTypeLabeledElement`], `None` otherwise.
     pub fn as_tuple_type_labeled_element(&self) -> Option<&TupleTypeLabeledElement<'gc>> {
         if let Node::TupleTypeLabeledElement(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ArrayTypeAnnotation`], `None` otherwise.
     pub fn as_array_type_annotation(&self) -> Option<&ArrayTypeAnnotation<'gc>> {
         if let Node::ArrayTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`InferTypeAnnotation`], `None` otherwise.
     pub fn as_infer_type_annotation(&self) -> Option<&InferTypeAnnotation<'gc>> {
         if let Node::InferTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`UnionTypeAnnotation`], `None` otherwise.
     pub fn as_union_type_annotation(&self) -> Option<&UnionTypeAnnotation<'gc>> {
         if let Node::UnionTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`IntersectionTypeAnnotation`], `None`
+    /// otherwise.
     pub fn as_intersection_type_annotation(&self) -> Option<&IntersectionTypeAnnotation<'gc>> {
         if let Node::IntersectionTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`GenericTypeAnnotation`], `None` otherwise.
     pub fn as_generic_type_annotation(&self) -> Option<&GenericTypeAnnotation<'gc>> {
         if let Node::GenericTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`IndexedAccessType`], `None` otherwise.
     pub fn as_indexed_access_type(&self) -> Option<&IndexedAccessType<'gc>> {
         if let Node::IndexedAccessType(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`OptionalIndexedAccessType`], `None`
+    /// otherwise.
     pub fn as_optional_indexed_access_type(&self) -> Option<&OptionalIndexedAccessType<'gc>> {
         if let Node::OptionalIndexedAccessType(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ConditionalTypeAnnotation`], `None`
+    /// otherwise.
     pub fn as_conditional_type_annotation(&self) -> Option<&ConditionalTypeAnnotation<'gc>> {
         if let Node::ConditionalTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TypePredicate`], `None` otherwise.
     pub fn as_type_predicate(&self) -> Option<&TypePredicate<'gc>> {
         if let Node::TypePredicate(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`InterfaceTypeAnnotation`], `None` otherwise.
     pub fn as_interface_type_annotation(&self) -> Option<&InterfaceTypeAnnotation<'gc>> {
         if let Node::InterfaceTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TypeAlias`], `None` otherwise.
     pub fn as_type_alias(&self) -> Option<&TypeAlias<'gc>> {
         if let Node::TypeAlias(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`OpaqueType`], `None` otherwise.
     pub fn as_opaque_type(&self) -> Option<&OpaqueType<'gc>> {
         if let Node::OpaqueType(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`InterfaceDeclaration`], `None` otherwise.
     pub fn as_interface_declaration(&self) -> Option<&InterfaceDeclaration<'gc>> {
         if let Node::InterfaceDeclaration(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`DeclareTypeAlias`], `None` otherwise.
     pub fn as_declare_type_alias(&self) -> Option<&DeclareTypeAlias<'gc>> {
         if let Node::DeclareTypeAlias(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`DeclareOpaqueType`], `None` otherwise.
     pub fn as_declare_opaque_type(&self) -> Option<&DeclareOpaqueType<'gc>> {
         if let Node::DeclareOpaqueType(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`DeclareInterface`], `None` otherwise.
     pub fn as_declare_interface(&self) -> Option<&DeclareInterface<'gc>> {
         if let Node::DeclareInterface(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`DeclareClass`], `None` otherwise.
     pub fn as_declare_class(&self) -> Option<&DeclareClass<'gc>> {
         if let Node::DeclareClass(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`DeclareFunction`], `None` otherwise.
     pub fn as_declare_function(&self) -> Option<&DeclareFunction<'gc>> {
         if let Node::DeclareFunction(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`DeclareHook`], `None` otherwise.
     pub fn as_declare_hook(&self) -> Option<&DeclareHook<'gc>> {
         if let Node::DeclareHook(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`DeclareComponent`], `None` otherwise.
     pub fn as_declare_component(&self) -> Option<&DeclareComponent<'gc>> {
         if let Node::DeclareComponent(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`DeclareVariable`], `None` otherwise.
     pub fn as_declare_variable(&self) -> Option<&DeclareVariable<'gc>> {
         if let Node::DeclareVariable(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`DeclareEnum`], `None` otherwise.
     pub fn as_declare_enum(&self) -> Option<&DeclareEnum<'gc>> {
         if let Node::DeclareEnum(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`DeclareExportDeclaration`], `None` otherwise.
     pub fn as_declare_export_declaration(&self) -> Option<&DeclareExportDeclaration<'gc>> {
         if let Node::DeclareExportDeclaration(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`DeclareExportAllDeclaration`], `None`
+    /// otherwise.
     pub fn as_declare_export_all_declaration(&self) -> Option<&DeclareExportAllDeclaration<'gc>> {
         if let Node::DeclareExportAllDeclaration(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`DeclareModule`], `None` otherwise.
     pub fn as_declare_module(&self) -> Option<&DeclareModule<'gc>> {
         if let Node::DeclareModule(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`DeclareNamespace`], `None` otherwise.
     pub fn as_declare_namespace(&self) -> Option<&DeclareNamespace<'gc>> {
         if let Node::DeclareNamespace(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`DeclareModuleExports`], `None` otherwise.
     pub fn as_declare_module_exports(&self) -> Option<&DeclareModuleExports<'gc>> {
         if let Node::DeclareModuleExports(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`InterfaceExtends`], `None` otherwise.
     pub fn as_interface_extends(&self) -> Option<&InterfaceExtends<'gc>> {
         if let Node::InterfaceExtends(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ClassImplements`], `None` otherwise.
     pub fn as_class_implements(&self) -> Option<&ClassImplements<'gc>> {
         if let Node::ClassImplements(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TypeAnnotation`], `None` otherwise.
     pub fn as_type_annotation(&self) -> Option<&TypeAnnotation<'gc>> {
         if let Node::TypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ObjectTypeAnnotation`], `None` otherwise.
     pub fn as_object_type_annotation(&self) -> Option<&ObjectTypeAnnotation<'gc>> {
         if let Node::ObjectTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ObjectTypeProperty`], `None` otherwise.
     pub fn as_object_type_property(&self) -> Option<&ObjectTypeProperty<'gc>> {
         if let Node::ObjectTypeProperty(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ObjectTypeSpreadProperty`], `None` otherwise.
     pub fn as_object_type_spread_property(&self) -> Option<&ObjectTypeSpreadProperty<'gc>> {
         if let Node::ObjectTypeSpreadProperty(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ObjectTypeInternalSlot`], `None` otherwise.
     pub fn as_object_type_internal_slot(&self) -> Option<&ObjectTypeInternalSlot<'gc>> {
         if let Node::ObjectTypeInternalSlot(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ObjectTypeCallProperty`], `None` otherwise.
     pub fn as_object_type_call_property(&self) -> Option<&ObjectTypeCallProperty<'gc>> {
         if let Node::ObjectTypeCallProperty(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ObjectTypeIndexer`], `None` otherwise.
     pub fn as_object_type_indexer(&self) -> Option<&ObjectTypeIndexer<'gc>> {
         if let Node::ObjectTypeIndexer(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ObjectTypeMappedTypeProperty`], `None`
+    /// otherwise.
     pub fn as_object_type_mapped_type_property(&self) -> Option<&ObjectTypeMappedTypeProperty<'gc>> {
         if let Node::ObjectTypeMappedTypeProperty(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`Variance`], `None` otherwise.
     pub fn as_variance(&self) -> Option<&Variance<'gc>> {
         if let Node::Variance(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TypeParameterDeclaration`], `None` otherwise.
     pub fn as_type_parameter_declaration(&self) -> Option<&TypeParameterDeclaration<'gc>> {
         if let Node::TypeParameterDeclaration(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TypeParameter`], `None` otherwise.
     pub fn as_type_parameter(&self) -> Option<&TypeParameter<'gc>> {
         if let Node::TypeParameter(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TypeParameterInstantiation`], `None`
+    /// otherwise.
     pub fn as_type_parameter_instantiation(&self) -> Option<&TypeParameterInstantiation<'gc>> {
         if let Node::TypeParameterInstantiation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TypeCastExpression`], `None` otherwise.
     pub fn as_type_cast_expression(&self) -> Option<&TypeCastExpression<'gc>> {
         if let Node::TypeCastExpression(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`AsExpression`], `None` otherwise.
     pub fn as_as_expression(&self) -> Option<&AsExpression<'gc>> {
         if let Node::AsExpression(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`AsConstExpression`], `None` otherwise.
     pub fn as_as_const_expression(&self) -> Option<&AsConstExpression<'gc>> {
         if let Node::AsConstExpression(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`InferredPredicate`], `None` otherwise.
     pub fn as_inferred_predicate(&self) -> Option<&InferredPredicate<'gc>> {
         if let Node::InferredPredicate(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`DeclaredPredicate`], `None` otherwise.
     pub fn as_declared_predicate(&self) -> Option<&DeclaredPredicate<'gc>> {
         if let Node::DeclaredPredicate(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`EnumDeclaration`], `None` otherwise.
     pub fn as_enum_declaration(&self) -> Option<&EnumDeclaration<'gc>> {
         if let Node::EnumDeclaration(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`EnumStringBody`], `None` otherwise.
     pub fn as_enum_string_body(&self) -> Option<&EnumStringBody<'gc>> {
         if let Node::EnumStringBody(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`EnumNumberBody`], `None` otherwise.
     pub fn as_enum_number_body(&self) -> Option<&EnumNumberBody<'gc>> {
         if let Node::EnumNumberBody(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`EnumBigIntBody`], `None` otherwise.
     pub fn as_enum_big_int_body(&self) -> Option<&EnumBigIntBody<'gc>> {
         if let Node::EnumBigIntBody(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`EnumBooleanBody`], `None` otherwise.
     pub fn as_enum_boolean_body(&self) -> Option<&EnumBooleanBody<'gc>> {
         if let Node::EnumBooleanBody(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`EnumSymbolBody`], `None` otherwise.
     pub fn as_enum_symbol_body(&self) -> Option<&EnumSymbolBody<'gc>> {
         if let Node::EnumSymbolBody(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`EnumDefaultedMember`], `None` otherwise.
     pub fn as_enum_defaulted_member(&self) -> Option<&EnumDefaultedMember<'gc>> {
         if let Node::EnumDefaultedMember(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`EnumStringMember`], `None` otherwise.
     pub fn as_enum_string_member(&self) -> Option<&EnumStringMember<'gc>> {
         if let Node::EnumStringMember(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`EnumNumberMember`], `None` otherwise.
     pub fn as_enum_number_member(&self) -> Option<&EnumNumberMember<'gc>> {
         if let Node::EnumNumberMember(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`EnumBigIntMember`], `None` otherwise.
     pub fn as_enum_big_int_member(&self) -> Option<&EnumBigIntMember<'gc>> {
         if let Node::EnumBigIntMember(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`EnumBooleanMember`], `None` otherwise.
     pub fn as_enum_boolean_member(&self) -> Option<&EnumBooleanMember<'gc>> {
         if let Node::EnumBooleanMember(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ComponentParameter`], `None` otherwise.
     pub fn as_component_parameter(&self) -> Option<&ComponentParameter<'gc>> {
         if let Node::ComponentParameter(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`RecordDeclaration`], `None` otherwise.
     pub fn as_record_declaration(&self) -> Option<&RecordDeclaration<'gc>> {
         if let Node::RecordDeclaration(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`RecordDeclarationImplements`], `None`
+    /// otherwise.
     pub fn as_record_declaration_implements(&self) -> Option<&RecordDeclarationImplements<'gc>> {
         if let Node::RecordDeclarationImplements(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`RecordDeclarationBody`], `None` otherwise.
     pub fn as_record_declaration_body(&self) -> Option<&RecordDeclarationBody<'gc>> {
         if let Node::RecordDeclarationBody(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`RecordDeclarationProperty`], `None`
+    /// otherwise.
     pub fn as_record_declaration_property(&self) -> Option<&RecordDeclarationProperty<'gc>> {
         if let Node::RecordDeclarationProperty(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`RecordDeclarationStaticProperty`], `None`
+    /// otherwise.
     pub fn as_record_declaration_static_property(&self) -> Option<&RecordDeclarationStaticProperty<'gc>> {
         if let Node::RecordDeclarationStaticProperty(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`RecordExpression`], `None` otherwise.
     pub fn as_record_expression(&self) -> Option<&RecordExpression<'gc>> {
         if let Node::RecordExpression(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`RecordExpressionProperties`], `None`
+    /// otherwise.
     pub fn as_record_expression_properties(&self) -> Option<&RecordExpressionProperties<'gc>> {
         if let Node::RecordExpressionProperties(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSTypeAnnotation`], `None` otherwise.
     pub fn as_ts_type_annotation(&self) -> Option<&TSTypeAnnotation<'gc>> {
         if let Node::TSTypeAnnotation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSAnyKeyword`], `None` otherwise.
     pub fn as_ts_any_keyword(&self) -> Option<&TSAnyKeyword<'gc>> {
         if let Node::TSAnyKeyword(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSNumberKeyword`], `None` otherwise.
     pub fn as_ts_number_keyword(&self) -> Option<&TSNumberKeyword<'gc>> {
         if let Node::TSNumberKeyword(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSBooleanKeyword`], `None` otherwise.
     pub fn as_ts_boolean_keyword(&self) -> Option<&TSBooleanKeyword<'gc>> {
         if let Node::TSBooleanKeyword(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSStringKeyword`], `None` otherwise.
     pub fn as_ts_string_keyword(&self) -> Option<&TSStringKeyword<'gc>> {
         if let Node::TSStringKeyword(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSSymbolKeyword`], `None` otherwise.
     pub fn as_ts_symbol_keyword(&self) -> Option<&TSSymbolKeyword<'gc>> {
         if let Node::TSSymbolKeyword(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSVoidKeyword`], `None` otherwise.
     pub fn as_ts_void_keyword(&self) -> Option<&TSVoidKeyword<'gc>> {
         if let Node::TSVoidKeyword(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSUndefinedKeyword`], `None` otherwise.
     pub fn as_ts_undefined_keyword(&self) -> Option<&TSUndefinedKeyword<'gc>> {
         if let Node::TSUndefinedKeyword(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSUnknownKeyword`], `None` otherwise.
     pub fn as_ts_unknown_keyword(&self) -> Option<&TSUnknownKeyword<'gc>> {
         if let Node::TSUnknownKeyword(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSNeverKeyword`], `None` otherwise.
     pub fn as_ts_never_keyword(&self) -> Option<&TSNeverKeyword<'gc>> {
         if let Node::TSNeverKeyword(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSBigIntKeyword`], `None` otherwise.
     pub fn as_ts_big_int_keyword(&self) -> Option<&TSBigIntKeyword<'gc>> {
         if let Node::TSBigIntKeyword(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSThisType`], `None` otherwise.
     pub fn as_ts_this_type(&self) -> Option<&TSThisType<'gc>> {
         if let Node::TSThisType(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSLiteralType`], `None` otherwise.
     pub fn as_ts_literal_type(&self) -> Option<&TSLiteralType<'gc>> {
         if let Node::TSLiteralType(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSIndexedAccessType`], `None` otherwise.
     pub fn as_ts_indexed_access_type(&self) -> Option<&TSIndexedAccessType<'gc>> {
         if let Node::TSIndexedAccessType(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSArrayType`], `None` otherwise.
     pub fn as_ts_array_type(&self) -> Option<&TSArrayType<'gc>> {
         if let Node::TSArrayType(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSTypeReference`], `None` otherwise.
     pub fn as_ts_type_reference(&self) -> Option<&TSTypeReference<'gc>> {
         if let Node::TSTypeReference(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSQualifiedName`], `None` otherwise.
     pub fn as_ts_qualified_name(&self) -> Option<&TSQualifiedName<'gc>> {
         if let Node::TSQualifiedName(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSFunctionType`], `None` otherwise.
     pub fn as_ts_function_type(&self) -> Option<&TSFunctionType<'gc>> {
         if let Node::TSFunctionType(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSConstructorType`], `None` otherwise.
     pub fn as_ts_constructor_type(&self) -> Option<&TSConstructorType<'gc>> {
         if let Node::TSConstructorType(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSTypePredicate`], `None` otherwise.
     pub fn as_ts_type_predicate(&self) -> Option<&TSTypePredicate<'gc>> {
         if let Node::TSTypePredicate(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSTupleType`], `None` otherwise.
     pub fn as_ts_tuple_type(&self) -> Option<&TSTupleType<'gc>> {
         if let Node::TSTupleType(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSTypeAssertion`], `None` otherwise.
     pub fn as_ts_type_assertion(&self) -> Option<&TSTypeAssertion<'gc>> {
         if let Node::TSTypeAssertion(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSAsExpression`], `None` otherwise.
     pub fn as_ts_as_expression(&self) -> Option<&TSAsExpression<'gc>> {
         if let Node::TSAsExpression(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSParameterProperty`], `None` otherwise.
     pub fn as_ts_parameter_property(&self) -> Option<&TSParameterProperty<'gc>> {
         if let Node::TSParameterProperty(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSTypeAliasDeclaration`], `None` otherwise.
     pub fn as_ts_type_alias_declaration(&self) -> Option<&TSTypeAliasDeclaration<'gc>> {
         if let Node::TSTypeAliasDeclaration(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSInterfaceDeclaration`], `None` otherwise.
     pub fn as_ts_interface_declaration(&self) -> Option<&TSInterfaceDeclaration<'gc>> {
         if let Node::TSInterfaceDeclaration(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSInterfaceHeritage`], `None` otherwise.
     pub fn as_ts_interface_heritage(&self) -> Option<&TSInterfaceHeritage<'gc>> {
         if let Node::TSInterfaceHeritage(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSInterfaceBody`], `None` otherwise.
     pub fn as_ts_interface_body(&self) -> Option<&TSInterfaceBody<'gc>> {
         if let Node::TSInterfaceBody(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSEnumDeclaration`], `None` otherwise.
     pub fn as_ts_enum_declaration(&self) -> Option<&TSEnumDeclaration<'gc>> {
         if let Node::TSEnumDeclaration(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSEnumMember`], `None` otherwise.
     pub fn as_ts_enum_member(&self) -> Option<&TSEnumMember<'gc>> {
         if let Node::TSEnumMember(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSModuleDeclaration`], `None` otherwise.
     pub fn as_ts_module_declaration(&self) -> Option<&TSModuleDeclaration<'gc>> {
         if let Node::TSModuleDeclaration(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSModuleBlock`], `None` otherwise.
     pub fn as_ts_module_block(&self) -> Option<&TSModuleBlock<'gc>> {
         if let Node::TSModuleBlock(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSModuleMember`], `None` otherwise.
     pub fn as_ts_module_member(&self) -> Option<&TSModuleMember<'gc>> {
         if let Node::TSModuleMember(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSTypeParameterDeclaration`], `None`
+    /// otherwise.
     pub fn as_ts_type_parameter_declaration(&self) -> Option<&TSTypeParameterDeclaration<'gc>> {
         if let Node::TSTypeParameterDeclaration(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSTypeParameter`], `None` otherwise.
     pub fn as_ts_type_parameter(&self) -> Option<&TSTypeParameter<'gc>> {
         if let Node::TSTypeParameter(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSTypeParameterInstantiation`], `None`
+    /// otherwise.
     pub fn as_ts_type_parameter_instantiation(&self) -> Option<&TSTypeParameterInstantiation<'gc>> {
         if let Node::TSTypeParameterInstantiation(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSUnionType`], `None` otherwise.
     pub fn as_ts_union_type(&self) -> Option<&TSUnionType<'gc>> {
         if let Node::TSUnionType(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSIntersectionType`], `None` otherwise.
     pub fn as_ts_intersection_type(&self) -> Option<&TSIntersectionType<'gc>> {
         if let Node::TSIntersectionType(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSTypeQuery`], `None` otherwise.
     pub fn as_ts_type_query(&self) -> Option<&TSTypeQuery<'gc>> {
         if let Node::TSTypeQuery(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSConditionalType`], `None` otherwise.
     pub fn as_ts_conditional_type(&self) -> Option<&TSConditionalType<'gc>> {
         if let Node::TSConditionalType(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSTypeLiteral`], `None` otherwise.
     pub fn as_ts_type_literal(&self) -> Option<&TSTypeLiteral<'gc>> {
         if let Node::TSTypeLiteral(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSPropertySignature`], `None` otherwise.
     pub fn as_ts_property_signature(&self) -> Option<&TSPropertySignature<'gc>> {
         if let Node::TSPropertySignature(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSMethodSignature`], `None` otherwise.
     pub fn as_ts_method_signature(&self) -> Option<&TSMethodSignature<'gc>> {
         if let Node::TSMethodSignature(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSIndexSignature`], `None` otherwise.
     pub fn as_ts_index_signature(&self) -> Option<&TSIndexSignature<'gc>> {
         if let Node::TSIndexSignature(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSCallSignatureDeclaration`], `None`
+    /// otherwise.
     pub fn as_ts_call_signature_declaration(&self) -> Option<&TSCallSignatureDeclaration<'gc>> {
         if let Node::TSCallSignatureDeclaration(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`TSModifiers`], `None` otherwise.
     pub fn as_ts_modifiers(&self) -> Option<&TSModifiers<'gc>> {
         if let Node::TSModifiers(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`CoverEmptyArgs`], `None` otherwise.
     pub fn as_cover_empty_args(&self) -> Option<&CoverEmptyArgs<'gc>> {
         if let Node::CoverEmptyArgs(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`CoverTrailingComma`], `None` otherwise.
     pub fn as_cover_trailing_comma(&self) -> Option<&CoverTrailingComma<'gc>> {
         if let Node::CoverTrailingComma(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`CoverInitializer`], `None` otherwise.
     pub fn as_cover_initializer(&self) -> Option<&CoverInitializer<'gc>> {
         if let Node::CoverInitializer(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`CoverRestElement`], `None` otherwise.
     pub fn as_cover_rest_element(&self) -> Option<&CoverRestElement<'gc>> {
         if let Node::CoverRestElement(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`CoverTypedIdentifier`], `None` otherwise.
     pub fn as_cover_typed_identifier(&self) -> Option<&CoverTypedIdentifier<'gc>> {
         if let Node::CoverTypedIdentifier(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`SHBuiltin`], `None` otherwise.
     pub fn as_sh_builtin(&self) -> Option<&SHBuiltin<'gc>> {
         if let Node::SHBuiltin(n) = self { Some(n) } else { None }
     }
 
+    /// The payload if this is a [`ImplicitCheckedCast`], `None` otherwise.
     pub fn as_implicit_checked_cast(&self) -> Option<&ImplicitCheckedCast<'gc>> {
         if let Node::ImplicitCheckedCast(n) = self { Some(n) } else { None }
     }
 
+    /// Visit every child node in declared order: the `ESTree.def`
+    /// fields plus the decoration lists the GC marker must trace.
     pub fn visit_children<V: Visitor<'gc> + ?Sized>(&'gc self, v: &mut V) {
         match self {
             Node::Empty(_) => {}
@@ -11831,6 +14368,8 @@ impl<'gc> Node<'gc> {
         }
     }
 
+    /// Call `cb` on every `NodeList` field of this node, including
+    /// decoration lists. Used by the GC to mark list elements.
     pub fn mark_lists<F: FnMut(&NodeList<'gc>)>(&'gc self, cb: &mut F) {
         match self {
             Node::Program(n) => { cb(&n.body); cb(&n.decorations.get()); cb(&n.dummy_param_list.get()); }
@@ -13291,280 +15830,552 @@ pub mod builder {
     /// One builder per node kind; clone-with-one-field-changed.
     #[derive(Debug)]
     pub enum Builder<'gc> {
+        /// Builder for [`super::Empty`].
         Empty(self::Empty<'gc>),
+        /// Builder for [`super::Metadata`].
         Metadata(self::Metadata<'gc>),
+        /// Builder for [`super::Program`].
         Program(self::Program<'gc>),
+        /// Builder for [`super::FunctionExpression`].
         FunctionExpression(self::FunctionExpression<'gc>),
+        /// Builder for [`super::ArrowFunctionExpression`].
         ArrowFunctionExpression(self::ArrowFunctionExpression<'gc>),
+        /// Builder for [`super::FunctionDeclaration`].
         FunctionDeclaration(self::FunctionDeclaration<'gc>),
+        /// Builder for [`super::ComponentDeclaration`].
         ComponentDeclaration(self::ComponentDeclaration<'gc>),
+        /// Builder for [`super::HookDeclaration`].
         HookDeclaration(self::HookDeclaration<'gc>),
+        /// Builder for [`super::MatchStatement`].
         MatchStatement(self::MatchStatement<'gc>),
+        /// Builder for [`super::WhileStatement`].
         WhileStatement(self::WhileStatement<'gc>),
+        /// Builder for [`super::DoWhileStatement`].
         DoWhileStatement(self::DoWhileStatement<'gc>),
+        /// Builder for [`super::ForInStatement`].
         ForInStatement(self::ForInStatement<'gc>),
+        /// Builder for [`super::ForOfStatement`].
         ForOfStatement(self::ForOfStatement<'gc>),
+        /// Builder for [`super::ForStatement`].
         ForStatement(self::ForStatement<'gc>),
+        /// Builder for [`super::DebuggerStatement`].
         DebuggerStatement(self::DebuggerStatement<'gc>),
+        /// Builder for [`super::EmptyStatement`].
         EmptyStatement(self::EmptyStatement<'gc>),
+        /// Builder for [`super::BlockStatement`].
         BlockStatement(self::BlockStatement<'gc>),
+        /// Builder for [`super::StaticBlock`].
         StaticBlock(self::StaticBlock<'gc>),
+        /// Builder for [`super::BreakStatement`].
         BreakStatement(self::BreakStatement<'gc>),
+        /// Builder for [`super::ContinueStatement`].
         ContinueStatement(self::ContinueStatement<'gc>),
+        /// Builder for [`super::ThrowStatement`].
         ThrowStatement(self::ThrowStatement<'gc>),
+        /// Builder for [`super::ReturnStatement`].
         ReturnStatement(self::ReturnStatement<'gc>),
+        /// Builder for [`super::WithStatement`].
         WithStatement(self::WithStatement<'gc>),
+        /// Builder for [`super::SwitchStatement`].
         SwitchStatement(self::SwitchStatement<'gc>),
+        /// Builder for [`super::LabeledStatement`].
         LabeledStatement(self::LabeledStatement<'gc>),
+        /// Builder for [`super::ExpressionStatement`].
         ExpressionStatement(self::ExpressionStatement<'gc>),
+        /// Builder for [`super::TryStatement`].
         TryStatement(self::TryStatement<'gc>),
+        /// Builder for [`super::IfStatement`].
         IfStatement(self::IfStatement<'gc>),
+        /// Builder for [`super::NullLiteral`].
         NullLiteral(self::NullLiteral<'gc>),
+        /// Builder for [`super::BooleanLiteral`].
         BooleanLiteral(self::BooleanLiteral<'gc>),
+        /// Builder for [`super::StringLiteral`].
         StringLiteral(self::StringLiteral<'gc>),
+        /// Builder for [`super::NumericLiteral`].
         NumericLiteral(self::NumericLiteral<'gc>),
+        /// Builder for [`super::RegExpLiteral`].
         RegExpLiteral(self::RegExpLiteral<'gc>),
+        /// Builder for [`super::BigIntLiteral`].
         BigIntLiteral(self::BigIntLiteral<'gc>),
+        /// Builder for [`super::ThisExpression`].
         ThisExpression(self::ThisExpression<'gc>),
+        /// Builder for [`super::Super`].
         Super(self::Super<'gc>),
+        /// Builder for [`super::SequenceExpression`].
         SequenceExpression(self::SequenceExpression<'gc>),
+        /// Builder for [`super::ObjectExpression`].
         ObjectExpression(self::ObjectExpression<'gc>),
+        /// Builder for [`super::ArrayExpression`].
         ArrayExpression(self::ArrayExpression<'gc>),
+        /// Builder for [`super::SpreadElement`].
         SpreadElement(self::SpreadElement<'gc>),
+        /// Builder for [`super::NewExpression`].
         NewExpression(self::NewExpression<'gc>),
+        /// Builder for [`super::YieldExpression`].
         YieldExpression(self::YieldExpression<'gc>),
+        /// Builder for [`super::AwaitExpression`].
         AwaitExpression(self::AwaitExpression<'gc>),
+        /// Builder for [`super::ImportExpression`].
         ImportExpression(self::ImportExpression<'gc>),
+        /// Builder for [`super::CallExpression`].
         CallExpression(self::CallExpression<'gc>),
+        /// Builder for [`super::OptionalCallExpression`].
         OptionalCallExpression(self::OptionalCallExpression<'gc>),
+        /// Builder for [`super::AssignmentExpression`].
         AssignmentExpression(self::AssignmentExpression<'gc>),
+        /// Builder for [`super::UnaryExpression`].
         UnaryExpression(self::UnaryExpression<'gc>),
+        /// Builder for [`super::UpdateExpression`].
         UpdateExpression(self::UpdateExpression<'gc>),
+        /// Builder for [`super::MemberExpression`].
         MemberExpression(self::MemberExpression<'gc>),
+        /// Builder for [`super::OptionalMemberExpression`].
         OptionalMemberExpression(self::OptionalMemberExpression<'gc>),
+        /// Builder for [`super::LogicalExpression`].
         LogicalExpression(self::LogicalExpression<'gc>),
+        /// Builder for [`super::ConditionalExpression`].
         ConditionalExpression(self::ConditionalExpression<'gc>),
+        /// Builder for [`super::BinaryExpression`].
         BinaryExpression(self::BinaryExpression<'gc>),
+        /// Builder for [`super::Directive`].
         Directive(self::Directive<'gc>),
+        /// Builder for [`super::DirectiveLiteral`].
         DirectiveLiteral(self::DirectiveLiteral<'gc>),
+        /// Builder for [`super::Identifier`].
         Identifier(self::Identifier<'gc>),
+        /// Builder for [`super::PrivateName`].
         PrivateName(self::PrivateName<'gc>),
+        /// Builder for [`super::MetaProperty`].
         MetaProperty(self::MetaProperty<'gc>),
+        /// Builder for [`super::SwitchCase`].
         SwitchCase(self::SwitchCase<'gc>),
+        /// Builder for [`super::CatchClause`].
         CatchClause(self::CatchClause<'gc>),
+        /// Builder for [`super::VariableDeclarator`].
         VariableDeclarator(self::VariableDeclarator<'gc>),
+        /// Builder for [`super::VariableDeclaration`].
         VariableDeclaration(self::VariableDeclaration<'gc>),
+        /// Builder for [`super::TemplateLiteral`].
         TemplateLiteral(self::TemplateLiteral<'gc>),
+        /// Builder for [`super::TaggedTemplateExpression`].
         TaggedTemplateExpression(self::TaggedTemplateExpression<'gc>),
+        /// Builder for [`super::TemplateElement`].
         TemplateElement(self::TemplateElement<'gc>),
+        /// Builder for [`super::Property`].
         Property(self::Property<'gc>),
+        /// Builder for [`super::Decorator`].
         Decorator(self::Decorator<'gc>),
+        /// Builder for [`super::ClassDeclaration`].
         ClassDeclaration(self::ClassDeclaration<'gc>),
+        /// Builder for [`super::ClassExpression`].
         ClassExpression(self::ClassExpression<'gc>),
+        /// Builder for [`super::ClassBody`].
         ClassBody(self::ClassBody<'gc>),
+        /// Builder for [`super::ClassProperty`].
         ClassProperty(self::ClassProperty<'gc>),
+        /// Builder for [`super::ClassPrivateProperty`].
         ClassPrivateProperty(self::ClassPrivateProperty<'gc>),
+        /// Builder for [`super::MethodDefinition`].
         MethodDefinition(self::MethodDefinition<'gc>),
+        /// Builder for [`super::ImportDeclaration`].
         ImportDeclaration(self::ImportDeclaration<'gc>),
+        /// Builder for [`super::ImportSpecifier`].
         ImportSpecifier(self::ImportSpecifier<'gc>),
+        /// Builder for [`super::ImportDefaultSpecifier`].
         ImportDefaultSpecifier(self::ImportDefaultSpecifier<'gc>),
+        /// Builder for [`super::ImportNamespaceSpecifier`].
         ImportNamespaceSpecifier(self::ImportNamespaceSpecifier<'gc>),
+        /// Builder for [`super::ImportAttribute`].
         ImportAttribute(self::ImportAttribute<'gc>),
+        /// Builder for [`super::ExportNamedDeclaration`].
         ExportNamedDeclaration(self::ExportNamedDeclaration<'gc>),
+        /// Builder for [`super::ExportSpecifier`].
         ExportSpecifier(self::ExportSpecifier<'gc>),
+        /// Builder for [`super::ExportNamespaceSpecifier`].
         ExportNamespaceSpecifier(self::ExportNamespaceSpecifier<'gc>),
+        /// Builder for [`super::ExportDefaultDeclaration`].
         ExportDefaultDeclaration(self::ExportDefaultDeclaration<'gc>),
+        /// Builder for [`super::ExportAllDeclaration`].
         ExportAllDeclaration(self::ExportAllDeclaration<'gc>),
+        /// Builder for [`super::ObjectPattern`].
         ObjectPattern(self::ObjectPattern<'gc>),
+        /// Builder for [`super::ArrayPattern`].
         ArrayPattern(self::ArrayPattern<'gc>),
+        /// Builder for [`super::RestElement`].
         RestElement(self::RestElement<'gc>),
+        /// Builder for [`super::AssignmentPattern`].
         AssignmentPattern(self::AssignmentPattern<'gc>),
+        /// Builder for [`super::MatchStatementCase`].
         MatchStatementCase(self::MatchStatementCase<'gc>),
+        /// Builder for [`super::MatchExpression`].
         MatchExpression(self::MatchExpression<'gc>),
+        /// Builder for [`super::MatchExpressionCase`].
         MatchExpressionCase(self::MatchExpressionCase<'gc>),
+        /// Builder for [`super::MatchWildcardPattern`].
         MatchWildcardPattern(self::MatchWildcardPattern<'gc>),
+        /// Builder for [`super::MatchLiteralPattern`].
         MatchLiteralPattern(self::MatchLiteralPattern<'gc>),
+        /// Builder for [`super::MatchUnaryPattern`].
         MatchUnaryPattern(self::MatchUnaryPattern<'gc>),
+        /// Builder for [`super::MatchIdentifierPattern`].
         MatchIdentifierPattern(self::MatchIdentifierPattern<'gc>),
+        /// Builder for [`super::MatchBindingPattern`].
         MatchBindingPattern(self::MatchBindingPattern<'gc>),
+        /// Builder for [`super::MatchObjectPattern`].
         MatchObjectPattern(self::MatchObjectPattern<'gc>),
+        /// Builder for [`super::MatchArrayPattern`].
         MatchArrayPattern(self::MatchArrayPattern<'gc>),
+        /// Builder for [`super::MatchOrPattern`].
         MatchOrPattern(self::MatchOrPattern<'gc>),
+        /// Builder for [`super::MatchAsPattern`].
         MatchAsPattern(self::MatchAsPattern<'gc>),
+        /// Builder for [`super::MatchMemberPattern`].
         MatchMemberPattern(self::MatchMemberPattern<'gc>),
+        /// Builder for [`super::MatchInstancePattern`].
         MatchInstancePattern(self::MatchInstancePattern<'gc>),
+        /// Builder for [`super::MatchObjectPatternProperty`].
         MatchObjectPatternProperty(self::MatchObjectPatternProperty<'gc>),
+        /// Builder for [`super::MatchInstanceObjectPattern`].
         MatchInstanceObjectPattern(self::MatchInstanceObjectPattern<'gc>),
+        /// Builder for [`super::MatchRestPattern`].
         MatchRestPattern(self::MatchRestPattern<'gc>),
+        /// Builder for [`super::JSXIdentifier`].
         JSXIdentifier(self::JSXIdentifier<'gc>),
+        /// Builder for [`super::JSXMemberExpression`].
         JSXMemberExpression(self::JSXMemberExpression<'gc>),
+        /// Builder for [`super::JSXNamespacedName`].
         JSXNamespacedName(self::JSXNamespacedName<'gc>),
+        /// Builder for [`super::JSXEmptyExpression`].
         JSXEmptyExpression(self::JSXEmptyExpression<'gc>),
+        /// Builder for [`super::JSXExpressionContainer`].
         JSXExpressionContainer(self::JSXExpressionContainer<'gc>),
+        /// Builder for [`super::JSXSpreadChild`].
         JSXSpreadChild(self::JSXSpreadChild<'gc>),
+        /// Builder for [`super::JSXOpeningElement`].
         JSXOpeningElement(self::JSXOpeningElement<'gc>),
+        /// Builder for [`super::JSXClosingElement`].
         JSXClosingElement(self::JSXClosingElement<'gc>),
+        /// Builder for [`super::JSXAttribute`].
         JSXAttribute(self::JSXAttribute<'gc>),
+        /// Builder for [`super::JSXSpreadAttribute`].
         JSXSpreadAttribute(self::JSXSpreadAttribute<'gc>),
+        /// Builder for [`super::JSXStringLiteral`].
         JSXStringLiteral(self::JSXStringLiteral<'gc>),
+        /// Builder for [`super::JSXText`].
         JSXText(self::JSXText<'gc>),
+        /// Builder for [`super::JSXElement`].
         JSXElement(self::JSXElement<'gc>),
+        /// Builder for [`super::JSXFragment`].
         JSXFragment(self::JSXFragment<'gc>),
+        /// Builder for [`super::JSXOpeningFragment`].
         JSXOpeningFragment(self::JSXOpeningFragment<'gc>),
+        /// Builder for [`super::JSXClosingFragment`].
         JSXClosingFragment(self::JSXClosingFragment<'gc>),
+        /// Builder for [`super::ExistsTypeAnnotation`].
         ExistsTypeAnnotation(self::ExistsTypeAnnotation<'gc>),
+        /// Builder for [`super::EmptyTypeAnnotation`].
         EmptyTypeAnnotation(self::EmptyTypeAnnotation<'gc>),
+        /// Builder for [`super::StringTypeAnnotation`].
         StringTypeAnnotation(self::StringTypeAnnotation<'gc>),
+        /// Builder for [`super::NumberTypeAnnotation`].
         NumberTypeAnnotation(self::NumberTypeAnnotation<'gc>),
+        /// Builder for [`super::StringLiteralTypeAnnotation`].
         StringLiteralTypeAnnotation(self::StringLiteralTypeAnnotation<'gc>),
+        /// Builder for [`super::NumberLiteralTypeAnnotation`].
         NumberLiteralTypeAnnotation(self::NumberLiteralTypeAnnotation<'gc>),
+        /// Builder for [`super::BigIntLiteralTypeAnnotation`].
         BigIntLiteralTypeAnnotation(self::BigIntLiteralTypeAnnotation<'gc>),
+        /// Builder for [`super::BooleanTypeAnnotation`].
         BooleanTypeAnnotation(self::BooleanTypeAnnotation<'gc>),
+        /// Builder for [`super::BooleanLiteralTypeAnnotation`].
         BooleanLiteralTypeAnnotation(self::BooleanLiteralTypeAnnotation<'gc>),
+        /// Builder for [`super::NullLiteralTypeAnnotation`].
         NullLiteralTypeAnnotation(self::NullLiteralTypeAnnotation<'gc>),
+        /// Builder for [`super::SymbolTypeAnnotation`].
         SymbolTypeAnnotation(self::SymbolTypeAnnotation<'gc>),
+        /// Builder for [`super::AnyTypeAnnotation`].
         AnyTypeAnnotation(self::AnyTypeAnnotation<'gc>),
+        /// Builder for [`super::MixedTypeAnnotation`].
         MixedTypeAnnotation(self::MixedTypeAnnotation<'gc>),
+        /// Builder for [`super::BigIntTypeAnnotation`].
         BigIntTypeAnnotation(self::BigIntTypeAnnotation<'gc>),
+        /// Builder for [`super::VoidTypeAnnotation`].
         VoidTypeAnnotation(self::VoidTypeAnnotation<'gc>),
+        /// Builder for [`super::NeverTypeAnnotation`].
         NeverTypeAnnotation(self::NeverTypeAnnotation<'gc>),
+        /// Builder for [`super::UnknownTypeAnnotation`].
         UnknownTypeAnnotation(self::UnknownTypeAnnotation<'gc>),
+        /// Builder for [`super::UndefinedTypeAnnotation`].
         UndefinedTypeAnnotation(self::UndefinedTypeAnnotation<'gc>),
+        /// Builder for [`super::FunctionTypeAnnotation`].
         FunctionTypeAnnotation(self::FunctionTypeAnnotation<'gc>),
+        /// Builder for [`super::HookTypeAnnotation`].
         HookTypeAnnotation(self::HookTypeAnnotation<'gc>),
+        /// Builder for [`super::FunctionTypeParam`].
         FunctionTypeParam(self::FunctionTypeParam<'gc>),
+        /// Builder for [`super::ComponentTypeAnnotation`].
         ComponentTypeAnnotation(self::ComponentTypeAnnotation<'gc>),
+        /// Builder for [`super::ComponentTypeParameter`].
         ComponentTypeParameter(self::ComponentTypeParameter<'gc>),
+        /// Builder for [`super::NullableTypeAnnotation`].
         NullableTypeAnnotation(self::NullableTypeAnnotation<'gc>),
+        /// Builder for [`super::QualifiedTypeIdentifier`].
         QualifiedTypeIdentifier(self::QualifiedTypeIdentifier<'gc>),
+        /// Builder for [`super::TypeofTypeAnnotation`].
         TypeofTypeAnnotation(self::TypeofTypeAnnotation<'gc>),
+        /// Builder for [`super::KeyofTypeAnnotation`].
         KeyofTypeAnnotation(self::KeyofTypeAnnotation<'gc>),
+        /// Builder for [`super::TypeOperator`].
         TypeOperator(self::TypeOperator<'gc>),
+        /// Builder for [`super::QualifiedTypeofIdentifier`].
         QualifiedTypeofIdentifier(self::QualifiedTypeofIdentifier<'gc>),
+        /// Builder for [`super::TupleTypeAnnotation`].
         TupleTypeAnnotation(self::TupleTypeAnnotation<'gc>),
+        /// Builder for [`super::TupleTypeSpreadElement`].
         TupleTypeSpreadElement(self::TupleTypeSpreadElement<'gc>),
+        /// Builder for [`super::TupleTypeLabeledElement`].
         TupleTypeLabeledElement(self::TupleTypeLabeledElement<'gc>),
+        /// Builder for [`super::ArrayTypeAnnotation`].
         ArrayTypeAnnotation(self::ArrayTypeAnnotation<'gc>),
+        /// Builder for [`super::InferTypeAnnotation`].
         InferTypeAnnotation(self::InferTypeAnnotation<'gc>),
+        /// Builder for [`super::UnionTypeAnnotation`].
         UnionTypeAnnotation(self::UnionTypeAnnotation<'gc>),
+        /// Builder for [`super::IntersectionTypeAnnotation`].
         IntersectionTypeAnnotation(self::IntersectionTypeAnnotation<'gc>),
+        /// Builder for [`super::GenericTypeAnnotation`].
         GenericTypeAnnotation(self::GenericTypeAnnotation<'gc>),
+        /// Builder for [`super::IndexedAccessType`].
         IndexedAccessType(self::IndexedAccessType<'gc>),
+        /// Builder for [`super::OptionalIndexedAccessType`].
         OptionalIndexedAccessType(self::OptionalIndexedAccessType<'gc>),
+        /// Builder for [`super::ConditionalTypeAnnotation`].
         ConditionalTypeAnnotation(self::ConditionalTypeAnnotation<'gc>),
+        /// Builder for [`super::TypePredicate`].
         TypePredicate(self::TypePredicate<'gc>),
+        /// Builder for [`super::InterfaceTypeAnnotation`].
         InterfaceTypeAnnotation(self::InterfaceTypeAnnotation<'gc>),
+        /// Builder for [`super::TypeAlias`].
         TypeAlias(self::TypeAlias<'gc>),
+        /// Builder for [`super::OpaqueType`].
         OpaqueType(self::OpaqueType<'gc>),
+        /// Builder for [`super::InterfaceDeclaration`].
         InterfaceDeclaration(self::InterfaceDeclaration<'gc>),
+        /// Builder for [`super::DeclareTypeAlias`].
         DeclareTypeAlias(self::DeclareTypeAlias<'gc>),
+        /// Builder for [`super::DeclareOpaqueType`].
         DeclareOpaqueType(self::DeclareOpaqueType<'gc>),
+        /// Builder for [`super::DeclareInterface`].
         DeclareInterface(self::DeclareInterface<'gc>),
+        /// Builder for [`super::DeclareClass`].
         DeclareClass(self::DeclareClass<'gc>),
+        /// Builder for [`super::DeclareFunction`].
         DeclareFunction(self::DeclareFunction<'gc>),
+        /// Builder for [`super::DeclareHook`].
         DeclareHook(self::DeclareHook<'gc>),
+        /// Builder for [`super::DeclareComponent`].
         DeclareComponent(self::DeclareComponent<'gc>),
+        /// Builder for [`super::DeclareVariable`].
         DeclareVariable(self::DeclareVariable<'gc>),
+        /// Builder for [`super::DeclareEnum`].
         DeclareEnum(self::DeclareEnum<'gc>),
+        /// Builder for [`super::DeclareExportDeclaration`].
         DeclareExportDeclaration(self::DeclareExportDeclaration<'gc>),
+        /// Builder for [`super::DeclareExportAllDeclaration`].
         DeclareExportAllDeclaration(self::DeclareExportAllDeclaration<'gc>),
+        /// Builder for [`super::DeclareModule`].
         DeclareModule(self::DeclareModule<'gc>),
+        /// Builder for [`super::DeclareNamespace`].
         DeclareNamespace(self::DeclareNamespace<'gc>),
+        /// Builder for [`super::DeclareModuleExports`].
         DeclareModuleExports(self::DeclareModuleExports<'gc>),
+        /// Builder for [`super::InterfaceExtends`].
         InterfaceExtends(self::InterfaceExtends<'gc>),
+        /// Builder for [`super::ClassImplements`].
         ClassImplements(self::ClassImplements<'gc>),
+        /// Builder for [`super::TypeAnnotation`].
         TypeAnnotation(self::TypeAnnotation<'gc>),
+        /// Builder for [`super::ObjectTypeAnnotation`].
         ObjectTypeAnnotation(self::ObjectTypeAnnotation<'gc>),
+        /// Builder for [`super::ObjectTypeProperty`].
         ObjectTypeProperty(self::ObjectTypeProperty<'gc>),
+        /// Builder for [`super::ObjectTypeSpreadProperty`].
         ObjectTypeSpreadProperty(self::ObjectTypeSpreadProperty<'gc>),
+        /// Builder for [`super::ObjectTypeInternalSlot`].
         ObjectTypeInternalSlot(self::ObjectTypeInternalSlot<'gc>),
+        /// Builder for [`super::ObjectTypeCallProperty`].
         ObjectTypeCallProperty(self::ObjectTypeCallProperty<'gc>),
+        /// Builder for [`super::ObjectTypeIndexer`].
         ObjectTypeIndexer(self::ObjectTypeIndexer<'gc>),
+        /// Builder for [`super::ObjectTypeMappedTypeProperty`].
         ObjectTypeMappedTypeProperty(self::ObjectTypeMappedTypeProperty<'gc>),
+        /// Builder for [`super::Variance`].
         Variance(self::Variance<'gc>),
+        /// Builder for [`super::TypeParameterDeclaration`].
         TypeParameterDeclaration(self::TypeParameterDeclaration<'gc>),
+        /// Builder for [`super::TypeParameter`].
         TypeParameter(self::TypeParameter<'gc>),
+        /// Builder for [`super::TypeParameterInstantiation`].
         TypeParameterInstantiation(self::TypeParameterInstantiation<'gc>),
+        /// Builder for [`super::TypeCastExpression`].
         TypeCastExpression(self::TypeCastExpression<'gc>),
+        /// Builder for [`super::AsExpression`].
         AsExpression(self::AsExpression<'gc>),
+        /// Builder for [`super::AsConstExpression`].
         AsConstExpression(self::AsConstExpression<'gc>),
+        /// Builder for [`super::InferredPredicate`].
         InferredPredicate(self::InferredPredicate<'gc>),
+        /// Builder for [`super::DeclaredPredicate`].
         DeclaredPredicate(self::DeclaredPredicate<'gc>),
+        /// Builder for [`super::EnumDeclaration`].
         EnumDeclaration(self::EnumDeclaration<'gc>),
+        /// Builder for [`super::EnumStringBody`].
         EnumStringBody(self::EnumStringBody<'gc>),
+        /// Builder for [`super::EnumNumberBody`].
         EnumNumberBody(self::EnumNumberBody<'gc>),
+        /// Builder for [`super::EnumBigIntBody`].
         EnumBigIntBody(self::EnumBigIntBody<'gc>),
+        /// Builder for [`super::EnumBooleanBody`].
         EnumBooleanBody(self::EnumBooleanBody<'gc>),
+        /// Builder for [`super::EnumSymbolBody`].
         EnumSymbolBody(self::EnumSymbolBody<'gc>),
+        /// Builder for [`super::EnumDefaultedMember`].
         EnumDefaultedMember(self::EnumDefaultedMember<'gc>),
+        /// Builder for [`super::EnumStringMember`].
         EnumStringMember(self::EnumStringMember<'gc>),
+        /// Builder for [`super::EnumNumberMember`].
         EnumNumberMember(self::EnumNumberMember<'gc>),
+        /// Builder for [`super::EnumBigIntMember`].
         EnumBigIntMember(self::EnumBigIntMember<'gc>),
+        /// Builder for [`super::EnumBooleanMember`].
         EnumBooleanMember(self::EnumBooleanMember<'gc>),
+        /// Builder for [`super::ComponentParameter`].
         ComponentParameter(self::ComponentParameter<'gc>),
+        /// Builder for [`super::RecordDeclaration`].
         RecordDeclaration(self::RecordDeclaration<'gc>),
+        /// Builder for [`super::RecordDeclarationImplements`].
         RecordDeclarationImplements(self::RecordDeclarationImplements<'gc>),
+        /// Builder for [`super::RecordDeclarationBody`].
         RecordDeclarationBody(self::RecordDeclarationBody<'gc>),
+        /// Builder for [`super::RecordDeclarationProperty`].
         RecordDeclarationProperty(self::RecordDeclarationProperty<'gc>),
+        /// Builder for [`super::RecordDeclarationStaticProperty`].
         RecordDeclarationStaticProperty(self::RecordDeclarationStaticProperty<'gc>),
+        /// Builder for [`super::RecordExpression`].
         RecordExpression(self::RecordExpression<'gc>),
+        /// Builder for [`super::RecordExpressionProperties`].
         RecordExpressionProperties(self::RecordExpressionProperties<'gc>),
+        /// Builder for [`super::TSTypeAnnotation`].
         TSTypeAnnotation(self::TSTypeAnnotation<'gc>),
+        /// Builder for [`super::TSAnyKeyword`].
         TSAnyKeyword(self::TSAnyKeyword<'gc>),
+        /// Builder for [`super::TSNumberKeyword`].
         TSNumberKeyword(self::TSNumberKeyword<'gc>),
+        /// Builder for [`super::TSBooleanKeyword`].
         TSBooleanKeyword(self::TSBooleanKeyword<'gc>),
+        /// Builder for [`super::TSStringKeyword`].
         TSStringKeyword(self::TSStringKeyword<'gc>),
+        /// Builder for [`super::TSSymbolKeyword`].
         TSSymbolKeyword(self::TSSymbolKeyword<'gc>),
+        /// Builder for [`super::TSVoidKeyword`].
         TSVoidKeyword(self::TSVoidKeyword<'gc>),
+        /// Builder for [`super::TSUndefinedKeyword`].
         TSUndefinedKeyword(self::TSUndefinedKeyword<'gc>),
+        /// Builder for [`super::TSUnknownKeyword`].
         TSUnknownKeyword(self::TSUnknownKeyword<'gc>),
+        /// Builder for [`super::TSNeverKeyword`].
         TSNeverKeyword(self::TSNeverKeyword<'gc>),
+        /// Builder for [`super::TSBigIntKeyword`].
         TSBigIntKeyword(self::TSBigIntKeyword<'gc>),
+        /// Builder for [`super::TSThisType`].
         TSThisType(self::TSThisType<'gc>),
+        /// Builder for [`super::TSLiteralType`].
         TSLiteralType(self::TSLiteralType<'gc>),
+        /// Builder for [`super::TSIndexedAccessType`].
         TSIndexedAccessType(self::TSIndexedAccessType<'gc>),
+        /// Builder for [`super::TSArrayType`].
         TSArrayType(self::TSArrayType<'gc>),
+        /// Builder for [`super::TSTypeReference`].
         TSTypeReference(self::TSTypeReference<'gc>),
+        /// Builder for [`super::TSQualifiedName`].
         TSQualifiedName(self::TSQualifiedName<'gc>),
+        /// Builder for [`super::TSFunctionType`].
         TSFunctionType(self::TSFunctionType<'gc>),
+        /// Builder for [`super::TSConstructorType`].
         TSConstructorType(self::TSConstructorType<'gc>),
+        /// Builder for [`super::TSTypePredicate`].
         TSTypePredicate(self::TSTypePredicate<'gc>),
+        /// Builder for [`super::TSTupleType`].
         TSTupleType(self::TSTupleType<'gc>),
+        /// Builder for [`super::TSTypeAssertion`].
         TSTypeAssertion(self::TSTypeAssertion<'gc>),
+        /// Builder for [`super::TSAsExpression`].
         TSAsExpression(self::TSAsExpression<'gc>),
+        /// Builder for [`super::TSParameterProperty`].
         TSParameterProperty(self::TSParameterProperty<'gc>),
+        /// Builder for [`super::TSTypeAliasDeclaration`].
         TSTypeAliasDeclaration(self::TSTypeAliasDeclaration<'gc>),
+        /// Builder for [`super::TSInterfaceDeclaration`].
         TSInterfaceDeclaration(self::TSInterfaceDeclaration<'gc>),
+        /// Builder for [`super::TSInterfaceHeritage`].
         TSInterfaceHeritage(self::TSInterfaceHeritage<'gc>),
+        /// Builder for [`super::TSInterfaceBody`].
         TSInterfaceBody(self::TSInterfaceBody<'gc>),
+        /// Builder for [`super::TSEnumDeclaration`].
         TSEnumDeclaration(self::TSEnumDeclaration<'gc>),
+        /// Builder for [`super::TSEnumMember`].
         TSEnumMember(self::TSEnumMember<'gc>),
+        /// Builder for [`super::TSModuleDeclaration`].
         TSModuleDeclaration(self::TSModuleDeclaration<'gc>),
+        /// Builder for [`super::TSModuleBlock`].
         TSModuleBlock(self::TSModuleBlock<'gc>),
+        /// Builder for [`super::TSModuleMember`].
         TSModuleMember(self::TSModuleMember<'gc>),
+        /// Builder for [`super::TSTypeParameterDeclaration`].
         TSTypeParameterDeclaration(self::TSTypeParameterDeclaration<'gc>),
+        /// Builder for [`super::TSTypeParameter`].
         TSTypeParameter(self::TSTypeParameter<'gc>),
+        /// Builder for [`super::TSTypeParameterInstantiation`].
         TSTypeParameterInstantiation(self::TSTypeParameterInstantiation<'gc>),
+        /// Builder for [`super::TSUnionType`].
         TSUnionType(self::TSUnionType<'gc>),
+        /// Builder for [`super::TSIntersectionType`].
         TSIntersectionType(self::TSIntersectionType<'gc>),
+        /// Builder for [`super::TSTypeQuery`].
         TSTypeQuery(self::TSTypeQuery<'gc>),
+        /// Builder for [`super::TSConditionalType`].
         TSConditionalType(self::TSConditionalType<'gc>),
+        /// Builder for [`super::TSTypeLiteral`].
         TSTypeLiteral(self::TSTypeLiteral<'gc>),
+        /// Builder for [`super::TSPropertySignature`].
         TSPropertySignature(self::TSPropertySignature<'gc>),
+        /// Builder for [`super::TSMethodSignature`].
         TSMethodSignature(self::TSMethodSignature<'gc>),
+        /// Builder for [`super::TSIndexSignature`].
         TSIndexSignature(self::TSIndexSignature<'gc>),
+        /// Builder for [`super::TSCallSignatureDeclaration`].
         TSCallSignatureDeclaration(self::TSCallSignatureDeclaration<'gc>),
+        /// Builder for [`super::TSModifiers`].
         TSModifiers(self::TSModifiers<'gc>),
+        /// Builder for [`super::CoverEmptyArgs`].
         CoverEmptyArgs(self::CoverEmptyArgs<'gc>),
+        /// Builder for [`super::CoverTrailingComma`].
         CoverTrailingComma(self::CoverTrailingComma<'gc>),
+        /// Builder for [`super::CoverInitializer`].
         CoverInitializer(self::CoverInitializer<'gc>),
+        /// Builder for [`super::CoverRestElement`].
         CoverRestElement(self::CoverRestElement<'gc>),
+        /// Builder for [`super::CoverTypedIdentifier`].
         CoverTypedIdentifier(self::CoverTypedIdentifier<'gc>),
+        /// Builder for [`super::SHBuiltin`].
         SHBuiltin(self::SHBuiltin<'gc>),
+        /// Builder for [`super::ImplicitCheckedCast`].
         ImplicitCheckedCast(self::ImplicitCheckedCast<'gc>),
     }
 
     impl<'gc> Builder<'gc> {
+        /// Start a builder for `node`, dispatching on its kind.
         pub fn from_node(node: &'gc Node<'gc>) -> Self {
             match node {
                 Node::Empty(n) => Builder::Empty(self::Empty::from_node(n)),
@@ -13842,12 +16653,14 @@ pub mod builder {
         }
     }
 
+    /// Clone-with-changes builder for [`super::Empty`].
     #[derive(Debug)]
     pub struct Empty<'gc> {
         is_changed: bool,
         pub(super) inner: super::Empty<'gc>,
     }
     impl<'gc> Empty<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::Empty<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -13856,6 +16669,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -13863,16 +16678,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::Empty(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::Metadata`].
     #[derive(Debug)]
     pub struct Metadata<'gc> {
         is_changed: bool,
         pub(super) inner: super::Metadata<'gc>,
     }
     impl<'gc> Metadata<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::Metadata<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -13881,6 +16699,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -13888,16 +16708,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::Metadata(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::Program`].
     #[derive(Debug)]
     pub struct Program<'gc> {
         is_changed: bool,
         pub(super) inner: super::Program<'gc>,
     }
     impl<'gc> Program<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::Program<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -13913,6 +16736,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -13920,17 +16745,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::Program(self.inner))
         }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: NodeList<'gc>) { self.is_changed = true; self.inner.body = body; }
     }
+    /// Clone-with-changes builder for [`super::FunctionExpression`].
     #[derive(Debug)]
     pub struct FunctionExpression<'gc> {
         is_changed: bool,
         pub(super) inner: super::FunctionExpression<'gc>,
     }
     impl<'gc> FunctionExpression<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::FunctionExpression<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -13952,6 +16781,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -13959,22 +16790,31 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::FunctionExpression(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `params` field and mark the builder changed.
         pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+        /// Set the `type_parameters` field and mark the builder changed.
         pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        /// Set the `return_type` field and mark the builder changed.
         pub fn return_type(&mut self, return_type: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.return_type = return_type; }
+        /// Set the `predicate` field and mark the builder changed.
         pub fn predicate(&mut self, predicate: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.predicate = predicate; }
     }
+    /// Clone-with-changes builder for [`super::ArrowFunctionExpression`].
     #[derive(Debug)]
     pub struct ArrowFunctionExpression<'gc> {
         is_changed: bool,
         pub(super) inner: super::ArrowFunctionExpression<'gc>,
     }
     impl<'gc> ArrowFunctionExpression<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ArrowFunctionExpression<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -13995,6 +16835,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14002,21 +16844,29 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ArrowFunctionExpression(self.inner))
         }
+        /// Set the `params` field and mark the builder changed.
         pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+        /// Set the `type_parameters` field and mark the builder changed.
         pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        /// Set the `return_type` field and mark the builder changed.
         pub fn return_type(&mut self, return_type: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.return_type = return_type; }
+        /// Set the `predicate` field and mark the builder changed.
         pub fn predicate(&mut self, predicate: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.predicate = predicate; }
     }
+    /// Clone-with-changes builder for [`super::FunctionDeclaration`].
     #[derive(Debug)]
     pub struct FunctionDeclaration<'gc> {
         is_changed: bool,
         pub(super) inner: super::FunctionDeclaration<'gc>,
     }
     impl<'gc> FunctionDeclaration<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::FunctionDeclaration<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14038,6 +16888,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14045,22 +16897,31 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::FunctionDeclaration(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `params` field and mark the builder changed.
         pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+        /// Set the `type_parameters` field and mark the builder changed.
         pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        /// Set the `return_type` field and mark the builder changed.
         pub fn return_type(&mut self, return_type: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.return_type = return_type; }
+        /// Set the `predicate` field and mark the builder changed.
         pub fn predicate(&mut self, predicate: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.predicate = predicate; }
     }
+    /// Clone-with-changes builder for [`super::ComponentDeclaration`].
     #[derive(Debug)]
     pub struct ComponentDeclaration<'gc> {
         is_changed: bool,
         pub(super) inner: super::ComponentDeclaration<'gc>,
     }
     impl<'gc> ComponentDeclaration<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ComponentDeclaration<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14080,6 +16941,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14087,21 +16950,29 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ComponentDeclaration(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `params` field and mark the builder changed.
         pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+        /// Set the `type_parameters` field and mark the builder changed.
         pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        /// Set the `renders_type` field and mark the builder changed.
         pub fn renders_type(&mut self, renders_type: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.renders_type = renders_type; }
     }
+    /// Clone-with-changes builder for [`super::HookDeclaration`].
     #[derive(Debug)]
     pub struct HookDeclaration<'gc> {
         is_changed: bool,
         pub(super) inner: super::HookDeclaration<'gc>,
     }
     impl<'gc> HookDeclaration<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::HookDeclaration<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14121,6 +16992,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14128,21 +17001,29 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::HookDeclaration(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `params` field and mark the builder changed.
         pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+        /// Set the `type_parameters` field and mark the builder changed.
         pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        /// Set the `return_type` field and mark the builder changed.
         pub fn return_type(&mut self, return_type: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.return_type = return_type; }
     }
+    /// Clone-with-changes builder for [`super::MatchStatement`].
     #[derive(Debug)]
     pub struct MatchStatement<'gc> {
         is_changed: bool,
         pub(super) inner: super::MatchStatement<'gc>,
     }
     impl<'gc> MatchStatement<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::MatchStatement<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14153,6 +17034,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14160,18 +17043,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::MatchStatement(self.inner))
         }
+        /// Set the `argument` field and mark the builder changed.
         pub fn argument(&mut self, argument: &'gc Node<'gc>) { self.is_changed = true; self.inner.argument = argument; }
+        /// Set the `cases` field and mark the builder changed.
         pub fn cases(&mut self, cases: NodeList<'gc>) { self.is_changed = true; self.inner.cases = cases; }
     }
+    /// Clone-with-changes builder for [`super::WhileStatement`].
     #[derive(Debug)]
     pub struct WhileStatement<'gc> {
         is_changed: bool,
         pub(super) inner: super::WhileStatement<'gc>,
     }
     impl<'gc> WhileStatement<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::WhileStatement<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14183,6 +17071,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14190,18 +17080,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::WhileStatement(self.inner))
         }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+        /// Set the `test` field and mark the builder changed.
         pub fn test(&mut self, test: &'gc Node<'gc>) { self.is_changed = true; self.inner.test = test; }
     }
+    /// Clone-with-changes builder for [`super::DoWhileStatement`].
     #[derive(Debug)]
     pub struct DoWhileStatement<'gc> {
         is_changed: bool,
         pub(super) inner: super::DoWhileStatement<'gc>,
     }
     impl<'gc> DoWhileStatement<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::DoWhileStatement<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14213,6 +17108,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14220,18 +17117,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::DoWhileStatement(self.inner))
         }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+        /// Set the `test` field and mark the builder changed.
         pub fn test(&mut self, test: &'gc Node<'gc>) { self.is_changed = true; self.inner.test = test; }
     }
+    /// Clone-with-changes builder for [`super::ForInStatement`].
     #[derive(Debug)]
     pub struct ForInStatement<'gc> {
         is_changed: bool,
         pub(super) inner: super::ForInStatement<'gc>,
     }
     impl<'gc> ForInStatement<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ForInStatement<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14245,6 +17147,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14252,19 +17156,25 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ForInStatement(self.inner))
         }
+        /// Set the `left` field and mark the builder changed.
         pub fn left(&mut self, left: &'gc Node<'gc>) { self.is_changed = true; self.inner.left = left; }
+        /// Set the `right` field and mark the builder changed.
         pub fn right(&mut self, right: &'gc Node<'gc>) { self.is_changed = true; self.inner.right = right; }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
     }
+    /// Clone-with-changes builder for [`super::ForOfStatement`].
     #[derive(Debug)]
     pub struct ForOfStatement<'gc> {
         is_changed: bool,
         pub(super) inner: super::ForOfStatement<'gc>,
     }
     impl<'gc> ForOfStatement<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ForOfStatement<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14279,6 +17189,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14286,19 +17198,25 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ForOfStatement(self.inner))
         }
+        /// Set the `left` field and mark the builder changed.
         pub fn left(&mut self, left: &'gc Node<'gc>) { self.is_changed = true; self.inner.left = left; }
+        /// Set the `right` field and mark the builder changed.
         pub fn right(&mut self, right: &'gc Node<'gc>) { self.is_changed = true; self.inner.right = right; }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
     }
+    /// Clone-with-changes builder for [`super::ForStatement`].
     #[derive(Debug)]
     pub struct ForStatement<'gc> {
         is_changed: bool,
         pub(super) inner: super::ForStatement<'gc>,
     }
     impl<'gc> ForStatement<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ForStatement<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14313,6 +17231,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14320,20 +17240,27 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ForStatement(self.inner))
         }
+        /// Set the `init` field and mark the builder changed.
         pub fn init(&mut self, init: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.init = init; }
+        /// Set the `test` field and mark the builder changed.
         pub fn test(&mut self, test: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.test = test; }
+        /// Set the `update` field and mark the builder changed.
         pub fn update(&mut self, update: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.update = update; }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
     }
+    /// Clone-with-changes builder for [`super::DebuggerStatement`].
     #[derive(Debug)]
     pub struct DebuggerStatement<'gc> {
         is_changed: bool,
         pub(super) inner: super::DebuggerStatement<'gc>,
     }
     impl<'gc> DebuggerStatement<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::DebuggerStatement<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14342,6 +17269,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14349,16 +17278,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::DebuggerStatement(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::EmptyStatement`].
     #[derive(Debug)]
     pub struct EmptyStatement<'gc> {
         is_changed: bool,
         pub(super) inner: super::EmptyStatement<'gc>,
     }
     impl<'gc> EmptyStatement<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::EmptyStatement<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14367,6 +17299,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14374,16 +17308,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::EmptyStatement(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::BlockStatement`].
     #[derive(Debug)]
     pub struct BlockStatement<'gc> {
         is_changed: bool,
         pub(super) inner: super::BlockStatement<'gc>,
     }
     impl<'gc> BlockStatement<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::BlockStatement<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14401,6 +17338,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14408,17 +17347,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::BlockStatement(self.inner))
         }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: NodeList<'gc>) { self.is_changed = true; self.inner.body = body; }
     }
+    /// Clone-with-changes builder for [`super::StaticBlock`].
     #[derive(Debug)]
     pub struct StaticBlock<'gc> {
         is_changed: bool,
         pub(super) inner: super::StaticBlock<'gc>,
     }
     impl<'gc> StaticBlock<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::StaticBlock<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14430,6 +17373,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14437,17 +17382,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::StaticBlock(self.inner))
         }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: NodeList<'gc>) { self.is_changed = true; self.inner.body = body; }
     }
+    /// Clone-with-changes builder for [`super::BreakStatement`].
     #[derive(Debug)]
     pub struct BreakStatement<'gc> {
         is_changed: bool,
         pub(super) inner: super::BreakStatement<'gc>,
     }
     impl<'gc> BreakStatement<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::BreakStatement<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14458,6 +17407,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14465,17 +17416,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::BreakStatement(self.inner))
         }
+        /// Set the `label` field and mark the builder changed.
         pub fn label(&mut self, label: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.label = label; }
     }
+    /// Clone-with-changes builder for [`super::ContinueStatement`].
     #[derive(Debug)]
     pub struct ContinueStatement<'gc> {
         is_changed: bool,
         pub(super) inner: super::ContinueStatement<'gc>,
     }
     impl<'gc> ContinueStatement<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ContinueStatement<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14486,6 +17441,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14493,17 +17450,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ContinueStatement(self.inner))
         }
+        /// Set the `label` field and mark the builder changed.
         pub fn label(&mut self, label: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.label = label; }
     }
+    /// Clone-with-changes builder for [`super::ThrowStatement`].
     #[derive(Debug)]
     pub struct ThrowStatement<'gc> {
         is_changed: bool,
         pub(super) inner: super::ThrowStatement<'gc>,
     }
     impl<'gc> ThrowStatement<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ThrowStatement<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14513,6 +17474,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14520,17 +17483,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ThrowStatement(self.inner))
         }
+        /// Set the `argument` field and mark the builder changed.
         pub fn argument(&mut self, argument: &'gc Node<'gc>) { self.is_changed = true; self.inner.argument = argument; }
     }
+    /// Clone-with-changes builder for [`super::ReturnStatement`].
     #[derive(Debug)]
     pub struct ReturnStatement<'gc> {
         is_changed: bool,
         pub(super) inner: super::ReturnStatement<'gc>,
     }
     impl<'gc> ReturnStatement<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ReturnStatement<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14540,6 +17507,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14547,17 +17516,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ReturnStatement(self.inner))
         }
+        /// Set the `argument` field and mark the builder changed.
         pub fn argument(&mut self, argument: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.argument = argument; }
     }
+    /// Clone-with-changes builder for [`super::WithStatement`].
     #[derive(Debug)]
     pub struct WithStatement<'gc> {
         is_changed: bool,
         pub(super) inner: super::WithStatement<'gc>,
     }
     impl<'gc> WithStatement<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::WithStatement<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14568,6 +17541,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14575,18 +17550,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::WithStatement(self.inner))
         }
+        /// Set the `object` field and mark the builder changed.
         pub fn object(&mut self, object: &'gc Node<'gc>) { self.is_changed = true; self.inner.object = object; }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
     }
+    /// Clone-with-changes builder for [`super::SwitchStatement`].
     #[derive(Debug)]
     pub struct SwitchStatement<'gc> {
         is_changed: bool,
         pub(super) inner: super::SwitchStatement<'gc>,
     }
     impl<'gc> SwitchStatement<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::SwitchStatement<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14599,6 +17579,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14606,18 +17588,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::SwitchStatement(self.inner))
         }
+        /// Set the `discriminant` field and mark the builder changed.
         pub fn discriminant(&mut self, discriminant: &'gc Node<'gc>) { self.is_changed = true; self.inner.discriminant = discriminant; }
+        /// Set the `cases` field and mark the builder changed.
         pub fn cases(&mut self, cases: NodeList<'gc>) { self.is_changed = true; self.inner.cases = cases; }
     }
+    /// Clone-with-changes builder for [`super::LabeledStatement`].
     #[derive(Debug)]
     pub struct LabeledStatement<'gc> {
         is_changed: bool,
         pub(super) inner: super::LabeledStatement<'gc>,
     }
     impl<'gc> LabeledStatement<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::LabeledStatement<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14629,6 +17616,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14636,18 +17625,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::LabeledStatement(self.inner))
         }
+        /// Set the `label` field and mark the builder changed.
         pub fn label(&mut self, label: &'gc Node<'gc>) { self.is_changed = true; self.inner.label = label; }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
     }
+    /// Clone-with-changes builder for [`super::ExpressionStatement`].
     #[derive(Debug)]
     pub struct ExpressionStatement<'gc> {
         is_changed: bool,
         pub(super) inner: super::ExpressionStatement<'gc>,
     }
     impl<'gc> ExpressionStatement<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ExpressionStatement<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14658,6 +17652,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14665,17 +17661,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ExpressionStatement(self.inner))
         }
+        /// Set the `expression` field and mark the builder changed.
         pub fn expression(&mut self, expression: &'gc Node<'gc>) { self.is_changed = true; self.inner.expression = expression; }
     }
+    /// Clone-with-changes builder for [`super::TryStatement`].
     #[derive(Debug)]
     pub struct TryStatement<'gc> {
         is_changed: bool,
         pub(super) inner: super::TryStatement<'gc>,
     }
     impl<'gc> TryStatement<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TryStatement<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14687,6 +17687,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14694,19 +17696,25 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TryStatement(self.inner))
         }
+        /// Set the `block` field and mark the builder changed.
         pub fn block(&mut self, block: &'gc Node<'gc>) { self.is_changed = true; self.inner.block = block; }
+        /// Set the `handler` field and mark the builder changed.
         pub fn handler(&mut self, handler: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.handler = handler; }
+        /// Set the `finalizer` field and mark the builder changed.
         pub fn finalizer(&mut self, finalizer: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.finalizer = finalizer; }
     }
+    /// Clone-with-changes builder for [`super::IfStatement`].
     #[derive(Debug)]
     pub struct IfStatement<'gc> {
         is_changed: bool,
         pub(super) inner: super::IfStatement<'gc>,
     }
     impl<'gc> IfStatement<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::IfStatement<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14718,6 +17726,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14725,19 +17735,25 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::IfStatement(self.inner))
         }
+        /// Set the `test` field and mark the builder changed.
         pub fn test(&mut self, test: &'gc Node<'gc>) { self.is_changed = true; self.inner.test = test; }
+        /// Set the `consequent` field and mark the builder changed.
         pub fn consequent(&mut self, consequent: &'gc Node<'gc>) { self.is_changed = true; self.inner.consequent = consequent; }
+        /// Set the `alternate` field and mark the builder changed.
         pub fn alternate(&mut self, alternate: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.alternate = alternate; }
     }
+    /// Clone-with-changes builder for [`super::NullLiteral`].
     #[derive(Debug)]
     pub struct NullLiteral<'gc> {
         is_changed: bool,
         pub(super) inner: super::NullLiteral<'gc>,
     }
     impl<'gc> NullLiteral<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::NullLiteral<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14746,6 +17762,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14753,16 +17771,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::NullLiteral(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::BooleanLiteral`].
     #[derive(Debug)]
     pub struct BooleanLiteral<'gc> {
         is_changed: bool,
         pub(super) inner: super::BooleanLiteral<'gc>,
     }
     impl<'gc> BooleanLiteral<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::BooleanLiteral<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14772,6 +17793,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14779,16 +17802,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::BooleanLiteral(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::StringLiteral`].
     #[derive(Debug)]
     pub struct StringLiteral<'gc> {
         is_changed: bool,
         pub(super) inner: super::StringLiteral<'gc>,
     }
     impl<'gc> StringLiteral<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::StringLiteral<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14798,6 +17824,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14805,16 +17833,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::StringLiteral(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::NumericLiteral`].
     #[derive(Debug)]
     pub struct NumericLiteral<'gc> {
         is_changed: bool,
         pub(super) inner: super::NumericLiteral<'gc>,
     }
     impl<'gc> NumericLiteral<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::NumericLiteral<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14824,6 +17855,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14831,16 +17864,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::NumericLiteral(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::RegExpLiteral`].
     #[derive(Debug)]
     pub struct RegExpLiteral<'gc> {
         is_changed: bool,
         pub(super) inner: super::RegExpLiteral<'gc>,
     }
     impl<'gc> RegExpLiteral<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::RegExpLiteral<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14851,6 +17887,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14858,16 +17896,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::RegExpLiteral(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::BigIntLiteral`].
     #[derive(Debug)]
     pub struct BigIntLiteral<'gc> {
         is_changed: bool,
         pub(super) inner: super::BigIntLiteral<'gc>,
     }
     impl<'gc> BigIntLiteral<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::BigIntLiteral<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14877,6 +17918,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14884,16 +17927,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::BigIntLiteral(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::ThisExpression`].
     #[derive(Debug)]
     pub struct ThisExpression<'gc> {
         is_changed: bool,
         pub(super) inner: super::ThisExpression<'gc>,
     }
     impl<'gc> ThisExpression<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ThisExpression<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14902,6 +17948,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14909,16 +17957,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ThisExpression(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::Super`].
     #[derive(Debug)]
     pub struct Super<'gc> {
         is_changed: bool,
         pub(super) inner: super::Super<'gc>,
     }
     impl<'gc> Super<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::Super<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14927,6 +17978,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14934,16 +17987,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::Super(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::SequenceExpression`].
     #[derive(Debug)]
     pub struct SequenceExpression<'gc> {
         is_changed: bool,
         pub(super) inner: super::SequenceExpression<'gc>,
     }
     impl<'gc> SequenceExpression<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::SequenceExpression<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14953,6 +18009,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14960,17 +18018,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::SequenceExpression(self.inner))
         }
+        /// Set the `expressions` field and mark the builder changed.
         pub fn expressions(&mut self, expressions: NodeList<'gc>) { self.is_changed = true; self.inner.expressions = expressions; }
     }
+    /// Clone-with-changes builder for [`super::ObjectExpression`].
     #[derive(Debug)]
     pub struct ObjectExpression<'gc> {
         is_changed: bool,
         pub(super) inner: super::ObjectExpression<'gc>,
     }
     impl<'gc> ObjectExpression<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ObjectExpression<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -14980,6 +18042,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -14987,17 +18051,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ObjectExpression(self.inner))
         }
+        /// Set the `properties` field and mark the builder changed.
         pub fn properties(&mut self, properties: NodeList<'gc>) { self.is_changed = true; self.inner.properties = properties; }
     }
+    /// Clone-with-changes builder for [`super::ArrayExpression`].
     #[derive(Debug)]
     pub struct ArrayExpression<'gc> {
         is_changed: bool,
         pub(super) inner: super::ArrayExpression<'gc>,
     }
     impl<'gc> ArrayExpression<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ArrayExpression<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15008,6 +18076,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15015,17 +18085,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ArrayExpression(self.inner))
         }
+        /// Set the `elements` field and mark the builder changed.
         pub fn elements(&mut self, elements: NodeList<'gc>) { self.is_changed = true; self.inner.elements = elements; }
     }
+    /// Clone-with-changes builder for [`super::SpreadElement`].
     #[derive(Debug)]
     pub struct SpreadElement<'gc> {
         is_changed: bool,
         pub(super) inner: super::SpreadElement<'gc>,
     }
     impl<'gc> SpreadElement<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::SpreadElement<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15035,6 +18109,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15042,17 +18118,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::SpreadElement(self.inner))
         }
+        /// Set the `argument` field and mark the builder changed.
         pub fn argument(&mut self, argument: &'gc Node<'gc>) { self.is_changed = true; self.inner.argument = argument; }
     }
+    /// Clone-with-changes builder for [`super::NewExpression`].
     #[derive(Debug)]
     pub struct NewExpression<'gc> {
         is_changed: bool,
         pub(super) inner: super::NewExpression<'gc>,
     }
     impl<'gc> NewExpression<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::NewExpression<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15064,6 +18144,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15071,19 +18153,25 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::NewExpression(self.inner))
         }
+        /// Set the `callee` field and mark the builder changed.
         pub fn callee(&mut self, callee: &'gc Node<'gc>) { self.is_changed = true; self.inner.callee = callee; }
+        /// Set the `type_arguments` field and mark the builder changed.
         pub fn type_arguments(&mut self, type_arguments: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_arguments = type_arguments; }
+        /// Set the `arguments` field and mark the builder changed.
         pub fn arguments(&mut self, arguments: NodeList<'gc>) { self.is_changed = true; self.inner.arguments = arguments; }
     }
+    /// Clone-with-changes builder for [`super::YieldExpression`].
     #[derive(Debug)]
     pub struct YieldExpression<'gc> {
         is_changed: bool,
         pub(super) inner: super::YieldExpression<'gc>,
     }
     impl<'gc> YieldExpression<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::YieldExpression<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15094,6 +18182,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15101,17 +18191,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::YieldExpression(self.inner))
         }
+        /// Set the `argument` field and mark the builder changed.
         pub fn argument(&mut self, argument: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.argument = argument; }
     }
+    /// Clone-with-changes builder for [`super::AwaitExpression`].
     #[derive(Debug)]
     pub struct AwaitExpression<'gc> {
         is_changed: bool,
         pub(super) inner: super::AwaitExpression<'gc>,
     }
     impl<'gc> AwaitExpression<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::AwaitExpression<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15121,6 +18215,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15128,17 +18224,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::AwaitExpression(self.inner))
         }
+        /// Set the `argument` field and mark the builder changed.
         pub fn argument(&mut self, argument: &'gc Node<'gc>) { self.is_changed = true; self.inner.argument = argument; }
     }
+    /// Clone-with-changes builder for [`super::ImportExpression`].
     #[derive(Debug)]
     pub struct ImportExpression<'gc> {
         is_changed: bool,
         pub(super) inner: super::ImportExpression<'gc>,
     }
     impl<'gc> ImportExpression<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ImportExpression<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15149,6 +18249,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15156,18 +18258,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ImportExpression(self.inner))
         }
+        /// Set the `source` field and mark the builder changed.
         pub fn source(&mut self, source: &'gc Node<'gc>) { self.is_changed = true; self.inner.source = source; }
+        /// Set the `options` field and mark the builder changed.
         pub fn options(&mut self, options: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.options = options; }
     }
+    /// Clone-with-changes builder for [`super::CallExpression`].
     #[derive(Debug)]
     pub struct CallExpression<'gc> {
         is_changed: bool,
         pub(super) inner: super::CallExpression<'gc>,
     }
     impl<'gc> CallExpression<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::CallExpression<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15179,6 +18286,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15186,19 +18295,25 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::CallExpression(self.inner))
         }
+        /// Set the `callee` field and mark the builder changed.
         pub fn callee(&mut self, callee: &'gc Node<'gc>) { self.is_changed = true; self.inner.callee = callee; }
+        /// Set the `type_arguments` field and mark the builder changed.
         pub fn type_arguments(&mut self, type_arguments: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_arguments = type_arguments; }
+        /// Set the `arguments` field and mark the builder changed.
         pub fn arguments(&mut self, arguments: NodeList<'gc>) { self.is_changed = true; self.inner.arguments = arguments; }
     }
+    /// Clone-with-changes builder for [`super::OptionalCallExpression`].
     #[derive(Debug)]
     pub struct OptionalCallExpression<'gc> {
         is_changed: bool,
         pub(super) inner: super::OptionalCallExpression<'gc>,
     }
     impl<'gc> OptionalCallExpression<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::OptionalCallExpression<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15211,6 +18326,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15218,19 +18335,25 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::OptionalCallExpression(self.inner))
         }
+        /// Set the `callee` field and mark the builder changed.
         pub fn callee(&mut self, callee: &'gc Node<'gc>) { self.is_changed = true; self.inner.callee = callee; }
+        /// Set the `type_arguments` field and mark the builder changed.
         pub fn type_arguments(&mut self, type_arguments: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_arguments = type_arguments; }
+        /// Set the `arguments` field and mark the builder changed.
         pub fn arguments(&mut self, arguments: NodeList<'gc>) { self.is_changed = true; self.inner.arguments = arguments; }
     }
+    /// Clone-with-changes builder for [`super::AssignmentExpression`].
     #[derive(Debug)]
     pub struct AssignmentExpression<'gc> {
         is_changed: bool,
         pub(super) inner: super::AssignmentExpression<'gc>,
     }
     impl<'gc> AssignmentExpression<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::AssignmentExpression<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15242,6 +18365,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15249,18 +18374,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::AssignmentExpression(self.inner))
         }
+        /// Set the `left` field and mark the builder changed.
         pub fn left(&mut self, left: &'gc Node<'gc>) { self.is_changed = true; self.inner.left = left; }
+        /// Set the `right` field and mark the builder changed.
         pub fn right(&mut self, right: &'gc Node<'gc>) { self.is_changed = true; self.inner.right = right; }
     }
+    /// Clone-with-changes builder for [`super::UnaryExpression`].
     #[derive(Debug)]
     pub struct UnaryExpression<'gc> {
         is_changed: bool,
         pub(super) inner: super::UnaryExpression<'gc>,
     }
     impl<'gc> UnaryExpression<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::UnaryExpression<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15272,6 +18402,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15279,17 +18411,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::UnaryExpression(self.inner))
         }
+        /// Set the `argument` field and mark the builder changed.
         pub fn argument(&mut self, argument: &'gc Node<'gc>) { self.is_changed = true; self.inner.argument = argument; }
     }
+    /// Clone-with-changes builder for [`super::UpdateExpression`].
     #[derive(Debug)]
     pub struct UpdateExpression<'gc> {
         is_changed: bool,
         pub(super) inner: super::UpdateExpression<'gc>,
     }
     impl<'gc> UpdateExpression<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::UpdateExpression<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15301,6 +18437,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15308,17 +18446,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::UpdateExpression(self.inner))
         }
+        /// Set the `argument` field and mark the builder changed.
         pub fn argument(&mut self, argument: &'gc Node<'gc>) { self.is_changed = true; self.inner.argument = argument; }
     }
+    /// Clone-with-changes builder for [`super::MemberExpression`].
     #[derive(Debug)]
     pub struct MemberExpression<'gc> {
         is_changed: bool,
         pub(super) inner: super::MemberExpression<'gc>,
     }
     impl<'gc> MemberExpression<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::MemberExpression<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15330,6 +18472,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15337,18 +18481,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::MemberExpression(self.inner))
         }
+        /// Set the `object` field and mark the builder changed.
         pub fn object(&mut self, object: &'gc Node<'gc>) { self.is_changed = true; self.inner.object = object; }
+        /// Set the `property` field and mark the builder changed.
         pub fn property(&mut self, property: &'gc Node<'gc>) { self.is_changed = true; self.inner.property = property; }
     }
+    /// Clone-with-changes builder for [`super::OptionalMemberExpression`].
     #[derive(Debug)]
     pub struct OptionalMemberExpression<'gc> {
         is_changed: bool,
         pub(super) inner: super::OptionalMemberExpression<'gc>,
     }
     impl<'gc> OptionalMemberExpression<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::OptionalMemberExpression<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15361,6 +18510,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15368,18 +18519,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::OptionalMemberExpression(self.inner))
         }
+        /// Set the `object` field and mark the builder changed.
         pub fn object(&mut self, object: &'gc Node<'gc>) { self.is_changed = true; self.inner.object = object; }
+        /// Set the `property` field and mark the builder changed.
         pub fn property(&mut self, property: &'gc Node<'gc>) { self.is_changed = true; self.inner.property = property; }
     }
+    /// Clone-with-changes builder for [`super::LogicalExpression`].
     #[derive(Debug)]
     pub struct LogicalExpression<'gc> {
         is_changed: bool,
         pub(super) inner: super::LogicalExpression<'gc>,
     }
     impl<'gc> LogicalExpression<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::LogicalExpression<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15391,6 +18547,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15398,18 +18556,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::LogicalExpression(self.inner))
         }
+        /// Set the `left` field and mark the builder changed.
         pub fn left(&mut self, left: &'gc Node<'gc>) { self.is_changed = true; self.inner.left = left; }
+        /// Set the `right` field and mark the builder changed.
         pub fn right(&mut self, right: &'gc Node<'gc>) { self.is_changed = true; self.inner.right = right; }
     }
+    /// Clone-with-changes builder for [`super::ConditionalExpression`].
     #[derive(Debug)]
     pub struct ConditionalExpression<'gc> {
         is_changed: bool,
         pub(super) inner: super::ConditionalExpression<'gc>,
     }
     impl<'gc> ConditionalExpression<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ConditionalExpression<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15421,6 +18584,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15428,19 +18593,25 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ConditionalExpression(self.inner))
         }
+        /// Set the `test` field and mark the builder changed.
         pub fn test(&mut self, test: &'gc Node<'gc>) { self.is_changed = true; self.inner.test = test; }
+        /// Set the `alternate` field and mark the builder changed.
         pub fn alternate(&mut self, alternate: &'gc Node<'gc>) { self.is_changed = true; self.inner.alternate = alternate; }
+        /// Set the `consequent` field and mark the builder changed.
         pub fn consequent(&mut self, consequent: &'gc Node<'gc>) { self.is_changed = true; self.inner.consequent = consequent; }
     }
+    /// Clone-with-changes builder for [`super::BinaryExpression`].
     #[derive(Debug)]
     pub struct BinaryExpression<'gc> {
         is_changed: bool,
         pub(super) inner: super::BinaryExpression<'gc>,
     }
     impl<'gc> BinaryExpression<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::BinaryExpression<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15452,6 +18623,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15459,18 +18632,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::BinaryExpression(self.inner))
         }
+        /// Set the `left` field and mark the builder changed.
         pub fn left(&mut self, left: &'gc Node<'gc>) { self.is_changed = true; self.inner.left = left; }
+        /// Set the `right` field and mark the builder changed.
         pub fn right(&mut self, right: &'gc Node<'gc>) { self.is_changed = true; self.inner.right = right; }
     }
+    /// Clone-with-changes builder for [`super::Directive`].
     #[derive(Debug)]
     pub struct Directive<'gc> {
         is_changed: bool,
         pub(super) inner: super::Directive<'gc>,
     }
     impl<'gc> Directive<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::Directive<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15480,6 +18658,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15487,17 +18667,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::Directive(self.inner))
         }
+        /// Set the `value` field and mark the builder changed.
         pub fn value(&mut self, value: &'gc Node<'gc>) { self.is_changed = true; self.inner.value = value; }
     }
+    /// Clone-with-changes builder for [`super::DirectiveLiteral`].
     #[derive(Debug)]
     pub struct DirectiveLiteral<'gc> {
         is_changed: bool,
         pub(super) inner: super::DirectiveLiteral<'gc>,
     }
     impl<'gc> DirectiveLiteral<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::DirectiveLiteral<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15507,6 +18691,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15514,16 +18700,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::DirectiveLiteral(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::Identifier`].
     #[derive(Debug)]
     pub struct Identifier<'gc> {
         is_changed: bool,
         pub(super) inner: super::Identifier<'gc>,
     }
     impl<'gc> Identifier<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::Identifier<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15538,6 +18727,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15545,17 +18736,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::Identifier(self.inner))
         }
+        /// Set the `type_annotation` field and mark the builder changed.
         pub fn type_annotation(&mut self, type_annotation: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
     }
+    /// Clone-with-changes builder for [`super::PrivateName`].
     #[derive(Debug)]
     pub struct PrivateName<'gc> {
         is_changed: bool,
         pub(super) inner: super::PrivateName<'gc>,
     }
     impl<'gc> PrivateName<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::PrivateName<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15565,6 +18760,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15572,17 +18769,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::PrivateName(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
     }
+    /// Clone-with-changes builder for [`super::MetaProperty`].
     #[derive(Debug)]
     pub struct MetaProperty<'gc> {
         is_changed: bool,
         pub(super) inner: super::MetaProperty<'gc>,
     }
     impl<'gc> MetaProperty<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::MetaProperty<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15593,6 +18794,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15600,18 +18803,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::MetaProperty(self.inner))
         }
+        /// Set the `meta` field and mark the builder changed.
         pub fn meta(&mut self, meta: &'gc Node<'gc>) { self.is_changed = true; self.inner.meta = meta; }
+        /// Set the `property` field and mark the builder changed.
         pub fn property(&mut self, property: &'gc Node<'gc>) { self.is_changed = true; self.inner.property = property; }
     }
+    /// Clone-with-changes builder for [`super::SwitchCase`].
     #[derive(Debug)]
     pub struct SwitchCase<'gc> {
         is_changed: bool,
         pub(super) inner: super::SwitchCase<'gc>,
     }
     impl<'gc> SwitchCase<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::SwitchCase<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15622,6 +18830,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15629,18 +18839,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::SwitchCase(self.inner))
         }
+        /// Set the `test` field and mark the builder changed.
         pub fn test(&mut self, test: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.test = test; }
+        /// Set the `consequent` field and mark the builder changed.
         pub fn consequent(&mut self, consequent: NodeList<'gc>) { self.is_changed = true; self.inner.consequent = consequent; }
     }
+    /// Clone-with-changes builder for [`super::CatchClause`].
     #[derive(Debug)]
     pub struct CatchClause<'gc> {
         is_changed: bool,
         pub(super) inner: super::CatchClause<'gc>,
     }
     impl<'gc> CatchClause<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::CatchClause<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15652,6 +18867,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15659,18 +18876,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::CatchClause(self.inner))
         }
+        /// Set the `param` field and mark the builder changed.
         pub fn param(&mut self, param: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.param = param; }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
     }
+    /// Clone-with-changes builder for [`super::VariableDeclarator`].
     #[derive(Debug)]
     pub struct VariableDeclarator<'gc> {
         is_changed: bool,
         pub(super) inner: super::VariableDeclarator<'gc>,
     }
     impl<'gc> VariableDeclarator<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::VariableDeclarator<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15681,6 +18903,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15688,18 +18912,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::VariableDeclarator(self.inner))
         }
+        /// Set the `init` field and mark the builder changed.
         pub fn init(&mut self, init: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.init = init; }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
     }
+    /// Clone-with-changes builder for [`super::VariableDeclaration`].
     #[derive(Debug)]
     pub struct VariableDeclaration<'gc> {
         is_changed: bool,
         pub(super) inner: super::VariableDeclaration<'gc>,
     }
     impl<'gc> VariableDeclaration<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::VariableDeclaration<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15710,6 +18939,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15717,17 +18948,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::VariableDeclaration(self.inner))
         }
+        /// Set the `declarations` field and mark the builder changed.
         pub fn declarations(&mut self, declarations: NodeList<'gc>) { self.is_changed = true; self.inner.declarations = declarations; }
     }
+    /// Clone-with-changes builder for [`super::TemplateLiteral`].
     #[derive(Debug)]
     pub struct TemplateLiteral<'gc> {
         is_changed: bool,
         pub(super) inner: super::TemplateLiteral<'gc>,
     }
     impl<'gc> TemplateLiteral<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TemplateLiteral<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15738,6 +18973,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15745,18 +18982,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TemplateLiteral(self.inner))
         }
+        /// Set the `quasis` field and mark the builder changed.
         pub fn quasis(&mut self, quasis: NodeList<'gc>) { self.is_changed = true; self.inner.quasis = quasis; }
+        /// Set the `expressions` field and mark the builder changed.
         pub fn expressions(&mut self, expressions: NodeList<'gc>) { self.is_changed = true; self.inner.expressions = expressions; }
     }
+    /// Clone-with-changes builder for [`super::TaggedTemplateExpression`].
     #[derive(Debug)]
     pub struct TaggedTemplateExpression<'gc> {
         is_changed: bool,
         pub(super) inner: super::TaggedTemplateExpression<'gc>,
     }
     impl<'gc> TaggedTemplateExpression<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TaggedTemplateExpression<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15767,6 +19009,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15774,18 +19018,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TaggedTemplateExpression(self.inner))
         }
+        /// Set the `tag` field and mark the builder changed.
         pub fn tag(&mut self, tag: &'gc Node<'gc>) { self.is_changed = true; self.inner.tag = tag; }
+        /// Set the `quasi` field and mark the builder changed.
         pub fn quasi(&mut self, quasi: &'gc Node<'gc>) { self.is_changed = true; self.inner.quasi = quasi; }
     }
+    /// Clone-with-changes builder for [`super::TemplateElement`].
     #[derive(Debug)]
     pub struct TemplateElement<'gc> {
         is_changed: bool,
         pub(super) inner: super::TemplateElement<'gc>,
     }
     impl<'gc> TemplateElement<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TemplateElement<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15797,6 +19046,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15804,16 +19055,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TemplateElement(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::Property`].
     #[derive(Debug)]
     pub struct Property<'gc> {
         is_changed: bool,
         pub(super) inner: super::Property<'gc>,
     }
     impl<'gc> Property<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::Property<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15828,6 +19082,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15835,18 +19091,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::Property(self.inner))
         }
+        /// Set the `key` field and mark the builder changed.
         pub fn key(&mut self, key: &'gc Node<'gc>) { self.is_changed = true; self.inner.key = key; }
+        /// Set the `value` field and mark the builder changed.
         pub fn value(&mut self, value: &'gc Node<'gc>) { self.is_changed = true; self.inner.value = value; }
     }
+    /// Clone-with-changes builder for [`super::Decorator`].
     #[derive(Debug)]
     pub struct Decorator<'gc> {
         is_changed: bool,
         pub(super) inner: super::Decorator<'gc>,
     }
     impl<'gc> Decorator<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::Decorator<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15856,6 +19117,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15863,17 +19126,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::Decorator(self.inner))
         }
+        /// Set the `expression` field and mark the builder changed.
         pub fn expression(&mut self, expression: &'gc Node<'gc>) { self.is_changed = true; self.inner.expression = expression; }
     }
+    /// Clone-with-changes builder for [`super::ClassDeclaration`].
     #[derive(Debug)]
     pub struct ClassDeclaration<'gc> {
         is_changed: bool,
         pub(super) inner: super::ClassDeclaration<'gc>,
     }
     impl<'gc> ClassDeclaration<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ClassDeclaration<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15893,6 +19160,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15900,23 +19169,33 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ClassDeclaration(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `type_parameters` field and mark the builder changed.
         pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        /// Set the `super_class` field and mark the builder changed.
         pub fn super_class(&mut self, super_class: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.super_class = super_class; }
+        /// Set the `super_type_arguments` field and mark the builder changed.
         pub fn super_type_arguments(&mut self, super_type_arguments: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.super_type_arguments = super_type_arguments; }
+        /// Set the `implements` field and mark the builder changed.
         pub fn implements(&mut self, implements: NodeList<'gc>) { self.is_changed = true; self.inner.implements = implements; }
+        /// Set the `decorators` field and mark the builder changed.
         pub fn decorators(&mut self, decorators: NodeList<'gc>) { self.is_changed = true; self.inner.decorators = decorators; }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
     }
+    /// Clone-with-changes builder for [`super::ClassExpression`].
     #[derive(Debug)]
     pub struct ClassExpression<'gc> {
         is_changed: bool,
         pub(super) inner: super::ClassExpression<'gc>,
     }
     impl<'gc> ClassExpression<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ClassExpression<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15936,6 +19215,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15943,23 +19224,33 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ClassExpression(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `type_parameters` field and mark the builder changed.
         pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        /// Set the `super_class` field and mark the builder changed.
         pub fn super_class(&mut self, super_class: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.super_class = super_class; }
+        /// Set the `super_type_arguments` field and mark the builder changed.
         pub fn super_type_arguments(&mut self, super_type_arguments: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.super_type_arguments = super_type_arguments; }
+        /// Set the `implements` field and mark the builder changed.
         pub fn implements(&mut self, implements: NodeList<'gc>) { self.is_changed = true; self.inner.implements = implements; }
+        /// Set the `decorators` field and mark the builder changed.
         pub fn decorators(&mut self, decorators: NodeList<'gc>) { self.is_changed = true; self.inner.decorators = decorators; }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
     }
+    /// Clone-with-changes builder for [`super::ClassBody`].
     #[derive(Debug)]
     pub struct ClassBody<'gc> {
         is_changed: bool,
         pub(super) inner: super::ClassBody<'gc>,
     }
     impl<'gc> ClassBody<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ClassBody<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -15969,6 +19260,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -15976,17 +19269,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ClassBody(self.inner))
         }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: NodeList<'gc>) { self.is_changed = true; self.inner.body = body; }
     }
+    /// Clone-with-changes builder for [`super::ClassProperty`].
     #[derive(Debug)]
     pub struct ClassProperty<'gc> {
         is_changed: bool,
         pub(super) inner: super::ClassProperty<'gc>,
     }
     impl<'gc> ClassProperty<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ClassProperty<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16005,6 +19302,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16012,22 +19311,31 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ClassProperty(self.inner))
         }
+        /// Set the `key` field and mark the builder changed.
         pub fn key(&mut self, key: &'gc Node<'gc>) { self.is_changed = true; self.inner.key = key; }
+        /// Set the `value` field and mark the builder changed.
         pub fn value(&mut self, value: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.value = value; }
+        /// Set the `decorators` field and mark the builder changed.
         pub fn decorators(&mut self, decorators: NodeList<'gc>) { self.is_changed = true; self.inner.decorators = decorators; }
+        /// Set the `variance` field and mark the builder changed.
         pub fn variance(&mut self, variance: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.variance = variance; }
+        /// Set the `type_annotation` field and mark the builder changed.
         pub fn type_annotation(&mut self, type_annotation: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
+        /// Set the `ts_modifiers` field and mark the builder changed.
         pub fn ts_modifiers(&mut self, ts_modifiers: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.ts_modifiers = ts_modifiers; }
     }
+    /// Clone-with-changes builder for [`super::ClassPrivateProperty`].
     #[derive(Debug)]
     pub struct ClassPrivateProperty<'gc> {
         is_changed: bool,
         pub(super) inner: super::ClassPrivateProperty<'gc>,
     }
     impl<'gc> ClassPrivateProperty<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ClassPrivateProperty<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16045,6 +19353,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16052,22 +19362,31 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ClassPrivateProperty(self.inner))
         }
+        /// Set the `key` field and mark the builder changed.
         pub fn key(&mut self, key: &'gc Node<'gc>) { self.is_changed = true; self.inner.key = key; }
+        /// Set the `value` field and mark the builder changed.
         pub fn value(&mut self, value: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.value = value; }
+        /// Set the `decorators` field and mark the builder changed.
         pub fn decorators(&mut self, decorators: NodeList<'gc>) { self.is_changed = true; self.inner.decorators = decorators; }
+        /// Set the `variance` field and mark the builder changed.
         pub fn variance(&mut self, variance: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.variance = variance; }
+        /// Set the `type_annotation` field and mark the builder changed.
         pub fn type_annotation(&mut self, type_annotation: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
+        /// Set the `ts_modifiers` field and mark the builder changed.
         pub fn ts_modifiers(&mut self, ts_modifiers: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.ts_modifiers = ts_modifiers; }
     }
+    /// Clone-with-changes builder for [`super::MethodDefinition`].
     #[derive(Debug)]
     pub struct MethodDefinition<'gc> {
         is_changed: bool,
         pub(super) inner: super::MethodDefinition<'gc>,
     }
     impl<'gc> MethodDefinition<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::MethodDefinition<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16082,6 +19401,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16089,19 +19410,25 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::MethodDefinition(self.inner))
         }
+        /// Set the `key` field and mark the builder changed.
         pub fn key(&mut self, key: &'gc Node<'gc>) { self.is_changed = true; self.inner.key = key; }
+        /// Set the `value` field and mark the builder changed.
         pub fn value(&mut self, value: &'gc Node<'gc>) { self.is_changed = true; self.inner.value = value; }
+        /// Set the `decorators` field and mark the builder changed.
         pub fn decorators(&mut self, decorators: NodeList<'gc>) { self.is_changed = true; self.inner.decorators = decorators; }
     }
+    /// Clone-with-changes builder for [`super::ImportDeclaration`].
     #[derive(Debug)]
     pub struct ImportDeclaration<'gc> {
         is_changed: bool,
         pub(super) inner: super::ImportDeclaration<'gc>,
     }
     impl<'gc> ImportDeclaration<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ImportDeclaration<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16114,6 +19441,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16121,19 +19450,25 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ImportDeclaration(self.inner))
         }
+        /// Set the `specifiers` field and mark the builder changed.
         pub fn specifiers(&mut self, specifiers: NodeList<'gc>) { self.is_changed = true; self.inner.specifiers = specifiers; }
+        /// Set the `source` field and mark the builder changed.
         pub fn source(&mut self, source: &'gc Node<'gc>) { self.is_changed = true; self.inner.source = source; }
+        /// Set the `attributes` field and mark the builder changed.
         pub fn attributes(&mut self, attributes: NodeList<'gc>) { self.is_changed = true; self.inner.attributes = attributes; }
     }
+    /// Clone-with-changes builder for [`super::ImportSpecifier`].
     #[derive(Debug)]
     pub struct ImportSpecifier<'gc> {
         is_changed: bool,
         pub(super) inner: super::ImportSpecifier<'gc>,
     }
     impl<'gc> ImportSpecifier<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ImportSpecifier<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16145,6 +19480,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16152,18 +19489,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ImportSpecifier(self.inner))
         }
+        /// Set the `imported` field and mark the builder changed.
         pub fn imported(&mut self, imported: &'gc Node<'gc>) { self.is_changed = true; self.inner.imported = imported; }
+        /// Set the `local` field and mark the builder changed.
         pub fn local(&mut self, local: &'gc Node<'gc>) { self.is_changed = true; self.inner.local = local; }
     }
+    /// Clone-with-changes builder for [`super::ImportDefaultSpecifier`].
     #[derive(Debug)]
     pub struct ImportDefaultSpecifier<'gc> {
         is_changed: bool,
         pub(super) inner: super::ImportDefaultSpecifier<'gc>,
     }
     impl<'gc> ImportDefaultSpecifier<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ImportDefaultSpecifier<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16173,6 +19515,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16180,17 +19524,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ImportDefaultSpecifier(self.inner))
         }
+        /// Set the `local` field and mark the builder changed.
         pub fn local(&mut self, local: &'gc Node<'gc>) { self.is_changed = true; self.inner.local = local; }
     }
+    /// Clone-with-changes builder for [`super::ImportNamespaceSpecifier`].
     #[derive(Debug)]
     pub struct ImportNamespaceSpecifier<'gc> {
         is_changed: bool,
         pub(super) inner: super::ImportNamespaceSpecifier<'gc>,
     }
     impl<'gc> ImportNamespaceSpecifier<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ImportNamespaceSpecifier<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16200,6 +19548,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16207,17 +19557,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ImportNamespaceSpecifier(self.inner))
         }
+        /// Set the `local` field and mark the builder changed.
         pub fn local(&mut self, local: &'gc Node<'gc>) { self.is_changed = true; self.inner.local = local; }
     }
+    /// Clone-with-changes builder for [`super::ImportAttribute`].
     #[derive(Debug)]
     pub struct ImportAttribute<'gc> {
         is_changed: bool,
         pub(super) inner: super::ImportAttribute<'gc>,
     }
     impl<'gc> ImportAttribute<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ImportAttribute<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16228,6 +19582,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16235,18 +19591,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ImportAttribute(self.inner))
         }
+        /// Set the `key` field and mark the builder changed.
         pub fn key(&mut self, key: &'gc Node<'gc>) { self.is_changed = true; self.inner.key = key; }
+        /// Set the `value` field and mark the builder changed.
         pub fn value(&mut self, value: &'gc Node<'gc>) { self.is_changed = true; self.inner.value = value; }
     }
+    /// Clone-with-changes builder for [`super::ExportNamedDeclaration`].
     #[derive(Debug)]
     pub struct ExportNamedDeclaration<'gc> {
         is_changed: bool,
         pub(super) inner: super::ExportNamedDeclaration<'gc>,
     }
     impl<'gc> ExportNamedDeclaration<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ExportNamedDeclaration<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16259,6 +19620,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16266,19 +19629,25 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ExportNamedDeclaration(self.inner))
         }
+        /// Set the `declaration` field and mark the builder changed.
         pub fn declaration(&mut self, declaration: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.declaration = declaration; }
+        /// Set the `specifiers` field and mark the builder changed.
         pub fn specifiers(&mut self, specifiers: NodeList<'gc>) { self.is_changed = true; self.inner.specifiers = specifiers; }
+        /// Set the `source` field and mark the builder changed.
         pub fn source(&mut self, source: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.source = source; }
     }
+    /// Clone-with-changes builder for [`super::ExportSpecifier`].
     #[derive(Debug)]
     pub struct ExportSpecifier<'gc> {
         is_changed: bool,
         pub(super) inner: super::ExportSpecifier<'gc>,
     }
     impl<'gc> ExportSpecifier<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ExportSpecifier<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16289,6 +19658,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16296,18 +19667,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ExportSpecifier(self.inner))
         }
+        /// Set the `exported` field and mark the builder changed.
         pub fn exported(&mut self, exported: &'gc Node<'gc>) { self.is_changed = true; self.inner.exported = exported; }
+        /// Set the `local` field and mark the builder changed.
         pub fn local(&mut self, local: &'gc Node<'gc>) { self.is_changed = true; self.inner.local = local; }
     }
+    /// Clone-with-changes builder for [`super::ExportNamespaceSpecifier`].
     #[derive(Debug)]
     pub struct ExportNamespaceSpecifier<'gc> {
         is_changed: bool,
         pub(super) inner: super::ExportNamespaceSpecifier<'gc>,
     }
     impl<'gc> ExportNamespaceSpecifier<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ExportNamespaceSpecifier<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16317,6 +19693,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16324,17 +19702,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ExportNamespaceSpecifier(self.inner))
         }
+        /// Set the `exported` field and mark the builder changed.
         pub fn exported(&mut self, exported: &'gc Node<'gc>) { self.is_changed = true; self.inner.exported = exported; }
     }
+    /// Clone-with-changes builder for [`super::ExportDefaultDeclaration`].
     #[derive(Debug)]
     pub struct ExportDefaultDeclaration<'gc> {
         is_changed: bool,
         pub(super) inner: super::ExportDefaultDeclaration<'gc>,
     }
     impl<'gc> ExportDefaultDeclaration<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ExportDefaultDeclaration<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16344,6 +19726,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16351,17 +19735,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ExportDefaultDeclaration(self.inner))
         }
+        /// Set the `declaration` field and mark the builder changed.
         pub fn declaration(&mut self, declaration: &'gc Node<'gc>) { self.is_changed = true; self.inner.declaration = declaration; }
     }
+    /// Clone-with-changes builder for [`super::ExportAllDeclaration`].
     #[derive(Debug)]
     pub struct ExportAllDeclaration<'gc> {
         is_changed: bool,
         pub(super) inner: super::ExportAllDeclaration<'gc>,
     }
     impl<'gc> ExportAllDeclaration<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ExportAllDeclaration<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16372,6 +19760,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16379,17 +19769,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ExportAllDeclaration(self.inner))
         }
+        /// Set the `source` field and mark the builder changed.
         pub fn source(&mut self, source: &'gc Node<'gc>) { self.is_changed = true; self.inner.source = source; }
     }
+    /// Clone-with-changes builder for [`super::ObjectPattern`].
     #[derive(Debug)]
     pub struct ObjectPattern<'gc> {
         is_changed: bool,
         pub(super) inner: super::ObjectPattern<'gc>,
     }
     impl<'gc> ObjectPattern<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ObjectPattern<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16400,6 +19794,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16407,18 +19803,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ObjectPattern(self.inner))
         }
+        /// Set the `properties` field and mark the builder changed.
         pub fn properties(&mut self, properties: NodeList<'gc>) { self.is_changed = true; self.inner.properties = properties; }
+        /// Set the `type_annotation` field and mark the builder changed.
         pub fn type_annotation(&mut self, type_annotation: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
     }
+    /// Clone-with-changes builder for [`super::ArrayPattern`].
     #[derive(Debug)]
     pub struct ArrayPattern<'gc> {
         is_changed: bool,
         pub(super) inner: super::ArrayPattern<'gc>,
     }
     impl<'gc> ArrayPattern<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ArrayPattern<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16429,6 +19830,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16436,18 +19839,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ArrayPattern(self.inner))
         }
+        /// Set the `elements` field and mark the builder changed.
         pub fn elements(&mut self, elements: NodeList<'gc>) { self.is_changed = true; self.inner.elements = elements; }
+        /// Set the `type_annotation` field and mark the builder changed.
         pub fn type_annotation(&mut self, type_annotation: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
     }
+    /// Clone-with-changes builder for [`super::RestElement`].
     #[derive(Debug)]
     pub struct RestElement<'gc> {
         is_changed: bool,
         pub(super) inner: super::RestElement<'gc>,
     }
     impl<'gc> RestElement<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::RestElement<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16457,6 +19865,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16464,17 +19874,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::RestElement(self.inner))
         }
+        /// Set the `argument` field and mark the builder changed.
         pub fn argument(&mut self, argument: &'gc Node<'gc>) { self.is_changed = true; self.inner.argument = argument; }
     }
+    /// Clone-with-changes builder for [`super::AssignmentPattern`].
     #[derive(Debug)]
     pub struct AssignmentPattern<'gc> {
         is_changed: bool,
         pub(super) inner: super::AssignmentPattern<'gc>,
     }
     impl<'gc> AssignmentPattern<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::AssignmentPattern<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16485,6 +19899,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16492,18 +19908,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::AssignmentPattern(self.inner))
         }
+        /// Set the `left` field and mark the builder changed.
         pub fn left(&mut self, left: &'gc Node<'gc>) { self.is_changed = true; self.inner.left = left; }
+        /// Set the `right` field and mark the builder changed.
         pub fn right(&mut self, right: &'gc Node<'gc>) { self.is_changed = true; self.inner.right = right; }
     }
+    /// Clone-with-changes builder for [`super::MatchStatementCase`].
     #[derive(Debug)]
     pub struct MatchStatementCase<'gc> {
         is_changed: bool,
         pub(super) inner: super::MatchStatementCase<'gc>,
     }
     impl<'gc> MatchStatementCase<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::MatchStatementCase<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16515,6 +19936,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16522,19 +19945,25 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::MatchStatementCase(self.inner))
         }
+        /// Set the `pattern` field and mark the builder changed.
         pub fn pattern(&mut self, pattern: &'gc Node<'gc>) { self.is_changed = true; self.inner.pattern = pattern; }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+        /// Set the `guard` field and mark the builder changed.
         pub fn guard(&mut self, guard: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.guard = guard; }
     }
+    /// Clone-with-changes builder for [`super::MatchExpression`].
     #[derive(Debug)]
     pub struct MatchExpression<'gc> {
         is_changed: bool,
         pub(super) inner: super::MatchExpression<'gc>,
     }
     impl<'gc> MatchExpression<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::MatchExpression<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16545,6 +19974,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16552,18 +19983,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::MatchExpression(self.inner))
         }
+        /// Set the `argument` field and mark the builder changed.
         pub fn argument(&mut self, argument: &'gc Node<'gc>) { self.is_changed = true; self.inner.argument = argument; }
+        /// Set the `cases` field and mark the builder changed.
         pub fn cases(&mut self, cases: NodeList<'gc>) { self.is_changed = true; self.inner.cases = cases; }
     }
+    /// Clone-with-changes builder for [`super::MatchExpressionCase`].
     #[derive(Debug)]
     pub struct MatchExpressionCase<'gc> {
         is_changed: bool,
         pub(super) inner: super::MatchExpressionCase<'gc>,
     }
     impl<'gc> MatchExpressionCase<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::MatchExpressionCase<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16575,6 +20011,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16582,19 +20020,25 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::MatchExpressionCase(self.inner))
         }
+        /// Set the `pattern` field and mark the builder changed.
         pub fn pattern(&mut self, pattern: &'gc Node<'gc>) { self.is_changed = true; self.inner.pattern = pattern; }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+        /// Set the `guard` field and mark the builder changed.
         pub fn guard(&mut self, guard: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.guard = guard; }
     }
+    /// Clone-with-changes builder for [`super::MatchWildcardPattern`].
     #[derive(Debug)]
     pub struct MatchWildcardPattern<'gc> {
         is_changed: bool,
         pub(super) inner: super::MatchWildcardPattern<'gc>,
     }
     impl<'gc> MatchWildcardPattern<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::MatchWildcardPattern<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16603,6 +20047,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16610,16 +20056,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::MatchWildcardPattern(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::MatchLiteralPattern`].
     #[derive(Debug)]
     pub struct MatchLiteralPattern<'gc> {
         is_changed: bool,
         pub(super) inner: super::MatchLiteralPattern<'gc>,
     }
     impl<'gc> MatchLiteralPattern<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::MatchLiteralPattern<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16629,6 +20078,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16636,17 +20087,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::MatchLiteralPattern(self.inner))
         }
+        /// Set the `literal` field and mark the builder changed.
         pub fn literal(&mut self, literal: &'gc Node<'gc>) { self.is_changed = true; self.inner.literal = literal; }
     }
+    /// Clone-with-changes builder for [`super::MatchUnaryPattern`].
     #[derive(Debug)]
     pub struct MatchUnaryPattern<'gc> {
         is_changed: bool,
         pub(super) inner: super::MatchUnaryPattern<'gc>,
     }
     impl<'gc> MatchUnaryPattern<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::MatchUnaryPattern<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16657,6 +20112,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16664,17 +20121,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::MatchUnaryPattern(self.inner))
         }
+        /// Set the `argument` field and mark the builder changed.
         pub fn argument(&mut self, argument: &'gc Node<'gc>) { self.is_changed = true; self.inner.argument = argument; }
     }
+    /// Clone-with-changes builder for [`super::MatchIdentifierPattern`].
     #[derive(Debug)]
     pub struct MatchIdentifierPattern<'gc> {
         is_changed: bool,
         pub(super) inner: super::MatchIdentifierPattern<'gc>,
     }
     impl<'gc> MatchIdentifierPattern<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::MatchIdentifierPattern<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16684,6 +20145,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16691,17 +20154,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::MatchIdentifierPattern(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
     }
+    /// Clone-with-changes builder for [`super::MatchBindingPattern`].
     #[derive(Debug)]
     pub struct MatchBindingPattern<'gc> {
         is_changed: bool,
         pub(super) inner: super::MatchBindingPattern<'gc>,
     }
     impl<'gc> MatchBindingPattern<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::MatchBindingPattern<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16712,6 +20179,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16719,17 +20188,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::MatchBindingPattern(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
     }
+    /// Clone-with-changes builder for [`super::MatchObjectPattern`].
     #[derive(Debug)]
     pub struct MatchObjectPattern<'gc> {
         is_changed: bool,
         pub(super) inner: super::MatchObjectPattern<'gc>,
     }
     impl<'gc> MatchObjectPattern<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::MatchObjectPattern<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16740,6 +20213,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16747,18 +20222,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::MatchObjectPattern(self.inner))
         }
+        /// Set the `properties` field and mark the builder changed.
         pub fn properties(&mut self, properties: NodeList<'gc>) { self.is_changed = true; self.inner.properties = properties; }
+        /// Set the `rest` field and mark the builder changed.
         pub fn rest(&mut self, rest: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.rest = rest; }
     }
+    /// Clone-with-changes builder for [`super::MatchArrayPattern`].
     #[derive(Debug)]
     pub struct MatchArrayPattern<'gc> {
         is_changed: bool,
         pub(super) inner: super::MatchArrayPattern<'gc>,
     }
     impl<'gc> MatchArrayPattern<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::MatchArrayPattern<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16769,6 +20249,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16776,18 +20258,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::MatchArrayPattern(self.inner))
         }
+        /// Set the `elements` field and mark the builder changed.
         pub fn elements(&mut self, elements: NodeList<'gc>) { self.is_changed = true; self.inner.elements = elements; }
+        /// Set the `rest` field and mark the builder changed.
         pub fn rest(&mut self, rest: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.rest = rest; }
     }
+    /// Clone-with-changes builder for [`super::MatchOrPattern`].
     #[derive(Debug)]
     pub struct MatchOrPattern<'gc> {
         is_changed: bool,
         pub(super) inner: super::MatchOrPattern<'gc>,
     }
     impl<'gc> MatchOrPattern<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::MatchOrPattern<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16797,6 +20284,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16804,17 +20293,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::MatchOrPattern(self.inner))
         }
+        /// Set the `patterns` field and mark the builder changed.
         pub fn patterns(&mut self, patterns: NodeList<'gc>) { self.is_changed = true; self.inner.patterns = patterns; }
     }
+    /// Clone-with-changes builder for [`super::MatchAsPattern`].
     #[derive(Debug)]
     pub struct MatchAsPattern<'gc> {
         is_changed: bool,
         pub(super) inner: super::MatchAsPattern<'gc>,
     }
     impl<'gc> MatchAsPattern<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::MatchAsPattern<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16825,6 +20318,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16832,18 +20327,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::MatchAsPattern(self.inner))
         }
+        /// Set the `pattern` field and mark the builder changed.
         pub fn pattern(&mut self, pattern: &'gc Node<'gc>) { self.is_changed = true; self.inner.pattern = pattern; }
+        /// Set the `target` field and mark the builder changed.
         pub fn target(&mut self, target: &'gc Node<'gc>) { self.is_changed = true; self.inner.target = target; }
     }
+    /// Clone-with-changes builder for [`super::MatchMemberPattern`].
     #[derive(Debug)]
     pub struct MatchMemberPattern<'gc> {
         is_changed: bool,
         pub(super) inner: super::MatchMemberPattern<'gc>,
     }
     impl<'gc> MatchMemberPattern<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::MatchMemberPattern<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16854,6 +20354,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16861,18 +20363,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::MatchMemberPattern(self.inner))
         }
+        /// Set the `base` field and mark the builder changed.
         pub fn base(&mut self, base: &'gc Node<'gc>) { self.is_changed = true; self.inner.base = base; }
+        /// Set the `property` field and mark the builder changed.
         pub fn property(&mut self, property: &'gc Node<'gc>) { self.is_changed = true; self.inner.property = property; }
     }
+    /// Clone-with-changes builder for [`super::MatchInstancePattern`].
     #[derive(Debug)]
     pub struct MatchInstancePattern<'gc> {
         is_changed: bool,
         pub(super) inner: super::MatchInstancePattern<'gc>,
     }
     impl<'gc> MatchInstancePattern<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::MatchInstancePattern<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16883,6 +20390,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16890,18 +20399,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::MatchInstancePattern(self.inner))
         }
+        /// Set the `target_constructor` field and mark the builder changed.
         pub fn target_constructor(&mut self, target_constructor: &'gc Node<'gc>) { self.is_changed = true; self.inner.target_constructor = target_constructor; }
+        /// Set the `properties` field and mark the builder changed.
         pub fn properties(&mut self, properties: &'gc Node<'gc>) { self.is_changed = true; self.inner.properties = properties; }
     }
+    /// Clone-with-changes builder for [`super::MatchObjectPatternProperty`].
     #[derive(Debug)]
     pub struct MatchObjectPatternProperty<'gc> {
         is_changed: bool,
         pub(super) inner: super::MatchObjectPatternProperty<'gc>,
     }
     impl<'gc> MatchObjectPatternProperty<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::MatchObjectPatternProperty<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16913,6 +20427,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16920,18 +20436,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::MatchObjectPatternProperty(self.inner))
         }
+        /// Set the `key` field and mark the builder changed.
         pub fn key(&mut self, key: &'gc Node<'gc>) { self.is_changed = true; self.inner.key = key; }
+        /// Set the `pattern` field and mark the builder changed.
         pub fn pattern(&mut self, pattern: &'gc Node<'gc>) { self.is_changed = true; self.inner.pattern = pattern; }
     }
+    /// Clone-with-changes builder for [`super::MatchInstanceObjectPattern`].
     #[derive(Debug)]
     pub struct MatchInstanceObjectPattern<'gc> {
         is_changed: bool,
         pub(super) inner: super::MatchInstanceObjectPattern<'gc>,
     }
     impl<'gc> MatchInstanceObjectPattern<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::MatchInstanceObjectPattern<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16942,6 +20463,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16949,18 +20472,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::MatchInstanceObjectPattern(self.inner))
         }
+        /// Set the `properties` field and mark the builder changed.
         pub fn properties(&mut self, properties: NodeList<'gc>) { self.is_changed = true; self.inner.properties = properties; }
+        /// Set the `rest` field and mark the builder changed.
         pub fn rest(&mut self, rest: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.rest = rest; }
     }
+    /// Clone-with-changes builder for [`super::MatchRestPattern`].
     #[derive(Debug)]
     pub struct MatchRestPattern<'gc> {
         is_changed: bool,
         pub(super) inner: super::MatchRestPattern<'gc>,
     }
     impl<'gc> MatchRestPattern<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::MatchRestPattern<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16970,6 +20498,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -16977,17 +20507,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::MatchRestPattern(self.inner))
         }
+        /// Set the `argument` field and mark the builder changed.
         pub fn argument(&mut self, argument: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.argument = argument; }
     }
+    /// Clone-with-changes builder for [`super::JSXIdentifier`].
     #[derive(Debug)]
     pub struct JSXIdentifier<'gc> {
         is_changed: bool,
         pub(super) inner: super::JSXIdentifier<'gc>,
     }
     impl<'gc> JSXIdentifier<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::JSXIdentifier<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -16997,6 +20531,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17004,16 +20540,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::JSXIdentifier(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::JSXMemberExpression`].
     #[derive(Debug)]
     pub struct JSXMemberExpression<'gc> {
         is_changed: bool,
         pub(super) inner: super::JSXMemberExpression<'gc>,
     }
     impl<'gc> JSXMemberExpression<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::JSXMemberExpression<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17024,6 +20563,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17031,18 +20572,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::JSXMemberExpression(self.inner))
         }
+        /// Set the `object` field and mark the builder changed.
         pub fn object(&mut self, object: &'gc Node<'gc>) { self.is_changed = true; self.inner.object = object; }
+        /// Set the `property` field and mark the builder changed.
         pub fn property(&mut self, property: &'gc Node<'gc>) { self.is_changed = true; self.inner.property = property; }
     }
+    /// Clone-with-changes builder for [`super::JSXNamespacedName`].
     #[derive(Debug)]
     pub struct JSXNamespacedName<'gc> {
         is_changed: bool,
         pub(super) inner: super::JSXNamespacedName<'gc>,
     }
     impl<'gc> JSXNamespacedName<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::JSXNamespacedName<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17053,6 +20599,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17060,18 +20608,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::JSXNamespacedName(self.inner))
         }
+        /// Set the `namespace` field and mark the builder changed.
         pub fn namespace(&mut self, namespace: &'gc Node<'gc>) { self.is_changed = true; self.inner.namespace = namespace; }
+        /// Set the `name` field and mark the builder changed.
         pub fn name(&mut self, name: &'gc Node<'gc>) { self.is_changed = true; self.inner.name = name; }
     }
+    /// Clone-with-changes builder for [`super::JSXEmptyExpression`].
     #[derive(Debug)]
     pub struct JSXEmptyExpression<'gc> {
         is_changed: bool,
         pub(super) inner: super::JSXEmptyExpression<'gc>,
     }
     impl<'gc> JSXEmptyExpression<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::JSXEmptyExpression<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17080,6 +20633,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17087,16 +20642,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::JSXEmptyExpression(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::JSXExpressionContainer`].
     #[derive(Debug)]
     pub struct JSXExpressionContainer<'gc> {
         is_changed: bool,
         pub(super) inner: super::JSXExpressionContainer<'gc>,
     }
     impl<'gc> JSXExpressionContainer<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::JSXExpressionContainer<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17106,6 +20664,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17113,17 +20673,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::JSXExpressionContainer(self.inner))
         }
+        /// Set the `expression` field and mark the builder changed.
         pub fn expression(&mut self, expression: &'gc Node<'gc>) { self.is_changed = true; self.inner.expression = expression; }
     }
+    /// Clone-with-changes builder for [`super::JSXSpreadChild`].
     #[derive(Debug)]
     pub struct JSXSpreadChild<'gc> {
         is_changed: bool,
         pub(super) inner: super::JSXSpreadChild<'gc>,
     }
     impl<'gc> JSXSpreadChild<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::JSXSpreadChild<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17133,6 +20697,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17140,17 +20706,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::JSXSpreadChild(self.inner))
         }
+        /// Set the `expression` field and mark the builder changed.
         pub fn expression(&mut self, expression: &'gc Node<'gc>) { self.is_changed = true; self.inner.expression = expression; }
     }
+    /// Clone-with-changes builder for [`super::JSXOpeningElement`].
     #[derive(Debug)]
     pub struct JSXOpeningElement<'gc> {
         is_changed: bool,
         pub(super) inner: super::JSXOpeningElement<'gc>,
     }
     impl<'gc> JSXOpeningElement<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::JSXOpeningElement<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17163,6 +20733,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17170,19 +20742,25 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::JSXOpeningElement(self.inner))
         }
+        /// Set the `name` field and mark the builder changed.
         pub fn name(&mut self, name: &'gc Node<'gc>) { self.is_changed = true; self.inner.name = name; }
+        /// Set the `attributes` field and mark the builder changed.
         pub fn attributes(&mut self, attributes: NodeList<'gc>) { self.is_changed = true; self.inner.attributes = attributes; }
+        /// Set the `type_arguments` field and mark the builder changed.
         pub fn type_arguments(&mut self, type_arguments: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_arguments = type_arguments; }
     }
+    /// Clone-with-changes builder for [`super::JSXClosingElement`].
     #[derive(Debug)]
     pub struct JSXClosingElement<'gc> {
         is_changed: bool,
         pub(super) inner: super::JSXClosingElement<'gc>,
     }
     impl<'gc> JSXClosingElement<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::JSXClosingElement<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17192,6 +20770,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17199,17 +20779,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::JSXClosingElement(self.inner))
         }
+        /// Set the `name` field and mark the builder changed.
         pub fn name(&mut self, name: &'gc Node<'gc>) { self.is_changed = true; self.inner.name = name; }
     }
+    /// Clone-with-changes builder for [`super::JSXAttribute`].
     #[derive(Debug)]
     pub struct JSXAttribute<'gc> {
         is_changed: bool,
         pub(super) inner: super::JSXAttribute<'gc>,
     }
     impl<'gc> JSXAttribute<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::JSXAttribute<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17220,6 +20804,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17227,18 +20813,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::JSXAttribute(self.inner))
         }
+        /// Set the `name` field and mark the builder changed.
         pub fn name(&mut self, name: &'gc Node<'gc>) { self.is_changed = true; self.inner.name = name; }
+        /// Set the `value` field and mark the builder changed.
         pub fn value(&mut self, value: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.value = value; }
     }
+    /// Clone-with-changes builder for [`super::JSXSpreadAttribute`].
     #[derive(Debug)]
     pub struct JSXSpreadAttribute<'gc> {
         is_changed: bool,
         pub(super) inner: super::JSXSpreadAttribute<'gc>,
     }
     impl<'gc> JSXSpreadAttribute<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::JSXSpreadAttribute<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17248,6 +20839,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17255,17 +20848,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::JSXSpreadAttribute(self.inner))
         }
+        /// Set the `argument` field and mark the builder changed.
         pub fn argument(&mut self, argument: &'gc Node<'gc>) { self.is_changed = true; self.inner.argument = argument; }
     }
+    /// Clone-with-changes builder for [`super::JSXStringLiteral`].
     #[derive(Debug)]
     pub struct JSXStringLiteral<'gc> {
         is_changed: bool,
         pub(super) inner: super::JSXStringLiteral<'gc>,
     }
     impl<'gc> JSXStringLiteral<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::JSXStringLiteral<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17276,6 +20873,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17283,16 +20882,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::JSXStringLiteral(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::JSXText`].
     #[derive(Debug)]
     pub struct JSXText<'gc> {
         is_changed: bool,
         pub(super) inner: super::JSXText<'gc>,
     }
     impl<'gc> JSXText<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::JSXText<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17303,6 +20905,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17310,16 +20914,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::JSXText(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::JSXElement`].
     #[derive(Debug)]
     pub struct JSXElement<'gc> {
         is_changed: bool,
         pub(super) inner: super::JSXElement<'gc>,
     }
     impl<'gc> JSXElement<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::JSXElement<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17331,6 +20938,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17338,19 +20947,25 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::JSXElement(self.inner))
         }
+        /// Set the `opening_element` field and mark the builder changed.
         pub fn opening_element(&mut self, opening_element: &'gc Node<'gc>) { self.is_changed = true; self.inner.opening_element = opening_element; }
+        /// Set the `children` field and mark the builder changed.
         pub fn children(&mut self, children: NodeList<'gc>) { self.is_changed = true; self.inner.children = children; }
+        /// Set the `closing_element` field and mark the builder changed.
         pub fn closing_element(&mut self, closing_element: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.closing_element = closing_element; }
     }
+    /// Clone-with-changes builder for [`super::JSXFragment`].
     #[derive(Debug)]
     pub struct JSXFragment<'gc> {
         is_changed: bool,
         pub(super) inner: super::JSXFragment<'gc>,
     }
     impl<'gc> JSXFragment<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::JSXFragment<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17362,6 +20977,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17369,19 +20986,25 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::JSXFragment(self.inner))
         }
+        /// Set the `opening_fragment` field and mark the builder changed.
         pub fn opening_fragment(&mut self, opening_fragment: &'gc Node<'gc>) { self.is_changed = true; self.inner.opening_fragment = opening_fragment; }
+        /// Set the `children` field and mark the builder changed.
         pub fn children(&mut self, children: NodeList<'gc>) { self.is_changed = true; self.inner.children = children; }
+        /// Set the `closing_fragment` field and mark the builder changed.
         pub fn closing_fragment(&mut self, closing_fragment: &'gc Node<'gc>) { self.is_changed = true; self.inner.closing_fragment = closing_fragment; }
     }
+    /// Clone-with-changes builder for [`super::JSXOpeningFragment`].
     #[derive(Debug)]
     pub struct JSXOpeningFragment<'gc> {
         is_changed: bool,
         pub(super) inner: super::JSXOpeningFragment<'gc>,
     }
     impl<'gc> JSXOpeningFragment<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::JSXOpeningFragment<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17390,6 +21013,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17397,16 +21022,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::JSXOpeningFragment(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::JSXClosingFragment`].
     #[derive(Debug)]
     pub struct JSXClosingFragment<'gc> {
         is_changed: bool,
         pub(super) inner: super::JSXClosingFragment<'gc>,
     }
     impl<'gc> JSXClosingFragment<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::JSXClosingFragment<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17415,6 +21043,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17422,16 +21052,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::JSXClosingFragment(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::ExistsTypeAnnotation`].
     #[derive(Debug)]
     pub struct ExistsTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::ExistsTypeAnnotation<'gc>,
     }
     impl<'gc> ExistsTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ExistsTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17440,6 +21073,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17447,16 +21082,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ExistsTypeAnnotation(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::EmptyTypeAnnotation`].
     #[derive(Debug)]
     pub struct EmptyTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::EmptyTypeAnnotation<'gc>,
     }
     impl<'gc> EmptyTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::EmptyTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17465,6 +21103,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17472,16 +21112,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::EmptyTypeAnnotation(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::StringTypeAnnotation`].
     #[derive(Debug)]
     pub struct StringTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::StringTypeAnnotation<'gc>,
     }
     impl<'gc> StringTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::StringTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17490,6 +21133,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17497,16 +21142,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::StringTypeAnnotation(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::NumberTypeAnnotation`].
     #[derive(Debug)]
     pub struct NumberTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::NumberTypeAnnotation<'gc>,
     }
     impl<'gc> NumberTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::NumberTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17515,6 +21163,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17522,16 +21172,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::NumberTypeAnnotation(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::StringLiteralTypeAnnotation`].
     #[derive(Debug)]
     pub struct StringLiteralTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::StringLiteralTypeAnnotation<'gc>,
     }
     impl<'gc> StringLiteralTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::StringLiteralTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17542,6 +21195,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17549,16 +21204,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::StringLiteralTypeAnnotation(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::NumberLiteralTypeAnnotation`].
     #[derive(Debug)]
     pub struct NumberLiteralTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::NumberLiteralTypeAnnotation<'gc>,
     }
     impl<'gc> NumberLiteralTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::NumberLiteralTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17569,6 +21227,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17576,16 +21236,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::NumberLiteralTypeAnnotation(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::BigIntLiteralTypeAnnotation`].
     #[derive(Debug)]
     pub struct BigIntLiteralTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::BigIntLiteralTypeAnnotation<'gc>,
     }
     impl<'gc> BigIntLiteralTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::BigIntLiteralTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17595,6 +21258,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17602,16 +21267,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::BigIntLiteralTypeAnnotation(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::BooleanTypeAnnotation`].
     #[derive(Debug)]
     pub struct BooleanTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::BooleanTypeAnnotation<'gc>,
     }
     impl<'gc> BooleanTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::BooleanTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17620,6 +21288,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17627,16 +21297,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::BooleanTypeAnnotation(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::BooleanLiteralTypeAnnotation`].
     #[derive(Debug)]
     pub struct BooleanLiteralTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::BooleanLiteralTypeAnnotation<'gc>,
     }
     impl<'gc> BooleanLiteralTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::BooleanLiteralTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17647,6 +21320,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17654,16 +21329,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::BooleanLiteralTypeAnnotation(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::NullLiteralTypeAnnotation`].
     #[derive(Debug)]
     pub struct NullLiteralTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::NullLiteralTypeAnnotation<'gc>,
     }
     impl<'gc> NullLiteralTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::NullLiteralTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17672,6 +21350,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17679,16 +21359,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::NullLiteralTypeAnnotation(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::SymbolTypeAnnotation`].
     #[derive(Debug)]
     pub struct SymbolTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::SymbolTypeAnnotation<'gc>,
     }
     impl<'gc> SymbolTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::SymbolTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17697,6 +21380,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17704,16 +21389,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::SymbolTypeAnnotation(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::AnyTypeAnnotation`].
     #[derive(Debug)]
     pub struct AnyTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::AnyTypeAnnotation<'gc>,
     }
     impl<'gc> AnyTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::AnyTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17722,6 +21410,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17729,16 +21419,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::AnyTypeAnnotation(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::MixedTypeAnnotation`].
     #[derive(Debug)]
     pub struct MixedTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::MixedTypeAnnotation<'gc>,
     }
     impl<'gc> MixedTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::MixedTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17747,6 +21440,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17754,16 +21449,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::MixedTypeAnnotation(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::BigIntTypeAnnotation`].
     #[derive(Debug)]
     pub struct BigIntTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::BigIntTypeAnnotation<'gc>,
     }
     impl<'gc> BigIntTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::BigIntTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17772,6 +21470,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17779,16 +21479,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::BigIntTypeAnnotation(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::VoidTypeAnnotation`].
     #[derive(Debug)]
     pub struct VoidTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::VoidTypeAnnotation<'gc>,
     }
     impl<'gc> VoidTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::VoidTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17797,6 +21500,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17804,16 +21509,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::VoidTypeAnnotation(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::NeverTypeAnnotation`].
     #[derive(Debug)]
     pub struct NeverTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::NeverTypeAnnotation<'gc>,
     }
     impl<'gc> NeverTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::NeverTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17822,6 +21530,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17829,16 +21539,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::NeverTypeAnnotation(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::UnknownTypeAnnotation`].
     #[derive(Debug)]
     pub struct UnknownTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::UnknownTypeAnnotation<'gc>,
     }
     impl<'gc> UnknownTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::UnknownTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17847,6 +21560,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17854,16 +21569,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::UnknownTypeAnnotation(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::UndefinedTypeAnnotation`].
     #[derive(Debug)]
     pub struct UndefinedTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::UndefinedTypeAnnotation<'gc>,
     }
     impl<'gc> UndefinedTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::UndefinedTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17872,6 +21590,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17879,16 +21599,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::UndefinedTypeAnnotation(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::FunctionTypeAnnotation`].
     #[derive(Debug)]
     pub struct FunctionTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::FunctionTypeAnnotation<'gc>,
     }
     impl<'gc> FunctionTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::FunctionTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17902,6 +21625,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17909,21 +21634,29 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::FunctionTypeAnnotation(self.inner))
         }
+        /// Set the `params` field and mark the builder changed.
         pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
+        /// Set the `this` field and mark the builder changed.
         pub fn this(&mut self, this: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.this = this; }
+        /// Set the `return_type` field and mark the builder changed.
         pub fn return_type(&mut self, return_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.return_type = return_type; }
+        /// Set the `rest` field and mark the builder changed.
         pub fn rest(&mut self, rest: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.rest = rest; }
+        /// Set the `type_parameters` field and mark the builder changed.
         pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
     }
+    /// Clone-with-changes builder for [`super::HookTypeAnnotation`].
     #[derive(Debug)]
     pub struct HookTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::HookTypeAnnotation<'gc>,
     }
     impl<'gc> HookTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::HookTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17936,6 +21669,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17943,20 +21678,27 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::HookTypeAnnotation(self.inner))
         }
+        /// Set the `params` field and mark the builder changed.
         pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
+        /// Set the `return_type` field and mark the builder changed.
         pub fn return_type(&mut self, return_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.return_type = return_type; }
+        /// Set the `rest` field and mark the builder changed.
         pub fn rest(&mut self, rest: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.rest = rest; }
+        /// Set the `type_parameters` field and mark the builder changed.
         pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
     }
+    /// Clone-with-changes builder for [`super::FunctionTypeParam`].
     #[derive(Debug)]
     pub struct FunctionTypeParam<'gc> {
         is_changed: bool,
         pub(super) inner: super::FunctionTypeParam<'gc>,
     }
     impl<'gc> FunctionTypeParam<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::FunctionTypeParam<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17968,6 +21710,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -17975,18 +21719,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::FunctionTypeParam(self.inner))
         }
+        /// Set the `name` field and mark the builder changed.
         pub fn name(&mut self, name: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.name = name; }
+        /// Set the `type_annotation` field and mark the builder changed.
         pub fn type_annotation(&mut self, type_annotation: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
     }
+    /// Clone-with-changes builder for [`super::ComponentTypeAnnotation`].
     #[derive(Debug)]
     pub struct ComponentTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::ComponentTypeAnnotation<'gc>,
     }
     impl<'gc> ComponentTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ComponentTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -17999,6 +21748,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18006,20 +21757,27 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ComponentTypeAnnotation(self.inner))
         }
+        /// Set the `params` field and mark the builder changed.
         pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
+        /// Set the `rest` field and mark the builder changed.
         pub fn rest(&mut self, rest: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.rest = rest; }
+        /// Set the `type_parameters` field and mark the builder changed.
         pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        /// Set the `renders_type` field and mark the builder changed.
         pub fn renders_type(&mut self, renders_type: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.renders_type = renders_type; }
     }
+    /// Clone-with-changes builder for [`super::ComponentTypeParameter`].
     #[derive(Debug)]
     pub struct ComponentTypeParameter<'gc> {
         is_changed: bool,
         pub(super) inner: super::ComponentTypeParameter<'gc>,
     }
     impl<'gc> ComponentTypeParameter<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ComponentTypeParameter<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18031,6 +21789,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18038,18 +21798,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ComponentTypeParameter(self.inner))
         }
+        /// Set the `name` field and mark the builder changed.
         pub fn name(&mut self, name: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.name = name; }
+        /// Set the `type_annotation` field and mark the builder changed.
         pub fn type_annotation(&mut self, type_annotation: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
     }
+    /// Clone-with-changes builder for [`super::NullableTypeAnnotation`].
     #[derive(Debug)]
     pub struct NullableTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::NullableTypeAnnotation<'gc>,
     }
     impl<'gc> NullableTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::NullableTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18059,6 +21824,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18066,17 +21833,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::NullableTypeAnnotation(self.inner))
         }
+        /// Set the `type_annotation` field and mark the builder changed.
         pub fn type_annotation(&mut self, type_annotation: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
     }
+    /// Clone-with-changes builder for [`super::QualifiedTypeIdentifier`].
     #[derive(Debug)]
     pub struct QualifiedTypeIdentifier<'gc> {
         is_changed: bool,
         pub(super) inner: super::QualifiedTypeIdentifier<'gc>,
     }
     impl<'gc> QualifiedTypeIdentifier<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::QualifiedTypeIdentifier<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18087,6 +21858,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18094,18 +21867,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::QualifiedTypeIdentifier(self.inner))
         }
+        /// Set the `qualification` field and mark the builder changed.
         pub fn qualification(&mut self, qualification: &'gc Node<'gc>) { self.is_changed = true; self.inner.qualification = qualification; }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
     }
+    /// Clone-with-changes builder for [`super::TypeofTypeAnnotation`].
     #[derive(Debug)]
     pub struct TypeofTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::TypeofTypeAnnotation<'gc>,
     }
     impl<'gc> TypeofTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TypeofTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18116,6 +21894,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18123,18 +21903,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TypeofTypeAnnotation(self.inner))
         }
+        /// Set the `argument` field and mark the builder changed.
         pub fn argument(&mut self, argument: &'gc Node<'gc>) { self.is_changed = true; self.inner.argument = argument; }
+        /// Set the `type_arguments` field and mark the builder changed.
         pub fn type_arguments(&mut self, type_arguments: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_arguments = type_arguments; }
     }
+    /// Clone-with-changes builder for [`super::KeyofTypeAnnotation`].
     #[derive(Debug)]
     pub struct KeyofTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::KeyofTypeAnnotation<'gc>,
     }
     impl<'gc> KeyofTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::KeyofTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18144,6 +21929,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18151,17 +21938,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::KeyofTypeAnnotation(self.inner))
         }
+        /// Set the `argument` field and mark the builder changed.
         pub fn argument(&mut self, argument: &'gc Node<'gc>) { self.is_changed = true; self.inner.argument = argument; }
     }
+    /// Clone-with-changes builder for [`super::TypeOperator`].
     #[derive(Debug)]
     pub struct TypeOperator<'gc> {
         is_changed: bool,
         pub(super) inner: super::TypeOperator<'gc>,
     }
     impl<'gc> TypeOperator<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TypeOperator<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18172,6 +21963,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18179,17 +21972,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TypeOperator(self.inner))
         }
+        /// Set the `type_annotation` field and mark the builder changed.
         pub fn type_annotation(&mut self, type_annotation: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
     }
+    /// Clone-with-changes builder for [`super::QualifiedTypeofIdentifier`].
     #[derive(Debug)]
     pub struct QualifiedTypeofIdentifier<'gc> {
         is_changed: bool,
         pub(super) inner: super::QualifiedTypeofIdentifier<'gc>,
     }
     impl<'gc> QualifiedTypeofIdentifier<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::QualifiedTypeofIdentifier<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18200,6 +21997,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18207,18 +22006,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::QualifiedTypeofIdentifier(self.inner))
         }
+        /// Set the `qualification` field and mark the builder changed.
         pub fn qualification(&mut self, qualification: &'gc Node<'gc>) { self.is_changed = true; self.inner.qualification = qualification; }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
     }
+    /// Clone-with-changes builder for [`super::TupleTypeAnnotation`].
     #[derive(Debug)]
     pub struct TupleTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::TupleTypeAnnotation<'gc>,
     }
     impl<'gc> TupleTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TupleTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18229,6 +22033,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18236,17 +22042,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TupleTypeAnnotation(self.inner))
         }
+        /// Set the `element_types` field and mark the builder changed.
         pub fn element_types(&mut self, element_types: NodeList<'gc>) { self.is_changed = true; self.inner.element_types = element_types; }
     }
+    /// Clone-with-changes builder for [`super::TupleTypeSpreadElement`].
     #[derive(Debug)]
     pub struct TupleTypeSpreadElement<'gc> {
         is_changed: bool,
         pub(super) inner: super::TupleTypeSpreadElement<'gc>,
     }
     impl<'gc> TupleTypeSpreadElement<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TupleTypeSpreadElement<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18257,6 +22067,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18264,18 +22076,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TupleTypeSpreadElement(self.inner))
         }
+        /// Set the `label` field and mark the builder changed.
         pub fn label(&mut self, label: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.label = label; }
+        /// Set the `type_annotation` field and mark the builder changed.
         pub fn type_annotation(&mut self, type_annotation: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
     }
+    /// Clone-with-changes builder for [`super::TupleTypeLabeledElement`].
     #[derive(Debug)]
     pub struct TupleTypeLabeledElement<'gc> {
         is_changed: bool,
         pub(super) inner: super::TupleTypeLabeledElement<'gc>,
     }
     impl<'gc> TupleTypeLabeledElement<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TupleTypeLabeledElement<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18288,6 +22105,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18295,19 +22114,25 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TupleTypeLabeledElement(self.inner))
         }
+        /// Set the `label` field and mark the builder changed.
         pub fn label(&mut self, label: &'gc Node<'gc>) { self.is_changed = true; self.inner.label = label; }
+        /// Set the `element_type` field and mark the builder changed.
         pub fn element_type(&mut self, element_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.element_type = element_type; }
+        /// Set the `variance` field and mark the builder changed.
         pub fn variance(&mut self, variance: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.variance = variance; }
     }
+    /// Clone-with-changes builder for [`super::ArrayTypeAnnotation`].
     #[derive(Debug)]
     pub struct ArrayTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::ArrayTypeAnnotation<'gc>,
     }
     impl<'gc> ArrayTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ArrayTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18317,6 +22142,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18324,17 +22151,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ArrayTypeAnnotation(self.inner))
         }
+        /// Set the `element_type` field and mark the builder changed.
         pub fn element_type(&mut self, element_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.element_type = element_type; }
     }
+    /// Clone-with-changes builder for [`super::InferTypeAnnotation`].
     #[derive(Debug)]
     pub struct InferTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::InferTypeAnnotation<'gc>,
     }
     impl<'gc> InferTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::InferTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18344,6 +22175,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18351,17 +22184,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::InferTypeAnnotation(self.inner))
         }
+        /// Set the `type_parameter` field and mark the builder changed.
         pub fn type_parameter(&mut self, type_parameter: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_parameter = type_parameter; }
     }
+    /// Clone-with-changes builder for [`super::UnionTypeAnnotation`].
     #[derive(Debug)]
     pub struct UnionTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::UnionTypeAnnotation<'gc>,
     }
     impl<'gc> UnionTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::UnionTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18371,6 +22208,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18378,17 +22217,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::UnionTypeAnnotation(self.inner))
         }
+        /// Set the `types` field and mark the builder changed.
         pub fn types(&mut self, types: NodeList<'gc>) { self.is_changed = true; self.inner.types = types; }
     }
+    /// Clone-with-changes builder for [`super::IntersectionTypeAnnotation`].
     #[derive(Debug)]
     pub struct IntersectionTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::IntersectionTypeAnnotation<'gc>,
     }
     impl<'gc> IntersectionTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::IntersectionTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18398,6 +22241,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18405,17 +22250,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::IntersectionTypeAnnotation(self.inner))
         }
+        /// Set the `types` field and mark the builder changed.
         pub fn types(&mut self, types: NodeList<'gc>) { self.is_changed = true; self.inner.types = types; }
     }
+    /// Clone-with-changes builder for [`super::GenericTypeAnnotation`].
     #[derive(Debug)]
     pub struct GenericTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::GenericTypeAnnotation<'gc>,
     }
     impl<'gc> GenericTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::GenericTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18426,6 +22275,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18433,18 +22284,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::GenericTypeAnnotation(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `type_parameters` field and mark the builder changed.
         pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
     }
+    /// Clone-with-changes builder for [`super::IndexedAccessType`].
     #[derive(Debug)]
     pub struct IndexedAccessType<'gc> {
         is_changed: bool,
         pub(super) inner: super::IndexedAccessType<'gc>,
     }
     impl<'gc> IndexedAccessType<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::IndexedAccessType<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18455,6 +22311,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18462,18 +22320,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::IndexedAccessType(self.inner))
         }
+        /// Set the `object_type` field and mark the builder changed.
         pub fn object_type(&mut self, object_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.object_type = object_type; }
+        /// Set the `index_type` field and mark the builder changed.
         pub fn index_type(&mut self, index_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.index_type = index_type; }
     }
+    /// Clone-with-changes builder for [`super::OptionalIndexedAccessType`].
     #[derive(Debug)]
     pub struct OptionalIndexedAccessType<'gc> {
         is_changed: bool,
         pub(super) inner: super::OptionalIndexedAccessType<'gc>,
     }
     impl<'gc> OptionalIndexedAccessType<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::OptionalIndexedAccessType<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18485,6 +22348,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18492,18 +22357,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::OptionalIndexedAccessType(self.inner))
         }
+        /// Set the `object_type` field and mark the builder changed.
         pub fn object_type(&mut self, object_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.object_type = object_type; }
+        /// Set the `index_type` field and mark the builder changed.
         pub fn index_type(&mut self, index_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.index_type = index_type; }
     }
+    /// Clone-with-changes builder for [`super::ConditionalTypeAnnotation`].
     #[derive(Debug)]
     pub struct ConditionalTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::ConditionalTypeAnnotation<'gc>,
     }
     impl<'gc> ConditionalTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ConditionalTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18516,6 +22386,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18523,20 +22395,27 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ConditionalTypeAnnotation(self.inner))
         }
+        /// Set the `check_type` field and mark the builder changed.
         pub fn check_type(&mut self, check_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.check_type = check_type; }
+        /// Set the `extends_type` field and mark the builder changed.
         pub fn extends_type(&mut self, extends_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.extends_type = extends_type; }
+        /// Set the `true_type` field and mark the builder changed.
         pub fn true_type(&mut self, true_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.true_type = true_type; }
+        /// Set the `false_type` field and mark the builder changed.
         pub fn false_type(&mut self, false_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.false_type = false_type; }
     }
+    /// Clone-with-changes builder for [`super::TypePredicate`].
     #[derive(Debug)]
     pub struct TypePredicate<'gc> {
         is_changed: bool,
         pub(super) inner: super::TypePredicate<'gc>,
     }
     impl<'gc> TypePredicate<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TypePredicate<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18548,6 +22427,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18555,18 +22436,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TypePredicate(self.inner))
         }
+        /// Set the `parameter_name` field and mark the builder changed.
         pub fn parameter_name(&mut self, parameter_name: &'gc Node<'gc>) { self.is_changed = true; self.inner.parameter_name = parameter_name; }
+        /// Set the `type_annotation` field and mark the builder changed.
         pub fn type_annotation(&mut self, type_annotation: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
     }
+    /// Clone-with-changes builder for [`super::InterfaceTypeAnnotation`].
     #[derive(Debug)]
     pub struct InterfaceTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::InterfaceTypeAnnotation<'gc>,
     }
     impl<'gc> InterfaceTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::InterfaceTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18577,6 +22463,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18584,18 +22472,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::InterfaceTypeAnnotation(self.inner))
         }
+        /// Set the `extends` field and mark the builder changed.
         pub fn extends(&mut self, extends: NodeList<'gc>) { self.is_changed = true; self.inner.extends = extends; }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.body = body; }
     }
+    /// Clone-with-changes builder for [`super::TypeAlias`].
     #[derive(Debug)]
     pub struct TypeAlias<'gc> {
         is_changed: bool,
         pub(super) inner: super::TypeAlias<'gc>,
     }
     impl<'gc> TypeAlias<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TypeAlias<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18607,6 +22500,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18614,19 +22509,25 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TypeAlias(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `type_parameters` field and mark the builder changed.
         pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        /// Set the `right` field and mark the builder changed.
         pub fn right(&mut self, right: &'gc Node<'gc>) { self.is_changed = true; self.inner.right = right; }
     }
+    /// Clone-with-changes builder for [`super::OpaqueType`].
     #[derive(Debug)]
     pub struct OpaqueType<'gc> {
         is_changed: bool,
         pub(super) inner: super::OpaqueType<'gc>,
     }
     impl<'gc> OpaqueType<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::OpaqueType<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18641,6 +22542,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18648,22 +22551,31 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::OpaqueType(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `type_parameters` field and mark the builder changed.
         pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        /// Set the `impltype` field and mark the builder changed.
         pub fn impltype(&mut self, impltype: &'gc Node<'gc>) { self.is_changed = true; self.inner.impltype = impltype; }
+        /// Set the `lower_bound` field and mark the builder changed.
         pub fn lower_bound(&mut self, lower_bound: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.lower_bound = lower_bound; }
+        /// Set the `upper_bound` field and mark the builder changed.
         pub fn upper_bound(&mut self, upper_bound: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.upper_bound = upper_bound; }
+        /// Set the `supertype` field and mark the builder changed.
         pub fn supertype(&mut self, supertype: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.supertype = supertype; }
     }
+    /// Clone-with-changes builder for [`super::InterfaceDeclaration`].
     #[derive(Debug)]
     pub struct InterfaceDeclaration<'gc> {
         is_changed: bool,
         pub(super) inner: super::InterfaceDeclaration<'gc>,
     }
     impl<'gc> InterfaceDeclaration<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::InterfaceDeclaration<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18676,6 +22588,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18683,20 +22597,27 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::InterfaceDeclaration(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `type_parameters` field and mark the builder changed.
         pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        /// Set the `extends` field and mark the builder changed.
         pub fn extends(&mut self, extends: NodeList<'gc>) { self.is_changed = true; self.inner.extends = extends; }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
     }
+    /// Clone-with-changes builder for [`super::DeclareTypeAlias`].
     #[derive(Debug)]
     pub struct DeclareTypeAlias<'gc> {
         is_changed: bool,
         pub(super) inner: super::DeclareTypeAlias<'gc>,
     }
     impl<'gc> DeclareTypeAlias<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::DeclareTypeAlias<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18708,6 +22629,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18715,19 +22638,25 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::DeclareTypeAlias(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `type_parameters` field and mark the builder changed.
         pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        /// Set the `right` field and mark the builder changed.
         pub fn right(&mut self, right: &'gc Node<'gc>) { self.is_changed = true; self.inner.right = right; }
     }
+    /// Clone-with-changes builder for [`super::DeclareOpaqueType`].
     #[derive(Debug)]
     pub struct DeclareOpaqueType<'gc> {
         is_changed: bool,
         pub(super) inner: super::DeclareOpaqueType<'gc>,
     }
     impl<'gc> DeclareOpaqueType<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::DeclareOpaqueType<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18742,6 +22671,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18749,22 +22680,31 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::DeclareOpaqueType(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `type_parameters` field and mark the builder changed.
         pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        /// Set the `impltype` field and mark the builder changed.
         pub fn impltype(&mut self, impltype: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.impltype = impltype; }
+        /// Set the `lower_bound` field and mark the builder changed.
         pub fn lower_bound(&mut self, lower_bound: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.lower_bound = lower_bound; }
+        /// Set the `upper_bound` field and mark the builder changed.
         pub fn upper_bound(&mut self, upper_bound: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.upper_bound = upper_bound; }
+        /// Set the `supertype` field and mark the builder changed.
         pub fn supertype(&mut self, supertype: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.supertype = supertype; }
     }
+    /// Clone-with-changes builder for [`super::DeclareInterface`].
     #[derive(Debug)]
     pub struct DeclareInterface<'gc> {
         is_changed: bool,
         pub(super) inner: super::DeclareInterface<'gc>,
     }
     impl<'gc> DeclareInterface<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::DeclareInterface<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18777,6 +22717,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18784,20 +22726,27 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::DeclareInterface(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `type_parameters` field and mark the builder changed.
         pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        /// Set the `extends` field and mark the builder changed.
         pub fn extends(&mut self, extends: NodeList<'gc>) { self.is_changed = true; self.inner.extends = extends; }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
     }
+    /// Clone-with-changes builder for [`super::DeclareClass`].
     #[derive(Debug)]
     pub struct DeclareClass<'gc> {
         is_changed: bool,
         pub(super) inner: super::DeclareClass<'gc>,
     }
     impl<'gc> DeclareClass<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::DeclareClass<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18812,6 +22761,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18819,22 +22770,31 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::DeclareClass(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `type_parameters` field and mark the builder changed.
         pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        /// Set the `extends` field and mark the builder changed.
         pub fn extends(&mut self, extends: NodeList<'gc>) { self.is_changed = true; self.inner.extends = extends; }
+        /// Set the `implements` field and mark the builder changed.
         pub fn implements(&mut self, implements: NodeList<'gc>) { self.is_changed = true; self.inner.implements = implements; }
+        /// Set the `mixins` field and mark the builder changed.
         pub fn mixins(&mut self, mixins: NodeList<'gc>) { self.is_changed = true; self.inner.mixins = mixins; }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
     }
+    /// Clone-with-changes builder for [`super::DeclareFunction`].
     #[derive(Debug)]
     pub struct DeclareFunction<'gc> {
         is_changed: bool,
         pub(super) inner: super::DeclareFunction<'gc>,
     }
     impl<'gc> DeclareFunction<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::DeclareFunction<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18845,6 +22805,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18852,18 +22814,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::DeclareFunction(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `predicate` field and mark the builder changed.
         pub fn predicate(&mut self, predicate: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.predicate = predicate; }
     }
+    /// Clone-with-changes builder for [`super::DeclareHook`].
     #[derive(Debug)]
     pub struct DeclareHook<'gc> {
         is_changed: bool,
         pub(super) inner: super::DeclareHook<'gc>,
     }
     impl<'gc> DeclareHook<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::DeclareHook<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18873,6 +22840,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18880,17 +22849,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::DeclareHook(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
     }
+    /// Clone-with-changes builder for [`super::DeclareComponent`].
     #[derive(Debug)]
     pub struct DeclareComponent<'gc> {
         is_changed: bool,
         pub(super) inner: super::DeclareComponent<'gc>,
     }
     impl<'gc> DeclareComponent<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::DeclareComponent<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18904,6 +22877,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18911,21 +22886,29 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::DeclareComponent(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `params` field and mark the builder changed.
         pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
+        /// Set the `rest` field and mark the builder changed.
         pub fn rest(&mut self, rest: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.rest = rest; }
+        /// Set the `type_parameters` field and mark the builder changed.
         pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        /// Set the `renders_type` field and mark the builder changed.
         pub fn renders_type(&mut self, renders_type: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.renders_type = renders_type; }
     }
+    /// Clone-with-changes builder for [`super::DeclareVariable`].
     #[derive(Debug)]
     pub struct DeclareVariable<'gc> {
         is_changed: bool,
         pub(super) inner: super::DeclareVariable<'gc>,
     }
     impl<'gc> DeclareVariable<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::DeclareVariable<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18936,6 +22919,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18943,17 +22928,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::DeclareVariable(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
     }
+    /// Clone-with-changes builder for [`super::DeclareEnum`].
     #[derive(Debug)]
     pub struct DeclareEnum<'gc> {
         is_changed: bool,
         pub(super) inner: super::DeclareEnum<'gc>,
     }
     impl<'gc> DeclareEnum<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::DeclareEnum<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18964,6 +22953,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -18971,18 +22962,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::DeclareEnum(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
     }
+    /// Clone-with-changes builder for [`super::DeclareExportDeclaration`].
     #[derive(Debug)]
     pub struct DeclareExportDeclaration<'gc> {
         is_changed: bool,
         pub(super) inner: super::DeclareExportDeclaration<'gc>,
     }
     impl<'gc> DeclareExportDeclaration<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::DeclareExportDeclaration<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -18995,6 +22991,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19002,19 +23000,25 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::DeclareExportDeclaration(self.inner))
         }
+        /// Set the `declaration` field and mark the builder changed.
         pub fn declaration(&mut self, declaration: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.declaration = declaration; }
+        /// Set the `specifiers` field and mark the builder changed.
         pub fn specifiers(&mut self, specifiers: NodeList<'gc>) { self.is_changed = true; self.inner.specifiers = specifiers; }
+        /// Set the `source` field and mark the builder changed.
         pub fn source(&mut self, source: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.source = source; }
     }
+    /// Clone-with-changes builder for [`super::DeclareExportAllDeclaration`].
     #[derive(Debug)]
     pub struct DeclareExportAllDeclaration<'gc> {
         is_changed: bool,
         pub(super) inner: super::DeclareExportAllDeclaration<'gc>,
     }
     impl<'gc> DeclareExportAllDeclaration<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::DeclareExportAllDeclaration<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19024,6 +23028,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19031,17 +23037,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::DeclareExportAllDeclaration(self.inner))
         }
+        /// Set the `source` field and mark the builder changed.
         pub fn source(&mut self, source: &'gc Node<'gc>) { self.is_changed = true; self.inner.source = source; }
     }
+    /// Clone-with-changes builder for [`super::DeclareModule`].
     #[derive(Debug)]
     pub struct DeclareModule<'gc> {
         is_changed: bool,
         pub(super) inner: super::DeclareModule<'gc>,
     }
     impl<'gc> DeclareModule<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::DeclareModule<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19052,6 +23062,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19059,18 +23071,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::DeclareModule(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
     }
+    /// Clone-with-changes builder for [`super::DeclareNamespace`].
     #[derive(Debug)]
     pub struct DeclareNamespace<'gc> {
         is_changed: bool,
         pub(super) inner: super::DeclareNamespace<'gc>,
     }
     impl<'gc> DeclareNamespace<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::DeclareNamespace<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19081,6 +23098,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19088,18 +23107,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::DeclareNamespace(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
     }
+    /// Clone-with-changes builder for [`super::DeclareModuleExports`].
     #[derive(Debug)]
     pub struct DeclareModuleExports<'gc> {
         is_changed: bool,
         pub(super) inner: super::DeclareModuleExports<'gc>,
     }
     impl<'gc> DeclareModuleExports<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::DeclareModuleExports<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19109,6 +23133,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19116,17 +23142,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::DeclareModuleExports(self.inner))
         }
+        /// Set the `type_annotation` field and mark the builder changed.
         pub fn type_annotation(&mut self, type_annotation: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
     }
+    /// Clone-with-changes builder for [`super::InterfaceExtends`].
     #[derive(Debug)]
     pub struct InterfaceExtends<'gc> {
         is_changed: bool,
         pub(super) inner: super::InterfaceExtends<'gc>,
     }
     impl<'gc> InterfaceExtends<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::InterfaceExtends<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19137,6 +23167,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19144,18 +23176,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::InterfaceExtends(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `type_parameters` field and mark the builder changed.
         pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
     }
+    /// Clone-with-changes builder for [`super::ClassImplements`].
     #[derive(Debug)]
     pub struct ClassImplements<'gc> {
         is_changed: bool,
         pub(super) inner: super::ClassImplements<'gc>,
     }
     impl<'gc> ClassImplements<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ClassImplements<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19166,6 +23203,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19173,18 +23212,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ClassImplements(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `type_parameters` field and mark the builder changed.
         pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
     }
+    /// Clone-with-changes builder for [`super::TypeAnnotation`].
     #[derive(Debug)]
     pub struct TypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::TypeAnnotation<'gc>,
     }
     impl<'gc> TypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19194,6 +23238,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19201,17 +23247,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TypeAnnotation(self.inner))
         }
+        /// Set the `type_annotation` field and mark the builder changed.
         pub fn type_annotation(&mut self, type_annotation: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
     }
+    /// Clone-with-changes builder for [`super::ObjectTypeAnnotation`].
     #[derive(Debug)]
     pub struct ObjectTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::ObjectTypeAnnotation<'gc>,
     }
     impl<'gc> ObjectTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ObjectTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19226,6 +23276,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19233,20 +23285,27 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ObjectTypeAnnotation(self.inner))
         }
+        /// Set the `properties` field and mark the builder changed.
         pub fn properties(&mut self, properties: NodeList<'gc>) { self.is_changed = true; self.inner.properties = properties; }
+        /// Set the `indexers` field and mark the builder changed.
         pub fn indexers(&mut self, indexers: NodeList<'gc>) { self.is_changed = true; self.inner.indexers = indexers; }
+        /// Set the `call_properties` field and mark the builder changed.
         pub fn call_properties(&mut self, call_properties: NodeList<'gc>) { self.is_changed = true; self.inner.call_properties = call_properties; }
+        /// Set the `internal_slots` field and mark the builder changed.
         pub fn internal_slots(&mut self, internal_slots: NodeList<'gc>) { self.is_changed = true; self.inner.internal_slots = internal_slots; }
     }
+    /// Clone-with-changes builder for [`super::ObjectTypeProperty`].
     #[derive(Debug)]
     pub struct ObjectTypeProperty<'gc> {
         is_changed: bool,
         pub(super) inner: super::ObjectTypeProperty<'gc>,
     }
     impl<'gc> ObjectTypeProperty<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ObjectTypeProperty<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19263,6 +23322,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19270,19 +23331,25 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ObjectTypeProperty(self.inner))
         }
+        /// Set the `key` field and mark the builder changed.
         pub fn key(&mut self, key: &'gc Node<'gc>) { self.is_changed = true; self.inner.key = key; }
+        /// Set the `value` field and mark the builder changed.
         pub fn value(&mut self, value: &'gc Node<'gc>) { self.is_changed = true; self.inner.value = value; }
+        /// Set the `variance` field and mark the builder changed.
         pub fn variance(&mut self, variance: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.variance = variance; }
     }
+    /// Clone-with-changes builder for [`super::ObjectTypeSpreadProperty`].
     #[derive(Debug)]
     pub struct ObjectTypeSpreadProperty<'gc> {
         is_changed: bool,
         pub(super) inner: super::ObjectTypeSpreadProperty<'gc>,
     }
     impl<'gc> ObjectTypeSpreadProperty<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ObjectTypeSpreadProperty<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19292,6 +23359,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19299,17 +23368,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ObjectTypeSpreadProperty(self.inner))
         }
+        /// Set the `argument` field and mark the builder changed.
         pub fn argument(&mut self, argument: &'gc Node<'gc>) { self.is_changed = true; self.inner.argument = argument; }
     }
+    /// Clone-with-changes builder for [`super::ObjectTypeInternalSlot`].
     #[derive(Debug)]
     pub struct ObjectTypeInternalSlot<'gc> {
         is_changed: bool,
         pub(super) inner: super::ObjectTypeInternalSlot<'gc>,
     }
     impl<'gc> ObjectTypeInternalSlot<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ObjectTypeInternalSlot<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19323,6 +23396,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19330,18 +23405,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ObjectTypeInternalSlot(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `value` field and mark the builder changed.
         pub fn value(&mut self, value: &'gc Node<'gc>) { self.is_changed = true; self.inner.value = value; }
     }
+    /// Clone-with-changes builder for [`super::ObjectTypeCallProperty`].
     #[derive(Debug)]
     pub struct ObjectTypeCallProperty<'gc> {
         is_changed: bool,
         pub(super) inner: super::ObjectTypeCallProperty<'gc>,
     }
     impl<'gc> ObjectTypeCallProperty<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ObjectTypeCallProperty<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19352,6 +23432,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19359,17 +23441,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ObjectTypeCallProperty(self.inner))
         }
+        /// Set the `value` field and mark the builder changed.
         pub fn value(&mut self, value: &'gc Node<'gc>) { self.is_changed = true; self.inner.value = value; }
     }
+    /// Clone-with-changes builder for [`super::ObjectTypeIndexer`].
     #[derive(Debug)]
     pub struct ObjectTypeIndexer<'gc> {
         is_changed: bool,
         pub(super) inner: super::ObjectTypeIndexer<'gc>,
     }
     impl<'gc> ObjectTypeIndexer<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ObjectTypeIndexer<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19383,6 +23469,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19390,20 +23478,27 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ObjectTypeIndexer(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `key` field and mark the builder changed.
         pub fn key(&mut self, key: &'gc Node<'gc>) { self.is_changed = true; self.inner.key = key; }
+        /// Set the `value` field and mark the builder changed.
         pub fn value(&mut self, value: &'gc Node<'gc>) { self.is_changed = true; self.inner.value = value; }
+        /// Set the `variance` field and mark the builder changed.
         pub fn variance(&mut self, variance: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.variance = variance; }
     }
+    /// Clone-with-changes builder for [`super::ObjectTypeMappedTypeProperty`].
     #[derive(Debug)]
     pub struct ObjectTypeMappedTypeProperty<'gc> {
         is_changed: bool,
         pub(super) inner: super::ObjectTypeMappedTypeProperty<'gc>,
     }
     impl<'gc> ObjectTypeMappedTypeProperty<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ObjectTypeMappedTypeProperty<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19417,6 +23512,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19424,20 +23521,27 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ObjectTypeMappedTypeProperty(self.inner))
         }
+        /// Set the `key_tparam` field and mark the builder changed.
         pub fn key_tparam(&mut self, key_tparam: &'gc Node<'gc>) { self.is_changed = true; self.inner.key_tparam = key_tparam; }
+        /// Set the `prop_type` field and mark the builder changed.
         pub fn prop_type(&mut self, prop_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.prop_type = prop_type; }
+        /// Set the `source_type` field and mark the builder changed.
         pub fn source_type(&mut self, source_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.source_type = source_type; }
+        /// Set the `variance` field and mark the builder changed.
         pub fn variance(&mut self, variance: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.variance = variance; }
     }
+    /// Clone-with-changes builder for [`super::Variance`].
     #[derive(Debug)]
     pub struct Variance<'gc> {
         is_changed: bool,
         pub(super) inner: super::Variance<'gc>,
     }
     impl<'gc> Variance<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::Variance<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19447,6 +23551,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19454,16 +23560,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::Variance(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::TypeParameterDeclaration`].
     #[derive(Debug)]
     pub struct TypeParameterDeclaration<'gc> {
         is_changed: bool,
         pub(super) inner: super::TypeParameterDeclaration<'gc>,
     }
     impl<'gc> TypeParameterDeclaration<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TypeParameterDeclaration<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19473,6 +23582,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19480,17 +23591,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TypeParameterDeclaration(self.inner))
         }
+        /// Set the `params` field and mark the builder changed.
         pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
     }
+    /// Clone-with-changes builder for [`super::TypeParameter`].
     #[derive(Debug)]
     pub struct TypeParameter<'gc> {
         is_changed: bool,
         pub(super) inner: super::TypeParameter<'gc>,
     }
     impl<'gc> TypeParameter<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TypeParameter<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19505,6 +23620,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19512,19 +23629,25 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TypeParameter(self.inner))
         }
+        /// Set the `bound` field and mark the builder changed.
         pub fn bound(&mut self, bound: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.bound = bound; }
+        /// Set the `variance` field and mark the builder changed.
         pub fn variance(&mut self, variance: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.variance = variance; }
+        /// Set the `default` field and mark the builder changed.
         pub fn default(&mut self, default: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.default = default; }
     }
+    /// Clone-with-changes builder for [`super::TypeParameterInstantiation`].
     #[derive(Debug)]
     pub struct TypeParameterInstantiation<'gc> {
         is_changed: bool,
         pub(super) inner: super::TypeParameterInstantiation<'gc>,
     }
     impl<'gc> TypeParameterInstantiation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TypeParameterInstantiation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19534,6 +23657,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19541,17 +23666,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TypeParameterInstantiation(self.inner))
         }
+        /// Set the `params` field and mark the builder changed.
         pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
     }
+    /// Clone-with-changes builder for [`super::TypeCastExpression`].
     #[derive(Debug)]
     pub struct TypeCastExpression<'gc> {
         is_changed: bool,
         pub(super) inner: super::TypeCastExpression<'gc>,
     }
     impl<'gc> TypeCastExpression<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TypeCastExpression<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19562,6 +23691,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19569,18 +23700,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TypeCastExpression(self.inner))
         }
+        /// Set the `expression` field and mark the builder changed.
         pub fn expression(&mut self, expression: &'gc Node<'gc>) { self.is_changed = true; self.inner.expression = expression; }
+        /// Set the `type_annotation` field and mark the builder changed.
         pub fn type_annotation(&mut self, type_annotation: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
     }
+    /// Clone-with-changes builder for [`super::AsExpression`].
     #[derive(Debug)]
     pub struct AsExpression<'gc> {
         is_changed: bool,
         pub(super) inner: super::AsExpression<'gc>,
     }
     impl<'gc> AsExpression<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::AsExpression<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19591,6 +23727,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19598,18 +23736,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::AsExpression(self.inner))
         }
+        /// Set the `expression` field and mark the builder changed.
         pub fn expression(&mut self, expression: &'gc Node<'gc>) { self.is_changed = true; self.inner.expression = expression; }
+        /// Set the `type_annotation` field and mark the builder changed.
         pub fn type_annotation(&mut self, type_annotation: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
     }
+    /// Clone-with-changes builder for [`super::AsConstExpression`].
     #[derive(Debug)]
     pub struct AsConstExpression<'gc> {
         is_changed: bool,
         pub(super) inner: super::AsConstExpression<'gc>,
     }
     impl<'gc> AsConstExpression<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::AsConstExpression<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19619,6 +23762,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19626,17 +23771,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::AsConstExpression(self.inner))
         }
+        /// Set the `expression` field and mark the builder changed.
         pub fn expression(&mut self, expression: &'gc Node<'gc>) { self.is_changed = true; self.inner.expression = expression; }
     }
+    /// Clone-with-changes builder for [`super::InferredPredicate`].
     #[derive(Debug)]
     pub struct InferredPredicate<'gc> {
         is_changed: bool,
         pub(super) inner: super::InferredPredicate<'gc>,
     }
     impl<'gc> InferredPredicate<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::InferredPredicate<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19645,6 +23794,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19652,16 +23803,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::InferredPredicate(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::DeclaredPredicate`].
     #[derive(Debug)]
     pub struct DeclaredPredicate<'gc> {
         is_changed: bool,
         pub(super) inner: super::DeclaredPredicate<'gc>,
     }
     impl<'gc> DeclaredPredicate<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::DeclaredPredicate<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19671,6 +23825,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19678,17 +23834,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::DeclaredPredicate(self.inner))
         }
+        /// Set the `value` field and mark the builder changed.
         pub fn value(&mut self, value: &'gc Node<'gc>) { self.is_changed = true; self.inner.value = value; }
     }
+    /// Clone-with-changes builder for [`super::EnumDeclaration`].
     #[derive(Debug)]
     pub struct EnumDeclaration<'gc> {
         is_changed: bool,
         pub(super) inner: super::EnumDeclaration<'gc>,
     }
     impl<'gc> EnumDeclaration<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::EnumDeclaration<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19699,6 +23859,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19706,18 +23868,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::EnumDeclaration(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
     }
+    /// Clone-with-changes builder for [`super::EnumStringBody`].
     #[derive(Debug)]
     pub struct EnumStringBody<'gc> {
         is_changed: bool,
         pub(super) inner: super::EnumStringBody<'gc>,
     }
     impl<'gc> EnumStringBody<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::EnumStringBody<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19729,6 +23896,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19736,17 +23905,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::EnumStringBody(self.inner))
         }
+        /// Set the `members` field and mark the builder changed.
         pub fn members(&mut self, members: NodeList<'gc>) { self.is_changed = true; self.inner.members = members; }
     }
+    /// Clone-with-changes builder for [`super::EnumNumberBody`].
     #[derive(Debug)]
     pub struct EnumNumberBody<'gc> {
         is_changed: bool,
         pub(super) inner: super::EnumNumberBody<'gc>,
     }
     impl<'gc> EnumNumberBody<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::EnumNumberBody<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19758,6 +23931,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19765,17 +23940,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::EnumNumberBody(self.inner))
         }
+        /// Set the `members` field and mark the builder changed.
         pub fn members(&mut self, members: NodeList<'gc>) { self.is_changed = true; self.inner.members = members; }
     }
+    /// Clone-with-changes builder for [`super::EnumBigIntBody`].
     #[derive(Debug)]
     pub struct EnumBigIntBody<'gc> {
         is_changed: bool,
         pub(super) inner: super::EnumBigIntBody<'gc>,
     }
     impl<'gc> EnumBigIntBody<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::EnumBigIntBody<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19787,6 +23966,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19794,17 +23975,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::EnumBigIntBody(self.inner))
         }
+        /// Set the `members` field and mark the builder changed.
         pub fn members(&mut self, members: NodeList<'gc>) { self.is_changed = true; self.inner.members = members; }
     }
+    /// Clone-with-changes builder for [`super::EnumBooleanBody`].
     #[derive(Debug)]
     pub struct EnumBooleanBody<'gc> {
         is_changed: bool,
         pub(super) inner: super::EnumBooleanBody<'gc>,
     }
     impl<'gc> EnumBooleanBody<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::EnumBooleanBody<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19816,6 +24001,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19823,17 +24010,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::EnumBooleanBody(self.inner))
         }
+        /// Set the `members` field and mark the builder changed.
         pub fn members(&mut self, members: NodeList<'gc>) { self.is_changed = true; self.inner.members = members; }
     }
+    /// Clone-with-changes builder for [`super::EnumSymbolBody`].
     #[derive(Debug)]
     pub struct EnumSymbolBody<'gc> {
         is_changed: bool,
         pub(super) inner: super::EnumSymbolBody<'gc>,
     }
     impl<'gc> EnumSymbolBody<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::EnumSymbolBody<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19844,6 +24035,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19851,17 +24044,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::EnumSymbolBody(self.inner))
         }
+        /// Set the `members` field and mark the builder changed.
         pub fn members(&mut self, members: NodeList<'gc>) { self.is_changed = true; self.inner.members = members; }
     }
+    /// Clone-with-changes builder for [`super::EnumDefaultedMember`].
     #[derive(Debug)]
     pub struct EnumDefaultedMember<'gc> {
         is_changed: bool,
         pub(super) inner: super::EnumDefaultedMember<'gc>,
     }
     impl<'gc> EnumDefaultedMember<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::EnumDefaultedMember<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19871,6 +24068,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19878,17 +24077,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::EnumDefaultedMember(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
     }
+    /// Clone-with-changes builder for [`super::EnumStringMember`].
     #[derive(Debug)]
     pub struct EnumStringMember<'gc> {
         is_changed: bool,
         pub(super) inner: super::EnumStringMember<'gc>,
     }
     impl<'gc> EnumStringMember<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::EnumStringMember<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19899,6 +24102,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19906,18 +24111,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::EnumStringMember(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `init` field and mark the builder changed.
         pub fn init(&mut self, init: &'gc Node<'gc>) { self.is_changed = true; self.inner.init = init; }
     }
+    /// Clone-with-changes builder for [`super::EnumNumberMember`].
     #[derive(Debug)]
     pub struct EnumNumberMember<'gc> {
         is_changed: bool,
         pub(super) inner: super::EnumNumberMember<'gc>,
     }
     impl<'gc> EnumNumberMember<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::EnumNumberMember<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19928,6 +24138,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19935,18 +24147,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::EnumNumberMember(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `init` field and mark the builder changed.
         pub fn init(&mut self, init: &'gc Node<'gc>) { self.is_changed = true; self.inner.init = init; }
     }
+    /// Clone-with-changes builder for [`super::EnumBigIntMember`].
     #[derive(Debug)]
     pub struct EnumBigIntMember<'gc> {
         is_changed: bool,
         pub(super) inner: super::EnumBigIntMember<'gc>,
     }
     impl<'gc> EnumBigIntMember<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::EnumBigIntMember<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19957,6 +24174,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19964,18 +24183,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::EnumBigIntMember(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `init` field and mark the builder changed.
         pub fn init(&mut self, init: &'gc Node<'gc>) { self.is_changed = true; self.inner.init = init; }
     }
+    /// Clone-with-changes builder for [`super::EnumBooleanMember`].
     #[derive(Debug)]
     pub struct EnumBooleanMember<'gc> {
         is_changed: bool,
         pub(super) inner: super::EnumBooleanMember<'gc>,
     }
     impl<'gc> EnumBooleanMember<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::EnumBooleanMember<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -19986,6 +24210,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -19993,18 +24219,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::EnumBooleanMember(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `init` field and mark the builder changed.
         pub fn init(&mut self, init: &'gc Node<'gc>) { self.is_changed = true; self.inner.init = init; }
     }
+    /// Clone-with-changes builder for [`super::ComponentParameter`].
     #[derive(Debug)]
     pub struct ComponentParameter<'gc> {
         is_changed: bool,
         pub(super) inner: super::ComponentParameter<'gc>,
     }
     impl<'gc> ComponentParameter<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ComponentParameter<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20016,6 +24247,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20023,18 +24256,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ComponentParameter(self.inner))
         }
+        /// Set the `name` field and mark the builder changed.
         pub fn name(&mut self, name: &'gc Node<'gc>) { self.is_changed = true; self.inner.name = name; }
+        /// Set the `local` field and mark the builder changed.
         pub fn local(&mut self, local: &'gc Node<'gc>) { self.is_changed = true; self.inner.local = local; }
     }
+    /// Clone-with-changes builder for [`super::RecordDeclaration`].
     #[derive(Debug)]
     pub struct RecordDeclaration<'gc> {
         is_changed: bool,
         pub(super) inner: super::RecordDeclaration<'gc>,
     }
     impl<'gc> RecordDeclaration<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::RecordDeclaration<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20047,6 +24285,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20054,20 +24294,27 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::RecordDeclaration(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `type_parameters` field and mark the builder changed.
         pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        /// Set the `implements` field and mark the builder changed.
         pub fn implements(&mut self, implements: NodeList<'gc>) { self.is_changed = true; self.inner.implements = implements; }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
     }
+    /// Clone-with-changes builder for [`super::RecordDeclarationImplements`].
     #[derive(Debug)]
     pub struct RecordDeclarationImplements<'gc> {
         is_changed: bool,
         pub(super) inner: super::RecordDeclarationImplements<'gc>,
     }
     impl<'gc> RecordDeclarationImplements<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::RecordDeclarationImplements<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20078,6 +24325,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20085,18 +24334,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::RecordDeclarationImplements(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `type_arguments` field and mark the builder changed.
         pub fn type_arguments(&mut self, type_arguments: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_arguments = type_arguments; }
     }
+    /// Clone-with-changes builder for [`super::RecordDeclarationBody`].
     #[derive(Debug)]
     pub struct RecordDeclarationBody<'gc> {
         is_changed: bool,
         pub(super) inner: super::RecordDeclarationBody<'gc>,
     }
     impl<'gc> RecordDeclarationBody<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::RecordDeclarationBody<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20106,6 +24360,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20113,17 +24369,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::RecordDeclarationBody(self.inner))
         }
+        /// Set the `elements` field and mark the builder changed.
         pub fn elements(&mut self, elements: NodeList<'gc>) { self.is_changed = true; self.inner.elements = elements; }
     }
+    /// Clone-with-changes builder for [`super::RecordDeclarationProperty`].
     #[derive(Debug)]
     pub struct RecordDeclarationProperty<'gc> {
         is_changed: bool,
         pub(super) inner: super::RecordDeclarationProperty<'gc>,
     }
     impl<'gc> RecordDeclarationProperty<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::RecordDeclarationProperty<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20135,6 +24395,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20142,19 +24404,26 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::RecordDeclarationProperty(self.inner))
         }
+        /// Set the `key` field and mark the builder changed.
         pub fn key(&mut self, key: &'gc Node<'gc>) { self.is_changed = true; self.inner.key = key; }
+        /// Set the `type_annotation` field and mark the builder changed.
         pub fn type_annotation(&mut self, type_annotation: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
+        /// Set the `default_value` field and mark the builder changed.
         pub fn default_value(&mut self, default_value: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.default_value = default_value; }
     }
+    /// Clone-with-changes builder for
+    /// [`super::RecordDeclarationStaticProperty`].
     #[derive(Debug)]
     pub struct RecordDeclarationStaticProperty<'gc> {
         is_changed: bool,
         pub(super) inner: super::RecordDeclarationStaticProperty<'gc>,
     }
     impl<'gc> RecordDeclarationStaticProperty<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::RecordDeclarationStaticProperty<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20166,6 +24435,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20173,19 +24444,25 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::RecordDeclarationStaticProperty(self.inner))
         }
+        /// Set the `key` field and mark the builder changed.
         pub fn key(&mut self, key: &'gc Node<'gc>) { self.is_changed = true; self.inner.key = key; }
+        /// Set the `type_annotation` field and mark the builder changed.
         pub fn type_annotation(&mut self, type_annotation: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
+        /// Set the `value` field and mark the builder changed.
         pub fn value(&mut self, value: &'gc Node<'gc>) { self.is_changed = true; self.inner.value = value; }
     }
+    /// Clone-with-changes builder for [`super::RecordExpression`].
     #[derive(Debug)]
     pub struct RecordExpression<'gc> {
         is_changed: bool,
         pub(super) inner: super::RecordExpression<'gc>,
     }
     impl<'gc> RecordExpression<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::RecordExpression<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20197,6 +24474,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20204,19 +24483,25 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::RecordExpression(self.inner))
         }
+        /// Set the `record_constructor` field and mark the builder changed.
         pub fn record_constructor(&mut self, record_constructor: &'gc Node<'gc>) { self.is_changed = true; self.inner.record_constructor = record_constructor; }
+        /// Set the `type_arguments` field and mark the builder changed.
         pub fn type_arguments(&mut self, type_arguments: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_arguments = type_arguments; }
+        /// Set the `properties` field and mark the builder changed.
         pub fn properties(&mut self, properties: &'gc Node<'gc>) { self.is_changed = true; self.inner.properties = properties; }
     }
+    /// Clone-with-changes builder for [`super::RecordExpressionProperties`].
     #[derive(Debug)]
     pub struct RecordExpressionProperties<'gc> {
         is_changed: bool,
         pub(super) inner: super::RecordExpressionProperties<'gc>,
     }
     impl<'gc> RecordExpressionProperties<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::RecordExpressionProperties<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20226,6 +24511,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20233,17 +24520,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::RecordExpressionProperties(self.inner))
         }
+        /// Set the `properties` field and mark the builder changed.
         pub fn properties(&mut self, properties: NodeList<'gc>) { self.is_changed = true; self.inner.properties = properties; }
     }
+    /// Clone-with-changes builder for [`super::TSTypeAnnotation`].
     #[derive(Debug)]
     pub struct TSTypeAnnotation<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSTypeAnnotation<'gc>,
     }
     impl<'gc> TSTypeAnnotation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSTypeAnnotation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20253,6 +24544,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20260,17 +24553,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSTypeAnnotation(self.inner))
         }
+        /// Set the `type_annotation` field and mark the builder changed.
         pub fn type_annotation(&mut self, type_annotation: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
     }
+    /// Clone-with-changes builder for [`super::TSAnyKeyword`].
     #[derive(Debug)]
     pub struct TSAnyKeyword<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSAnyKeyword<'gc>,
     }
     impl<'gc> TSAnyKeyword<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSAnyKeyword<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20279,6 +24576,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20286,16 +24585,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSAnyKeyword(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::TSNumberKeyword`].
     #[derive(Debug)]
     pub struct TSNumberKeyword<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSNumberKeyword<'gc>,
     }
     impl<'gc> TSNumberKeyword<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSNumberKeyword<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20304,6 +24606,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20311,16 +24615,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSNumberKeyword(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::TSBooleanKeyword`].
     #[derive(Debug)]
     pub struct TSBooleanKeyword<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSBooleanKeyword<'gc>,
     }
     impl<'gc> TSBooleanKeyword<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSBooleanKeyword<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20329,6 +24636,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20336,16 +24645,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSBooleanKeyword(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::TSStringKeyword`].
     #[derive(Debug)]
     pub struct TSStringKeyword<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSStringKeyword<'gc>,
     }
     impl<'gc> TSStringKeyword<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSStringKeyword<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20354,6 +24666,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20361,16 +24675,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSStringKeyword(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::TSSymbolKeyword`].
     #[derive(Debug)]
     pub struct TSSymbolKeyword<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSSymbolKeyword<'gc>,
     }
     impl<'gc> TSSymbolKeyword<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSSymbolKeyword<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20379,6 +24696,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20386,16 +24705,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSSymbolKeyword(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::TSVoidKeyword`].
     #[derive(Debug)]
     pub struct TSVoidKeyword<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSVoidKeyword<'gc>,
     }
     impl<'gc> TSVoidKeyword<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSVoidKeyword<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20404,6 +24726,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20411,16 +24735,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSVoidKeyword(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::TSUndefinedKeyword`].
     #[derive(Debug)]
     pub struct TSUndefinedKeyword<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSUndefinedKeyword<'gc>,
     }
     impl<'gc> TSUndefinedKeyword<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSUndefinedKeyword<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20429,6 +24756,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20436,16 +24765,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSUndefinedKeyword(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::TSUnknownKeyword`].
     #[derive(Debug)]
     pub struct TSUnknownKeyword<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSUnknownKeyword<'gc>,
     }
     impl<'gc> TSUnknownKeyword<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSUnknownKeyword<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20454,6 +24786,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20461,16 +24795,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSUnknownKeyword(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::TSNeverKeyword`].
     #[derive(Debug)]
     pub struct TSNeverKeyword<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSNeverKeyword<'gc>,
     }
     impl<'gc> TSNeverKeyword<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSNeverKeyword<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20479,6 +24816,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20486,16 +24825,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSNeverKeyword(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::TSBigIntKeyword`].
     #[derive(Debug)]
     pub struct TSBigIntKeyword<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSBigIntKeyword<'gc>,
     }
     impl<'gc> TSBigIntKeyword<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSBigIntKeyword<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20504,6 +24846,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20511,16 +24855,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSBigIntKeyword(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::TSThisType`].
     #[derive(Debug)]
     pub struct TSThisType<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSThisType<'gc>,
     }
     impl<'gc> TSThisType<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSThisType<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20529,6 +24876,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20536,16 +24885,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSThisType(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::TSLiteralType`].
     #[derive(Debug)]
     pub struct TSLiteralType<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSLiteralType<'gc>,
     }
     impl<'gc> TSLiteralType<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSLiteralType<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20555,6 +24907,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20562,17 +24916,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSLiteralType(self.inner))
         }
+        /// Set the `literal` field and mark the builder changed.
         pub fn literal(&mut self, literal: &'gc Node<'gc>) { self.is_changed = true; self.inner.literal = literal; }
     }
+    /// Clone-with-changes builder for [`super::TSIndexedAccessType`].
     #[derive(Debug)]
     pub struct TSIndexedAccessType<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSIndexedAccessType<'gc>,
     }
     impl<'gc> TSIndexedAccessType<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSIndexedAccessType<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20583,6 +24941,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20590,18 +24950,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSIndexedAccessType(self.inner))
         }
+        /// Set the `object_type` field and mark the builder changed.
         pub fn object_type(&mut self, object_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.object_type = object_type; }
+        /// Set the `index_type` field and mark the builder changed.
         pub fn index_type(&mut self, index_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.index_type = index_type; }
     }
+    /// Clone-with-changes builder for [`super::TSArrayType`].
     #[derive(Debug)]
     pub struct TSArrayType<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSArrayType<'gc>,
     }
     impl<'gc> TSArrayType<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSArrayType<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20611,6 +24976,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20618,17 +24985,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSArrayType(self.inner))
         }
+        /// Set the `element_type` field and mark the builder changed.
         pub fn element_type(&mut self, element_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.element_type = element_type; }
     }
+    /// Clone-with-changes builder for [`super::TSTypeReference`].
     #[derive(Debug)]
     pub struct TSTypeReference<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSTypeReference<'gc>,
     }
     impl<'gc> TSTypeReference<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSTypeReference<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20639,6 +25010,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20646,18 +25019,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSTypeReference(self.inner))
         }
+        /// Set the `type_name` field and mark the builder changed.
         pub fn type_name(&mut self, type_name: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_name = type_name; }
+        /// Set the `type_parameters` field and mark the builder changed.
         pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
     }
+    /// Clone-with-changes builder for [`super::TSQualifiedName`].
     #[derive(Debug)]
     pub struct TSQualifiedName<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSQualifiedName<'gc>,
     }
     impl<'gc> TSQualifiedName<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSQualifiedName<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20668,6 +25046,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20675,18 +25055,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSQualifiedName(self.inner))
         }
+        /// Set the `left` field and mark the builder changed.
         pub fn left(&mut self, left: &'gc Node<'gc>) { self.is_changed = true; self.inner.left = left; }
+        /// Set the `right` field and mark the builder changed.
         pub fn right(&mut self, right: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.right = right; }
     }
+    /// Clone-with-changes builder for [`super::TSFunctionType`].
     #[derive(Debug)]
     pub struct TSFunctionType<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSFunctionType<'gc>,
     }
     impl<'gc> TSFunctionType<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSFunctionType<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20698,6 +25083,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20705,19 +25092,25 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSFunctionType(self.inner))
         }
+        /// Set the `params` field and mark the builder changed.
         pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
+        /// Set the `return_type` field and mark the builder changed.
         pub fn return_type(&mut self, return_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.return_type = return_type; }
+        /// Set the `type_parameters` field and mark the builder changed.
         pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
     }
+    /// Clone-with-changes builder for [`super::TSConstructorType`].
     #[derive(Debug)]
     pub struct TSConstructorType<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSConstructorType<'gc>,
     }
     impl<'gc> TSConstructorType<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSConstructorType<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20729,6 +25122,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20736,19 +25131,25 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSConstructorType(self.inner))
         }
+        /// Set the `params` field and mark the builder changed.
         pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
+        /// Set the `return_type` field and mark the builder changed.
         pub fn return_type(&mut self, return_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.return_type = return_type; }
+        /// Set the `type_parameters` field and mark the builder changed.
         pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
     }
+    /// Clone-with-changes builder for [`super::TSTypePredicate`].
     #[derive(Debug)]
     pub struct TSTypePredicate<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSTypePredicate<'gc>,
     }
     impl<'gc> TSTypePredicate<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSTypePredicate<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20759,6 +25160,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20766,18 +25169,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSTypePredicate(self.inner))
         }
+        /// Set the `parameter_name` field and mark the builder changed.
         pub fn parameter_name(&mut self, parameter_name: &'gc Node<'gc>) { self.is_changed = true; self.inner.parameter_name = parameter_name; }
+        /// Set the `type_annotation` field and mark the builder changed.
         pub fn type_annotation(&mut self, type_annotation: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
     }
+    /// Clone-with-changes builder for [`super::TSTupleType`].
     #[derive(Debug)]
     pub struct TSTupleType<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSTupleType<'gc>,
     }
     impl<'gc> TSTupleType<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSTupleType<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20787,6 +25195,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20794,17 +25204,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSTupleType(self.inner))
         }
+        /// Set the `element_types` field and mark the builder changed.
         pub fn element_types(&mut self, element_types: NodeList<'gc>) { self.is_changed = true; self.inner.element_types = element_types; }
     }
+    /// Clone-with-changes builder for [`super::TSTypeAssertion`].
     #[derive(Debug)]
     pub struct TSTypeAssertion<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSTypeAssertion<'gc>,
     }
     impl<'gc> TSTypeAssertion<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSTypeAssertion<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20815,6 +25229,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20822,18 +25238,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSTypeAssertion(self.inner))
         }
+        /// Set the `type_annotation` field and mark the builder changed.
         pub fn type_annotation(&mut self, type_annotation: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
+        /// Set the `expression` field and mark the builder changed.
         pub fn expression(&mut self, expression: &'gc Node<'gc>) { self.is_changed = true; self.inner.expression = expression; }
     }
+    /// Clone-with-changes builder for [`super::TSAsExpression`].
     #[derive(Debug)]
     pub struct TSAsExpression<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSAsExpression<'gc>,
     }
     impl<'gc> TSAsExpression<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSAsExpression<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20844,6 +25265,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20851,18 +25274,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSAsExpression(self.inner))
         }
+        /// Set the `expression` field and mark the builder changed.
         pub fn expression(&mut self, expression: &'gc Node<'gc>) { self.is_changed = true; self.inner.expression = expression; }
+        /// Set the `type_annotation` field and mark the builder changed.
         pub fn type_annotation(&mut self, type_annotation: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
     }
+    /// Clone-with-changes builder for [`super::TSParameterProperty`].
     #[derive(Debug)]
     pub struct TSParameterProperty<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSParameterProperty<'gc>,
     }
     impl<'gc> TSParameterProperty<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSParameterProperty<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20876,6 +25304,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20883,17 +25313,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSParameterProperty(self.inner))
         }
+        /// Set the `parameter` field and mark the builder changed.
         pub fn parameter(&mut self, parameter: &'gc Node<'gc>) { self.is_changed = true; self.inner.parameter = parameter; }
     }
+    /// Clone-with-changes builder for [`super::TSTypeAliasDeclaration`].
     #[derive(Debug)]
     pub struct TSTypeAliasDeclaration<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSTypeAliasDeclaration<'gc>,
     }
     impl<'gc> TSTypeAliasDeclaration<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSTypeAliasDeclaration<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20905,6 +25339,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20912,19 +25348,25 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSTypeAliasDeclaration(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `type_parameters` field and mark the builder changed.
         pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
+        /// Set the `type_annotation` field and mark the builder changed.
         pub fn type_annotation(&mut self, type_annotation: &'gc Node<'gc>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
     }
+    /// Clone-with-changes builder for [`super::TSInterfaceDeclaration`].
     #[derive(Debug)]
     pub struct TSInterfaceDeclaration<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSInterfaceDeclaration<'gc>,
     }
     impl<'gc> TSInterfaceDeclaration<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSInterfaceDeclaration<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20937,6 +25379,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20944,20 +25388,27 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSInterfaceDeclaration(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
+        /// Set the `extends` field and mark the builder changed.
         pub fn extends(&mut self, extends: NodeList<'gc>) { self.is_changed = true; self.inner.extends = extends; }
+        /// Set the `type_parameters` field and mark the builder changed.
         pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
     }
+    /// Clone-with-changes builder for [`super::TSInterfaceHeritage`].
     #[derive(Debug)]
     pub struct TSInterfaceHeritage<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSInterfaceHeritage<'gc>,
     }
     impl<'gc> TSInterfaceHeritage<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSInterfaceHeritage<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20968,6 +25419,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -20975,18 +25428,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSInterfaceHeritage(self.inner))
         }
+        /// Set the `expression` field and mark the builder changed.
         pub fn expression(&mut self, expression: &'gc Node<'gc>) { self.is_changed = true; self.inner.expression = expression; }
+        /// Set the `type_parameters` field and mark the builder changed.
         pub fn type_parameters(&mut self, type_parameters: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_parameters = type_parameters; }
     }
+    /// Clone-with-changes builder for [`super::TSInterfaceBody`].
     #[derive(Debug)]
     pub struct TSInterfaceBody<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSInterfaceBody<'gc>,
     }
     impl<'gc> TSInterfaceBody<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSInterfaceBody<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -20996,6 +25454,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -21003,17 +25463,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSInterfaceBody(self.inner))
         }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: NodeList<'gc>) { self.is_changed = true; self.inner.body = body; }
     }
+    /// Clone-with-changes builder for [`super::TSEnumDeclaration`].
     #[derive(Debug)]
     pub struct TSEnumDeclaration<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSEnumDeclaration<'gc>,
     }
     impl<'gc> TSEnumDeclaration<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSEnumDeclaration<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -21024,6 +25488,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -21031,18 +25497,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSEnumDeclaration(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `members` field and mark the builder changed.
         pub fn members(&mut self, members: NodeList<'gc>) { self.is_changed = true; self.inner.members = members; }
     }
+    /// Clone-with-changes builder for [`super::TSEnumMember`].
     #[derive(Debug)]
     pub struct TSEnumMember<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSEnumMember<'gc>,
     }
     impl<'gc> TSEnumMember<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSEnumMember<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -21053,6 +25524,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -21060,18 +25533,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSEnumMember(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `initializer` field and mark the builder changed.
         pub fn initializer(&mut self, initializer: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.initializer = initializer; }
     }
+    /// Clone-with-changes builder for [`super::TSModuleDeclaration`].
     #[derive(Debug)]
     pub struct TSModuleDeclaration<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSModuleDeclaration<'gc>,
     }
     impl<'gc> TSModuleDeclaration<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSModuleDeclaration<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -21082,6 +25560,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -21089,18 +25569,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSModuleDeclaration(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: &'gc Node<'gc>) { self.is_changed = true; self.inner.body = body; }
     }
+    /// Clone-with-changes builder for [`super::TSModuleBlock`].
     #[derive(Debug)]
     pub struct TSModuleBlock<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSModuleBlock<'gc>,
     }
     impl<'gc> TSModuleBlock<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSModuleBlock<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -21110,6 +25595,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -21117,17 +25604,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSModuleBlock(self.inner))
         }
+        /// Set the `body` field and mark the builder changed.
         pub fn body(&mut self, body: NodeList<'gc>) { self.is_changed = true; self.inner.body = body; }
     }
+    /// Clone-with-changes builder for [`super::TSModuleMember`].
     #[derive(Debug)]
     pub struct TSModuleMember<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSModuleMember<'gc>,
     }
     impl<'gc> TSModuleMember<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSModuleMember<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -21138,6 +25629,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -21145,18 +25638,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSModuleMember(self.inner))
         }
+        /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: &'gc Node<'gc>) { self.is_changed = true; self.inner.id = id; }
+        /// Set the `initializer` field and mark the builder changed.
         pub fn initializer(&mut self, initializer: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.initializer = initializer; }
     }
+    /// Clone-with-changes builder for [`super::TSTypeParameterDeclaration`].
     #[derive(Debug)]
     pub struct TSTypeParameterDeclaration<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSTypeParameterDeclaration<'gc>,
     }
     impl<'gc> TSTypeParameterDeclaration<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSTypeParameterDeclaration<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -21166,6 +25664,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -21173,17 +25673,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSTypeParameterDeclaration(self.inner))
         }
+        /// Set the `params` field and mark the builder changed.
         pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
     }
+    /// Clone-with-changes builder for [`super::TSTypeParameter`].
     #[derive(Debug)]
     pub struct TSTypeParameter<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSTypeParameter<'gc>,
     }
     impl<'gc> TSTypeParameter<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSTypeParameter<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -21195,6 +25699,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -21202,19 +25708,25 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSTypeParameter(self.inner))
         }
+        /// Set the `name` field and mark the builder changed.
         pub fn name(&mut self, name: &'gc Node<'gc>) { self.is_changed = true; self.inner.name = name; }
+        /// Set the `constraint` field and mark the builder changed.
         pub fn constraint(&mut self, constraint: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.constraint = constraint; }
+        /// Set the `default` field and mark the builder changed.
         pub fn default(&mut self, default: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.default = default; }
     }
+    /// Clone-with-changes builder for [`super::TSTypeParameterInstantiation`].
     #[derive(Debug)]
     pub struct TSTypeParameterInstantiation<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSTypeParameterInstantiation<'gc>,
     }
     impl<'gc> TSTypeParameterInstantiation<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSTypeParameterInstantiation<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -21224,6 +25736,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -21231,17 +25745,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSTypeParameterInstantiation(self.inner))
         }
+        /// Set the `params` field and mark the builder changed.
         pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
     }
+    /// Clone-with-changes builder for [`super::TSUnionType`].
     #[derive(Debug)]
     pub struct TSUnionType<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSUnionType<'gc>,
     }
     impl<'gc> TSUnionType<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSUnionType<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -21251,6 +25769,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -21258,17 +25778,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSUnionType(self.inner))
         }
+        /// Set the `types` field and mark the builder changed.
         pub fn types(&mut self, types: NodeList<'gc>) { self.is_changed = true; self.inner.types = types; }
     }
+    /// Clone-with-changes builder for [`super::TSIntersectionType`].
     #[derive(Debug)]
     pub struct TSIntersectionType<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSIntersectionType<'gc>,
     }
     impl<'gc> TSIntersectionType<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSIntersectionType<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -21278,6 +25802,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -21285,17 +25811,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSIntersectionType(self.inner))
         }
+        /// Set the `types` field and mark the builder changed.
         pub fn types(&mut self, types: NodeList<'gc>) { self.is_changed = true; self.inner.types = types; }
     }
+    /// Clone-with-changes builder for [`super::TSTypeQuery`].
     #[derive(Debug)]
     pub struct TSTypeQuery<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSTypeQuery<'gc>,
     }
     impl<'gc> TSTypeQuery<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSTypeQuery<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -21305,6 +25835,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -21312,17 +25844,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSTypeQuery(self.inner))
         }
+        /// Set the `expr_name` field and mark the builder changed.
         pub fn expr_name(&mut self, expr_name: &'gc Node<'gc>) { self.is_changed = true; self.inner.expr_name = expr_name; }
     }
+    /// Clone-with-changes builder for [`super::TSConditionalType`].
     #[derive(Debug)]
     pub struct TSConditionalType<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSConditionalType<'gc>,
     }
     impl<'gc> TSConditionalType<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSConditionalType<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -21335,6 +25871,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -21342,20 +25880,27 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSConditionalType(self.inner))
         }
+        /// Set the `check_type` field and mark the builder changed.
         pub fn check_type(&mut self, check_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.check_type = check_type; }
+        /// Set the `extends_type` field and mark the builder changed.
         pub fn extends_type(&mut self, extends_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.extends_type = extends_type; }
+        /// Set the `true_type` field and mark the builder changed.
         pub fn true_type(&mut self, true_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.true_type = true_type; }
+        /// Set the `false_type` field and mark the builder changed.
         pub fn false_type(&mut self, false_type: &'gc Node<'gc>) { self.is_changed = true; self.inner.false_type = false_type; }
     }
+    /// Clone-with-changes builder for [`super::TSTypeLiteral`].
     #[derive(Debug)]
     pub struct TSTypeLiteral<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSTypeLiteral<'gc>,
     }
     impl<'gc> TSTypeLiteral<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSTypeLiteral<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -21365,6 +25910,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -21372,17 +25919,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSTypeLiteral(self.inner))
         }
+        /// Set the `members` field and mark the builder changed.
         pub fn members(&mut self, members: NodeList<'gc>) { self.is_changed = true; self.inner.members = members; }
     }
+    /// Clone-with-changes builder for [`super::TSPropertySignature`].
     #[derive(Debug)]
     pub struct TSPropertySignature<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSPropertySignature<'gc>,
     }
     impl<'gc> TSPropertySignature<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSPropertySignature<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -21399,6 +25950,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -21406,19 +25959,25 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSPropertySignature(self.inner))
         }
+        /// Set the `key` field and mark the builder changed.
         pub fn key(&mut self, key: &'gc Node<'gc>) { self.is_changed = true; self.inner.key = key; }
+        /// Set the `type_annotation` field and mark the builder changed.
         pub fn type_annotation(&mut self, type_annotation: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
+        /// Set the `initializer` field and mark the builder changed.
         pub fn initializer(&mut self, initializer: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.initializer = initializer; }
     }
+    /// Clone-with-changes builder for [`super::TSMethodSignature`].
     #[derive(Debug)]
     pub struct TSMethodSignature<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSMethodSignature<'gc>,
     }
     impl<'gc> TSMethodSignature<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSMethodSignature<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -21431,6 +25990,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -21438,19 +25999,25 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSMethodSignature(self.inner))
         }
+        /// Set the `key` field and mark the builder changed.
         pub fn key(&mut self, key: &'gc Node<'gc>) { self.is_changed = true; self.inner.key = key; }
+        /// Set the `params` field and mark the builder changed.
         pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
+        /// Set the `return_type` field and mark the builder changed.
         pub fn return_type(&mut self, return_type: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.return_type = return_type; }
     }
+    /// Clone-with-changes builder for [`super::TSIndexSignature`].
     #[derive(Debug)]
     pub struct TSIndexSignature<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSIndexSignature<'gc>,
     }
     impl<'gc> TSIndexSignature<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSIndexSignature<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -21461,6 +26028,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -21468,18 +26037,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSIndexSignature(self.inner))
         }
+        /// Set the `parameters` field and mark the builder changed.
         pub fn parameters(&mut self, parameters: NodeList<'gc>) { self.is_changed = true; self.inner.parameters = parameters; }
+        /// Set the `type_annotation` field and mark the builder changed.
         pub fn type_annotation(&mut self, type_annotation: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.type_annotation = type_annotation; }
     }
+    /// Clone-with-changes builder for [`super::TSCallSignatureDeclaration`].
     #[derive(Debug)]
     pub struct TSCallSignatureDeclaration<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSCallSignatureDeclaration<'gc>,
     }
     impl<'gc> TSCallSignatureDeclaration<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSCallSignatureDeclaration<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -21490,6 +26064,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -21497,18 +26073,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSCallSignatureDeclaration(self.inner))
         }
+        /// Set the `params` field and mark the builder changed.
         pub fn params(&mut self, params: NodeList<'gc>) { self.is_changed = true; self.inner.params = params; }
+        /// Set the `return_type` field and mark the builder changed.
         pub fn return_type(&mut self, return_type: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.return_type = return_type; }
     }
+    /// Clone-with-changes builder for [`super::TSModifiers`].
     #[derive(Debug)]
     pub struct TSModifiers<'gc> {
         is_changed: bool,
         pub(super) inner: super::TSModifiers<'gc>,
     }
     impl<'gc> TSModifiers<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::TSModifiers<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -21519,6 +26100,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -21526,16 +26109,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::TSModifiers(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::CoverEmptyArgs`].
     #[derive(Debug)]
     pub struct CoverEmptyArgs<'gc> {
         is_changed: bool,
         pub(super) inner: super::CoverEmptyArgs<'gc>,
     }
     impl<'gc> CoverEmptyArgs<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::CoverEmptyArgs<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -21544,6 +26130,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -21551,16 +26139,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::CoverEmptyArgs(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::CoverTrailingComma`].
     #[derive(Debug)]
     pub struct CoverTrailingComma<'gc> {
         is_changed: bool,
         pub(super) inner: super::CoverTrailingComma<'gc>,
     }
     impl<'gc> CoverTrailingComma<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::CoverTrailingComma<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -21569,6 +26160,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -21576,16 +26169,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::CoverTrailingComma(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::CoverInitializer`].
     #[derive(Debug)]
     pub struct CoverInitializer<'gc> {
         is_changed: bool,
         pub(super) inner: super::CoverInitializer<'gc>,
     }
     impl<'gc> CoverInitializer<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::CoverInitializer<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -21595,6 +26191,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -21602,17 +26200,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::CoverInitializer(self.inner))
         }
+        /// Set the `init` field and mark the builder changed.
         pub fn init(&mut self, init: &'gc Node<'gc>) { self.is_changed = true; self.inner.init = init; }
     }
+    /// Clone-with-changes builder for [`super::CoverRestElement`].
     #[derive(Debug)]
     pub struct CoverRestElement<'gc> {
         is_changed: bool,
         pub(super) inner: super::CoverRestElement<'gc>,
     }
     impl<'gc> CoverRestElement<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::CoverRestElement<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -21622,6 +26224,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -21629,17 +26233,21 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::CoverRestElement(self.inner))
         }
+        /// Set the `rest` field and mark the builder changed.
         pub fn rest(&mut self, rest: &'gc Node<'gc>) { self.is_changed = true; self.inner.rest = rest; }
     }
+    /// Clone-with-changes builder for [`super::CoverTypedIdentifier`].
     #[derive(Debug)]
     pub struct CoverTypedIdentifier<'gc> {
         is_changed: bool,
         pub(super) inner: super::CoverTypedIdentifier<'gc>,
     }
     impl<'gc> CoverTypedIdentifier<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::CoverTypedIdentifier<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -21651,6 +26259,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -21658,18 +26268,23 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::CoverTypedIdentifier(self.inner))
         }
+        /// Set the `left` field and mark the builder changed.
         pub fn left(&mut self, left: &'gc Node<'gc>) { self.is_changed = true; self.inner.left = left; }
+        /// Set the `right` field and mark the builder changed.
         pub fn right(&mut self, right: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.right = right; }
     }
+    /// Clone-with-changes builder for [`super::SHBuiltin`].
     #[derive(Debug)]
     pub struct SHBuiltin<'gc> {
         is_changed: bool,
         pub(super) inner: super::SHBuiltin<'gc>,
     }
     impl<'gc> SHBuiltin<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::SHBuiltin<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -21678,6 +26293,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -21685,16 +26302,19 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::SHBuiltin(self.inner))
         }
     }
+    /// Clone-with-changes builder for [`super::ImplicitCheckedCast`].
     #[derive(Debug)]
     pub struct ImplicitCheckedCast<'gc> {
         is_changed: bool,
         pub(super) inner: super::ImplicitCheckedCast<'gc>,
     }
     impl<'gc> ImplicitCheckedCast<'gc> {
+        /// Start from a copy of `node`, with no field changed yet.
         pub fn from_node(node: &'gc super::ImplicitCheckedCast<'gc>) -> Self {
             Self {
                 is_changed: false,
@@ -21704,6 +26324,8 @@ pub mod builder {
                 },
             }
         }
+        /// Allocate the rebuilt node if a setter ran, else
+        /// `TransformResult::Unchanged`.
         pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>) -> TransformResult<&'gc Node<'gc>> {
             if self.is_changed {
                 TransformResult::Changed(self.build_forced(gc))
@@ -21711,9 +26333,11 @@ pub mod builder {
                 TransformResult::Unchanged
             }
         }
+        /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
             gc.alloc(Node::ImplicitCheckedCast(self.inner))
         }
+        /// Set the `argument` field and mark the builder changed.
         pub fn argument(&mut self, argument: &'gc Node<'gc>) { self.is_changed = true; self.inner.argument = argument; }
     }
 }

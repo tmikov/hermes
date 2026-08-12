@@ -17,6 +17,7 @@
 #   python3 rust/crates/ast/gen_nodes.py --stdout   # prints to stdout
 import re
 import sys
+import textwrap
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -306,6 +307,70 @@ LEAF_DECORATOR = {
 }
 
 
+# Reference B': one doc comment per distinct decoration field, condensed from
+# the comments on the C++ members in ESTree.h:264-501. Each entry is the list
+# of `///` lines emitted above the field (no leading `/// `).
+DECORATION_DOCS = {
+    "scope": ["Sema: the lexical scope created by this node, if any."],
+    "labelIndex": ["Sema: label index; `INVALID_LABEL` until set."],
+    "semInfo": ["Sema: `FunctionInfo` for this function."],
+    "strictness": ["Sema: strict-mode state of this function."],
+    "isMethodDefinition": [
+        "Whether this function is a method definition (getters and setters",
+        "included) rather than a `function`. Used for lazy reparsing.",
+    ],
+    "decorations": [
+        "Decorations attached to this function by `Hermes.decorate(...)`",
+        "calls in typed mode; each entry wraps a decoration expression.",
+    ],
+    "dummyParamList": [
+        "An always-empty parameter list, for uniformity with functions.",
+    ],
+    "bufferId": ["The source buffer id in which this block was found."],
+    "isLazyFunctionBody": [
+        "True if this is a function body pruned while pre-parsing.",
+    ],
+    "paramYield": [
+        "For a lazy block, the `Yield` param to restore when parsed eagerly.",
+    ],
+    "paramAwait": [
+        "For a lazy block, the `Await` param to restore when parsed eagerly.",
+    ],
+    "containsArrowFunctions": [
+        "Whether this function contains an arrow function. Read by lazy",
+        "compilation to populate the `FunctionInfo`.",
+    ],
+    "mayContainArrowFunctionsUsingArguments": [
+        "Conservative estimate of whether an arrow function here may use",
+        "`arguments`, so a non-arrow function must eagerly capture it.",
+    ],
+    "functionInfo": ["Sema: `FunctionInfo` for this static block."],
+    "implicitCtorFunctionInfo": [
+        "Sema: `FunctionInfo` of the synthetic implicit constructor, if the",
+        "class has one.",
+    ],
+    "instanceElementsInitFunctionInfo": [
+        "Sema: `FunctionInfo` of the synthetic function that initializes the",
+        "instance elements, if the class needs one.",
+    ],
+    "staticElementsInitFunctionInfo": [
+        "Sema: `FunctionInfo` of the synthetic function that runs the static",
+        "field initializers, if the class has any.",
+    ],
+    "unresolvable": [
+        "Sema: unresolvable because of an enclosing `eval` or `with`.",
+    ],
+    "declState": [
+        "Sema: how to read `decl` — the `BitHave*` bits of `ESTree.h`'s",
+        "`IdentifierDecoration`.",
+    ],
+    "decl": [
+        "Sema: the declaration this identifier resolves to; `None` until a",
+        "resolution is recorded.",
+    ],
+}
+
+
 def decoration_descriptor(source_name, rust_type, default_expr):
     """Build a uniform field descriptor for a decoration field."""
     rf = rust_field(source_name)
@@ -313,9 +378,12 @@ def decoration_descriptor(source_name, rust_type, default_expr):
         child_kind = "declist"
     else:
         child_kind = "none"
+    if source_name not in DECORATION_DOCS:
+        sys.exit(f"error: no DECORATION_DOCS entry for {source_name!r}")
     return dict(json_name=source_name, rust_field=rf, rust_type=rust_type,
                 child_kind=child_kind, new_arg_type=None, cell=True,
-                default_expr=default_expr, is_def_arg=False, dump_kind=None)
+                default_expr=default_expr, is_def_arg=False, dump_kind=None,
+                doc=DECORATION_DOCS[source_name])
 
 
 def flatten_decoration(name, seen=None):
@@ -386,11 +454,14 @@ def compose_fields(node_name, base, def_fields, range_parents):
     add(dict(json_name=None, rust_field="metadata",
              rust_type="NodeMetadata<'gc>", child_kind="meta",
              new_arg_type="NodeMetadata<'gc>", cell=False, default_expr=None,
-             is_def_arg=False, dump_kind=None))
+             is_def_arg=False, dump_kind=None,
+             doc=["Source range, debug location, paren count, and node id."]))
 
     # 2. .def arg fields.
     for (ftype, fname, opt) in def_fields:
-        add(def_field_descriptor(ftype, fname, opt))
+        fd = def_field_descriptor(ftype, fname, opt)
+        fd["doc"] = [f"ESTree `{fname}` property."]
+        add(fd)
 
     # 3+4. range-chain decorations (outermost-first), flattened base-first.
     # `decos_seen` dedups across decoration classes only (a field introduced by
@@ -438,26 +509,58 @@ use crate::SemaId;
 """
 
 
+def emit_doc(out, lines, indent=""):
+    """Emit `lines` as a `///` doc comment at `indent`.
+
+    Each input line is a paragraph of its own: hard-wrapped to 80 columns if
+    needed (long node names make some of them overflow), but never joined with
+    its neighbours, so the hand-written line breaks survive.
+    """
+    width = 80 - len(indent) - len("/// ")
+    for line in lines:
+        for wrapped in (textwrap.wrap(line, width) or [""]):
+            out.append(f"{indent}/// {wrapped}".rstrip())
+
+
+def unraw(name):
+    """The plain source name of a possibly raw-escaped Rust identifier."""
+    return name[2:] if name.startswith("r#") else name
+
+
 def emit_node_kind(items, out):
+    emit_doc(out, [
+        "The kind discriminant of an AST node.",
+        "",
+        "Mirrors the C++ `NodeKind` enum: `#[repr(u32)]`, `ESTree.def` order,",
+        "with `_Name_First`/`_Last` sentinels interleaved so the `Node::is_*`",
+        "range predicates are two integer comparisons.",
+    ])
     out.append("#[repr(u32)]")
     out.append("#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]")
     out.append("pub enum NodeKind {")
     for it in items:
         if it[0] == "first":
+            emit_doc(out, [f"Exclusive lower bound of the `{it[1]}` range."],
+                     "    ")
             out.append(f"    _{it[1]}_First,")
         elif it[0] == "last":
+            emit_doc(out, [f"Exclusive upper bound of the `{it[1]}` range."],
+                     "    ")
             out.append(f"    _{it[1]}_Last,")
         else:  # node
+            emit_doc(out, [f"The kind of [`{it[1]}`]."], "    ")
             out.append(f"    {it[1]},")
     out.append("}")
     out.append("")
 
 
 def emit_struct(node_name, fields, out):
+    emit_doc(out, [f"The `{node_name}` AST node."])
     out.append("#[derive(Debug)]")
     out.append("#[repr(C)]")
     out.append(f"pub struct {node_name}<'gc> {{")
     for fd in fields:
+        emit_doc(out, fd["doc"], "    ")
         out.append(f"    pub {fd['rust_field']}: {fd['rust_type']},")
     out.append("}")
     # new constructor — signature args one-per-line, struct-init fields one-per-line.
@@ -468,7 +571,11 @@ def emit_struct(node_name, fields, out):
         if fd["new_arg_type"] is None:
             continue  # decoration field: defaulted
         new_args.append(f"{fd['rust_field']}: {fd['new_arg_type']}")
+    doc = [f"Build `{node_name}` from its metadata and `ESTree.def` fields."]
+    if any(fd["new_arg_type"] is None for fd in fields):
+        doc.append("Decoration fields start at their defaults.")
     out.append(f"impl<'gc> {node_name}<'gc> {{")
+    emit_doc(out, doc, "    ")
     out.append("    pub fn new(")
     for arg in new_args:
         out.append(f"        {arg},")
@@ -493,10 +600,19 @@ def emit_struct(node_name, fields, out):
 
 
 def emit_node_enum(nodes, out):
+    emit_doc(out, [
+        "An AST node: one arm per `ESTree.def` node kind.",
+        "",
+        "`#[repr(C)]`, and each arm's payload struct is named after the arm,",
+        "so a deep `match` compiles to a single dispatch. Nodes live in the",
+        "[`crate::context::Context`] arena and are handed out as `&'gc Node`",
+        "for as long as a [`crate::context::GCLock`] is held.",
+    ])
     out.append("#[derive(Debug)]")
     out.append("#[repr(C)]")
     out.append("pub enum Node<'gc> {")
     for name, _fields in nodes:
+        emit_doc(out, [f"A [`{name}`] node."], "    ")
         out.append(f"    {name}({name}<'gc>),")
     out.append("}")
     out.append("")
@@ -505,6 +621,7 @@ def emit_node_enum(nodes, out):
 def emit_accessors(items, nodes, out):
     out.append("impl<'gc> Node<'gc> {")
     # kind().
+    out.append("    /// This node's [`NodeKind`].")
     out.append("    pub fn kind(&self) -> NodeKind {")
     out.append("        match self {")
     for name, _ in nodes:
@@ -513,6 +630,7 @@ def emit_accessors(items, nodes, out):
     out.append("    }")
     out.append("")
     # metadata().
+    out.append("    /// This node's metadata, common to every kind.")
     out.append("    pub fn metadata(&self) -> &NodeMetadata<'gc> {")
     out.append("        match self {")
     for name, _ in nodes:
@@ -521,11 +639,13 @@ def emit_accessors(items, nodes, out):
     out.append("    }")
     out.append("")
     # node_id().
+    out.append("    /// This node's arena identity (see [`NodeId`]).")
     out.append("    pub fn node_id(&self) -> NodeId {")
     out.append("        self.metadata().id.get()")
     out.append("    }")
     out.append("")
     # range().
+    out.append("    /// This node's source range.")
     out.append("    pub fn range(&self) -> support::location::SMRange {")
     out.append("        self.metadata().range.get()")
     out.append("    }")
@@ -535,6 +655,8 @@ def emit_accessors(items, nodes, out):
         if it[0] == "first":
             rng = it[1]
             pred = "is_" + camel_to_snake(rng)
+            emit_doc(out, [f"Whether this node's kind is in the `{rng}` range."],
+                     "    ")
             out.append(f"    pub fn {pred}(&self) -> bool {{")
             out.append("        let k = self.kind() as u32;")
             out.append(
@@ -546,6 +668,8 @@ def emit_accessors(items, nodes, out):
     # leaf accessors.
     for name, _ in nodes:
         acc = "as_" + camel_to_snake(name)
+        emit_doc(out, [f"The payload if this is a [`{name}`], `None` otherwise."],
+                 "    ")
         out.append(f"    pub fn {acc}(&self) -> Option<&{name}<'gc>> {{")
         out.append(f"        if let Node::{name}(n) = self {{ Some(n) }} "
                    f"else {{ None }}")
@@ -575,6 +699,8 @@ def child_fields(fields):
 
 
 def emit_visit_children(nodes, out):
+    out.append("    /// Visit every child node in declared order: the `ESTree.def`")
+    out.append("    /// fields plus the decoration lists the GC marker must trace.")
     out.append("    pub fn visit_children<V: Visitor<'gc> + ?Sized>"
                "(&'gc self, v: &mut V) {")
     out.append("        match self {")
@@ -607,6 +733,8 @@ def emit_visit_children(nodes, out):
 
 
 def emit_mark_lists(nodes, out):
+    out.append("    /// Call `cb` on every `NodeList` field of this node, including")
+    out.append("    /// decoration lists. Used by the GC to mark list elements.")
     out.append("    pub fn mark_lists<F: FnMut(&NodeList<'gc>)>"
                "(&'gc self, cb: &mut F) {")
     out.append("        match self {")
@@ -701,6 +829,7 @@ def emit_node_field(nodes, out):
     out.append("#[allow(non_camel_case_types)]")
     out.append("pub enum NodeField {")
     for v in variants:
+        emit_doc(out, [f"The `{unraw(v)}` child field."], "    ")
         out.append(f"    {v},")
     out.append("}")
     out.append("")
@@ -762,10 +891,12 @@ def emit_builders(nodes, out):
     out.append("    #[derive(Debug)]")
     out.append("    pub enum Builder<'gc> {")
     for name, _fields in nodes:
+        emit_doc(out, [f"Builder for [`super::{name}`]."], "        ")
         out.append(f"        {name}(self::{name}<'gc>),")
     out.append("    }")
     out.append("")
     out.append("    impl<'gc> Builder<'gc> {")
+    out.append("        /// Start a builder for `node`, dispatching on its kind.")
     out.append("        pub fn from_node(node: &'gc Node<'gc>) -> Self {")
     out.append("            match node {")
     for name, _fields in nodes:
@@ -784,12 +915,16 @@ def emit_builders(nodes, out):
 
 def emit_builder_struct(name, fields, out):
     """Emit one builder struct + impl (from_node/build/build_forced/setters)."""
+    emit_doc(out, [
+        f"Clone-with-changes builder for [`super::{name}`].",
+    ], "    ")
     out.append("    #[derive(Debug)]")
     out.append(f"    pub struct {name}<'gc> {{")
     out.append("        is_changed: bool,")
     out.append(f"        pub(super) inner: super::{name}<'gc>,")
     out.append("    }")
     out.append(f"    impl<'gc> {name}<'gc> {{")
+    out.append("        /// Start from a copy of `node`, with no field changed yet.")
     out.append(
         f"        pub fn from_node(node: &'gc super::{name}<'gc>) -> Self {{")
     out.append("            Self {")
@@ -807,6 +942,8 @@ def emit_builder_struct(name, fields, out):
     out.append("                },")
     out.append("            }")
     out.append("        }")
+    out.append("        /// Allocate the rebuilt node if a setter ran, else")
+    out.append("        /// `TransformResult::Unchanged`.")
     out.append(
         "        pub fn build(self, gc: &'gc crate::context::GCLock<'_, '_>)"
         " -> TransformResult<&'gc Node<'gc>> {")
@@ -816,6 +953,7 @@ def emit_builder_struct(name, fields, out):
     out.append("                TransformResult::Unchanged")
     out.append("            }")
     out.append("        }")
+    out.append("        /// Allocate the node unconditionally, changed or not.")
     out.append(
         "        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>)"
         " -> &'gc Node<'gc> {")
@@ -824,6 +962,8 @@ def emit_builder_struct(name, fields, out):
     for fd in structural_fields(fields):
         rf = fd["rust_field"]
         ty = fd["rust_type"]
+        out.append(
+            f"        /// Set the `{unraw(rf)}` field and mark the builder changed.")
         out.append(
             f"        pub fn {rf}(&mut self, {rf}: {ty}) {{ "
             f"self.is_changed = true; self.inner.{rf} = {rf}; }}")

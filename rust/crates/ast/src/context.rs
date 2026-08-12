@@ -498,6 +498,9 @@ impl<'ast> Context<'ast> {
         self.preemptive_function_compilation_threshold = byte_count;
     }
 
+    /// Mark and sweep the arena: everything reachable from a live [`NodeRc`]
+    /// survives, the rest is returned to the free lists. Requires `&mut self`,
+    /// so no [`GCLock`] — and therefore no `&Node` — can be outstanding.
     pub fn gc(&mut self) {
         let nodes = unsafe { &mut *self.nodes.get() };
         let free_nodes = unsafe { &mut *self.free_nodes.get() };
@@ -846,6 +849,7 @@ impl<'ast, 'ctx> GCLock<'ast, 'ctx> {
 pub struct NodePtr<'gc>(pub &'gc Node<'gc>);
 
 impl<'gc> NodePtr<'gc> {
+    /// Wrap a node reference so it can be used as a hash-table key.
     pub fn from_node(node: &'gc Node<'gc>) -> Self {
         Self(node)
     }

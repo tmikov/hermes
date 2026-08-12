@@ -18,8 +18,11 @@ pub type NodeString = atom_table::AtomBytes;
 /// Function strictness state (mirrors `ESTree.h` `enum class Strictness`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Strictness {
+    /// Sema has not decided yet.
     NotSet,
+    /// The function is not in strict mode.
     NonStrictMode,
+    /// The function is in strict mode.
     StrictMode,
 }
 
@@ -33,6 +36,7 @@ pub const INVALID_LABEL: u32 = u32::MAX;
 #[derive(Debug)]
 pub struct NodeMetadata<'gc> {
     pub(crate) phantom: PhantomData<&'gc Node<'gc>>,
+    /// The node's source range, mirroring ESTree.h `Node::sourceRange_`.
     pub range: Cell<SMRange>,
     /// Debug location, mirroring ESTree.h Node debug loc set by
     /// JSParserImpl::setLocation. Defaults to range start.
@@ -153,6 +157,7 @@ impl<'gc> NodeList<'gc> {
         self.head.is_null()
     }
 
+    /// Iterate the list front to back. Cost: `O(1)` to start, `O(1)` per step.
     pub fn iter(self) -> NodeListIter<'gc> {
         NodeListIter {
             ptr: self.head,
