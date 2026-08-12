@@ -32,7 +32,8 @@ use ast::context::{Context, GCLock, NodeRc};
 use ast::dump::dump_estree_json_with_sm;
 use ast::dump::{ESTreeDumpMode, ESTreeRawProp, LocationDumpMode};
 use ast::node::Node;
-use support::diag::{CollectingHandler, OutputOptions, ResolvedDiagnostic};
+use support::diag::ResolvedDiagnostic;
+use support::diag::{CollectingHandler, DiagKind, OutputOptions};
 use support::manager::SourceErrorManager;
 use support::render::render_diagnostic;
 
@@ -121,6 +122,12 @@ impl ParseFlags {
 /// arena; dropping it frees the AST. Read the tree with
 /// [`with_program`](Self::with_program), or dump it with
 /// [`to_estree_json`](Self::to_estree_json).
+///
+/// **Not `Send`.** The arena uses `Cell`/`UnsafeCell` and the `GCLock` that
+/// guards it is thread-local by design, so a `ParsedJS` cannot be moved to
+/// another thread — parse on the thread that will read the AST. (The name
+/// keeps the crate's `JSParserImpl`/`JSLexer` casing rather than Rust's
+/// `ParsedJs`; that is deliberate, for consistency inside the port.)
 pub struct ParsedJS {
     /// The `Program` node, pinned so it survives outside a `GCLock`.
     ///
@@ -146,8 +153,11 @@ impl ParsedJS {
     ///
     /// This is the read path for the AST: walk it with an
     /// [`ast::visitor::Visitor`], match on [`Node`] arms, or read
-    /// [`Node::kind`]. Values derived from the nodes cannot escape the
-    /// closure; return owned data instead.
+    /// [`Node::kind`]. References into the arena cannot escape the closure —
+    /// their lifetime ends with the lock — so return owned data instead. The
+    /// one thing that *can* escape is an [`ast::context::NodeRc`], which is
+    /// refcounted rather than borrowed; dropping this `ParsedJS` while such a
+    /// handle is still alive panics inside `Context::drop`.
     ///
     /// The bound is higher-ranked because [`Node`] is *invariant* in its
     /// lifetime: a walker (`ast::visitor::Visitor<'gc>`) needs the node
@@ -176,6 +186,12 @@ impl ParsedJS {
     ///
     /// `pretty` selects indented output. For other dumper settings use
     /// [`to_estree_json_with`](Self::to_estree_json_with).
+    ///
+    /// # Panics
+    ///
+    /// Takes the arena lock, so it panics if another [`GCLock`] is live on
+    /// this thread — in particular when called from inside
+    /// [`with_program`](Self::with_program).
     pub fn to_estree_json(&mut self, pretty: bool) -> String {
         self.to_estree_json_with(
             pretty,
@@ -188,6 +204,12 @@ impl ParsedJS {
     /// Dump the AST as ESTree JSON with full control over the dumper, which
     /// is [`ast::dump::dump_estree_json_with_sm`] — see it for what each
     /// argument does.
+    ///
+    /// # Panics
+    ///
+    /// Takes the arena lock, so it panics if another [`GCLock`] is live on
+    /// this thread — in particular when called from inside
+    /// [`with_program`](Self::with_program).
     pub fn to_estree_json_with(
         &mut self,
         pretty: bool,
@@ -277,13 +299,20 @@ impl ParseError {
 }
 
 impl std::fmt::Display for ParseError {
-    /// Writes each of [`messages`](Self::messages), newline-terminated. A
-    /// rendered diagnostic spans several lines (message, source line, caret).
+    /// A single line — count plus the first error's location and text — as
+    /// error types are expected to produce. The full LLVM-style rendering
+    /// (source line and caret) is [`messages`](Self::messages); the
+    /// structured form is [`diagnostics`](Self::diagnostics).
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for m in self.messages() {
-            writeln!(f, "{m}")?;
+        let plural = if self.error_count == 1 { "" } else { "s" };
+        match self.diagnostics.iter().find(|d| d.kind == DiagKind::Error) {
+            Some(d) => write!(
+                f,
+                "{} parse error{plural}; first at {}:{}:{}: {}",
+                self.error_count, d.file_name, d.line, d.col, d.message
+            ),
+            None => write!(f, "{} parse error{plural}", self.error_count),
         }
-        Ok(())
     }
 }
 
@@ -382,7 +411,6 @@ fn collected(sm: &SourceErrorManager) -> &[ResolvedDiagnostic] {
 mod tests {
     use super::*;
     use ast::node::NodeKind;
-    use support::diag::DiagKind;
 
     #[test]
     fn parses_and_reports_program() {
@@ -421,8 +449,15 @@ mod tests {
         assert_eq!(err.error_count(), 1);
         assert_eq!(err.diagnostics().len() as u32, err.error_count());
         assert_eq!(err.diagnostics()[0].kind, DiagKind::Error);
+        // The re-export at the crate root names the same type.
+        let _: &[crate::ResolvedDiagnostic] = err.diagnostics();
+        // `Display` is a one-line summary; the full rendering is `messages`.
+        let shown = err.to_string();
+        assert!(!shown.contains('\n'), "{shown}");
+        let want = "1 parse error; first at input:1:";
+        assert!(shown.starts_with(want), "{shown}");
         assert_eq!(err.messages().len(), 1);
-        assert!(err.to_string().contains("input:1:"), "{err}");
+        assert!(err.messages()[0].contains('\n'), "{:?}", err.messages()[0]);
     }
 
     #[test]

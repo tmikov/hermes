@@ -33,17 +33,22 @@ fn main() {
         ),
     };
 
-    // `.js`/`.jsx` say nothing about the type dialect, so this stays plain
-    // ECMAScript + JSX; pass `parse_flow: true` or `parse_ts: true` for those.
-    let flags = ParseFlags {
-        parse_jsx: true,
-        ..Default::default()
-    };
+    // Plain ECMAScript. A file extension says nothing about the dialect, so
+    // like `hermesc` this example assumes none; set the flags explicitly for
+    // the others, e.g.:
+    //     ParseFlags { parse_flow: true, ..Default::default() }   // Flow
+    //     ParseFlags { parse_ts: true, ..Default::default() }     // TypeScript
+    //     ParseFlags { parse_jsx: true, ..Default::default() }    // JSX
+    let flags = ParseFlags::default();
 
     match parse_named(&source, name, flags) {
         Ok(mut parsed) => print!("{}", parsed.to_estree_json(true)),
         Err(e) => {
-            eprint!("{e}");
+            // `Display` is the one-line summary; `messages()` is the full
+            // LLVM-style rendering, which is what a CLI wants.
+            for m in e.messages() {
+                eprintln!("{m}");
+            }
             std::process::exit(1);
         }
     }

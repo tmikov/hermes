@@ -14,8 +14,10 @@
 
 use std::collections::HashMap;
 
-use ast::node::{Node, NodeKind};
-use ast::visitor::Visitor;
+// The `ast` crate is re-exported by `parser`, so this example needs no second
+// dependency.
+use parser::ast::node::{Node, NodeKind};
+use parser::ast::visitor::Visitor;
 use parser::{parse, ParseFlags};
 
 /// Counts how many nodes of each kind the tree contains.

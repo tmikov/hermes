@@ -100,6 +100,10 @@ The crate is not yet published. Once on crates.io, add it to your project:
 hermes-parser = "0.1"    # version TBD at launch
 ```
 
+That one dependency is enough: `hermes-parser` re-exports the AST crate as
+`hermes_parser::ast`, and the diagnostic type its API returns
+(`ResolvedDiagnostic`) from its own root.
+
 ### Parse a JavaScript source and dump ESTree JSON
 
 ```rust
@@ -118,7 +122,7 @@ The AST lives in an arena owned by the returned `ParsedJS`, and is read under a
 lock, so traversal happens inside a closure:
 
 ```rust
-use hermes_ast::node::Node;
+use hermes_parser::ast::node::Node;
 use hermes_parser::{parse, ParseFlags};
 
 fn main() {
@@ -144,18 +148,20 @@ callers that need lazy parsing, a custom diagnostic handler, or one arena
 shared across files. `crates/parser/src/bin/ast_dump.rs` is the reference for
 that path.
 
-Runnable versions of the two snippets above are in
+Expanded versions of both paths are in
 [`crates/parser/examples/`](crates/parser/examples): `parse_to_estree_json.rs`
-and `walk_ast.rs`. They spell the crates by their current in-tree names
-(`parser`, `ast`); the `hermes_*` spelling used here becomes correct with the
-rename that precedes publication.
+(reads a path from `argv`, prints the JSON, renders diagnostics on failure) and
+`walk_ast.rs` (walks a snippet with `ast::visitor::Visitor` and prints a
+node-kind histogram). They spell the crate by its current in-tree name
+(`parser`); the `hermes_*` spelling used here becomes correct with the rename
+that precedes publication.
 
 ## Crate family
 
 | Published crate | Role |
 |---|---|
 | `hermes-parser` | Lexer + parser + JSON parser — stable public surface |
-| `hermes-ast` | ESTree node set + JSON dumper — stable public surface |
+| `hermes-ast` | ESTree node set + JSON dumper — stable public surface, re-exported as `hermes_parser::ast` |
 | `hermes-support` | `SourceErrorManager`, diagnostics, JSON emitter — support crate |
 | `hermes-atom-table` | String interner — support crate |
 | `hermes-unicode` | Unicode property tables — support crate |

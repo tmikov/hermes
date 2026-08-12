@@ -11,7 +11,7 @@
 //! # Quickstart
 //!
 //! ```
-//! use ast::node::Node;
+//! use parser::ast::node::Node;
 //! use parser::{parse, ParseFlags};
 //!
 //! let flags = ParseFlags::default();
@@ -31,10 +31,13 @@
 //!
 //! The pieces a consumer touches:
 //! - [`parse`] / [`parse_named`] returning [`ParsedJS`] — the convenience
-//!   façade in [`facade`], which assembles an `ast::context::Context`, a
+//!   façade, which assembles an [`ast::context::Context`], a
 //!   `SourceErrorManager`, a [`lexer::JSLexer`] and a [`js::JSParserImpl`]
 //!   into one call. It adds no behavior; anything it does not expose is
 //!   reachable by driving those pieces directly.
+//! - [`ast`] — the AST crate, re-exported so that depending on this crate
+//!   alone is enough to name [`ast::node::Node`], walk with
+//!   [`ast::visitor::Visitor`], or drive [`ast::dump`] by hand.
 //! - [`js::JSParserImpl`] — the recursive-descent parser; `new` + `parse`
 //!   returns the `Program` node, or `None` after a reported error.
 //! - [`lexer::JSLexer`] — the lexer, usable on its own; it reports through a
@@ -60,7 +63,6 @@
 #![warn(missing_docs)]
 
 pub mod cursor;
-pub mod facade;
 pub mod html_entities;
 pub mod js;
 pub mod json;
@@ -70,4 +72,19 @@ pub mod token;
 pub mod token_kinds;
 pub mod utf8;
 
+/// The façade module is private: its items are re-exported here so each has
+/// exactly one path in the docs.
+mod facade;
+
 pub use facade::{parse, parse_named, ParseError, ParseFlags, ParsedJS};
+
+/// The AST crate, re-exported. Parsing hands back `ast` types, so a consumer
+/// needs them; re-exporting keeps this crate the only dependency they must
+/// declare. `ast::node::Node`, `ast::visitor`, `ast::context::GCLock` and
+/// `ast::dump` are the pieces the façade's signatures mention.
+pub use ast;
+
+/// One recorded diagnostic, re-exported because it appears in the façade's
+/// signatures ([`ParseError::diagnostics`], [`ParsedJS::diagnostics`]).
+/// Render one with `support::render::render_diagnostic`.
+pub use support::diag::ResolvedDiagnostic;
