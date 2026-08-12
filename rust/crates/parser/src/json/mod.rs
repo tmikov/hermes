@@ -230,7 +230,11 @@ impl<'a> ObjectView<'a> {
     }
 
     /// JSONParser.h:286 — value for `name`, or None.
-    pub fn get(&self, name: &str, atoms: &hermes_atom_table::AtomTable) -> Option<&'a JSONValue<'a>> {
+    pub fn get(
+        &self,
+        name: &str,
+        atoms: &hermes_atom_table::AtomTable,
+    ) -> Option<&'a JSONValue<'a>> {
         self.class.find(name.as_bytes(), atoms).map(|i| self.values[i])
     }
 
@@ -266,7 +270,9 @@ impl<'a> ObjectView<'a> {
     }
 
     /// JSONParser.h:330 — (key, value) pairs, in the hidden class's sorted order.
-    pub fn iter(&self) -> impl Iterator<Item = (hermes_atom_table::AtomBytes, &'a JSONValue<'a>)> + '_ {
+    pub fn iter(
+        &self,
+    ) -> impl Iterator<Item = (hermes_atom_table::AtomBytes, &'a JSONValue<'a>)> + '_ {
         self.class.keys.iter().copied().zip(self.values.iter().copied())
     }
 }

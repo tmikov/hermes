@@ -26,6 +26,17 @@ citation inside a section dated before 2026-08-10 references the PRE-cherry-pick
 tree, not the current one — do not "fix" those in place. Only the live
 Imported/Deferred tables' current reasons are kept synced to the current tree.
 
+**Citation note (added 2026-08-12):** the publication track renamed the five
+publishable Cargo packages to the `hermes-*` family, so the *current* spelling
+of a parser gate is `-p hermes-parser` (likewise `-p hermes-ast`,
+`-p hermes-support`). `-p sema`, `-p tools` and `-p command_line` are
+unchanged — those crates keep their bare names and `publish = false`. Per the
+same "kept for the history" convention, historical sections below still show
+`-p parser`/`-p ast`; those blocks also carry the corpus counts of their own
+date (e.g. "208 / 107" where the live gate now reports "219 / 109"), so they
+are records of a past run, not commands to re-run. The live gate command is
+the one under "## Gate" above.
+
 Total top-level files: 54. Imported **as of the S1 Task 8 sweep**: 15 (14 from
 `test/Sema` + 1 new gap-filler, `expr-visit-generic.js`, added in Step 2
 below); deferred: 40 (14 + 40 = 54; counting `deep-ast-err.js`, which is listed

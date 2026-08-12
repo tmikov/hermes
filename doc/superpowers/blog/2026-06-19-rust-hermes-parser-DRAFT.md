@@ -42,8 +42,9 @@ the original, and how a byte-for-byte differential oracle against the real
    - Oracle command: `hermesc -dump-ast -dump-source-location=both` produces raw
      parse AST as JSON before semantic analysis — no separate tool needed.
    - Gate command (see Appendix D). CI fails if a single byte differs.
-   - 138 corpus files across 5 dialect corpora (plain JS, Flow, component, records,
-     match). What the differential caught that code review did not: facts/figures needed
+   - 166 corpus files across 8 dialect corpora (plain JS, Flow, component, records,
+     match, TypeScript, JSX, JSX+Flow).
+     What the differential caught that code review did not: facts/figures needed
      here — find a concrete example from the port history where the differential caught
      a real divergence that review missed.
    - What review caught that the differential could not: correctness of the
@@ -66,12 +67,13 @@ the original, and how a byte-for-byte differential oracle against the real
    - The feature is fully implemented, just without syntactic sugar.
 
 5. **The `*const u8` cursor decision**
-   - The only `unsafe` in the `parser` crate: a raw pointer cursor in
+   - The only `unsafe` in the `hermes-parser` crate: a raw pointer cursor in
      `src/cursor.rs`, confined to that module.
    - Rationale: lexer speed depends on in-register pointer arithmetic; the
      `NullTerminatedBuf` trailing NUL makes one-byte lookahead unconditionally
      in-bounds; encapsulation makes the unsafety reviewable.
-   - Contrast with the rest of the codebase: `support` and `unicode` forbid `unsafe`
+   - Contrast with the rest of the codebase: `hermes-support` and `hermes-unicode`
+     forbid `unsafe`
      entirely via `[lints.rust] unsafe_code = "forbid"`.
 
 6. **What fidelity costs and what it buys**
@@ -181,7 +183,7 @@ development, where each subagent takes a bounded implementation task and a
 two-stage human review follows every phase, all gated by a byte-for-byte differential
 oracle that catches any behavioral drift. The result is a complete, production-quality
 port that has already outlasted most hand-ported projects by the only metric that
-matters: `diff <(hermesc -dump-ast ...) <(ast-dump ...)` exits zero on all 138
+matters: `diff <(hermesc -dump-ast ...) <(ast-dump ...)` exits zero on all 166
 corpus files.
 
 **NOTE:** This angle has the highest reach (developer-workflow, AI tooling, Rust
@@ -248,8 +250,8 @@ differential, complete Flow grammar), then explain the process.
 
 6. **Outcome and the honest accounting**
    - JavaScript and Flow: complete and differential-tested.
-   - TypeScript and JSX: in progress (see Appendix A). The same methodology applies;
-     TS/JSX are scheduled workstream items, not abandoned.
+   - TypeScript and JSX: complete and differential-tested (see Appendix A), each
+     with its own corpus in the same gate.
    - Performance: directional numbers (Appendix B). The GC-arena design is a
      deliberate fidelity choice, not a performance optimization.
    - This is not a claim that subagent-driven development is always better than
@@ -259,7 +261,7 @@ differential, complete Flow grammar), then explain the process.
 **Facts/figures this angle needs from the appendix:**
 - LOC counts (JS parser: ~16 900 C++ lines; lexer: ~3 700; total ported). Verify
   against current source; these are approximations from ARCHITECTURE.md.
-- Corpus totals: 138 files, 5 corpora (Appendix D).
+- Corpus totals: 166 files, 8 corpora (Appendix D).
 - The gate command (Appendix D).
 - The "what differential catches vs. what review catches" contrast — a concrete
   example from the port history would make this vivid. Find in commit log.
@@ -279,12 +281,11 @@ differential, complete Flow grammar), then explain the process.
 |---|---|
 | JavaScript / ECMAScript (ES2025+) | Complete |
 | Flow type grammar | Complete (full grammar, all dialects, differential-tested) |
-| TypeScript | In progress (P7); type-annotation core landed; object types, interface, class members, enums remain |
-| JSX | In progress; lexer complete, parser not yet wired |
+| TypeScript | Complete (P7), differential-tested |
+| JSX | Complete (P8), differential-tested |
 
-**Do not describe TS or JSX as done.** They are explicitly in-progress workstream
-items. The post should be honest about this; it is not a weakness — JS + Flow is
-already a stronger story than any other Rust parser.
+All four dialects now pass the byte-for-byte gate; the earlier "TS/JSX in
+progress" framing in older drafts is obsolete.
 
 ---
 
@@ -350,8 +351,8 @@ Key cells relevant to the post:
 | Feature | hermes-parser | SWC | OXC | Biome | Boa |
 |---|---|---|---|---|---|
 | ECMAScript coverage | Complete (ES2025+) | Complete | Complete | Complete | Complete |
-| JSX | In progress | Complete | Complete | Complete | None |
-| TypeScript | In progress | Complete (TS 5.x) | Complete (TS 5.x) | Complete | None |
+| JSX | **Complete** | Complete | Complete | Complete | None |
+| TypeScript | **Complete** | Complete (TS 5.x) | Complete (TS 5.x) | Complete | None |
 | Flow | **Complete** (full grammar, differential-tested) | Partial (type-stripping focus; `Syntax::Flow` opt-in; shallower than this port) | None | None | None |
 | AST model | GC-arena, ESTree-compatible | Own AST (ESTree-inspired, not compatible) | Bump-arena, ESTree-compatible | Lossless CST (rowan fork) | Own AST |
 | Error recovery | Fail-fast (mirrors C++ Hermes) | Partial | Advanced | Fully tolerant | Limited |
@@ -370,32 +371,37 @@ it as "partial / type-stripping focus." OXC and Biome genuinely have no Flow sup
 ### Appendix D — Differential Testing Method
 
 **Oracle:** `hermesc -dump-ast -dump-source-location=both` produces the raw parse AST
-as ESTree JSON before semantic analysis. The Rust `ast-dump` binary produces output in
-the identical format.
+as ESTree JSON before semantic analysis. The Rust `ast-dump` binary (in the
+unpublished `rust/crates/tools`) produces output in the identical format.
 
 **Corpora:**
 
 | Corpus directory | Flags | File count |
 |---|---|---|
-| `parser_corpus/` | (none — plain JS) | 76 |
+| `parser_corpus/` | (none — plain JS) | 77 |
 | `parser_corpus_flow/` | `-parse-flow` | 42 |
 | `parser_corpus_flow_component/` | `-parse-flow -Xparse-component-syntax` | 8 |
 | `parser_corpus_flow_records/` | `-parse-flow -Xparse-flow-records` | 5 |
 | `parser_corpus_flow_match/` | `-parse-flow -Xparse-flow-match` | 7 |
-| **Total** | | **138** |
+| `parser_corpus_ts/` | `-parse-ts` | 20 |
+| `parser_corpus_jsx/` | `-parse-jsx` | 6 |
+| `parser_corpus_jsx_flow/` | `-parse-jsx -parse-flow` | 1 |
+| **Total** | | **166** |
 
-*Note: A 6th directory `parser_corpus_ts/` (7 files) exists but its differential gate is not yet active, as TypeScript support is in progress.*
+All eight are live in the gate (`parser_differential` is 8/8). A ninth
+directory, `parser_corpus_lazy/` (13 files), backs the pre-parse/lazy-parse
+gate rather than the AST differential.
 
 **Gate command:**
 
 ```bash
 # Build the Rust ast-dump binary and the C++ hermesc oracle:
-cargo build --manifest-path rust/Cargo.toml -p parser --bin ast-dump
+cargo build --manifest-path rust/Cargo.toml -p tools --bin ast-dump
 cmake --build cmake-build-asan --target hermesc
 
 # Run the differential gate (fails if the oracle binary is absent):
 REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml \
-    -p parser --test parser_differential
+    -p hermes-parser --test parser_differential
 ```
 
 Any single-byte difference between the Rust output and the `hermesc` output is a CI

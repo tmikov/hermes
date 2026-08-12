@@ -9,5 +9,5 @@ the transforming visitor, and the `ESTreeJSONDumper` — byte-for-byte matching
 
 **Status:** pre-release, not yet on crates.io.
 
-See [`../../README.md`](../../README.md) for the full documentation, language
-support matrix, and the project story.
+See [the project README](https://github.com/tmikov/hermes/blob/rust1/rust/README.md) for the full documentation,
+language support matrix, and the project story.

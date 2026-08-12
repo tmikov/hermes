@@ -6,7 +6,11 @@
  */
 
 //! Guards that the committed src/node.rs is exactly what gen_nodes.py produces.
-//! Skips if python3 is unavailable, unless REQUIRE_GEN=1 forces a hard failure.
+//!
+//! Skips whenever the generator cannot run — no `python3`, or (the case that
+//! matters for the published crate) no `include/hermes/AST/ESTree.def`, which
+//! only exists inside the Hermes source tree and is not part of the packaged
+//! `hermes-ast`. `REQUIRE_GEN=1` turns the skip into a hard failure.
 
 use std::process::Command;
 
@@ -28,8 +32,9 @@ fn committed_node_rs_matches_generator() {
                 panic!("gen_nodes.py failed/absent but REQUIRE_GEN=1: {other:?}");
             }
             eprintln!(
-                "skipping idempotency check (python3 unavailable). \
-                 Set REQUIRE_GEN=1 to force."
+                "skipping idempotency check: gen_nodes.py did not run — no \
+                 python3, or no include/hermes/AST/ESTree.def (expected \
+                 outside the Hermes source tree). Set REQUIRE_GEN=1 to force."
             );
             return;
         }

@@ -14,8 +14,8 @@
 
 use std::collections::HashMap;
 
-// The `ast` crate is re-exported by `parser`, so this example needs no second
-// dependency.
+// The AST crate is re-exported as `hermes_parser::ast`, so this example needs
+// no second dependency.
 use hermes_parser::ast::node::{Node, NodeKind};
 use hermes_parser::ast::visitor::Visitor;
 use hermes_parser::{parse, ParseFlags};

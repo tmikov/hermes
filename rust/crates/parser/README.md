@@ -12,5 +12,5 @@ ESTree-compatible AST (`hermes-ast`) byte-for-byte matching `hermesc -dump-ast`.
 
 **Status:** pre-release, not yet on crates.io.
 
-See [`../../README.md`](../../README.md) for the full documentation, language
-support matrix, quickstart, and comparison with other Rust parsers.
+See [the project README](https://github.com/tmikov/hermes/blob/rust1/rust/README.md) for the full documentation,
+language support matrix, quickstart, and comparison with other Rust parsers.

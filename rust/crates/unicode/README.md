@@ -14,5 +14,5 @@ closure requires it, and it carries no stability guarantee of its own.
 
 **Status:** pre-release, not yet on crates.io.
 
-See [`../../README.md`](../../README.md) for the full documentation of the
-crate family.
+See [the project README](https://github.com/tmikov/hermes/blob/rust1/rust/README.md) for the full
+documentation of the crate family.
