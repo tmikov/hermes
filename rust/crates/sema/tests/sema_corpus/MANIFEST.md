@@ -29,8 +29,9 @@ Imported/Deferred tables' current reasons are kept synced to the current tree.
 **Citation note (added 2026-08-12):** the publication track renamed the five
 publishable Cargo packages to the `hermes-*` family, so the *current* spelling
 of a parser gate is `-p hermes-parser` (likewise `-p hermes-ast`,
-`-p hermes-support`). `-p sema`, `-p tools` and `-p command_line` are
-unchanged — those crates keep their bare names and `publish = false`. Per the
+`-p hermes-support`); `command_line` was renamed the same way on 2026-08-12,
+so it is now `-p hermes-command-line`. `-p sema` and `-p tools` are unchanged
+— those crates keep their bare names and `publish = false`. Per the
 same "kept for the history" convention, historical sections below still show
 `-p parser`/`-p ast`; those blocks also carry the corpus counts of their own
 date (e.g. "208 / 107" where the live gate now reports "219 / 109"), so they

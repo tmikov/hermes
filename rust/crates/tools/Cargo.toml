@@ -29,5 +29,5 @@ hermes_support = { path = "../support", package = "hermes-support" }
 hermes_atom_table = { path = "../atom_table", package = "hermes-atom-table" }
 hermes_ast = { path = "../ast", package = "hermes-ast" }
 hermes_parser = { path = "../parser", package = "hermes-parser" }
-command_line = { path = "../command_line" }
+hermes_command_line = { path = "../command_line", package = "hermes-command-line" }
 bumpalo = "3.16"

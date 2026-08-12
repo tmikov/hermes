@@ -10,6 +10,7 @@ use std::path::Path;
 use super::opt::*;
 use crate::cl::CommandLine;
 
+/// What the caller should do once [`CommandLine::parse()`] has succeeded.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum CommandLineIntent {
     /// Successful completion.

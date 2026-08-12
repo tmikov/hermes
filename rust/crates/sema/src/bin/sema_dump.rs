@@ -66,25 +66,25 @@
 //! [`exit_on_failure`]. The other dialect/eval flags above still apply
 //! normally in this mode.
 //!
-//! Command-line parsing uses the `command_line` crate (the LLVM-`cl`-style
+//! Command-line parsing uses the `hermes-command-line` crate (the LLVM-`cl`-style
 //! option parser copied from juno), like `parser`'s `ast-dump`.
 //!
-//! ## One `command_line`-vs-LLVM-`cl` spelling difference, and its exit code
+//! ## One `hermes-command-line`-vs-LLVM-`cl` spelling difference, and its exit code
 //!
 //! LLVM's `cl` accepts BOTH `-ferror-limit=2` and the space-separated
 //! `-ferror-limit 2` for a value-taking option; hermesc therefore takes
-//! either. The `command_line` crate's parser (`parser.rs`'s
+//! either. The `hermes-command-line` crate's parser (`parser.rs`'s
 //! `parse_long_arg`/`parse_single_dash_arg`) only ever reads the value out of
 //! the SAME argv element, so **only the `=` form works here** — the space
 //! form is rejected with "option requires a value". Closing that is a
-//! `command_line`-crate port item, not a Sema one, and is deliberately left
+//! `hermes-command-line`-crate port item, not a Sema one, and is deliberately left
 //! alone here.
 //!
 //! What the whole-Sema capstone review flagged (finding F3) was not the
-//! spelling but the exit code: `command_line`'s `parse_env_args` printed the
+//! spelling but the exit code: `hermes-command-line`'s `parse_env_args` printed the
 //! usage error and then called `exit(0)`, so `sema-dump -ferror-limit 2
 //! file.js` produced no dump yet reported SUCCESS — invisible to a scripted
-//! differential sweep. That is fixed at the source (`command_line`'s
+//! differential sweep. That is fixed at the source (`hermes-command-line`'s
 //! `cl.rs`, now `exit(1)`, matching LLVM's `ParseCommandLineOptions` error
 //! path and hermesc's own exit 1 on a bad option).
 //!
@@ -96,7 +96,7 @@
 
 use std::io::{self, Read, Write};
 
-use command_line::{CommandLine, Hidden, Opt, OptDesc};
+use hermes_command_line::{CommandLine, Hidden, Opt, OptDesc};
 use hermes_ast::context::{Context, NodeRc};
 use hermes_ast::node::Node;
 use hermes_parser::js::JSParserImpl;
@@ -159,7 +159,7 @@ struct Options {
     /// it, so a corpus file's `// FLAGS:` line — which
     /// `sema_differential.rs` appends VERBATIM to both binaries' argv — can
     /// name the flag once for both. It must be written `--Xparse-flow-match`
-    /// (double dash): `command_line`'s single-dash path treats `-X...` as a
+    /// (double dash): `hermes-command-line`'s single-dash path treats `-X...` as a
     /// short option `X` with an attached value, while LLVM's `cl` accepts
     /// either spelling, so the double-dash form is the one both sides
     /// understand. The other two hidden `-Xparse-*` flags
@@ -194,8 +194,8 @@ struct Options {
     /// spelling and `main`'s merge of the two into the effective value.
     fstd_globals: Opt<bool>,
     /// The negative spelling, `-fno-std-globals`. Kept as a separate `Opt`
-    /// rather than sharing `fstd_globals`'s storage (the `command_line`
-    /// crate's `OptDesc::opt_value` sharing exists, but each registered
+    /// rather than sharing `fstd_globals`'s storage (the
+    /// `hermes-command-line` crate's `OptDesc::opt_value` sharing exists, but each registered
     /// `Opt` unconditionally calls `OptValue::finish()`
     /// (`command_line/src/opt.rs:384-385`) via `CommandLine`'s parse-end
     /// sweep, and `OptValue::finish()` asserts it is never called twice

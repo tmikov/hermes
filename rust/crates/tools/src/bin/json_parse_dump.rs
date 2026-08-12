@@ -38,7 +38,7 @@ use std::io::{self, Read, Write};
 use std::time::Instant;
 
 use bumpalo::Bump;
-use command_line::{CommandLine, Opt, OptDesc};
+use hermes_command_line::{CommandLine, Opt, OptDesc};
 use hermes_atom_table::AtomTable;
 use hermes_parser::json::{JSONFactory, JSONParser};
 use hermes_support::json_emitter::JSONEmitter;

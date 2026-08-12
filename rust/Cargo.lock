@@ -9,10 +9,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
 
 [[package]]
-name = "command_line"
-version = "0.1.0"
-
-[[package]]
 name = "hermes-ast"
 version = "0.1.0"
 dependencies = [
@@ -22,6 +18,10 @@ dependencies = [
 
 [[package]]
 name = "hermes-atom-table"
+version = "0.1.0"
+
+[[package]]
+name = "hermes-command-line"
 version = "0.1.0"
 
 [[package]]
@@ -50,9 +50,9 @@ version = "0.1.0"
 name = "sema"
 version = "0.0.0"
 dependencies = [
- "command_line",
  "hermes-ast",
  "hermes-atom-table",
+ "hermes-command-line",
  "hermes-parser",
  "hermes-support",
 ]
@@ -62,9 +62,9 @@ name = "tools"
 version = "0.0.0"
 dependencies = [
  "bumpalo",
- "command_line",
  "hermes-ast",
  "hermes-atom-table",
+ "hermes-command-line",
  "hermes-parser",
  "hermes-support",
 ]

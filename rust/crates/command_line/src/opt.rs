@@ -15,11 +15,22 @@ use std::str::FromStr;
 
 use crate::cl::CommandLine;
 
+/// The callback that converts an option's string value into `T`, or into an
+/// error message to show the user. Boxed so that [`OptHolder`] need not be
+/// generic over the callback's type.
+type ParserFn<T> = Box<dyn Fn(&str) -> Result<T, String>>;
+
 /// This enum controls whether an option can have a value.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum ExpectedValue {
+    /// A value may be supplied. When it is omitted, [`OptDesc::def_value`] is
+    /// stored instead, if there is one.
     Optional,
+    /// A value must be supplied; omitting it is an error.
     Required,
+    /// A value must not be supplied; supplying one is an error. Each
+    /// occurrence stores [`OptDesc::def_value`] if there is one — for an enum
+    /// option, the value the matched name selects. This is how flags work.
     Disallowed,
 }
 
@@ -101,10 +112,10 @@ pub struct OptDesc<'a, T, S: Into<String>> {
     /// Short option name, e.g. "h". If both long and short names are omitted,
     /// the option is positional.
     pub short: Option<S>,
-    /// If specified, and [`long`] and [`short`] are missing, it is a list of
-    /// mutually exclusive options.
-    /// If specified, but [`long`] or [`short`] are present, it is a list of
-    /// possible values.
+    /// If specified, and [`Self::long`] and [`Self::short`] are missing, it is
+    /// a list of mutually exclusive options.
+    /// If specified, but [`Self::long`] or [`Self::short`] are present, it is a
+    /// list of possible values.
     pub values: Option<&'a [EnumDesc<T, S>]>,
     /// Initialize the option with this value,
     pub init: Option<T>,
@@ -127,6 +138,11 @@ pub struct OptDesc<'a, T, S: Into<String>> {
     /// Whether the option is hidden.
     pub hidden: Hidden,
     /// If this field is set, it allows several options to share a value.
+    ///
+    /// In practice two *registered* options cannot share one: parsing ends by
+    /// freezing every registered option's [`OptValue`], and freezing the same
+    /// one twice panics ("finish() must not be called twice"). Give each
+    /// option its own storage and merge the values afterwards instead.
     pub opt_value: Option<Rc<OptValue<T>>>,
     /// The category this option belongs to. The default 0 is "Generic Options".
     pub category: usize,
@@ -159,6 +175,17 @@ impl<T, S: Into<String>> OptDesc<'_, T, S> {
     }
 }
 
+/// A handle to a registered option, and the way its value is read back.
+///
+/// One of the constructors ([`Opt::new()`], [`Opt::new_list()`],
+/// [`Opt::new_enum()`], [`Opt::new_bool()`], [`Opt::new_flag()`],
+/// [`Opt::new_optional()`], [`Opt::with_parser()`]) registers the option with a
+/// [`CommandLine`] and returns this handle; cloning it shares the same
+/// underlying [`OptHolder`].
+///
+/// The value only becomes readable once parsing has finished. Dereferencing
+/// (`*opt`, the single or first value), indexing (`opt[i]`) or calling
+/// [`Opt::values()`] before that panics.
 #[derive(Clone)]
 pub struct Opt<T>(pub Rc<OptHolder<T>>);
 
@@ -193,6 +220,12 @@ impl<T> Opt<T> {
     }
 }
 
+/// The registered state of a single option: its names, value storage, parse
+/// callback and occurrence count.
+///
+/// This is the inside of an [`Opt`], reachable through that type's public
+/// field. Every field except [`OptHolder::category`] is private; they are
+/// filled in from the [`OptDesc`] the option was created with.
 pub struct OptHolder<T> {
     /// Long option name, e.g. "help". If both long and short names are omitted,
     /// the option is positional.
@@ -230,7 +263,7 @@ pub struct OptHolder<T> {
     pub category: usize,
 
     /// Callback to parse a string into T.
-    parser: Box<dyn Fn(&str) -> Result<T, String>>,
+    parser: ParserFn<T>,
     /// How many times has the option been specified.
     count: Cell<usize>,
 }
@@ -241,6 +274,10 @@ pub(crate) struct OptInfo<'a> {
     pub values_desc: Option<&'a [(String, String)]>,
     pub expected_value: ExpectedValue,
     pub min_count: usize,
+    /// Mirrors [`OptHolder::max_count`] to keep this a complete snapshot of the
+    /// descriptor, as in the juno original. Nothing reads it: `build_help()`
+    /// renders a positional's multiplicity from `list`/`min_count` alone, and
+    /// the occurrence check runs against `OptHolder` directly, not `OptInfo`.
     #[allow(dead_code)]
     pub max_count: usize,
     pub list: bool,
@@ -454,6 +491,13 @@ impl<T: 'static + Clone> CLOption for OptHolder<T> {
 }
 
 impl<T: 'static + Clone> Opt<T> {
+    /// Register an option whose value is produced by `parser`, a callback
+    /// converting the option's string value into `T` or into an error message.
+    /// This is the general constructor the type-specific ones are built on;
+    /// use it for a `T` that has no suitable [`FromStr`] implementation.
+    ///
+    /// Unlike [`Opt::new()`], this does not supply an initial value: for a
+    /// non-list option [`OptDesc::init`] must be set, or this panics.
     pub fn with_parser<S: Into<String> + Clone>(
         opts: &mut CommandLine,
         desc: OptDesc<T, S>,
@@ -466,7 +510,7 @@ impl<T: 'static + Clone> Opt<T> {
     fn with_parser_impl<S: Into<String> + Clone>(
         opts: &mut CommandLine,
         mut desc: OptDesc<T, S>,
-        parser: Box<dyn Fn(&str) -> Result<T, String>>,
+        parser: ParserFn<T>,
     ) -> Opt<T> {
         // Need to record this before fields start moving out.
         let is_enum_option = desc.is_enum_option();
@@ -684,7 +728,7 @@ impl<T: 'static + Clone> Opt<T> {
 }
 
 impl<U: 'static + Clone> Opt<Option<U>> {
-    /// Create a new option with type Option<U>.
+    /// Create a new option with type `Option<U>`.
     pub fn new_optional<S: Into<String> + Clone>(
         opts: &mut CommandLine,
         mut desc: OptDesc<Option<U>, S>,

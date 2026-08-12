@@ -23,7 +23,7 @@ rust/
     unicode/            Unicode character-property tables (generated from UnicodeData.inc)
     ast/                GC-arena AST: 271 ESTree nodes + JSON dumper
     parser/             lexer + JSON parser + JS parser
-    command_line/       LLVM-cl-style CLI flag parser — publish = false
+    command_line/       LLVM-cl-style CLI flag parser
     sema/               semantic validation and scope resolution — publish = false
     tools/              CLI drivers (ast-dump, json-parse-dump, gen-json,
                         preparse-dump) — publish = false
@@ -41,10 +41,11 @@ paths) are the `hermes-*` family:
 | `unicode/` | `hermes-unicode` | `hermes_unicode` | support crate |
 | `ast/` | `hermes-ast` | `hermes_ast` (also `hermes_parser::ast`) | stable public surface |
 | `parser/` | `hermes-parser` | `hermes_parser` | stable public surface |
+| `command_line/` | `hermes-command-line` | `hermes_command_line` | support crate |
 
-Cargo commands therefore take `-p hermes-parser`, not `-p parser`. The four
-internal crates (`command_line`, `sema`, `tools`, `comparison`) keep their bare
-package names and `publish = false`.
+Cargo commands therefore take `-p hermes-parser`, not `-p parser`. The three
+internal crates (`sema`, `tools`, `comparison`) keep their bare package names
+and `publish = false`.
 
 ### `support`
 
@@ -270,8 +271,9 @@ hermesc (C++ oracle) ← differential tests only
 `unicode`. The `ast` crate depends on `support` and `atom_table`. The `parser`
 crate depends on all of the above — and on nothing else: the CLI drivers and
 their `command_line` dependency live in the unpublished `tools` crate, so the
-published library is a pure library. The `command_line` crate is a thin CLI
-argument helper.
+published library is a pure library. The `hermes-command-line` crate is a thin
+CLI argument helper; it is published because the drivers are built on it, but
+nothing in `hermes-parser`'s dependency closure needs it.
 
 ---
 

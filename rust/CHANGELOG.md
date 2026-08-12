@@ -150,11 +150,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Byte-for-byte validated against captured `hermesc` output (`tests/golden.rs`).
 
 #### Packaging
-- The five published crates are named `hermes-parser`, `hermes-ast`,
-  `hermes-support`, `hermes-atom-table` and `hermes-unicode`, so the public
-  import paths are `hermes_parser::…`, `hermes_ast::…`, `hermes_support::…`,
-  `hermes_atom_table::…` and `hermes_unicode::…`. There are no `[lib] name`
+- The six published crates are named `hermes-parser`, `hermes-ast`,
+  `hermes-support`, `hermes-atom-table`, `hermes-unicode` and
+  `hermes-command-line`, so the public import paths are `hermes_parser::…`,
+  `hermes_ast::…`, `hermes_support::…`, `hermes_atom_table::…`,
+  `hermes_unicode::…` and `hermes_command_line::…`. There are no `[lib] name`
   overrides — the lib names are the package names with underscores.
+- `hermes-command-line` is the LLVM-`cl`-style option parser the project's own
+  CLI drivers are built on. It is the one published crate that is not in
+  `hermes-parser`'s dependency closure; it is dependency-free itself.
 - `hermes-parser` re-exports the AST crate under the short name `ast`, so
   `hermes_parser::ast::node::Node` and `hermes_ast::node::Node` name the same
   item, and depending on `hermes-parser` alone is enough.
@@ -164,7 +168,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 #### Tooling
 - The CLI drivers live in the unpublished `tools` crate (`publish = false`),
-  so the published library ships no binaries and no `command_line` dependency.
+  so the published `hermes-parser` library ships no binaries and does not
+  depend on `hermes-command-line`.
 - `ast-dump` binary: parses a JS/Flow file and dumps ESTree JSON, matching
   `hermesc -dump-ast` byte-for-byte.
 - `json-parse-dump` binary: parses a JSON file and re-emits it.

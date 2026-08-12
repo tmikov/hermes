@@ -44,7 +44,7 @@ cargo clippy --manifest-path rust/Cargo.toml
 
 The CLI drivers (`ast-dump`, `json-parse-dump`, `gen-json`, `preparse-dump`)
 live in the unpublished `tools` crate, not in `parser`: the published library
-ships no binaries and no `command_line` dependency.
+ships no binaries and no `hermes-command-line` dependency.
 
 ```bash
 cargo build --manifest-path rust/Cargo.toml -p tools

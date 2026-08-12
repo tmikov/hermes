@@ -19,6 +19,11 @@ struct OptionCategory {
     desc: Option<String>,
 }
 
+/// The set of options a program accepts, and the entry point for parsing.
+///
+/// Build one with [`CommandLine::new()`], register options against it by
+/// constructing [`Opt`] values, then consume it with [`CommandLine::parse()`]
+/// or [`CommandLine::parse_env_args()`].
 #[derive(Default)]
 pub struct CommandLine {
     desc: String,
@@ -30,6 +35,10 @@ pub struct CommandLine {
 }
 
 impl CommandLine {
+    /// Create a command line whose `desc` is the overview text printed after
+    /// `OVERVIEW: ` in the help. Registers the "Generic Options" category
+    /// (index 0, the default for [`OptDesc::category`]) and the built-in
+    /// `-h`/`--help` and `--help-hidden` flags.
     pub fn new<S: Into<String>>(desc: S) -> Self {
         let mut res = CommandLine {
             desc: desc.into(),
@@ -62,6 +71,10 @@ impl CommandLine {
         res
     }
 
+    /// Register a help category with the given name and optional description,
+    /// returning its index for use in [`OptDesc::category`]. Categories are
+    /// printed in registration order; while only the default category exists,
+    /// the help omits category headers entirely.
     pub fn add_category<S: Into<String>>(&mut self, name: S, description: Option<S>) -> usize {
         self.categories.push(OptionCategory {
             name: name.into(),
@@ -70,13 +83,18 @@ impl CommandLine {
         self.categories.len() - 1
     }
 
-    /// Parse the specified arguments.
+    /// Parse the specified arguments. `args[0]` is the program path, whose
+    /// file name is used in error and usage messages; parsing starts at
+    /// `args[1]`. On failure the error is a message ready to print.
     pub fn parse(self, args: &[String]) -> Result<CommandLineIntent, String> {
         let parser = Parser::new(self, args);
         parser.parse()
     }
 
-    /// Parse the program command line arguments.
+    /// Parse the program's own command line ([`std::env::args()`]), handling
+    /// the terminal cases itself: on a usage error, print the message to
+    /// stderr and exit 1; on `--help`, print the help text to stdout and exit
+    /// 0; otherwise return, leaving the options readable.
     pub fn parse_env_args(self) {
         let args: Vec<String> = std::env::args().collect();
         match self.parse(&args) {

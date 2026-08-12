@@ -143,9 +143,12 @@ prints a node-kind histogram). Run either with
 | `hermes-support` | `SourceErrorManager`, diagnostics, JSON emitter — support crate |
 | `hermes-atom-table` | String interner — support crate |
 | `hermes-unicode` | Unicode property tables — support crate |
+| `hermes-command-line` | LLVM-`cl`-style CLI option parser — support crate |
 
 The support crates are published only because the dependency closure requires
-it. Depend on them directly at your own risk; only `hermes-parser` and
+it — except `hermes-command-line`, which nothing in that closure needs and
+which is published because the project's own CLI drivers are built on it.
+Depend on any of them directly at your own risk; only `hermes-parser` and
 `hermes-ast` carry stable public API guarantees.
 
 ## Support
@@ -155,4 +158,4 @@ Issues and PRs are welcome and addressed as time permits. There is no SLA.
 ## License
 
 MIT — see [LICENSE](LICENSE). The Hermes C++ engine and the juno crates
-(`atom_table`, `unicode`) are credited in [NOTICE](NOTICE).
+(`atom_table`, `unicode`, `command_line`) are credited in [NOTICE](NOTICE).

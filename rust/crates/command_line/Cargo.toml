@@ -1,9 +1,16 @@
 [package]
-name = "command_line"
+name = "hermes-command-line"
 version = "0.1.0"
-authors = ["Facebook"]
-edition = "2018"
+edition = "2021"
+description = "LLVM-cl-style command-line option parser used by the Hermes Rust front-end tools."
 license = "MIT"
-# Internal-only: a Meta-authored helper with a generic name. Never publish it —
-# only support/atom_table/unicode/ast/parser go to crates.io.
-publish = false
+repository = "https://github.com/tmikov/hermes"
+authors = ["Tzvetan Mikov <tmikov@gmail.com>"]
+keywords = ["cli", "command-line", "argument", "options", "getopt"]
+categories = ["command-line-interface", "development-tools"]
+readme = "README.md"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[dependencies]

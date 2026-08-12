@@ -7,7 +7,8 @@ Not an official Meta project and not supported by Meta.
 This work is a faithful port of the Hermes JavaScript engine front-end:
   https://github.com/facebook/hermes  (MIT License, (c) Meta Platforms, Inc.)
 
-The `atom_table` and `unicode` crates are derived from the juno project:
+The `atom_table`, `unicode` and `command_line` crates are derived from the
+juno project:
   https://github.com/facebook/hermes/tree/main/unsupported/juno  (MIT License)
 
 Licensed under the MIT License. See LICENSE.

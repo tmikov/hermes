@@ -21,12 +21,12 @@
 //!
 //! Usage: gen-json <count>
 //!
-//! Command-line parsing uses the `command_line` crate (the LLVM-`cl`-style
+//! Command-line parsing uses the `hermes-command-line` crate (the LLVM-`cl`-style
 //! option parser copied from juno).
 
 use std::io::{self, BufWriter, Write};
 
-use command_line::{CommandLine, Opt, OptDesc};
+use hermes_command_line::{CommandLine, Opt, OptDesc};
 
 /// Command-line options. A single required positional `<count>`.
 struct Options {
