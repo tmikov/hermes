@@ -53,6 +53,18 @@ bins into an unpublished `tools` crate (removes the `command_line` publish block
 
 ## ⚠️ MUST reconcile before publishing any perf claim
 
+> **SUPERSEDED by user decision 2026-08-12 (later the same day): public docs
+> and READMEs carry NO performance mentions at all.** The reconciled perf note
+> below was subsequently REMOVED from `rust/README.md`, and FEATURE-MATRIX's
+> perf section was replaced with a "not published at this time" stub, after
+> the measurement was found too noisy to publish (±30% session-to-session
+> swing on the C++ react number: 149.9 → 113.1 MiB/s across sessions;
+> full-lifecycle timing compresses ratios; the "1.3×" SWC floor didn't
+> reproduce). Internal data stays in `BENCH-RESULTS.md` + the 06-30
+> investigation doc; the blog draft carries a perf-claim gate banner. To
+> publish perf claims later: pinned CPU + performance governor, PARSE-ONLY
+> timing both sides, more fixtures, fresh runs.
+>
 > **RECONCILED 2026-08-12** (commits `f39215889`, `5e5cba67c`): the README perf
 > note, BENCH-RESULTS.md, FEATURE-MATRIX.md and the blog draft were rewritten
 > against a re-measured **Clang-built** C++ baseline. The old GCC numbers are

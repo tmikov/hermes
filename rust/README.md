@@ -66,39 +66,9 @@ See [`crates/comparison/FEATURE-MATRIX.md`](crates/comparison/FEATURE-MATRIX.md)
 for a detailed feature and conformance matrix comparing `hermes-parser`, SWC,
 OXC, Biome, and Boa.
 
-### Directional performance note
-
-This is a fidelity-first port. The AST uses a GC arena rather than a bump
-allocator, which does different amounts of work than OXC's bump AST or Biome's
-lossless CST. These are apples-to-oranges comparisons.
-
-Verified directional numbers (Criterion + Clang-built Release C++ `parse-bench`;
-same machine; median; FullParse/eager; one process per measurement; MiB/s;
-re-measured 2026-08-12):
-
-- The Rust port **tracks C++ Hermes** — it reaches 83–85% of Clang-built C++
-  Hermes throughput on the small and medium fixtures (react 95.6 vs 113.1,
-  jquery 72.5 vs 86.9, three.min 42.1 vs 49.9) and 61% on the 8.7 MB typescript
-  fixture (61.5 vs 100.7). The large-file gap's root cause is AST node footprint
-  at scale (128-byte uniform `Node` enum, ~14× source size live), not GC
-  collection.
-- The Rust port is **comparable to SWC** — ahead on jquery and three.min, ~2%
-  behind on react and typescript — and the C++ front-end it ports is **1.3–1.9×
-  faster than SWC** on every workload in the deeper study linked below.
-- **OXC is faster than Hermes by ~1.3–1.7×** on the fair, equal-work comparison
-  (parse + binding/semantic). A parse-vs-parse number overstates the gap: Hermes
-  interns every identifier and converts numeric literals to `f64` during the parse,
-  work OXC defers to `oxc_semantic`. That ~1.3–1.7× is measured against C++
-  Hermes; a Rust binding/semantic pass exists in-tree but is not published yet, so
-  the equal-work benchmark for the port itself is future work.
-
-See [`crates/comparison/BENCH-RESULTS.md`](crates/comparison/BENCH-RESULTS.md)
-for the port's full table, methodology, and large-file decomposition, and
-[the C++ front-end perf investigation](../doc/superpowers/2026-06-30-hermes-vs-oxc-parser-perf.md)
-for the OXC/SWC study.
-
-Performance is a secondary concern. The headline is correctness: byte-for-byte
-agreement with the production C++ engine.
+This project does not publish performance comparisons at this time. The
+headline is correctness: byte-for-byte agreement with the production C++
+engine.
 
 ## Quickstart
 

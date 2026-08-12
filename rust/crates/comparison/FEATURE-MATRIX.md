@@ -34,16 +34,17 @@ Three differentiators separate the Hermes Rust port from every other parser in t
 ## Feature Matrix
 
 Versions verified: `swc_ecma_parser 41.1.1`, `oxc_parser 0.137.0`,
-`biome_js_parser 0.5.7` (docs/source; not benchmarked — build failure in
-published crates, see perf section), `boa_parser 0.21.1`.
+`biome_js_parser 0.5.7` (docs/source only — a publish mismatch between
+`biome_js_syntax` and `biome_rowan` makes it unbuildable as a standalone
+dependency), `boa_parser 0.21.1`.
 Research date: 2026-06-19.
 
 | Feature | hermes-parser (this port) | SWC `swc_ecma_parser` 41.1.1 | OXC `oxc_parser` 0.137.0 | Biome `biome_js_parser` 0.5.7 | Boa `boa_parser` 0.21.1 |
 |---|---|---|---|---|---|
 | **ECMAScript coverage** | ✅ ES2025+; standard JS grammar complete | ✅ ES2025+; passes nearly all tc39/test262 | ✅ ES2025+; full latest stable ECMAScript | ✅ ES2025+; JS + TS + JSX | ✅ ES2025; ~94% test262 conformance (v0.21 release notes) |
 | **Stage 3+ proposals** | ✅ Decorators (Hermes set), `using`/`await using` | ✅ Decorators, `import attributes`, more | ✅ Stage 3 Decorators, import attributes | ✅ Decorators, experimental parameter decorators opt-in | ⚠️ Engine-focused; subset of proposals |
-| **JSX** | 🚧 Lexer complete; parser not yet wired | ✅ Full JSX + TSX | ✅ Full JSX + TSX | ✅ Full JSX + TSX | ❌ Not supported |
-| **TypeScript** | 🚧 In progress (P7); type-annotation core landed; object types + interface + class members + enums remain | ✅ Full TS 5.x including decorators, `satisfies`, `const` type params | ✅ Full TS 5.x including all modern syntax | ✅ Full TS + TSX | ❌ Not supported |
+| **JSX** | ✅ Complete; byte-for-byte differential-tested vs `hermesc -parse-jsx` | ✅ Full JSX + TSX | ✅ Full JSX + TSX | ✅ Full JSX + TSX | ❌ Not supported |
+| **TypeScript** | ✅ Complete (Hermes `-parse-ts` subset: what `hermesc` accepts, e.g. no `satisfies`/`abstract`/`declare`); differential-tested | ✅ Full TS 5.x including decorators, `satisfies`, `const` type params | ✅ Full TS 5.x including all modern syntax | ✅ Full TS + TSX | ❌ Not supported |
 | **Flow** | ✅ **Complete** — full type grammar, `declare` family, `enum`, `component`/`hook`, `record`/`tuple`, `match`; byte-for-byte differential-tested | ✅ Partial — `Syntax::Flow` opt-in strips type-only constructs; `components`, `enums`, `patternMatching` options present; coverage shallower than this port | ❌ Not supported | ❌ Not supported | ❌ Not supported |
 | **AST model** | Own AST; ESTree node shapes (271 nodes from `ESTree.def`), GC-arena-allocated, JSON-dumpable | Own `swc_ecma_ast` (ESTree-inspired but not compatible); heap-allocated (`Box`/`Vec`) | Own AST; **ESTree-compatible output** (100% compatible with acorn); bump-arena allocated | **Lossless CST** (fork of rowan/rust-analyzer green/red tree); not ESTree | Own AST; ESTree-inspired; heap-allocated |
 | **Error recovery / tolerant parsing** | ❌ Fail-fast (mirrors C++ Hermes); errors terminate parse | ⚠️ Partial — can return `Ok(Module)` with errors emitted to handler; some panics on malformed input documented | ✅ Advanced error recovery; recoverable vs. unrecoverable errors distinguished | ✅ **Fully tolerant** — any input produces a CST; errors wrapped in `ERROR` nodes; designed for IDE use | ⚠️ Limited; engine-focused error handling |
@@ -76,8 +77,8 @@ GitHub `crates/swc_ecma_parser/` source (2026-06-19).
 
 ### OXC (`oxc_parser` 0.137.0)
 
-OXC is the fastest parser in this comparison by a wide margin. Its bump-arena
-allocation (`oxc_allocator`) and u32 spans explain much of the throughput advantage.
+OXC is built around bump-arena allocation (`oxc_allocator`), u32 spans, and a
+defer-work-out-of-parse design (zero-copy atoms, lazy semantics).
 ESTree compatibility (100% acorn-compatible output) makes it drop-in for tooling.
 Full TypeScript 5.x and JSX/TSX. No Flow support — not planned (Flow is treated as
 a separate dialect handled by other tools; Prettier's Hermes plugin is recommended
@@ -117,78 +118,21 @@ standalone parse library. Its parser is an internal component that feeds the
 interpreter. It does not support TypeScript, JSX, or Flow — it targets plain
 ECMAScript. Test262 conformance is ~94% as of v0.21.
 
-The throughput is significantly lower than the other parsers (~8× slower than this
-port on the react fixture) because Boa's parser performs additional work during
-parsing (scope resolution, interning) that the other parsers defer or skip.
+Boa's parser performs additional work during parsing (scope resolution,
+interning) that the other parsers defer or skip, so throughput comparisons
+against it are not meaningful.
 
 Verified against: Boa v0.21 release blog (`boajs.dev/blog/2025/10/22/boa-release-21`),
 `github.com/boa-dev/boa` README (2026-06-19).
 
 ---
 
-## Performance (Directional)
+## Performance
 
-> **Important caveat:** These numbers are directional only. Each parser does
-> different amounts of work: different AST shapes, different interning strategies,
-> arena vs. heap allocation, presence or absence of scope resolution during parse.
-> A faster number here does not mean a better parser for your use case.
-
-Full methodology, all fixture sizes, and the trailing-error fairness guard are
-documented in [`BENCH-RESULTS.md`](BENCH-RESULTS.md).
-
-Benchmarked with Criterion.rs (`opt-level = 3`) for Rust parsers and the
-**Clang-built** Release C++ `parse-bench` tool for the C++ Hermes baseline
-(a bare `cmake -DCMAKE_BUILD_TYPE=Release` selects GCC on Ubuntu and understates
-C++ Hermes). Per-iteration fresh `Context`; `FullParse`/eager; median; same
-machine; one process per (parser, fixture). Four fixtures including the 8.7 MB
-typescript.js (plain JS — TS/JSX in this port are in progress and were not exercised).
-
-Re-measured 2026-08-12; supersedes the 2026-06-19 table, whose C++ column was
-GCC-built.
-
-| Parser | react 107K | jquery 278K | three.min 654K | typescript 8.7M |
-|---|---|---|---|---|
-| **hermes-parser (this port)** | 95.6 | 72.5 | 42.1 | 61.5 |
-| **C++ Hermes (Clang, Release)** | 113.1 | 86.9 | 49.9 | 100.7 |
-| `oxc_parser` 0.137.0 | 192.9 | 124.1 | 75.6 | 149.1 |
-| `swc_ecma_parser` 41.1.1 | 97.1 | 70.5 | 36.2 | 62.4 |
-| `boa_parser` 0.21.1 | 12.1 | 10.6 | 4.7 | 5.0 |
-| `biome_js_parser` 0.5.7 | not benchmarked (build failure) | — | — | — |
-
-Numbers are MiB/s (median). Higher is faster.
-
-**Key directional conclusions (verified):**
-
-- **The Rust port tracks the C++ Hermes baseline without reaching it.** It runs
-  at 83–85% of Clang-built C++ Hermes on react, jquery and three.min. This is
-  the primary performance claim for a faithful port: the same order of
-  throughput as the original engine.
-- **The Rust port reaches 61% of C++ Hermes on the 8.7 MB typescript fixture**
-  (61.5 vs 100.7 MiB/s). Root cause (verified by decomposition): each AST node is a
-  uniform 128-byte `Node` enum; ~904,000 nodes for typescript.js ≈ ~123 MiB live AST
-  (~14× the source), exceeding CPU cache. Boxing the large variants is a candidate
-  fix (unvalidated hypothesis — boxing trades footprint for indirection; net effect
-  must be measured). See BENCH-RESULTS.md for full decomposition.
-- **The OXC gap is a design difference, not a port regression — and it is
-  smaller than parse-vs-parse suggests.** Parse-only, OXC is 1.7–2.4× faster
-  than this port. On the fair, equal-work comparison — parse + binding/semantic,
-  which forces OXC to do the scope/symbol/interning work it defers out of parse
-  — OXC leads C++ Hermes by only 1.3–1.7×
-  ([investigation](../../../doc/superpowers/2026-06-30-hermes-vs-oxc-parser-perf.md)).
-  OXC's bump allocator and zero-copy `Atom` type are structurally different from
-  Hermes's atom interning and GC-arena AST, and any faithful port of Hermes
-  inherits that difference. Against SWC the port is comparable rather than
-  uniformly ahead: faster on jquery and three.min, ~2% behind on react and
-  typescript.
-- Boa is ~8× slower; its parser performs scope resolution during parse.
-- Biome's lossless CST does fundamentally different work; throughput comparison is
-  not meaningful.
-
-The benchmark source is in `benches/parse_throughput.rs`; run with:
-
-```
-bash rust/crates/comparison/fetch_fixtures.sh   # download fixtures once
-# One benchmark per process: the group is sensitive to what ran before it in
-# the same process (see BENCH-RESULTS.md).
-cargo bench --manifest-path rust/crates/comparison/Cargo.toml -- '^parse/hermes/react$'
-```
+Performance comparisons are intentionally not published at this time: the
+existing measurements are directional (single machine, no CPU pinning, and a
+demonstrated ±30% session-to-session swing on the C++ baseline), which is not
+a standard we want public claims to rest on. Internal measurement notes and
+raw data live in `BENCH-RESULTS.md` (this directory, unpublished crate) and
+`doc/superpowers/2026-06-30-hermes-vs-oxc-parser-perf.md`; the benchmark
+source is `benches/parse_throughput.rs`.

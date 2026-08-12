@@ -6,6 +6,14 @@
 comparison data is confirmed.
 **Venue:** TBD (personal blog / Rust community / engineering blog)
 
+> **⚠️ PERF-CLAIM GATE (decision 2026-08-12):** no performance numbers or
+> comparisons may be published anywhere until the benchmark methodology is
+> hardened (CPU pinning, performance governor, PARSE-ONLY timing on both
+> sides, more fixtures — the current data shows ±30% session-to-session swing
+> on the C++ baseline). The perf figures below are retained as internal notes
+> for the eventual rewrite; any published version of this post must either
+> omit them or use freshly measured, pinned-methodology numbers.
+
 ---
 
 ## How to Use This Draft

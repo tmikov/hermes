@@ -1,4 +1,9 @@
-# Benchmark Results — Verified
+# Benchmark Results — Internal Working Notes
+
+> **NOT FOR PUBLICATION (decision 2026-08-12):** public docs and READMEs carry
+> no performance claims. These numbers are directional (single machine, no CPU
+> pinning; the C++ baseline showed ±30% session-to-session swing) and are kept
+> only as internal working data for a future hardened re-measurement.
 
 **Current numbers:** see [Re-measurement (2026-08-12, Clang baseline)](#re-measurement-2026-08-12-clang-baseline).  
 **Platform:** Linux x86-64, single machine.

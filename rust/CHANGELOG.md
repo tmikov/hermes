@@ -43,7 +43,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Byte-for-byte differential validated against the real `json-parse-dump` C++
   oracle (17-file corpus including astral, lone-surrogate, hidden-class-shape,
   number edge cases, and 7 error cases).
-- JSON parse throughput within ~1.5% of C++ Release build on an 11.6 MB corpus.
 
 #### AST (`hermes-ast`)
 - GC-arena AST copied and adapted from juno: `Context`/`GCLock`/`NodeRc` +
