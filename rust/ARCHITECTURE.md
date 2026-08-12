@@ -11,8 +11,8 @@ authoritative log.
 
 ## Crate map
 
-The Rust workspace lives under `rust/` with five published library crates and
-four internal-only crates:
+The Rust workspace lives under `rust/` with six published library crates and
+three internal-only crates:
 
 ```
 rust/

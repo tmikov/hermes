@@ -7,8 +7,9 @@ Options are declared as typed handles registered against a `CommandLine`; each
 declaration returns an `Opt` that dereferences to the parsed value once parsing
 has finished. It covers long and short names, positional arguments,
 list-valued options, enum options (a set of mutually exclusive flags) and
-enum-valued options (`--opt=name`), minimum/maximum occurrence counts, help
-categories and hidden options. `--help` is generated from the declarations.
+enum-valued options (`--opt=name`), minimum/maximum occurrence counts, values
+shared between several options, help categories and hidden options. `--help` is
+generated from the declarations.
 
 The crate is Meta-authored and was copied from
 [`unsupported/juno/crates/command_line`](https://github.com/tmikov/hermes/tree/rust1/unsupported/juno/crates/command_line)
@@ -16,11 +17,13 @@ in the Hermes repository. It is *styled* after LLVM's `cl` library — it matche
 that library's command-line syntax and help layout — but it is not derived from
 LLVM source. Zero `unsafe` (`unsafe_code = "forbid"`) and no dependencies.
 
-Two behavioral changes have been made since the copy, both to align with LLVM
+Three behavioral changes have been made since the copy. Two align with LLVM
 `cl` (and therefore with `hermesc`): a single leading dash is accepted as a
 synonym for a double dash when it matches an option's full long name
 (`-parse-flow` == `--parse-flow`), and `parse_env_args()` exits with status 1,
-not 0, on a command-line usage error.
+not 0, on a command-line usage error. The third is a bug fix: sharing one
+`OptValue` between several options used to panic at the end of parsing, and now
+works.
 
 This is a support crate: it is published because the Hermes Rust front-end's
 tools (`ast-dump`, `json-parse-dump`, `gen-json`, `sema-dump`) are built on it,

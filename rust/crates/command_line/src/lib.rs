@@ -12,7 +12,8 @@
 //! once parsing has finished. Supported out of the box: long and short names,
 //! positional arguments, list-valued options, enum options (a set of mutually
 //! exclusive flags) and enum-valued options (`--opt=name`), minimum/maximum
-//! occurrence counts, help categories and hidden options. `--help` is
+//! occurrence counts, values shared between several options
+//! ([`OptDesc::opt_value`]), help categories and hidden options. `--help` is
 //! generated from the declarations.
 //!
 //! # Provenance
@@ -24,15 +25,19 @@
 //! source; the references to LLVM in the comments describe behavior being
 //! matched.
 //!
-//! Two behavioral changes have been made since the copy, both to align with
-//! LLVM `cl` (and therefore with `hermesc`):
+//! Three behavioral changes have been made since the copy:
 //!
 //! - A single leading dash is accepted as a synonym for a double dash when it
 //!   matches an option's full long name (`-parse-flow` == `--parse-flow`),
 //!   with single-character grouping (`-i32`, `-m 10`) as the fallback tried
-//!   only when no long name matches.
+//!   only when no long name matches. Aligns with LLVM `cl` and `hermesc`.
 //! - [`CommandLine::parse_env_args()`] exits with status 1, not 0, on a
-//!   command-line usage error.
+//!   command-line usage error. Aligns with LLVM `cl` and `hermesc`.
+//! - [`OptDesc::opt_value`] sharing works. In juno the end-of-parse sweep
+//!   froze the shared storage once per sharing option and the second freeze
+//!   asserted, so any two options sharing a value panicked; freezing is now
+//!   idempotent, and [`OptValue`] gained the two accessors needed to read a
+//!   shared storage directly.
 //!
 //! # Example
 //!

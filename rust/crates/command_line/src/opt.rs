@@ -79,13 +79,19 @@ impl<T> OptValue<T> {
         }
     }
 
-    /// Move the values into frozen storage, making them available for borrowing.
+    /// Move the values into frozen storage, making them available for
+    /// borrowing.
+    ///
+    /// Idempotent, because [`OptDesc::opt_value`] lets several registered
+    /// options share one storage and the end-of-parse sweep calls this once
+    /// per registered option. All values were pushed during parsing, so the
+    /// first call takes the complete vector and freezes it; a later call
+    /// finds `mutable` already emptied and its `set` fails, which is
+    /// discarded. Mutation after freezing stays an error — that is
+    /// [`Self::update_value()`]'s assert, not this one's.
     fn finish(&self) {
         let values = self.mutable.take();
-        assert!(
-            self.frozen.set(values).is_ok(),
-            "finish() must not be called twice"
-        );
+        let _ = self.frozen.set(values);
     }
 
     fn borrow_vec(&self) -> &Vec<T> {
@@ -97,6 +103,25 @@ impl<T> OptValue<T> {
         self.borrow_vec()
             .first()
             .expect("value must be set when borrowing non-list")
+    }
+
+    /// Return all values stored here.
+    ///
+    /// The counterpart of [`Opt::values()`] for a storage shared between
+    /// several options via [`OptDesc::opt_value`]: the values of every option
+    /// sharing it, in command-line order. Panics if called before parsing has
+    /// finished.
+    pub fn values(&self) -> &Vec<T> {
+        self.borrow_vec()
+    }
+
+    /// Return the single (or first) value stored here.
+    ///
+    /// The counterpart of dereferencing an [`Opt`] for a storage shared
+    /// between several options via [`OptDesc::opt_value`]. Panics if called
+    /// before parsing has finished, or if no value was stored.
+    pub fn value(&self) -> &T {
+        self.borrow_value()
     }
 }
 
@@ -139,10 +164,14 @@ pub struct OptDesc<'a, T, S: Into<String>> {
     pub hidden: Hidden,
     /// If this field is set, it allows several options to share a value.
     ///
-    /// In practice two *registered* options cannot share one: parsing ends by
-    /// freezing every registered option's [`OptValue`], and freezing the same
-    /// one twice panics ("finish() must not be called twice"). Give each
-    /// option its own storage and merge the values afterwards instead.
+    /// The sharing options accumulate into one storage in command-line order,
+    /// so a list collects every option's values and a non-list ends up with
+    /// the last occurrence's — which is how a positive and a negative
+    /// spelling of one flag (`--fstd-globals` / `--fno-std-globals`) resolve
+    /// against each other without a separate merge step. Read the result
+    /// through any of the [`Opt`] handles, or through [`OptValue::values()`] /
+    /// [`OptValue::value()`] on the storage itself. Occurrence counts stay
+    /// per-option.
     pub opt_value: Option<Rc<OptValue<T>>>,
     /// The category this option belongs to. The default 0 is "Generic Options".
     pub category: usize,
@@ -233,12 +262,12 @@ pub struct OptHolder<T> {
     /// Short option name, e.g. "h". If both long and short names are omitted,
     /// the option is positional.
     short: Option<String>,
-    /// If specified, and [`long`] and [`short`] are missing, it is a list of
-    /// mutually exclusive options.
-    /// If specified, but [`long`] or [`short`] are present, it is a list of
-    /// possible values.
+    /// If specified, and [`Self::long`] and [`Self::short`] are missing, it is
+    /// a list of mutually exclusive options.
+    /// If specified, but [`Self::long`] or [`Self::short`] are present, it is a
+    /// list of possible values.
     values: Option<Box<[T]>>,
-    /// The names and descriptions of the [`values`].
+    /// The names and descriptions of the [`Self::values`].
     values_desc: Option<Box<[(String, String)]>>,
     /// A default value to use when the value is omitted.
     def_value: Option<T>,
@@ -786,7 +815,8 @@ impl Opt<bool> {
     }
 }
 
-/// Return "s" if he value is 1, "" otherwise. For use in string formatting.
+/// Return "s" unless the value is 1, "" otherwise. For use in string
+/// formatting.
 fn plural(count: usize) -> &'static str {
     cond!(count != 1, "s", "")
 }
@@ -804,8 +834,8 @@ pub fn parse_bool(input: &str) -> Result<bool, String> {
     }
 }
 
-/// A parser for options that do not take a value. Ordinarily it should not be
-/// invoked because such options should have [`ExpectedValue::Disallowed`] set/
+/// A parser for options that do not take a value. Ordinarily it is never
+/// invoked, because such options should have [`ExpectedValue::Disallowed`] set.
 pub fn parse_disallowed<T>(_input: &str) -> Result<T, String> {
     Err(String::from("option does not take a value"))
 }

@@ -36,8 +36,10 @@ bins into an unpublished `tools` crate (removes the `command_line` publish block
 - Independent **MIT** crate, published **in-place from `rust/`** in the `tmikov/hermes`
   fork. No separate repo. Upstream merge is orthogonal.
 - Family: **`hermes-parser` + `hermes-ast`** (stable public API) + `hermes-support` /
-  `hermes-atom-table` / `hermes-unicode` (support crates). `command_line` +
-  `comparison` stay `publish = false`.
+  `hermes-atom-table` / `hermes-unicode` / `hermes-command-line` (support crates).
+  `sema`, `tools` + `comparison` stay `publish = false`.
+  (`command_line` was published as `hermes-command-line` on 2026-08-12 — scope
+  extension; it is dependency-free and not in `hermes-parser`'s closure.)
 - Provenance wording (verbatim, everywhere): "A Rust port of the Hermes front-end by
   Tzvetan Mikov, the architect of Hermes. Not an official Meta project and not
   supported by Meta." Do **not** emphasize the word "unofficial."
@@ -99,26 +101,29 @@ raw OXC parse-vs-parse number; it makes the port look ~2× slower for doing more
   `cmake -B cmake-build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
   -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++`.
 - Publish dependency order (Task 10): `hermes-unicode` → `hermes-atom-table` →
-  `hermes-support` → `hermes-ast` → `hermes-parser`.
+  `hermes-support` → `hermes-ast` → `hermes-parser`. `hermes-command-line` has no
+  dependencies, so its position is free.
 
 ## Launch runbook (as of 2026-08-12 — Tasks 3,4,5,6,10 complete, final review APPROVED)
 
 All automated prep is done: crates renamed `hermes-*` @ 0.1.0, API documented
 (`missing_docs` clean), `parse()` façade + examples, bins in unpublished
-`tools`, dry-run 5/5, perf claims reconciled. Only the manual, irreversible
+`tools`, dry-run 6/6, perf claims reconciled. Only the manual, irreversible
 steps remain:
 
 1. **Skip the placeholder name reservation** (plan Step 5) unless launch is
    weeks away — the real 0.1.0 publish IS the reservation, and placeholders
-   add five extra irreversible publishes plus junk 0.0.0 version rows.
+   add six extra irreversible publishes plus junk 0.0.0 version rows.
 2. **Publish with ONE multi-package invocation** (the plan's per-crate loop
    provably fails: versioned path deps resolve against the registry):
    ```bash
    cargo login <token>
    cargo publish --manifest-path rust/Cargo.toml \
      -p hermes-unicode -p hermes-atom-table -p hermes-support \
-     -p hermes-ast -p hermes-parser
+     -p hermes-ast -p hermes-parser -p hermes-command-line
    ```
+   Every crate to publish must be named explicitly — an omitted `-p` is
+   silently skipped, not an error.
    cargo stages them in dependency order and waits for index propagation.
    Verify each on crates.io and that docs.rs builds parser/ast.
 3. **Post-publish checklist:** re-point the crate READMEs' pinned
