@@ -34,23 +34,56 @@ between the parser and the compiler back end:
 The result is a `SemContext`: the `Decl`, `LexicalScope` and `FunctionInfo`
 records, plus the side tables mapping AST nodes to them.
 
+## The façade
+
+One call, taking `hermes-parser`'s `ParsedJS`:
+
+```rust
+use hermes_parser::{parse, ParseFlags};
+use hermes_sema::sem_context::DeclKind;
+
+let parsed = parse("var x = 1; x;", ParseFlags::default())?;
+let mut resolved = hermes_sema::resolve(parsed)?;
+
+// Every identifier now has a declaration to point at.
+let dump = resolved.to_sema_dump();          // `hermesc -dump-sema` text
+let sem = resolved.sem_context();            // Decls, scopes, functions
+```
+
+`resolve` **consumes** the `ParsedJS` and returns a `ResolvedJS` owning the
+arena, the resolved AST and the `SemContext`. That is not just tidiness: the
+resolver is a transforming visitor, so the root that comes out is a different
+node than the one that went in, and keeping the old one would silently read a
+stale tree.
+
+Read the tree with `ResolvedJS::with_program(|gc, root, sem| …)`, which hands
+the closure the `SemContext` alongside the node — resolution's whole point is
+asking, of a given identifier, which declaration it binds to.
+`ResolvedJS::into_parsed` gives the `ParsedJS` back (with the resolved tree)
+when you want the ESTree JSON dumper afterwards.
+
 ## Entry points
 
-Two, mirroring the two the C++ has:
+Three functions over the two the C++ has:
 
-- `resolve::resolve_ast` — the **compile** path (`compile = true`, C++
-  `sema::resolveAST`). It takes a list of ambient declaration files, performs
-  the AST rewrites above, and returns `None` when resolution fails, so a
-  caller can stop before code generation.
-- `resolve::resolve_ast_for_parser` — the **parser** path (`compile = false`,
-  C++ `sema::resolveASTForParser`). This is what a parser-only consumer wants:
-  no ambient declarations, no constant folding and no other compile-only
-  rewrite, and it always hands back a tree — the resolution errors are
-  reported through the `SourceErrorManager` but do not suppress the result.
+- `resolve` — the **parser** path plus the error check its C++ callers make by
+  hand: `Err(ResolveError)` if resolution reported anything. The default.
+- `resolve_for_parser` — the **parser** path exactly as C++
+  `sema::resolveASTForParser` defines it (`compile = false`): no ambient
+  declarations, no constant folding and no other compile-only rewrite, and it
+  *always* hands back a tree — resolution errors are reported through the
+  `SourceErrorManager` (`ResolvedJS::error_count`) but do not suppress the
+  result.
+- `resolve_for_compile` — the **compile** path (`compile = true`, C++
+  `sema::resolveAST`). It declares the standard globals (and any
+  `GlobalDefinitions` you add) as ambient declarations, performs the AST
+  rewrites listed above, rejects what the compiler cannot handle, and fails
+  outright rather than returning a tree.
 
-A one-call façade over `hermes-parser` + this crate is planned for the 0.1.0
-release; until it lands, parse with `hermes_parser` and pass the tree to one
-of the two entry points above.
+The two underlying entry points, `resolve::resolve_ast` and
+`resolve::resolve_ast_for_parser`, stay public: use them directly to share one
+`SemContext` across files or to drive a hand-built arena, the way
+`sema-dump` does.
 
 ## Validation
 

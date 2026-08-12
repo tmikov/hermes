@@ -179,6 +179,64 @@ impl ParsedJS {
         f(&gc, node)
     }
 
+    /// Run `f` with the arena locked, the `Program` node, and the source
+    /// manager, then adopt the node `f` returns as this `ParsedJS`'s program.
+    ///
+    /// This is [`with_program`](Self::with_program) for a pass that *rewrites*
+    /// the tree. A transforming visitor cannot mutate a node in place — the
+    /// arena hands out shared references — so it rebuilds the ancestors of
+    /// whatever it rewrote and returns a new root; that root is the one
+    /// carrying the pass's results, and keeping the old one would silently
+    /// read a stale tree. Returning it from the closure is how the new root
+    /// gets re-pinned here, in the one place that can do it without dropping
+    /// the arena or leaving the pin dangling: the old pin is released only
+    /// after the new one exists, and the arena is never touched in between.
+    /// Returning the node `f` was given is fine and means "unchanged".
+    ///
+    /// The `&mut SourceErrorManager` is the pass's diagnostic sink, and it is
+    /// the same one the parse used: a pass reports through it, and the
+    /// messages join the parse's in [`diagnostics`](Self::diagnostics).
+    ///
+    /// This exists for `hermes-sema`'s `resolve` façade, which is a
+    /// transforming visitor over exactly this shape; nothing about it is
+    /// specific to that crate.
+    ///
+    /// The escape rules of [`with_program`](Self::with_program) apply
+    /// unchanged: references into the arena cannot leave the closure (the
+    /// bound is higher-ranked for the same reason), while an
+    /// [`hermes_ast::context::NodeRc`] can — and dropping this `ParsedJS`
+    /// while one is alive panics inside `Context::drop`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if another [`GCLock`] is active on this thread — in particular
+    /// if this is called from inside [`with_program`](Self::with_program) or
+    /// from inside another `transform_program`.
+    pub fn transform_program<R, F>(&mut self, f: F) -> R
+    where
+        F: for<'gc> FnOnce(
+            &'gc GCLock<'static, '_>,
+            &'gc Node<'gc>,
+            &mut SourceErrorManager,
+        ) -> (&'gc Node<'gc>, R),
+    {
+        // Disjoint field borrows: `program` immutably, `ctx` mutably (through
+        // the lock), `sm` mutably.
+        let program = self.program.as_ref().expect("ParsedJS without program");
+        let gc = self.ctx.lock();
+        let node = program.node(&gc);
+        let (new_root, result) = f(&gc, node, &mut self.sm);
+        // Pin the new root *before* releasing the old pin, so the arena is
+        // never observed without one.
+        let new_program = NodeRc::from_node(&gc, new_root);
+        // Release the lock before the store: the old `NodeRc` is dropped by
+        // the assignment, and a `NodeRc` drop only decrements refcounts — it
+        // neither needs nor may take a lock.
+        drop(gc);
+        self.program = Some(new_program);
+        result
+    }
+
     /// Dump the AST as ESTree JSON: empty fields hidden, no `loc`/`range`,
     /// and `"raw"` source text on numeric literals (the only node the dumper
     /// emits it for). That is `hermesc -dump-ast` plus
@@ -441,6 +499,42 @@ mod tests {
         );
         assert!(with_loc.contains("\"loc\""), "{with_loc}");
         assert!(!with_loc.contains("\"raw\""), "{with_loc}");
+    }
+
+    #[test]
+    fn transform_program_adopts_the_returned_root() {
+        let mut parsed = parse("1 + 2;", ParseFlags::default()).unwrap();
+        // Stand in for a rewriting pass: hand back a *different* node of the
+        // same arena as the new root.
+        let old = parsed.transform_program(|_gc, program, sm| {
+            assert_eq!(sm.error_count(), 0);
+            let stmt = match program {
+                Node::Program(p) => p.body.iter().next().unwrap(),
+                _ => panic!("root is not a Program"),
+            };
+            let expr = match stmt {
+                Node::ExpressionStatement(e) => e.expression,
+                _ => panic!("not an ExpressionStatement"),
+            };
+            (expr, program.kind())
+        });
+        assert_eq!(old, NodeKind::Program);
+        // The new root is what every later read sees.
+        let kind = parsed.with_program(|_gc, root| root.kind());
+        assert_eq!(kind, NodeKind::BinaryExpression);
+        // The old root is unpinned but still allocated, and the arena is
+        // intact: dropping `parsed` must not panic (checked at scope exit).
+        assert!(parsed.ctx.num_nodes() > 0);
+    }
+
+    #[test]
+    fn transform_program_keeps_the_root_when_unchanged() {
+        let mut parsed = parse("var x;", ParseFlags::default()).unwrap();
+        parsed.transform_program(|_gc, program, _sm| (program, ()));
+        assert_eq!(
+            parsed.with_program(|_gc, root| root.kind()),
+            NodeKind::Program
+        );
     }
 
     #[test]
