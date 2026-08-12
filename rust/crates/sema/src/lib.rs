@@ -99,6 +99,11 @@
 //! - the lazy-compilation and `eval` entry points (`resolveASTLazy`,
 //!   `resolveASTInScope`), which need `SemContext`'s parent/child tree and
 //!   shared binding table — see [`mod@resolve`]'s module doc;
+//! - `visitProgram`'s `SaveAndRestore` of `globalScope_`
+//!   (`SemanticResolver.cpp:216-217`): the assignment is ported, the restore
+//!   is not. It only becomes observable once `Program` can recur, which is
+//!   the same lazy/`eval` work as the previous bullet — see the comment at
+//!   the site in `resolver/mod.rs`;
 //! - the FlowChecker itself, which is a separate C++ component and not part
 //!   of this crate.
 //!

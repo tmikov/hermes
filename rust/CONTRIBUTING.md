@@ -131,10 +131,19 @@ REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml \
     -p hermes-sema --test sema_differential -- --nocapture
 ```
 
-The sema differential must run against a **debug** build on the Rust side: the
-recursion limits are profile-selected on both sides, and `--release` also
-compiles out an assertion one corpus file exists to reproduce. See the module
-doc of `crates/sema/tests/sema_differential.rs`.
+**The differentials are debug-only against this oracle.** Run them with a
+plain `cargo test`, never `cargo test --release`. The recursion limits are
+profile-selected on both sides: the ASan oracle takes C++'s
+`HERMES_LIMIT_STACK_DEPTH` branch (parser limit 128, resolver limit 512),
+while the port mirrors that under `cfg!(debug_assertions)` and uses C++'s
+release values (1024/1024) otherwise. Debug-vs-ASan agrees; crossing the
+profiles does not. Concretely, `cargo test --release … sema_differential`
+fails on `nested-expressions.js` — the oracle reports the recursion-limit
+error at `12:46` and the port at `23:62` — and it always will. That is
+expected, not a port defect: do not "fix" it by changing a limit on either
+side. (`--release` additionally compiles out an assertion that one corpus
+file exists to reproduce.) See the module doc of
+`crates/sema/tests/sema_differential.rs`.
 
 The `REQUIRE_DIFFERENTIAL=1` environment variable causes the test to fail hard
 if the oracle binary is absent, rather than silently skip. Always set it when

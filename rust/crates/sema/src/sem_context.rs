@@ -210,6 +210,12 @@ pub enum DeclSpecial {
     /// (`funcArgumentsDecl`, SemContext.cpp:160-198) and consulted wherever a
     /// reference must be recognized as *the* `arguments` object rather than
     /// an ordinary variable of that name.
+    ///
+    /// Not every `arguments` decl carries it: when the closest non-arrow
+    /// ancestor is the *global* function, `func_arguments_decl` instead
+    /// creates an [`DeclKind::UndeclaredGlobalProperty`] decl with
+    /// [`DeclSpecial::NotSpecial`] (SemContext.cpp:178-184), because at top
+    /// level `arguments` is just an ordinary global property.
     Arguments,
     /// A declaration named `eval` (SemContext.h:113). Declared by the C++
     /// enum but never assigned: no site in `lib/` or `include/` sets

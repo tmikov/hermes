@@ -13,9 +13,12 @@
 //! "clean up" the formatting.
 //!
 //! **Stability: advanced / port-internal.** Same status as [`crate::dump`]:
-//! this exists to serve the differential harness, its shape is dictated by
-//! the C++ printer, and it is `pub` only because `tools`' `sema-dump` bin and
-//! the differential test drive it directly. Use
+//! this exists to serve the differential harness and its shape is dictated by
+//! the C++ printer. The in-tree consumers reach it through `crate::` and so
+//! would keep working at `pub(crate)` — [`crate::dump`] (`dump.rs`) builds a
+//! [`SemContextDumper`] itself, and `tools`' `sema-dump` bin only calls
+//! `dump::sem_dump`. The one external user is this crate's own integration
+//! test `tests/dump_context.rs`, which drives the dumper directly. Use
 //! [`crate::ResolvedJS::to_sema_dump`] for the dump; this module may change,
 //! or be demoted to `pub(crate)`, in a 0.x release. See the crate doc.
 //!

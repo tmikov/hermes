@@ -99,6 +99,16 @@ They are public because `sema-dump` and this crate's integration tests drive
 them directly, not because their shape is settled; they may change or be made
 private in a 0.x bump. Each says so in its own module documentation.
 
+One honest caveat about that stable surface: it reaches into `hermes-support`.
+`SemContext::binding_table()` returns a
+`hermes_support::persistent_scoped_map::PersistentScopedMap`, and the public
+`LexicalScope::binding_table_scope` field is a `ScopePtr` into it — so
+`PersistentScopedMap`, `Scope` and `ScopePtr` are part of what `sem_context`
+guarantees, even though the family README tells you to depend on
+`hermes-support` directly at your own risk. Those three types are covered by
+this crate's 0.1.x source-compatibility promise; the rest of `hermes-support`
+is not.
+
 Still unported from `lib/Sema`'s untyped path, and loud rather than silent
 where reached: the `$SHBuiltin` module protocol (`visitModuleFactory` /
 `visitModuleExport` / `visitModuleImport`, `resolveCommonJSAST`), and the

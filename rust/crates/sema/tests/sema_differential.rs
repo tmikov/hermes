@@ -66,7 +66,14 @@
 //! on (a non-degeneracy guard: an all-failing corpus would make the stdout/
 //! stderr comparison above vacuous in the success case).
 //!
-//! BUILD-PROFILE PAIRING (load-bearing, two independent reasons):
+//! BUILD-PROFILE PAIRING — THIS TEST IS DEBUG-ONLY BY DESIGN.
+//!
+//! Run it with a plain `cargo test`. `cargo test --release` FAILS on
+//! `nested-expressions.js` (oracle reports the recursion-limit error at
+//! `12:46`, the Rust side at `23:62`) and always will. That divergence is
+//! NOT a port defect and must not be "fixed" by changing a limit — it is
+//! the arithmetic consequence of pairing a 128-deep ASan oracle with a
+//! 1024-deep release build of the port. Two independent reasons:
 //!
 //!   1. The recursion limits are profile-selected on BOTH sides. The C++
 //!      oracles are ASan builds, so they take the `HERMES_LIMIT_STACK_DEPTH`
