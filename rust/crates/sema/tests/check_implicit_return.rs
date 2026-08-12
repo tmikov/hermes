@@ -28,11 +28,11 @@ use hermes_ast::context::{Context, GCLock};
 use hermes_ast::node::Node;
 use hermes_parser::js::JSParserImpl;
 use hermes_parser::lexer::{GrammarContext, JSLexer};
+use hermes_sema::ids::FunctionInfoId;
+use hermes_sema::keywords::Keywords;
+use hermes_sema::resolve::resolve_ast;
+use hermes_sema::sem_context::SemContext;
 use hermes_support::manager::SourceErrorManager;
-use sema::ids::FunctionInfoId;
-use sema::keywords::Keywords;
-use sema::resolve::resolve_ast;
-use sema::sem_context::SemContext;
 
 /// Parse `src` as a `Program` and return its root node, panicking on any
 /// parse error.

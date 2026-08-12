@@ -19,21 +19,21 @@
 //!     with `compile = true` and skips the dump on error
 //!     (`CompilerDriver.cpp:960-974`).
 //!
-//! GATE COMMANDS (this test needs the `sema-dump` bin, which is behind the
-//! `dump-bin` feature — a test cannot depend on its own crate's features any
-//! other way, hence the `#![cfg]` below and the `--features` flag; the
-//! parser-entry gate additionally needs the `sema-parser-dump` C++ tool):
+//! GATE COMMANDS (the parser-entry gate additionally needs the
+//! `sema-parser-dump` C++ tool):
 //!
 //! ```text
 //! cmake --build cmake-build-asan --target hermesc
 //! cmake --build cmake-build-asan --target sema-parser-dump
 //! REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml \
-//!     -p sema --features dump-bin --test sema_differential -- --nocapture
+//!     -p hermes-sema --test sema_differential -- --nocapture
 //! ```
 //!
-//! Without `--features dump-bin` the whole file compiles away to nothing, so
-//! a plain `cargo test` over the workspace stays green (and silently skips
-//! this oracle).
+//! The `sema-dump` driver lives in the unpublished `tools` crate, so this test
+//! builds it and finds it through [`common::tools_bin`] rather than through
+//! Cargo's `CARGO_BIN_EXE_<name>` (which is only defined for binaries of the
+//! same package). A plain `cargo test` over the workspace stays green: without
+//! the C++ oracles present the run skips (see the bottom of this doc).
 //!
 //! Flag pairing: both oracle binaries and `sema-dump` take the file as their
 //! only positional argument; `-fstd-globals`/`-fno-std-globals` (which loads
@@ -87,10 +87,10 @@
 //! `REQUIRE_DIFFERENTIAL=1` to turn a missing oracle into a hard failure
 //! (used in CI).
 
-#![cfg(feature = "dump-bin")]
-
 use std::path::PathBuf;
 use std::process::Command;
+
+mod common;
 
 /// Selects which oracle/Rust binary pair [`run_differential`] exercises —
 /// see the module doc for what each variant ports.
@@ -221,19 +221,11 @@ fn run_differential(
         return;
     }
 
-    // CARGO_BIN_EXE_sema-dump is set by Cargo to the path of the sema-dump
-    // binary in the current build profile. It only exists because this test
-    // is compiled with the `dump-bin` feature, which is what makes the
-    // `[[bin]]`'s `required-features` satisfied. Both pairs use this same
-    // binary — see `ToolPair::rust_base_args`.
-    let sema_dump = PathBuf::from(env!("CARGO_BIN_EXE_sema-dump"));
-    assert!(
-        sema_dump.exists(),
-        "sema-dump binary not found at {}; run: cargo build \
-         --manifest-path rust/Cargo.toml -p sema --features dump-bin \
-         --bin sema-dump",
-        sema_dump.display()
-    );
+    // `sema-dump` is a binary of the `tools` crate, so Cargo neither builds it
+    // for this test nor defines `CARGO_BIN_EXE_sema-dump`; `tools_bin` builds
+    // it (once per test process) and returns its exact path. Both pairs use
+    // this same binary — see `ToolPair::rust_base_args`.
+    let sema_dump = common::tools_bin("sema-dump");
 
     let corpus_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(corpus);
     let mut files: Vec<PathBuf> = std::fs::read_dir(&corpus_dir)

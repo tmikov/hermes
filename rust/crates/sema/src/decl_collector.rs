@@ -22,10 +22,10 @@
 //!   `DeclCollector` is meant to outlive the `GCLock` it was built under
 //!   (the C++ instance is `unique_ptr`-owned per function and consulted
 //!   long after the initial walk), so every stored declaration reference is
-//!   pinned via `NodeRc` — the same convention `sema::sem_context` uses for
+//!   pinned via `NodeRc` — the same convention `hermes_sema::sem_context` uses for
 //!   its `hoistedFunctions`/`imports` backrefs (see that module's doc).
 //! - **The scope-keyed map (`scopes_`) is keyed by `hermes_ast::NodeId`, not by
-//!   `ESTree::Node*` identity.** Same reasoning as `sema::sem_context`'s
+//!   `ESTree::Node*` identity.** Same reasoning as `hermes_sema::sem_context`'s
 //!   side tables: `NodeId` is the stable, non-aliasing identity for a node
 //!   (see `hermes_ast::NodeId`'s doc comment), and callers already have the
 //!   scope-creating node in hand (they're the ones walking the AST) when
@@ -56,7 +56,7 @@
 //! - **`DeclCollector::clone` (header lines 63-65) is not ported.** It
 //!   exists solely to support `ESTreeClone`, which this Rust port has not
 //!   built yet (same reasoning as the `ESTreeClone`-only fields skipped in
-//!   `sema::sem_context`, e.g. around SemContext.h:270,397) — revisit when
+//!   `hermes_sema::sem_context`, e.g. around SemContext.h:270,397) — revisit when
 //!   `ESTreeClone` lands.
 //! - `getScopeDeclsForNode`/`getScopedFuncDecls` become
 //!   `scope_decls_for_node`/`scoped_func_decls`. `DeclCollectorMapTy`
@@ -141,7 +141,7 @@ impl DeclCollector {
     ///
     /// \param node_id the id of an AST node which could have created a
     ///   scope (the only nodes which can are decorated with a `scope`
-    ///   Cell — see `sema::dump`'s `node_scope` for the exact list).
+    ///   Cell — see `hermes_sema::dump`'s `node_scope` for the exact list).
     /// \return the `ScopeDecls` if the AST node did create a (non-empty)
     ///   scope, `None` if it didn't (either it can't create a scope, or it
     ///   did but collected no declarations — see `closeScope`'s
@@ -158,7 +158,7 @@ impl DeclCollector {
     /// Port of `DeclCollector::dump` (cpp:99-110): debug introspection.
     /// Prefer `scope_decls_for_node`/`scoped_func_decls` for assertions —
     /// see the deviations below for why this isn't a good fit for exact
-    /// golden-text comparisons the way `sema::dump`'s dumpers are.
+    /// golden-text comparisons the way `hermes_sema::dump`'s dumpers are.
     ///
     /// ## Deviations
     /// - C++ prints `getNodeName()` and the raw `Node*` address for the

@@ -11,9 +11,9 @@
 //!
 //! Source of truth in the C++ tree:
 //! - `include/hermes/Sema/SemContext.h` (`Decl`, `LexicalScope`,
-//!   `FunctionInfo` — see `sema::ids`)
+//!   `FunctionInfo` — see `hermes_sema::ids`)
 //! - `include/hermes/AST/Context.h` (`Keywords`, line 168) and
-//!   `include/hermes/AST/Keywords.def` (see `sema::keywords`)
+//!   `include/hermes/AST/Keywords.def` (see `hermes_sema::keywords`)
 //! - `lib/Sema/SemanticResolver.cpp` / `include/hermes/Sema/SemResolve.h`
 //!   (the validator/resolver this crate will host as later tasks land)
 

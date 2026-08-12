@@ -24,10 +24,15 @@ path = "src/bin/gen_json.rs"
 name = "preparse-dump"
 path = "src/bin/preparse_dump.rs"
 
+[[bin]]
+name = "sema-dump"
+path = "src/bin/sema_dump.rs"
+
 [dependencies]
 hermes_support = { path = "../support", package = "hermes-support" }
 hermes_atom_table = { path = "../atom_table", package = "hermes-atom-table" }
 hermes_ast = { path = "../ast", package = "hermes-ast" }
 hermes_parser = { path = "../parser", package = "hermes-parser" }
+hermes_sema = { path = "../sema", package = "hermes-sema" }
 hermes_command_line = { path = "../command_line", package = "hermes-command-line" }
 bumpalo = "3.16"

@@ -5,7 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-//! Tests for `sema::sem_context`, ported switch-arm-for-switch-arm from
+//! Tests for `hermes_sema::sem_context`, ported switch-arm-for-switch-arm from
 //! `lib/Sema/SemContext.cpp`. See task-4-brief.md sections A-D.
 
 use hermes_ast::context::{Context, GCLock};
@@ -13,9 +13,9 @@ use hermes_ast::node::{
     ClassBody, ClassDeclaration, Identifier, MethodDefinition, Node,
 };
 use hermes_ast::node_child::{NodeList, NodeMetadata};
-use sema::ids::{DeclId, FunctionInfoId, ScopeId};
-use sema::keywords::Keywords;
-use sema::sem_context::{
+use hermes_sema::ids::{DeclId, FunctionInfoId, ScopeId};
+use hermes_sema::keywords::Keywords;
+use hermes_sema::sem_context::{
     ConstructorKind, Constness, DeclKind, DeclSpecial, FuncIsArrow, SemContext,
 };
 
@@ -1015,7 +1015,7 @@ fn private_name_identifier_prefixes_a_hash() {
     let gc = GCLock::new(&mut ctx);
 
     let x = gc.atom_bytes("x");
-    let mangled = sema::sem_context::private_name_identifier(&gc, x);
+    let mangled = hermes_sema::sem_context::private_name_identifier(&gc, x);
     assert_eq!(gc.bytes(mangled), b"#x");
     // Same atom table as ordinary identifiers, so this is atom equality.
     assert_eq!(mangled, gc.atom_bytes("#x"));
@@ -1023,18 +1023,23 @@ fn private_name_identifier_prefixes_a_hash() {
     assert_ne!(mangled, x);
 
     // Stable across calls.
-    assert_eq!(mangled, sema::sem_context::private_name_identifier(&gc, x));
+    assert_eq!(
+        mangled,
+        hermes_sema::sem_context::private_name_identifier(&gc, x)
+    );
 
     // Only ONE `#` is added: mangling an already-mangled name double-prefixes
     // rather than being a no-op (nothing does that, but it pins that the
     // function is a plain prefix, not a normalizer).
-    let twice = sema::sem_context::private_name_identifier(&gc, mangled);
+    let twice = hermes_sema::sem_context::private_name_identifier(&gc, mangled);
     assert_eq!(gc.bytes(twice), b"##x");
 
     // The empty name is not special-cased.
     let empty = gc.atom_bytes("");
     assert_eq!(
-        gc.bytes(sema::sem_context::private_name_identifier(&gc, empty)),
+        gc.bytes(hermes_sema::sem_context::private_name_identifier(
+            &gc, empty
+        )),
         b"#"
     );
 }

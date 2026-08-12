@@ -5,12 +5,12 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-//! Golden tests for `sema::dump::sem_dump` / `ASTPrinter`, ported from
+//! Golden tests for `hermes_sema::dump::sem_dump` / `ASTPrinter`, ported from
 //! `lib/Sema/SemResolve.cpp:20-161,258-297`. Hand-builds `SemContext` +
 //! ESTree trees (no parser) and asserts the exact multi-line text the C++
 //! `semDump` would produce for the equivalent structure. Every test goes
 //! through `sem_dump` — the only public entry point (`ASTPrinter` itself
-//! is a private implementation detail of `sema::dump`) — so expected
+//! is a private implementation detail of `hermes_sema::dump`) — so expected
 //! strings always include the leading `SemContext` block Task 5's dumper
 //! produces.
 
@@ -20,10 +20,10 @@ use hermes_ast::node::{
     TypeAnnotation,
 };
 use hermes_ast::node_child::{NodeList, NodeMetadata};
-use sema::dump::sem_dump;
-use sema::ids::{FunctionInfoId, ScopeId};
-use sema::keywords::Keywords;
-use sema::sem_context::{
+use hermes_sema::dump::sem_dump;
+use hermes_sema::ids::{FunctionInfoId, ScopeId};
+use hermes_sema::keywords::Keywords;
+use hermes_sema::sem_context::{
     ConstructorKind, DeclKind, DeclSpecial, FuncIsArrow, SemContext,
 };
 
@@ -88,7 +88,7 @@ fn ident<'gc>(gc: &'gc GCLock, name: &str) -> &'gc Node<'gc> {
 /// The one mandated test covering the `BinaryExpression` `+`/`-`
 /// linearization (SemResolve.cpp:70-95): `(1 + 2) - 3`.
 ///
-/// Locks in the quirk documented in `sema::dump`'s module doc: the C++
+/// Locks in the quirk documented in `hermes_sema::dump`'s module doc: the C++
 /// prints `list[0]->_operator` (here, `+`, the *innermost* operator) on
 /// **every** `BinOp` line, not each step's actual operator — so the second
 /// line reads `BinOp +`, not `BinOp -`, even though the outer node's own
@@ -307,7 +307,7 @@ Id 'q' [D:%d.1 'onlyDecl']
 /// An unresolvable identifier with no recorded decl at all: no `[...]`
 /// bracket (neither `declD` nor `exprD` is present), just the ` UNR` suffix
 /// (SemResolve.cpp:125-126). Also exercises the deviation documented in
-/// `sema::dump`'s module doc: `get_expression_decl` is never called on an
+/// `hermes_sema::dump`'s module doc: `get_expression_decl` is never called on an
 /// unresolvable identifier, so this doesn't hit that function's `assert!`.
 #[test]
 fn identifier_unresolvable_prints_unr_suffix_only() {

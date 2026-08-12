@@ -2021,7 +2021,7 @@ fn make_strictness(strict: bool) -> Strictness {
 /// Port of `scopeNode->setScope(scope)` in `ScopeRAII`
 /// (SemanticResolver.cpp:2945-2946), i.e.
 /// `ESTree::ScopeDecorationBase::setScope`. Enumerates the same 15
-/// scope-bearing node kinds as `sema::dump`'s `node_scope`.
+/// scope-bearing node kinds as `hermes_sema::dump`'s `node_scope`.
 fn set_node_scope(node: &Node, scope: ScopeId) {
     let id = Some(scope.sema_id());
     match node {
@@ -2048,7 +2048,7 @@ fn set_node_scope(node: &Node, scope: ScopeId) {
 
 /// Port of `node->setSemInfo(semInfo)` (SemanticResolver.cpp:3005), i.e.
 /// `ESTree::FunctionLikeDecoration::setSemInfo`. Enumerates the same six
-/// function-like node kinds as `sema::dump`'s `function_like_sem_info`.
+/// function-like node kinds as `hermes_sema::dump`'s `function_like_sem_info`.
 fn set_node_sem_info(node: &Node, sem_info: FunctionInfoId) {
     let id: Option<SemaId> = Some(sem_info.sema_id());
     match node {

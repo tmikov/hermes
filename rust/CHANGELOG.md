@@ -136,6 +136,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `tools/preparse-dump/` oracle (152 corpus files), and a `lazy_reparse` test
   proving deferred bodies reparse to the eager, hermesc-verified AST.
 
+#### Semantic analysis (`hermes-sema`)
+- Complete port of `lib/Sema` for the untyped (non-FlowChecker) path:
+  `DeclCollector`, `SemanticResolver` (scope tree, `Decl` creation, identifier
+  resolution, `Unresolver` for `eval`/`with`), `ScopedFunctionPromoter`,
+  `SemContext`/`Decl`/`LexicalScope`/`FunctionInfo`, `ASTEval` constant
+  folding, and the `semDump`/`SemContextDumper` printers.
+- Both C++ entry points: `resolve_ast` (`resolveAST`, `compile = true`, ambient
+  declaration files, AST rewrites) and `resolve_ast_for_parser`
+  (`resolveASTForParser`, `compile = false`).
+- The validation diagnostics `SemanticResolver` owns — redeclarations, invalid
+  assignment targets, strict-mode restrictions, label/`break`/`continue`
+  rules, `super`/`return` placement, class-field and private-name rules,
+  generator/`await` context — rendered byte-compatibly with `hermesc`.
+- Byte-for-byte differential (stdout, stderr and exit status) against
+  `hermesc -dump-sema` over 219 corpus files and against the C++
+  `sema-parser-dump` tool over 13.
+
 #### Support (`hermes-support`)
 - `SourceErrorManager` façade: `SourceBuffer` (lazy line index), offset-based
   `SMLoc`/`SMRange`/`SourceId`/`SourceCoords`, `DiagKind`/`Subsystem`/
@@ -150,12 +167,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Byte-for-byte validated against captured `hermesc` output (`tests/golden.rs`).
 
 #### Packaging
-- The six published crates are named `hermes-parser`, `hermes-ast`,
-  `hermes-support`, `hermes-atom-table`, `hermes-unicode` and
+- The seven published crates are named `hermes-parser`, `hermes-ast`,
+  `hermes-sema`, `hermes-support`, `hermes-atom-table`, `hermes-unicode` and
   `hermes-command-line`, so the public import paths are `hermes_parser::…`,
-  `hermes_ast::…`, `hermes_support::…`, `hermes_atom_table::…`,
-  `hermes_unicode::…` and `hermes_command_line::…`. There are no `[lib] name`
-  overrides — the lib names are the package names with underscores.
+  `hermes_ast::…`, `hermes_sema::…`, `hermes_support::…`,
+  `hermes_atom_table::…`, `hermes_unicode::…` and `hermes_command_line::…`.
+  There are no `[lib] name` overrides — the lib names are the package names
+  with underscores.
 - `hermes-command-line` is the LLVM-`cl`-style option parser the project's own
   CLI drivers are built on. It is the one published crate that is not in
   `hermes-parser`'s dependency closure; it is dependency-free itself.
@@ -176,12 +194,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `gen-json` binary: generates deterministic JSON corpora for benchmarking.
 - `preparse-dump` binary: dumps the pre-parse side table, matching the C++
   `preparse-dump` oracle byte-for-byte.
+- `sema-dump` binary: resolves a JS file and dumps the `SemContext` +
+  annotated AST, matching `hermesc -dump-sema` byte-for-byte; with
+  `--parser-entry` it matches the C++ `sema-parser-dump` tool instead.
 - C++ differential oracle tools (`tools/js-lexer-dump/`, `tools/json-parse-dump/`)
   registered via `add_hermes_tool`.
 
 ### Not yet available
 
-- Semantic analysis: ported in-tree as the unpublished `sema` crate, but not
-  part of this publication — a `hermes-sema` crate is future work.
 - `hermes-ir`, `hermes-optimizer`, `hermes-bcgen` — future components in the
   port roadmap.

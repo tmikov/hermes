@@ -93,7 +93,7 @@ validation commands, and workflow.
 > the `computed-fn-name.js` repro — sweep only meaningful with debug builds both sides). New resolver module
 > `resolver/modules.rs`; new C++ tool `tools/sema-parser-dump/`; new corpus `sema_corpus_parser/`.
 > Gates (live, green):
-> `REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml -p sema --features dump-bin --test sema_differential -- --nocapture`
+> `REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml -p hermes-sema --test sema_differential -- --nocapture`
 > → "sema differential (tests/sema_corpus): **219 corpus files matched (109 succeeded on hermesc)**" and
 > "sema differential (tests/sema_corpus_parser): **13 corpus files matched (5 succeeded on the oracle)**" (the
 > second gate is new in S4a; the driver progression past S4a's 196/103: 200/107 capstone fixes → 202/107

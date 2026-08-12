@@ -11,8 +11,8 @@ authoritative log.
 
 ## Crate map
 
-The Rust workspace lives under `rust/` with six published library crates and
-three internal-only crates:
+The Rust workspace lives under `rust/` with seven published library crates and
+two internal-only crates:
 
 ```
 rust/
@@ -24,9 +24,9 @@ rust/
     ast/                GC-arena AST: 271 ESTree nodes + JSON dumper
     parser/             lexer + JSON parser + JS parser
     command_line/       LLVM-cl-style CLI flag parser
-    sema/               semantic validation and scope resolution — publish = false
+    sema/               semantic validation and scope resolution
     tools/              CLI drivers (ast-dump, json-parse-dump, gen-json,
-                        preparse-dump) — publish = false
+                        preparse-dump, sema-dump) — publish = false
     comparison/         benchmark harness — excluded from workspace, publish = false
 ```
 
@@ -41,11 +41,12 @@ paths) are the `hermes-*` family:
 | `unicode/` | `hermes-unicode` | `hermes_unicode` | support crate |
 | `ast/` | `hermes-ast` | `hermes_ast` (also `hermes_parser::ast`) | stable public surface |
 | `parser/` | `hermes-parser` | `hermes_parser` | stable public surface |
+| `sema/` | `hermes-sema` | `hermes_sema` | stable public surface |
 | `command_line/` | `hermes-command-line` | `hermes_command_line` | support crate |
 
-Cargo commands therefore take `-p hermes-parser`, not `-p parser`. The three
-internal crates (`sema`, `tools`, `comparison`) keep their bare package names
-and `publish = false`.
+Cargo commands therefore take `-p hermes-parser`, not `-p parser` (likewise
+`-p hermes-sema`). The two internal crates (`tools`, `comparison`) keep their
+bare package names and `publish = false`.
 
 ### `support`
 
@@ -93,6 +94,24 @@ The lexer, JSON parser, and JS parser, consuming `support` + `atom_table` +
   sliced into `mod`, `expressions`, `statements`, `functions`, `classes`,
   `modules`, and `flow/{mod, declarations, types, function_types, object_types,
   params, match_}`.
+
+### `sema`
+
+Semantic analysis, consuming only `ast` + `support` + `atom_table` — the same
+layering C++ `lib/Sema` has:
+- `decl_collector.rs` — port of `DeclCollector.{h,cpp}`: per-scope declaration
+  grouping.
+- `resolver/` — port of `SemanticResolver.{h,cpp}` (scope tree, bindings,
+  identifier resolution, validation diagnostics, the named AST rewrites),
+  sliced into `mod`, `declarations`, `identifiers`, `statements`,
+  `expressions`, `functions`, `classes`, `calls`, `modules`, `promoter`
+  (`ScopedFunctionPromoter`) and `unresolver`.
+- `sem_context.rs` — port of `SemContext.h`'s `Decl` / `LexicalScope` /
+  `FunctionInfo` records, id-indexed instead of pointer-linked.
+- `resolve.rs` — the two entry points, `resolve_ast` (`compile = true`) and
+  `resolve_ast_for_parser` (`compile = false`).
+- `dump.rs` / `dump_context.rs` — the `semDump` / `SemContextDumper` ports the
+  differential compares byte-for-byte.
 
 ---
 
@@ -263,7 +282,9 @@ hermesc (C++ oracle) ← differential tests only
          └──→ unicode
          └──→ atom_table
 
-    tools ──→ parser, ast, support, atom_table
+    sema ──→ ast, support, atom_table
+
+    tools ──→ parser, sema, ast, support, atom_table
          └──→ command_line (CLI flags, no logic)
 ```
 
@@ -271,7 +292,10 @@ hermesc (C++ oracle) ← differential tests only
 `unicode`. The `ast` crate depends on `support` and `atom_table`. The `parser`
 crate depends on all of the above — and on nothing else: the CLI drivers and
 their `command_line` dependency live in the unpublished `tools` crate, so the
-published library is a pure library. The `hermes-command-line` crate is a thin
+published library is a pure library. The `sema` crate sits beside `parser`
+rather than above it, consuming only the AST — the same layering C++
+`lib/Sema` has; it takes `parser` as a dev-dependency only, because its tests
+build trees by parsing source. The `hermes-command-line` crate is a thin
 CLI argument helper; it is published because the drivers are built on it, but
 nothing in `hermes-parser`'s dependency closure needs it.
 

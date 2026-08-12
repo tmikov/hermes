@@ -24,7 +24,7 @@
 //!   `getGlobalScope`, `getBindingTable`, `getBindingTableGlobalScope`)
 //!   therefore read `self` directly.
 //! - C++ `std::deque<T>` storages (`functions_`, `scopes_`, `decls_`) become
-//!   `Vec<T>` indexed by the typed ids from `sema::ids`; C++ raw/owning
+//!   `Vec<T>` indexed by the typed ids from `hermes_sema::ids`; C++ raw/owning
 //!   pointers between these records become the corresponding typed id.
 //! - The two side tables that back the identifier decl-state machine
 //!   (`sideIdentifierDeclarationDecl_`, `promotedFunctionDecls_`) are keyed

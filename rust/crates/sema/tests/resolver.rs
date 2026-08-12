@@ -5,7 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-//! Tests for `sema::resolve::resolve_ast` / `sema::resolver` — the S0
+//! Tests for `hermes_sema::resolve::resolve_ast` / `sema::resolver` — the S0
 //! resolver entry.
 //!
 //! The *behavioral* test for this component is `sema_differential.rs`, which
@@ -27,11 +27,11 @@ use hermes_parser::js::JSParserImpl;
 use hermes_parser::lexer::{GrammarContext, JSLexer};
 use hermes_support::diag::{DiagHandler, ResolvedDiagnostic};
 use hermes_support::manager::SourceErrorManager;
-use sema::dump::sem_dump;
-use sema::ids::FunctionInfoId;
-use sema::keywords::Keywords;
-use sema::resolve::{resolve_ast, resolve_ast_for_parser};
-use sema::sem_context::{DeclKind, SemContext};
+use hermes_sema::dump::sem_dump;
+use hermes_sema::ids::FunctionInfoId;
+use hermes_sema::keywords::Keywords;
+use hermes_sema::resolve::{resolve_ast, resolve_ast_for_parser};
+use hermes_sema::sem_context::{DeclKind, SemContext};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -186,7 +186,7 @@ fn resolver_diagnostics_are_buffered_then_flushed() {
 
     {
         let binding_table = sem_ctx.binding_table_rc();
-        let mut resolver = sema::resolver::SemanticResolver::new(
+        let mut resolver = hermes_sema::resolver::SemanticResolver::new(
             &binding_table,
             &mut sem_ctx,
             &mut sm,
@@ -1730,7 +1730,7 @@ fn a_rebuilt_catch_clause_keeps_its_scope() {
             .expect("handler is not a CatchClause");
         let scope = catch.scope.get().expect("the rebuilt clause lost `scope`");
         // The catch parameter is declared in that very scope.
-        let scope_id = sema::ids::ScopeId::from_sema_id(scope);
+        let scope_id = hermes_sema::ids::ScopeId::from_sema_id(scope);
         let decls = &sem_ctx.scope(scope_id).decls;
         assert_eq!(decls.len(), 1, "the catch param must be the only decl");
         assert_eq!(sem_ctx.decl(decls[0]).kind, DeclKind::ES5Catch);
@@ -1797,7 +1797,7 @@ fn an_implicit_constructor_function_info_is_created_for_a_class_without_one() {
         let info = sem_ctx.function(ctor);
         assert_eq!(
             info.constructor_kind,
-            sema::sem_context::ConstructorKind::Base
+            hermes_sema::sem_context::ConstructorKind::Base
         );
         assert!(info.strict, "an implicit constructor is always strict");
         assert_eq!(info.get_scopes().len(), 1);
@@ -1819,7 +1819,7 @@ fn an_implicit_constructor_function_info_is_created_for_a_class_without_one() {
         );
         assert_eq!(
             sem_ctx.function(ctor).constructor_kind,
-            sema::sem_context::ConstructorKind::Derived
+            hermes_sema::sem_context::ConstructorKind::Derived
         );
     });
 }
@@ -1868,7 +1868,7 @@ fn an_explicit_constructor_suppresses_the_implicit_one() {
         );
         assert_eq!(
             sem_ctx.function(id).constructor_kind,
-            sema::sem_context::ConstructorKind::Derived
+            hermes_sema::sem_context::ConstructorKind::Derived
         );
     });
 }
@@ -1949,7 +1949,7 @@ fn a_class_declaration_name_carries_both_a_class_and_a_class_expr_name_decl() {
         assert_eq!(sem_ctx.decl(decl).kind, DeclKind::Class);
         assert_eq!(sem_ctx.decl(expr).kind, DeclKind::ClassExprName);
         // The ClassExprName lives in the class node's own scope.
-        let scope = sema::ids::ScopeId::from_sema_id(
+        let scope = hermes_sema::ids::ScopeId::from_sema_id(
             class.scope.get().expect("no scope on the class"),
         );
         assert_eq!(sem_ctx.decl(expr).scope, Some(scope));
@@ -2059,7 +2059,7 @@ fn a_nested_class_gets_its_own_class_context() {
         );
         assert_eq!(
             sem_ctx.function(id).constructor_kind,
-            sema::sem_context::ConstructorKind::Derived
+            hermes_sema::sem_context::ConstructorKind::Derived
         );
     });
 }
@@ -2081,7 +2081,7 @@ fn a_private_field_decl_is_not_the_same_as_a_same_named_variable() {
         let class = first_statement(resolved);
         let class_decl =
             class.as_class_declaration().expect("not a ClassDeclaration");
-        let scope = sema::ids::ScopeId::from_sema_id(
+        let scope = hermes_sema::ids::ScopeId::from_sema_id(
             class_decl.scope.get().expect("no scope on the class"),
         );
         let body = class_decl.body.as_class_body().expect("not a ClassBody");
@@ -2103,7 +2103,7 @@ fn a_private_field_decl_is_not_the_same_as_a_same_named_variable() {
         assert_eq!(sem_ctx.decl(private_decl).kind, DeclKind::PrivateField);
         assert_eq!(
             sem_ctx.decl(private_decl).special,
-            sema::sem_context::DeclSpecial::NotSpecial,
+            hermes_sema::sem_context::DeclSpecial::NotSpecial,
             "a FIELD never gets PrivateStatic (cpp:2182 passes isStatic=false)"
         );
         // It lives in the class's own scope, right after the ClassExprName.
@@ -2132,7 +2132,7 @@ fn a_private_getter_setter_pair_shares_one_upgraded_decl() {
             .body
             .as_class_body()
             .expect("not a ClassBody");
-        let decls: Vec<sema::ids::DeclId> = body
+        let decls: Vec<hermes_sema::ids::DeclId> = body
             .body
             .iter()
             .map(|elm| {
@@ -2164,7 +2164,7 @@ fn a_private_getter_setter_pair_shares_one_upgraded_decl() {
         );
         assert_eq!(
             sem_ctx.decl(decls[0]).special,
-            sema::sem_context::DeclSpecial::PrivateStatic
+            hermes_sema::sem_context::DeclSpecial::PrivateStatic
         );
     });
 }
@@ -2190,7 +2190,7 @@ fn a_static_block_hoists_its_vars_into_its_own_function_scope() {
         );
         assert!(sem_ctx.function(info).is_static_block);
         assert_ne!(info, outer);
-        let scope = sema::ids::ScopeId::from_sema_id(
+        let scope = hermes_sema::ids::ScopeId::from_sema_id(
             block.scope.get().expect("no scope on the block"),
         );
         assert_eq!(sem_ctx.function(info).get_function_body_scope(), scope);
@@ -2335,7 +2335,7 @@ fn a_block_nested_function_is_promoted_to_global_scope() {
             .expect("no promoted decl recorded");
         assert_ne!(promoted, declared);
         assert_eq!(sem_ctx.decl(promoted).kind, DeclKind::ScopedFunction);
-        let block_scope = sema::ids::ScopeId::from_sema_id(
+        let block_scope = hermes_sema::ids::ScopeId::from_sema_id(
             block.scope.get().expect("no scope on the block"),
         );
         assert_eq!(sem_ctx.decl(promoted).scope, Some(block_scope));
@@ -2423,7 +2423,7 @@ fn a_visible_let_blocks_promotion() {
         let declared =
             sem_ctx.get_declaration_decl(id).expect("no declaration decl");
         assert_eq!(sem_ctx.decl(declared).kind, DeclKind::ScopedFunction);
-        let block_scope = sema::ids::ScopeId::from_sema_id(
+        let block_scope = hermes_sema::ids::ScopeId::from_sema_id(
             block.scope.get().expect("no scope on the block"),
         );
         assert_eq!(sem_ctx.decl(declared).scope, Some(block_scope));
@@ -2469,7 +2469,7 @@ fn resolve_always<'gc>(
     compile: bool,
 ) -> &'gc Node<'gc> {
     let binding_table = sem_ctx.binding_table_rc();
-    let mut resolver = sema::resolver::SemanticResolver::new(
+    let mut resolver = hermes_sema::resolver::SemanticResolver::new(
         &binding_table,
         sem_ctx,
         sm,

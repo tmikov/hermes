@@ -26,17 +26,23 @@ citation inside a section dated before 2026-08-10 references the PRE-cherry-pick
 tree, not the current one — do not "fix" those in place. Only the live
 Imported/Deferred tables' current reasons are kept synced to the current tree.
 
-**Citation note (added 2026-08-12):** the publication track renamed the five
+**Citation note (added 2026-08-12):** the publication track renamed the
 publishable Cargo packages to the `hermes-*` family, so the *current* spelling
 of a parser gate is `-p hermes-parser` (likewise `-p hermes-ast`,
 `-p hermes-support`); `command_line` was renamed the same way on 2026-08-12,
-so it is now `-p hermes-command-line`. `-p sema` and `-p tools` are unchanged
-— those crates keep their bare names and `publish = false`. Per the
-same "kept for the history" convention, historical sections below still show
-`-p parser`/`-p ast`; those blocks also carry the corpus counts of their own
-date (e.g. "208 / 107" where the live gate now reports "219 / 109"), so they
-are records of a past run, not commands to re-run. The live gate command is
-the one under "## Gate" above.
+so it is now `-p hermes-command-line`, and `sema` followed on the same day —
+it is now `-p hermes-sema`. `-p tools` is unchanged: that crate keeps its bare
+name and `publish = false`. Per the same "kept for the history" convention,
+historical sections below still show `-p parser`/`-p ast`/`-p sema`; those
+blocks also carry the corpus counts of their own date (e.g. "208 / 107" where
+the live gate now reports "219 / 109"), so they are records of a past run, not
+commands to re-run. The live gate command is the one under "## Gate" above.
+
+**Invocation note (added 2026-08-12):** the same publication change moved the
+`sema-dump` driver out of the `sema` crate into the unpublished `tools` crate,
+which retired the `dump-bin` feature that used to gate it. The live gate has
+no `--features` flag at all any more; every `--features dump-bin` below is
+part of a past run's command line and must not be re-run as written.
 
 Total top-level files: 54. Imported **as of the S1 Task 8 sweep**: 15 (14 from
 `test/Sema` + 1 new gap-filler, `expr-visit-generic.js`, added in Step 2
@@ -229,7 +235,7 @@ before this sweep (now reinforced by the 14 files imported above).
 
 ```
 REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml \
-    -p sema --features dump-bin --test sema_differential -- --nocapture
+    -p hermes-sema --test sema_differential -- --nocapture
 ```
 
 Final count after S1 Task 8: **69 corpus files matched** (54 pre-existing + 14
@@ -1127,6 +1133,14 @@ harness) are unaffected either way.
   when BOTH spellings are given on the same command line — unreachable via
   this harness's per-file `// FLAGS:` line, which never spells out both for
   the same file. See the `no_std_globals` field doc for the full citation.
+  **[2026-08-12: superseded.** The publication track fixed
+  `OptValue::finish()` to be idempotent and moved `sema-dump` into the `tools`
+  crate, so the sharing mechanism now works and the two options were collapsed
+  onto one shared `OptValue`. The merge expression, the `no_std_globals` field
+  and its doc are gone; last-one-wins is now inherited from the shared storage
+  rather than approximated, which also closed the tie-break gap this paragraph
+  describes — verified against hermesc in both orders. This paragraph is kept
+  as the record of why the split existed.**]
 
 ### New files
 

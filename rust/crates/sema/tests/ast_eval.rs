@@ -5,7 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-//! Table-driven tests for `sema::ast_eval`, ported switch-arm-for-switch-arm
+//! Table-driven tests for `hermes_sema::ast_eval`, ported switch-arm-for-switch-arm
 //! from `lib/Sema/ASTEval.cpp` (95 lines, both functions). Every operator x
 //! operand-kind combination the C++ folds is asserted to produce the exact
 //! `f64` bits and node kind; every combination it declines is asserted to
@@ -18,9 +18,9 @@ use hermes_ast::node::{
 };
 use hermes_ast::node_child::NodeMetadata;
 use hermes_atom_table::AtomBytes;
+use hermes_sema::ast_eval::{ast_fold_binary_expression, ast_fold_unary_expression};
+use hermes_sema::keywords::Keywords;
 use hermes_support::location::{SMLoc, SMRange, SourceId};
-use sema::ast_eval::{ast_fold_binary_expression, ast_fold_unary_expression};
-use sema::keywords::Keywords;
 
 fn loc(offset: u32) -> SMLoc {
     SMLoc {

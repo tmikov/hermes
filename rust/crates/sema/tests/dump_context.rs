@@ -5,7 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-//! Golden test for `sema::dump_context::SemContextDumper`, ported from
+//! Golden test for `hermes_sema::dump_context::SemContextDumper`, ported from
 //! `lib/Sema/SemContext.cpp:415-570`. Hand-builds a `SemContext` (no
 //! parser) and asserts the exact multi-line text the C++ `printSemContext`
 //! would produce for the equivalent structure.
@@ -13,9 +13,9 @@
 use hermes_ast::context::{Context, GCLock, NodeRc};
 use hermes_ast::node::{BlockStatement, FunctionDeclaration, Identifier, Node};
 use hermes_ast::node_child::{NodeList, NodeMetadata};
-use sema::dump_context::SemContextDumper;
-use sema::keywords::Keywords;
-use sema::sem_context::{
+use hermes_sema::dump_context::SemContextDumper;
+use hermes_sema::keywords::Keywords;
+use hermes_sema::sem_context::{
     ConstructorKind, DeclKind, DeclSpecial, FuncIsArrow, SemContext,
 };
 
@@ -113,6 +113,6 @@ Func loose
     // ASCII-only golden: comparing as `String` is fine here (and reads
     // better than a byte-slice literal); the byte-buffer output sink's
     // WTF-8 pass-through behavior is exercised directly by a dedicated
-    // unit test in `sema::dump_context`'s own test module.
+    // unit test in `hermes_sema::dump_context`'s own test module.
     assert_eq!(String::from_utf8(out).unwrap(), expected);
 }

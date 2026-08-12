@@ -36,6 +36,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "hermes-sema"
+version = "0.1.0"
+dependencies = [
+ "hermes-ast",
+ "hermes-atom-table",
+ "hermes-parser",
+ "hermes-support",
+]
+
+[[package]]
 name = "hermes-support"
 version = "0.1.0"
 dependencies = [
@@ -47,17 +57,6 @@ name = "hermes-unicode"
 version = "0.1.0"
 
 [[package]]
-name = "sema"
-version = "0.0.0"
-dependencies = [
- "hermes-ast",
- "hermes-atom-table",
- "hermes-command-line",
- "hermes-parser",
- "hermes-support",
-]
-
-[[package]]
 name = "tools"
 version = "0.0.0"
 dependencies = [
@@ -66,5 +65,6 @@ dependencies = [
  "hermes-atom-table",
  "hermes-command-line",
  "hermes-parser",
+ "hermes-sema",
  "hermes-support",
 ]

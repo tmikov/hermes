@@ -38,7 +38,7 @@
 //!
 //! ## Dump visibility
 //!
-//! `unresolvable` IS printed — `sema::dump` appends ` UNR` to the
+//! `unresolvable` IS printed — `hermes_sema::dump` appends ` UNR` to the
 //! identifier line and suppresses the `[...]` decl bracket
 //! (SemResolve.cpp:125-126, `dump.rs`'s `enter_identifier`) — but the
 //! differential cannot see it through a `with`, because

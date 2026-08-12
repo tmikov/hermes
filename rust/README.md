@@ -140,6 +140,7 @@ prints a node-kind histogram). Run either with
 |---|---|
 | `hermes-parser` | Lexer + parser + JSON parser — stable public surface |
 | `hermes-ast` | ESTree node set + JSON dumper — stable public surface, re-exported as `hermes_parser::ast` |
+| `hermes-sema` | Semantic analysis: declaration collection, scope/binding resolution, validation — stable public surface |
 | `hermes-support` | `SourceErrorManager`, diagnostics, JSON emitter — support crate |
 | `hermes-atom-table` | String interner — support crate |
 | `hermes-unicode` | Unicode property tables — support crate |
@@ -148,8 +149,8 @@ prints a node-kind histogram). Run either with
 The support crates are published only because the dependency closure requires
 it — except `hermes-command-line`, which nothing in that closure needs and
 which is published because the project's own CLI drivers are built on it.
-Depend on any of them directly at your own risk; only `hermes-parser` and
-`hermes-ast` carry stable public API guarantees.
+Depend on any of them directly at your own risk; only `hermes-parser`,
+`hermes-ast` and `hermes-sema` carry stable public API guarantees.
 
 ## Support
 

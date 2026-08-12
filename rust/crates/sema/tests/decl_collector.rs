@@ -5,7 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-//! Tests for `sema::decl_collector::DeclCollector`, ported from
+//! Tests for `hermes_sema::decl_collector::DeclCollector`, ported from
 //! `lib/Sema/DeclCollector.{h,cpp}`. Unlike the hand-built-tree tests
 //! elsewhere in this crate, these parse real source with the `parser`
 //! crate (a dev-dependency) — the parse-driver setup below is trimmed from
@@ -34,8 +34,8 @@ use hermes_ast::node::{Node, VariableDeclaration};
 use hermes_ast::NodeId;
 use hermes_parser::js::JSParserImpl;
 use hermes_parser::lexer::{GrammarContext, JSLexer};
-use sema::decl_collector::DeclCollector;
-use sema::keywords::Keywords;
+use hermes_sema::decl_collector::DeclCollector;
+use hermes_sema::keywords::Keywords;
 use hermes_support::manager::SourceErrorManager;
 
 /// Parse `src` as a `Program` and return its root node, panicking on any

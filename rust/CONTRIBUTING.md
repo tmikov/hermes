@@ -36,15 +36,17 @@ cargo test --manifest-path rust/Cargo.toml
 # Test a single crate:
 cargo test --manifest-path rust/Cargo.toml -p hermes-parser
 cargo test --manifest-path rust/Cargo.toml -p hermes-ast
+cargo test --manifest-path rust/Cargo.toml -p hermes-sema
 cargo test --manifest-path rust/Cargo.toml -p hermes-support
 
 # Clippy (only pre-existing faithful-C-idiom lints are allowed):
 cargo clippy --manifest-path rust/Cargo.toml
 ```
 
-The CLI drivers (`ast-dump`, `json-parse-dump`, `gen-json`, `preparse-dump`)
-live in the unpublished `tools` crate, not in `parser`: the published library
-ships no binaries and no `hermes-command-line` dependency.
+The CLI drivers (`ast-dump`, `json-parse-dump`, `gen-json`, `preparse-dump`,
+`sema-dump`) live in the unpublished `tools` crate, not in `parser` or `sema`:
+the published libraries ship no binaries and no `hermes-command-line`
+dependency.
 
 ```bash
 cargo build --manifest-path rust/Cargo.toml -p tools
@@ -69,10 +71,10 @@ REQUIRE_GEN=1 cargo test --manifest-path rust/Cargo.toml \
 The committed `src/node.rs` must always be byte-for-byte identical to what the
 generator produces.
 
-## The differential gate (required for parser changes)
+## The differential gate (required for parser and sema changes)
 
-Any change to the parser, lexer, or AST dumper must pass the byte-for-byte
-differential gate before it can be merged.
+Any change to the parser, lexer, AST dumper, or semantic resolver must pass the
+byte-for-byte differential gate before it can be merged.
 
 ### Build the C++ oracle
 
@@ -95,6 +97,9 @@ cmake --build cmake-build-asan --target json-parse-dump
 
 # Build the pre-parse oracle (for the pre-parse differential):
 cmake --build cmake-build-asan --target preparse-dump
+
+# Build the parser-entry sema oracle (hermesc above is the driver-path one):
+cmake --build cmake-build-asan --target sema-parser-dump
 ```
 
 ### Run the gate
@@ -118,7 +123,18 @@ REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml \
 # Pre-parse differential (lazy 13 / plain 77 / Flow 42 / TS 20 corpus files):
 REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml \
     -p hermes-parser --test preparse_differential -- --nocapture
+
+# Sema differential — both pairs at once: `hermesc -dump-sema` over 219 corpus
+# files (109 of them hermesc successes), and `sema-parser-dump` vs `sema-dump
+# --parser-entry` over 13 (5 successes):
+REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml \
+    -p hermes-sema --test sema_differential -- --nocapture
 ```
+
+The sema differential must run against a **debug** build on the Rust side: the
+recursion limits are profile-selected on both sides, and `--release` also
+compiles out an assertion one corpus file exists to reproduce. See the module
+doc of `crates/sema/tests/sema_differential.rs`.
 
 The `REQUIRE_DIFFERENTIAL=1` environment variable causes the test to fail hard
 if the oracle binary is absent, rather than silently skip. Always set it when

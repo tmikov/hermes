@@ -12,8 +12,8 @@
 //!
 //! OUTPUT CONTRACT
 //!   On success (parsed, no parse errors, resolution succeeded): exactly what
-//!     `sema::dump::sem_dump` emits (which ends in a newline); nothing added,
-//!     exit 0.
+//!     `hermes_sema::dump::sem_dump` emits (which ends in a newline); nothing
+//!     added, exit 0.
 //!   On a parse error or a resolution failure: nothing on stdout, exit 2.
 //!     Diagnostics (errors AND warnings) go to stderr through the installed
 //!     `StderrHandler`, in hermesc's `file:line:col: kind: message` + source
@@ -53,21 +53,22 @@
 //!
 //! `--parser-entry` switches to a SEPARATE entry point that mirrors the C++
 //! `tools/sema-parser-dump/sema-parser-dump.cpp` oracle instead: resolve via
-//! `sema::resolve_ast_for_parser` (port of `resolveASTForParser`,
-//! `SemResolve.cpp:299-310`, the `compile = false` entry point
-//! `hermes-parser-wasm.cpp:104` uses) and dump the result UNCONDITIONALLY,
-//! even when resolution reported errors — unlike the driver path above,
-//! which never dumps on a `resolveAST` failure. Three consequences, ported
-//! from the C++ tool's own OUTPUT CONTRACT: no ambient decls are ever loaded
-//! (`resolveASTForParser` takes none), no `-ferror-limit` is applied (the
-//! C++ tool never sets one, so the `SourceErrorManager` stays unbounded),
-//! and on failure there is no "Emitted N errors. exiting." epilogue (the
-//! C++ tool never prints one) — see [`exit_parser_entry`] vs
-//! [`exit_on_failure`]. The other dialect/eval flags above still apply
-//! normally in this mode.
+//! `hermes_sema::resolve::resolve_ast_for_parser` (port of
+//! `resolveASTForParser`, `SemResolve.cpp:299-310`, the `compile = false`
+//! entry point `hermes-parser-wasm.cpp:104` uses) and dump the result
+//! UNCONDITIONALLY, even when resolution reported errors — unlike the driver
+//! path above, which never dumps on a `resolveAST` failure. Three
+//! consequences, ported from the C++ tool's own OUTPUT CONTRACT: no ambient
+//! decls are ever loaded (`resolveASTForParser` takes none), no
+//! `-ferror-limit` is applied (the C++ tool never sets one, so the
+//! `SourceErrorManager` stays unbounded), and on failure there is no
+//! "Emitted N errors. exiting." epilogue (the C++ tool never prints one) —
+//! see [`exit_parser_entry`] vs [`exit_on_failure`]. The other dialect/eval
+//! flags above still apply normally in this mode.
 //!
-//! Command-line parsing uses the `hermes-command-line` crate (the LLVM-`cl`-style
-//! option parser copied from juno), like `parser`'s `ast-dump`.
+//! Command-line parsing uses the `hermes-command-line` crate (the
+//! LLVM-`cl`-style option parser copied from juno), like this crate's
+//! `ast-dump`.
 //!
 //! ## One `hermes-command-line`-vs-LLVM-`cl` spelling difference, and its exit code
 //!
@@ -95,19 +96,20 @@
 //! two different runs rather than a mismatch.
 
 use std::io::{self, Read, Write};
+use std::rc::Rc;
 
-use hermes_command_line::{CommandLine, Hidden, Opt, OptDesc};
+use hermes_command_line::{CommandLine, Hidden, Opt, OptDesc, OptValue};
 use hermes_ast::context::{Context, NodeRc};
 use hermes_ast::node::Node;
 use hermes_parser::js::JSParserImpl;
 use hermes_parser::lexer::{GrammarContext, JSLexer};
+use hermes_sema::dump::sem_dump;
+use hermes_sema::keywords::Keywords;
+use hermes_sema::libhermes::LIBHERMES;
+use hermes_sema::resolve::{resolve_ast, resolve_ast_for_parser};
+use hermes_sema::sem_context::SemContext;
 use hermes_support::manager::SourceErrorManager;
 use hermes_support::render::StderrHandler;
-use sema::dump::sem_dump;
-use sema::keywords::Keywords;
-use sema::libhermes::LIBHERMES;
-use sema::resolve::{resolve_ast, resolve_ast_for_parser};
-use sema::sem_context::SemContext;
 
 /// Print hermesc's post-`parseJS`-failure epilogue (if there were any
 /// errors) and exit with hermesc's exit code. Port of the single
@@ -186,26 +188,21 @@ struct Options {
     /// `resolver/calls.rs`'s `visit_call_expression` reads to choose between
     /// the `DirectEval`/`EvalDisabled` warning branches.
     enable_eval: Opt<bool>,
-    /// Enable registration of standard globals: the positive spelling of the
-    /// hermesc `-fstd-globals`/`-fno-std-globals` pair (`CompilerDriver.cpp:
-    /// 273-278`: a `CLFlag`, i.e. two `ValueDisallowed` options resolved by
-    /// whichever was given last, defaulting to true when neither is given).
-    /// Defaults to true here too; see `no_std_globals` for the negative
-    /// spelling and `main`'s merge of the two into the effective value.
+    /// Whether standard globals are registered: hermesc's
+    /// `-fstd-globals`/`-fno-std-globals` pair (`CompilerDriver.cpp:273-278`),
+    /// which is a `CLFlag` — two `ValueDisallowed` options over ONE stored
+    /// value, so whichever spelling comes last on the command line wins, and
+    /// the value defaults to true when neither is given.
+    ///
+    /// Ported literally: both spellings are registered against one shared
+    /// `OptValue` via `OptDesc::opt_value`, which is what makes last-one-wins
+    /// fall out with no merge step on this side either. This handle is the
+    /// positive spelling's; it reads the shared storage, so it already holds
+    /// the resolved value and the negative spelling needs no handle of its
+    /// own. Verified against hermesc: `-fno-std-globals -fstd-globals` loads
+    /// the 63 ambient globals and `-fstd-globals -fno-std-globals` loads
+    /// none.
     fstd_globals: Opt<bool>,
-    /// The negative spelling, `-fno-std-globals`. Kept as a separate `Opt`
-    /// rather than sharing `fstd_globals`'s storage (the
-    /// `hermes-command-line` crate's `OptDesc::opt_value` sharing exists, but each registered
-    /// `Opt` unconditionally calls `OptValue::finish()`
-    /// (`command_line/src/opt.rs:384-385`) via `CommandLine`'s parse-end
-    /// sweep, and `OptValue::finish()` asserts it is never called twice
-    /// (`opt.rs:72-78`) — sharing one `OptValue` between two registered
-    /// options panics there). `main` merges the two fields into the
-    /// effective bool; this is a deliberate simplification, not a full port
-    /// of `CLFlag::getValue()`'s position-based tie-break: it is unreachable
-    /// via this harness's per-file `// FLAGS:` line, which never spells out
-    /// both `-fstd-globals` and `-fno-std-globals` for the same file.
-    no_std_globals: Opt<bool>,
     /// Switch to the `resolveASTForParser` (`compile = false`) entry point
     /// and its "dump unconditionally" output contract — see the module doc.
     parser_entry: Opt<bool>,
@@ -309,24 +306,39 @@ impl Options {
                     ..Default::default()
                 },
             ),
-            fstd_globals: Opt::new_flag(
-                cl,
-                OptDesc {
-                    long: Some("fstd-globals"),
-                    desc: Some("Enable registration of standard globals."),
-                    init: Some(true),
-                    ..Default::default()
-                },
-            ),
-            no_std_globals: Opt::new_flag(
-                cl,
-                OptDesc {
-                    long: Some("fno-std-globals"),
-                    desc: Some("Disable registration of standard globals."),
-                    init: Some(false),
-                    ..Default::default()
-                },
-            ),
+            // The `CLFlag` pair, registered in hermesc's own order against a
+            // single shared storage. `init` (the value when neither spelling
+            // occurs) must be the SAME on both, because registering an option
+            // writes its `init` into the storage and the second registration
+            // would otherwise overwrite the first's; `def_value` is what each
+            // spelling stores when it does occur, and the later occurrence
+            // overwrites the earlier one. See the `fstd_globals` field doc.
+            fstd_globals: {
+                let shared: Rc<OptValue<bool>> = Rc::new(Default::default());
+                let positive = Opt::new_flag(
+                    cl,
+                    OptDesc {
+                        long: Some("fstd-globals"),
+                        desc: Some("Enable registration of standard globals."),
+                        init: Some(true),
+                        def_value: Some(true),
+                        opt_value: Some(shared.clone()),
+                        ..Default::default()
+                    },
+                );
+                Opt::new_flag(
+                    cl,
+                    OptDesc {
+                        long: Some("fno-std-globals"),
+                        desc: Some("Disable registration of standard globals."),
+                        init: Some(true),
+                        def_value: Some(false),
+                        opt_value: Some(shared),
+                        ..Default::default()
+                    },
+                );
+                positive
+            },
             parser_entry: Opt::new_flag(
                 cl,
                 OptDesc {
@@ -368,12 +380,10 @@ fn main() {
         || parse_component_syntax
         || parse_flow_records
         || parse_flow_match;
-    // Merge the `-fstd-globals`/`-fno-std-globals` pair; see the
-    // `no_std_globals` field doc for why this is two independent `Opt`s
-    // instead of one shared-storage `CLFlag` pair. `-fno-std-globals` wins
-    // if both are given (not a full port of `CLFlag`'s last-one-wins tie
-    // break — see that doc).
-    let fstd_globals = *opt.fstd_globals && !*opt.no_std_globals;
+    // No merge step: `-fstd-globals` and `-fno-std-globals` share one stored
+    // value, so this handle already reads what the `CLFlag` pair resolved to
+    // (last spelling on the command line wins). See the field doc.
+    let fstd_globals = *opt.fstd_globals;
     let parser_entry = *opt.parser_entry;
 
     let input = &*opt.input;

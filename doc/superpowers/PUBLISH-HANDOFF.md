@@ -37,9 +37,12 @@ bins into an unpublished `tools` crate (removes the `command_line` publish block
   fork. No separate repo. Upstream merge is orthogonal.
 - Family: **`hermes-parser` + `hermes-ast`** (stable public API) + `hermes-support` /
   `hermes-atom-table` / `hermes-unicode` / `hermes-command-line` (support crates).
-  `sema`, `tools` + `comparison` stay `publish = false`.
+  `tools` + `comparison` stay `publish = false`.
   (`command_line` was published as `hermes-command-line` on 2026-08-12 — scope
-  extension; it is dependency-free and not in `hermes-parser`'s closure.)
+  extension; it is dependency-free and not in `hermes-parser`'s closure.
+  `sema` was published as `hermes-sema` the same day — same scope extension,
+  on the grounds that without it the port has no full front-end
+  functionality; its `sema-dump` bin moved into `tools`.)
 - Provenance wording (verbatim, everywhere): "A Rust port of the Hermes front-end by
   Tzvetan Mikov, the architect of Hermes. Not an official Meta project and not
   supported by Meta." Do **not** emphasize the word "unofficial."
@@ -101,26 +104,28 @@ raw OXC parse-vs-parse number; it makes the port look ~2× slower for doing more
   `cmake -B cmake-build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
   -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++`.
 - Publish dependency order (Task 10): `hermes-unicode` → `hermes-atom-table` →
-  `hermes-support` → `hermes-ast` → `hermes-parser`. `hermes-command-line` has no
-  dependencies, so its position is free.
+  `hermes-support` → `hermes-ast` → `hermes-parser`, with `hermes-sema` anywhere
+  after `hermes-ast`. `hermes-command-line` has no dependencies, so its position
+  is free.
 
 ## Launch runbook (as of 2026-08-12 — Tasks 3,4,5,6,10 complete, final review APPROVED)
 
 All automated prep is done: crates renamed `hermes-*` @ 0.1.0, API documented
 (`missing_docs` clean), `parse()` façade + examples, bins in unpublished
-`tools`, dry-run 6/6, perf claims reconciled. Only the manual, irreversible
-steps remain:
+`tools`, dry-run 6/6, perf claims reconciled. `hermes-sema` joined the set on
+2026-08-12 (scope extension) — re-run the dry run for 7/7 before launching.
+Only the manual, irreversible steps remain:
 
 1. **Skip the placeholder name reservation** (plan Step 5) unless launch is
    weeks away — the real 0.1.0 publish IS the reservation, and placeholders
-   add six extra irreversible publishes plus junk 0.0.0 version rows.
+   add seven extra irreversible publishes plus junk 0.0.0 version rows.
 2. **Publish with ONE multi-package invocation** (the plan's per-crate loop
    provably fails: versioned path deps resolve against the registry):
    ```bash
    cargo login <token>
    cargo publish --manifest-path rust/Cargo.toml \
      -p hermes-unicode -p hermes-atom-table -p hermes-support \
-     -p hermes-ast -p hermes-parser -p hermes-command-line
+     -p hermes-ast -p hermes-parser -p hermes-sema -p hermes-command-line
    ```
    Every crate to publish must be named explicitly — an omitted `-p` is
    silently skipped, not an error.

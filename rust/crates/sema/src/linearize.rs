@@ -21,11 +21,12 @@
 //!
 //! - **Location.** C++ declares these in `ESTree.h`, i.e. what this port
 //!   calls the `ast` crate. They live here instead because both consumers
-//!   are in `sema` — `sema::dump`'s `ASTPrinter` (`SemResolve.cpp:76`) and
-//!   `SemanticResolver`'s `visit(BinaryExpressionNode *)` /
-//!   `visit(AssignmentExpressionNode *)` (`SemanticResolver.cpp:410,441`) —
-//!   and a single crate-private copy is what keeps the two from drifting.
-//!   Nothing here depends on `sema`; if IRGen (`ESTreeIRGen-expr.cpp:2620`,
+//!   are in this crate — `hermes_sema::dump`'s `ASTPrinter`
+//!   (`SemResolve.cpp:76`) and `SemanticResolver`'s
+//!   `visit(BinaryExpressionNode *)` / `visit(AssignmentExpressionNode *)`
+//!   (`SemanticResolver.cpp:410,441`) — and a single crate-private copy is
+//!   what keeps the two from drifting. Nothing here depends on the rest of
+//!   this crate; if IRGen (`ESTreeIRGen-expr.cpp:2620`,
 //!   `:2814`, the remaining C++ callers) is ever ported, this module moves
 //!   to `ast` unchanged.
 //! - **`ops` is a list of interned atoms, not of strings.** C++ compares
