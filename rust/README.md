@@ -140,7 +140,7 @@ prints a node-kind histogram). Run either with
 |---|---|
 | `hermes-parser` | Lexer + parser + JSON parser — stable public surface |
 | `hermes-ast` | ESTree node set + JSON dumper — stable public surface, re-exported as `hermes_parser::ast` |
-| `hermes-sema` | Semantic analysis: declaration collection, scope/binding resolution, validation — stable public surface |
+| `hermes-sema` | Semantic analysis: declaration collection, scope/binding resolution, validation — stable *core* surface, plus advanced modules that may change |
 | `hermes-support` | `SourceErrorManager`, diagnostics, JSON emitter — support crate |
 | `hermes-atom-table` | String interner — support crate |
 | `hermes-unicode` | Unicode property tables — support crate |
@@ -151,6 +151,15 @@ it — except `hermes-command-line`, which nothing in that closure needs and
 which is published because the project's own CLI drivers are built on it.
 Depend on any of them directly at your own risk; only `hermes-parser`,
 `hermes-ast` and `hermes-sema` carry stable public API guarantees.
+
+`hermes-sema` is the one crate whose guarantee is partial. Its stable surface
+is the `resolve` façade (`resolve` / `resolve_for_parser` / `resolve_for_compile`
+/ `ResolvedJS` / `ResolveError`), the two low-level entry points in its
+`resolve` module, and the result model (`sem_context`, `ids`). Its other seven
+modules — `resolver`, `decl_collector`, `ast_eval`, `dump`, `dump_context`,
+`libhermes`, `keywords` — are public because the project's own tools and tests
+drive them directly; they are advanced / port-internal and may change or be
+made private in a 0.x bump. Each says so in its own module documentation.
 
 ## Support
 

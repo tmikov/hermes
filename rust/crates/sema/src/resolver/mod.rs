@@ -5,11 +5,22 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+//! The resolution pass itself: the scope tree, `Decl` creation, identifier
+//! resolution, the validation diagnostics, and the compile-path AST
+//! rewrites.
+//!
 //! Port of `hermes::sema::SemanticResolver` (`lib/Sema/SemanticResolver.h`,
-//! `lib/Sema/SemanticResolver.cpp`) — S0 entry path plus S1 T4's identifier
-//! resolution core, S1 T5's declarations (hoisting, validation, blocks) and
-//! S1 T6's expression visits (constant folding, assignment/update/unary
-//! validation).
+//! `lib/Sema/SemanticResolver.cpp`).
+//!
+//! **Stability: advanced / port-internal.** Run the resolver through
+//! [`crate::resolve()`] or one of [`mod@crate::resolve`]'s two entry points;
+//! those are the stable surface, together with
+//! [`crate::sem_context`] and [`crate::ids`] (see the crate doc). This
+//! module is `pub` because the port's own tests (`tests/resolver.rs`) drive
+//! `SemanticResolver` directly, and because the port is not finished — the
+//! type shown here mirrors the C++ class as it is being transcribed and will
+//! keep changing as the remaining pieces land. Expect breaking changes in a
+//! 0.x release.
 //!
 //! ## What's covered so far
 //!
@@ -375,7 +386,8 @@
 //!   are read by `resolveIdentifier` (below) starting with S1 T4.
 //! - **`DebugInfoSetting::ALL`**: the port has no debug-info setting yet, so
 //!   both tests against it on this path are ported as a documented constant
-//!   `false` — see [`DEBUG_INFO_SETTING_ALL`].
+//!   `false` — see the private `DEBUG_INFO_SETTING_ALL` constant in this
+//!   module's source.
 
 use std::collections::{HashMap, HashSet};
 

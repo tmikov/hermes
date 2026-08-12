@@ -11,6 +11,14 @@
 //! `"use strict"`, operator spellings like `"+"`, …), so those comparisons
 //! are atom equality rather than byte comparison.
 //!
+//! **Stability: advanced / port-internal.** This module is `pub` because
+//! building a [`crate::sem_context::SemContext`] by hand — what `tools`'
+//! `sema-dump` bin and the tests do — needs a `Keywords` to seed it with; the
+//! crate-root façade builds one for you. Its field list tracks
+//! `Keywords.def` and will change whenever that file does, so it may change,
+//! or be demoted to `pub(crate)`, in a 0.x release. See the crate doc for the
+//! stable surface.
+//!
 //! `Keywords.def` currently has 133 `HERMES_KEYWORD` entries (not 136); see
 //! [`Keywords::COUNT`] and the accompanying test. All entries are
 //! unconditional here: the `#if HERMES_PARSE_FLOW` / `#if HERMES_PARSE_TS`
@@ -38,7 +46,12 @@ macro_rules! declare_keywords {
         /// Convenient storage of "keyword" identifier atoms used by sema.
         /// Port of `hermes::Keywords` (AST/Context.h:168, Keywords.def).
         pub struct Keywords {
-            $(pub $field: AtomBytes,)*
+            $(
+                #[doc = concat!(
+                    "Pre-interned atom for the string `\"", $string, "\"`."
+                )]
+                pub $field: AtomBytes,
+            )*
         }
 
         impl Keywords {

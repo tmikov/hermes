@@ -9,6 +9,10 @@
 //! `resolveASTForParser` (`cpp:299-310`) — the two `SemResolve.h` entry
 //! points this crate has.
 //!
+//! **Stability: stable.** The two functions here are the low-level entry
+//! points under the crate-root façade, and are what a consumer needing more
+//! control than [`crate::resolve()`] offers should call; see the crate doc.
+//!
 //! ## The other `SemResolve.h` entries, and where they went
 //!
 //! `SemResolve.h` declares three more resolver entries, none of which is

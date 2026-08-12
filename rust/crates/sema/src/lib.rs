@@ -57,14 +57,50 @@
 //!   `crates/tools/src/bin/sema_dump.rs` does.
 //! - [`sem_context::SemContext`] — the results: `Decl`, `LexicalScope`,
 //!   `FunctionInfo`, and the side tables keyed by AST node.
-//! - [`dump::sem_dump`] — the `hermesc -dump-sema` text, which is what this
-//!   crate's differential gate compares byte-for-byte.
+//! - [`ResolvedJS::to_sema_dump`] — the `hermesc -dump-sema` text, which is
+//!   what this crate's differential gate compares byte-for-byte. (The
+//!   printers behind it live in [`dump`] and [`dump_context`].)
 //!
 //! The façade function [`resolve()`] and the module [`mod@resolve`] share a
 //! name, as `parse` would if the parser had a `parse` module: they are in
 //! different namespaces, so `hermes_sema::resolve(parsed)` calls the function
 //! and `hermes_sema::resolve::resolve_ast` names the entry point inside the
 //! module. Both spellings are used in the examples above.
+//!
+//! # Stability
+//!
+//! This crate is pre-1.0 and the port it wraps is not finished (see the scope
+//! note below), so its ten public modules are not all equally settled. The
+//! **stable** surface — what 0.1.x means to keep source-compatible — is:
+//!
+//! - the façade: [`resolve()`], [`resolve_for_parser`], [`resolve_for_compile`],
+//!   [`ResolvedJS`], [`ResolveError`], [`CompileOptions`],
+//!   [`GlobalDefinitions`];
+//! - the two low-level entry points in [`mod@resolve`]:
+//!   [`resolve::resolve_ast`] and [`resolve::resolve_ast_for_parser`];
+//! - the result model: [`sem_context`] and [`ids`].
+//!
+//! The other seven modules — [`resolver`], [`decl_collector`], [`ast_eval`],
+//! [`dump`], [`dump_context`], [`libhermes`], [`keywords`] — are **advanced /
+//! port-internal**. They are `pub` because the port's own tools (`sema-dump`)
+//! and integration tests drive them directly, not because their shape is
+//! settled. They may change, or be demoted to `pub(crate)`, in a 0.x bump.
+//! Each says so in its own module doc.
+//!
+//! # Scope of the port
+//!
+//! The eager, untyped (non-FlowChecker) path of `lib/Sema` is ported and
+//! gated byte-for-byte against `hermesc -dump-sema`. Still unported, and loud
+//! rather than silent where they are reached:
+//!
+//! - the `$SHBuiltin` module protocol (`visitModuleFactory` / `visitModuleExport`
+//!   / `visitModuleImport` and `resolveCommonJSAST`) — the three branches in
+//!   `resolver/calls.rs` panic with a pointer at the C++ lines;
+//! - the lazy-compilation and `eval` entry points (`resolveASTLazy`,
+//!   `resolveASTInScope`), which need `SemContext`'s parent/child tree and
+//!   shared binding table — see [`mod@resolve`]'s module doc;
+//! - the FlowChecker itself, which is a separate C++ component and not part
+//!   of this crate.
 //!
 //! AST types (`Node`, `Visitor`, `GCLock`) come from `hermes_parser::ast`,
 //! which is the same `hermes-ast` crate this one is built on, so depending on
@@ -78,6 +114,8 @@
 //! - `lib/Sema/SemanticResolver.cpp` / `include/hermes/Sema/SemResolve.h`
 //!   (the validator/resolver, plus the two `resolve` entry points the façade
 //!   wraps)
+
+#![warn(missing_docs)]
 
 pub mod ast_eval;
 // Private for the same reason its C++ counterpart is declared in the internal

@@ -137,14 +137,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   proving deferred bodies reparse to the eager, hermesc-verified AST.
 
 #### Semantic analysis (`hermes-sema`)
-- Complete port of `lib/Sema` for the untyped (non-FlowChecker) path:
+- Port of `lib/Sema` for the untyped (non-FlowChecker) eager path:
   `DeclCollector`, `SemanticResolver` (scope tree, `Decl` creation, identifier
   resolution, `Unresolver` for `eval`/`with`), `ScopedFunctionPromoter`,
   `SemContext`/`Decl`/`LexicalScope`/`FunctionInfo`, `ASTEval` constant
   folding, and the `semDump`/`SemContextDumper` printers.
-- Both C++ entry points: `resolve_ast` (`resolveAST`, `compile = true`, ambient
-  declaration files, AST rewrites) and `resolve_ast_for_parser`
-  (`resolveASTForParser`, `compile = false`).
+- Two of the five C++ resolver entry points: `resolve_ast` (`resolveAST`,
+  `compile = true`, ambient declaration files, AST rewrites) and
+  `resolve_ast_for_parser` (`resolveASTForParser`, `compile = false`).
+- Not yet ported, and loud rather than silent where reached: the `$SHBuiltin`
+  module protocol (`visitModuleFactory`/`visitModuleExport`/`visitModuleImport`
+  and `resolveCommonJSAST`) — the three branches in `resolver/calls.rs` panic
+  with a pointer at the C++ lines; and the lazy-compilation and `eval` entries
+  (`resolveASTLazy`, `resolveASTInScope`), which need `SemContext`'s
+  parent/child tree, its shared binding table, and the third
+  `getPromotedScopedFuncDecls` call site (`SemanticResolver.cpp:158`, in
+  `runInScope`). The FlowChecker is a separate C++ component and out of scope
+  for this crate.
+- Its public modules are therefore not all equally settled: see the crate
+  documentation's *Stability* section for the stable core and the seven
+  advanced / port-internal modules.
 - The validation diagnostics `SemanticResolver` owns — redeclarations, invalid
   assignment targets, strict-mode restrictions, label/`break`/`continue`
   rules, `super`/`return` placement, class-field and private-name rules,

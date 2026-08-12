@@ -5,9 +5,17 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+//! The result model of semantic analysis: `Decl`, `LexicalScope`,
+//! `FunctionInfo` and the `SemContext` that owns them.
+//!
 //! Port of `hermes::sema::{Decl, LexicalScope, FunctionInfo, SemContext}`
 //! (`include/hermes/Sema/SemContext.h`, whole file) and the free-standing
 //! `SemContext` methods (`lib/Sema/SemContext.cpp:1-415`).
+//!
+//! **Stability: stable.** This module, [`crate::ids`], [`mod@crate::resolve`] and
+//! the crate-root façade are the surface `hermes-sema` intends to keep
+//! source-compatible within 0.1.x. See the crate doc for the modules that
+//! carry no such promise.
 //!
 //! ## Deviations (locked design decisions; see the S0 sema spec)
 //!
@@ -36,7 +44,7 @@
 //!   `builtinDeclarations_`) become `hermes_ast::context::NodeRc`, which keeps the
 //!   referenced node alive independent of any `GCLock`.
 //! - `SourceVisibility`/`CustomDirectives` are ports of
-//!   `include/hermes/AST/Context.h:128-166`; they live in `sema` for now
+//!   `include/hermes/AST/Context.h:125-166`; they live in `sema` for now
 //!   rather than in the (not yet ported) `hermes_ast::Context`.
 //! - `SemContext::customData1`/`customData2` (opaque `shared_ptr<void>`
 //!   slots for downstream consumers — e.g. IRGen state across lazy
@@ -97,6 +105,8 @@ pub fn private_name_identifier(gc: &GCLock, name: Atom) -> Atom {
 /// sites once a use site exists (S1).
 #[derive(Debug, Clone)]
 pub struct Binding {
+    /// The declaration this name is bound to (SemContext.h:29, where the
+    /// field is a `Decl *` defaulting to `nullptr`).
     pub decl: DeclId,
     /// The declaring node. Note that this is nullable (SemContext.h:31).
     pub ident: Option<NodeRc>,
@@ -127,9 +137,19 @@ pub type BindingTableScopePtr = ScopePtr<Atom, Binding>;
 #[repr(u8)]
 pub enum DeclKind {
     // ==== Let-like declarations ===
+    /// A `let` binding (SemContext.h:60).
     Let,
+    /// A `const` binding (SemContext.h:61). Also the kind assigned to any
+    /// `VariableDeclaration` whose `kind` is neither `var` nor `let`, since
+    /// `extractIdentsFromDecl` tests only those two and falls through to
+    /// `Const` (SemanticResolver.cpp:2285-2296).
     Const,
+    /// The name bound by a `class` *declaration* (SemContext.h:62). The name
+    /// of a class *expression* is [`ClassExprName`](Self::ClassExprName)
+    /// instead.
     Class,
+    /// A name bound by an `import` declaration (SemContext.h:63) — default,
+    /// named and namespace specifiers all produce this kind.
     Import,
     /// A catch variable bound with let-like rules (non-ES5).
     /// ES14.0 B.3.4 handles ES5-style catch bindings differently.
@@ -165,6 +185,9 @@ pub enum DeclKind {
     // ==== Var-like declarations ===
     /// "var" in function scope.
     Var,
+    /// A function parameter (SemContext.h:99), declared in the parameter
+    /// scope by the resolver's `declare_params` (the C++ `declareParams`
+    /// lambda, SemanticResolver.cpp:1776).
     Parameter,
     /// "var" in global scope.
     GlobalProperty,
@@ -179,8 +202,20 @@ pub enum DeclKind {
 /// `hermes::sema::Decl::Special` (SemContext.h:110-116).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeclSpecial {
+    /// Nothing special about this declaration; the case for almost every
+    /// `Decl` (SemContext.h:111).
     NotSpecial,
+    /// The implicit `arguments` object of a non-arrow function
+    /// (SemContext.h:112). Set by [`SemContext::func_arguments_decl`]
+    /// (`funcArgumentsDecl`, SemContext.cpp:160-198) and consulted wherever a
+    /// reference must be recognized as *the* `arguments` object rather than
+    /// an ordinary variable of that name.
     Arguments,
+    /// A declaration named `eval` (SemContext.h:113). Declared by the C++
+    /// enum but never assigned: no site in `lib/` or `include/` sets
+    /// `Special::Eval`, so no `Decl` in this port carries it either. It
+    /// exists here because the dumper prints the enum name and the port is
+    /// 1:1 with the C++ enum.
     Eval,
     /// Can only be set for a private method or accessor.
     PrivateStatic,
@@ -330,7 +365,11 @@ pub struct LexicalScope {
 /// Port of `hermes::sema::FuncIsArrow` (SemContext.h:288).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FuncIsArrow {
+    /// The function is an `ArrowFunctionExpression`; `FunctionInfo::arrow`
+    /// becomes true (SemContext.h:388).
     Yes,
+    /// Anything else — a function declaration or expression, a method, a
+    /// class's implicit constructor, or the top-level `Program`.
     No,
 }
 
@@ -338,20 +377,25 @@ pub enum FuncIsArrow {
 /// `hermes::sema::FunctionInfo::ConstructorKind` (SemContext.h:327).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConstructorKind {
+    /// Not a constructor — the value every other function gets.
     None,
+    /// The constructor of a class with no `extends` clause.
     Base,
+    /// The constructor of a class with an `extends` clause. This is the
+    /// distinction the `super()` rules are keyed on: only a `Derived`
+    /// constructor may contain a `super()` call.
     Derived,
 }
 
 /// An enum to track the "source visibility" of functions. This notion is
 /// coined to implement "directives" such as 'hide source' and 'sensitive'
-/// defined by https://github.com/tc39/proposal-function-implementation-hiding,
+/// defined by <https://github.com/tc39/proposal-function-implementation-hiding>,
 /// as well as 'show source' Hermes proposed to explicitly preserve source
 /// for `toString`.
 ///
 /// Members are ordered in an increasingly stronger manner, where only later
 /// source visibility can override the earlier but not vice versa. Port of
-/// `hermes::SourceVisibility` (AST/Context.h:126-146); lives in `sema` for
+/// `hermes::SourceVisibility` (AST/Context.h:125-147); lives in `sema` for
 /// now — see the module doc.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum SourceVisibility {
@@ -371,7 +415,7 @@ pub enum SourceVisibility {
 }
 
 /// Custom directives which were specified on a given function. Port of
-/// `hermes::CustomDirectives` (AST/Context.h:147-166); lives in `sema` for
+/// `hermes::CustomDirectives` (AST/Context.h:149-166); lives in `sema` for
 /// now — see the module doc.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct CustomDirectives {

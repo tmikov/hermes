@@ -7,10 +7,19 @@
 
 //! Port of `hermes::sema::ASTPrinter` and the untyped arm of `semDump`
 //! (`lib/Sema/SemResolve.cpp:20-161,258-297`). Byte-exact text dumper (the
-//! `-dump-sema` AST half, paired with Task 5's `SemContextDumper` for the
-//! `SemContext` half) that the differential oracle depends on — every
-//! space, quote, and (see below) quirk is transcribed straight from the
-//! C++ `<<` chain it replaces.
+//! `-dump-sema` AST half, paired with [`crate::dump_context`]'s
+//! `SemContextDumper` for the `SemContext` half) that the differential
+//! oracle depends on — every space, quote, and (see below) quirk is
+//! transcribed straight from the C++ `<<` chain it replaces.
+//!
+//! **Stability: advanced / port-internal.** This module exists to serve the
+//! differential harness: its output is compared byte-for-byte against
+//! `hermesc -dump-sema`, and its shape is therefore dictated by the C++
+//! printer rather than chosen for consumers. The stable spelling of "give me
+//! the dump" is [`crate::ResolvedJS::to_sema_dump`]. This module is `pub`
+//! because `tools`' `sema-dump` bin and the differential test drive it
+//! directly, and it may change, or be demoted to `pub(crate)`, in a 0.x
+//! release. See the crate doc for the stable surface.
 //!
 //! ## `ESTreeVisit` mapping
 //!

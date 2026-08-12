@@ -15,6 +15,15 @@
 //! `Identifier` inside it; `SemanticResolver` re-derives names/bindings from
 //! those nodes later.
 //!
+//! **Stability: advanced / port-internal.** This module is `pub` because the
+//! port's own tests (`tests/decl_collector.rs`) drive it directly, not
+//! because it is a settled API: in normal use the resolver builds and owns
+//! one `DeclCollector` per function, and its results reach you as the
+//! `Decl`s in a [`crate::sem_context::SemContext`]. It may change, or be
+//! demoted to `pub(crate)`, in a 0.x release. The stable surface is the
+//! crate-root façade plus [`mod@crate::resolve`], [`crate::sem_context`] and
+//! [`crate::ids`] — see the crate doc.
+//!
 //! ## Deviations
 //!
 //! - **AST node references are `hermes_ast::context::NodeRc`, not `&Node`.** C++

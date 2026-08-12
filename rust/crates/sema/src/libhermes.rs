@@ -8,6 +8,14 @@
 //! Port of `include/hermes/Runtime/Libhermes.h:13-72`: the list of built-in
 //! symbols declared by the HermesVM runtime, as a JS source string.
 //!
+//! **Stability: advanced / port-internal.** This module is `pub` because
+//! `tools`' `sema-dump` bin parses [`LIBHERMES`] itself to reproduce
+//! CompilerDriver's ambient-declaration setup; the crate-root
+//! [`crate::resolve_for_compile`] already does that for you. The contents
+//! track the C++ header and change whenever HermesVM's built-in list does,
+//! so this may change, or be demoted to `pub(crate)`, in a 0.x release. See
+//! the crate doc for the stable surface.
+//!
 //! The C++ side is a single `const char libhermes[]` built from adjacent
 //! string literals, with the twelve typed-array constructors spliced in by
 //! `#include "hermes/VM/TypedArrays.def"` under a local `TYPED_ARRAY(name,
@@ -37,6 +45,11 @@
 //! (`Error` appears both as a `var` and as a `function`), and the
 //! `sema_differential` test enforces that byte-for-byte against
 //! `hermesc -dump-sema`.
+
+/// The HermesVM runtime's built-in symbol declarations, as JS source. Port
+/// of `hermes::libhermes` (`include/hermes/Runtime/Libhermes.h:13-72`); see
+/// the module doc for the two spellings that are preserved verbatim and for
+/// how the C++ `TYPED_ARRAY` include was expanded by hand.
 pub const LIBHERMES: &str = "\
 var Array;
 var BigInt;

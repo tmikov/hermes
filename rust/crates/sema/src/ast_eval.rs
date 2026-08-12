@@ -12,6 +12,13 @@
 //! single `NumericLiteral`, computing the exact operations the C++ performs
 //! and nothing else.
 //!
+//! **Stability: advanced / port-internal.** This module is `pub` because the
+//! port's own tests (`tests/ast_eval.rs`) drive it directly, not because it
+//! is a settled API; on the compile path the resolver calls it for you. It
+//! may change, or be demoted to `pub(crate)`, in a 0.x release. The stable
+//! surface is the crate-root façade plus [`mod@crate::resolve`],
+//! [`crate::sem_context`] and [`crate::ids`] — see the crate doc.
+//!
 //! ## Node identity and location handling
 //!
 //! C++ *reuses* the operand's already-allocated literal node: it mutates

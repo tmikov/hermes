@@ -6,11 +6,18 @@
  */
 
 //! Port of `hermes::sema::SemContextDumper` (`lib/Sema/SemContext.cpp:415-570`,
-//! declared `include/hermes/Sema/SemContext.h:694-756`). This is the
+//! declared `include/hermes/Sema/SemContext.h:694-753`). This is the
 //! byte-exact text dumper the differential oracle depends on
 //! (`hermesc -dump-sema` output), so every space and quote below is
 //! transcribed straight from the C++ `<<` chain it replaces — do not
 //! "clean up" the formatting.
+//!
+//! **Stability: advanced / port-internal.** Same status as [`crate::dump`]:
+//! this exists to serve the differential harness, its shape is dictated by
+//! the C++ printer, and it is `pub` only because `tools`' `sema-dump` bin and
+//! the differential test drive it directly. Use
+//! [`crate::ResolvedJS::to_sema_dump`] for the dump; this module may change,
+//! or be demoted to `pub(crate)`, in a 0.x release. See the crate doc.
 //!
 //! ## Deviations
 //!

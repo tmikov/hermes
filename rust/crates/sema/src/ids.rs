@@ -12,6 +12,9 @@
 //! once and referenced thereafter by (typed) pointer; here they are
 //! referenced by a typed, `u32`-sized index instead, since the AST side
 //! only has an opaque `SemaId` slot (`hermes_ast::node_child`) to store one in.
+//!
+//! **Stability: stable.** Part of the result model, alongside
+//! [`crate::sem_context`]; see the crate doc.
 
 use hermes_ast::SemaId;
 

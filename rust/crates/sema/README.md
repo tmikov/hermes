@@ -85,6 +85,28 @@ The two underlying entry points, `resolve::resolve_ast` and
 `SemContext` across files or to drive a hand-built arena, the way
 `sema-dump` does.
 
+## Stability
+
+Pre-1.0, and the port is not finished, so not every public module is equally
+settled. The **stable** surface — what 0.1.x means to keep source-compatible —
+is the façade (`resolve`, `resolve_for_parser`, `resolve_for_compile`,
+`ResolvedJS`, `ResolveError`), the two entry points in the `resolve` module,
+and the result model (`sem_context`, `ids`).
+
+The other seven modules — `resolver`, `decl_collector`, `ast_eval`, `dump`,
+`dump_context`, `libhermes`, `keywords` — are **advanced / port-internal**.
+They are public because `sema-dump` and this crate's integration tests drive
+them directly, not because their shape is settled; they may change or be made
+private in a 0.x bump. Each says so in its own module documentation.
+
+Still unported from `lib/Sema`'s untyped path, and loud rather than silent
+where reached: the `$SHBuiltin` module protocol (`visitModuleFactory` /
+`visitModuleExport` / `visitModuleImport`, `resolveCommonJSAST`), and the
+lazy-compilation and `eval` entry points (`resolveASTLazy`,
+`resolveASTInScope`), which need `SemContext`'s parent/child tree and shared
+binding table. The FlowChecker is a separate C++ component and not part of
+this crate.
+
 ## Validation
 
 Correctness is established by differential testing against the C++ Hermes

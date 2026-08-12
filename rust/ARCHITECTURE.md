@@ -41,12 +41,21 @@ paths) are the `hermes-*` family:
 | `unicode/` | `hermes-unicode` | `hermes_unicode` | support crate |
 | `ast/` | `hermes-ast` | `hermes_ast` (also `hermes_parser::ast`) | stable public surface |
 | `parser/` | `hermes-parser` | `hermes_parser` | stable public surface |
-| `sema/` | `hermes-sema` | `hermes_sema` | stable public surface |
+| `sema/` | `hermes-sema` | `hermes_sema` | stable core, advanced modules may change |
 | `command_line/` | `hermes-command-line` | `hermes_command_line` | support crate |
 
 Cargo commands therefore take `-p hermes-parser`, not `-p parser` (likewise
 `-p hermes-sema`). The two internal crates (`tools`, `comparison`) keep their
 bare package names and `publish = false`.
+
+`hermes-sema`'s stable core is the `resolve` façade, the two entry points in
+its `resolve` module, and the result model (`sem_context`, `ids`). Its other
+seven public modules (`resolver`, `decl_collector`, `ast_eval`, `dump`,
+`dump_context`, `libhermes`, `keywords`) are public because `tools`' `sema-dump`
+bin and the crate's integration tests drive them directly; the port is also
+still missing the `$SHBuiltin` module protocol and the lazy/`eval` entry
+points, so those modules are labelled advanced / port-internal in their own
+module docs and may change or be made private in a 0.x bump.
 
 ### `support`
 
