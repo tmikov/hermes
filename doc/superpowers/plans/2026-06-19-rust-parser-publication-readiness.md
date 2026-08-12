@@ -673,3 +673,39 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 **Type/name consistency:** crate names are bare (`parser`/`ast`/…) through Tasks 1–9 and renamed to `hermes-*` only in Task 10; `-p parser` is used in Tasks 3–9 and `-p hermes-parser` only after the Task 10 rename — consistent with the non-disruption rule. Bin names (`ast-dump`, `json-parse-dump`, `gen-json`) are stable across Task 6's move.
 
 **Known deliberate deferrals:** launch version and blog venue. (The lib-naming question is now DECIDED — Option B, full `use hermes_parser::` rename — see Task 10 Step 1.)
+
+---
+
+## Addendum (2026-08-12) — post-rebase reconciliation
+
+`rust1` was rebased onto `rust` @ `02e868719` (all 24 publication commits
+replayed; backup branch `backup-rust1-before-rebase`). The `rust` side now
+carries the complete Sema port (S0–S4a + whole-Sema capstone) and the 11-defect
+C++/Rust fix propagation. Facts below supersede the June task text where they
+conflict:
+
+- **Task 6 (bins):** `parser` now has **four** bins — add
+  `src/bin/preparse_dump.rs` (bin name `preparse-dump`) to the move list along
+  with `ast_dump.rs`, `json_parse_dump.rs`, `gen_json.rs`. The `sema` crate's
+  `sema-dump` bin (behind the `dump-bin` feature) stays where it is: `sema` is
+  `publish = false` and is NOT part of this extraction.
+- **Task 10 Step 1 (rename sweep):** the sweep is now **~92 files**, not ~49.
+  It must include `crates/sema` (src, tests, bin) and `crates/tools` (created
+  by Task 6). `sema/Cargo.toml`'s dep keys (`parser`, `ast`, `support`,
+  `atom_table`, `unicode`, and the `dump-bin` feature's `dep:parser`) must be
+  aliased to the renamed packages; `sema` itself keeps its bare name and
+  `publish = false`. Doc/CI commands referencing `-p parser` become
+  `-p hermes-parser`; `-p sema` stays.
+- **Oracle for differential steps:** `cmake-build-asan/bin/{hermesc,
+  sema-parser-dump,json-parse-dump}` built in THIS worktree (ASan+Debug+clang).
+  The old "`--target ast-dump`" note in Task 4 Step 3 is wrong — `ast-dump` is
+  the Rust bin; the C++ oracle is `hermesc`.
+- **Gates that must stay green through Tasks 6 and 10:** parser differential
+  (8 suites incl. JSON), sema driver corpus 219/109, sema parser-entry corpus
+  13/5 (both under `REQUIRE_DIFFERENTIAL=1`, sema with `--features dump-bin`).
+- **CI:** the clippy step is scoped `-p parser`; extend to the workspace when
+  CI is next touched (Task 6 adds the `tools` crate to the workspace).
+- **Commit trailers:** the June commit templates name an older model; use the
+  current session's standard trailers instead:
+  `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>` + Claude-Session
+  line.
