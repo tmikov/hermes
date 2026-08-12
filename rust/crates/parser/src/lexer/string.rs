@@ -204,8 +204,8 @@ impl<'a> JSLexer<'a> {
 
 #[cfg(test)]
 mod tests {
-    use atom_table::AtomTable;
-    use support::manager::SourceErrorManager;
+    use hermes_atom_table::AtomTable;
+    use hermes_support::manager::SourceErrorManager;
 
     use super::super::{GrammarContext, JSLexer};
     use crate::token_kinds::TokenKind;

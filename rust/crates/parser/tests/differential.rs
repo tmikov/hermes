@@ -22,10 +22,10 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 
-use atom_table::AtomTable;
-use parser::lexer::{GrammarContext, JSLexer};
-use parser::token_kinds::TokenKind;
-use support::manager::SourceErrorManager;
+use hermes_atom_table::AtomTable;
+use hermes_parser::lexer::{GrammarContext, JSLexer};
+use hermes_parser::token_kinds::TokenKind;
+use hermes_support::manager::SourceErrorManager;
 
 /// The C++ `--context=` flag value matching a Rust `GrammarContext`.
 fn context_flag(ctx: GrammarContext) -> &'static str {

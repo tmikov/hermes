@@ -7,7 +7,7 @@
 //! out-of-range continuation read sees `0x00` (a non-continuation byte) and is
 //! correctly rejected; we also guard indexes against `bytes.len()` defensively.
 
-use unicode::{
+use hermes_unicode::{
     is_high_surrogate, is_low_surrogate, utf16_surrogate_pair_to_code_point,
     UNICODE_MAX_VALUE, UNICODE_REPLACEMENT_CHARACTER, UNICODE_SURROGATE_FIRST,
     UNICODE_SURROGATE_LAST, UTF16_HIGH_SURROGATE, UTF16_LOW_SURROGATE,

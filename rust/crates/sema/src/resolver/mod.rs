@@ -154,7 +154,7 @@
 //! for the *next* one outlives them, so "dialect" is the honest umbrella
 //! for "Flow/TS-only, whether or not `-typed`" going forward.)
 //!
-//! ## The dispatch protocol: `ast::VisitorMut`
+//! ## The dispatch protocol: `hermes_ast::VisitorMut`
 //!
 //! C++'s resolver is a `RecursiveVisitor` that mutates the AST *in place*:
 //! an overload declared as `visit(NodeType *n, Node **ppNode)` writes
@@ -165,7 +165,7 @@
 //!
 //! This port's AST is immutable in its structural fields, so the same
 //! capability comes from the `ast` crate's phase-3 transform machinery: the
-//! resolver implements [`ast::visitor::VisitorMut`] and every visit returns
+//! resolver implements [`hermes_ast::visitor::VisitorMut`] and every visit returns
 //! a [`TransformResult`]. `TransformResult::Changed(n)` *is* `*ppNode = n`;
 //! the generated `Node::visit_children_mut` re-runs the per-kind builder and
 //! rebuilds an ancestor only when one of its children changed, so an
@@ -390,14 +390,14 @@ mod promoter;
 mod statements;
 mod unresolver;
 
-use ast::context::{GCLock, NodeRc};
-use ast::node::Node;
-use ast::node_child::{NodeLabel, Strictness};
-use ast::visitor::{Path, TransformResult, Visitor, VisitorMut};
-use ast::SemaId;
-use support::diag::{Subsystem, Warning};
-use support::manager::SourceErrorManager;
-use support::persistent_scoped_map::Scope;
+use hermes_ast::context::{GCLock, NodeRc};
+use hermes_ast::node::Node;
+use hermes_ast::node_child::{NodeLabel, Strictness};
+use hermes_ast::visitor::{Path, TransformResult, Visitor, VisitorMut};
+use hermes_ast::SemaId;
+use hermes_support::diag::{Subsystem, Warning};
+use hermes_support::manager::SourceErrorManager;
+use hermes_support::persistent_scoped_map::Scope;
 
 use crate::decl_collector::DeclCollector;
 use classes::ClassContext;
@@ -421,7 +421,7 @@ use crate::sem_context::{
 /// (Support/Compiler.h:106-110).
 ///
 /// RUST MAPPING: same reasoning as the parser's `MAX_RECURSION_DEPTH` (see
-/// `parser::js::MAX_RECURSION_DEPTH`) — Rust has no stable
+/// `hermes_parser::js::MAX_RECURSION_DEPTH`) — Rust has no stable
 /// `cfg(sanitize = ...)`, so `debug_assertions` stands in: a debug Rust build
 /// has ASan-sized frames and is what the differential gates pair against the
 /// ASan `hermesc`/`sema-parser-dump` oracles; a release build gets C++'s
@@ -1780,7 +1780,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
                 _ => break,
             };
             let directive = expr_st.directive.get();
-            if directive == atom_table::INVALID_ATOM_BYTES {
+            if directive == hermes_atom_table::INVALID_ATOM_BYTES {
                 break;
             }
 
@@ -2065,10 +2065,10 @@ fn set_node_sem_info(node: &Node, sem_info: FunctionInfoId) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ast::context::Context;
-    use ast::node::EmptyStatement;
-    use ast::node_child::NodeMetadata;
-    use support::location::{SMLoc, SMRange};
+    use hermes_ast::context::Context;
+    use hermes_ast::node::EmptyStatement;
+    use hermes_ast::node_child::NodeMetadata;
+    use hermes_support::location::{SMLoc, SMRange};
 
     /// The `RecursionDepthTracker` protocol, exercised directly (the visits
     /// that drive it are covered end-to-end by `tests/resolver.rs`): exactly
@@ -2133,7 +2133,7 @@ mod tests {
     /// which kinds fall into the range arm.
     #[test]
     fn flow_range_size_is_97() {
-        use ast::node::NodeKind;
+        use hermes_ast::node::NodeKind;
         let count =
             NodeKind::_Flow_Last as u32 - NodeKind::_Flow_First as u32 - 1;
         assert_eq!(count, 97);

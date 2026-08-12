@@ -27,11 +27,11 @@
 //! offset-based. The behavior verified (which token's end the prev-end tracks)
 //! is identical.
 
-use atom_table::AtomTable;
-use parser::lexer::{GrammarContext, JSLexer};
-use parser::token_kinds::TokenKind;
-use support::diag::{CollectingHandler, DiagKind};
-use support::manager::SourceErrorManager;
+use hermes_atom_table::AtomTable;
+use hermes_parser::lexer::{GrammarContext, JSLexer};
+use hermes_parser::token_kinds::TokenKind;
+use hermes_support::diag::{CollectingHandler, DiagKind};
+use hermes_support::manager::SourceErrorManager;
 
 /// Delta error/warning counter that mirrors C++ `DiagContext`.
 /// `err_clear()` / `warn_clear()` return the number of errors/warnings emitted
@@ -65,14 +65,14 @@ impl Diag {
 }
 
 /// Make a (SourceErrorManager, buffer-id) pair for a UTF-8 source.
-fn mk(src: &str) -> (SourceErrorManager, support::location::SourceId) {
+fn mk(src: &str) -> (SourceErrorManager, hermes_support::location::SourceId) {
     let mut sm = SourceErrorManager::new();
     let id = sm.add_buffer("t", src);
     (sm, id)
 }
 
 /// Make a (SourceErrorManager, buffer-id) pair for a raw-byte source.
-fn mk_bytes(src: &[u8]) -> (SourceErrorManager, support::location::SourceId) {
+fn mk_bytes(src: &[u8]) -> (SourceErrorManager, hermes_support::location::SourceId) {
     let mut sm = SourceErrorManager::new();
     let id = sm.add_buffer_bytes("t", src);
     (sm, id)
@@ -1345,7 +1345,7 @@ fn jsx_test() {
 
 #[test]
 fn store_comments_test() {
-    use parser::token::CommentKind;
+    use hermes_parser::token::CommentKind;
 
     // Helper: stored-comment (kind, stripped-string) pairs given the source.
     // The stripped string is computed via StoredComment::get_string over the

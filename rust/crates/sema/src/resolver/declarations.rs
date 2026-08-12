@@ -59,11 +59,11 @@
 //!   The direct unit tests are kept: they still pin the classification in
 //!   isolation from the walk.
 
-use ast::context::{GCLock, NodeRc};
-use ast::node::{builder, Node, NodeField};
-use ast::visitor::TransformResult;
-use support::diag::Subsystem;
-use support::manager::SourceErrorManager;
+use hermes_ast::context::{GCLock, NodeRc};
+use hermes_ast::node::{builder, Node, NodeField};
+use hermes_ast::visitor::TransformResult;
+use hermes_support::diag::Subsystem;
+use hermes_support::manager::SourceErrorManager;
 
 use crate::ids::{DeclId, ScopeId};
 use crate::sem_context::{Atom, Binding, DeclKind};
@@ -932,7 +932,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
         &mut self,
         gc: &'gc GCLock,
         node: &'gc Node<'gc>,
-        path: Option<ast::visitor::Path<'gc>>,
+        path: Option<hermes_ast::visitor::Path<'gc>>,
     ) -> TransformResult<&'gc Node<'gc>> {
         // Some nodes with attached BlockStatement have already dealt with
         // the scope.
@@ -1021,17 +1021,17 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
 
 #[cfg(test)]
 mod tests {
-    use ast::context::Context;
-    use ast::node::{
+    use hermes_ast::context::Context;
+    use hermes_ast::node::{
         Identifier, NumericLiteral, VariableDeclaration, VariableDeclarator,
     };
-    use ast::node_child::NodeList;
-    use ast::node_child::NodeMetadata;
-    use parser::js::JSParserImpl;
-    use parser::lexer::{GrammarContext, JSLexer};
-    use support::location::{SMLoc, SMRange};
-    use support::manager::SourceErrorManager;
-    use support::persistent_scoped_map::Scope;
+    use hermes_ast::node_child::NodeList;
+    use hermes_ast::node_child::NodeMetadata;
+    use hermes_parser::js::JSParserImpl;
+    use hermes_parser::lexer::{GrammarContext, JSLexer};
+    use hermes_support::location::{SMLoc, SMRange};
+    use hermes_support::manager::SourceErrorManager;
+    use hermes_support::persistent_scoped_map::Scope;
 
     use super::*;
     use crate::keywords::Keywords;

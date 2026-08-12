@@ -9,18 +9,18 @@
 //!   1. Functional rebuild + orphan reclamation (rebuild_then_gc_reclaims_orphans)
 //!   2. GC traces decoration NodeList (gc_traces_decoration_lists)
 
-use ast::context::{Context, GCLock, NodeRc};
-use ast::node::{BinaryExpression, Identifier, Node, NumericLiteral, Program};
-use ast::node_child::{NodeList, NodeMetadata};
+use hermes_ast::context::{Context, GCLock, NodeRc};
+use hermes_ast::node::{BinaryExpression, Identifier, Node, NumericLiteral, Program};
+use hermes_ast::node_child::{NodeList, NodeMetadata};
 use std::cell::Cell;
 
 /// Build a dummy source range (no `SMRange::invalid()` on this API).
-fn dummy_range() -> support::location::SMRange {
-    let l = support::location::SMLoc {
-        source: support::location::SourceId::from_index(0),
+fn dummy_range() -> hermes_support::location::SMRange {
+    let l = hermes_support::location::SMLoc {
+        source: hermes_support::location::SourceId::from_index(0),
         offset: 0,
     };
-    support::location::SMRange { start: l, end: l }
+    hermes_support::location::SMRange { start: l, end: l }
 }
 
 /// Allocate a `NumericLiteral` node with the given value.

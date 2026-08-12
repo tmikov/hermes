@@ -30,21 +30,27 @@ rust/
     comparison/         benchmark harness — excluded from workspace, publish = false
 ```
 
-**Published names** (when launched):
+**Package names.** The directory names above are the short in-tree names used
+throughout this document; the Cargo package names (and therefore the `use`
+paths) are the `hermes-*` family:
 
-| Crate | Published as | Stability |
-|---|---|---|
-| `support` | `hermes-support` | support crate |
-| `atom_table` | `hermes-atom-table` | support crate |
-| `unicode` | `hermes-unicode` | support crate |
-| `ast` | `hermes-ast` | stable public surface |
-| `parser` | `hermes-parser` | stable public surface |
+| Directory | Package | Import path | Stability |
+|---|---|---|---|
+| `support/` | `hermes-support` | `hermes_support` | support crate |
+| `atom_table/` | `hermes-atom-table` | `hermes_atom_table` | support crate |
+| `unicode/` | `hermes-unicode` | `hermes_unicode` | support crate |
+| `ast/` | `hermes-ast` | `hermes_ast` (also `hermes_parser::ast`) | stable public surface |
+| `parser/` | `hermes-parser` | `hermes_parser` | stable public surface |
+
+Cargo commands therefore take `-p hermes-parser`, not `-p parser`. The four
+internal crates (`command_line`, `sema`, `tools`, `comparison`) keep their bare
+package names and `publish = false`.
 
 ### `support`
 
 Contains the `SourceErrorManager` façade (buffer, locations, line index,
 diagnostics), the `JSONEmitter` (ESTree JSON output), and a WTF-8 ↔ UTF-16
-codec (`support::utf8`). Zero `unsafe` — forbids `unsafe` via
+codec (`hermes_support::utf8`). Zero `unsafe` — forbids `unsafe` via
 `[lints.rust] unsafe_code = "forbid"` in its Cargo.toml.
 
 ### `atom_table`
@@ -227,7 +233,7 @@ cmake --build cmake-build-asan --target hermesc
 
 # Run the differential gate (fails if the oracle binary is absent):
 REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml \
-    -p parser --test parser_differential
+    -p hermes-parser --test parser_differential
 ```
 
 This gate must pass before any parser change is merged.
@@ -238,7 +244,7 @@ The AST node generator has its own gate:
 
 ```bash
 REQUIRE_GEN=1 cargo test --manifest-path rust/Cargo.toml \
-    -p ast --test generated_idempotent
+    -p hermes-ast --test generated_idempotent
 ```
 
 This confirms the committed `src/node.rs` is byte-for-byte identical to what

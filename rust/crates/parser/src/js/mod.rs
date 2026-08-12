@@ -12,9 +12,9 @@ use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use ast::context::GCLock;
-use ast::node::Node;
-use support::location::{SMLoc, SMRange};
+use hermes_ast::context::GCLock;
+use hermes_ast::node::Node;
+use hermes_support::location::{SMLoc, SMRange};
 
 use crate::lexer::{GrammarContext, JSLexer};
 use crate::token_kinds::TokenKind;
@@ -528,7 +528,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             range.start,
             Some(range),
             msg,
-            support::diag::Subsystem::Parser,
+            hermes_support::diag::Subsystem::Parser,
         );
     }
     /// Report an error at the current token. Port of `error(Twine)`.
@@ -544,7 +544,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             loc,
             None,
             msg,
-            support::diag::Subsystem::Parser,
+            hermes_support::diag::Subsystem::Parser,
         );
     }
 
@@ -649,7 +649,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             err_loc,
             range,
             msg,
-            support::diag::Subsystem::Parser,
+            hermes_support::diag::Subsystem::Parser,
         );
         // cpp:223-224: the note only exists on the different-line arm, and
         // only when both `what` and a (valid) `whatLoc` were provided.
@@ -659,7 +659,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     w,
                     None,
                     what,
-                    support::diag::Subsystem::Parser,
+                    hermes_support::diag::Subsystem::Parser,
                 );
             }
         }
@@ -810,7 +810,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         &self,
         start: SMLoc,
         end: SMLoc,
-    ) -> atom_table::AtomBytes {
+    ) -> hermes_atom_table::AtomBytes {
         self.lexer.get_string_literal(self.source_bytes(start, end))
     }
 
@@ -1016,8 +1016,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     ///
     /// Parses directives + a statement list until EOF, then wraps in a Program.
     fn parse_program(&mut self) -> Option<&'gc Node<'gc>> {
-        use ast::node::Program;
-        use ast::node_child::{NodeList, NodeMetadata};
+        use hermes_ast::node::Program;
+        use hermes_ast::node_child::{NodeList, NodeMetadata};
 
         let start = self.cur_start();
 
@@ -1065,8 +1065,8 @@ mod tests {
 
     #[test]
     fn parser_constructs_and_sees_first_token() {
-        use ast::context::Context;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let buf_id = sm.add_buffer_bytes("input", b"  /* hi */  ");
@@ -1088,9 +1088,9 @@ mod tests {
 
     #[test]
     fn parses_empty_program() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let buf_id = sm.add_buffer_bytes("input", b"/* only trivia */\n");
@@ -1114,9 +1114,9 @@ mod tests {
 
     #[test]
     fn parses_numeric_literal_stmt() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let buf_id = sm.add_buffer_bytes("input", b"42;\n");
@@ -1160,8 +1160,8 @@ mod tests {
     /// as the end-to-end pin for this gate.
     #[test]
     fn parse_returns_none_on_recoverable_error() {
-        use ast::context::Context;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let buf_id =
@@ -1187,9 +1187,9 @@ mod tests {
 
     #[test]
     fn parses_empty_statement() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let buf_id = sm.add_buffer_bytes("input", b";;;\n");
@@ -1221,9 +1221,9 @@ mod tests {
     /// `if(x);` parses cleanly as of P2.4 (was a deferred-error test in P1.1).
     #[test]
     fn if_statement_parses() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let buf_id = sm.add_buffer_bytes("input", b"if(x);");
@@ -1253,9 +1253,9 @@ mod tests {
     /// P3.1: a function expression now parses as a FunctionExpression.
     #[test]
     fn function_expression_parses() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let mut ctx = Context::new();
@@ -1273,8 +1273,8 @@ mod tests {
     /// Helper: parse `src` and assert it fails with at least one error
     /// (used for the still-deferred declaration forms).
     fn assert_parse_errors(src: &[u8], why: &str) {
-        use ast::context::Context;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let buf_id = sm.add_buffer_bytes("input", src);
@@ -1297,8 +1297,8 @@ mod tests {
     /// enabled iff `parse_flow`) and assert at least one error was reported —
     /// the parse may still recover and return a `Program`.
     fn assert_parse_has_errors_impl(src: &[u8], why: &str, parse_flow: bool) {
-        use ast::context::Context;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let buf_id = sm.add_buffer_bytes("input", src);
@@ -1334,18 +1334,18 @@ mod tests {
     /// Helper: parse `src`, expect zero errors, return the first top-level
     /// statement. Shorthand for [`flow_parse_stmt_at`] with index 0.
     fn parse_one_stmt<'gc>(
-        gc: &'gc ast::context::GCLock<'_, '_>,
-        sm: &mut support::manager::SourceErrorManager,
+        gc: &'gc hermes_ast::context::GCLock<'_, '_>,
+        sm: &mut hermes_support::manager::SourceErrorManager,
         src: &[u8],
-    ) -> &'gc ast::node::Node<'gc> {
+    ) -> &'gc hermes_ast::node::Node<'gc> {
         flow_parse_stmt_at(gc, sm, src, 0)
     }
 
     #[test]
     fn function_declaration_parses() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt = parse_one_stmt(&gc, &mut sm, b"function f(){}");
@@ -1358,9 +1358,9 @@ mod tests {
 
     #[test]
     fn generator_declaration_has_generator_flag() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt = parse_one_stmt(&gc, &mut sm, b"function* h(){}");
@@ -1374,9 +1374,9 @@ mod tests {
 
     #[test]
     fn async_declaration_has_async_flag() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt = parse_one_stmt(&gc, &mut sm, b"async function k(){}");
@@ -1390,9 +1390,9 @@ mod tests {
 
     #[test]
     fn function_params_identifier_and_rest() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt = parse_one_stmt(&gc, &mut sm, b"function f(a, ...r){}");
@@ -1414,9 +1414,9 @@ mod tests {
 
     #[test]
     fn function_params_object_and_array_patterns() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt = parse_one_stmt(&gc, &mut sm, b"function g({x},[y]){}");
@@ -1440,7 +1440,7 @@ mod tests {
     /// function body now that function bodies parse (P3.1).
     #[test]
     fn await_in_async_body_parses() {
-        let mut sm = support::manager::SourceErrorManager::new();
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         assert!(
             parse_snippet(&mut sm, b"async function f(){ await x; }"),
             "await in async body must parse cleanly"
@@ -1450,7 +1450,7 @@ mod tests {
     /// P3.2: a generator body containing `yield` now parses cleanly.
     #[test]
     fn yield_in_generator_parses() {
-        let mut sm = support::manager::SourceErrorManager::new();
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         assert!(
             parse_snippet(&mut sm, b"function* g(){ yield 1; }"),
             "yield in generator body must parse cleanly"
@@ -1463,9 +1463,9 @@ mod tests {
     /// identifier `B`.
     #[test]
     fn class_declaration_with_heritage() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt = parse_one_stmt(&gc, &mut sm, b"class A extends B {}");
@@ -1485,11 +1485,11 @@ mod tests {
     /// Helper: parse `class A { <member> }` and return the single class-body
     /// element.
     fn parse_one_class_member<'gc>(
-        gc: &'gc ast::context::GCLock<'_, '_>,
-        sm: &mut support::manager::SourceErrorManager,
+        gc: &'gc hermes_ast::context::GCLock<'_, '_>,
+        sm: &mut hermes_support::manager::SourceErrorManager,
         member_src: &str,
-    ) -> &'gc ast::node::Node<'gc> {
-        use ast::node::Node;
+    ) -> &'gc hermes_ast::node::Node<'gc> {
+        use hermes_ast::node::Node;
         let src = format!("class A {{ {member_src} }}");
         let stmt = parse_one_stmt(gc, sm, src.as_bytes());
         let Node::ClassDeclaration(cd) = stmt else {
@@ -1504,9 +1504,9 @@ mod tests {
     /// `m(){}` -> MethodDefinition with kind "method".
     #[test]
     fn class_method_kind_method() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let member = parse_one_class_member(&gc, &mut sm, "m(){}");
@@ -1521,9 +1521,9 @@ mod tests {
     /// `constructor(){}` -> MethodDefinition with kind "constructor".
     #[test]
     fn class_method_kind_constructor() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let member = parse_one_class_member(&gc, &mut sm, "constructor(){}");
@@ -1537,9 +1537,9 @@ mod tests {
     /// `get x(){}` -> MethodDefinition with kind "get".
     #[test]
     fn class_method_kind_get() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let member = parse_one_class_member(&gc, &mut sm, "get x(){}");
@@ -1553,9 +1553,9 @@ mod tests {
     /// `static s(){}` -> static MethodDefinition.
     #[test]
     fn class_method_static() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let member = parse_one_class_member(&gc, &mut sm, "static s(){}");
@@ -1568,9 +1568,9 @@ mod tests {
     /// `#p(){}` -> MethodDefinition whose key is a PrivateName.
     #[test]
     fn class_private_method_key_is_private_name() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let member = parse_one_class_member(&gc, &mut sm, "#p(){}");
@@ -1587,9 +1587,9 @@ mod tests {
     /// `x = 1;` -> ClassProperty with a value.
     #[test]
     fn class_field_with_value() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let member = parse_one_class_member(&gc, &mut sm, "x = 1;");
@@ -1602,9 +1602,9 @@ mod tests {
     /// `#f;` -> ClassPrivateProperty.
     #[test]
     fn class_private_field() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let member = parse_one_class_member(&gc, &mut sm, "#f;");
@@ -1618,9 +1618,9 @@ mod tests {
     /// `static { }` -> StaticBlock.
     #[test]
     fn class_static_block() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let member = parse_one_class_member(&gc, &mut sm, "static { }");
@@ -1634,9 +1634,9 @@ mod tests {
     /// `const C = class {};` -> ClassExpression.
     #[test]
     fn class_expression_parses() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let atoms = &gc.ctx().atom_table;
@@ -1652,9 +1652,9 @@ mod tests {
     /// a single Decorator.
     #[test]
     fn class_declaration_with_decorator() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt = parse_one_stmt(&gc, &mut sm, b"@dec class A {}");
@@ -1674,8 +1674,8 @@ mod tests {
     /// statement — which is illegal in strict mode — must still parse cleanly.
     #[test]
     fn class_strict_mode_does_not_leak() {
-        use ast::context::Context;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let buf_id = sm.add_buffer_bytes("input", b"class A {}\nwith(x) y;");
@@ -1707,9 +1707,9 @@ mod tests {
 
     #[test]
     fn import_call_no_options() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let mut ctx = Context::new();
@@ -1731,9 +1731,9 @@ mod tests {
 
     #[test]
     fn import_call_with_options() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let mut ctx = Context::new();
@@ -1754,9 +1754,9 @@ mod tests {
 
     #[test]
     fn import_meta_property() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let mut ctx = Context::new();
@@ -1798,9 +1798,9 @@ mod tests {
     /// MetaProperty — it must NOT trip the `'meta' expected` error path.
     #[test]
     fn import_meta_escaped_meta_parses() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let mut ctx = Context::new();
@@ -1828,10 +1828,10 @@ mod tests {
 
     /// Helper: the interned bytes of an `Identifier` node.
     fn ident_bytes<'gc>(
-        gc: &'gc ast::context::GCLock<'_, '_>,
-        node: &ast::node::Node<'gc>,
+        gc: &'gc hermes_ast::context::GCLock<'_, '_>,
+        node: &hermes_ast::node::Node<'gc>,
     ) -> Vec<u8> {
-        if let ast::node::Node::Identifier(id) = node {
+        if let hermes_ast::node::Node::Identifier(id) = node {
             gc.ctx().atom_table.bytes(id.name.get()).to_vec()
         } else {
             panic!("expected Identifier, got {:?}", node.kind());
@@ -1840,9 +1840,9 @@ mod tests {
 
     #[test]
     fn import_default_specifier_parses() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt = parse_one_stmt(&gc, &mut sm, b"import x from 'm';");
@@ -1870,9 +1870,9 @@ mod tests {
 
     #[test]
     fn import_named_specifier_parses() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt = parse_one_stmt(&gc, &mut sm, b"import {b as c} from 'm';");
@@ -1892,9 +1892,9 @@ mod tests {
 
     #[test]
     fn import_namespace_specifier_parses() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt = parse_one_stmt(&gc, &mut sm, b"import * as ns from 'm';");
@@ -1916,9 +1916,9 @@ mod tests {
 
     #[test]
     fn import_default_plus_named_parses() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt =
@@ -1936,9 +1936,9 @@ mod tests {
 
     #[test]
     fn import_default_plus_namespace_parses() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt =
@@ -1955,9 +1955,9 @@ mod tests {
 
     #[test]
     fn import_bare_parses() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt = parse_one_stmt(&gc, &mut sm, b"import 'm';");
@@ -1976,9 +1976,9 @@ mod tests {
 
     #[test]
     fn import_attribute_parses() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt = parse_one_stmt(
@@ -2029,9 +2029,9 @@ mod tests {
 
     #[test]
     fn export_named_specifier_parses() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         // The `var a;` declaration and the `export` share one program.
@@ -2072,9 +2072,9 @@ mod tests {
 
     #[test]
     fn export_named_from_parses() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt = parse_one_stmt(&gc, &mut sm, b"export {a} from 'm';");
@@ -2091,9 +2091,9 @@ mod tests {
 
     #[test]
     fn export_all_parses() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt = parse_one_stmt(&gc, &mut sm, b"export * from 'm';");
@@ -2110,9 +2110,9 @@ mod tests {
 
     #[test]
     fn export_namespace_parses() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt = parse_one_stmt(&gc, &mut sm, b"export * as ns from 'm';");
@@ -2131,9 +2131,9 @@ mod tests {
 
     #[test]
     fn export_default_expr_parses() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt = parse_one_stmt(&gc, &mut sm, b"export default 1;");
@@ -2150,9 +2150,9 @@ mod tests {
 
     #[test]
     fn export_default_function_parses() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt = parse_one_stmt(&gc, &mut sm, b"export default function(){}");
@@ -2172,9 +2172,9 @@ mod tests {
 
     #[test]
     fn export_var_declaration_parses() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt = parse_one_stmt(&gc, &mut sm, b"export var x = 1;");
@@ -2191,9 +2191,9 @@ mod tests {
 
     #[test]
     fn export_function_declaration_parses() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt = parse_one_stmt(&gc, &mut sm, b"export function f(){}");
@@ -2225,9 +2225,9 @@ mod tests {
     /// Helper: parse `src` with Flow enabled, expect one top-level
     /// `ExportNamedDeclaration`, and assert its `exportKind` atom is `kind`.
     fn assert_flow_export_kind(src: &[u8], kind: &[u8]) {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -2288,13 +2288,13 @@ mod tests {
     /// and carry exportKind `type`.
     #[test]
     fn flow_export_type_clause_and_star_have_type_kind() {
-        use ast::context::Context;
-        use ast::node::Node;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
         assert_flow_export_kind(b"export type {x};", b"type");
         assert_flow_export_kind(b"export type {x} from 'm';", b"type");
 
         // `export type *` produces an ExportAllDeclaration (not a named one).
-        let mut sm = support::manager::SourceErrorManager::new();
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -2312,8 +2312,8 @@ mod tests {
     /// Array literals are implemented in P1.7; `[1]` must now parse cleanly.
     #[test]
     fn array_literal_parses() {
-        use ast::context::Context;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let buf_id = sm.add_buffer_bytes("input", b"[1];");
@@ -2336,9 +2336,9 @@ mod tests {
 
     #[test]
     fn parses_sequence_expression() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let buf_id = sm.add_buffer_bytes("input", b"1, 2, 3;");
@@ -2370,9 +2370,9 @@ mod tests {
 
     #[test]
     fn use_strict_directive_sets_strict_mode() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let buf_id = sm.add_buffer_bytes("input", b"\"use strict\"; 1;");
@@ -2401,11 +2401,11 @@ mod tests {
     /// Helper: parse a snippet and extract the expression from the first
     /// ExpressionStatement.
     fn parse_expr_from<'gc>(
-        gc: &'gc ast::context::GCLock<'_, '_>,
-        sm: &mut support::manager::SourceErrorManager,
-        atoms: &atom_table::AtomTable,
+        gc: &'gc hermes_ast::context::GCLock<'_, '_>,
+        sm: &mut hermes_support::manager::SourceErrorManager,
+        atoms: &hermes_atom_table::AtomTable,
         src: &[u8],
-    ) -> &'gc ast::node::Node<'gc> {
+    ) -> &'gc hermes_ast::node::Node<'gc> {
         let buf_id = sm.add_buffer_bytes("input", src);
         let lexer = crate::lexer::JSLexer::new(
             buf_id,
@@ -2416,9 +2416,9 @@ mod tests {
         let mut parser = JSParserImpl::new(gc, lexer);
         let program = parser.parse().expect("parse succeeded");
         assert_eq!(parser.error_count_pub(), 0, "zero errors");
-        if let ast::node::Node::Program(p) = program {
+        if let hermes_ast::node::Node::Program(p) = program {
             let stmt = p.body.iter().next().expect("has statement");
-            if let ast::node::Node::ExpressionStatement(es) = stmt {
+            if let hermes_ast::node::Node::ExpressionStatement(es) = stmt {
                 return es.expression;
             }
         }
@@ -2427,9 +2427,9 @@ mod tests {
 
     #[test]
     fn parses_simple_assignment() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let mut ctx = Context::new();
@@ -2456,9 +2456,9 @@ mod tests {
 
     #[test]
     fn parses_compound_assignment_plus() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let mut ctx = Context::new();
@@ -2478,9 +2478,9 @@ mod tests {
     #[test]
     fn parses_right_assoc_chain() {
         // a = b = c  must parse as  a = (b = c)
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let mut ctx = Context::new();
@@ -2525,9 +2525,9 @@ mod tests {
     #[test]
     fn assignment_not_confused_with_equality() {
         // `a == b` must NOT produce an AssignmentExpression.
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let mut ctx = Context::new();
@@ -2544,8 +2544,8 @@ mod tests {
     #[test]
     fn arrow_expr_parses_after_p33() {
         // Arrow functions landed in P3.3; `a => b` now parses cleanly.
-        use ast::context::Context;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let buf_id = sm.add_buffer_bytes("input", b"a => b;");
@@ -2566,8 +2566,8 @@ mod tests {
     // P1.8: object literal tests.
 
     /// Helper: parse a snippet, return the parse result (Some = success).
-    fn parse_snippet(sm: &mut support::manager::SourceErrorManager, src: &[u8]) -> bool {
-        use ast::context::Context;
+    fn parse_snippet(sm: &mut hermes_support::manager::SourceErrorManager, src: &[u8]) -> bool {
+        use hermes_ast::context::Context;
         let buf_id = sm.add_buffer_bytes("input", src);
         let mut ctx = Context::new();
         let gc = ctx.lock();
@@ -2585,37 +2585,37 @@ mod tests {
 
     #[test]
     fn object_literal_empty_parses() {
-        let mut sm = support::manager::SourceErrorManager::new();
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         assert!(parse_snippet(&mut sm, b"({});"), "empty object literal");
     }
 
     #[test]
     fn object_literal_keyed_parses() {
-        let mut sm = support::manager::SourceErrorManager::new();
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         assert!(parse_snippet(&mut sm, b"({a: 1, b: 2});"), "keyed properties");
     }
 
     #[test]
     fn object_literal_shorthand_parses() {
-        let mut sm = support::manager::SourceErrorManager::new();
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         assert!(parse_snippet(&mut sm, b"({a, b});"), "shorthand properties");
     }
 
     #[test]
     fn object_literal_computed_parses() {
-        let mut sm = support::manager::SourceErrorManager::new();
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         assert!(parse_snippet(&mut sm, b"({[x]: 1});"), "computed key");
     }
 
     #[test]
     fn object_literal_spread_parses() {
-        let mut sm = support::manager::SourceErrorManager::new();
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         assert!(parse_snippet(&mut sm, b"({...a});"), "spread element");
     }
 
     #[test]
     fn object_literal_string_and_number_keys_parse() {
-        let mut sm = support::manager::SourceErrorManager::new();
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         assert!(
             parse_snippet(&mut sm, b"({\"s\": 1, 0: 2});"),
             "string and number keys"
@@ -2625,7 +2625,7 @@ mod tests {
     #[test]
     fn object_literal_get_set_as_data_property() {
         // `get` and `set` used as plain property names — must succeed.
-        let mut sm = support::manager::SourceErrorManager::new();
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         assert!(
             parse_snippet(&mut sm, b"({get: 1, set: 2});"),
             "get/set as data properties"
@@ -2639,7 +2639,7 @@ mod tests {
     #[test]
     fn object_literal_async_as_data_property() {
         // `async` used as a plain property name — must succeed.
-        let mut sm = support::manager::SourceErrorManager::new();
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         assert!(
             parse_snippet(&mut sm, b"({async: 1});"),
             "async as data property"
@@ -2653,7 +2653,7 @@ mod tests {
     #[test]
     fn object_literal_cover_initializer_parses() {
         // `({a=1})` is a CoverInitializedName — hermesc accepts it in raw AST dump.
-        let mut sm = support::manager::SourceErrorManager::new();
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         assert!(
             parse_snippet(&mut sm, b"({a=1});"),
             "CoverInitializedName must parse"
@@ -2665,11 +2665,11 @@ mod tests {
     /// Helper: parse `(OBJECT);`, expect success, return the single Property of
     /// the contained ObjectExpression.
     fn parse_single_property<'gc>(
-        gc: &'gc ast::context::GCLock<'_, '_>,
-        sm: &mut support::manager::SourceErrorManager,
+        gc: &'gc hermes_ast::context::GCLock<'_, '_>,
+        sm: &mut hermes_support::manager::SourceErrorManager,
         src: &[u8],
-    ) -> &'gc ast::node::Property<'gc> {
-        use ast::node::Node;
+    ) -> &'gc hermes_ast::node::Property<'gc> {
+        use hermes_ast::node::Node;
         let expr = parse_expr_ok(gc, sm, src);
         let Node::ObjectExpression(obj) = expr else {
             panic!("expected ObjectExpression, got {:?}", expr.kind());
@@ -2685,9 +2685,9 @@ mod tests {
     #[test]
     fn object_getter_parses() {
         // `{get x() { return 1; }}` → Property kind "get", value FunctionExpression.
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let p = parse_single_property(&gc, &mut sm, b"({get x() { return 1; }});");
@@ -2705,9 +2705,9 @@ mod tests {
     #[test]
     fn object_setter_parses() {
         // `{set x(v) {}}` → Property kind "set", value FunctionExpression w/ 1 param.
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let p = parse_single_property(&gc, &mut sm, b"({set x(v) {}});");
@@ -2722,9 +2722,9 @@ mod tests {
     #[test]
     fn object_method_parses() {
         // `{m() {}}` → Property kind "init", method=true, value FunctionExpression.
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let p = parse_single_property(&gc, &mut sm, b"({m() {}});");
@@ -2741,9 +2741,9 @@ mod tests {
     #[test]
     fn object_generator_method_parses() {
         // `{*g() {}}` → method=true, value FunctionExpression.generator==true.
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let p = parse_single_property(&gc, &mut sm, b"({*g() {}});");
@@ -2758,9 +2758,9 @@ mod tests {
     #[test]
     fn object_async_method_parses() {
         // `{async a() {}}` → method=true, value FunctionExpression.async==true.
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let p = parse_single_property(&gc, &mut sm, b"({async a() {}});");
@@ -2775,9 +2775,9 @@ mod tests {
     #[test]
     fn object_async_generator_method_parses() {
         // `{async *ag() {}}` → both async and generator true.
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let p = parse_single_property(&gc, &mut sm, b"({async *ag() {}});");
@@ -2792,9 +2792,9 @@ mod tests {
     #[test]
     fn object_computed_method_parses() {
         // `{[k]() {}}` → computed=true, method=true.
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let p = parse_single_property(&gc, &mut sm, b"({[k]() {}});");
@@ -2806,7 +2806,7 @@ mod tests {
     #[test]
     fn object_string_and_numeric_methods_parse() {
         // `{'s'() {}, 0() {}}` → both methods parse with method=true.
-        let mut sm = support::manager::SourceErrorManager::new();
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         assert!(
             parse_snippet(&mut sm, b"({'s'() {}, 0() {}});"),
             "string- and numeric-keyed methods"
@@ -2817,10 +2817,10 @@ mod tests {
 
     /// Helper: parse source, expect success, return first-statement expression.
     fn parse_expr_ok<'gc>(
-        gc: &'gc ast::context::GCLock<'_, '_>,
-        sm: &mut support::manager::SourceErrorManager,
+        gc: &'gc hermes_ast::context::GCLock<'_, '_>,
+        sm: &mut hermes_support::manager::SourceErrorManager,
         src: &[u8],
-    ) -> &'gc ast::node::Node<'gc> {
+    ) -> &'gc hermes_ast::node::Node<'gc> {
         let buf_id = sm.add_buffer_bytes("input", src);
         let atoms = &gc.ctx().atom_table;
         let lexer = crate::lexer::JSLexer::new(
@@ -2832,9 +2832,9 @@ mod tests {
         let mut parser = JSParserImpl::new(gc, lexer);
         let program = parser.parse().expect("parse succeeded");
         assert_eq!(parser.error_count_pub(), 0, "zero errors");
-        if let ast::node::Node::Program(p) = program {
+        if let hermes_ast::node::Node::Program(p) = program {
             let stmt = p.body.iter().next().expect("has statement");
-            if let ast::node::Node::ExpressionStatement(es) = stmt {
+            if let hermes_ast::node::Node::ExpressionStatement(es) = stmt {
                 return es.expression;
             }
         }
@@ -2844,9 +2844,9 @@ mod tests {
     #[test]
     fn array_destructure_simple() {
         // `[a] = b` → AssignmentExpression(=, ArrayPattern([Identifier(a)]), ...)
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let expr = parse_expr_ok(&gc, &mut sm, b"[a] = b;");
@@ -2867,9 +2867,9 @@ mod tests {
     #[test]
     fn array_destructure_with_rest() {
         // `[a, ...b] = c` → ArrayPattern contains RestElement.
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let expr = parse_expr_ok(&gc, &mut sm, b"[a, ...b] = c;");
@@ -2890,9 +2890,9 @@ mod tests {
     #[test]
     fn array_destructure_with_hole() {
         // `[a, , b] = c` → ArrayPattern has Empty hole.
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let expr = parse_expr_ok(&gc, &mut sm, b"[a, , b] = c;");
@@ -2914,9 +2914,9 @@ mod tests {
     #[test]
     fn array_destructure_with_default() {
         // `[a = 1, b] = c` → first element is AssignmentPattern.
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let expr = parse_expr_ok(&gc, &mut sm, b"[a = 1, b] = c;");
@@ -2940,9 +2940,9 @@ mod tests {
     #[test]
     fn object_destructure_shorthand() {
         // `({a} = b)` → AssignmentExpression(=, ObjectPattern([Property(...)]), ...)
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let expr = parse_expr_ok(&gc, &mut sm, b"({a} = b);");
@@ -2962,9 +2962,9 @@ mod tests {
     #[test]
     fn object_destructure_cover_initializer() {
         // `({a = 1} = b)` → Property value is AssignmentPattern.
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let expr = parse_expr_ok(&gc, &mut sm, b"({a = 1} = b);");
@@ -2991,9 +2991,9 @@ mod tests {
     #[test]
     fn object_destructure_with_rest() {
         // `({...r} = o)` → ObjectPattern([RestElement(Identifier(r))]).
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let expr = parse_expr_ok(&gc, &mut sm, b"({...r} = o);");
@@ -3016,9 +3016,9 @@ mod tests {
     #[test]
     fn nested_array_object_destructure() {
         // `[{a}, [b]] = c` — nested pattern.
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let expr = parse_expr_ok(&gc, &mut sm, b"[{a}, [b]] = c;");
@@ -3047,9 +3047,9 @@ mod tests {
     /// `parse_returns_none_on_recoverable_error`, above).
     #[test]
     fn return_outside_function_reports_error_but_parses() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let buf_id = sm.add_buffer_bytes("input", b"return x;\n");
         let mut ctx = Context::new();
         let gc = ctx.lock();
@@ -3081,8 +3081,8 @@ mod tests {
     /// ("'throw' argument must be on the same line") and the parse fails.
     #[test]
     fn throw_newline_before_argument_fails() {
-        use ast::context::Context;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let buf_id = sm.add_buffer_bytes("input", b"throw\nx;\n");
         let mut ctx = Context::new();
         let gc = ctx.lock();
@@ -3105,9 +3105,9 @@ mod tests {
     /// body is the expression statement `x;`.
     #[test]
     fn labelled_statement_parses() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let buf_id = sm.add_buffer_bytes("input", b"foo: x;\n");
         let mut ctx = Context::new();
         let gc = ctx.lock();
@@ -3148,9 +3148,9 @@ mod tests {
 
     #[test]
     fn binding_array_pattern_basic() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let buf_id = sm.add_buffer_bytes("input", b"[a, , ...b]");
@@ -3193,9 +3193,9 @@ mod tests {
 
     #[test]
     fn binding_array_pattern_default_initializer() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let buf_id = sm.add_buffer_bytes("input", b"[a = 1]");
@@ -3239,9 +3239,9 @@ mod tests {
 
     #[test]
     fn binding_object_pattern_basic() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let buf_id = sm.add_buffer_bytes("input", b"{a, b: c, d = 1, ...r}");
@@ -3332,12 +3332,12 @@ mod tests {
     /// and (via a `CollectingHandler`) the emitted diagnostics. The handler is
     /// installed before parsing so error message text is captured.
     fn parse_with_collector<'gc>(
-        gc: &'gc ast::context::GCLock<'_, '_>,
-        sm: &mut support::manager::SourceErrorManager,
-        atoms: &atom_table::AtomTable,
+        gc: &'gc hermes_ast::context::GCLock<'_, '_>,
+        sm: &mut hermes_support::manager::SourceErrorManager,
+        atoms: &hermes_atom_table::AtomTable,
         src: &[u8],
-    ) -> Option<&'gc ast::node::Node<'gc>> {
-        sm.set_handler(Box::new(support::diag::CollectingHandler::new()));
+    ) -> Option<&'gc hermes_ast::node::Node<'gc>> {
+        sm.set_handler(Box::new(hermes_support::diag::CollectingHandler::new()));
         let buf_id = sm.add_buffer_bytes("input", src);
         let lexer = crate::lexer::JSLexer::new(
             buf_id,
@@ -3353,9 +3353,9 @@ mod tests {
     /// declarator's `id` is an ArrayPattern.
     #[test]
     fn var_array_pattern_declaration() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let buf_id = sm.add_buffer_bytes("input", b"var [a] = b;");
@@ -3399,9 +3399,9 @@ mod tests {
     /// `const x;` → reports "missing initializer in const declaration".
     #[test]
     fn const_without_initializer_errors() {
-        use ast::context::Context;
-        use support::diag::{CollectingHandler, DiagKind};
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_support::diag::{CollectingHandler, DiagKind};
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let mut ctx = Context::new();
@@ -3427,9 +3427,9 @@ mod tests {
     /// (the C++ typo "destucturing" is preserved).
     #[test]
     fn destructuring_without_initializer_errors() {
-        use ast::context::Context;
-        use support::diag::{CollectingHandler, DiagKind};
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_support::diag::{CollectingHandler, DiagKind};
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let mut ctx = Context::new();
@@ -3454,9 +3454,9 @@ mod tests {
     /// `let x = 1;` → VariableDeclaration with kind "let".
     #[test]
     fn let_declaration_kind() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let buf_id = sm.add_buffer_bytes("input", b"let x = 1;");
@@ -3493,9 +3493,9 @@ mod tests {
     /// `is_let_followed_by_decl_start` lookahead.)
     #[test]
     fn loose_let_is_expression_statement() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let buf_id = sm.add_buffer_bytes("input", b"let;\nlet x;");
@@ -3539,10 +3539,10 @@ mod tests {
     /// Helper: parse `src`, expect success with zero errors, return the first
     /// statement of the Program body.
     fn parse_first_stmt<'gc>(
-        gc: &'gc ast::context::GCLock<'_, '_>,
-        sm: &mut support::manager::SourceErrorManager,
+        gc: &'gc hermes_ast::context::GCLock<'_, '_>,
+        sm: &mut hermes_support::manager::SourceErrorManager,
         src: &[u8],
-    ) -> &'gc ast::node::Node<'gc> {
+    ) -> &'gc hermes_ast::node::Node<'gc> {
         let buf_id = sm.add_buffer_bytes("input", src);
         let atoms = &gc.ctx().atom_table;
         let lexer = crate::lexer::JSLexer::new(
@@ -3554,7 +3554,7 @@ mod tests {
         let mut parser = JSParserImpl::new(gc, lexer);
         let program = parser.parse().expect("parse succeeded");
         assert_eq!(parser.error_count_pub(), 0, "zero errors");
-        if let ast::node::Node::Program(p) = program {
+        if let hermes_ast::node::Node::Program(p) = program {
             return p.body.iter().next().expect("has statement");
         }
         panic!("expected Program");
@@ -3563,9 +3563,9 @@ mod tests {
     /// `{{x;}}` → a BlockStatement whose single child is a BlockStatement.
     #[test]
     fn nested_block_statement() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt = parse_first_stmt(&gc, &mut sm, b"{{x;}}");
@@ -3583,9 +3583,9 @@ mod tests {
     /// `if(a)b;else c;` → IfStatement with a non-None alternate.
     #[test]
     fn if_with_else() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt = parse_first_stmt(&gc, &mut sm, b"if(a)b;else c;");
@@ -3598,9 +3598,9 @@ mod tests {
     /// `if(a)if(b)c;else d;` → the else binds to the INNER if (dangling-else).
     #[test]
     fn dangling_else_binds_to_inner_if() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt = parse_first_stmt(&gc, &mut sm, b"if(a)if(b)c;else d;");
@@ -3629,9 +3629,9 @@ mod tests {
     /// swapped — the C++ ctor takes body first).
     #[test]
     fn while_body_and_test_not_swapped() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt = parse_first_stmt(&gc, &mut sm, b"while(x)y;");
@@ -3655,9 +3655,9 @@ mod tests {
     /// clause in 'switch'".
     #[test]
     fn switch_duplicate_default_errors() {
-        use ast::context::Context;
-        use support::diag::{CollectingHandler, DiagKind};
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_support::diag::{CollectingHandler, DiagKind};
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let atoms = &gc.ctx().atom_table;
@@ -3684,9 +3684,9 @@ mod tests {
     /// `try{}` (no catch/finally) → reports the catch/finally expected error.
     #[test]
     fn try_without_handler_errors() {
-        use ast::context::Context;
-        use support::diag::{CollectingHandler, DiagKind};
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_support::diag::{CollectingHandler, DiagKind};
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let atoms = &gc.ctx().atom_table;
@@ -3710,9 +3710,9 @@ mod tests {
     /// Identifier(b).
     #[test]
     fn for_in_basic() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt = parse_first_stmt(&gc, &mut sm, b"for(a in b)c;");
@@ -3733,9 +3733,9 @@ mod tests {
     /// (the `[a]` cover expression was reparsed into a pattern).
     #[test]
     fn for_of_array_pattern_left() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt = parse_first_stmt(&gc, &mut sm, b"for([a] of b)c;");
@@ -3754,9 +3754,9 @@ mod tests {
     /// for-in/for-of loop".
     #[test]
     fn for_in_multiple_bindings_errors() {
-        use ast::context::Context;
-        use support::diag::{CollectingHandler, DiagKind};
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_support::diag::{CollectingHandler, DiagKind};
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let atoms = &gc.ctx().atom_table;
@@ -3779,9 +3779,9 @@ mod tests {
     /// `for(;;);` → ForStatement with init/test/update all None.
     #[test]
     fn for_empty_head() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt = parse_first_stmt(&gc, &mut sm, b"for(;;);");
@@ -3802,9 +3802,9 @@ mod tests {
     /// VariableDeclaration.
     #[test]
     fn for_c_style_var_init() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt = parse_first_stmt(&gc, &mut sm, b"for(var i=0;i<2;i++);");
@@ -3828,11 +3828,11 @@ mod tests {
     /// Parse `src` (a `function* g(){ <body> }`) and return the
     /// `YieldExpression` reached as the first statement's expression.
     fn first_yield<'gc>(
-        gc: &'gc ast::context::GCLock<'_, '_>,
-        sm: &mut support::manager::SourceErrorManager,
+        gc: &'gc hermes_ast::context::GCLock<'_, '_>,
+        sm: &mut hermes_support::manager::SourceErrorManager,
         src: &[u8],
-    ) -> &'gc ast::node::YieldExpression<'gc> {
-        use ast::node::Node;
+    ) -> &'gc hermes_ast::node::YieldExpression<'gc> {
+        use hermes_ast::node::Node;
         let decl = parse_first_stmt(gc, sm, src);
         let Node::FunctionDeclaration(f) = decl else {
             panic!("expected FunctionDeclaration, got {:?}", decl.kind())
@@ -3856,8 +3856,8 @@ mod tests {
     /// `function* g(){ yield* a; }` → delegate=true, argument Some.
     #[test]
     fn yield_delegate() {
-        use ast::context::Context;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let y = first_yield(&gc, &mut sm, b"function* g(){ yield* a; }");
@@ -3868,8 +3868,8 @@ mod tests {
     /// `function* g(){ yield; }` → argument None, delegate=false.
     #[test]
     fn yield_no_argument() {
-        use ast::context::Context;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let y = first_yield(&gc, &mut sm, b"function* g(){ yield; }");
@@ -3880,8 +3880,8 @@ mod tests {
     /// `function* g(){ yield 1; }` → argument Some, delegate=false.
     #[test]
     fn yield_with_argument() {
-        use ast::context::Context;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let y = first_yield(&gc, &mut sm, b"function* g(){ yield 1; }");
@@ -3896,11 +3896,11 @@ mod tests {
     /// Parse `src` and return the `ArrowFunctionExpression` reached as the
     /// first statement's expression.
     fn first_arrow<'gc>(
-        gc: &'gc ast::context::GCLock<'_, '_>,
-        sm: &mut support::manager::SourceErrorManager,
+        gc: &'gc hermes_ast::context::GCLock<'_, '_>,
+        sm: &mut hermes_support::manager::SourceErrorManager,
         src: &[u8],
-    ) -> &'gc ast::node::ArrowFunctionExpression<'gc> {
-        use ast::node::Node;
+    ) -> &'gc hermes_ast::node::ArrowFunctionExpression<'gc> {
+        use hermes_ast::node::Node;
         let stmt = parse_first_stmt(gc, sm, src);
         let Node::ExpressionStatement(es) = stmt else {
             panic!("expected ExpressionStatement, got {:?}", stmt.kind())
@@ -3917,9 +3917,9 @@ mod tests {
     /// `a => a;` → expression=true, async=false, params=[Identifier].
     #[test]
     fn arrow_single_ident() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let a = first_arrow(&gc, &mut sm, b"a => a;");
@@ -3937,8 +3937,8 @@ mod tests {
     /// `() => 0;` → params empty.
     #[test]
     fn arrow_empty_params() {
-        use ast::context::Context;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let a = first_arrow(&gc, &mut sm, b"() => 0;");
@@ -3949,9 +3949,9 @@ mod tests {
     /// `(a, ...b) => b;` → params=[Identifier, RestElement].
     #[test]
     fn arrow_rest_param() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let a = first_arrow(&gc, &mut sm, b"(a, ...b) => b;");
@@ -3972,9 +3972,9 @@ mod tests {
     /// `(a = 1) => a;` → params=[AssignmentPattern].
     #[test]
     fn arrow_default_param() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let a = first_arrow(&gc, &mut sm, b"(a = 1) => a;");
@@ -3990,9 +3990,9 @@ mod tests {
     /// `({x}) => x;` → params=[ObjectPattern].
     #[test]
     fn arrow_object_pattern_param() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let a = first_arrow(&gc, &mut sm, b"({x}) => x;");
@@ -4008,9 +4008,9 @@ mod tests {
     /// `a => { return a; };` → expression=false (block body).
     #[test]
     fn arrow_block_body() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let a = first_arrow(&gc, &mut sm, b"a => { return a; };");
@@ -4025,8 +4025,8 @@ mod tests {
     /// `async a => a;` → async=true.
     #[test]
     fn arrow_async_single_ident() {
-        use ast::context::Context;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let a = first_arrow(&gc, &mut sm, b"async a => a;");
@@ -4038,9 +4038,9 @@ mod tests {
     /// async-CallExpression cover head).
     #[test]
     fn arrow_async_paren() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let a = first_arrow(&gc, &mut sm, b"async (a) => a;");
@@ -4057,9 +4057,9 @@ mod tests {
     /// Non-arrow `(a)` → a parenthesized Identifier (parens recorded).
     #[test]
     fn paren_ident_not_arrow() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt = parse_first_stmt(&gc, &mut sm, b"(a);");
@@ -4081,9 +4081,9 @@ mod tests {
     /// Non-arrow `(a, b)` → SequenceExpression.
     #[test]
     fn paren_sequence_not_arrow() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt = parse_first_stmt(&gc, &mut sm, b"(a, b);");
@@ -4102,9 +4102,9 @@ mod tests {
     /// AST when not followed by `=>`).
     #[test]
     fn paren_trailing_comma_not_arrow() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt = parse_first_stmt(&gc, &mut sm, b"(a,);");
@@ -4130,11 +4130,11 @@ mod tests {
     /// statement's argument, for the `super` tests below.
     #[cfg(test)]
     fn return_arg_in_object_method<'gc>(
-        gc: &'gc ast::context::GCLock<'_, '_>,
-        sm: &mut support::manager::SourceErrorManager,
+        gc: &'gc hermes_ast::context::GCLock<'_, '_>,
+        sm: &mut hermes_support::manager::SourceErrorManager,
         src: &[u8],
-    ) -> &'gc ast::node::Node<'gc> {
-        use ast::node::Node;
+    ) -> &'gc hermes_ast::node::Node<'gc> {
+        use hermes_ast::node::Node;
         let stmt = parse_first_stmt(gc, sm, src);
         let Node::ExpressionStatement(es) = stmt else {
             panic!("expected ExpressionStatement, got {:?}", stmt.kind())
@@ -4163,9 +4163,9 @@ mod tests {
     /// object is a `Super` node.
     #[test]
     fn super_member_dot() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let arg = return_arg_in_object_method(
@@ -4188,9 +4188,9 @@ mod tests {
     /// object is a `Super` node.
     #[test]
     fn super_member_computed() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let arg = return_arg_in_object_method(
@@ -4222,9 +4222,9 @@ mod tests {
     /// NumberTypeAnnotation}.
     #[test]
     fn flow_type_alias_number() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -4245,9 +4245,9 @@ mod tests {
     /// StringLiteralTypeAnnotation with value "hi".
     #[test]
     fn flow_type_alias_string_literal() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -4279,9 +4279,9 @@ mod tests {
     /// Without `parse_flow`, `type` stays usable as a plain identifier.
     #[test]
     fn flow_disabled_type_is_plain_identifier() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt = parse_one_stmt(&gc, &mut sm, b"var type = 1;");
@@ -4300,12 +4300,12 @@ mod tests {
     /// statement, which must be an `EnumDeclaration`. The enum body is
     /// returned alongside.
     fn flow_enum<'gc>(
-        gc: &'gc ast::context::GCLock<'_, '_>,
-        sm: &mut support::manager::SourceErrorManager,
+        gc: &'gc hermes_ast::context::GCLock<'_, '_>,
+        sm: &mut hermes_support::manager::SourceErrorManager,
         src: &[u8],
-    ) -> (&'gc ast::node::Node<'gc>, &'gc ast::node::Node<'gc>) {
+    ) -> (&'gc hermes_ast::node::Node<'gc>, &'gc hermes_ast::node::Node<'gc>) {
         let stmt = parse_one_stmt(gc, sm, src);
-        let ast::node::Node::EnumDeclaration(decl) = stmt else {
+        let hermes_ast::node::Node::EnumDeclaration(decl) = stmt else {
             panic!("expected EnumDeclaration, got {:?}", stmt.kind())
         };
         (stmt, decl.body)
@@ -4315,9 +4315,9 @@ mod tests {
     /// is an empty, non-explicit `EnumStringBody` (the untyped/empty default).
     #[test]
     fn flow_enum_empty() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -4334,9 +4334,9 @@ mod tests {
     /// `enum E { A, B, C }` → defaulted string-body members.
     #[test]
     fn flow_enum_defaulted() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -4359,9 +4359,9 @@ mod tests {
     /// type and `EnumNumberMember`s.
     #[test]
     fn flow_enum_number_typed() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -4385,9 +4385,9 @@ mod tests {
     /// `enum B of boolean { A = true, B = false }` → `EnumBooleanBody`.
     #[test]
     fn flow_enum_boolean_typed() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -4411,9 +4411,9 @@ mod tests {
     /// `explicit_type` field) with defaulted members.
     #[test]
     fn flow_enum_symbol_body_has_no_explicit_type() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -4432,9 +4432,9 @@ mod tests {
     /// `enum E { A = 1, B = 2, ... }` → inexact body (`has_unknown_members`).
     #[test]
     fn flow_enum_inexact() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -4451,9 +4451,9 @@ mod tests {
     /// `enum E { A = -1, B = 2 }` → a negated `EnumNumberMember`.
     #[test]
     fn flow_enum_negative_member() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -4502,9 +4502,9 @@ mod tests {
     /// Without `parse_flow`, `enum` stays a plain identifier.
     #[test]
     fn flow_disabled_enum_is_plain_identifier() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         let gc = ctx.lock();
         let stmt = parse_one_stmt(&gc, &mut sm, b"var enum2 = 1;");
@@ -4523,12 +4523,12 @@ mod tests {
     /// `parse_flow_ambiguous`), parse `src`, and return the first statement's
     /// expression (it must be an `ExpressionStatement`).
     fn flow_ambiguous_expr<'gc>(
-        gc: &'gc ast::context::GCLock<'_, '_>,
-        sm: &mut support::manager::SourceErrorManager,
+        gc: &'gc hermes_ast::context::GCLock<'_, '_>,
+        sm: &mut hermes_support::manager::SourceErrorManager,
         src: &[u8],
-    ) -> &'gc ast::node::Node<'gc> {
+    ) -> &'gc hermes_ast::node::Node<'gc> {
         let stmt = parse_one_stmt(gc, sm, src);
-        let ast::node::Node::ExpressionStatement(es) = stmt else {
+        let hermes_ast::node::Node::ExpressionStatement(es) = stmt else {
             panic!("expected ExpressionStatement, got {:?}", stmt.kind())
         };
         es.expression
@@ -4537,9 +4537,9 @@ mod tests {
     /// `x as number` → `AsExpression{ Identifier "x", NumberTypeAnnotation }`.
     #[test]
     fn flow_as_expression() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         ctx.set_parse_flow_ambiguous(true);
@@ -4560,9 +4560,9 @@ mod tests {
     /// special-case, NOT an `AsExpression` over a `GenericTypeAnnotation`).
     #[test]
     fn flow_as_const_expression() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         ctx.set_parse_flow_ambiguous(true);
@@ -4578,11 +4578,11 @@ mod tests {
     /// `a < b` rolls the speculation back into a `BinaryExpression`.
     #[test]
     fn flow_call_type_args_vs_comparison() {
-        use ast::context::Context;
-        use ast::node::Node;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
         // f<T>() — type-args kept.
         {
-            let mut sm = support::manager::SourceErrorManager::new();
+            let mut sm = hermes_support::manager::SourceErrorManager::new();
             let mut ctx = Context::new();
             ctx.set_parse_flow(true);
             ctx.set_parse_flow_ambiguous(true);
@@ -4598,7 +4598,7 @@ mod tests {
         }
         // a < b — speculation rolled back to a comparison.
         {
-            let mut sm = support::manager::SourceErrorManager::new();
+            let mut sm = hermes_support::manager::SourceErrorManager::new();
             let mut ctx = Context::new();
             ctx.set_parse_flow(true);
             ctx.set_parse_flow_ambiguous(true);
@@ -4616,11 +4616,11 @@ mod tests {
     /// keeps both type-args and arguments.
     #[test]
     fn flow_new_type_args() {
-        use ast::context::Context;
-        use ast::node::Node;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
         // new C<T> — type-args, NO parens required.
         {
-            let mut sm = support::manager::SourceErrorManager::new();
+            let mut sm = hermes_support::manager::SourceErrorManager::new();
             let mut ctx = Context::new();
             ctx.set_parse_flow(true);
             ctx.set_parse_flow_ambiguous(true);
@@ -4637,7 +4637,7 @@ mod tests {
         }
         // new C<T>(x) — type-args AND one argument.
         {
-            let mut sm = support::manager::SourceErrorManager::new();
+            let mut sm = hermes_support::manager::SourceErrorManager::new();
             let mut ctx = Context::new();
             ctx.set_parse_flow(true);
             ctx.set_parse_flow_ambiguous(true);
@@ -4655,9 +4655,9 @@ mod tests {
     /// `?.<T>()` form is unambiguous Flow — no SavePoint, no rollback).
     #[test]
     fn flow_optional_call_type_args() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         ctx.set_parse_flow_ambiguous(true);
@@ -4679,10 +4679,10 @@ mod tests {
     /// is a comparison, exactly like plain JS. (Guards against Flow leakage.)
     #[test]
     fn flow_ambiguous_off_keeps_comparison() {
-        use ast::context::Context;
-        use ast::node::Node;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
         // parse_flow ON but parse_flow_ambiguous OFF: still a comparison chain.
-        let mut sm = support::manager::SourceErrorManager::new();
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         // deliberately NOT setting parse_flow_ambiguous.
@@ -4705,16 +4705,16 @@ mod tests {
     /// on `parse_flow`, NOT `parse_flow_ambiguous`), parse `src`, return the
     /// init of the single top-level `const`.
     fn flow_const_init<'gc>(
-        gc: &'gc ast::context::GCLock<'_, '_>,
-        sm: &mut support::manager::SourceErrorManager,
+        gc: &'gc hermes_ast::context::GCLock<'_, '_>,
+        sm: &mut hermes_support::manager::SourceErrorManager,
         src: &[u8],
-    ) -> &'gc ast::node::Node<'gc> {
+    ) -> &'gc hermes_ast::node::Node<'gc> {
         let stmt = parse_one_stmt(gc, sm, src);
-        let ast::node::Node::VariableDeclaration(vd) = stmt else {
+        let hermes_ast::node::Node::VariableDeclaration(vd) = stmt else {
             panic!("expected VariableDeclaration, got {:?}", stmt.kind())
         };
         let decl = vd.declarations.iter().next().expect("one declarator");
-        let ast::node::Node::VariableDeclarator(d) = decl else {
+        let hermes_ast::node::Node::VariableDeclarator(d) = decl else {
             panic!("expected VariableDeclarator, got {:?}", decl.kind())
         };
         d.init.expect("declarator has an init")
@@ -4724,9 +4724,9 @@ mod tests {
     /// parameters, a return type, and `expression == true`.
     #[test]
     fn flow_typed_arrow_full() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -4746,9 +4746,9 @@ mod tests {
     /// no return type.
     #[test]
     fn flow_typed_arrow_predicate() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -4779,9 +4779,9 @@ mod tests {
     /// (`expression == false`).
     #[test]
     fn flow_typed_arrow_void_block() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -4796,9 +4796,9 @@ mod tests {
     /// `async <T>(x: T): T => x` → an async typed arrow.
     #[test]
     fn flow_typed_async_arrow() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -4815,9 +4815,9 @@ mod tests {
     /// `async (x: number) => x` → an async typed arrow without type params.
     #[test]
     fn flow_typed_async_arrow_no_generics() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -4834,9 +4834,9 @@ mod tests {
     /// typed-async path falls back to the normal async handling.
     #[test]
     fn flow_plain_async_arrow_still_works() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -4853,9 +4853,9 @@ mod tests {
     /// the same line) stays an identifier reference.
     #[test]
     fn flow_async_as_identifier() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -4870,9 +4870,9 @@ mod tests {
     /// `(x: number)` parenthesized type-cast → `TypeCastExpression`.
     #[test]
     fn flow_type_cast() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -4892,9 +4892,9 @@ mod tests {
     /// expression is an ObjectExpression.
     #[test]
     fn flow_type_cast_object() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -4913,9 +4913,9 @@ mod tests {
     /// arrow in the consequent must be recognized through the backtracking.
     #[test]
     fn flow_conditional_consequent_cover() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -4937,9 +4937,9 @@ mod tests {
     /// The `<T>(…) =>` head must roll back when there is no `=>`.
     #[test]
     fn flow_typed_arrow_disambiguation_comparison() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -4958,9 +4958,9 @@ mod tests {
     /// `parse_flow` on still parses as a comparison.
     #[test]
     fn flow_typed_arrow_lt_not_arrow() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -4977,12 +4977,12 @@ mod tests {
     /// Helper: parse `src` with the caller's (Flow-enabled) context and
     /// return the right-hand side of the single top-level `TypeAlias`.
     fn flow_alias_right<'gc>(
-        gc: &'gc ast::context::GCLock<'_, '_>,
-        sm: &mut support::manager::SourceErrorManager,
+        gc: &'gc hermes_ast::context::GCLock<'_, '_>,
+        sm: &mut hermes_support::manager::SourceErrorManager,
         src: &[u8],
-    ) -> &'gc ast::node::Node<'gc> {
+    ) -> &'gc hermes_ast::node::Node<'gc> {
         let stmt = parse_one_stmt(gc, sm, src);
-        let ast::node::Node::TypeAlias(alias) = stmt else {
+        let hermes_ast::node::Node::TypeAlias(alias) = stmt else {
             panic!("expected TypeAlias, got {:?}", stmt.kind())
         };
         alias.right
@@ -4991,11 +4991,11 @@ mod tests {
     /// Helper: assert `node` is a `GenericTypeAnnotation` over a plain
     /// `Identifier` named `name` (the shape every bare `X` parses to).
     fn assert_generic_named<'gc>(
-        gc: &'gc ast::context::GCLock<'_, '_>,
-        node: &ast::node::Node<'gc>,
+        gc: &'gc hermes_ast::context::GCLock<'_, '_>,
+        node: &hermes_ast::node::Node<'gc>,
         name: &[u8],
     ) {
-        use ast::node::Node;
+        use hermes_ast::node::Node;
         let Node::GenericTypeAnnotation(g) = node else {
             panic!("expected GenericTypeAnnotation, got {:?}", node.kind())
         };
@@ -5007,9 +5007,9 @@ mod tests {
     /// equivalence, and `&` binding tighter than `|`.
     #[test]
     fn flow_union_intersection_types() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -5055,9 +5055,9 @@ mod tests {
     /// `??X` parses as two nested NullableTypeAnnotations.
     #[test]
     fn flow_nullable_nesting() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -5079,9 +5079,9 @@ mod tests {
     /// optional indexed access, and the stickiness of `?.` in `X?.[A][B]`.
     #[test]
     fn flow_postfix_types() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -5135,9 +5135,9 @@ mod tests {
     /// TypeParameterInstantiation.
     #[test]
     fn flow_generic_types() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -5191,9 +5191,9 @@ mod tests {
     /// following `>>` into two `>` tokens instead of one shift token.
     #[test]
     fn flow_nested_generic_type_args() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -5223,9 +5223,9 @@ mod tests {
     /// argument's parens counter — invisible in the AST dump), type args.
     #[test]
     fn flow_typeof_types() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -5270,9 +5270,9 @@ mod tests {
     /// labeled), variance prefixes, inexact `...`, and empty.
     #[test]
     fn flow_tuple_types() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -5381,9 +5381,9 @@ mod tests {
     /// non-identifier label trips the reparse helper's "identifier expected".
     #[test]
     fn flow_tuple_errors() {
-        use ast::context::Context;
-        use support::diag::{CollectingHandler, DiagKind};
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_support::diag::{CollectingHandler, DiagKind};
+        use hermes_support::manager::SourceErrorManager;
 
         // Comma after the inexact `...`.
         {
@@ -5442,9 +5442,9 @@ mod tests {
     /// `keyof X` → KeyofTypeAnnotation over the generic argument.
     #[test]
     fn flow_keyof_type() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -5460,9 +5460,9 @@ mod tests {
     /// generic children in the right slots.
     #[test]
     fn flow_conditional_type() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -5483,15 +5483,15 @@ mod tests {
     /// away when a `?` follows in a position that allows conditional types.
     #[test]
     fn flow_infer_type_bound_and_backtrack() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
 
         // Helper: unwrap InferTypeAnnotation → TypeParameter.
-        fn infer_param<'gc>(node: &'gc Node<'gc>) -> &'gc ast::node::TypeParameter<'gc> {
+        fn infer_param<'gc>(node: &'gc Node<'gc>) -> &'gc hermes_ast::node::TypeParameter<'gc> {
             let Node::InferTypeAnnotation(i) = node else {
                 panic!("expected InferTypeAnnotation, got {:?}", node.kind())
             };
@@ -5560,9 +5560,9 @@ mod tests {
     /// `-` through the literal.
     #[test]
     fn flow_negative_literal_types() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -5592,9 +5592,9 @@ mod tests {
 
     /// Helper: assert `node` is a `FunctionTypeAnnotation` and return it.
     fn as_fta<'gc, 'n>(
-        node: &'n ast::node::Node<'gc>,
-    ) -> &'n ast::node::FunctionTypeAnnotation<'gc> {
-        let ast::node::Node::FunctionTypeAnnotation(fta) = node else {
+        node: &'n hermes_ast::node::Node<'gc>,
+    ) -> &'n hermes_ast::node::FunctionTypeAnnotation<'gc> {
+        let hermes_ast::node::Node::FunctionTypeAnnotation(fta) = node else {
             panic!("expected FunctionTypeAnnotation, got {:?}", node.kind())
         };
         fta
@@ -5602,9 +5602,9 @@ mod tests {
 
     /// Helper: assert `node` is a `FunctionTypeParam` and return it.
     fn as_ftp<'gc, 'n>(
-        node: &'n ast::node::Node<'gc>,
-    ) -> &'n ast::node::FunctionTypeParam<'gc> {
-        let ast::node::Node::FunctionTypeParam(ftp) = node else {
+        node: &'n hermes_ast::node::Node<'gc>,
+    ) -> &'n hermes_ast::node::FunctionTypeParam<'gc> {
+        let hermes_ast::node::Node::FunctionTypeParam(ftp) = node else {
             panic!("expected FunctionTypeParam, got {:?}", node.kind())
         };
         ftp
@@ -5614,9 +5614,9 @@ mod tests {
     /// optional params, rest, and the return type.
     #[test]
     fn flow_function_type_full_shape() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -5674,8 +5674,8 @@ mod tests {
     /// returns the inner type with its paren count bumped.
     #[test]
     fn flow_group_vs_function_type() {
-        use ast::context::Context;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -5704,8 +5704,8 @@ mod tests {
     /// The anonymous function type `T => U => V` nests to the right.
     #[test]
     fn flow_anon_function_type() {
-        use ast::context::Context;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -5723,9 +5723,9 @@ mod tests {
     /// `kind` atoms and variance.
     #[test]
     fn flow_object_type_properties() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -5746,7 +5746,7 @@ mod tests {
 
         let props: Vec<_> = obj.properties.iter().collect();
         assert_eq!(props.len(), 6);
-        let prop = |i: usize| -> &ast::node::ObjectTypeProperty<'_> {
+        let prop = |i: usize| -> &hermes_ast::node::ObjectTypeProperty<'_> {
             let Node::ObjectTypeProperty(p) = props[i] else {
                 panic!("expected ObjectTypeProperty, got {:?}", props[i].kind())
             };
@@ -5796,14 +5796,14 @@ mod tests {
     /// exact `{| |}`, and explicit inexact `{ ... }`.
     #[test]
     fn flow_object_type_member_families() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
 
-        let obj_of = |sm: &mut support::manager::SourceErrorManager,
+        let obj_of = |sm: &mut hermes_support::manager::SourceErrorManager,
                       src: &[u8]| {
             let ty = flow_alias_right(&gc, sm, src);
             let Node::ObjectTypeAnnotation(obj) = ty else {
@@ -5859,7 +5859,7 @@ mod tests {
             match sigil {
                 None => assert_eq!(
                     mapped.optional.get(),
-                    atom_table::INVALID_ATOM_BYTES,
+                    hermes_atom_table::INVALID_ATOM_BYTES,
                     "no sigil dumps as null"
                 ),
                 Some(s) => assert_eq!(
@@ -5919,9 +5919,9 @@ mod tests {
     /// and method names in an object type that disallows those modifiers.
     #[test]
     fn flow_object_type_modifier_name_fallbacks() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
@@ -5952,14 +5952,14 @@ mod tests {
     /// bounds, and defaults.
     #[test]
     fn flow_type_param_declarations() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
 
-        let params_of = |sm: &mut support::manager::SourceErrorManager,
+        let params_of = |sm: &mut hermes_support::manager::SourceErrorManager,
                          src: &[u8]| {
             let stmt = parse_one_stmt(&gc, sm, src);
             let Node::TypeAlias(alias) = stmt else {
@@ -5971,7 +5971,7 @@ mod tests {
             };
             tpd.params.iter().collect::<Vec<_>>()
         };
-        let tparam = |node: &'_ ast::node::Node<'_>| {
+        let tparam = |node: &'_ hermes_ast::node::Node<'_>| {
             let Node::TypeParameter(p) = node else {
                 panic!("expected TypeParameter, got {:?}", node.kind())
             };
@@ -6044,14 +6044,14 @@ mod tests {
     /// (null kind), `asserts x [is T]`, and `implies x is T`.
     #[test]
     fn flow_type_predicates() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
 
-        let predicate_of = |sm: &mut support::manager::SourceErrorManager,
+        let predicate_of = |sm: &mut hermes_support::manager::SourceErrorManager,
                             src: &[u8]| {
             let ty = flow_alias_right(&gc, sm, src);
             as_fta(ty).return_type
@@ -6068,7 +6068,7 @@ mod tests {
             p.type_annotation.expect("has type"),
             Node::NumberTypeAnnotation(_)
         ));
-        assert_eq!(p.kind.get(), atom_table::INVALID_ATOM_BYTES);
+        assert_eq!(p.kind.get(), hermes_atom_table::INVALID_ATOM_BYTES);
 
         // `asserts x is T` and the type-less `asserts x`.
         let ret =
@@ -6104,9 +6104,9 @@ mod tests {
     /// one identifier in Type grammar context.
     #[test]
     fn flow_checks_predicates() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let parse_predicate = |src: &[u8]| -> (&'static str, bool) {
             let mut sm = SourceErrorManager::new();
@@ -6148,9 +6148,9 @@ mod tests {
     /// The P5.2 diagnostics keep the exact C++ texts.
     #[test]
     fn flow_p52_errors() {
-        use ast::context::Context;
-        use support::diag::{CollectingHandler, DiagKind};
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_support::diag::{CollectingHandler, DiagKind};
+        use hermes_support::manager::SourceErrorManager;
 
         let assert_error = |src: &[u8], expected: &str| {
             let mut sm = SourceErrorManager::new();
@@ -6224,11 +6224,11 @@ mod tests {
     /// expect zero errors, return the top-level statement at `idx` (for the
     /// strict-mode tests, where the directive prologue is statement 0).
     fn flow_parse_stmt_at<'gc>(
-        gc: &'gc ast::context::GCLock<'_, '_>,
-        sm: &mut support::manager::SourceErrorManager,
+        gc: &'gc hermes_ast::context::GCLock<'_, '_>,
+        sm: &mut hermes_support::manager::SourceErrorManager,
         src: &[u8],
         idx: usize,
-    ) -> &'gc ast::node::Node<'gc> {
+    ) -> &'gc hermes_ast::node::Node<'gc> {
         let buf_id = sm.add_buffer_bytes("input", src);
         let atoms = &gc.ctx().atom_table;
         let lexer = crate::lexer::JSLexer::new(
@@ -6240,7 +6240,7 @@ mod tests {
         let mut parser = JSParserImpl::new(gc, lexer);
         let program = parser.parse().expect("parse succeeded");
         assert_eq!(parser.error_count_pub(), 0, "zero errors");
-        if let ast::node::Node::Program(p) = program {
+        if let hermes_ast::node::Node::Program(p) = program {
             return p.body.iter().nth(idx).expect("has enough statements");
         }
         panic!("expected Program");
@@ -6250,9 +6250,9 @@ mod tests {
     /// `: Supertype`, and the `super`/`extends` bounds.
     #[test]
     fn flow_opaque_type_shapes() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         // (src, has type params, lower bound, upper bound, supertype)
         let check = |src: &[u8],
@@ -6312,9 +6312,9 @@ mod tests {
     /// GenericTypeAnnotation → InterfaceExtends unwrapping), and the body.
     #[test]
     fn flow_interface_declaration() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let mut ctx = Context::new();
@@ -6376,9 +6376,9 @@ mod tests {
     /// reserved-word arm). Both build InterfaceTypeAnnotation.
     #[test]
     fn flow_interface_type_annotation() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let mut ctx = Context::new();
@@ -6444,9 +6444,9 @@ mod tests {
     /// integration lands in P5.4): `I` and `I<T>`.
     #[test]
     fn flow_class_implements() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let parse_impl = |src: &[u8], expect_args: bool| {
             let mut sm = SourceErrorManager::new();
@@ -6484,9 +6484,9 @@ mod tests {
     /// The P5.3 diagnostics keep the exact C++ texts.
     #[test]
     fn flow_p53_errors() {
-        use ast::context::Context;
-        use support::diag::{CollectingHandler, DiagKind};
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_support::diag::{CollectingHandler, DiagKind};
+        use hermes_support::manager::SourceErrorManager;
 
         let assert_error = |src: &[u8], expected: &str| {
             let mut sm = SourceErrorManager::new();
@@ -6528,9 +6528,9 @@ mod tests {
     /// Function signature: type params, annotated params, return type.
     #[test]
     fn flow_function_signature() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let mut ctx = Context::new();
@@ -6559,9 +6559,9 @@ mod tests {
     /// (directly after the colon, with no return type).
     #[test]
     fn flow_function_predicates() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         // Return type + inferred predicate.
         {
@@ -6610,9 +6610,9 @@ mod tests {
     /// with its type annotation and the following comma consumed.
     #[test]
     fn flow_this_param() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let mut ctx = Context::new();
@@ -6648,13 +6648,13 @@ mod tests {
     /// identifiers, and `:` types on array/object binding patterns.
     #[test]
     fn flow_binding_annotations() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         /// The single declarator's id of the variable declaration in `src`.
         fn decl_id<'gc>(
-            gc: &'gc ast::context::GCLock<'_, '_>,
+            gc: &'gc hermes_ast::context::GCLock<'_, '_>,
             src: &[u8],
         ) -> &'gc Node<'gc> {
             let mut sm = SourceErrorManager::new();
@@ -6715,9 +6715,9 @@ mod tests {
     /// return types, and private-field annotations.
     #[test]
     fn flow_class_integration() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let mut ctx = Context::new();
@@ -6828,9 +6828,9 @@ mod tests {
     /// `class` means there is no class name.
     #[test]
     fn flow_class_expression_heritage() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let mut ctx = Context::new();
@@ -6855,9 +6855,9 @@ mod tests {
     /// `get`/`set` used as method names (detected via `<`).
     #[test]
     fn flow_object_literal_methods() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let mut ctx = Context::new();
@@ -6928,9 +6928,9 @@ mod tests {
     /// The P5.4 class-element diagnostics keep the exact C++ texts.
     #[test]
     fn flow_p54_errors() {
-        use ast::context::Context;
-        use support::diag::{CollectingHandler, DiagKind};
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_support::diag::{CollectingHandler, DiagKind};
+        use hermes_support::manager::SourceErrorManager;
 
         let assert_error = |src: &[u8], expected: &str| {
             let mut sm = SourceErrorManager::new();
@@ -6967,11 +6967,11 @@ mod tests {
     /// enabled, expect zero errors, and return the `idx`th top-level
     /// statement.
     fn comp_parse_stmt_at<'gc>(
-        gc: &'gc ast::context::GCLock<'_, '_>,
-        sm: &mut support::manager::SourceErrorManager,
+        gc: &'gc hermes_ast::context::GCLock<'_, '_>,
+        sm: &mut hermes_support::manager::SourceErrorManager,
         src: &[u8],
         idx: usize,
-    ) -> &'gc ast::node::Node<'gc> {
+    ) -> &'gc hermes_ast::node::Node<'gc> {
         let buf_id = sm.add_buffer_bytes("input", src);
         let atoms = &gc.ctx().atom_table;
         let lexer = crate::lexer::JSLexer::new(
@@ -6983,15 +6983,15 @@ mod tests {
         let mut parser = JSParserImpl::new(gc, lexer);
         let program = parser.parse().expect("parse succeeded");
         assert_eq!(parser.error_count_pub(), 0, "zero errors for {src:?}");
-        if let ast::node::Node::Program(p) = program {
+        if let hermes_ast::node::Node::Program(p) = program {
             return p.body.iter().nth(idx).expect("has enough statements");
         }
         panic!("expected Program");
     }
 
     /// Build a component-syntax-enabled `Context` (Flow + component syntax).
-    fn comp_ctx() -> ast::context::Context<'static> {
-        let mut ctx = ast::context::Context::new();
+    fn comp_ctx() -> hermes_ast::context::Context<'static> {
+        let mut ctx = hermes_ast::context::Context::new();
         ctx.set_parse_flow(true);
         ctx.set_parse_flow_component_syntax(true);
         ctx
@@ -7000,8 +7000,8 @@ mod tests {
     /// `component Foo() {}` — basic component declaration.
     #[test]
     fn flow_component_basic() {
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = comp_ctx();
         let gc = ctx.lock();
         let stmt = comp_parse_stmt_at(&gc, &mut sm, b"component Foo() {}", 0);
@@ -7020,8 +7020,8 @@ mod tests {
     /// `ident?: T = init` (plus a rest element).
     #[test]
     fn flow_component_parameters() {
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = comp_ctx();
         let gc = ctx.lock();
         let stmt = comp_parse_stmt_at(
@@ -7070,9 +7070,9 @@ mod tests {
     /// declarations, with the operator label captured on the `TypeOperator`.
     #[test]
     fn flow_component_renders_operators() {
-        use ast::node::Node;
+        use hermes_ast::node::Node;
         let check = |src: &[u8], op: &[u8]| {
-            let mut sm = support::manager::SourceErrorManager::new();
+            let mut sm = hermes_support::manager::SourceErrorManager::new();
             let mut ctx = comp_ctx();
             let gc = ctx.lock();
             let stmt = comp_parse_stmt_at(&gc, &mut sm, src, 0);
@@ -7093,8 +7093,8 @@ mod tests {
     /// `async component` and generic `hook` declarations.
     #[test]
     fn flow_component_async_and_generic_hook() {
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = comp_ctx();
         let gc = ctx.lock();
         let stmt0 = comp_parse_stmt_at(
@@ -7128,8 +7128,8 @@ mod tests {
     /// type annotations.
     #[test]
     fn flow_component_and_hook_type_annotations() {
-        use ast::node::Node;
-        let alias_right = |stmt: &ast::node::Node<'_>| -> ast::node::NodeKind {
+        use hermes_ast::node::Node;
+        let alias_right = |stmt: &hermes_ast::node::Node<'_>| -> hermes_ast::node::NodeKind {
             let Node::TypeAlias(a) = stmt else {
                 panic!("expected TypeAlias, got {:?}", stmt.kind())
             };
@@ -7138,7 +7138,7 @@ mod tests {
 
         // component type annotation.
         {
-            let mut sm = support::manager::SourceErrorManager::new();
+            let mut sm = hermes_support::manager::SourceErrorManager::new();
             let mut ctx = comp_ctx();
             let gc = ctx.lock();
             let stmt = comp_parse_stmt_at(
@@ -7160,7 +7160,7 @@ mod tests {
 
         // hook type annotation.
         {
-            let mut sm = support::manager::SourceErrorManager::new();
+            let mut sm = hermes_support::manager::SourceErrorManager::new();
             let mut ctx = comp_ctx();
             let gc = ctx.lock();
             let stmt = comp_parse_stmt_at(
@@ -7169,7 +7169,7 @@ mod tests {
                 b"type H = hook(a: number, b: string) => void;",
                 0,
             );
-            assert_eq!(alias_right(stmt), ast::node::NodeKind::HookTypeAnnotation);
+            assert_eq!(alias_right(stmt), hermes_ast::node::NodeKind::HookTypeAnnotation);
             let Node::TypeAlias(a) = stmt else { unreachable!() };
             let Node::HookTypeAnnotation(h) = a.right else {
                 panic!("expected HookTypeAnnotation, got {:?}", a.right.kind())
@@ -7182,8 +7182,8 @@ mod tests {
     /// A hook type annotation rejects a `this` constraint.
     #[test]
     fn flow_hook_type_rejects_this() {
-        use ast::context::Context;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_support::manager::SourceErrorManager;
         let src = b"type H = hook(this: number) => void;";
         let mut sm = SourceErrorManager::new();
         let buf_id = sm.add_buffer_bytes("input", src);
@@ -7221,12 +7221,12 @@ mod tests {
             /* parse_flow */ true,
         );
         // But `component` remains a valid identifier in an expression.
-        let mut sm = support::manager::SourceErrorManager::new();
-        let mut ctx = ast::context::Context::new();
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
+        let mut ctx = hermes_ast::context::Context::new();
         ctx.set_parse_flow(true);
         let gc = ctx.lock();
         let stmt = parse_one_stmt(&gc, &mut sm, b"var component = 1;");
-        assert!(matches!(stmt, ast::node::Node::VariableDeclaration(_)));
+        assert!(matches!(stmt, hermes_ast::node::Node::VariableDeclaration(_)));
     }
 
     /// No-leak spot checks: with Flow parsing DISABLED the new sites must not
@@ -7257,8 +7257,8 @@ mod tests {
     /// ambiguous-expression grammar is set because hermesc `-parse-flow`
     /// defaults to `ParseFlowSetting::ALL` (ambiguous on), and the record
     /// EXPRESSION type-args speculation (`ns.Maker<T> {…}`) is gated on it.
-    fn rec_ctx() -> ast::context::Context<'static> {
-        let mut ctx = ast::context::Context::new();
+    fn rec_ctx() -> hermes_ast::context::Context<'static> {
+        let mut ctx = hermes_ast::context::Context::new();
         ctx.set_parse_flow(true);
         ctx.set_parse_flow_ambiguous(true);
         ctx.set_parse_flow_records(true);
@@ -7269,19 +7269,19 @@ mod tests {
     /// `idx`. Reuses the component-test helper (which only needs the flags set
     /// on the passed `gc`).
     fn rec_parse_stmt_at<'gc>(
-        gc: &'gc ast::context::GCLock<'_, '_>,
-        sm: &mut support::manager::SourceErrorManager,
+        gc: &'gc hermes_ast::context::GCLock<'_, '_>,
+        sm: &mut hermes_support::manager::SourceErrorManager,
         src: &[u8],
         idx: usize,
-    ) -> &'gc ast::node::Node<'gc> {
+    ) -> &'gc hermes_ast::node::Node<'gc> {
         comp_parse_stmt_at(gc, sm, src, idx)
     }
 
     /// `record Foo {}` — an empty record declaration.
     #[test]
     fn flow_record_empty() {
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = rec_ctx();
         let gc = ctx.lock();
         let stmt = rec_parse_stmt_at(&gc, &mut sm, b"record Foo {}", 0);
@@ -7302,8 +7302,8 @@ mod tests {
     /// async-generator-method body elements.
     #[test]
     fn flow_record_full() {
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = rec_ctx();
         let gc = ctx.lock();
         let stmt = rec_parse_stmt_at(
@@ -7385,8 +7385,8 @@ mod tests {
     /// `Point { x: 1 }` — a record EXPRESSION with an Identifier constructor.
     #[test]
     fn flow_record_expr_ident() {
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = rec_ctx();
         let gc = ctx.lock();
         let init = {
@@ -7417,8 +7417,8 @@ mod tests {
     /// constructor AND type-args (exercises the LHS-tail commit-condition).
     #[test]
     fn flow_record_expr_member_typeargs() {
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = rec_ctx();
         let gc = ctx.lock();
         let init = {
@@ -7455,8 +7455,8 @@ mod tests {
     /// identifier expression statement followed by a block; the Rust must too.
     #[test]
     fn flow_record_expr_lowercase_rejected() {
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = rec_ctx();
         let gc = ctx.lock();
         // `point` (lowercase) then a block `{ x }`. Not a record expression;
@@ -7472,8 +7472,8 @@ mod tests {
     /// plain identifier `record` then `R` — an error), confirming the gate.
     #[test]
     fn flow_record_disabled_is_not_record() {
-        use ast::context::Context;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = Context::new();
         ctx.set_parse_flow(true); // Flow on, records OFF.
         let gc = ctx.lock();
@@ -7498,8 +7498,8 @@ mod tests {
     // -----------------------------------------------------------------------
 
     /// Build a `Context` with Flow + `parse_flow_match` enabled.
-    fn match_ctx() -> ast::context::Context<'static> {
-        use ast::context::Context;
+    fn match_ctx() -> hermes_ast::context::Context<'static> {
+        use hermes_ast::context::Context;
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
         ctx.set_parse_flow_match(true);
@@ -7509,11 +7509,11 @@ mod tests {
     /// Parse `src` with the match flag on; expect zero errors; return the
     /// statement at `idx`.
     fn match_parse_stmt_at<'gc>(
-        gc: &'gc ast::context::GCLock<'_, '_>,
-        sm: &mut support::manager::SourceErrorManager,
+        gc: &'gc hermes_ast::context::GCLock<'_, '_>,
+        sm: &mut hermes_support::manager::SourceErrorManager,
         src: &[u8],
         idx: usize,
-    ) -> &'gc ast::node::Node<'gc> {
+    ) -> &'gc hermes_ast::node::Node<'gc> {
         let buf_id = sm.add_buffer_bytes("input", src);
         let atoms = &gc.ctx().atom_table;
         let lexer = crate::lexer::JSLexer::new(
@@ -7525,7 +7525,7 @@ mod tests {
         let mut parser = JSParserImpl::new(gc, lexer);
         let program = parser.parse().expect("parse succeeded");
         assert_eq!(parser.error_count_pub(), 0, "zero errors for {src:?}");
-        if let ast::node::Node::Program(p) = program {
+        if let hermes_ast::node::Node::Program(p) = program {
             return p.body.iter().nth(idx).expect("has enough statements");
         }
         panic!("expected Program");
@@ -7533,11 +7533,11 @@ mod tests {
 
     /// Extract the single `MatchExpression` from `const r = <match-expr>;`.
     fn match_expr_from<'gc>(
-        gc: &'gc ast::context::GCLock<'_, '_>,
-        sm: &mut support::manager::SourceErrorManager,
+        gc: &'gc hermes_ast::context::GCLock<'_, '_>,
+        sm: &mut hermes_support::manager::SourceErrorManager,
         src: &[u8],
-    ) -> &'gc ast::node::Node<'gc> {
-        use ast::node::Node;
+    ) -> &'gc hermes_ast::node::Node<'gc> {
+        use hermes_ast::node::Node;
         let stmt = match_parse_stmt_at(gc, sm, src, 0);
         let Node::VariableDeclaration(vd) = stmt else {
             panic!("expected VariableDeclaration, got {:?}", stmt.kind())
@@ -7553,8 +7553,8 @@ mod tests {
     /// carry `MatchLiteralPattern`/`MatchWildcardPattern` and expression bodies.
     #[test]
     fn flow_match_expression_basic() {
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = match_ctx();
         let gc = ctx.lock();
         let expr =
@@ -7585,8 +7585,8 @@ mod tests {
     /// A `match` statement: block bodies, optional commas.
     #[test]
     fn flow_match_statement_basic() {
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = match_ctx();
         let gc = ctx.lock();
         let stmt =
@@ -7609,8 +7609,8 @@ mod tests {
     /// and `match (foo)(bar)` is a chained CallExpression — the call path.
     #[test]
     fn flow_match_call_not_match() {
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = match_ctx();
         let gc = ctx.lock();
 
@@ -7645,7 +7645,7 @@ mod tests {
     /// (it must not silently parse a `MatchExpression`/`MatchStatement`).
     #[test]
     fn flow_match_newline_is_not_match() {
-        let mut sm = support::manager::SourceErrorManager::new();
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = match_ctx();
         let gc = ctx.lock();
         let buf_id = sm.add_buffer_bytes("input", b"match\n(x) { _ => 1 }\n");
@@ -7669,8 +7669,8 @@ mod tests {
     /// `match (x) {…}` is a statement.
     #[test]
     fn flow_match_expr_vs_stmt() {
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = match_ctx();
         let gc = ctx.lock();
         let e = match_expr_from(&gc, &mut sm, b"const r = match (x) { _ => 1 };");
@@ -7682,8 +7682,8 @@ mod tests {
     /// Object + array patterns, including the `...const rest` rest binding.
     #[test]
     fn flow_match_object_array_patterns() {
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = match_ctx();
         let gc = ctx.lock();
         let expr = match_expr_from(
@@ -7720,8 +7720,8 @@ mod tests {
     /// Or-patterns, `const`/`let` bindings, and an `if` guard.
     #[test]
     fn flow_match_or_and_guard() {
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = match_ctx();
         let gc = ctx.lock();
         let expr = match_expr_from(
@@ -7754,8 +7754,8 @@ mod tests {
     /// pattern (`Status{value: const v}`).
     #[test]
     fn flow_match_member_unary_instance() {
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = match_ctx();
         let gc = ctx.lock();
         let expr = match_expr_from(
@@ -7801,8 +7801,8 @@ mod tests {
     /// The `as` binding pattern wrapping an or-pattern group: `(1 | 2) as const k`.
     #[test]
     fn flow_match_as_pattern() {
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = match_ctx();
         let gc = ctx.lock();
         let expr =
@@ -7833,7 +7833,7 @@ mod tests {
     /// error — faithful to hermesc.
     #[test]
     fn flow_match_rest_needs_binding() {
-        let mut sm = support::manager::SourceErrorManager::new();
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         let mut ctx = match_ctx();
         let gc = ctx.lock();
         let buf_id =
@@ -7857,9 +7857,9 @@ mod tests {
     /// call, and `const r = match;` is an identifier reference.
     #[test]
     fn flow_match_disabled_is_identifier() {
-        use ast::context::Context;
-        use ast::node::Node;
-        let mut sm = support::manager::SourceErrorManager::new();
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        let mut sm = hermes_support::manager::SourceErrorManager::new();
         // Flow on, match OFF.
         let mut ctx = Context::new();
         ctx.set_parse_flow(true);
@@ -7899,11 +7899,11 @@ mod tests {
     /// Parse `src` with Flow on (and component syntax optionally on), returning
     /// the program's whole body and asserting zero errors.
     fn flow_parse_body<'gc>(
-        gc: &'gc ast::context::GCLock<'_, '_>,
-        sm: &mut support::manager::SourceErrorManager,
+        gc: &'gc hermes_ast::context::GCLock<'_, '_>,
+        sm: &mut hermes_support::manager::SourceErrorManager,
         src: &[u8],
         components: bool,
-    ) -> Vec<&'gc ast::node::Node<'gc>> {
+    ) -> Vec<&'gc hermes_ast::node::Node<'gc>> {
         let _ = components; // ctx is already configured by the caller
         let buf_id = sm.add_buffer_bytes("input", src);
         let atoms = &gc.ctx().atom_table;
@@ -7921,7 +7921,7 @@ mod tests {
             "zero errors for {:?}",
             String::from_utf8_lossy(src)
         );
-        if let ast::node::Node::Program(p) = program {
+        if let hermes_ast::node::Node::Program(p) = program {
             return p.body.iter().collect();
         }
         panic!("expected Program");
@@ -7930,9 +7930,9 @@ mod tests {
     /// Each `declare` statement form parses to the right node kind.
     #[test]
     fn flow_declare_forms() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let check = |src: &[u8], pred: fn(&Node) -> bool| {
             let mut sm = SourceErrorManager::new();
@@ -7981,9 +7981,9 @@ mod tests {
     /// with `default` set only for `declare export default`.
     #[test]
     fn flow_declare_export_forms() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let decl_of = |src: &[u8]| -> bool {
             // returns the `default` flag of a DeclareExportDeclaration
@@ -8045,9 +8045,9 @@ mod tests {
     /// per-specifier `type`/`typeof` forms set each specifier's importKind.
     #[test]
     fn flow_import_type_kinds() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let import_kind = |src: &[u8]| -> Vec<u8> {
             let mut sm = SourceErrorManager::new();
@@ -8100,9 +8100,9 @@ mod tests {
     /// specifier is an ImportDefaultSpecifier named `type`.
     #[test]
     fn flow_import_type_from_trap() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let mut ctx = Context::new();
@@ -8131,9 +8131,9 @@ mod tests {
     /// so an inner `declare export var` parses.
     #[test]
     fn flow_declare_module_body_recursion() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let mut ctx = Context::new();
@@ -8163,9 +8163,9 @@ mod tests {
     /// parsers (gated on the dedicated flag).
     #[test]
     fn flow_declare_component_and_hook() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         let mut sm = SourceErrorManager::new();
         let mut ctx = Context::new();
@@ -8187,9 +8187,9 @@ mod tests {
     /// the declaration kind stays `value` and a plain import/export parses.
     #[test]
     fn flow_plain_import_export_unaffected() {
-        use ast::context::Context;
-        use ast::node::Node;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::Node;
+        use hermes_support::manager::SourceErrorManager;
 
         // Plain JS (no Flow): `import {a as b} from 'm';` parses with kind value.
         let mut sm = SourceErrorManager::new();

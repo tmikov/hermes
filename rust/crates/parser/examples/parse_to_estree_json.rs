@@ -8,14 +8,15 @@
 //! Parse a file and print its ESTree JSON, using the crate's `parse()` façade.
 //!
 //! ```text
-//! cargo run -p parser --example parse_to_estree_json -- file.js
+//! cargo run -p hermes-parser --example parse_to_estree_json -- file.js
 //! ```
 //!
 //! With no argument it parses a built-in snippet. This is the façade version
-//! of what `src/bin/ast_dump.rs` does with the low-level API; that bin remains
-//! the reference for flag-by-flag control.
+//! of what the `ast-dump` bin (in the unpublished `rust/crates/tools`) does
+//! with the low-level API; that bin remains the reference for flag-by-flag
+//! control.
 
-use parser::{parse_named, ParseFlags};
+use hermes_parser::{parse_named, ParseFlags};
 
 fn main() {
     let path = std::env::args().nth(1);

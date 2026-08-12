@@ -23,7 +23,7 @@
 //! `TypeAnnotationNode`) and falling back to the generic `Node*` overload
 //! otherwise.
 //!
-//! `ast::Visitor` (`rust/crates/ast/src/visitor.rs`) is far thinner: one
+//! `hermes_ast::Visitor` (`rust/crates/ast/src/visitor.rs`) is far thinner: one
 //! method, `visit_node(&mut self, node)`, whose default body just recurses
 //! via `node.visit_children(self)` — no `shouldVisit`/`enter`/`leave` split
 //! and no per-node-kind override point. Rather than force that shape to
@@ -39,7 +39,7 @@
 //!     leave(node)                      // leave
 //! ```
 //!
-//! `node.visit_children` (generated per `.def` entry, `ast::node`) is
+//! `node.visit_children` (generated per `.def` entry, `hermes_ast::node`) is
 //! exactly the C++ macro's per-node child-field enumeration, so reusing it
 //! here reproduces the same traversal order for every node kind for free.
 //! `enter`/`leave` internally match on node kind to reach the
@@ -117,10 +117,10 @@
 //! dialect) since it doesn't matter for untyped ASTs and matters once
 //! Flow/TS corpora are dumped.
 
-use ast::context::GCLock;
-use ast::node::{BinaryExpression, Identifier, Node};
-use ast::visitor::Visitor;
-use ast::SemaId;
+use hermes_ast::context::GCLock;
+use hermes_ast::node::{BinaryExpression, Identifier, Node};
+use hermes_ast::visitor::Visitor;
+use hermes_ast::SemaId;
 
 use crate::dump_context::{push_atom, push_indent, push_str, SemContextDumper};
 use crate::ids::{FunctionInfoId, ScopeId};

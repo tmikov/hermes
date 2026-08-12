@@ -34,9 +34,9 @@ cargo build --manifest-path rust/Cargo.toml
 cargo test --manifest-path rust/Cargo.toml
 
 # Test a single crate:
-cargo test --manifest-path rust/Cargo.toml -p parser
-cargo test --manifest-path rust/Cargo.toml -p ast
-cargo test --manifest-path rust/Cargo.toml -p support
+cargo test --manifest-path rust/Cargo.toml -p hermes-parser
+cargo test --manifest-path rust/Cargo.toml -p hermes-ast
+cargo test --manifest-path rust/Cargo.toml -p hermes-support
 
 # Clippy (only pre-existing faithful-C-idiom lints are allowed):
 cargo clippy --manifest-path rust/Cargo.toml
@@ -63,7 +63,7 @@ python3 rust/crates/ast/gen_nodes.py
 
 # Verify the committed output matches the generator (idempotency gate):
 REQUIRE_GEN=1 cargo test --manifest-path rust/Cargo.toml \
-    -p ast --test generated_idempotent
+    -p hermes-ast --test generated_idempotent
 ```
 
 The committed `src/node.rs` must always be byte-for-byte identical to what the
@@ -104,20 +104,20 @@ cmake --build cmake-build-asan --target preparse-dump
 # + 5 records + 7 match + 20 TS + 6 JSX + 1 JSX/Flow); fails hard if hermesc
 # is absent:
 REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml \
-    -p parser --test parser_differential
+    -p hermes-parser --test parser_differential
 
 # Lexer differential (div 58 / regexp 5 / type 6 / jsx 4 / jsx-child 10 /
 # nonstrict 7 corpus entries):
 REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml \
-    -p parser --test differential -- --nocapture
+    -p hermes-parser --test differential -- --nocapture
 
 # JSON parser differential (17 corpus files):
 REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml \
-    -p parser --test json_differential -- --nocapture
+    -p hermes-parser --test json_differential -- --nocapture
 
 # Pre-parse differential (lazy 13 / plain 77 / Flow 42 / TS 20 corpus files):
 REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml \
-    -p parser --test preparse_differential -- --nocapture
+    -p hermes-parser --test preparse_differential -- --nocapture
 ```
 
 The `REQUIRE_DIFFERENTIAL=1` environment variable causes the test to fail hard

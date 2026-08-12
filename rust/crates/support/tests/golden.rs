@@ -17,17 +17,17 @@
 //! `(! cmake-build-asan/bin/hermesc -dump-ast FILE 2>&1)` with the file path
 //! normalized to `FILE`. The Rust port must reproduce that stderr exactly.
 
-use support::diag::{CollectingHandler, DiagKind, OutputOptions};
-use support::location::{SMLoc, SMRange};
-use support::manager::SourceErrorManager;
-use support::render::{build_source_and_caret_line, render_diagnostic};
+use hermes_support::diag::{CollectingHandler, DiagKind, OutputOptions};
+use hermes_support::location::{SMLoc, SMRange};
+use hermes_support::manager::SourceErrorManager;
+use hermes_support::render::{build_source_and_caret_line, render_diagnostic};
 
 /// Render the single diagnostic emitted into a fresh manager with `FILE` as the
 /// buffer name, using default (color-off) options — matching how `hermesc`
 /// prints to a non-TTY stderr.
 fn render_one(
     source: &str,
-    emit: impl FnOnce(&mut SourceErrorManager, support::location::SourceId),
+    emit: impl FnOnce(&mut SourceErrorManager, hermes_support::location::SourceId),
 ) -> String {
     let mut sm = SourceErrorManager::new();
     let id = sm.add_buffer("FILE", source);

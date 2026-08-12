@@ -19,12 +19,14 @@
 //! The parse-driver setup is trimmed from
 //! `rust/crates/tools/src/bin/ast_dump.rs`, like `decl_collector.rs`'s.
 
-use ast::context::{Context, GCLock, NodeRc};
-use ast::node::{ExpressionStatement, Node, NumericLiteral, Program};
-use ast::node_child::{NodeList, NodeMetadata, Strictness};
-use atom_table::INVALID_ATOM_BYTES;
-use parser::js::JSParserImpl;
-use parser::lexer::{GrammarContext, JSLexer};
+use hermes_ast::context::{Context, GCLock, NodeRc};
+use hermes_ast::node::{ExpressionStatement, Node, NumericLiteral, Program};
+use hermes_ast::node_child::{NodeList, NodeMetadata, Strictness};
+use hermes_atom_table::INVALID_ATOM_BYTES;
+use hermes_parser::js::JSParserImpl;
+use hermes_parser::lexer::{GrammarContext, JSLexer};
+use hermes_support::diag::{DiagHandler, ResolvedDiagnostic};
+use hermes_support::manager::SourceErrorManager;
 use sema::dump::sem_dump;
 use sema::ids::FunctionInfoId;
 use sema::keywords::Keywords;
@@ -32,8 +34,6 @@ use sema::resolve::{resolve_ast, resolve_ast_for_parser};
 use sema::sem_context::{DeclKind, SemContext};
 use std::cell::RefCell;
 use std::rc::Rc;
-use support::diag::{DiagHandler, ResolvedDiagnostic};
-use support::manager::SourceErrorManager;
 
 /// Parse `src` as a `Program` and return its root node, panicking on any
 /// parse error.
@@ -79,7 +79,7 @@ fn resolve(src: &str) -> (SemContext, Strictness) {
 
 /// The text of `atom`, for assertions. Needs a live `GCLock`, hence the
 /// closure-shaped `resolve_with_ambient` below.
-fn atom_string(gc: &GCLock, atom: atom_table::AtomBytes) -> String {
+fn atom_string(gc: &GCLock, atom: hermes_atom_table::AtomBytes) -> String {
     String::from_utf8(gc.bytes(atom).to_vec()).expect("atom is not UTF-8")
 }
 
@@ -381,8 +381,8 @@ fn a_direct_eval_marks_its_whole_scope_chain() {
     // Three FunctionInfos, in creation order: the global function, `f`, `g`.
     assert_eq!(sem_ctx.functions_len(), 3);
     let global = sem_ctx.get_global_function();
-    let f = FunctionInfoId::from_sema_id(ast::SemaId(1));
-    let g = FunctionInfoId::from_sema_id(ast::SemaId(2));
+    let f = FunctionInfoId::from_sema_id(hermes_ast::SemaId(1));
+    let g = FunctionInfoId::from_sema_id(hermes_ast::SemaId(2));
     // `f`'s scopes are its body scope and the nested block's; same for `g`.
     let marked = |func| -> Vec<bool> {
         sem_ctx
@@ -1505,7 +1505,7 @@ fn identifier_states<'gc>(
         gc: &'a GCLock<'b, 'c>,
         out: Vec<(String, bool)>,
     }
-    impl<'gc> ast::visitor::Visitor<'gc> for Collect<'_, '_, '_> {
+    impl<'gc> hermes_ast::visitor::Visitor<'gc> for Collect<'_, '_, '_> {
         fn visit_node(&mut self, node: &'gc Node<'gc>) {
             if let Node::Identifier(id) = node {
                 let name = atom_string(self.gc, id.name.get());
@@ -1515,14 +1515,14 @@ fn identifier_states<'gc>(
         }
     }
     let mut c = Collect { gc, out: Vec::new() };
-    ast::visitor::Visitor::visit_node(&mut c, node);
+    hermes_ast::visitor::Visitor::visit_node(&mut c, node);
     c.out
 }
 
 /// The third statement of a resolved `Program`, as a `WithStatement`.
 fn third_with_statement<'gc>(
     root: &'gc Node<'gc>,
-) -> &'gc ast::node::WithStatement<'gc> {
+) -> &'gc hermes_ast::node::WithStatement<'gc> {
     let Node::Program(p) = root else {
         unreachable!("not a Program root")
     };
@@ -1765,7 +1765,7 @@ fn a_rebuilt_catch_clause_keeps_its_scope() {
 /// `(implicitCtor, instanceElementsInit, staticElementsInit)`.
 fn class_function_infos(
     node: &Node,
-) -> (Option<ast::SemaId>, Option<ast::SemaId>, Option<ast::SemaId>) {
+) -> (Option<hermes_ast::SemaId>, Option<hermes_ast::SemaId>, Option<hermes_ast::SemaId>) {
     match node {
         Node::ClassDeclaration(n) => (
             n.implicit_ctor_function_info.get(),
@@ -2262,7 +2262,7 @@ fn a_rebuilt_static_block_keeps_its_scope_and_function_info() {
 /// `StaticBlock`.
 fn static_block_of_class_in_function_body<'gc>(
     func: &'gc Node<'gc>,
-) -> &'gc ast::node::StaticBlock<'gc> {
+) -> &'gc hermes_ast::node::StaticBlock<'gc> {
     let class = func
         .as_function_declaration()
         .expect("not a FunctionDeclaration")
@@ -2912,7 +2912,7 @@ fn field_initializer_scopes_are_parented_in_the_initializer_function() {
     let class_c_scope = global_scopes[1];
 
     let multi: Vec<FunctionInfoId> = (0..sem_ctx.functions_len())
-        .map(|i| FunctionInfoId::from_sema_id(ast::SemaId(i as u32)))
+        .map(|i| FunctionInfoId::from_sema_id(hermes_ast::SemaId(i as u32)))
         .filter(|&f| f != global && sem_ctx.function(f).get_scopes().len() > 1)
         .collect();
     assert_eq!(

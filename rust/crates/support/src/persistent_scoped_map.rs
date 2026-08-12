@@ -22,7 +22,7 @@
 //!
 //! Example (mirrors the C++ doc comment):
 //! ```
-//! use support::persistent_scoped_map::{PersistentScopedMap, Scope, ScopePtr};
+//! use hermes_support::persistent_scoped_map::{PersistentScopedMap, Scope, ScopePtr};
 //!
 //! let table: PersistentScopedMap<&str, &str> = PersistentScopedMap::new();
 //! let mut ptr: ScopePtr<&str, &str> = ScopePtr::default();

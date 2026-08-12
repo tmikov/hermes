@@ -9,7 +9,7 @@
 //! alias declarations, and `interface` declarations. Port of the declaration
 //! entry points of `lib/Parser/JSParserImpl-flow.cpp`.
 
-use ast::node::{
+use hermes_ast::node::{
     BigIntLiteral, BlockStatement, BooleanLiteral, ComponentDeclaration,
     ComponentParameter, DeclareClass, DeclareComponent, DeclareEnum,
     DeclareExportAllDeclaration, DeclareExportDeclaration, DeclareFunction,
@@ -25,8 +25,8 @@ use ast::node::{
     RecordDeclarationProperty, RecordDeclarationStaticProperty, StringLiteral,
     TypeAlias, TypeAnnotation,
 };
-use ast::node_child::{NodeList, NodeMetadata};
-use support::location::{SMLoc, SMRange};
+use hermes_ast::node_child::{NodeList, NodeMetadata};
+use hermes_support::location::{SMLoc, SMRange};
 
 use crate::js::{AllowImportExport, JSParserImpl, Param, PARAM_IN};
 use crate::lexer::GrammarContext;
@@ -599,7 +599,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Port of `JSParserImpl::parseRenderTypeOperator` (flow.cpp:489-523).
     pub(in crate::js) fn parse_render_type_operator(
         &mut self,
-    ) -> Option<ast::node_child::NodeLabel> {
+    ) -> Option<hermes_ast::node_child::NodeLabel> {
         // C++ 490.
         debug_assert!(self.check_name(b"renders"));
         // C++ 491-520: the `checkFollowingCharacter` calls must run with the
@@ -670,7 +670,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         };
         // C++ 549-552.
-        let node = Node::TypeOperator(ast::node::TypeOperator::new(
+        let node = Node::TypeOperator(hermes_ast::node::TypeOperator::new(
             NodeMetadata::new(self.dummy_range()),
             operator,
             body,
@@ -2838,7 +2838,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                             start,
                             None,
                             "start of enum body",
-                            support::diag::Subsystem::Parser,
+                            hermes_support::diag::Subsystem::Parser,
                         );
                         return None;
                     }
@@ -2878,7 +2878,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     self.lexer.get_source_mgr_mut().note_range(
                         first_range,
                         "first enum member",
-                        support::diag::Subsystem::Parser,
+                        hermes_support::diag::Subsystem::Parser,
                     );
                     return None;
                 }

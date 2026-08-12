@@ -35,15 +35,15 @@
 //! `sema/tests/sema_corpus/jsx-error-attr-member.js`, and the match case by
 //! `sema/tests/sema_corpus/flow-match-pattern-binding-error.js`.
 
-use ast::context::Context;
-use atom_table::AtomTable;
 use bumpalo::Bump;
-use parser::js::JSParserImpl;
-use parser::json::{JSONFactory, JSONParser};
-use parser::lexer::{GrammarContext, JSLexer};
-use support::diag::CollectingHandler;
-use support::manager::SourceErrorManager;
-use support::render::render_diagnostic;
+use hermes_ast::context::Context;
+use hermes_atom_table::AtomTable;
+use hermes_parser::js::JSParserImpl;
+use hermes_parser::json::{JSONFactory, JSONParser};
+use hermes_parser::lexer::{GrammarContext, JSLexer};
+use hermes_support::diag::CollectingHandler;
+use hermes_support::manager::SourceErrorManager;
+use hermes_support::render::render_diagnostic;
 
 /// Which dialect flags to enable for [`render_parse_errors`], named after the
 /// `hermesc` flags they mirror.

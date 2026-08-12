@@ -13,10 +13,10 @@
 //! after `pre_parse_buffer` (whole-pass scope, cpp:7523) the retained count
 //! must be near zero — NOT O(file), and not even O(keepers).
 
-use ast::context::Context;
-use parser::js::JSParserImpl;
-use parser::lexer::{GrammarContext, JSLexer};
-use support::manager::SourceErrorManager;
+use hermes_ast::context::Context;
+use hermes_parser::js::JSParserImpl;
+use hermes_parser::lexer::{GrammarContext, JSLexer};
+use hermes_support::manager::SourceErrorManager;
 
 fn gen_source(n: usize) -> Vec<u8> {
     let mut src = Vec::new();

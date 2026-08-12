@@ -26,7 +26,7 @@ pub mod node;
 pub mod node_child;
 pub mod visitor;
 
-pub use support::HeapSize;
+pub use hermes_support::HeapSize;
 
 /// Opaque handle to a resolved Sema entity (scope / decl / function info).
 /// The AST only stores the raw index in a `Cell`; the `sema` crate wraps it

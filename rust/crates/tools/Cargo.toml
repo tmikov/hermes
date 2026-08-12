@@ -25,9 +25,9 @@ name = "preparse-dump"
 path = "src/bin/preparse_dump.rs"
 
 [dependencies]
-support = { path = "../support" }
-atom_table = { path = "../atom_table" }
-ast = { path = "../ast" }
-parser = { path = "../parser" }
+hermes_support = { path = "../support", package = "hermes-support" }
+hermes_atom_table = { path = "../atom_table", package = "hermes-atom-table" }
+hermes_ast = { path = "../ast", package = "hermes-ast" }
+hermes_parser = { path = "../parser", package = "hermes-parser" }
 command_line = { path = "../command_line" }
 bumpalo = "3.16"

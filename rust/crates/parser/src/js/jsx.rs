@@ -31,16 +31,16 @@
 //! is wired faithfully via `parse_type_args_flow` but is only reachable with
 //! `-parse-flow` enabled (see `parse_jsx_opening_element`).
 
-use ast::node::{
+use hermes_ast::node::{
     JSXAttribute, JSXClosingElement, JSXClosingFragment, JSXElement,
     JSXEmptyExpression, JSXExpressionContainer, JSXFragment, JSXIdentifier,
     JSXMemberExpression, JSXNamespacedName, JSXOpeningElement,
     JSXOpeningFragment, JSXSpreadAttribute, JSXSpreadChild, JSXStringLiteral,
     JSXText, Node,
 };
-use ast::node_child::{NodeList, NodeMetadata};
+use hermes_ast::node_child::{NodeList, NodeMetadata};
 
-use support::location::SMLoc;
+use hermes_support::location::SMLoc;
 
 use crate::js::flow::{AllowTypedArrowFunction, CoverTypedParameters};
 use crate::js::{JSParserImpl, PARAM_IN};

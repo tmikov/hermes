@@ -33,7 +33,7 @@
 //!
 //! ## Deviations
 //!
-//! - **Node identity is `ast::NodeId`, not a raw pointer.** C++'s `funcDecls_`
+//! - **Node identity is `hermes_ast::NodeId`, not a raw pointer.** C++'s `funcDecls_`
 //!   is a `SmallDenseSet<FunctionDeclarationNode *>` keyed by pointer
 //!   identity; this port keys it by `NodeId`, the same substitution
 //!   `DeclCollector` makes for its `scopes_` map (see that module's doc). The
@@ -62,7 +62,7 @@
 //! - **`incRecursionDepth`/`decRecursionDepth`** (cpp:69-74) exist only to
 //!   satisfy `RecursiveVisitorDispatch` and are unconditional no-ops
 //!   (`return true;` / `{}`), i.e. this pass has no depth limit in C++
-//!   either. `ast::visitor::Visitor` has no depth hooks, so they have no
+//!   either. `hermes_ast::visitor::Visitor` has no depth hooks, so they have no
 //!   counterpart — same as `unresolver.rs`.
 //! - **`acquirePromotedFuncDecls`** (cpp:32-34) is a move-out accessor; here
 //!   the entry point simply consumes the promoter value's field.
@@ -77,12 +77,12 @@
 
 use std::collections::HashSet;
 
-use ast::context::{GCLock, NodeRc};
-use ast::node::Node;
-use ast::visitor::Visitor;
-use ast::NodeId;
-use support::manager::SourceErrorManager;
-use support::persistent_scoped_map::{PersistentScopedMap, Scope};
+use hermes_ast::context::{GCLock, NodeRc};
+use hermes_ast::node::Node;
+use hermes_ast::visitor::Visitor;
+use hermes_ast::NodeId;
+use hermes_support::manager::SourceErrorManager;
+use hermes_support::persistent_scoped_map::{PersistentScopedMap, Scope};
 
 use crate::decl_collector::{DeclCollector, ScopeDecls};
 use crate::ids::FunctionInfoId;

@@ -33,7 +33,7 @@
 //!   `print_decl_ref`) take an extra `gc: &GCLock` parameter that the C++
 //!   signatures don't have. C++ resolves `d->name` (a `UniqueString*`)
 //!   in-process; the Rust `Decl::name` is an interned [`Atom`] (`AtomBytes`),
-//!   and its bytes only exist behind a [`GCLock`] (see `ast::context`), so
+//!   and its bytes only exist behind a [`GCLock`] (see `hermes_ast::context`), so
 //!   the dumper has to be handed one. `print_scope_ref` doesn't print a
 //!   name (see `printScopeRef`, cpp:530-534) and so needs no `gc`.
 //! - `printSemContext`/`printFunction` build a `std::map<const FunctionInfo*
@@ -54,9 +54,9 @@
 
 use std::collections::HashMap;
 
-use ast::context::GCLock;
-use ast::SemaId;
-use atom_table::INVALID_ATOM_BYTES;
+use hermes_ast::context::GCLock;
+use hermes_ast::SemaId;
+use hermes_atom_table::INVALID_ATOM_BYTES;
 
 use crate::ids::{DeclId, FunctionInfoId, ScopeId};
 use crate::sem_context::{Atom, DeclKind, DeclSpecial, SemContext};
@@ -446,7 +446,7 @@ fn decl_special_str(special: DeclSpecial) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ast::context::Context;
+    use hermes_ast::context::Context;
     use crate::keywords::Keywords;
     use crate::sem_context::{ConstructorKind, FuncIsArrow};
 

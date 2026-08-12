@@ -23,13 +23,13 @@
 
 use std::io::{self, Read, Write};
 
-use ast::context::Context;
-use ast::dump::{dump_estree_json_with_sm, ESTreeDumpMode, ESTreeRawProp, LocationDumpMode};
-use ast::node::Node;
 use command_line::{CommandLine, Opt, OptDesc};
-use parser::js::JSParserImpl;
-use parser::lexer::{GrammarContext, JSLexer};
-use support::manager::SourceErrorManager;
+use hermes_ast::context::Context;
+use hermes_ast::dump::{dump_estree_json_with_sm, ESTreeDumpMode, ESTreeRawProp, LocationDumpMode};
+use hermes_ast::node::Node;
+use hermes_parser::js::JSParserImpl;
+use hermes_parser::lexer::{GrammarContext, JSLexer};
+use hermes_support::manager::SourceErrorManager;
 
 /// The parsed command-line options. Built into a [`CommandLine`] then read back
 /// after parsing (the juno `command_line` idiom).

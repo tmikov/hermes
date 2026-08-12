@@ -71,10 +71,10 @@
 //! NaN/Infinity, which always truncate to 0) with no floating-point
 //! rounding involved.
 
-use ast::context::GCLock;
-use ast::node::{BinaryExpression, Node, NumericLiteral, UnaryExpression};
-use ast::node_child::NodeMetadata;
-use support::location::SMRange;
+use hermes_ast::context::GCLock;
+use hermes_ast::node::{BinaryExpression, Node, NumericLiteral, UnaryExpression};
+use hermes_ast::node_child::NodeMetadata;
+use hermes_support::location::SMRange;
 
 use crate::keywords::Keywords;
 

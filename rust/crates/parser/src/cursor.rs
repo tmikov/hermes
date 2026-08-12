@@ -24,8 +24,8 @@
 //!   lookahead invariant.
 #![allow(unsafe_code)]
 
+use hermes_support::buffer::SourceBuffer;
 use std::rc::Rc;
-use support::buffer::SourceBuffer;
 
 /// A raw-pointer scan cursor over a NUL-terminated source buffer.
 pub struct Cursor {
@@ -158,8 +158,8 @@ impl Cursor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hermes_support::buffer::SourceBuffer;
     use std::rc::Rc;
-    use support::buffer::SourceBuffer;
 
     fn cur(s: &str) -> Cursor {
         Cursor::new(Rc::new(SourceBuffer::from_str("t", s)))

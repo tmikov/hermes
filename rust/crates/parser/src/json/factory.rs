@@ -10,8 +10,8 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use atom_table::{AtomBytes, AtomTable};
 use bumpalo::Bump;
+use hermes_atom_table::{AtomBytes, AtomTable};
 
 use super::{JSONHiddenClass, JSONValue};
 
@@ -169,8 +169,8 @@ impl<'a> JSONFactory<'a> {
 #[cfg(test)]
 mod factory_tests {
     use super::super::*;
-    use atom_table::AtomTable;
     use bumpalo::Bump;
+    use hermes_atom_table::AtomTable;
 
     #[test]
     fn objects_arrays_and_hidden_class_sharing() {

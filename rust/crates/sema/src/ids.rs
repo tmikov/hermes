@@ -5,15 +5,15 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-//! Typed ids for sema entities, backed by `ast::SemaId` (lib.rs:16).
+//! Typed ids for sema entities, backed by `hermes_ast::SemaId` (lib.rs:16).
 //! Port of the identity discipline used by `hermes::sema::Decl`,
 //! `hermes::sema::LexicalScope`, and `hermes::sema::FunctionInfo`
 //! (`include/hermes/Sema/SemContext.h`): those C++ classes are allocated
 //! once and referenced thereafter by (typed) pointer; here they are
 //! referenced by a typed, `u32`-sized index instead, since the AST side
-//! only has an opaque `SemaId` slot (`ast::node_child`) to store one in.
+//! only has an opaque `SemaId` slot (`hermes_ast::node_child`) to store one in.
 
-use ast::SemaId;
+use hermes_ast::SemaId;
 
 /// Declares a `u32` newtype that converts to/from [`SemaId`].
 macro_rules! declare_sema_id {

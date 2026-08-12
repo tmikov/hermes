@@ -15,8 +15,8 @@
 //! signature sites (type parameters, return type, `%checks` predicate, leading
 //! `this` parameter) are ported (P5.4); the TS blocks are omitted (P7).
 
-use ast::node::{BlockStatement, FunctionDeclaration, FunctionExpression, Identifier, Node};
-use ast::node_child::{NodeList, NodeMetadata};
+use hermes_ast::node::{BlockStatement, FunctionDeclaration, FunctionExpression, Identifier, Node};
+use hermes_ast::node_child::{NodeList, NodeMetadata};
 
 use crate::lexer::GrammarContext;
 use crate::token_kinds::TokenKind;
@@ -494,7 +494,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 // Build stub directive nodes: one ExpressionStatement wrapping
                 // a StringLiteral per directive recorded during PreParse.
                 // C++ lines 771-778.
-                use ast::node::{
+                use hermes_ast::node::{
                     BlockStatement, ExpressionStatement, StringLiteral,
                 };
                 let mut stmt_list: Vec<&'gc Node<'gc>> = Vec::new();

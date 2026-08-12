@@ -18,14 +18,14 @@
 //! (modifiers, `?` optional fields, TS type params/args) are P7 — see the
 //! comments at each site.
 
-use ast::node::{
+use hermes_ast::node::{
     CallExpression, ClassBody, ClassDeclaration, ClassExpression, ClassPrivateProperty,
     ClassProperty, Decorator, FunctionExpression, Identifier, MemberExpression, MethodDefinition,
     Node, PrivateName, StaticBlock, TSModifiers, Variance,
 };
-use ast::node_child::{NodeLabel, NodeList, NodeMetadata};
-use atom_table::INVALID_ATOM_BYTES;
-use support::location::{SMLoc, SMRange};
+use hermes_ast::node_child::{NodeLabel, NodeList, NodeMetadata};
+use hermes_atom_table::INVALID_ATOM_BYTES;
+use hermes_support::location::{SMLoc, SMRange};
 
 use crate::lexer::GrammarContext;
 use crate::token_kinds::TokenKind;
@@ -698,7 +698,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                                 first.range().start,
                                 Some(first.range()),
                                 "first constructor definition",
-                                support::diag::Subsystem::Parser,
+                                hermes_support::diag::Subsystem::Parser,
                             );
                         } else {
                             *constructor = Some(elem);
@@ -974,7 +974,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let prop = prop.expect("class element property name must be set");
 
         // Store the propName for comparisons, used for SyntaxErrors.
-        let prop_name: Option<atom_table::AtomBytes> = match prop {
+        let prop_name: Option<hermes_atom_table::AtomBytes> = match prop {
             Node::Identifier(id) => Some(id.name.get()),
             Node::StringLiteral(s) => Some(s.value.get()),
             _ => None,

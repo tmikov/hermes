@@ -11,16 +11,16 @@
 //! `f64` bits and node kind; every combination it declines is asserted to
 //! return `None`.
 
-use ast::context::{Context, GCLock};
-use ast::node::{
+use hermes_ast::context::{Context, GCLock};
+use hermes_ast::node::{
     BinaryExpression, BooleanLiteral, Identifier, Node, NumericLiteral,
     UnaryExpression,
 };
-use ast::node_child::NodeMetadata;
-use atom_table::AtomBytes;
+use hermes_ast::node_child::NodeMetadata;
+use hermes_atom_table::AtomBytes;
+use hermes_support::location::{SMLoc, SMRange, SourceId};
 use sema::ast_eval::{ast_fold_binary_expression, ast_fold_unary_expression};
 use sema::keywords::Keywords;
-use support::location::{SMLoc, SMRange, SourceId};
 
 fn loc(offset: u32) -> SMLoc {
     SMLoc {

@@ -14,10 +14,10 @@
 
 use std::collections::HashSet;
 
-use atom_table::{AtomBytes, AtomTable, INVALID_ATOM_BYTES};
-use support::json_emitter::JSONEmitter;
-use support::location::SMRange;
-use support::manager::SourceErrorManager;
+use hermes_atom_table::{AtomBytes, AtomTable, INVALID_ATOM_BYTES};
+use hermes_support::json_emitter::JSONEmitter;
+use hermes_support::location::SMRange;
+use hermes_support::manager::SourceErrorManager;
 
 use crate::node::{Node, NodeKind};
 use crate::node_child::{NodeLabel, NodeList};
@@ -169,7 +169,7 @@ impl<'a, 'w> ESTreeJSONDumper<'a, 'w> {
             return;
         }
         let bytes = self.atoms.bytes(label);
-        let units = support::utf8::convert_utf8_with_surrogates_to_utf16(bytes);
+        let units = hermes_support::utf8::convert_utf8_with_surrogates_to_utf16(bytes);
         self.json.emit_u16(&units);
     }
 
@@ -210,7 +210,7 @@ impl<'a, 'w> ESTreeJSONDumper<'a, 'w> {
         self.json.emit_key("raw");
         // Numeric-literal source text is ASCII; route through the WTF-8 codec
         // for uniformity with C++ primitiveEmitString.
-        let units = support::utf8::convert_utf8_with_surrogates_to_utf16(bytes);
+        let units = hermes_support::utf8::convert_utf8_with_surrogates_to_utf16(bytes);
         self.json.emit_u16(&units);
     }
 

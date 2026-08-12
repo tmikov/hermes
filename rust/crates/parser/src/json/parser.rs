@@ -15,10 +15,10 @@
 //! in `b21856de4` ("Add a recursion limit to the compiler-side JSONParser")
 //! and this is the mirror of that fix.
 
-use atom_table::AtomTable;
-use support::diag::Subsystem;
-use support::location::{SMRange, SourceId};
-use support::manager::SourceErrorManager;
+use hermes_atom_table::AtomTable;
+use hermes_support::diag::Subsystem;
+use hermes_support::location::{SMRange, SourceId};
+use hermes_support::manager::SourceErrorManager;
 
 use crate::lexer::{GrammarContext, JSLexer};
 use crate::token::Token;
@@ -250,9 +250,9 @@ impl<'a> JSONParser<'a> {
 #[cfg(test)]
 mod parser_tests {
     use super::super::*;
-    use atom_table::AtomTable;
     use bumpalo::Bump;
-    use support::manager::SourceErrorManager;
+    use hermes_atom_table::AtomTable;
+    use hermes_support::manager::SourceErrorManager;
 
     /// Helper: parse `src` and return the JSON value (if successful).
     /// `sm` must outlive the call so the returned `&'a JSONValue<'a>` is valid.

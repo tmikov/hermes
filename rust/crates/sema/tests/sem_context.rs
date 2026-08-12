@@ -8,23 +8,23 @@
 //! Tests for `sema::sem_context`, ported switch-arm-for-switch-arm from
 //! `lib/Sema/SemContext.cpp`. See task-4-brief.md sections A-D.
 
-use ast::context::{Context, GCLock};
-use ast::node::{
+use hermes_ast::context::{Context, GCLock};
+use hermes_ast::node::{
     ClassBody, ClassDeclaration, Identifier, MethodDefinition, Node,
 };
-use ast::node_child::{NodeList, NodeMetadata};
+use hermes_ast::node_child::{NodeList, NodeMetadata};
 use sema::ids::{DeclId, FunctionInfoId, ScopeId};
 use sema::keywords::Keywords;
 use sema::sem_context::{
     ConstructorKind, Constness, DeclKind, DeclSpecial, FuncIsArrow, SemContext,
 };
 
-fn r() -> support::location::SMRange {
-    let l = support::location::SMLoc {
-        source: support::location::SourceId::from_index(0),
+fn r() -> hermes_support::location::SMRange {
+    let l = hermes_support::location::SMLoc {
+        source: hermes_support::location::SourceId::from_index(0),
         offset: 0,
     };
-    support::location::SMRange { start: l, end: l }
+    hermes_support::location::SMRange { start: l, end: l }
 }
 
 fn new_sem_context(gc: &GCLock) -> SemContext {
@@ -166,10 +166,10 @@ fn ids_are_dense_indices_and_global_accessors_return_id_0() {
         false,
         Default::default(),
     );
-    assert_eq!(f0, FunctionInfoId::from_sema_id(ast::SemaId(0)));
+    assert_eq!(f0, FunctionInfoId::from_sema_id(hermes_ast::SemaId(0)));
 
     let s0 = sc.new_scope(f0, None);
-    assert_eq!(s0, ScopeId::from_sema_id(ast::SemaId(0)));
+    assert_eq!(s0, ScopeId::from_sema_id(hermes_ast::SemaId(0)));
 
     assert_eq!(sc.get_global_function(), f0);
     assert_eq!(sc.get_global_scope(), s0);
@@ -183,10 +183,10 @@ fn ids_are_dense_indices_and_global_accessors_return_id_0() {
         false,
         Default::default(),
     );
-    assert_eq!(f1, FunctionInfoId::from_sema_id(ast::SemaId(1)));
+    assert_eq!(f1, FunctionInfoId::from_sema_id(hermes_ast::SemaId(1)));
 
     let s1 = sc.new_scope(f1, None);
-    assert_eq!(s1, ScopeId::from_sema_id(ast::SemaId(1)));
+    assert_eq!(s1, ScopeId::from_sema_id(hermes_ast::SemaId(1)));
     // Second scope in f1.
     let s2 = sc.new_scope(f1, Some(s1));
     assert_eq!(sc.scope(s2).depth, sc.scope(s1).depth + 1);
@@ -199,9 +199,9 @@ fn ids_are_dense_indices_and_global_accessors_return_id_0() {
 
     let name = gc.atom_bytes("x");
     let d0 = sc.new_decl_in_scope(name, DeclKind::Let, s1, DeclSpecial::NotSpecial);
-    assert_eq!(d0, DeclId::from_sema_id(ast::SemaId(0)));
+    assert_eq!(d0, DeclId::from_sema_id(hermes_ast::SemaId(0)));
     let d1 = sc.new_decl_in_scope_default(name, DeclKind::Const, s1);
-    assert_eq!(d1, DeclId::from_sema_id(ast::SemaId(1)));
+    assert_eq!(d1, DeclId::from_sema_id(hermes_ast::SemaId(1)));
 
     // scope.decls records the decl.
     assert_eq!(sc.scope(s1).decls, vec![d0, d1]);
@@ -241,13 +241,13 @@ fn node_is_arrow_no_for_none_and_non_arrow_and_yes_for_arrow() {
     let id = ident(&gc, "x");
     assert_eq!(SemContext::node_is_arrow(Some(id)), FuncIsArrow::No);
 
-    let body = gc.alloc(Node::BlockStatement(ast::node::BlockStatement::new(
+    let body = gc.alloc(Node::BlockStatement(hermes_ast::node::BlockStatement::new(
         NodeMetadata::new(r()),
         NodeList::empty(),
         false,
     )));
     let arrow = gc.alloc(Node::ArrowFunctionExpression(
-        ast::node::ArrowFunctionExpression::new(
+        hermes_ast::node::ArrowFunctionExpression::new(
             NodeMetadata::new(r()),
             NodeList::empty(),
             body,
@@ -385,7 +385,7 @@ fn func_arguments_decl_on_global_function_creates_undeclared_global_property() {
 // ===================== D. Decl-state machine ================================
 
 fn mkdecl(n: u32) -> DeclId {
-    DeclId::from_sema_id(ast::SemaId(n))
+    DeclId::from_sema_id(hermes_ast::SemaId(n))
 }
 
 #[test]
@@ -833,11 +833,11 @@ fn get_constructor_finds_the_constructor_method() {
 
     let ctor_key = ident(&gc, "constructor");
     let ctor_value = gc.alloc(Node::FunctionExpression(
-        ast::node::FunctionExpression::new(
+        hermes_ast::node::FunctionExpression::new(
             NodeMetadata::new(r()),
             None,
             NodeList::empty(),
-            gc.alloc(Node::BlockStatement(ast::node::BlockStatement::new(
+            gc.alloc(Node::BlockStatement(hermes_ast::node::BlockStatement::new(
                 NodeMetadata::new(r()),
                 NodeList::empty(),
                 false,
@@ -861,11 +861,11 @@ fn get_constructor_finds_the_constructor_method() {
 
     let other_key = ident(&gc, "foo");
     let other_value = gc.alloc(Node::FunctionExpression(
-        ast::node::FunctionExpression::new(
+        hermes_ast::node::FunctionExpression::new(
             NodeMetadata::new(r()),
             None,
             NodeList::empty(),
-            gc.alloc(Node::BlockStatement(ast::node::BlockStatement::new(
+            gc.alloc(Node::BlockStatement(hermes_ast::node::BlockStatement::new(
                 NodeMetadata::new(r()),
                 NodeList::empty(),
                 false,
@@ -915,11 +915,11 @@ fn get_constructor_returns_none_when_absent() {
 
     let other_key = ident(&gc, "foo");
     let other_value = gc.alloc(Node::FunctionExpression(
-        ast::node::FunctionExpression::new(
+        hermes_ast::node::FunctionExpression::new(
             NodeMetadata::new(r()),
             None,
             NodeList::empty(),
-            gc.alloc(Node::BlockStatement(ast::node::BlockStatement::new(
+            gc.alloc(Node::BlockStatement(hermes_ast::node::BlockStatement::new(
                 NodeMetadata::new(r()),
                 NodeList::empty(),
                 false,
@@ -944,16 +944,18 @@ fn get_constructor_returns_none_when_absent() {
         NodeMetadata::new(r()),
         NodeList::from_iter(&gc, [other_method]),
     )));
-    let class_expr = gc.alloc(Node::ClassExpression(ast::node::ClassExpression::new(
-        NodeMetadata::new(r()),
-        None,
-        None,
-        None,
-        None,
-        NodeList::empty(),
-        NodeList::empty(),
-        class_body,
-    )));
+    let class_expr = gc.alloc(Node::ClassExpression(
+        hermes_ast::node::ClassExpression::new(
+            NodeMetadata::new(r()),
+            None,
+            None,
+            None,
+            None,
+            NodeList::empty(),
+            NodeList::empty(),
+            class_body,
+        ),
+    ));
 
     assert!(sc.get_constructor(class_expr).is_none());
 }
@@ -968,11 +970,11 @@ fn builtin_declarations_and_binding_table_accessors() {
     assert!(sc.builtin_declarations().is_empty());
 
     let fd = gc.alloc(Node::FunctionDeclaration(
-        ast::node::FunctionDeclaration::new(
+        hermes_ast::node::FunctionDeclaration::new(
             NodeMetadata::new(r()),
             None,
             NodeList::empty(),
-            gc.alloc(Node::BlockStatement(ast::node::BlockStatement::new(
+            gc.alloc(Node::BlockStatement(hermes_ast::node::BlockStatement::new(
                 NodeMetadata::new(r()),
                 NodeList::empty(),
                 false,
@@ -984,7 +986,7 @@ fn builtin_declarations_and_binding_table_accessors() {
             false,
         ),
     ));
-    sc.add_builtin_declaration(ast::context::NodeRc::from_node(&gc, fd));
+    sc.add_builtin_declaration(hermes_ast::context::NodeRc::from_node(&gc, fd));
     assert_eq!(sc.builtin_declarations().len(), 1);
 
     // Binding table: exists and is initially empty (no active scope yet).
@@ -992,7 +994,7 @@ fn builtin_declarations_and_binding_table_accessors() {
 
     assert!(sc.get_binding_table_global_scope().is_null());
     let ptr = {
-        let scope = support::persistent_scoped_map::Scope::new(sc.binding_table());
+        let scope = hermes_support::persistent_scoped_map::Scope::new(sc.binding_table());
         scope.ptr()
         // `scope` (and its borrow of `sc`) is dropped here; `ptr` keeps the
         // (now-popped) scope alive via its own `Rc`.

@@ -3,8 +3,9 @@
 > A Rust port of the Hermes front-end by Tzvetan Mikov, the architect of Hermes.
 > Not an official Meta project and not supported by Meta.
 
-**Status:** pre-release, not yet on crates.io. The intended published name is
-`hermes-parser`. Quickstart instructions below are written against that name.
+**Status:** pre-release, not yet on crates.io. The crates already carry their
+published names (`hermes-parser` and friends), so the quickstart below is the
+real thing — only the upload is pending.
 
 ---
 
@@ -151,10 +152,9 @@ that path.
 Expanded versions of both paths are in
 [`crates/parser/examples/`](crates/parser/examples): `parse_to_estree_json.rs`
 (reads a path from `argv`, prints the JSON, renders diagnostics on failure) and
-`walk_ast.rs` (walks a snippet with `ast::visitor::Visitor` and prints a
-node-kind histogram). They spell the crate by its current in-tree name
-(`parser`); the `hermes_*` spelling used here becomes correct with the rename
-that precedes publication.
+`walk_ast.rs` (walks a snippet with `hermes_parser::ast::visitor::Visitor` and
+prints a node-kind histogram). Run either with
+`cargo run -p hermes-parser --example <name>`.
 
 ## Crate family
 

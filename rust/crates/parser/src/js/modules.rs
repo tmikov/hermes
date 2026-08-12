@@ -20,14 +20,14 @@
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
-use ast::node::{
+use hermes_ast::node::{
     ExportAllDeclaration, ExportDefaultDeclaration, ExportNamedDeclaration,
     ExportNamespaceSpecifier, ExportSpecifier, Identifier, ImportAttribute,
     ImportDeclaration, ImportDefaultSpecifier, ImportNamespaceSpecifier,
     ImportSpecifier, Node, StringLiteral,
 };
-use ast::node_child::{NodeLabel, NodeList, NodeMetadata};
-use support::location::{SMLoc, SMRange};
+use hermes_ast::node_child::{NodeLabel, NodeList, NodeMetadata};
+use hermes_support::location::{SMLoc, SMRange};
 
 use crate::lexer::GrammarContext;
 use crate::token_kinds::TokenKind;
@@ -586,7 +586,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// `JSParserImpl::parseImportSpecifier` (C++ 6943-7125).
     fn parse_import_specifier(
         &mut self,
-        import_loc: support::location::SMLoc,
+        import_loc: hermes_support::location::SMLoc,
     ) -> Option<&'gc Node<'gc>> {
         // ImportSpecifier:
         //   ImportedBinding

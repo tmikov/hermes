@@ -9,16 +9,16 @@
 //! histogram.
 //!
 //! ```text
-//! cargo run -p parser --example walk_ast
+//! cargo run -p hermes-parser --example walk_ast
 //! ```
 
 use std::collections::HashMap;
 
 // The `ast` crate is re-exported by `parser`, so this example needs no second
 // dependency.
-use parser::ast::node::{Node, NodeKind};
-use parser::ast::visitor::Visitor;
-use parser::{parse, ParseFlags};
+use hermes_parser::ast::node::{Node, NodeKind};
+use hermes_parser::ast::visitor::Visitor;
+use hermes_parser::{parse, ParseFlags};
 
 /// Counts how many nodes of each kind the tree contains.
 struct Histogram {

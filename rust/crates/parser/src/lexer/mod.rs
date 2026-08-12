@@ -30,13 +30,13 @@ pub use state::SavePoint;
 
 use std::rc::Rc;
 
-use atom_table::{AtomBytes, AtomTable};
-use support::buffer::SourceBuffer;
-use support::diag::Subsystem;
-use support::location::{SMLoc, SMRange, SourceId};
-use support::manager::SourceErrorManager;
+use hermes_atom_table::{AtomBytes, AtomTable};
+use hermes_support::buffer::SourceBuffer;
+use hermes_support::diag::Subsystem;
+use hermes_support::location::{SMLoc, SMRange, SourceId};
+use hermes_support::manager::SourceErrorManager;
 
-use unicode::{
+use hermes_unicode::{
     is_unicode_id_start, is_unicode_only_id_start, is_unicode_only_space,
 };
 
@@ -1339,8 +1339,8 @@ pub(crate) fn is_ascii_digit(ch: u8) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use atom_table::AtomTable;
-    use support::manager::SourceErrorManager;
+    use hermes_atom_table::AtomTable;
+    use hermes_support::manager::SourceErrorManager;
 
     #[test]
     fn convert_surrogates() {

@@ -3,18 +3,6 @@
 version = 4
 
 [[package]]
-name = "ast"
-version = "0.1.0"
-dependencies = [
- "atom_table",
- "support",
-]
-
-[[package]]
-name = "atom_table"
-version = "0.0.0"
-
-[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -25,46 +13,58 @@ name = "command_line"
 version = "0.1.0"
 
 [[package]]
-name = "parser"
-version = "0.0.0"
+name = "hermes-ast"
+version = "0.1.0"
 dependencies = [
- "ast",
- "atom_table",
- "bumpalo",
- "support",
- "unicode",
+ "hermes-atom-table",
+ "hermes-support",
 ]
+
+[[package]]
+name = "hermes-atom-table"
+version = "0.1.0"
+
+[[package]]
+name = "hermes-parser"
+version = "0.1.0"
+dependencies = [
+ "bumpalo",
+ "hermes-ast",
+ "hermes-atom-table",
+ "hermes-support",
+ "hermes-unicode",
+]
+
+[[package]]
+name = "hermes-support"
+version = "0.1.0"
+dependencies = [
+ "hermes-unicode",
+]
+
+[[package]]
+name = "hermes-unicode"
+version = "0.1.0"
 
 [[package]]
 name = "sema"
 version = "0.0.0"
 dependencies = [
- "ast",
- "atom_table",
  "command_line",
- "parser",
- "support",
-]
-
-[[package]]
-name = "support"
-version = "0.0.0"
-dependencies = [
- "unicode",
+ "hermes-ast",
+ "hermes-atom-table",
+ "hermes-parser",
+ "hermes-support",
 ]
 
 [[package]]
 name = "tools"
 version = "0.0.0"
 dependencies = [
- "ast",
- "atom_table",
  "bumpalo",
  "command_line",
- "parser",
- "support",
+ "hermes-ast",
+ "hermes-atom-table",
+ "hermes-parser",
+ "hermes-support",
 ]
-
-[[package]]
-name = "unicode"
-version = "0.0.0"

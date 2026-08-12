@@ -12,7 +12,7 @@ use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use support::location::SMLoc;
+use hermes_support::location::SMLoc;
 
 /// The parser mode. Port of `enum ParserPass` (JSParser.h:26-36). Same order:
 /// PreParse, LazyParse, FullParse.
@@ -90,7 +90,7 @@ impl Drop for SaveFunctionState {
     }
 }
 
-use ast::node::{Node, NodeKind};
+use hermes_ast::node::{Node, NodeKind};
 
 use crate::lexer::{GrammarContext, JSLexer};
 
@@ -106,7 +106,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// discarded and `JSParserImpl` holds no node references. The pass
     /// output is the side-table + parser flags only.
     pub fn pre_parse_buffer(
-        gc: &'gc ast::context::GCLock<'ast, 'ctx>,
+        gc: &'gc hermes_ast::context::GCLock<'ast, 'ctx>,
         lexer: JSLexer<'a>,
         strict: bool,
     ) -> Option<JSParserImpl<'gc, 'ast, 'ctx, 'a>> {
@@ -275,8 +275,8 @@ mod tests {
     // A parser built with `new` defaults to FullParse; new_with_pass honors the arg.
     #[test]
     fn parser_pass_defaults_and_override() {
-        use ast::context::Context;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_support::manager::SourceErrorManager;
         use crate::lexer::{GrammarContext, JSLexer};
         use crate::js::{JSParserImpl, ParserPass};
 
@@ -293,7 +293,7 @@ mod tests {
     // The side-table round-trips through take/set; threshold defaults to 0.
     #[test]
     fn pre_parsed_table_and_threshold() {
-        use ast::context::Context;
+        use hermes_ast::context::Context;
         let mut ctx = Context::new();
         assert_eq!(ctx.preemptive_function_compilation_threshold(), 0);
         ctx.set_preemptive_function_compilation_threshold(64);
@@ -305,8 +305,8 @@ mod tests {
     // not asserted here — that restore is done explicitly by each call-site.
     #[test]
     fn save_function_state_restores_on_drop() {
-        use ast::context::Context;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_support::manager::SourceErrorManager;
         use crate::lexer::{GrammarContext, JSLexer};
         use crate::js::{JSParserImpl, ParserPass};
 
@@ -338,8 +338,8 @@ mod tests {
     // flag and directives.
     #[test]
     fn preparse_records_functions() {
-        use ast::context::Context;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_support::manager::SourceErrorManager;
         use crate::lexer::{GrammarContext, JSLexer};
         use crate::js::{JSParserImpl, ParserPass};
 
@@ -369,9 +369,9 @@ mod tests {
 
     /// Walk the AST looking for a BlockStatement with
     /// `is_lazy_function_body == true`.
-    fn has_lazy_stub<'gc>(node: &'gc ast::node::Node<'gc>) -> bool {
-        use ast::node::Node;
-        use ast::visitor::Visitor;
+    fn has_lazy_stub<'gc>(node: &'gc hermes_ast::node::Node<'gc>) -> bool {
+        use hermes_ast::node::Node;
+        use hermes_ast::visitor::Visitor;
 
         struct LazyFinder(bool);
         impl<'gc> Visitor<'gc> for LazyFinder {
@@ -396,10 +396,10 @@ mod tests {
 
     /// Find the first `FunctionDeclaration` node in the AST and return it.
     fn find_function_decl<'gc>(
-        node: &'gc ast::node::Node<'gc>,
-    ) -> Option<&'gc ast::node::Node<'gc>> {
-        use ast::node::Node;
-        use ast::visitor::Visitor;
+        node: &'gc hermes_ast::node::Node<'gc>,
+    ) -> Option<&'gc hermes_ast::node::Node<'gc>> {
+        use hermes_ast::node::Node;
+        use hermes_ast::visitor::Visitor;
 
         struct FnFinder<'gc>(Option<&'gc Node<'gc>>);
         impl<'gc> Visitor<'gc> for FnFinder<'gc> {
@@ -426,9 +426,9 @@ mod tests {
     // and assert the re-parsed body is eager (not a stub) and non-empty.
     #[test]
     fn parse_lazy_function_reparses_body() {
-        use ast::context::Context;
-        use ast::node::{Node, NodeKind};
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_ast::node::{Node, NodeKind};
+        use hermes_support::manager::SourceErrorManager;
         use crate::lexer::{GrammarContext, JSLexer};
         use crate::js::{JSParserImpl, ParserPass};
 
@@ -491,8 +491,8 @@ mod tests {
     // spine + blank-bodied keepers, a small fraction of the full AST.
     #[test]
     fn preparse_reclaims_function_bodies() {
-        use ast::context::Context;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_support::manager::SourceErrorManager;
         use crate::lexer::{GrammarContext, JSLexer};
         use crate::js::{JSParserImpl, ParserPass};
 
@@ -535,8 +535,8 @@ mod tests {
     // is a lazy stub.
     #[test]
     fn lazyparse_defers_body() {
-        use ast::context::Context;
-        use support::manager::SourceErrorManager;
+        use hermes_ast::context::Context;
+        use hermes_support::manager::SourceErrorManager;
         use crate::lexer::{GrammarContext, JSLexer};
         use crate::js::{JSParserImpl, ParserPass};
 

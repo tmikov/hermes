@@ -186,9 +186,9 @@
 //! yet at the time the child is visited — exactly as in C++, where the
 //! rebuild never happens at all.
 
-use ast::context::GCLock;
-use ast::node::{builder, AssignmentExpression, Node, NodeField};
-use ast::visitor::{Path, TransformResult, VisitorMut};
+use hermes_ast::context::GCLock;
+use hermes_ast::node::{builder, AssignmentExpression, Node, NodeField};
+use hermes_ast::visitor::{Path, TransformResult, VisitorMut};
 
 use crate::ast_eval::{
     ast_fold_binary_expression, ast_fold_unary_expression,
@@ -1256,12 +1256,12 @@ fn meta_property_name(node: &Node) -> Atom {
 
 #[cfg(test)]
 mod tests {
-    use ast::context::Context;
-    use ast::node::{Identifier, NumericLiteral, Program};
-    use ast::node_child::{NodeList, NodeMetadata};
-    use support::location::{SMLoc, SMRange};
-    use support::manager::SourceErrorManager;
-    use support::persistent_scoped_map::Scope;
+    use hermes_ast::context::Context;
+    use hermes_ast::node::{Identifier, NumericLiteral, Program};
+    use hermes_ast::node_child::{NodeList, NodeMetadata};
+    use hermes_support::location::{SMLoc, SMRange};
+    use hermes_support::manager::SourceErrorManager;
+    use hermes_support::persistent_scoped_map::Scope;
 
     use super::*;
     use crate::keywords::Keywords;

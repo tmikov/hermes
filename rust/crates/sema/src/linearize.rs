@@ -40,8 +40,8 @@
 //!   requirement out, plus the `dyn_cast<N>` that `checkExprOperator`
 //!   performs.
 
-use ast::node::{AssignmentExpression, BinaryExpression, Node};
-use ast::node_child::NodeLabel;
+use hermes_ast::node::{AssignmentExpression, BinaryExpression, Node};
+use hermes_ast::node_child::NodeLabel;
 
 /// An arbitrary limit to nested assignments. We handle them non-recursively,
 /// so this can be very large, but we don't want to let it consume all our
@@ -181,9 +181,9 @@ pub(crate) fn linearize_right<'gc, N: OperatorExpr<'gc>>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ast::context::{Context, GCLock};
-    use ast::node_child::NodeMetadata;
-    use support::location::{SMLoc, SMRange, SourceId};
+    use hermes_ast::context::{Context, GCLock};
+    use hermes_ast::node_child::NodeMetadata;
+    use hermes_support::location::{SMLoc, SMRange, SourceId};
 
     /// A zero-width dummy range; nothing here reads locations.
     fn r() -> SMRange {
@@ -195,7 +195,7 @@ mod tests {
     }
 
     fn num<'gc>(gc: &'gc GCLock, v: f64) -> &'gc Node<'gc> {
-        gc.alloc(Node::NumericLiteral(ast::node::NumericLiteral::new(
+        gc.alloc(Node::NumericLiteral(hermes_ast::node::NumericLiteral::new(
             NodeMetadata::new(r()),
             v,
         )))

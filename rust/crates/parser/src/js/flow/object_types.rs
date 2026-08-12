@@ -10,14 +10,14 @@
 //! members. Port of the corresponding sections of
 //! `lib/Parser/JSParserImpl-flow.cpp`.
 
-use ast::node::{
+use hermes_ast::node::{
     Identifier, Node, ObjectTypeAnnotation, ObjectTypeCallProperty,
     ObjectTypeIndexer, ObjectTypeInternalSlot, ObjectTypeMappedTypeProperty,
     ObjectTypeProperty, ObjectTypeSpreadProperty, TypeParameter, Variance,
 };
-use ast::node_child::{NodeList, NodeMetadata, NodeString};
-use atom_table::INVALID_ATOM_BYTES;
-use support::location::SMLoc;
+use hermes_ast::node_child::{NodeList, NodeMetadata, NodeString};
+use hermes_atom_table::INVALID_ATOM_BYTES;
+use hermes_support::location::SMLoc;
 
 use crate::js::JSParserImpl;
 use crate::lexer::GrammarContext;

@@ -8,7 +8,7 @@
 //! Statement parsing for the JS parser. Port of the statement-parsing section
 //! of `lib/Parser/JSParserImpl.cpp`.
 
-use ast::node::{
+use hermes_ast::node::{
     ArrayPattern, AssignmentPattern, BlockStatement, BreakStatement,
     CatchClause, ContinueStatement, DebuggerStatement, DoWhileStatement, Empty,
     EmptyStatement, ExpressionStatement, ForInStatement, ForOfStatement,
@@ -17,9 +17,9 @@ use ast::node::{
     SwitchCase, SwitchStatement, ThrowStatement, TryStatement,
     VariableDeclaration, VariableDeclarator, WhileStatement, WithStatement,
 };
-use ast::node_child::{NodeList, NodeMetadata};
-use atom_table::INVALID_ATOM_BYTES;
-use support::location::{SMLoc, SMRange};
+use hermes_ast::node_child::{NodeList, NodeMetadata};
+use hermes_atom_table::INVALID_ATOM_BYTES;
+use hermes_support::location::{SMLoc, SMRange};
 
 use crate::lexer::GrammarContext;
 use crate::token_kinds::TokenKind;
@@ -970,7 +970,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 start_loc,
                 None,
                 "location of the 'throw'",
-                support::diag::Subsystem::Parser,
+                hermes_support::diag::Subsystem::Parser,
             );
             return None;
         }
@@ -2277,7 +2277,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // buffer between the quote characters.
         let contains_escapes =
             self.lexer.token().get_string_literal_contains_escapes();
-        let raw_directive: atom_table::AtomBytes = if !contains_escapes {
+        let raw_directive: hermes_atom_table::AtomBytes = if !contains_escapes {
             str_value
         } else {
             // Raw is the source text minus the enclosing quote characters
@@ -2325,7 +2325,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Process a recognised directive string. Port of
     /// `JSParserImpl::processDirective` (lines 340-346).
-    fn process_directive(&mut self, directive: atom_table::AtomBytes) {
+    fn process_directive(&mut self, directive: hermes_atom_table::AtomBytes) {
         // Compare as slices and capture the booleans first so the immutable
         // borrow of the atom table ends before the following `&mut self` calls.
         let bytes = self.lexer.get_string_table().bytes(directive);

@@ -119,9 +119,9 @@
 //! elsewhere in the `Program`) leaves the recorded `NodeRc`s pointing at
 //! nodes that are still in the returned tree.
 
-use ast::context::{GCLock, NodeRc};
-use ast::node::{builder, FunctionExpression, Node};
-use ast::visitor::TransformResult;
+use hermes_ast::context::{GCLock, NodeRc};
+use hermes_ast::node::{builder, FunctionExpression, Node};
+use hermes_ast::visitor::TransformResult;
 
 use super::functions::copy_location_from;
 use super::SemanticResolver;

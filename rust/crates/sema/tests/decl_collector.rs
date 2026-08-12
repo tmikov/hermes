@@ -29,14 +29,14 @@
 //!   not when it's directly at the function's top level.
 //! - `closeScope` only stores a scope's `ScopeDecls` if non-empty (cpp:194).
 
-use ast::context::{Context, GCLock};
-use ast::node::{Node, VariableDeclaration};
-use ast::NodeId;
-use parser::js::JSParserImpl;
-use parser::lexer::{GrammarContext, JSLexer};
+use hermes_ast::context::{Context, GCLock};
+use hermes_ast::node::{Node, VariableDeclaration};
+use hermes_ast::NodeId;
+use hermes_parser::js::JSParserImpl;
+use hermes_parser::lexer::{GrammarContext, JSLexer};
 use sema::decl_collector::DeclCollector;
 use sema::keywords::Keywords;
-use support::manager::SourceErrorManager;
+use hermes_support::manager::SourceErrorManager;
 
 /// Parse `src` as a `Program` and return its root node, panicking on any
 /// parse error. Trimmed from `tools/src/bin/ast_dump.rs`'s driver setup.
@@ -78,7 +78,7 @@ fn decl_kind_and_name(gc: &GCLock, node: &Node) -> (&'static str, String) {
     }
 }
 
-fn atom_string(gc: &GCLock, atom: atom_table::AtomBytes) -> String {
+fn atom_string(gc: &GCLock, atom: hermes_atom_table::AtomBytes) -> String {
     String::from_utf8_lossy(gc.bytes(atom)).into_owned()
 }
 
@@ -92,7 +92,7 @@ fn first_declarator_name(gc: &GCLock, vd: &VariableDeclaration) -> String {
 
 /// A tiny local visitor that finds the first `FunctionDeclaration` named
 /// `name` anywhere under the node it's run on. Reuses
-/// `ast::node::Node::visit_children`'s generated per-kind dispatch instead
+/// `hermes_ast::node::Node::visit_children`'s generated per-kind dispatch instead
 /// of duplicating a match-on-every-kind walk in each test.
 struct FunctionFinder<'gc, 'g, 'ast, 'ctx> {
     name: &'g str,
@@ -100,7 +100,7 @@ struct FunctionFinder<'gc, 'g, 'ast, 'ctx> {
     result: Option<&'gc Node<'gc>>,
 }
 
-impl<'gc, 'g, 'ast, 'ctx> ast::visitor::Visitor<'gc>
+impl<'gc, 'g, 'ast, 'ctx> hermes_ast::visitor::Visitor<'gc>
     for FunctionFinder<'gc, 'g, 'ast, 'ctx>
 {
     fn visit_node(&mut self, node: &'gc Node<'gc>) {

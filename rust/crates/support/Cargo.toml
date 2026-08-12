@@ -1,8 +1,7 @@
 [package]
-name = "support"
-version = "0.0.0"
+name = "hermes-support"
+version = "0.1.0"
 edition = "2021"
-publish = false
 description = "Diagnostics and source-management support crate for the Hermes Rust front-end."
 license = "MIT"
 repository = "https://github.com/tmikov/hermes"
@@ -14,4 +13,4 @@ readme = "README.md"
 unsafe_code = "forbid"
 
 [dependencies]
-unicode = { path = "../unicode" }
+hermes_unicode = { path = "../unicode", version = "0.1.0", package = "hermes-unicode" }

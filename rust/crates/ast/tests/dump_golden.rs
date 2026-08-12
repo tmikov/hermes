@@ -7,15 +7,17 @@
 
 //! Golden tests for ESTreeJSONDumper (ast phase 4). Trees are hand-built in a
 //! Context/GCLock; output is asserted byte-for-byte.
-use ast::context::{Context, GCLock};
-use ast::dump::{
+use hermes_ast::context::{Context, GCLock};
+use hermes_ast::dump::{
     dump_estree_json, dump_estree_json_with_sm, ESTreeDumpMode, ESTreeRawProp, LocationDumpMode,
 };
-use ast::node::{ExpressionStatement, Identifier, Node, NumericLiteral, Program, StringLiteral};
-use ast::node_child::{NodeList, NodeMetadata};
-use atom_table::INVALID_ATOM_BYTES;
-use support::location::{SMLoc, SMRange, SourceId};
-use support::manager::SourceErrorManager;
+use hermes_ast::node::{
+    ExpressionStatement, Identifier, Node, NumericLiteral, Program, StringLiteral,
+};
+use hermes_ast::node_child::{NodeList, NodeMetadata};
+use hermes_atom_table::INVALID_ATOM_BYTES;
+use hermes_support::location::{SMLoc, SMRange, SourceId};
+use hermes_support::manager::SourceErrorManager;
 
 /// Build an `SMRange` over `[a, b)` in a placeholder buffer. Without a source
 /// manager the buffer is never consulted, so any `SourceId` works.

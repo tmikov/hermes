@@ -21,12 +21,12 @@ publish = false
 
 [dependencies]
 # Our port
-support    = { path = "../support" }
-atom_table = { path = "../atom_table" }
-unicode    = { path = "../unicode" }
-ast        = { path = "../ast" }
-parser     = { path = "../parser" }
-bumpalo    = "3.16"
+hermes_support    = { path = "../support", package = "hermes-support" }
+hermes_atom_table = { path = "../atom_table", package = "hermes-atom-table" }
+hermes_unicode    = { path = "../unicode", package = "hermes-unicode" }
+hermes_ast        = { path = "../ast", package = "hermes-ast" }
+hermes_parser     = { path = "../parser", package = "hermes-parser" }
+bumpalo           = "3.16"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

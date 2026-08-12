@@ -14,8 +14,8 @@
 //! (consumed by the parser), and the `pub(crate)` setters are all used by the
 //! scanners or exercised by tests.
 
-use atom_table::AtomBytes;
-use support::location::{SMLoc, SMRange, SourceId};
+use hermes_atom_table::AtomBytes;
+use hermes_support::location::{SMLoc, SMRange, SourceId};
 
 use crate::token_kinds::TokenKind;
 
@@ -398,7 +398,7 @@ impl StoredToken {
 mod tests {
     use super::*;
     use crate::token_kinds::TokenKind;
-    use support::location::{SMLoc, SMRange, SourceId};
+    use hermes_support::location::{SMLoc, SMRange, SourceId};
 
     #[test]
     fn punctuator_token() {
@@ -425,7 +425,7 @@ mod tests {
         // set_jsx_string_literal sets value + raw + escapes=false. Exercises
         // set_jsx_string_literal and get_string_literal_raw_value (a faithful
         // Token surface the parser consumes; otherwise unexercised in-crate).
-        let tab = atom_table::AtomTable::new();
+        let tab = hermes_atom_table::AtomTable::new();
         let value = tab.atom_bytes(b"a<b");
         let raw = tab.atom_bytes(b"a&lt;b");
         let mut t = Token::new(SourceId::from_index(0));
@@ -439,7 +439,7 @@ mod tests {
     #[test]
     fn template_literal_contains_not_escapes() {
         // get_template_literal_contains_not_escapes() == (cooked is None).
-        let tab = atom_table::AtomTable::new();
+        let tab = hermes_atom_table::AtomTable::new();
         let raw = tab.atom_bytes(b"\\9");
         let mut t = Token::new(SourceId::from_index(0));
         t.set_template_literal(TokenKind::no_substitution_template, None, raw);

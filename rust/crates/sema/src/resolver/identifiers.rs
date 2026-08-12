@@ -38,10 +38,10 @@
 //! mangling both of them start from is
 //! [`crate::sem_context::private_name_identifier`].
 
-use ast::context::{GCLock, NodeRc};
-use ast::node::{Node, NodeField};
-use ast::visitor::{Path, TransformResult};
-use support::diag::{Subsystem, Warning};
+use hermes_ast::context::{GCLock, NodeRc};
+use hermes_ast::node::{Node, NodeField};
+use hermes_ast::visitor::{Path, TransformResult};
+use hermes_support::diag::{Subsystem, Warning};
 
 use crate::ids::DeclId;
 use crate::sem_context::{
@@ -482,12 +482,12 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
 
 #[cfg(test)]
 mod tests {
-    use ast::context::Context;
-    use ast::node::Identifier;
-    use ast::node_child::NodeMetadata;
-    use support::location::{SMLoc, SMRange};
-    use support::manager::SourceErrorManager;
-    use support::persistent_scoped_map::Scope;
+    use hermes_ast::context::Context;
+    use hermes_ast::node::Identifier;
+    use hermes_ast::node_child::NodeMetadata;
+    use hermes_support::location::{SMLoc, SMRange};
+    use hermes_support::manager::SourceErrorManager;
+    use hermes_support::persistent_scoped_map::Scope;
 
     use super::*;
     use crate::keywords::Keywords;
@@ -496,7 +496,7 @@ mod tests {
 
     /// Allocate an `Identifier` node named `name` at `loc`.
     fn alloc_identifier<'gc>(
-        gc: &'gc ast::context::GCLock,
+        gc: &'gc hermes_ast::context::GCLock,
         name: &str,
         loc: SMLoc,
     ) -> &'gc Node<'gc> {
@@ -786,12 +786,12 @@ mod tests {
         // kinds — so, unlike the identifier under test, the placeholder
         // handed to `enter_function` must be a (trivial, empty) `Program`.
         let program_placeholder =
-            gc.alloc(Node::Program(ast::node::Program::new(
+            gc.alloc(Node::Program(hermes_ast::node::Program::new(
                 NodeMetadata::new(SMRange {
                     start: loc,
                     end: loc,
                 }),
-                ast::node_child::NodeList::from_iter(&gc, []),
+                hermes_ast::node_child::NodeList::from_iter(&gc, []),
             )));
 
         let (d1, d2) = {

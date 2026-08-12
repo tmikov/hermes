@@ -151,6 +151,19 @@ Version numbers and release dates will be set at launch.
 - `Deque`/`HeapSize` shared utilities.
 - Byte-for-byte validated against captured `hermesc` output (`tests/golden.rs`).
 
+#### Packaging
+- The five published crates are named `hermes-parser`, `hermes-ast`,
+  `hermes-support`, `hermes-atom-table` and `hermes-unicode`, so the public
+  import paths are `hermes_parser::…`, `hermes_ast::…`, `hermes_support::…`,
+  `hermes_atom_table::…` and `hermes_unicode::…`. There are no `[lib] name`
+  overrides — the lib names are the package names with underscores.
+- `hermes-parser` re-exports the AST crate under the short name `ast`, so
+  `hermes_parser::ast::node::Node` and `hermes_ast::node::Node` name the same
+  item, and depending on `hermes-parser` alone is enough.
+- The in-tree directories keep their short names (`rust/crates/parser`, …);
+  only the Cargo package names changed. Cargo commands take the package name:
+  `cargo test -p hermes-parser`, not `-p parser`.
+
 #### Tooling
 - The CLI drivers live in the unpublished `tools` crate (`publish = false`),
   so the published library ships no binaries and no `command_line` dependency.

@@ -1,8 +1,7 @@
 [package]
-name = "parser"
-version = "0.0.0"
+name = "hermes-parser"
+version = "0.1.0"
 edition = "2021"
-publish = false
 description = "A Rust port of the Hermes JavaScript/Flow/TypeScript parser (front-end) by Tzvetan Mikov, the architect of Hermes. Not an official Meta project."
 license = "MIT"
 repository = "https://github.com/tmikov/hermes"
@@ -15,8 +14,8 @@ readme = "README.md"
 unsafe_code = "deny"   # the cursor module (later) gets a scoped #[allow]; token tables are unsafe-free
 
 [dependencies]
-support = { path = "../support" }
-atom_table = { path = "../atom_table" }
-unicode = { path = "../unicode" }
-ast = { path = "../ast" }
+hermes_support = { path = "../support", version = "0.1.0", package = "hermes-support" }
+hermes_atom_table = { path = "../atom_table", version = "0.1.0", package = "hermes-atom-table" }
+hermes_unicode = { path = "../unicode", version = "0.1.0", package = "hermes-unicode" }
+hermes_ast = { path = "../ast", version = "0.1.0", package = "hermes-ast" }
 bumpalo = "3.16"

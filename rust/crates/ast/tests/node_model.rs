@@ -8,16 +8,16 @@
 //! Structural tests over the generated node set: range predicates, deep match,
 //! visit_children counts, and GC survival across child + decoration lists.
 
-use ast::context::{Context, GCLock, NodeRc};
-use ast::node::*;
-use ast::node_child::{NodeList, NodeMetadata};
+use hermes_ast::context::{Context, GCLock, NodeRc};
+use hermes_ast::node::*;
+use hermes_ast::node_child::{NodeList, NodeMetadata};
 
-fn r() -> support::location::SMRange {
-    let l = support::location::SMLoc {
-        source: support::location::SourceId::from_index(0),
+fn r() -> hermes_support::location::SMRange {
+    let l = hermes_support::location::SMLoc {
+        source: hermes_support::location::SourceId::from_index(0),
         offset: 0,
     };
-    support::location::SMRange { start: l, end: l }
+    hermes_support::location::SMRange { start: l, end: l }
 }
 
 fn num<'gc>(gc: &'gc GCLock, v: f64) -> &'gc Node<'gc> {
@@ -29,7 +29,7 @@ fn num<'gc>(gc: &'gc GCLock, v: f64) -> &'gc Node<'gc> {
 
 /// Counts children visited by the generated `visit_children`.
 struct Counter(usize);
-impl<'gc> ast::visitor::Visitor<'gc> for Counter {
+impl<'gc> hermes_ast::visitor::Visitor<'gc> for Counter {
     fn visit_node(&mut self, node: &'gc Node<'gc>) {
         self.0 += 1;
         node.visit_children(self);
@@ -73,7 +73,7 @@ fn range_predicates_match_kinds() {
     )));
     assert!(fs.is_statement() && fs.is_loop_statement());
     if let Node::ForStatement(n) = fs {
-        assert_eq!(n.label_index.get(), ast::node_child::INVALID_LABEL);
+        assert_eq!(n.label_index.get(), hermes_ast::node_child::INVALID_LABEL);
     }
 }
 
@@ -89,7 +89,7 @@ fn visit_children_counts() {
         gc.atom_bytes("*".as_bytes()),
     )));
     let mut c = Counter(0);
-    use ast::visitor::Visitor;
+    use hermes_ast::visitor::Visitor;
     c.visit_node(bin);
     assert_eq!(c.0, 3);
 }
@@ -152,8 +152,8 @@ fn gc_traces_decorations_on_function_declaration() {
 
 #[test]
 fn node_metadata_debug_loc_defaults_to_start() {
-    use ast::node_child::NodeMetadata;
-    use support::location::{SMLoc, SMRange, SourceId};
+    use hermes_ast::node_child::NodeMetadata;
+    use hermes_support::location::{SMLoc, SMRange, SourceId};
 
     let start = SMLoc { source: SourceId::from_index(0), offset: 10 };
     let end = SMLoc { source: SourceId::from_index(0), offset: 20 };

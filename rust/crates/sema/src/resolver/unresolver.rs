@@ -55,7 +55,7 @@
 //! - C++ dispatches through `visitESTreeNodeNoReplace` and therefore has to
 //!   supply no-op `incRecursionDepth`/`decRecursionDepth` hooks
 //!   (SemanticResolver.h:693-698). This port's read-only
-//!   [`ast::visitor::Visitor`] has no depth hooks at all, so those two
+//!   [`hermes_ast::visitor::Visitor`] has no depth hooks at all, so those two
 //!   members have no counterpart.
 //! - C++'s generic `visit(Node *)` overload (SemanticResolver.h:687-689) and
 //!   its `visit(IdentifierNode *)` overload become the two arms of the single
@@ -63,8 +63,8 @@
 //! - The constructor is private in C++ (`run` is the only entry point); here
 //!   it is inlined into [`Unresolver::run`] for the same effect.
 
-use ast::node::{Identifier, Node};
-use ast::visitor::Visitor;
+use hermes_ast::node::{Identifier, Node};
+use hermes_ast::visitor::Visitor;
 
 use crate::sem_context::SemContext;
 

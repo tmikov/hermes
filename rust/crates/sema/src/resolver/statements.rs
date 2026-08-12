@@ -104,11 +104,11 @@
 
 use std::collections::hash_map::Entry;
 
-use ast::context::{GCLock, NodeRc};
-use ast::node::{builder, BlockStatement, Node, NodeField, TryStatement};
-use ast::node_child::NodeList;
-use ast::visitor::{Path, TransformResult, VisitorMut};
-use support::diag::Subsystem;
+use hermes_ast::context::{GCLock, NodeRc};
+use hermes_ast::node::{builder, BlockStatement, Node, NodeField, TryStatement};
+use hermes_ast::node_child::NodeList;
+use hermes_ast::visitor::{Path, TransformResult, VisitorMut};
+use hermes_support::diag::Subsystem;
 
 use super::declarations::atom_str;
 use super::expressions::replacement_of;
@@ -922,7 +922,7 @@ impl SemanticResolver<'_, '_, '_, '_> {
 
 /// The `_name` of a `break`/`continue` label. Port of
 /// `llvh::cast<IdentifierNode>(node->_label)->_name` (cpp:697, 725).
-fn label_identifier_name(label_node: &Node) -> ast::node_child::NodeLabel {
+fn label_identifier_name(label_node: &Node) -> hermes_ast::node_child::NodeLabel {
     match label_node {
         Node::Identifier(id) => id.name.get(),
         _ => panic!(

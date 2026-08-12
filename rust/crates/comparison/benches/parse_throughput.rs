@@ -29,18 +29,18 @@
 
 use std::hint::black_box;
 
-use ast::context::Context;
-use ast::node::Node;
 use boa_ast::scope::Scope;
 use boa_interner::Interner;
 use boa_parser::{Parser as BoaParser, Source};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use hermes_ast::context::Context;
+use hermes_ast::node::Node;
+use hermes_parser::js::JSParserImpl;
+use hermes_parser::lexer::{GrammarContext, JSLexer};
+use hermes_parser::token_kinds::TokenKind;
+use hermes_support::manager::SourceErrorManager;
 use oxc_allocator::Allocator;
 use oxc_span::SourceType;
-use parser::js::JSParserImpl;
-use parser::lexer::{GrammarContext, JSLexer};
-use parser::token_kinds::TokenKind;
-use support::manager::SourceErrorManager;
 use swc_common::sync::Lrc;
 use swc_common::{FileName, SourceMap};
 use swc_ecma_parser::{lexer::Lexer, Parser as SwcParser, StringInput, Syntax};

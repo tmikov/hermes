@@ -22,7 +22,7 @@
 //! arms to `parse_ts_function_or_parenthesized_type`. The object (`{`) → P7.3
 //! and `interface` → P7.4 arms remain honest deferrals.
 
-use ast::node::{
+use hermes_ast::node::{
     BigIntLiteral, BooleanLiteral, ExistsTypeAnnotation, Identifier, Node,
     NullLiteral, NumericLiteral, StringLiteral, TSAnyKeyword, TSArrayType,
     TSBigIntKeyword, TSBooleanKeyword, TSConditionalType, TSIndexedAccessType,
@@ -31,8 +31,8 @@ use ast::node::{
     TSTypeAnnotation, TSTypePredicate, TSTypeQuery, TSTypeReference,
     TSUndefinedKeyword, TSUnionType, TSUnknownKeyword, TSVoidKeyword,
 };
-use ast::node_child::{NodeList, NodeMetadata};
-use support::location::SMLoc;
+use hermes_ast::node_child::{NodeList, NodeMetadata};
+use hermes_support::location::SMLoc;
 
 use crate::js::ts::IsConstructorType;
 use crate::js::JSParserImpl;

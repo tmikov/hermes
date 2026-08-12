@@ -3,10 +3,10 @@
 //! These `impl<'a> JSLexer<'a>` methods live in a child module of `lexer`, so
 //! they can access the private fields of `JSLexer` declared in `lexer/mod.rs`.
 
-use support::diag::Subsystem;
-use support::location::SMRange;
+use hermes_support::diag::Subsystem;
+use hermes_support::location::SMRange;
 
-use unicode::{
+use hermes_unicode::{
     is_ascii_identifier_start, is_unicode_id_continue, is_unicode_id_start,
 };
 
@@ -263,7 +263,7 @@ impl<'a> JSLexer<'a> {
                 end: self.cur_loc(),
             };
             self.sm.warning_range(
-                support::diag::Warning::Misc,
+                hermes_support::diag::Warning::Misc,
                 range,
                 "scanning identifier with unicode escape as reserved word",
                 Subsystem::Lexer,

@@ -13,19 +13,19 @@
 //!   4. `AllocationScope` truncation logs the reclaimed ids
 //!   5. `NodeMetadata::new` starts `UNASSIGNED`; `alloc` stamps unconditionally
 
-use ast::context::{Context, GCLock, NodeRc};
-use ast::node::{BinaryExpression, Node, NumericLiteral};
-use ast::node_child::NodeMetadata;
-use ast::NodeId;
+use hermes_ast::context::{Context, GCLock, NodeRc};
+use hermes_ast::node::{BinaryExpression, Node, NumericLiteral};
+use hermes_ast::node_child::NodeMetadata;
+use hermes_ast::NodeId;
 use std::cell::Cell;
 
 /// Build a dummy source range (no `SMRange::invalid()` on this API).
-fn dummy_range() -> support::location::SMRange {
-    let l = support::location::SMLoc {
-        source: support::location::SourceId::from_index(0),
+fn dummy_range() -> hermes_support::location::SMRange {
+    let l = hermes_support::location::SMLoc {
+        source: hermes_support::location::SourceId::from_index(0),
         offset: 0,
     };
-    support::location::SMRange { start: l, end: l }
+    hermes_support::location::SMRange { start: l, end: l }
 }
 
 /// Allocate a `NumericLiteral` node with the given value.
@@ -59,7 +59,7 @@ fn ids_are_unique_and_monotonic() {
 /// node with a brand-new id, while the original node's id is untouched.
 #[test]
 fn builder_rebuild_gets_fresh_id() {
-    use ast::node::builder;
+    use hermes_ast::node::builder;
 
     let mut ctx = Context::new();
     let gc = GCLock::new(&mut ctx);
@@ -78,7 +78,7 @@ fn builder_rebuild_gets_fresh_id() {
         let three = num(&gc, 3.0);
         b.left(three);
         match b.build(&gc) {
-            ast::visitor::TransformResult::Changed(n) => n,
+            hermes_ast::visitor::TransformResult::Changed(n) => n,
             other => panic!("expected Changed, got {:?}", other),
         }
     } else {

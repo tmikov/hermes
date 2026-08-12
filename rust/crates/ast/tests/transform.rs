@@ -17,22 +17,22 @@
 //!   7. Builder unit test: no change → `Unchanged`; change one field → `Changed`
 //!      with the other field pointer-shared
 
-use ast::context::{Context, GCLock, NodeRc};
-use ast::node::*;
-use ast::node_child::{NodeList, NodeMetadata};
-use ast::visitor::{Path, TransformResult, VisitorMut};
+use hermes_ast::context::{Context, GCLock, NodeRc};
+use hermes_ast::node::*;
+use hermes_ast::node_child::{NodeList, NodeMetadata};
+use hermes_ast::visitor::{Path, TransformResult, VisitorMut};
 
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
 
 /// Build a zero-width dummy source range at source-buffer 0, offset 0.
-fn r() -> support::location::SMRange {
-    let l = support::location::SMLoc {
-        source: support::location::SourceId::from_index(0),
+fn r() -> hermes_support::location::SMRange {
+    let l = hermes_support::location::SMLoc {
+        source: hermes_support::location::SourceId::from_index(0),
         offset: 0,
     };
-    support::location::SMRange { start: l, end: l }
+    hermes_support::location::SMRange { start: l, end: l }
 }
 
 /// Allocate a `NumericLiteral` with the given value.
@@ -375,7 +375,7 @@ fn gc_reclaims_orphans_after_transform() {
 
 #[test]
 fn builder_clone_with_one_field_changed() {
-    use ast::node::builder;
+    use hermes_ast::node::builder;
 
     let mut ctx = Context::new();
     let gc = GCLock::new(&mut ctx);

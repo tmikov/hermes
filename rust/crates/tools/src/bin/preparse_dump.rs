@@ -22,10 +22,10 @@
 
 use std::io::{self, Read, Write};
 
-use ast::context::Context;
-use parser::js::JSParserImpl;
-use parser::lexer::{GrammarContext, JSLexer};
-use support::manager::SourceErrorManager;
+use hermes_ast::context::Context;
+use hermes_parser::js::JSParserImpl;
+use hermes_parser::lexer::{GrammarContext, JSLexer};
+use hermes_support::manager::SourceErrorManager;
 
 fn main() {
     let prog = "preparse-dump";

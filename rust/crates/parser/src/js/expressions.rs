@@ -8,8 +8,8 @@
 //! Expression parsing for the JS parser. Port of the expression-parsing
 //! section of `lib/Parser/JSParserImpl.cpp`.
 
-use ast::context::GCLock;
-use ast::node::{
+use hermes_ast::context::GCLock;
+use hermes_ast::node::{
     ArrayExpression, ArrowFunctionExpression, ArrayPattern, AsConstExpression, AsExpression,
     AssignmentExpression, AssignmentPattern,
     AwaitExpression, BigIntLiteral, BinaryExpression, BooleanLiteral, CallExpression,
@@ -25,8 +25,8 @@ use ast::node::{
     UnaryExpression, UpdateExpression,
     YieldExpression,
 };
-use ast::node_child::{NodeList, NodeMetadata};
-use support::location::SMLoc;
+use hermes_ast::node_child::{NodeList, NodeMetadata};
+use hermes_support::location::SMLoc;
 
 use crate::lexer::GrammarContext;
 use crate::token_kinds::TokenKind;
@@ -51,8 +51,8 @@ pub(super) enum OfEndsAssignment {
 }
 
 // For AssignState.op field type (interned operator label).
-use atom_table;
-use atom_table::INVALID_ATOM_BYTES;
+use hermes_atom_table;
+use hermes_atom_table::INVALID_ATOM_BYTES;
 
 impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     // -----------------------------------------------------------------------
@@ -345,7 +345,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             /// The already-parsed LHS (C++ `optLeftExpr`).
             opt_left_expr: &'gc Node<'gc>,
             /// The interned operator token string (C++ `op`).
-            op: atom_table::AtomBytes,
+            op: hermes_atom_table::AtomBytes,
             /// Start of the operator token (C++ `debugLoc`).
             debug_loc: SMLoc,
         }
@@ -1054,7 +1054,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
             // If we encounter an initializer, unpack it. C++ 5780-5792.
             let mut init: Option<&'gc Node<'gc>> = None;
-            let mut asn_range: Option<support::location::SMRange> = None;
+            let mut asn_range: Option<hermes_support::location::SMRange> = None;
             if let Node::AssignmentExpression(asn) = expr {
                 let eq_op = self.gc.ctx().atom_table.atom_bytes(b"=");
                 if asn.operator.get() == eq_op {
@@ -1324,7 +1324,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// the `&mut self` error calls to avoid overlapping borrows.
     pub(super) fn validate_binding_identifier(
         &mut self,
-        range: support::location::SMRange,
+        range: hermes_support::location::SMRange,
         id_bytes: &[u8],
         kind: TokenKind,
     ) -> bool {
@@ -1850,7 +1850,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             let saved_suppressed =
                 self.lexer.get_source_mgr().suppressed_messages();
             self.lexer.get_source_mgr_mut().set_suppressed_messages(Some(
-                support::diag::Subsystem::Parser,
+                hermes_support::diag::Subsystem::Parser,
             ));
             let _guard = match self.check_recursion() {
                 Some(g) => g,
@@ -2016,7 +2016,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // speculative parse runs.
         let saved_suppressed = self.lexer.get_source_mgr().suppressed_messages();
         self.lexer.get_source_mgr_mut().set_suppressed_messages(Some(
-            support::diag::Subsystem::Parser,
+            hermes_support::diag::Subsystem::Parser,
         ));
 
         // Labeled block so every early-bail path restores suppression below; the
@@ -2237,7 +2237,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         &mut self,
         param: Param,
     ) -> Option<&'gc Node<'gc>> {
-        use support::location::SMRange;
+        use hermes_support::location::SMRange;
 
         // Stack entry: left-hand expression, operator, start location of LHS.
         // The C++ uses a SmallVector; we use a Vec (plain heap; fine for P1).
@@ -2566,7 +2566,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 // ExponentiationExpression only allows UpdateExpression on the
                 // left. A bare unary operator before `**` must be parenthesized.
                 if self.check(TokenKind::starstar) {
-                    use support::location::SMRange;
+                    use hermes_support::location::SMRange;
                     self.error_at(
                         SMRange {
                             start: start_loc,
@@ -2751,7 +2751,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// commit-condition (P6.4). The TS arm is OR'd into the same gate (P7.5b).
     pub(super) fn parse_left_hand_side_expression_tail(
         &mut self,
-        start_loc: support::location::SMLoc,
+        start_loc: hermes_support::location::SMLoc,
         mut expr: &'gc Node<'gc>,
         is_class_heritage_argument: IsClassHeritageArgument,
     ) -> Option<&'gc Node<'gc>> {
@@ -2878,7 +2878,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     new_start,
                     None,
                     "start of member expression",
-                    support::diag::Subsystem::Parser,
+                    hermes_support::diag::Subsystem::Parser,
                 );
                 return None;
             }
@@ -3060,7 +3060,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                         import_range.start,
                         None,
                         "start of member expression",
-                        support::diag::Subsystem::Parser,
+                        hermes_support::diag::Subsystem::Parser,
                     );
                     return None;
                 }
@@ -3193,7 +3193,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     pub(in crate::js) fn parse_optional_expression_except_new_tail(
         &mut self,
         is_constructor_call: IsConstructorCall,
-        start_loc: support::location::SMLoc,
+        start_loc: hermes_support::location::SMLoc,
         mut expr: &'gc Node<'gc>,
     ) -> Option<&'gc Node<'gc>> {
         let mut object_loc = start_loc;
@@ -3295,7 +3295,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                         expr_range.start,
                         Some(expr_range),
                         "location of optional chain",
-                        support::diag::Subsystem::Parser,
+                        hermes_support::diag::Subsystem::Parser,
                     );
                     self.recursion_depth.set(saved_depth);
                     // Deviation: C++ (3566-3577) emits this diagnostic and
@@ -3347,7 +3347,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// but the check is present for correctness.
     pub(super) fn parse_arguments(
         &mut self,
-    ) -> Option<(Vec<&'gc Node<'gc>>, support::location::SMLoc)> {
+    ) -> Option<(Vec<&'gc Node<'gc>>, hermes_support::location::SMLoc)> {
         // Consume `(`.
         let l_paren_range = self.advance(GrammarContext::AllowRegExp);
         let l_paren_start = l_paren_range.start;
@@ -3393,7 +3393,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                             err_loc,
                             None,
                             "Rest parameter must be last formal parameter",
-                            support::diag::Subsystem::Parser,
+                            hermes_support::diag::Subsystem::Parser,
                         );
                     }
                     return Some((arg_list, end_loc));
@@ -4434,8 +4434,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// sibling block (`?.m<T>()`) is handled likewise (P7.5b).
     fn parse_member_select(
         &mut self,
-        start_loc: support::location::SMLoc,
-        object_loc: support::location::SMLoc,
+        start_loc: hermes_support::location::SMLoc,
+        object_loc: hermes_support::location::SMLoc,
         expr: &'gc Node<'gc>,
         seen_optional_chain: bool,
     ) -> Option<&'gc Node<'gc>> {
@@ -4622,7 +4622,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let saved_suppressed = self.lexer.get_source_mgr().suppressed_messages();
         self.lexer
             .get_source_mgr_mut()
-            .set_suppressed_messages(Some(support::diag::Subsystem::Parser));
+            .set_suppressed_messages(Some(hermes_support::diag::Subsystem::Parser));
         let type_args = self.parse_type_arguments();
         self.lexer
             .get_source_mgr_mut()
@@ -4654,7 +4654,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// TS arm is OR'd into the same gate (P7.5b).
     fn parse_call_expression(
         &mut self,
-        start_loc: support::location::SMLoc,
+        start_loc: hermes_support::location::SMLoc,
         mut expr: &'gc Node<'gc>,
         mut type_args: Option<&'gc Node<'gc>>,
         mut seen_optional_chain: bool,

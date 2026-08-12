@@ -33,12 +33,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use ast::context::Context;
-use ast::dump::{ESTreeDumpMode, ESTreeRawProp, LocationDumpMode, dump_estree_json_with_sm};
-use ast::node::{Node, NodeKind};
-use parser::js::{JSParserImpl, ParserPass};
-use parser::lexer::{GrammarContext, JSLexer};
-use support::manager::SourceErrorManager;
+use hermes_ast::context::Context;
+use hermes_ast::dump::{ESTreeDumpMode, ESTreeRawProp, LocationDumpMode, dump_estree_json_with_sm};
+use hermes_ast::node::{Node, NodeKind};
+use hermes_parser::js::{JSParserImpl, ParserPass};
+use hermes_parser::lexer::{GrammarContext, JSLexer};
+use hermes_support::manager::SourceErrorManager;
 
 // ---------------------------------------------------------------------------
 // Information collected per function-like node during the walk.
@@ -220,7 +220,7 @@ fn collect_children<'gc>(node: &'gc Node<'gc>, out: &mut BTreeMap<u32, FuncEntry
 
 struct ChildVisitor<'a>(pub &'a mut BTreeMap<u32, FuncEntry>);
 
-impl<'gc> ast::visitor::Visitor<'gc> for ChildVisitor<'_> {
+impl<'gc> hermes_ast::visitor::Visitor<'gc> for ChildVisitor<'_> {
     fn visit_node(&mut self, node: &'gc Node<'gc>) {
         collect_funcs(node, self.0);
     }
@@ -233,8 +233,8 @@ impl<'gc> ast::visitor::Visitor<'gc> for ChildVisitor<'_> {
 
 fn collect_eager_body_strings<'gc>(
     node: &'gc Node<'gc>,
-    atoms: &atom_table::AtomTable,
-    sm: &support::manager::SourceErrorManager,
+    atoms: &hermes_atom_table::AtomTable,
+    sm: &hermes_support::manager::SourceErrorManager,
     out: &mut BTreeMap<u32, String>,
 ) {
     match node {
@@ -290,20 +290,20 @@ fn collect_eager_body_strings<'gc>(
 
 fn collect_eager_body_string_children<'gc>(
     node: &'gc Node<'gc>,
-    atoms: &atom_table::AtomTable,
-    sm: &support::manager::SourceErrorManager,
+    atoms: &hermes_atom_table::AtomTable,
+    sm: &hermes_support::manager::SourceErrorManager,
     out: &mut BTreeMap<u32, String>,
 ) {
     node.visit_children(&mut EagerBodyChildVisitor { atoms, sm, out });
 }
 
 struct EagerBodyChildVisitor<'a> {
-    atoms: &'a atom_table::AtomTable,
-    sm: &'a support::manager::SourceErrorManager,
+    atoms: &'a hermes_atom_table::AtomTable,
+    sm: &'a hermes_support::manager::SourceErrorManager,
     out: &'a mut BTreeMap<u32, String>,
 }
 
-impl<'gc> ast::visitor::Visitor<'gc> for EagerBodyChildVisitor<'_> {
+impl<'gc> hermes_ast::visitor::Visitor<'gc> for EagerBodyChildVisitor<'_> {
     fn visit_node(&mut self, node: &'gc Node<'gc>) {
         collect_eager_body_strings(node, self.atoms, self.sm, self.out);
     }
@@ -315,8 +315,8 @@ impl<'gc> ast::visitor::Visitor<'gc> for EagerBodyChildVisitor<'_> {
 
 fn dump_node<'a>(
     node: &'a Node<'a>,
-    atoms: &atom_table::AtomTable,
-    sm: &support::manager::SourceErrorManager,
+    atoms: &hermes_atom_table::AtomTable,
+    sm: &hermes_support::manager::SourceErrorManager,
 ) -> String {
     let mut out = String::new();
     dump_estree_json_with_sm(
@@ -480,7 +480,7 @@ fn check_file(src: &[u8], label: &str, threshold: u32) -> usize {
         .collect();
 
     while let Some((offset, entry)) = queue.pop_front() {
-        let start = support::location::SMLoc { source: id, offset };
+        let start = hermes_support::location::SMLoc { source: id, offset };
 
         // Mirror HBC.cpp:158: set the lazy parser's strict mode from the
         // pre-parsed table entry for this function's body, identified by its

@@ -43,9 +43,9 @@
 //! `PerfSection validation("Resolving JavaScript global AST")` (cpp:169) is
 //! not ported: there is no `PerfSection` in this tree.
 
-use ast::context::{GCLock, NodeRc};
-use ast::node::Node;
-use support::manager::SourceErrorManager;
+use hermes_ast::context::{GCLock, NodeRc};
+use hermes_ast::node::Node;
+use hermes_support::manager::SourceErrorManager;
 
 use crate::resolver::SemanticResolver;
 use crate::sem_context::SemContext;

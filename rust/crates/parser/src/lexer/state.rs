@@ -8,16 +8,16 @@
 //! Ported from `include/hermes/Parser/JSLexer.h` (`SavePoint`, the `unsafeSet*`
 //! helpers) and `lib/Parser/JSLexer.cpp:911-1035`.
 
-use atom_table::AtomBytes;
-use support::diag::Subsystem;
-use support::location::{SMLoc, SMRange};
+use hermes_atom_table::AtomBytes;
+use hermes_support::diag::Subsystem;
+use hermes_support::location::{SMLoc, SMRange};
 
 use crate::token_kinds::TokenKind;
 use crate::utf8::{
     is_utf8_start, match_unicode_line_terminator_offset1,
     UTF8_LINE_TERMINATOR_CHAR0,
 };
-use unicode::is_unicode_only_space;
+use hermes_unicode::is_unicode_only_space;
 
 use super::JSLexer;
 

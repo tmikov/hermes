@@ -130,10 +130,10 @@
 //! and the `export` branch both `return` without falling through to
 //! cpp:1218, while the `import` branch (cpp:1202-1204) DOES fall through.
 
-use ast::context::GCLock;
-use ast::node::{builder, Node, SHBuiltin};
-use ast::visitor::TransformResult;
-use support::diag::{Subsystem, Warning};
+use hermes_ast::context::GCLock;
+use hermes_ast::node::{builder, Node, SHBuiltin};
+use hermes_ast::visitor::TransformResult;
+use hermes_support::diag::{Subsystem, Warning};
 
 use crate::ids::ScopeId;
 use crate::sem_context::{Atom, ConstructorKind, DeclKind, SemContext};
@@ -422,7 +422,7 @@ mod tests {
     use super::*;
     use crate::keywords::Keywords;
     use crate::sem_context::{CustomDirectives, FuncIsArrow};
-    use ast::context::Context;
+    use hermes_ast::context::Context;
 
     /// `registerLocalEval` marks the given scope AND every ancestor, and
     /// leaves unrelated scopes alone. `local_eval` never reaches

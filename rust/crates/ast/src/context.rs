@@ -23,15 +23,15 @@ use std::ptr::NonNull;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
 
-use atom_table::AtomBytes;
-use atom_table::AtomTable;
+use hermes_atom_table::AtomBytes;
+use hermes_atom_table::AtomTable;
 
-use support::deque::Deque;
+use hermes_support::deque::Deque;
 use crate::node::Node;
 use crate::NodeId;
 use crate::node_child::NodeList;
 use crate::visitor::Visitor;
-use support::HeapSize;
+use hermes_support::HeapSize;
 
 /// ID which indicates a `StorageEntry` is free.
 const FREE_ENTRY: u32 = 0;
@@ -1003,12 +1003,12 @@ mod tests {
     use crate::node_child::NodeMetadata;
     use std::cell::Cell;
 
-    fn dummy_range() -> support::location::SMRange {
-        let l = support::location::SMLoc {
-            source: support::location::SourceId::from_index(0),
+    fn dummy_range() -> hermes_support::location::SMRange {
+        let l = hermes_support::location::SMLoc {
+            source: hermes_support::location::SourceId::from_index(0),
             offset: 0,
         };
-        support::location::SMRange { start: l, end: l }
+        hermes_support::location::SMRange { start: l, end: l }
     }
 
     fn num<'gc>(gc: &'gc GCLock, v: f64) -> &'gc Node<'gc> {

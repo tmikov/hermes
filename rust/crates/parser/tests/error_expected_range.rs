@@ -23,12 +23,12 @@
 //! rendered only the current token's own range (`    ^~`) — this test
 //! pins the fixed, byte-identical-to-hermesc output.
 
-use ast::context::Context;
-use parser::js::JSParserImpl;
-use parser::lexer::{GrammarContext, JSLexer};
-use support::diag::CollectingHandler;
-use support::manager::SourceErrorManager;
-use support::render::render_diagnostic;
+use hermes_ast::context::Context;
+use hermes_parser::js::JSParserImpl;
+use hermes_parser::lexer::{GrammarContext, JSLexer};
+use hermes_support::diag::CollectingHandler;
+use hermes_support::manager::SourceErrorManager;
+use hermes_support::render::render_diagnostic;
 
 /// Parse `src` (which must fail) as `name` and return every diagnostic it
 /// produced, rendered exactly as the driver would print it.

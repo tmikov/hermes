@@ -24,15 +24,15 @@
 //!
 //! The parse-driver setup is trimmed from `resolver.rs`'s.
 
-use ast::context::{Context, GCLock};
-use ast::node::Node;
-use parser::js::JSParserImpl;
-use parser::lexer::{GrammarContext, JSLexer};
+use hermes_ast::context::{Context, GCLock};
+use hermes_ast::node::Node;
+use hermes_parser::js::JSParserImpl;
+use hermes_parser::lexer::{GrammarContext, JSLexer};
+use hermes_support::manager::SourceErrorManager;
 use sema::ids::FunctionInfoId;
 use sema::keywords::Keywords;
 use sema::resolve::resolve_ast;
 use sema::sem_context::SemContext;
-use support::manager::SourceErrorManager;
 
 /// Parse `src` as a `Program` and return its root node, panicking on any
 /// parse error.
@@ -68,7 +68,7 @@ fn flags_and_errors(src: &str) -> (Vec<bool>, u32) {
     let _resolved = resolve_ast(&gc, &mut sem_ctx, &mut sm, root, &[]);
     let flags = (0..sem_ctx.functions_len())
         .map(|i| {
-            let id = FunctionInfoId::from_sema_id(ast::SemaId(i as u32));
+            let id = FunctionInfoId::from_sema_id(hermes_ast::SemaId(i as u32));
             sem_ctx.function(id).may_reach_implicit_return
         })
         .collect();

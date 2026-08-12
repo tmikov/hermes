@@ -15,7 +15,7 @@
 //! construct. The statement form rolls back with a `SavePoint`; the expression
 //! form reinterprets an already-parsed argument list (no `SavePoint`).
 
-use ast::node::{
+use hermes_ast::node::{
     BigIntLiteral, BooleanLiteral, CallExpression, Identifier,
     MatchArrayPattern, MatchAsPattern, MatchBindingPattern, MatchExpression,
     MatchExpressionCase, MatchIdentifierPattern, MatchInstanceObjectPattern,
@@ -25,8 +25,8 @@ use ast::node::{
     MatchWildcardPattern, Node, NullLiteral, NumericLiteral, SequenceExpression,
     StringLiteral,
 };
-use ast::node_child::{NodeList, NodeMetadata};
-use support::location::{SMLoc, SMRange};
+use hermes_ast::node_child::{NodeList, NodeMetadata};
+use hermes_support::location::{SMLoc, SMRange};
 
 use crate::js::{
     IsClassHeritageArgument, IsConstructorCall, JSParserImpl, Param, PARAM_IN,

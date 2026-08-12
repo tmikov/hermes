@@ -64,8 +64,8 @@
 
 use std::collections::HashSet;
 
-use ast::node::{Node, SwitchStatement, TryStatement};
-use ast::node_child::NodeList;
+use hermes_ast::node::{Node, SwitchStatement, TryStatement};
+use hermes_ast::node_child::NodeList;
 
 /// Encodes the result of checking for termination in CheckImplicitReturn.
 /// targetLabels encodes where execution may continue to.

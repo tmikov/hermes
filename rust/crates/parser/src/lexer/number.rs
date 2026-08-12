@@ -3,8 +3,8 @@
 //! These `impl<'a> JSLexer<'a>` methods live in a child module of `lexer`, so
 //! they can access the private fields of `JSLexer` declared in `lexer/mod.rs`.
 
-use support::diag::Subsystem;
-use support::location::{SMLoc, SMRange};
+use hermes_support::diag::Subsystem;
+use hermes_support::location::{SMLoc, SMRange};
 
 use crate::number;
 
@@ -431,7 +431,7 @@ impl<'a> JSLexer<'a> {
                     },
                 };
                 self.sm.warning_range(
-                    support::diag::Warning::Misc,
+                    hermes_support::diag::Warning::Misc,
                     range,
                     "Numeric literal starts with 0 but contains an 8 or 9 digit. \
                      Interpreting as decimal (not octal).",

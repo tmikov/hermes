@@ -156,10 +156,10 @@
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
-use ast::context::{GCLock, NodeRc};
-use ast::node::{builder, Node, NodeField};
-use ast::visitor::{Path, TransformResult, VisitorMut};
-use ast::SemaId;
+use hermes_ast::context::{GCLock, NodeRc};
+use hermes_ast::node::{builder, Node, NodeField};
+use hermes_ast::visitor::{Path, TransformResult, VisitorMut};
+use hermes_ast::SemaId;
 
 use crate::ids::{DeclId, FunctionInfoId};
 use crate::sem_context::{
@@ -1433,7 +1433,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
 /// unlike the class node itself the builder's snapshot point does not matter.
 fn build_class_property<'gc>(
     gc: &'gc GCLock,
-    prop: &'gc ast::node::ClassProperty<'gc>,
+    prop: &'gc hermes_ast::node::ClassProperty<'gc>,
     key: Option<&'gc Node<'gc>>,
     value: Option<&'gc Node<'gc>>,
 ) -> TransformResult<&'gc Node<'gc>> {
@@ -1452,7 +1452,7 @@ fn build_class_property<'gc>(
 /// `visit(ClassPrivatePropertyNode *)` never visits the key.
 fn build_class_private_property<'gc>(
     gc: &'gc GCLock,
-    prop: &'gc ast::node::ClassPrivateProperty<'gc>,
+    prop: &'gc hermes_ast::node::ClassPrivateProperty<'gc>,
     value: Option<&'gc Node<'gc>>,
 ) -> TransformResult<&'gc Node<'gc>> {
     let mut b = builder::ClassPrivateProperty::from_node(prop);
@@ -1466,7 +1466,7 @@ fn build_class_private_property<'gc>(
 /// — see [`build_class_property`].
 fn build_method_definition<'gc>(
     gc: &'gc GCLock,
-    method: &'gc ast::node::MethodDefinition<'gc>,
+    method: &'gc hermes_ast::node::MethodDefinition<'gc>,
     key: Option<&'gc Node<'gc>>,
     value: Option<&'gc Node<'gc>>,
 ) -> TransformResult<&'gc Node<'gc>> {

@@ -10,7 +10,7 @@
 //! the reparse helpers. Port of the corresponding sections of
 //! `lib/Parser/JSParserImpl-flow.cpp`.
 
-use ast::node::{
+use hermes_ast::node::{
     AnyTypeAnnotation, ArrayTypeAnnotation, BigIntLiteralTypeAnnotation,
     BigIntTypeAnnotation, BooleanLiteralTypeAnnotation, BooleanTypeAnnotation,
     ComponentTypeAnnotation, ComponentTypeParameter, ConditionalTypeAnnotation,
@@ -28,8 +28,8 @@ use ast::node::{
     UndefinedTypeAnnotation, UnionTypeAnnotation, UnknownTypeAnnotation,
     Variance, VoidTypeAnnotation,
 };
-use ast::node_child::{NodeLabel, NodeList, NodeMetadata};
-use support::location::SMLoc;
+use hermes_ast::node_child::{NodeLabel, NodeList, NodeMetadata};
+use hermes_support::location::SMLoc;
 
 use crate::js::expressions::inc_parens;
 use crate::js::{JSParserImpl, Param};

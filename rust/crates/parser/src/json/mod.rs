@@ -15,7 +15,7 @@ pub mod parser;
 pub use factory::{JSONFactory, Prop};
 pub use parser::JSONParser;
 
-use atom_table::AtomBytes;
+use hermes_atom_table::AtomBytes;
 
 /// Port of `JSONKind` (JSONParser.h:36).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -65,7 +65,7 @@ impl<'a> JSONHiddenClass<'a> {
 
     /// JSONParser.h:225 — binary-search the sorted keys for `name` (compared by
     /// bytes); return its index. `atoms` resolves AtomBytes -> bytes.
-    pub fn find(&self, name: &[u8], atoms: &atom_table::AtomTable) -> Option<usize> {
+    pub fn find(&self, name: &[u8], atoms: &hermes_atom_table::AtomTable) -> Option<usize> {
         self.keys
             .binary_search_by(|k| atoms.bytes(*k).cmp(name))
             .ok()
@@ -153,8 +153,8 @@ impl<'a> JSONValue<'a> {
     /// works correctly via the same path.
     pub fn emit_into(
         &self,
-        emitter: &mut support::json_emitter::JSONEmitter,
-        atoms: &atom_table::AtomTable,
+        emitter: &mut hermes_support::json_emitter::JSONEmitter,
+        atoms: &hermes_atom_table::AtomTable,
     ) {
         match self {
             JSONValue::Object(class, values) => {
@@ -230,17 +230,17 @@ impl<'a> ObjectView<'a> {
     }
 
     /// JSONParser.h:286 — value for `name`, or None.
-    pub fn get(&self, name: &str, atoms: &atom_table::AtomTable) -> Option<&'a JSONValue<'a>> {
+    pub fn get(&self, name: &str, atoms: &hermes_atom_table::AtomTable) -> Option<&'a JSONValue<'a>> {
         self.class.find(name.as_bytes(), atoms).map(|i| self.values[i])
     }
 
     /// JSONParser.h:295 — value for `name`; panics if absent (C++ asserts).
-    pub fn at(&self, name: &str, atoms: &atom_table::AtomTable) -> &'a JSONValue<'a> {
+    pub fn at(&self, name: &str, atoms: &hermes_atom_table::AtomTable) -> &'a JSONValue<'a> {
         self.get(name, atoms).expect("name not found")
     }
 
     /// JSONParser.h:323 — 1 if present else 0.
-    pub fn count(&self, name: &str, atoms: &atom_table::AtomTable) -> usize {
+    pub fn count(&self, name: &str, atoms: &hermes_atom_table::AtomTable) -> usize {
         if self.class.find(name.as_bytes(), atoms).is_some() {
             1
         } else {
@@ -254,19 +254,19 @@ impl<'a> ObjectView<'a> {
     }
 
     /// Key (interned handle) by position. Panics if out of range.
-    pub fn key_at(&self, index: usize) -> atom_table::AtomBytes {
+    pub fn key_at(&self, index: usize) -> hermes_atom_table::AtomBytes {
         self.class.keys[index]
     }
 
     /// JSONParser.h:440 — index of `name` in the (sorted) members, or None.
     /// (C++ returns an iterator; we return the positional index for use with
     /// `value_at`/`key_at`.)
-    pub fn find(&self, name: &str, atoms: &atom_table::AtomTable) -> Option<usize> {
+    pub fn find(&self, name: &str, atoms: &hermes_atom_table::AtomTable) -> Option<usize> {
         self.class.find(name.as_bytes(), atoms)
     }
 
     /// JSONParser.h:330 — (key, value) pairs, in the hidden class's sorted order.
-    pub fn iter(&self) -> impl Iterator<Item = (atom_table::AtomBytes, &'a JSONValue<'a>)> + '_ {
+    pub fn iter(&self) -> impl Iterator<Item = (hermes_atom_table::AtomBytes, &'a JSONValue<'a>)> + '_ {
         self.class.keys.iter().copied().zip(self.values.iter().copied())
     }
 }
@@ -363,9 +363,9 @@ mod model_tests {
     #[test]
     fn emit_into_round_trip() {
         use super::JSONFactory;
-        use atom_table::AtomTable;
         use bumpalo::Bump;
-        use support::json_emitter::JSONEmitter;
+        use hermes_atom_table::AtomTable;
+        use hermes_support::json_emitter::JSONEmitter;
 
         let arena = Bump::new();
         let atoms = AtomTable::new();
@@ -396,9 +396,9 @@ mod model_tests {
     #[test]
     fn emit_into_astral_string() {
         use super::JSONFactory;
-        use atom_table::AtomTable;
         use bumpalo::Bump;
-        use support::json_emitter::JSONEmitter;
+        use hermes_atom_table::AtomTable;
+        use hermes_support::json_emitter::JSONEmitter;
         let arena = Bump::new();
         let atoms = AtomTable::new();
         let f = JSONFactory::new(&arena, &atoms);
@@ -427,7 +427,7 @@ mod model_tests {
 
     #[test]
     fn string_accessor_and_hidden_class_find() {
-        use atom_table::AtomTable;
+        use hermes_atom_table::AtomTable;
         let arena = Bump::new();
         let atoms = AtomTable::new();
         let a = atoms.atom_bytes("foo");
@@ -439,7 +439,7 @@ mod model_tests {
         let ka = atoms.atom_bytes("a");
         let kb = atoms.atom_bytes("b");
         let kc = atoms.atom_bytes("c");
-        let keys: &[atom_table::AtomBytes] = arena.alloc_slice_copy(&[ka, kb, kc]);
+        let keys: &[hermes_atom_table::AtomBytes] = arena.alloc_slice_copy(&[ka, kb, kc]);
         let hc = JSONHiddenClass { keys };
         assert_eq!(hc.find(b"a", &atoms), Some(0));
         assert_eq!(hc.find(b"b", &atoms), Some(1));
@@ -450,8 +450,8 @@ mod model_tests {
     #[test]
     fn object_find_index() {
         use super::JSONFactory;
-        use atom_table::AtomTable;
         use bumpalo::Bump;
+        use hermes_atom_table::AtomTable;
         let arena = Bump::new();
         let atoms = AtomTable::new();
         let f = JSONFactory::new(&arena, &atoms);

@@ -17,10 +17,10 @@
 //! pre-interned atom (`ident_using`). The C++ `make_scope_exit` restore +
 //! `SaveAndSuppressMessages` become explicit save/restore.
 
-use atom_table::AtomBytes;
-use support::diag::Subsystem;
+use hermes_atom_table::AtomBytes;
+use hermes_support::diag::Subsystem;
 
-use unicode::{is_ascii_identifier_continue, is_ascii_identifier_start};
+use hermes_unicode::{is_ascii_identifier_continue, is_ascii_identifier_start};
 
 use crate::token_kinds::TokenKind;
 
@@ -365,8 +365,8 @@ impl<'a> JSLexer<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use atom_table::AtomTable;
-    use support::manager::SourceErrorManager;
+    use hermes_atom_table::AtomTable;
+    use hermes_support::manager::SourceErrorManager;
 
     #[test]
     fn lookahead1_basic() {

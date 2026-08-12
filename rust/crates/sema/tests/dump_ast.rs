@@ -14,12 +14,12 @@
 //! strings always include the leading `SemContext` block Task 5's dumper
 //! produces.
 
-use ast::context::{Context, GCLock};
-use ast::node::{
+use hermes_ast::context::{Context, GCLock};
+use hermes_ast::node::{
     BinaryExpression, Identifier, Node, NumericLiteral, Program,
     TypeAnnotation,
 };
-use ast::node_child::{NodeList, NodeMetadata};
+use hermes_ast::node_child::{NodeList, NodeMetadata};
 use sema::dump::sem_dump;
 use sema::ids::{FunctionInfoId, ScopeId};
 use sema::keywords::Keywords;
@@ -27,12 +27,12 @@ use sema::sem_context::{
     ConstructorKind, DeclKind, DeclSpecial, FuncIsArrow, SemContext,
 };
 
-fn r() -> support::location::SMRange {
-    let l = support::location::SMLoc {
-        source: support::location::SourceId::from_index(0),
+fn r() -> hermes_support::location::SMRange {
+    let l = hermes_support::location::SMLoc {
+        source: hermes_support::location::SourceId::from_index(0),
         offset: 0,
     };
-    support::location::SMRange { start: l, end: l }
+    hermes_support::location::SMRange { start: l, end: l }
 }
 
 /// A `SemContext` with a single (loose) global function + its one scope —

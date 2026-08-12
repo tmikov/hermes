@@ -74,7 +74,7 @@ jobs:
         run: >-
           cargo test
           --manifest-path rust/Cargo.toml
-          -p parser
+          -p hermes-parser
           --test parser_differential
           --test json_differential
           --test preparse_differential

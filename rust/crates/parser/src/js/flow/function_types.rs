@@ -9,14 +9,14 @@
 //! predicates), and `%checks` predicates. Port of the corresponding sections
 //! of `lib/Parser/JSParserImpl-flow.cpp`.
 
-use ast::node::{
+use hermes_ast::node::{
     DeclaredPredicate, FunctionTypeAnnotation, FunctionTypeParam,
     HookTypeAnnotation, Identifier, InferredPredicate, Node, TypeAnnotation,
     TypePredicate,
 };
-use ast::node_child::{NodeList, NodeMetadata};
-use atom_table::INVALID_ATOM_BYTES;
-use support::location::SMLoc;
+use hermes_ast::node_child::{NodeList, NodeMetadata};
+use hermes_atom_table::INVALID_ATOM_BYTES;
+use hermes_support::location::SMLoc;
 
 use crate::js::expressions::inc_parens;
 use crate::js::{JSParserImpl, PARAM_IN};

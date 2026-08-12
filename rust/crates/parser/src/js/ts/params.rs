@@ -12,11 +12,11 @@
 //! constraint and `=` default), and `parseTSTypeArguments` (the `<A, B>`
 //! instantiation on a generic reference).
 
-use ast::node::{
+use hermes_ast::node::{
     Identifier, Node, TSTypeParameter, TSTypeParameterDeclaration,
     TSTypeParameterInstantiation,
 };
-use ast::node_child::{NodeList, NodeMetadata};
+use hermes_ast::node_child::{NodeList, NodeMetadata};
 
 use crate::js::JSParserImpl;
 use crate::lexer::GrammarContext;

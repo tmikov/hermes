@@ -8,13 +8,13 @@
 //! The convenience front door: [`parse`] a string, get a [`ParsedJS`].
 //!
 //! This module adds no parsing behavior. It is a thin assembly of the pieces
-//! the `ast-dump` bin wires up by hand — an [`ast::context::Context`] (the AST
+//! the `ast-dump` bin wires up by hand — an [`hermes_ast::context::Context`] (the AST
 //! arena), a [`SourceErrorManager`] (source buffers + diagnostics), a
 //! [`JSLexer`], and a [`JSParserImpl`] — into one call, so that a consumer who
 //! only wants "source in, AST out" does not have to know the assembly order.
 //!
 //! Everything it uses stays public: for lazy parsing, a custom
-//! [`support::diag::DiagHandler`], a shared `Context` across several files, or
+//! [`hermes_support::diag::DiagHandler`], a shared `Context` across several files, or
 //! any other control the façade does not expose, drive
 //! [`crate::js::JSParserImpl`] directly the way
 //! `crates/tools/src/bin/ast_dump.rs` does.
@@ -23,19 +23,19 @@
 //!
 //! AST nodes live in the `Context` arena and are only reachable while a
 //! [`GCLock`] is held, so [`ParsedJS`] owns the `Context` and keeps the
-//! `Program` node pinned with an [`ast::context::NodeRc`]. Reading the AST
+//! `Program` node pinned with an [`hermes_ast::context::NodeRc`]. Reading the AST
 //! therefore goes through [`ParsedJS::with_program`], which takes the lock for
 //! the duration of a closure. Only one `GCLock` may exist per thread at a
 //! time, so `with_program` calls must not be nested.
 
-use ast::context::{Context, GCLock, NodeRc};
-use ast::dump::dump_estree_json_with_sm;
-use ast::dump::{ESTreeDumpMode, ESTreeRawProp, LocationDumpMode};
-use ast::node::Node;
-use support::diag::ResolvedDiagnostic;
-use support::diag::{CollectingHandler, DiagKind, OutputOptions};
-use support::manager::SourceErrorManager;
-use support::render::render_diagnostic;
+use hermes_ast::context::{Context, GCLock, NodeRc};
+use hermes_ast::dump::dump_estree_json_with_sm;
+use hermes_ast::dump::{ESTreeDumpMode, ESTreeRawProp, LocationDumpMode};
+use hermes_ast::node::Node;
+use hermes_support::diag::ResolvedDiagnostic;
+use hermes_support::diag::{CollectingHandler, DiagKind, OutputOptions};
+use hermes_support::manager::SourceErrorManager;
+use hermes_support::render::render_diagnostic;
 
 use crate::js::JSParserImpl;
 use crate::lexer::{GrammarContext, JSLexer};
@@ -43,13 +43,13 @@ use crate::lexer::{GrammarContext, JSLexer};
 /// Which dialect(s) the parser accepts, plus forced strict mode.
 ///
 /// `Default` is plain ECMAScript, non-strict — every flag `false`. Each field
-/// maps to the identically-named [`ast::context::Context`] flag, which is
+/// maps to the identically-named [`hermes_ast::context::Context`] flag, which is
 /// where the parser reads it from; the C++ `Context` getters cited in that
 /// module are the authoritative semantics. Two fields set more than their own
 /// flag, as documented below.
 ///
 /// ```
-/// use parser::ParseFlags;
+/// use hermes_parser::ParseFlags;
 /// let flags = ParseFlags { parse_flow: true, ..Default::default() };
 /// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -152,15 +152,15 @@ impl ParsedJS {
     /// Run `f` with the arena locked and the `Program` node in hand.
     ///
     /// This is the read path for the AST: walk it with an
-    /// [`ast::visitor::Visitor`], match on [`Node`] arms, or read
+    /// [`hermes_ast::visitor::Visitor`], match on [`Node`] arms, or read
     /// [`Node::kind`]. References into the arena cannot escape the closure —
     /// their lifetime ends with the lock — so return owned data instead. The
-    /// one thing that *can* escape is an [`ast::context::NodeRc`], which is
+    /// one thing that *can* escape is an [`hermes_ast::context::NodeRc`], which is
     /// refcounted rather than borrowed; dropping this `ParsedJS` while such a
     /// handle is still alive panics inside `Context::drop`.
     ///
     /// The bound is higher-ranked because [`Node`] is *invariant* in its
-    /// lifetime: a walker (`ast::visitor::Visitor<'gc>`) needs the node
+    /// lifetime: a walker (`hermes_ast::visitor::Visitor<'gc>`) needs the node
     /// reference and the node's own lifetime to be the same `'gc`, which only
     /// a `for<'gc>` closure can promise.
     ///
@@ -202,7 +202,7 @@ impl ParsedJS {
     }
 
     /// Dump the AST as ESTree JSON with full control over the dumper, which
-    /// is [`ast::dump::dump_estree_json_with_sm`] — see it for what each
+    /// is [`hermes_ast::dump::dump_estree_json_with_sm`] — see it for what each
     /// argument does.
     ///
     /// # Panics
@@ -237,7 +237,7 @@ impl ParsedJS {
     /// The diagnostics recorded while parsing.
     ///
     /// An `Ok` parse reported no errors, so these are warnings and notes.
-    /// Render one with [`support::render::render_diagnostic`].
+    /// Render one with [`hermes_support::render::render_diagnostic`].
     pub fn diagnostics(&self) -> &[ResolvedDiagnostic] {
         collected(&self.sm)
     }
@@ -323,7 +323,7 @@ impl std::error::Error for ParseError {}
 /// See [`parse_named`], which this calls, for the details.
 ///
 /// ```
-/// use parser::{parse, ParseFlags};
+/// use hermes_parser::{parse, ParseFlags};
 ///
 /// let parsed = parse("let x = 1;", ParseFlags::default()).unwrap();
 /// # let _ = parsed;
@@ -343,7 +343,7 @@ pub fn parse(source: &str, flags: ParseFlags) -> Result<ParsedJS, ParseError> {
 /// to stderr.
 ///
 /// ```
-/// use parser::{parse_named, ParseFlags};
+/// use hermes_parser::{parse_named, ParseFlags};
 ///
 /// let err = parse_named("1 +", "bad.js", ParseFlags::default())
 ///     .expect_err("should not parse");
@@ -410,7 +410,7 @@ fn collected(sm: &SourceErrorManager) -> &[ResolvedDiagnostic] {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ast::node::NodeKind;
+    use hermes_ast::node::NodeKind;
 
     #[test]
     fn parses_and_reports_program() {

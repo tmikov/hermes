@@ -6,7 +6,7 @@
  */
 
 //! WTF-8 / UTF-8 → UTF-16 codec helpers, faithfully copied from the subset of
-//! `parser::utf8` (itself ported from `include/hermes/Support/UTF8.h`) that is
+//! `hermes_parser::utf8` (itself ported from `include/hermes/Support/UTF8.h`) that is
 //! needed by `JSONEmitter` and the forthcoming AST-dumper port.
 //!
 //! Keeping this copy in `support` means `json_emitter` and the AST-dumper can
@@ -14,7 +14,7 @@
 //! duplicating logic. The module is zero-`unsafe` (the `support` crate
 //! `forbid`s `unsafe_code`).
 
-use unicode::{
+use hermes_unicode::{
     UNICODE_MAX_VALUE, UNICODE_REPLACEMENT_CHARACTER, UNICODE_SURROGATE_FIRST,
     UNICODE_SURROGATE_LAST, UTF16_HIGH_SURROGATE, UTF16_LOW_SURROGATE,
 };

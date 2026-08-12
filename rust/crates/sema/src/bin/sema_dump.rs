@@ -96,18 +96,18 @@
 
 use std::io::{self, Read, Write};
 
-use ast::context::{Context, NodeRc};
-use ast::node::Node;
 use command_line::{CommandLine, Hidden, Opt, OptDesc};
-use parser::js::JSParserImpl;
-use parser::lexer::{GrammarContext, JSLexer};
+use hermes_ast::context::{Context, NodeRc};
+use hermes_ast::node::Node;
+use hermes_parser::js::JSParserImpl;
+use hermes_parser::lexer::{GrammarContext, JSLexer};
+use hermes_support::manager::SourceErrorManager;
+use hermes_support::render::StderrHandler;
 use sema::dump::sem_dump;
 use sema::keywords::Keywords;
 use sema::libhermes::LIBHERMES;
 use sema::resolve::{resolve_ast, resolve_ast_for_parser};
 use sema::sem_context::SemContext;
-use support::manager::SourceErrorManager;
-use support::render::StderrHandler;
 
 /// Print hermesc's post-`parseJS`-failure epilogue (if there were any
 /// errors) and exit with hermesc's exit code. Port of the single
@@ -182,7 +182,7 @@ struct Options {
     /// Enable support for `eval()` (the hermesc `-enable-eval` flag,
     /// `CompilerRuntimeFlags.h:19-22`: a plain `cl::opt<bool>` defaulting to
     /// true, accepting both bare `-enable-eval` and `-enable-eval=false`).
-    /// Wired into `ast::Context::enable_eval` (S2 T6's field), which
+    /// Wired into `hermes_ast::Context::enable_eval` (S2 T6's field), which
     /// `resolver/calls.rs`'s `visit_call_expression` reads to choose between
     /// the `DirectEval`/`EvalDisabled` warning branches.
     enable_eval: Opt<bool>,

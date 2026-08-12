@@ -10,21 +10,21 @@
 //! parser) and asserts the exact multi-line text the C++ `printSemContext`
 //! would produce for the equivalent structure.
 
-use ast::context::{Context, GCLock, NodeRc};
-use ast::node::{BlockStatement, FunctionDeclaration, Identifier, Node};
-use ast::node_child::{NodeList, NodeMetadata};
+use hermes_ast::context::{Context, GCLock, NodeRc};
+use hermes_ast::node::{BlockStatement, FunctionDeclaration, Identifier, Node};
+use hermes_ast::node_child::{NodeList, NodeMetadata};
 use sema::dump_context::SemContextDumper;
 use sema::keywords::Keywords;
 use sema::sem_context::{
     ConstructorKind, DeclKind, DeclSpecial, FuncIsArrow, SemContext,
 };
 
-fn r() -> support::location::SMRange {
-    let l = support::location::SMLoc {
-        source: support::location::SourceId::from_index(0),
+fn r() -> hermes_support::location::SMRange {
+    let l = hermes_support::location::SMLoc {
+        source: hermes_support::location::SourceId::from_index(0),
         offset: 0,
     };
-    support::location::SMRange { start: l, end: l }
+    hermes_support::location::SMRange { start: l, end: l }
 }
 
 #[test]

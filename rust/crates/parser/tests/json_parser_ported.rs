@@ -7,10 +7,10 @@
 
 //! Port of unittests/Parser/JSONParserTest.cpp (5 cases).
 
-use atom_table::AtomTable;
 use bumpalo::Bump;
-use parser::json::{JSONFactory, JSONParser, JSONValue};
-use support::manager::SourceErrorManager;
+use hermes_atom_table::AtomTable;
+use hermes_parser::json::{JSONFactory, JSONParser, JSONValue};
+use hermes_support::manager::SourceErrorManager;
 
 /// Mirror of the C++ setup: factory in the arena, parse a source string.
 fn parse<'a>(
@@ -134,7 +134,7 @@ fn hidden_class_test() {
 #[test]
 fn emit_test() {
     // JSONParserTest::EmitTest — parse then emit, compare bytes.
-    use support::json_emitter::JSONEmitter;
+    use hermes_support::json_emitter::JSONEmitter;
     let src = "{ 'key1' : 1, 'key2' : 'value2', 'key3' : {'nested1': true}, \"key4\" : [false, null, 'value2']}";
     let arena = Bump::new();
     let atoms = AtomTable::new();

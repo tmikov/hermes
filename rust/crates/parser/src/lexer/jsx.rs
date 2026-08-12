@@ -4,7 +4,7 @@
 //! These `impl<'a> JSLexer<'a>` methods live in a child module of `lexer`, so
 //! they can access the private fields of `JSLexer` declared in `lexer/mod.rs`.
 
-use unicode::UNICODE_MAX_VALUE;
+use hermes_unicode::UNICODE_MAX_VALUE;
 
 use crate::html_entities;
 use crate::token::Token;
@@ -193,8 +193,8 @@ impl<'a> JSLexer<'a> {
 
 #[cfg(test)]
 mod tests {
-    use atom_table::AtomTable;
-    use support::manager::SourceErrorManager;
+    use hermes_atom_table::AtomTable;
+    use hermes_support::manager::SourceErrorManager;
 
     use super::super::{GrammarContext, JSLexer};
     use crate::token_kinds::TokenKind;

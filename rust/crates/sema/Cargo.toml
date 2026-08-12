@@ -8,7 +8,7 @@ publish = false
 unsafe_code = "forbid"
 
 [features]
-dump-bin = ["dep:parser", "dep:command_line"]
+dump-bin = ["dep:hermes_parser", "dep:command_line"]
 
 # The Rust side of the `sema_differential` oracle test. Gated on `dump-bin`
 # because it needs the parser + the command-line option parser; the test
@@ -20,11 +20,11 @@ path = "src/bin/sema_dump.rs"
 required-features = ["dump-bin"]
 
 [dependencies]
-support = { path = "../support" }
-atom_table = { path = "../atom_table" }
-ast = { path = "../ast" }
-parser = { path = "../parser", optional = true }
+hermes_support = { path = "../support", package = "hermes-support" }
+hermes_atom_table = { path = "../atom_table", package = "hermes-atom-table" }
+hermes_ast = { path = "../ast", package = "hermes-ast" }
+hermes_parser = { path = "../parser", package = "hermes-parser", optional = true }
 command_line = { path = "../command_line", optional = true }
 
 [dev-dependencies]
-parser = { path = "../parser" }
+hermes_parser = { path = "../parser", package = "hermes-parser" }

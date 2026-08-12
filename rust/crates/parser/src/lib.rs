@@ -5,14 +5,14 @@
 //! output is the ESTree AST of the `ast` crate. Every dialect the C++ parser
 //! supports is complete and covered by that differential gate: ECMAScript,
 //! the Flow type grammar, TypeScript, and JSX. The three non-standard ones
-//! are opt-in through the same `ast::context::Context` flags as in the C++
+//! are opt-in through the same `hermes_ast::context::Context` flags as in the C++
 //! (`parse_flow` and its four extension flags, `parse_ts`, `parse_jsx`).
 //!
 //! # Quickstart
 //!
 //! ```
-//! use parser::ast::node::Node;
-//! use parser::{parse, ParseFlags};
+//! use hermes_parser::ast::node::Node;
+//! use hermes_parser::{parse, ParseFlags};
 //!
 //! let flags = ParseFlags::default();
 //! let mut parsed = parse("1 + 2;", flags).expect("parse error");
@@ -31,17 +31,17 @@
 //!
 //! The pieces a consumer touches:
 //! - [`parse`] / [`parse_named`] returning [`ParsedJS`] — the convenience
-//!   façade, which assembles an [`ast::context::Context`], a
+//!   façade, which assembles an [`hermes_ast::context::Context`], a
 //!   `SourceErrorManager`, a [`lexer::JSLexer`] and a [`js::JSParserImpl`]
 //!   into one call. It adds no behavior; anything it does not expose is
 //!   reachable by driving those pieces directly.
 //! - [`ast`] — the AST crate, re-exported so that depending on this crate
-//!   alone is enough to name [`ast::node::Node`], walk with
-//!   [`ast::visitor::Visitor`], or drive [`ast::dump`] by hand.
+//!   alone is enough to name [`hermes_ast::node::Node`], walk with
+//!   [`hermes_ast::visitor::Visitor`], or drive [`hermes_ast::dump`] by hand.
 //! - [`js::JSParserImpl`] — the recursive-descent parser; `new` + `parse`
 //!   returns the `Program` node, or `None` after a reported error.
 //! - [`lexer::JSLexer`] — the lexer, usable on its own; it reports through a
-//!   `support::manager::SourceErrorManager` and interns into an `AtomTable`.
+//!   `hermes_support::manager::SourceErrorManager` and interns into an `AtomTable`.
 //! - [`token::Token`] and [`token_kinds::TokenKind`] — the token surface, the
 //!   latter generated from `include/hermes/Parser/TokenKinds.def` order.
 //! - [`js::ParserPass`] — `FullParse` (eager), plus the `PreParse`/`LazyParse`
@@ -78,13 +78,15 @@ mod facade;
 
 pub use facade::{parse, parse_named, ParseError, ParseFlags, ParsedJS};
 
-/// The AST crate, re-exported. Parsing hands back `ast` types, so a consumer
-/// needs them; re-exporting keeps this crate the only dependency they must
-/// declare. `ast::node::Node`, `ast::visitor`, `ast::context::GCLock` and
-/// `ast::dump` are the pieces the façade's signatures mention.
-pub use ast;
+/// The AST crate, re-exported under the short name `ast`, so the public path
+/// is `hermes_parser::ast`. Parsing hands back AST types, so a consumer needs
+/// them; re-exporting keeps this crate the only dependency they must declare.
+/// `ast::node::Node`, `ast::visitor`, `ast::context::GCLock` and `ast::dump`
+/// are the pieces the façade's signatures mention. The same items are also
+/// reachable as `hermes_ast::…` by depending on that crate directly.
+pub use hermes_ast as ast;
 
 /// One recorded diagnostic, re-exported because it appears in the façade's
 /// signatures ([`ParseError::diagnostics`], [`ParsedJS::diagnostics`]).
-/// Render one with `support::render::render_diagnostic`.
-pub use support::diag::ResolvedDiagnostic;
+/// Render one with `hermes_support::render::render_diagnostic`.
+pub use hermes_support::diag::ResolvedDiagnostic;

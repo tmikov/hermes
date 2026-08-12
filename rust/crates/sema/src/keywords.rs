@@ -18,15 +18,15 @@
 //! (`include/hermes/AST/Config.h`), and the non-mobile default — the one
 //! this port targets — enables both, so every entry is always present.
 //!
-//! Field type: `atom_table::AtomBytes`, the same type as `ast::node_child`'s
+//! Field type: `hermes_atom_table::AtomBytes`, the same type as `hermes_ast::node_child`'s
 //! `NodeLabel`/`NodeString` (the type `Identifier.name` and directive
 //! prologue strings actually store), interned the same way the parser
 //! interns identifier atoms — via `GCLock::atom_bytes` — so that
 //! `directive == kw.ident_use_strict`-style atom comparisons need no
 //! conversion.
 
-use ast::context::GCLock;
-use atom_table::AtomBytes;
+use hermes_ast::context::GCLock;
+use hermes_atom_table::AtomBytes;
 
 /// Declares [`Keywords`] with one `pub $field: AtomBytes` per entry, and
 /// `Keywords::new` which interns every string via `GCLock::atom_bytes`. The
@@ -196,7 +196,7 @@ declare_keywords! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ast::context::Context;
+    use hermes_ast::context::Context;
 
     #[test]
     fn count_is_133() {

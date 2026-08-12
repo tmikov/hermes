@@ -9417,7 +9417,7 @@ impl<'gc> Node<'gc> {
     }
 
     /// This node's source range.
-    pub fn range(&self) -> support::location::SMRange {
+    pub fn range(&self) -> hermes_support::location::SMRange {
         self.metadata().range.get()
     }
 

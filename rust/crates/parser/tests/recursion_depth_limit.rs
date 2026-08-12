@@ -37,12 +37,12 @@
 //! oracles.
 #![cfg(debug_assertions)]
 
-use ast::context::Context;
-use parser::js::JSParserImpl;
-use parser::lexer::{GrammarContext, JSLexer};
-use support::diag::CollectingHandler;
-use support::manager::SourceErrorManager;
-use support::render::render_diagnostic;
+use hermes_ast::context::Context;
+use hermes_parser::js::JSParserImpl;
+use hermes_parser::lexer::{GrammarContext, JSLexer};
+use hermes_support::diag::CollectingHandler;
+use hermes_support::manager::SourceErrorManager;
+use hermes_support::render::render_diagnostic;
 
 /// `N` nested parentheses around `1`, one token per line so the rendered
 /// caret line stays short enough to pin literally.

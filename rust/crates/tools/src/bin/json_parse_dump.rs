@@ -37,12 +37,12 @@
 use std::io::{self, Read, Write};
 use std::time::Instant;
 
-use atom_table::AtomTable;
 use bumpalo::Bump;
 use command_line::{CommandLine, Opt, OptDesc};
-use parser::json::{JSONFactory, JSONParser};
-use support::json_emitter::JSONEmitter;
-use support::manager::SourceErrorManager;
+use hermes_atom_table::AtomTable;
+use hermes_parser::json::{JSONFactory, JSONParser};
+use hermes_support::json_emitter::JSONEmitter;
+use hermes_support::manager::SourceErrorManager;
 
 /// Command-line options, built into a [`CommandLine`] then read back after
 /// parsing (the juno `command_line` idiom).

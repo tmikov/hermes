@@ -9,12 +9,12 @@
 //! (`<T, U>`), and (possibly qualified) generic type references. Port of the
 //! corresponding sections of `lib/Parser/JSParserImpl-flow.cpp`.
 
-use ast::node::{
+use hermes_ast::node::{
     ClassImplements, GenericTypeAnnotation, Identifier, Node,
     QualifiedTypeIdentifier, TypeAnnotation, TypeParameter,
     TypeParameterDeclaration, TypeParameterInstantiation, Variance,
 };
-use ast::node_child::{NodeLabel, NodeList, NodeMetadata};
+use hermes_ast::node_child::{NodeLabel, NodeList, NodeMetadata};
 
 use crate::js::JSParserImpl;
 use crate::lexer::GrammarContext;

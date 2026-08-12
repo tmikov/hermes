@@ -3,9 +3,9 @@
 //! These `impl<'a> JSLexer<'a>` methods live in a child module of `lexer`, so
 //! they can access the private fields of `JSLexer` declared in `lexer/mod.rs`.
 
-use support::location::{SMLoc, SMRange};
+use hermes_support::location::{SMLoc, SMRange};
 
-use unicode::{UNICODE_MAX_VALUE, UNICODE_REPLACEMENT_CHARACTER};
+use hermes_unicode::{UNICODE_MAX_VALUE, UNICODE_REPLACEMENT_CHARACTER};
 
 use super::JSLexer;
 

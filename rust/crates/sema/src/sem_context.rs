@@ -28,16 +28,16 @@
 //!   pointers between these records become the corresponding typed id.
 //! - The two side tables that back the identifier decl-state machine
 //!   (`sideIdentifierDeclarationDecl_`, `promotedFunctionDecls_`) are keyed
-//!   by `ast::NodeId` here rather than by `ESTree::IdentifierNode *`: the
+//!   by `hermes_ast::NodeId` here rather than by `ESTree::IdentifierNode *`: the
 //!   node itself carries the state bits and value slot (`decl_state`/`decl`
 //!   Cells, `rust/crates/ast/src/node.rs:1758`), and `NodeId` is the stable,
-//!   non-aliasing identity for a node (see `ast::NodeId`'s doc comment).
+//!   non-aliasing identity for a node (see `hermes_ast::NodeId`'s doc comment).
 //! - Node backreferences (`hoistedFunctions`, `imports`,
-//!   `builtinDeclarations_`) become `ast::context::NodeRc`, which keeps the
+//!   `builtinDeclarations_`) become `hermes_ast::context::NodeRc`, which keeps the
 //!   referenced node alive independent of any `GCLock`.
 //! - `SourceVisibility`/`CustomDirectives` are ports of
 //!   `include/hermes/AST/Context.h:128-166`; they live in `sema` for now
-//!   rather than in the (not yet ported) `ast::Context`.
+//!   rather than in the (not yet ported) `hermes_ast::Context`.
 //! - `SemContext::customData1`/`customData2` (opaque `shared_ptr<void>`
 //!   slots for downstream consumers — e.g. IRGen state across lazy
 //!   compilation, and a `LexicalScope`-lookup cache — SemContext.h:624-636)
@@ -51,17 +51,17 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use ast::context::{GCLock, NodeRc};
-use ast::node::{Identifier, Node};
-use ast::{NodeId, SemaId};
-use support::persistent_scoped_map::{PersistentScopedMap, Scope, ScopePtr};
+use hermes_ast::context::{GCLock, NodeRc};
+use hermes_ast::node::{Identifier, Node};
+use hermes_ast::{NodeId, SemaId};
+use hermes_support::persistent_scoped_map::{PersistentScopedMap, Scope, ScopePtr};
 
 use crate::ids::{DeclId, FunctionInfoId, ScopeId};
 use crate::keywords::Keywords;
 
 /// The atom type used throughout sema for identifier/keyword text. Same
-/// type as `ast::node_child::NodeLabel` (both alias `atom_table::AtomBytes`).
-pub type Atom = atom_table::AtomBytes;
+/// type as `hermes_ast::node_child::NodeLabel` (both alias `hermes_atom_table::AtomBytes`).
+pub type Atom = hermes_atom_table::AtomBytes;
 
 /// Get or create the atom for the string *value* of a private name whose
 /// source spelling (the `IdentifierNode::_name` inside a `PrivateNameNode`,
@@ -297,7 +297,7 @@ pub struct Decl {
 /// Deviation: `customData` is deliberately NOT ported — see the module doc.
 ///
 /// Not `Debug`: `binding_table_scope` (`ScopePtr`) doesn't implement it (see
-/// `support::persistent_scoped_map`'s module doc on why it can't derive it).
+/// `hermes_support::persistent_scoped_map`'s module doc on why it can't derive it).
 pub struct LexicalScope {
     /// The global depth of this scope, where 0 is the root scope (globally).
     pub depth: u32,

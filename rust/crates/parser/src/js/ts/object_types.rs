@@ -9,11 +9,11 @@
 //! property/method/call/index-signature members. Port of the object type entry
 //! points of `lib/Parser/JSParserImpl-ts.cpp`.
 
-use ast::node::{
+use hermes_ast::node::{
     Identifier, Node, TSCallSignatureDeclaration, TSIndexSignature,
     TSMethodSignature, TSPropertySignature, TSTypeLiteral,
 };
-use ast::node_child::{NodeList, NodeMetadata};
+use hermes_ast::node_child::{NodeList, NodeMetadata};
 
 use crate::js::flow::{AllowTypedArrowFunction, CoverTypedParameters};
 use crate::js::{JSParserImpl, Param, PARAM_IN};
@@ -271,7 +271,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// (ts.cpp:1365-1404).
     fn parse_ts_index_signature(
         &mut self,
-        start: support::location::SMLoc,
+        start: hermes_support::location::SMLoc,
     ) -> Option<&'gc Node<'gc>> {
         let mut params: Vec<&'gc Node<'gc>> = Vec::new();
 

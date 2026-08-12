@@ -2,7 +2,7 @@
 use std::cell::Cell;
 use std::marker::PhantomData;
 
-use support::location::{SMLoc, SMRange};
+use hermes_support::location::{SMLoc, SMRange};
 
 use crate::context::{GCLock, NodeListElement};
 use crate::NodeId;
@@ -10,10 +10,10 @@ use crate::node::{EmptyStatement, Node};
 use crate::visitor::{Path, TransformResult, VisitorMut};
 
 /// JS identifier / operator / keyword bytes, interned in the AtomTable.
-pub type NodeLabel = atom_table::AtomBytes;
+pub type NodeLabel = hermes_atom_table::AtomBytes;
 
 /// JS string-literal bytes, interned in the AtomTable (C++ `NodeString = UniqueString*`).
-pub type NodeString = atom_table::AtomBytes;
+pub type NodeString = hermes_atom_table::AtomBytes;
 
 /// Function strictness state (mirrors `ESTree.h` `enum class Strictness`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

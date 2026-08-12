@@ -107,10 +107,10 @@
 //! in `crate::check_implicit_return`. It runs on the *visited* body rather
 //! than on `node`, for the reason that module's doc gives.
 
-use ast::context::{GCLock, NodeRc};
-use ast::node::{builder, BlockStatement, Node, NodeField, ReturnStatement};
-use ast::node_child::{NodeList, NodeMetadata, Strictness};
-use ast::visitor::{Path, TransformResult, VisitorMut};
+use hermes_ast::context::{GCLock, NodeRc};
+use hermes_ast::node::{builder, BlockStatement, Node, NodeField, ReturnStatement};
+use hermes_ast::node_child::{NodeList, NodeMetadata, Strictness};
+use hermes_ast::visitor::{Path, TransformResult, VisitorMut};
 
 use crate::check_implicit_return::may_reach_implicit_return;
 use crate::ids::FunctionInfoId;

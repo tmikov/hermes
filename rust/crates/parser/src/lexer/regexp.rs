@@ -4,7 +4,7 @@
 //! `impl<'a> JSLexer<'a>` methods live in a child module of `lexer`, so they can
 //! access the private fields of `JSLexer` declared in `lexer/mod.rs`.
 
-use atom_table::AtomBytes;
+use hermes_atom_table::AtomBytes;
 
 use crate::token::RegExpLiteral;
 use crate::utf8::{
@@ -150,8 +150,8 @@ impl<'a> JSLexer<'a> {
 mod tests {
     use crate::lexer::{GrammarContext, JSLexer};
     use crate::token_kinds::TokenKind;
-    use atom_table::AtomTable;
-    use support::manager::SourceErrorManager;
+    use hermes_atom_table::AtomTable;
+    use hermes_support::manager::SourceErrorManager;
 
     /// Lex `src` under `ctx` and return the kind sequence (incl. the final eof).
     fn kinds_ctx(src: &str, ctx: GrammarContext) -> Vec<TokenKind> {

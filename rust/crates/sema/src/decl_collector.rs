@@ -17,17 +17,17 @@
 //!
 //! ## Deviations
 //!
-//! - **AST node references are `ast::context::NodeRc`, not `&Node`.** C++
+//! - **AST node references are `hermes_ast::context::NodeRc`, not `&Node`.** C++
 //!   stores raw `ESTree::Node*` in `scopes_`/`scopedFuncDecls_`; this port's
 //!   `DeclCollector` is meant to outlive the `GCLock` it was built under
 //!   (the C++ instance is `unique_ptr`-owned per function and consulted
 //!   long after the initial walk), so every stored declaration reference is
 //!   pinned via `NodeRc` — the same convention `sema::sem_context` uses for
 //!   its `hoistedFunctions`/`imports` backrefs (see that module's doc).
-//! - **The scope-keyed map (`scopes_`) is keyed by `ast::NodeId`, not by
+//! - **The scope-keyed map (`scopes_`) is keyed by `hermes_ast::NodeId`, not by
 //!   `ESTree::Node*` identity.** Same reasoning as `sema::sem_context`'s
 //!   side tables: `NodeId` is the stable, non-aliasing identity for a node
-//!   (see `ast::NodeId`'s doc comment), and callers already have the
+//!   (see `hermes_ast::NodeId`'s doc comment), and callers already have the
 //!   scope-creating node in hand (they're the ones walking the AST) when
 //!   they want its `ScopeDecls`.
 //! - **`NestedRecursionDepthTracker` becomes an explicit counter.** C++'s
@@ -66,10 +66,10 @@
 
 use std::collections::HashMap;
 
-use ast::context::{GCLock, NodeRc};
-use ast::node::{CatchClause, Node, VariableDeclaration};
-use ast::visitor::Visitor;
-use ast::NodeId;
+use hermes_ast::context::{GCLock, NodeRc};
+use hermes_ast::node::{CatchClause, Node, VariableDeclaration};
+use hermes_ast::visitor::Visitor;
+use hermes_ast::NodeId;
 
 use crate::dump_context::push_str;
 use crate::keywords::Keywords;

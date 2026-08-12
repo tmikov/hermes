@@ -9,13 +9,13 @@
 //! `interface`, `enum`, and `namespace` declarations. Port of the declaration
 //! entry points of `lib/Parser/JSParserImpl-ts.cpp`.
 
-use ast::node::{
+use hermes_ast::node::{
     Identifier, Node, TSEnumDeclaration, TSEnumMember, TSInterfaceBody,
     TSInterfaceDeclaration, TSInterfaceHeritage, TSModuleBlock, TSModuleMember,
     TSTypeAliasDeclaration, TSTypeReference,
 };
-use ast::node_child::{NodeList, NodeMetadata};
-use support::location::SMLoc;
+use hermes_ast::node_child::{NodeList, NodeMetadata};
+use hermes_support::location::SMLoc;
 
 use crate::js::flow::{AllowTypedArrowFunction, CoverTypedParameters};
 use crate::js::{AllowImportExport, JSParserImpl, Param, PARAM_IN};

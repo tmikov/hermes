@@ -39,9 +39,9 @@ mod object_types;
 mod params;
 mod types;
 
-use ast::node::{Node, RecordExpression, RecordExpressionProperties};
-use ast::node_child::{NodeList, NodeMetadata};
-use support::location::SMLoc;
+use hermes_ast::node::{Node, RecordExpression, RecordExpressionProperties};
+use hermes_ast::node_child::{NodeList, NodeMetadata};
+use hermes_support::location::SMLoc;
 
 use crate::js::JSParserImpl;
 use crate::lexer::GrammarContext;
