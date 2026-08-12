@@ -414,10 +414,60 @@ it, exactly as upstream). New unit test
 
 ---
 
+## 12. `try/catch/finally` inside a function aborts the parser-entry resolver
+
+**Date found:** 2026-08-12, during the `hermes-sema` façade work (Task 3 of
+`doc/superpowers/plans/2026-08-12-publication-scope-sema-and-cli.md`), by the
+façade-vs-low-level agreement sweep over the sema corpus.
+
+**Severity:** debug-abort on **valid input** through the public
+`resolveASTForParser` entry — and, unlike items 1–5, the Release behavior is a
+**silently wrong answer**, not a benign pass-through.
+
+```bash
+printf 'function f() { try {} catch (e) {} finally {} }\n' > /tmp/bug12.js
+cmake-build-asan/bin/sema-parser-dump /tmp/bug12.js
+# => Assertion `!(node->_handler && node->_finalizer) && "try-catch-finally
+#    should have been transformed by SemanticResolver"' failed.
+#    (lib/Sema/CheckImplicitReturn.cpp:250)   SIGABRT, exit 134
+```
+
+Top-level `try/catch/finally` does **not** trip it — the check runs per
+function, so the statement must be inside a function body. The stock
+`hermesc -dump-sema` path is unaffected (it runs `compile = true`).
+
+**Root cause:** `SemanticResolver` splits `try { } catch { } finally { }` into
+nested try-catch/try-finally, but the split is gated on `compile_`
+(`lib/Sema/SemanticResolver.cpp:794`). The `mayReachImplicitReturn` call that
+runs `CheckImplicitReturn` (~`SemanticResolver.cpp:1950-1957`) is **not**
+gated, so under `compile = false` the checker meets an unsplit
+try-catch-finally and hits the assert its invariant assumes away.
+
+**Release consequence (worse than a debug abort):** with the assert compiled
+out, the unsplit statement takes the handler-only branch and the **finalizer is
+ignored**, so `mayReachImplicitReturn` can compute the wrong answer for a
+function whose `finally` block affects reachability.
+
+**Fix direction:** either gate the `mayReachImplicitReturn` call on `compile_`
+the way the split is, or teach `CheckImplicitReturn` to handle an unsplit
+try-catch-finally (walk handler *and* finalizer) instead of asserting.
+
+**Rust pin:** the port reproduces the abort faithfully — panic at
+`rust/crates/sema/src/check_implicit_return.rs:340`. The façade agreement sweep
+(`rust/crates/sema/tests/facade_agreement.rs`) skips the single corpus file that
+would trip it, via a documented named constant; delete that skip when this is
+fixed.
+
+**Status:** OPEN — found after the 2026-08-10 propagation of items 1–11, so it
+is not in that campaign. Not yet fixed upstream, not yet in
+`~/work/hermes-cpp-defects`.
+
+---
+
 ## Summary table
 
 **Status (2026-08-10): all 11 items fixed upstream and mirrored into the Rust
-port.** See `doc/superpowers/plans/2026-08-10-cpp-defect-fixes-propagation.md`
+port.** **Item 12 was found later (2026-08-12) and is OPEN.** See `doc/superpowers/plans/2026-08-10-cpp-defect-fixes-propagation.md`
 for the propagation plan and each item above for its `Fixed upstream`/
 `Pin flipped` lines.
 
@@ -435,6 +485,7 @@ for the propagation plan and each item above for its `Fixed upstream`/
 | 10a | `ScopedFunctionPromoter` dead `newDecls` | dead code | ScopedFunctionPromoter.cpp:174-206 | same | `9232443cf` (`ffcdbdd52`) |
 | 10c | `JSParserImpl-jsx.cpp:493` dead `isa<MemberExpressionNode>` | dead code (was harmless) | jsx.cpp:493 | same | `37520ccef` (`51035e8c2`) |
 | 11 | `match` binding pattern, bad token | abort | JSLexer.h:160 | untested | `550aafe33` (`bfeeb404f`) |
+| 12 | `try/catch/finally` in a function, parser entry | abort | CheckImplicitReturn.cpp:250 | **wrong answer** (finalizer ignored) | **OPEN** (found 2026-08-12) |
 
 (Item 10b, `SemanticResolver.cpp:1931-1937`'s `if (false && localEval)`, is
 not part of the 11 fixes and remains open/dead in both languages.)
