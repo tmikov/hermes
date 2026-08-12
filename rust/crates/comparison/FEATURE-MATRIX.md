@@ -136,37 +136,50 @@ Verified against: Boa v0.21 release blog (`boajs.dev/blog/2025/10/22/boa-release
 Full methodology, all fixture sizes, and the trailing-error fairness guard are
 documented in [`BENCH-RESULTS.md`](BENCH-RESULTS.md).
 
-Benchmarked with Criterion.rs (`opt-level = 3`) for Rust parsers and the Release
-C++ `parse-bench` tool for the C++ Hermes baseline. Per-iteration fresh `Context`;
-`FullParse`/eager; median; same machine. Four fixtures including the 8.7 MB
+Benchmarked with Criterion.rs (`opt-level = 3`) for Rust parsers and the
+**Clang-built** Release C++ `parse-bench` tool for the C++ Hermes baseline
+(a bare `cmake -DCMAKE_BUILD_TYPE=Release` selects GCC on Ubuntu and understates
+C++ Hermes). Per-iteration fresh `Context`; `FullParse`/eager; median; same
+machine; one process per (parser, fixture). Four fixtures including the 8.7 MB
 typescript.js (plain JS — TS/JSX in this port are in progress and were not exercised).
+
+Re-measured 2026-08-12; supersedes the 2026-06-19 table, whose C++ column was
+GCC-built.
 
 | Parser | react 107K | jquery 278K | three.min 654K | typescript 8.7M |
 |---|---|---|---|---|
-| **hermes-parser (this port)** | 97.8 | 73.8 | 42.4 | 63.0 |
-| **C++ Hermes (Release)** | 78.9 | 82.6 | 47.5 | 92.4 |
-| `oxc_parser` 0.137.0 | 230.5 | 152.2 | 101.7 | 176.7 |
-| `swc_ecma_parser` 41.1.1 | 93.9 | 66.4 | 34.0 | 60.3 |
-| `boa_parser` 0.21.1 | 12.0 | 10.5 | 4.8 | 4.9 |
+| **hermes-parser (this port)** | 95.6 | 72.5 | 42.1 | 61.5 |
+| **C++ Hermes (Clang, Release)** | 113.1 | 86.9 | 49.9 | 100.7 |
+| `oxc_parser` 0.137.0 | 192.9 | 124.1 | 75.6 | 149.1 |
+| `swc_ecma_parser` 41.1.1 | 97.1 | 70.5 | 36.2 | 62.4 |
+| `boa_parser` 0.21.1 | 12.1 | 10.6 | 4.7 | 5.0 |
 | `biome_js_parser` 0.5.7 | not benchmarked (build failure) | — | — | — |
 
 Numbers are MiB/s (median). Higher is faster.
 
 **Key directional conclusions (verified):**
 
-- **The Rust port tracks the C++ Hermes baseline.** It is faster than C++ Hermes
-  on the react fixture and within ~11% on jquery/three.min. This is the primary
-  performance claim for a faithful port: parity with the original engine.
-- **The Rust port is ~32% slower than C++ Hermes on the 8.7 MB typescript fixture**
-  (63.0 vs 92.4 MiB/s). Root cause (verified by decomposition): each AST node is a
+- **The Rust port tracks the C++ Hermes baseline without reaching it.** It runs
+  at 83–85% of Clang-built C++ Hermes on react, jquery and three.min. This is
+  the primary performance claim for a faithful port: the same order of
+  throughput as the original engine.
+- **The Rust port reaches 61% of C++ Hermes on the 8.7 MB typescript fixture**
+  (61.5 vs 100.7 MiB/s). Root cause (verified by decomposition): each AST node is a
   uniform 128-byte `Node` enum; ~904,000 nodes for typescript.js ≈ ~123 MiB live AST
   (~14× the source), exceeding CPU cache. Boxing the large variants is a candidate
   fix (unvalidated hypothesis — boxing trades footprint for indirection; net effect
   must be measured). See BENCH-RESULTS.md for full decomposition.
-- **The OXC gap (~2.4–2.8×) is inherent to Hermes design, not a port regression.**
+- **The OXC gap is a design difference, not a port regression — and it is
+  smaller than parse-vs-parse suggests.** Parse-only, OXC is 1.7–2.4× faster
+  than this port. On the fair, equal-work comparison — parse + binding/semantic,
+  which forces OXC to do the scope/symbol/interning work it defers out of parse
+  — OXC leads C++ Hermes by only 1.3–1.7×
+  ([investigation](../../../doc/superpowers/2026-06-30-hermes-vs-oxc-parser-perf.md)).
   OXC's bump allocator and zero-copy `Atom` type are structurally different from
-  Hermes's atom interning and GC-arena AST. Any faithful port of Hermes inherits
-  this gap. The Rust port beats SWC on every fixture.
+  Hermes's atom interning and GC-arena AST, and any faithful port of Hermes
+  inherits that difference. Against SWC the port is comparable rather than
+  uniformly ahead: faster on jquery and three.min, within ~2% on react and
+  typescript.
 - Boa is ~8× slower; its parser performs scope resolution during parse.
 - Biome's lossless CST does fundamentally different work; throughput comparison is
   not meaningful.
@@ -175,5 +188,7 @@ The benchmark source is in `benches/parse_throughput.rs`; run with:
 
 ```
 bash rust/crates/comparison/fetch_fixtures.sh   # download fixtures once
-cargo bench --manifest-path rust/crates/comparison/Cargo.toml
+# One benchmark per process: the group is sensitive to what ran before it in
+# the same process (see BENCH-RESULTS.md).
+cargo bench --manifest-path rust/crates/comparison/Cargo.toml -- '^parse/hermes/react$'
 ```

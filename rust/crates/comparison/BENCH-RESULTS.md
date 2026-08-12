@@ -1,12 +1,98 @@
 # Benchmark Results — Verified
 
-**Date:** 2026-06-19 (supersedes earlier provisional numbers)  
-**Platform:** Linux x86-64, single machine  
-**Status:** Verified — these numbers replace any earlier provisional/C++-baseline-pending figures.
+**Current numbers:** see [Re-measurement (2026-08-12, Clang baseline)](#re-measurement-2026-08-12-clang-baseline).  
+**Platform:** Linux x86-64, single machine.
+
+The 2026-06-19 run below is kept as history. Its C++ Hermes column was built
+with GCC and is **superseded**; its Rust column mixed two process-isolation
+modes. Both problems are corrected in the 2026-08-12 re-measurement.
 
 ---
 
-## Methodology
+## Re-measurement (2026-08-12, Clang baseline)
+
+**Date:** 2026-08-12. **Tree:** `rust1` @ `f39215889`. Same machine as the
+2026-06-19 run, nothing else running, C++ and Rust measured serially.
+
+### What changed since 2026-06-19
+
+1. **The C++ baseline is now Clang-built.** The original baseline came from a
+   bare `cmake -DCMAKE_BUILD_TYPE=Release`, which on Ubuntu silently selects
+   GCC (`/usr/bin/c++`). GCC-built Hermes is materially slower than
+   Clang-built Hermes, and the Rust parsers it is compared against are built
+   by rustc's LLVM — a compiler confound. The project rule is to always
+   configure the C++ tree with `-DCMAKE_C_COMPILER=clang
+   -DCMAKE_CXX_COMPILER=clang++`; see
+   [`doc/superpowers/2026-06-30-hermes-vs-oxc-parser-perf.md`](../../../doc/superpowers/2026-06-30-hermes-vs-oxc-parser-perf.md).
+   Clang raises the C++ baseline on every fixture, by +43% on react.
+2. **Every measurement is now process-isolated.** One fresh process per
+   (parser, fixture). The Criterion harness turned out to be sensitive to what
+   ran earlier in the same process: running the react benchmark first slows the
+   subsequent port jquery benchmark from 3.81 ms to 5.00 ms (73 → 55 MiB/s),
+   reproducibly, and speeds up the bump-allocator parsers. The C++ tool shows
+   no such sensitivity (multi-file and single-file runs agree within 2%). The
+   2026-06-19 table mixed the two modes: its port numbers are isolated-mode
+   values, its OXC/SWC numbers are shared-process values.
+
+### Results (MiB/s, median, FullParse/eager, one process per measurement)
+
+| Parser | react 107K | jquery 278K | three.min 654K | typescript 8.7M |
+|---|---|---|---|---|
+| **Hermes Rust port** | 95.6 | 72.5 | 42.1 | 61.5 |
+| **C++ Hermes (Clang, Release)** | 113.1 | 86.9 | 49.9 | 100.7 |
+| OXC 0.137.0 | 192.9 | 124.1 | 75.6 | 149.1 |
+| SWC 41.1.1 | 97.1 | 70.5 | 36.2 | 62.4 |
+| Boa 0.21.1 | 12.1 | 10.6 | 4.7 | 5.0 |
+
+Port as a fraction of the Clang-built C++ baseline:
+
+| | react | jquery | three.min | typescript |
+|---|---|---|---|---|
+| port / C++ Hermes | 85% | 83% | 84% | 61% |
+
+C++ medians are over 6 runs of `parse-bench --iters=30` per fixture; port,
+OXC and SWC medians are over 3 (port) and 2 (OXC, SWC, Boa) Criterion runs of
+100 samples each. Run-to-run spread was under 3% for every entry except the
+port's `three.min`, which is bimodal (see below).
+
+### Shared-process figures, for transparency
+
+Running the whole Criterion group in one process (the mode the 2026-06-19
+OXC/SWC numbers came from) gives: port 95.4 / 54.6 / 28.8 / 61.4, OXC
+229.5 / 154.0 / 101.3 / 175.9, SWC 93.5 / 67.2 / 33.8 / 59.7. The C++ tool run
+over all four files in one process gives 114.0 / 86.5 / 50.3 / 98.2 — i.e.
+unchanged. Isolated mode is the figure published above because it is the only
+mode in which every parser is measured on the same footing, and because it is
+what a caller parsing one file actually gets.
+
+The port's `three.min` number is the least stable measurement in the set: in
+isolation it lands at 42 MiB/s, after other benchmarks in the same process at
+29–35 MiB/s. Treat it as ~42 MiB/s with a wide band.
+
+### Conclusions after re-measurement
+
+1. **The port does not beat C++ Hermes anywhere.** It reaches 83–85% of the
+   Clang-built C++ baseline on the small and medium fixtures and 61% on the
+   8.7 MB typescript fixture. The earlier "faster than C++ Hermes on react"
+   claim was an artifact of the GCC baseline and does not survive the correct
+   compiler.
+2. **The large-file gap is unchanged in kind** (61% of C++ on typescript,
+   previously reported as ~32% slower). The AST-footprint root cause below
+   still stands — it was measured on the port and is independent of how the
+   C++ side was built.
+3. **The port is comparable to SWC, not uniformly ahead of it.** Isolated:
+   ahead on jquery (72.5 vs 70.5) and three.min (42.1 vs 36.2), within ~2%
+   behind on react (95.6 vs 97.1) and typescript (61.5 vs 62.4).
+4. **OXC's parse-only lead over this port is 1.7–2.4×** (react 2.0×, jquery
+   1.7×, three.min 1.8×, typescript 2.4×). Parse-vs-parse overstates the
+   design gap; on the equal-work comparison (parse + binding/semantic) OXC is
+   1.3–1.7× faster than C++ Hermes. See the investigation linked above.
+
+The remaining sections below are the 2026-06-19 record.
+
+---
+
+## Methodology (2026-06-19 run)
 
 ### Rust port (hermes-parser)
 
@@ -23,6 +109,10 @@ Measured with the `parse-bench` tool built from the same Hermes tree, in Release
 configuration (`cmake -DCMAKE_BUILD_TYPE=Release`). Each iteration creates a fresh
 `Context` and parses eagerly. Median reported. Run on the same machine, same OS, same
 fixtures.
+
+> **Superseded.** That bare configure line selects GCC on Ubuntu. The resulting
+> C++ column is not a valid baseline; use the Clang numbers in the 2026-08-12
+> re-measurement above.
 
 ### Fixture sizes
 
@@ -47,7 +137,11 @@ comparable to the others.
 
 ---
 
-## Results (MiB/s, median, FullParse/eager, same machine)
+## Results — 2026-06-19, SUPERSEDED (MiB/s, median, FullParse/eager, same machine)
+
+> **Superseded by the 2026-08-12 re-measurement above.** The C++ row is
+> GCC-built; the port row is isolated-mode while the OXC/SWC/Boa rows are
+> shared-process. Kept for history only.
 
 | Parser | react 107K | jquery 278K | three.min 654K | typescript 8.7M |
 |---|---|---|---|---|
@@ -63,9 +157,13 @@ from being used as a standalone Cargo dependency.
 
 ---
 
-## Conclusions
+## Conclusions (2026-06-19; items 1 and 2 corrected above)
 
-### 1. Rust port is at C++ Hermes parity on small and medium files
+### 1. Rust port is at C++ Hermes parity on small and medium files — WITHDRAWN
+
+> **Withdrawn.** Against the Clang-built baseline the port is at 83–85% of C++
+> Hermes on the small and medium fixtures, not at or above parity. See the
+> 2026-08-12 conclusions.
 
 The Rust port outperforms C++ Hermes on the react fixture (97.8 vs 78.9 MiB/s) and
 is within ~11% on the jquery and three.min fixtures (73.8 vs 82.6 and 42.4 vs 47.5).
@@ -75,6 +173,12 @@ On the 8.7 MB typescript fixture the Rust port is ~32% slower than C++ Hermes
 (63.0 vs 92.4 MiB/s). This is a real gap; the root cause is discussed below.
 
 ### 2. The OXC gap is inherent to Hermes design — not a port regression
+
+> **Restated.** The ~2.4–2.8× figure below is parse-vs-parse and mixes process
+> modes; measured consistently it is 1.7–2.4×, and on the equal-work
+> comparison (parse + binding/semantic) OXC leads C++ Hermes by 1.3–1.7×. The
+> "beats SWC on every fixture" claim is likewise corrected above. The design
+> reasons stated in this section are unaffected.
 
 OXC is roughly 2.4–2.8× faster than this port across fixtures. This gap exists
 between OXC and C++ Hermes as well, and would exist for any faithful port of Hermes:
@@ -121,11 +225,14 @@ maintainer, not a blocker for the port's correctness story.
 # Download fixtures (once)
 bash rust/crates/comparison/fetch_fixtures.sh
 
-# Rust benchmarks
-cargo bench --manifest-path rust/crates/comparison/Cargo.toml
+# Rust benchmarks — one process per (parser, fixture); the group as a whole is
+# process-state sensitive, so filter down to a single benchmark per run.
+cargo bench --manifest-path rust/crates/comparison/Cargo.toml -- '^parse/hermes/react$'
 
-# C++ baseline (Release build)
-cmake -B cmake-build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build cmake-build-release --target parse-bench
-cmake-build-release/bin/parse-bench <fixture>
+# C++ baseline — Clang Release build (a bare configure picks GCC on Ubuntu and
+# understates C++ Hermes)
+cmake -B cmake-build-release-clang -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+cmake --build cmake-build-release-clang --target parse-bench
+cmake-build-release-clang/bin/parse-bench --iters=30 <fixture>
 ```

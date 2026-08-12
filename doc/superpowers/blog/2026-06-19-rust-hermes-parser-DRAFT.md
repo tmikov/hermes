@@ -77,10 +77,11 @@ the original, and how a byte-for-byte differential oracle against the real
      entirely via `[lints.rust] unsafe_code = "forbid"`.
 
 6. **What fidelity costs and what it buys**
-   - Costs: GC-arena AST and atom interning produce a ~2.4–2.8× gap vs OXC — but
+   - Costs: GC-arena AST and atom interning produce a 1.7–2.4× parse-only gap vs
+     OXC (1.3–1.7× on the equal-work parse+binding comparison) — but
      this gap exists between OXC and C++ Hermes too; it is a Hermes design constraint,
-     not a port regression (see Appendix B). On small and medium files the port tracks
-     C++ Hermes closely. On the 8.7 MB typescript fixture the port is ~32% slower than
+     not a port regression (see Appendix B). On small and medium files the port runs
+     at 83–85% of C++ Hermes. On the 8.7 MB typescript fixture the port reaches 61% of
      C++ Hermes due to AST node footprint at scale — a candidate optimization (boxing
      large variants) that has not yet been validated. Fail-fast error handling mirrors
      C++ Hermes, not IDE-friendly error recovery.
@@ -297,28 +298,30 @@ progress" framing in older drafts is obsolete.
 > a better parser for your use case.
 
 Benchmarked with Criterion.rs (`opt-level = 3`, Linux x86-64) for Rust parsers, and
-the Release C++ `parse-bench` tool for the C++ Hermes baseline. Per-iteration fresh
-`Context`; FullParse/eager; median; same machine. Four plain-JS fixtures (TS/JSX not
+the **Clang-built** Release C++ `parse-bench` tool for the C++ Hermes baseline (a
+bare `cmake -DCMAKE_BUILD_TYPE=Release` picks GCC on Ubuntu and understates C++
+Hermes). Per-iteration fresh `Context`; FullParse/eager; median; same machine; one
+process per (parser, fixture). Four plain-JS fixtures (TS/JSX not
 exercised — in progress). Full methodology and trailing-error fairness guard in
-`rust/crates/comparison/BENCH-RESULTS.md`.
+`rust/crates/comparison/BENCH-RESULTS.md`. Re-measured 2026-08-12.
 
 | Parser | react 107K | jquery 278K | three.min 654K | typescript 8.7M |
 |---|---|---|---|---|
-| hermes-parser (this port) | 97.8 MiB/s | 73.8 MiB/s | 42.4 MiB/s | 63.0 MiB/s |
-| C++ Hermes (Release) | 78.9 MiB/s | 82.6 MiB/s | 47.5 MiB/s | 92.4 MiB/s |
-| oxc_parser 0.137.0 | 230.5 MiB/s | 152.2 MiB/s | 101.7 MiB/s | 176.7 MiB/s |
-| swc_ecma_parser 41.1.1 | 93.9 MiB/s | 66.4 MiB/s | 34.0 MiB/s | 60.3 MiB/s |
-| boa_parser 0.21.1 | 12.0 MiB/s | 10.5 MiB/s | 4.8 MiB/s | 4.9 MiB/s |
+| hermes-parser (this port) | 95.6 MiB/s | 72.5 MiB/s | 42.1 MiB/s | 61.5 MiB/s |
+| C++ Hermes (Clang, Release) | 113.1 MiB/s | 86.9 MiB/s | 49.9 MiB/s | 100.7 MiB/s |
+| oxc_parser 0.137.0 | 192.9 MiB/s | 124.1 MiB/s | 75.6 MiB/s | 149.1 MiB/s |
+| swc_ecma_parser 41.1.1 | 97.1 MiB/s | 70.5 MiB/s | 36.2 MiB/s | 62.4 MiB/s |
+| boa_parser 0.21.1 | 12.1 MiB/s | 10.6 MiB/s | 4.7 MiB/s | 5.0 MiB/s |
 | biome_js_parser 0.5.7 | not benchmarked (build failure — crates.io publish mismatch) | — | — | — |
 
 **Key directional takeaways for the post:**
 
-- **The Rust port tracks the C++ Hermes baseline.** It is faster than C++ Hermes on
-  the react fixture (97.8 vs 78.9 MiB/s) and within ~11% on jquery/three.min. For a
-  faithful port, matching the original engine is the goal — and on small and medium
-  files, the Rust port achieves it.
-- **On the 8.7 MB typescript fixture the port is ~32% slower than C++ Hermes**
-  (63.0 vs 92.4 MiB/s). This is a real gap, and measurement surfaced a concrete
+- **The Rust port tracks the C++ Hermes baseline.** It reaches 83–85% of
+  Clang-built C++ Hermes on react, jquery and three.min. For a faithful port,
+  landing in the same throughput class as the original engine is the goal — but
+  the port does not beat it anywhere.
+- **On the 8.7 MB typescript fixture the port reaches 61% of C++ Hermes**
+  (61.5 vs 100.7 MiB/s). This is a real gap, and measurement surfaced a concrete
   explanation: every AST node is a uniform 128-byte `Node` enum (confirmed via
   `std::mem::size_of`). The typescript fixture produces ~904,000 nodes, totalling
   ~123 MiB of live AST — roughly 14× the source size. At that scale the working set
@@ -327,10 +330,13 @@ exercised — in progress). Full methodology and trailing-error fairness guard i
   large `Node` variants to shrink the average node size is a candidate optimization —
   but boxing trades footprint for indirection, and the net effect on throughput must
   be measured. This is a follow-up for the maintainer, not a done fix.
-- **OXC's ~2.4–2.8× lead is inherent to Hermes design, not a port regression.**
-  OXC's bump allocator and zero-copy `Atom` type are structurally different from
-  Hermes's atom interning and GC-arena AST. C++ Hermes carries the same gap vs OXC.
-  Any faithful port of Hermes inherits it. The Rust port beats SWC on every fixture.
+- **OXC's lead is a design difference, not a port regression — and smaller than
+  parse-vs-parse suggests.** Parse-only, OXC is 1.7–2.4× faster than this port.
+  On the equal-work comparison (parse + binding/semantic), OXC leads C++ Hermes
+  by 1.3–1.7×. OXC's bump allocator and zero-copy `Atom` type are structurally
+  different from Hermes's atom interning and GC-arena AST; C++ Hermes carries the
+  same gap vs OXC, and any faithful port inherits it. Against SWC the port is
+  comparable: ahead on jquery and three.min, within ~2% on react and typescript.
 - Boa is roughly 8× slower than this port; its parser performs scope resolution
   during parse, which the others defer.
 - Biome's lossless CST does fundamentally different work; throughput comparison is
