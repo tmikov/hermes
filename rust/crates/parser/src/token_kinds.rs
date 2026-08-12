@@ -132,12 +132,12 @@ pub enum TokenKind {
     /// `PUNCTUATOR(l_brace, "{")`
     l_brace,
     /// `PUNCTUATOR_FLOW(l_bracepipe, "{|")` — opens a Flow exact object
-    /// type; only scanned as one token when Flow parsing is enabled.
+    /// type; only scanned as one token in `GrammarContext::Type`.
     l_bracepipe,
     /// `PUNCTUATOR(r_brace, "}")`
     r_brace,
     /// `PUNCTUATOR_FLOW(piper_brace, "|}")` — closes a Flow exact object
-    /// type; only scanned as one token when Flow parsing is enabled.
+    /// type; only scanned as one token in `GrammarContext::Type`.
     piper_brace,
     /// `PUNCTUATOR(l_paren, "(")`
     l_paren,
@@ -275,8 +275,8 @@ pub enum TokenKind {
     /// `TOK(jsx_text, "JSX text")` — a run of literal JSX child text, only
     /// produced by `JSLexer::advance_in_jsx_child`.
     jsx_text,
-    /// `TOK(bigint_literal, "bigint")` — a `123n` literal; the digits are
-    /// kept as text (`Token::get_bigint_literal`), never converted to `f64`.
+    /// `TOK(bigint_literal, "bigint")` — a `123n` literal; the value is kept
+    /// as text (`Token::get_bigint_literal`), never converted to `f64`.
     bigint_literal,
 
     /// `TEMPLATE(no_substitution_template, "template literal")` — a whole

@@ -163,7 +163,9 @@ impl Token {
         self.raw_string.unwrap()
     }
     /// \return whether a `string_literal` contained any escape or line
-    /// continuation. Used to decide whether a string can be a directive.
+    /// continuation. The parser uses this to build a directive's raw text:
+    /// with no escapes the raw equals the cooked value, otherwise it must
+    /// re-slice the source between the quotes.
     pub fn get_string_literal_contains_escapes(&self) -> bool {
         debug_assert_eq!(self.kind, TokenKind::string_literal);
         self.string_literal_contains_escapes
@@ -186,8 +188,10 @@ impl Token {
         self.raw_string.unwrap()
     }
 
-    /// \return the digits of a `bigint_literal` token, without the trailing
-    /// `n`; the value is kept as text and never converted to a number.
+    /// \return the value of a `bigint_literal` token as text, never converted
+    /// to a number: the literal without its trailing `n` and with numeric
+    /// separators removed, but with any radix prefix kept (`0xF_Fn` ->
+    /// `0xFF`). This is the ESTree `bigint` property.
     pub fn get_bigint_literal(&self) -> AtomBytes {
         debug_assert_eq!(self.kind, TokenKind::bigint_literal);
         self.string_literal.unwrap()

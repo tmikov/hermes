@@ -1,4 +1,3 @@
-#![warn(missing_docs)]
 //! A Rust port of the Hermes JavaScript front end — lexer and parser.
 //!
 //! Faithful 1:1 port of the C++ `JSLexer` and `JSParserImpl`, validated
@@ -21,14 +20,18 @@
 //! - [`json`] — the separate `JSONParser` port (a distinct grammar sharing the
 //!   same lexer), with the uniquing/hidden-class `JSONFactory`.
 //!
-//! The remaining modules are the lexer's building blocks and are public
-//! because the lexer's own API exposes them: [`cursor`] (the scan cursor),
-//! [`number`] (numeric-literal conversion), [`utf8`] (the UTF-8/UTF-16
-//! conversions the C++ keeps in `Support`), and [`html_entities`] (the JSX
-//! entity table generated from `HTMLEntities.def`).
+//! The remaining modules are the lexer's own building blocks: [`cursor`] (the
+//! scan cursor), [`number`] (numeric-literal conversion), [`utf8`] (the
+//! UTF-8/UTF-16 conversions the C++ keeps in `Support`), and
+//! [`html_entities`] (the JSX entity table generated from `HTMLEntities.def`).
+//! Only the port's internals call them, and no public signature in this crate
+//! mentions them; they are public incidentally rather than by design, and may
+//! be demoted to `pub(crate)` in a future release.
 //!
 //! See `rust/ARCHITECTURE.md` for the design rationale and
 //! doc/superpowers/specs/2026-06-06-js-parser-design.md for the port spec.
+
+#![warn(missing_docs)]
 
 pub mod cursor;
 pub mod html_entities;
