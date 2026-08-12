@@ -35,6 +35,8 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+mod common;
+
 /// Path to the C++ hermesc oracle (sibling style: relative join from the crate
 /// manifest dir `<repo>/rust/crates/parser`).
 fn hermesc_bin() -> PathBuf {
@@ -64,15 +66,10 @@ fn run_differential(corpus: &str, hermesc_extra: &[&str], ast_dump_extra: &[&str
         return;
     }
 
-    // CARGO_BIN_EXE_ast-dump is set by Cargo to the path of the ast-dump
-    // binary in the current build profile, exactly like json_differential.rs
-    // uses CARGO_BIN_EXE_json-parse-dump.
-    let ast_dump = PathBuf::from(env!("CARGO_BIN_EXE_ast-dump"));
-    assert!(
-        ast_dump.exists(),
-        "ast-dump binary not found at {}; run: cargo build --manifest-path rust/Cargo.toml -p parser --bin ast-dump",
-        ast_dump.display()
-    );
+    // ast-dump lives in the unpublished `tools` crate, so `tools_bin` builds it
+    // and reports its path (see tests/common/mod.rs), exactly like
+    // json_differential.rs and preparse_differential.rs do for their drivers.
+    let ast_dump = common::tools_bin("ast-dump");
 
     let corpus_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(corpus);
     let mut files: Vec<PathBuf> = std::fs::read_dir(&corpus_dir)

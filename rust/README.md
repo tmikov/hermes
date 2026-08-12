@@ -145,7 +145,7 @@ Flow extension flags (`component`/`hook`, `record`, `match`). On failure,
 `parse()` is a convenience façade over the low-level API — `Context`,
 `SourceErrorManager`, `JSLexer`, `JSParserImpl` — which stays public for
 callers that need lazy parsing, a custom diagnostic handler, or one arena
-shared across files. `crates/parser/src/bin/ast_dump.rs` is the reference for
+shared across files. `crates/tools/src/bin/ast_dump.rs` is the reference for
 that path.
 
 Expanded versions of both paths are in

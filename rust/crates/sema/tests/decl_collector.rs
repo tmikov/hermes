@@ -9,7 +9,7 @@
 //! `lib/Sema/DeclCollector.{h,cpp}`. Unlike the hand-built-tree tests
 //! elsewhere in this crate, these parse real source with the `parser`
 //! crate (a dev-dependency) — the parse-driver setup below is trimmed from
-//! `rust/crates/parser/src/bin/ast_dump.rs`.
+//! `rust/crates/tools/src/bin/ast_dump.rs`.
 //!
 //! Expected collections are transcribed from the C++ `DeclCollector.cpp`
 //! *behavior*, not guessed:
@@ -39,7 +39,7 @@ use sema::keywords::Keywords;
 use support::manager::SourceErrorManager;
 
 /// Parse `src` as a `Program` and return its root node, panicking on any
-/// parse error. Trimmed from `parser/src/bin/ast_dump.rs`'s driver setup.
+/// parse error. Trimmed from `tools/src/bin/ast_dump.rs`'s driver setup.
 fn parse<'gc>(gc: &'gc GCLock, src: &str) -> &'gc Node<'gc> {
     let mut sm = SourceErrorManager::new();
     let buf_id = sm.add_buffer_bytes("input", src.as_bytes());

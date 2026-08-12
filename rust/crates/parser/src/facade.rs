@@ -17,7 +17,7 @@
 //! [`support::diag::DiagHandler`], a shared `Context` across several files, or
 //! any other control the façade does not expose, drive
 //! [`crate::js::JSParserImpl`] directly the way
-//! `crates/parser/src/bin/ast_dump.rs` does.
+//! `crates/tools/src/bin/ast_dump.rs` does.
 //!
 //! # Lifetime model
 //!
@@ -93,7 +93,7 @@ pub struct ParseFlags {
 impl ParseFlags {
     /// Apply these flags to a fresh `Context`.
     ///
-    /// Mirrors the flag wiring in `crates/parser/src/bin/ast_dump.rs`,
+    /// Mirrors the flag wiring in `crates/tools/src/bin/ast_dump.rs`,
     /// including the two implications documented on the fields: the three
     /// `parse_flow_*` extensions turn on `parse_flow`, and `parse_flow` turns
     /// on the ambiguous-expression grammar.

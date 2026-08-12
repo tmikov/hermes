@@ -20,6 +20,8 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+mod common;
+
 fn cpp_bin() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../cmake-build-asan/bin/json-parse-dump")
@@ -50,7 +52,9 @@ fn json_corpus_differential() {
         eprintln!("skip: json-parse-dump (C++) not built at {cpp:?}");
         return;
     }
-    let rust = Path::new(env!("CARGO_BIN_EXE_json-parse-dump"));
+    // The Rust driver lives in the unpublished `tools` crate; `tools_bin`
+    // builds it and returns its path (see tests/common/mod.rs).
+    let rust = common::tools_bin("json-parse-dump");
     let dir =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/json_corpus");
     let mut count = 0;
@@ -65,7 +69,7 @@ fn json_corpus_differential() {
     for path in files {
         let src = std::fs::read(&path).unwrap();
         let cpp_out = run(&cpp, &src);
-        let rust_out = run(rust, &src);
+        let rust_out = run(&rust, &src);
         assert_eq!(
             cpp_out,
             rust_out,

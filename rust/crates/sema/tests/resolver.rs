@@ -17,7 +17,7 @@
 //! under-resolves a construct it doesn't model yet.
 //!
 //! The parse-driver setup is trimmed from
-//! `rust/crates/parser/src/bin/ast_dump.rs`, like `decl_collector.rs`'s.
+//! `rust/crates/tools/src/bin/ast_dump.rs`, like `decl_collector.rs`'s.
 
 use ast::context::{Context, GCLock, NodeRc};
 use ast::node::{ExpressionStatement, Node, NumericLiteral, Program};

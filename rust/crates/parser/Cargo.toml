@@ -11,22 +11,6 @@ keywords = ["javascript", "parser", "flow", "ecmascript", "ast"]
 categories = ["parser-implementations", "development-tools"]
 readme = "README.md"
 
-[[bin]]
-name = "ast-dump"
-path = "src/bin/ast_dump.rs"
-
-[[bin]]
-name = "json-parse-dump"
-path = "src/bin/json_parse_dump.rs"
-
-[[bin]]
-name = "gen-json"
-path = "src/bin/gen_json.rs"
-
-[[bin]]
-name = "preparse-dump"
-path = "src/bin/preparse_dump.rs"
-
 [lints.rust]
 unsafe_code = "deny"   # the cursor module (later) gets a scoped #[allow]; token tables are unsafe-free
 
@@ -35,5 +19,4 @@ support = { path = "../support" }
 atom_table = { path = "../atom_table" }
 unicode = { path = "../unicode" }
 ast = { path = "../ast" }
-command_line = { path = "../command_line" }
 bumpalo = "3.16"

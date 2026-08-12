@@ -12,7 +12,7 @@ authoritative log.
 ## Crate map
 
 The Rust workspace lives under `rust/` with five published library crates and
-one internal-only crate:
+four internal-only crates:
 
 ```
 rust/
@@ -23,7 +23,10 @@ rust/
     unicode/            Unicode character-property tables (generated from UnicodeData.inc)
     ast/                GC-arena AST: 271 ESTree nodes + JSON dumper
     parser/             lexer + JSON parser + JS parser
-    command_line/       CLI binaries (ast-dump, json-parse-dump, …) — publish = false
+    command_line/       LLVM-cl-style CLI flag parser — publish = false
+    sema/               semantic validation and scope resolution — publish = false
+    tools/              CLI drivers (ast-dump, json-parse-dump, gen-json,
+                        preparse-dump) — publish = false
     comparison/         benchmark harness — excluded from workspace, publish = false
 ```
 
@@ -207,16 +210,19 @@ Parser corpora live under `rust/crates/parser/tests/`:
 | `parser_corpus_flow_component/` | `-parse-flow -Xparse-component-syntax` |
 | `parser_corpus_flow_records/` | `-parse-flow -Xparse-flow-records` |
 | `parser_corpus_flow_match/` | `-parse-flow -Xparse-flow-match` |
+| `parser_corpus_ts/` | `-parse-ts` |
+| `parser_corpus_jsx/` | `-parse-jsx` |
+| `parser_corpus_jsx_flow/` | `-parse-jsx -parse-flow` |
 
-The plain JS corpus has 76 files; the Flow corpus 42; component 8; records 5;
-match 7 — 138 files total. Every file is parsed by both binaries and the outputs
-are compared byte-for-byte.
+The plain JS corpus has 77 files; the Flow corpus 42; component 8; records 5;
+match 7; TS 20; JSX 6; JSX/Flow 1 — 166 files total. Every file is parsed by
+both binaries and the outputs are compared byte-for-byte.
 
 ### The gate command
 
 ```bash
 # Build the Rust ast-dump binary and the C++ hermesc oracle:
-cargo build --manifest-path rust/Cargo.toml -p parser --bin ast-dump
+cargo build --manifest-path rust/Cargo.toml -p tools --bin ast-dump
 cmake --build cmake-build-asan --target hermesc
 
 # Run the differential gate (fails if the oracle binary is absent):
@@ -249,12 +255,16 @@ hermesc (C++ oracle) ← differential tests only
          │         └──→ atom_table
          └──→ unicode
          └──→ atom_table
+
+    tools ──→ parser, ast, support, atom_table
          └──→ command_line (CLI flags, no logic)
 ```
 
 `unicode` has no intra-workspace dependencies. The `support` crate depends on
 `unicode`. The `ast` crate depends on `support` and `atom_table`. The `parser`
-crate depends on all of the above. The `command_line` crate is a thin CLI
+crate depends on all of the above — and on nothing else: the CLI drivers and
+their `command_line` dependency live in the unpublished `tools` crate, so the
+published library is a pure library. The `command_line` crate is a thin CLI
 argument helper.
 
 ---

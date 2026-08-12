@@ -39,8 +39,19 @@ cargo test --manifest-path rust/Cargo.toml -p ast
 cargo test --manifest-path rust/Cargo.toml -p support
 
 # Clippy (only pre-existing faithful-C-idiom lints are allowed):
-cargo clippy --manifest-path rust/Cargo.toml -p parser
+cargo clippy --manifest-path rust/Cargo.toml
 ```
+
+The CLI drivers (`ast-dump`, `json-parse-dump`, `gen-json`, `preparse-dump`)
+live in the unpublished `tools` crate, not in `parser`: the published library
+ships no binaries and no `command_line` dependency.
+
+```bash
+cargo build --manifest-path rust/Cargo.toml -p tools
+```
+
+The differential tests build the driver they need on demand, so the gate below
+does not need a separate `-p tools` build first.
 
 ### Regenerate and verify the AST node set
 
@@ -81,13 +92,17 @@ cmake --build cmake-build-asan --target js-lexer-dump
 
 # Build the JSON oracle (for the JSON parser differential):
 cmake --build cmake-build-asan --target json-parse-dump
+
+# Build the pre-parse oracle (for the pre-parse differential):
+cmake --build cmake-build-asan --target preparse-dump
 ```
 
 ### Run the gate
 
 ```bash
-# JS parser differential (138 corpus files: 76 plain + 42 Flow + 8 component
-# + 5 records + 7 match); fails hard if hermesc is absent:
+# JS parser differential (166 corpus files: 77 plain + 42 Flow + 8 component
+# + 5 records + 7 match + 20 TS + 6 JSX + 1 JSX/Flow); fails hard if hermesc
+# is absent:
 REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml \
     -p parser --test parser_differential
 
@@ -96,9 +111,13 @@ REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml \
 REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml \
     -p parser --test differential -- --nocapture
 
-# JSON parser differential (16 corpus files):
+# JSON parser differential (17 corpus files):
 REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml \
     -p parser --test json_differential -- --nocapture
+
+# Pre-parse differential (lazy 13 / plain 77 / Flow 42 / TS 20 corpus files):
+REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml \
+    -p parser --test preparse_differential -- --nocapture
 ```
 
 The `REQUIRE_DIFFERENTIAL=1` environment variable causes the test to fail hard

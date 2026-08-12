@@ -38,7 +38,7 @@ fn render_parse_errors(name: &str, src: &str) -> String {
 
 /// Like `render_parse_errors`, but with Flow syntax enabled (`-parse-flow`
 /// on both `ctx.set_parse_flow` and `ctx.set_parse_flow_ambiguous`, matching
-/// how `bin/ast_dump.rs` wires up `--parse-flow`).
+/// how `tools/src/bin/ast_dump.rs` wires up `--parse-flow`).
 fn render_flow_parse_errors(name: &str, src: &str) -> String {
     render_parse_errors_impl(name, src, true)
 }

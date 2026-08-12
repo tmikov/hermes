@@ -18,6 +18,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod common;
+
 /// Path to the C++ preparse-dump oracle binary.
 fn cpp_bin() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -40,7 +42,9 @@ fn run_differential(corpus: &str, extra: &[&str]) -> usize {
         eprintln!("skip: preparse-dump (C++) not built at {cpp:?}");
         return 0;
     }
-    let rust = Path::new(env!("CARGO_BIN_EXE_preparse-dump"));
+    // The Rust driver lives in the unpublished `tools` crate; `tools_bin`
+    // builds it and returns its path (see tests/common/mod.rs).
+    let rust = common::tools_bin("preparse-dump");
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(corpus);
     let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
         .unwrap_or_else(|e| {
@@ -62,7 +66,7 @@ fn run_differential(corpus: &str, extra: &[&str]) -> usize {
             .arg(path)
             .output()
             .expect("spawn preparse-dump (C++)");
-        let rust_out = Command::new(rust)
+        let rust_out = Command::new(&rust)
             .args(extra)
             .arg(path)
             .output()

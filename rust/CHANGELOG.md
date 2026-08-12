@@ -117,10 +117,14 @@ Version numbers and release dates will be set at launch.
 - Byte-for-byte validated against captured `hermesc` output (`tests/golden.rs`).
 
 #### Tooling
+- The CLI drivers live in the unpublished `tools` crate (`publish = false`),
+  so the published library ships no binaries and no `command_line` dependency.
 - `ast-dump` binary: parses a JS/Flow file and dumps ESTree JSON, matching
   `hermesc -dump-ast` byte-for-byte.
 - `json-parse-dump` binary: parses a JSON file and re-emits it.
 - `gen-json` binary: generates deterministic JSON corpora for benchmarking.
+- `preparse-dump` binary: dumps the pre-parse side table, matching the C++
+  `preparse-dump` oracle byte-for-byte.
 - C++ differential oracle tools (`tools/js-lexer-dump/`, `tools/json-parse-dump/`)
   registered via `add_hermes_tool`.
 

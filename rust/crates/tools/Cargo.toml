@@ -1,0 +1,33 @@
+[package]
+name = "tools"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Unpublished command-line drivers for the Rust Hermes front-end (dump/differential tools)."
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[[bin]]
+name = "ast-dump"
+path = "src/bin/ast_dump.rs"
+
+[[bin]]
+name = "json-parse-dump"
+path = "src/bin/json_parse_dump.rs"
+
+[[bin]]
+name = "gen-json"
+path = "src/bin/gen_json.rs"
+
+[[bin]]
+name = "preparse-dump"
+path = "src/bin/preparse_dump.rs"
+
+[dependencies]
+support = { path = "../support" }
+atom_table = { path = "../atom_table" }
+ast = { path = "../ast" }
+parser = { path = "../parser" }
+command_line = { path = "../command_line" }
+bumpalo = "3.16"

@@ -31,7 +31,6 @@ dependencies = [
  "ast",
  "atom_table",
  "bumpalo",
- "command_line",
  "support",
  "unicode",
 ]
@@ -52,6 +51,18 @@ name = "support"
 version = "0.0.0"
 dependencies = [
  "unicode",
+]
+
+[[package]]
+name = "tools"
+version = "0.0.0"
+dependencies = [
+ "ast",
+ "atom_table",
+ "bumpalo",
+ "command_line",
+ "parser",
+ "support",
 ]
 
 [[package]]

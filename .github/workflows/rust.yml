@@ -36,6 +36,10 @@ jobs:
         working-directory: rust
         run: cargo test --manifest-path Cargo.toml
 
-      - name: Clippy (parser)
+      - name: Clippy (workspace)
+        # Workspace-wide since the CLI drivers moved out of `parser` into the
+        # unpublished `tools` crate. Lints are reported, not denied: the port
+        # keeps a handful of faithful-C-idiom lints (and `command_line` two
+        # `type_complexity` ones) that are deliberately not "fixed".
         working-directory: rust
-        run: cargo clippy --manifest-path Cargo.toml -p parser
+        run: cargo clippy --manifest-path Cargo.toml

@@ -68,7 +68,7 @@ fn render_parse_errors(dialect: Dialect, name: &str, src: &str) -> String {
         Dialect::FlowMatch => {
             // `-parse-flow` defaults to `ParseFlowSetting::ALL`, i.e. the
             // ambiguous-expression grammar too; `-Xparse-flow-match` implies
-            // `-parse-flow` (matching `bin/ast_dump.rs`'s wiring).
+            // `-parse-flow` (matching `tools/src/bin/ast_dump.rs`'s wiring).
             ctx.set_parse_flow(true);
             ctx.set_parse_flow_ambiguous(true);
             ctx.set_parse_flow_match(true);
