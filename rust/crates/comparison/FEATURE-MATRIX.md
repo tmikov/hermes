@@ -178,7 +178,7 @@ Numbers are MiB/s (median). Higher is faster.
   OXC's bump allocator and zero-copy `Atom` type are structurally different from
   Hermes's atom interning and GC-arena AST, and any faithful port of Hermes
   inherits that difference. Against SWC the port is comparable rather than
-  uniformly ahead: faster on jquery and three.min, within ~2% on react and
+  uniformly ahead: faster on jquery and three.min, ~2% behind on react and
   typescript.
 - Boa is ~8× slower; its parser performs scope resolution during parse.
 - Biome's lossless CST does fundamentally different work; throughput comparison is

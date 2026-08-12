@@ -336,7 +336,7 @@ exercised — in progress). Full methodology and trailing-error fairness guard i
   by 1.3–1.7×. OXC's bump allocator and zero-copy `Atom` type are structurally
   different from Hermes's atom interning and GC-arena AST; C++ Hermes carries the
   same gap vs OXC, and any faithful port inherits it. Against SWC the port is
-  comparable: ahead on jquery and three.min, within ~2% on react and typescript.
+  comparable: ahead on jquery and three.min, ~2% behind on react and typescript.
 - Boa is roughly 8× slower than this port; its parser performs scope resolution
   during parse, which the others defer.
 - Biome's lossless CST does fundamentally different work; throughput comparison is

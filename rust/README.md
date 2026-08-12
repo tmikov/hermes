@@ -82,8 +82,8 @@ re-measured 2026-08-12):
   fixture (61.5 vs 100.7). The large-file gap's root cause is AST node footprint
   at scale (128-byte uniform `Node` enum, ~14× source size live), not GC
   collection.
-- The Rust port is **comparable to SWC** — ahead on jquery and three.min, within
-  ~2% on react and typescript — and the C++ front-end it ports is **1.3–1.9×
+- The Rust port is **comparable to SWC** — ahead on jquery and three.min, ~2%
+  behind on react and typescript — and the C++ front-end it ports is **1.3–1.9×
   faster than SWC** on every workload in the deeper study linked below.
 - **OXC is faster than Hermes by ~1.3–1.7×** on the fair, equal-work comparison
   (parse + binding/semantic). A parse-vs-parse number overstates the gap: Hermes
