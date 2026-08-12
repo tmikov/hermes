@@ -22,8 +22,8 @@ output, matching the Hermes `hermesc` binary's behavior byte-for-byte.
 |---|---|
 | JavaScript / ECMAScript | ✅ Complete |
 | Flow type grammar | ✅ Complete |
-| TypeScript | 🚧 In progress |
-| JSX | 🚧 In progress |
+| TypeScript | ✅ Complete |
+| JSX | ✅ Complete |
 
 ## Why this parser?
 
@@ -100,35 +100,55 @@ The crate is not yet published. Once on crates.io, add it to your project:
 hermes-parser = "0.1"    # version TBD at launch
 ```
 
-### Parse a JavaScript file and dump ESTree JSON
+### Parse a JavaScript source and dump ESTree JSON
 
 ```rust
 use hermes_parser::{parse, ParseFlags};
-use hermes_ast::dump_estree_json;
 
 fn main() {
     let src = r#"function greet(name) { return "Hello, " + name; }"#;
-    let result = parse(src, ParseFlags::default()).expect("parse error");
-    let json = dump_estree_json(&result);
-    println!("{}", json);
+    let mut parsed = parse(src, ParseFlags::default()).expect("parse error");
+    println!("{}", parsed.to_estree_json(true));
 }
 ```
 
-### Parse with Flow types enabled
+### Parse with Flow types enabled, and walk the AST
+
+The AST lives in an arena owned by the returned `ParsedJS`, and is read under a
+lock, so traversal happens inside a closure:
 
 ```rust
+use hermes_ast::node::Node;
 use hermes_parser::{parse, ParseFlags};
 
 fn main() {
     let src = "type Point = { x: number, y: number };";
     let flags = ParseFlags { parse_flow: true, ..Default::default() };
-    let result = parse(src, flags).expect("parse error");
-    // use result.ast ...
+    let mut parsed = parse(src, flags).expect("parse error");
+
+    let statements = parsed.with_program(|_gc, program| match program {
+        Node::Program(p) => p.body.iter().count(),
+        _ => unreachable!("the root of a parse is always a Program"),
+    });
+    assert_eq!(statements, 1);
 }
 ```
 
-Note: the exact API shape will be finalized during the public-API audit before
-publication. The examples above reflect the intended surface.
+`ParseFlags` also carries `parse_ts`, `parse_jsx`, `strict_mode`, and the three
+Flow extension flags (`component`/`hook`, `record`, `match`). On failure,
+`parse` returns a `ParseError` carrying the diagnostics.
+
+`parse()` is a convenience façade over the low-level API — `Context`,
+`SourceErrorManager`, `JSLexer`, `JSParserImpl` — which stays public for
+callers that need lazy parsing, a custom diagnostic handler, or one arena
+shared across files. `crates/parser/src/bin/ast_dump.rs` is the reference for
+that path.
+
+Runnable versions of the two snippets above are in
+[`crates/parser/examples/`](crates/parser/examples): `parse_to_estree_json.rs`
+and `walk_ast.rs`. They spell the crates by their current in-tree names
+(`parser`, `ast`); the `hermes_*` spelling used here becomes correct with the
+rename that precedes publication.
 
 ## Crate family
 
