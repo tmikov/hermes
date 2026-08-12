@@ -3,9 +3,8 @@
 > A Rust port of the Hermes front-end by Tzvetan Mikov, the architect of Hermes.
 > Not an official Meta project and not supported by Meta.
 
-**Status:** pre-release, not yet on crates.io. The crates already carry their
-published names (`hermes-parser` and friends), so the quickstart below is the
-real thing — only the upload is pending.
+**Version:** 0.1.0 — the initial release of the `hermes-parser` crate family on
+[crates.io](https://crates.io/crates/hermes-parser).
 
 ---
 
@@ -81,24 +80,30 @@ median; FullParse/eager; MiB/s):
   typescript fixture the port is ~32% slower (63.0 vs 92.4 MiB/s); root cause is
   AST node footprint at scale (128-byte uniform `Node` enum, ~14× source size live),
   not GC collection.
-- **OXC's ~2.4–2.8× lead is inherent to Hermes design** (atom interning + GC-arena
-  AST vs OXC's bump allocator + zero-copy atoms) — any faithful port of Hermes
-  inherits this gap, as does C++ Hermes itself.
-- The Rust port beats SWC on every fixture.
+- The Rust port **beats SWC on every fixture**, and the C++ front-end it ports is
+  **1.3–1.9× faster than SWC** on every workload in the deeper study linked below.
+- **OXC is faster than Hermes by ~1.3–1.7×** on the fair, equal-work comparison
+  (parse + binding/semantic). A parse-vs-parse number overstates the gap: Hermes
+  interns every identifier and converts numeric literals to `f64` during the parse,
+  work OXC defers to `oxc_semantic`. That ~1.3–1.7× is measured against C++
+  Hermes; a Rust binding/semantic pass exists in-tree but is not published yet, so
+  the equal-work benchmark for the port itself is future work.
 
 See [`crates/comparison/BENCH-RESULTS.md`](crates/comparison/BENCH-RESULTS.md)
-for the full table, methodology, and large-file decomposition.
+for the port's full table, methodology, and large-file decomposition, and
+[the C++ front-end perf investigation](../doc/superpowers/2026-06-30-hermes-vs-oxc-parser-perf.md)
+for the OXC/SWC study.
 
 Performance is a secondary concern. The headline is correctness: byte-for-byte
 agreement with the production C++ engine.
 
 ## Quickstart
 
-The crate is not yet published. Once on crates.io, add it to your project:
+Add it to your project:
 
 ```toml
 [dependencies]
-hermes-parser = "0.1"    # version TBD at launch
+hermes-parser = "0.1"
 ```
 
 That one dependency is enough: `hermes-parser` re-exports the AST crate as

@@ -11,7 +11,7 @@ containers. Zero `unsafe` (`unsafe_code = "forbid"`).
 This is a support crate: it is published because `hermes-parser`'s dependency
 closure requires it, and it carries no stability guarantee of its own.
 
-**Status:** pre-release, not yet on crates.io.
+**Version:** 0.1.0 — API docs at [docs.rs/hermes-support](https://docs.rs/hermes-support).
 
 See [the project README](https://github.com/tmikov/hermes/blob/rust1/rust/README.md) for the full
 documentation of the crate family.

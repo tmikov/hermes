@@ -7,7 +7,7 @@ Provides the GC-arena AST (271 ESTree nodes generated from `ESTree.def`),
 the transforming visitor, and the `ESTreeJSONDumper` — byte-for-byte matching
 `hermesc -dump-ast -dump-source-location=both`.
 
-**Status:** pre-release, not yet on crates.io.
+**Version:** 0.1.0 — API docs at [docs.rs/hermes-ast](https://docs.rs/hermes-ast).
 
 See [the project README](https://github.com/tmikov/hermes/blob/rust1/rust/README.md) for the full documentation,
 language support matrix, and the project story.
