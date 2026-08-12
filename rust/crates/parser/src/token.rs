@@ -27,12 +27,15 @@ pub struct RegExpLiteral {
 }
 
 impl RegExpLiteral {
+    /// A literal with the given interned body and flags.
     pub fn new(body: AtomBytes, flags: AtomBytes) -> RegExpLiteral {
         RegExpLiteral { body, flags }
     }
+    /// \return the pattern between the delimiting slashes.
     pub fn body(&self) -> AtomBytes {
         self.body
     }
+    /// \return the flags following the closing slash (possibly empty).
     pub fn flags(&self) -> AtomBytes {
         self.flags
     }
@@ -86,12 +89,15 @@ impl Token {
         }
     }
 
+    /// \return the kind of this token.
     pub fn kind(&self) -> TokenKind {
         self.kind
     }
+    /// \return true if this token is a reserved word.
     pub fn is_res_word(&self) -> bool {
         self.kind.is_res_word()
     }
+    /// \return true if this token is one of the four template-literal kinds.
     pub fn is_template_literal(&self) -> bool {
         matches!(
             self.kind,
@@ -102,46 +108,62 @@ impl Token {
         )
     }
 
+    /// \return the location of the first byte of the token.
     pub fn start_loc(&self) -> SMLoc {
         self.range.start
     }
+    /// \return the location one past the last byte of the token.
     pub fn end_loc(&self) -> SMLoc {
         self.range.end
     }
+    /// \return the half-open source range covered by the token.
     pub fn source_range(&self) -> SMRange {
         self.range
     }
 
+    /// \return the value of a `numeric_literal` token.
     pub fn get_numeric_literal(&self) -> f64 {
         debug_assert_eq!(self.kind, TokenKind::numeric_literal);
         self.numeric
     }
 
+    /// \return the interned name of an `identifier` token.
     pub fn get_identifier(&self) -> AtomBytes {
         debug_assert_eq!(self.kind, TokenKind::identifier);
         self.ident.unwrap()
     }
+    /// \return the interned name of a `private_identifier` token, without
+    /// the leading `#` (which is still part of the token's source range).
     pub fn get_private_identifier(&self) -> AtomBytes {
         debug_assert_eq!(self.kind, TokenKind::private_identifier);
         self.ident.unwrap()
     }
+    /// \return the interned spelling of a reserved-word token.
     pub fn get_res_word_identifier(&self) -> AtomBytes {
         debug_assert!(self.is_res_word());
         self.ident.unwrap()
     }
+    /// \return the interned spelling of an identifier or reserved word,
+    /// for the many places where the grammar accepts either.
     pub fn get_res_word_or_identifier(&self) -> AtomBytes {
         debug_assert!(self.kind == TokenKind::identifier || self.is_res_word());
         self.ident.unwrap()
     }
 
+    /// \return the cooked value of a `string_literal` token, with escapes
+    /// and line continuations already processed.
     pub fn get_string_literal(&self) -> AtomBytes {
         debug_assert_eq!(self.kind, TokenKind::string_literal);
         self.string_literal.unwrap()
     }
+    /// \return the raw (undecoded) text of a JSX string literal. Only set by
+    /// `Token::set_jsx_string_literal`; the normal string path leaves it unset.
     pub fn get_string_literal_raw_value(&self) -> AtomBytes {
         debug_assert_eq!(self.kind, TokenKind::string_literal);
         self.raw_string.unwrap()
     }
+    /// \return whether a `string_literal` contained any escape or line
+    /// continuation. Used to decide whether a string can be a directive.
     pub fn get_string_literal_contains_escapes(&self) -> bool {
         debug_assert_eq!(self.kind, TokenKind::string_literal);
         self.string_literal_contains_escapes
@@ -152,33 +174,44 @@ impl Token {
         debug_assert!(self.is_template_literal());
         self.string_literal.is_none()
     }
+    /// \return the cooked value of a template-literal token, or `None` if it
+    /// contains a NotEscapeSequence (legal only in a tagged template).
     pub fn get_template_value(&self) -> Option<AtomBytes> {
         debug_assert!(self.is_template_literal());
         self.string_literal
     }
+    /// \return the Template Raw Value (TRV) of a template-literal token.
     pub fn get_template_raw_value(&self) -> AtomBytes {
         debug_assert!(self.is_template_literal());
         self.raw_string.unwrap()
     }
 
+    /// \return the digits of a `bigint_literal` token, without the trailing
+    /// `n`; the value is kept as text and never converted to a number.
     pub fn get_bigint_literal(&self) -> AtomBytes {
         debug_assert_eq!(self.kind, TokenKind::bigint_literal);
         self.string_literal.unwrap()
     }
+    /// \return the raw source text of a `bigint_literal` token, including
+    /// any radix prefix and the trailing `n`.
     pub fn get_bigint_literal_raw_value(&self) -> AtomBytes {
         debug_assert_eq!(self.kind, TokenKind::bigint_literal);
         self.raw_string.unwrap()
     }
 
+    /// \return the body and flags of a `regexp_literal` token.
     pub fn get_regexp_literal(&self) -> RegExpLiteral {
         debug_assert_eq!(self.kind, TokenKind::regexp_literal);
         self.regexp.unwrap()
     }
 
+    /// \return the value of a `jsx_text` token, with HTML entities decoded.
     pub fn get_jsx_text_value(&self) -> AtomBytes {
         debug_assert_eq!(self.kind, TokenKind::jsx_text);
         self.string_literal.unwrap()
     }
+    /// \return the raw source text of a `jsx_text` token, with HTML entities
+    /// left as written.
     pub fn get_jsx_text_raw(&self) -> AtomBytes {
         debug_assert_eq!(self.kind, TokenKind::jsx_text);
         self.raw_string.unwrap()
@@ -292,12 +325,15 @@ pub struct StoredComment {
 }
 
 impl StoredComment {
+    /// A comment of `kind` spanning `range`, delimiters included.
     pub fn new(kind: CommentKind, range: SMRange) -> StoredComment {
         StoredComment { kind, range }
     }
+    /// \return whether this is a line, block, or hashbang comment.
     pub fn kind(&self) -> CommentKind {
         self.kind
     }
+    /// \return the source range of the comment, delimiters included.
     pub fn source_range(&self) -> SMRange {
         self.range
     }
@@ -340,12 +376,15 @@ pub struct StoredToken {
 }
 
 impl StoredToken {
+    /// A stored token of `kind` spanning `range`.
     pub fn new(kind: TokenKind, range: SMRange) -> StoredToken {
         StoredToken { kind, range }
     }
+    /// \return the kind of the stored token.
     pub fn kind(&self) -> TokenKind {
         self.kind
     }
+    /// \return the source range of the stored token.
     pub fn source_range(&self) -> SMRange {
         self.range
     }

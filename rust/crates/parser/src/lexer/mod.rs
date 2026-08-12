@@ -54,9 +54,15 @@ use crate::utf8::{
 /// `JSLexer::GrammarContext`.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum GrammarContext {
+    /// A RegExp can follow, so `/` starts a regular-expression literal.
     AllowRegExp,
+    /// `/` can follow, so it is scanned as the division operator.
     AllowDiv,
+    /// `/` can follow, `-` is part of identifiers, and `>` is scanned as its
+    /// own token.
     AllowJSXIdentifier,
+    /// A type annotation: `/` can follow, `>>` scans as two separate `>`
+    /// tokens, and legacy octal literals are rejected as in strict mode.
     Type,
 }
 
@@ -65,8 +71,11 @@ pub enum GrammarContext {
 /// Flow accepts `@`.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum IdentifierMode {
+    /// Standard JavaScript identifiers only.
     JS,
+    /// JavaScript identifiers and '-'.
     JSX,
+    /// JavaScript identifiers and identifiers which begin with '@'.
     Flow,
 }
 

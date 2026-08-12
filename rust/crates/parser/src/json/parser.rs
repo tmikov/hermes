@@ -9,7 +9,7 @@
 //!
 //! Value nesting is depth-limited, matching C++ `JSONParser` (`lib/Parser/
 //! JSONParser.cpp:202-212`, `JSONParser.h:636-651`): `parse_value` checks
-//! [`MAX_RECURSION_DEPTH`] and reports "Too many nested JSON values" instead
+//! `MAX_RECURSION_DEPTH` and reports "Too many nested JSON values" instead
 //! of overflowing the native stack. Historically NEITHER side had a limit
 //! (parity by absence, and both died on e.g. 100000 `[`); upstream added one
 //! in `b21856de4` ("Add a recursion limit to the compiler-side JSONParser")

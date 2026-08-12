@@ -8,268 +8,294 @@
 ///
 /// Ported from `include/hermes/Parser/TokenKinds.def`.  The discriminant
 /// of each variant matches C++ `ord(TokenKind::name)`.
+///
+/// Each variant's doc quotes its `.def` entry verbatim: the macro name gives
+/// the category (`RESWORD`, `PUNCTUATOR`, `BINOP` with its precedence,
+/// `TEMPLATE`, `IDENT_OP`) and the string gives the source spelling.
+/// `RANGE_MARKER` variants are sentinels bounding a run of real kinds; the
+/// lexer never produces them.
 #[derive(Copy, Clone, Eq, PartialEq, Debug, Hash)]
 #[repr(u16)]
 #[allow(non_camel_case_types)]
 pub enum TokenKind {
-    // TOK(none, "<none>")
+    /// `TOK(none, "<none>")` — no token; a freshly constructed `Token`.
     none,
-    // TOK(identifier, "identifier")
+    /// `TOK(identifier, "identifier")` — an identifier or a contextual
+    /// keyword the lexer did not reclassify.
     identifier,
-    // TOK(private_identifier, "private identifier")
+    /// `TOK(private_identifier, "private identifier")` — a `#name` private
+    /// class element name (the `#` is not part of the identifier text).
     private_identifier,
 
-    // RANGE_MARKER(_first_resword)
+    /// Exclusive lower bound of the reserved-word range
+    /// (`RANGE_MARKER(_first_resword)`); never produced by the lexer.
     _first_resword,
-    // RESWORD(function)
+    /// `RESWORD(function)`
     rw_function,
-    // RESWORD(for)
+    /// `RESWORD(for)`
     rw_for,
-    // RESWORD(if)
+    /// `RESWORD(if)`
     rw_if,
-    // RESWORD(in)
+    /// `RESWORD(in)`
     rw_in,
-    // RESWORD(var)
+    /// `RESWORD(var)`
     rw_var,
-    // RESWORD(break)
+    /// `RESWORD(break)`
     rw_break,
-    // RESWORD(continue)
+    /// `RESWORD(continue)`
     rw_continue,
-    // RESWORD(return)
+    /// `RESWORD(return)`
     rw_return,
-    // RESWORD(switch)
+    /// `RESWORD(switch)`
     rw_switch,
-    // RESWORD(this)
+    /// `RESWORD(this)`
     rw_this,
 
-    // RESWORD(true)
+    /// `RESWORD(true)`
     rw_true,
-    // RESWORD(false)
+    /// `RESWORD(false)`
     rw_false,
-    // RESWORD(null)
+    /// `RESWORD(null)`
     rw_null,
-    // RESWORD(case)
+    /// `RESWORD(case)`
     rw_case,
-    // RESWORD(catch)
+    /// `RESWORD(catch)`
     rw_catch,
-    // RESWORD(const)
+    /// `RESWORD(const)`
     rw_const,
-    // RESWORD(debugger)
+    /// `RESWORD(debugger)`
     rw_debugger,
-    // RESWORD(default)
+    /// `RESWORD(default)`
     rw_default,
-    // RESWORD(delete)
+    /// `RESWORD(delete)`
     rw_delete,
-    // RESWORD(do)
+    /// `RESWORD(do)`
     rw_do,
-    // RESWORD(else)
+    /// `RESWORD(else)`
     rw_else,
-    // RESWORD(finally)
+    /// `RESWORD(finally)`
     rw_finally,
-    // RESWORD(instanceof)
+    /// `RESWORD(instanceof)`
     rw_instanceof,
-    // RESWORD(new)
+    /// `RESWORD(new)`
     rw_new,
-    // RESWORD(throw)
+    /// `RESWORD(throw)`
     rw_throw,
-    // RESWORD(try)
+    /// `RESWORD(try)`
     rw_try,
-    // RESWORD(typeof)
+    /// `RESWORD(typeof)`
     rw_typeof,
-    // RESWORD(void)
+    /// `RESWORD(void)`
     rw_void,
-    // RESWORD(while)
+    /// `RESWORD(while)`
     rw_while,
-    // RESWORD(with)
+    /// `RESWORD(with)`
     rw_with,
 
-    // RESWORD(export)
+    /// `RESWORD(export)`
     rw_export,
-    // RESWORD(import)
+    /// `RESWORD(import)`
     rw_import,
 
-    // RESWORD(class)
+    /// `RESWORD(class)`
     rw_class,
-    // RESWORD(static)
+    /// `RESWORD(static)`
     rw_static,
-    // RESWORD(extends)
+    /// `RESWORD(extends)`
     rw_extends,
-    // RESWORD(super)
+    /// `RESWORD(super)`
     rw_super,
 
     // Future reserved words
-    // RESWORD(enum)
+    /// `RESWORD(enum)`
     rw_enum,
 
     // Strict mode future reserved words
-    // RESWORD(implements)
+    /// `RESWORD(implements)`
     rw_implements,
-    // RESWORD(interface)
+    /// `RESWORD(interface)`
     rw_interface,
-    // RESWORD(package)
+    /// `RESWORD(package)`
     rw_package,
-    // RESWORD(private)
+    /// `RESWORD(private)`
     rw_private,
-    // RESWORD(protected)
+    /// `RESWORD(protected)`
     rw_protected,
-    // RESWORD(public)
+    /// `RESWORD(public)`
     rw_public,
-    // RESWORD(yield)
+    /// `RESWORD(yield)`
     rw_yield,
-    // RANGE_MARKER(_last_resword)
+    /// Exclusive upper bound of the reserved-word range
+    /// (`RANGE_MARKER(_last_resword)`); never produced by the lexer.
     _last_resword,
 
-    // PUNCTUATOR(l_brace, "{")
+    /// `PUNCTUATOR(l_brace, "{")`
     l_brace,
-    // PUNCTUATOR_FLOW(l_bracepipe, "{|")
+    /// `PUNCTUATOR_FLOW(l_bracepipe, "{|")` — opens a Flow exact object
+    /// type; only scanned as one token when Flow parsing is enabled.
     l_bracepipe,
-    // PUNCTUATOR(r_brace, "}")
+    /// `PUNCTUATOR(r_brace, "}")`
     r_brace,
-    // PUNCTUATOR_FLOW(piper_brace, "|}")
+    /// `PUNCTUATOR_FLOW(piper_brace, "|}")` — closes a Flow exact object
+    /// type; only scanned as one token when Flow parsing is enabled.
     piper_brace,
-    // PUNCTUATOR(l_paren, "(")
+    /// `PUNCTUATOR(l_paren, "(")`
     l_paren,
-    // PUNCTUATOR(r_paren, ")")
+    /// `PUNCTUATOR(r_paren, ")")`
     r_paren,
-    // PUNCTUATOR(l_square, "[")
+    /// `PUNCTUATOR(l_square, "[")`
     l_square,
-    // PUNCTUATOR(r_square, "]")
+    /// `PUNCTUATOR(r_square, "]")`
     r_square,
-    // PUNCTUATOR(period, ".")
+    /// `PUNCTUATOR(period, ".")`
     period,
-    // PUNCTUATOR(questiondot, "?.")
+    /// `PUNCTUATOR(questiondot, "?.")`
     questiondot,
-    // PUNCTUATOR(dotdotdot, "...")
+    /// `PUNCTUATOR(dotdotdot, "...")`
     dotdotdot,
-    // PUNCTUATOR(semi, ";")
+    /// `PUNCTUATOR(semi, ";")`
     semi,
-    // PUNCTUATOR(comma, ",")
+    /// `PUNCTUATOR(comma, ",")`
     comma,
-    // PUNCTUATOR(plusplus, "++")
+    /// `PUNCTUATOR(plusplus, "++")`
     plusplus,
-    // PUNCTUATOR(minusminus, "--")
+    /// `PUNCTUATOR(minusminus, "--")`
     minusminus,
-    // RANGE_MARKER(_first_binary)
+    /// Exclusive lower bound of the binary-operator range
+    /// (`RANGE_MARKER(_first_binary)`); never produced by the lexer.
     _first_binary,
-    // BINOP(starstar, "**", 12)
+    /// `BINOP(starstar, "**", 12)`
     starstar,
-    // BINOP(star, "*", 11)
+    /// `BINOP(star, "*", 11)`
     star,
-    // BINOP(percent, "%", 11)
+    /// `BINOP(percent, "%", 11)`
     percent,
-    // BINOP(slash, "/", 11)
+    /// `BINOP(slash, "/", 11)`
     slash,
-    // BINOP(plus, "+", 10)
+    /// `BINOP(plus, "+", 10)`
     plus,
-    // BINOP(minus, "-", 10)
+    /// `BINOP(minus, "-", 10)`
     minus,
-    // BINOP(lessless, "<<", 9)
+    /// `BINOP(lessless, "<<", 9)`
     lessless,
-    // BINOP(greatergreater, ">>", 9)
+    /// `BINOP(greatergreater, ">>", 9)`
     greatergreater,
-    // BINOP(greatergreatergreater, ">>>", 9)
+    /// `BINOP(greatergreatergreater, ">>>", 9)`
     greatergreatergreater,
-    // BINOP(less, "<", 8)
+    /// `BINOP(less, "<", 8)`
     less,
-    // BINOP(greater, ">", 8)
+    /// `BINOP(greater, ">", 8)`
     greater,
-    // BINOP(lessequal, "<=", 8)
+    /// `BINOP(lessequal, "<=", 8)`
     lessequal,
-    // BINOP(greaterequal, ">=", 8)
+    /// `BINOP(greaterequal, ">=", 8)`
     greaterequal,
-    // BINOP(equalequal, "==", 7)
+    /// `BINOP(equalequal, "==", 7)`
     equalequal,
-    // BINOP(exclaimequal, "!=", 7)
+    /// `BINOP(exclaimequal, "!=", 7)`
     exclaimequal,
-    // BINOP(equalequalequal, "===", 7)
+    /// `BINOP(equalequalequal, "===", 7)`
     equalequalequal,
-    // BINOP(exclaimequalequal, "!==", 7)
+    /// `BINOP(exclaimequalequal, "!==", 7)`
     exclaimequalequal,
-    // BINOP(amp, "&", 6)
+    /// `BINOP(amp, "&", 6)`
     amp,
-    // BINOP(caret, "^", 5)
+    /// `BINOP(caret, "^", 5)`
     caret,
-    // BINOP(pipe, "|", 4)
+    /// `BINOP(pipe, "|", 4)`
     pipe,
-    // BINOP(ampamp, "&&", 3)
+    /// `BINOP(ampamp, "&&", 3)`
     ampamp,
-    // BINOP(pipepipe, "||", 2)
+    /// `BINOP(pipepipe, "||", 2)`
     pipepipe,
-    // BINOP(questionquestion, "??", 1)
+    /// `BINOP(questionquestion, "??", 1)`
     questionquestion,
-    // RANGE_MARKER(_last_binary)
+    /// Exclusive upper bound of the binary-operator range
+    /// (`RANGE_MARKER(_last_binary)`); never produced by the lexer.
     _last_binary,
-    // PUNCTUATOR(exclaim, "!")
+    /// `PUNCTUATOR(exclaim, "!")`
     exclaim,
-    // PUNCTUATOR(tilde, "~")
+    /// `PUNCTUATOR(tilde, "~")`
     tilde,
-    // PUNCTUATOR(question, "?")
+    /// `PUNCTUATOR(question, "?")`
     question,
-    // PUNCTUATOR(colon, ":")
+    /// `PUNCTUATOR(colon, ":")`
     colon,
-    // PUNCTUATOR(equal, "=")
+    /// `PUNCTUATOR(equal, "=")`
     equal,
-    // PUNCTUATOR(plusequal, "+=")
+    /// `PUNCTUATOR(plusequal, "+=")`
     plusequal,
-    // PUNCTUATOR(minusequal, "-=")
+    /// `PUNCTUATOR(minusequal, "-=")`
     minusequal,
-    // PUNCTUATOR(starequal, "*=")
+    /// `PUNCTUATOR(starequal, "*=")`
     starequal,
-    // PUNCTUATOR(starstarequal, "**=")
+    /// `PUNCTUATOR(starstarequal, "**=")`
     starstarequal,
-    // PUNCTUATOR(percentequal, "%=")
+    /// `PUNCTUATOR(percentequal, "%=")`
     percentequal,
-    // PUNCTUATOR(slashequal, "/=")
+    /// `PUNCTUATOR(slashequal, "/=")`
     slashequal,
-    // PUNCTUATOR(lesslessequal, "<<=")
+    /// `PUNCTUATOR(lesslessequal, "<<=")`
     lesslessequal,
-    // PUNCTUATOR(greatergreaterequal, ">>=")
+    /// `PUNCTUATOR(greatergreaterequal, ">>=")`
     greatergreaterequal,
-    // PUNCTUATOR(greatergreatergreaterequal, ">>>=")
+    /// `PUNCTUATOR(greatergreatergreaterequal, ">>>=")`
     greatergreatergreaterequal,
-    // PUNCTUATOR(ampequal, "&=")
+    /// `PUNCTUATOR(ampequal, "&=")`
     ampequal,
-    // PUNCTUATOR(pipeequal, "|=")
+    /// `PUNCTUATOR(pipeequal, "|=")`
     pipeequal,
-    // PUNCTUATOR(ampampequal, "&&=")
+    /// `PUNCTUATOR(ampampequal, "&&=")`
     ampampequal,
-    // PUNCTUATOR(pipepipeequal, "||=")
+    /// `PUNCTUATOR(pipepipeequal, "||=")`
     pipepipeequal,
-    // PUNCTUATOR(questionquestionequal, "\?\?=")
+    /// `PUNCTUATOR(questionquestionequal, "\?\?=")`
     questionquestionequal,
-    // PUNCTUATOR(caretequal, "^=")
+    /// `PUNCTUATOR(caretequal, "^=")`
     caretequal,
-    // PUNCTUATOR(equalgreater, "=>")
+    /// `PUNCTUATOR(equalgreater, "=>")`
     equalgreater,
-    // PUNCTUATOR(at, "@")
+    /// `PUNCTUATOR(at, "@")`
     at,
 
-    // IDENT_OP(as_operator, "as", 8)
+    /// `IDENT_OP(as_operator, "as", 8)` — the contextual `as` cast operator.
+    /// The lexer scans `as` as an `identifier`; the parser reclassifies it
+    /// with `convert_cur_token_to_ident_op` where a cast is allowed.
     as_operator,
 
-    // TOK(numeric_literal, "number")
+    /// `TOK(numeric_literal, "number")` — the `f64` value is read back with
+    /// `Token::get_numeric_literal`.
     numeric_literal,
-    // TOK(string_literal, "string")
+    /// `TOK(string_literal, "string")` — `Token::get_string_literal` returns
+    /// the cooked value, with escapes already decoded.
     string_literal,
-    // TOK(regexp_literal, "regexp")
+    /// `TOK(regexp_literal, "regexp")` — `Token::get_regexp_literal` returns
+    /// the body and flags; the pattern itself is not validated by the lexer.
     regexp_literal,
-    // TOK(jsx_text, "JSX text")
+    /// `TOK(jsx_text, "JSX text")` — a run of literal JSX child text, only
+    /// produced by `JSLexer::advance_in_jsx_child`.
     jsx_text,
-    // TOK(bigint_literal, "bigint")
+    /// `TOK(bigint_literal, "bigint")` — a `123n` literal; the digits are
+    /// kept as text (`Token::get_bigint_literal`), never converted to `f64`.
     bigint_literal,
 
-    // TEMPLATE(no_substitution_template, "template literal")
+    /// `TEMPLATE(no_substitution_template, "template literal")` — a whole
+    /// template with no substitutions.
     no_substitution_template,
-    // TEMPLATE(template_head, "template literal start")
+    /// `TEMPLATE(template_head, "template literal start")` — the chunk up to
+    /// the first `${`.
     template_head,
-    // TEMPLATE(template_middle, "template literal resume")
+    /// `TEMPLATE(template_middle, "template literal resume")` — a chunk
+    /// between two substitutions.
     template_middle,
-    // TEMPLATE(template_tail, "template literal end")
+    /// `TEMPLATE(template_tail, "template literal end")` — the chunk after
+    /// the last substitution.
     template_tail,
 
-    // TOK(eof, "<eof>")
+    /// `TOK(eof, "<eof>")` — end of input; scanning again keeps returning it.
     eof,
-    // RANGE_MARKER(_last_token)
+    /// One past the last real token kind (`RANGE_MARKER(_last_token)`); its
+    /// ordinal plus one is [`NUM_JS_TOKENS`], the size of the token tables.
     _last_token,
 }
 

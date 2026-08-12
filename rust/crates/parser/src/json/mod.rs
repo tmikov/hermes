@@ -20,11 +20,17 @@ use atom_table::AtomBytes;
 /// Port of `JSONKind` (JSONParser.h:36).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum JSONKind {
+    /// A `{...}` object.
     Object,
+    /// A `[...]` array.
     Array,
+    /// A string literal.
     String,
+    /// A numeric literal.
     Number,
+    /// `true` or `false`.
     Boolean,
+    /// `null`.
     Null,
 }
 
@@ -70,11 +76,19 @@ impl<'a> JSONHiddenClass<'a> {
 /// the C++ `JSONValue*`: nodes live in a `bumpalo` arena; the variant replaces
 /// the kind tag + LLVM RTTI; arena identity gives pointer equality.
 pub enum JSONValue<'a> {
+    /// `null`. A singleton within a [`JSONFactory`].
     Null,
+    /// `true` or `false`. Two singletons within a [`JSONFactory`].
     Boolean(bool),
+    /// A number, already converted to `f64`. Uniqued by bit pattern, so
+    /// `-0.0` and `0.0` are distinct nodes.
     Number(f64),
+    /// A string, interned in the `AtomTable` and uniqued by that handle.
     String(AtomBytes),
+    /// An array, as an arena slice of its elements in source order.
     Array(&'a [&'a JSONValue<'a>]),
+    /// An object: the hidden class holding the sorted key names, plus the
+    /// values in the same order as `JSONHiddenClass::keys`.
     Object(&'a JSONHiddenClass<'a>, &'a [&'a JSONValue<'a>]),
 }
 
