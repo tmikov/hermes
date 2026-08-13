@@ -2605,7 +2605,10 @@ known to be caught.
 | M17 | `continue` is not terminating | **0** | 1 |
 | M18 | *(control)* `return` is terminating | 55 | 56 |
 
-**Eleven of eighteen decisions had zero witnesses in either corpus.** The
+**Twelve of eighteen decisions had zero witnesses in either corpus** (the
+table's twelve bold `0` rows: M1-M5, M10-M15, M17). They are closed by the
+**eleven** functions below, not twelve, because `switchBreak` pins both M11
+and M12 — see the per-function "Pins" column. The
 `M1` row is the one the reviewer found by hand: with that insert deleted the
 port reports `noImplicitReturn` for `function f(x) { if (x) return 1; }` —
 wrong, and confirmed wrong against the oracle — and **both differentials
@@ -2694,7 +2697,12 @@ added or removed.
 **Standing note for the next dump-format change.** Any commit that runs
 `update-lit` breaks this invariant again for every corpus file copied from a
 `test/Sema` lit file that dumps sema. Re-establish it in the same commit, and
-check with:
+check with the snippet below.
+
+**Known deliberate exception:** `type-alias-children.js` is expected to differ
+from its lit twin — it carries a prepended `// FLAGS: -parse-flow` line (row
+above, S4a T1), so it is verbatim-plus-one-line by design. The snippet reports
+it every time; that one is not a regression. Any *other* name it prints is.
 
 ```bash
 for f in rust/crates/sema/tests/sema_corpus/*.js; do
