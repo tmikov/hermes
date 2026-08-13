@@ -247,44 +247,64 @@ class CheckImplicitReturn {
   }
 
   // \return the termination result of a try statement.
+  // A try statement may have a handler, a finalizer, or both. In compile mode
+  // SemanticResolver rewrites the both-present form into nested try statements
+  // before this runs, but in parser mode (resolveASTForParser) it does not, so
+  // the node reaching here can still carry both children. The rewrite is only
+  // a restatement of the language semantics -- "try B catch H finally F" is
+  // "try { try B catch H } finally F" -- so the two cases are composed here in
+  // that same order rather than handled by a third rule.
   TerminationResult checkTerminationTryStatement(
       ESTree::TryStatementNode *node) {
-    auto tryRes = checkTermination(node->_block);
-
     assert(
-        !(node->_handler && node->_finalizer) &&
-        "try-catch-finally should have been transformed by SemanticResolver");
+        (node->_handler || node->_finalizer) &&
+        "try statement must have a handler or a finalizer");
+
+    // The result of the protected block together with its handler, i.e. of
+    // the inner "try B catch H" when both children are present.
+    TerminationResult innerRes = checkTermination(node->_block);
     if (node->_handler) {
-      // Both the try and catch must be terminating if there's no finalizer.
+      // Both the try and catch must be terminating for the pair to terminate.
       auto catchRes = checkTermination(
           llvh::cast<ESTree::CatchClauseNode>(node->_handler)->_body);
-      tryRes.targetLabels.insert(
+      innerRes.targetLabels.insert(
           catchRes.targetLabels.begin(), catchRes.targetLabels.end());
-      return tryRes;
-    } else {
-      auto finallyRes = checkTermination(node->_finalizer);
-      if (finallyRes.mustTerminate()) {
-        // If the finally block terminates, the try-finally will terminate after
-        // executing the finally.
-        return finallyRes;
-      }
-      if (tryRes.mustTerminate() && finallyRes.mustExecuteNextStatement()) {
-        // If the try definitely terminates and the finally can't break
-        // to another handler in this function, the try-finally will definitely
-        // terminate.
-        // However, we also check that the finally has no control flow
-        // that would prevent the try from being able to terminate, e.g.
-        //     label:
-        //       try { return 1; }
-        //       finally { break label; }
-        // needs to avoid this branch, which mustExecuteNextStatement checks.
-        return tryRes;
-      }
-      // Otherwise, we just combine the possible next points of the try-finally.
-      tryRes.targetLabels.insert(
-          finallyRes.targetLabels.begin(), finallyRes.targetLabels.end());
+    }
+
+    if (!node->_finalizer)
+      return innerRes;
+    return checkTerminationFinalizer(innerRes, node->_finalizer);
+  }
+
+  // \return the termination result of a try-finally whose protected part has
+  // the termination result \p tryRes and whose finalizer is \p finalizer.
+  // \p tryRes describes the whole "try B" or "try B catch H" that the finally
+  // protects, since the finalizer runs however that part completes.
+  TerminationResult checkTerminationFinalizer(
+      TerminationResult tryRes,
+      ESTree::Node *finalizer) {
+    auto finallyRes = checkTermination(finalizer);
+    if (finallyRes.mustTerminate()) {
+      // If the finally block terminates, the try-finally will terminate after
+      // executing the finally.
+      return finallyRes;
+    }
+    if (tryRes.mustTerminate() && finallyRes.mustExecuteNextStatement()) {
+      // If the try definitely terminates and the finally can't break
+      // to another handler in this function, the try-finally will definitely
+      // terminate.
+      // However, we also check that the finally has no control flow
+      // that would prevent the try from being able to terminate, e.g.
+      //     label:
+      //       try { return 1; }
+      //       finally { break label; }
+      // needs to avoid this branch, which mustExecuteNextStatement checks.
       return tryRes;
     }
+    // Otherwise, we just combine the possible next points of the try-finally.
+    tryRes.targetLabels.insert(
+        finallyRes.targetLabels.begin(), finallyRes.targetLabels.end());
+    return tryRes;
   }
 
   // \return the termination result of a switch statement, accounting for breaks
