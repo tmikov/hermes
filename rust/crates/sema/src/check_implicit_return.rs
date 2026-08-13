@@ -43,12 +43,13 @@
 //!   C++ mutates the AST in place, so `root->_body` is up to date by the
 //!   time the resolver reaches cpp:1953. This port rebuilds nodes instead
 //!   (see `resolver`'s module doc), and the function-like node the resolver
-//!   still holds at that point carries the *pre-visit* body — which for a
-//!   `try`/`catch`/`finally` has not been split into nested `try`s yet and
-//!   would trip [`CheckImplicitReturn::check_termination_try_statement`]'s
-//!   assert. So the caller passes the post-visit body and the
-//!   `dyn_cast<BlockStatementNode>` half of `getBlockStatement` happens
-//!   here.
+//!   still holds at that point carries the *pre-visit* body, with none of
+//!   the resolver's rewrites applied: an arrow's expression body is still an
+//!   expression rather than the `BlockStatement`
+//!   [`may_reach_implicit_return`] requires, and a `try`/`catch`/`finally`
+//!   has not been split into nested `try`s. So the caller passes the
+//!   post-visit body and the `dyn_cast<BlockStatementNode>` half of
+//!   `getBlockStatement` happens here.
 //! - **`LabelDecorationBase *` becomes a `u32`.**
 //!   `checkTerminationLoopOrLabeledStatement` takes the decoration base only
 //!   to call `getLabelIndex()` on it; every call site upcasts a statically
@@ -346,60 +347,82 @@ impl CheckImplicitReturn {
     }
 
     /// \return the termination result of a try statement.
+    /// A try statement may have a handler, a finalizer, or both. In compile
+    /// mode SemanticResolver rewrites the both-present form into nested try
+    /// statements before this runs, but in parser mode
+    /// (`resolve_ast_for_parser`) it does not, so the node reaching here can
+    /// still carry both children. The rewrite is only a restatement of the
+    /// language semantics — "try B catch H finally F" is
+    /// "try { try B catch H } finally F" — so the two cases are composed here
+    /// in that same order rather than handled by a third rule.
     fn check_termination_try_statement(
         &self,
         node: &TryStatement<'_>,
     ) -> TerminationResult {
-        let mut try_res = self.check_termination(node.block);
-
         debug_assert!(
-            !(node.handler.is_some() && node.finalizer.is_some()),
-            "try-catch-finally should have been transformed by \
-             SemanticResolver"
+            node.handler.is_some() || node.finalizer.is_some(),
+            "try statement must have a handler or a finalizer"
         );
+
+        // The result of the protected block together with its handler, i.e.
+        // of the inner "try B catch H" when both children are present.
+        let mut inner_res = self.check_termination(node.block);
         if let Some(handler) = node.handler {
-            // Both the try and catch must be terminating if there's no
-            // finalizer.
+            // Both the try and catch must be terminating for the pair to
+            // terminate.
             let catch_clause = handler
                 .as_catch_clause()
                 .expect("a TryStatement handler is a CatchClause");
             let catch_res = self.check_termination(catch_clause.body);
-            try_res.target_labels.extend(catch_res.target_labels);
-            try_res
-        } else {
-            // C++ passes `node->_finalizer` straight to `checkTermination`,
-            // which would dereference null if a `TryStatement` had neither a
-            // handler nor a finalizer; the parser never builds one.
-            let finalizer = node
-                .finalizer
-                .expect("a TryStatement has a handler or a finalizer");
-            let finally_res = self.check_termination(finalizer);
-            if finally_res.must_terminate() {
-                // If the finally block terminates, the try-finally will
-                // terminate after executing the finally.
-                return finally_res;
-            }
-            if try_res.must_terminate()
-                && finally_res.must_execute_next_statement()
-            {
-                // If the try definitely terminates and the finally can't
-                // break to another handler in this function, the try-finally
-                // will definitely terminate.
-                // However, we also check that the finally has no control
-                // flow that would prevent the try from being able to
-                // terminate, e.g.
-                //     label:
-                //       try { return 1; }
-                //       finally { break label; }
-                // needs to avoid this branch, which mustExecuteNextStatement
-                // checks.
-                return try_res;
-            }
-            // Otherwise, we just combine the possible next points of the
-            // try-finally.
-            try_res.target_labels.extend(finally_res.target_labels);
-            try_res
+            inner_res.target_labels.extend(catch_res.target_labels);
         }
+
+        // C++ passes `node->_finalizer` straight to `checkTermination` after
+        // the null test; here the `Option` is unwrapped by the `let else`,
+        // which is the same test. A `TryStatement` with neither child is what
+        // the assert above rules out; the parser never builds one.
+        let Some(finalizer) = node.finalizer else {
+            return inner_res;
+        };
+        self.check_termination_finalizer(inner_res, finalizer)
+    }
+
+    /// \return the termination result of a try-finally whose protected part
+    /// has the termination result \p try_res and whose finalizer is
+    /// \p finalizer.
+    /// \p try_res describes the whole "try B" or "try B catch H" that the
+    /// finally protects, since the finalizer runs however that part
+    /// completes.
+    fn check_termination_finalizer(
+        &self,
+        mut try_res: TerminationResult,
+        finalizer: &Node,
+    ) -> TerminationResult {
+        let finally_res = self.check_termination(finalizer);
+        if finally_res.must_terminate() {
+            // If the finally block terminates, the try-finally will
+            // terminate after executing the finally.
+            return finally_res;
+        }
+        if try_res.must_terminate() && finally_res.must_execute_next_statement()
+        {
+            // If the try definitely terminates and the finally can't
+            // break to another handler in this function, the try-finally
+            // will definitely terminate.
+            // However, we also check that the finally has no control
+            // flow that would prevent the try from being able to
+            // terminate, e.g.
+            //     label:
+            //       try { return 1; }
+            //       finally { break label; }
+            // needs to avoid this branch, which mustExecuteNextStatement
+            // checks.
+            return try_res;
+        }
+        // Otherwise, we just combine the possible next points of the
+        // try-finally.
+        try_res.target_labels.extend(finally_res.target_labels);
+        try_res
     }
 
     /// \return the termination result of a switch statement, accounting for

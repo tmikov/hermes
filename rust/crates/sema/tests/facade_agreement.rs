@@ -318,21 +318,6 @@ fn corpus(dir: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Corpus files the *parser* entry point cannot process at all, with the
-/// reason. Nothing to do with the façade: `sema-dump --parser-entry` aborts on
-/// these too, and so does the C++.
-///
-/// `try-catch-finally.js`: splitting `try`/`catch`/`finally` into nested
-/// `try`s is a `compile = true` rewrite, but `CheckImplicitReturn` runs
-/// unconditionally and asserts the split has happened
-/// (`CheckImplicitReturn.cpp:248-250`, called from
-/// `SemanticResolver.cpp:1957` with no `compile_` guard — the port reproduces
-/// both, `check_implicit_return.rs:338` and `resolver/functions.rs:1123`).
-/// So a function containing `try`/`catch`/`finally` trips a debug assert on
-/// the parser path in the C++ as well. The corpus that entry point is gated
-/// on (`sema_corpus_parser`) contains no such file.
-const PARSER_ENTRY_SKIP: &[&str] = &["try-catch-finally.js"];
-
 /// Run `f` on a thread with a large stack.
 ///
 /// Both the parser and the resolver are recursive descent over the source's
@@ -358,9 +343,6 @@ fn sweep(dir: &str, parser_entry: bool) -> usize {
         let Some(flags) = Flags::parse(&src) else {
             continue;
         };
-        if parser_entry && PARSER_ENTRY_SKIP.contains(&name.as_str()) {
-            continue;
-        }
         let want = low_level(&name, &src, flags, parser_entry);
         let got = facade(&name, &src, flags, parser_entry);
         assert_eq!(
@@ -396,10 +378,10 @@ fn sweep(dir: &str, parser_entry: bool) -> usize {
 #[test]
 fn agrees_on_the_compile_path() {
     let compared = on_big_stack(|| sweep("sema_corpus", false));
-    // 223 corpus files, minus the one selecting `-enable-eval=false`, which
+    // 224 corpus files, minus the one selecting `-enable-eval=false`, which
     // `ParseFlags` cannot express. A drop here means the sweep silently
     // stopped covering files.
-    assert_eq!(compared, 222, "corpus size changed");
+    assert_eq!(compared, 223, "corpus size changed");
 }
 
 /// `resolve_for_parser` == `resolve_ast_for_parser` wired by hand, over the
@@ -408,16 +390,20 @@ fn agrees_on_the_compile_path() {
 #[test]
 fn agrees_on_the_parser_path() {
     let compared = on_big_stack(|| sweep("sema_corpus_parser", true));
-    assert_eq!(compared, 14, "parser corpus size changed");
+    assert_eq!(compared, 16, "parser corpus size changed");
 }
 
 /// The parser corpus is small; run the compile-path comparison over it too,
 /// and the parser-path comparison over the big corpus, so neither entry point
-/// is only checked on 13 files.
+/// is only checked on 16 files.
 #[test]
 fn agrees_on_both_paths_over_both_corpora() {
-    assert_eq!(on_big_stack(|| sweep("sema_corpus_parser", false)), 14);
-    assert_eq!(on_big_stack(|| sweep("sema_corpus", true)), 221);
+    assert_eq!(on_big_stack(|| sweep("sema_corpus_parser", false)), 16);
+    // The same 223 the compile-path sweep covers: since upstream `5ae5260c8`
+    // (`CppDefectsFound.md` item 12) the parser entry no longer aborts on a
+    // `try`/`catch`/`finally` inside a function, so `try-catch-finally.js` —
+    // which this sweep used to have to skip — is swept like every other file.
+    assert_eq!(on_big_stack(|| sweep("sema_corpus", true)), 223);
 }
 
 /// Non-vacuity: the byte comparison the sweeps make can tell the two entry
@@ -436,9 +422,6 @@ fn discriminates_body() {
         let Some(flags) = Flags::parse(&src) else {
             continue;
         };
-        if PARSER_ENTRY_SKIP.contains(&name.as_str()) {
-            continue;
-        }
         total += 1;
         let compile = facade(&name, &src, flags, false);
         let parser = facade(&name, &src, flags, true);
@@ -458,7 +441,7 @@ fn discriminates_body() {
             std_globals_differs += 1;
         }
     }
-    assert_eq!(total, 221);
+    assert_eq!(total, 223);
     // Most files differ between the entry points (the compile path folds
     // constants, rewrites arrows, and rejects what it cannot compile).
     assert!(

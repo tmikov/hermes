@@ -51,6 +51,8 @@ live Imported table's current descriptions are kept synced to the current tree.
 | `with-statement.js` | `with (o) { x; }`. **Task 5 (defect-fix propagation).** Was the corpus's first landmine (see below): `Unresolver::visit` (`SemanticResolver.cpp:3206-3224`) marks the body's `x` unresolvable, and a DEBUG `sema-parser-dump` aborted on `getExpressionDecl`'s `assert(!node->isUnresolvable())` (`SemContext.h:559-561`) while this port printed ` UNR` — release C++'s behavior. Upstream `918158cb0` made the C++ dumper guard the call (`SemResolve.cpp:99-110`), so debug now matches release and both match the port. `with` is a `compile_`-gated error, so the DRIVER corpus can never dump a `with` body: this is the only pin for the ` UNR` flag reaching a dump at all, and for the `with` object staying resolved (`Id 'o' [D:E:…]`) because it lies outside the `Unresolver`'s root. Verified byte-identical: 312 bytes stdout both sides, empty stderr both sides, exit 0 both sides — an oracle-success file |
 | `anon-export-default.js` | `export default function () {}`. **Task 5 (defect-fix propagation).** The corpus's second landmine, and the other half of `918158cb0`. Rewrite #4 (`SemanticResolver.cpp:1539-1558`) is `compile_`-gated, so under this pair the anonymous `FunctionDeclaration` is never rewritten to a `FunctionExpression`; `visit(FunctionDeclarationNode*)` hoists it unconditionally (the hoist does not check for a name), so a null-`_id` function reaches the `hoistedFunction` printer. Both dumpers used to crash there — C++ on `llvh::cast`'s null check, this port on `print_scope`'s `.expect` — and both now print `hoistedFunction *default*` (`SemContext.cpp:493-501` / `dump_context.rs`'s `print_scope`). Verified byte-identical: 258 bytes stdout both sides, empty stderr both sides, exit 0 both sides — also an oracle-success file. `compile-false-basics.js` is its NAMED counterpart, which keeps printing `hoistedFunction f`, so `*default*` cannot be a blanket replacement |
 | `flow-match-implicit-return.js` | `// FLAGS: -parse-flow --Xparse-flow-match` + `test/Sema/flow/match-implicit-return.js` verbatim. **Upstream sync task 3** — see the section of that name at the end of this file. The ONLY pin anywhere for `CheckImplicitReturn`'s `MatchStatement` arm (upstream `653e49c60`), because compiling a match is now rejected outright (`90f4a3ac6`) and the driver corpus therefore can never dump one. Twelve one-decision functions; the dump's `Func` tokens are `mayReachImplicitReturn`/`noImplicitReturn` in exactly the order upstream's `CHECK` lines assert. Verified byte-identical: 11615 B stdout both sides, empty stderr both sides, exit 0 both sides — an oracle-success file |
+| `implicit-return-try-catch-finally.js` | `test/Sema/implicit-return-try-catch-finally.js` verbatim — the lit test upstream `5ae5260c8` added, flagless. **Upstream sync task 4** — see the section of that name at the end of this file. Upstream's file carries TWO RUN lines over ONE set of `CHECK` lines (`-dump-sema` and `-Xcompile=false -dump-sema`), so the same file is imported into BOTH corpora: the driver corpus pins the answers the resolver's split produces, this one pins the answers the UNSPLIT statement produces. The only pin anywhere for the three decisions `5ae5260c8` adds — under `compile = true` a `TryStatement` never reaches the checker with both children. Verified byte-identical: 7322 B stdout both sides, empty stderr both sides, exit 0 both sides — an oracle-success file. Also measured, not assumed, that this corpus's oracle really is upstream's second RUN line: `hermesc -Xcompile=false -dump-sema` and `sema-parser-dump` produce byte-identical stdout on it (7322 B, exit 0), and its 5 `mayReachImplicitReturn` / 2 `noImplicitReturn` tokens are the same ones the compile path prints |
+| `implicit-return-shapes.js` | Byte-identical copy of the driver corpus's authored `sema_corpus/implicit-return-shapes.js` (see `sema_corpus/MANIFEST.md`'s "Task-2 review round" for why it is authored rather than imported). **Upstream sync task 4.** Eleven one-decision `CheckImplicitReturn` shapes, none of which involves a `compile_`-gated rewrite, so the same source pins the same eleven decisions on the parser entry — where, before this task, eight of them had NO witness at all. Its dump is not the driver corpus's: no ambient declarations and no constant folding, so the file is a distinct comparison rather than a duplicate one. Verified byte-identical: 6772 B stdout both sides (vs 10288 B on the driver pair), empty stderr both sides, exit 0 both sides — an oracle-success file |
 | `flow-annotations.js` | `// FLAGS: -parse-flow` + `function f(x: number): number { return x; } var y = f(1);`. **S4a final review.** Was the corpus's only FLAGS-bearing file and its only Flow file until upstream sync task 3 added `flow-match-implicit-return.js`: the first exercise of the C++ tool's `if (parseFlow) ctx.setParseFlow(ParseFlowSetting::ALL)` branch, which was dead before it (spec §5 called for a flow seed here; it never shipped). The type annotations parse into type nodes the resolver walks past without declaring anything, so the dump is the same shape the untyped version would give (`f`/`y` `GlobalProperty`, `x` `Parameter`). The same review taught the C++ tool the `-parse-flow` spelling alongside `--parse-flow` — the FLAGS line is appended verbatim to BOTH binaries' argv, and hermesc's own spelling is the single dash. Resolves clean, so this is also an oracle-success file. Verified byte-identical: 630 bytes stdout both sides, empty stderr both sides, exit 0 both sides. |
 
 ## Pending (excluded from the walk — `pending/` subdirectory)
@@ -63,7 +65,7 @@ table above.
 
 ## Gate
 
-`sema differential (tests/sema_corpus_parser): 14 corpus files matched (6
+`sema differential (tests/sema_corpus_parser): 16 corpus files matched (8
 succeeded on the oracle)`.
 
 History: 7 → **11** files (+4, all from S4a's final review:
@@ -77,10 +79,13 @@ oracle-succeeded 3 → **5** (+2: BOTH new files resolve clean and exit 0 on
 both sides). Arithmetic: 11 + 2 = 13; 3 + 2 = 5. Then 13 → **14** (+1,
 upstream sync task 3: `flow-match-implicit-return.js`), oracle-succeeded
 5 → **6** (+1: it resolves clean and exits 0 on both sides). Arithmetic:
-13 + 1 = 14; 5 + 1 = 6.
+13 + 1 = 14; 5 + 1 = 6. Then 14 → **16** (+2, upstream sync task 4:
+`implicit-return-try-catch-finally.js`, `implicit-return-shapes.js`),
+oracle-succeeded 6 → **8** (+2: both resolve clean and exit 0 on both sides).
+Arithmetic: 14 + 2 = 16; 6 + 2 = 8.
 
 The non-degeneracy guard in `run_differential` (at least one oracle success)
-is satisfied six times over; the remaining eight are all legitimate
+is satisfied eight times over; the remaining eight are all legitimate
 error-path pins (oracle exit 2), same convention as
 `tests/sema_corpus/parse-error.js`.
 
@@ -363,4 +368,82 @@ caught by anything else in the workspace — this file is the only pin.
 
 ```
 sema differential (tests/sema_corpus_parser): 14 corpus files matched (6 succeeded on the oracle)
+```
+
+## Upstream sync task 4: try-catch-finally, and the parser-entry implicit-return survey
+
+Upstream `5ae5260c8` ("Handle try-catch-finally in CheckImplicitReturn",
+branch `private/export-D115669841`), cherry-picked here as `9b5025f89`, is the
+fix for `CppDefectsFound.md` **item 12**: `CheckImplicitReturn` handled a
+`try` with a handler OR with a finalizer, but not one with both, and the
+`SemanticResolver` rewrite that splits the combined form is gated on
+`compile_`. So the combined form reached the checker through
+`resolveASTForParser` — i.e. through THIS corpus's oracle — tripped the
+assert, and under NDEBUG ran the handler branch with the **finalizer
+ignored**.
+
+That makes this corpus the only place the fix is observable at all: on the
+compile path the split has already happened, so the checker never sees a
+`TryStatement` carrying both children. The task-2 review had already noted
+(section "Upstream sync task 2" above) that widening this corpus for
+implicit-return shapes was worth doing "when `5ae5260c8` lands"; it landed.
+
+### The survey: which `CheckImplicitReturn` decisions did this corpus pin?
+
+Same method as the driver corpus's task-2 survey (`sema_corpus/MANIFEST.md`):
+every decision in `check_implicit_return.rs` deleted or inverted in turn, one
+at a time, and `sema-dump --parser-entry` re-run over the whole corpus against
+a cached clean baseline. (The clean port matches the oracle byte-for-byte on
+every file here, so "differs from the oracle" and "differs from the clean
+port" are the same question.) `M18` is a control. `M19`–`M21` are the three
+decisions `5ae5260c8` introduces.
+
+| # | Decision deleted / inverted | Before | After |
+|---|---|---|---|
+| M1 | if-without-else: the `kNextStatementLabel` insert | **0** | 1 |
+| M2 | if-with-else: the alternate's target labels | **0** | 1 |
+| M3 | do-while's `must_execute = true` | **0** | 1 |
+| M4 | labeled statement's `must_execute = true` | 1 | 2 |
+| M5 | loop: break-to-own-label becomes a continuation | 1 | 3 |
+| M6 | loop: the next-statement label insert | 1 | 3 |
+| M7 | statement list: the fall-through erase | 1 | 1 |
+| M8 | statement list: the ran-off-the-end label | 2 | 3 |
+| M9 | statement list: stop scanning after a terminator | 2 | 4 |
+| M10 | switch: `found_default` | **0** | 1 |
+| M11 | switch: `found_explicit_break` | **0** | 1 |
+| M12 | switch: the past-the-switch label insert | **0** | 1 |
+| M13 | switch: the per-case fall-through erase | **0** | 1 |
+| M14 | try/catch: the catch clause's target labels | **0** | 2 |
+| M15 | try/finally: the terminating-finally shortcut | **0** | 2 |
+| M16 | try/finally: the terminating-try shortcut | **0** | 1 |
+| M17 | `continue` is not terminating | **0** | 1 |
+| M18 | *(control)* `return` is terminating | 2 | 4 |
+| M19 | try-catch-finally: the finalizer half (the pre-fix *release* behavior) | **0** | 1 |
+| M20 | try-catch-finally: the handler half | **0** | 1 |
+| M21 | try-catch-finally: handler-then-finalizer *order* | **0** | 1 |
+
+**Before: 14 of the 21 decisions had zero witnesses here** (M1-M3, M10-M17,
+M19-M21) — the corpus pinned 7. **After: none does.** The two new files close
+them: `implicit-return-shapes.js` closes M1-M3, M10-M14, M15, M17, and
+`implicit-return-try-catch-finally.js` closes M14-M16 and M19-M21.
+
+M19-M21 measured **0 on the driver corpus too**, over all 224 of its files —
+and that is structural, not a gap: the `compile_`-gated split at
+`SemanticResolver.cpp:794` means the combined form never reaches the checker
+there. Without this corpus, nothing in the workspace would catch the exact
+regression item 12 describes.
+
+M21 is worth spelling out because it is the subtle one: reversing the
+composition (finalizer over the block first, then the catch labels unioned on
+top) changes the answer for exactly one of the six upstream functions,
+`finallyReturns` — `try { g(); } catch (e) { g(); } finally { return 1; }`.
+Handler-first, the terminating finalizer wins and the function is
+`noImplicitReturn`; finalizer-first, the handler's fall-through is unioned on
+*after* the shortcut fired and the function wrongly becomes
+`mayReachImplicitReturn`. The other five agree under either order.
+
+### Gate
+
+```
+sema differential (tests/sema_corpus_parser): 16 corpus files matched (8 succeeded on the oracle)
 ```

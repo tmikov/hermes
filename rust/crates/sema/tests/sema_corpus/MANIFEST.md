@@ -2790,3 +2790,62 @@ sema differential (tests/sema_corpus):        223 corpus files matched (110 succ
 sema differential (tests/sema_corpus_parser):  14 corpus files matched (6 succeeded on the oracle)
 test result: ok. 3 passed; 0 failed
 ```
+
+## Upstream sync task 4: try-catch-finally in `CheckImplicitReturn`
+
+Upstream `5ae5260c8` ("Handle try-catch-finally in CheckImplicitReturn",
+branch `private/export-D115669841`), cherry-picked here as `9b5025f89`. It is
+the fix for `CppDefectsFound.md` **item 12**, which this port found on
+2026-08-12. The commit only ADDS a test file, so `update-lit` was not run and
+the corpus/lit verbatim invariant above was not disturbed (re-checked with the
+snippet: `type-alias-children.js` alone, the documented exception).
+
+### New import
+
+| File | Note |
+|---|---|
+| `implicit-return-try-catch-finally.js` | `test/Sema/implicit-return-try-catch-finally.js` verbatim (no FLAGS line — its own RUN lines are plain `-dump-sema` and `-Xcompile=false -dump-sema`). Six one-decision functions over a `try` carrying BOTH a handler and a finalizer. In THIS corpus the resolver has already split them (`SemanticResolver.cpp:794`), so the file pins the *split* answers: `hermesc -dump-sema` exit 0, stdout 12008 B, stderr 0 B, byte-identical to `sema-dump`. The same file is also in the parser corpus, where it pins the *unsplit* answers — that is upstream's second RUN line, and the two sets of `Func` tokens are identical (5 `mayReachImplicitReturn`, 2 `noImplicitReturn`), which is exactly what upstream's single set of `CHECK` lines asserts |
+
+### The combined form is unreachable on this path — by construction
+
+Three mutations of the new `checkTerminationTryStatement` composition were run
+over this corpus (all 224 files, then reverted):
+
+| # | Mutation | Driver corpus | Parser corpus |
+|---|---|---|---|
+| M19 | the finalizer half dropped when a handler is present (the pre-fix *release* behavior — the finalizer silently ignored) | **0** | 1 |
+| M20 | the handler half dropped when a finalizer is present | **0** | 1 |
+| M21 | the two rules composed in the other order (finalizer over the block, then the catch labels unioned on top) | **0** | 1 |
+
+The zeros are not a coverage gap that a bigger corpus would close: under
+`compile = true` a `TryStatement` never reaches `CheckImplicitReturn` with
+both children, because the split at `SemanticResolver.cpp:794` has already
+happened. The three decisions `5ae5260c8` adds are observable **only** through
+the parser entry, so the parser corpus is where they are pinned — see
+`sema_corpus_parser/MANIFEST.md`.
+
+The other eighteen decisions (the `M1`–`M18` of the task-2 survey above) were
+re-measured over the grown corpus and every one still has at least one witness:
+1, 1, 1, 1, 2, 3, 38, 20, 58, 1, 1, 1, 1, 2, 2, 2, 1, 57 in `M1`…`M18` order.
+
+### Gate
+
+Corpus size **223 → 224** (+1, `implicit-return-try-catch-finally.js`);
+oracle successes **110 → 111** (+1 — it resolves clean, exit 0). Arithmetic:
+223 + 1 = 224; 110 + 1 = 111. The parser corpus moves 14 → 16 (6 → 8); see
+its own MANIFEST.
+
+```
+sema differential (tests/sema_corpus):        224 corpus files matched (111 succeeded on the oracle)
+sema differential (tests/sema_corpus_parser):  16 corpus files matched (8 succeeded on the oracle)
+test result: ok. 3 passed; 0 failed
+```
+
+### Façade sweep
+
+`facade_agreement.rs`'s hardcoded corpus sizes moved 222 → **223** (224 files
+minus `flags-enable-eval-off.js`, whose flag `ParseFlags` cannot express),
+14 → **16**, and the parser-path sweep over THIS corpus 221 → **223**: it
+gained the new file *and* the file it used to skip. `PARSER_ENTRY_SKIP` —
+which existed only because of item 12 — is deleted, along with its use in
+`sweep` and in `discriminates_body` (whose `total` moves 221 → 223).

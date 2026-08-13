@@ -1597,8 +1597,8 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // to whatever the enclosing scopes offer (an
             // `UndeclaredGlobalProperty` at global scope). That is
             // observable, not assumed — `sema_corpus_parser/
-            // match-implicit-return.js`'s dump shows `const a => …`'s `a`
-            // exactly that way.
+            // flow-match-implicit-return.js`'s dump shows `const a => …`'s
+            // `a` exactly that way.
             n if n.is_match_pattern() => node.visit_children_mut(gc, self),
             Node::MatchStatementCase(_)
             | Node::MatchExpressionCase(_)

@@ -30,7 +30,7 @@ use hermes_parser::js::JSParserImpl;
 use hermes_parser::lexer::{GrammarContext, JSLexer};
 use hermes_sema::ids::FunctionInfoId;
 use hermes_sema::keywords::Keywords;
-use hermes_sema::resolve::resolve_ast;
+use hermes_sema::resolve::{resolve_ast, resolve_ast_for_parser};
 use hermes_sema::sem_context::SemContext;
 use hermes_support::manager::SourceErrorManager;
 
@@ -93,6 +93,23 @@ fn flag(src: &str) -> bool {
 /// that no case below depends on how unresolved globals are treated.
 fn body_flag(body: &str) -> bool {
     flag(&format!("var x, y, o;\nfunction f() {{\n{body}\n}}\n"))
+}
+
+/// [`body_flag`] through the PARSER entry point (`resolve_ast_for_parser`,
+/// `compile = false`) instead of `resolve_ast`. None of the resolver's AST
+/// rewrites runs on that path, so the analysis sees the source's own shapes.
+fn body_flag_parser_entry(body: &str) -> bool {
+    let src = format!("var x, y, o;\nfunction f() {{\n{body}\n}}\n");
+    let mut ctx = Context::new();
+    let gc = ctx.lock();
+    let mut sm = SourceErrorManager::new();
+    let root = parse(&gc, &mut sm, &src);
+    let mut sem_ctx = SemContext::new(Keywords::new(&gc));
+    resolve_ast_for_parser(&gc, &mut sem_ctx, &mut sm, root);
+    assert_eq!(sm.error_count(), 0, "unexpected resolution errors in: {src}");
+    assert!(sem_ctx.functions_len() >= 2, "no function in: {src}");
+    let id = FunctionInfoId::from_sema_id(hermes_ast::SemaId(1));
+    sem_ctx.function(id).may_reach_implicit_return
 }
 
 /// Runs a table of `(body, expected)` rows through [`body_flag`].
@@ -396,20 +413,59 @@ fn a_finalizer_that_breaks_out_defeats_the_terminating_try() {
     ]);
 }
 
+/// The try-catch-finally shapes and their answers, shared by the compile-path
+/// and parser-path tests below — which is the point: the two paths reach them
+/// through different code and must agree, exactly as upstream's
+/// `test/Sema/implicit-return-try-catch-finally.js` asserts by running its
+/// one set of `CHECK` lines under both `-Xcompile` settings.
+const TRY_CATCH_FINALLY_SHAPES: &[(&str, bool)] = &[
+    (
+        "try { return 1; } catch (e) { return 2; } finally { return 3; }",
+        false,
+    ),
+    ("try { return 1; } catch (e) { return 2; } finally { }", false),
+    ("try { return 1; } catch (e) { } finally { }", true),
+    ("try { } catch (e) { } finally { }", true),
+    // The finalizer wins over a handler that falls through (cpp:287-291).
+    ("try { x; } catch (e) { x; } finally { return 1; }", false),
+    // `break` out of the finalizer defeats the terminating pair
+    // (cpp:292-303), so what follows the label is reachable.
+    (
+        "L: { try { return 1; } catch (e) { return 2; } finally { break L; } }",
+        true,
+    ),
+    (
+        "L: { try { return 1; } catch (e) { return 2; } \
+         finally { if (x) break L; } }",
+        true,
+    ),
+];
+
 #[test]
 fn try_catch_finally_is_analyzed_after_the_resolver_rewrite() {
     // SemanticResolver.cpp:771-811 turns these into
     // `try { try {} catch {} } finally {}` before the analysis runs, so the
     // outer statement is a try-finally over a block holding a try-catch.
-    check_bodies(&[
-        (
-            "try { return 1; } catch (e) { return 2; } finally { return 3; }",
-            false,
-        ),
-        ("try { return 1; } catch (e) { return 2; } finally { }", false),
-        ("try { return 1; } catch (e) { } finally { }", true),
-        ("try { } catch (e) { } finally { }", true),
-    ]);
+    check_bodies(TRY_CATCH_FINALLY_SHAPES);
+}
+
+#[test]
+fn try_catch_finally_gives_the_same_answers_unsplit() {
+    // The parser entry point (`compile = false`) does NOT run that rewrite,
+    // so `check_termination_try_statement` meets a `TryStatement` carrying
+    // BOTH children and composes the two rules itself (cpp:257-277,
+    // upstream `5ae5260c8`). Before that fix this shape tripped the assert
+    // the composition replaced, and under NDEBUG silently dropped the
+    // finalizer — `CppDefectsFound.md` item 12. The answers must be the same
+    // ones the split form gives above.
+    for (body, expected) in TRY_CATCH_FINALLY_SHAPES {
+        assert_eq!(
+            body_flag_parser_entry(body),
+            *expected,
+            "parser-entry mayReachImplicitReturn of \
+             `function f() {{ {body} }}`"
+        );
+    }
 }
 
 // ---- The wiring (SemanticResolver.cpp:1939-1944) ------------------------
