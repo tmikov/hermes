@@ -19,8 +19,9 @@ explicit pin that *asserts the buggy behavior* (so silent drift is caught). If a
 defect is fixed in C++, flip the corresponding pin (named per item) in the same
 change.
 
-**Update (2026-08-10):** all 11 items were fixed upstream on the 2026-08-08
-branch, then cherry-picked into this branch (11 upstream commits, Task 1 of
+**Update (2026-08-10; item count superseded — see the 2026-08-13 update
+below, which closes a twelfth item):** all 11 items *known at the time* were
+fixed upstream on the 2026-08-08 branch, then cherry-picked into this branch (11 upstream commits, Task 1 of
 `doc/superpowers/plans/2026-08-10-cpp-defect-fixes-propagation.md`) and
 mirrored into the Rust port across four Rust tasks the same day (parser:
 JSX/match/JSON; resolver: promoter/dead-code/async-export/export-wording;
@@ -81,7 +82,7 @@ cmake-build-asan/bin/sema-parser-dump /tmp/bug2.js
 **Root cause:** under `compile = false` the anonymous-default-export rewrite
 (item 6) does not run, so a hoisted `FunctionDeclaration` with `_id == nullptr`
 lands on `LexicalScope::hoistedFunctions`; `SemContextDumper::printScope`
-(`lib/Sema/SemContext.cpp:493-494`) does an unconditional
+(`lib/Sema/SemContext.cpp:501`) does an unconditional
 `llvh::cast<ESTree::IdentifierNode>(fd->_id)`. The driver's `-dump-sema` path
 can't reach this (it runs `compile = true`, and plain-mode export errors suppress
 the dump), which is why it survived.
@@ -94,9 +95,11 @@ carries the landmine row.
 2026-08-10 as `179fb8ca3`.
 **Pin flipped:** `dump_context.rs`'s `print_scope` no longer `.expect()`s a
 hoisted `FunctionDeclaration`'s id; on `None` it now prints `*default*`,
-matching the C++ fix's `SemContext.cpp:493-501`. Live corpus pin (previously
-excluded, now imported): `sema_corpus_parser/anon-export-default.js`. Rust
-mirror commit `400f108ae` (Task 5 of the propagation plan).
+matching the C++ fix's `SemContext.cpp:496-504`. Live corpus pin (previously
+excluded, now imported): `sema_corpus_parser/parser-mode-export-default-anon.js`
+(upstream's own lit file since the 2026-08-13 sync task 5; it was an authored
+`anon-export-default.js` before that). Rust mirror commit `400f108ae` (Task 5
+of the propagation plan).
 
 ---
 
@@ -112,7 +115,7 @@ cmake-build-asan/bin/sema-parser-dump /tmp/bug3.js
 #    SIGABRT, exit 134
 ```
 
-**Root cause:** the `Unresolver` (`lib/Sema/SemanticResolver.cpp:3192-3206`)
+**Root cause:** the `Unresolver` (`lib/Sema/SemanticResolver.cpp:3222-3236`)
 stores a null expression decl and sets `unresolvable`; the dumper's
 `enter(IdentifierNode*)` (`lib/Sema/SemResolve.cpp:96-102`) then calls
 `getExpressionDecl` (`SemContext.h:557`), whose debug assert at `:559` rejects
@@ -133,8 +136,9 @@ deviation argued at `rust/crates/sema/src/dump.rs:82-101`.
 port, and the "deliberately reproduces Release behavior" argument at
 `dump.rs:82-101` is rewritten to record the guard as *matching* upstream,
 not diverging from it. Live corpus pin (previously excluded, now imported):
-`sema_corpus_parser/with-statement.js`. Rust mirror commit `400f108ae`
-(Task 5).
+`sema_corpus_parser/parser-mode-with-statement.js` (upstream's own lit file
+since the 2026-08-13 sync task 5; it was an authored `with-statement.js`
+before that). Rust mirror commit `400f108ae` (Task 5).
 
 ---
 
@@ -146,7 +150,7 @@ not diverging from it. Live corpus pin (previously excluded, now imported):
 printf 'class C { x = class {}; }\n' > /tmp/bug4.js
 cmake-build-asan/bin/hermesc -dump-sema /tmp/bug4.js
 # => Assertion `processedCount == f.getScopes().size() && "not all scopes were
-#    visited"' failed.   (SemContext.cpp:478)
+#    visited"' failed.   (SemContext.cpp:481)
 #    SIGABRT, exit 134
 ```
 
@@ -189,7 +193,7 @@ cmake-build-asan/bin/hermesc -dump-sema /tmp/bug5.js
 #    SIGABRT, exit 134
 ```
 
-**Root cause:** `lib/Sema/SemanticResolver.cpp:1166-1167` does
+**Root cause:** `lib/Sema/SemanticResolver.cpp:1171-1172` does
 `llvh::cast<IdentifierNode>(methodCallee->_property)`, but a non-computed member
 expression's property may be a `PrivateName`.
 
@@ -227,14 +231,14 @@ cmake-build-asan/bin/hermesc -commonjs -dump-sema /tmp/bug6b.js
 ```
 
 **Root cause:** the anonymous-default-export rewrite
-(`lib/Sema/SemanticResolver.cpp:1526-1544`, "change it to a FunctionExpression
+(`lib/Sema/SemanticResolver.cpp:1540-1558`, "change it to a FunctionExpression
 node for cleaner IRGen") passes a literal **`/* async */ false`** at `cpp:1538`
 instead of `funcDecl->_async`. The rewritten `FunctionExpression` is then visited
 as non-async, so its own `await` is rejected; an awaitless async body compiles as
 a sync function (the returned value would not be a Promise).
 
 **Suggested fix:** pass `funcDecl->_async` (and confirm `_generator` really is
-intended to be forwarded, which it is at cpp:1537).
+intended to be forwarded, which it is at cpp:1551).
 
 **Port pin:** `rust/crates/sema/tests/resolver.rs:2602`
 (`export_default_anonymous_function_is_rewritten_to_an_expression`) asserts the
@@ -301,7 +305,7 @@ cmake-build-asan/bin/hermesc -dump-sema /tmp/bug8.js
 #    1:13: error: 'export' statement requires CommonJS module mode
 ```
 
-`ExportNamed`/`ExportDefault` (cpp:1511/1520) say "module mode";
+`ExportNamed`/`ExportDefault` (cpp:1525/1534) say "module mode";
 `ExportAll` (cpp:1553) says "CommonJS module mode". Cosmetic; the port preserves
 both strings exactly (`resolver/modules.rs`).
 
@@ -355,10 +359,18 @@ imported into the corpus (previously Deferred). Rust mirror commit
   `promoter.rs`'s write-only `new_decls`/`ScopeDecls::new()`/two `push`
   sites are gone, and the module doc's header quote now ends with the
   corrected upstream sentence. Rust mirror commit `044b815d1` (Task 3).
-- **`SemanticResolver.cpp:1931-1937`:** `if (false && localEval)` — permanently
-  dead branch (the port's `unresolver.rs` documents it). **Not part of the
-  11 upstream fixes** — this dead branch is untouched by the 2026-08-08
-  cherry-picks and remains dead in both C++ and Rust.
+- **`SemanticResolver.cpp:1960-1967`:** the local-`eval` `Unresolver` call —
+  a permanently dead branch (the port's `unresolver.rs` documents it). **Not
+  part of the 12 upstream fixes** — it is not a defect, just dead code, and
+  it remains dead in both C++ and Rust. Its *spelling* has moved, though:
+  upstream briefly hid it behind `#if 0` to silence a Windows clang17
+  `-Wunreachable-code` warning (`D113782482`) and then backed that out
+  (`6fbc3706d`, cherry-picked here 2026-08-13 as `2fde4d88c`), landing on
+  `if ((false)) if (…)` — doubled parentheses marking the constant as
+  deliberate. The port's `resolver/functions.rs` mirrors that nesting. The
+  sibling dead block, the `arguments` redeclaration at
+  `SemanticResolver.cpp:2454-2461`, took the same round trip (`8f9e357fd`,
+  here `de41b2056`) and is mirrored in `resolver/declarations.rs`.
 - **`JSParserImpl-jsx.cpp:493`:** the `isa<MemberExpressionNode>` check is dead —
   `JSXMemberExpression` derives from the `JSX` base, not `MemberExpression`
   (found in parser phase P8; mirrored harmlessly).
@@ -437,7 +449,7 @@ printf 'function f() { try {} catch (e) {} finally {} }\n' > /tmp/bug12.js
 cmake-build-asan/bin/sema-parser-dump /tmp/bug12.js
 # => Assertion `!(node->_handler && node->_finalizer) && "try-catch-finally
 #    should have been transformed by SemanticResolver"' failed.
-#    (lib/Sema/CheckImplicitReturn.cpp:250)   SIGABRT, exit 134
+#    (lib/Sema/CheckImplicitReturn.cpp:259)   SIGABRT, exit 134
 ```
 
 Top-level `try/catch/finally` does **not** trip it — the check runs per
@@ -447,7 +459,7 @@ function, so the statement must be inside a function body. The stock
 **Root cause:** `SemanticResolver` splits `try { } catch { } finally { }` into
 nested try-catch/try-finally, but the split is gated on `compile_`
 (`lib/Sema/SemanticResolver.cpp:794`). The `mayReachImplicitReturn` call that
-runs `CheckImplicitReturn` (~`SemanticResolver.cpp:1950-1957`) is **not**
+runs `CheckImplicitReturn` (~`SemanticResolver.cpp:1969-1974`) is **not**
 gated, so under `compile = false` the checker meets an unsplit
 try-catch-finally and hits the assert its invariant assumes away.
 
@@ -512,10 +524,10 @@ each item above for its `Fixed upstream`/`Pin flipped` lines.
 | # | Input | Effect | Site | Release behavior | Fixed upstream (in-tree) |
 |---|-------|--------|------|------------------|---------------------------|
 | 1 | `using` + block fn | abort | ScopedFunctionPromoter.cpp:255-262 | treated as `var` | `4ad67c992` (`e4408f849`) |
-| 2 | anon export default via parser entry + dump | abort | SemContext.cpp:493-494 | crash (null deref) or UB — untested | `918158cb0` (`179fb8ca3`) |
+| 2 | anon export default via parser entry + dump | abort | SemContext.cpp:501 | crash (null deref) or UB — untested | `918158cb0` (`179fb8ca3`) |
 | 3 | `with` via parser entry + dump | abort | SemContext.h:559 | prints ` UNR`, fine | `918158cb0` (`179fb8ca3`) |
-| 4 | `class C { x = class {}; }` | abort | SemContext.cpp:478 | dump silently wrong/partial — untested | `dee8c5ce0` (`b351e1184`, `48d221fb2`) |
-| 5 | `$SHBuiltin.#x()` | abort | SemanticResolver.cpp:1166-1167 | UB cast — untested | `07efab88d` (`416aafcd2`) |
+| 4 | `class C { x = class {}; }` | abort | SemContext.cpp:481 | dump silently wrong/partial — untested | `dee8c5ce0` (`b351e1184`, `48d221fb2`) |
+| 5 | `$SHBuiltin.#x()` | abort | SemanticResolver.cpp:1171-1172 | UB cast — untested | `07efab88d` (`416aafcd2`) |
 | 6 | anon `export default async function` (`-commonjs`) | **wrong semantics** | SemanticResolver.cpp:1538 | same (not assert-gated) | `6b59daf0d` (`4a0fe2bfd`) |
 | 7 | deep JSON | stack overflow | JSONParser.cpp | same | `304c1533c` (`b21856de4`, `0b8bbd1fc`) |
 | 8 | export outside module mode | wording | cpp:1511/1553 | same | `f90a83146` (`4193b558a`) |
@@ -523,7 +535,8 @@ each item above for its `Fixed upstream`/`Pin flipped` lines.
 | 10a | `ScopedFunctionPromoter` dead `newDecls` | dead code | ScopedFunctionPromoter.cpp:174-206 | same | `9232443cf` (`ffcdbdd52`) |
 | 10c | `JSParserImpl-jsx.cpp:493` dead `isa<MemberExpressionNode>` | dead code (was harmless) | jsx.cpp:493 | same | `37520ccef` (`51035e8c2`) |
 | 11 | `match` binding pattern, bad token | abort | JSLexer.h:160 | untested | `550aafe33` (`bfeeb404f`) |
-| 12 | `try/catch/finally` in a function, parser entry | abort | CheckImplicitReturn.cpp:250 | **wrong answer** (finalizer ignored) | `5ae5260c8` (`9b5025f89`) |
+| 12 | `try/catch/finally` in a function, parser entry | abort | CheckImplicitReturn.cpp:259 | **wrong answer** (finalizer ignored) | `5ae5260c8` (`9b5025f89`) |
 
-(Item 10b, `SemanticResolver.cpp:1931-1937`'s `if (false && localEval)`, is
-not part of the 11 fixes and remains open/dead in both languages.)
+(Item 10b, `SemanticResolver.cpp:1960-1967`'s local-`eval` branch, is not a
+defect and not part of the fixes; it remains dead in both languages, now
+spelled `if ((false))` on both sides.)

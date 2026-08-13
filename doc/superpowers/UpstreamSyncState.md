@@ -17,13 +17,27 @@ upstream fixes are ported.
 | **Plus** | `04f1f53a8` (`-Xcompile` + dump `mayReachImplicitReturn`), cherry-picked 2026-08-13 as `1e3806f47`, mirrored in the port by `de917f249` |
 | **Plus** | the three Flow-`match` fixes `653e49c60`/`90f4a3ac6`/`ca6de21ce`, cherry-picked 2026-08-13 as `acf86bf51`/`502bbc7d3`/`be443ad10`, mirrored in the port by the task-3 commit |
 | **Plus** | `5ae5260c8` (try-catch-finally in `CheckImplicitReturn`, `CppDefectsFound.md` item 12), cherry-picked 2026-08-13 as `9b5025f89`, mirrored in the port by `2253b7331` — **from `private/export-D115669841`, not from `static_h`**; see below |
+| **Plus** | `6fbc3706d` + `8f9e357fd` (back out the two `#if 0` guards around permanently-dead blocks, restoring `if ((false))`), cherry-picked 2026-08-13 as `2fde4d88c`/`de41b2056` — no Rust behavior change; the port mirrors the new nesting and its citations were re-verified |
+| **Plus** | `26872f6e9` (move the parser-mode semDump unit tests to lit), cherry-picked 2026-08-13 as `c5266734b`; the port replaced its two AUTHORED parser-entry corpus files with upstream's lit files |
 | **Upstream `static_h` HEAD at time of writing** | `2d3e9018b` (2026-08-13) |
 | **Commits between fork point and upstream HEAD** | 147 (105 of them predate the local `static_h` ref at `5dfe740ad`) |
 
-The port's C++ tree is **not equal to any single upstream commit**: it is the
-fork point plus sixteen cherry-picks. The 132 other commits in
-`60b5c73db..origin/static_h` are unported, but all but three are irrelevant to
-the front end (VM, GC, debugger, JSI, build). See the backlog below.
+The port's C++ tree is **not equal to any single upstream commit**, and this is
+the fact this file exists to state plainly: it is the fork point `60b5c73db`
+plus **nineteen** cherry-picks — the 11 defect fixes of 2026-08-10 (two of
+them corrected on 2026-08-13), then `04f1f53a8`, the three Flow-`match` fixes,
+`5ae5260c8`, `6fbc3706d`, `8f9e357fd` and `26872f6e9`. Eighteen of those
+nineteen are in `origin/static_h`; **`5ae5260c8` is not** — it came from
+`private/export-D115669841`, so the tree runs one commit AHEAD of upstream's
+mainline (see the section below, and do not re-apply it at the next sync).
+
+**Residual gap:** every commit in `60b5c73db..origin/static_h` that touches the
+ported front end (`lib/{Parser,Sema,AST}`, `include/hermes/{Parser,Sema,AST}`,
+`SourceErrorManager`, or the front-end tests) is now ported — the backlog table
+below has no open rows. The 129 other commits in that range are unported and
+are all irrelevant to the front end (VM, GC, debugger, JSI, build). So the gap
+is exactly: *fork point + 19 cherry-picks* vs *`2d3e9018b`*, differing only in
+components this port does not cover, plus the one commit where the port leads.
 
 ### The 11 cherry-picked defect fixes
 
@@ -71,7 +85,7 @@ mirroring a variant upstream no longer has:
    exactly, and the Rust mirror with them. **The reorder changes nothing
    observable**, and the "it decides which scope the `arguments` decl lands
    in" reasoning that motivated the row was wrong: `declareArguments()`
-   (`SemanticResolver.h:348-353`) puts the `Decl` in
+   (`SemanticResolver.h:350-355`) puts the `Decl` in
    `argumentsFunc->getScopes().front()` — a *function*-derived scope, chosen
    inside `SemContext::funcArgumentsDecl` — and its `Binding` in the current
    *binding-table* scope, which `SaveAndRestore<LexicalScope *> curScope_`
@@ -129,14 +143,73 @@ tests, minus the 11 above. (`b70dd7942` touches `include/hermes/Support` but is
 | ~~`653e49c60`~~ | Handle Flow `match` in `CheckImplicitReturn` (+61 lines) | **DONE 2026-08-13** (`acf86bf51` + the Rust mirror). `check_implicit_return.rs` gained the `MatchStatement` arm, `check_termination_match_statement` and `is_irrefutable_match_pattern`. Pinned by `sema_corpus_parser/flow-match-implicit-return.js` — the parser corpus, because `90f4a3ac6` makes the driver path reject a match before it can be dumped. Six mutations of the new code, each caught by that one file; see `sema_corpus_parser/MANIFEST.md`. |
 | ~~`90f4a3ac6`~~ | Reject Flow `match` when compiling: new `visit(MatchStatement/MatchExpression)` emitting "match statements/expressions are unsupported" under `compile_` | **DONE 2026-08-13** (`502bbc7d3` + the Rust mirror). `resolver/statements.rs`'s `visit_match_statement` and `resolver/expressions.rs`'s `visit_match_expression`, plus children-walk arms for the sixteen match sub-grammar kinds — before this the resolver PANICKED on any `match`. Pinned in both directions: `sema_corpus/flow-match-unsupported.js` (errors present) and `sema_corpus_parser/flow-match-implicit-return.js` (the `compile_` gate, i.e. errors absent). |
 | ~~`ca6de21ce`~~ | Parser: check the parsed value of a match object property (`if (!optPattern) return false;`) | **DONE 2026-08-13** (`be443ad10`). **Nothing to change in the port:** its call site is `self.parse_match_pattern_flow()?` and `?` IS the added check, so this port never had the defect. Cited at the site and pinned by `sema_corpus/flow-match-pattern-object-{value,binding}-error.js` plus `parser/tests/upstream_defect_fixes.rs`. |
-| `26872f6e9` | Moves the parser-mode semDump unit tests to lit (`test/Sema/parser-mode-*.js`) | Optional: upstream now has real files for the two shapes this port had to author (`sema_corpus_parser/{anon-export-default,with-statement}.js`); they can be replaced with upstream imports. |
-| `6fbc3706d` | Backs out `#if 0` around the dead local-eval block → `if ((false))` | Dead in both forms; check the port's comments/citations (`CppDefectsFound.md` item 10b). |
-| `8f9e357fd` | Reverts `#if 0` around the dead `arguments` block → `if ((false))` | Same class. |
+| ~~`26872f6e9`~~ | Moves the parser-mode semDump unit tests to lit (`test/Sema/parser-mode-*.js`) | **DONE 2026-08-13** (`c5266734b`, sync task 5). Upstream now has real files for the two shapes this port had to author, so `sema_corpus_parser/{with-statement,anon-export-default}.js` were REPLACED by verbatim imports of `test/Sema/parser-mode-{with-statement,export-default-anon}.js`. Both RUN lines are `-Xcompile=false -dump-sema`, which is what that corpus's pair already is, so no `// FLAGS:` line is needed and the copies are byte-identical to their lit twins. Corpus unchanged at **16 (8)** — one for one. Coverage re-proved by mutation, and the `WithStatement`-arm gap the re-check surfaced is recorded; see `sema_corpus_parser/MANIFEST.md`'s "Upstream sync task 5" section. |
+| ~~`6fbc3706d`~~ | Backs out `#if 0` around the dead local-eval block → `if ((false))` | **DONE 2026-08-13** (`2fde4d88c`). Dead in every spelling, so **no Rust behavior change**; the port's `resolver/functions.rs` mirrors the new `if false { if … }` nesting for source fidelity. This tree never carried the `#if 0` (it was never cherry-picked), so the cherry-pick conflicted and was resolved to upstream's post-back-out text — verified line-for-line against `6fbc3706d:lib/Sema/SemanticResolver.cpp`, NOT by `patch-id` (the deltas differ because the starting states differ). Citations into the block re-verified: it is now `SemanticResolver.cpp:1960-1967`. |
+| ~~`8f9e357fd`~~ | Reverts `#if 0` around the dead `arguments` block → `if ((false))` | **DONE 2026-08-13** (`de41b2056`). Same class, same resolution and same verification; the site is now `SemanticResolver.cpp:2454-2461` and `resolver/declarations.rs` already had the matching nesting. |
 
-The two divergences above are **no longer in the backlog**: both were
-corrected on 2026-08-13 (plan task 1).
+**The backlog is empty.** The two divergences above are also no longer in it:
+both were corrected on 2026-08-13 (plan task 1).
 
 ---
+
+## The wide sweep after the sync (2026-08-13)
+
+Re-run at the end of sync task 5, the standing whole-`test/` differential the
+roadmap describes: `hermesc -dump-sema` vs a **debug** `sema-dump`, stdout +
+stderr + exit status, over every `.js` in `test/{Parser,IRGen,BCGen,Optimizer,
+hermes,AST,Driver,RA}`.
+
+```
+files 1420   identical 1410   mismatch 3   panic 7
+```
+
+The population grew **1418 → 1420**: the two files upstream `ca6de21ce` added
+under `test/Parser/flow/match/` entered the swept directories with task 3's
+cherry-pick, and **both are byte-identical**, which is why identical went
+1408 → 1410. **Zero new residuals** — every one of the ten is a pre-existing,
+individually classified item:
+
+| Residual | Files | Classification |
+|---|---|---|
+| `$SHBuiltin.moduleFactory` panic (`resolver/calls.rs:349`, "needs `visitModuleFactory` — S4 modules") | `test/BCGen/HBC/xmod-requires-opt.js`, `test/Optimizer/xmod-{builtins,require-cse,requires-opt,requires-opt-extension}.js`, `test/hermes/xmod-exec-require{,-bad-func}.js` | 7 — the standing S4b deferral; message checked on each, all identical |
+| Regex validation | `test/AST/regexp.js` | needs `lib/Regex/`, its own future component; the port exits 0 with a dump where hermesc reports 4 `Invalid regular expression` errors |
+| Notes dropped per house style | `test/Parser/es6/import-error.js` | stderr only — hermesc's extra `note: first usage of name` |
+| Error-recovery gap | `test/Parser/optional-chaining-error.js` | stderr only — 4 diagnostics vs the port's 3 |
+
+**Reconciliation with task 2's sweep.** Task 2 ran a *different* dir set
+(`test/Sema` + `test/Parser` + `test/hermes`, 1232 files) and found 2 stdout
+diffs + 3 crashes. Both figures are consistent: its 3 crashes are
+`test/Sema/xmod-errors.js` plus the two `test/hermes` `xmod` files, and
+`test/Sema` is not one of the eight directories above. Task 5 also swept
+`test/Sema` separately — **242 files, 241 identical, 1 panic**
+(`xmod-errors.js`, the same S4b deferral) — which pins the two new
+`test/Sema/parser-mode-*.js` files as byte-identical on the driver pair too,
+on top of the parser pair the corpus uses. Union of both sweeps: 1662 files,
+1651 identical, 3 mismatch, 8 panic.
+
+## Citation drift found and repaired (2026-08-13, task 5)
+
+Worth recording because it is a recurring defect class in this repo and this
+round found it had reopened. Tasks 1-4 of this sync changed eight C++ files
+that the port cites by line number, and only the citations those tasks
+*wrote* were correct afterwards; pre-existing ones drifted silently — e.g.
+`resolver/mod.rs`'s `SemanticResolver.cpp:1762-1765` for the "'use strict'
+not allowed inside function with non-simple parameter list" error had been
+15 lines stale since task 3, and this task's own cherry-pick added one more.
+
+The repair was blame-aware, not a flat shift: for every citation, the commit
+that last wrote that LINE was found with `git blame`, the cited C++ file was
+diffed from *that* commit to HEAD, and the numbers were mapped through the
+resulting line map. A flat shift would have corrupted the citations tasks 1-4
+wrote correctly (e.g. `statements.rs`'s `SemanticResolver.cpp:1615-1622` for
+`visit(MatchStatementNode *)`, which is right and must not move). 436 tokens
+were remapped across `SemanticResolver.{cpp,h}`, `CheckImplicitReturn.cpp`,
+`SemContext.cpp`, `CompilerDriver.cpp`, `JSONParser.h`,
+`JSParserImpl-flow.cpp` and `sema-parser-dump.cpp`; ~20 more were fixed by
+hand where the cited line had been deleted or where the citation was already
+wrong before this sync's baseline. Dated plan/spec documents under
+`doc/superpowers/{plans,specs}/` were left alone, per this repo's convention
+that they are historical records.
 
 ## Deferred follow-ups
 
@@ -213,6 +286,16 @@ behavior 8 of the 13 corpus files exist to pin. So retiring the tool would
 either lose the error-path parser-entry coverage or need those files
 restructured; decide that deliberately rather than assuming a drop-in swap.
 
+**Task 5 (2026-08-13) re-measured at 16 files: still 6 differing, unchanged.**
+The two files task 5 imported from upstream (`parser-mode-with-statement.js`,
+`parser-mode-export-default-anon.js`) are error-free, so the driver's
+dump-suppression never engages and `hermesc -Xcompile=false -dump-sema`
+matches `sema-parser-dump` byte-for-byte on both — as do the two
+implicit-return files task 4 added. The blocker is unchanged and is still the
+same six error-path files: **6 of 16 differ**, all `stdout 0 B` from the
+driver against a full dump from the tool, same exit status (2). This item
+stays **OPEN**.
+
 **Task 3 (2026-08-13) added a 14th file and one more flag, information only.**
 `flow-match-implicit-return.js` was imported into the parser-entry corpus, and
 `sema-parser-dump` learned `-Xparse-flow-match`/`--Xparse-flow-match` to carry
@@ -225,7 +308,7 @@ seventh. Retiring the tool now also means re-checking the two flags it
 understands rather than one.
 
 **When doing it, check:** that `-Xcompile=false` output is byte-identical to
-`sema-parser-dump`'s for all 14 parser-entry corpus files (it is not — see
+`sema-parser-dump`'s for all 16 parser-entry corpus files (it is not — see
 the measurement above; both call the same two library entries, but the driver
 wraps them differently: `sema-parser-dump` dumps *unconditionally* even when
 errors were reported, whereas the driver suppresses the dump on errors, and

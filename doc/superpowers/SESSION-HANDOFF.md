@@ -66,8 +66,8 @@ validation commands, and workflow.
 > → "sema differential (tests/sema_corpus): 160 corpus files matched" (88 succeed on hermesc).
 > **Update (2026-07-29): Sema S3 (`ScopedFunctionPromoter`) is DONE.** Commits `36593518b..274fa63b8` on `rust`. T1:
 > ports all 328 lines of `lib/Sema/ScopedFunctionPromoter.cpp` (+ header) as `resolver/promoter.rs` and replaces both
-> S3 assert seams (`visit_program` cpp:224-227, `visit_function_body_after_params_visited` cpp:1904-1910) with the
-> real promotion + `process_promoted_func_decls` (cpp:2129-2141), making S1 T5's dormant `promotedFuncDecls`
+> S3 assert seams (`visit_program` cpp:224-227, `visit_function_body_after_params_visited` cpp:1933-1939) with the
+> real promotion + `process_promoted_func_decls` (cpp:2159-2171), making S1 T5's dormant `promotedFuncDecls`
 > redeclaration rows live; the third C++ call site (`runInScope`, cpp:158) is left to S5 with a note at the site. T2:
 > a seven-file promotion corpus battery + the three unblocked `test/Sema` rows. T3: an upstream re-probe over the
 > same 1416-file corpus confirming zero S3-attributable panics (**1209**/190/**17**, was 1203/190/23). New resolver
@@ -108,7 +108,7 @@ validation commands, and workflow.
 > `runInScope` (cpp:158); the regex engine as its own future component; the documented landmines — same-location
 > diagnostic ties, THREE hermesc self-aborts (`class C { x = class {}; }`, `$SHBuiltin.#x()`, and
 > `using x = 1; { function f(){} }`), and a FOURTH found in S4a (the dumper itself aborting on anonymous
-> `export default function(){}` dumped under `compile = false`, `SemContext.cpp:493-494` vs `dump_context.rs:304`)
+> `export default function(){}` dumped under `compile = false`, `SemContext.cpp:501` vs `dump_context.rs:304`)
 > — **ALL FOUR CLOSED 2026-08-10** by the C++ defect-fix propagation (see the Update below); and the THREE tracked parser-phase follow-ups, ALL NOW
 > CLOSED — the 180-file `errorExpected` same-line-range/cross-line-note gap, **CLOSED 2026-08-08** (see the
 > Update below); the recursion-depth gap **CLOSED
