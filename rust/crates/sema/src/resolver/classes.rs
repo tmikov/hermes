@@ -1099,21 +1099,6 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
                 self.get_or_create_instance_elements_init_function_info(gc)
             };
             let func_state = self.enter_function_with_info(sem_info);
-            // Make the initializer function's body scope current, so any
-            // scopes created by the initializer expression (e.g. by a class
-            // expression) are parented in it, matching the runtime
-            // environment chain. Upstream `b351e1184` ("Fix scope parenting
-            // of class expressions in field initializers"):
-            //   llvh::SaveAndRestore<LexicalScope *> oldScope{
-            //       curScope_, curFunctionInfo()->getFunctionBodyScope()};
-            // Its restore runs BEFORE the `FunctionContext`'s (reverse
-            // declaration order), hence the ordering below.
-            let old_scope = self.cur_scope;
-            self.cur_scope = Some(
-                self.sem_ctx
-                    .function(self.cur_function_info())
-                    .get_function_body_scope(),
-            );
             // We need to make sure that the special `arguments` object is
             // declared so that we can detect usages of it, and correctly
             // error out since field initializers are not allowed to
@@ -1124,6 +1109,30 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // table scope which is created by the class declaration /
             // expression node.
             self.declare_arguments();
+            // Make the initializer function's body scope current, so any
+            // scopes created by the initializer expression (e.g. by a class
+            // expression) are parented in it, matching the runtime
+            // environment chain. Upstream `dee8c5ce0` ("Fix scope parenting
+            // of class exprs in field inits"):
+            //   llvh::SaveAndRestore<LexicalScope *> oldScope{
+            //       curScope_, curFunctionInfo()->getFunctionBodyScope()};
+            // Upstream declares it AFTER `declareArguments()`, and so does
+            // the port. The order is not observable: `declare_arguments`
+            // reads neither `cur_scope` nor anything derived from it — it
+            // puts the `Decl` in `get_scopes()[0]` of the *function*
+            // (`sem_context.rs`'s `func_arguments_decl`) and the binding in
+            // the current *binding-table* scope, which this assignment does
+            // not push. Kept in upstream's order for fidelity.
+            //
+            // The restore of `cur_scope` runs BEFORE `exit_function`,
+            // mirroring C++'s reverse-declaration-order destruction of
+            // `oldScope` before the `FunctionContext`.
+            let old_scope = self.cur_scope;
+            self.cur_scope = Some(
+                self.sem_ctx
+                    .function(self.cur_function_info())
+                    .get_function_body_scope(),
+            );
             value_repl = replacement_of(self.call(
                 gc,
                 value,
@@ -1273,21 +1282,6 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
                 self.get_or_create_instance_elements_init_function_info(gc)
             };
             let func_state = self.enter_function_with_info(sem_info);
-            // Make the initializer function's body scope current, so any
-            // scopes created by the initializer expression (e.g. by a class
-            // expression) are parented in it, matching the runtime
-            // environment chain. Upstream `b351e1184` ("Fix scope parenting
-            // of class expressions in field initializers"):
-            //   llvh::SaveAndRestore<LexicalScope *> oldScope{
-            //       curScope_, curFunctionInfo()->getFunctionBodyScope()};
-            // Its restore runs BEFORE the `FunctionContext`'s (reverse
-            // declaration order), hence the ordering below.
-            let old_scope = self.cur_scope;
-            self.cur_scope = Some(
-                self.sem_ctx
-                    .function(self.cur_function_info())
-                    .get_function_body_scope(),
-            );
             // We need to make sure that the special `arguments` object is
             // declared so that we can detect usages of it, and correctly
             // error out since field initializers are not allowed to
@@ -1298,6 +1292,30 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // table scope which is created by the class declaration /
             // expression node.
             self.declare_arguments();
+            // Make the initializer function's body scope current, so any
+            // scopes created by the initializer expression (e.g. by a class
+            // expression) are parented in it, matching the runtime
+            // environment chain. Upstream `dee8c5ce0` ("Fix scope parenting
+            // of class exprs in field inits"):
+            //   llvh::SaveAndRestore<LexicalScope *> oldScope{
+            //       curScope_, curFunctionInfo()->getFunctionBodyScope()};
+            // Upstream declares it AFTER `declareArguments()`, and so does
+            // the port. The order is not observable: `declare_arguments`
+            // reads neither `cur_scope` nor anything derived from it — it
+            // puts the `Decl` in `get_scopes()[0]` of the *function*
+            // (`sem_context.rs`'s `func_arguments_decl`) and the binding in
+            // the current *binding-table* scope, which this assignment does
+            // not push. Kept in upstream's order for fidelity.
+            //
+            // The restore of `cur_scope` runs BEFORE `exit_function`,
+            // mirroring C++'s reverse-declaration-order destruction of
+            // `oldScope` before the `FunctionContext`.
+            let old_scope = self.cur_scope;
+            self.cur_scope = Some(
+                self.sem_ctx
+                    .function(self.cur_function_info())
+                    .get_function_body_scope(),
+            );
             value_repl = replacement_of(self.call(
                 gc,
                 value,

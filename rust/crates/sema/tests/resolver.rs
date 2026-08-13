@@ -2878,8 +2878,9 @@ fn shbuiltin_identifier_property_still_rewrites() {
     );
 }
 
-/// Upstream `b351e1184` ("Fix scope parenting of class expressions in field
-/// initializers"): a scope created by a field initializer's VALUE belongs to
+/// Upstream `b351e1184`, landed in `static_h` as `dee8c5ce0` ("Fix scope
+/// parenting of class exprs in field inits"): a scope created by a field
+/// initializer's VALUE belongs to
 /// the synthesized elements-initializer function, so it must be parented in
 /// that function's body scope — not in the enclosing class's scope, which
 /// belongs to the outer function.

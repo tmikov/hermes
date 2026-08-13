@@ -8,12 +8,14 @@
 //! JSONParser: recursive-descent parser driving JSLexer.
 //!
 //! Value nesting is depth-limited, matching C++ `JSONParser` (`lib/Parser/
-//! JSONParser.cpp:202-212`, `JSONParser.h:636-651`): `parse_value` checks
+//! JSONParser.cpp:202-211`, `JSONParser.h:636-659`): `parse_value` checks
 //! `MAX_RECURSION_DEPTH` and reports "Too many nested JSON values" instead
 //! of overflowing the native stack. Historically NEITHER side had a limit
 //! (parity by absence, and both died on e.g. 100000 `[`); upstream added one
-//! in `b21856de4` ("Add a recursion limit to the compiler-side JSONParser")
-//! and this is the mirror of that fix.
+//! in `304c1533c` ("Add a recursion limit to compiler JSONParser") and this
+//! is the mirror of that fix. The limit is NOT the JS parser's: off Windows
+//! upstream set it to 4x `JSParserImpl::MAX_RECURSION_DEPTH`, because a JSON
+//! nesting level costs far less native stack than a JS one.
 
 use hermes_atom_table::AtomTable;
 use hermes_support::diag::Subsystem;
@@ -32,15 +34,20 @@ const CTX: GrammarContext = GrammarContext::AllowDiv;
 
 /// The maximum depth of value nesting, to avoid stack overflow on deeply
 /// nested input. Port of `JSONParser::MAX_RECURSION_DEPTH`
-/// (JSONParser.h:638-651), whose `#ifdef` ladder is the same one as
-/// `JSParserImpl::MAX_RECURSION_DEPTH` ("The values match
-/// JSParserImpl::MAX_RECURSION_DEPTH"), so the Rust mapping is the same too:
-/// key off `debug_assertions`, which pairs a DEBUG Rust build with the
-/// project's standard ASan C++ oracle (both take the 128 branch) and a
-/// RELEASE Rust build with C++'s release value. See
+/// (JSONParser.h:639-659). Its `#ifdef` ladder has the same SHAPE as
+/// `JSParserImpl::MAX_RECURSION_DEPTH` but deliberately not the same VALUES:
+/// upstream `304c1533c` set the non-Windows arms to 4x the JS parser's,
+/// "since a nesting level here is cheaper than one in JSParserImpl" (the
+/// Windows arms, which the port does not model, still match JSParserImpl
+/// because the default stack there is 1MB).
+///
+/// The Rust mapping is the same as `crate::js::MAX_RECURSION_DEPTH`'s: key
+/// off `debug_assertions`, which pairs a DEBUG Rust build with the project's
+/// standard ASan C++ oracle (both take the `HERMES_LIMIT_STACK_DEPTH` arm,
+/// 512) and a RELEASE Rust build with C++'s default arm (4096). See
 /// `crate::js::MAX_RECURSION_DEPTH` for the full ladder and the
 /// profile-pairing caveat.
-const MAX_RECURSION_DEPTH: u32 = if cfg!(debug_assertions) { 128 } else { 1024 };
+const MAX_RECURSION_DEPTH: u32 = if cfg!(debug_assertions) { 512 } else { 4096 };
 
 /// Port of `JSONParser` (JSONParser.h:630). Drives `JSLexer`; errors go through
 /// the lexer's single `&mut SourceErrorManager`.

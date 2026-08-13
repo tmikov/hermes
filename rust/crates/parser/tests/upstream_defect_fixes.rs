@@ -22,10 +22,13 @@
 //!     `Token::get_res_word_or_identifier`, bug-for-bug). The pin is flipped
 //!     here: the same input must now produce the diagnostic and recover
 //!     cleanly, with no panic.
-//!   - `b21856de4` "Add a recursion limit to the compiler-side JSONParser"
+//!   - `304c1533c` "Add a recursion limit to compiler JSONParser"
 //!     (`unittests/AST/JSONTest.cpp`'s `DeepNestingTest`) — deeply nested
 //!     JSON overflowed the native stack; it must report `Too many nested JSON
-//!     values` instead.
+//!     values` instead. Off Windows the limit upstream landed is 4x
+//!     `JSParserImpl::MAX_RECURSION_DEPTH`, i.e. 512 under
+//!     `HERMES_LIMIT_STACK_DEPTH` (the ASan oracle, paired with a debug Rust
+//!     build) and 4096 by default (paired with a release one).
 //!
 //! Every expected rendering below was captured from
 //! `cmake-build-asan/bin/hermesc` built from the cherry-picked fixes (the
@@ -154,25 +157,44 @@ fn parse_json(src: &str) -> (bool, Vec<String>) {
     (parsed, messages)
 }
 
-/// `b21856de4`: nesting past `MAX_RECURSION_DEPTH` is an error, not a stack
-/// overflow. 2000 is past the limit in BOTH build profiles (128 debug / 1024
-/// release), so this test does not need the profile gate that
-/// `recursion_depth_limit.rs` carries; the C++ `DeepNestingTest` uses 100000
-/// for the same reason.
+/// `MAX_RECURSION_DEPTH` for the profile this test was compiled for, kept in
+/// sync by hand with `json/parser.rs` (the constant is private). Upstream
+/// `304c1533c` set the non-Windows arms to 4x `JSParserImpl`'s, so these are
+/// 4x `recursion_depth_limit.rs`'s figures, not equal to them.
+const JSON_MAX_RECURSION_DEPTH: usize = if cfg!(debug_assertions) { 512 } else { 4096 };
+
+/// `n` balanced levels of array nesting: the value at nesting level `n` is
+/// the empty array `[]`, so no `parse_value` call is made at level `n + 1`.
+fn balanced_arrays(n: usize) -> String {
+    format!("{}{}", "[".repeat(n), "]".repeat(n))
+}
+
+/// `304c1533c`: nesting past `MAX_RECURSION_DEPTH` is an error, not a stack
+/// overflow. The C++ `DeepNestingTest` uses 100000 `[`, which is past the
+/// limit in every profile on both sides; so does this. Note the parser never
+/// recurses 100000 deep — it stops at `MAX_RECURSION_DEPTH`.
 #[test]
 fn deeply_nested_json_is_rejected() {
-    let (parsed, messages) = parse_json(&"[".repeat(2000));
+    let (parsed, messages) = parse_json(&"[".repeat(100000));
     assert!(!parsed, "deeply nested JSON must not parse");
     assert_eq!(messages, vec!["Too many nested JSON values".to_string()]);
 }
 
-/// The clean side of the same boundary: 100 levels are under the limit in
-/// both profiles and must still parse, so the check above cannot pass by
-/// rejecting everything.
+/// The exact boundary, both sides of it: `MAX_RECURSION_DEPTH` balanced
+/// levels parse cleanly, one more does not. This is what makes the check
+/// above non-vacuous — it cannot pass by rejecting everything — and it is
+/// what pins the *value* of the limit rather than merely its existence:
+/// against the pre-`304c1533c` constants (128 debug / 1024 release) the
+/// first half fails, since 512 levels were over the old limit.
 #[test]
-fn moderately_nested_json_still_parses() {
-    let src = format!("{}{}", "[".repeat(100), "]".repeat(100));
-    let (parsed, messages) = parse_json(&src);
-    assert!(parsed, "100 levels must parse: {messages:?}");
+fn json_nesting_boundary_is_max_recursion_depth() {
+    let max = JSON_MAX_RECURSION_DEPTH;
+
+    let (parsed, messages) = parse_json(&balanced_arrays(max));
+    assert!(parsed, "{max} levels must parse: {messages:?}");
     assert!(messages.is_empty(), "{messages:?}");
+
+    let (parsed, messages) = parse_json(&balanced_arrays(max + 1));
+    assert!(!parsed, "{} levels must not parse", max + 1);
+    assert_eq!(messages, vec!["Too many nested JSON values".to_string()]);
 }

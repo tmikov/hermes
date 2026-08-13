@@ -34,9 +34,9 @@ fixed upstream 2026-08-08, cherry-picked here 2026-08-10 (plan:
 | `efb4594e2` anon `export default async` | `4a0fe2bfd` | identical |
 | `7d155fb21` semDump on parser-resolved ASTs | `179fb8ca3` | identical |
 | `21fa90ff9` `$SHBuiltin.#privateName()` | `416aafcd2` | identical |
-| `dee8c5ce0` class-expr scope parenting in field inits | `48d221fb2` | **DIFFERS (behavioral)** |
+| `dee8c5ce0` class-expr scope parenting in field inits | `48d221fb2`, corrected 2026-08-13 | identical |
 | `4aa3006f8` export module-mode wording | `4193b558a` | differs (cosmetic wrap only) |
-| `304c1533c` JSONParser recursion limit | `0b8bbd1fc` | **DIFFERS (behavioral)** |
+| `304c1533c` JSONParser recursion limit | `0b8bbd1fc`, corrected 2026-08-13 | identical |
 | `87677f148` stable-sort buffered diagnostics | `7805e2103` | identical |
 | `88ca314ed` promoter dead code | `ffcdbdd52` | identical |
 | `91f1222dd` JSX member-expression attr names | `51035e8c2` | identical |
@@ -46,21 +46,36 @@ Comparison method: `git show <commit> -- lib include | git patch-id --stable`,
 which ignores line-number drift, so "identical" means the source change really
 is the same.
 
-**The two behavioral divergences matter** — upstream revised these fixes before
-landing them, so the port currently mirrors a variant that upstream no longer
-has:
+**The two behavioral divergences were corrected on 2026-08-13** (plan task 1).
+Upstream had revised both fixes before landing them, so the port had been
+mirroring a variant upstream no longer has:
 
-1. **`304c1533c` (JSON recursion limit).** Upstream landed **4× the
-   `JSParserImpl` limits off Windows** (a JSON nesting level costs far less
-   stack): `HERMES_LIMIT_STACK_DEPTH` → **512**, default → **4096**; Windows
-   values unchanged. Our cherry-pick used the un-scaled 128/1024. The Rust
-   port mirrors ours.
-2. **`dee8c5ce0` (field-init scope parenting).** Same `SaveAndRestore`, but
-   upstream places it **after** `declareArguments()`, we placed it **before**.
-   `declareArguments()` inserts `arguments` into the *current* binding-table
-   scope, so the placement decides whether that decl lands in the class scope
-   (upstream) or the initializer function's body scope (ours). The Rust port
-   mirrors ours.
+1. **`304c1533c` (JSON recursion limit) — was behavioral, now fixed.**
+   Upstream landed **4× the `JSParserImpl` limits off Windows** (a JSON
+   nesting level costs far less stack): `HERMES_LIMIT_STACK_DEPTH` →
+   **512**, default → **4096**; Windows values unchanged. Our cherry-pick had
+   used the un-scaled 128/1024. `include/hermes/Parser/JSONParser.h`,
+   `lib/Parser/JSONParser.cpp` and `unittests/AST/JSONTest.cpp` are now
+   byte-identical to `304c1533c`'s versions, and
+   `rust/crates/parser/src/json/parser.rs` mirrors the new values
+   (512 debug / 4096 release under the standing `cfg!(debug_assertions)`
+   mapping). `err_deep_nesting.json` grew from 2000 to 5000 levels so it
+   stays past the limit in every build profile.
+2. **`dee8c5ce0` (field-init scope parenting) — turned out NOT to be
+   behavioral.** Same `SaveAndRestore`; upstream declares it **after**
+   `declareArguments()`, we had it **before**. Both `visit(ClassPropertyNode*)`
+   and `visit(ClassPrivatePropertyNode*)` were reordered to match upstream
+   exactly, and the Rust mirror with them. **The reorder changes nothing
+   observable**, and the "it decides which scope the `arguments` decl lands
+   in" reasoning that motivated the row was wrong: `declareArguments()`
+   (`SemanticResolver.h:348-353`) puts the `Decl` in
+   `argumentsFunc->getScopes().front()` — a *function*-derived scope, chosen
+   inside `SemContext::funcArgumentsDecl` — and its `Binding` in the current
+   *binding-table* scope, which `SaveAndRestore<LexicalScope *> curScope_`
+   does not push. Neither effect reads `curScope_`. Empirically: with the
+   oracle rebuilt, all 219 driver-corpus + 13 parser-entry C++ dumps
+   (stdout, stderr and exit status) are byte-identical before and after.
+   The reorder is kept purely for source fidelity to upstream.
 
 ---
 
@@ -91,8 +106,8 @@ tests, minus the 11 above. (`b70dd7942` touches `include/hermes/Support` but is
 | `6fbc3706d` | Backs out `#if 0` around the dead local-eval block → `if ((false))` | Dead in both forms; check the port's comments/citations (`CppDefectsFound.md` item 10b). |
 | `8f9e357fd` | Reverts `#if 0` around the dead `arguments` block → `if ((false))` | Same class. |
 
-Plus the two behavioral divergences above, which are *regressions against
-upstream* rather than new work.
+The two divergences above are **no longer in the backlog**: both were
+corrected on 2026-08-13 (plan task 1).
 
 ---
 
@@ -100,6 +115,20 @@ upstream* rather than new work.
 
 Work this sync surfaces but deliberately does **not** do. Do not let these
 rot — check them at the start of the next sync.
+
+### OPEN — import upstream's fuller `test/Sema/class-field-class-expr.js`
+
+The divergence check compares `lib include` only, so it never looked at the
+lit test `dee8c5ce0` added. Upstream's version of
+`test/Sema/class-field-class-expr.js` is 73 lines to our 55: besides `x` and
+`static y` it also declares `#px = class {}` and `static #py = class {}`,
+i.e. it is the only coverage of the **`visit(ClassPrivatePropertyNode *)`**
+site. Ours exercises only `visit(ClassPropertyNode *)`, so the private-field
+half of the fix has no lit or corpus pin on either side. Importing upstream's
+file (and re-importing it into `sema_corpus/`, where the MANIFEST records it
+as a verbatim copy) would close that. Not done in task 1 because it changes
+corpus *content* and the task's own change provably changes no dump bytes,
+which is what made task 1 auditable.
 
 ### OPEN — retire `tools/sema-parser-dump`
 

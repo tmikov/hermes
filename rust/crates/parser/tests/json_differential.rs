@@ -9,12 +9,14 @@
 //! `json-parse-dump` oracle and the Rust `json-parse-dump`, compare stdout.
 //!
 //! `err_deep_nesting.json` pins the value-nesting limit both sides gained in
-//! upstream `b21856de4` (see `json/parser.rs`'s module doc). Its 2000 levels
-//! are past the limit in EVERY build profile — 128 for an ASan C++ /
-//! debug Rust build, 1024 for a release one — so, unlike the JS parser's
+//! upstream `304c1533c` (see `json/parser.rs`'s module doc). Its 5000 levels
+//! are past the limit in EVERY build profile — 512 for an ASan C++ /
+//! debug Rust build, 4096 for a release one — so, unlike the JS parser's
 //! recursion boundary, this file is profile-INSENSITIVE and safe to keep in
-//! a differential corpus: all four pairings produce the same `ERROR 1`. The
-//! exact trip depth is pinned instead by
+//! a differential corpus: all four pairings produce the same `ERROR 1`. It
+//! nested 2000 deep until `304c1533c` raised the non-Windows limits 4x;
+//! 2000 is under the new release limit, so the file had to grow to keep
+//! that property. The exact trip depth is pinned instead by
 //! `parser/tests/upstream_defect_fixes.rs`.
 
 use std::path::{Path, PathBuf};

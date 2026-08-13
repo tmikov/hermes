@@ -162,7 +162,10 @@ list (S2). The Rust side reproduces the mismatch class via its own
 `--release` masking note in the MANIFEST).
 
 **Fixed upstream:** `b351e1184` (2026-08-08 branch), cherry-picked to `rust`
-2026-08-10 as `48d221fb2`.
+2026-08-10 as `48d221fb2`; upstream revised it before landing it in
+`static_h` as **`dee8c5ce0`** (the `SaveAndRestore` is declared *after*
+`declareArguments()`, not before), and the tree was corrected to match on
+2026-08-13. The reordering is not observable — see `resolver/classes.rs`.
 **Pin flipped:** `resolver/classes.rs`'s `visit_class_private_property` and
 `visit_class_property` now save/restore `cur_scope` to the initializer
 function's body scope (matching the C++ fix's `SaveAndRestore`) around the
@@ -273,14 +276,19 @@ maps/metadata — not the runtime `JSON.parse`.)
 `rust/crates/parser/src/json/parser.rs` module doc; if C++ gains a limit, port it.
 
 **Fixed upstream:** `b21856de4` (2026-08-08 branch), cherry-picked to `rust`
-2026-08-10 as `0b8bbd1fc`.
+2026-08-10 as `0b8bbd1fc`; upstream revised it before landing it in
+`static_h` as **`304c1533c`**, and the tree was corrected to match on
+2026-08-13.
 **Pin flipped:** `json/parser.rs` gained a `recursion_depth: u32` field and
 `parse_value` is now a depth-checking wrapper around the old body
 (`parse_value_impl`) — `error("Too many nested JSON values")` at the limit,
 mirroring the C++ fix's split. `MAX_RECURSION_DEPTH` is profile-selected
-(128 debug/ASan, 1024 release), matching `JSParserImpl::MAX_RECURSION_DEPTH`'s
-own `#ifdef` ladder. Live gate: `parser/tests/json_corpus/err_deep_nesting.json`
-(json differential corpus 16 → 17). Rust mirror commit `ad4d7eb68` (Task 2).
+(**512** debug/ASan, **4096** release): the ladder has the same shape as
+`JSParserImpl::MAX_RECURSION_DEPTH`'s but, off Windows, 4x the values, since
+a JSON nesting level costs far less native stack. Live gate:
+`parser/tests/json_corpus/err_deep_nesting.json` (json differential corpus
+16 → 17; grown from 2000 to 5000 levels so it stays past the limit in every
+profile). Rust mirror commit `ad4d7eb68` (Task 2).
 
 ---
 
@@ -476,10 +484,10 @@ for the propagation plan and each item above for its `Fixed upstream`/
 | 1 | `using` + block fn | abort | ScopedFunctionPromoter.cpp:255-262 | treated as `var` | `4ad67c992` (`e4408f849`) |
 | 2 | anon export default via parser entry + dump | abort | SemContext.cpp:493-494 | crash (null deref) or UB — untested | `918158cb0` (`179fb8ca3`) |
 | 3 | `with` via parser entry + dump | abort | SemContext.h:559 | prints ` UNR`, fine | `918158cb0` (`179fb8ca3`) |
-| 4 | `class C { x = class {}; }` | abort | SemContext.cpp:478 | dump silently wrong/partial — untested | `b351e1184` (`48d221fb2`) |
+| 4 | `class C { x = class {}; }` | abort | SemContext.cpp:478 | dump silently wrong/partial — untested | `dee8c5ce0` (`b351e1184`, `48d221fb2`) |
 | 5 | `$SHBuiltin.#x()` | abort | SemanticResolver.cpp:1166-1167 | UB cast — untested | `07efab88d` (`416aafcd2`) |
 | 6 | anon `export default async function` (`-commonjs`) | **wrong semantics** | SemanticResolver.cpp:1538 | same (not assert-gated) | `6b59daf0d` (`4a0fe2bfd`) |
-| 7 | deep JSON | stack overflow | JSONParser.cpp | same | `b21856de4` (`0b8bbd1fc`) |
+| 7 | deep JSON | stack overflow | JSONParser.cpp | same | `304c1533c` (`b21856de4`, `0b8bbd1fc`) |
 | 8 | export outside module mode | wording | cpp:1511/1553 | same | `f90a83146` (`4193b558a`) |
 | 9 | same-location diagnostics | unstable order | SourceErrorManager.cpp:61-71 | same | `5f313a13a` (`7805e2103`) |
 | 10a | `ScopedFunctionPromoter` dead `newDecls` | dead code | ScopedFunctionPromoter.cpp:174-206 | same | `9232443cf` (`ffcdbdd52`) |
