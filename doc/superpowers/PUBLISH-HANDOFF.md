@@ -130,13 +130,23 @@ Only the manual, irreversible steps remain:
    rather than through a branch, so the links survive `rust1` being renamed,
    merged or deleted — and they resolve to exactly the source that was
    published. Two rules follow:
+   - **Push to the `private` remote, not `origin`.** In this worktree
+     `origin` is `facebook/hermes` (upstream) and `private` is
+     `git@github.com:tmikov/hermes.git` — the fork the READMEs and every
+     crate's `repository` field point at:
+     ```bash
+     git push private hermes-crates-v0.1.0
+     ```
+     Until the tag is on the fork, all ten README links 404 on the crates.io
+     pages, and a published README cannot be edited without a new version.
    - The tag must point at **the commit you publish from**. If any commit
      lands after the tag was cut, move it: `git tag -f hermes-crates-v0.1.0`
-     then `git push -f origin hermes-crates-v0.1.0`.
-   - The tag must actually be **pushed to GitHub** (`git push origin
-     hermes-crates-v0.1.0`) — until it is, all ten README links 404 on the
-     crates.io pages, and a published README cannot be edited without a new
-     version.
+     then `git push -f private hermes-crates-v0.1.0`.
+   - The links also need the *files* reachable on the fork, so the branch
+     holding them (`rust1`) must be pushed to `private` too — as of
+     2026-08-13 the fork has `rust` but not `rust1`. Pushing the tag alone is
+     enough for the links to resolve (a tag carries its own commit), but push
+     the branch as well if you want the work visible there.
 3. **Publish with ONE multi-package invocation** (the plan's per-crate loop
    provably fails: versioned path deps resolve against the registry):
    ```bash
