@@ -29,7 +29,7 @@ function baz(a: number): bool {
 // CHECK-NEXT:%function.4 = function(a: number): boolean
 
 // CHECK:SemContext
-// CHECK-NEXT:Func strict
+// CHECK-NEXT:Func strict mayReachImplicitReturn
 // CHECK-NEXT:    Scope %s.1
 // CHECK-NEXT:        Decl %d.1 'exports' Parameter : any
 // CHECK-NEXT:        Decl %d.2 'foo' Var : %function.2
@@ -39,17 +39,17 @@ function baz(a: number): bool {
 // CHECK-NEXT:        hoistedFunction foo
 // CHECK-NEXT:        hoistedFunction bar
 // CHECK-NEXT:        hoistedFunction baz
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict mayReachImplicitReturn
 // CHECK-NEXT:        Scope %s.2
 // CHECK-NEXT:            Decl %d.6 'x' Parameter : number
 // CHECK-NEXT:            Decl %d.7 'y' Parameter : string
 // CHECK-NEXT:            Decl %d.8 'len' Var : number
 // CHECK-NEXT:            Decl %d.9 'arguments' Var Arguments
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict mayReachImplicitReturn
 // CHECK-NEXT:        Scope %s.3
 // CHECK-NEXT:            Decl %d.10 'len' Var : number
 // CHECK-NEXT:            Decl %d.11 'arguments' Var Arguments
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict noImplicitReturn
 // CHECK-NEXT:        Scope %s.4
 // CHECK-NEXT:            Decl %d.12 'a' Parameter : number
 // CHECK-NEXT:            Decl %d.13 'arguments' Var Arguments

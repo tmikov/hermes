@@ -50,7 +50,7 @@ let [[na, nb]]: Array<Array<number>> = nested;
 // CHECK-NEXT:%function.5 = function(%class.4): void
 
 // CHECK:SemContext
-// CHECK-NEXT:Func strict
+// CHECK-NEXT:Func strict mayReachImplicitReturn
 // CHECK-NEXT:    Scope %s.1
 // CHECK-NEXT:        Decl %d.1 'exports' Parameter : any
 // CHECK-NEXT:        Decl %d.2 'arr' Let : %class.2
@@ -71,7 +71,7 @@ let [[na, nb]]: Array<Array<number>> = nested;
 // CHECK-NEXT:        Decl %d.17 'nb' Let : number
 // CHECK-NEXT:        Decl %d.18 'arguments' Var Arguments
 // CHECK-NEXT:        hoistedFunction f
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict mayReachImplicitReturn
 // CHECK-NEXT:        Scope %s.2
 // CHECK-NEXT:            Decl %d.19 'h' Parameter : string
 // CHECK-NEXT:            Decl %d.20 't' Parameter : %class.4

@@ -55,7 +55,7 @@ let s: string = fg('hi');
 // CHECK-NEXT:%function.10 = function(x: string): string
 
 // CHECK:SemContext
-// CHECK-NEXT:Func strict
+// CHECK-NEXT:Func strict mayReachImplicitReturn
 // CHECK-NEXT:    Scope %s.1
 // CHECK-NEXT:        Decl %d.1 'exports' Parameter : any
 // CHECK-NEXT:        Decl %d.2 'f1' Var : %function.2
@@ -79,40 +79,40 @@ let s: string = fg('hi');
 // CHECK-NEXT:        hoistedFunction fg
 // CHECK-NEXT:        hoistedFunction fg
 // CHECK-NEXT:        hoistedFunction fg
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict mayReachImplicitReturn
 // CHECK-NEXT:        Scope %s.2
 // CHECK-NEXT:            Decl %d.14 'x' Parameter : void
 // CHECK-NEXT:            Decl %d.15 'arguments' Var Arguments
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict mayReachImplicitReturn
 // CHECK-NEXT:        Scope %s.3
 // CHECK-NEXT:            Decl %d.16 'x' Parameter : %union.3
 // CHECK-NEXT:            Decl %d.17 'arguments' Var Arguments
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict mayReachImplicitReturn
 // CHECK-NEXT:        Scope %s.4
 // CHECK-NEXT:            Decl %d.18 'x' Parameter : %union.5
 // CHECK-NEXT:            Decl %d.19 'arguments' Var Arguments
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict mayReachImplicitReturn
 // CHECK-NEXT:        Scope %s.5
 // CHECK-NEXT:            Decl %d.20 'x' Parameter : number
 // CHECK-NEXT:            Decl %d.21 'y' Parameter : void
 // CHECK-NEXT:            Decl %d.22 'arguments' Var Arguments
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict mayReachImplicitReturn
 // CHECK-NEXT:        Scope %s.6
 // CHECK-NEXT:            Decl %d.23 'x' Parameter : mixed
 // CHECK-NEXT:            Decl %d.24 'arguments' Var Arguments
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict mayReachImplicitReturn
 // CHECK-NEXT:        Scope %s.7
 // CHECK-NEXT:            Decl %d.25 'x' Parameter : any
 // CHECK-NEXT:            Decl %d.26 'arguments' Var Arguments
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict noImplicitReturn
 // CHECK-NEXT:        Scope %s.8
 // CHECK-NEXT:            Decl %d.27 'x' Parameter
 // CHECK-NEXT:            Decl %d.28 'arguments' Var Arguments
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict noImplicitReturn
 // CHECK-NEXT:        Scope %s.9
 // CHECK-NEXT:            Decl %d.29 'x' Parameter : void
 // CHECK-NEXT:            Decl %d.30 'arguments' Var Arguments
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict noImplicitReturn
 // CHECK-NEXT:        Scope %s.10
 // CHECK-NEXT:            Decl %d.31 'x' Parameter : string
 // CHECK-NEXT:            Decl %d.32 'arguments' Var Arguments

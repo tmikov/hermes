@@ -28,7 +28,7 @@ function foo(f: (x: number) => void): void {
 // CHECK-NEXT:%function.6 = function(x: number, y: number): void
 
 // CHECK:SemContext
-// CHECK-NEXT:Func strict
+// CHECK-NEXT:Func strict mayReachImplicitReturn
 // CHECK-NEXT:    Scope %s.1
 // CHECK-NEXT:        Decl %d.1 'exports' Parameter : any
 // CHECK-NEXT:        Decl %d.2 'takeUnion' Var : %function.3
@@ -36,11 +36,11 @@ function foo(f: (x: number) => void): void {
 // CHECK-NEXT:        Decl %d.4 'arguments' Var Arguments
 // CHECK-NEXT:        hoistedFunction takeUnion
 // CHECK-NEXT:        hoistedFunction foo
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict mayReachImplicitReturn
 // CHECK-NEXT:        Scope %s.2
 // CHECK-NEXT:            Decl %d.5 'f' Parameter : %union.2
 // CHECK-NEXT:            Decl %d.6 'arguments' Var Arguments
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict mayReachImplicitReturn
 // CHECK-NEXT:        Scope %s.3
 // CHECK-NEXT:            Decl %d.7 'f' Parameter : %function.4
 // CHECK-NEXT:            Decl %d.8 'arguments' Var Arguments

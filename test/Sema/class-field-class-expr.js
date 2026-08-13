@@ -23,32 +23,32 @@ class C {
 // Auto-generated content below. Please do not modify manually.
 
 // CHECK:SemContext
-// CHECK-NEXT:Func loose
+// CHECK-NEXT:Func loose mayReachImplicitReturn
 // CHECK-NEXT:    Scope %s.1
 // CHECK-NEXT:        Decl %d.1 'C' Class
 // CHECK-NEXT:        Scope %s.2
 // CHECK-NEXT:            Decl %d.2 'C' ClassExprName
 // CHECK-NEXT:            Decl %d.3 '#px' PrivateField
 // CHECK-NEXT:            Decl %d.4 '#py' PrivateField
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict mayReachImplicitReturn
 // CHECK-NEXT:        Scope %s.3
 // CHECK-NEXT:            Decl %d.5 'arguments' Var Arguments
 // CHECK-NEXT:            Scope %s.4
 // CHECK-NEXT:            Scope %s.5
-// CHECK-NEXT:        Func strict
+// CHECK-NEXT:        Func strict mayReachImplicitReturn
 // CHECK-NEXT:            Scope %s.6
-// CHECK-NEXT:        Func strict
+// CHECK-NEXT:        Func strict mayReachImplicitReturn
 // CHECK-NEXT:            Scope %s.7
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict mayReachImplicitReturn
 // CHECK-NEXT:        Scope %s.8
 // CHECK-NEXT:            Decl %d.6 'arguments' Var Arguments
 // CHECK-NEXT:            Scope %s.9
 // CHECK-NEXT:            Scope %s.10
-// CHECK-NEXT:        Func strict
+// CHECK-NEXT:        Func strict mayReachImplicitReturn
 // CHECK-NEXT:            Scope %s.11
-// CHECK-NEXT:        Func strict
+// CHECK-NEXT:        Func strict mayReachImplicitReturn
 // CHECK-NEXT:            Scope %s.12
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict mayReachImplicitReturn
 // CHECK-NEXT:        Scope %s.13
 
 // CHECK:Program Scope %s.1

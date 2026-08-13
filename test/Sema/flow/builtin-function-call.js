@@ -42,7 +42,7 @@ function test(): void {
 // CHECK-NEXT:})
 
 // CHECK:SemContext
-// CHECK-NEXT:Func strict
+// CHECK-NEXT:Func strict mayReachImplicitReturn
 // CHECK-NEXT:    Scope %s.1
 // CHECK-NEXT:        Decl %d.1 'exports' Parameter : any
 // CHECK-NEXT:        Decl %d.2 'C' Class : %class_constructor.3
@@ -54,22 +54,22 @@ function test(): void {
 // CHECK-NEXT:        hoistedFunction noThis
 // CHECK-NEXT:        hoistedFunction test
 // CHECK-NEXT:        Scope %s.2
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict mayReachImplicitReturn
 // CHECK-NEXT:        Scope %s.3
 // CHECK-NEXT:            Decl %d.7 'arguments' Var Arguments
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict mayReachImplicitReturn
 // CHECK-NEXT:        Scope %s.4
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict noImplicitReturn
 // CHECK-NEXT:        Scope %s.5
 // CHECK-NEXT:            Decl %d.8 'this' Parameter : %class.2
 // CHECK-NEXT:            Decl %d.9 'n' Parameter : number
 // CHECK-NEXT:            Decl %d.10 'arguments' Var Arguments
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict noImplicitReturn
 // CHECK-NEXT:        Scope %s.6
 // CHECK-NEXT:            Decl %d.11 'a' Parameter : number
 // CHECK-NEXT:            Decl %d.12 'b' Parameter : string
 // CHECK-NEXT:            Decl %d.13 'arguments' Var Arguments
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict mayReachImplicitReturn
 // CHECK-NEXT:        Scope %s.7
 // CHECK-NEXT:            Decl %d.14 'c' Let : %class.2
 // CHECK-NEXT:            Decl %d.15 'r1' Let : number

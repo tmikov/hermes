@@ -37,7 +37,7 @@ class Foo {
 // CHECK-NEXT:})
 
 // CHECK:SemContext
-// CHECK-NEXT:Func strict
+// CHECK-NEXT:Func strict mayReachImplicitReturn
 // CHECK-NEXT:    Scope %s.1
 // CHECK-NEXT:        Decl %d.1 'exports' Parameter : any
 // CHECK-NEXT:        Decl %d.2 'Foo' Class : %class_constructor.2
@@ -48,28 +48,28 @@ class Foo {
 // CHECK-NEXT:            Decl %d.6 'multi' Const
 // CHECK-NEXT:            Decl %d.7 'multi' Const
 // CHECK-NEXT:            Decl %d.8 'multi' Const
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict noImplicitReturn
 // CHECK-NEXT:        Scope %s.3
 // CHECK-NEXT:            Decl %d.9 'x' Parameter : number
 // CHECK-NEXT:            Decl %d.10 'arguments' Var Arguments
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict noImplicitReturn
 // CHECK-NEXT:        Scope %s.4
 // CHECK-NEXT:            Decl %d.11 'x' Parameter : string
 // CHECK-NEXT:            Decl %d.12 'arguments' Var Arguments
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict noImplicitReturn
 // CHECK-NEXT:        Scope %s.5
 // CHECK-NEXT:            Decl %d.13 'x' Parameter : number
 // CHECK-NEXT:            Decl %d.14 'arguments' Var Arguments
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict noImplicitReturn
 // CHECK-NEXT:        Scope %s.6
 // CHECK-NEXT:            Decl %d.15 'x' Parameter : number
 // CHECK-NEXT:            Decl %d.16 'y' Parameter : number
 // CHECK-NEXT:            Decl %d.17 'arguments' Var Arguments
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict noImplicitReturn
 // CHECK-NEXT:        Scope %s.7
 // CHECK-NEXT:            Decl %d.18 'x' Parameter : string
 // CHECK-NEXT:            Decl %d.19 'arguments' Var Arguments
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict mayReachImplicitReturn
 // CHECK-NEXT:        Scope %s.8
 
 // CHECK:FunctionExpression : %untyped_function.1

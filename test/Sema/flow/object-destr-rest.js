@@ -44,7 +44,7 @@ function f(x: any) {
 // CHECK-NEXT:%function.5 = function(x: any): any
 
 // CHECK:SemContext
-// CHECK-NEXT:Func strict
+// CHECK-NEXT:Func strict mayReachImplicitReturn
 // CHECK-NEXT:    Scope %s.1
 // CHECK-NEXT:        Decl %d.1 'exports' Parameter : any
 // CHECK-NEXT:        Decl %d.2 'obj' Let : %object.2
@@ -59,7 +59,7 @@ function f(x: any) {
 // CHECK-NEXT:        Decl %d.11 'f' Var : %function.5
 // CHECK-NEXT:        Decl %d.12 'arguments' Var Arguments
 // CHECK-NEXT:        hoistedFunction f
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict noImplicitReturn
 // CHECK-NEXT:        Scope %s.2
 // CHECK-NEXT:            Decl %d.13 'x' Parameter : any
 // CHECK-NEXT:            Decl %d.14 'p' Let : any

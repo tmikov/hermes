@@ -48,7 +48,7 @@ function assignFewerToMore(): void {
 // CHECK-NEXT:%function.7 = function(x: number, y: string): void
 
 // CHECK:SemContext
-// CHECK-NEXT:Func strict
+// CHECK-NEXT:Func strict mayReachImplicitReturn
 // CHECK-NEXT:    Scope %s.1
 // CHECK-NEXT:        Decl %d.1 'exports' Parameter : any
 // CHECK-NEXT:        Decl %d.2 'decl' Var : %function.2
@@ -64,34 +64,34 @@ function assignFewerToMore(): void {
 // CHECK-NEXT:        hoistedFunction fewerToMore
 // CHECK-NEXT:        hoistedFunction testFewerToMore
 // CHECK-NEXT:        hoistedFunction assignFewerToMore
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict mayReachImplicitReturn
 // CHECK-NEXT:        Scope %s.2
 // CHECK-NEXT:            Decl %d.9 'x' Parameter : number
 // CHECK-NEXT:            Decl %d.10 'y' Parameter : %union.6
 // CHECK-NEXT:            Decl %d.11 'arguments' Var Arguments
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict mayReachImplicitReturn
 // CHECK-NEXT:        Scope %s.3
 // CHECK-NEXT:            Decl %d.12 'a' Let : %function.4
 // CHECK-NEXT:            Decl %d.13 'arguments' Var Arguments
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict mayReachImplicitReturn
 // CHECK-NEXT:        Scope %s.4
 // CHECK-NEXT:            Decl %d.14 'b' Let : %function.2
 // CHECK-NEXT:            Decl %d.15 'c' Let : %function.4
 // CHECK-NEXT:            Decl %d.16 'arguments' Var Arguments
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict mayReachImplicitReturn
 // CHECK-NEXT:        Scope %s.5
 // CHECK-NEXT:            Decl %d.17 'cb' Parameter : %function.4
 // CHECK-NEXT:            Decl %d.18 'arguments' Var Arguments
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict mayReachImplicitReturn
 // CHECK-NEXT:        Scope %s.6
 // CHECK-NEXT:            Decl %d.19 'arguments' Var Arguments
-// CHECK-NEXT:        Func strict
+// CHECK-NEXT:        Func strict mayReachImplicitReturn
 // CHECK-NEXT:            Scope %s.7
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict mayReachImplicitReturn
 // CHECK-NEXT:        Scope %s.8
 // CHECK-NEXT:            Decl %d.20 'f' Let : %function.7
 // CHECK-NEXT:            Decl %d.21 'arguments' Var Arguments
-// CHECK-NEXT:        Func strict
+// CHECK-NEXT:        Func strict mayReachImplicitReturn
 // CHECK-NEXT:            Scope %s.9
 // CHECK-NEXT:                Decl %d.22 'x' Parameter : number
 

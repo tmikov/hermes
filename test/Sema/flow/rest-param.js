@@ -43,7 +43,7 @@ type G = (...rest: MyArr) => void;
 // CHECK-NEXT:%function.5 = function(...items: %class.4): void
 
 // CHECK:SemContext
-// CHECK-NEXT:Func strict
+// CHECK-NEXT:Func strict mayReachImplicitReturn
 // CHECK-NEXT:    Scope %s.1
 // CHECK-NEXT:        Decl %d.1 'exports' Parameter : any
 // CHECK-NEXT:        Decl %d.2 'foo' Var : %function.2
@@ -52,12 +52,12 @@ type G = (...rest: MyArr) => void;
 // CHECK-NEXT:        Decl %d.5 'arguments' Var Arguments
 // CHECK-NEXT:        hoistedFunction foo
 // CHECK-NEXT:        hoistedFunction bar
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict mayReachImplicitReturn
 // CHECK-NEXT:        Scope %s.2
 // CHECK-NEXT:            Decl %d.6 'x' Parameter : number
 // CHECK-NEXT:            Decl %d.7 'args' Parameter : %class.3
 // CHECK-NEXT:            Decl %d.8 'arguments' Var Arguments
-// CHECK-NEXT:    Func strict
+// CHECK-NEXT:    Func strict mayReachImplicitReturn
 // CHECK-NEXT:        Scope %s.3
 // CHECK-NEXT:            Decl %d.9 'items' Parameter : %class.4
 // CHECK-NEXT:            Decl %d.10 'arguments' Var Arguments

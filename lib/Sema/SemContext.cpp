@@ -451,7 +451,10 @@ void SemContextDumper::printFunction(
     const FunctionInfo &f,
     unsigned level) {
   os << ind(level) << (f.isStaticBlock ? "StaticBlock " : "Func ")
-     << (f.strict ? "strict" : "loose") << "\n";
+     << (f.strict ? "strict" : "loose")
+     << (f.mayReachImplicitReturn ? " mayReachImplicitReturn"
+                                  : " noImplicitReturn")
+     << "\n";
   std::map<const LexicalScope *, llvh::SmallVector<const LexicalScope *, 2>>
       children;
 
