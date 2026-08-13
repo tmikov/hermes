@@ -390,15 +390,15 @@ fn agrees_on_the_compile_path() {
 #[test]
 fn agrees_on_the_parser_path() {
     let compared = on_big_stack(|| sweep("sema_corpus_parser", true));
-    assert_eq!(compared, 16, "parser corpus size changed");
+    assert_eq!(compared, 17, "parser corpus size changed");
 }
 
 /// The parser corpus is small; run the compile-path comparison over it too,
 /// and the parser-path comparison over the big corpus, so neither entry point
-/// is only checked on 16 files.
+/// is only checked on 17 files.
 #[test]
 fn agrees_on_both_paths_over_both_corpora() {
-    assert_eq!(on_big_stack(|| sweep("sema_corpus_parser", false)), 16);
+    assert_eq!(on_big_stack(|| sweep("sema_corpus_parser", false)), 17);
     // The same 223 the compile-path sweep covers: since upstream `5ae5260c8`
     // (`CppDefectsFound.md` item 12) the parser entry no longer aborts on a
     // `try`/`catch`/`finally` inside a function, so `try-catch-finally.js` —

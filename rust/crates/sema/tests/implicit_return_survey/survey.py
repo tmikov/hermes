@@ -64,8 +64,9 @@ CORPORA = [
 #
 # The ids match the tables in both MANIFESTs: M1-M18 are the task-2 survey,
 # M19-M21 the three decisions upstream `5ae5260c8` (try-catch-finally) adds,
-# MATCH-A..F the task-3 survey of `653e49c60`'s Flow-`match` arm. M18 and
-# THROW are controls (known-caught before either survey).
+# MATCH-A..F the task-3 survey of `653e49c60`'s Flow-`match` arm, and WITH the
+# `WithStatement` arm (upstream sync task 6). M18 and THROW are controls
+# (known-caught before either survey).
 # ---------------------------------------------------------------------------
 MUTATIONS = [
     (
@@ -391,6 +392,15 @@ MUTATIONS = [
             pattern = as_pattern.pattern;
         }""",
         """        let pattern = pattern;""",
+    ),
+    (
+        "WITH",
+        "with: the arm returns the body's termination result",
+        """            Node::WithStatement(n) => self.check_termination(n.body),""",
+        """            Node::WithStatement(n) => {
+                let _ = n;
+                TerminationResult::make_next_statement()
+            }""",
     ),
 ]
 

@@ -548,12 +548,15 @@ fn with_statements_never_reach_the_analysis() {
     // (`resolve_ast_for_parser`, `compile = false`) does not reject `with`,
     // and `function f(){ with (o) return 1; }` run through
     // `sema-dump --parser-entry` does reach the arm — verified by replacing
-    // it with a `panic!`, which fires on exactly that input. What still has
-    // no witness anywhere is that reachable case: the parser-entry corpus's
+    // it with a `panic!`, which fires on exactly that input. That reachable
+    // case used to have NO witness anywhere: the parser-entry corpus's
     // `parser-mode-with-statement.js` is a TOP-LEVEL `with`, and
-    // `mayReachImplicitReturn` only runs over function bodies, so the same
-    // `panic!` mutant leaves the whole 224 + 16 differential green. A
-    // `with`-inside-a-function parser-entry corpus file would close it.
+    // `mayReachImplicitReturn` only runs over function bodies, so a mutant
+    // arm left the whole 224 + 16 differential green. CLOSED by upstream
+    // sync task 6: `sema_corpus_parser/implicit-return-with-statement.js`
+    // puts `with` inside a function (returning, falling-through and
+    // block-returning bodies), and the survey harness pins the arm as its
+    // `WITH` row. This test keeps asserting only the compile-path fact.
     let (f, errors) = flags_and_errors("function f() { with (x) return 1; }");
     assert!(errors > 0, "expected `with` to be rejected");
     assert!(f[1], "the flag must keep SemContext.h:354's default");

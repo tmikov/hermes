@@ -53,6 +53,7 @@ live Imported table's current descriptions are kept synced to the current tree.
 | `flow-match-implicit-return.js` | `// FLAGS: -parse-flow --Xparse-flow-match` + `test/Sema/flow/match-implicit-return.js` verbatim. **Upstream sync task 3** — see the section of that name at the end of this file. The ONLY pin anywhere for `CheckImplicitReturn`'s `MatchStatement` arm (upstream `653e49c60`), because compiling a match is now rejected outright (`90f4a3ac6`) and the driver corpus therefore can never dump one. Twelve one-decision functions; the dump's `Func` tokens are `mayReachImplicitReturn`/`noImplicitReturn` in exactly the order upstream's `CHECK` lines assert. Verified byte-identical: 11615 B stdout both sides, empty stderr both sides, exit 0 both sides — an oracle-success file |
 | `implicit-return-try-catch-finally.js` | `test/Sema/implicit-return-try-catch-finally.js` verbatim — the lit test upstream `5ae5260c8` added, flagless. **Upstream sync task 4** — see the section of that name at the end of this file. Upstream's file carries TWO RUN lines over ONE set of `CHECK` lines (`-dump-sema` and `-Xcompile=false -dump-sema`), so the same file is imported into BOTH corpora: the driver corpus pins the answers the resolver's split produces, this one pins the answers the UNSPLIT statement produces. The only pin anywhere for the three decisions `5ae5260c8` adds — under `compile = true` a `TryStatement` never reaches the checker with both children. Verified byte-identical: 7322 B stdout both sides, empty stderr both sides, exit 0 both sides — an oracle-success file. Also measured, not assumed, that this corpus's oracle really is upstream's second RUN line: `hermesc -Xcompile=false -dump-sema` and `sema-parser-dump` produce byte-identical stdout on it (7322 B, exit 0), and its 5 `mayReachImplicitReturn` / 2 `noImplicitReturn` tokens are the same ones the compile path prints |
 | `implicit-return-shapes.js` | Byte-identical copy of the driver corpus's authored `sema_corpus/implicit-return-shapes.js` (see `sema_corpus/MANIFEST.md`'s "Task-2 review round" for why it is authored rather than imported). **Upstream sync task 4.** Eleven one-decision `CheckImplicitReturn` shapes, none of which involves a `compile_`-gated rewrite, so the same source pins the same eleven decisions on the parser entry — where, before this task, eight of them had NO witness at all. Its dump is not the driver corpus's: no ambient declarations and no constant folding, so the file is a distinct comparison rather than a duplicate one. Verified byte-identical: 6772 B stdout both sides (vs 10288 B on the driver pair), empty stderr both sides, exit 0 both sides — an oracle-success file |
+| `implicit-return-with-statement.js` | Three functions whose bodies are `with` statements — one that returns out of the `with`, one that falls through it, one whose `with` body is a block ending in `return`. **Upstream sync task 6** — see the section of that name at the end of this file. The ONLY pin anywhere for `CheckImplicitReturn`'s `WithStatement` arm (cpp:177-179), which returns the termination result of the `with` BODY: the compile path rejects `with` outright (`SemanticResolver.cpp:757-759`, `compile_`-gated) so the analysis never runs there, and this corpus's other `with` file, `parser-mode-with-statement.js`, is a TOP-LEVEL `with` — `mayReachImplicitReturn` only runs over function bodies, so it never reaches the arm either. Authored, not imported: upstream has no lit test for a `with` inside a function under `-Xcompile=false`. Verified byte-identical: 1910 B stdout both sides, empty stderr both sides, exit 0 both sides — an oracle-success file |
 | `flow-annotations.js` | `// FLAGS: -parse-flow` + `function f(x: number): number { return x; } var y = f(1);`. **S4a final review.** Was the corpus's only FLAGS-bearing file and its only Flow file until upstream sync task 3 added `flow-match-implicit-return.js`: the first exercise of the C++ tool's `if (parseFlow) ctx.setParseFlow(ParseFlowSetting::ALL)` branch, which was dead before it (spec §5 called for a flow seed here; it never shipped). The type annotations parse into type nodes the resolver walks past without declaring anything, so the dump is the same shape the untyped version would give (`f`/`y` `GlobalProperty`, `x` `Parameter`). The same review taught the C++ tool the `-parse-flow` spelling alongside `--parse-flow` — the FLAGS line is appended verbatim to BOTH binaries' argv, and hermesc's own spelling is the single dash. Resolves clean, so this is also an oracle-success file. Verified byte-identical: 630 bytes stdout both sides, empty stderr both sides, exit 0 both sides. |
 
 ## Pending (excluded from the walk — `pending/` subdirectory)
@@ -65,7 +66,7 @@ table above.
 
 ## Gate
 
-`sema differential (tests/sema_corpus_parser): 16 corpus files matched (8
+`sema differential (tests/sema_corpus_parser): 17 corpus files matched (9
 succeeded on the oracle)`.
 
 History: 7 → **11** files (+4, all from S4a's final review:
@@ -88,10 +89,13 @@ Arithmetic: 14 + 2 = 16; 6 + 2 = 8. Upstream sync task 5 then swapped two
 files one-for-one for upstream's own lit versions (`with-statement.js` →
 `parser-mode-with-statement.js`, `anon-export-default.js` →
 `parser-mode-export-default-anon.js`), so the figures are **unchanged at
-16 (8)**: 16 - 2 + 2 = 16; 8 - 2 + 2 = 8.
+16 (8)**: 16 - 2 + 2 = 16; 8 - 2 + 2 = 8. Then 16 → **17** (+1, upstream sync
+task 6: `implicit-return-with-statement.js`), oracle-succeeded 8 → **9**
+(+1: measured, not assumed — `sema-parser-dump` exits 0 on it with a full
+dump). Arithmetic: 16 + 1 = 17; 8 + 1 = 9.
 
 The non-degeneracy guard in `run_differential` (at least one oracle success)
-is satisfied eight times over; the remaining eight are all legitimate
+is satisfied nine times over; the remaining eight are all legitimate
 error-path pins (oracle exit 2), same convention as
 `tests/sema_corpus/parse-error.js`.
 
@@ -522,6 +526,10 @@ so the swap is coverage-neutral.
 
 ### Still unwitnessed: `CheckImplicitReturn`'s `WithStatement` arm
 
+**CLOSED by upstream sync task 6** — see "Upstream sync task 6" at the end of
+this file. Kept as written for the history; what follows describes the state
+before that task.
+
 Found while re-checking `tests/check_implicit_return.rs`'s
 `with_statements_never_reach_the_analysis`. The arm is unreachable on the
 compile path (`with` errors first), and the parser entry *can* reach it —
@@ -545,3 +553,80 @@ column above **exactly, all 21 rows**. See the README for how to read it and
 for the two caveats: absolute counts drift as the corpora grow, and the
 task-3 `MATCH-*` table above counts `Func`-line token flips inside one file
 rather than files.
+
+## Upstream sync task 6: closing the `WithStatement` zero-witness gap
+
+Task 5 recorded a gap it could not close in its own mandate (section "Still
+unwitnessed: `CheckImplicitReturn`'s `WithStatement` arm" above); the sync's
+final whole-branch review asked for it to be closed. This is that.
+
+**The defect class.** `check_implicit_return.rs`'s `WithStatement` arm
+(cpp:177-179) is live code reachable through the published `hermes-sema`
+parser entry, and NOTHING witnessed it. That is the same zero-witness class
+this sync already found real twice (the task-2 review's eleven unpinned
+decisions, and task 4's fourteen). It is not a hypothetical: with the arm
+deleted, every gate in the workspace stayed green — measured below.
+
+### The 17th file
+
+`implicit-return-with-statement.js`, authored (upstream has no lit test for a
+`with` inside a function under `-Xcompile=false`). Three functions, chosen so
+that no fixed answer can pass:
+
+| Function | `with` body | Oracle token |
+|---|---|---|
+| `withReturns(o)` | `return 1;` — terminates | `noImplicitReturn` |
+| `withFallsThrough(o)` | `{ g(); }` — falls through | `mayReachImplicitReturn` |
+| `withBlockReturns(o)` | `{ g(); return 1; }` — block list terminates | `noImplicitReturn` |
+
+A fixed `make_next_statement()` in the arm flips the first and third; a fixed
+`make_must_terminate()` flips the second; deleting the arm flips all three.
+
+**Oracle-verified on all three channels BEFORE import**, exactly as the
+harness invokes it (flagless — this pair already *is* `-Xcompile=false`):
+
+```
+sema-parser-dump          implicit-return-with-statement.js -> exit 0, stdout 1910 B, stderr 0 B
+sema-dump --parser-entry  "                                 -> exit 0, stdout 1910 B, stderr 0 B
+cmp: stdout identical, stderr identical, exit identical
+```
+
+The oracle SUCCEEDS on it (exit 0), which is why the gate's success count
+moves too: **16 (8) → 17 (9)**, measured rather than assumed.
+
+Also measured, for the deferred oracle-swap item in
+`doc/superpowers/UpstreamSyncState.md`: `hermesc -Xcompile=false -dump-sema`
+gives byte-identical stdout on this file too (1910 B, exit 0), so it is not a
+seventh blocker — the swap still stands at **6 of 17 differing**.
+
+### PROOF: the gap was real, and the file closes it
+
+Each mutation applied alone to `check_implicit_return.rs`, the parser
+differential run, then reverted:
+
+| Mutation of the `WithStatement` arm | Result |
+|---|---|
+| `self.check_termination(n.body)` → a fixed `TerminationResult::make_next_statement()` | `sema dump mismatch (stdout)` naming **`implicit-return-with-statement.js`**; driver corpus unaffected (224 (111) still green) |
+| the arm removed entirely (`Node::WithStatement(n) if false =>`, i.e. it falls to the catch-all) | `sema dump mismatch (stdout)` naming **`implicit-return-with-statement.js`**; driver corpus unaffected |
+| *(the gap itself)* the first mutation applied with this file temporarily moved OUT of the corpus | **fully green** — `17 → 16 corpus files matched (8 succeeded on the oracle)` and `224 (111)`, i.e. the pre-task-6 workspace could not see it at all |
+
+The third row is the finding: before this file, the arm could be deleted from
+the port and all 224 + 16 comparisons would still pass.
+
+### The survey catalogue gained a `WITH` row
+
+`rust/crates/sema/tests/implicit_return_survey/survey.py` now carries a
+22nd mutation, `WITH` — the arm reduced to a fixed `make_next_statement()`.
+Re-run over both corpora with the new file in place:
+
+```
+baseline: driver 224 files, parser 17 files
+WITH     driver=0  parser=1   with: the arm returns the body's termination result
+
+decisions with ZERO witnesses in either corpus: none
+```
+
+`driver=0` is structural, not a gap — the same reason `M19`-`M21` read 0
+there: `with` is rejected on the compile path before the analysis runs, so
+the driver corpus can never witness this arm. `parser=1` is the row the gate
+now pins.

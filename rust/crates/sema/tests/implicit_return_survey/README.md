@@ -54,7 +54,8 @@ that corpus.
   decision could be deleted from the port today and the corpus would stay
   green. That is the finding the tables exist to record, and closing the zeros
   is why `sema_corpus/implicit-return-shapes.js` and
-  `sema_corpus_parser/implicit-return-{shapes,try-catch-finally}.js` were
+  `sema_corpus_parser/implicit-return-{shapes,try-catch-finally,with-statement}.js`
+  were
   added.
 - The survey exits non-zero if any decision has zero witnesses in **both**
   corpora.
@@ -62,13 +63,16 @@ that corpus.
   three try-catch-finally decisions (`M19`-`M21`) can only ever be witnessed
   through the parser entry point, because the compile path splits the combined
   `try`/`catch`/`finally` before the analysis runs
-  (`SemanticResolver.cpp:794`).
+  (`SemanticResolver.cpp:794`). `WITH` is the same shape for the same kind of
+  reason: `with` is rejected outright when compiling
+  (`SemanticResolver.cpp:757-759`), so it reads `driver=0 parser=1`.
 - **Absolute counts drift as the corpora grow**; the MANIFEST tables record
   them as of the day they were run. What those tables assert, and what a later
   run should reproduce, is the zero-versus-non-zero split, not the exact
-  numbers. As of 2026-08-13 (driver corpus 224 files, parser corpus 16) no
-  decision has zero witnesses in both corpora. A full run then reproduced the
-  parser MANIFEST's task-4 "After" column exactly, all 21 rows.
+  numbers. As of 2026-08-13 (driver corpus 224 files, parser corpus 17) no
+  decision has zero witnesses in both corpora. A full run at parser corpus 16
+  reproduced the parser MANIFEST's task-4 "After" column exactly, all 21 rows;
+  upstream sync task 6 then added the 22nd row, `WITH`.
 - The `MATCH-*` rows are **not** directly comparable to the parser MANIFEST's
   task-3 table: that table counts `Func`-line *token flips* inside the single
   file `flow-match-implicit-return.js`, whereas this survey counts *files*, so
@@ -96,3 +100,4 @@ Ids match the MANIFEST tables:
 | `M18`, `THROW` | controls — known-caught before any survey ran |
 | `M19`-`M21` | the three decisions upstream `5ae5260c8` (try-catch-finally) adds |
 | `MATCH-A`-`MATCH-F` | the task-3 survey of `653e49c60`'s Flow-`match` arm |
+| `WITH` | the `WithStatement` arm (cpp:177-179), pinned by upstream sync task 6 |
