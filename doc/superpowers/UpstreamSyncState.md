@@ -14,12 +14,13 @@ upstream fixes are ported.
 |---|---|
 | **Fork point from `static_h`** | **`60b5c73db`** ("Deploy 0.316.0 to xplat") |
 | **Plus** | the 11 defect fixes cherry-picked 2026-08-10 (below) |
+| **Plus** | `04f1f53a8` (`-Xcompile` + dump `mayReachImplicitReturn`), cherry-picked 2026-08-13 as `1e3806f47`, mirrored in the port by `de917f249` |
 | **Upstream `static_h` HEAD at time of writing** | `2d3e9018b` (2026-08-13) |
 | **Commits between fork point and upstream HEAD** | 147 (105 of them predate the local `static_h` ref at `5dfe740ad`) |
 
 The port's C++ tree is **not equal to any single upstream commit**: it is the
-fork point plus eleven cherry-picks. The 136 other commits in
-`60b5c73db..origin/static_h` are unported, but all but seven are irrelevant to
+fork point plus twelve cherry-picks. The 135 other commits in
+`60b5c73db..origin/static_h` are unported, but all but six are irrelevant to
 the front end (VM, GC, debugger, JSI, build). See the backlog below.
 
 ### The 11 cherry-picked defect fixes
@@ -98,7 +99,7 @@ tests, minus the 11 above. (`b70dd7942` touches `include/hermes/Support` but is
 
 | Upstream | What it does | Port impact |
 |---|---|---|
-| `04f1f53a8` | Adds `-Xcompile` to the driver **and dumps `mayReachImplicitReturn`** | **Largest.** Every `Func`/`StaticBlock` dump line gains ` mayReachImplicitReturn` or ` noImplicitReturn`, so all 219 driver-corpus + 13 parser-entry comparisons mismatch until `dump_context.rs` matches. The port already *computes* the flag but never dumped it, so this byte-verifies the port's `CheckImplicitReturn` for the first time. `-Xcompile=false` also gives the stock driver a parser-mode dump, which may retire the in-repo `tools/sema-parser-dump` oracle. |
+| ~~`04f1f53a8`~~ | Adds `-Xcompile` to the driver **and dumps `mayReachImplicitReturn`** | **DONE 2026-08-13** (`1e3806f47` + `de917f249`). The port's `CheckImplicitReturn` was byte-verified for the first time and **agreed with C++ everywhere**: 219/219 driver-corpus and 13/13 parser-entry dumps identical after mirroring `printFunction`, and zero stdout differences across all 1232 `.js` under `test/Sema`, `test/Parser` and `test/hermes`. Not vacuous — 196 of the driver corpus's 555 `Func`/`StaticBlock` lines carry `noImplicitReturn`. `-Xcompile` was cherry-picked but nothing was built on it; see the deferred `sema-parser-dump` item. |
 | `653e49c60` | Handle Flow `match` in `CheckImplicitReturn` (+61 lines) | Port `check_implicit_return.rs`. |
 | `90f4a3ac6` | Reject Flow `match` when compiling: new `visit(MatchStatement/MatchExpression)` emitting "match statements/expressions are unsupported" under `compile_` | Port to the resolver; parser mode still resolves. |
 | `ca6de21ce` | Parser: check the parsed value of a match object property (`if (!optPattern) return false;`) | Port to the flow-match parser — same class as `8d786acbe`. |
@@ -116,7 +117,17 @@ corrected on 2026-08-13 (plan task 1).
 Work this sync surfaces but deliberately does **not** do. Do not let these
 rot — check them at the start of the next sync.
 
-### OPEN — import upstream's fuller `test/Sema/class-field-class-expr.js`
+### CLOSED (2026-08-13, task 2 step 0) — import upstream's fuller `test/Sema/class-field-class-expr.js`
+
+Done in `885a7f300`, exactly as prescribed below, and re-proved: with the
+`cur_scope` switch deleted from `visit_class_private_property` only,
+`sema-dump` on the imported file panics at `dump_context.rs:251` ("not all
+scopes were visited, left: 2, right: 3", exit 101) and
+`sema_differential_s0` reports a stdout mismatch for it; the pre-widening
+55-line file exits 0 under the same mutant. Restored: 219 (109) / 13 (5).
+The original entry follows unchanged, for the record.
+
+
 
 The divergence check compares `lib include` only, so it never looked at the
 lit test `dee8c5ce0` added. Upstream's version of
@@ -162,11 +173,25 @@ flight together, so a mismatch could not be attributed to either. Land the
 dump-format port first, get the gates green, then swap the oracle as its own
 change.
 
+**Measured 2026-08-13 (task 2, information only — no action taken): the swap
+is NOT free.** With `04f1f53a8` cherry-picked, `hermesc -Xcompile=false
+-dump-sema` vs `sema-parser-dump` over the 13 parser-entry corpus files gives
+**6 differing**, all of the predicted shape: same exit status (2), but the
+driver emits an EMPTY stdout where `sema-parser-dump` emits the dump —
+`error-arrow-rewrite-then-error.js` (0 vs 521 B),
+`error-break-outside-loop.js` (0/100), `error-continue-outside-loop.js`
+(0/356), `error-invalid-assignment-lvalue.js` (0/188),
+`import-assertions-compile-false.js` (0/265), `module-imports.js` (0/530).
+That is the driver's dump-suppression-on-error, and it is exactly the
+behavior 8 of the 13 corpus files exist to pin. So retiring the tool would
+either lose the error-path parser-entry coverage or need those files
+restructured; decide that deliberately rather than assuming a drop-in swap.
+
 **When doing it, check:** that `-Xcompile=false` output is byte-identical to
-`sema-parser-dump`'s for all 13 parser-entry corpus files (it should be — both
-call the same two library entries, but the driver wraps them differently:
-`sema-parser-dump` dumps *unconditionally* even when errors were reported,
-whereas the driver historically suppresses the dump on errors, and
+`sema-parser-dump`'s for all 13 parser-entry corpus files (it is not — see
+the measurement above; both call the same two library entries, but the driver
+wraps them differently: `sema-parser-dump` dumps *unconditionally* even when
+errors were reported, whereas the driver suppresses the dump on errors, and
 `-Xcompile=false` also refuses `-commonjs`); that the harness's
 per-file `// FLAGS:` mechanism can carry `-Xcompile=false`; and that
 `tools/CMakeLists.txt`, the corpus MANIFESTs, `CONTRIBUTING.md` and

@@ -263,3 +263,40 @@ landmine. (`computed-fn-name.js`'s own defect was likewise closed upstream,
 by `b351e1184`; see `tests/sema_corpus/MANIFEST.md`, which records it as
 re-matching but keeps the minimal `class-field-class-expr.js` as the pin
 instead of importing the 18 KB original.)
+
+## Upstream sync task 2: the dump gained `mayReachImplicitReturn`
+
+Upstream `04f1f53a8` (cherry-picked as `1e3806f47`, mirrored by `de917f249`)
+appends ` mayReachImplicitReturn` / ` noImplicitReturn` to every
+`Func`/`StaticBlock` line. This corpus compares against a live oracle, so
+nothing was regenerated; all 13 files still match on all three channels
+(**13 matched, 5 succeeded on the oracle**).
+
+This corpus is the ONLY place the `compile = false` answer is pinned, and
+upstream's commit message is explicit that it differs from the compile one
+because `SemanticResolver` skips its AST rewrites under `compile = false`.
+Its coverage of the new token is thin but real: the 13 files' dumps carry
+**14 `mayReachImplicitReturn` and 2 `noImplicitReturn`** lines, and the
+mutation `ReturnStatement => make_next_statement()` in
+`check_implicit_return.rs` is caught here by `flow-annotations.js`
+(the driver corpus catches it in 55 of 219). Widening this corpus for
+implicit-return shapes specifically is worth doing when
+`5ae5260c8` ("Handle try-catch-finally in CheckImplicitReturn",
+`CppDefectsFound.md` item 12) lands — that fix is precisely about a
+parser-mode implicit-return shape that aborts today, so its arrival is the
+natural moment to add try/catch/finally files here.
+
+### `-Xcompile=false` does NOT drop in for `sema-parser-dump`
+
+`04f1f53a8` also adds `hermesc -Xcompile=false -dump-sema`, which was the
+hoped-for replacement for this corpus's local-only oracle (see
+`doc/superpowers/UpstreamSyncState.md`'s deferred item). Measured with the
+cherry-pick in place: **6 of these 13 files differ** — same exit status (2),
+but the driver emits an EMPTY stdout where `sema-parser-dump` emits the dump
+(`error-arrow-rewrite-then-error.js` 0 vs 521 B,
+`error-break-outside-loop.js` 0/100, `error-continue-outside-loop.js` 0/356,
+`error-invalid-assignment-lvalue.js` 0/188,
+`import-assertions-compile-false.js` 0/265, `module-imports.js` 0/530).
+That is the driver's dump-suppression-on-error, and it is exactly what most
+of this corpus exists to pin. Recorded here so the swap is not attempted as
+a drop-in.

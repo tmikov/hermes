@@ -2495,3 +2495,72 @@ gates are back to 219 (109) / 13 (5).
 
 Corpus size **219 unchanged** (the file was replaced, not added); oracle
 successes **109 unchanged** (it exited 0 before and after).
+
+## Upstream sync task 2: the dump gained `mayReachImplicitReturn`
+
+Upstream `04f1f53a8` ("Add `-Xcompile` and dump `mayReachImplicitReturn`",
+cherry-picked here as `1e3806f47`) appends one token to every
+`Func`/`StaticBlock` line in `SemContextDumper::printFunction`:
+
+```cpp
+<< (f.mayReachImplicitReturn ? " mayReachImplicitReturn" : " noImplicitReturn")
+```
+
+`dump_context.rs::print_function` mirrors it (`de917f249`). Both spellings are
+emitted, as upstream does: the flag defaults to `true`
+(`SemContext.h:354`, `sem_context.rs:545`) and `CheckImplicitReturn` is
+skipped after a resolution error, so an omitted-when-true encoding would
+conflate "computed true" with "not computed".
+
+**Every corpus file's expected dump changed, and none of them are stored** —
+this harness compares against a live oracle, not a checked-in baseline, so
+there was nothing to regenerate on this side. The ~100 checked-in `test/Sema`
+lit baselines were regenerated with `update-lit`, which reproduced upstream's
+own post-image for 129 of the 133 changed files (the 4 that differ do so only
+in FlowChecker type annotations, from unported FlowChecker commits).
+
+### The point: `may_reach_implicit_return` was byte-verified for the first time
+
+The port has computed this flag since S3 but never dumped it, so nothing had
+ever compared it to C++. After the mirror, **zero files mismatch**:
+
+```
+sema differential (tests/sema_corpus):        219 corpus files matched (109 succeeded)
+sema differential (tests/sema_corpus_parser):  13 corpus files matched (5 succeeded)
+```
+
+**Not vacuous.** Over the driver corpus's dumps the oracle emits 359
+` mayReachImplicitReturn` and 196 ` noImplicitReturn` lines — 35% of all 555
+`Func`/`StaticBlock` lines take the false branch — and the port emits the
+same counts in the same places. The parser corpus adds 14 / 2.
+
+**Non-degeneracy proved by mutation** (both reverted afterwards), in
+`check_implicit_return.rs`:
+
+| Mutation | Caught by |
+|---|---|
+| `ReturnStatement => make_next_statement()` instead of `make_must_terminate()` | **55 of 219** driver files, **1 of 13** parser files |
+| `ThrowStatement` likewise | `try-catch-finally.js` |
+
+### Wider sweep, to make the null result credible
+
+`hermesc -dump-sema` vs `sema-dump` over **all 1232 `.js` under `test/Sema`,
+`test/Parser` and `test/hermes`**: **zero stdout differences.** 1227 identical
+on all three channels; the 5 outliers are pre-existing and unrelated —
+
+- 3 `$SHBuiltin.moduleFactory` panics (`test/Sema/xmod-errors.js`,
+  `test/hermes/xmod-exec-require{,-bad-func}.js`), the Deferred row above,
+  still S4b;
+- 2 stderr-only parser deviations already documented as deliberate:
+  `test/Parser/es6/import-error.js` (the `note: first usage of name`
+  companions dropped per house style) and
+  `test/Parser/optional-chaining-error.js` (error-and-continue recovery, 4
+  diagnostics vs 3).
+
+Note this sweep no longer has the `computed-fn-name.js` abort landmine (closed
+by Task 4 above), so it is a clean measurement.
+
+### Gate
+
+Corpus size **219 unchanged**; oracle successes **109 unchanged**. Nothing was
+imported or removed by this task; only the dump format moved.
