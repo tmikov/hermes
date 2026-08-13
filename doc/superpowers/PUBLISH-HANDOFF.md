@@ -125,7 +125,19 @@ Only the manual, irreversible steps remain:
 1. **Skip the placeholder name reservation** (plan Step 5) unless launch is
    weeks away — the real 0.1.0 publish IS the reservation, and placeholders
    add seven extra irreversible publishes plus junk 0.0.0 version rows.
-2. **Publish with ONE multi-package invocation** (the plan's per-crate loop
+2. **Push the `hermes-crates-v0.1.0` tag before publishing.** Every crate
+   README links to GitHub through that tag (`/blob/hermes-crates-v0.1.0/…`)
+   rather than through a branch, so the links survive `rust1` being renamed,
+   merged or deleted — and they resolve to exactly the source that was
+   published. Two rules follow:
+   - The tag must point at **the commit you publish from**. If any commit
+     lands after the tag was cut, move it: `git tag -f hermes-crates-v0.1.0`
+     then `git push -f origin hermes-crates-v0.1.0`.
+   - The tag must actually be **pushed to GitHub** (`git push origin
+     hermes-crates-v0.1.0`) — until it is, all ten README links 404 on the
+     crates.io pages, and a published README cannot be edited without a new
+     version.
+3. **Publish with ONE multi-package invocation** (the plan's per-crate loop
    provably fails: versioned path deps resolve against the registry):
    ```bash
    cargo login <token>
@@ -137,10 +149,14 @@ Only the manual, irreversible steps remain:
    not an error.
    cargo stages them in dependency order and waits for index propagation.
    Verify each on crates.io and that docs.rs builds parser/ast/sema.
-3. **Post-publish checklist:** re-point the crate READMEs' pinned
-   `blob/rust1/` links if the branch is renamed/merged (needs a patch release
-   — decide branch fate first if that matters); trigger
+4. **Post-publish checklist:** confirm the ten README links resolve on the
+   live crates.io pages (they depend on the pushed tag — a 404 there needs a
+   patch release to fix, so check early); trigger
    `rust-differential-nightly.yml` once via `workflow_dispatch` for its first
    observed green; sweep `doc/superpowers/{SESSION-HANDOFF,RustPortRoadmap}.md`
    `-p parser` spellings when `rust1` merges into `rust`; human editorial pass
    on the blog draft before any announcement.
+
+**Branch fate is now decoupled from the crates.** Because the READMEs point at
+an immutable tag, `rust1` may be renamed, merged into `rust`, or deleted after
+publish without breaking anything on crates.io. Keep the tag.
