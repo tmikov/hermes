@@ -4,6 +4,11 @@ The single source of truth for *what* we are porting, *why*, *what is done*, and
 *what is next*. Read this first when picking the effort back up. Component-level
 specs/plans live under `doc/superpowers/specs/` and `doc/superpowers/plans/`.
 
+**Which upstream C++ state the port mirrors** — fork point, cherry-picks, and
+the outstanding sync backlog — is recorded in
+[`UpstreamSyncState.md`](UpstreamSyncState.md). Update it whenever upstream
+fixes are ported.
+
 ## Goal & principles
 
 Port the Hermes JavaScript compiler **front-end** to Rust, faithfully and incrementally.
