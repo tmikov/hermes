@@ -7,7 +7,7 @@
 
 // S3 T2 battery: the `Var, ScopedFunc` arm of
 // `validateAndDeclareIdentifier`'s "when to create a new declaration"
-// switch (SemanticResolver.cpp:2560-2576). `var` never blocks promotion
+// switch (SemanticResolver.cpp:2576-2592). `var` never blocks promotion
 // (cpp:206's `!isKindLetLike(Var)`), so wherever a `var` and a promoted
 // function share a name, they end up sharing ONE `Decl` rather than
 // conflicting.
@@ -18,7 +18,7 @@
 // `return`'s) resolve to the SAME decl the promoted function got.
 //
 // `crossScopeReuse`: the genuinely cross-scope branch
-// (cpp:2568-2575, `reuseDeclForNewBinding`). `h`'s first block is promoted
+// (cpp:2584-2591, `reuseDeclForNewBinding`). `h`'s first block is promoted
 // normally. In `h`'s second (sibling) block, `function h(){}` is declared
 // BEFORE `let h;` in source order, so at the moment the function's OWN
 // (never-before-declared) identifier is resolved, the binding table has
@@ -32,7 +32,7 @@
 // "two declarations" shapes in `promotion-basic.js`, which always mint one).
 // `getDeclarationDecl(ident)` is therefore never pre-set for this
 // identifier, so `visit(VariableDeclarationNode)`'s "two declarations put"
-// special case (cpp:2625-2634) is correctly skipped. The immediately
+// special case (cpp:2641-2650) is correctly skipped. The immediately
 // following `let h;` then dumps as `[D:<its own Let decl> E:<the reused Var
 // decl>]`, because its own `try_emplace` at the block's binding-table depth
 // finds `h` already bound there (to the reused `Var` decl) and is a no-op

@@ -6,7 +6,7 @@
  */
 
 // visit(ClassPropertyNode *) (SemanticResolver.cpp:1013-1061): the two
-// synthetic elements-initializer FunctionInfos (cpp:3130-3177) and the
+// synthetic elements-initializer FunctionInfos (cpp:3146-3193) and the
 // FunctionContext a field initializer is resolved inside.
 //
 // Each getter is exercised on its own and together: a class with only
@@ -14,7 +14,7 @@
 // gets one, one with both gets two (instance first, in visit order). A field
 // with NO initializer still creates the initializer function in untyped mode
 // (cpp:1051-1060) but does NOT run declareArguments, so its scope has no
-// 'arguments' decl — while any field WITH an initializer adds one (cpp:1049).
+// 'arguments' decl — while any field WITH an initializer adds one (cpp:1044).
 
 var key = 'k';
 var outerVar = 1;

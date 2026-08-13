@@ -96,7 +96,7 @@
 //! `assert(!node->isUnresolvable())` (SemContext.h:559-561), which is
 //! compiled out in `NDEBUG`/Release builds; in that configuration the call
 //! was harmless, because the *only* call site that ever marks an identifier
-//! unresolvable (`Unresolver::visit`, `SemanticResolver.cpp:3206-3220`)
+//! unresolvable (`Unresolver::visit`, `SemanticResolver.cpp:3222-3236`)
 //! always clears the "have expression decl" bit first via
 //! `setExpressionDecl(node, nullptr)` — so `getExpressionDecl` would
 //! return `nullptr` there regardless of the assert. A debug C++ build,
@@ -114,7 +114,7 @@
 //! semCtx_.getExpressionDecl(V);`, `SemResolve.cpp:99-110`), so debug now
 //! matches release upstream and both match this port: `with(o){x;}` dumps
 //! `Id 'x' UNR` on every side, in every build configuration. It is a live
-//! differential corpus file — `sema_corpus_parser/with-statement.js`.
+//! differential corpus file — `sema_corpus_parser/parser-mode-with-statement.js`.
 //!
 //! ## `should_visit` and `TypeAnnotation`
 //!

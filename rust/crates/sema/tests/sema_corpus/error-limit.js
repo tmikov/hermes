@@ -6,9 +6,9 @@
  */
 
 // THE ERROR LIMIT. `hermesc`'s driver sets one — `-ferror-limit`, `init(20)`
-// (CompilerDriver.cpp:555-559) applied by
+// (CompilerDriver.cpp:566-570) applied by
 // `context->getSourceErrorManager().setErrorLimit(cl::ErrorLimit)`
-// (CompilerDriver.cpp:1223) — while a bare `SourceErrorManager` starts
+// (CompilerDriver.cpp:1252) — while a bare `SourceErrorManager` starts
 // unlimited (`errorLimit_` = `UINT32_MAX`, SourceErrorManager.h). The S2 T8
 // sweep found `sema-dump` was never applying the driver's limit, so any input
 // with more than 20 errors diverged; the corpus had never noticed because its

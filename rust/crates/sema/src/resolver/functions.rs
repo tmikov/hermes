@@ -16,10 +16,10 @@
 //! Ports `SemanticResolver::visit(FunctionDeclarationNode *, Node *)`
 //! (SemanticResolver.cpp:233-243), `visit(FunctionExpressionNode *, Node *)`
 //! (cpp:244-248), `visit(ArrowFunctionExpressionNode *, Node *)`
-//! (cpp:249-275, S2 T2), `visitFunctionLike` (cpp:1660-1697),
-//! `visitFunctionLikeInFunctionContext` (cpp:1699-1896),
-//! `visitFunctionBodyAfterParamsVisited` (cpp:1898-1959),
-//! `visitFunctionExpression` (cpp:1961-1979) and
+//! (cpp:249-275, S2 T2), `visitFunctionLike` (cpp:1675-1712),
+//! `visitFunctionLikeInFunctionContext` (cpp:1714-1911),
+//! `visitFunctionBodyAfterParamsVisited` (cpp:1913-1975),
+//! `visitFunctionExpression` (cpp:1977-1995) and
 //! `visit(ReturnStatementNode *)` (cpp:1483-1489), plus the four
 //! `ESTree::` free functions they reach (`getParams`, `getBlockStatement`,
 //! `isGenerator`, `isAsync` — `lib/AST/ESTree.cpp:17-36,58-80,186-205,
@@ -93,17 +93,17 @@
 //!
 //! ## What's dormant
 //!
-//! - **The `MethodDefinition` constructor branch** (cpp:1666-1675) needs
+//! - **The `MethodDefinition` constructor branch** (cpp:1681-1690) needs
 //!   `curClassContext_`, which belongs to S2's class work. It is ported as
 //!   a documented seam that panics if the parent really is a
 //!   `MethodDefinition` — unreachable today, since `MethodDefinition`
 //!   itself panics as an unhandled kind before it could ever visit a child.
-//! - **The lazy-body branch** (cpp:1738-1748) reads the three
+//! - **The lazy-body branch** (cpp:1753-1763) reads the three
 //!   `BlockStatement` `Cell`s the pre-parser sets; nothing in S1 sets them,
 //!   so it is ported but only exercised in S5.
 //!
 //! S2 T7 fills in the last line of `visitFunctionBodyAfterParamsVisited`
-//! (cpp:1953-1958): the `mayReachImplicitReturn` call, whose analysis lives
+//! (cpp:1969-1974): the `mayReachImplicitReturn` call, whose analysis lives
 //! in `crate::check_implicit_return`. It runs on the *visited* body rather
 //! than on `node`, for the reason that module's doc gives.
 
@@ -124,11 +124,11 @@ use super::{
 };
 
 /// Port of `astContext_.getEnableAsyncGenerators()` (Context.h:491-493),
-/// read once by `visitFunctionLikeInFunctionContext` (cpp:1708).
+/// read once by `visitFunctionLikeInFunctionContext` (cpp:1723).
 ///
 /// The setting is not ported: like `DEBUG_INFO_SETTING_ALL` in `mod.rs` it
 /// is a compiler-driver knob (`-Xasync-generators`, `CompilerRuntimeFlags.h:
-/// 51-55`, `llvh::cl::init(false)`; wired in `CompilerDriver.cpp:1209-1210`)
+/// 51-55`, `llvh::cl::init(false)`; wired in `CompilerDriver.cpp:1238-1239`)
 /// rather than something sema computes, and this port has no driver flags.
 /// `false` is hermesc's documented default, so the `if` below keeps the
 /// exact shape of the C++ condition and porting the real setting later is a
@@ -140,7 +140,7 @@ const ENABLE_ASYNC_GENERATORS: bool = false;
 ///
 /// Same treatment as [`ENABLE_ASYNC_GENERATORS`]. hermesc leaves it at the
 /// `Context` default `false` (Context.h:243); the only thing that sets it
-/// is the typed-mode IIFE wrapper (`CompilerDriver.cpp:835-837`, i.e.
+/// is the typed-mode IIFE wrapper (`CompilerDriver.cpp:846-848`, i.e.
 /// `-typed` without `-script`), which is S2's typed-mode scope.
 const ALLOW_RETURN_OUTSIDE_FUNCTION: bool = false;
 
@@ -258,7 +258,7 @@ fn function_like_params<'gc>(node: &'gc Node<'gc>) -> NodeList<'gc> {
 /// `visit` overload passes `node->_body` explicitly (cpp:239, 247, 260) and
 /// `getBlockStatement` (`lib/AST/ESTree.cpp:58-80`) is the downcasting
 /// variant, which `visitFunctionLikeInFunctionContext` open-codes as
-/// `dyn_cast<BlockStatementNode>(body)` (cpp:1717).
+/// `dyn_cast<BlockStatementNode>(body)` (cpp:1732).
 ///
 /// `pub(super)` rather than private: `promoter.rs` (S3 T1) needs it for
 /// `getBlockStatement(funcNode)` (ScopedFunctionPromoter.cpp:137).
@@ -317,7 +317,7 @@ fn is_async(node: &Node) -> bool {
 
 /// Port of the `isMethodDefinition` field of `FunctionLikeDecoration`
 /// (`include/hermes/AST/ESTree.h`), read by `visitFunctionLike`
-/// (cpp:1687). Enumerates the same six function-like kinds as `mod.rs`'s
+/// (cpp:1702). Enumerates the same six function-like kinds as `mod.rs`'s
 /// `set_node_sem_info`; `Program` has the decoration too and is always
 /// `false`.
 fn is_method_definition(node: &Node) -> bool {
@@ -332,7 +332,7 @@ fn is_method_definition(node: &Node) -> bool {
     }
 }
 
-/// Port of `node->strictness = ...` (cpp:1726), i.e.
+/// Port of `node->strictness = ...` (cpp:1741), i.e.
 /// `ESTree::FunctionLikeDecoration::strictness`. Same six kinds as
 /// `mod.rs`'s `set_node_sem_info` (`visit(ProgramNode *)` writes the
 /// `Program` one through the payload directly, so `Program` never reaches
@@ -401,7 +401,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     /// Port of `SemanticResolver::visit(ESTree::FunctionExpressionNode
     /// *funcExpr, ESTree::Node *parent)` (SemanticResolver.cpp:244-248),
     /// fused with the `visitFunctionExpression` it immediately forwards to
-    /// (cpp:1961-1979) — the C++ split exists only because
+    /// (cpp:1977-1995) — the C++ split exists only because
     /// `visitFunctionExpression` is also called from the class-method path
     /// (S2), which passes different `body`/`params` references; with those
     /// out-parameters gone (see the module doc) the two collapse into one.
@@ -556,7 +556,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     // ---- visitFunctionLike ---------------------------------------------
 
     /// Port of `SemanticResolver::visitFunctionLike`
-    /// (SemanticResolver.cpp:1660-1697). The `body`/`params`
+    /// (SemanticResolver.cpp:1675-1712). The `body`/`params`
     /// out-parameters are gone — see the module doc.
     fn visit_function_like<'gc>(
         &mut self,
@@ -626,7 +626,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     // ---- visitFunctionLikeInFunctionContext ----------------------------
 
     /// Port of `SemanticResolver::visitFunctionLikeInFunctionContext`
-    /// (SemanticResolver.cpp:1699-1896).
+    /// (SemanticResolver.cpp:1714-1911).
     fn visit_function_like_in_function_context<'gc>(
         &mut self,
         gc: &'gc GCLock,
@@ -871,7 +871,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 
     /// Declare the parameters. Port of the `declareParams` lambda
-    /// (SemanticResolver.cpp:1776-1811).
+    /// (SemanticResolver.cpp:1791-1826).
     ///
     /// C++ captures `hasParameterNamedArguments` by reference; here it is an
     /// explicit out-parameter.
@@ -968,7 +968,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 
     /// Visits the parameters in the current scope. Port of the `visitParams`
-    /// lambda (SemanticResolver.cpp:1814-1838).
+    /// lambda (SemanticResolver.cpp:1829-1853).
     fn visit_params<'gc>(
         &mut self,
         gc: &'gc GCLock,
@@ -1016,7 +1016,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     // ---- visitFunctionBodyAfterParamsVisited ---------------------------
 
     /// Port of `SemanticResolver::visitFunctionBodyAfterParamsVisited`
-    /// (SemanticResolver.cpp:1898-1959). C++'s `id` parameter is not ported:
+    /// (SemanticResolver.cpp:1913-1975). C++'s `id` parameter is not ported:
     /// its only use is the commented-out `visitESTreeNode` below.
     fn visit_function_body_after_params_visited<'gc>(
         &mut self,
@@ -1103,21 +1103,32 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
         //
         // Ported AS DEAD CODE, with C++'s own literal `false` guard, so that
         // the day the TODO is honored this is the line that changes. The
-        // `Unresolver` pass it names (SemanticResolver.h:679-711,
-        // SemanticResolver.cpp:3200-3224) IS ported as of S2 T3
+        // `Unresolver` pass it names (SemanticResolver.h:681-713,
+        // SemanticResolver.cpp:3216-3240) IS ported as of S2 T3
         // (`resolver/unresolver.rs`) — reached today only from
         // `visit(WithStatementNode *)`.
+        //
+        // The guard is a SEPARATE, outer `if false` rather than a
+        // `false && …` conjunction because that is the shape upstream
+        // settled on: `if ((false)) if (…)` at cpp:1963-1967. A Windows
+        // clang17 `-Wunreachable-code` round trip first hid the block behind
+        // `#if 0` and then backed that out (`6fbc3706d`), leaving the extra
+        // parentheses that mark the constant as deliberate. Dead in every
+        // form; mirrored for source fidelity only.
         let lex_scope = self
             .sem_ctx
             .function(self.cur_function_info())
             .get_function_body_scope();
-        #[allow(clippy::overly_complex_bool_expr)]
-        if false
-            && self.sem_ctx.scope(lex_scope).local_eval
-            && !self.sem_ctx.function(self.cur_function_info()).strict
-        {
-            let depth = self.sem_ctx.scope(lex_scope).depth;
-            Unresolver::run(self.sem_ctx, depth, node);
+        // `collapsible_if` is allowed deliberately: collapsing the two would
+        // undo the mirror of cpp:1963-1967 described above.
+        #[allow(clippy::overly_complex_bool_expr, clippy::collapsible_if)]
+        if false {
+            if self.sem_ctx.scope(lex_scope).local_eval
+                && !self.sem_ctx.function(self.cur_function_info()).strict
+            {
+                let depth = self.sem_ctx.scope(lex_scope).depth;
+                Unresolver::run(self.sem_ctx, depth, node);
+            }
         }
 
         // Determine whether the function can run the implicit return.

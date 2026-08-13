@@ -277,7 +277,7 @@ impl<'a> ObjectView<'a> {
     }
 }
 
-/// Port of `JSONSharedValue` (JSONParser.h:698-720). Pairs a JSON value
+/// Port of `JSONSharedValue` (JSONParser.h:704-726). Pairs a JSON value
 /// reference with the `Rc<Bump>` arena that backs it so the caller can own
 /// both without worrying about arena lifetime. C++ uses `const JSONValue*` +
 /// `shared_ptr<const Allocator>`; here the raw pointer is lifetime-erased to

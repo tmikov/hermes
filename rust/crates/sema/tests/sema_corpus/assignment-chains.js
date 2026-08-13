@@ -6,7 +6,7 @@ a = b = c = 1 + 2;
 a += 1;
 a.p = b;
 // Destructuring targets recurse through validateAssignmentTarget
-// (cpp:2693-2725).
+// (cpp:2709-2741).
 [a, b] = [1, 2];
 [a, , b] = [1, 2];
 [a, ...b] = c;

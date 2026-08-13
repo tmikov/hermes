@@ -78,7 +78,7 @@
 //! `try`s before it is visited, catch clauses get their own scope holding
 //! only the catch parameter's bindings, and `with` reports its
 //! not-supported error and then runs the new `Unresolver` pass
-//! (`unresolver.rs`, the port of SemanticResolver.h:679-711) over its body,
+//! (`unresolver.rs`, the port of SemanticResolver.h:681-713) over its body,
 //! which is what turns S1 T5's dormant `Catch`/`ES5Catch` redeclaration
 //! rows live — plus `visit(RegExpLiteralNode *)` (`expressions.rs`), whose
 //! regex-engine boundary is documented at its site. From S2 T4
@@ -92,8 +92,8 @@
 //! (the implicit constructor and the instance/static elements initializers,
 //! all three recorded in `Cell`s on the class node), which is also what
 //! turns S1 T7's dormant `MethodDefinition` constructor-kind branch live.
-//! From S2 T5, `collectDeclaredPrivateIdentifiers` (cpp:2157-2274),
-//! `declarePrivateName`/`resolvePrivateName` (cpp:2047-2080,
+//! From S2 T5, `collectDeclaredPrivateIdentifiers` (cpp:2173-2290),
+//! `declarePrivateName`/`resolvePrivateName` (cpp:2063-2096,
 //! `identifiers.rs`) and the `#` mangling
 //! (`sem_context::private_name_identifier`), plus
 //! `visit(PrivateNameNode *)`, `visit(ClassPrivatePropertyNode *)` and
@@ -111,7 +111,7 @@
 //! documented `typeof` double-fire quirk reachable (see
 //! `tests/sema_corpus/error-static-block-typeof-arguments.js`).
 //! From S2 T6, `visit(CallExpressionNode *)` (cpp:1127-1219) and
-//! `registerLocalEval` (cpp:2849-2857, `calls.rs`) — a direct call to
+//! `registerLocalEval` (cpp:2865-2873, `calls.rs`) — a direct call to
 //! `eval()` warns and marks its whole scope chain as a local-`eval` user,
 //! **spec §3.4 rewrite #3** turns `$SHBuiltin.prop(...)` into a call whose
 //! callee's object is an `SHBuiltin` node, and `super()` outside a derived
@@ -121,7 +121,7 @@
 //! call arguments.
 //! From S3 T1, `getPromotedScopedFuncDecls` (the whole of
 //! `lib/Sema/ScopedFunctionPromoter.cpp`, ported as `promoter.rs`) and
-//! `processPromotedFuncDecls` (cpp:2143-2155, below) — a loose-mode
+//! `processPromotedFuncDecls` (cpp:2159-2171, below) — a loose-mode
 //! function or program containing a block-nested `function f() {}` now runs
 //! the Annex B 3.3 promotion check instead of asserting: the declaration is
 //! declared a SECOND time, in function (`Var`) or global
@@ -449,12 +449,12 @@ const AST_MAX_RECURSION_DEPTH: u32 =
 /// `DebugInfoSetting` (`include/hermes/AST/Context.h`) is not ported yet — it
 /// is a compiler-driver knob (`-g3`), not something sema computes — and
 /// nothing on the S0 path can set it, so both uses on this path (`ScopeRAII`,
-/// SemanticResolver.cpp:2948-2950; `visit(ProgramNode *)`, cpp:219-221) test
+/// SemanticResolver.cpp:2964-2966; `visit(ProgramNode *)`, cpp:219-221) test
 /// this constant instead. The `if` statements are kept in the exact shape of
 /// the C++ code so that porting the real setting later is a one-line change.
 const DEBUG_INFO_SETTING_ALL: bool = false;
 
-/// Port of `FunctionContext::Label` (SemanticResolver.h:531-538).
+/// Port of `FunctionContext::Label` (SemanticResolver.h:533-540).
 ///
 /// Constructed by `resolver/statements.rs`'s `visit_labeled_statement`
 /// (S2 T1) — `FunctionContext::label_map` was always empty before then.
@@ -467,7 +467,7 @@ pub(crate) struct Label {
     pub target_statement: NodeRc,
 }
 
-/// Port of `hermes::sema::FunctionContext` (SemanticResolver.h:525-621).
+/// Port of `hermes::sema::FunctionContext` (SemanticResolver.h:527-623).
 ///
 /// C++'s `resolver_`/`prevContext_` fields implement the intrusive context
 /// stack; here the stack is `SemanticResolver::function_stack` and those two
@@ -503,14 +503,14 @@ pub(crate) struct FunctionContext {
     pub binding_table_scope_depth: u32,
 }
 
-/// Port of `SemanticResolver::FoundDirectives` (SemanticResolver.h:471-484).
+/// Port of `SemanticResolver::FoundDirectives` (SemanticResolver.h:473-486).
 #[derive(Debug, Clone, Copy, Default)]
 struct FoundDirectives<'ast> {
     /// The *first* "use strict" directive statement, if any. Kept as the
     /// node (not just a flag) because C++ points a diagnostic at it — see
     /// `visitFunctionLikeInFunctionContext`'s "'use strict' not allowed
     /// inside function with non-simple parameter list" error
-    /// (SemanticResolver.cpp:1762-1765).
+    /// (SemanticResolver.cpp:1777-1780).
     use_strict_node: Option<&'ast Node<'ast>>,
     /// The strongest source-visibility directive seen.
     source_visibility: SourceVisibility,
@@ -520,13 +520,13 @@ struct FoundDirectives<'ast> {
     no_inline: bool,
     /// Whether a "builtin" directive was seen. Copied into
     /// `FunctionInfo::custom_directives.builtin` by
-    /// `visitFunctionLikeInFunctionContext` (cpp:1730); also read by
-    /// `hasBuiltinDirective` (cpp:2830-2838), which is S2 scope.
+    /// `visitFunctionLikeInFunctionContext` (cpp:1745); also read by
+    /// `hasBuiltinDirective` (cpp:2846-2854), which is S2 scope.
     builtin: bool,
 }
 
 /// The state a scope entry saves so `exit_scope` can restore it. Port of
-/// `SemanticResolver::ScopeRAII`'s members (SemanticResolver.h:336-342)
+/// `SemanticResolver::ScopeRAII`'s members (SemanticResolver.h:338-344)
 /// minus `resolver_` (implicit in the method receiver) and `bindingScope_`
 /// (owned by `SemanticResolver::binding_scopes`, since a
 /// `persistent_scoped_map::Scope` borrows the table and so cannot be moved
@@ -784,7 +784,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
 
     /// \return true if the innermost function context is the "global scope"
     /// context, in other words not a real function. Port of
-    /// `FunctionContext::isGlobalScope` (SemanticResolver.h:613-617), which
+    /// `FunctionContext::isGlobalScope` (SemanticResolver.h:615-619), which
     /// reads `globalFunctionContext_`.
     pub fn in_global_scope_context(&self) -> bool {
         match self.global_function_context {
@@ -815,7 +815,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 
     /// Port of `SemanticResolver::curFunctionInfo()`
-    /// (SemanticResolver.h:623-625).
+    /// (SemanticResolver.h:625-627).
     fn cur_function_info(&self) -> FunctionInfoId {
         self.function_context().sem_info
     }
@@ -824,7 +824,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
 
     /// Port of the `FunctionContext` constructor that creates a brand new
     /// `FunctionInfo` and a `DeclCollector` for `node`
-    /// (SemanticResolver.cpp:2977-3006), fused with the `SaveAndRestore` of
+    /// (SemanticResolver.cpp:2993-3022), fused with the `SaveAndRestore` of
     /// `globalFunctionContext_` its S0-reachable call site wraps it in
     /// (cpp:203).
     ///
@@ -848,7 +848,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             strict,
             custom_directives,
         );
-        // C++'s depth-exceeded lambda (cpp:2999-3003) mutates the resolver
+        // C++'s depth-exceeded lambda (cpp:3015-3019) mutates the resolver
         // from inside the collector's walk. That closure cannot borrow
         // `self` mutably here (the `kw` argument already borrows it), so it
         // only records the offending node and the two effects are applied
@@ -891,7 +891,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 
     /// Port of the `FunctionContext(SemanticResolver &, FunctionInfo *)`
-    /// constructor (SemanticResolver.cpp:3008-3016) — the one that adopts an
+    /// constructor (SemanticResolver.cpp:3024-3032) — the one that adopts an
     /// ALREADY-CREATED `FunctionInfo` and runs no `DeclCollector`.
     ///
     /// Its callers are `classes.rs`'s `visit_class_property` and
@@ -924,7 +924,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 
     /// Port of the `FunctionContext(SemanticResolver &, StaticBlockNode *,
-    /// FunctionInfo *)` constructor (SemanticResolver.cpp:3018-3037) — the
+    /// FunctionInfo *)` constructor (SemanticResolver.cpp:3034-3053) — the
     /// one that adopts an already-created `FunctionInfo` (the one
     /// `ClassContext::createStaticBlockFunctionInfo` just made) AND runs a
     /// `DeclCollector` over the static block, so that `var`s inside it hoist
@@ -977,7 +977,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 
     /// Port of `FunctionContext::~FunctionContext`
-    /// (SemanticResolver.cpp:3063-3084) plus the call site's
+    /// (SemanticResolver.cpp:3079-3100) plus the call site's
     /// `SaveAndRestore` restore.
     fn exit_function(&mut self, state: FunctionState) {
         self.function_stack
@@ -991,7 +991,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     // ---- RecursionDepthTracker -------------------------------------------
 
     /// Port of `SemanticResolver::recursionDepthExceeded`
-    /// (SemanticResolver.cpp:2773-2776).
+    /// (SemanticResolver.cpp:2789-2792).
     fn recursion_depth_exceeded(&mut self, node: &Node) {
         self.sm.error(
             node.range().end,
@@ -1033,7 +1033,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
 
     /// Create a binding scope and push a semantic scope. Port of
     /// `SemanticResolver::ScopeRAII::ScopeRAII`
-    /// (SemanticResolver.cpp:2933-2958); the C++ member-initializer list
+    /// (SemanticResolver.cpp:2949-2974); the C++ member-initializer list
     /// runs before the constructor body, so the binding scope is pushed
     /// first.
     ///
@@ -1079,7 +1079,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
 
     /// Pops the created scope. Port of
     /// `SemanticResolver::ScopeRAII::~ScopeRAII`
-    /// (SemanticResolver.cpp:2959-2961) plus the implicit destruction of the
+    /// (SemanticResolver.cpp:2975-2977) plus the implicit destruction of the
     /// `bindingScope_` member (which, being declared last, is destroyed
     /// first).
     fn exit_scope(&mut self, state: ScopeState) {
@@ -1300,7 +1300,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             //
             // S1 T6 adds the remaining override-free *expression* kinds,
             // each checked against the `SemanticResolver::visit` inventory
-            // in SemanticResolver.h:200-304: `ArrayExpression`,
+            // in SemanticResolver.h:200-306: `ArrayExpression`,
             // `ConditionalExpression`, `LogicalExpression`,
             // `SequenceExpression`, `TemplateLiteral` and `TemplateElement`
             // appear nowhere in it, so C++ reaches them through
@@ -1313,7 +1313,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             //
             // S2 T1 adds `SwitchCase`, the only child kind its statement
             // visits reach that has no override of its own: it appears
-            // nowhere in the SemanticResolver.h:200-304 `visit` inventory,
+            // nowhere in the SemanticResolver.h:200-306 `visit` inventory,
             // so C++ walks its `_test`/`_consequent` through
             // `visitESTreeChildren` exactly like this arm does.
             //
@@ -1341,7 +1341,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // so this arm is exactly `Unchanged` for it — but it must be
             // present, because the rewritten callee's children walk reaches
             // it. And `IfStatement`, which the static-block corpus needs: it
-            // appears nowhere in the SemanticResolver.h:200-304 inventory, so
+            // appears nowhere in the SemanticResolver.h:200-306 inventory, so
             // C++ walks its `_test`/`_consequent`/`_alternate` through
             // `visitESTreeChildren`, and `DeclCollector` has no override for
             // it either, so it creates no scope. (Its only mentions anywhere
@@ -1351,7 +1351,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             //
             // S2 T3 adds `ThrowStatement`, which `throw`-inside-`try` corpus
             // files need: `ThrowStatement` appears nowhere in
-            // `lib/Sema/` at all (only `CheckImplicitReturn.cpp:155`
+            // `lib/Sema/` at all (only `CheckImplicitReturn.cpp:161`
             // mentions it), so it has no `SemanticResolver::visit` override
             // and C++ reaches its one child (`_argument`, non-null,
             // ESTree.def:187) through `visitESTreeChildren`, exactly like
@@ -1359,7 +1359,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // creates no scope.
             // S2 T4 adds `ClassBody`, the one child kind its class visits
             // reach that has no override of its own: it appears nowhere in
-            // the SemanticResolver.h:200-304 `visit` inventory, so C++ walks
+            // the SemanticResolver.h:200-306 `visit` inventory, so C++ walks
             // its `_body` list through `visitESTreeChildren` exactly like
             // this arm does — which is how each `ClassProperty`/
             // `MethodDefinition`/`StaticBlock` element gets dispatched. It
@@ -1373,7 +1373,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             //
             // S2 T7 adds `DebuggerStatement`, which the tests for
             // `check_implicit_return` need in order to reach its
-            // `DebuggerStatement` arm (CheckImplicitReturn.cpp:175). Like
+            // `DebuggerStatement` arm (CheckImplicitReturn.cpp:181). Like
             // `ThrowStatement`, its only mention anywhere in `lib/Sema/` is
             // that arm — so no `SemanticResolver::visit` override, no
             // `DeclCollector` override, and it is an `ESTREE_NODE_0_ARGS`
@@ -1389,7 +1389,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // the FlowChecker (`FlowChecker-expr.cpp:1244` handles
             // `BigIntLiteral` as a *typed* expression), so none has a
             // `SemanticResolver::visit` override in the
-            // SemanticResolver.h:200-304 inventory and none has a
+            // SemanticResolver.h:200-306 inventory and none has a
             // `DeclCollector` override: C++ reaches `_tag`/`_quasi`,
             // `_source`/`_options` and (for the `NodeLabel`-only
             // `BigIntLiteral`) nothing at all through `visitESTreeChildren`,
@@ -1403,7 +1403,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // `ImportAttribute` (ESTree.def:597-611),
             // `ExportSpecifier` and `ExportNamespaceSpecifier`
             // (ESTree.def:625-632). Same argument as `ClassBody`'s above:
-            // none of the six appears in the SemanticResolver.h:200-304
+            // none of the six appears in the SemanticResolver.h:200-306
             // `visit` inventory (which names ONLY `ImportDeclarationNode`
             // and the three `Export*DeclarationNode`s, at :256 and
             // :280-282), so C++ reaches each one's children —
@@ -1529,7 +1529,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // range is where the argument is uniform.
             //
             // The whole `#if HERMES_PARSE_FLOW` block of the header's
-            // inventory (SemanticResolver.h:289-298) names exactly eight
+            // inventory (SemanticResolver.h:289-300) names exactly eight
             // Flow kinds, and only FIVE of them are inside the AST's `Flow`
             // range (ESTree.def:854-1272, the `ESTREE_FIRST(Flow, Base)`/
             // `ESTREE_LAST(Flow)` markers inside the `#if HERMES_PARSE_FLOW`
@@ -1711,7 +1711,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 
     /// Port of `SemanticResolver::processCollectedDeclarations`
-    /// (cpp:2102-2107).
+    /// (cpp:2118-2123).
     ///
     /// Clones the looked-up `ScopeDecls` (a `Vec<NodeRc>` — cheap refcount
     /// bumps, not a deep copy) before calling `process_declarations`: that
@@ -1741,7 +1741,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     /// Var in function scope or GlobalProperty in global scope. Add the
     /// names to the function context's `promoted_func_decls` list. Port of
     /// `SemanticResolver::processPromotedFuncDecls`
-    /// (SemanticResolver.h:428-432, cpp:2143-2155).
+    /// (SemanticResolver.h:430-434, cpp:2159-2171).
     ///
     /// Takes the `NodeRc`s `get_promoted_scoped_func_decls` returns rather
     /// than `&Node`s, for the reason `promoter.rs`'s module doc gives, and
@@ -1797,7 +1797,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // "already declared" error, which needs a let-like declaration
             // of the same name visible in this function — exactly what the
             // promoter refuses to promote past. (3) The "two declarations
-            // put" path (cpp:2633-2639), whose guard requires
+            // put" path (cpp:2649-2655), whose guard requires
             // `semCtx_.getDeclarationDecl(ident)` to already be non-null —
             // impossible here, since this is the promoted function's own
             // identifier node, being declared for the first time.
@@ -1813,7 +1813,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 
     /// Scan the directive prologue of `body`. Port of
-    /// `SemanticResolver::scanDirectives` (cpp:2778-2828).
+    /// `SemanticResolver::scanDirectives` (cpp:2794-2844).
     ///
     /// The C++ `else if (directive == X) { if (cond) ... }` chain is written
     /// here as `else if (directive == X && cond)`. That is equivalent: the
@@ -1895,7 +1895,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 
     /// Declare the list of ambient decls that was passed to the constructor.
-    /// Port of `SemanticResolver::processAmbientDecls` (cpp:2860-2931).
+    /// Port of `SemanticResolver::processAmbientDecls` (cpp:2876-2947).
     fn process_ambient_decls(&mut self, gc: &GCLock) {
         assert!(
             !self.global_scope.is_null(),
@@ -1921,7 +1921,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
         }
     }
 
-    /// Port of the `declareAmbientGlobal` lambda (cpp:2911-2920).
+    /// Port of the `declareAmbientGlobal` lambda (cpp:2927-2936).
     ///
     /// \param name the `_name` of the `IdentifierNode` being declared; C++
     ///   takes the node and casts it, but the name is all it uses.
@@ -1997,7 +1997,7 @@ impl Drop for SemanticResolver<'_, '_, '_, '_> {
 
 /// This visitor struct collects declarations within a single closure without
 /// descending into child closures. Port of `processAmbientDecls`'s local
-/// `struct DeclHoisting` (cpp:2870-2909); its `enter`/`leave` are empty and
+/// `struct DeclHoisting` (cpp:2886-2925); its `enter`/`leave` are empty and
 /// its `shouldVisit` is the body of `visit_node` below.
 ///
 /// C++ collects the `VariableDeclaratorNode *`/`FunctionDeclarationNode *`
@@ -2077,7 +2077,7 @@ fn make_strictness(strict: bool) -> Strictness {
 }
 
 /// Port of `scopeNode->setScope(scope)` in `ScopeRAII`
-/// (SemanticResolver.cpp:2945-2946), i.e.
+/// (SemanticResolver.cpp:2961-2962), i.e.
 /// `ESTree::ScopeDecorationBase::setScope`. Enumerates the same 15
 /// scope-bearing node kinds as `hermes_sema::dump`'s `node_scope`.
 fn set_node_scope(node: &Node, scope: ScopeId) {
@@ -2104,7 +2104,7 @@ fn set_node_scope(node: &Node, scope: ScopeId) {
     }
 }
 
-/// Port of `node->setSemInfo(semInfo)` (SemanticResolver.cpp:3005), i.e.
+/// Port of `node->setSemInfo(semInfo)` (SemanticResolver.cpp:3021), i.e.
 /// `ESTree::FunctionLikeDecoration::setSemInfo`. Enumerates the same six
 /// function-like node kinds as `hermes_sema::dump`'s `function_like_sem_info`.
 fn set_node_sem_info(node: &Node, sem_info: FunctionInfoId) {

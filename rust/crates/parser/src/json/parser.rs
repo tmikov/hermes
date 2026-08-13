@@ -61,7 +61,7 @@ pub struct JSONParser<'a> {
 
 impl<'a> JSONParser<'a> {
     /// Construct a `JSONParser` over the source buffer identified by `buf_id` in
-    /// `sm`. Port of `JSONParser::JSONParser` (JSONParser.h:660-672).
+    /// `sm`. Port of `JSONParser::JSONParser` (JSONParser.h:666-678).
     pub fn new(
         factory: &'a JSONFactory<'a>,
         buf_id: SourceId,
@@ -84,7 +84,7 @@ impl<'a> JSONParser<'a> {
         self.lexer.get_source_mgr().error_count()
     }
 
-    /// Report an error at the current token's range. Port of JSONParser.h:685.
+    /// Report an error at the current token's range. Port of JSONParser.h:691.
     fn error(&mut self, msg: impl Into<String>) {
         let range: SMRange = self.lexer.token().source_range();
         self.lexer.get_source_mgr_mut().error_at(

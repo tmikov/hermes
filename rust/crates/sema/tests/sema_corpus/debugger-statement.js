@@ -6,13 +6,13 @@
  */
 
 // `DebuggerStatement` joined `visit_node`'s override-free generic arm in S2 T7
-// (the `CheckImplicitReturn` arm at CheckImplicitReturn.cpp:175 could not be
+// (the `CheckImplicitReturn` arm at CheckImplicitReturn.cpp:181 could not be
 // tested otherwise), but no corpus file contained a `debugger;` — the S2 T8
 // sweep found it was the ONLY node kind the resolver handles with zero corpus
 // occurrences. This file closes that gap.
 //
 // `DebuggerStatement` appears nowhere in `lib/Sema/` outside that one arm: no
-// `SemanticResolver::visit` override (SemanticResolver.h:200-304), no
+// `SemanticResolver::visit` override (SemanticResolver.h:200-306), no
 // `DeclCollector` override, and it is an `ESTREE_NODE_0_ARGS` kind
 // (ESTree.def:171). So the dump-visible claim being pinned here is a triple
 // negative: the statement must appear in the AST dump, must create NO scope of
@@ -20,7 +20,7 @@
 // statement position a `debugger` can occupy.
 //
 // `mayReachImplicitReturn` (the reason the kind was whitelisted) is NOT
-// dump-visible: `SemContextDumper::printFunction` (SemContext.cpp:449-480)
+// dump-visible: `SemContextDumper::printFunction` (SemContext.cpp:449-483)
 // prints only `Func strict`/`loose` + scopes + decls + hoisted functions, and
 // `FunctionInfo::mayReachImplicitReturn` (SemContext.h:354) is read by the
 // FlowChecker and IRGen, neither of which `-dump-sema` runs. That flag's

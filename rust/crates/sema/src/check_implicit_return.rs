@@ -10,11 +10,11 @@
 //! (SemContext.h:354).
 //!
 //! The C++ file declares its one entry point in the *internal*
-//! `lib/Sema/SemanticResolver.h:718` (not in the public `SemResolve.h`) and
+//! `lib/Sema/SemanticResolver.h:720` (not in the public `SemResolve.h`) and
 //! puts everything else in an anonymous namespace, so this module is private
 //! to the crate and only [`may_reach_implicit_return`] is `pub(crate)`. Its
 //! single caller is `resolver::functions`'s port of
-//! `visitFunctionBodyAfterParamsVisited` (cpp:1953-1958).
+//! `visitFunctionBodyAfterParamsVisited` (cpp:1969-1974).
 //!
 //! ## What the analysis is
 //!
@@ -41,7 +41,7 @@
 //!   `mayReachImplicitReturn(FunctionLikeNode *root)` starts with
 //!   `getBlockStatement(root)` (lib/AST/ESTree.cpp:58-81). It can, because
 //!   C++ mutates the AST in place, so `root->_body` is up to date by the
-//!   time the resolver reaches cpp:1953. This port rebuilds nodes instead
+//!   time the resolver reaches cpp:1969. This port rebuilds nodes instead
 //!   (see `resolver`'s module doc), and the function-like node the resolver
 //!   still holds at that point carries the *pre-visit* body, with none of
 //!   the resolver's rewrites applied: an arrow's expression body is still an
@@ -141,7 +141,7 @@ impl TerminationResult {
 /// Runs a conservative check to determine whether there are any possible
 /// paths through the function which end in an implicit 'undefined' return.
 ///
-/// Port of the class at CheckImplicitReturn.cpp:84-377. It holds no state —
+/// Port of the class at CheckImplicitReturn.cpp:84-397. It holds no state —
 /// as in C++, where the only constructor is `explicit CheckImplicitReturn()
 /// {}` — so it exists purely to group the five `checkTermination*` methods
 /// (and `isIrrefutableMatchPattern`, which is `static` in C++ too).
@@ -469,7 +469,7 @@ impl CheckImplicitReturn {
     }
 
     // The two helpers below are `#if HERMES_PARSE_FLOW` in C++
-    // (CheckImplicitReturn.cpp:322-376, upstream `653e49c60`); this port has
+    // (CheckImplicitReturn.cpp:342-396, upstream `653e49c60`); this port has
     // no build gate for the Flow grammar — see the `MatchStatement` arm of
     // [`Self::check_termination`].
 
@@ -540,7 +540,7 @@ impl CheckImplicitReturn {
 }
 
 /// Port of `mayReachImplicitReturn(ESTree::FunctionLikeNode *root)`
-/// (CheckImplicitReturn.cpp:381-393).
+/// (CheckImplicitReturn.cpp:401-413).
 ///
 /// \param body the function's body node **after** it has been visited by the
 ///   resolver — C++ takes the function-like node and calls

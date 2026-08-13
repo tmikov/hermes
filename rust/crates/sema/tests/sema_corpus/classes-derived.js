@@ -9,12 +9,12 @@
 // are declared but AFTER the class name (SemanticResolver.cpp:936-939), so it
 // sees the inner ClassExprName binding. isDerivedClass() (SemanticResolver.h:
 // 659-662) is what makes an implicit or explicit constructor `Derived`
-// (cpp:1671-1675, cpp:3111-3113) — invisible in the dump, unit-tested
+// (cpp:1686-1690, cpp:3127-3129) — invisible in the dump, unit-tested
 // separately, but the shapes are covered here.
 //
 // `super.x` member access is allowed wherever canReferenceSuper_ is set:
 // inside a method (because the FunctionExpression is a method definition,
-// cpp:1689), inside an arrow nested in a method (arrows inherit it), and in a
+// cpp:1704), inside an arrow nested in a method (arrows inherit it), and in a
 // field initializer (cpp:1032). super() CALLS are not here — the call check
 // lives in visit(CallExpressionNode *).
 

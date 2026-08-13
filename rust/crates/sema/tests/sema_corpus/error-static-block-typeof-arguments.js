@@ -13,8 +13,8 @@
 // FALLS THROUGH to the unconditional `resolveIdentifier(identifier, false)` at
 // cpp:322. The second call is normally a no-op — the first one already cached a
 // decl on the node, so `checkIdentifierResolved` returns early — but the two
-// forbid-flag checks in `resolveIdentifier` (cpp:1990-2005) run BEFORE that
-// early return (cpp:2007-2010) and are keyed on the identifier's NAME, not on
+// forbid-flag checks in `resolveIdentifier` (cpp:2006-2021) run BEFORE that
+// early return (cpp:2023-2026) and are keyed on the identifier's NAME, not on
 // the decl. So a forbidden name under `typeof` reports its diagnostic TWICE.
 //
 // `forbidArgumentsAsIdentifier_` is only ever set by visit(StaticBlockNode *)

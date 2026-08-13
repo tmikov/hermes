@@ -716,7 +716,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Report a "'k1', 'k2' or 'k3' expected{where_}" error at the current
     /// token. Port of the three-token `errorExpected` initializer-list call
-    /// (e.g. the export-type dispatch at JSParserImpl-flow.cpp:2570-2575); the
+    /// (e.g. the export-type dispatch at JSParserImpl-flow.cpp:2572-2577); the
     /// C++ list rendering joins all but the last token with ", " and the last
     /// with " or ". `what`/`what_loc` are C++'s `what`/`whatLoc` (see
     /// `error_expected2`).
@@ -742,7 +742,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Report a "'k1', 'k2', 'k3' or 'k4' expected{where_}" error at the
     /// current token. Port of the four-token `errorExpected` initializer-list
     /// call (e.g. the Flow object-type property separator at
-    /// JSParserImpl-flow.cpp:4139-4146); the C++ list rendering joins all but
+    /// JSParserImpl-flow.cpp:4141-4148); the C++ list rendering joins all but
     /// the last token with ", " and the last with " or ". `what`/`what_loc`
     /// are C++'s `what`/`whatLoc` (see `error_expected2`).
     // The four tokens plus `where`/`what`/`whatLoc` are the C++ signature.
@@ -871,7 +871,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Set `allow_anon_function_type` to `new_val`, returning a guard that
     /// restores the old value on Drop. Port of the
     /// `llvh::SaveAndRestore<bool>(allowAnonFunctionType_, new)` in
-    /// `parseTypeAnnotationFlow` (JSParserImpl-flow.cpp:3081-3083).
+    /// `parseTypeAnnotationFlow` (JSParserImpl-flow.cpp:3083-3085).
     pub(super) fn save_allow_anon_function_type(
         &self,
         new_val: bool,
@@ -887,7 +887,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Set `allow_conditional_type` to `new_val`, returning a guard that
     /// restores the old value on Drop. Port of the
     /// `llvh::SaveAndRestore<bool>(allowConditionalType_, ...)` uses in the
-    /// Flow type grammar (e.g. JSParserImpl-flow.cpp:3099).
+    /// Flow type grammar (e.g. JSParserImpl-flow.cpp:3101).
     pub(super) fn save_allow_conditional_type(
         &self,
         new_val: bool,

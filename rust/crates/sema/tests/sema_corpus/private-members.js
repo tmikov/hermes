@@ -6,16 +6,16 @@
  */
 
 // Every legal private-name shape collectDeclaredPrivateIdentifiers
-// (SemanticResolver.cpp:2157-2274) declares, and every way the rest of the
+// (SemanticResolver.cpp:2173-2290) declares, and every way the rest of the
 // resolver reaches one:
-//   - declarePrivateName (cpp:2047-2064): the '#'-prefixed Decl name comes
+//   - declarePrivateName (cpp:2063-2080): the '#'-prefixed Decl name comes
 //     from Context::getPrivateNameIdentifier, and `isStatic` becomes
 //     Decl::Special::PrivateStatic (methods/accessors only).
 //   - the five private Decl kinds: PrivateField, PrivateMethod,
 //     PrivateGetter, PrivateSetter and the PrivateGetterSetter a legal
-//     getter+setter pair upgrades to (cpp:2267-2271), where BOTH accessors'
+//     getter+setter pair upgrades to (cpp:2283-2287), where BOTH accessors'
 //     identifiers bind to the SAME decl.
-//   - resolvePrivateName (cpp:2066-2080) through visit(PrivateNameNode *)
+//   - resolvePrivateName (cpp:2082-2096) through visit(PrivateNameNode *)
 //     (cpp:952-963) and through the MemberExpression branches
 //     (cpp:1221-1309).
 //   - visit(ClassPrivatePropertyNode *) (cpp:965-1011): a private field's
@@ -52,7 +52,7 @@ class A {
   set #onlySetter(v) {}
   // ...and their STATIC forms, which are the only way to reach the
   // `PrivateGetter PrivateStatic` / `PrivateSetter PrivateStatic` decl+special
-  // pairs: `declarePrivateName(id, kind, method->_static)` (cpp:2240-2243 →
+  // pairs: `declarePrivateName(id, kind, method->_static)` (cpp:2256-2259 →
   // 2047-2058) sets `Decl::Special::PrivateStatic` for every static private
   // method or accessor, but a one-sided static accessor is neither upgraded to
   // `PrivateGetterSetter` (the static pair above) nor a `PrivateMethod`. The

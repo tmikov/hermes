@@ -332,7 +332,7 @@ impl DiagHandler for SharedHandler {
 
 /// Resolution boundary: a construct not yet modeled must panic loudly
 /// rather than resolve to something wrong. Calls themselves are modeled as
-/// of S2 T6 (`visit(CallExpressionNode *)`, SemanticResolver.cpp:1117), but
+/// of S2 T6 (`visit(CallExpressionNode *)`, SemanticResolver.cpp:1127), but
 /// the `$SHBuiltin` CommonJS-module protocol inside them is S4 — the panic
 /// is the guarantee it is not silently mis-resolved.
 #[test]
@@ -357,7 +357,7 @@ fn shbuiltin_import_is_not_modeled() {
 
 // ---- S2 T6: the eval specials -------------------------------------------
 
-/// `registerLocalEval` (SemanticResolver.cpp:2835-2843) reached end-to-end
+/// `registerLocalEval` (SemanticResolver.cpp:2865-2873) reached end-to-end
 /// through a real direct `eval()` call: the scope the call is in AND every
 /// ancestor up to the global scope get `local_eval`, while a sibling scope
 /// does not. `LexicalScope::local_eval` never reaches `-dump-sema`, so the
@@ -368,7 +368,7 @@ fn a_direct_eval_marks_its_whole_scope_chain() {
     let gc = ctx.lock();
     let mut sm = SourceErrorManager::new();
     // `eval` is unbound here (no ambient decls), which is the `isEval = true`
-    // branch of cpp:1129-1131.
+    // branch of cpp:1139-1141.
     let root = parse(
         &gc,
         &mut sm,
@@ -397,7 +397,7 @@ fn a_direct_eval_marks_its_whole_scope_chain() {
     assert_eq!(marked(g), vec![false, false], "an unrelated function");
 }
 
-/// With `eval` disabled (`Context::setEnableEval(false)`, cpp:1134-1149) the
+/// With `eval` disabled (`Context::setEnableEval(false)`, cpp:1144-1159) the
 /// warning becomes `EvalDisabled` and `registerLocalEval` does NOT run.
 /// Unreachable from the differential corpus: `sema_differential.rs` has no
 /// per-file flag mechanism, so it can only ever compare hermesc's default
@@ -757,7 +757,7 @@ fn hoisted_function_backref_is_untouched_without_a_rebuild() {
     assert_eq!(hoisted[0].node(&gc).node_id(), original_id);
 }
 
-/// `declareParams`' redeclaration rules (cpp:1770-1796): a loose, simple
+/// `declareParams`' redeclaration rules (cpp:1799-1825): a loose, simple
 /// parameter list may repeat a name without an error, but the SECOND
 /// declaration wins — a new `Decl` is created and the existing binding is
 /// re-pointed at it, so a body reference resolves to the second parameter.
@@ -806,7 +806,7 @@ fn duplicate_loose_parameters_rebind_to_the_last_declaration() {
     );
 }
 
-/// A strict duplicate parameter IS an error (`uniqueParams`, cpp:1755-1756
+/// A strict duplicate parameter IS an error (`uniqueParams`, cpp:1784-1785
 /// and 1778-1783) — the same code path, opposite outcome.
 #[test]
 fn duplicate_strict_parameters_are_an_error() {
@@ -826,7 +826,7 @@ fn duplicate_strict_parameters_are_an_error() {
     assert_eq!(sm.error_count(), 1);
 }
 
-/// **The dual scope layout** (cpp:1846-1881). With parameter expressions the
+/// **The dual scope layout** (cpp:1875-1910). With parameter expressions the
 /// function gets THREE scopes, in creation order: the parameter scope, the
 /// (always empty) temporary `arguments` scope, and the function body scope
 /// — and `getParameterScope()` (scopes[0]) is then distinct from
@@ -876,7 +876,7 @@ fn parameter_expressions_split_the_parameter_and_body_scopes() {
 
 /// Without parameter expressions there is exactly ONE scope, and the
 /// parameter scope and the function body scope are the same object
-/// (cpp:1874-1881).
+/// (cpp:1903-1910).
 #[test]
 fn simple_parameters_share_one_scope_with_the_body() {
     let mut ctx = Context::new();
@@ -897,7 +897,7 @@ fn simple_parameters_share_one_scope_with_the_body() {
     );
 }
 
-/// The `FunctionExprName` scope (cpp:1953-1961) belongs to the ENCLOSING
+/// The `FunctionExprName` scope (cpp:1983-1991) belongs to the ENCLOSING
 /// function, not to the function expression: `ScopeRAII` runs before the
 /// `FunctionContext` is pushed, so `curFunctionInfo()` is still the outer
 /// one. It is also the scope the `FunctionExpression` node is decorated
@@ -1535,7 +1535,7 @@ fn third_with_statement<'gc>(
 }
 
 /// **The `Unresolver` pass** (`resolver/unresolver.rs`, port of
-/// SemanticResolver.h:679-711 + cpp:3186-3210), reached through
+/// SemanticResolver.h:681-713 + cpp:3216-3240), reached through
 /// `visit(WithStatementNode *)` (cpp:763-768).
 ///
 /// `with` runs the pass over its BODY with `curScope_->depth + 1`, so:
@@ -1587,7 +1587,7 @@ fn with_statement_unresolves_identifiers_above_its_depth() {
 }
 
 /// The pass early-returns on an identifier that is already `unresolvable`
-/// (cpp:3193-3195), which is what keeps `SemContext::get_expression_decl`'s
+/// (cpp:3223-3225), which is what keeps `SemContext::get_expression_decl`'s
 /// "not on an unresolvable identifier" assertion from firing when a second,
 /// nested `with` walks the same subtree.
 #[test]
@@ -1782,7 +1782,7 @@ fn class_function_infos(
 }
 
 /// A class with no explicit constructor gets a synthetic implicit-constructor
-/// `FunctionInfo` (`createImplicitConstructorFunctionInfo`, cpp:3088-3114),
+/// `FunctionInfo` (`createImplicitConstructorFunctionInfo`, cpp:3118-3144),
 /// whose `ConstructorKind` is `Base` for a plain class and `Derived` for one
 /// with a superclass, and which owns exactly one (body) scope.
 #[test]
@@ -1804,7 +1804,7 @@ fn an_implicit_constructor_function_info_is_created_for_a_class_without_one() {
         assert_eq!(info.get_function_body_scope(), info.get_scopes()[0]);
     });
 
-    // The `Derived` half of cpp:3097-3099 — `isDerivedClass()` is the only
+    // The `Derived` half of cpp:3127-3129 — `isDerivedClass()` is the only
     // input, so a derived class with NO explicit constructor is the only
     // shape that reaches it. Dump-invisible, like the `Base` case above.
     with_resolved("class A {}\nclass B extends A {}\n", |sem_ctx, resolved| {
@@ -1824,7 +1824,7 @@ fn an_implicit_constructor_function_info_is_created_for_a_class_without_one() {
     });
 }
 
-/// The `hasConstructor` flag (set from `visitFunctionLike`, cpp:1656)
+/// The `hasConstructor` flag (set from `visitFunctionLike`, cpp:1685)
 /// suppresses the implicit constructor, and a `constructor` in a derived
 /// class gets `ConstructorKind::Derived`.
 #[test]
@@ -1903,7 +1903,7 @@ fn a_rebuilt_class_keeps_its_synthetic_function_infos() {
                 .is_some(),
             "the rebuilt class lost `scope`"
         );
-        // The instance initializer declared `arguments` (cpp:1039); the
+        // The instance initializer declared `arguments` (cpp:1044); the
         // static one never ran `declareArguments` (`static y` has no value).
         assert!(sem_ctx.function(inst).arguments_decl.is_some());
         assert!(sem_ctx.function(stat).arguments_decl.is_none());
@@ -2104,7 +2104,7 @@ fn a_private_field_decl_is_not_the_same_as_a_same_named_variable() {
         assert_eq!(
             sem_ctx.decl(private_decl).special,
             hermes_sema::sem_context::DeclSpecial::NotSpecial,
-            "a FIELD never gets PrivateStatic (cpp:2182 passes isStatic=false)"
+            "a FIELD never gets PrivateStatic (cpp:2212 passes isStatic=false)"
         );
         // It lives in the class's own scope, right after the ClassExprName.
         assert_eq!(sem_ctx.decl(private_decl).scope, Some(scope));
@@ -2118,8 +2118,8 @@ fn a_private_field_decl_is_not_the_same_as_a_same_named_variable() {
 
 /// A legal getter+setter pair collapses onto ONE decl, whose kind was
 /// UPGRADED in place from `PrivateGetter` to `PrivateGetterSetter`
-/// (cpp:2253-2255) — and BOTH accessors' identifier nodes are bound to it
-/// (the `setBothDecl` at cpp:2257). `isStatic` on both halves becomes
+/// (cpp:2283-2285) — and BOTH accessors' identifier nodes are bound to it
+/// (the `setBothDecl` at cpp:2287). `isStatic` on both halves becomes
 /// `Decl::Special::PrivateStatic`.
 #[test]
 fn a_private_getter_setter_pair_shares_one_upgraded_decl() {
@@ -2170,7 +2170,7 @@ fn a_private_getter_setter_pair_shares_one_upgraded_decl() {
 }
 
 /// A `var` inside a static block hoists to the STATIC BLOCK's own body scope,
-/// not to the function the class lives in (cpp:1058-1064): the block's
+/// not to the function the class lives in (cpp:1068-1074): the block's
 /// `FunctionInfo` is synthetic, flagged `isStaticBlock`, and owns that scope.
 #[test]
 fn a_static_block_hoists_its_vars_into_its_own_function_scope() {
@@ -2315,7 +2315,7 @@ fn a_block_nested_function_is_promoted_to_global_scope() {
         let id = id_node.as_identifier().expect("id is not an Identifier");
 
         // `processPromotedFuncDecls` used GlobalProperty because the
-        // promoting function context is the global scope (cpp:2131-2133),
+        // promoting function context is the global scope (cpp:2161-2163),
         // and that decl — not the block's — is what the name resolves to.
         let declared =
             sem_ctx.get_declaration_decl(id).expect("no declaration decl");
@@ -2329,7 +2329,7 @@ fn a_block_nested_function_is_promoted_to_global_scope() {
         // Visiting the block then created the SECOND declaration, the
         // block-scoped `ScopedFunction` one, and recorded it in the
         // `promotedFunctionDecls_` side table keyed by the identifier node
-        // (`validateAndDeclareIdentifier`, cpp:2609-2625).
+        // (`validateAndDeclareIdentifier`, cpp:2639-2655).
         let promoted = sem_ctx
             .get_promoted_decl(id_node.node_id())
             .expect("no promoted decl recorded");
@@ -2343,7 +2343,7 @@ fn a_block_nested_function_is_promoted_to_global_scope() {
 }
 
 /// The same, one function down: `visitFunctionBodyAfterParamsVisited`'s call
-/// site (cpp:1904-1910) promotes into the function body scope with
+/// site (cpp:1933-1939) promotes into the function body scope with
 /// `Decl::Kind::Var`, not `GlobalProperty`.
 #[test]
 fn a_block_nested_function_inside_a_function_is_promoted_as_var() {
@@ -2449,7 +2449,7 @@ fn a_visible_let_blocks_promotion() {
 // this port's `dump_context.rs`), and rewrite #4's rebuilt
 // `FunctionExpression`, which under `compile = true` always sits behind an
 // `'export' statement requires module mode` error, and `hermesc` never dumps
-// after a `resolveAST` failure (CompilerDriver.cpp:960-974). These tests are
+// after a `resolveAST` failure (CompilerDriver.cpp:978-992). These tests are
 // the only pin for both.
 
 /// Resolve `root` through the ERROR-TOLERANT resolver entry
@@ -2545,7 +2545,7 @@ fn import_declarations_are_recorded_on_the_function_info() {
     );
 
     // And the specifiers really did declare their locals as `Import` — the
-    // `extractIdentsFromDecl` arm (cpp:2334-2347) this visit makes reachable.
+    // `extractIdentsFromDecl` arm (cpp:2364-2377) this visit makes reachable.
     let kinds: Vec<DeclKind> = sem_ctx
         .scope(sem_ctx.get_global_scope())
         .decls
@@ -2588,7 +2588,7 @@ fn import_backref_is_untouched_without_a_rebuild() {
     assert_eq!(imports[0].node(&gc).node_id(), original_id);
 }
 
-/// **Rewrite #4** (cpp:1525-1544): an ANONYMOUS `export default function`
+/// **Rewrite #4** (cpp:1539-1558): an ANONYMOUS `export default function`
 /// becomes a `FunctionExpression` "for cleaner IRGen", carrying the
 /// declaration's `_id`/`_params`/`_body`/`_typeParameters`/`_returnType`/
 /// `_predicate`/`_generator`, its strictness and its location.
@@ -2652,7 +2652,7 @@ fn export_default_anonymous_function_is_rewritten_to_an_expression() {
         "rewrite #4 must carry `_async` over (cpp:1538) — an anonymous \
          `export default async function` stays async"
     );
-    // copyLocationFrom(funcDecl) (cpp:1540).
+    // copyLocationFrom(funcDecl) (cpp:1554).
     let range = func.metadata.range.get();
     assert_eq!(range.start, decl_range_before.start);
     assert_eq!(range.end, decl_range_before.end);
@@ -2688,7 +2688,7 @@ fn export_default_anonymous_non_async_function_stays_non_async() {
 
 /// Rewrite #4 fires ONLY for an anonymous function declaration: a NAMED
 /// `export default function f() {}` keeps its `FunctionDeclaration`
-/// (cpp:1526 `!funcDecl->_id`).
+/// (cpp:1540 `!funcDecl->_id`).
 #[test]
 fn export_default_named_function_is_not_rewritten() {
     let mut ctx = Context::new();
@@ -2710,7 +2710,7 @@ fn export_default_named_function_is_not_rewritten() {
     );
 }
 
-/// The other half of cpp:1525's `dyn_cast<FunctionDeclarationNode>`: a
+/// The other half of cpp:1539's `dyn_cast<FunctionDeclarationNode>`: a
 /// non-function default export is untouched by rewrite #4 (it is still
 /// visited, and here still folded, but never turned into a
 /// `FunctionExpression`).
@@ -2737,8 +2737,8 @@ fn export_default_non_function_is_not_rewritten() {
 }
 
 /// Under `compile = false` (`resolveASTForParser`) rewrite #4 does NOT fire
-/// (cpp:1526 is `compile_ &&`) and NO `'export'` error is reported
-/// (cpp:1520). Half of the bug-for-bug asymmetry; the import half is the
+/// (cpp:1540 is `compile_ &&`) and NO `'export'` error is reported
+/// (cpp:1534). Half of the bug-for-bug asymmetry; the import half is the
 /// next test.
 #[test]
 fn compile_false_skips_the_export_error_and_the_rewrite() {
@@ -2764,7 +2764,7 @@ fn compile_false_skips_the_export_error_and_the_rewrite() {
 
 /// The other half of the asymmetry: an `import` in the same position STILL
 /// errors at `compile = false`, because cpp:876-879 is not `compile_`-gated
-/// the way cpp:1511/1520/1550 are.
+/// the way cpp:1525/1534/1564 are.
 #[test]
 fn compile_false_still_errors_on_imports() {
     let mut ctx = Context::new();
@@ -2887,7 +2887,7 @@ fn shbuiltin_identifier_property_still_rewrites() {
 ///
 /// This is exactly the invariant the dumper's per-function scope walk relies
 /// on (`dump_context.rs`'s `processed == scopes.len()` assert, port of
-/// `SemContext.cpp:478`), and it is asserted directly here so a regression
+/// `SemContext.cpp:481`), and it is asserted directly here so a regression
 /// names the broken link rather than tripping an assert three layers away.
 #[test]
 fn field_initializer_scopes_are_parented_in_the_initializer_function() {
@@ -2955,7 +2955,8 @@ fn field_initializer_scopes_are_parented_in_the_initializer_function() {
 // `918158cb0` taught the C++ dumper both; these two tests pin the Rust
 // mirrors. The differential corpus (`tests/sema_corpus_parser/`) compares
 // the full dumps against `sema-parser-dump` byte-for-byte —
-// `with-statement.js` and `anon-export-default.js` — but only when the C++
+// `parser-mode-with-statement.js` and `parser-mode-export-default-anon.js`
+// — but only when the C++
 // oracle is present, so these are the unconditional pins.
 
 /// Parse and resolve `src` through the PARSER entry point

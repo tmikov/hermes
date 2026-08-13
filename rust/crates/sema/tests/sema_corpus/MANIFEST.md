@@ -171,12 +171,12 @@ unchanged at 47 rows and the Deferred table stays at 8, i.e. 46 + 8 = 54.
 | `break-in-nested-func.js` | **S3 T2** — `break;` inside a loose-mode block-nested `FunctionDeclaration`: the promoter still runs (and would promote `foo`), but `break`'s own loop/switch-nesting check fires first, so this pins that ordering rather than promotion itself |
 | `function-redeclaration-error.js` | **S3 T2** — sixteen redeclaration shapes (`var`/`let`/`Catch`-vs-`function`, strict AND loose, block-nested AND top-level) crossed with the Annex B.3.3 loose-mode exception; several of the loose, block-nested pairs (e.g. `var b2; function b2(){}`) are exactly the `visit(VariableDeclarationNode *)` "already declared" shape `promotion-var-shadows-promoted.js` isolates on its own |
 | `regress-function-promotion-decl.js` | **S3 T2** — the canonical positive case: one block-nested `function inner(){}` promoted to `Var`, alongside a `let foo` sibling that is untouched |
-| `type-alias-children.js` | **S4a T1** — **upstream + `// FLAGS: -parse-flow` line prepended, so NOT byte-identical to the upstream source** (only the dump output is byte-for-byte vs hermesc, per this table's usual methodology); with `-parse-flow` actually enabling the Flow grammar, pins `visit(TypeAliasNode *)`'s true no-op (SemanticResolver.cpp:1579-1581, newly ported to `resolver/mod.rs`'s `visit_node`, cited there) — the alias's `_id`/`_right` children are never visited, so `Id 'A'`/`Id 'B'`/`GenericTypeAnnotation` appear in the dump with no `[D:E:...]` resolution annotations, which is the file's whole point ("children of type alias AST node are not resolved as variables") |
-| `flow-typecast-cover.js` | **S4a T4** — `visit(CoverTypedIdentifierNode *)` (SemanticResolver.cpp:1575-1577, `resolver/expressions.rs:966`). `(x: number)` alone does NOT reach this visit — JSParserImpl.cpp:2633-2640 rewrites a non-optional cover node with a type annotation into a `TypeCastExpressionNode` inside the parenthesized-expression parser itself; the OPTIONAL form (`x?: number`, `_optional = true`) skips that rewrite and survives as a real `CoverTypedIdentifierNode` when it is not consumed as arrow parameters, which is what `(x?: number);` pins. hermesc: exit 2, 1 error |
-| `flow-this-param.js` | **S4a T4** — `declareParams`'s `this`-parameter check (SemanticResolver.cpp:1767-1771, `resolver/functions.rs:897`), gated `compile_ && !typed_`: `function f(this: number) {}` under `-parse-flow` parses (Flow accepts a `this` parameter) but the untyped dialect rejects it in sema. hermesc: exit 2, 1 error |
+| `type-alias-children.js` | **S4a T1** — **upstream + `// FLAGS: -parse-flow` line prepended, so NOT byte-identical to the upstream source** (only the dump output is byte-for-byte vs hermesc, per this table's usual methodology); with `-parse-flow` actually enabling the Flow grammar, pins `visit(TypeAliasNode *)`'s true no-op (SemanticResolver.cpp:1593-1595, newly ported to `resolver/mod.rs`'s `visit_node`, cited there) — the alias's `_id`/`_right` children are never visited, so `Id 'A'`/`Id 'B'`/`GenericTypeAnnotation` appear in the dump with no `[D:E:...]` resolution annotations, which is the file's whole point ("children of type alias AST node are not resolved as variables") |
+| `flow-typecast-cover.js` | **S4a T4** — `visit(CoverTypedIdentifierNode *)` (SemanticResolver.cpp:1589-1591, `resolver/expressions.rs:966`). `(x: number)` alone does NOT reach this visit — JSParserImpl.cpp:2633-2640 rewrites a non-optional cover node with a type annotation into a `TypeCastExpressionNode` inside the parenthesized-expression parser itself; the OPTIONAL form (`x?: number`, `_optional = true`) skips that rewrite and survives as a real `CoverTypedIdentifierNode` when it is not consumed as arrow parameters, which is what `(x?: number);` pins. hermesc: exit 2, 1 error |
+| `flow-this-param.js` | **S4a T4** — `declareParams`'s `this`-parameter check (SemanticResolver.cpp:1796-1800, `resolver/functions.rs:897`), gated `compile_ && !typed_`: `function f(this: number) {}` under `-parse-flow` parses (Flow accepts a `this` parameter) but the untyped dialect rejects it in sema. hermesc: exit 2, 1 error |
 | `flow-annotations-benign.js` | **S4a T4** — negative control: parameter, return and variable type annotations under `-parse-flow` resolving completely cleanly — the annotation nodes are never visited as expressions, so they neither perturb declarations nor scopes. hermesc: exit 0, full dump match |
-| `flow-typecast-resolves.js` | **S4a T4 fix review** — `visit(TypeCastExpressionNode *)` (SemanticResolver.cpp:1591-1594, `#if HERMES_PARSE_FLOW`, `resolver/expressions.rs`'s `visit_type_cast_expression`). A **review-found gap**: `(x: number);`, the task brief's original (unverified) sketch for `flow-typecast-cover.js`, does not hit the Cover-node error at all — it is the parser's rewritten `TypeCastExpressionNode` (JSParserImpl.cpp:2633-2640) and resolves cleanly, but that visit had no port and the resolver panicked at the catch-all. Ported and pinned here: `x` is declared first, so the dump shows it resolving through the cast normally ("visit the expression, but not the type annotation"). hermesc: exit 0 |
-| `flow-as-expression.js` | **S4a T4 fix review** — `visit(AsExpressionNode *)` (SemanticResolver.cpp:1596-1599, `#if HERMES_PARSE_FLOW`, `resolver/expressions.rs`'s `visit_as_expression`), the same shape as `flow-typecast-resolves.js` for Flow's `as` operator (`x as number`, JSParserImpl.cpp:4329-4350) — also unconditional on `typed_`, also found panicking during the fix review. hermesc: exit 0 |
+| `flow-typecast-resolves.js` | **S4a T4 fix review** — `visit(TypeCastExpressionNode *)` (SemanticResolver.cpp:1605-1608, `#if HERMES_PARSE_FLOW`, `resolver/expressions.rs`'s `visit_type_cast_expression`). A **review-found gap**: `(x: number);`, the task brief's original (unverified) sketch for `flow-typecast-cover.js`, does not hit the Cover-node error at all — it is the parser's rewritten `TypeCastExpressionNode` (JSParserImpl.cpp:2633-2640) and resolves cleanly, but that visit had no port and the resolver panicked at the catch-all. Ported and pinned here: `x` is declared first, so the dump shows it resolving through the cast normally ("visit the expression, but not the type annotation"). hermesc: exit 0 |
+| `flow-as-expression.js` | **S4a T4 fix review** — `visit(AsExpressionNode *)` (SemanticResolver.cpp:1610-1628, `#if HERMES_PARSE_FLOW`, `resolver/expressions.rs`'s `visit_as_expression`), the same shape as `flow-typecast-resolves.js` for Flow's `as` operator (`x as number`, JSParserImpl.cpp:4329-4350) — also unconditional on `typed_`, also found panicking during the fix review. hermesc: exit 0 |
 | `invalid-args-eval.js` | **Task 5 (defect-fix propagation)** — the S1 `arguments`/`eval` declaration rules, upstream verbatim. Deferred since S1 on a same-location diagnostic-order tie at `89:9` (the strict-mode `cannot declare 'arguments'` error and the `was not declared in function "global"` warning), which C++'s `std::sort` over the buffered-message array left unspecified. Upstream `5f313a13a` made that a `std::stable_sort` (`SourceErrorManager.cpp:60-74`), matching this port's stable `sort_by_key` in `disable_buffering` (`support/src/manager.rs`), so both sides now break the tie in emission order and the match is by construction. hermesc: exit 2 (error-path file, not an oracle success) |
 
 `deep-ast-err.js` is listed in the Deferred table below but is NOT a real S1
@@ -347,13 +347,13 @@ stderr and exit status) against `hermesc -dump-sema` before being added:
 | `spread-shapes.js` | the reachable arms of `visit(SpreadElementNode *)`'s parent whitelist: `ArrayExpression`, `ObjectExpression`, `NewExpression`, and a nested spread |
 | `error-cover-nodes.js` | all four non-Flow `Cover*` error stubs: `( )`, `(1, )`, `({ p = 1 })`, `(...e)` — including the one that reports at `getStartLoc` rather than over a range |
 | `arrows-nested.js` | a chain of nested arrows (each level rewritten), `arguments` reached past another arrow and past a function expression that has its own, and `for await (... of ...)` inside an async arrow |
-| `error-arrows.js` | duplicate arrow parameters (an error even in loose mode — `uniqueParams` is unconditionally true for arrows, cpp:1755-1756), a parameter/`let` collision in the body, and `'use strict'` inside an arrow with a non-simple parameter list |
+| `error-arrows.js` | duplicate arrow parameters (an error even in loose mode — `uniqueParams` is unconditionally true for arrows, cpp:1784-1785), a parameter/`let` collision in the body, and `'use strict'` inside an arrow with a non-simple parameter list |
 | `error-arrows-strict.js` | `arguments`/`eval` as arrow parameter names in strict mode |
 | `function-expr-name-fold.js` | **S1-capstone pin** — a NAMED `FunctionExpression` whose body folds, so the node carrying the function-expression-name scope decoration is rebuilt |
 
 Not corpus-reachable, and documented at their sites rather than curated away:
 
-- **`spread operator is not supported`** (cpp:1465). `JSParserImpl` builds a
+- **`spread operator is not supported`** (cpp:1479). `JSParserImpl` builds a
   `SpreadElementNode` in exactly three places, and all of their parents are on
   the whitelist; `...` anywhere else is an `invalid expression` parse error or
   gets reinterpreted into a `RestElement`/`CoverRestElement`. Probed with
@@ -375,7 +375,7 @@ Not corpus-reachable, and documented at their sites rather than curated away:
   exactly, and reports `'target'/'meta' expected in member expression`
   otherwise (probed: `new.foo`, `import.foo`).
 - **`'yield' not in a generator function` / `'await' not in an async
-  function'`** (cpp:1480, 1496). Both need a `YieldExpression`/
+  function'`** (cpp:1494, 1496). Both need a `YieldExpression`/
   `AwaitExpression` whose *enclosing* function context is not a
   generator/async one, which the parser only produces inside class field
   initializers and static blocks (`test/Parser/await-field-error.js`,
@@ -415,8 +415,8 @@ Not corpus-reachable, and documented at their sites rather than curated away:
   cannot be matched and is **deferred to the regex component**. Valid regexes
   are unaffected, which is what makes `regexp-literals.js` a real test — see
   that file's header and the module doc's "REGEX-ENGINE DEFERRED" block.
-- **The `Unresolver`'s local-`eval` call site** (cpp:1931-1937) is dead in C++
-  too (`if (false && lexScope->localEval && ...)`), so only the `with` call
+- **The `Unresolver`'s local-`eval` call site** (cpp:1960-1967) is dead in C++
+  too (`if ((false)) if (lexScope->localEval && ...)`), so only the `with` call
   site exercises the pass, and that one is dump-invisible (above).
 
 ## S2 Task 4 additions
@@ -433,19 +433,19 @@ added:
 |---|---|
 | `classes-shapes.js` | every shape `visitClassAsExpr` handles: declarations and expressions, named and anonymous, self-reference through the inner `ClassExprName` decl, every `MethodDefinition` kind (plain, computed, getter, setter, static, static computed, generator, `async`), classes nested in methods and in functions, a class whose only constructor is the SYNTHETIC implicit one vs. one with an explicit constructor (which suppresses it), and a method body that folds (rebuilding the class node) |
 | `class-properties.js` | `visit(ClassPropertyNode *)`: instance-only, static-only, both (in either order, so both creation orders of the two synthetic initializer functions are pinned) and neither; a field with no initializer (which still creates the initializer function in untyped mode but runs no `declareArguments`, so its scope has no `arguments` decl) vs. one with; computed keys resolved in the ENCLOSING context; `this`, an arrow and a fold inside an initializer; fields in a class inside a function; and `arguments` in a computed key, which is legal precisely because no `FunctionContext` is pushed for it |
-| `classes-derived.js` | `extends` of an identifier, a member expression, a folding sequence expression and a class expression; `super.x` in a method, a static method, a getter, a setter, an arrow inside a method, a doubly-nested arrow and a field initializer (`canReferenceSuper_` inheritance, cpp:1027/1675); anonymous and function-local derived classes. `super()` CALLS are deliberately absent — that check is S2 T6 |
+| `classes-derived.js` | `extends` of an identifier, a member expression, a folding sequence expression and a class expression; `super.x` in a method, a static method, a getter, a setter, an arrow inside a method, a doubly-nested arrow and a field initializer (`canReferenceSuper_` inheritance, cpp:1032/1704); anonymous and function-local derived classes. `super()` CALLS are deliberately absent — that check is S2 T6 |
 | `error-class-name.js` | class-name errors: duplicate class, `let`-then-class, `class arguments`/`class eval` (reachable at loose global scope only because a class forces strict mode on the enclosing function, cpp:919), the same for a class *expression* name, and assignment/`+=`/`++` to the class name from inside the body — the inner `ClassExprName` decl's const rules |
-| `error-class-decorators.js` | all three `decorators are not supported` sites (cpp:914-916 on the class, cpp:1009-1011 on a `ClassProperty`, cpp:1097-1099 on a `MethodDefinition`), for declarations and expressions, instance and static members, and a class with two decorators (which reports once) |
+| `error-class-decorators.js` | all three `decorators are not supported` sites (cpp:914-916 on the class, cpp:1014-1016 on a `ClassProperty`, cpp:1107-1109 on a `MethodDefinition`), for declarations and expressions, instance and static members, and a class with two decorators (which reports once) |
 | `error-class-field.js` | the two errors a field initializer's flag save/restores produce: `invalid use of 'arguments'` (`forbidSpecialArgumentsReference_`, including through one and two levels of arrow, at global scope and inside a function) and `'await' not in an async function` (`forbidAwaitExpression_`, even inside an `async` function, for instance and static fields) — plus the contrast that `await` in a COMPUTED KEY inside an `async` function is legal, because the key is resolved in the async function's own context |
 | `super-member-shapes.js` | `visit(SuperNode *, Node *)`'s `isa<MemberExpressionLikeNode>` test — the reachable (`MemberExpression`) half of the range, in several nesting shapes including `super.a?.b`; the `OptionalMemberExpression` half is **unreachable in Hermes's grammar** (see the note below) — and `canReferenceSuper_` coming from `isMethodDefinition` on OBJECT-literal method shorthand (plain, getter, setter, computed, generator, `async`, and an arrow inside one) — all legal, so it is the non-error counterpart to `reject-super-references.js` |
-| `await-field-error.js` | **S2 T2 pin, from `test/Parser`** — `'await' not in an async function` (cpp:1496), unreachable before the class visits existed |
+| `await-field-error.js` | **S2 T2 pin, from `test/Parser`** — `'await' not in an async function` (cpp:1510), unreachable before the class visits existed |
 | `arguments-field-error.js` | from `test/Parser` — `invalid use of 'arguments'` reaching a field initializer through an arrow, inside a generator |
 | `yield-field-error.js` | from `test/Parser` — evidence that the `'yield' not in a generator function` pin is unreachable (the parser rejects `yield` in a field initializer first) AND the regression pin for this task's parser fix: C++ reports that `invalid expression` through `error(SMLoc, Twine)` (a bare caret), which this port was rendering as an underlined 5-character range |
 
 Not corpus-reachable, and documented rather than curated away:
 
 - **The `OptionalMemberExpression` half of `visit(SuperNode *, Node *)`'s
-  `isa<MemberExpressionLikeNode>(parent)` range** (cpp:1089). A `Super`'s
+  `isa<MemberExpressionLikeNode>(parent)` range** (cpp:1099). A `Super`'s
   parent can never be an `OptionalMemberExpression`: the parser requires `(`,
   `[` or `.` immediately after `super` (`super?.a` is `'(', '[' or '.'
   expected after 'super' keyword`), and in `super.a?.b` the
@@ -459,7 +459,7 @@ Not corpus-reachable, and documented rather than curated away:
   propagation, Task 4" at the end of this file. The shape below is now the
   corpus file `class-field-class-expr.js`.* (`class C { x =
   class {}; }`) makes **hermesc itself abort** on an assertion in the C++
-  dumper: `SemContext.cpp:478: printFunction: Assertion 'processedCount ==
+  dumper: `SemContext.cpp:481: printFunction: Assertion 'processedCount ==
   f.getScopes().size() && "not all scopes were visited"' failed`. The inner
   class's `LexicalScope` is created with `parentFunction = curFunctionInfo()`
   (the synthetic elements-initializer function) but `parentScope = curScope_`
@@ -487,34 +487,34 @@ verified byte-for-byte (stdout, stderr and exit status) against
 | File | Covers |
 |---|---|
 | `private-members.js` | every legal private-name shape: fields with and without an initializer, instance and static; methods incl. generator and `async`; a getter+setter pair in BOTH declaration orders plus a static pair (so both `PrivateGetterSetter` upgrade orders are pinned); getter-only and setter-only; private access as `this.#x`, `o.#x`, `o?.#x` and the ES2022 `#x in o` check (whose `PrivateName` reaches `visit(PrivateNameNode *)` without a member expression); a member referencing a private name declared LATER in the class (which is the whole reason `collectDeclaredPrivateIdentifiers` runs before the body walk); private fields in nested classes with the same spelling; and the derived-class and class-expression forms; plus two private field initializers that FOLD, rebuilding the `ClassPrivateProperty` and hence the whole class node |
-| `error-private-dups.js` | the rows of the cpp:2143-2260 early-error matrix that `private-declaration-dup-error.js` does not reach: method+method, setter+setter, accessor-then-field, method-then-field, accessor-then-method, a complete pair plus a third accessor, the static-mismatch rule in the opposite order, and (as the negative control) a legal static getter+static setter pair |
-| `error-private-load-store.js` | every cpp:1207-1295 restriction, written without a `CallExpression` so it is reachable today: load from a setter-only name, store to a getter-only name, store to a method, `delete` on both member kinds — **pinning that the two overloads deliberately report `delete` at DIFFERENT ranges** (`node` vs `parent`) — `super.#y`, an undeclared private name both inside and outside a class, and the four assignment-target shapes where this port's `path.field == left` test could diverge from C++'s `assign->_left == node` pointer comparison (compound assignment, a parenthesized LHS, a linearized `=` chain with a different name per link, and an `UpdateExpression` parent, which is a LOAD) |
-| `static-blocks.js` | `visit(StaticBlockNode *)`: an empty static block, three blocks each hoisting their own `var x` into their own body scope (they would collide if they hoisted to the enclosing function), a `var` hoisted out of a nested block, a block alongside static and instance fields (the shared static-elements-init function), a block as a class's ONLY static element (which still creates that function, cpp:1057), `this`/`super.x`/arrows inside a block, a block inside a class inside a function, a class nested inside a block, private names visible from a block, and a block whose body folds (rebuilding the `StaticBlock` node) |
+| `error-private-dups.js` | the rows of the cpp:2173-2290 early-error matrix that `private-declaration-dup-error.js` does not reach: method+method, setter+setter, accessor-then-field, method-then-field, accessor-then-method, a complete pair plus a third accessor, the static-mismatch rule in the opposite order, and (as the negative control) a legal static getter+static setter pair |
+| `error-private-load-store.js` | every cpp:1221-1309 restriction, written without a `CallExpression` so it is reachable today: load from a setter-only name, store to a getter-only name, store to a method, `delete` on both member kinds — **pinning that the two overloads deliberately report `delete` at DIFFERENT ranges** (`node` vs `parent`) — `super.#y`, an undeclared private name both inside and outside a class, and the four assignment-target shapes where this port's `path.field == left` test could diverge from C++'s `assign->_left == node` pointer comparison (compound assignment, a parenthesized LHS, a linearized `=` chain with a different name per link, and an `UpdateExpression` parent, which is a LOAD) |
+| `static-blocks.js` | `visit(StaticBlockNode *)`: an empty static block, three blocks each hoisting their own `var x` into their own body scope (they would collide if they hoisted to the enclosing function), a `var` hoisted out of a nested block, a block alongside static and instance fields (the shared static-elements-init function), a block as a class's ONLY static element (which still creates that function, cpp:1067), `this`/`super.x`/arrows inside a block, a block inside a class inside a function, a class nested inside a block, private names visible from a block, and a block whose body folds (rebuilding the `StaticBlock` node) |
 | `error-static-block.js` | the diagnostics the four flag save/restores make reachable: `'await' not in an async function` for `await` in a block inside an `async` function, `invalid use of 'arguments' as an identifier` directly and through an arrow, and a `let`/`var` redeclaration in the block's own scope |
 | `error-static-block-typeof-arguments.js` | **PIN for a bug-for-bug quirk.** `class C { static { typeof arguments; } }` reports `invalid use of 'arguments' as an identifier` TWICE at the same location, because `visit(IdentifierNode *, Node *)` has no early return after its `typeof` arm (cpp:304-308 falls through to cpp:322) while `resolveIdentifier`'s two forbid-flag checks run before its decl-cache early return. `forbidArgumentsAsIdentifier_` is only ever set by `visit(StaticBlockNode *)`, so this shape is the only way to reach the double fire — it is the corpus pin S2 T2's report asked S2 T5 to add |
 | `class-static-block-await-error.js` | from `test/Parser` — `'await' not in an async function` inside a static block, contrasted with a legal `await` in the class's `extends` clause of the same async function |
 | `class-static-block-return-error.js` | from `test/Parser` — `'return' not in a function` for a `return` in a static block, at global scope AND inside a function; the diagnostic is the PARSER's (JSParserImpl.cpp:700), which is why sema's `visit(ReturnStatementNode *)` never sees it |
-| `class-static-block-yield-error.js` | from `test/Parser` — the evidence closing S2 T2's open question: `yield` in a static block is `invalid expression` from the parser, so `'yield' not in a generator function` (cpp:1480) is unreachable from there too |
+| `class-static-block-yield-error.js` | from `test/Parser` — the evidence closing S2 T2's open question: `yield` in a static block is `invalid expression` from the parser, so `'yield' not in a generator function` (cpp:1494) is unreachable from there too |
 
 Not corpus-reachable, and documented at their sites rather than curated away:
 
-- **The `@Hermes.overload` duplicate-private-method exemption** (cpp:2197-2200)
+- **The `@Hermes.overload` duplicate-private-method exemption** (cpp:2227-2230)
   is `typed_`-only; `TYPED` is a constant `false` in this port, so the `&&`
   short-circuits and `hermes::findDecorator` is never called. Ported as a panic
   inside the `if TYPED` that guards it, like the rest of the typed-dialect
   branches.
-- **The `test262` code-generation setting** (cpp:1221/1265) gates the whole
+- **The `test262` code-generation setting** (cpp:1235/1279) gates the whole
   load/store validation block in both member overloads. It is a compiler-driver
   knob (`hermesc -test262`) this port has no flag for, so it reads the
   documented `CODE_GENERATION_SETTINGS_TEST262 = false` constant — which is
   also hermesc's default, i.e. what the corpus compares against.
-- **`'yield' not in a generator function`** (cpp:1480) is now known to be
+- **`'yield' not in a generator function`** (cpp:1494) is now known to be
   unreachable from a static block too: the parser rejects `yield` there as
   `invalid expression` (pinned by the imported
   `class-static-block-yield-error.js`), closing the question S2 T2's note left
   open. Combined with S2 T4's finding for field initializers, the diagnostic has
   no reachable source in this dialect at all.
-- **`DebugInfoSetting::ALL`** (cpp:1065-1069) would store the static block's
+- **`DebugInfoSetting::ALL`** (cpp:1075-1079) would store the static block's
   binding-table scope for `eval` of its children. Ported in shape behind
   `DEBUG_INFO_SETTING_ALL`, exactly like the other two uses of that constant.
 
@@ -526,18 +526,18 @@ and exit status) against `hermesc -dump-sema` **before** being added:
 
 | File | Covers |
 |---|---|
-| `calls-shapes.js` | every call shape that hits NONE of the three specials, i.e. the plain `visitESTreeChildren` tail at cpp:1204: callee shapes (identifier, member, computed member, IIFE, arrow IIFE, sequence, logical, a call of a call), `new` in five forms, `OptionalCallExpression` in seven forms (`f?.()`, `o.m?.()`, `o?.m()`, `o?.m?.(1)`, `f?.()()`, `f()?.()`), spread arguments in `CallExpression`/`OptionalCallExpression`/`NewExpression` (three of `visit(SpreadElementNode *)`'s five whitelisted parents, cpp:1460), calls in every statement position (`if`/`while`/`do`/`for`/`for-in`/`switch`/`try`/`throw`/labeled), calls in every function-like body (function, nested function expression, both arrow body shapes, generator, `async`), and calls in a computed class key, a field initializer, a method body and a static block. This is also the first corpus file to need `OptionalCallExpression` in `visit_node`'s override-free generic arm |
-| `eval-direct.js` | the `DirectEval` half of the eval detection (cpp:1118-1151): a direct `eval()` at global scope, with extra arguments, with none, inside a function, inside both arrow body shapes, three block levels deep, in a method, a field initializer and a static block — plus the four shapes that are NOT direct calls and therefore warn about nothing (`o.eval("8")`, `eval?.("9")`, `new eval("10")`, and `eval` merely referenced) |
-| `eval-shadowed.js` | the negative half (cpp:1121-1131): `isEval` is false when the binding is not a global-scope `UndeclaredGlobalProperty`/`GlobalProperty`, so a parameter, a `var`, a `let`, a block `let`, a nested `function` and a catch parameter all named `eval` suppress the warning — **and the quirk that a GLOBAL `var eval` does NOT**, because `GlobalProperty` in the global scope is one of the two kinds the check accepts. Loose mode throughout, since every one of those declarations is a strict-mode error |
-| `shbuiltin-calls.js` | **rewrite #3** (cpp:1153-1165): `$SHBuiltin.foo(1)` and friends, whose dump shows the `Id '$SHBuiltin'` line replaced by a bare `SHBuiltin` line (with no `[D:E:...]`) — at global scope, in a function, in an arrow, in a method, a field initializer and a static block; a rewritten call used as a value, as a callee and as an argument to another rewritten call; and one whose argument FOLDS, so the rebuilt `CallExpression` is rebuilt a second time by its own children walk |
+| `calls-shapes.js` | every call shape that hits NONE of the three specials, i.e. the plain `visitESTreeChildren` tail at cpp:1218: callee shapes (identifier, member, computed member, IIFE, arrow IIFE, sequence, logical, a call of a call), `new` in five forms, `OptionalCallExpression` in seven forms (`f?.()`, `o.m?.()`, `o?.m()`, `o?.m?.(1)`, `f?.()()`, `f()?.()`), spread arguments in `CallExpression`/`OptionalCallExpression`/`NewExpression` (three of `visit(SpreadElementNode *)`'s five whitelisted parents, cpp:1474), calls in every statement position (`if`/`while`/`do`/`for`/`for-in`/`switch`/`try`/`throw`/labeled), calls in every function-like body (function, nested function expression, both arrow body shapes, generator, `async`), and calls in a computed class key, a field initializer, a method body and a static block. This is also the first corpus file to need `OptionalCallExpression` in `visit_node`'s override-free generic arm |
+| `eval-direct.js` | the `DirectEval` half of the eval detection (cpp:1128-1161): a direct `eval()` at global scope, with extra arguments, with none, inside a function, inside both arrow body shapes, three block levels deep, in a method, a field initializer and a static block — plus the four shapes that are NOT direct calls and therefore warn about nothing (`o.eval("8")`, `eval?.("9")`, `new eval("10")`, and `eval` merely referenced) |
+| `eval-shadowed.js` | the negative half (cpp:1131-1141): `isEval` is false when the binding is not a global-scope `UndeclaredGlobalProperty`/`GlobalProperty`, so a parameter, a `var`, a `let`, a block `let`, a nested `function` and a catch parameter all named `eval` suppress the warning — **and the quirk that a GLOBAL `var eval` does NOT**, because `GlobalProperty` in the global scope is one of the two kinds the check accepts. Loose mode throughout, since every one of those declarations is a strict-mode error |
+| `shbuiltin-calls.js` | **rewrite #3** (cpp:1163-1182): `$SHBuiltin.foo(1)` and friends, whose dump shows the `Id '$SHBuiltin'` line replaced by a bare `SHBuiltin` line (with no `[D:E:...]`) — at global scope, in a function, in an arrow, in a method, a field initializer and a static block; a rewritten call used as a value, as a callee and as an argument to another rewritten call; and one whose argument FOLDS, so the rebuilt `CallExpression` is rebuilt a second time by its own children walk |
 | `error-shbuiltin.js` | every shape rewrite #3 does NOT rewrite, all of which end in `invalid use of $SHBuiltin` from `visit(IdentifierNode *)` (cpp:310-314) because the identifier survives into the children walk: a bare reference, a member access that is not a call, a call whose callee is the identifier itself, a COMPUTED member call (both literal and dynamic key), an `OptionalCallExpression` and an `OptionalMemberExpression` callee, a `NewExpression`, and a shadowed `let $SHBuiltin` — **pinning that each surviving occurrence is reported exactly ONCE** even where `visit(CallExpressionNode *)` also called `resolveIdentifier` on it. Its one legal line, `a.$SHBuiltin(1)`, is the contrast: a non-computed member *property* returns early at cpp:287-293 |
-| `super-calls.js` | the legal `super()` shapes (cpp:1195-1202): a derived constructor, with arguments, with a spread, in nested block/`if`/`for`/`try`/`catch`/`switch` positions, through one and two arrows and through an arrow's parameter default (all `nearestNonArrow`), a derived class expression, a derived class inside a function, and `extends` of a parenthesized expression |
+| `super-calls.js` | the legal `super()` shapes (cpp:1209-1216): a derived constructor, with arguments, with a spread, in nested block/`if`/`for`/`try`/`catch`/`switch` positions, through one and two arrows and through an arrow's parameter default (all `nearestNonArrow`), a derived class expression, a derived class inside a function, and `extends` of a parenthesized expression |
 | `error-super-call.js` | the eight `super() call only allowed in derived class constructor` shapes: a base-class constructor, an arrow inside one, a plain function inside a *derived* constructor (the function is itself the nearest non-arrow), an object-literal method, an instance and a static method of a derived class, a derived class's field initializer (which runs in the synthetic elements-initializer `FunctionInfo`), and `super(1, 2 + 3)` — the last one pinning that the range covers the ARGUMENTS, since the diagnostic uses `node->getSourceRange()` |
 
 Not corpus-reachable, and documented at their sites rather than curated away:
 
 - **The `EvalDisabled` warning and the `registerLocalEval`-is-skipped branch**
-  (cpp:1143-1149) need `Context::setEnableEval(false)`, i.e. hermesc's
+  (cpp:1153-1159) need `Context::setEnableEval(false)`, i.e. hermesc's
   `-enable-eval=false`. `sema_differential.rs` has no per-file flag mechanism,
   so the corpus can only ever compare hermesc's default (eval enabled) against
   ours — which is why `disabled-eval.js` was imported for its ENABLED-branch
@@ -545,7 +545,7 @@ Not corpus-reachable, and documented at their sites rather than curated away:
   `disabled_eval_warns_differently_and_marks_no_scope` in `tests/resolver.rs`
   instead. The flag itself IS ported (`ast::Context::enable_eval`, default
   `true`, matching Context.h:228).
-- **`LexicalScope::localEval`** — what `registerLocalEval` (cpp:2835-2843)
+- **`LexicalScope::localEval`** — what `registerLocalEval` (cpp:2865-2873)
   actually writes — is never printed by `-dump-sema`, so the differential is
   structurally blind to it. Pinned by two unit tests instead:
   `register_local_eval_marks_the_whole_ancestor_chain` (the helper directly,
@@ -611,12 +611,12 @@ vocabulary):
    visits.)
 2. **`Decl::Kind`** (SemContext.h:58-105, 18 kinds): all reachable ones appear.
    The two absent are `Import` (S4 modules) and `TypedBuiltin` (`typed_`-only,
-   cpp:2630-2639).
+   cpp:2660-2669).
 3. **`Decl::Special`** (SemContext.h:110-116): `Arguments` (218 occurrences)
    and `PrivateStatic` appear; `Eval` appears nowhere — because **nothing in
    the whole C++ tree ever sets or reads it**. `Decl::Special::Eval` is a dead
    enumerator whose only mention outside the header is the `CASE(Eval)` line of
-   `printDecl`'s macro (SemContext.cpp:535-545); across `lib/`, only
+   `printDecl`'s macro (SemContext.cpp:545-555); across `lib/`, only
    `Special::Arguments` (9 sites) and `Special::PrivateStatic` (5) are ever
    used. The kind×special
    PAIRS were then inventoried, which found a real gap:
@@ -628,8 +628,8 @@ vocabulary):
    `D:E:%d.N` (921 occurrences) and `D:%d.N E:%d.M` (65) are covered; the
    third — `declD` set with NO `exprD` — is unreachable in the corpus, and so
    is ` UNR`. Both come from the `Unresolver` (`setExpressionDecl(node,
-   nullptr)` at cpp:3204, `setUnresolvable`), whose only live call site is
-   `with` (cpp:1931-1937's local-`eval` site is `if (false && …)`), and `with`
+   nullptr)` at cpp:3234, `setUnresolvable`), whose only live call site is
+   `with` (cpp:1960-1967's local-`eval` site is `if ((false))`), and `with`
    always exits 2 without a dump. That is the same structural blindness
    `error-with.js`'s row already records; the unit tests are the net.
 5. **Diagnostics**: the 54 distinct `error`/`warning`/`note` messages the
@@ -650,14 +650,14 @@ vocabulary):
    `typecast not allowed in this context` — `-parse-flow`;
    `Too many nested expressions…` — the recursion-depth row) **plus one this
    sweep found undocumented**: `'this' parameter requires typed mode`
-   (cpp:1768-1772). It fires when Flow syntax is parsed but typing is off, i.e.
+   (cpp:1797-1801). It fires when Flow syntax is parsed but typing is off, i.e.
    under `-parse-flow` and NOT under `-typed`; in the untyped dialect the
    parser rejects a `this` parameter first (`identifier, '{' or '[' expected in
    binding pattern`, probed for functions, methods, arrows and object methods).
    Dialect-corpus phase, like the other `-parse-flow`-only rows.
 
 Task 7's own feature is invisible here by construction:
-`SemContextDumper::printFunction` (SemContext.cpp:449-480) prints only
+`SemContextDumper::printFunction` (SemContext.cpp:449-483) prints only
 `Func`/`StaticBlock` + strictness + scopes + decls + hoisted functions, and
 `FunctionInfo::mayReachImplicitReturn` (SemContext.h:354) is read only by the
 FlowChecker and IRGen. `tests/check_implicit_return.rs` is its regression net,
@@ -665,7 +665,7 @@ which is why S2 T7 added no corpus file and why `debugger-statement.js` pins
 only the resolver-visible half.
 
 A sixth inventory covered `set_node_scope`'s 15 scope-bearing kinds
-(SemanticResolver.cpp:2931-2932): 11 of them appear with a printed `Scope
+(SemanticResolver.cpp:2961-2962): 11 of them appear with a printed `Scope
 %s.N` in the corpus. The other four never get one from this resolver —
 `FunctionDeclaration`/`ArrowFunctionExpression` because `visitFunctionLike`
 opens the function scope with the node-less `ScopeRAII` (verified: even with a
@@ -694,7 +694,7 @@ Two of those are single-file findings worth naming:
   documented regex-engine deferral (see S2 T3's note), now with an upstream
   file as its witness.
 - `test/hermes/computed-fn-name.js:71` (`[k("strClass")] = class {};`) — makes
-  **hermesc itself** abort on `SemContext.cpp:478`, exactly the pre-existing
+  **hermesc itself** abort on `SemContext.cpp:481`, exactly the pre-existing
   C++ defect S2 T4 documented; this port reproduces it with its own
   `assert_eq!`. Confirmation that the defect is real upstream code, not a
   contrived shape.
@@ -737,7 +737,7 @@ reading this MANIFEST.
 |---|---|
 | `debugger-statement.js` | **new** — the only handled node kind with zero corpus occurrences (inventory 1) |
 | `expr-visit-generic-2.js` | **new** — `BigIntLiteral`, `TaggedTemplateExpression` and `ImportExpression`: three override-free kinds the resolver PANICKED on (`1n`, `` tag`x${a}` ``, `import("m")`) while hermesc dumps them happily. Found by the Step 3 sweep: **26** upstream files contain one of the three kinds and **25** of them were panicking pre-fix (the 26th, `test/Parser/es6/import-assertions.js`, panics earlier on `ImportDeclaration`, S4). Fixed by adding them to `visit_node`'s generic arm with the usual citation, and this file is the pin — including that BigInt operands are NOT folded |
-| `error-limit.js` | **new** — hermesc's driver sets `-ferror-limit` = 20 (CompilerDriver.cpp:555-559, :1223) and `sema-dump` never did, so any input with >20 errors diverged (the corpus's noisiest other file, `error-private-load-store.js`, stops at 15). Pins the cut-off, the `<unknown>:0: error: too many errors emitted` sentinel, its forced-last position, the post-limit suppression of errors AND warnings, and that the surviving 20th is a DECLARATION-pass error from the file's last line (generation order, not location order) |
+| `error-limit.js` | **new** — hermesc's driver sets `-ferror-limit` = 20 (CompilerDriver.cpp:566-570, :1252) and `sema-dump` never did, so any input with >20 errors diverged (the corpus's noisiest other file, `error-private-load-store.js`, stops at 15). Pins the cut-off, the `<unknown>:0: error: too many errors emitted` sentinel, its forced-last position, the post-limit suppression of errors AND warnings, and that the surviving 20th is a DECLARATION-pass error from the file's last line (generation order, not location order) |
 | `private-members.js` | +2 lines: the static one-sided private accessors (inventory 3) |
 | `error-class-field.js` | +1 shape: `class C { a = typeof arguments; }` double-fires `invalid use of 'arguments'`, the `forbidSpecialArgumentsReference_` sibling of `error-static-block-typeof-arguments.js` |
 | `shbuiltin-calls.js` | comment fix: the `$SHBuiltin` ambient decl is `%d.27`, not `%d.23`, and this corpus keeps no CHECK lines ("in the dump below" was false) |
@@ -764,7 +764,7 @@ Out-of-corpus fixes the sweep forced (each TDD'd, smallest repro first):
 
 S3 Task 1 ported `lib/Sema/ScopedFunctionPromoter.cpp` and wired both of its
 in-scope call sites (`visit(ProgramNode *)`, SemanticResolver.cpp:224-227, and
-`visitFunctionBodyAfterParamsVisited`, cpp:1904-1910), replacing the two
+`visitFunctionBodyAfterParamsVisited`, cpp:1933-1939), replacing the two
 `assert!` seams that fired on any loose-mode function containing a block-nested
 function declaration. It imported no upstream `test/Sema` file — the remaining
 Deferred rows are all blocked on S4/S5 features (modules, per-file harness
@@ -772,7 +772,7 @@ flags, lazy/eval) — and added two new files:
 
 | File | What it pins |
 |---|---|
-| `promotion-basic.js` | **new** — promotion HAPPENS. Both call sites (top level → `GlobalProperty`, inside a function → `Var`), the parameter rule (`processParameters`, cpp:147-158 / ES2022 B.3.2.1 29.a.ii: a formal parameter of the same name blocks), four more of the seven `visitScope` kinds (`Switch`/`For`/`ForIn`/`ForOf`), and that two same-named candidates in sibling blocks both promote onto ONE function-scope decl (`try_emplace`, cpp:2138) |
+| `promotion-basic.js` | **new** — promotion HAPPENS. Both call sites (top level → `GlobalProperty`, inside a function → `Var`), the parameter rule (`processParameters`, cpp:147-158 / ES2022 B.3.2.1 29.a.ii: a formal parameter of the same name blocks), four more of the seven `visitScope` kinds (`Switch`/`For`/`ForIn`/`ForOf`), and that two same-named candidates in sibling blocks both promote onto ONE function-scope decl (`try_emplace`, cpp:2168) |
 | `promotion-blocked-by-let.js` | **new** — promotion is REFUSED. `let`, `const` and `class` each block from the enclosing scope, at top level and inside a function; the `catch (e)` case is the counter-example that must NOT block (`ES5Catch` is skipped, cpp:212-216 / ES14.0 B.3.4), so the function nested inside the catch block IS promoted to `Var` |
 
 Twenty further shapes were probed against hermesc without being imported (they
@@ -835,11 +835,11 @@ full in the files' own header comments:
 |---|---|
 | `promotion-catch-destructuring-blocks.js` | **new** — `catch ({ e })` (a destructuring param) maps to `Decl::Kind::Catch`, not `ES5Catch` (cpp:287-294), so — unlike `promotion-blocked-by-let.js`'s `inCatch()` — it DOES block promotion (cpp:212-216) |
 | `promotion-nested-scope-visibility.js` | **new** — a `let` blocks a candidate arbitrarily deep in its own descendant scopes, but stops applying the moment its own block closes: a candidate in a later sibling block promotes normally |
-| `promotion-var-reuse.js` | **new** — the `Var, ScopedFunc` arm of the "when to create a new declaration" switch (cpp:2546-2562) in both source orders (`function` then `var`, `var` then `function`), plus the genuinely cross-scope sub-case (`reuseDeclForNewBinding`, cpp:2554-2561): a second, same-named candidate whose OWN identifier has never been declared before, reached with a `Var`-like decl as the nearest (unshadowed) binding. Derived from the C++, not the brief's sketch — see the file's header comment for the exact mechanics (why a `let` in the SAME block, positioned AFTER the function in source order, produces this instead of just blocking it, the way an enclosing `let` would) |
+| `promotion-var-reuse.js` | **new** — the `Var, ScopedFunc` arm of the "when to create a new declaration" switch (cpp:2576-2592) in both source orders (`function` then `var`, `var` then `function`), plus the genuinely cross-scope sub-case (`reuseDeclForNewBinding`, cpp:2584-2591): a second, same-named candidate whose OWN identifier has never been declared before, reached with a `Var`-like decl as the nearest (unshadowed) binding. Derived from the C++, not the brief's sketch — see the file's header comment for the exact mechanics (why a `let` in the SAME block, positioned AFTER the function in source order, produces this instead of just blocking it, the way an enclosing `let` would) |
 | `promotion-var-shadows-promoted.js` | **new** — `visit(VariableDeclarationNode *)`'s `prevIsLexicalBindingOfPromotedFunc` special case (cpp:365-374, feeding the error at cpp:391-401), at both top level and function scope. Derived from the C++, not the brief's `let`-based sketch (a `let` there doesn't even reach this code path — only a `var` does, since the check is gated on `kw_.identVar`). Its `prevKind` is `ScopedFunction`, which is independently let-like, so this shape alone does not prove the flag is load-bearing — see `promotion-es5catch-var-shadows.js` for that |
 | `promotion-es5catch-var-shadows.js` | **new (review follow-up)** — isolates `prevIsLexicalBindingOfPromotedFunc` as the SOLE cause of the error: with `prevKind == ES5Catch`, the ordinary check at cpp:392 is explicitly excluded (`!= ES5Catch`, the B.3.5 exemption `catch-shapes.js` pins), so only the flag being `true` can fire it. A function promoted from a sibling block, then a nested `var` inside `catch (e) { ... }` with the SAME name |
-| `promotion-es5catch-cross-scope-reuse.js` | **new** — the `ES5Catch` counterpart of `promotion-var-reuse.js`'s cross-scope case: the `ES5Catch, ScopedFunc` arm (cpp:2563-2578, specifically the `promotedFuncDecls` lookup at cpp:2569-2577) — the S1-T5 matrix row that stayed S3-blocked until this task. Needs an outer, already-popped `let` of the same name to make the blocked candidate's nearest binding land on the catch's `ES5Catch` decl rather than the `let` itself; see the file's header comment |
-| `promotion-strict-mode-negative.js` | **new** — the strict-mode gate on both promotion call sites (cpp:224-227, cpp:1906-1910): Annex B.3.3 is loose-mode-only, so a block-nested function keeps its local `ScopedFunction` decl and a same-name reference resolves as an undeclared global instead of a promoted `Var` |
+| `promotion-es5catch-cross-scope-reuse.js` | **new** — the `ES5Catch` counterpart of `promotion-var-reuse.js`'s cross-scope case: the `ES5Catch, ScopedFunc` arm (cpp:2593-2608, specifically the `promotedFuncDecls` lookup at cpp:2599-2607) — the S1-T5 matrix row that stayed S3-blocked until this task. Needs an outer, already-popped `let` of the same name to make the blocked candidate's nearest binding land on the catch's `ES5Catch` decl rather than the `let` itself; see the file's header comment |
+| `promotion-strict-mode-negative.js` | **new** — the strict-mode gate on both promotion call sites (cpp:224-227, cpp:1935-1939): Annex B.3.3 is loose-mode-only, so a block-nested function keeps its local `ScopedFunction` decl and a same-name reference resolves as an undeclared global instead of a promoted `Var` |
 
 Two battery bullets did not get a new file:
 
@@ -978,14 +978,14 @@ The 17-file panic bucket is, exhaustively (each message read, not assumed):
   `test/Parser/es6/export.js`; `X = ImportDeclaration` on
   `test/Parser/es6/{import-assertions,import-location,import}.js`. And
   `calls.rs:312`'s `$SHBuiltin.moduleFactory needs visitModuleFactory
-  (cpp:1320-1366) — S4 modules` panic on 7 files
+  (cpp:1334-1380) — S4 modules` panic on 7 files
   (`test/BCGen/HBC/xmod-requires-opt.js`, `test/Optimizer/xmod-{builtins,
   require-cse,requires-opt-extension,requires-opt}.js`,
   `test/hermes/xmod-exec-require{-bad-func,}.js`). Same two call sites,
   same messages, as `xmod-errors.js`'s already-Deferred row.
 - **1 pre-existing-C++-defect reproduction** — `test/hermes/
   computed-fn-name.js:71` (`[k("strClass")] = class {};`), the same
-  `SemContext.cpp:478` scope-walk assertion S2 T4 already documented (hermesc
+  `SemContext.cpp:481` scope-walk assertion S2 T4 already documented (hermesc
   itself aborts, exit -6/134; this port's `dump_context.rs` `assert_eq!`
   fires too, exit 101 — different abort mechanisms, so never byte-identical,
   but not a port gap).
@@ -1068,14 +1068,14 @@ case).
   extra nested block" — it actually sits in the enclosing SIBLING block,
   outside the `try`/`catch` entirely; the nested block that does exist
   wraps the candidate `function e(){}` (to dodge the `prevInPrevScope`
-  error, SemanticResolver.cpp:2529-2530), not the `let`. The paragraph was
+  error, SemanticResolver.cpp:2559-2560), not the `let`. The paragraph was
   replaced with the correct derivation (matching the task-2 report's own
   worked example).
 - `rust/crates/sema/src/resolver/mod.rs` (`process_promoted_func_decls`):
   the expect-unreachability comment enumerated two of
   `validateAndDeclareIdentifier`'s three early-returns that could leave a
   declaration decl unset, omitting the "two declarations put" path
-  (cpp:2619-2625). Added: that path's own guard requires
+  (cpp:2649-2655). Added: that path's own guard requires
   `semCtx_.getDeclarationDecl(ident)` to already be non-null, which is
   impossible for a promoted function's own identifier node being declared
   for the first time.
@@ -1120,7 +1120,7 @@ harness) are unaffected either way.
   `CompilerDriver.cpp:273-278`, both defaulting to true): gates whether
   `libhermes` is parsed and loaded as the ambient `DeclarationFileListTy` at
   all (previously unconditional), mirroring `if (cl::StdGlobals) {
-  loadGlobalDefinition(...) }` at `CompilerDriver.cpp:2000-2007`. Ported as
+  loadGlobalDefinition(...) }` at `CompilerDriver.cpp:2029-2036`. Ported as
   two independent `Opt<bool>`s merged in `main()` (`fstd_globals &&
   !no_std_globals`), NOT as a single option sharing one `OptValue` via
   `OptDesc::opt_value`: that sharing mechanism exists in the crate but every
@@ -1146,7 +1146,7 @@ harness) are unaffected either way.
 
 | File | Covers |
 |---|---|
-| `flags-enable-eval-off.js` | `// FLAGS: -enable-eval=false`; pins the `EvalDisabled` branch of `visit(CallExpressionNode *)` (SemanticResolver.cpp:1147, `resolver/calls.rs:232`'s `else if is_eval` arm) — a direct call to `eval` still resolves the identifier but warns "eval() is disabled at runtime" instead of the enabled branch's `DirectEval` warning. The enabled branch is already pinned by `disabled-eval.js` (S2 T6); this file is what that row's note flagged as unit-tested-only until the harness grew per-file flags |
+| `flags-enable-eval-off.js` | `// FLAGS: -enable-eval=false`; pins the `EvalDisabled` branch of `visit(CallExpressionNode *)` (SemanticResolver.cpp:1157, `resolver/calls.rs:232`'s `else if is_eval` arm) — a direct call to `eval` still resolves the identifier but warns "eval() is disabled at runtime" instead of the enabled branch's `DirectEval` warning. The enabled branch is already pinned by `disabled-eval.js` (S2 T6); this file is what that row's note flagged as unit-tested-only until the harness grew per-file flags |
 | `flags-no-std-globals.js` | `// FLAGS: -fno-std-globals`; pins two things at once: the ambient-decl load being skipped entirely (no 63 `UndeclaredGlobalProperty` decls in the dump) AND that `print` — normally one of those 63 — still resolves as an on-the-fly `UndeclaredGlobalProperty` when there is no ambient decl and no local declaration either |
 
 `type-alias-children.js` (`test/Sema`, formerly a Deferred row) was
@@ -1159,7 +1159,7 @@ parse-error match that kept this file Deferred — it now PARSES the file and
 resolves it, which needed one small resolver addition: `resolver/mod.rs`'s
 `visit_node` grew a `Node::TypeAlias(_) => TransformResult::Unchanged` arm,
 porting `SemanticResolver::visit(TypeAliasNode *node) { // Do nothing. }`
-(SemanticResolver.cpp:1579-1581) — a TRUE no-op that does NOT recurse into
+(SemanticResolver.cpp:1593-1595) — a TRUE no-op that does NOT recurse into
 `_id`/`_typeParameters`/`_right` (unlike this port's generic
 `visit_children_mut` catch-all arms), which is exactly why the dump shows
 `Id 'A'`/`Id 'B'`/`GenericTypeAnnotation` with no `[D:E:...]` resolution
@@ -1172,7 +1172,7 @@ authorizes "whatever their surrounding visits need to exist" for the untyped
 `-parse-flow` paths — the plan's own Global Constraints were amended
 (commit 9d2fa2d92) to reflect this, and this one-line, single-citation,
 this-file-only arm is squarely what that authorization covers. The
-neighboring cpp:1583-1596 do-nothing arms (`TypeParameterDeclarationNode`,
+neighboring cpp:1597-1610 do-nothing arms (`TypeParameterDeclarationNode`,
 `TypeParameterInstantiationNode`) are NOT ported here — `type-alias-
 children.js` never reaches them (no type parameters in `type A = B;`) — and
 are left for whichever later task's corpus needs them.
@@ -1189,9 +1189,9 @@ above).
 
 `resolver/modules.rs` ports the four ES-module declaration visits —
 `visit(ImportDeclarationNode *)` (SemanticResolver.cpp:874-890),
-`visit(ExportNamedDeclarationNode *)` (cpp:1510-1517),
-`visit(ExportDefaultDeclarationNode *)` (cpp:1519-1547, carrying **rewrite
-#4**) and `visit(ExportAllDeclarationNode *)` (cpp:1549-1554) — replacing
+`visit(ExportNamedDeclarationNode *)` (cpp:1524-1531),
+`visit(ExportDefaultDeclarationNode *)` (cpp:1533-1561, carrying **rewrite
+#4**) and `visit(ExportAllDeclarationNode *)` (cpp:1563-1568) — replacing
 `visit_node`'s catch-all panic for those four kinds, per the plan's global
 constraint that ONLY these four arms may do so in this phase. The
 `$SHBuiltin` CommonJS-module protocol (`calls.rs`'s three phase-tagged
@@ -1200,7 +1200,7 @@ implemented nowhere in this port. Six module-SPECIFIER kinds
 (`ImportSpecifier`, `ImportDefaultSpecifier`, `ImportNamespaceSpecifier`,
 `ImportAttribute`, `ExportSpecifier`, `ExportNamespaceSpecifier`) joined
 `visit_node`'s override-free generic arm at the same time — none of them
-appears in the SemanticResolver.h:200-304 `visit` inventory or in
+appears in the SemanticResolver.h:200-306 `visit` inventory or in
 DeclCollector.h:81-99, so C++ reaches their children through
 `visitESTreeChildren`, exactly like that arm; they are the children the four
 new visits walk into.
@@ -1211,7 +1211,7 @@ Two C++ quirks are preserved bug-for-bug and flagged in `modules.rs`:
 > and mirrored here; see "C++ defect-fix propagation, Task 3" at the end of
 > this file. The third asymmetry below (import's ungated error) still holds.
 
-- **`ExportAllDeclaration`'s message wording** (cpp:1552-1553) is `'export'
+- **`ExportAllDeclaration`'s message wording** (cpp:1566-1553) is `'export'
   statement requires **CommonJS** module mode`, where the Named and Default
   visits — same gate, same condition — say plain `'export' statement
   requires module mode`. Pinned by `module-export-plain.js` (all three in
@@ -1242,7 +1242,7 @@ tree, in order) rather than just length.
 | File | Covers |
 |---|---|
 | `module-import-plain.js` | `import {a} from 'm';`. The import visit's module-mode error, which is NOT `compile_`-gated (cpp:876-879) — the bug-for-bug asymmetry against the exports. hermesc: exit 2, 1 error, no dump (the post-walk gate). Verified against `hermesc -dump-sema` FIRST, raw stdout+stderr+exit |
-| `module-export-plain.js` | All three export visits in one file, including the ExportAll **message-wording quirk** (`CommonJS module mode` vs `module mode`) side by side with the other two. Its `export default function () {}` also drives rewrite #4 through the walk under `compile_ = true` — dump-invisible here (hermesc skips the dump on a `resolveAST` failure, CompilerDriver.cpp:960-974), so what it pins is that the rewritten subtree still resolves cleanly. hermesc: exit 2, 3 errors. Verified FIRST |
+| `module-export-plain.js` | All three export visits in one file, including the ExportAll **message-wording quirk** (`CommonJS module mode` vs `module mode`) side by side with the other two. Its `export default function () {}` also drives rewrite #4 through the walk under `compile_ = true` — dump-invisible here (hermesc skips the dump on a `resolveAST` failure, CompilerDriver.cpp:978-992), so what it pins is that the rewritten subtree still resolves cleanly. hermesc: exit 2, 3 errors. Verified FIRST |
 
 ### New files (Step 4 — the S3-T3 sweep's module panic bucket)
 
@@ -1291,7 +1291,7 @@ reconciliation S3-T3 documents, and the only one applied.
 
 The residual 8 panics are, exhaustively (each message read, not assumed):
 seven `calls.rs` `$SHBuiltin.moduleFactory needs visitModuleFactory
-(cpp:1320-1366) — S4 modules` files (`test/BCGen/HBC/xmod-requires-opt.js`,
+(cpp:1334-1380) — S4 modules` files (`test/BCGen/HBC/xmod-requires-opt.js`,
 `test/Optimizer/xmod-{builtins,require-cse,requires-opt-extension,
 requires-opt}.js`, `test/hermes/xmod-exec-require{-bad-func,}.js`) plus
 `test/hermes/computed-fn-name.js`'s `not all scopes were visited` assertion
@@ -1311,10 +1311,10 @@ Arithmetic: 176 + 2 + 9 = 187; 100 + 0 + 0 = 100.
 Three new files, each hermesc-verified FIRST (raw stdout+stderr+exit, `-parse-
 flow` on both sides) before being added. Both diagnostics this battery targets
 were already ported before this task — `visit(CoverTypedIdentifierNode *)`
-(SemanticResolver.cpp:1575-1577, `resolver/expressions.rs:966`, ported
+(SemanticResolver.cpp:1589-1591, `resolver/expressions.rs:966`, ported
 unconditionally even though the C++ site is `#if HERMES_PARSE_FLOW`, per the
 single-node-set precedent) and the `this`-parameter check inside
-`declareParams` (cpp:1767-1771, `resolver/functions.rs:897`, gated `compile_
+`declareParams` (cpp:1796-1800, `resolver/functions.rs:897`, gated `compile_
 && !typed_`) — so this task is pure corpus work, no resolver changes.
 
 | File | Covers |
@@ -1333,7 +1333,7 @@ every other diagnostic-shape file in this corpus). Arithmetic: 187 + 3 = 190;
 ## S4a Task 4 fix review
 
 A review of this task found an Important gap: `visit(TypeCastExpressionNode
-*)` (SemanticResolver.cpp:1591-1594) was never ported, even though the
+*)` (SemanticResolver.cpp:1605-1608) was never ported, even though the
 task's own derivation for `flow-typecast-cover.js` had already shown that
 `(x: number);` — the task brief's original sketch — resolves to exactly this
 node under hermesc (exit 0), not to a `CoverTypedIdentifierNode`. The
@@ -1342,7 +1342,7 @@ derivation reasoning was used to pick a DIFFERENT, correct corpus shape
 probed against `sema-dump`, so the gap went unverified on the Rust side:
 `sema-dump -parse-flow` on `(x: number);` panicked at `visit_node`'s
 catch-all, `sema: unhandled node kind TypeCastExpression (S3+/typed
-phases)`. The sibling `visit(AsExpressionNode *)` (cpp:1596-1599, Flow's `as`
+phases)`. The sibling `visit(AsExpressionNode *)` (cpp:1610-1628, Flow's `as`
 operator, also unconditional on `typed_`) was probed on the same reasoning
 and found to have the identical gap (`x as number;` panicked the same way).
 
@@ -1458,13 +1458,13 @@ The residual 8-file panic bucket is, exhaustively (each message read, not
 assumed, from this task's own `panic.txt`):
 
 - **7 `calls.rs:312` `$SHBuiltin.moduleFactory needs visitModuleFactory
-  (cpp:1320-1366) — S4 modules` panics** — `test/BCGen/HBC/
+  (cpp:1334-1380) — S4 modules` panics** — `test/BCGen/HBC/
   xmod-requires-opt.js`, `test/Optimizer/xmod-{builtins,require-cse,
   requires-opt-extension,requires-opt}.js`,
   `test/hermes/xmod-exec-require{-bad-func,}.js`. Untouched by design: the
   global constraints reserve the `$SHBuiltin` module branches for S4b.
 - **1 pre-existing-C++-defect reproduction** — `test/hermes/
-  computed-fn-name.js`, the same `SemContext.cpp:478` scope-walk assertion
+  computed-fn-name.js`, the same `SemContext.cpp:481` scope-walk assertion
   S2 T4/S3 T3 already documented. This one is **debug-build-only on both
   sides**: hermesc's assertion and this port's `dump_context.rs:241`
   `debug_assert_eq!` are both compiled out of release builds (the "a release
@@ -1498,7 +1498,7 @@ not assumed:
 | `deep-ast-err.js` | still a vacuous match (comment-only file, both exit 0, byte-identical); still excluded on purpose, not a real gap |
 | `invalid-args-eval.js` | still the SAME single same-location diagnostic-order tie at `89:9` (`the variable "arguments" was not declared` warning vs `cannot declare 'arguments' in strict mode` error) — the two sides emit the identical set of messages, only in the opposite relative order, because C++'s `std::sort` over the buffered-message array is unstable and this port's `sort_by_key` is stable. Unchanged, unfixable-by-construction (`support/src/manager.rs:903-909`'s documented deviation) |
 | `regress-nested-expressions-error.js` | still `10:3052` (hermesc) vs `10:6124` (sema-dump) — the same recursion-depth-counting-rate mismatch, re-verified with a fresh diff of both stderrs. Unchanged; tracked as the parser-track recursion-depth-parity follow-up, not this phase's to fix |
-| `xmod-errors.js` | still panics identically: `sema: $SHBuiltin.moduleFactory needs visitModuleFactory (cpp:1320-1366) — S4 modules` at `calls.rs:312`, same call site as the seven upstream `xmod-*.js` files above. **Confirmed still blocked — S4b**, exactly as the brief requires |
+| `xmod-errors.js` | still panics identically: `sema: $SHBuiltin.moduleFactory needs visitModuleFactory (cpp:1334-1380) — S4 modules` at `calls.rs:312`, same call site as the seven upstream `xmod-*.js` files above. **Confirmed still blocked — S4b**, exactly as the brief requires |
 
 No upstream `test/Sema` row newly matches (all four are still the same
 established gaps: a C++ unstable-sort tie, a recursion-depth-counting
@@ -1650,7 +1650,7 @@ track — is where they belong. Three C++-prescribed mechanisms were missing:
    1587-1589) — a do-nothing visit, exactly like the `TypeAlias` one next to
    it. Reachable through three parents' children walks: `CallExpression`,
    `NewExpression` and `OptionalCallExpression`. Its sibling
-   `visit(TypeParameterDeclarationNode *)` (cpp:1583-1585) was ported at the
+   `visit(TypeParameterDeclarationNode *)` (cpp:1597-1599) was ported at the
    same time for completeness even though the function/class visits
    hand-drive their children and never dispatch it.
 2. **The `ObjectPattern`/`ArrayPattern` overrides** (SemanticResolver.h:
@@ -1941,10 +1941,10 @@ current token's RANGE, where C++'s classification is POINT):
 | JSParserImpl-flow.cpp:101, 2799 | flow/declarations.rs (`parse_declare_flow`, `parse_declare_export_flow`) | "'type' required in opaque type declaration" (2 call sites, same message) |
 | JSParserImpl-flow.cpp:123, 2606, 2695 | flow/declarations.rs (3 call sites) | "\`async\` is not supported for declared hooks..." |
 | JSParserImpl-flow.cpp:133, 2622, 2723 | flow/declarations.rs (3 call sites) | "\`async\` is not supported for declared components..." |
-| JSParserImpl-flow.cpp:2841 | flow/declarations.rs (`parse_declare_export_flow`) | "expected 'from' clause in export declaration" |
+| JSParserImpl-flow.cpp:2844 | flow/declarations.rs (`parse_declare_export_flow`) | "expected 'from' clause in export declaration" |
 | JSParserImpl-flow.cpp:1345 | flow/match_.rs (`parse_match_unary_pattern_flow`) | "invalid match unary pattern argument" |
 | JSParserImpl-flow.cpp:1386 | flow/match_.rs (`parse_match_pattern_flow`) | "invalid match pattern" |
-| JSParserImpl-flow.cpp:3599, JSParserImpl-ts.cpp:1055 | flow/types.rs, ts/types.rs | "unexpected token in type annotation" (2 sites, same message, one per dialect) |
+| JSParserImpl-flow.cpp:3602, JSParserImpl-ts.cpp:1055 | flow/types.rs, ts/types.rs | "unexpected token in type annotation" (2 sites, same message, one per dialect) |
 
 Verified none of these files' fixes were false positives: every automated
 "FLAG" was cross-checked by reading the actual C++ source at the cited line
@@ -2344,7 +2344,7 @@ retires (both are now marked SUPERSEDED in place, kept for the history):
 The S2 T8 / S3 T3 / S4a T5 sweep sections all recorded
 `test/hermes/computed-fn-name.js:71` (`[k("strClass")] = class {};`) as the
 one file in the ~1400-file `test/` sweep where **hermesc itself** aborted on
-`SemContext.cpp:478` and this port aborted on its own `debug_assert_eq!` —
+`SemContext.cpp:481` and this port aborted on its own `debug_assert_eq!` —
 "different abort mechanisms, so never byte-identical". Re-probed after this
 task's mirror: **exit 0 on both sides, stdout 18461/18461 bytes
 byte-identical, stderr empty on both.** The next full sweep should move it
@@ -2576,6 +2576,17 @@ obvious follow-up question — *which of the analysis's decisions does this
 gate actually pin?* — and the answer was: **not many**.
 
 ### The survey
+
+**Reproducing it:** the harness is checked in at
+`rust/crates/sema/tests/implicit_return_survey/` (`survey.py` + `README.md`)
+as of the 2026-08-13 upstream sync task 5 — it was a scratchpad script when
+this table was first written, which is why three reviews flagged the numbers
+as unreproducible. Run
+`python3 rust/crates/sema/tests/implicit_return_survey/survey.py`. Absolute
+counts drift as the corpus grows (this table was measured at 220 driver
+files; the 2026-08-13 run, at 224, reads 57 for `M18` rather than 56, and
+similarly for the other non-zero rows). What the table asserts, and what a
+later run reproduces, is the zero-versus-non-zero split.
 
 Every decision in `check_implicit_return.rs` was deleted or inverted in turn,
 one at a time, and the corpora re-run. (Because the clean port matches the

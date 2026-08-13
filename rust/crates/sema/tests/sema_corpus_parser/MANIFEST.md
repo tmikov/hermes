@@ -8,7 +8,7 @@ Rust `sema-dump --parser-entry`, exercised by `sema_parser_differential` in
 `compile = false` entry point `hermes-parser-wasm.cpp:104` uses — instead of
 `resolveAST`/`resolve_ast` (`compile = true`), and the C++ tool dumps
 UNCONDITIONALLY (even when diagnostics were emitted), which `hermesc
--dump-sema` never does (`CompilerDriver.cpp:960-974` skips the dump on a
+-dump-sema` never does (`CompilerDriver.cpp:978-992` skips the dump on a
 `resolveAST` failure). Every file here was run as `sema-parser-dump <file>`
 vs `sema-dump --parser-entry <file>` before being imported, per the global
 constraint that every corpus file is verified against the C++ side FIRST
@@ -43,13 +43,13 @@ live Imported table's current descriptions are kept synced to the current tree.
 | `error-arrow-rewrite-then-error.js` | `var f = (a) => a + 1;\nbreak;`. Same post-walk gate as above, but AFTER a real rewrite (arrow-function processing, S2 rewrite #1) has already mutated the tree — proves `run_always`'s rebuilt-tree-on-error path carries the rewrite through, not just the original unmodified nodes. Verified byte-identical: 481 bytes stdout both sides, matching stderr, exit 2 both sides. |
 | `error-continue-outside-loop.js` | `function f(){ continue; }`. Same post-walk gate, nested one function deep (`continue` outside a loop inside a function body, not at Program scope) — proves the dump-despite-error path also works when the error site is below the top-level function context. Verified byte-identical: 310 bytes stdout both sides, matching stderr, exit 2 both sides. |
 | `compile-false-basics.js` | `export default function f(){}`. **S4a Task 3** — moved in from `pending/`. Pins TWO `compile_`-gated behaviors of `visit(ExportDefaultDeclarationNode *)` at once (cpp:1533-1561): no `'export' statement requires module mode` error is emitted (cpp:1534 is `compile_ &&`), and **rewrite #4 does not fire** (cpp:1541 likewise) — the dump shows `ExportDefaultDeclaration` → `FunctionDeclaration`, not the `FunctionExpression` the rewrite would have produced. Verified byte-identical: exit 0 both sides, full dump, empty stderr. This is the corpus's SECOND hermesc-analogue success file |
-| `module-imports.js` | `import d, {a as b} from 'm'; import * as ns from 'n';`. **S4a Task 3** — the other side of the module-mode asymmetry: the import error is NOT `compile_`-gated (cpp:876-879), so both declarations error even here, and the tool dumps anyway. That dump is what the DRIVER corpus can never show (hermesc skips the dump on a `resolveAST` failure), so this file is the only pin for `extractIdentsFromDecl`'s `ImportDeclaration` arm (cpp:2334-2347): `Decl %d.N Import` for `d` (`ImportDefaultSpecifier`), `b` (`ImportSpecifier` `_local`) and `ns` (`ImportNamespaceSpecifier`), plus — proving the specifier children walk really runs — `a` (the `ImportSpecifier`'s `_imported`) resolving as an ordinary `UndeclaredGlobalProperty`. Verified byte-identical: exit 2 both sides, matching stdout and stderr |
+| `module-imports.js` | `import d, {a as b} from 'm'; import * as ns from 'n';`. **S4a Task 3** — the other side of the module-mode asymmetry: the import error is NOT `compile_`-gated (cpp:876-879), so both declarations error even here, and the tool dumps anyway. That dump is what the DRIVER corpus can never show (hermesc skips the dump on a `resolveAST` failure), so this file is the only pin for `extractIdentsFromDecl`'s `ImportDeclaration` arm (cpp:2364-2377): `Decl %d.N Import` for `d` (`ImportDefaultSpecifier`), `b` (`ImportSpecifier` `_local`) and `ns` (`ImportNamespaceSpecifier`), plus — proving the specifier children walk really runs — `a` (the `ImportSpecifier`'s `_imported`) resolving as an ordinary `UndeclaredGlobalProperty`. Verified byte-identical: exit 2 both sides, matching stdout and stderr |
 | `error-invalid-assignment-lvalue.js` | `1 = 2;`. Also the post-walk gate (`ResolverTest.cpp`'s `TestBadAssignmentLValue` confirms "invalid assignment left-hand side" is a `sema::resolveAST`-time check on an already-cleanly-parsed tree, not a parser diagnostic) — see "Gate classification" below for why this file does NOT exercise the entry gate, correcting an initial (hedged, "verify yourself") classification from code review. Verified byte-identical: 165 bytes stdout both sides, matching stderr, exit 2 both sides. |
-| `parse-error-recoverable.js` | `"use strict"; var x = 010;`. **S4a final review.** A RECOVERABLE parse error: the lexer reports the strict-mode octal and `parseProgram()` still returns a tree, which `JSParserImpl::parse` then discards via its trailing `if (lexer_.getSourceMgr().getErrorCount() != 0) return None;` (`JSParserImpl.cpp:170-171`) — so the tool's `if (!parsedJs)` (`sema-parser-dump.cpp:115-119`) fires: nothing dumped, exit 2. At the time, the Rust `parse()` had no such gate and returned `Some` here, so `sema-dump` had to apply the error-count check at its own call site; before it did, `--parser-entry` handed the unresolved tree to `sem_dump` and panicked indexing an empty `SemContext` (`sem_context.rs:845`, exit 101). This file is the pin for that fix — and, since parser-phase follow-up (c), for `parse()`'s own `cpp:168-172` gate too, which now makes the same `Some`/nonzero-error-count case unreachable at the source. Verified byte-identical: 0 bytes stdout both sides, 151 bytes stderr both sides, exit 2 both sides. |
+| `parse-error-recoverable.js` | `"use strict"; var x = 010;`. **S4a final review.** A RECOVERABLE parse error: the lexer reports the strict-mode octal and `parseProgram()` still returns a tree, which `JSParserImpl::parse` then discards via its trailing `if (lexer_.getSourceMgr().getErrorCount() != 0) return None;` (`JSParserImpl.cpp:170-171`) — so the tool's `if (!parsedJs)` (`sema-parser-dump.cpp:134-138`) fires: nothing dumped, exit 2. At the time, the Rust `parse()` had no such gate and returned `Some` here, so `sema-dump` had to apply the error-count check at its own call site; before it did, `--parser-entry` handed the unresolved tree to `sem_dump` and panicked indexing an empty `SemContext` (`sem_context.rs:845`, exit 101). This file is the pin for that fix — and, since parser-phase follow-up (c), for `parse()`'s own `cpp:168-172` gate too, which now makes the same `Some`/nonzero-error-count case unreachable at the source. Verified byte-identical: 0 bytes stdout both sides, 151 bytes stderr both sides, exit 2 both sides. |
 | `parse-error-no-ast.js` | `var 1x;`. **S4a final review.** The OTHER no-AST path: a HARD parse error, where `parseProgram()` cannot build a tree at all and `parse()` returns through `if (!res) return None;` (`JSParserImpl.cpp:168-169`) rather than the error-count arm above. Pins that both tools stay silent on stdout, print both diagnostics (the lexer's `invalid numeric literal` and the declaration parser's `'identifier' expected in declaration`) in the same order, and exit 2 — with no `Emitted N errors. exiting.` epilogue on either side (that is the DRIVER pair's contract, not this one's). Verified byte-identical: 0 bytes stdout both sides, 242 bytes stderr both sides, exit 2 both sides. |
 | `import-assertions-compile-false.js` | `import 'b.js' with {type:'json'};`. **S4a final review.** (Named apart from the driver corpus's own upstream `import-assertions.js`, which pins the TRUE side of the same gate.) The FALSE side of the `compile_` gate on the import-assertions error (cpp:882-885, `if (compile_ && !importDecl->_attributes.empty())`): the attribute list here is non-empty, yet under `compile = false` the "import assertions are not supported" error is NOT emitted — the only diagnostic is the ungated module-mode one from cpp:876-880. `module-imports.js` cannot see this (no attributes there), so a port that dropped the `compile_ &&` half would pass the whole corpus without this file. The dump also shows the `ImportAttribute` subtree being walked: its key `type` resolves as an ordinary `UndeclaredGlobalProperty`. Verified byte-identical: 242 bytes stdout both sides, 183 bytes stderr both sides, exit 2 both sides. |
-| `with-statement.js` | `with (o) { x; }`. **Task 5 (defect-fix propagation).** Was the corpus's first landmine (see below): `Unresolver::visit` (`SemanticResolver.cpp:3206-3224`) marks the body's `x` unresolvable, and a DEBUG `sema-parser-dump` aborted on `getExpressionDecl`'s `assert(!node->isUnresolvable())` (`SemContext.h:559-561`) while this port printed ` UNR` — release C++'s behavior. Upstream `918158cb0` made the C++ dumper guard the call (`SemResolve.cpp:99-110`), so debug now matches release and both match the port. `with` is a `compile_`-gated error, so the DRIVER corpus can never dump a `with` body: this is the only pin for the ` UNR` flag reaching a dump at all, and for the `with` object staying resolved (`Id 'o' [D:E:…]`) because it lies outside the `Unresolver`'s root. Verified byte-identical: 312 bytes stdout both sides, empty stderr both sides, exit 0 both sides — an oracle-success file |
-| `anon-export-default.js` | `export default function () {}`. **Task 5 (defect-fix propagation).** The corpus's second landmine, and the other half of `918158cb0`. Rewrite #4 (`SemanticResolver.cpp:1539-1558`) is `compile_`-gated, so under this pair the anonymous `FunctionDeclaration` is never rewritten to a `FunctionExpression`; `visit(FunctionDeclarationNode*)` hoists it unconditionally (the hoist does not check for a name), so a null-`_id` function reaches the `hoistedFunction` printer. Both dumpers used to crash there — C++ on `llvh::cast`'s null check, this port on `print_scope`'s `.expect` — and both now print `hoistedFunction *default*` (`SemContext.cpp:493-501` / `dump_context.rs`'s `print_scope`). Verified byte-identical: 258 bytes stdout both sides, empty stderr both sides, exit 0 both sides — also an oracle-success file. `compile-false-basics.js` is its NAMED counterpart, which keeps printing `hoistedFunction f`, so `*default*` cannot be a blanket replacement |
+| `parser-mode-with-statement.js` | `test/Sema/parser-mode-with-statement.js` verbatim — the lit test upstream `26872f6e9` added, flagless (its own RUN line is `-Xcompile=false -dump-sema`, which is what this pair already is). **Upstream sync task 5**; it REPLACES the authored `with-statement.js` this port had to write for the same shape when the only C++ that could produce the dump was our own tool. Was the corpus's first landmine (see below): `Unresolver::visit` (`SemanticResolver.cpp:3222-3240`) marks the body's `x` unresolvable, and a DEBUG `sema-parser-dump` aborted on `getExpressionDecl`'s `assert(!node->isUnresolvable())` (`SemContext.h:559-561`) while this port printed ` UNR` — release C++'s behavior. Upstream `918158cb0` made the C++ dumper guard the call (`SemResolve.cpp:99-110`), so debug now matches release and both match the port. `with` is a `compile_`-gated error, so the DRIVER corpus can never dump a `with` body: this is the only pin for the ` UNR` flag reaching a dump at all, and for the `with` object staying resolved (`Id 'o' [D:E:…]`) because it lies outside the `Unresolver`'s root. Verified byte-identical: 335 B stdout both sides, empty stderr both sides, exit 0 both sides — an oracle-success file |
+| `parser-mode-export-default-anon.js` | `test/Sema/parser-mode-export-default-anon.js` verbatim — the other lit test `26872f6e9` added, flagless for the same reason. **Upstream sync task 5**; REPLACES the authored `anon-export-default.js`. The corpus's second landmine, and the other half of `918158cb0`. Rewrite #4 (`SemanticResolver.cpp:1539-1558`) is `compile_`-gated, so under this pair the anonymous `FunctionDeclaration` is never rewritten to a `FunctionExpression`; `visit(FunctionDeclarationNode*)` hoists it unconditionally (the hoist does not check for a name), so a null-`_id` function reaches the `hoistedFunction` printer. Both dumpers used to crash there — C++ on `llvh::cast`'s null check, this port on `print_scope`'s `.expect` — and both now print `hoistedFunction *default*` (`SemContext.cpp:496-504` / `dump_context.rs`'s `print_scope`). Verified byte-identical: 304 B stdout both sides, empty stderr both sides, exit 0 both sides — also an oracle-success file. `compile-false-basics.js` is its NAMED counterpart, which keeps printing `hoistedFunction f`, so `*default*` cannot be a blanket replacement |
 | `flow-match-implicit-return.js` | `// FLAGS: -parse-flow --Xparse-flow-match` + `test/Sema/flow/match-implicit-return.js` verbatim. **Upstream sync task 3** — see the section of that name at the end of this file. The ONLY pin anywhere for `CheckImplicitReturn`'s `MatchStatement` arm (upstream `653e49c60`), because compiling a match is now rejected outright (`90f4a3ac6`) and the driver corpus therefore can never dump one. Twelve one-decision functions; the dump's `Func` tokens are `mayReachImplicitReturn`/`noImplicitReturn` in exactly the order upstream's `CHECK` lines assert. Verified byte-identical: 11615 B stdout both sides, empty stderr both sides, exit 0 both sides — an oracle-success file |
 | `implicit-return-try-catch-finally.js` | `test/Sema/implicit-return-try-catch-finally.js` verbatim — the lit test upstream `5ae5260c8` added, flagless. **Upstream sync task 4** — see the section of that name at the end of this file. Upstream's file carries TWO RUN lines over ONE set of `CHECK` lines (`-dump-sema` and `-Xcompile=false -dump-sema`), so the same file is imported into BOTH corpora: the driver corpus pins the answers the resolver's split produces, this one pins the answers the UNSPLIT statement produces. The only pin anywhere for the three decisions `5ae5260c8` adds — under `compile = true` a `TryStatement` never reaches the checker with both children. Verified byte-identical: 7322 B stdout both sides, empty stderr both sides, exit 0 both sides — an oracle-success file. Also measured, not assumed, that this corpus's oracle really is upstream's second RUN line: `hermesc -Xcompile=false -dump-sema` and `sema-parser-dump` produce byte-identical stdout on it (7322 B, exit 0), and its 5 `mayReachImplicitReturn` / 2 `noImplicitReturn` tokens are the same ones the compile path prints |
 | `implicit-return-shapes.js` | Byte-identical copy of the driver corpus's authored `sema_corpus/implicit-return-shapes.js` (see `sema_corpus/MANIFEST.md`'s "Task-2 review round" for why it is authored rather than imported). **Upstream sync task 4.** Eleven one-decision `CheckImplicitReturn` shapes, none of which involves a `compile_`-gated rewrite, so the same source pins the same eleven decisions on the parser entry — where, before this task, eight of them had NO witness at all. Its dump is not the driver corpus's: no ambient declarations and no constant folding, so the file is a distinct comparison rather than a duplicate one. Verified byte-identical: 6772 B stdout both sides (vs 10288 B on the driver pair), empty stderr both sides, exit 0 both sides — an oracle-success file |
@@ -74,7 +74,9 @@ History: 7 → **11** files (+4, all from S4a's final review:
 oracle-succeeded 2 → **3** (+1: `flow-annotations.js` is an exit-0 file; the
 other three are error-path pins). Then 11 → **13** files (+2, Task 5 of the
 C++ defect-fix propagation plan: `with-statement.js`,
-`anon-export-default.js` — the two shapes upstream `918158cb0` unblocked),
+`anon-export-default.js` — the two shapes upstream `918158cb0` unblocked;
+both were replaced by upstream's own lit files in upstream sync task 5, see
+that section),
 oracle-succeeded 3 → **5** (+2: BOTH new files resolve clean and exit 0 on
 both sides). Arithmetic: 11 + 2 = 13; 3 + 2 = 5. Then 13 → **14** (+1,
 upstream sync task 3: `flow-match-implicit-return.js`), oracle-succeeded
@@ -82,7 +84,11 @@ upstream sync task 3: `flow-match-implicit-return.js`), oracle-succeeded
 13 + 1 = 14; 5 + 1 = 6. Then 14 → **16** (+2, upstream sync task 4:
 `implicit-return-try-catch-finally.js`, `implicit-return-shapes.js`),
 oracle-succeeded 6 → **8** (+2: both resolve clean and exit 0 on both sides).
-Arithmetic: 14 + 2 = 16; 6 + 2 = 8.
+Arithmetic: 14 + 2 = 16; 6 + 2 = 8. Upstream sync task 5 then swapped two
+files one-for-one for upstream's own lit versions (`with-statement.js` →
+`parser-mode-with-statement.js`, `anon-export-default.js` →
+`parser-mode-export-default-anon.js`), so the figures are **unchanged at
+16 (8)**: 16 - 2 + 2 = 16; 8 - 2 + 2 = 8.
 
 The non-degeneracy guard in `run_differential` (at least one oracle success)
 is satisfied eight times over; the remaining eight are all legitimate
@@ -163,7 +169,7 @@ failure either).
 
 Recorded by the whole-Sema capstone review (2026-08-04, finding F2), because
 this pair is the ONLY way to observe it and the answers are not obvious from
-`SemanticResolver.cpp:1168-1189`. The three `$SHBuiltin` property branches
+`SemanticResolver.cpp:1183-1204`. The three `$SHBuiltin` property branches
 of rewrite #3 keep their loud S4b panics in `resolver/calls.rs` through S4a
 (spec-sanctioned), so none of these shapes can be a corpus file yet — but
 whoever lands S4b should make them into three, and should know the answers
@@ -171,9 +177,9 @@ first:
 
 | Input (single statement) | `sema-parser-dump` | What the C++ actually does |
 |---|---|---|
-| `$SHBuiltin.moduleFactory(0, function(exports){ var inner = 1; });` | exit 0, full dump | `if (compile_) visitModuleFactory(node); return;` — the `return` at cpp:1176 is **outside** the `if`, so under `compile = false` the call is skipped **and the children walk is still skipped**. Observable: the inner `Id 'exports'`/`Id 'inner'` carry NO `[D:E:...]` annotation |
-| `var v = 1; $SHBuiltin.export("n", v);` | exit 0, full dump | `visitESTreeChildren` + `visitModuleExport` both run **ungated** by `compile_` (cpp:1182-1187). Observable: the argument `Id 'v'` DOES resolve |
-| `$SHBuiltin.import("m");` | exit 2 + dump | `visitModuleImport` runs **ungated** (cpp:1188-1189) and there is no `return`, so the branch falls through to the children walk; the arity error comes from `visitModuleImport` itself |
+| `$SHBuiltin.moduleFactory(0, function(exports){ var inner = 1; });` | exit 0, full dump | `if (compile_) visitModuleFactory(node); return;` — the `return` at cpp:1199 is **outside** the `if`, so under `compile = false` the call is skipped **and the children walk is still skipped**. Observable: the inner `Id 'exports'`/`Id 'inner'` carry NO `[D:E:...]` annotation |
+| `var v = 1; $SHBuiltin.export("n", v);` | exit 0, full dump | `visitESTreeChildren` + `visitModuleExport` both run **ungated** by `compile_` (cpp:1196-1201). Observable: the argument `Id 'v'` DOES resolve |
+| `$SHBuiltin.import("m");` | exit 2 + dump | `visitModuleImport` runs **ungated** (cpp:1202-1203) and there is no `return`, so the branch falls through to the children walk; the arity error comes from `visitModuleImport` itself |
 
 The trap this closes: an earlier `calls.rs` comment justified the
 unconditional `moduleFactory` panic by asserting `compile` is `true` on every
@@ -187,7 +193,8 @@ it could reasonably drop the `if (compile_)` gate, the children-skipping
 
 **Closed by upstream `918158cb0`** ("Fix semDump crashes on ASTs resolved for
 a parser"), mirrored by Task 5 of the C++ defect-fix propagation plan. The
-shape is a live corpus file now — `with-statement.js` in the table above,
+shape is a live corpus file now — `parser-mode-with-statement.js` in the
+table above,
 oracle exit 0, byte-identical. The section is kept for the history; what
 follows describes the state BEFORE that fix.
 
@@ -208,7 +215,7 @@ $ sema-dump --parser-entry with.js
 
 The dumper's `enter(IdentifierNode *)` (`SemResolve.cpp:96-102`) calls
 `getExpressionDecl` unconditionally, right after `getDeclarationDecl`, and
-`Unresolver::visit` (`SemanticResolver.cpp:3192-3206`) has marked `x`
+`Unresolver::visit` (`SemanticResolver.cpp:3222-3236`) has marked `x`
 unresolvable. Unlike the landmine below (and the `computed-fn-name.js` one
 in the driver corpus), this port did **not** mirror the abort: the assert is
 compiled out under `NDEBUG`, and in that build the call provably returns
@@ -227,14 +234,15 @@ port always did.
 propagation plan: the C++ `printScope` and this port's `print_scope` both
 print `hoistedFunction *default*` for a null-id hoisted function instead of
 casting/unwrapping unconditionally. The shape is a live corpus file now —
-`anon-export-default.js` in the table above, oracle exit 0, byte-identical.
+`parser-mode-export-default-anon.js` in the table above, oracle exit 0,
+byte-identical.
 The section is kept for the history; what follows describes the state BEFORE
 that fix.
 
 `export default function () {}` could not be added to this corpus, by
 construction, on either side (deferred from S4a T3's review; verified here
 2026-08-03). Under `compile = false` — this pair's whole reason to exist —
-rewrite #4 (`visit_export_default_declaration`, cpp:1526-1544) is
+rewrite #4 (`visit_export_default_declaration`, cpp:1540-1558) is
 `compile_`-gated and does not fire, so the anonymous `FunctionDeclaration`
 survives unrewritten. `visit(FunctionDeclarationNode*)`
 (`SemanticResolver.cpp:232-236`, `resolver/functions.rs`'s port) pushes it
@@ -244,7 +252,7 @@ Both dumpers then crash printing it, at the SAME underlying defect: a
 null-id function reaching the `hoistedFunction` printer, which
 unconditionally casts `_id` to an identifier:
 
-- C++ `SemContextDumper::printScope` (`SemContext.cpp:493-494`,
+- C++ `SemContextDumper::printScope` (`SemContext.cpp:501`,
   `llvh::cast<ESTree::IdentifierNode>(fd->_id)`) hits `isa<> used on a null
   pointer` (`Casting.h:106`), SIGABRT.
 - Rust `dump_context.rs`'s `print_scope`
@@ -264,7 +272,7 @@ a hoisted FunctionDeclaration always has an id                 # exit 101
 ```
 
 Same category as `test/hermes/computed-fn-name.js`
-(`SemContext.cpp:478`'s scope-walk assertion, one of the roadmap's Sema-row
+(`SemContext.cpp:481`'s scope-walk assertion, one of the roadmap's Sema-row
 documented hermesc self-aborts): a pre-existing C++ **dumper** defect,
 faithfully mirrored — not a port gap, and not fixable without hermesc
 itself changing. The last clause is what changed: hermesc DID change
@@ -347,6 +355,11 @@ file spells both, the way upstream's lit tests do.
 
 ### Non-vacuity: five independent mutations, each caught
 
+(These six are `MATCH-A`..`MATCH-F` in the checked-in survey harness,
+`rust/crates/sema/tests/implicit_return_survey/`. The counts below are
+`Func`-line token flips WITHIN this one file; the harness counts files, so it
+reports `parser=1` for each.)
+
 The whole point of importing this file is that it must FAIL without the
 `653e49c60` mirror. Every decision in `check_termination_match_statement` was
 deleted or inverted in turn and `sema-dump --parser-entry` re-run against the
@@ -390,6 +403,11 @@ implicit-return shapes was worth doing "when `5ae5260c8` lands"; it landed.
 
 ### The survey: which `CheckImplicitReturn` decisions did this corpus pin?
 
+**Reproducing it:** the harness is checked in at
+`rust/crates/sema/tests/implicit_return_survey/` (`survey.py` + `README.md`)
+as of upstream sync task 5; a full run on 2026-08-13 reproduced this table's
+"After" column exactly, all 21 rows.
+
 Same method as the driver corpus's task-2 survey (`sema_corpus/MANIFEST.md`):
 every decision in `check_implicit_return.rs` deleted or inverted in turn, one
 at a time, and `sema-dump --parser-entry` re-run over the whole corpus against
@@ -424,7 +442,7 @@ decisions `5ae5260c8` introduces.
 
 **Before: 14 of the 21 decisions had zero witnesses here** (M1-M3, M10-M17,
 M19-M21) — the corpus pinned 7. **After: none does.** The two new files close
-them: `implicit-return-shapes.js` closes M1-M3, M10-M14, M15, M17, and
+them: `implicit-return-shapes.js` closes M1-M3, M10-M15, M17, and
 `implicit-return-try-catch-finally.js` closes M14-M16 and M19-M21.
 
 M19-M21 measured **0 on the driver corpus too**, over all 224 of its files —
@@ -447,3 +465,83 @@ Handler-first, the terminating finalizer wins and the function is
 ```
 sema differential (tests/sema_corpus_parser): 16 corpus files matched (8 succeeded on the oracle)
 ```
+
+## Upstream sync task 5: the two authored files become upstream imports
+
+Upstream `26872f6e9` ("Move the parser-mode semDump tests to lit",
+cherry-picked here as `c5266734b`) deletes
+`ParserDumpAnonymousExportDefaultTest`/`ParserDumpWithStatementTest` from
+`unittests/AST/ResolverTest.cpp` and expresses them as
+`test/Sema/parser-mode-export-default-anon.js` and
+`test/Sema/parser-mode-with-statement.js`, each with a
+`%hermesc -Xcompile=false -dump-sema` RUN line. Those are exactly the two
+shapes this corpus had to AUTHOR in the 2026-08-10 propagation, because at
+the time no upstream file existed for them. They are now upstream imports:
+
+| Was (authored) | Is (upstream, verbatim) |
+|---|---|
+| `with-statement.js` | `parser-mode-with-statement.js` |
+| `anon-export-default.js` | `parser-mode-export-default-anon.js` |
+
+Corpus size is **unchanged at 16 (8)** — a one-for-one swap.
+
+### Why the import is exact
+
+Both files' RUN lines ask for `-Xcompile=false -dump-sema` and nothing else,
+and this pair *is* `-Xcompile=false`, so no `// FLAGS:` line is needed and
+both are imported byte-identically — which also puts them under the
+`sema_corpus/MANIFEST.md` verbatim invariant (`cmp` against the `test/Sema`
+twin), a check the authored versions could never satisfy. The C++ text
+differs from ours only cosmetically (`with(o){x;}` vs `with (o) { x; }`, plus
+upstream's copyright header and CHECK lines, all inert comments here).
+
+Oracle-verified on all three channels before being counted, exactly as the
+harness invokes them:
+
+```
+sema-parser-dump       parser-mode-export-default-anon.js -> exit 0, stdout 304 B, stderr 0 B
+sema-dump --parser-entry  "                              -> exit 0, stdout 304 B, stderr 0 B
+sema-parser-dump       parser-mode-with-statement.js      -> exit 0, stdout 335 B, stderr 0 B
+sema-dump --parser-entry  "                              -> exit 0, stdout 335 B, stderr 0 B
+cmp: stdout identical, stderr identical, exit identical (both files)
+```
+
+### Nothing was lost: both pins re-proved by mutation
+
+The authored files existed to pin two specific dumper behaviors, so the
+replacements were checked to still catch the same regressions — each mutation
+applied alone, the parser differential run, then reverted:
+
+| Mutation | Result |
+|---|---|
+| `dump_context.rs`'s `print_scope`: `None => "*default*"` replaced by a `panic!` (the pre-`918158cb0` unconditional cast) | `sema dump mismatch (stdout)` naming **`parser-mode-export-default-anon.js`** |
+| `dump.rs`'s `enter_identifier`: the `unresolvable` guard deleted so `get_expression_decl` is called unconditionally | `sema dump mismatch (stdout)` naming **`parser-mode-with-statement.js`** |
+
+Each mutation is caught by exactly the file that replaced the authored one,
+so the swap is coverage-neutral.
+
+### Still unwitnessed: `CheckImplicitReturn`'s `WithStatement` arm
+
+Found while re-checking `tests/check_implicit_return.rs`'s
+`with_statements_never_reach_the_analysis`. The arm is unreachable on the
+compile path (`with` errors first), and the parser entry *can* reach it —
+`function f(){ with (o) return 1; }` through `sema-dump --parser-entry` fires
+a `panic!` planted in the arm — but `parser-mode-with-statement.js` is a
+TOP-LEVEL `with`, and `mayReachImplicitReturn` only runs over function
+bodies. The same `panic!` mutant therefore leaves all 224 + 16 comparisons
+green. Recorded, not closed: closing it means a 17th file
+(`with`-inside-a-function), which is outside this task's mandate.
+
+### The mutation survey is checked in now
+
+The witness tables in this file and in `sema_corpus/MANIFEST.md` were
+originally produced by a scratchpad script, which made them unreproducible —
+flagged by three consecutive reviews. The harness now lives at
+`rust/crates/sema/tests/implicit_return_survey/` (`survey.py` + `README.md`):
+it applies each catalogued mutation to `check_implicit_return.rs` in turn,
+rebuilds `sema-dump`, re-runs both corpora against a cached clean baseline,
+and prints the table. A full run on 2026-08-13 reproduced the task-4 "After"
+column above **exactly, all 21 rows**. See the README for how to read it and
+for the two caveats: absolute counts drift as the corpora grow, and the
+task-3 `MATCH-*` table above counts `Func`-line token flips inside one file
+rather than files.

@@ -18,7 +18,7 @@
 //! (`while (true) {}` "may" fall off the end).
 //!
 //! The tests go through the whole resolver rather than calling the analysis
-//! directly, which also pins the wiring (SemanticResolver.cpp:1939-1944):
+//! directly, which also pins the wiring (SemanticResolver.cpp:1969-1974):
 //! the flag must be written on the right `FunctionInfo`, and only when the
 //! resolution produced no errors.
 //!
@@ -126,20 +126,20 @@ fn check_bodies(rows: &[(&str, bool)]) {
 
 // ---- BlockStatement / statement lists -----------------------------------
 //
-// cpp:91-94 (BlockStatement) and cpp:193-212
+// cpp:91-94 (BlockStatement) and cpp:199-218
 // (checkTerminationStatementList): a list continues iff every statement in
-// it continues, and the trailing `insert(kNextStatementLabel)` at cpp:210
+// it continues, and the trailing `insert(kNextStatementLabel)` at cpp:216
 // is what makes an empty list — and a body that falls off the end — reach
 // the implicit return.
 
 #[test]
 fn statement_lists_fall_off_the_end() {
     check_bodies(&[
-        // Empty body: the `for` at cpp:195 never runs, cpp:210 inserts
+        // Empty body: the `for` at cpp:201 never runs, cpp:216 inserts
         // kNextStatementLabel.
         ("", true),
         // ExpressionStatement / EmptyStatement / DebuggerStatement all
-        // return makeNextStatement() (cpp:175-178).
+        // return makeNextStatement() (cpp:181-184).
         ("x;", true),
         (";", true),
         ("debugger;", true),
@@ -152,12 +152,12 @@ fn statement_lists_fall_off_the_end() {
 #[test]
 fn return_and_throw_terminate_the_list() {
     check_bodies(&[
-        // ReturnStatement -> makeMustTerminate (cpp:152-154).
+        // ReturnStatement -> makeMustTerminate (cpp:158-160).
         ("return;", false),
         ("return 1;", false),
-        // ThrowStatement -> makeMustTerminate (cpp:155-160).
+        // ThrowStatement -> makeMustTerminate (cpp:161-166).
         ("throw x;", false),
-        // A terminating statement ends the scan (cpp:204-207), so the
+        // A terminating statement ends the scan (cpp:210-213), so the
         // unreachable statement after it cannot put kNextStatementLabel
         // back.
         ("return 1; x;", false),
@@ -170,7 +170,7 @@ fn return_and_throw_terminate_the_list() {
 
 #[test]
 fn non_statement_children_of_a_block_just_continue() {
-    // The `default` arm (cpp:180-187): a node that is not an
+    // The `default` arm (cpp:186-193): a node that is not an
     // ESTree::StatementNode does no control flow. `VariableDeclaration`,
     // `FunctionDeclaration` and `ClassDeclaration` are all outside
     // ESTree.def's `Statement` range (ESTree.def:105-255), so they land
@@ -214,12 +214,12 @@ fn if_statement_unions_its_branches() {
 // ---- Loops --------------------------------------------------------------
 //
 // cpp:114-138 dispatch to checkTerminationLoopOrLabeledStatement
-// (cpp:216-241) with `mustExecute` false for the four pre-condition loops
+// (cpp:222-247) with `mustExecute` false for the four pre-condition loops
 // and true for `do`-`while`.
 
 #[test]
 fn precondition_loops_always_continue() {
-    // `mayExecuteNextStatement = !mustExecute` (cpp:227) is `true` for
+    // `mayExecuteNextStatement = !mustExecute` (cpp:233) is `true` for
     // `while`/`for`/`for-in`/`for-of` regardless of the body, because the
     // condition may be false on the first iteration. This is where the
     // analysis is deliberately conservative: cpp never looks at the test
@@ -239,7 +239,7 @@ fn precondition_loops_always_continue() {
 
 #[test]
 fn do_while_must_run_its_body() {
-    // `mustExecute` is true (cpp:134-138), so cpp:227 starts at `false` and
+    // `mustExecute` is true (cpp:134-138), so cpp:233 starts at `false` and
     // only a `break`/`continue` targeting this loop can add
     // kNextStatementLabel back.
     check_bodies(&[
@@ -248,10 +248,10 @@ fn do_while_must_run_its_body() {
         ("do { } while (x);", true),
         ("do { if (x) return 1; } while (x);", true),
         // `break` with no label targets this loop (SemanticResolver.cpp:
-        // 709-713), so its label index is erased at cpp:231-235 and
-        // cpp:237-239 puts kNextStatementLabel back.
+        // 709-713), so its label index is erased at cpp:237-241 and
+        // cpp:243-245 puts kNextStatementLabel back.
         ("do { break; } while (x);", true),
-        // Ditto `continue` — cpp:162-166 conservatively assumes the loop
+        // Ditto `continue` — cpp:168-172 conservatively assumes the loop
         // condition may then be false.
         ("do { continue; } while (x);", true),
         // Unreachable code after the terminating do-while.
@@ -263,7 +263,7 @@ fn do_while_must_run_its_body() {
 fn breaks_targeting_an_outer_statement_are_not_erased_by_the_inner_one() {
     // `break outer` resolves to the *loop*, not to the LabeledStatement
     // wrapping it (SemanticResolver.cpp:642-652 picks the loop as
-    // targetStatement), so the inner do-while at cpp:230 does not find its
+    // targetStatement), so the inner do-while at cpp:236 does not find its
     // own index in the body result and stays terminating.
     check_bodies(&[
         ("outer: do { do { break outer; } while (y); } while (x);", true),
@@ -299,7 +299,7 @@ fn labeled_statement_body_must_execute() {
         ("L: { throw x; }", false),
         ("L: { }", true),
         // The break's target index is the LabeledStatement's own, so
-        // cpp:231-235 erases it and cpp:237-239 continues.
+        // cpp:237-241 erases it and cpp:243-245 continues.
         ("L: { break L; }", true),
         ("L: { if (x) break L; return 1; }", true),
         // ... and the statement after the label then decides.
@@ -310,12 +310,12 @@ fn labeled_statement_body_must_execute() {
 
 // ---- SwitchStatement ----------------------------------------------------
 //
-// cpp:286-315: fallthrough between cases, `break` erasure, and the
+// cpp:312-341: fallthrough between cases, `break` erasure, and the
 // "no default means the switch may be skipped entirely" rule.
 
 #[test]
 fn switch_without_default_may_be_skipped() {
-    // `!foundDefault` at cpp:310 inserts kNextStatementLabel.
+    // `!foundDefault` at cpp:336 inserts kNextStatementLabel.
     check_bodies(&[
         ("switch (x) { }", true),
         ("switch (x) { case 1: return 1; }", true),
@@ -332,10 +332,10 @@ fn switch_with_exhaustive_default_terminates() {
         ("switch (x) { default: throw x; }", false),
         // A default whose consequent is empty falls through the end of the
         // switch: checkTerminationStatementList on an empty list returns
-        // kNextStatementLabel (cpp:210).
+        // kNextStatementLabel (cpp:216).
         ("switch (x) { default: }", true),
         // Fallthrough: `case 1:` is empty, so its result continues into
-        // `default:` (cpp:293) and only the default's `return` remains.
+        // `default:` (cpp:319) and only the default's `return` remains.
         ("switch (x) { case 1: default: return 1; }", false),
         // Fallthrough out of the last case.
         ("switch (x) { default: case 1: }", true),
@@ -344,8 +344,8 @@ fn switch_with_exhaustive_default_terminates() {
 
 #[test]
 fn switch_break_makes_the_switch_completable() {
-    // cpp:306: erasing the switch's own label index reports `true`, so
-    // cpp:310-312 inserts kNextStatementLabel.
+    // cpp:332: erasing the switch's own label index reports `true`, so
+    // cpp:336-338 inserts kNextStatementLabel.
     check_bodies(&[
         ("switch (x) { default: break; }", true),
         ("switch (x) { case 1: break; default: return 1; }", true),
@@ -363,14 +363,14 @@ fn switch_break_makes_the_switch_completable() {
 
 // ---- TryStatement -------------------------------------------------------
 //
-// cpp:244-282. Note the assert at cpp:248-250: `try`/`catch`/`finally` is
+// cpp:257-308. Note the assert at cpp:248-250: `try`/`catch`/`finally` is
 // rewritten into nested `try`s by the resolver
 // (SemanticResolver.cpp:771-811), so only try-catch and try-finally reach
 // the analysis.
 
 #[test]
 fn try_catch_unions_both_bodies() {
-    // cpp:251-257.
+    // cpp:266-257.
     check_bodies(&[
         ("try { return 1; } catch (e) { return 2; }", false),
         ("try { throw x; } catch (e) { throw x; }", false),
@@ -392,7 +392,7 @@ fn try_finally_is_decided_by_the_finalizer_first() {
         // result wins (cpp:265-276).
         ("try { return 1; } finally { }", false),
         ("try { return 1; } finally { x; }", false),
-        // Neither terminates -> union (cpp:277-280).
+        // Neither terminates -> union (cpp:277-302).
         ("try { } finally { }", true),
         ("try { if (x) return 1; } finally { }", true),
     ]);
@@ -468,7 +468,7 @@ fn try_catch_finally_gives_the_same_answers_unsplit() {
     }
 }
 
-// ---- The wiring (SemanticResolver.cpp:1939-1944) ------------------------
+// ---- The wiring (SemanticResolver.cpp:1969-1974) ------------------------
 
 #[test]
 fn the_flag_is_per_function() {
@@ -518,7 +518,7 @@ fn class_methods_and_accessors_get_the_flag() {
 #[test]
 fn generators_and_async_functions_are_not_special_cased() {
     // `yield`/`await` are expressions, so their statements just continue
-    // (cpp:175-178).
+    // (cpp:181-184).
     assert!(flag("function* g() { yield 1; }"));
     assert!(!flag("function* g() { yield 1; return 2; }"));
     assert!(flag("async function g() { }"));
@@ -526,11 +526,11 @@ fn generators_and_async_functions_are_not_special_cased() {
 
 #[test]
 fn the_flag_is_not_computed_when_resolution_failed() {
-    // cpp:1939-1942: "CheckImplicitReturn relies on break and continue
+    // cpp:1969-1972: "CheckImplicitReturn relies on break and continue
     // being properly resolved, and if there's errors during resolution they
     // might not be." An unresolved `break` has no label index at all, so
     // running the analysis would both read a garbage index and trip the
-    // assert at cpp:328-330; the flag must stay at its default instead.
+    // assert at cpp:409-411; the flag must stay at its default instead.
     let (f, errors) = flags_and_errors("function f() { break; return 1; }");
     assert_eq!(errors, 1, "expected the 'break' to be rejected");
     assert!(f[1], "the flag must keep SemContext.h:354's default");
@@ -538,10 +538,22 @@ fn the_flag_is_not_computed_when_resolution_failed() {
 
 #[test]
 fn with_statements_never_reach_the_analysis() {
-    // The WithStatement arm (cpp:171-173) is dead in this port: `with` is
-    // rejected outright in compile mode (SemanticResolver.cpp:757-759), so
-    // the error count is non-zero by the time the check would run. Pinned
-    // so that a future non-compile mode notices the arm is untested.
+    // The WithStatement arm (cpp:177-179) is unreachable ON THE COMPILE
+    // PATH, which is the path this test drives: `with` is rejected outright
+    // when `compile_` is set (SemanticResolver.cpp:757-759), so the error
+    // count is non-zero by the time the check would run and the flag keeps
+    // its default.
+    //
+    // It is NOT unreachable in general any more. The parser entry point
+    // (`resolve_ast_for_parser`, `compile = false`) does not reject `with`,
+    // and `function f(){ with (o) return 1; }` run through
+    // `sema-dump --parser-entry` does reach the arm — verified by replacing
+    // it with a `panic!`, which fires on exactly that input. What still has
+    // no witness anywhere is that reachable case: the parser-entry corpus's
+    // `parser-mode-with-statement.js` is a TOP-LEVEL `with`, and
+    // `mayReachImplicitReturn` only runs over function bodies, so the same
+    // `panic!` mutant leaves the whole 224 + 16 differential green. A
+    // `with`-inside-a-function parser-entry corpus file would close it.
     let (f, errors) = flags_and_errors("function f() { with (x) return 1; }");
     assert!(errors > 0, "expected `with` to be rejected");
     assert!(f[1], "the flag must keep SemContext.h:354's default");

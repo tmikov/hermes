@@ -5,7 +5,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-//! Port of `hermes::sema::SemContextDumper` (`lib/Sema/SemContext.cpp:415-570`,
+//! Port of `hermes::sema::SemContextDumper` (`lib/Sema/SemContext.cpp:415-573`,
 //! declared `include/hermes/Sema/SemContext.h:694-753`). This is the
 //! byte-exact text dumper the differential oracle depends on
 //! (`hermesc -dump-sema` output), so every space and quote below is
@@ -45,7 +45,7 @@
 //!   in-process; the Rust `Decl::name` is an interned [`Atom`] (`AtomBytes`),
 //!   and its bytes only exist behind a [`GCLock`] (see `hermes_ast::context`), so
 //!   the dumper has to be handed one. `print_scope_ref` doesn't print a
-//!   name (see `printScopeRef`, cpp:530-534) and so needs no `gc`.
+//!   name (see `printScopeRef`, cpp:540-544) and so needs no `gc`.
 //! - `printSemContext`/`printFunction` build a `std::map<const FunctionInfo*
 //!   /* or LexicalScope* */, SmallVector<...>>` keyed by pointer and then
 //!   iterate it (cpp:429-450, 466-489). A `std::map` over pointers into a
@@ -58,7 +58,7 @@
 //!   order as the C++ `std::map`, without needing a real ordered map.
 //! - `processedCount` in C++ `printSemContext` (cpp:441, 447) is computed
 //!   but never asserted against anything (unlike the one in `printFunction`,
-//!   cpp:483-489, which is): it's dead. It's omitted here; the analogous
+//!   cpp:486-492, which is): it's dead. It's omitted here; the analogous
 //!   count inside the `printFunction` port (`print_function`) IS checked,
 //!   matching the C++ `assert`.
 
@@ -72,7 +72,7 @@ use crate::ids::{DeclId, FunctionInfoId, ScopeId};
 use crate::sem_context::{Atom, DeclKind, DeclSpecial, SemContext};
 
 /// Port of `PtrNumberingImpl`/`Numbering<T>` (SemContext.h:730-756,
-/// cpp:565-570): assigns each distinct id an increasing number, starting
+/// cpp:575-580): assigns each distinct id an increasing number, starting
 /// at 1, the first time it is printed. C++ keys this by pointer identity;
 /// here the id itself (already a stable, unique identity — see
 /// `crate::ids`) is the key.
@@ -89,7 +89,7 @@ impl<Id: Copy + Eq + std::hash::Hash> Numbering<Id> {
         }
     }
 
-    /// Port of `PtrNumberingImpl::getNumberImpl` (cpp:565-570).
+    /// Port of `PtrNumberingImpl::getNumberImpl` (cpp:575-580).
     fn get_number(&mut self, id: Id) -> usize {
         if let Some(&n) = self.numbers.get(&id) {
             return n;
@@ -209,7 +209,7 @@ impl SemContextDumper {
         }
     }
 
-    /// Port of `printFunction` (cpp:453-475).
+    /// Port of `printFunction` (cpp:453-478).
     fn print_function(
         &mut self,
         out: &mut Vec<u8>,
@@ -255,7 +255,7 @@ impl SemContextDumper {
 
         // Same reasoning as the function-level children map in
         // `print_sem_context` above, applied to this function's own scopes
-        // (`sc->parentScope`, cpp:463-465).
+        // (`sc->parentScope`, cpp:466-468).
         let mut children: HashMap<Option<ScopeId>, Vec<ScopeId>> =
             HashMap::new();
         for &sc_id in &scopes[1..] {
@@ -272,7 +272,7 @@ impl SemContextDumper {
     }
 
     /// Recursive helper walking the scope tree built by `print_function`.
-    /// Port of the `dumpScope` lambda (cpp:467-478). \return the number of
+    /// Port of the `dumpScope` lambda (cpp:470-481). \return the number of
     /// scopes visited (itself plus all descendants), mirroring the C++
     /// `processedCount` this port checks in `print_function`.
     fn dump_scope(
@@ -294,7 +294,7 @@ impl SemContextDumper {
         processed
     }
 
-    /// Port of `printScope` (cpp:492-506).
+    /// Port of `printScope` (cpp:495-516).
     fn print_scope(
         &mut self,
         out: &mut Vec<u8>,
@@ -327,7 +327,7 @@ impl SemContextDumper {
             // of a parser (`resolve_ast_for_parser`) a hoisted function may
             // have no name. Mirrors upstream `918158cb0`, which replaced the
             // unconditional `cast<IdentifierNode>(fd->_id)` with this
-            // null check (`SemContext.cpp:493-501`).
+            // null check (`SemContext.cpp:496-504`).
             match func_decl.id {
                 Some(id_node) => {
                     let ident = id_node
@@ -341,15 +341,15 @@ impl SemContextDumper {
         }
     }
 
-    /// Port of `printScopeRef` (cpp:508-512). Unlike `print_scope`, this
+    /// Port of `printScopeRef` (cpp:518-522). Unlike `print_scope`, this
     /// never prints a name, so it needs no `GCLock`.
     pub fn print_scope_ref(&mut self, out: &mut Vec<u8>, s: ScopeId) {
         push_str(out, "Scope %s.");
         push_str(out, &self.scope_numbers.get_number(s).to_string());
     }
 
-    /// Port of `printDecl` (cpp:514-554), including the CASE-macro switches
-    /// for `Decl::Kind` and `Decl::Special` (cpp:519-543, 546-554).
+    /// Port of `printDecl` (cpp:524-564), including the CASE-macro switches
+    /// for `Decl::Kind` and `Decl::Special` (cpp:529-553, 546-554).
     fn print_decl(
         &mut self,
         out: &mut Vec<u8>,
@@ -375,7 +375,7 @@ impl SemContextDumper {
         }
     }
 
-    /// Port of `printDeclRef` (cpp:556-562).
+    /// Port of `printDeclRef` (cpp:566-572).
     pub fn print_decl_ref(
         &mut self,
         out: &mut Vec<u8>,
@@ -426,7 +426,7 @@ pub(crate) fn push_atom(out: &mut Vec<u8>, gc: &GCLock, atom: Atom) {
 }
 
 /// The `Decl::Kind` → string table. Port of the `CASE` macro switch in
-/// `printDecl` (cpp:519-543) — match-arm order here doesn't need to mirror
+/// `printDecl` (cpp:529-553) — match-arm order here doesn't need to mirror
 /// the C++ switch or the enum declaration order (a Rust `match` is checked
 /// for exhaustiveness by the compiler either way); each arm just needs the
 /// same string the C++ `#x` stringification produces.
@@ -455,8 +455,8 @@ fn decl_kind_str(kind: DeclKind) -> &'static str {
 }
 
 /// The `Decl::Special` → string table. Port of the `CASE` macro switch in
-/// `printDecl` (cpp:546-553). Callers only invoke this once `special !=
-/// NotSpecial` has been checked (cpp:544), same as here.
+/// `printDecl` (cpp:556-563). Callers only invoke this once `special !=
+/// NotSpecial` has been checked (cpp:554), same as here.
 fn decl_special_str(special: DeclSpecial) -> &'static str {
     match special {
         DeclSpecial::NotSpecial => {
@@ -521,7 +521,7 @@ Func loose mayReachImplicitReturn
     }
 
     /// `print_decl_ref` with `print_name = false` must omit the name even
-    /// though the decl has one (cpp:558: `if (printName && ...)`).
+    /// though the decl has one (cpp:568: `if (printName && ...)`).
     #[test]
     fn print_decl_ref_without_name_omits_the_quoted_name() {
         let mut ctx = Context::new();
@@ -576,7 +576,7 @@ Func loose mayReachImplicitReturn
     }
 
     /// A `Decl` with a `special` must print the extra ` Special` suffix
-    /// (cpp:544-554).
+    /// (cpp:554-564).
     #[test]
     fn decl_with_special_prints_the_special_suffix() {
         let mut ctx = Context::new();
@@ -611,7 +611,7 @@ Func loose mayReachImplicitReturn
     }
 
     /// A `StaticBlock` FunctionInfo prints `StaticBlock ` instead of
-    /// `Func ` (cpp:456-457).
+    /// `Func ` (cpp:459-460).
     #[test]
     fn static_block_function_prints_static_block_label() {
         let mut ctx = Context::new();

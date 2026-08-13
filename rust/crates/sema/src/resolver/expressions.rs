@@ -16,8 +16,8 @@
 //! (SemanticResolver.cpp:405-436), `visit(AssignmentExpressionNode *)`
 //! (cpp:438-462), `visit(UpdateExpressionNode *)` (cpp:464-473),
 //! `visit(UnaryExpressionNode *, Node **)` (cpp:475-500),
-//! `validateAssignmentTarget` (cpp:2693-2725) and `isLValue`
-//! (cpp:2727-2771).
+//! `validateAssignmentTarget` (cpp:2709-2741) and `isLValue`
+//! (cpp:2743-2787).
 //!
 //! S2 T2 adds the remaining small expression visits, all of them pure
 //! validation over the current resolver state (none allocates or rewrites
@@ -205,7 +205,7 @@ use super::SemanticResolver;
 
 /// Port of `astContext_.getCodeGenerationSettings().test262`
 /// (`include/hermes/AST/Context.h`), read by `visit(UnaryExpressionNode *)`
-/// (SemanticResolver.cpp:485) and `isLValue` (cpp:2735).
+/// (SemanticResolver.cpp:485) and `isLValue` (cpp:2751).
 ///
 /// `CodeGenerationSettings` is a compiler-driver knob (`hermesc -test262`),
 /// not something sema computes, and this port has no driver flag that could
@@ -608,7 +608,7 @@ impl SemanticResolver<'_, '_, '_, '_> {
     // ---- validateAssignmentTarget / isLValue ---------------------------
 
     /// Port of `SemanticResolver::validateAssignmentTarget`
-    /// (SemanticResolver.cpp:2693-2725).
+    /// (SemanticResolver.cpp:2709-2741).
     ///
     /// C++'s `return validateAssignmentTarget(...)` on a `void` function is
     /// a tail call written for brevity; here each is a call followed by a
@@ -769,7 +769,7 @@ impl SemanticResolver<'_, '_, '_, '_> {
     /// *awaitExpr)` (SemanticResolver.cpp:1508-1522). cpp:1509 is the ONLY
     /// read of `forbidAwaitExpression_` anywhere in the C++ resolver, which
     /// is why the flag has been write-only in this port since S1 T7 wired
-    /// `visitFunctionLikeInFunctionContext`'s save/restore (cpp:1845-1846).
+    /// `visitFunctionLikeInFunctionContext`'s save/restore (cpp:1860-1861).
     /// Three more writers exist — `visit(ClassPrivatePropertyNode *)`
     /// (cpp:976), `visit(ClassPropertyNode *)` (cpp:1033) and
     /// `visit(StaticBlockNode *)` (cpp:1084), each forcing it to `true` — and
@@ -1461,7 +1461,7 @@ mod tests {
         }
     }
 
-    /// The loose-mode `arguments` quirk (cpp:2759-2765): the *special*
+    /// The loose-mode `arguments` quirk (cpp:2775-2781): the *special*
     /// `arguments` decl is rejected even in loose mode, where the spec would
     /// allow it. Not reachable from the S1 corpus (the special decl is
     /// created by `declareArguments`, which needs the function visits), so

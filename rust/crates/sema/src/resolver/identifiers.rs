@@ -17,11 +17,11 @@
 //! `mod.rs` would.
 //!
 //! Ports `SemanticResolver::visit(IdentifierNode *, Node *)`
-//! (SemanticResolver.cpp:277-323), `resolveIdentifier` (cpp:1981-2045),
-//! `checkIdentifierResolved` (cpp:2082-2100), `declareArguments`
-//! (SemanticResolver.h:349-355), and the two helpers
+//! (SemanticResolver.cpp:277-323), `resolveIdentifier` (cpp:1997-2061),
+//! `checkIdentifierResolved` (cpp:2098-2116), `declareArguments`
+//! (SemanticResolver.h:351-357), and the two helpers
 //! `resolveIdentifier`'s strict-mode warning needs:
-//! `FunctionContext::getFunctionName` (cpp:3086-3093) and the free function
+//! `FunctionContext::getFunctionName` (cpp:3102-3109) and the free function
 //! `ESTree::getIdentifier(FunctionLikeNode *)` (`lib/AST/ESTree.cpp:83-92`).
 //! See the task report for the two deliberate scope cuts (the C++
 //! `MemberExpression`/`OptionalMemberExpression` overrides' private-name
@@ -30,7 +30,7 @@
 //! `expressions::visit_member_like_expression`.
 //!
 //! S2 T5 also adds this file's private-name pair, `declarePrivateName`
-//! (cpp:2047-2064) and `resolvePrivateName` (cpp:2066-2080): they live here
+//! (cpp:2063-2080) and `resolvePrivateName` (cpp:2082-2096): they live here
 //! because they are `checkIdentifierResolved`'s immediate C++ neighbours and
 //! share its decl-state-machine plumbing, while everything that *calls* them
 //! (the class-body early errors, `visit(PrivateNameNode *)`, the member
@@ -53,13 +53,13 @@ use super::SemanticResolver;
 impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     /// Declare 'arguments' for use in either the function or the
     /// parameters. Port of `SemanticResolver::declareArguments`
-    /// (SemanticResolver.h:349-355).
+    /// (SemanticResolver.h:351-357).
     ///
     /// Called from the function visits (S1 T7, `functions.rs`) at the two
     /// C++ call sites those cover — the temporary-arguments scope
-    /// (cpp:1874) and the function-body declaration (cpp:1937) — and, since
-    /// S2 T4/T5, from the two class field-initializer visits (cpp:1049 for
-    /// `ClassProperty`, cpp:999 for `ClassPrivateProperty`). Those are all
+    /// (cpp:1889) and the function-body declaration (cpp:1952) — and, since
+    /// S2 T4/T5, from the two class field-initializer visits (cpp:1044 for
+    /// `ClassProperty`, cpp:994 for `ClassPrivateProperty`). Those are all
     /// four C++ call sites.
     pub(super) fn declare_arguments(&mut self) {
         let func = self.cur_function_info();
@@ -72,7 +72,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     // ---- Identifier resolution (S1 T4) ------------------------------------
 
     /// Port of `SemanticResolver::checkIdentifierResolved`
-    /// (SemanticResolver.cpp:2082-2100).
+    /// (SemanticResolver.cpp:2098-2116).
     ///
     /// Deviation: takes the `Identifier` node itself rather than the
     /// brief's suggested `(NodeId, &Identifier)` pair — both are derivable
@@ -140,7 +140,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
 
     /// \return the name of the current function, if it has an explicit
     /// name (a named `FunctionExpression`/`FunctionDeclaration`). Port of
-    /// `FunctionContext::getFunctionName` (SemanticResolver.cpp:3086-3093).
+    /// `FunctionContext::getFunctionName` (SemanticResolver.cpp:3102-3109).
     fn function_name(&self, gc: &GCLock) -> Option<Atom> {
         let node_rc = self.function_context().node.as_ref()?;
         let id_node = Self::function_like_identifier(node_rc.node(gc))?;
@@ -153,15 +153,15 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     // ---- Private names (S2 T5) --------------------------------------------
 
     /// Create a new declaration of a private name in the current scope. Port
-    /// of `SemanticResolver::declarePrivateName` (cpp:2047-2064).
+    /// of `SemanticResolver::declarePrivateName` (cpp:2063-2080).
     ///
     /// \pre An `Identifier` node which has the same `_name` field has not
     ///   been declared in this same `LexicalScope`.
     /// \param ident_node the AST node containing the name.
     /// \param kind the kind of decl to be created.
     /// \param is_static is only valid for methods / accessors. C++ defaults
-    ///   it to `false` (SemanticResolver.h:412); the field/`PrivateField`
-    ///   call site (cpp:2196) is the one that relies on the default, and
+    ///   it to `false` (SemanticResolver.h:414); the field/`PrivateField`
+    ///   call site (cpp:2212) is the one that relies on the default, and
     ///   passes `false` explicitly here.
     /// \return the newly created decl.
     pub(super) fn declare_private_name<'gc>(
@@ -204,7 +204,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
 
     /// Resolve an identifier for a private name to a declaration and record
     /// the resolution. Port of `SemanticResolver::resolvePrivateName`
-    /// (cpp:2066-2080).
+    /// (cpp:2082-2096).
     ///
     /// Unlike its sibling `check_identifier_resolved`, this one does NOT test
     /// `isUnresolvable()`: the C++ doesn't either (a private name is never
@@ -215,7 +215,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     ///   `ClassPrivateProperty`'s `_key`.
     /// \return the declaration the private name resolves to, or `None` when
     ///   no enclosing class declared it. NOTE (unlike the header's wording
-    ///   at SemanticResolver.h:414-417): this function raises no error
+    ///   at SemanticResolver.h:416-419): this function raises no error
     ///   itself; each caller decides — `visit(PrivateNameNode *)` reports
     ///   "was not declared in any enclosing class", while the
     ///   `MemberExpression` branches (cpp:1238-1239) silently skip their
@@ -249,7 +249,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     }
 
     /// Port of `SemanticResolver::resolveIdentifier`
-    /// (SemanticResolver.cpp:1981-2045). See the module doc's "identifier
+    /// (SemanticResolver.cpp:1997-2061). See the module doc's "identifier
     /// resolution" notes and the task brief for the exact ordering this
     /// preserves (Arguments-special check, then the two forbid-flag
     /// checks, THEN the early `decl` return, then the strict-mode warning /
@@ -589,7 +589,7 @@ mod tests {
     /// `forbidSpecialArgumentsReference_`: referencing the special
     /// `arguments` decl while forbidden reports "invalid use of
     /// 'arguments'" — and, regardless of the flag,
-    /// `curFunctionInfo()->usesArguments` is set (cpp:1994-1998).
+    /// `curFunctionInfo()->usesArguments` is set (cpp:2010-2014).
     #[test]
     fn forbid_special_arguments_reference_reports_invalid_use() {
         let mut ctx = Context::new();

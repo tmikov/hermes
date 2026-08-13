@@ -8,7 +8,7 @@
 // The legal half of the super() check in visit(CallExpressionNode *)
 // (SemanticResolver.cpp:1209-1216): a `Super` callee is allowed exactly when
 // semCtx_.nearestNonArrow(functionContext()->semInfo)->constructorKind is
-// Derived, which visit(MethodDefinitionNode *) sets (cpp:1666-1676) for the
+// Derived, which visit(MethodDefinitionNode *) sets (cpp:1681-1691) for the
 // `constructor` of a class WITH an `extends` clause.
 //
 // `nearestNonArrow` (SemContext.cpp:82-93) is what makes super() legal through

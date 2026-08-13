@@ -1,6 +1,6 @@
 // Arrow-specific error shapes.
 //
-// `uniqueParams` is unconditionally true for an arrow (cpp:1769-1770's third
+// `uniqueParams` is unconditionally true for an arrow (cpp:1784-1785's third
 // disjunct, `isa<ArrowFunctionExpressionNode>(node)`), so duplicate arrow
 // parameters are an error even in loose mode — unlike a plain function.
 var dup = (x, x) => x;

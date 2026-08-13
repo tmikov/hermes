@@ -25,10 +25,10 @@
 //!
 //!     Both failure modes share this exact epilogue + exit code because in
 //!     `CompilerDriver::compileFileToDisk` they are the SAME check: `parseJS`
-//!     (CompilerDriver.cpp:800-980) returns `nullptr` on either a parser
+//!     (CompilerDriver.cpp:811-998) returns `nullptr` on either a parser
 //!     failure (early returns while parsing) or a `resolveAST` failure
 //!     (:939-947), and the single caller-side check
-//!     (`if (!ast) { ... } return ParsingFailed;`, CompilerDriver.cpp:2076-
+//!     (`if (!ast) { ... } return ParsingFailed;`, CompilerDriver.cpp:2105-
 //!     2080) is what prints the epilogue and picks the exit code — there is
 //!     no separate sema-failure branch. `ParsingFailed == 2`
 //!     (`CompileStatus`, CompilerDriver.h:19-38: `Success` = 0, `InvalidFlags`
@@ -45,7 +45,7 @@
 //! This mirrors CompilerDriver's `-dump-sema` path: load the runtime library
 //! (`libhermes`) as a global-definitions file first, gated on
 //! `-fstd-globals`/`-fno-std-globals`
-//! (CompilerDriver.cpp:2000-2007 → `loadGlobalDefinition`, :762-774), parse
+//! (CompilerDriver.cpp:2029-2036 → `loadGlobalDefinition`, :773-785), parse
 //! the input, then `sema::resolveAST(..., declFileList)` (:940-947) and
 //! `sema::semDump` (:969-974). `-fstd-globals`/`-fno-std-globals` defaults
 //! to true, matching `cl::StdGlobals`'s `CLFlag` default
@@ -114,7 +114,7 @@ use hermes_support::render::StderrHandler;
 /// Print hermesc's post-`parseJS`-failure epilogue (if there were any
 /// errors) and exit with hermesc's exit code. Port of the single
 /// `if (!ast) { ... } return ParsingFailed;` check in
-/// `CompilerDriver::compileFileToDisk` (CompilerDriver.cpp:2076-2080) that
+/// `CompilerDriver::compileFileToDisk` (CompilerDriver.cpp:2105-2109) that
 /// both a parse failure and a `resolveAST` failure hit (see the module doc).
 /// `N` is only printed when nonzero, matching
 /// `if (auto N = ...getErrorCount()) llvh::errs() << ...` exactly (an
@@ -179,7 +179,7 @@ struct Options {
     parse_jsx: Opt<bool>,
     /// Maximum number of errors before the rest are suppressed; 0 means
     /// unlimited. The hermesc `-ferror-limit` flag, with hermesc's own default
-    /// (CompilerDriver.cpp:555-559).
+    /// (CompilerDriver.cpp:566-570).
     ferror_limit: Opt<u32>,
     /// Enable support for `eval()` (the hermesc `-enable-eval` flag,
     /// `CompilerRuntimeFlags.h:19-22`: a plain `cl::opt<bool>` defaulting to
@@ -280,7 +280,7 @@ impl Options {
                     ..Default::default()
                 },
             ),
-            // Port of hermesc's `-ferror-limit` (CompilerDriver.cpp:555-559),
+            // Port of hermesc's `-ferror-limit` (CompilerDriver.cpp:566-570),
             // including its `init(20)` and its "0 means unlimited" contract —
             // which needs no special-casing on either side: `errorLimit_` 0 is
             // never equal to a message count that has just been incremented
@@ -411,7 +411,7 @@ fn main() {
     // A bare `SourceErrorManager` is unlimited, but hermesc's driver applies
     // its `-ferror-limit` option (default 20) with
     // `context->getSourceErrorManager().setErrorLimit(cl::ErrorLimit)`
-    // (CompilerDriver.cpp:1223), before any parsing. Past the limit hermesc
+    // (CompilerDriver.cpp:1252), before any parsing. Past the limit hermesc
     // emits `<unknown>:0: error: too many errors emitted` once and drops every
     // later message, so an unlimited `sema-dump` diverges on any input with
     // more than 20 errors (`error-limit.js` in the corpus is the pin).
@@ -440,18 +440,18 @@ fn main() {
     ctx.set_parse_jsx(*opt.parse_jsx);
     // The hermesc driver does
     // `context->setEnableEval(cl::compilerRuntimeFlags.EnableEval)`
-    // (CompilerDriver.cpp:1207) before any parsing.
+    // (CompilerDriver.cpp:1236) before any parsing.
     ctx.set_enable_eval(*opt.enable_eval);
     // hermesc's `-strict` defaults to false and `-dump-sema` never sets it;
     // `visit(ProgramNode *)` seeds the global function's strictness from it.
     let gc = ctx.lock();
 
     // Load the runtime library, exactly like `loadGlobalDefinition`
-    // (CompilerDriver.cpp:762-774): it is parsed BEFORE the input file, into
+    // (CompilerDriver.cpp:773-785): it is parsed BEFORE the input file, into
     // its own buffer, and its Program becomes the single entry of the
     // ambient `DeclarationFileListTy` — but ONLY when `-fstd-globals` is
     // enabled, mirroring `if (cl::StdGlobals) { loadGlobalDefinition(...) }`
-    // (CompilerDriver.cpp:2000-2007): with `-fno-std-globals`, hermesc never
+    // (CompilerDriver.cpp:2029-2036): with `-fno-std-globals`, hermesc never
     // even parses `libhermes`, so `ambient_decls` stays empty and none of
     // the 63 ambient `UndeclaredGlobalProperty` decls appear in the dump.
     //
@@ -510,7 +510,7 @@ fn main() {
         // so on the C++ side a nonzero error count after parsing ALWAYS
         // shows up as a `None`/`nullptr` AST — which is why the parser-entry
         // oracle's lone `if (!parsedJs) return sm.getErrorCount() != 0 ? 2 :
-        // 0;` (sema-parser-dump.cpp:115-119) suffices there and why hermesc's
+        // 0;` (sema-parser-dump.cpp:134-138) suffices there and why hermesc's
         // `parseJS` needs no separate check either. The Rust `parser.parse()`
         // (`parser/src/js/mod.rs`, "Port of `JSParserImpl::parse`") now
         // ports that same tail gate, so `sm.error_count() == 0` here is

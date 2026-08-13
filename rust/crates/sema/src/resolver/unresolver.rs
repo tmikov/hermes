@@ -6,10 +6,10 @@
  */
 
 //! S2 T3: port of `hermes::sema::Unresolver` — declared at
-//! SemanticResolver.h:679-711, defined at SemanticResolver.cpp:3200-3224.
+//! SemanticResolver.h:681-713, defined at SemanticResolver.cpp:3216-3240.
 //!
 //! "Visitor pass for marking variables as Unresolvable based on local
-//! `eval()` or `with`" (SemanticResolver.h:679-680).
+//! `eval()` or `with`" (SemanticResolver.h:681-682).
 //!
 //! ## Why it exists
 //!
@@ -29,12 +29,15 @@
 //!   `curScope_->depth + 1` and the `with`'s BODY as the root, so
 //!   declarations made *inside* the `with` (depth >= that) keep their
 //!   resolution while everything from the enclosing scope outwards loses it.
-//! - `visitFunctionBodyAfterParamsVisited` (cpp:1945-1951) — the local-`eval`
-//!   case, which C++ itself disables: the condition is literally `if (false
-//!   && lexScope->localEval && !curFunctionInfo()->strict)` behind a `TODO:
-//!   enable this when non-strict direct eval is supported`. `functions.rs`
-//!   carries that dead branch's TODO at the matching site; nothing calls this
-//!   pass from there in either tree.
+//! - `visitFunctionBodyAfterParamsVisited` (cpp:1960-1967) — the local-`eval`
+//!   case, which C++ itself disables: the call sits under a literal
+//!   `if ((false))` — the doubled parentheses say the constant is
+//!   deliberate — behind a `TODO: enable this when non-strict direct eval is
+//!   supported`. (Upstream briefly spelled it `#if 0` for a Windows clang17
+//!   `-Wunreachable-code` warning and backed that out in `6fbc3706d`; the
+//!   block is dead in every spelling.) `functions.rs` carries that dead
+//!   branch's TODO at the matching site; nothing calls this pass from there
+//!   in either tree.
 //!
 //! ## Dump visibility
 //!
@@ -54,10 +57,10 @@
 //!
 //! - C++ dispatches through `visitESTreeNodeNoReplace` and therefore has to
 //!   supply no-op `incRecursionDepth`/`decRecursionDepth` hooks
-//!   (SemanticResolver.h:693-698). This port's read-only
+//!   (SemanticResolver.h:695-700). This port's read-only
 //!   [`hermes_ast::visitor::Visitor`] has no depth hooks at all, so those two
 //!   members have no counterpart.
-//! - C++'s generic `visit(Node *)` overload (SemanticResolver.h:687-689) and
+//! - C++'s generic `visit(Node *)` overload (SemanticResolver.h:689-691) and
 //!   its `visit(IdentifierNode *)` overload become the two arms of the single
 //!   `visit_node` below, exactly as `mod.rs`'s `DeclHoisting` does it.
 //! - The constructor is private in C++ (`run` is the only entry point); here
@@ -68,7 +71,7 @@ use hermes_ast::visitor::Visitor;
 
 use crate::sem_context::SemContext;
 
-/// Port of `hermes::sema::Unresolver` (SemanticResolver.h:681-711).
+/// Port of `hermes::sema::Unresolver` (SemanticResolver.h:683-713).
 pub(super) struct Unresolver<'sc> {
     sem_ctx: &'sc mut SemContext,
     /// Depth of the scope which contains the construct which could shadow
@@ -80,7 +83,7 @@ pub(super) struct Unresolver<'sc> {
 impl Unresolver<'_> {
     /// Mark all declarations that are at a lower depth than \p depth as
     /// unresolvable, starting at \p root. Port of `Unresolver::run`
-    /// (SemanticResolver.cpp:3200-3204).
+    /// (SemanticResolver.cpp:3216-3220).
     ///
     /// No `GCLock` is threaded through, unlike every resolver visit: this
     /// pass allocates nothing and only reads and re-decorates existing
@@ -97,7 +100,7 @@ impl Unresolver<'_> {
     }
 
     /// Port of `Unresolver::visit(ESTree::IdentifierNode *node)`
-    /// (SemanticResolver.cpp:3206-3224).
+    /// (SemanticResolver.cpp:3222-3240).
     ///
     /// `node` is the enclosing `Node` because `set_expression_decl` needs its
     /// `NodeId` (C++ keys the same side table by the node pointer it already

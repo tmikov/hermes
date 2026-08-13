@@ -19,7 +19,7 @@
 // None of the three appears anywhere in `lib/Sema/` outside the FlowChecker
 // (`FlowChecker-expr.cpp:1244` for `BigIntLiteral`), so none has a
 // `SemanticResolver::visit` override (the inventory in
-// SemanticResolver.h:200-304) and none has a `DeclCollector` override: C++
+// SemanticResolver.h:200-306) and none has a `DeclCollector` override: C++
 // reaches their children through `visitESTreeChildren` and creates no scope,
 // which is exactly `visit_node`'s override-free generic arm. That is where
 // this sweep put them.

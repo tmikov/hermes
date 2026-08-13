@@ -8,7 +8,7 @@
 // visit(StaticBlockNode *) (SemanticResolver.cpp:1063-1094). A static block is
 // treated as a function-level scope of its own:
 //   - it gets a SYNTHETIC FunctionInfo of its own
-//     (ClassContext::createStaticBlockFunctionInfo, cpp:3179-3191), which the
+//     (ClassContext::createStaticBlockFunctionInfo, cpp:3195-3207), which the
 //     SemContext dump labels `StaticBlock` rather than `Func` because
 //     FunctionInfo::isStaticBlock is set; the id is stored on the StaticBlock
 //     node, not on the class.

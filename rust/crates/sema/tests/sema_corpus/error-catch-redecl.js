@@ -8,7 +8,7 @@
 // The Catch/ES5Catch rows of the redeclaration decision table, which only
 // become reachable once visit(CatchClauseNode *) declares catch parameters:
 // validateAndDeclareIdentifier's `prevInPrevScope` row
-// (SemanticResolver.cpp:2539-2544) and visit(VariableDeclarationNode *)'s
+// (SemanticResolver.cpp:2555-2560) and visit(VariableDeclarationNode *)'s
 // var-over-let-like check, whose ES10 B.3.4 exception is spelled out as
 // `prevKind != Decl::Kind::ES5Catch` (cpp:388-392).
 

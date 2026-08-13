@@ -17,7 +17,7 @@
 //!
 //! Ports `SemanticResolver::visit(ESTree::CallExpressionNode *node)`
 //! (cpp:1127-1219) and `SemanticResolver::registerLocalEval`
-//! (cpp:2849-2857, declared `static` at SemanticResolver.h:501-503).
+//! (cpp:2865-2873, declared `static` at SemanticResolver.h:503-505).
 //!
 //! The visit does three unrelated things in sequence, and `visit_node`
 //! dispatches `CallExpression` — and ONLY `CallExpression` — here:
@@ -45,7 +45,7 @@
 //!
 //! `OptionalCallExpression` and `NewExpression` have **no**
 //! `SemanticResolver::visit` overload. Verified against the inventory in
-//! SemanticResolver.h:200-304: the only call-family overload is `void
+//! SemanticResolver.h:200-306: the only call-family overload is `void
 //! visit(ESTree::CallExpressionNode *node)` (SemanticResolver.h:269), and
 //! `OptionalCallExpressionNode` does not derive from `CallExpressionNode` —
 //! ESTree.def:304-319 makes both of them children of the
@@ -143,9 +143,9 @@ use super::SemanticResolver;
 
 /// Mark \p scope and every one of its ancestor scopes as users of local
 /// `eval()`. Port of `SemanticResolver::registerLocalEval`
-/// (SemanticResolver.cpp:2849-2857).
+/// (SemanticResolver.cpp:2865-2873).
 ///
-/// C++ declares this `static` (SemanticResolver.h:503) — it touches no
+/// C++ declares this `static` (SemanticResolver.h:505) — it touches no
 /// resolver state — so it is a free function here rather than a method,
 /// taking the `SemContext` the `LexicalScope` records live in. C++'s
 /// `LexicalScope *scope` is nullable in principle; `Option<ScopeId>` ports
@@ -271,7 +271,7 @@ impl SemanticResolver<'_, '_, '_, '_> {
                     && !method_callee.computed.get()
                     && prop_ident.is_some()
                 {
-                    // `resolveIdentifier` never returns null (cpp:1981-2045
+                    // `resolveIdentifier` never returns null (cpp:1997-2061
                     // ends in an unconditional `return decl;` after creating
                     // an ambient global), which is why this port's
                     // `resolve_identifier` returns a plain `DeclId` and C++'s

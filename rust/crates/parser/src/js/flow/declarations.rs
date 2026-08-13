@@ -1459,7 +1459,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// `JSParserImpl::parseInterfaceTailFlow` (flow.cpp:2121-2142). `start`
     /// is the interface's start location, passed through unchanged from C++
     /// as the real `whatLoc`/`what="location of interface"` hint on both
-    /// `need` calls below (cpp:2125-2129, 2136).
+    /// `need` calls below (cpp:2128-2132, 2136).
     pub(super) fn parse_interface_tail_flow(
         &mut self,
         start: SMLoc,

@@ -9,8 +9,8 @@
 // (SemanticResolver.cpp:913-950): declarations and expressions, named and
 // anonymous, and every MethodDefinition kind (cpp:1104-1125). A class with no
 // explicit constructor gets a synthetic implicit-constructor FunctionInfo
-// (cpp:3102-3128) which shows up as an extra `Func strict` with one scope;
-// an explicit constructor suppresses it (cpp:1670).
+// (cpp:3118-3144) which shows up as an extra `Func strict` with one scope;
+// an explicit constructor suppresses it (cpp:1685).
 
 // No constructor: the implicit one is created after the body is visited.
 class Empty {}

@@ -17,7 +17,7 @@
 //!     resolveASTForParser`, `SemResolve.cpp:299-310`), which has no
 //!     driver-path coverage because `hermesc -dump-sema` always resolves
 //!     with `compile = true` and skips the dump on error
-//!     (`CompilerDriver.cpp:960-974`).
+//!     (`CompilerDriver.cpp:978-992`).
 //!
 //! GATE COMMANDS (the parser-entry gate additionally needs the
 //! `sema-parser-dump` C++ tool):
@@ -60,7 +60,7 @@
 //! legitimately make hermesc exit nonzero, in which case all three channels
 //! (stdout, stderr, exit status) are still compared byte-for-byte — stdout
 //! empty on both sides, stderr carrying hermesc's driver epilogue
-//! (`Emitted N errors. exiting.\n`, CompilerDriver.cpp:2076-2080) and exit
+//! (`Emitted N errors. exiting.\n`, CompilerDriver.cpp:2105-2109) and exit
 //! code 2 (`CompileStatus::ParsingFailed`, CompilerDriver.h:19-38). The
 //! corpus is only required to contain at least one file the oracle SUCCEEDS
 //! on (a non-degeneracy guard: an all-failing corpus would make the stdout/

@@ -7,7 +7,7 @@
 // The anonymous `export default function` also drives rewrite #4
 // (cpp:1539-1558) through the walk under compile_ = true; the rewrite itself
 // is dump-invisible here (hermesc skips the dump on a resolveAST failure,
-// CompilerDriver.cpp:960-974), so what this pins is that the rewritten
+// CompilerDriver.cpp:978-992), so what this pins is that the rewritten
 // subtree still resolves without incident.
 export {a};
 export default function () {}

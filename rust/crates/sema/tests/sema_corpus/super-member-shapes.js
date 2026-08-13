@@ -16,7 +16,7 @@
 // closest thing the grammar allows, not because it reaches the other half.
 //
 // canReferenceSuper_ comes from FunctionLikeDecoration::isMethodDefinition
-// (cpp:1689), which the parser sets for OBJECT-literal method shorthand too,
+// (cpp:1704), which the parser sets for OBJECT-literal method shorthand too,
 // not just class methods — so none of these is an error. The error shapes all
 // live in reject-super-references.js.
 

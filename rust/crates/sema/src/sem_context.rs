@@ -142,7 +142,7 @@ pub enum DeclKind {
     /// A `const` binding (SemContext.h:61). Also the kind assigned to any
     /// `VariableDeclaration` whose `kind` is neither `var` nor `let`, since
     /// `extractIdentsFromDecl` tests only those two and falls through to
-    /// `Const` (SemanticResolver.cpp:2285-2296).
+    /// `Const` (SemanticResolver.cpp:2301-2312).
     Const,
     /// The name bound by a `class` *declaration* (SemContext.h:62). The name
     /// of a class *expression* is [`ClassExprName`](Self::ClassExprName)
@@ -187,7 +187,7 @@ pub enum DeclKind {
     Var,
     /// A function parameter (SemContext.h:99), declared in the parameter
     /// scope by the resolver's `declare_params` (the C++ `declareParams`
-    /// lambda, SemanticResolver.cpp:1776).
+    /// lambda, SemanticResolver.cpp:1791).
     Parameter,
     /// "var" in global scope.
     GlobalProperty,

@@ -11,7 +11,7 @@
 // check than the ordinary "already declared" one: it exists because a
 // `var` nested in a block has been hoisted to the function's OWN scope by
 // `DeclCollector`, so the general same-scope check
-// (`validateAndDeclareIdentifier`, cpp:2527-2544) cannot see that a nested
+// (`validateAndDeclareIdentifier`, cpp:2543-2560) cannot see that a nested
 // `var` and a nested lexical declaration are actually in conflict — this
 // re-check walks the identifiers of a nested `var` explicitly.
 //
@@ -20,7 +20,7 @@
 // promotion candidate; `var g;` follows it in the SAME block. By the time
 // `var g;`'s own statement is visited, the block's own decl-processing has
 // ALREADY re-declared `g`'s identifier a second time (the "two
-// declarations put" path, cpp:2625-2634), which shadowed the promoted decl
+// declarations put" path, cpp:2641-2650), which shadowed the promoted decl
 // at the block's OWN binding-table depth with a fresh `ScopedFunction` one
 // (`bindingTable_.put`, not `try_emplace`). So when `var g`'s check runs,
 // `bindingTable_.findWithDepth("g")` finds that `ScopedFunction` decl,

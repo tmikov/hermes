@@ -138,7 +138,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
     /// ImportDeclarationNode *)` (DeclCollector.cpp:124-127 /
     /// `decl_collector.rs`), whose `addToCur` puts the whole declaration in
     /// the enclosing scope's list; `extractIdentsFromDecl`'s
-    /// `ImportDeclaration` arm (cpp:2348-2361 /
+    /// `ImportDeclaration` arm (cpp:2364-2377 /
     /// `declarations::extract_idents_from_decl`) then maps each specifier's
     /// `_local` to a `DeclKind::Import` decl when the scope is processed.
     /// Both sides of that were ported in S1; this visit is what first makes

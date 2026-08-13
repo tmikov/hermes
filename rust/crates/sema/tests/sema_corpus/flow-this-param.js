@@ -1,6 +1,6 @@
 // FLAGS: -parse-flow
 // The `declareParams` lambda's `this`-parameter check
-// (SemanticResolver.cpp:1781-1785, `resolver/functions.rs:897`), gated on
+// (SemanticResolver.cpp:1796-1800, `resolver/functions.rs:897`), gated on
 // `compile_ && !typed_`: under `-parse-flow` the parser accepts a `this`
 // parameter (Flow/TS syntax for typing the receiver), but this dialect is
 // untyped (`typed_` is always false here), so the resolver rejects it. In

@@ -462,7 +462,7 @@ pub fn resolve_for_compile(
     let sem_ctx = parsed.transform_program(|gc, root, sm| {
         // The ambient files are parsed into the same arena and the same
         // source manager as the input, exactly like `loadGlobalDefinition`
-        // (CompilerDriver.cpp:762-774); their `Program` nodes are what
+        // (CompilerDriver.cpp:773-785); their `Program` nodes are what
         // `resolveAST` takes as `ambientDecls`. (The C++ driver parses them
         // *before* the input file because that is when it reads its command
         // line; the resolver visits them in list order either way, so the
@@ -520,7 +520,7 @@ pub fn resolve_for_compile(
 /// Parse one ambient-declaration file into `gc`'s arena, returning its
 /// `Program` pinned, or `None` if the parse reported an error.
 ///
-/// Mirrors `loadGlobalDefinition` (CompilerDriver.cpp:762-774): its own
+/// Mirrors `loadGlobalDefinition` (CompilerDriver.cpp:773-785): its own
 /// buffer in the shared source manager, the same parser as the input, and the
 /// resulting `Program` becomes one entry of the `DeclarationFileListTy`.
 fn parse_ambient<'gc>(

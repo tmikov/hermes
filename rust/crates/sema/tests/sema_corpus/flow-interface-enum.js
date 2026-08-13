@@ -4,7 +4,7 @@
 // `EnumDeclaration`.
 //
 // Neither appears anywhere in the header's `visit` inventory
-// (SemanticResolver.h:191-305, whose `#if HERMES_PARSE_FLOW` block names
+// (SemanticResolver.h:191-307, whose `#if HERMES_PARSE_FLOW` block names
 // only `CoverTypedIdentifier`, `TypeAlias`, `TypeParameterDeclaration`,
 // `TypeParameterInstantiation`, `TypeCastExpression`, `AsExpression`,
 // `ComponentDeclaration` and `HookDeclaration`), so C++ reaches them
