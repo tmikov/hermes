@@ -14,8 +14,9 @@ vs `sema-dump --parser-entry <file>` before being imported, per the global
 constraint that every corpus file is verified against the C++ side FIRST
 with the raw stdout+stderr+exit triple — and with exactly the flags its own
 first-line `// FLAGS:` carries, which `sema_parser_differential` appends
-verbatim to BOTH binaries' argv (`flow-annotations.js` is the only file here
-that carries one; the rest are flagless).
+verbatim to BOTH binaries' argv (`flow-annotations.js` and
+`flow-match-implicit-return.js` are the only files here that carry one; the
+rest are flagless).
 
 `read_dir` in `run_differential` is non-recursive, so a `pending/`
 subdirectory is automatically excluded from the walk — no extra filtering
@@ -49,7 +50,8 @@ live Imported table's current descriptions are kept synced to the current tree.
 | `import-assertions-compile-false.js` | `import 'b.js' with {type:'json'};`. **S4a final review.** (Named apart from the driver corpus's own upstream `import-assertions.js`, which pins the TRUE side of the same gate.) The FALSE side of the `compile_` gate on the import-assertions error (cpp:882-885, `if (compile_ && !importDecl->_attributes.empty())`): the attribute list here is non-empty, yet under `compile = false` the "import assertions are not supported" error is NOT emitted — the only diagnostic is the ungated module-mode one from cpp:876-880. `module-imports.js` cannot see this (no attributes there), so a port that dropped the `compile_ &&` half would pass the whole corpus without this file. The dump also shows the `ImportAttribute` subtree being walked: its key `type` resolves as an ordinary `UndeclaredGlobalProperty`. Verified byte-identical: 242 bytes stdout both sides, 183 bytes stderr both sides, exit 2 both sides. |
 | `with-statement.js` | `with (o) { x; }`. **Task 5 (defect-fix propagation).** Was the corpus's first landmine (see below): `Unresolver::visit` (`SemanticResolver.cpp:3206-3224`) marks the body's `x` unresolvable, and a DEBUG `sema-parser-dump` aborted on `getExpressionDecl`'s `assert(!node->isUnresolvable())` (`SemContext.h:559-561`) while this port printed ` UNR` — release C++'s behavior. Upstream `918158cb0` made the C++ dumper guard the call (`SemResolve.cpp:99-110`), so debug now matches release and both match the port. `with` is a `compile_`-gated error, so the DRIVER corpus can never dump a `with` body: this is the only pin for the ` UNR` flag reaching a dump at all, and for the `with` object staying resolved (`Id 'o' [D:E:…]`) because it lies outside the `Unresolver`'s root. Verified byte-identical: 312 bytes stdout both sides, empty stderr both sides, exit 0 both sides — an oracle-success file |
 | `anon-export-default.js` | `export default function () {}`. **Task 5 (defect-fix propagation).** The corpus's second landmine, and the other half of `918158cb0`. Rewrite #4 (`SemanticResolver.cpp:1539-1558`) is `compile_`-gated, so under this pair the anonymous `FunctionDeclaration` is never rewritten to a `FunctionExpression`; `visit(FunctionDeclarationNode*)` hoists it unconditionally (the hoist does not check for a name), so a null-`_id` function reaches the `hoistedFunction` printer. Both dumpers used to crash there — C++ on `llvh::cast`'s null check, this port on `print_scope`'s `.expect` — and both now print `hoistedFunction *default*` (`SemContext.cpp:493-501` / `dump_context.rs`'s `print_scope`). Verified byte-identical: 258 bytes stdout both sides, empty stderr both sides, exit 0 both sides — also an oracle-success file. `compile-false-basics.js` is its NAMED counterpart, which keeps printing `hoistedFunction f`, so `*default*` cannot be a blanket replacement |
-| `flow-annotations.js` | `// FLAGS: -parse-flow` + `function f(x: number): number { return x; } var y = f(1);`. **S4a final review.** The corpus's only FLAGS-bearing file and its only Flow file: the sole exercise of the C++ tool's `if (parseFlow) ctx.setParseFlow(ParseFlowSetting::ALL)` branch, which was dead before it (spec §5 called for a flow seed here; it never shipped). The type annotations parse into type nodes the resolver walks past without declaring anything, so the dump is the same shape the untyped version would give (`f`/`y` `GlobalProperty`, `x` `Parameter`). The same review taught the C++ tool the `-parse-flow` spelling alongside `--parse-flow` — the FLAGS line is appended verbatim to BOTH binaries' argv, and hermesc's own spelling is the single dash. Resolves clean, so this is also an oracle-success file. Verified byte-identical: 630 bytes stdout both sides, empty stderr both sides, exit 0 both sides. |
+| `flow-match-implicit-return.js` | `// FLAGS: -parse-flow --Xparse-flow-match` + `test/Sema/flow/match-implicit-return.js` verbatim. **Upstream sync task 3** — see the section of that name at the end of this file. The ONLY pin anywhere for `CheckImplicitReturn`'s `MatchStatement` arm (upstream `653e49c60`), because compiling a match is now rejected outright (`90f4a3ac6`) and the driver corpus therefore can never dump one. Twelve one-decision functions; the dump's `Func` tokens are `mayReachImplicitReturn`/`noImplicitReturn` in exactly the order upstream's `CHECK` lines assert. Verified byte-identical: 11615 B stdout both sides, empty stderr both sides, exit 0 both sides — an oracle-success file |
+| `flow-annotations.js` | `// FLAGS: -parse-flow` + `function f(x: number): number { return x; } var y = f(1);`. **S4a final review.** Was the corpus's only FLAGS-bearing file and its only Flow file until upstream sync task 3 added `flow-match-implicit-return.js`: the first exercise of the C++ tool's `if (parseFlow) ctx.setParseFlow(ParseFlowSetting::ALL)` branch, which was dead before it (spec §5 called for a flow seed here; it never shipped). The type annotations parse into type nodes the resolver walks past without declaring anything, so the dump is the same shape the untyped version would give (`f`/`y` `GlobalProperty`, `x` `Parameter`). The same review taught the C++ tool the `-parse-flow` spelling alongside `--parse-flow` — the FLAGS line is appended verbatim to BOTH binaries' argv, and hermesc's own spelling is the single dash. Resolves clean, so this is also an oracle-success file. Verified byte-identical: 630 bytes stdout both sides, empty stderr both sides, exit 0 both sides. |
 
 ## Pending (excluded from the walk — `pending/` subdirectory)
 
@@ -61,7 +63,7 @@ table above.
 
 ## Gate
 
-`sema differential (tests/sema_corpus_parser): 13 corpus files matched (5
+`sema differential (tests/sema_corpus_parser): 14 corpus files matched (6
 succeeded on the oracle)`.
 
 History: 7 → **11** files (+4, all from S4a's final review:
@@ -72,10 +74,13 @@ other three are error-path pins). Then 11 → **13** files (+2, Task 5 of the
 C++ defect-fix propagation plan: `with-statement.js`,
 `anon-export-default.js` — the two shapes upstream `918158cb0` unblocked),
 oracle-succeeded 3 → **5** (+2: BOTH new files resolve clean and exit 0 on
-both sides). Arithmetic: 11 + 2 = 13; 3 + 2 = 5.
+both sides). Arithmetic: 11 + 2 = 13; 3 + 2 = 5. Then 13 → **14** (+1,
+upstream sync task 3: `flow-match-implicit-return.js`), oracle-succeeded
+5 → **6** (+1: it resolves clean and exits 0 on both sides). Arithmetic:
+13 + 1 = 14; 5 + 1 = 6.
 
 The non-degeneracy guard in `run_differential` (at least one oracle success)
-is satisfied five times over; the remaining eight are all legitimate
+is satisfied six times over; the remaining eight are all legitimate
 error-path pins (oracle exit 2), same convention as
 `tests/sema_corpus/parse-error.js`.
 
@@ -300,3 +305,62 @@ but the driver emits an EMPTY stdout where `sema-parser-dump` emits the dump
 That is the driver's dump-suppression-on-error, and it is exactly what most
 of this corpus exists to pin. Recorded here so the swap is not attempted as
 a drop-in.
+
+## Upstream sync task 3: the Flow-`match` implicit-return pin
+
+Upstream `653e49c60` ("Handle Flow match in `CheckImplicitReturn`",
+cherry-picked as `acf86bf51`) gave `MatchStatement` a real
+`checkTermination*` handler; `90f4a3ac6` (`502bbc7d3`) made compiling a match
+an error. Together those two mean the match implicit-return answers are
+observable in **exactly one** configuration — `compile = false` with the dump
+printing `mayReachImplicitReturn` — which is this corpus and nothing else.
+Upstream's own lit test says so by asking for `-Xcompile=false`.
+
+### Why the file lives here rather than in the driver corpus
+
+Its RUN line is `%hermesc -parse-flow -Xparse-flow-match -Xcompile=false
+-dump-sema`. This pair (`sema-parser-dump` vs `sema-dump --parser-entry`)
+already *is* `-Xcompile=false`, so the flag is supplied by the pair instead of
+the `// FLAGS:` line. That substitution loses nothing, and it was measured
+rather than assumed: `hermesc -Xcompile=false -dump-sema -parse-flow
+-Xparse-flow-match` and `sema-parser-dump -parse-flow --Xparse-flow-match`
+produce **byte-identical** stdout on this file (11615 B, exit 0). The
+alternative — teaching Rust `sema-dump` an `--Xcompile` option so the file
+could live in the driver corpus — was not taken: the section
+"`-Xcompile=false` does NOT drop in for `sema-parser-dump`" above records why
+the two are not interchangeable in general, and the substitution above is
+exact for this file.
+
+### The C++ tool learned the match flag
+
+`tools/sema-parser-dump/sema-parser-dump.cpp` now accepts
+`-Xparse-flow-match` and `--Xparse-flow-match` (both, for the same
+`// FLAGS:`-goes-to-both-binaries reason it accepts both spellings of
+`-parse-flow`) and calls `ctx.setParseFlowMatch()`. Like hermesc
+(`CompilerDriver.cpp:1298-1302`) it does NOT imply `-parse-flow`; the corpus
+file spells both, the way upstream's lit tests do.
+
+### Non-vacuity: five independent mutations, each caught
+
+The whole point of importing this file is that it must FAIL without the
+`653e49c60` mirror. Every decision in `check_termination_match_statement` was
+deleted or inverted in turn and `sema-dump --parser-entry` re-run against the
+oracle's output (all reverted afterwards):
+
+| # | Mutation | Result on this file |
+|---|---|---|
+| A | The `Node::MatchStatement` arm removed entirely — i.e. the state before `653e49c60` | The `debug_assert!("unhandled statement in statement list")` fires; **no dump at all** vs the oracle's 296 lines. (This is the C++ debug behavior too.) |
+| B | The arm kept but reduced to `make_next_statement()` — the pre-fix *release* behavior ("no control flow") | **5** `Func`-line token flips |
+| C | `is_irrefutable_match_pattern` always `false` | **4** flips |
+| D | The `!guard` half of the irrefutable test dropped | **2** flips |
+| E | The `break` after the first irrefutable case dropped (dead cases' labels unioned) | **1** flip (`deadCase`) |
+| F | The `MatchAsPattern` unwrap loop dropped | **1** flip (`asPattern`) |
+
+No decision in the new code is unwitnessed, and none of the six mutations is
+caught by anything else in the workspace — this file is the only pin.
+
+### Gate
+
+```
+sema differential (tests/sema_corpus_parser): 14 corpus files matched (6 succeeded on the oracle)
+```

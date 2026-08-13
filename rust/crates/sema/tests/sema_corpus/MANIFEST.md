@@ -2728,3 +2728,65 @@ sema differential (tests/sema_corpus):        220 corpus files matched (110 succ
 sema differential (tests/sema_corpus_parser):  13 corpus files matched (5 succeeded on the oracle)
 test result: ok. 3 passed; 0 failed
 ```
+
+## Upstream sync task 3: the three Flow-`match` fixes
+
+Cherry-picked here as `acf86bf51` (`653e49c60`), `502bbc7d3` (`90f4a3ac6`)
+and `be443ad10` (`ca6de21ce`). None of the three touched an existing lit
+expectation — all three only ADD test files — so `update-lit` was not run and
+the corpus/lit verbatim invariant above was never disturbed (re-checked with
+the snippet: `type-alias-children.js` alone, the documented exception).
+
+### Port-side changes
+
+| Upstream | Rust mirror |
+|---|---|
+| `653e49c60` `CheckImplicitReturn.cpp:152-156` + `:322-376` | `check_implicit_return.rs`: a `Node::MatchStatement` arm, `check_termination_match_statement` and `is_irrefutable_match_pattern`. The `#if HERMES_PARSE_FLOW` is dropped, as everywhere in this port — the Flow grammar is a runtime `Context` flag. The stale comment at the catch-all ("the two statement kinds that would trip this assert … and the Flow-only `MatchStatement`") is now true again: `StaticBlock` is the only one left |
+| `90f4a3ac6` `SemanticResolver.cpp:1615-1628` | `resolver/statements.rs`'s `visit_match_statement` and `resolver/expressions.rs`'s `visit_match_expression`, dispatched from two new `visit_node` arms. Neither node kind is inside the AST's `Flow` range (`MatchStatement` is a `Statement`, ESTree.def:110; `MatchExpression` is a plain `Base` node, :685), so the `n if n.is_flow()` range arm never covered them — before this task **both panicked at the catch-all**. The sub-grammar below them (the `MatchPattern` range plus `MatchStatementCase`, `MatchExpressionCase`, `MatchObjectPatternProperty`, `MatchInstanceObjectPattern`, `MatchRestPattern`) got override-free children-walk arms on the usual argument: none of the sixteen appears in SemanticResolver.h's `visit` inventory or in `DeclCollector`'s |
+| `ca6de21ce` `JSParserImpl-flow.cpp:1529-1530` | **Nothing to change.** The port's call site is `let pattern = self.parse_match_pattern_flow()?;` — `?` IS the `if (!optPattern) return false;` the fix adds, so this port never had the defect. Cited at the site (`parser/src/js/flow/match_.rs`) and pinned by the two imports below plus `parser/tests/upstream_defect_fixes.rs`'s `match_object_property_with_unparseable_value_recovers_cleanly` |
+
+`tools/sema-parser-dump/sema-parser-dump.cpp` (this tree's local `compile =
+false` oracle, not an upstream file) learned `-Xparse-flow-match` /
+`--Xparse-flow-match`, mirroring how it learned `-parse-flow` /
+`--parse-flow`. Like hermesc (CompilerDriver.cpp:1298-1302) it does NOT imply
+`-parse-flow`; a corpus file spells both, the way the upstream lit tests do.
+
+### New imports (3 here, 1 in the parser corpus)
+
+| File | Note |
+|---|---|
+| `flow-match-unsupported.js` | `test/Sema/flow/match-unsupported.js` (`90f4a3ac6`'s lit test), verbatim + a prepended `// FLAGS: -parse-flow --Xparse-flow-match -ferror-limit=0` line (its own RUN line's flags). The compile-path pin for BOTH new diagnostics: `match statements are unsupported` over the statement's range and `match expressions are unsupported` over the expression's. hermesc: exit 2, empty stdout, 365 B stderr, byte-identical |
+| `flow-match-pattern-object-value-error.js` | `test/Parser/flow/match/pattern-object-value-error.js` (`ca6de21ce`), verbatim + `// FLAGS: -parse-flow --Xparse-flow-match`. `match (x) { {a: *}: 2 }` — the property value is not a pattern at all. hermesc: exit 2, empty stdout, 202 B stderr, byte-identical. Named `flow-match-…` after its sibling `flow-match-pattern-binding-error.js` (`550aafe33`), whose row is a few sections up |
+| `flow-match-pattern-object-binding-error.js` | `test/Parser/flow/match/pattern-object-binding-error.js` (`ca6de21ce`), verbatim + the same FLAGS line. `match (x) { {a: const [y]}: 2 }` — the same unchecked call site reached through a binding pattern missing its identifier. hermesc: exit 2, empty stdout, 243 B stderr, byte-identical |
+
+`653e49c60`'s own test goes to the PARSER corpus instead — see
+`sema_corpus_parser/MANIFEST.md`'s section of the same name for why (compiling
+a match is now rejected, so the driver corpus can never dump one).
+
+### Non-vacuity of the two `90f4a3ac6` mirrors (measured, then reverted)
+
+| Mutation | Result |
+|---|---|
+| Both `compile_`-gated `error_range` calls deleted (the pre-`90f4a3ac6` state) | `flow-match-unsupported.js` stderr 365 B vs 0 B — **caught** |
+| The `compile_` gate itself removed, i.e. error unconditionally | `sema_corpus_parser/flow-match-implicit-return.js` stderr 0 B vs 2788 B — **caught**. This is the direction that matters: the asymmetry, not the message |
+
+### Façade sweep
+
+`facade_agreement.rs`'s hardcoded corpus sizes moved 219 → **222** (223 files
+minus `flags-enable-eval-off.js`, whose flag `ParseFlags` cannot express), 13
+→ **14**, 218 → **221**. `Flags::parse` also learned `-ferror-limit=0` as a
+recognized no-op — the sweep never sets a limit on either side
+(`SourceErrorManager::new`'s `error_limit: u32::MAX`), so accepting it keeps
+`flow-match-unsupported.js` in the sweep instead of silently dropping it.
+
+### Gate
+
+Corpus size **220 → 223** (+3); oracle successes **110 unchanged** — all
+three new files are exit-2 error-path pins. Arithmetic: 220 + 3 = 223;
+110 + 0 = 110. The parser corpus moves 13 → 14 (5 → 6); see its own MANIFEST.
+
+```
+sema differential (tests/sema_corpus):        223 corpus files matched (110 succeeded on the oracle)
+sema differential (tests/sema_corpus_parser):  14 corpus files matched (6 succeeded on the oracle)
+test result: ok. 3 passed; 0 failed
+```

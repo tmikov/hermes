@@ -1210,6 +1210,20 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
                 self.visit_type_cast_expression(gc, node)
             }
             Node::AsExpression(_) => self.visit_as_expression(gc, node),
+            // `visit(MatchStatementNode *)` (cpp:1615-1622) and
+            // `visit(MatchExpressionNode *)` (cpp:1624-1628), added by
+            // upstream `90f4a3ac6` ("EASY: Reject Flow match when
+            // compiling") — both `#if HERMES_PARSE_FLOW`. Each reports its
+            // own diagnostic under `compile_` ONLY and then walks the
+            // children either way; see `statements::visit_match_statement`
+            // and `expressions::visit_match_expression`. Neither node kind
+            // is inside the AST's `Flow` range (`MatchStatement` is a
+            // `Statement`, ESTree.def:110-113; `MatchExpression` is a plain
+            // `Base` node, :685-688), so the `n if n.is_flow()` arm far
+            // below never covered them — before this task they fell to the
+            // catch-all panic.
+            Node::MatchStatement(_) => self.visit_match_statement(gc, node),
+            Node::MatchExpression(_) => self.visit_match_expression(gc, node),
             // `visit(WithStatementNode*)` (cpp:757-769),
             // `visit(TryStatementNode*)` (cpp:771-811, rewrite #2) and
             // `visit(CatchClauseNode*)` (cpp:813-819) — see `statements::*`
@@ -1559,6 +1573,38 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // — DeclCollector.h:95-99, `decl_collector.rs:445-447`), and
             // every other Flow kind is likewise a plain children walk there.
             n if n.is_flow() => node.visit_children_mut(gc, self),
+            // The whole Flow-`match` sub-grammar BELOW the two visits above:
+            // the `MatchPattern` range (ESTree.def:697-750 —
+            // `MatchWildcardPattern`, `MatchLiteralPattern`,
+            // `MatchUnaryPattern`, `MatchIdentifierPattern`,
+            // `MatchBindingPattern`, `MatchObjectPattern`,
+            // `MatchArrayPattern`, `MatchOrPattern`, `MatchAsPattern`,
+            // `MatchMemberPattern`, `MatchInstancePattern`) plus the five
+            // auxiliary kinds that are not in it (`MatchStatementCase` :677,
+            // `MatchExpressionCase` :690, `MatchObjectPatternProperty` :754,
+            // `MatchInstanceObjectPattern` :760, `MatchRestPattern` :765).
+            //
+            // Same argument as `ClassBody`'s in the override-free arm far
+            // above: the ONLY match kinds in SemanticResolver.h's `visit`
+            // inventory are `MatchStatementNode` and `MatchExpressionNode`
+            // (:295-296, added by `90f4a3ac6`), so C++ reaches every one of
+            // these sixteen through `visitESTreeChildren`
+            // (SemanticResolver.h:191-193), exactly like this arm.
+            // `DeclCollector` has no override for any of them either
+            // (DeclCollector.h:81-99), so none creates a scope — and, more
+            // to the point, a `MatchBindingPattern`'s `_id` declares
+            // NOTHING: it is walked as an ordinary `Identifier` and resolves
+            // to whatever the enclosing scopes offer (an
+            // `UndeclaredGlobalProperty` at global scope). That is
+            // observable, not assumed — `sema_corpus_parser/
+            // match-implicit-return.js`'s dump shows `const a => …`'s `a`
+            // exactly that way.
+            n if n.is_match_pattern() => node.visit_children_mut(gc, self),
+            Node::MatchStatementCase(_)
+            | Node::MatchExpressionCase(_)
+            | Node::MatchObjectPatternProperty(_)
+            | Node::MatchInstanceObjectPattern(_)
+            | Node::MatchRestPattern(_) => node.visit_children_mut(gc, self),
             _ => panic!(
                 "sema: unhandled node kind {} (S3+/dialect phases)",
                 node.node_type_str()

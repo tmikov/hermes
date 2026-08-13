@@ -945,7 +945,18 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 ) {
                     return None;
                 }
-                // flow.cpp:1528-1533.
+                // flow.cpp:1528-1535. The `?` is upstream `ca6de21ce`
+                // ("Check the parsed value of a match object property"):
+                // C++ used to call `.getValue()` on this `Optional` without
+                // checking it, so a property value that failed to parse
+                // dereferenced null right after the error was reported
+                // (`match (x) { {a: *}: 2 }`, and `{a: const [y]}` through
+                // the binding-pattern path). The fix adds `if (!optPattern)
+                // return false;`, which is what `?` has always done here —
+                // this port never had the defect, and the two upstream
+                // regression tests are imported as
+                // `sema_corpus/flow-match-pattern-object-{value,binding}-
+                // error.js` to keep it that way.
                 let pattern = self.parse_match_pattern_flow()?;
                 let node = Node::MatchObjectPatternProperty(
                     MatchObjectPatternProperty::new(

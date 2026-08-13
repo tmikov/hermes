@@ -15,12 +15,13 @@ upstream fixes are ported.
 | **Fork point from `static_h`** | **`60b5c73db`** ("Deploy 0.316.0 to xplat") |
 | **Plus** | the 11 defect fixes cherry-picked 2026-08-10 (below) |
 | **Plus** | `04f1f53a8` (`-Xcompile` + dump `mayReachImplicitReturn`), cherry-picked 2026-08-13 as `1e3806f47`, mirrored in the port by `de917f249` |
+| **Plus** | the three Flow-`match` fixes `653e49c60`/`90f4a3ac6`/`ca6de21ce`, cherry-picked 2026-08-13 as `acf86bf51`/`502bbc7d3`/`be443ad10`, mirrored in the port by the task-3 commit |
 | **Upstream `static_h` HEAD at time of writing** | `2d3e9018b` (2026-08-13) |
 | **Commits between fork point and upstream HEAD** | 147 (105 of them predate the local `static_h` ref at `5dfe740ad`) |
 
 The port's C++ tree is **not equal to any single upstream commit**: it is the
-fork point plus twelve cherry-picks. The 135 other commits in
-`60b5c73db..origin/static_h` are unported, but all but six are irrelevant to
+fork point plus fifteen cherry-picks. The 132 other commits in
+`60b5c73db..origin/static_h` are unported, but all but three are irrelevant to
 the front end (VM, GC, debugger, JSI, build). See the backlog below.
 
 ### The 11 cherry-picked defect fixes
@@ -100,9 +101,9 @@ tests, minus the 11 above. (`b70dd7942` touches `include/hermes/Support` but is
 | Upstream | What it does | Port impact |
 |---|---|---|
 | ~~`04f1f53a8`~~ | Adds `-Xcompile` to the driver **and dumps `mayReachImplicitReturn`** | **DONE 2026-08-13** (`1e3806f47` + `de917f249`). The port's `CheckImplicitReturn` was byte-verified for the first time and **agreed with C++ everywhere**: 219/219 driver-corpus and 13/13 parser-entry dumps identical after mirroring `printFunction`, and zero stdout differences across all 1232 `.js` under `test/Sema`, `test/Parser` and `test/hermes`. Not vacuous — 196 of the driver corpus's 555 `Func`/`StaticBlock` lines carry `noImplicitReturn`. `-Xcompile` was cherry-picked but nothing was built on it; see the deferred `sema-parser-dump` item. **Review round:** making the flag visible also exposed that the standing gate pinned only 7 of `CheckImplicitReturn`'s 18 decisions; the authored corpus file `implicit-return-shapes.js` now pins all 18, and the driver corpus is **220 (110)**. See `sema_corpus/MANIFEST.md`'s survey table. |
-| `653e49c60` | Handle Flow `match` in `CheckImplicitReturn` (+61 lines) | Port `check_implicit_return.rs`. |
-| `90f4a3ac6` | Reject Flow `match` when compiling: new `visit(MatchStatement/MatchExpression)` emitting "match statements/expressions are unsupported" under `compile_` | Port to the resolver; parser mode still resolves. |
-| `ca6de21ce` | Parser: check the parsed value of a match object property (`if (!optPattern) return false;`) | Port to the flow-match parser — same class as `8d786acbe`. |
+| ~~`653e49c60`~~ | Handle Flow `match` in `CheckImplicitReturn` (+61 lines) | **DONE 2026-08-13** (`acf86bf51` + the Rust mirror). `check_implicit_return.rs` gained the `MatchStatement` arm, `check_termination_match_statement` and `is_irrefutable_match_pattern`. Pinned by `sema_corpus_parser/flow-match-implicit-return.js` — the parser corpus, because `90f4a3ac6` makes the driver path reject a match before it can be dumped. Six mutations of the new code, each caught by that one file; see `sema_corpus_parser/MANIFEST.md`. |
+| ~~`90f4a3ac6`~~ | Reject Flow `match` when compiling: new `visit(MatchStatement/MatchExpression)` emitting "match statements/expressions are unsupported" under `compile_` | **DONE 2026-08-13** (`502bbc7d3` + the Rust mirror). `resolver/statements.rs`'s `visit_match_statement` and `resolver/expressions.rs`'s `visit_match_expression`, plus children-walk arms for the sixteen match sub-grammar kinds — before this the resolver PANICKED on any `match`. Pinned in both directions: `sema_corpus/flow-match-unsupported.js` (errors present) and `sema_corpus_parser/flow-match-implicit-return.js` (the `compile_` gate, i.e. errors absent). |
+| ~~`ca6de21ce`~~ | Parser: check the parsed value of a match object property (`if (!optPattern) return false;`) | **DONE 2026-08-13** (`be443ad10`). **Nothing to change in the port:** its call site is `self.parse_match_pattern_flow()?` and `?` IS the added check, so this port never had the defect. Cited at the site and pinned by `sema_corpus/flow-match-pattern-object-{value,binding}-error.js` plus `parser/tests/upstream_defect_fixes.rs`. |
 | `26872f6e9` | Moves the parser-mode semDump unit tests to lit (`test/Sema/parser-mode-*.js`) | Optional: upstream now has real files for the two shapes this port had to author (`sema_corpus_parser/{anon-export-default,with-statement}.js`); they can be replaced with upstream imports. |
 | `6fbc3706d` | Backs out `#if 0` around the dead local-eval block → `if ((false))` | Dead in both forms; check the port's comments/citations (`CppDefectsFound.md` item 10b). |
 | `8f9e357fd` | Reverts `#if 0` around the dead `arguments` block → `if ((false))` | Same class. |
@@ -187,8 +188,19 @@ behavior 8 of the 13 corpus files exist to pin. So retiring the tool would
 either lose the error-path parser-entry coverage or need those files
 restructured; decide that deliberately rather than assuming a drop-in swap.
 
+**Task 3 (2026-08-13) added a 14th file and one more flag, information only.**
+`flow-match-implicit-return.js` was imported into the parser-entry corpus, and
+`sema-parser-dump` learned `-Xparse-flow-match`/`--Xparse-flow-match` to carry
+it. On THAT file the swap *is* free: `hermesc -Xcompile=false -dump-sema
+-parse-flow -Xparse-flow-match` and `sema-parser-dump -parse-flow
+--Xparse-flow-match` produce byte-identical stdout (11615 B, exit 0), because
+it is an error-free file and so the driver's dump-suppression never engages.
+The 6 differing files above are still the blocker; this one just is not a
+seventh. Retiring the tool now also means re-checking the two flags it
+understands rather than one.
+
 **When doing it, check:** that `-Xcompile=false` output is byte-identical to
-`sema-parser-dump`'s for all 13 parser-entry corpus files (it is not — see
+`sema-parser-dump`'s for all 14 parser-entry corpus files (it is not — see
 the measurement above; both call the same two library entries, but the driver
 wraps them differently: `sema-parser-dump` dumps *unconditionally* even when
 errors were reported, whereas the driver suppresses the dump on errors, and

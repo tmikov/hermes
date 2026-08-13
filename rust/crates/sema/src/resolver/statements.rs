@@ -918,6 +918,48 @@ impl SemanticResolver<'_, '_, '_, '_> {
         self.exit_scope(scope_state);
         result
     }
+
+    // ---- visit(MatchStatementNode *) -------------------------------------
+
+    /// Port of `SemanticResolver::visit(ESTree::MatchStatementNode *node)`
+    /// (SemanticResolver.cpp:1615-1622, upstream `90f4a3ac6`; `#if
+    /// HERMES_PARSE_FLOW` there, unconditional here — the Flow grammar is a
+    /// runtime `Context` flag in this port, same as the other Flow visits,
+    /// see `expressions::visit_type_cast_expression`).
+    ///
+    /// ```text
+    /// void SemanticResolver::visit(MatchStatementNode *node) {
+    ///   // IRGen cannot lower a match, so reject it here rather than let it
+    ///   // reach the backend and be reported as an unrecognized statement.
+    ///   // Parser mode still resolves it, since an embedder wants the
+    ///   // resolved AST.
+    ///   if (compile_)
+    ///     sm_.error(node->getSourceRange(), "match statements are unsupported");
+    ///   visitESTreeChildren(*this, node);
+    /// }
+    /// ```
+    ///
+    /// The `compile_` gate is the whole point of the fix and NOT an
+    /// optimization: under `compile = false` (`resolve_ast_for_parser`) the
+    /// match must still resolve, which is the only mode in which a match
+    /// reaches the rest of sema — and the only mode in which
+    /// `check_implicit_return`'s `MatchStatement` arm (upstream `653e49c60`)
+    /// can be observed at all.
+    ///
+    /// A match statement is deliberately NOT pushed onto
+    /// `current_loop_or_switch`: it is not a `break` target in Hermes, which
+    /// is exactly what `check_termination_match_statement`'s doc relies on.
+    pub(super) fn visit_match_statement<'gc>(
+        &mut self,
+        gc: &'gc GCLock,
+        node: &'gc Node<'gc>,
+    ) -> TransformResult<&'gc Node<'gc>> {
+        if self.compile() {
+            self.sm
+                .error_range(node.range(), "match statements are unsupported");
+        }
+        node.visit_children_mut(gc, self)
+    }
 }
 
 /// The `_name` of a `break`/`continue` label. Port of

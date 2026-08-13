@@ -34,8 +34,14 @@
 ///   nothing extra to wire up, unlike `preparse-dump`, which installs a
 ///   no-op handler specifically to SUPPRESS printing.
 ///
-/// Args: [--parse-flow|-parse-flow] <file|->
+/// Args: [--parse-flow|-parse-flow]
+///       [--Xparse-flow-match|-Xparse-flow-match] <file|->
 ///   - means read from stdin.
+///
+///   `-Xparse-flow-match` does NOT imply `-parse-flow`, exactly as hermesc's
+///   hidden flag does not (CompilerDriver.cpp:1298-1302 sets the two
+///   independently) — a corpus file that wants a Flow `match` spells both,
+///   the way the upstream lit tests do.
 ///
 /// No `-ferror-limit`: `SourceErrorManager`'s default is unbounded
 /// (`error_limit_` unset), and neither this tool nor
@@ -59,6 +65,7 @@ using namespace hermes;
 int main(int argc, char **argv) {
   const char *filePath = nullptr;
   bool parseFlow = false;
+  bool parseFlowMatch = false;
   for (int i = 1; i < argc; ++i) {
     const char *arg = argv[i];
     // Both spellings: `--parse-flow` (this tool's original) and
@@ -71,6 +78,16 @@ int main(int argc, char **argv) {
       parseFlow = true;
       continue;
     }
+    // Both spellings again, for the same reason: a `// FLAGS:` line has to
+    // name the flag once for both binaries, and the Rust `sema-dump` only
+    // understands the DOUBLE-dash form of a `-X` option (its `command_line`
+    // single-dash path would read `-X` as a short option with an attached
+    // value), while LLVM's `cl` — i.e. hermesc — accepts either.
+    if (std::strcmp(arg, "--Xparse-flow-match") == 0 ||
+        std::strcmp(arg, "-Xparse-flow-match") == 0) {
+      parseFlowMatch = true;
+      continue;
+    }
     if (filePath != nullptr) {
       llvh::errs() << argv[0] << ": too many arguments\n";
       return 1;
@@ -79,7 +96,8 @@ int main(int argc, char **argv) {
   }
   if (filePath == nullptr) {
     llvh::errs() << "Usage: " << argv[0]
-                 << " [--parse-flow|-parse-flow] <file|->\n";
+                 << " [--parse-flow|-parse-flow] "
+                    "[--Xparse-flow-match|-Xparse-flow-match] <file|->\n";
     return 1;
   }
 
@@ -94,6 +112,7 @@ int main(int argc, char **argv) {
   Context ctx;
   if (parseFlow)
     ctx.setParseFlow(ParseFlowSetting::ALL);
+  ctx.setParseFlowMatch(parseFlowMatch);
   SourceErrorManager &sm = ctx.getSourceErrorManager();
   // `SourceErrorOutputOptions::showColors` defaults to `true`
   // (SourceErrorManager.h:35), but the Rust renderer this tool is an

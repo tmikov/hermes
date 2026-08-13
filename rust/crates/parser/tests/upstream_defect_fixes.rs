@@ -22,6 +22,15 @@
 //!     `Token::get_res_word_or_identifier`, bug-for-bug). The pin is flipped
 //!     here: the same input must now produce the diagnostic and recover
 //!     cleanly, with no panic.
+//!   - `ca6de21ce` "Check the parsed value of a match object property"
+//!     (`test/Parser/flow/match/pattern-object-{value,binding}-error.js`) —
+//!     `parseMatchObjectPatternPropertiesFlow` called `getValue()` on the
+//!     result of `parseMatchPatternFlow()` without checking it, so a property
+//!     value that failed to parse crashed right after the error was reported.
+//!     The port never had this defect: its call site is
+//!     `self.parse_match_pattern_flow()?`, and `?` IS the `if (!optPattern)
+//!     return false;` the fix added. The test below is the pin that keeps it
+//!     that way.
 //!   - `304c1533c` "Add a recursion limit to compiler JSONParser"
 //!     (`unittests/AST/JSONTest.cpp`'s `DeepNestingTest`) — deeply nested
 //!     JSON overflowed the native stack; it must report `Too many nested JSON
@@ -131,6 +140,37 @@ fn match_binding_pattern_without_identifier_recovers_cleanly() {
         "pattern-binding-error.js:1:29: error: 'identifier' expected in \
          match binding pattern\n\
          const e = match (x) { const [y]: 2 };\n                      \
+         ~~~~~~^\n"
+    );
+}
+
+/// `ca6de21ce`: an object-pattern property whose VALUE fails to parse. Both
+/// upstream shapes, one assert each: `*` is not a pattern at all, and
+/// `const [y]` is a binding pattern missing its identifier (which reaches the
+/// same unchecked call site, and is the shape `550aafe33` above made
+/// diagnose-and-return instead of assert). Exactly one diagnostic each, and
+/// no crash on the way out.
+#[test]
+fn match_object_property_with_unparseable_value_recovers_cleanly() {
+    assert_eq!(
+        render_parse_errors(
+            Dialect::FlowMatch,
+            "pattern-object-value-error.js",
+            "const e = match (x) { {a: *}: 2 };\n"
+        ),
+        "pattern-object-value-error.js:1:27: error: invalid match pattern\n\
+         const e = match (x) { {a: *}: 2 };\n                          \
+         ^\n"
+    );
+    assert_eq!(
+        render_parse_errors(
+            Dialect::FlowMatch,
+            "pattern-object-binding-error.js",
+            "const e = match (x) { {a: const [y]}: 2 };\n"
+        ),
+        "pattern-object-binding-error.js:1:33: error: 'identifier' expected \
+         in match binding pattern\n\
+         const e = match (x) { {a: const [y]}: 2 };\n                          \
          ~~~~~~^\n"
     );
 }

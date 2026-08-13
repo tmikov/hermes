@@ -1055,6 +1055,35 @@ impl SemanticResolver<'_, '_, '_, '_> {
         b.build(gc)
     }
 
+    // ---- visit(MatchExpressionNode *) -----------------------------------
+
+    /// Port of `SemanticResolver::visit(ESTree::MatchExpressionNode *node)`
+    /// (SemanticResolver.cpp:1624-1628, upstream `90f4a3ac6`; `#if
+    /// HERMES_PARSE_FLOW` there, unconditional here for the same reason
+    /// [`Self::visit_type_cast_expression`] gives).
+    ///
+    /// ```text
+    /// void SemanticResolver::visit(MatchExpressionNode *node) {
+    ///   if (compile_)
+    ///     sm_.error(node->getSourceRange(), "match expressions are unsupported");
+    ///   visitESTreeChildren(*this, node);
+    /// }
+    /// ```
+    ///
+    /// The statement twin — and the reason the `compile_` gate exists — is
+    /// `statements::visit_match_statement`.
+    pub(super) fn visit_match_expression<'gc>(
+        &mut self,
+        gc: &'gc GCLock,
+        node: &'gc Node<'gc>,
+    ) -> TransformResult<&'gc Node<'gc>> {
+        if self.compile() {
+            self.sm
+                .error_range(node.range(), "match expressions are unsupported");
+        }
+        node.visit_children_mut(gc, self)
+    }
+
     // ---- visit(RegExpLiteralNode *) -------------------------------------
 
     /// Port of `SemanticResolver::visit(RegExpLiteralNode *regexp)`

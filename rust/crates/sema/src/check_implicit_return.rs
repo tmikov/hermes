@@ -64,7 +64,9 @@
 
 use std::collections::HashSet;
 
-use hermes_ast::node::{Node, SwitchStatement, TryStatement};
+use hermes_ast::node::{
+    MatchStatement, Node, SwitchStatement, TryStatement,
+};
 use hermes_ast::node_child::NodeList;
 
 /// Encodes the result of checking for termination in CheckImplicitReturn.
@@ -138,9 +140,10 @@ impl TerminationResult {
 /// Runs a conservative check to determine whether there are any possible
 /// paths through the function which end in an implicit 'undefined' return.
 ///
-/// Port of the class at CheckImplicitReturn.cpp:84-316. It holds no state —
+/// Port of the class at CheckImplicitReturn.cpp:84-377. It holds no state —
 /// as in C++, where the only constructor is `explicit CheckImplicitReturn()
-/// {}` — so it exists purely to group the four `checkTermination*` methods.
+/// {}` — so it exists purely to group the five `checkTermination*` methods
+/// (and `isIrrefutableMatchPattern`, which is `static` in C++ too).
 struct CheckImplicitReturn;
 
 impl CheckImplicitReturn {
@@ -213,6 +216,15 @@ impl CheckImplicitReturn {
             }
             Node::TryStatement(n) => self.check_termination_try_statement(n),
 
+            // `#if HERMES_PARSE_FLOW` in C++ (cpp:152-156). This port has no
+            // such build gate — the Flow grammar is a runtime `Context` flag
+            // (`parse_flow_match`), so the arm is unconditional here, exactly
+            // like the `TypeAlias`/`TypeCastExpression` visits in
+            // `resolver/mod.rs`.
+            Node::MatchStatement(n) => {
+                self.check_termination_match_statement(n)
+            }
+
             Node::ReturnStatement(_) => {
                 // Explicit return will always prevent implicit return.
                 TerminationResult::make_must_terminate()
@@ -244,11 +256,14 @@ impl CheckImplicitReturn {
             }
 
             _ => {
-                // The two statement kinds that would trip this assert are
-                // `StaticBlock`, which cannot appear in a statement list at
-                // all, and the Flow-only `MatchStatement` — exactly as in
-                // C++, where both are inside ESTree.def's `Statement` range
-                // (ESTree.def:105-255) and neither has an arm above.
+                // `StaticBlock` is now the ONLY statement kind that would
+                // trip this assert, and it cannot appear in a statement list
+                // at all — exactly as in C++, where it is the only member of
+                // ESTree.def's `Statement` range (ESTree.def:105-255) with no
+                // arm above. The Flow-only `MatchStatement` used to be the
+                // other one; upstream `653e49c60` gave it a real arm
+                // (cpp:152-156), mirrored above, which is what makes this
+                // comment true again.
                 debug_assert!(
                     !node.is_statement(),
                     "unhandled statement in statement list"
@@ -429,10 +444,80 @@ impl CheckImplicitReturn {
 
         result
     }
+
+    // The two helpers below are `#if HERMES_PARSE_FLOW` in C++
+    // (CheckImplicitReturn.cpp:322-376, upstream `653e49c60`); this port has
+    // no build gate for the Flow grammar — see the `MatchStatement` arm of
+    // [`Self::check_termination`].
+
+    /// \return true if \p pattern accepts every value, so a case using it runs
+    /// whenever it is reached. This is the 'match' equivalent of a switch's
+    /// default case.
+    fn is_irrefutable_match_pattern(pattern: &Node) -> bool {
+        // 'as' only names what the inner pattern matched, it does not narrow
+        // what is accepted.
+        let mut pattern = pattern;
+        while let Node::MatchAsPattern(as_pattern) = pattern {
+            pattern = as_pattern.pattern;
+        }
+        matches!(
+            pattern,
+            Node::MatchWildcardPattern(_) | Node::MatchBindingPattern(_)
+        )
+    }
+
+    /// \return the termination result of a Flow 'match' statement.
+    /// A match statement is not a break target in Hermes: SemanticResolver
+    /// never records it in currentLoopOrSwitch, so a 'break' inside a case
+    /// body always refers to an enclosing loop or switch. Consequently there
+    /// is no label to remove here, and the labels targeted by the case bodies
+    /// are simply unioned so that such breaks are propagated to the enclosing
+    /// construct.
+    fn check_termination_match_statement(
+        &self,
+        node: &MatchStatement<'_>,
+    ) -> TerminationResult {
+        let mut result = TerminationResult::default();
+        // Whether some case is guaranteed to run, which is what lets the match
+        // as a whole terminate. Mirrors the default case of a switch
+        // statement.
+        let mut found_irrefutable = false;
+        for child in node.cases.iter() {
+            let match_case = child
+                .as_match_statement_case()
+                .expect("a MatchStatement case is a MatchStatementCase");
+            // Cases don't fall through, so every body is checked
+            // independently. A body which completes normally continues after
+            // the match, which the union below propagates.
+            let case_res = self.check_termination(match_case.body);
+            result.target_labels.extend(case_res.target_labels);
+            // A guard can fail no matter what the pattern accepts.
+            if match_case.guard.is_none()
+                && Self::is_irrefutable_match_pattern(match_case.pattern)
+            {
+                found_irrefutable = true;
+                // Cases are tested in order and the first match wins, so no
+                // later case can run. Stop instead of unioning labels that a
+                // dead case targets, which would report control flow that
+                // cannot happen.
+                break;
+            }
+        }
+        if !found_irrefutable {
+            // No case has to run, so execution may continue past the match.
+            // Note that exhaustiveness of the patterns taken together is not
+            // computed here, so a match which covers its argument by
+            // enumeration is still treated as able to complete normally.
+            result
+                .target_labels
+                .insert(TerminationResult::K_NEXT_STATEMENT_LABEL);
+        }
+        result
+    }
 }
 
 /// Port of `mayReachImplicitReturn(ESTree::FunctionLikeNode *root)`
-/// (CheckImplicitReturn.cpp:320-332).
+/// (CheckImplicitReturn.cpp:381-393).
 ///
 /// \param body the function's body node **after** it has been visited by the
 ///   resolver — C++ takes the function-like node and calls

@@ -91,6 +91,13 @@ impl Flags {
                 }
                 "-parse-jsx" | "--parse-jsx" => flags.parse_jsx = true,
                 "-fno-std-globals" => flags.std_globals = false,
+                // `-ferror-limit=0` is hermesc's spelling of "unlimited",
+                // which is already what `SourceErrorManager::new` does here
+                // (`error_limit: u32::MAX`, `support/src/manager.rs:135`) —
+                // neither wiring sets a limit at all, so accepting it as a
+                // no-op keeps `flow-match-unsupported.js` in the sweep rather
+                // than silently dropping it.
+                "-ferror-limit=0" => {}
                 // `-enable-eval=false` is a `Context` flag with no
                 // `ParseFlags` field; nothing else appears in the corpus.
                 _ => return None,
@@ -389,10 +396,10 @@ fn sweep(dir: &str, parser_entry: bool) -> usize {
 #[test]
 fn agrees_on_the_compile_path() {
     let compared = on_big_stack(|| sweep("sema_corpus", false));
-    // 220 corpus files, minus the one selecting `-enable-eval=false`, which
+    // 223 corpus files, minus the one selecting `-enable-eval=false`, which
     // `ParseFlags` cannot express. A drop here means the sweep silently
     // stopped covering files.
-    assert_eq!(compared, 219, "corpus size changed");
+    assert_eq!(compared, 222, "corpus size changed");
 }
 
 /// `resolve_for_parser` == `resolve_ast_for_parser` wired by hand, over the
@@ -401,7 +408,7 @@ fn agrees_on_the_compile_path() {
 #[test]
 fn agrees_on_the_parser_path() {
     let compared = on_big_stack(|| sweep("sema_corpus_parser", true));
-    assert_eq!(compared, 13, "parser corpus size changed");
+    assert_eq!(compared, 14, "parser corpus size changed");
 }
 
 /// The parser corpus is small; run the compile-path comparison over it too,
@@ -409,8 +416,8 @@ fn agrees_on_the_parser_path() {
 /// is only checked on 13 files.
 #[test]
 fn agrees_on_both_paths_over_both_corpora() {
-    assert_eq!(on_big_stack(|| sweep("sema_corpus_parser", false)), 13);
-    assert_eq!(on_big_stack(|| sweep("sema_corpus", true)), 218);
+    assert_eq!(on_big_stack(|| sweep("sema_corpus_parser", false)), 14);
+    assert_eq!(on_big_stack(|| sweep("sema_corpus", true)), 221);
 }
 
 /// Non-vacuity: the byte comparison the sweeps make can tell the two entry
@@ -451,7 +458,7 @@ fn discriminates_body() {
             std_globals_differs += 1;
         }
     }
-    assert_eq!(total, 218);
+    assert_eq!(total, 221);
     // Most files differ between the entry points (the compile path folds
     // constants, rewrites arrows, and rejects what it cannot compile).
     assert!(
