@@ -16,7 +16,7 @@ modes. Both problems are corrected in the 2026-08-12 re-measurement.
 
 ## Re-measurement (2026-08-12, Clang baseline)
 
-**Date:** 2026-08-12. **Tree:** `rust1` @ `f39215889`. Same machine as the
+**Date:** 2026-08-12. **Tree:** `f39215889` (then on the since-deleted `rust1`). Same machine as the
 2026-06-19 run, nothing else running, C++ and Rust measured serially.
 
 ### What changed since 2026-06-19

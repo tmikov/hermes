@@ -4,9 +4,11 @@ Hand this to a new session focused **only** on publishing the Rust front-end to
 crates.io. It references the authoritative files (read them; don't trust this
 summary over them).
 
-> **Date:** 2026-07-14. **Branch:** `rust1` (base is the `rust` impl branch).
+> **Date:** 2026-07-14, revised 2026-08-13. **Branch:** `rust` (the only
+> branch; `rust1` was rebased into it and deleted 2026-08-13 — nothing had
+> been published, so the split was no longer worth carrying).
 > All publication prep is committed; working tree is clean apart from gitignored
-> scratch (`clean_lex.js`, `.superpowers/`). Commit directly to `rust1`; **never
+> scratch (`clean_lex.js`, `.superpowers/`). Commit directly to `rust`; **never
 > open a PR or merge** (project rule). Execute subagent-driven (user preference).
 
 ## Read first (in order)
@@ -127,7 +129,7 @@ Only the manual, irreversible steps remain:
    add seven extra irreversible publishes plus junk 0.0.0 version rows.
 2. **Push the `hermes-crates-v0.1.0` tag before publishing.** Every crate
    README links to GitHub through that tag (`/blob/hermes-crates-v0.1.0/…`)
-   rather than through a branch, so the links survive `rust1` being renamed,
+   rather than through a branch, so the links survive any branch being renamed,
    merged or deleted — and they resolve to exactly the source that was
    published. Two rules follow:
    - **Push to the `private` remote, not `origin`.** In this worktree
@@ -142,11 +144,9 @@ Only the manual, irreversible steps remain:
    - The tag must point at **the commit you publish from**. If any commit
      lands after the tag was cut, move it: `git tag -f hermes-crates-v0.1.0`
      then `git push -f private hermes-crates-v0.1.0`.
-   - The links also need the *files* reachable on the fork, so the branch
-     holding them (`rust1`) must be pushed to `private` too — as of
-     2026-08-13 the fork has `rust` but not `rust1`. Pushing the tag alone is
-     enough for the links to resolve (a tag carries its own commit), but push
-     the branch as well if you want the work visible there.
+   - Pushing the tag alone is enough for the links to resolve (a tag carries
+     its own commit). Push `rust` as well if you want the work browsable on
+     the fork.
 3. **Publish with ONE multi-package invocation** (the plan's per-crate loop
    provably fails: versioned path deps resolve against the registry):
    ```bash
@@ -164,9 +164,10 @@ Only the manual, irreversible steps remain:
    patch release to fix, so check early); trigger
    `rust-differential-nightly.yml` once via `workflow_dispatch` for its first
    observed green; sweep `doc/superpowers/{SESSION-HANDOFF,RustPortRoadmap}.md`
-   `-p parser` spellings when `rust1` merges into `rust`; human editorial pass
-   on the blog draft before any announcement.
+   `-p parser` spellings in `doc/superpowers/{SESSION-HANDOFF,RustPortRoadmap}.md`;
+   human editorial pass on the blog draft before any announcement.
 
-**Branch fate is now decoupled from the crates.** Because the READMEs point at
-an immutable tag, `rust1` may be renamed, merged into `rust`, or deleted after
-publish without breaking anything on crates.io. Keep the tag.
+**Branch fate is decoupled from the crates.** Because the READMEs point at an
+immutable tag rather than a branch, the branch may be renamed or moved without
+breaking anything on crates.io. Keep the tag, and keep it pointing at the
+commit that was actually published.
