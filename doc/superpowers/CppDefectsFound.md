@@ -460,24 +460,54 @@ function whose `finally` block affects reachability.
 the way the split is, or teach `CheckImplicitReturn` to handle an unsplit
 try-catch-finally (walk handler *and* finalizer) instead of asserting.
 
-**Rust pin:** the port reproduces the abort faithfully — panic at
+**Rust pin:** the port reproduced the abort faithfully — panic at
 `rust/crates/sema/src/check_implicit_return.rs:340`. The façade agreement sweep
-(`rust/crates/sema/tests/facade_agreement.rs`) skips the single corpus file that
-would trip it, via a documented named constant; delete that skip when this is
-fixed.
+(`rust/crates/sema/tests/facade_agreement.rs`) skipped the single corpus file
+that would trip it, via a documented named constant.
 
-**Status:** OPEN — found after the 2026-08-10 propagation of items 1–11, so it
-is not in that campaign. Not yet fixed upstream, not yet in
-`~/work/hermes-cpp-defects`.
+**Fixed upstream:** `5ae5260c8` on branch `private/export-D115669841`
+(2026-08-13) — not in `origin/static_h` at the time; cherry-picked to `rust`
+2026-08-13 as `9b5025f89`. `checkTerminationTryStatement` stops asserting the
+split has happened and instead composes the two rules in the order the split
+states — the handler rule over the block, then the finalizer rule over that
+result — with the finalizer half moved unchanged into a new
+`checkTerminationFinalizer`. New lit test
+`test/Sema/implicit-return-try-catch-finally.js`, whose two RUN lines
+(`-dump-sema` and `-Xcompile=false -dump-sema`) share one set of `CHECK`
+lines, so the two paths disagreeing is itself a failure.
+
+**Pin flipped:** `check_implicit_return.rs`'s
+`check_termination_try_statement` mirrors the composition and grew
+`check_termination_finalizer`; the `debug_assert!` that reproduced the abort
+is replaced by upstream's weaker one (a `try` has a handler or a finalizer).
+`facade_agreement.rs`'s `PARSER_ENTRY_SKIP` constant and its two uses are
+**deleted**, and the previously skipped file passes the parser-path sweep with
+no other change. Live pins: `sema_corpus/implicit-return-try-catch-finally.js`
+(the split answers) and `sema_corpus_parser/implicit-return-try-catch-finally.js`
+(the unsplit ones, i.e. the shape this item is about) plus
+`sema_corpus_parser/implicit-return-shapes.js`; new unit test
+`try_catch_finally_gives_the_same_answers_unsplit`, the parser-entry half of
+upstream's two RUN lines. The three decisions the fix adds are observable
+**only** through the parser entry — they measure zero witnesses over all 224
+driver-corpus files, because the `compile_`-gated split at
+`SemanticResolver.cpp:794` means the checker never meets the combined form
+there. Rust mirror commit `2253b7331` (upstream sync Task 4).
+
+**Status:** FIXED. Found after the 2026-08-10 propagation of items 1–11, so it
+is not in that campaign and not in `~/work/hermes-cpp-defects`; it was fixed
+directly upstream instead.
 
 ---
 
 ## Summary table
 
-**Status (2026-08-10): all 11 items fixed upstream and mirrored into the Rust
-port.** **Item 12 was found later (2026-08-12) and is OPEN.** See `doc/superpowers/plans/2026-08-10-cpp-defect-fixes-propagation.md`
-for the propagation plan and each item above for its `Fixed upstream`/
-`Pin flipped` lines.
+**Status (2026-08-13): all 12 items fixed upstream and mirrored into the Rust
+port.** Items 1–11 were propagated on 2026-08-10; item 12 was found later
+(2026-08-12) and closed on 2026-08-13 by Task 4 of the upstream sync, not by
+that campaign. See `doc/superpowers/plans/2026-08-10-cpp-defect-fixes-propagation.md`
+for the propagation plan,
+`doc/superpowers/plans/2026-08-13-upstream-sync-static-h.md` for item 12, and
+each item above for its `Fixed upstream`/`Pin flipped` lines.
 
 | # | Input | Effect | Site | Release behavior | Fixed upstream (in-tree) |
 |---|-------|--------|------|------------------|---------------------------|
@@ -493,7 +523,7 @@ for the propagation plan and each item above for its `Fixed upstream`/
 | 10a | `ScopedFunctionPromoter` dead `newDecls` | dead code | ScopedFunctionPromoter.cpp:174-206 | same | `9232443cf` (`ffcdbdd52`) |
 | 10c | `JSParserImpl-jsx.cpp:493` dead `isa<MemberExpressionNode>` | dead code (was harmless) | jsx.cpp:493 | same | `37520ccef` (`51035e8c2`) |
 | 11 | `match` binding pattern, bad token | abort | JSLexer.h:160 | untested | `550aafe33` (`bfeeb404f`) |
-| 12 | `try/catch/finally` in a function, parser entry | abort | CheckImplicitReturn.cpp:250 | **wrong answer** (finalizer ignored) | **OPEN** (found 2026-08-12) |
+| 12 | `try/catch/finally` in a function, parser entry | abort | CheckImplicitReturn.cpp:250 | **wrong answer** (finalizer ignored) | `5ae5260c8` (`9b5025f89`) |
 
 (Item 10b, `SemanticResolver.cpp:1931-1937`'s `if (false && localEval)`, is
 not part of the 11 fixes and remains open/dead in both languages.)

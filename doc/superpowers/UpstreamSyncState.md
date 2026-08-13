@@ -16,11 +16,12 @@ upstream fixes are ported.
 | **Plus** | the 11 defect fixes cherry-picked 2026-08-10 (below) |
 | **Plus** | `04f1f53a8` (`-Xcompile` + dump `mayReachImplicitReturn`), cherry-picked 2026-08-13 as `1e3806f47`, mirrored in the port by `de917f249` |
 | **Plus** | the three Flow-`match` fixes `653e49c60`/`90f4a3ac6`/`ca6de21ce`, cherry-picked 2026-08-13 as `acf86bf51`/`502bbc7d3`/`be443ad10`, mirrored in the port by the task-3 commit |
+| **Plus** | `5ae5260c8` (try-catch-finally in `CheckImplicitReturn`, `CppDefectsFound.md` item 12), cherry-picked 2026-08-13 as `9b5025f89`, mirrored in the port by `2253b7331` — **from `private/export-D115669841`, not from `static_h`**; see below |
 | **Upstream `static_h` HEAD at time of writing** | `2d3e9018b` (2026-08-13) |
 | **Commits between fork point and upstream HEAD** | 147 (105 of them predate the local `static_h` ref at `5dfe740ad`) |
 
 The port's C++ tree is **not equal to any single upstream commit**: it is the
-fork point plus fifteen cherry-picks. The 132 other commits in
+fork point plus sixteen cherry-picks. The 132 other commits in
 `60b5c73db..origin/static_h` are unported, but all but three are irrelevant to
 the front end (VM, GC, debugger, JSI, build). See the backlog below.
 
@@ -81,13 +82,37 @@ mirroring a variant upstream no longer has:
 
 ---
 
-## Pending: `private/export-D115669841`
+## Ported ahead of `static_h`: `private/export-D115669841`
 
-**`5ae5260c8` — "Handle try-catch-finally in CheckImplicitReturn".** Not yet in
-`origin/static_h`; will land. This is the upstream fix for
-**`CppDefectsFound.md` item 12** (OPEN), which this port found on 2026-08-12:
-`try/catch/finally` inside a function aborts the parser-entry resolver, and in
-Release silently ignores the finalizer.
+**`5ae5260c8` — "Handle try-catch-finally in CheckImplicitReturn".** **DONE
+2026-08-13** (cherry-picked as `9b5025f89`, mirrored by `2253b7331`, upstream
+sync task 4). The upstream fix for **`CppDefectsFound.md` item 12** (now
+FIXED), which this port found on 2026-08-12: `try/catch/finally` inside a
+function aborted the parser-entry resolver, and in Release silently ignored
+the finalizer.
+
+**It was NOT in `origin/static_h` when it was ported** — it was taken from the
+export branch `private/export-D115669841` and will land in `static_h` later.
+That is the one place this tree runs ahead of upstream's mainline, and it
+matters for the next sync: when `5ae5260c8` (or its `static_h` rewrite, likely
+under a different hash) appears in `60b5c73db..origin/static_h`, it is
+**already ported** — compare with `git show <commit> -- lib include | git
+patch-id --stable` against `9b5025f89` before assuming otherwise, exactly as
+the 11-fix table above does, and do not re-apply it.
+
+Rust-side consequence worth recording: this fix is what deleted
+`facade_agreement.rs`'s `PARSER_ENTRY_SKIP`, and the three decisions it adds
+to `CheckImplicitReturn` are observable **only** through the parser entry
+point (`sema_corpus_parser`), never on the compile path — measured, see
+`rust/crates/sema/tests/sema_corpus_parser/MANIFEST.md`.
+
+Task 4 also closed the parser-entry half of the coverage gap the `04f1f53a8`
+row below records for the driver corpus. Same mutation survey, run over
+`sema_corpus_parser`: **14 of `check_implicit_return.rs`'s 21 decisions had
+zero witnesses there** (the 18 of the task-2 survey plus the 3 this fix adds),
+and after importing upstream's lit test and a copy of the authored
+`implicit-return-shapes.js`, **none does**. Parser corpus **14 (6) → 16 (8)**,
+driver corpus **223 (110) → 224 (111)**.
 
 ---
 
