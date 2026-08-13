@@ -96,6 +96,41 @@ upstream* rather than new work.
 
 ---
 
+## Deferred follow-ups
+
+Work this sync surfaces but deliberately does **not** do. Do not let these
+rot — check them at the start of the next sync.
+
+### OPEN — retire `tools/sema-parser-dump`
+
+`04f1f53a8` adds **`-Xcompile`** to the stock driver, so
+`hermesc -Xcompile=false -dump-sema` now produces the parser-mode (i.e.
+`compile = false`) sema dump. That is exactly, and only, what the in-repo
+`tools/sema-parser-dump/` oracle was written to provide (S4a §2.1) — it exists
+because no upstream binary could reach `resolveASTForParser` + `semDump`.
+
+Retiring it would delete a local-only C++ tool we otherwise maintain forever,
+and would let the parser-entry corpus run against a stock upstream binary
+instead of one of our own making — a strictly stronger oracle.
+
+**Deliberately deferred (2026-08-13):** the same commit changes the sema dump
+format, which reds all 232 corpus comparisons until the port matches. Doing
+both at once would mean the dump-format change and an oracle swap are in
+flight together, so a mismatch could not be attributed to either. Land the
+dump-format port first, get the gates green, then swap the oracle as its own
+change.
+
+**When doing it, check:** that `-Xcompile=false` output is byte-identical to
+`sema-parser-dump`'s for all 13 parser-entry corpus files (it should be — both
+call the same two library entries, but the driver wraps them differently:
+`sema-parser-dump` dumps *unconditionally* even when errors were reported,
+whereas the driver historically suppresses the dump on errors, and
+`-Xcompile=false` also refuses `-commonjs`); that the harness's
+per-file `// FLAGS:` mechanism can carry `-Xcompile=false`; and that
+`tools/CMakeLists.txt`, the corpus MANIFESTs, `CONTRIBUTING.md` and
+`CppDefectsFound.md` items 2–3 (whose repros invoke the tool by name) are all
+updated together.
+
 ## Updating this file
 
 When a sync lands: move the ported rows out of the backlog, update "Ported
