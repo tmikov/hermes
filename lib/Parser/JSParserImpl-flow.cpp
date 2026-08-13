@@ -1526,6 +1526,8 @@ bool JSParserImpl::parseMatchObjectPatternPropertiesFlow(
               propStartLoc))
         return false;
       auto optPattern = parseMatchPatternFlow();
+      if (!optPattern)
+        return false;
       prop = setLocation(
           propStartLoc,
           getPrevTokenEndLoc(),
