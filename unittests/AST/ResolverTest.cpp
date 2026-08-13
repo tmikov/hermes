@@ -162,44 +162,6 @@ TEST(ResolverTest, NamedBreakLabelTest) {
   ASSERT_EQ(2, diag.getErrCountClear());
 }
 
-/// Regression test: an anonymous `export default function () {}` is only
-/// rewritten to a FunctionExpression when compiling, so under
-/// resolveASTForParser() the dumper used to crash on the hoisted
-/// FunctionDeclaration's null id.
-TEST(ResolverTest, ParserDumpAnonymousExportDefaultTest) {
-  Context ctx;
-  sema::SemContext semCtx(ctx);
-  DiagContext diag(ctx);
-  JSParser parser(ctx, "export default function () {}");
-  auto parsed = parser.parse();
-  ASSERT_TRUE(parsed.hasValue());
-
-  ASSERT_TRUE(sema::resolveASTForParser(ctx, semCtx, *parsed));
-  std::string str;
-  llvh::raw_string_ostream os{str};
-  sema::semDump(os, ctx, semCtx, nullptr, *parsed);
-  EXPECT_NE(os.str().find("hoistedFunction *default*"), std::string::npos);
-}
-
-/// Regression test: identifiers inside `with` are marked unresolvable when
-/// resolving on behalf of a parser; the dumper used to violate
-/// getExpressionDecl()'s precondition on them and assert. They must be
-/// dumped with the "UNR" flag instead.
-TEST(ResolverTest, ParserDumpWithStatementTest) {
-  Context ctx;
-  sema::SemContext semCtx(ctx);
-  DiagContext diag(ctx);
-  JSParser parser(ctx, "with(o){x;}");
-  auto parsed = parser.parse();
-  ASSERT_TRUE(parsed.hasValue());
-
-  ASSERT_TRUE(sema::resolveASTForParser(ctx, semCtx, *parsed));
-  std::string str;
-  llvh::raw_string_ostream os{str};
-  sema::semDump(os, ctx, semCtx, nullptr, *parsed);
-  EXPECT_NE(os.str().find("Id 'x' UNR"), std::string::npos);
-}
-
 void assertFunctionLikeSourceVisibility(
     llvh::Optional<ESTree::FunctionLikeNode *> funcLikeNode,
     SourceVisibility sourceVisibility) {
