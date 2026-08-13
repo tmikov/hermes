@@ -122,13 +122,26 @@ The divergence check compares `lib include` only, so it never looked at the
 lit test `dee8c5ce0` added. Upstream's version of
 `test/Sema/class-field-class-expr.js` is 73 lines to our 55: besides `x` and
 `static y` it also declares `#px = class {}` and `static #py = class {}`,
-i.e. it is the only coverage of the **`visit(ClassPrivatePropertyNode *)`**
-site. Ours exercises only `visit(ClassPropertyNode *)`, so the private-field
-half of the fix has no lit or corpus pin on either side. Importing upstream's
-file (and re-importing it into `sema_corpus/`, where the MANIFEST records it
-as a verbatim copy) would close that. Not done in task 1 because it changes
-corpus *content* and the task's own change provably changes no dump bytes,
-which is what made task 1 auditable.
+i.e. it is a **class expression inside a *private* field initializer**, which
+nothing else anywhere exercises for **scope parenting**. (To be precise: the
+`visit(ClassPrivatePropertyNode *)` `_value` branch itself *is* covered —
+`sema_corpus/private-members.js`, `field-value-arguments-error.js`,
+`static-blocks.js`, lit `test/Sema/private-names.js`. What has no pin on
+either side is that site's half of `dee8c5ce0`.)
+
+**This is not hypothetical.** The task-1 reviewer deleted the `cur_scope`
+switch from *only* `visit_class_private_property` in the Rust port: the entire
+`hermes-sema` suite — including the 219 + 13 differential — stayed green,
+while upstream's 73-line input made the mutated port panic at
+`dump_context.rs:251` with `not all scopes were visited, left: 2, right: 3`
+(the defect-4 signature). So that half of the fix can be removed today and
+nothing notices.
+
+Importing is free: the unmutated Rust `sema-dump` output on that input is
+byte-identical to our `hermesc`'s, which is byte-identical to upstream's own
+CHECK lines — a pure coverage gain with no expectation churn. Not done in
+task 1 only because it changes corpus *content*, and task 1's auditability
+rested on provably changing no dump bytes. **Do it first in task 2.**
 
 ### OPEN — retire `tools/sema-parser-dump`
 
