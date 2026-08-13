@@ -292,6 +292,8 @@ class SemanticResolver
   void visit(ESTree::TypeParameterInstantiationNode *node);
   void visit(ESTree::TypeCastExpressionNode *node);
   void visit(ESTree::AsExpressionNode *node);
+  void visit(ESTree::MatchStatementNode *node);
+  void visit(ESTree::MatchExpressionNode *node);
   void visit(
       ESTree::ComponentDeclarationNode *componentDecl,
       ESTree::Node *parent);

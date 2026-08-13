@@ -1612,6 +1612,21 @@ void SemanticResolver::visit(AsExpressionNode *node) {
   visitESTreeNode(*this, node->_expression, node);
 }
 
+void SemanticResolver::visit(MatchStatementNode *node) {
+  // IRGen cannot lower a match, so reject it here rather than let it reach the
+  // backend and be reported as an unrecognized statement. Parser mode still
+  // resolves it, since an embedder wants the resolved AST.
+  if (compile_)
+    sm_.error(node->getSourceRange(), "match statements are unsupported");
+  visitESTreeChildren(*this, node);
+}
+
+void SemanticResolver::visit(MatchExpressionNode *node) {
+  if (compile_)
+    sm_.error(node->getSourceRange(), "match expressions are unsupported");
+  visitESTreeChildren(*this, node);
+}
+
 /// Process a component declaration by creating a new FunctionContext.
 void SemanticResolver::visit(
     ComponentDeclarationNode *componentDecl,
