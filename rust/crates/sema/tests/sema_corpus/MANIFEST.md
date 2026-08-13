@@ -2457,7 +2457,10 @@ Upstream's own copy of the file is 73 lines: `dee8c5ce0` added `#px = class
 {}` and `static #py = class {}` in the same commit. That version was pulled
 in verbatim (`git show dee8c5ce0:test/Sema/class-field-class-expr.js`) over
 both the lit file and this corpus copy, so the MANIFEST's "verbatim copy of
-the lit file" claim still holds.
+the lit file" claim still holds. *(It stopped holding one commit later, when
+the cherry-pick's `update-lit` rewrote the lit file's `CHECK:` lines — along
+with 20 other corpus copies'. Re-established in the review round; see "the
+verbatim invariant" below.)*
 
 Oracle-verified before importing, all three channels, exactly as the harness
 compares them:
@@ -2564,3 +2567,156 @@ by Task 4 above), so it is a clean measurement.
 
 Corpus size **219 unchanged**; oracle successes **109 unchanged**. Nothing was
 imported or removed by this task; only the dump format moved.
+
+## Task-2 review round: pin the unwitnessed `CheckImplicitReturn` branches
+
+Task 2 made `mayReachImplicitReturn` visible in the dump and found the port
+already agreed with C++ on all 232 corpus files. The review then asked the
+obvious follow-up question — *which of the analysis's decisions does this
+gate actually pin?* — and the answer was: **not many**.
+
+### The survey
+
+Every decision in `check_implicit_return.rs` was deleted or inverted in turn,
+one at a time, and the corpora re-run. (Because the clean port matches the
+oracle byte-for-byte everywhere, "differs from the oracle" and "differs from
+the clean port" are the same question, so the survey only needs `sema-dump`
+runs against a cached clean baseline.) `M18` is a control: it was already
+known to be caught.
+
+| # | Decision deleted / inverted | Before | After |
+|---|---|---|---|
+| M1 | if-without-else: the `kNextStatementLabel` insert | **0** | 1 |
+| M2 | if-with-else: the alternate's target labels | **0** | 1 |
+| M3 | do-while's `must_execute = true` | **0** | 1 |
+| M4 | labeled statement's `must_execute = true` | **0** | 1 |
+| M5 | loop: break-to-own-label becomes a continuation | **0** | 1 |
+| M6 | loop: the next-statement label insert | 1 | 2 |
+| M7 | statement list: the fall-through erase | 38 | 38 |
+| M8 | statement list: the ran-off-the-end label | 19 | 20 |
+| M9 | statement list: stop scanning after a terminator | 56 | 57 |
+| M10 | switch: `found_default` | **0** | 1 |
+| M11 | switch: `found_explicit_break` | **0** | 1 |
+| M12 | switch: the past-the-switch label insert | **0** | 1 |
+| M13 | switch: the per-case fall-through erase | **0** | 1 |
+| M14 | try/catch: the catch clause's target labels | **0** | 1 |
+| M15 | try/finally: the terminating-finally shortcut | **0** | 1 |
+| M16 | try/finally: the terminating-try shortcut | 1 | 1 |
+| M17 | `continue` is not terminating | **0** | 1 |
+| M18 | *(control)* `return` is terminating | 55 | 56 |
+
+**Eleven of eighteen decisions had zero witnesses in either corpus.** The
+`M1` row is the one the reviewer found by hand: with that insert deleted the
+port reports `noImplicitReturn` for `function f(x) { if (x) return 1; }` —
+wrong, and confirmed wrong against the oracle — and **both differentials
+stayed green**. The task-2 null result still stands (the unit tests catch M1,
+and the 1232-file wide sweep catches it on 15 `test/hermes` files), but the
+standing gate did not pin it.
+
+### The new file: `implicit-return-shapes.js`
+
+Authored, not imported. Nothing minimal existed to import: the only files in
+the entire `test/` tree that witness these branches are large `test/hermes`
+runtime programs that contain the shapes incidentally (`proxy.js`, `set.js`,
+`reflect.js`, `TypedArray.js`, `regexp_escapes.js`, the `intl/` files, …),
+and upstream's own `test/Sema/flow/implicit-return.js` witnesses **none** of
+them — it is `--typed` Flow and every function in it returns explicitly on
+every path.
+
+Eleven functions, one per unwitnessed decision, each chosen so that deleting
+its decision flips that function's token. The oracle's answers (which the
+port reproduces byte-for-byte):
+
+| Function | Oracle | Pins |
+|---|---|---|
+| `ifNoElse` | `mayReachImplicitReturn` | M1 |
+| `elseBreakLabel` | `mayReachImplicitReturn` | M2 |
+| `doWhileRunsOnce` | `noImplicitReturn` | M3 |
+| `labeledRuns` | `noImplicitReturn` | M4 |
+| `breakOutOfLabel` | `mayReachImplicitReturn` | M5 |
+| `switchDefault` | `noImplicitReturn` | M10 |
+| `switchBreak` | `mayReachImplicitReturn` | M11, M12 |
+| `switchFallthrough` | `noImplicitReturn` | M13 |
+| `tryCatchFallsOut` | `mayReachImplicitReturn` | M14 |
+| `tryFinallyReturns` | `noImplicitReturn` | M15 |
+| `continueDoWhile` | `mayReachImplicitReturn` | M17 |
+
+Six `mayReachImplicitReturn` and five `noImplicitReturn`, so the file cannot
+be satisfied by a dumper biased either way.
+
+Oracle-verified on all three channels before it was counted, exactly as the
+harness invokes them:
+
+```
+hermesc -dump-sema  sema_corpus/implicit-return-shapes.js -> exit 0, stdout 10288 B, stderr 0 B
+sema-dump           sema_corpus/implicit-return-shapes.js -> exit 0, stdout 10288 B, stderr 0 B
+cmp: stdout identical, stderr identical, exit identical
+```
+
+### Proof that it closes the gap
+
+With the reviewer's mutation re-applied (the if-without-else insert deleted,
+nothing else):
+
+```
+sema dump mismatch (stdout) for .../sema_corpus/implicit-return-shapes.js
+test result: FAILED. 2 passed; 1 failed
+```
+
+Restored: **220 (110) / 13 (5)**. After the survey the "After" column above
+has **no zeros left** — every decision in the analysis is now pinned by the
+standing gate.
+
+### The verbatim invariant, broken by `update-lit` and re-established
+
+`update-lit` in the `04f1f53a8` cherry-pick rewrote the `CHECK:` lines of the
+lit files, which silently falsified this MANIFEST's "**verbatim** copy of
+`test/Sema/<name>`" claim for **21 corpus files** — every one of them
+differing from its lit twin *only* in `Func`/`StaticBlock` `CHECK` lines:
+
+```
+arguments-arg-let  arguments-var  assign-eval-loose  await-arrow
+catch-block  catch-block-destr  class-children  class-field-class-expr
+field-init-bindings  function-redeclaration  let-arguments-in-arrow
+optional-chaining  private-names  regress-function-promotion-decl
+restricted-global-nested  restricted-global-var
+static-initialization-block  super-in-arrow  super-in-subclass
+valid-super-references  var-scope-redeclaration
+```
+
+All 21 were re-copied from their lit twins and are byte-identical again. The
+`CHECK:` lines are inert here (the harness only reads the JS), and this was
+verified rather than assumed: every corpus file's `sema-dump` stdout, stderr
+and exit status was captured before and after the refresh and **not one of
+the 220 moved** — expected, since only comment text changed and no line was
+added or removed.
+
+**Standing note for the next dump-format change.** Any commit that runs
+`update-lit` breaks this invariant again for every corpus file copied from a
+`test/Sema` lit file that dumps sema. Re-establish it in the same commit, and
+check with:
+
+```bash
+for f in rust/crates/sema/tests/sema_corpus/*.js; do
+  t=test/Sema/$(basename "$f")
+  [ -f "$t" ] && ! cmp -s "$f" "$t" && echo "diverged: $(basename "$f")"
+done
+```
+
+(Files deliberately *not* verbatim — `jsx-error-attr-member.js`, whose lit
+`RUN:`/`CHECK:` lines were replaced by a header comment and a `// FLAGS:`
+line, and the name collisions with same-named files under `test/hermes`,
+`test/Parser` and `test/Sema/flow` — are unaffected and must not be
+"refreshed".)
+
+### Gate
+
+Corpus size **219 → 220** (+1, `implicit-return-shapes.js`); oracle successes
+**109 → 110** (+1 — it resolves clean, exit 0). Arithmetic: 219 + 1 = 220;
+109 + 1 = 110. The parser corpus is untouched at 13 (5).
+
+```
+sema differential (tests/sema_corpus):        220 corpus files matched (110 succeeded on the oracle)
+sema differential (tests/sema_corpus_parser):  13 corpus files matched (5 succeeded on the oracle)
+test result: ok. 3 passed; 0 failed
+```

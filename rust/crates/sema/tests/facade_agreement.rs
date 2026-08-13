@@ -389,10 +389,10 @@ fn sweep(dir: &str, parser_entry: bool) -> usize {
 #[test]
 fn agrees_on_the_compile_path() {
     let compared = on_big_stack(|| sweep("sema_corpus", false));
-    // 219 corpus files, minus the one selecting `-enable-eval=false`, which
+    // 220 corpus files, minus the one selecting `-enable-eval=false`, which
     // `ParseFlags` cannot express. A drop here means the sweep silently
     // stopped covering files.
-    assert_eq!(compared, 218, "corpus size changed");
+    assert_eq!(compared, 219, "corpus size changed");
 }
 
 /// `resolve_for_parser` == `resolve_ast_for_parser` wired by hand, over the
@@ -410,7 +410,7 @@ fn agrees_on_the_parser_path() {
 #[test]
 fn agrees_on_both_paths_over_both_corpora() {
     assert_eq!(on_big_stack(|| sweep("sema_corpus_parser", false)), 13);
-    assert_eq!(on_big_stack(|| sweep("sema_corpus", true)), 217);
+    assert_eq!(on_big_stack(|| sweep("sema_corpus", true)), 218);
 }
 
 /// Non-vacuity: the byte comparison the sweeps make can tell the two entry
@@ -451,7 +451,7 @@ fn discriminates_body() {
             std_globals_differs += 1;
         }
     }
-    assert_eq!(total, 217);
+    assert_eq!(total, 218);
     // Most files differ between the entry points (the compile path folds
     // constants, rewrites arrows, and rejects what it cannot compile).
     assert!(
