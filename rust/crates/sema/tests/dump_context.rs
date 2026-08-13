@@ -102,11 +102,11 @@ fn prints_global_function_scope_decls_and_nested_strict_function() {
 
     let expected = "\
 SemContext
-Func loose
+Func loose mayReachImplicitReturn
     Scope %s.1
         Decl %d.1 'x' Let
         Decl %d.2 'f' GlobalProperty
-    Func strict
+    Func strict mayReachImplicitReturn
         Scope %s.2
             hoistedFunction g
 ";

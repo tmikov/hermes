@@ -228,6 +228,22 @@ impl SemContextDumper {
             },
         );
         push_str(out, if info.strict { "strict" } else { "loose" });
+        // Upstream `04f1f53a8` ("Add -Xcompile and dump
+        // mayReachImplicitReturn"):
+        //   << (f.mayReachImplicitReturn ? " mayReachImplicitReturn"
+        //                                : " noImplicitReturn")
+        // Both cases are spelled out on purpose: the flag DEFAULTS to true
+        // and `CheckImplicitReturn` is skipped when resolution already
+        // reported an error, so printing nothing for the true case would
+        // hide the difference between "computed true" and "not computed".
+        push_str(
+            out,
+            if info.may_reach_implicit_return {
+                " mayReachImplicitReturn"
+            } else {
+                " noImplicitReturn"
+            },
+        );
         out.push(b'\n');
 
         let scopes = info.get_scopes();
@@ -497,7 +513,7 @@ mod tests {
 
         let expected = "\
 SemContext
-Func loose
+Func loose mayReachImplicitReturn
     Scope %s.1
         Decl %d.1 'x' Let /* annotated 0 */
 ";
@@ -587,7 +603,7 @@ Func loose
         dumper.print_sem_context(&mut out, &gc, &sc, None);
         let expected = "\
 SemContext
-Func loose
+Func loose mayReachImplicitReturn
     Scope %s.1
         Decl %d.1 'arguments' Var Arguments
 ";
@@ -615,7 +631,7 @@ Func loose
         let mut dumper = SemContextDumper::new();
         let mut out = Vec::new();
         dumper.print_sem_context(&mut out, &gc, &sc, None);
-        assert_eq!(out, b"SemContext\nStaticBlock strict\n    Scope %s.1\n");
+        assert_eq!(out, b"SemContext\nStaticBlock strict mayReachImplicitReturn\n    Scope %s.1\n");
     }
 
     /// The finding this test locks in: a decl whose name is WTF-8 with a
@@ -666,7 +682,8 @@ Func loose
         let mut out2 = Vec::new();
         dumper.print_sem_context(&mut out2, &gc, &sc, None);
         let mut expected2 =
-            b"SemContext\nFunc loose\n    Scope %s.1\n        Decl %d.1 '"
+            b"SemContext\nFunc loose mayReachImplicitReturn\n    \
+              Scope %s.1\n        Decl %d.1 '"
                 .to_vec();
         expected2.extend_from_slice(&lone_surrogate_name);
         expected2.extend_from_slice(b"' Let\n");

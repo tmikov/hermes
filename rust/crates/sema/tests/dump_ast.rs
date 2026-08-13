@@ -110,7 +110,7 @@ fn linearized_binary_1_plus_2_minus_3() {
 
     let expected = "\
 SemContext
-Func loose
+Func loose mayReachImplicitReturn
     Scope %s.1
 
 BinaryExpression
@@ -142,7 +142,7 @@ fn non_linearized_binary_operator_recurses_normally() {
 
     let expected = "\
 SemContext
-Func loose
+Func loose mayReachImplicitReturn
     Scope %s.1
 
 BinaryExpression
@@ -175,7 +175,7 @@ fn sem_dump_empty_program_tail() {
 
     let expected = "\
 SemContext
-Func loose
+Func loose mayReachImplicitReturn
     Scope %s.1
 
 Program Scope %s.1
@@ -212,7 +212,7 @@ fn identifier_decl_equals_expr_prints_d_e_colon() {
 
     let expected = "\
 SemContext
-Func loose
+Func loose mayReachImplicitReturn
     Scope %s.1
         Decl %d.1 'x' Let
 
@@ -258,7 +258,7 @@ fn identifier_decl_differs_from_expr_prints_d_and_e() {
 
     let expected = "\
 SemContext
-Func loose
+Func loose mayReachImplicitReturn
     Scope %s.1
         Decl %d.1 'a' Let
         Decl %d.2 'b' Let
@@ -294,7 +294,7 @@ fn identifier_decl_only_prints_d_only() {
 
     let expected = "\
 SemContext
-Func loose
+Func loose mayReachImplicitReturn
     Scope %s.1
         Decl %d.1 'onlyDecl' Let
 
@@ -324,7 +324,7 @@ fn identifier_unresolvable_prints_unr_suffix_only() {
 
     let expected = "\
 SemContext
-Func loose
+Func loose mayReachImplicitReturn
     Scope %s.1
 
 Id 'u' UNR
@@ -360,7 +360,7 @@ fn type_annotation_child_is_skipped_entirely() {
 
     let expected = "\
 SemContext
-Func loose
+Func loose mayReachImplicitReturn
     Scope %s.1
 
 Id 't'
