@@ -2271,7 +2271,9 @@ harness compares them (`hermesc -dump-sema f` vs `sema-dump f`):
   exit 2 on both.
 - `class-field-class-expr.js`: stdout identical (the full 97-line dump,
   including `ClassExpression Scope %s.4` / `%s.7`), stderr empty on both,
-  exit 0 on both.
+  exit 0 on both. *(Figures as imported. The file was widened with two
+  private fields by the upstream sync — see "Upstream sync task 2 step 0" at
+  the end of this file; the dump is 113 lines now.)*
 
 ### Port-side changes
 
@@ -2440,3 +2442,56 @@ sema differential (tests/sema_corpus): 219 corpus files matched (109 succeeded o
 sema differential (tests/sema_corpus_parser): 13 corpus files matched (5 succeeded on the oracle)
 test result: ok. 3 passed; 0 failed
 ```
+
+## Upstream sync task 2 step 0: widen `class-field-class-expr.js`
+
+The task-1 review found a hole in this corpus file. `dee8c5ce0`'s fix has two
+halves — `visit(ClassPropertyNode *)` and `visit(ClassPrivatePropertyNode *)`
+— and the file as first imported here (55 lines, `x = class {}` and
+`static y = class {}` only) pins the first half but not the second: deleting
+the `cur_scope` save/restore from `visit_class_private_property` in
+`resolver/classes.rs` and leaving `visit_class_property` alone left all 219
++ 13 differentials green.
+
+Upstream's own copy of the file is 73 lines: `dee8c5ce0` added `#px = class
+{}` and `static #py = class {}` in the same commit. That version was pulled
+in verbatim (`git show dee8c5ce0:test/Sema/class-field-class-expr.js`) over
+both the lit file and this corpus copy, so the MANIFEST's "verbatim copy of
+the lit file" claim still holds.
+
+Oracle-verified before importing, all three channels, exactly as the harness
+compares them:
+
+```
+hermesc -dump-sema sema_corpus/class-field-class-expr.js -> exit 0, stdout 113 lines
+sema-dump          sema_corpus/class-field-class-expr.js -> exit 0, stdout 113 lines
+cmp: stdout identical, stderr empty on both, exit 0 on both
+```
+
+The lit file's `CHECK:` lines are upstream's, unmodified, and
+`LIT_FILTER=class-field-class-expr check-hermes` passes against this tree's
+`shermes` — upstream's expectations and ours agree on this input.
+
+### Non-degeneracy re-measured (the point of the widening)
+
+With the `cur_scope` save/restore deleted from `visit_class_private_property`
+ONLY (`visit_class_property` untouched):
+
+```
+sema-dump sema_corpus/class-field-class-expr.js
+  thread 'main' panicked at crates/sema/src/dump_context.rs:251:9:
+  assertion `left == right` failed: not all scopes were visited
+    left: 2
+   right: 3
+  exit 101
+sema_differential_s0: stdout mismatch for class-field-class-expr.js  -> FAILED
+```
+
+and, on the pre-widening 55-line file, the same mutant exits **0** with a
+clean dump. So the widening is exactly what closes the gap. Restored, the
+gates are back to 219 (109) / 13 (5).
+
+### Gate
+
+Corpus size **219 unchanged** (the file was replaced, not added); oracle
+successes **109 unchanged** (it exited 0 before and after).

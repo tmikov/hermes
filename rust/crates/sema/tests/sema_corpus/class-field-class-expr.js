@@ -16,6 +16,8 @@
 class C {
   x = class {};
   static y = class {};
+  #px = class {};
+  static #py = class {};
 }
 
 // Auto-generated content below. Please do not modify manually.
@@ -26,20 +28,28 @@ class C {
 // CHECK-NEXT:        Decl %d.1 'C' Class
 // CHECK-NEXT:        Scope %s.2
 // CHECK-NEXT:            Decl %d.2 'C' ClassExprName
+// CHECK-NEXT:            Decl %d.3 '#px' PrivateField
+// CHECK-NEXT:            Decl %d.4 '#py' PrivateField
 // CHECK-NEXT:    Func strict
 // CHECK-NEXT:        Scope %s.3
-// CHECK-NEXT:            Decl %d.3 'arguments' Var Arguments
+// CHECK-NEXT:            Decl %d.5 'arguments' Var Arguments
 // CHECK-NEXT:            Scope %s.4
-// CHECK-NEXT:        Func strict
 // CHECK-NEXT:            Scope %s.5
-// CHECK-NEXT:    Func strict
-// CHECK-NEXT:        Scope %s.6
-// CHECK-NEXT:            Decl %d.4 'arguments' Var Arguments
-// CHECK-NEXT:            Scope %s.7
 // CHECK-NEXT:        Func strict
-// CHECK-NEXT:            Scope %s.8
+// CHECK-NEXT:            Scope %s.6
+// CHECK-NEXT:        Func strict
+// CHECK-NEXT:            Scope %s.7
 // CHECK-NEXT:    Func strict
-// CHECK-NEXT:        Scope %s.9
+// CHECK-NEXT:        Scope %s.8
+// CHECK-NEXT:            Decl %d.6 'arguments' Var Arguments
+// CHECK-NEXT:            Scope %s.9
+// CHECK-NEXT:            Scope %s.10
+// CHECK-NEXT:        Func strict
+// CHECK-NEXT:            Scope %s.11
+// CHECK-NEXT:        Func strict
+// CHECK-NEXT:            Scope %s.12
+// CHECK-NEXT:    Func strict
+// CHECK-NEXT:        Scope %s.13
 
 // CHECK:Program Scope %s.1
 // CHECK-NEXT:    ClassDeclaration Scope %s.2
@@ -51,5 +61,13 @@ class C {
 // CHECK-NEXT:                    ClassBody
 // CHECK-NEXT:            ClassProperty
 // CHECK-NEXT:                Id 'y'
-// CHECK-NEXT:                ClassExpression Scope %s.7
+// CHECK-NEXT:                ClassExpression Scope %s.9
+// CHECK-NEXT:                    ClassBody
+// CHECK-NEXT:            ClassPrivateProperty
+// CHECK-NEXT:                Id 'px' [D:E:%d.3 '#px']
+// CHECK-NEXT:                ClassExpression Scope %s.5
+// CHECK-NEXT:                    ClassBody
+// CHECK-NEXT:            ClassPrivateProperty
+// CHECK-NEXT:                Id 'py' [D:E:%d.4 '#py']
+// CHECK-NEXT:                ClassExpression Scope %s.10
 // CHECK-NEXT:                    ClassBody
