@@ -36,6 +36,28 @@ use hermes_support::HeapSize;
 /// ID which indicates a `StorageEntry` is free.
 const FREE_ENTRY: u32 = 0;
 
+/// Recover a pointer to the struct which contains `field`, where `offset` is
+/// the byte offset of that field inside the containing struct (the C
+/// `container_of` idiom).
+///
+/// The arithmetic is deliberately in *bytes*: `field` is a typed pointer, so
+/// the plain `offset`/`sub` methods would step by `size_of::<Field>()` and
+/// land somewhere far outside the object whenever the field is not at offset
+/// zero. Nothing about a `repr(Rust)` struct guarantees a particular field
+/// order, so byte stride is the only correct stride here.
+///
+/// # Safety
+///
+/// `field` must point to the field of a live `Outer` whose byte offset is
+/// `offset` (i.e. `offset` came from `core::mem::offset_of!(Outer, <field>)`).
+#[inline]
+unsafe fn container_of<Outer, Field>(field: *const Field, offset: usize) -> *const Outer {
+    // SAFETY: by the contract above, `field` is `offset` bytes into a live
+    // `Outer`, so stepping back `offset` *bytes* stays inside that same
+    // allocation and yields its base address.
+    unsafe { field.byte_sub(offset).cast::<Outer>() }
+}
+
 /// A single entry in the heap.
 #[derive(Debug)]
 struct StorageEntry<'ctx> {
@@ -54,10 +76,19 @@ struct StorageEntry<'ctx> {
 }
 
 impl<'ctx> StorageEntry<'ctx> {
+    /// Recover the `StorageEntry` which contains `node`.
+    ///
+    /// # Safety
+    ///
+    /// `node` must be a node allocated in a `Context` (i.e. it must be the
+    /// `inner` field of a live `StorageEntry`), which is true of every node
+    /// reference handed out by the arena.
     unsafe fn from_node<'a>(node: &'a Node<'a>) -> &'a StorageEntry<'a> {
-        let inner_offset = core::mem::offset_of!(StorageEntry, inner) as isize;
-        let inner = node as *const Node<'a>;
-        &*(inner.offset(-inner_offset) as *const StorageEntry<'a>)
+        let inner_offset = core::mem::offset_of!(StorageEntry, inner);
+        // SAFETY: by the contract above `node` is the `inner` field of a live
+        // `StorageEntry`, so `container_of` yields that entry, which outlives
+        // `'a` (entries never move once pushed into the deque).
+        unsafe { &*container_of::<StorageEntry<'a>, Node<'a>>(node, inner_offset) }
     }
 
     #[inline]
@@ -654,6 +685,42 @@ impl<'ast> Context<'ast> {
         result += free_list_elements.heap_size();
         result
     }
+
+    /// Leak everything an outstanding [`NodeRc`] still touches after this
+    /// `Context` is gone, and return the leaked node storage.
+    ///
+    /// Called only from the `Drop` guard's failure path. A `NodeRc` that
+    /// outlives its `Context` is a caller bug which the guard reports by
+    /// panicking, but the report is worthless if the handle's own `drop` —
+    /// which runs during the unwind, or after a `catch_unwind` — writes into
+    /// freed memory. A handle reaches exactly two places: the `count` cell in
+    /// its `StorageEntry` (inside the node deque) and the `NodeRcCounter`
+    /// box (also read by `NodeRc::node` for its context-id check). Both are
+    /// leaked here, so those accesses stay valid for the life of the process.
+    /// Nothing else in the arena is reachable from a `NodeRc` once the
+    /// `Context` is gone, so the rest is freed normally.
+    fn leak_noderc_targets<'s>(&'s mut self) -> &'s Deque<StorageEntry<'ast>> {
+        // SAFETY: `drop` holds `&mut self`, so no `GCLock` and no other
+        // borrow of the deque exists; the field is left holding an empty
+        // deque for the drop glue to dispose of.
+        let nodes = std::mem::take(unsafe { &mut *self.nodes.get() });
+        // The `StorageEntry`s live in the deque's chunks, which this moves
+        // (as a `Vec<Vec<_>>` header) but does not reallocate, so entry
+        // addresses — the ones the outstanding handles hold — are unchanged.
+        let leaked_nodes: &'s Deque<StorageEntry<'ast>> = Box::leak(Box::new(nodes));
+
+        // Replace the counter with a fresh box and forget the old one, so the
+        // address every outstanding handle holds stays allocated. `ctx_id` is
+        // preserved in the leaked copy, which keeps `NodeRc::node`'s
+        // "allocated in context N" assertion honest afterwards.
+        let fresh = Pin::new(Box::new(NodeRcCounter {
+            ctx_id: self.id,
+            count: Cell::new(0),
+        }));
+        std::mem::forget(std::mem::replace(&mut self.noderc_count, fresh));
+
+        leaked_nodes
+    }
 }
 
 impl HeapSize for Context<'_> {
@@ -682,13 +749,22 @@ impl Drop for Context<'_> {
     /// # Panics
     ///
     /// Will panic if there are any `NodeRc`s stored when this `Context` is dropped.
+    ///
+    /// The panic is the *only* effect: before panicking, the node storage and
+    /// the `NodeRc` counter are leaked (`Context::leak_noderc_targets`), so
+    /// the outstanding handles — which are dropped during the ensuing
+    /// unwind, or later still if the panic is caught — decrement refcounts in
+    /// memory that is still valid. Leaking the arena is the price of keeping a
+    /// caller's bug a panic instead of a use-after-free.
     fn drop(&mut self) {
         if self.noderc_count.count.get() > 0 {
+            // Do this first: everything below can panic, and after the leak
+            // no unwind path can free what the outstanding `NodeRc`s touch.
+            let leaked_nodes = self.leak_noderc_targets();
             #[cfg(debug_assertions)]
             {
                 // In debug mode, provide more information on which node was leaked.
-                let nodes = unsafe { &*self.nodes.get() };
-                for entry in nodes.iter() {
+                for entry in leaked_nodes.iter() {
                     assert!(
                         entry.count.get() == 0,
                         "NodeRc must not outlive Context: {:#?}\n",
@@ -696,6 +772,8 @@ impl Drop for Context<'_> {
                     );
                 }
             }
+            #[cfg(not(debug_assertions))]
+            let _ = leaked_nodes;
             // In release mode, just panic immediately.
             panic!("NodeRc must not outlive Context");
         }
@@ -892,6 +970,12 @@ impl<'gc> From<&'gc Node<'gc>> for NodePtr<'gc> {
 ///
 /// It can be used to keep references to `Node`s outside of the lifetime of a [`GCLock`],
 /// but the only way to derefence and inspect the `Node` is to use a `GCLock`.
+///
+/// A `NodeRc` must not outlive its `Context`: dropping a `Context` while one
+/// is alive panics (see [`Context`]'s `Drop`). Should that happen anyway, the
+/// handle itself stays safe to drop and to clone — the guard leaks the storage
+/// it points at rather than freeing it — but it can no longer be dereferenced,
+/// since [`NodeRc::node`] needs a `GCLock` on the context it came from.
 #[derive(Debug, Eq)]
 pub struct NodeRc {
     /// The `NodeRcCounter` counting for the `Context` to which this belongs.
@@ -948,12 +1032,10 @@ impl Clone for NodeRc {
 impl NodeRc {
     /// Turn a node reference into a `NodeRc` for storage outside `GCLock`.
     pub fn from_node<'gc>(gc: &'gc GCLock, node: &'gc Node<'gc>) -> NodeRc {
-        let inner_offset = core::mem::offset_of!(StorageEntry, inner) as isize;
-        let inner = node as *const Node<'gc>;
-        unsafe {
-            let entry: &mut StorageEntry = &mut *(inner.offset(-inner_offset) as *mut StorageEntry);
-            Self::from_entry(gc, entry)
-        }
+        // SAFETY: `node` was handed out by the arena, so it is the `inner`
+        // field of a live `StorageEntry` — the contract of
+        // `StorageEntry::from_node`.
+        unsafe { Self::from_entry(gc, StorageEntry::from_node(node)) }
     }
 
     /// Return the actual `Node` that `self` points to.
@@ -1002,6 +1084,8 @@ mod tests {
     use crate::node::*;
     use crate::node_child::NodeMetadata;
     use std::cell::Cell;
+    use std::cell::RefCell;
+    use std::panic::AssertUnwindSafe;
 
     fn dummy_range() -> hermes_support::location::SMRange {
         let l = hermes_support::location::SMLoc {
@@ -1106,6 +1190,123 @@ mod tests {
         assert!(matches!(node, Node::NumericLiteral(nl) if nl.value.get() == 42.0));
         // Drop rc while the lock is held so the Context doesn't panic on drop.
         drop(rc);
+    }
+
+    /// The `StorageEntry` recovered from a node reference must be exactly the
+    /// entry the allocation produced — for the node itself and for the
+    /// `NodeRc` built from it.
+    #[test]
+    fn storage_entry_recovery_matches_allocation() {
+        let mut ctx = Context::new();
+        let rc = {
+            let gc = GCLock::new(&mut ctx);
+            let n = num(&gc, 7.0);
+
+            // The entry the arena actually allocated: the last one pushed.
+            let nodes = unsafe { &*gc.ctx().nodes.get() };
+            let allocated = nodes.iter().last().expect("one entry") as *const StorageEntry as usize;
+
+            let entry = unsafe { StorageEntry::from_node(n) };
+            assert_eq!(
+                entry as *const StorageEntry as usize, allocated,
+                "StorageEntry::from_node must recover the allocated entry"
+            );
+            assert!(
+                std::ptr::eq(&entry.inner, n),
+                "recovered entry holds the node"
+            );
+            assert_eq!(entry.ctx_id_markbit.get() & !(1 << 31), gc.ctx().id);
+
+            let rc = NodeRc::from_node(&gc, n);
+            assert_eq!(
+                rc.entry.as_ptr() as usize,
+                allocated,
+                "NodeRc::from_node must point at the allocated entry"
+            );
+            assert_eq!(entry.count.get(), 1, "the NodeRc took the entry's refcount");
+            rc
+        };
+        let gc2 = GCLock::new(&mut ctx);
+        assert!(matches!(rc.node(&gc2), Node::NumericLiteral(n) if n.value.get() == 7.0));
+        drop(rc);
+    }
+
+    /// `container_of` must step back in *bytes*. `StorageEntry` is
+    /// `repr(Rust)` and happens to place `inner` at offset 0 today, which
+    /// hides the difference; this stand-in forces a non-zero offset, which is
+    /// exactly what a field reorder would produce.
+    #[test]
+    fn container_of_is_byte_stride() {
+        #[repr(C)]
+        struct Outer {
+            ctx_id_markbit: Cell<u32>,
+            count: Cell<u32>,
+            inner: [u64; 4],
+        }
+        let outer = Outer {
+            ctx_id_markbit: Cell::new(1),
+            count: Cell::new(0),
+            inner: [7; 4],
+        };
+        let offset = core::mem::offset_of!(Outer, inner);
+        assert_ne!(offset, 0, "the stand-in must exercise a non-zero offset");
+        let recovered = unsafe { container_of::<Outer, [u64; 4]>(&outer.inner, offset) };
+        assert_eq!(
+            recovered as usize, &outer as *const Outer as usize,
+            "container_of must step back in bytes, not in units of the field type"
+        );
+    }
+
+    /// Build a `NodeRc`, park it in `escaped`, then drop its `Context` out
+    /// from under it — which panics on the way out, by design.
+    fn orphan_noderc(escaped: &RefCell<Option<NodeRc>>) {
+        let mut ctx = Context::new();
+        {
+            let gc = GCLock::new(&mut ctx);
+            *escaped.borrow_mut() = Some(NodeRc::from_node(&gc, num(&gc, 5.0)));
+        }
+        drop(ctx); // panics: a NodeRc is still alive
+    }
+
+    /// The documented guard: dropping a `Context` with a live `NodeRc` panics.
+    /// `escaped` is a local of *this* function, so the orphaned handle is
+    /// dropped by the unwind the guard starts — which is the first place the
+    /// old code went off the rails (SIGSEGV, since a deque chunk is large
+    /// enough to be unmapped on free).
+    #[test]
+    #[should_panic(expected = "NodeRc must not outlive Context")]
+    fn noderc_outliving_context_panics() {
+        let escaped = RefCell::new(None);
+        orphan_noderc(&escaped);
+    }
+
+    /// ...and the panic is survivable, which is what a panic-catching host
+    /// (test harness, server) depends on: here the handle outlives the caught
+    /// panic and is cloned and dropped afterwards, touching both the entry's
+    /// refcount and the counter's. Pre-fix those were accesses to freed
+    /// memory.
+    #[test]
+    fn noderc_outliving_context_is_survivable() {
+        // Declared outside the closure, so the handle survives the unwind.
+        let escaped: RefCell<Option<NodeRc>> = RefCell::new(None);
+        let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            orphan_noderc(&escaped);
+        }));
+        assert!(result.is_err(), "the guard must still panic");
+
+        let rc = escaped
+            .borrow_mut()
+            .take()
+            .expect("handle outlived the panic");
+        let cloned = rc.clone(); // touches the leaked entry + counter
+        drop(cloned);
+        drop(rc);
+
+        // Churn the allocator the way a panic-catching host would: pre-fix
+        // the refcount decrements above landed in freed memory.
+        let mut v: Vec<Vec<u64>> = (0..512u64).map(|i| vec![i; 64]).collect();
+        v.truncate(0);
+        drop(v);
     }
 
     #[test]
