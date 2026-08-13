@@ -30,3 +30,7 @@ cmake-build*/
 
 # Compilation database
 /compile_commands.json
+
+# Rust build output (criterion writes target/ at the repo root when benches
+# are run from here; rust/.gitignore covers rust/target)
+/target
