@@ -43,8 +43,15 @@ pub struct SnapshotSite {
 /// A whole snapshot file.
 #[derive(Debug)]
 pub struct Snapshot {
-    /// `git rev-parse HEAD` of the tree the snapshot was blessed against, so
-    /// the remap (task 2) can diff from there to the working tree.
+    /// `git rev-parse HEAD` when `bless` ran, so the remap (task 2) has a
+    /// base to diff from.
+    ///
+    /// Note what this is *not*: it is HEAD at bless time, so once the
+    /// snapshot is committed it names the **parent** of the commit carrying
+    /// it, and it says nothing about uncommitted C++ in the working tree. The
+    /// hashes, not this field, are the record of what was blessed — a remap
+    /// must verify against them and treat a diff from this commit as a
+    /// hypothesis about where lines went, never as ground truth.
     pub cpp_commit: String,
     /// Every checked site, in scan order.
     pub sites: Vec<SnapshotSite>,

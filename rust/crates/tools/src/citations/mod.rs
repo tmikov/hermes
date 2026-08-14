@@ -418,23 +418,37 @@ pub fn bless(root: &Path) -> Result<String, String> {
 pub struct CheckReport {
     /// Sites whose cited span no longer hashes to the blessed value.
     pub stale: Vec<String>,
+    /// Sites the config now resolves to a different file or range than the
+    /// snapshot recorded — a `citations.toml` edit, not C++ drift. Kept apart
+    /// from `stale` because "the span changed" would misdescribe it.
+    pub repointed: Vec<String>,
     /// Sites in the tree that the snapshot does not have (Rust-side edits).
     pub unblessed: Vec<String>,
     /// Snapshot entries with no site in the tree (Rust-side deletions).
     pub missing: Vec<String>,
     /// Resolution/range failures; see [`Scan::errors`].
     pub errors: Vec<String>,
+    /// The `[unresolved]` skips, so every run names them and not just their
+    /// number: a config entry that silences a citation must stay visible.
+    pub skipped: String,
     /// One-line totals, always printed.
     pub summary: String,
 }
 
 impl CheckReport {
-    /// True when nothing at all is wrong.
+    /// True when nothing at all is wrong. Skips are not failures — they are
+    /// reported, not counted against the check.
     pub fn is_ok(&self) -> bool {
         self.stale.is_empty()
+            && self.repointed.is_empty()
             && self.unblessed.is_empty()
             && self.missing.is_empty()
             && self.errors.is_empty()
+    }
+
+    /// Summary plus the skip identities: what a passing run should print.
+    pub fn success_text(&self) -> String {
+        format!("{}\n{}", self.summary, self.skipped)
     }
 
     /// The failure text for the standing test: every problem, one short line
@@ -445,6 +459,7 @@ impl CheckReport {
         out.push('\n');
         for group in [
             ("citation span changed", &self.stale),
+            ("resolved elsewhere than the snapshot says", &self.repointed),
             ("not in the snapshot", &self.unblessed),
             ("in the snapshot but no longer in the source", &self.missing),
             ("could not be checked", &self.errors),
@@ -460,6 +475,8 @@ impl CheckReport {
                 out.push('\n');
             }
         }
+        out.push('\n');
+        out.push_str(&self.skipped);
         out.push_str(
             "\nThe C++ lines a comment cites moved, or the comment changed. Re-point the \
              citations, then re-record them with:\n  \
@@ -490,6 +507,7 @@ pub fn check(root: &Path) -> Result<CheckReport, String> {
 
     let mut report = CheckReport {
         errors: scan.errors.clone(),
+        skipped: skip_report(&scan),
         ..Default::default()
     };
     let mut seen = std::collections::HashSet::new();
@@ -500,10 +518,18 @@ pub fn check(root: &Path) -> Result<CheckReport, String> {
             None => report.unblessed.push(site.describe()),
             Some(b) => {
                 seen.insert(key);
-                if b.hash != site.hash {
-                    report
+                match compare(b, site) {
+                    Verdict::Same => {}
+                    Verdict::RePointed => report.repointed.push(format!(
+                        "{} — the snapshot has {}:{}-{}; a resolution change, not a C++ edit",
+                        site.describe(),
+                        b.cpp,
+                        b.start,
+                        b.end
+                    )),
+                    Verdict::Stale => report
                         .stale
-                        .push(format!("{} — span changed", site.describe()));
+                        .push(format!("{} — span changed", site.describe())),
                 }
             }
         }
@@ -517,21 +543,53 @@ pub fn check(root: &Path) -> Result<CheckReport, String> {
         }
     }
     report.stale.sort();
+    report.repointed.sort();
     report.unblessed.sort();
     report.missing.sort();
     report.summary = format!(
         "{} citation sites checked against {} blessed at C++ commit {}; \
-         {} stale, {} unblessed, {} missing, {} unresolvable, {} skipped by config",
+         {} stale, {} re-pointed, {} unblessed, {} missing, {} unresolvable, \
+         {} skipped by config",
         scan.sites.len(),
         snap.sites.len(),
         short(&snap.cpp_commit),
         report.stale.len(),
+        report.repointed.len(),
         report.unblessed.len(),
         report.missing.len(),
         report.errors.len(),
         scan.skipped.len(),
     );
     Ok(report)
+}
+
+/// How a scanned site compares with the snapshot's record of it.
+#[derive(Debug, PartialEq, Eq)]
+enum Verdict {
+    /// Same file, same lines, same bytes.
+    Same,
+    /// The config resolves the citation somewhere else now.
+    RePointed,
+    /// Same file and lines, different bytes: the C++ moved or changed.
+    Stale,
+}
+
+/// Compare one blessed record with the site scanned today.
+///
+/// Where the citation *points* is compared before what is there. A
+/// `citations.toml` edit that re-points a glob also changes the hash, and
+/// reporting that as "span changed" would send the reader hunting through the
+/// C++ for an edit that never happened.
+fn compare(blessed: &SnapshotSite, site: &Site) -> Verdict {
+    if (blessed.cpp.as_str(), blessed.start, blessed.end)
+        != (site.cpp.as_str(), site.start, site.end)
+    {
+        Verdict::RePointed
+    } else if blessed.hash != site.hash {
+        Verdict::Stale
+    } else {
+        Verdict::Same
+    }
 }
 
 /// Make a key unique per occurrence: `k`, `k#2`, `k#3`, ...
@@ -610,9 +668,18 @@ mod tests {
         let cfg = load_config(&root).expect("config loads");
         let scan = scan_tree(&root, &cfg).expect("scan succeeds");
         assert!(scan.errors.is_empty(), "{}", error_report(&scan));
+        // A floor just under today's count, to catch a scanner or config
+        // change that stops finding citations *here*, where no snapshot is
+        // consulted. It is a smoke alarm, not the guarantee: losing sites is
+        // caught precisely by `check`, which names every snapshot entry that
+        // no longer has a site. Raise this when the corpus grows; lower it
+        // only for a deliberate, explained shrink.
+        const FLOOR: usize = 3000;
         assert!(
-            scan.sites.len() > 1500,
-            "expected the port's ~1.7k citations, got {}",
+            scan.sites.len() >= FLOOR,
+            "only {} citations resolved, below the floor of {FLOOR}; if that drop is \
+             intentional, update the floor — otherwise the scanner or citations.toml \
+             just stopped seeing citations",
             scan.sites.len()
         );
     }
@@ -626,6 +693,57 @@ mod tests {
         assert_eq!(span_bytes(&file, 2, 3), b"bb\nccc\n");
         assert_eq!(span_bytes(&file, 4, 4), b"dddd\n");
         assert_eq!(last_real_line(&file), 4);
+    }
+
+    #[test]
+    fn a_re_pointed_citation_is_not_reported_as_drift() {
+        let blessed = SnapshotSite {
+            rust: "crates/support/src/manager.rs".into(),
+            line: 439,
+            text: "cpp:109-117".into(),
+            cpp: "lib/Support/SourceErrorManager.cpp".into(),
+            start: 109,
+            end: 117,
+            hash: "0123456789abcdef".into(),
+        };
+        let site = |cpp: &str, hash: &str| Site {
+            rust: blessed.rust.clone(),
+            line: 439,
+            text: blessed.text.clone(),
+            cpp: cpp.to_string(),
+            start: 109,
+            end: 117,
+            start_digits: (0, 0),
+            end_digits: None,
+            hash: hash.to_string(),
+        };
+        assert_eq!(
+            compare(&blessed, &site(&blessed.cpp, &blessed.hash)),
+            Verdict::Same
+        );
+        // Same lines, different bytes: the C++ changed under the citation.
+        assert_eq!(
+            compare(&blessed, &site(&blessed.cpp, "ffffffffffffffff")),
+            Verdict::Stale
+        );
+        // Another file entirely: a config change, whatever the hash says.
+        assert_eq!(
+            compare(
+                &blessed,
+                &site("lib/Parser/JSONParser.cpp", "ffffffffffffffff")
+            ),
+            Verdict::RePointed
+        );
+        assert_eq!(
+            compare(&blessed, &site("lib/Parser/JSONParser.cpp", &blessed.hash)),
+            Verdict::RePointed
+        );
+        // And a re-point must fail the check, not slip through.
+        let report = CheckReport {
+            repointed: vec!["x".into()],
+            ..Default::default()
+        };
+        assert!(!report.is_ok());
     }
 
     #[test]

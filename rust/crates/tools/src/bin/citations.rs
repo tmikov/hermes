@@ -41,7 +41,7 @@ fn main() {
             Err(e) => fail(&e),
             Ok(report) => {
                 if report.is_ok() {
-                    println!("{}", report.summary);
+                    println!("{}", report.success_text());
                 } else {
                     eprintln!("{}", report.failure_text());
                     std::process::exit(1);
