@@ -8,6 +8,10 @@ description = "Unpublished command-line drivers for the Rust Hermes front-end (d
 [lints.rust]
 unsafe_code = "forbid"
 
+[lib]
+name = "tools"
+path = "src/lib.rs"
+
 [[bin]]
 name = "ast-dump"
 path = "src/bin/ast_dump.rs"
@@ -27,6 +31,10 @@ path = "src/bin/preparse_dump.rs"
 [[bin]]
 name = "sema-dump"
 path = "src/bin/sema_dump.rs"
+
+[[bin]]
+name = "citations"
+path = "src/bin/citations.rs"
 
 [dependencies]
 hermes_support = { path = "../support", package = "hermes-support" }
