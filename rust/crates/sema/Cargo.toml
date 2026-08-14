@@ -1,0 +1,25 @@
+[package]
+name = "hermes-sema"
+version = "0.1.0"
+edition = "2021"
+description = "A Rust port of the Hermes semantic analysis (scope resolution and validation) pass by Tzvetan Mikov, the architect of Hermes. Not an official Meta project."
+license = "MIT"
+repository = "https://github.com/tmikov/hermes"
+authors = ["Tzvetan Mikov <tmikov@gmail.com>"]
+keywords = ["javascript", "semantic", "scope", "resolver", "ecmascript"]
+categories = ["development-tools", "compilers"]
+readme = "README.md"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+# The analysis itself consumes only the AST, matching the layering of C++
+# Sema. The parser dependency belongs to the `resolve` façade alone: its input
+# is a `hermes_parser::ParsedJS`, and the compile path parses ambient global
+# declarations into that same arena. Nothing under `resolver`/`dump`/
+# `sem_context` refers to it.
+[dependencies]
+hermes_support = { path = "../support", version = "0.1.0", package = "hermes-support" }
+hermes_atom_table = { path = "../atom_table", version = "0.1.0", package = "hermes-atom-table" }
+hermes_ast = { path = "../ast", version = "0.1.0", package = "hermes-ast" }
+hermes_parser = { path = "../parser", version = "0.1.0", package = "hermes-parser" }
