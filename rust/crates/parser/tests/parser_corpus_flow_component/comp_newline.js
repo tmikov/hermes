@@ -1,0 +1,3 @@
+component
+Foo;
+component Bar() {}

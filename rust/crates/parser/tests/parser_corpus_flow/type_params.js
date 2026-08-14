@@ -1,0 +1,10 @@
+type A<T> = T;
+type B<T: number> = T;
+type C<T = string> = T;
+type D<+T, -U> = [T, U];
+type E<const T> = T;
+type F<in T> = T;
+type G<out T> = T;
+type H<in> = X;
+type I<T extends U> = T;
+type J<T,> = T;

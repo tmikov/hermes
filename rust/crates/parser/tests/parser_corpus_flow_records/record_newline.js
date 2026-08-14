@@ -1,0 +1,3 @@
+record
+Foo;
+record Bar {}
