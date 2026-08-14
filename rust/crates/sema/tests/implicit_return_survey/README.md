@@ -98,6 +98,6 @@ Ids match the MANIFEST tables:
 |---|---|
 | `M1`-`M17` | the task-2 survey of the pre-existing decisions |
 | `M18`, `THROW` | controls — known-caught before any survey ran |
-| `M19`-`M21` | the three decisions upstream `5ae5260c8` (try-catch-finally) adds |
+| `M19`-`M21` | the three decisions upstream `5ae5260c8` (try-catch-finally) adds — landed in `static_h` as `594e9c6a1`, which reaches the same rule with the finalizer half inlined rather than in a helper |
 | `MATCH-A`-`MATCH-F` | the task-3 survey of `653e49c60`'s Flow-`match` arm |
 | `WITH` | the `WithStatement` arm (cpp:177-179), pinned by upstream sync task 6 |

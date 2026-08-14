@@ -1,5 +1,13 @@
 # Upstream C++ Sync — `static_h` @ `2d3e9018b` + `private/export-D115669841`
 
+> **Completed plan; historical record — do not re-run.** Annotated 2026-08-14:
+> the `5ae5260c8` this plan's Task 4 took from `private/export-D115669841` has
+> since **landed in `static_h` as `594e9c6a1`**, and the port's C++ tree was
+> subsequently reconstructed directly on `origin/static_h` @ `14112ce36`, so
+> nothing here is pending and nothing needs re-applying. The text is left as
+> written, per this repo's convention that dated plans are records of what was
+> done. Current state: `doc/superpowers/UpstreamSyncState.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Bring the Rust port back into bug-for-bug agreement with upstream

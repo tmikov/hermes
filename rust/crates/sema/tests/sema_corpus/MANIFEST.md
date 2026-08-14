@@ -38,6 +38,17 @@ blocks also carry the corpus counts of their own date (e.g. "208 / 107" where
 the live gate now reports "219 / 109"), so they are records of a past run, not
 commands to re-run. The live gate command is the one under "## Gate" above.
 
+**Upstream note (added 2026-08-14):** `5ae5260c8` ("Handle try-catch-finally
+in `CheckImplicitReturn`"), which the "Upstream sync task 4" section below
+takes from `private/export-D115669841`, has **landed in `static_h` as
+`594e9c6a1`** (#2131), as a restructure rather than the same patch: upstream
+inlined the finalizer half into `checkTerminationTryStatement` instead of
+adding a `checkTerminationFinalizer` helper. The Rust port keeps its helper
+and is unchanged, and the `M19`–`M21` zeros recorded below still hold —
+re-measured on the rewritten oracle, this corpus is still **224 (111)**. Per
+this file's "kept for the history" convention the dated section below still
+says `5ae5260c8` and still calls it unlanded; that is the state at its date.
+
 **Invocation note (added 2026-08-12):** the same publication change moved the
 `sema-dump` driver out of the `sema` crate into the unpublished `tools` crate,
 which retired the `dump-bin` feature that used to gate it. The live gate has

@@ -8,7 +8,51 @@ upstream fixes are ported.
 
 ---
 
-## Ported through (as of 2026-08-13)
+## Ported through (as of 2026-08-14)
+
+| | |
+|---|---|
+| **Base** | **`origin/static_h` @ `14112ce36`** — the port's history was reconstructed directly on top of it on 2026-08-14 |
+| **Local C++ delta** | **exactly one**: a 3-line cosmetic re-wrap in `lib/Sema/SemanticResolver.cpp` (the `ExportAllDeclarationNode` error call, kept in its pre-`4aa3006f8` clang-format shape). Upstream's wording, our wrapping. |
+| **Local C++ additions** | the five oracle tools `tools/{js-lexer-dump,json-parse-dump,preparse-dump,sema-parser-dump,parse-bench}/` and their rows in `tools/CMakeLists.txt`. These are ours and are maintained here; nothing upstream provides them. |
+| **Everything else under `lib/`, `include/`, `test/`, `unittests/`** | byte-identical to `14112ce36` |
+| **Pre-squash history** | tag `rust-history-2026-08-14` and branch `rust-presquash-backup`, both `550c5db8f` |
+
+**The port's C++ tree is a single upstream commit again**, and that is the
+headline this document now carries. Until 2026-08-14 it was "fork point
+`60b5c73db` plus nineteen cherry-picks", one of which (`5ae5260c8`) had not
+landed upstream — so the tree ran one commit *ahead* of `static_h`'s mainline.
+Both halves of that are gone:
+
+- Eighteen of the nineteen cherry-picks were already in `origin/static_h`.
+- The nineteenth, `5ae5260c8`, **landed upstream as `594e9c6a1`**
+  ("Handle try-catch-finally in CheckImplicitReturn (#2131)") — the same rule
+  reached by a different structure: our version added a
+  `checkTerminationFinalizer` helper, upstream inlined the finalizer half into
+  `checkTerminationTryStatement`. The port keeps its helper (semantics-
+  preserving) and the parser-entry gate, **17 (9)**, is the evidence the two
+  C++ forms agree. **Nothing in this tree is now pending upstream landing.**
+
+So the next sync is the ordinary procedure: fast-forward the C++ tree to a
+newer `origin/static_h`, rebuild the oracle, re-run the gates, run
+`citations -- remap`. There is nothing to re-apply and nothing to carry.
+
+**How the branch was reconstructed.** The 552 chronological commits were
+replaced by 11 subsystem commits (support / AST / lexer / JSON / parser core /
+dialects / pre-lazy / sema / oracle tools / local C++ deltas / docs) plus a
+citation re-point, based on `origin/static_h` @ `14112ce36`. Correctness was
+enforced by a tree-equality invariant rather than by trusting the process:
+every path the port owns is byte-identical to the pre-squash tip except the
+`cpp:` citation line numbers, and every other path is byte-identical to
+`origin/static_h`. Both halves were checked mechanically. The plan is
+`plans/2026-08-14-squash-onto-static-h.md`.
+
+### Superseded (pre-2026-08-14): the "fork point plus cherry-picks" record
+
+Kept because what follows — the 11-defect-fix table, the exclusion rules, the
+backlog — is the record of *how* the port reached parity, and the exclusion
+rules in particular are still live policy. The state it describes is no longer
+current.
 
 | | |
 |---|---|
@@ -16,11 +60,17 @@ upstream fixes are ported.
 | **Plus** | the 11 defect fixes cherry-picked 2026-08-10 (below) |
 | **Plus** | `04f1f53a8` (`-Xcompile` + dump `mayReachImplicitReturn`), cherry-picked 2026-08-13 as `1e3806f47`, mirrored in the port by `de917f249` |
 | **Plus** | the three Flow-`match` fixes `653e49c60`/`90f4a3ac6`/`ca6de21ce`, cherry-picked 2026-08-13 as `acf86bf51`/`502bbc7d3`/`be443ad10`, mirrored in the port by the task-3 commit |
-| **Plus** | `5ae5260c8` (try-catch-finally in `CheckImplicitReturn`, `CppDefectsFound.md` item 12), cherry-picked 2026-08-13 as `9b5025f89`, mirrored in the port by `2253b7331` — **from `private/export-D115669841`, not from `static_h`**; see below |
+| **Plus** | `5ae5260c8` (try-catch-finally in `CheckImplicitReturn`, `CppDefectsFound.md` item 12), cherry-picked 2026-08-13 as `9b5025f89`, mirrored in the port by `2253b7331` — was **from `private/export-D115669841`, not from `static_h`**. **Landed upstream 2026-08-14 as `594e9c6a1`; this row is history.** |
 | **Plus** | `6fbc3706d` + `8f9e357fd` (back out the two `#if 0` guards around permanently-dead blocks, restoring `if ((false))`), cherry-picked 2026-08-13 as `2fde4d88c`/`de41b2056` — no Rust behavior change; the port mirrors the new nesting and its citations were re-verified |
 | **Plus** | `26872f6e9` (move the parser-mode semDump unit tests to lit), cherry-picked 2026-08-13 as `c5266734b`; the port replaced its two AUTHORED parser-entry corpus files with upstream's lit files |
 | **Upstream `static_h` HEAD at time of writing** | `2d3e9018b` (2026-08-13) |
 | **Commits between fork point and upstream HEAD** | 147 (105 of them predate the local `static_h` ref at `5dfe740ad`) |
+
+> **No longer true as of 2026-08-14** — see the current state above. The tree
+> IS equal to a single upstream commit (`14112ce36`) apart from one cosmetic
+> re-wrap, and it no longer runs ahead of upstream: `5ae5260c8` landed as
+> `594e9c6a1`. The paragraph is kept because the nineteen-cherry-pick
+> composition is what the tables below account for.
 
 The port's C++ tree is **not equal to any single upstream commit**, and this is
 the fact this file exists to state plainly: it is the fork point `60b5c73db`
@@ -32,6 +82,14 @@ nineteen are in `origin/static_h`; **`5ae5260c8` is not** — it came from
 mainline (see the section below, and do not re-apply it at the next sync).
 
 ### Residual gap, and the commits that touch the watched paths but are NOT ported
+
+> **Re-based 2026-08-14.** The arithmetic below is against `2d3e9018b`; the
+> tree is now on `14112ce36`, 7 commits later, and the C++ tree is upstream's
+> rather than fork-point-plus-picks — so "18 ported + 13 excluded = 31" is a
+> historical accounting, not a live gap. **The three exclusion rules are still
+> live policy** and are the reason this section is kept: the FlowChecker and
+> the typed-Flow dialect are still not ported components, and the FlowChecker
+> table below is still the starting backlog for whenever they are.
 
 Re-derive the gap with the path filter this document has always used:
 
@@ -164,7 +222,7 @@ mirroring a variant upstream no longer has:
 
 ---
 
-## Ported ahead of `static_h`: `private/export-D115669841`
+## No longer ahead of `static_h`: `5ae5260c8` landed as `594e9c6a1`
 
 **`5ae5260c8` — "Handle try-catch-finally in CheckImplicitReturn".** **DONE
 2026-08-13** (cherry-picked as `9b5025f89`, mirrored by `2253b7331`, upstream
@@ -173,14 +231,27 @@ FIXED), which this port found on 2026-08-12: `try/catch/finally` inside a
 function aborted the parser-entry resolver, and in Release silently ignored
 the finalizer.
 
-**It was NOT in `origin/static_h` when it was ported** — it was taken from the
-export branch `private/export-D115669841` and will land in `static_h` later.
-That is the one place this tree runs ahead of upstream's mainline, and it
-matters for the next sync: when `5ae5260c8` (or its `static_h` rewrite, likely
-under a different hash) appears in `60b5c73db..origin/static_h`, it is
-**already ported** — compare with `git show <commit> -- lib include | git
-patch-id --stable` against `9b5025f89` before assuming otherwise, exactly as
-the 11-fix table above does, and do not re-apply it.
+**CLOSED 2026-08-14.** It was taken from the export branch
+`private/export-D115669841` because `origin/static_h` did not have it. It has
+since landed there as **`594e9c6a1`** — *"Handle try-catch-finally in
+CheckImplicitReturn (#2131)"* — and `lib/Sema/CheckImplicitReturn.cpp` in this
+tree is now upstream's file verbatim. **The prediction in the old wording was
+right down to the detail:** it landed under a different hash and as a rewrite
+rather than the same patch. Upstream inlined the finalizer half into
+`checkTerminationTryStatement`; our version had added a
+`checkTerminationFinalizer` helper. The restructure is semantics-preserving,
+so the Rust port keeps its helper and was not changed.
+
+Two things follow, both already done, both worth knowing at the next sync:
+
+- **Nothing is pending, so nothing must be re-applied.** The "compare with
+  `git patch-id --stable` before assuming otherwise" instruction has been
+  discharged; there is no export-branch content left in this tree.
+- **The citations into that file moved.** `594e9c6a1` deleted the function
+  eight of them named, so `citations -- remap` declined them by name and they
+  were re-pointed by hand. Five of those eight turned out to have been *wrong
+  since before the rewrite* — blessed at trust-on-first-use against text that
+  happened not to move. Upstream's edit is what surfaced them.
 
 Rust-side consequence worth recording: this fix is what deleted
 `facade_agreement.rs`'s `PARSER_ENTRY_SKIP`, and the three decisions it adds
@@ -496,7 +567,9 @@ updated together.
 When a sync lands: move the ported rows out of the backlog, update "Ported
 through", and — if the port's C++ tree is brought to a plain upstream commit
 rather than fork-point-plus-cherry-picks — say so, because that is the state
-this document exists to record. Re-run the divergence check
+this document exists to record. **That state was reached on 2026-08-14**
+(`14112ce36`), so the next sync starts from a plain fast-forward, not from a
+cherry-pick ledger. Re-run the divergence check
 (`git patch-id --stable` over `lib include`) for anything cherry-picked ahead
 of upstream landing it; it caught two real regressions here.
 

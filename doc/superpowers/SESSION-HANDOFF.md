@@ -4,6 +4,50 @@ Hand this to a new session to restore context. It **references** the authoritati
 (read them; don't trust this summary over them) and records the conventions, file map,
 validation commands, and workflow.
 
+## READ THIS FIRST — the branch history was reconstructed on 2026-08-14
+
+**`rust` no longer contains the 552 chronological commits this file's updates
+below refer to by hash.** They were replaced by **11 subsystem commits plus a
+citation re-point**, based directly on `origin/static_h` @ **`14112ce36`**.
+Nothing was lost and nothing was rewritten by hand: every path the port owns is
+byte-identical to the pre-squash tip except `cpp:` citation line numbers, and
+every other path is byte-identical to `origin/static_h`. Both halves were
+checked mechanically.
+
+What a future session needs to know:
+
+- **The old history is preserved** at annotated tag **`rust-history-2026-08-14`**
+  and branch **`rust-presquash-backup`**, both `550c5db8f`. Every commit hash
+  mentioned anywhere in this file, in `RustPortRoadmap.md`, or in the plan
+  documents resolves there. `git show <hash>` will fail on `rust` and succeed
+  after `git checkout rust-presquash-backup` (or with the tag as a starting
+  point). **Do not delete either ref.**
+- **The C++ tree is now a plain upstream commit.** The only local delta is a
+  3-line cosmetic re-wrap in `lib/Sema/SemanticResolver.cpp`; the five oracle
+  tools under `tools/` are ours. Everything else matches `14112ce36` byte for
+  byte. `5ae5260c8` — the one fix this tree used to carry ahead of upstream —
+  **landed upstream as `594e9c6a1`**, so text below (and in
+  `CppDefectsFound.md`) calling it unlanded is history, not current state. See
+  `UpstreamSyncState.md`, which is the authoritative record.
+- **The oracle build directory.** The harnesses hardcode
+  `<repo>/cmake-build-asan/bin/…`; they do not read it from the environment. If
+  that path is missing, the differential gates skip rather than fail — always
+  run them with `REQUIRE_DIFFERENTIAL=1` so a missing oracle is a hard error.
+- **Gates on the new base, all green and all unmoved:** sema **224 (111)** +
+  parser-entry **17 (9)**; parser 8/8; JSON 1/1; preparse 4/4; lexer 6/6;
+  workspace 842 passed; `RUSTFLAGS="-D warnings"` clean; `cargo publish
+  --dry-run` 7/7; citations 3183/3183. The C++ lit suite is 4102 pass / 0
+  unexpected.
+- **The release tag `hermes-crates-v0.1.0`** (which the published crate READMEs
+  link through) was re-pointed to the new tip.
+
+Plan: `plans/2026-08-14-squash-onto-static-h.md`.
+
+Everything below this banner predates the reconstruction. Its *content* is
+accurate; its *commit hashes* live on the backup ref.
+
+---
+
 > **Date of handoff:** 2026-07-15. **Branch:** `rust` (base is `static_h`, NOT `main`).
 > **Status:** the **JS lexer**, **JSONParser**, the **AST**, and now the **JS Parser are ALL COMPLETE** —
 > **phases P0 (foundations + `parser_differential` gate), P1 (value expressions), P2 (statements & declarations), P3 (functions, classes,

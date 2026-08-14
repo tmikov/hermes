@@ -400,7 +400,8 @@ fn agrees_on_the_parser_path() {
 fn agrees_on_both_paths_over_both_corpora() {
     assert_eq!(on_big_stack(|| sweep("sema_corpus_parser", false)), 17);
     // The same 223 the compile-path sweep covers: since upstream `5ae5260c8`
-    // (`CppDefectsFound.md` item 12) the parser entry no longer aborts on a
+    // (landed in `static_h` as `594e9c6a1`, `CppDefectsFound.md` item 12) the
+    // parser entry no longer aborts on a
     // `try`/`catch`/`finally` inside a function, so `try-catch-finally.js` —
     // which this sweep used to have to skip — is swept like every other file.
     assert_eq!(on_big_stack(|| sweep("sema_corpus", true)), 223);

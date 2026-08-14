@@ -63,7 +63,9 @@ CORPORA = [
 # a catalogue bug, not a coverage result.
 #
 # The ids match the tables in both MANIFESTs: M1-M18 are the task-2 survey,
-# M19-M21 the three decisions upstream `5ae5260c8` (try-catch-finally) adds,
+# M19-M21 the three decisions upstream `5ae5260c8` (try-catch-finally) adds
+# — landed in `static_h` as `594e9c6a1`; the mutation ids and descriptions
+# below keep the original hash because they name the era, not the file —
 # MATCH-A..F the task-3 survey of `653e49c60`'s Flow-`match` arm, and WITH the
 # `WithStatement` arm (upstream sync task 6). M18 and THROW are controls
 # (known-caught before either survey).

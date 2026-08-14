@@ -509,6 +509,22 @@ there. Rust mirror commit `2253b7331` (upstream sync Task 4).
 is not in that campaign and not in `~/work/hermes-cpp-defects`; it was fixed
 directly upstream instead.
 
+**Update (2026-08-14): `5ae5260c8` has landed in `static_h` as `594e9c6a1`**
+— *"Handle try-catch-finally in CheckImplicitReturn (#2131)"*. The analysis
+above stands and is left unchanged as the record; two details of it are now
+historical rather than current:
+
+- "not in `origin/static_h`" was true when written and is no longer true. This
+  tree's `lib/Sema/CheckImplicitReturn.cpp` is upstream's file verbatim, and
+  the port no longer runs ahead of upstream anywhere.
+- **The landed form is a restructure, not the same patch.** Upstream inlined
+  the finalizer half into `checkTerminationTryStatement` rather than adding a
+  `checkTerminationFinalizer` helper, so **there is no
+  `checkTerminationFinalizer` in the C++ tree**. The rule is the same, and the
+  Rust port keeps its helper unchanged. The evidence that the two forms agree
+  is the parser-entry corpus, still **17 (9)** against upstream's binary — the
+  gate this item's pins live in.
+
 ---
 
 ## Summary table
@@ -535,7 +551,7 @@ each item above for its `Fixed upstream`/`Pin flipped` lines.
 | 10a | `ScopedFunctionPromoter` dead `newDecls` | dead code | ScopedFunctionPromoter.cpp:174-206 | same | `9232443cf` (`ffcdbdd52`) |
 | 10c | `JSParserImpl-jsx.cpp:493` dead `isa<MemberExpressionNode>` | dead code (was harmless) | jsx.cpp:493 | same | `37520ccef` (`51035e8c2`) |
 | 11 | `match` binding pattern, bad token | abort | JSLexer.h:160 | untested | `550aafe33` (`bfeeb404f`) |
-| 12 | `try/catch/finally` in a function, parser entry | abort | CheckImplicitReturn.cpp:259 | **wrong answer** (finalizer ignored) | `5ae5260c8` (`9b5025f89`) |
+| 12 | `try/catch/finally` in a function, parser entry | abort | CheckImplicitReturn.cpp:259 | **wrong answer** (finalizer ignored) | `5ae5260c8` (`9b5025f89`); landed in `static_h` 2026-08-14 as `594e9c6a1` |
 
 (Item 10b, `SemanticResolver.cpp:1960-1967`'s local-`eval` branch, is not a
 defect and not part of the fixes; it remains dead in both languages, now

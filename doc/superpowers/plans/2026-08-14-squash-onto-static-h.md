@@ -1,5 +1,24 @@
 # Squash the port onto `origin/static_h`
 
+> **DONE 2026-08-14; historical record — do not re-run.** `rust` is now 12
+> commits above `origin/static_h` @ `14112ce36`; the pre-squash history is at
+> tag `rust-history-2026-08-14` / branch `rust-presquash-backup`, both
+> `550c5db8f`. Four of this plan's "Verified facts" were superseded during
+> execution and the text below is left as written:
+>
+> 1. `origin/static_h` fast-forwarded to **`14112ce36`**, not `2d3e9018b`;
+>    that is the base actually used.
+> 2. `5ae5260c8` **landed upstream as `594e9c6a1`**, so `CheckImplicitReturn.cpp`
+>    is upstream's verbatim and the tree does not run ahead of upstream.
+> 3. `CompilerDriver.cpp`'s `result = InvalidFlags;` was never ours — it is
+>    upstream's own line, deleted upstream in `ce5efcd53` to fix a clang17
+>    `-Wunreachable-code -Werror` break. Taken as deleted.
+> 4. So the "three local C++ deltas" of Task 2 step 10 / Task 4 step 2 are in
+>    reality **one**: the `SemanticResolver.cpp` cosmetic re-wrap.
+>
+> Also: `doc/` is not wholly ours (9 upstream paths), and 13 test files were
+> added, not 15. Current state: `doc/superpowers/UpstreamSyncState.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace 552 chronological, largely unreviewable commits with **~11
