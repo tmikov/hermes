@@ -1,5 +1,8 @@
 # Citation resolution config for the `citations` checker (crates/tools).
 #
+# Start at src/citations/README.md if you have not met this tool before: it
+# explains what a citation is, how to run check/remap/bless, and the debt.
+#
 # The Rust port cites the exact C++ lines each piece was ported from, e.g.
 # `//! visit(ClassDeclarationNode *) (cpp:891-907)`. This file is the ONLY
 # place that says which C++ file a citation refers to: the checker never reads

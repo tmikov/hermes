@@ -279,16 +279,73 @@ wrong before this sync's baseline. Dated plan/spec documents under
 `doc/superpowers/{plans,specs}/` were left alone, per this repo's convention
 that they are historical records.
 
+**Since 2026-08-14 none of this is done by hand:** the checker below is
+checked in, and `citations -- remap` does the mapping (hash-proved rather than
+blame-guessed) in one command. Run it after every C++-touching commit.
+
 ## Deferred follow-ups
 
 Work this sync surfaces but deliberately does **not** do. Do not let these
 rot — check them at the start of the next sync.
 
-### OPEN — a checked-in citation checker (recommended by the final review; NOT started)
+### CLOSED (2026-08-14) — a checked-in citation checker
 
-**Recorded 2026-08-13 (task 6) for the user to decide. Nothing has been
-built.** The whole-branch review that closed this sync recommended it; the
-controller chose to record rather than start it.
+**Built and blessed 2026-08-14**, plan
+`doc/superpowers/plans/2026-08-14-citation-checker.md`. It lives in
+`rust/crates/tools/src/citations/` (the `citations` binary of the unpublished
+`tools` crate), with `citations.toml` (resolution config),
+`citations.snapshot.json` (the blessed hashes) and the standing test
+`crates/tools/tests/citations.rs` beside it in `rust/crates/tools/`.
+Documentation: **`rust/crates/tools/src/citations/README.md`**; the workflow is
+in `rust/CONTRIBUTING.md`.
+
+**What it does.** Three modes:
+
+- `check` — re-hashes every cited C++ span against the working tree and names
+  the sites that moved. This is what the standing `cargo test` runs.
+- `remap` — the mechanical repair the item below asked for, and better than
+  blame-aware: it maps a stale citation through `git diff` from the blessed
+  commit, and rewrites the digits **only when the blessed hash reproduces both
+  at the base coordinates and at the destination**. Everything else is
+  declined by name, with the reason. That is what keeps a C++-only edit cheap.
+- `bless` — re-records the tree after a reviewed change.
+
+**Scale, as blessed:** 3183 citation sites, 53 C++ files, 84 Rust files.
+The scanner covers every form in the tree — `cpp:NNN`, `File.cpp:NNN[-MMM]`,
+path-qualified, `// C++ NNN`, `NNNN in File.cpp`, comma continuations,
+citations wrapped across two comment lines, and the implicit-file `:NNN`.
+Resolution is explicit in `citations.toml`, never guessed from a module
+header's prose (the recommendation below assumed the header convention was
+parseable; it is not — headers vary, wrap, and are sometimes absent).
+
+**Two findings worth keeping.** (1) The population was **3183**, not the
+~1,600 estimated below: the estimate both double-counted (a bare-`cpp:` grep
+matches the tail of a qualified citation) and missed the commonest spelling
+entirely, the inline `// C++ NNN` form, 1278 sites / 42% of the total.
+(2) Extending the scanner to the colon-less `NNNN in File.cpp` banner shape
+immediately found **34 citations in `JSParserImpl-flow.cpp` short by exactly
+3**, caused by two of *this sync's own* cherry-picks (`bfeeb404f` +1,
+`be443ad10` +2), verified correct when written. They had been rotting in-tree,
+unreported, because no tool could see that shape — the same failure this item
+was opened about, caught mid-flight.
+
+**Known debt, deliberately not repaired** (measured, and routed to a future
+repair decision): ≥20 citations that resolve and range-check but name the
+wrong lines — a **floor**, measured over 15.5% of sites by a heuristic that
+excluded the commonest spelling, so the true figure is higher and unmeasured;
+plus **23** `(flow.cpp:NNNN-MMMM)` sibling doc citations short by exactly 2
+that `check` and `remap` **structurally cannot see** (blessed at
+trust-on-first-use, span never moved since), plus ~12 assorted further
+mismatches. **Drift is not wrongness:** `remap` repairs 0 of the 20 known-wrong
+sites, so a repair decision cannot lean on it. See the README's "Known citation
+debt" section.
+
+**At the next sync, `remap` is part of the routine** — see "Updating this
+file" at the bottom.
+
+The original item, unchanged, follows as the record of what motivated it.
+
+### The original OPEN item (recorded 2026-08-13, task 6) — for the record
 
 **The problem.** The Rust sources cite C++ by line number, roughly **1,600
 citation tokens**: ~367 of the qualified `File.cpp:NNN` form and ~1,270 bare
@@ -442,3 +499,20 @@ rather than fork-point-plus-cherry-picks — say so, because that is the state
 this document exists to record. Re-run the divergence check
 (`git patch-id --stable` over `lib include`) for anything cherry-picked ahead
 of upstream landing it; it caught two real regressions here.
+
+**Every cherry-pick moves C++ lines, so the citations go with it.** After any
+commit that changes the C++ tree — the same routine step as rebuilding the
+oracle, and per-task, not once at the end:
+
+```bash
+cargo run --manifest-path rust/Cargo.toml -p tools --bin citations -- remap
+cargo run --manifest-path rust/Cargo.toml -p tools --bin citations -- check
+```
+
+`remap` rewrites the digits of everything that merely shifted and declines,
+by name, anything whose cited text changed; those are read by hand and
+re-recorded with `… -- bless`. Commit
+`rust/crates/tools/citations.snapshot.json` alongside the sync commit. The
+citation drift documented above (436 tokens remapped by hand in the 2026-08-13
+sync, plus the 34 that were invisible until 2026-08-14) is exactly what this
+step exists to prevent, and skipping it puts the drift back.

@@ -326,6 +326,12 @@ cmake --build cmake-build-asan --target js-lexer-dump
 REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml -p parser --test differential -- --nocapture
 # Expect: differential[div] 58, [regexp] 5, [type] 6, [jsx] 4, [jsx-child] 10, [nonstrict] 7 — all pass.
 
+# Citations into the C++ tree: after ANY commit that changes C++, remap then check.
+# (~3200 comments cite exact C++ lines; a cherry-pick shifts them silently. `remap` is
+#  what keeps a C++-only edit cheap. Docs: rust/crates/tools/src/citations/README.md)
+cargo run --manifest-path rust/Cargo.toml -p tools --bin citations -- remap
+cargo run --manifest-path rust/Cargo.toml -p tools --bin citations -- check   # the standing test runs this
+
 # JSONParser oracle + differential (same pattern):
 cmake --build cmake-build-asan --target json-parse-dump
 REQUIRE_DIFFERENTIAL=1 cargo test --manifest-path rust/Cargo.toml -p parser --test json_differential -- --nocapture

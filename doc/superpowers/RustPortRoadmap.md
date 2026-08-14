@@ -637,6 +637,13 @@ AST) — no dedicated C++ tool needed. A Rust `ast-dump` bin is diffed byte-for-
   `CollectMessagesRAII` can't be literal guards in safe Rust (a `&mut`-holding guard can't
   coexist with emitting through the manager, and the crate forbids `unsafe`), so each is an
   explicit set-restore / enable-disable / begin-end API — the full feature, minus the sugar.
+- **The port cites C++ by line number, and the citations are checked mechanically.**
+  ~3200 comments name the exact C++ lines they mirror; since 2026-08-14 a checked-in tool
+  (`rust/crates/tools/src/citations/`, run as `cargo run --manifest-path rust/Cargo.toml
+  -p tools --bin citations -- check|remap|bless`) hashes every cited span, fails a standing
+  test when one moves, and repairs pure line drift mechanically. **Run `remap` then `check`
+  after any commit that touches the C++ tree.** Docs, including the resolution config and
+  the known citation debt: `rust/crates/tools/src/citations/README.md`.
 - **Translator vs. rendering.** A `CoordTranslator` affects *displayed* coordinates
   (`find_coords`, `dump_coords`) but the rendered diagnostic resolves its source line and
   caret column from the **untranslated** location, matching the C++ primary diagnostic.

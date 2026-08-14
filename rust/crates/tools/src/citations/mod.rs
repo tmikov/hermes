@@ -7,6 +7,10 @@
 
 //! The `cpp:NNN` citation checker.
 //!
+//! `README.md` beside this file is the same story for someone who has never
+//! met the convention, plus the resolution config, the workflow, and the
+//! known citation debt.
+//!
 //! ## What a citation is
 //!
 //! This repository holds the C++ Hermes front end and a faithful, bug-for-bug

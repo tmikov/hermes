@@ -149,6 +149,48 @@ The `REQUIRE_DIFFERENTIAL=1` environment variable causes the test to fail hard
 if the oracle binary is absent, rather than silently skip. Always set it when
 running the gate before submitting a change.
 
+## Citations into the C++ tree (required after any C++ edit)
+
+Roughly 3200 comments in the port name the exact C++ lines they mirror —
+`cpp:891-907`, `SemanticResolver.cpp:891`, `// C++ 4890-4896`,
+`2886 in JSParserImpl-flow.cpp`. Those are line numbers into files that move: a
+cherry-pick that inserts three lines near the top of a C++ file silently
+invalidates every citation below it, and nothing fails to compile. A checked-in
+snapshot hashes each cited span, and a standing test fails naming the sites
+whose span moved.
+
+So, **after any commit that changes the C++ tree — in the same breath as
+rebuilding the oracle:**
+
+```bash
+cargo run --manifest-path rust/Cargo.toml -p tools --bin citations -- remap
+cargo run --manifest-path rust/Cargo.toml -p tools --bin citations -- check
+```
+
+**A C++-only edit should be cheap, and `remap` is the reason it is.** It moves
+the digits of every citation whose cited text merely shifted — accepting a new
+location only when the text there still hashes to what was blessed, so it
+cannot invent a plausible-but-wrong citation — which makes the usual cost of
+touching C++ one command plus a diff of digits, not a re-reading of several
+hundred comments. Whatever it declines is a semantic question, not a mechanical
+one (the cited text *changed*, it did not just move): read those citations
+against the C++, re-point them by hand, and re-record with
+
+```bash
+cargo run --manifest-path rust/Cargo.toml -p tools --bin citations -- bless
+```
+
+Commit the updated `rust/crates/tools/citations.snapshot.json` with the change.
+The standing test on its own is:
+
+```bash
+cargo test --manifest-path rust/Cargo.toml -p tools --test citations
+```
+
+Full documentation — what a citation is, the forms, how the resolution config
+works, and the known citation debt — is in
+[`crates/tools/src/citations/README.md`](crates/tools/src/citations/README.md).
+
 ## Faithful-port conventions (summary)
 
 Full detail is in [ARCHITECTURE.md](ARCHITECTURE.md). The short version:
