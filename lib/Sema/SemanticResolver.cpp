@@ -1563,7 +1563,8 @@ void SemanticResolver::visit(ESTree::ExportDefaultDeclarationNode *node) {
 void SemanticResolver::visit(ESTree::ExportAllDeclarationNode *node) {
   if (compile_ && !astContext_.getUseCJSModules()) {
     sm_.error(
-        node->getSourceRange(), "'export' statement requires module mode");
+        node->getSourceRange(),
+        "'export' statement requires module mode");
   }
   visitESTreeChildren(*this, node);
 }
