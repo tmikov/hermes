@@ -1,0 +1,18 @@
+[package]
+name = "hermes-ast"
+version = "0.1.0"
+edition = "2021"
+description = "ESTree-compatible AST and JSON dumper for the Hermes Rust front-end."
+license = "MIT"
+repository = "https://github.com/tmikov/hermes"
+authors = ["Tzvetan Mikov <tmikov@gmail.com>"]
+keywords = ["javascript", "ast", "estree", "parser", "flow"]
+categories = ["parser-implementations", "development-tools"]
+readme = "README.md"
+
+[dependencies]
+hermes_support = { path = "../support", version = "0.1.0", package = "hermes-support" }
+hermes_atom_table = { path = "../atom_table", version = "0.1.0", package = "hermes-atom-table" }
+
+[lints.rust]
+unsafe_code = "deny"
