@@ -55,7 +55,8 @@
 //! cherry-pick maps from the same origin through the now-larger diff, instead
 //! of compounding one offset on another. Remap after the C++ change is
 //! *reverted* sees an empty diff, maps the base coordinates to themselves,
-//! and puts the citation back exactly where it started.
+//! and puts the citation back where it started — ordinarily. The one
+//! exception is a duplicated span; see "Duplicated spans" below.
 //!
 //! ## What it declines, and why it never chases
 //!
@@ -71,6 +72,47 @@
 //!
 //! A declined site is reported, never silently skipped, and `remap` exits
 //! non-zero while anything is left for a human.
+//!
+//! ## Duplicated spans: a twin can absorb the destination check
+//!
+//! Both proofs above are proofs about *bytes*, not about identity: a hash
+//! match confirms the cited text is there, not that it is the same
+//! occurrence the citation was blessed against. That distinction disappears
+//! whenever a cited single-line span is byte-identical to another line in the
+//! same file — the same statement written twice, say — because then two
+//! different locations answer the hash question the same way.
+//!
+//! `lib/Sema/SemanticResolver.cpp` has such a pair: lines 542 and 546 are both
+//! `visitForInOf(node, node, node->_left, node->_right, node->_body);`, byte
+//! for byte, and `crates/sema/src/resolver/statements.rs` cites both
+//! together, as one comma continuation naming 542 then 546. A C++ shift that
+//! pushed line 542's content down to 546 would repair the first number to 546
+//! — correctly, the destination genuinely is that call, relocated — while
+//! the second number, still cited at 546, would never even register as
+//! stale: the shift backfills line 546 with the (identical) content that
+//! used to be at 542, so its hash still matches there too. Revert the C++
+//! and the original text is restored at both 542 and 546, but the citation
+//! is left reading `546, 546`. Reverting does not fix that on its own: the
+//! first number's hash check now runs at 546, finds the twin's restored
+//! text, and passes. `check` never sees the site as stale — the blessed
+//! hash genuinely does reproduce at 546 — so `remap` never reconsiders it.
+//! The citation is left visibly wrong, two identical numbers where it once
+//! distinguished two lines, next to a fully green `check`. Two more sites in
+//! `crates/parser/src/js/flow/declarations.rs`, whose cited spans end at C++
+//! lines 5166 and 5360, have the same shape.
+//!
+//! Three things keep this from being worse than it looks. The forward-only
+//! workflow this tool actually exists for — cherry-pick, `remap`, `bless` —
+//! never revisits base coordinates the way an apply/revert round trip does,
+//! so a real (non-reverted) shift never hits this case. The residue is a
+//! visible diff, not hidden state: a citation reading `546, 546` is wrong on
+//! its face to anyone who reads it, unlike the drift this module exists to
+//! erase silently. And the snapshot still records each site's true
+//! `base_start`/`base_end` (this repair does not touch them, per the section
+//! above), so the *next* genuine shift maps from the real base again and
+//! self-heals the citation — unless an intervening `bless` cements the
+//! twin's coordinates as the new base first, which turns the mistake
+//! permanent until a human reads the site by hand.
 //!
 //! ## Drift, not wrongness: what remap cannot repair
 //!

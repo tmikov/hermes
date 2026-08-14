@@ -252,14 +252,31 @@ debt, and the single most decision-relevant thing in this README:
   the two sync commits above, so they are short by exactly 2. They were blessed
   at trust-on-first-use — the snapshot recorded whatever was under them at
   first bless — and their spans have not moved since, so their hashes match.
-  `check` will never flag them and `remap` will never see them. (Audited over
-  all 233 `flow.cpp` doc citations: 24 exact, 23 off by −2.) Plus roughly 12
+  `check` will never flag them and `remap` will never see them. (Of the 233
+  `flow.cpp` doc citations in the tree, only 47 sit beside a banner to check
+  against this way: 24 exact, 23 off by −2. The other 186 have no banner
+  sibling, so this particular audit says nothing about them.) Plus roughly 12
   further mismatches of assorted magnitudes.
 - **2 structurally invalid citations**, in `[unresolved]` above.
 
 Nothing here is a defect in the tool; a citation blessed at first use is only
 as good as the first reading. What the tool guarantees is that a *correct*
 citation stays correct.
+
+**One more thing to know, not counted as debt above.** If a cited single-line
+span happens to be byte-identical to another line in the same file, and a
+shift lands the site on that twin, `remap` repairs it cleanly — but reverting
+the C++ does not, by itself, undo the repair: the twin still holds the same
+hash, the destination check keeps passing, and `remap` never re-examines the
+site. Nothing in today's tree is known to be in this state — it takes an
+apply-then-revert round trip to reach, not the forward-only cherry-pick,
+`remap`, `bless` workflow the tool is actually used for — but it means "empty
+diff restores the citation" is not quite an absolute guarantee. The residue is
+visible, not silent (a citation reading, say, `546, 546` is wrong on its
+face), and a later genuine shift usually self-heals it, unless a `bless` in
+between cements the twin's position as the new base. Full argument, with a
+real pair of C++ lines that has this shape today:
+[`remap.rs`](remap.rs)'s module doc.
 
 ## Layout, and why it lives here
 
