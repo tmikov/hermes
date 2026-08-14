@@ -72,6 +72,28 @@
 //! A declined site is reported, never silently skipped, and `remap` exits
 //! non-zero while anything is left for a human.
 //!
+//! ## Drift, not wrongness: what remap cannot repair
+//!
+//! Read this before planning a repair of the port's known-bad citations.
+//! `remap` fixes citations that **drifted** — the same C++ text at a new
+//! position — and can do nothing at all for citations that were **wrong when
+//! written**, which is a different and larger problem.
+//!
+//! Measured against the 20 sites the checker's first task found to be
+//! provably wrong (13 by a claim-vs-span heuristic, 3 found by hand, a 4-site
+//! cluster found by review): **0 of 20 are repairable here**, for two
+//! independent reasons. They are not stale — the C++ at the lines they name
+//! is exactly what was blessed, so `check` is green on all 20 and `remap`
+//! never even considers them. And if they were flagged, the text at the
+//! *intended* location differs from the text at the cited location in every
+//! one of the 20, so no destination passes the hash proof; accepting one
+//! anyway would mean weakening the property this module exists to guarantee.
+//!
+//! So a wholesale repair of that debt needs a different instrument — one that
+//! compares each cited span against the Rust body claiming to mirror it — and
+//! its output has to be read site by site and then `bless`ed. What `remap`
+//! buys is that the *next* cherry-pick does not add 500 more.
+//!
 //! ## Citations whose file shrank under them
 //!
 //! One shape needs care in the other direction. A citation naming lines the
@@ -111,7 +133,7 @@ use std::path::Path;
 use super::snapshot::Snapshot;
 use super::{
     check, compare, config_path, load_config, occurrence_key, scan, scan_tree, skip_report,
-    snapshot_path, Cited, CppFile, Verdict,
+    snapshot_path, Cited, CppFile, Scan, Verdict,
 };
 
 /// Run `git` in `root` and return its stdout, or a message naming what failed.
@@ -262,12 +284,18 @@ pub struct RemapReport {
     /// `check`'s summary line after the rewrite, so a run says plainly what
     /// state it left the tree in.
     pub after: String,
+    /// Whether that `check` passes. A remap that leaves the tree failing the
+    /// standing test has not finished, whatever it repaired, so this is part
+    /// of [`RemapReport::is_clean`] as well as of the text: the exit code is
+    /// only worth trusting if it cannot be greener than `check`.
+    pub after_ok: bool,
 }
 
 impl RemapReport {
-    /// True when nothing is left for a human to look at.
+    /// True when nothing is left for a human to look at *and* the tree now
+    /// passes `check`. Never greener than `check` itself.
     pub fn is_clean(&self) -> bool {
-        self.declined.is_empty() && self.untouched.is_empty()
+        self.declined.is_empty() && self.untouched.is_empty() && self.after_ok
     }
 
     /// The whole report, for stdout.
@@ -413,34 +441,31 @@ struct Repair<'a> {
     new_end: u32,
 }
 
-/// Repair every stale citation whose cited text can be found, unchanged, at a
-/// mapped location in the working tree; report everything else.
+/// Pair every scanned citation with its snapshot entry, exactly as `check`
+/// does, and split them into "a line shift remap can try" and "something else
+/// a human has to look at".
 ///
-/// With `dry_run` nothing is written — neither the Rust sources nor the
-/// snapshot — and the report says what would have happened.
-pub fn remap(root: &Path, dry_run: bool) -> Result<RemapReport, String> {
-    let cfg = load_config(root)?;
-    let scan = scan_tree(root, &cfg)?;
-    let path = snapshot_path(root);
-    let text = std::fs::read_to_string(&path)
-        .map_err(|e| format!("cannot read {}: {e} (run `bless` first)", path.display()))?;
-    let mut snap = Snapshot::from_json(&text).map_err(|e| format!("{}: {e}", path.display()))?;
-
-    let mut report = RemapReport {
-        dry_run,
-        skipped: skip_report(&scan),
-        ..Default::default()
-    };
-
-    // Pair scanned sites with snapshot entries exactly as `check` does, so
-    // remap acts on precisely the sites the standing test complains about.
+/// Returns the candidates; everything else lands in `report.untouched`. The
+/// four categories `check` reports are all accounted for here, and that is
+/// the point: remap's exit code is only honest if a problem it cannot repair
+/// still reaches the report. A blessed entry with no citation left in the
+/// source (`check`'s `missing`) has no scanned citation to walk from, so it
+/// needs its own pass over the unmatched entries — the omission that once let
+/// `remap` exit 0 on a tree `check` rejects.
+fn classify<'a>(
+    scan: &'a Scan,
+    snap: &Snapshot,
+    report: &mut RemapReport,
+) -> Vec<(usize, Cited<'a>)> {
     let mut blessed: HashMap<String, usize> = HashMap::new();
     let mut counts: HashMap<String, usize> = HashMap::new();
     for (i, s) in snap.sites.iter().enumerate() {
         let key = occurrence_key(&mut counts, &format!("{}#{}", s.rust, s.text));
         blessed.insert(key, i);
     }
-    let mut stale: Vec<(usize, Cited)> = Vec::new();
+    let mut matched: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut stale: Vec<(usize, Cited<'a>)> = Vec::new();
+
     let mut counts: HashMap<String, usize> = HashMap::new();
     for site in &scan.sites {
         let key = occurrence_key(&mut counts, &site.key());
@@ -450,17 +475,20 @@ pub fn remap(root: &Path, dry_run: bool) -> Result<RemapReport, String> {
                  review it and `bless`",
                 site.describe()
             )),
-            Some(&i) => match compare(&snap.sites[i], site) {
-                Verdict::Same => {}
-                Verdict::RePointed => report.untouched.push(format!(
-                    "{} — the snapshot has {}:{}-{}; a resolution change, not a line shift",
-                    site.describe(),
-                    snap.sites[i].cpp,
-                    snap.sites[i].start,
-                    snap.sites[i].end
-                )),
-                Verdict::Stale => stale.push((i, site.cited())),
-            },
+            Some(&i) => {
+                matched.insert(key);
+                match compare(&snap.sites[i], site) {
+                    Verdict::Same => {}
+                    Verdict::RePointed => report.untouched.push(format!(
+                        "{} — the snapshot has {}:{}-{}; a resolution change, not a line shift",
+                        site.describe(),
+                        snap.sites[i].cpp,
+                        snap.sites[i].start,
+                        snap.sites[i].end
+                    )),
+                    Verdict::Stale => stale.push((i, site.cited())),
+                }
+            }
         }
     }
 
@@ -486,9 +514,32 @@ pub fn remap(root: &Path, dry_run: bool) -> Result<RemapReport, String> {
                 cited.describe(),
                 snap.sites[i].cpp
             )),
-            Some(&i) => stale.push((i, cited)),
+            Some(&i) => {
+                matched.insert(key);
+                stale.push((i, cited));
+            }
         }
     }
+
+    // Blessed entries with no citation left in the source. There is nothing
+    // to rewrite — the comment that carried them is gone or was edited — but
+    // the tree does not pass `check` until a human has looked, so they must
+    // be reported and must fail the run.
+    let mut unmatched: Vec<String> = blessed
+        .iter()
+        .filter(|(key, _)| !matched.contains(*key))
+        .map(|(_, &i)| {
+            let b = &snap.sites[i];
+            format!(
+                "{}:{} cites {}:{}-{} — in the snapshot but no longer in the source; the \
+                 citation was deleted or its text edited, so there is nothing to remap. \
+                 Review it and `bless`.",
+                b.rust, b.line, b.cpp, b.start, b.end
+            )
+        })
+        .collect();
+    unmatched.sort();
+    report.untouched.append(&mut unmatched);
 
     // Every other unresolvable citation is out of remap's reach.
     let handled: std::collections::HashSet<&str> =
@@ -498,6 +549,29 @@ pub fn remap(root: &Path, dry_run: bool) -> Result<RemapReport, String> {
             .untouched
             .push(format!("{e} — unresolvable, so not remappable"));
     }
+    stale
+}
+
+/// Repair every stale citation whose cited text can be found, unchanged, at a
+/// mapped location in the working tree; report everything else.
+///
+/// With `dry_run` nothing is written — neither the Rust sources nor the
+/// snapshot — and the report says what would have happened.
+pub fn remap(root: &Path, dry_run: bool) -> Result<RemapReport, String> {
+    let cfg = load_config(root)?;
+    let scan = scan_tree(root, &cfg)?;
+    let path = snapshot_path(root);
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| format!("cannot read {}: {e} (run `bless` first)", path.display()))?;
+    let mut snap = Snapshot::from_json(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+
+    let mut report = RemapReport {
+        dry_run,
+        skipped: skip_report(&scan),
+        ..Default::default()
+    };
+
+    let stale = classify(&scan, &snap, &mut report);
 
     if stale.is_empty() {
         report.summary = format!(
@@ -506,7 +580,7 @@ pub fn remap(root: &Path, dry_run: bool) -> Result<RemapReport, String> {
             scan.sites.len(),
             super::short(&snap.cpp_commit)
         );
-        report.after = check_summary(root)?;
+        (report.after, report.after_ok) = check_summary(root)?;
         return Ok(report);
     }
 
@@ -622,7 +696,16 @@ pub fn remap(root: &Path, dry_run: bool) -> Result<RemapReport, String> {
             .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
         let (new, tokens) = rewrite_file(&old, &by_file[rust], rust)?;
         for (r, token) in by_file[rust].iter().zip(tokens) {
-            new_texts.insert(r.snap_idx, token);
+            // One snapshot entry, one repair. A duplicate would mean two
+            // citations were paired with the same blessed record, and the
+            // snapshot update below would silently keep only one of them —
+            // so refuse rather than guess, as everywhere else here.
+            if new_texts.insert(r.snap_idx, token).is_some() {
+                return Err(format!(
+                    "{rust}: two repairs share the snapshot entry for {}; refusing to write",
+                    r.cited.text
+                ));
+            }
         }
         writes.push((path, new));
     }
@@ -645,6 +728,24 @@ pub fn remap(root: &Path, dry_run: bool) -> Result<RemapReport, String> {
         .map_err(|e| format!("{}: {e}", cfg_path.display()))?;
     report.config_keys_updated = renamed;
 
+    // The snapshot follows the citation: same text at a new place, so the
+    // hash is untouched and the base stays where it was blessed. Worked out
+    // here, with everything else, so that nothing reaches the disk until the
+    // whole result is known.
+    let mut updates: Vec<(usize, u32, u32, String)> = Vec::with_capacity(repairs.len());
+    for r in &repairs {
+        match new_texts.remove(&r.snap_idx) {
+            Some(text) => updates.push((r.snap_idx, r.new_start, r.new_end, text)),
+            None => {
+                return Err(format!(
+                    "{}: no rewritten citation text was recorded for {}; refusing to write \
+                     a snapshot that would not describe the files",
+                    r.cited.rust, r.cited.text
+                ))
+            }
+        }
+    }
+
     report.summary = format!(
         "{} citation(s) stale: {} repaired{}, {} declined; {} other problem(s) left alone; \
          {} citations.toml key(s) follow the repaired citations",
@@ -657,9 +758,15 @@ pub fn remap(root: &Path, dry_run: bool) -> Result<RemapReport, String> {
     );
 
     if dry_run {
-        report.after =
-            "dry run: nothing written; the citations, the config and the snapshot are unchanged"
-                .to_string();
+        // The tree is unchanged, so `check`'s verdict is the one that was
+        // true before the run: a dry run that found work to do reports the
+        // tree as it still is, and exits non-zero.
+        let (after, ok) = check_summary(root)?;
+        report.after = format!(
+            "dry run: nothing written; the citations, the config and the snapshot are \
+             unchanged\n{after}"
+        );
+        report.after_ok = ok;
         return Ok(report);
     }
     report.files_written = writes.len();
@@ -671,31 +778,29 @@ pub fn remap(root: &Path, dry_run: bool) -> Result<RemapReport, String> {
         std::fs::write(path, text).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
     }
 
-    // The snapshot follows the citation: same text at a new place, so the
-    // hash is untouched and the base stays where it was blessed.
-    for r in &repairs {
-        let entry = &mut snap.sites[r.snap_idx];
-        entry.start = r.new_start;
-        entry.end = r.new_end;
-        entry.text = new_texts
-            .remove(&r.snap_idx)
-            .expect("every repair recorded its rewritten citation text");
+    for (idx, start, end, text) in updates {
+        let entry = &mut snap.sites[idx];
+        entry.start = start;
+        entry.end = end;
+        entry.text = text;
     }
     std::fs::write(&path, snap.to_json())
         .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
 
+    let (after, ok) = check_summary(root)?;
     report.after = format!(
-        "wrote {} Rust file(s), renamed {} citations.toml key(s), re-recorded the snapshot\n{}",
-        report.files_written,
-        report.config_keys_updated,
-        check_summary(root)?
+        "wrote {} Rust file(s), renamed {} citations.toml key(s), re-recorded the \
+         snapshot\n{after}",
+        report.files_written, report.config_keys_updated,
     );
+    report.after_ok = ok;
     Ok(report)
 }
 
-/// `check`'s one-line summary, for the tail of a remap report.
-fn check_summary(root: &Path) -> Result<String, String> {
-    Ok(format!("after: {}", check(root)?.summary))
+/// `check`'s one-line summary and verdict, for the tail of a remap report.
+fn check_summary(root: &Path) -> Result<(String, bool), String> {
+    let report = check(root)?;
+    Ok((format!("after: {}", report.summary), report.is_ok()))
 }
 
 /// `891` or `891-907`, the way a citation writes a range.
@@ -1114,6 +1219,71 @@ mod tests {
         assert!(Decline::Length(2, 5)
             .explain(&cited_at(2, 4), &b, "abc123")
             .contains("a range of a different length"));
+    }
+
+    /// A blessed citation that is no longer in the source has nothing to
+    /// remap — and must still fail the run. This is the case that once let
+    /// `remap` exit 0 on a tree `check` rejects: it is reached through the
+    /// snapshot, not through any scanned citation, so it needs its own pass.
+    #[test]
+    fn a_blessed_citation_that_vanished_from_the_source_fails_the_run() {
+        let blessed_at =
+            |line, text: &str, start, end, hash: &str| super::super::snapshot::SnapshotSite {
+                rust: "crates/a.rs".into(),
+                line,
+                text: text.into(),
+                cpp: "lib/X.cpp".into(),
+                start,
+                end,
+                base_start: start,
+                base_end: end,
+                hash: hash.into(),
+            };
+        let snap = Snapshot {
+            cpp_commit: "0000000000000000000000000000000000000000".into(),
+            sites: vec![
+                blessed_at(3, "cpp:10-12", 10, 12, "aaaaaaaaaaaaaaaa"),
+                blessed_at(9, "cpp:40", 40, 40, "bbbbbbbbbbbbbbbb"),
+            ],
+        };
+        // The source still has the first citation, unchanged; the second one
+        // was deleted (or its digits edited away).
+        let scan = Scan {
+            sites: vec![super::super::Site {
+                rust: "crates/a.rs".into(),
+                line: 3,
+                text: "cpp:10-12".into(),
+                cpp: "lib/X.cpp".into(),
+                start: 10,
+                end: 12,
+                start_digits: (0, 0),
+                end_digits: None,
+                hash: "aaaaaaaaaaaaaaaa".into(),
+            }],
+            dangling: Vec::new(),
+            skipped: Vec::new(),
+            errors: Vec::new(),
+        };
+        let mut report = RemapReport::default();
+        let stale = classify(&scan, &snap, &mut report);
+        assert!(stale.is_empty(), "nothing drifted, so nothing to remap");
+        assert_eq!(report.untouched.len(), 1, "{:?}", report.untouched);
+        assert!(
+            report.untouched[0].contains("crates/a.rs:9 cites lib/X.cpp:40-40")
+                && report.untouched[0].contains("no longer in the source"),
+            "{}",
+            report.untouched[0]
+        );
+        assert!(!report.is_clean(), "the run must not report itself clean");
+
+        // And the second half of the same guarantee: a run whose own lists
+        // are empty is still not clean unless `check` passes afterwards.
+        assert!(!RemapReport::default().is_clean());
+        assert!(RemapReport {
+            after_ok: true,
+            ..Default::default()
+        }
+        .is_clean());
     }
 
     #[test]

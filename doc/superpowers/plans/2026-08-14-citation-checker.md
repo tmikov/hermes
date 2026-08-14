@@ -192,6 +192,17 @@ point at the same constructs as before (spot-check 5). Then revert the C++ and
 
 All gates. `rust(tools): citation remap — mechanically repair shifted citations`
 
+**Result (measured, and load-bearing for any later repair decision): `remap`
+repairs drift, not wrongness — 0 of the 20 known-wrong citations Task 1 found
+are mechanically repairable.** They are not stale (the C++ at the lines they
+name is exactly what was blessed, so `check` is green on all 20 and remap
+never considers them), and the text at each one's *intended* location differs
+from the text at its cited location, so no destination passes the hash proof.
+Repairing that debt needs a different instrument — comparing each cited span
+against the Rust body claiming to mirror it — plus site-by-site review and a
+`bless`. The full argument lives in `crates/tools/src/citations/remap.rs`'s
+module doc, which is where it stays true.
+
 ---
 
 ### Task 3: Documentation, wiring, and closing the follow-up

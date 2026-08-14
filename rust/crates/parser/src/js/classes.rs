@@ -1339,7 +1339,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// `true` when the current token after an `async` specifier means `async`
     /// was actually the property name (not an async-method modifier). Port of
-    /// `checkN(less, l_paren, r_brace, equal, colon, semi)` (JSParserImpl.cpp
+    /// `checkN(less, l_paren, r_brace, equal, colon, semi)` (JSParserImpl.cpp:
     /// 5298-5304). No `star`, since `async *` is an async generator. `less`/
     /// `colon` are Flow/TS tokens, kept for an identical check.
     fn check_class_element_after_async_name(&self) -> bool {

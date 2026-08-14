@@ -1,6 +1,6 @@
 {
-  "cpp_commit": "fab819f1caf767234bedf958715fa315b75faf9e",
-  "site_count": 3045,
+  "cpp_commit": "29bb3de5d1eea5c1e7ffd8f0a70bc12404934ab9",
+  "site_count": 3046,
   "sites": [
     {"rust": "crates/ast/src/context.rs", "line": 217, "text": "Context.h:227-228", "cpp": "include/hermes/AST/Context.h", "start": 227, "end": 228, "hash": "f3ad5658f0cc6261"},
     {"rust": "crates/ast/src/context.rs", "line": 217, "text": "Context.h:407-412", "cpp": "include/hermes/AST/Context.h", "start": 407, "end": 412, "hash": "e9b8c6fb4ddb7fb5"},
@@ -57,6 +57,7 @@
     {"rust": "crates/parser/src/js/classes.rs", "line": 1240, "text": "C++ 5619-5626", "cpp": "lib/Parser/JSParserImpl.cpp", "start": 5619, "end": 5626, "hash": "104784f8c864d0fd"},
     {"rust": "crates/parser/src/js/classes.rs", "line": 1303, "text": "C++ 5670-5672", "cpp": "lib/Parser/JSParserImpl.cpp", "start": 5670, "end": 5672, "hash": "b7641e20b7977a15"},
     {"rust": "crates/parser/src/js/classes.rs", "line": 1326, "text": "C++ 5260-5267", "cpp": "lib/Parser/JSParserImpl.cpp", "start": 5260, "end": 5267, "hash": "9ca36f472c92a372"},
+    {"rust": "crates/parser/src/js/classes.rs", "line": 1343, "text": "JSParserImpl.cpp: 5298-5304", "cpp": "lib/Parser/JSParserImpl.cpp", "start": 5298, "end": 5304, "hash": "68e8f8c411083947"},
     {"rust": "crates/parser/src/js/classes.rs", "line": 1357, "text": "C++ 5241-5255", "cpp": "lib/Parser/JSParserImpl.cpp", "start": 5241, "end": 5255, "hash": "dbb3fd0017ef83a1"},
     {"rust": "crates/parser/src/js/classes.rs", "line": 1370, "text": "C++ 5249-5252", "cpp": "lib/Parser/JSParserImpl.cpp", "start": 5249, "end": 5252, "hash": "f39b081e6aef5801"},
     {"rust": "crates/parser/src/js/expressions.rs", "line": 78, "text": "C++ 6556-6561", "cpp": "lib/Parser/JSParserImpl.cpp", "start": 6556, "end": 6561, "hash": "8c59fd1352da5e27"},
