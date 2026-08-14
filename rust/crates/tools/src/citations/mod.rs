@@ -38,12 +38,21 @@
 //!
 //! ```text
 //! cargo run -p tools --bin citations -- check   # verify (what the test runs)
+//! cargo run -p tools --bin citations -- remap   # repair what merely shifted
 //! cargo run -p tools --bin citations -- bless   # re-record the current tree
 //! ```
 //!
-//! `bless` is for after a *reviewed* change: it accepts whatever the citations
-//! currently point at. It does not check that a citation is *right*, only that
-//! it has not drifted since a human last looked.
+//! [`remap()`] is the mechanical repair, and the first thing to reach for after
+//! a cherry-pick: it moves the digits of every citation whose C++ text only
+//! changed *position*, accepting a new location solely when the text there
+//! still hashes to what was blessed, and declining — by name, with a reason —
+//! every citation whose text changed. See that module for the safety
+//! argument.
+//!
+//! `bless` is for after a *reviewed* change, including whatever `remap`
+//! declined: it accepts whatever the citations currently point at. It does
+//! not check that a citation is *right*, only that it has not drifted since a
+//! human last looked.
 //!
 //! ## Resolving a citation to a file
 //!
@@ -52,8 +61,11 @@
 //! citation the config cannot resolve is reported, never silently dropped.
 
 pub mod config;
+pub mod remap;
 pub mod scan;
 pub mod snapshot;
+
+pub use remap::{remap, RemapReport};
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -95,6 +107,104 @@ impl Site {
 
     /// `crates/x.rs:12 cites lib/Sema/SemanticResolver.cpp:891-907`.
     pub fn describe(&self) -> String {
+        self.cited().describe()
+    }
+
+    /// The part of this site a rewrite needs.
+    pub fn cited(&self) -> Cited<'_> {
+        Cited {
+            rust: &self.rust,
+            line: self.line,
+            text: &self.text,
+            cpp: &self.cpp,
+            start: self.start,
+            end: self.end,
+            start_digits: self.start_digits,
+            end_digits: self.end_digits,
+        }
+    }
+}
+
+/// A citation that resolves to a real C++ file but does not name lines that
+/// exist in it.
+///
+/// It is a hard error for `check` and `bless` — it is in [`Scan::errors`] as
+/// well — because a citation past the end of its file is exactly the breakage
+/// this tool exists to catch. It is listed separately as well because
+/// [`remap()`] can often repair it: the snapshot still knows what text the
+/// citation named and where that text sat, and the digits' byte ranges say
+/// what to rewrite. This is the shape a file that *shrank* leaves behind,
+/// which is what a revert of an upstream insertion looks like.
+#[derive(Debug)]
+pub struct Dangling {
+    /// Rust file, relative to `rust/`.
+    pub rust: String,
+    /// 1-based line of the citation's first digit.
+    pub line: u32,
+    /// The citation as written, whitespace collapsed.
+    pub text: String,
+    /// The C++ file it resolved to.
+    pub cpp: String,
+    /// First cited line, as written.
+    pub start: u32,
+    /// Last cited line, as written.
+    pub end: u32,
+    /// Byte range of the start number's digits in the Rust file.
+    pub start_digits: (u32, u32),
+    /// Byte range of the end number's digits, if the citation is a range.
+    pub end_digits: Option<(u32, u32)>,
+    /// The exact line this citation contributed to [`Scan::errors`], so a
+    /// caller that handles the citation itself can drop the duplicate.
+    pub message: String,
+}
+
+impl Dangling {
+    /// The part of this citation a rewrite needs.
+    pub fn cited(&self) -> Cited<'_> {
+        Cited {
+            rust: &self.rust,
+            line: self.line,
+            text: &self.text,
+            cpp: &self.cpp,
+            start: self.start,
+            end: self.end,
+            start_digits: self.start_digits,
+            end_digits: self.end_digits,
+        }
+    }
+}
+
+/// Where a citation is written and what it currently says: the view [`remap()`]
+/// works from, so that a resolved [`Site`] and a [`Dangling`] citation can be
+/// repaired by the same code.
+#[derive(Clone, Copy, Debug)]
+pub struct Cited<'a> {
+    /// Rust file, relative to `rust/`.
+    pub rust: &'a str,
+    /// 1-based line of the citation's first digit.
+    pub line: u32,
+    /// The citation as written, whitespace collapsed.
+    pub text: &'a str,
+    /// The C++ file it resolves to.
+    pub cpp: &'a str,
+    /// First cited line, as written.
+    pub start: u32,
+    /// Last cited line, as written.
+    pub end: u32,
+    /// Byte range of the start number's digits in the Rust file.
+    pub start_digits: (u32, u32),
+    /// Byte range of the end number's digits, if the citation is a range.
+    pub end_digits: Option<(u32, u32)>,
+}
+
+impl Cited<'_> {
+    /// `crates/x.rs#cpp:891-907` — the key the config and the snapshot use.
+    pub fn key(&self) -> String {
+        format!("{}#{}", self.rust, self.text)
+    }
+
+    /// `crates/x.rs:12 cites lib/Sema/SemanticResolver.cpp:891-907`.
+    pub fn describe(&self) -> String {
         let range = if self.start == self.end {
             self.start.to_string()
         } else {
@@ -118,6 +228,10 @@ pub struct Skipped {
 pub struct Scan {
     /// Every resolved, in-range citation.
     pub sites: Vec<Site>,
+    /// Resolved citations that name lines the file does not have. Each is in
+    /// [`Scan::errors`] too — this list exists so `remap` can try to repair
+    /// them; see [`Dangling`].
+    pub dangling: Vec<Dangling>,
     /// Citations the config says to skip, with why.
     pub skipped: Vec<Skipped>,
     /// Citations that could not be resolved or do not name real lines. These
@@ -129,6 +243,7 @@ pub struct Scan {
 
 impl Scan {
     /// Total citations found, however they were classified.
+    /// A dangling citation is counted once, as an error.
     pub fn total(&self) -> usize {
         self.sites.len() + self.skipped.len() + self.errors.len()
     }
@@ -214,9 +329,55 @@ fn read_dir_sorted(dir: &Path) -> Result<Vec<PathBuf>, String> {
 }
 
 /// A C++ file's bytes plus its line index, loaded once per run.
-struct CppFile {
+///
+/// The content need not come from the working tree — [`remap`] builds one
+/// from a file as of a git commit — so this holds the bytes rather than a
+/// path.
+pub(crate) struct CppFile {
     text: String,
     index: LineIndex,
+}
+
+impl CppFile {
+    /// Index `text` for span lookups.
+    pub(crate) fn new(text: String) -> CppFile {
+        let index = LineIndex::build(text.as_bytes());
+        CppFile { text, index }
+    }
+
+    /// Last line that has any content, i.e. the file's line count ignoring
+    /// the empty "line" that a trailing newline creates.
+    pub(crate) fn last_real_line(&self) -> u32 {
+        let count = self.index.line_count();
+        if count > 1 && self.text.ends_with('\n') {
+            count - 1
+        } else {
+            count
+        }
+    }
+
+    /// The exact bytes of lines `start..=end`, including the last line's
+    /// newline when it has one. This is what gets hashed.
+    fn span_bytes(&self, start: u32, end: u32) -> &[u8] {
+        let bytes = self.text.as_bytes();
+        let from = self.index.line_start(start) as usize;
+        let to = if end < self.index.line_count() {
+            self.index.line_start(end + 1) as usize
+        } else {
+            bytes.len()
+        };
+        &bytes[from..to]
+    }
+
+    /// Hash of lines `start..=end`, or `None` when that range is not entirely
+    /// inside the file — which is the answer a remap needs when a line map
+    /// sends a citation past the end of a file that shrank.
+    pub(crate) fn hash_span(&self, start: u32, end: u32) -> Option<String> {
+        if start < 1 || end < start || end > self.last_real_line() {
+            return None;
+        }
+        Some(hash_bytes(self.span_bytes(start, end)))
+    }
 }
 
 /// Walk the Rust tree, resolve every citation through `cfg`, and hash the
@@ -224,6 +385,7 @@ struct CppFile {
 pub fn scan_tree(root: &Path, cfg: &Config) -> Result<Scan, String> {
     let mut cpp_cache: HashMap<String, Option<CppFile>> = HashMap::new();
     let mut sites = Vec::new();
+    let mut dangling = Vec::new();
     let mut skipped = Vec::new();
     let mut errors = Vec::new();
 
@@ -286,10 +448,7 @@ pub fn scan_tree(root: &Path, cfg: &Config) -> Result<Scan, String> {
 
             let file = cpp_cache.entry(cpp.clone()).or_insert_with(|| {
                 let p = root.join(&cpp);
-                std::fs::read_to_string(&p).ok().map(|text| {
-                    let index = LineIndex::build(text.as_bytes());
-                    CppFile { text, index }
-                })
+                std::fs::read_to_string(&p).ok().map(CppFile::new)
             });
             let Some(file) = file else {
                 errors.push(format!(
@@ -308,16 +467,32 @@ pub fn scan_tree(root: &Path, cfg: &Config) -> Result<Scan, String> {
                 continue;
             }
             // `line_count()` counts the empty line after a trailing newline.
-            let last_line = last_real_line(file);
+            let last_line = file.last_real_line();
             if raw.start < 1 || end > last_line {
-                errors.push(format!(
+                let message = format!(
                     "{rust}:{} cites {cpp}:{}-{} — past end of file ({cpp} has {last_line} lines)",
                     raw.line, raw.start, end
-                ));
+                );
+                errors.push(message.clone());
+                // Still an error, but a repairable one: recorded so `remap`
+                // can look for the blessed text in the file that shrank.
+                dangling.push(Dangling {
+                    rust: rust.clone(),
+                    line: raw.line,
+                    text: raw.text,
+                    cpp,
+                    start: raw.start,
+                    end,
+                    start_digits: raw.start_digits,
+                    end_digits: raw.end_digits,
+                    message,
+                });
                 continue;
             }
 
-            let hash = hash_bytes(span_bytes(file, raw.start, end));
+            let hash = file
+                .hash_span(raw.start, end)
+                .expect("the range was just checked against the file");
             sites.push(Site {
                 rust: rust.clone(),
                 line: raw.line,
@@ -333,50 +508,16 @@ pub fn scan_tree(root: &Path, cfg: &Config) -> Result<Scan, String> {
     }
     Ok(Scan {
         sites,
+        dangling,
         skipped,
         errors,
     })
 }
 
-/// Last line that has any content, i.e. the file's line count ignoring the
-/// empty "line" that a trailing newline creates.
-fn last_real_line(file: &CppFile) -> u32 {
-    let count = file.index.line_count();
-    if count > 1 && file.text.ends_with('\n') {
-        count - 1
-    } else {
-        count
-    }
-}
-
-/// The exact bytes of lines `start..=end`, including the last line's newline
-/// when it has one. This is what gets hashed.
-fn span_bytes(file: &CppFile, start: u32, end: u32) -> &[u8] {
-    let bytes = file.text.as_bytes();
-    let from = file.index.line_start(start) as usize;
-    let to = if end < file.index.line_count() {
-        file.index.line_start(end + 1) as usize
-    } else {
-        bytes.len()
-    };
-    &bytes[from..to]
-}
-
 /// `git rev-parse HEAD` for the C++ tree, so the remap has a base commit.
 fn head_commit(root: &Path) -> Result<String, String> {
-    let out = std::process::Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["rev-parse", "HEAD"])
-        .output()
-        .map_err(|e| format!("cannot run git: {e}"))?;
-    if !out.status.success() {
-        return Err(format!(
-            "git rev-parse HEAD failed: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    let out = remap::git(root, &["rev-parse", "HEAD"])?;
+    Ok(String::from_utf8_lossy(&out).trim().to_string())
 }
 
 /// Rescan the tree and rewrite the snapshot. Returns the human report.
@@ -398,6 +539,10 @@ pub fn bless(root: &Path) -> Result<String, String> {
                 cpp: s.cpp.clone(),
                 start: s.start,
                 end: s.end,
+                // Blessing re-chooses the base: the citation as written now is
+                // where the hash just recorded came from.
+                base_start: s.start,
+                base_end: s.end,
                 hash: s.hash.clone(),
             })
             .collect(),
@@ -478,8 +623,14 @@ impl CheckReport {
         out.push('\n');
         out.push_str(&self.skipped);
         out.push_str(
-            "\nThe C++ lines a comment cites moved, or the comment changed. Re-point the \
-             citations, then re-record them with:\n  \
+            "\nThe C++ lines a comment cites moved, or the C++ at them changed. Try the \
+             mechanical repair first — it only accepts a new location whose text still \
+             hashes to what was blessed, so it cannot invent a plausible-but-wrong \
+             citation:\n  \
+             cargo run -p tools --bin citations -- remap --dry-run   # what it would do\n  \
+             cargo run -p tools --bin citations -- remap\n\
+             Whatever it declines is a semantic question, not a mechanical one: read those \
+             citations against the C++, re-point them by hand, and re-record with:\n  \
              cargo run -p tools --bin citations -- bless\n",
         );
         out
@@ -565,7 +716,7 @@ pub fn check(root: &Path) -> Result<CheckReport, String> {
 
 /// How a scanned site compares with the snapshot's record of it.
 #[derive(Debug, PartialEq, Eq)]
-enum Verdict {
+pub(crate) enum Verdict {
     /// Same file, same lines, same bytes.
     Same,
     /// The config resolves the citation somewhere else now.
@@ -580,7 +731,7 @@ enum Verdict {
 /// `citations.toml` edit that re-points a glob also changes the hash, and
 /// reporting that as "span changed" would send the reader hunting through the
 /// C++ for an edit that never happened.
-fn compare(blessed: &SnapshotSite, site: &Site) -> Verdict {
+pub(crate) fn compare(blessed: &SnapshotSite, site: &Site) -> Verdict {
     if (blessed.cpp.as_str(), blessed.start, blessed.end)
         != (site.cpp.as_str(), site.start, site.end)
     {
@@ -593,7 +744,7 @@ fn compare(blessed: &SnapshotSite, site: &Site) -> Verdict {
 }
 
 /// Make a key unique per occurrence: `k`, `k#2`, `k#3`, ...
-fn occurrence_key(counts: &mut HashMap<String, usize>, key: &str) -> String {
+pub(crate) fn occurrence_key(counts: &mut HashMap<String, usize>, key: &str) -> String {
     let n = counts.entry(key.to_string()).or_insert(0);
     *n += 1;
     if *n == 1 {
@@ -604,7 +755,7 @@ fn occurrence_key(counts: &mut HashMap<String, usize>, key: &str) -> String {
 }
 
 /// First 12 characters of a commit hash.
-fn short(commit: &str) -> &str {
+pub(crate) fn short(commit: &str) -> &str {
     &commit[..commit.len().min(12)]
 }
 
@@ -686,13 +837,18 @@ mod tests {
 
     #[test]
     fn span_bytes_covers_the_inclusive_range() {
-        let text = "a\nbb\nccc\ndddd\n".to_string();
-        let index = LineIndex::build(text.as_bytes());
-        let file = CppFile { text, index };
-        assert_eq!(span_bytes(&file, 1, 1), b"a\n");
-        assert_eq!(span_bytes(&file, 2, 3), b"bb\nccc\n");
-        assert_eq!(span_bytes(&file, 4, 4), b"dddd\n");
-        assert_eq!(last_real_line(&file), 4);
+        let file = CppFile::new("a\nbb\nccc\ndddd\n".to_string());
+        assert_eq!(file.span_bytes(1, 1), b"a\n");
+        assert_eq!(file.span_bytes(2, 3), b"bb\nccc\n");
+        assert_eq!(file.span_bytes(4, 4), b"dddd\n");
+        assert_eq!(file.last_real_line(), 4);
+        assert_eq!(file.hash_span(2, 3), Some(hash_bytes(b"bb\nccc\n")));
+        // A range the file does not contain has no hash, rather than a hash
+        // of whatever happens to be there: a remap must be able to tell that
+        // a line map sent it past the end of a file that shrank.
+        assert_eq!(file.hash_span(4, 5), None);
+        assert_eq!(file.hash_span(0, 1), None);
+        assert_eq!(file.hash_span(3, 2), None);
     }
 
     #[test]
@@ -704,6 +860,8 @@ mod tests {
             cpp: "lib/Support/SourceErrorManager.cpp".into(),
             start: 109,
             end: 117,
+            base_start: 109,
+            base_end: 117,
             hash: "0123456789abcdef".into(),
         };
         let site = |cpp: &str, hash: &str| Site {

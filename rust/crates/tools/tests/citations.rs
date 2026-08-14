@@ -8,11 +8,23 @@
 //! The standing check that the port's `cpp:NNN` citations still point at the
 //! C++ they were written against.
 //!
-//! Roughly 1.7k comments in the Rust sources name exact C++ line numbers. A
+//! Roughly 3k comments in the Rust sources name exact C++ line numbers. A
 //! cherry-pick that shifts those lines breaks every citation below it without
 //! breaking the build, so this test re-hashes each cited span and fails
 //! naming the ones that moved. See `tools::citations` for the full story and
 //! `crates/tools/citations.toml` for how a citation is resolved to a file.
+//!
+//! When it fails, the message points at the mechanical repair first:
+//!
+//! ```text
+//! cargo run -p tools --bin citations -- remap --dry-run
+//! cargo run -p tools --bin citations -- remap
+//! ```
+//!
+//! `remap` moves the digits of any citation whose C++ text merely shifted —
+//! it accepts a new location only when the text there still hashes to what
+//! was blessed — and declines, loudly, every citation whose text *changed*.
+//! Those are the ones to read against the C++ by hand before `bless`.
 //!
 //! This lives in `tools` (`publish = false`) for the same reason
 //! `common_copies_identical.rs` does: it reads across the whole workspace and

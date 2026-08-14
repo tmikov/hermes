@@ -36,22 +36,55 @@ pub struct SnapshotSite {
     pub start: u32,
     /// Last cited line, inclusive; equal to `start` for a single-line cite.
     pub end: u32,
+    /// Where the blessed span sat in the *base* content — the C++ file as of
+    /// [`Snapshot::cpp_commit`] — when this site was last blessed.
+    ///
+    /// A freshly blessed site has `base_start == start`, and the field is not
+    /// written to the file at all; the two differ only after a `remap` moved
+    /// the citation without a re-bless. Keeping the base fixed is what makes
+    /// `remap` idempotent and reversible: the line map always runs from the
+    /// same origin (the blessed commit) to the working tree, so remapping
+    /// twice, or remapping after the C++ change is reverted, lands on the
+    /// right line rather than compounding an offset.
+    ///
+    /// It is a *claim* about the base, not a fact: `remap` re-hashes the
+    /// blessed span at these coordinates in the base content before it trusts
+    /// any line map derived from that commit, and declines the site when the
+    /// claim does not hold.
+    pub base_start: u32,
+    /// Last line of the blessed span in the base content; see
+    /// [`SnapshotSite::base_start`].
+    pub base_end: u32,
     /// FNV-1a 64 of the cited span's exact bytes, lowercase hex.
     pub hash: String,
+}
+
+impl SnapshotSite {
+    /// True when the site still sits where it was blessed, i.e. no `remap`
+    /// has moved it since. Such a site writes no `base_*` fields.
+    fn base_is_current(&self) -> bool {
+        self.base_start == self.start && self.base_end == self.end
+    }
 }
 
 /// A whole snapshot file.
 #[derive(Debug)]
 pub struct Snapshot {
-    /// `git rev-parse HEAD` when `bless` ran, so the remap (task 2) has a
-    /// base to diff from.
+    /// `git rev-parse HEAD` when `bless` ran, so the remap has a base to diff
+    /// from.
     ///
     /// Note what this is *not*: it is HEAD at bless time, so once the
     /// snapshot is committed it names the **parent** of the commit carrying
     /// it, and it says nothing about uncommitted C++ in the working tree. The
     /// hashes, not this field, are the record of what was blessed — a remap
     /// must verify against them and treat a diff from this commit as a
-    /// hypothesis about where lines went, never as ground truth.
+    /// hypothesis about where lines went, never as ground truth. That is
+    /// exactly what `remap` does: it re-hashes each blessed span in this
+    /// commit's content before believing the line map, and again at the
+    /// mapped location before writing anything.
+    ///
+    /// `remap` never changes this field: the base is only re-chosen by
+    /// `bless`, which re-records the hashes at the same time.
     pub cpp_commit: String,
     /// Every checked site, in scan order.
     pub sites: Vec<SnapshotSite>,
@@ -69,15 +102,28 @@ impl Snapshot {
         out.push_str(&format!("  \"site_count\": {},\n", self.sites.len()));
         out.push_str("  \"sites\": [\n");
         for (i, s) in self.sites.iter().enumerate() {
+            // The base coordinates are written only when a `remap` has moved
+            // the site since it was blessed, so a blessed snapshot keeps the
+            // shape it has always had and a remap's diff shows exactly the
+            // sites it touched.
+            let base = if s.base_is_current() {
+                String::new()
+            } else {
+                format!(
+                    ", \"base_start\": {}, \"base_end\": {}",
+                    s.base_start, s.base_end
+                )
+            };
             out.push_str(&format!(
                 "    {{\"rust\": {}, \"line\": {}, \"text\": {}, \"cpp\": {}, \
-                 \"start\": {}, \"end\": {}, \"hash\": {}}}{}\n",
+                 \"start\": {}, \"end\": {}{}, \"hash\": {}}}{}\n",
                 json_string(&s.rust),
                 s.line,
                 json_string(&s.text),
                 json_string(&s.cpp),
                 s.start,
                 s.end,
+                base,
                 json_string(&s.hash),
                 if i + 1 == self.sites.len() { "" } else { "," }
             ));
@@ -133,13 +179,24 @@ impl Snapshot {
                     .map(|n| n as u32)
                     .ok_or_else(|| format!("snapshot site {i} has no number `{name}`"))
             };
+            // Absent base coordinates mean "still where it was blessed"; see
+            // `SnapshotSite::base_start`.
+            let optional_number = |name: &str| -> Option<u32> {
+                o.find(name, &atoms)
+                    .and_then(|j| o.value_at(j).as_number())
+                    .map(|n| n as u32)
+            };
+            let start = number("start")?;
+            let end = number("end")?;
             sites.push(SnapshotSite {
                 rust: string("rust")?,
                 line: number("line")?,
                 text: string("text")?,
                 cpp: string("cpp")?,
-                start: number("start")?,
-                end: number("end")?,
+                start,
+                end,
+                base_start: optional_number("base_start").unwrap_or(start),
+                base_end: optional_number("base_end").unwrap_or(end),
                 hash: string("hash")?,
             });
         }
@@ -198,6 +255,8 @@ mod tests {
                     cpp: "lib/Sema/SemanticResolver.cpp".into(),
                     start: 891,
                     end: 907,
+                    base_start: 891,
+                    base_end: 907,
                     hash: hash_bytes(b"whatever"),
                 },
                 SnapshotSite {
@@ -207,6 +266,10 @@ mod tests {
                     cpp: "lib/Parser/JSONParser.cpp".into(),
                     start: 202,
                     end: 211,
+                    // A site a `remap` has moved: the base stays where it was
+                    // blessed, so the round trip must carry both pairs.
+                    base_start: 200,
+                    base_end: 209,
                     hash: hash_bytes(b"other"),
                 },
             ],
@@ -225,6 +288,21 @@ mod tests {
     fn one_site_per_line() {
         let json = sample().to_json();
         assert_eq!(json.lines().filter(|l| l.contains("\"rust\":")).count(), 2);
+    }
+
+    /// A site that has not been remapped writes no `base_*` fields, and a
+    /// snapshot without them reads back with the base equal to the citation.
+    #[test]
+    fn the_base_is_written_only_when_it_differs() {
+        let json = sample().to_json();
+        assert_eq!(json.matches("\"base_start\"").count(), 1);
+        assert!(json.contains("\"base_start\": 200, \"base_end\": 209"));
+
+        let old = "{\"cpp_commit\": \"x\", \"sites\": [{\"rust\": \"a.rs\", \"line\": 1, \
+                   \"text\": \"cpp:5\", \"cpp\": \"b.cpp\", \"start\": 5, \"end\": 5, \
+                   \"hash\": \"0\"}]}";
+        let snap = Snapshot::from_json(old).expect("a pre-remap snapshot still reads");
+        assert_eq!((snap.sites[0].base_start, snap.sites[0].base_end), (5, 5));
     }
 
     #[test]

@@ -5,19 +5,24 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-//! citations: verify (or re-record) the `cpp:NNN` citations in the Rust port.
+//! citations: verify, repair, or re-record the `cpp:NNN` citations in the
+//! Rust port.
 //!
 //! ```text
 //!   cargo run -p tools --bin citations -- check
+//!   cargo run -p tools --bin citations -- remap [--dry-run]
 //!   cargo run -p tools --bin citations -- bless
 //! ```
 //!
 //! `check` exits non-zero and lists every citation whose cited C++ span
 //! changed since it was blessed; it is what the standing test in
-//! `crates/tools/tests/citations.rs` runs. `bless` re-records the current
-//! tree — only after a human has looked at what moved.
+//! `crates/tools/tests/citations.rs` runs. `remap` is the mechanical repair:
+//! it moves the digits of a citation whose text merely shifted, and declines
+//! — loudly — any citation whose text changed. `bless` re-records the current
+//! tree, and is for what remap declined, after a human has looked at it.
 //!
-//! See `tools::citations` for what a citation is and why the port has them.
+//! See `tools::citations` for what a citation is and why the port has them,
+//! and `tools::citations::remap` for what remap will and will not do.
 
 use hermes_command_line::{CommandLine, Opt, OptDesc};
 use tools::citations;
@@ -27,9 +32,21 @@ fn main() {
     let mode = Opt::<String>::new(
         &mut cl,
         OptDesc {
-            desc: Some("What to do: 'check' (verify) or 'bless' (re-record)."),
-            value_desc: Some("check|bless"),
+            desc: Some(
+                "What to do: 'check' (verify), 'remap' (mechanically repair \
+                 shifted citations) or 'bless' (re-record).",
+            ),
+            value_desc: Some("check|remap|bless"),
             min_count: 1,
+            ..Default::default()
+        },
+    );
+    let dry_run = Opt::<bool>::new_bool(
+        &mut cl,
+        OptDesc {
+            long: Some("dry-run"),
+            desc: Some("remap: report what would be rewritten, write nothing."),
+            init: Some(false),
             ..Default::default()
         },
     );
@@ -48,12 +65,23 @@ fn main() {
                 }
             }
         },
+        // A remap that left anything for a human exits non-zero: the tree is
+        // still not in the state the standing test wants.
+        "remap" => match citations::remap(&root, *dry_run) {
+            Err(e) => fail(&e),
+            Ok(report) => {
+                print!("{}", report.text());
+                if !report.is_clean() {
+                    std::process::exit(1);
+                }
+            }
+        },
         "bless" => match citations::bless(&root) {
             Err(e) => fail(&e),
             Ok(report) => println!("{report}"),
         },
         other => fail(&format!(
-            "unknown mode {other:?}; expected 'check' or 'bless'"
+            "unknown mode {other:?}; expected 'check', 'remap' or 'bless'"
         )),
     }
 }
