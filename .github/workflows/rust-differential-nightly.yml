@@ -1,0 +1,97 @@
+name: Rust differential (nightly)
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  differential:
+    name: Rust differential tests against C++ oracle
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install CMake and Ninja
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y cmake ninja-build
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96.0"
+          components: rustfmt, clippy
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+
+      # Cache the C++ oracle build to amortise the engine build cost.
+      # The key invalidates on any change to CMakeLists files or C/C++ sources.
+      - name: Cache cmake-build-asan
+        uses: actions/cache@v4
+        with:
+          path: cmake-build-asan
+          key: >-
+            cmake-asan-${{ runner.os }}-${{ hashFiles(
+              '**/CMakeLists.txt',
+              '**/*.cmake',
+              'lib/**/*.cpp',
+              'lib/**/*.h',
+              'include/**/*.h'
+            ) }}
+          restore-keys: cmake-asan-${{ runner.os }}-
+
+      - name: Configure C++ oracle (ASan + Debug + -O1)
+        run: |
+          cmake -B cmake-build-asan -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DHERMES_ENABLE_ADDRESS_SANITIZER=ON \
+            -DCMAKE_CXX_FLAGS="-O1" \
+            -DCMAKE_C_FLAGS="-O1"
+
+      # The oracles are C++ binaries: `hermesc` for the AST differential and
+      # for sema's driver path (`-dump-sema`), `json-parse-dump` for the JSON
+      # one, `preparse-dump` for the pre-parse side table, `js-lexer-dump` for
+      # the lexer, `sema-parser-dump` for sema's parser-entry path
+      # (`resolveASTForParser`, which hermesc cannot reach). (`ast-dump` and
+      # `sema-dump` are *Rust* drivers, not CMake targets.)
+      - name: Build C++ oracle targets
+        run: >-
+          cmake --build cmake-build-asan --target
+          hermesc json-parse-dump preparse-dump js-lexer-dump sema-parser-dump
+
+      # The Rust drivers live in the unpublished `tools` crate; each
+      # differential test builds the one it needs on demand (see
+      # rust/crates/parser/tests/common/mod.rs).
+      - name: Run parser differential tests
+        env:
+          REQUIRE_DIFFERENTIAL: "1"
+        run: >-
+          cargo test
+          --manifest-path rust/Cargo.toml
+          -p hermes-parser
+          --test parser_differential
+          --test json_differential
+          --test preparse_differential
+          --test differential
+
+      # A separate invocation because `--test <name>` resolves per package:
+      # `sema_differential` lives in `hermes-sema`, so it cannot join the
+      # `-p hermes-parser` command above. This is the sema crate's entire
+      # correctness claim (the 219-file corpus + the parser-entry corpus), so
+      # it must run in CI alongside the parser ones.
+      - name: Run sema differential tests
+        env:
+          REQUIRE_DIFFERENTIAL: "1"
+        run: >-
+          cargo test
+          --manifest-path rust/Cargo.toml
+          -p hermes-sema
+          --test sema_differential
