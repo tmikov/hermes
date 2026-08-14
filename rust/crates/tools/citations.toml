@@ -76,6 +76,7 @@
 "ts.cpp" = "lib/Parser/JSParserImpl-ts.cpp"
 "jsx.cpp" = "lib/Parser/JSParserImpl-jsx.cpp"
 "JSParserImpl-flow.cpp" = "lib/Parser/JSParserImpl-flow.cpp"
+"JSParserImpl-ts.cpp" = "lib/Parser/JSParserImpl-ts.cpp"
 "JSParserImpl-jsx.cpp" = "lib/Parser/JSParserImpl-jsx.cpp"
 "JSParserImpl.cpp" = "lib/Parser/JSParserImpl.cpp"
 "JSParserImpl.h" = "lib/Parser/JSParserImpl.h"

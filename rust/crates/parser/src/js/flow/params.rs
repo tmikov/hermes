@@ -24,7 +24,7 @@ use super::AllowAnonFunctionType;
 
 impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     // -----------------------------------------------------------------------
-    // parseTypeParamsFlow — 4690 in JSParserImpl-flow.cpp
+    // parseTypeParamsFlow — 4693 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse a type-parameter declaration `<T, U: B, ...>`, with the current
@@ -207,7 +207,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseTypeArgsFlow — 4816 in JSParserImpl-flow.cpp
+    // parseTypeArgsFlow — 4819 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse type arguments `<T, U>`, with the current token at `<`.
@@ -262,7 +262,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseGenericTypeFlow — 5007 in JSParserImpl-flow.cpp
+    // parseGenericTypeFlow — 5010 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse a (possibly qualified) generic type reference
@@ -351,7 +351,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseClassImplementsFlow — 5052 in JSParserImpl-flow.cpp
+    // parseClassImplementsFlow — 5055 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse one entry of a class `implements` clause: `Name` or

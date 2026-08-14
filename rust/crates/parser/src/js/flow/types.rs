@@ -43,7 +43,7 @@ use super::{
 
 impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     // -----------------------------------------------------------------------
-    // parseTypeAnnotationFlow — 3078 in JSParserImpl-flow.cpp
+    // parseTypeAnnotationFlow — 3081 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse a type annotation.
@@ -463,7 +463,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parsePrimaryTypeAnnotationFlow — 3305 in JSParserImpl-flow.cpp
+    // parsePrimaryTypeAnnotationFlow — 3308 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse a primary type annotation. Port of
@@ -918,7 +918,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseTypeofTypeAnnotationFlow — 3604 in JSParserImpl-flow.cpp
+    // parseTypeofTypeAnnotationFlow — 3607 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse a `typeof X.Y<Args>` type annotation, with the current token at
@@ -1041,7 +1041,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseTupleTypeAnnotationFlow — 3668 in JSParserImpl-flow.cpp
+    // parseTupleTypeAnnotationFlow — 3671 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse a tuple type annotation, with the current token at `[`.
@@ -1249,7 +1249,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // reparseTypeAnnotationAsIdFlow — 5100 in JSParserImpl-flow.cpp
+    // reparseTypeAnnotationAsIdFlow — 5103 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Map a type-annotation node back to the identifier atom it would have
@@ -1589,7 +1589,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseHookTypeAnnotationFlow — 3816 in JSParserImpl-flow.cpp
+    // parseHookTypeAnnotationFlow — 3819 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse a `hook(params) => R` TYPE annotation, with the cursor at `hook`.

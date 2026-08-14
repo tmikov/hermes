@@ -19,6 +19,7 @@
 //!   cpp:86-88, 160-245          a continuation: `160-245` inherits the file
 //!   ESTree.def:697-750 ... :677 an implicit file: `:677` inherits it too
 //!   C++ 4890-4896               the parser port's spelling of `cpp:4890-4896`
+//!   2886 in JSParserImpl-flow.cpp   the section-banner spelling, no colon
 //! ```
 //!
 //! `C++ NNN[-MMM]` resolves exactly like `cpp:NNN[-MMM]` — through the
@@ -26,6 +27,21 @@
 //! (1278 of them). A `C++` followed by a number that a dash then continues
 //! into a word is prose, not a citation: "the C++ 3-arg `setLocation`
 //! overload".
+//!
+//! `NNN[-MMM] in <basename>` is how the parser port spells the banner above
+//! each ported function — `// parseReturnTypeAnnotationFlow — 2886 in
+//! JSParserImpl-flow.cpp` — 137 of them, and the one shape with no colon at
+//! all. It has no shorthand: the file must be named right there and it
+//! resolves through `[qualified]` like any other named file, so nothing about
+//! it is guessed. Because English can put a number in front of the word "in",
+//! the shape is deliberately tight: `in` must be a word of its own, the
+//! number must not be glued to what precedes it (so `C++17 in Foo.cpp` and
+//! `v2 in Foo.cpp` are not citations), and what follows `in` must be a
+//! `.cpp`/`.h`/`.def` basename — there is no bare-number variant that would
+//! let a file named earlier be inherited. A sentence that satisfies all of
+//! that anyway ("… returns 5 in Foo.cpp") would be read as a citation; it
+//! cannot corrupt anything silently, because a citation nobody blessed is
+//! reported as `unblessed` and fails the standing test.
 //!
 //! The `:NNN` shape is the only guessed one. Prose that has already named a
 //! file often goes on citing it with a bare `:NNN`, and the file it means is
@@ -207,6 +223,47 @@ fn read_ref_back(bytes: &[u8], end: usize) -> usize {
     start
 }
 
+/// End of the run of file-reference characters starting at `start`, with any
+/// trailing `.` dropped so a sentence-ending period is not read as part of the
+/// name (`in JSParserImpl.cpp.`).
+fn read_ref_forward(bytes: &[u8], start: usize) -> usize {
+    let mut end = start;
+    while end < bytes.len() && is_ref_char(bytes[end]) {
+        end += 1;
+    }
+    while end > start && bytes[end - 1] == b'.' {
+        end -= 1;
+    }
+    end
+}
+
+/// True when the character before a `NNN in File.cpp` citation's first digit
+/// lets the number stand as a token of its own. A letter, digit, `_`, `+`,
+/// `.` or `/` glues it to something else, and `C++17 in Foo.cpp` or
+/// `v2 in Foo.cpp` is then not a citation of line 17 or line 2.
+fn number_stands_alone(bytes: &[u8], first_digit: usize) -> bool {
+    match first_digit.checked_sub(1).map(|i| bytes[i]) {
+        None => true,
+        Some(b) => !(b.is_ascii_alphanumeric() || matches!(b, b'_' | b'+' | b'.' | b'/')),
+    }
+}
+
+/// A `NNN[-MMM] in <basename>` citation, parsed by its anchor search so the
+/// main loop can push it without re-reading the token.
+#[derive(Clone, Debug)]
+struct InCitation {
+    /// Offset of the first digit: the token's start, and its anchor.
+    text_start: usize,
+    /// Offset just past the basename: the token's end.
+    text_end: usize,
+    /// `(value, offset just past the last digit)` of the first number.
+    start_num: (u32, usize),
+    /// The same for a range's second number.
+    end_num: Option<(u32, usize)>,
+    /// The file the token names, always [`FileRef::Qualified`].
+    file_ref: FileRef,
+}
+
 /// Scan one Rust file's text for citation tokens, in source order.
 pub fn scan_text(text: &str) -> Vec<RawCitation> {
     let joined = join(text);
@@ -219,12 +276,15 @@ pub fn scan_text(text: &str) -> Vec<RawCitation> {
     let mut last_file: Option<FileRef> = None;
     let mut scanned_to = 0usize;
 
-    // A citation is anchored either at the `:` that precedes its first digit
-    // or at the `C++` of the `C++ NNN-MMM` spelling.
-    // Both anchor searches are cached and only re-run once passed, so the
-    // scan stays linear in the file's length.
+    // A citation is anchored at the `:` that precedes its first digit, at the
+    // `C++` of the `C++ NNN-MMM` spelling, or at the first digit of the
+    // `NNN in File.cpp` spelling. The three anchor characters are disjoint —
+    // `:`, `C`, a digit — so whichever comes first identifies its own shape.
+    // All three searches are cached and only re-run once passed, so the scan
+    // stays linear in the file's length.
     let mut next_colon = joined.text.find(':');
     let mut next_cxx = find_cxx_anchor(&joined.text, bytes, 0);
+    let mut next_in = find_in_anchor(&joined.text, bytes, 0);
     loop {
         if next_colon.is_some_and(|c| c < i) {
             next_colon = joined.text[i..].find(':').map(|r| i + r);
@@ -232,17 +292,43 @@ pub fn scan_text(text: &str) -> Vec<RawCitation> {
         if next_cxx.is_some_and(|c| c < i) {
             next_cxx = find_cxx_anchor(&joined.text, bytes, i);
         }
-        let colon = match (next_colon, next_cxx) {
-            (None, None) => break,
-            (Some(c), None) => c,
-            (None, Some(x)) => x,
-            (Some(c), Some(x)) => c.min(x),
+        if next_in.as_ref().is_some_and(|c| c.text_start < i) {
+            next_in = find_in_anchor(&joined.text, bytes, i);
+        }
+        let Some(colon) = [next_colon, next_cxx, next_in.as_ref().map(|c| c.text_start)]
+            .into_iter()
+            .flatten()
+            .min()
+        else {
+            break;
         };
         i = colon + 1;
         if joined.text[scanned_to..colon].contains('\n') {
             last_file = None;
         }
         scanned_to = colon;
+
+        // `NNN[-MMM] in File.cpp`: the section-banner spelling. The file is
+        // always written out, so nothing is inherited and nothing is guessed;
+        // `last_file` is deliberately left alone, since a shape with no colon
+        // is a poor thing to lend a colon's context to.
+        if next_in.as_ref().is_some_and(|c| c.text_start == colon) {
+            let c = next_in.as_ref().expect("just matched");
+            push_site(
+                &mut out,
+                &joined,
+                &index,
+                c.text_start,
+                c.text_end,
+                c.start_num,
+                c.end_num,
+                c.file_ref.clone(),
+                c.start_num.0,
+                c.end_num.map(|e| e.0),
+            );
+            i = c.text_end;
+            continue;
+        }
 
         // `C++ NNN-MMM`: the same citation as `cpp:NNN-MMM`, spelled the way
         // the parser port's inline comments spell it. The file comes from the
@@ -406,6 +492,75 @@ fn find_cxx_anchor(text: &str, bytes: &[u8], from: usize) -> Option<usize> {
         }
     }
     None
+}
+
+/// The next `NNN[-MMM] in <basename>` citation whose first digit is at or
+/// after `from`, parsed.
+///
+/// Anchored on the word `in`, which is the only fixed part of the shape. Every
+/// other requirement is a guard against reading prose as a citation: `in` must
+/// be blank-delimited on both sides, the number must end where the blanks
+/// before `in` begin and must not be glued to the word before it, and what
+/// follows must be a basename this checker can resolve. There is no
+/// bare-number variant — a number followed by `in` and something that is not a
+/// source file is prose.
+fn find_in_anchor(text: &str, bytes: &[u8], from: usize) -> Option<InCitation> {
+    let mut at = from;
+    while let Some(rel) = text[at..].find("in") {
+        let pos = at + rel;
+        at = pos + 2;
+        let blank = |b: Option<&u8>| matches!(b, Some(b' ') | Some(b'\t'));
+        if !blank(pos.checked_sub(1).map(|i| &bytes[i])) || !blank(bytes.get(pos + 2)) {
+            continue;
+        }
+        // The file, written out in full right after `in`.
+        let name_start = skip_blanks(bytes, pos + 2);
+        let name_end = read_ref_forward(bytes, name_start);
+        let Some(file_ref @ FileRef::Qualified { .. }) = classify(&text[name_start..name_end])
+        else {
+            continue;
+        };
+        // The number (or range), immediately before `in`.
+        let Some(end_num) = digits_back(bytes, skip_blanks_back(bytes, pos)) else {
+            continue;
+        };
+        let dash = skip_blanks_back(bytes, end_num.1 - digit_len(end_num.0));
+        let (start_num, end_num) = match dash.checked_sub(1).map(|i| bytes[i]) {
+            Some(b'-') => match digits_back(bytes, skip_blanks_back(bytes, dash - 1)) {
+                Some(first) => (first, Some(end_num)),
+                // `- MMM` with nothing before the dash is not a range.
+                None => continue,
+            },
+            _ => (end_num, None),
+        };
+        let text_start = start_num.1 - digit_len(start_num.0);
+        if text_start < from || !number_stands_alone(bytes, text_start) {
+            continue;
+        }
+        return Some(InCitation {
+            text_start,
+            text_end: name_end,
+            start_num,
+            end_num,
+            file_ref,
+        });
+    }
+    None
+}
+
+/// Parse the decimal number that ends at `end` (exclusive), scanning
+/// backwards. Returns the same `(value, offset just past the last digit)` pair
+/// as [`digits_at`], or `None` if `end` is not preceded by a digit.
+fn digits_back(bytes: &[u8], end: usize) -> Option<(u32, usize)> {
+    let mut start = end;
+    while start > 0 && bytes[start - 1].is_ascii_digit() {
+        start -= 1;
+    }
+    if start == end {
+        return None;
+    }
+    // Reuse the forward parse so the overflow rule is stated once.
+    digits_at(bytes, start).filter(|&(_, past)| past == end)
 }
 
 /// Number of decimal digits in `n` (n >= 1 for every line number we parse).
@@ -674,6 +829,76 @@ mod tests {
         assert!(scan_text("/// the C++ 3-arg `setLocation` overload\n").is_empty());
         assert!(scan_text("/// matching the C++11 rules\n").is_empty());
         assert!(scan_text("/// see ANSI-C++ 42\n").len() == 1);
+    }
+
+    #[test]
+    fn the_in_spelling_names_its_file_outright() {
+        let src = "    // parseReturnTypeAnnotationFlow — 2886 in JSParserImpl-flow.cpp\n";
+        let c = one(src);
+        assert_eq!(
+            c.file_ref,
+            FileRef::Qualified {
+                prefix: String::new(),
+                basename: "JSParserImpl-flow.cpp".into()
+            }
+        );
+        assert_eq!((c.start, c.end), (2886, None));
+        assert_eq!(c.text, "2886 in JSParserImpl-flow.cpp");
+        assert_eq!(c.line, 1);
+        assert_eq!(
+            &src[c.start_digits.0 as usize..c.start_digits.1 as usize],
+            "2886"
+        );
+        assert!(c.end_digits.is_none());
+
+        // A range, a directory prefix, and a sentence-ending period.
+        let src = "//! see 202-211 in lib/Parser/JSONParser.cpp.\n";
+        let c = one(src);
+        assert_eq!(
+            c.file_ref,
+            FileRef::Qualified {
+                prefix: "lib/Parser/".into(),
+                basename: "JSONParser.cpp".into()
+            }
+        );
+        assert_eq!((c.start, c.end), (202, Some(211)));
+        assert_eq!(c.text, "202-211 in lib/Parser/JSONParser.cpp");
+        let e = c.end_digits.expect("range");
+        assert_eq!(&src[e.0 as usize..e.1 as usize], "211");
+
+        // Headers and `.def` files resolve the same way.
+        assert_eq!(one("// 354 in SemContext.h\n").start, 354);
+        assert_eq!(one("// 697 in ESTree.def\n").start, 697);
+
+        // It coexists with the other shapes on one line, in source order.
+        let v = scan_text("// parseFoo — 12 in JSLexer.cpp, ported at cpp:34 and C++ 56\n");
+        assert_eq!(v.len(), 3);
+        assert_eq!(v[0].text, "12 in JSLexer.cpp");
+        assert_eq!(
+            (v[1].text.as_str(), v[2].text.as_str()),
+            ("cpp:34", "C++ 56")
+        );
+    }
+
+    #[test]
+    fn the_in_spelling_does_not_swallow_prose() {
+        // The number must not be glued to the word before it.
+        assert!(scan_text("//! the C++17 in Foo.cpp rules\n").is_empty());
+        assert!(scan_text("//! the v2 in Foo.cpp rules\n").is_empty());
+        // `in` must be a word of its own.
+        assert!(scan_text("//! 12 int Foo.cpp\n").is_empty());
+        assert!(scan_text("//! 12in Foo.cpp\n").is_empty());
+        // No bare-number variant: what follows `in` must be a source file, and
+        // a file named earlier on the line is never inherited.
+        assert!(scan_text("//! JSLexer.cpp has 12 in total\n").is_empty());
+        assert!(scan_text("//! 12 in resolver/mod.rs\n").is_empty());
+        assert!(scan_text("//! 12 in the parser\n").is_empty());
+        // A number with no file after it at all.
+        assert!(scan_text("//! 3 of the 12 in question\n").is_empty());
+        // Prose with the file but no number: the `in` shape adds nothing.
+        assert!(scan_text("//! the whitelist in SemanticResolver.h\n").is_empty());
+        // A citation must not span a real newline between two code lines.
+        assert!(scan_text("let a = 12;\nin JSLexer.cpp;\n").is_empty());
     }
 
     #[test]

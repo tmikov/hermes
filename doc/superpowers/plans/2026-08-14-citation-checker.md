@@ -244,6 +244,22 @@ if a rule needs declaring; `citations.snapshot.json` (re-bless).
 - [ ] **Step 4: Verify + commit.** All gates.
   `rust(tools): cover the "NNNN in File.cpp" citation shape (137 sites)`
 
+**Result (measured, see `task-2b-report.md`): 102 correct / 35 drifted / 0
+wrong**; snapshot 3046 -> 3183. 34 of the 35 are one drift in one file: every
+`JSParserImpl-flow.cpp` banner below line 1618 was off by exactly −3, caused by
+`bfeeb404f` (+1 at 1413) and `be443ad10` (+2 at 1529). Both commits are already
+in this repository, so that quarter of the shape had been wrong for the whole
+of Tasks 1 and 2 while `check` stayed green — the pool rotted precisely because
+nothing was watching it. The 35th (`js/statements.rs:45`, 948 -> 949) was
+written one line high, not drifted.
+
+**Debt found and NOT repaired here:** 15 already-blessed `(flow.cpp:NNNN-MMMM)`
+doc citations sitting next to those banners are short by exactly 2 (written +1
+high, then moved −3). `check` cannot see them — their spans have not changed —
+and `remap` cannot either (drift is not wrongness, Task 2 §5). 15 is a floor:
+it was measured only over the 60 banners that have such a sibling. This belongs
+to the repair decision Task 1 §5 called for.
+
 ---
 
 ### Task 3: Documentation, wiring, and closing the follow-up

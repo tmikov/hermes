@@ -27,7 +27,7 @@ use super::AllowAnonFunctionType;
 
 impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     // -----------------------------------------------------------------------
-    // parseReturnTypeAnnotationFlow — 2883 in JSParserImpl-flow.cpp
+    // parseReturnTypeAnnotationFlow — 2886 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse a function return type annotation, which may be a plain type or
@@ -275,7 +275,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseFunctionTypeAnnotationFlow — 3823 in JSParserImpl-flow.cpp
+    // parseFunctionTypeAnnotationFlow — 3826 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse a (possibly generic) function type annotation
@@ -342,7 +342,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseFunctionOrGroupTypeAnnotationFlow — 3899 in JSParserImpl-flow.cpp
+    // parseFunctionOrGroupTypeAnnotationFlow — 3902 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse a parenthesized group type `(T)` or a parenthesized function
@@ -514,7 +514,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseMethodishTypeAnnotationFlow — 4848 in JSParserImpl-flow.cpp
+    // parseMethodishTypeAnnotationFlow — 4851 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse a method-ish type annotation `(params): R` starting at the
@@ -568,7 +568,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseFunctionTypeAnnotationParamsFlow — 4881 in JSParserImpl-flow.cpp
+    // parseFunctionTypeAnnotationParamsFlow — 4884 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse the parenthesized parameter list of a function type, with the
@@ -660,7 +660,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseHookTypeAnnotationParamFlow — 4946 in JSParserImpl-flow.cpp
+    // parseHookTypeAnnotationParamFlow — 4949 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse one hook-type parameter. Identical to a function-type parameter
@@ -738,7 +738,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parsePredicateFlow — 5078 in JSParserImpl-flow.cpp
+    // parsePredicateFlow — 5081 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse a `%checks` / `%checks(expr)` predicate, with the current token

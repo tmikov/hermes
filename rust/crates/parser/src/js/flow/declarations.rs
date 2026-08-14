@@ -787,7 +787,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // checkRecordDeclarationFlow — 1618 in JSParserImpl-flow.cpp
+    // checkRecordDeclarationFlow — 1621 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Whether the current token starts a `record` declaration. Port of
@@ -806,7 +806,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseRecordDeclarationFlow — 1630 in JSParserImpl-flow.cpp
+    // parseRecordDeclarationFlow — 1633 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse a `record` declaration, with the cursor at `record` and `start` at
@@ -1180,7 +1180,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseRecordDeclarationImplementsFlow — 1903 in JSParserImpl-flow.cpp
+    // parseRecordDeclarationImplementsFlow — 1906 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse one entry of a `record` `implements` clause: an Identifier with
@@ -1223,7 +1223,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseTypeAliasFlow — 1981 in JSParserImpl-flow.cpp
+    // parseTypeAliasFlow — 1984 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse a type alias, with `type` already consumed and `start` at the
@@ -1374,7 +1374,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseInterfaceDeclarationFlow — 2073 in JSParserImpl-flow.cpp
+    // parseInterfaceDeclarationFlow — 2076 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse an interface declaration, with the current token at the
@@ -1723,7 +1723,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseDeclareFunctionOrHookFlow — 2159 in JSParserImpl-flow.cpp
+    // parseDeclareFunctionOrHookFlow — 2162 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse a `declare function`/`declare hook` declaration, with the cursor
@@ -1895,7 +1895,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseDeclareModuleFlow — 2270 in JSParserImpl-flow.cpp
+    // parseDeclareModuleFlow — 2273 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse `declare module ...`, with the cursor at `module` and `start` at
@@ -2018,7 +2018,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseDeclareNamespaceFlow — 2351 in JSParserImpl-flow.cpp
+    // parseDeclareNamespaceFlow — 2354 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse `declare namespace ...`, with the cursor at `namespace` and `start`
@@ -2092,7 +2092,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseDeclareClassFlow — 2400 in JSParserImpl-flow.cpp
+    // parseDeclareClassFlow — 2403 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse `declare class ...`, with the cursor at `class` and `start` at
@@ -2238,7 +2238,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseDeclareExportFlow — 2577 in JSParserImpl-flow.cpp
+    // parseDeclareExportFlow — 2580 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse `declare export ...`, with the cursor at `export` and `start` at
@@ -2564,7 +2564,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseExportTypeDeclarationFlow — 2498 in JSParserImpl-flow.cpp
+    // parseExportTypeDeclarationFlow — 2501 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse the tail of `export type ...` with the cursor at `type` and
@@ -2668,7 +2668,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseEnumDeclarationFlow — 5148 in JSParserImpl-flow.cpp
+    // parseEnumDeclarationFlow — 5151 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse a Flow `enum` declaration, with the cursor at `enum` and `start`
@@ -2767,7 +2767,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseEnumBodyFlow — 5207 in JSParserImpl-flow.cpp
+    // parseEnumBodyFlow — 5210 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse the `{ ... }` body of an enum, with the cursor at `{`. `opt_kind`
@@ -2976,7 +2976,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseEnumMemberFlow — 5354 in JSParserImpl-flow.cpp
+    // parseEnumMemberFlow — 5357 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse one enum member, with the cursor at the member's identifier. Port

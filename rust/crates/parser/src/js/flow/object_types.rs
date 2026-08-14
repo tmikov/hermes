@@ -30,7 +30,7 @@ use super::{
 
 impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     // -----------------------------------------------------------------------
-    // parseObjectTypeAnnotationFlow — 4034 in JSParserImpl-flow.cpp
+    // parseObjectTypeAnnotationFlow — 4037 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse an object type annotation, with the current token at `{` or

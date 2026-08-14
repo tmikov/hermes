@@ -49,7 +49,7 @@ use crate::token_kinds::{ord, TokenKind};
 
 impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     // -----------------------------------------------------------------------
-    // checkRecordExpressionFlow — 1929 in JSParserImpl-flow.cpp
+    // checkRecordExpressionFlow — 1932 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Whether `expr` followed by the current `{` forms a `record` expression.
@@ -82,7 +82,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseRecordExpressionFlow — 1948 in JSParserImpl-flow.cpp
+    // parseRecordExpressionFlow — 1951 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse a `record` expression body — `Constructor[<TypeArgs>] { props }` —

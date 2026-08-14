@@ -42,7 +42,7 @@ pub(super) enum VariableDeclAllowPattern {
 
 impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     // -----------------------------------------------------------------------
-    // parseStatementList — 948 in JSParserImpl.cpp
+    // parseStatementList — 949 in JSParserImpl.cpp
     // -----------------------------------------------------------------------
 
     /// Parse a statement list until any of the `until` tokens (typically `eof`,
