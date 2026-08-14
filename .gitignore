@@ -24,6 +24,11 @@ buck-out
 .git/
 .idea/
 cmake-build*/
+# Also match a bare name, so a `cmake-build-asan` SYMLINK pointing at a real
+# build dir is ignored too — the Rust differential harnesses resolve the oracle
+# through that exact path, so pointing it at another build tree is a normal
+# thing to do.
+cmake-build*
 
 # clangd cache
 /.cache/
