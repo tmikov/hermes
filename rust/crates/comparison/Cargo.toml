@@ -1,0 +1,53 @@
+# Standalone comparison-benchmark workspace.
+# Build with: cargo bench --manifest-path rust/crates/comparison/Cargo.toml
+# IMPORTANT: This crate is excluded from the main workspace (rust/Cargo.toml).
+# Always use --manifest-path, never -p comparison.
+#
+# Resolved competitor versions (pinned by Cargo.lock):
+#   swc_ecma_parser = "41.1.1"
+#   oxc_parser       = "0.137.0"
+#   biome_js_parser  = NOT BENCHMARKED (biome_rowan/biome_js_syntax publish
+#                       mismatch: FileSourceError variants incompatible)
+#   boa_parser       = "0.21.1"
+
+[workspace]
+resolver = "2"
+
+[package]
+name = "comparison"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+# Our port
+hermes_support    = { path = "../support", package = "hermes-support" }
+hermes_atom_table = { path = "../atom_table", package = "hermes-atom-table" }
+hermes_unicode    = { path = "../unicode", package = "hermes-unicode" }
+hermes_ast        = { path = "../ast", package = "hermes-ast" }
+hermes_parser     = { path = "../parser", package = "hermes-parser" }
+bumpalo           = "3.16"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+# Competitors (benches only)
+swc_common      = "*"
+swc_ecma_ast    = "*"
+swc_ecma_parser = "*"
+
+oxc_allocator = "*"
+oxc_parser    = "*"
+oxc_span      = "*"
+
+# biome_js_parser dropped — biome_js_syntax 0.5.7 / biome_rowan 0.5.8 publish
+# mismatch: FileSourceError variants changed from tuple to unit, causing
+# compile errors inside the published crate itself.
+
+boa_ast      = "*"
+boa_parser   = "*"
+boa_interner = "*"
+
+[[bench]]
+name = "parse_throughput"
+harness = false

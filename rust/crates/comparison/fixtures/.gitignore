@@ -1,0 +1,2 @@
+# Fixture files are downloaded at bench time — do not commit.
+*.js

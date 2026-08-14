@@ -1,0 +1,165 @@
+# Citation resolution config for the `citations` checker (crates/tools).
+#
+# Start at src/citations/README.md if you have not met this tool before: it
+# explains what a citation is, how to run check/remap/bless, and the debt.
+#
+# The Rust port cites the exact C++ lines each piece was ported from, e.g.
+# `//! visit(ClassDeclarationNode *) (cpp:891-907)`. This file is the ONLY
+# place that says which C++ file a citation refers to: the checker never reads
+# the prose of a module header to guess.
+#
+# Four tables, all consulted in this order for a given citation:
+#
+#   [unresolved]     keys that are deliberately NOT checked (reported as
+#                    skipped, with the reason, on every run — never silently
+#                    dropped).
+#   [site_override]  one exact citation site -> the C++ file it really means.
+#   [qualified]      cited basename -> repo-relative path, for citations that
+#                    name a file (`SemanticResolver.cpp:891-907`).
+#   [bare]           Rust-path glob -> the C++ file a BARE `cpp:NNN` means in
+#                    those Rust files. FIRST MATCH WINS, so more specific
+#                    globs must come first. `*` does not cross `/`.
+#
+# Site keys are `<rust path relative to rust/>#<citation text as written>`,
+# with runs of whitespace inside the citation collapsed to one space (a
+# citation may wrap across two comment lines). Example:
+#   "crates/sema/src/check_implicit_return.rs#cpp:1969-1974"
+#
+# A citation written as a bare `:NNN` inherits the file named nearest before
+# it on the same logical comment line (see `scan.rs`). That is the one
+# guessed part of resolution, so where the guess is wrong the site gets a
+# [site_override] below.
+#
+# Adding an entry: a new cited basename goes in [qualified] (run
+# `cargo run -p tools --bin citations -- check`; unmapped basenames are
+# listed). A new module family that uses bare `cpp:` goes in [bare] — and the
+# mapping MUST be verified by reading 2-3 of that module's citations against
+# the C++ file before it is added, because a wrong mapping blesses nonsense.
+
+# Sites and names that are deliberately not checked, with the reason. Keys are
+# a site key, a cited basename, or a Rust-path glob.
+[unresolved]
+"crates/tools/src/citations/*.rs" = "the checker's own sources: every `cpp:NNN` in them is a documentation example or a scanner unit-test fixture, not a citation of the C++ tree."
+"crates/sema/tests/check_implicit_return.rs#cpp:266-257" = "reversed range (end < start): a transposition of CheckImplicitReturn.cpp:257-266, `checkTerminationTryStatement`. Pre-existing; repairing citations is out of scope for the checker."
+"crates/tools/src/bin/sema_dump.rs#CompilerDriver.cpp:2105- 2080" = "reversed range (end < start): the cited construct `if (!ast) { ... } return ParsingFailed;` is CompilerDriver.cpp:2105-2109. Pre-existing."
+
+# One site whose bare `cpp:` means a different C++ file than its module's
+# [bare] entry. Every one of these was found by the past-EOF check, not by
+# guessing, and each was confirmed by reading the cited lines.
+[site_override]
+# `visitFunctionBodyAfterParamsVisited`, the single caller of the analysis.
+"crates/sema/src/check_implicit_return.rs#cpp:1969-1974" = "lib/Sema/SemanticResolver.cpp"
+"crates/sema/src/check_implicit_return.rs#cpp:1969" = "lib/Sema/SemanticResolver.cpp"
+# The quoted "CheckImplicitReturn relies on break and continue..." comment.
+"crates/sema/tests/check_implicit_return.rs#cpp:1969-1972" = "lib/Sema/SemanticResolver.cpp"
+# `SemanticResolver::processPromotedFuncDecls`, the caller of the promoter.
+"crates/sema/src/resolver/promoter.rs#cpp:2159-2171" = "lib/Sema/SemanticResolver.cpp"
+# The `if (blockBody)` guard in `visitFunctionLikeInFunctionContext`.
+"crates/sema/src/resolver/promoter.rs#cpp:1934" = "lib/Sema/SemanticResolver.cpp"
+# `SemanticResolver::extractIdentsFromDecl`, contrasted with the promoter's.
+"crates/sema/src/resolver/promoter.rs#cpp:2292-2382" = "lib/Sema/SemanticResolver.cpp"
+# Four `:NNN` citations whose implicit file is NOT the one named nearest
+# before them (the scanner's rule); each was read and confirmed by hand.
+# `resolveCommonJSAST` and its inline overload, and `semDump` — the prose
+# names `SemanticResolver.h` in between, but the list is of `SemResolve.h`
+# entry points.
+"crates/sema/src/resolve.rs#:86" = "include/hermes/Sema/SemResolve.h"
+"crates/sema/src/resolve.rs#:93" = "include/hermes/Sema/SemResolve.h"
+"crates/sema/src/resolve.rs#:111" = "include/hermes/Sema/SemResolve.h"
+# `visit(MatchStatementNode *)`/`visit(MatchExpressionNode *)` in the header's
+# visit inventory; the nearest file named before it is `ESTree.def`.
+"crates/sema/src/resolver/mod.rs#:295-296" = "lib/Sema/SemanticResolver.h"
+
+# Cited basename -> repo-relative path. Shorthands (`flow.cpp`) included.
+# Where a basename exists more than once in the tree the choice was confirmed
+# by reading the cited lines; those entries carry a comment.
+[qualified]
+# Shorthands used throughout the parser port for the dialect files.
+"flow.cpp" = "lib/Parser/JSParserImpl-flow.cpp"
+"ts.cpp" = "lib/Parser/JSParserImpl-ts.cpp"
+"jsx.cpp" = "lib/Parser/JSParserImpl-jsx.cpp"
+"JSParserImpl-flow.cpp" = "lib/Parser/JSParserImpl-flow.cpp"
+"JSParserImpl-ts.cpp" = "lib/Parser/JSParserImpl-ts.cpp"
+"JSParserImpl-jsx.cpp" = "lib/Parser/JSParserImpl-jsx.cpp"
+"JSParserImpl.cpp" = "lib/Parser/JSParserImpl.cpp"
+"JSParserImpl.h" = "lib/Parser/JSParserImpl.h"
+"JSParser.h" = "include/hermes/Parser/JSParser.h"
+"JSLexer.cpp" = "lib/Parser/JSLexer.cpp"
+"JSLexer.h" = "include/hermes/Parser/JSLexer.h"
+"JSONParser.cpp" = "lib/Parser/JSONParser.cpp"
+"JSONParser.h" = "include/hermes/Parser/JSONParser.h"
+"JSONParserTest.cpp" = "unittests/Parser/JSONParserTest.cpp"
+"PreParser.h" = "include/hermes/Parser/PreParser.h"
+"TokenKinds.def" = "include/hermes/Parser/TokenKinds.def"
+"SemanticResolver.cpp" = "lib/Sema/SemanticResolver.cpp"
+"SemanticResolver.h" = "lib/Sema/SemanticResolver.h"
+"SemContext.cpp" = "lib/Sema/SemContext.cpp"
+"SemContext.h" = "include/hermes/Sema/SemContext.h"
+"SemResolve.cpp" = "lib/Sema/SemResolve.cpp"
+"SemResolve.h" = "include/hermes/Sema/SemResolve.h"
+"DeclCollector.cpp" = "lib/Sema/DeclCollector.cpp"
+"DeclCollector.h" = "lib/Sema/DeclCollector.h"
+"ScopedFunctionPromoter.cpp" = "lib/Sema/ScopedFunctionPromoter.cpp"
+"ScopedFunctionPromoter.h" = "lib/Sema/ScopedFunctionPromoter.h"
+"CheckImplicitReturn.cpp" = "lib/Sema/CheckImplicitReturn.cpp"
+"ASTEval.cpp" = "lib/Sema/ASTEval.cpp"
+"FlowChecker-expr.cpp" = "lib/Sema/FlowChecker-expr.cpp"
+"ESTree.cpp" = "lib/AST/ESTree.cpp"
+"ESTree.h" = "include/hermes/AST/ESTree.h"
+"ESTree.def" = "include/hermes/AST/ESTree.def"
+"RecursiveVisitor.h" = "include/hermes/AST/RecursiveVisitor.h"
+"Context.h" = "include/hermes/AST/Context.h"
+"ESTreeIRGen-expr.cpp" = "lib/IRGen/ESTreeIRGen-expr.cpp"
+"SourceErrorManager.cpp" = "lib/Support/SourceErrorManager.cpp"
+"SourceErrorManager.h" = "include/hermes/Support/SourceErrorManager.h"
+"JSONEmitter.cpp" = "lib/Support/JSONEmitter.cpp"
+"JSONEmitter.h" = "include/hermes/Support/JSONEmitter.h"
+"Conversions.cpp" = "lib/Support/Conversions.cpp"
+"Conversions.h" = "include/hermes/Support/Conversions.h"
+"StringTable.cpp" = "lib/Support/StringTable.cpp"
+"UTF8.cpp" = "lib/Support/UTF8.cpp"
+"UTF8.h" = "include/hermes/Support/UTF8.h"
+# Two candidates; `Allocator.h:500` is `class AllocationScope`, which is the
+# Hermes one (external/llvh/include/llvh/Support/Allocator.h has no such
+# class). The citations spell it `hermes/Support/Allocator.h`.
+"Allocator.h" = "include/hermes/Support/Allocator.h"
+# Three candidates; `Compiler.h:106-110` is the `HERMES_LIMIT_STACK_DEPTH`
+# ASan/UBSan branch, which only the Hermes header has.
+"Compiler.h" = "include/hermes/Support/Compiler.h"
+# Only in external/llvh; `SourceMgr.cpp:238` is `SourceMgr::GetMessage`.
+"SourceMgr.cpp" = "external/llvh/lib/Support/SourceMgr.cpp"
+"CompilerDriver.cpp" = "lib/CompilerDriver/CompilerDriver.cpp"
+"CompilerDriver.h" = "include/hermes/CompilerDriver/CompilerDriver.h"
+"CompilerRuntimeFlags.h" = "include/hermes/Utils/CompilerRuntimeFlags.h"
+"Libhermes.h" = "include/hermes/Runtime/Libhermes.h"
+# Two candidates; `HBC.cpp:158` is `parser.setStrictMode(lazyData.strictMode)`,
+# which is in the library file, not the unit test of the same basename.
+"HBC.cpp" = "lib/BCGen/HBC/HBC.cpp"
+"hermesc.cpp" = "tools/hermesc/hermesc.cpp"
+"hermes-parser-wasm.cpp" = "tools/hermes-parser/hermes-parser-wasm.cpp"
+"js-lexer-dump.cpp" = "tools/js-lexer-dump/js-lexer-dump.cpp"
+"sema-parser-dump.cpp" = "tools/sema-parser-dump/sema-parser-dump.cpp"
+
+# Rust-path glob -> the C++ file a bare `cpp:NNN` means there. FIRST MATCH
+# WINS. Every entry below was verified by reading citations from that glob
+# against the C++ file (see the task-1 report for the sampling evidence).
+[bare]
+# The promoter is a port of ScopedFunctionPromoter.{h,cpp}; the class itself
+# is defined in the .cpp, so header-looking citations land there too.
+"crates/sema/src/resolver/promoter.rs" = "lib/Sema/ScopedFunctionPromoter.cpp"
+# Everything else under resolver/ is one C++ file split across Rust modules.
+"crates/sema/src/resolver/*.rs" = "lib/Sema/SemanticResolver.cpp"
+"crates/sema/src/dump.rs" = "lib/Sema/SemResolve.cpp"
+"crates/sema/src/resolve.rs" = "lib/Sema/SemResolve.cpp"
+"crates/sema/src/dump_context.rs" = "lib/Sema/SemContext.cpp"
+"crates/sema/src/decl_collector.rs" = "lib/Sema/DeclCollector.cpp"
+"crates/sema/src/check_implicit_return.rs" = "lib/Sema/CheckImplicitReturn.cpp"
+"crates/sema/tests/resolver.rs" = "lib/Sema/SemanticResolver.cpp"
+"crates/sema/tests/check_implicit_return.rs" = "lib/Sema/CheckImplicitReturn.cpp"
+"crates/sema/tests/decl_collector.rs" = "lib/Sema/DeclCollector.cpp"
+"crates/parser/src/js/flow/*.rs" = "lib/Parser/JSParserImpl-flow.cpp"
+"crates/parser/src/js/ts/*.rs" = "lib/Parser/JSParserImpl-ts.cpp"
+"crates/parser/src/js/jsx.rs" = "lib/Parser/JSParserImpl-jsx.cpp"
+"crates/parser/src/js/*.rs" = "lib/Parser/JSParserImpl.cpp"
+"crates/parser/tests/*.rs" = "lib/Parser/JSParserImpl.cpp"
+"crates/support/src/manager.rs" = "lib/Support/SourceErrorManager.cpp"
