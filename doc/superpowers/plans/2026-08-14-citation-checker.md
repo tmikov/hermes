@@ -205,6 +205,47 @@ module doc, which is where it stays true.
 
 ---
 
+### Task 2b (added 2026-08-14): the colon-less `NNNN in File.cpp` shape
+
+Task 2's fix round found a whole citation shape the scanner cannot see:
+`// parseReturnTypeAnnotationFlow — 2883 in JSParserImpl-flow.cpp`. Both the
+implementer and the reviewer independently counted **137** of them, and the
+reviewer's spot-check found **2 of 3 already rotted** (off by 3, off by 1). At
+4.5% of the corpus, concentrated in the dialect files a cherry-pick touches
+most (`js/statements.rs` 38, `js/flow/declarations.rs` 23, `js/ts/types.rs` 10,
+`js/modules.rs` 10, `js/flow/types.rs` 10), leaving them unprotected undercuts
+the tool's purpose.
+
+Helpfully, they are uniform: all 137 name their file explicitly, and only three
+basenames appear (`JSParserImpl.cpp` 65, `JSParserImpl-flow.cpp` 47,
+`JSParserImpl-ts.cpp` 25), so **one scanner rule resolves all of them** — no
+per-site overrides.
+
+**Files:** the scanner in `rust/crates/tools/src/citations/`; `citations.toml`
+if a rule needs declaring; `citations.snapshot.json` (re-bless).
+
+- [ ] **Step 1: Teach the scanner the shape.** Match `NNNN[-MMMM] in <basename>.cpp`
+  and resolve the basename through the existing `[qualified]` table. Keep the
+  guessing surface narrow: require the explicit basename (do not invent a
+  bare-number variant), and make sure the new pattern cannot swallow prose that
+  merely contains "123 in Foo.cpp".
+- [ ] **Step 2: Read them before blessing.** These are trust-on-first-use, and
+  at least two are known wrong. Read all 137 against their C++ — this is the
+  point of the task, not overhead. Sort each into: correct (bless), **drifted**
+  (the cited construct exists elsewhere in the same file — repair the digits,
+  since unlike the known-wrong 20 these have a hash-verified destination and
+  repairing them is what makes blessing them meaningful), or **wrong** (the
+  claim does not match anything nearby — leave, and add to the measured debt).
+  Report the three counts.
+- [ ] **Step 3: Bless and prove.** Re-bless; confirm the snapshot grows by the
+  number blessed. Then prove protection: shift `JSParserImpl-flow.cpp`, confirm
+  the newly-covered sites are now named stale, `remap` repairs them, revert,
+  remap back to zero residue.
+- [ ] **Step 4: Verify + commit.** All gates.
+  `rust(tools): cover the "NNNN in File.cpp" citation shape (137 sites)`
+
+---
+
 ### Task 3: Documentation, wiring, and closing the follow-up
 
 **Files:**
