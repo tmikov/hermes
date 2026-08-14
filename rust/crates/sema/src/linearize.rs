@@ -26,8 +26,8 @@
 //!   `visit(BinaryExpressionNode *)` / `visit(AssignmentExpressionNode *)`
 //!   (`SemanticResolver.cpp:410,441`) — and a single crate-private copy is
 //!   what keeps the two from drifting. Nothing here depends on the rest of
-//!   this crate; if IRGen (`ESTreeIRGen-expr.cpp:2620`,
-//!   `:2814`, the remaining C++ callers) is ever ported, this module moves
+//!   this crate; if IRGen (`ESTreeIRGen-expr.cpp:2647`,
+//!   `:2841`, the remaining C++ callers) is ever ported, this module moves
 //!   to `ast` unchanged.
 //! - **`ops` is a list of interned atoms, not of strings.** C++ compares
 //!   `n->_operator->str()` against an `ArrayRef<StringRef>`. Operators are

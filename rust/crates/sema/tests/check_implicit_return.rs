@@ -310,12 +310,12 @@ fn labeled_statement_body_must_execute() {
 
 // ---- SwitchStatement ----------------------------------------------------
 //
-// cpp:312-341: fallthrough between cases, `break` erasure, and the
+// cpp:303-332: fallthrough between cases, `break` erasure, and the
 // "no default means the switch may be skipped entirely" rule.
 
 #[test]
 fn switch_without_default_may_be_skipped() {
-    // `!foundDefault` at cpp:336 inserts kNextStatementLabel.
+    // `!foundDefault` at cpp:327 inserts kNextStatementLabel.
     check_bodies(&[
         ("switch (x) { }", true),
         ("switch (x) { case 1: return 1; }", true),
@@ -335,7 +335,7 @@ fn switch_with_exhaustive_default_terminates() {
         // kNextStatementLabel (cpp:216).
         ("switch (x) { default: }", true),
         // Fallthrough: `case 1:` is empty, so its result continues into
-        // `default:` (cpp:319) and only the default's `return` remains.
+        // `default:` (cpp:310) and only the default's `return` remains.
         ("switch (x) { case 1: default: return 1; }", false),
         // Fallthrough out of the last case.
         ("switch (x) { default: case 1: }", true),
@@ -344,8 +344,8 @@ fn switch_with_exhaustive_default_terminates() {
 
 #[test]
 fn switch_break_makes_the_switch_completable() {
-    // cpp:332: erasing the switch's own label index reports `true`, so
-    // cpp:336-338 inserts kNextStatementLabel.
+    // cpp:323: erasing the switch's own label index reports `true`, so
+    // cpp:327-329 inserts kNextStatementLabel.
     check_bodies(&[
         ("switch (x) { default: break; }", true),
         ("switch (x) { case 1: break; default: return 1; }", true),
@@ -363,10 +363,12 @@ fn switch_break_makes_the_switch_completable() {
 
 // ---- TryStatement -------------------------------------------------------
 //
-// cpp:257-308. Note the assert at cpp:248-250: `try`/`catch`/`finally` is
-// rewritten into nested `try`s by the resolver
-// (SemanticResolver.cpp:771-811), so only try-catch and try-finally reach
-// the analysis.
+// cpp:257-299, one function that composes two rules: the handler rule over
+// the protected block, then the finalizer rule over that result. The assert
+// at cpp:259-261 requires a handler or a finalizer, not the absence of both
+// together: when `compile_` is set the resolver rewrites `try`/`catch`/
+// `finally` into nested `try`s (SemanticResolver.cpp:771-811), but the parser
+// entry point does not, so a node carrying both children does reach here.
 
 #[test]
 fn try_catch_unions_both_bodies() {
@@ -385,14 +387,14 @@ fn try_catch_unions_both_bodies() {
 #[test]
 fn try_finally_is_decided_by_the_finalizer_first() {
     check_bodies(&[
-        // The finalizer terminates -> the whole statement does (cpp:260-264).
+        // The finalizer terminates -> the whole statement does (cpp:278-282).
         ("try { } finally { return 1; }", false),
         ("try { x; } finally { throw x; }", false),
         // The try terminates and the finalizer only continues -> the try's
-        // result wins (cpp:265-276).
+        // result wins (cpp:283-294).
         ("try { return 1; } finally { }", false),
         ("try { return 1; } finally { x; }", false),
-        // Neither terminates -> union (cpp:277-302).
+        // Neither terminates -> union (cpp:295-298).
         ("try { } finally { }", true),
         ("try { if (x) return 1; } finally { }", true),
     ]);
@@ -400,10 +402,10 @@ fn try_finally_is_decided_by_the_finalizer_first() {
 
 #[test]
 fn a_finalizer_that_breaks_out_defeats_the_terminating_try() {
-    // The case called out by the C++ comment at cpp:269-274: the try
+    // The case called out by the C++ comment at cpp:287-292: the try
     // definitely terminates, but the finalizer's `break label` means
     // control reaches the statement after the label instead, so
-    // `mustExecuteNextStatement()` (cpp:265) must reject the shortcut.
+    // `mustExecuteNextStatement()` (cpp:283) must reject the shortcut.
     check_bodies(&[
         ("L: try { return 1; } finally { break L; }", true),
         // Without the `break` the same shape terminates.
@@ -426,10 +428,10 @@ const TRY_CATCH_FINALLY_SHAPES: &[(&str, bool)] = &[
     ("try { return 1; } catch (e) { return 2; } finally { }", false),
     ("try { return 1; } catch (e) { } finally { }", true),
     ("try { } catch (e) { } finally { }", true),
-    // The finalizer wins over a handler that falls through (cpp:287-291).
+    // The finalizer wins over a handler that falls through (cpp:278-282).
     ("try { x; } catch (e) { x; } finally { return 1; }", false),
     // `break` out of the finalizer defeats the terminating pair
-    // (cpp:292-303), so what follows the label is reachable.
+    // (cpp:283-294), so what follows the label is reachable.
     (
         "L: { try { return 1; } catch (e) { return 2; } finally { break L; } }",
         true,
@@ -453,8 +455,10 @@ fn try_catch_finally_is_analyzed_after_the_resolver_rewrite() {
 fn try_catch_finally_gives_the_same_answers_unsplit() {
     // The parser entry point (`compile = false`) does NOT run that rewrite,
     // so `check_termination_try_statement` meets a `TryStatement` carrying
-    // BOTH children and composes the two rules itself (cpp:257-277,
-    // upstream `5ae5260c8`). Before that fix this shape tripped the assert
+    // BOTH children and composes the two rules itself (cpp:257-299, upstream
+    // `594e9c6a1`, which is the landed form of the `5ae5260c8` this port was
+    // written against and inlines its finalizer helper into the one
+    // function). Before that fix this shape tripped the assert
     // the composition replaced, and under NDEBUG silently dropped the
     // finalizer — `CppDefectsFound.md` item 12. The answers must be the same
     // ones the split form gives above.
@@ -530,7 +534,7 @@ fn the_flag_is_not_computed_when_resolution_failed() {
     // being properly resolved, and if there's errors during resolution they
     // might not be." An unresolved `break` has no label index at all, so
     // running the analysis would both read a garbage index and trip the
-    // assert at cpp:409-411; the flag must stay at its default instead.
+    // assert at cpp:400-402; the flag must stay at its default instead.
     let (f, errors) = flags_and_errors("function f() { break; return 1; }");
     assert_eq!(errors, 1, "expected the 'break' to be rejected");
     assert!(f[1], "the flag must keep SemContext.h:354's default");

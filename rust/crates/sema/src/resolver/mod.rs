@@ -1366,7 +1366,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // also adds `ThisExpression`, which class corpus files need
             // everywhere (`this.x` in a method or a field initializer):
             // `ThisExpression` appears nowhere in `lib/Sema/` outside the
-            // FlowChecker (`FlowChecker-expr.cpp:498`), so it has no
+            // FlowChecker (`FlowChecker-expr.cpp:506`), so it has no
             // `SemanticResolver::visit` override, and it is an
             // `ESTREE_NODE_0_ARGS` kind (ESTree.def:274) — no children at
             // all, so this arm is exactly `Unchanged` for it.
@@ -1386,7 +1386,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             // was panicking on them; the sweep found them by running
             // `sema-dump` over `test/Parser`, `test/IRGen`, `test/BCGen` and
             // `test/Optimizer`. None appears anywhere in `lib/Sema/` outside
-            // the FlowChecker (`FlowChecker-expr.cpp:1244` handles
+            // the FlowChecker (`FlowChecker-expr.cpp:1454` handles
             // `BigIntLiteral` as a *typed* expression), so none has a
             // `SemanticResolver::visit` override in the
             // SemanticResolver.h:200-306 inventory and none has a

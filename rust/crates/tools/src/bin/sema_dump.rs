@@ -45,7 +45,7 @@
 //! This mirrors CompilerDriver's `-dump-sema` path: load the runtime library
 //! (`libhermes`) as a global-definitions file first, gated on
 //! `-fstd-globals`/`-fno-std-globals`
-//! (CompilerDriver.cpp:2029-2036 → `loadGlobalDefinition`, :773-785), parse
+//! (CompilerDriver.cpp:2028-2035 → `loadGlobalDefinition`, :773-785), parse
 //! the input, then `sema::resolveAST(..., declFileList)` (:940-947) and
 //! `sema::semDump` (:969-974). `-fstd-globals`/`-fno-std-globals` defaults
 //! to true, matching `cl::StdGlobals`'s `CLFlag` default
@@ -114,7 +114,7 @@ use hermes_support::render::StderrHandler;
 /// Print hermesc's post-`parseJS`-failure epilogue (if there were any
 /// errors) and exit with hermesc's exit code. Port of the single
 /// `if (!ast) { ... } return ParsingFailed;` check in
-/// `CompilerDriver::compileFileToDisk` (CompilerDriver.cpp:2105-2109) that
+/// `CompilerDriver::compileFileToDisk` (CompilerDriver.cpp:2104-2108) that
 /// both a parse failure and a `resolveAST` failure hit (see the module doc).
 /// `N` is only printed when nonzero, matching
 /// `if (auto N = ...getErrorCount()) llvh::errs() << ...` exactly (an
@@ -451,7 +451,7 @@ fn main() {
     // its own buffer, and its Program becomes the single entry of the
     // ambient `DeclarationFileListTy` — but ONLY when `-fstd-globals` is
     // enabled, mirroring `if (cl::StdGlobals) { loadGlobalDefinition(...) }`
-    // (CompilerDriver.cpp:2029-2036): with `-fno-std-globals`, hermesc never
+    // (CompilerDriver.cpp:2028-2035): with `-fno-std-globals`, hermesc never
     // even parses `libhermes`, so `ambient_decls` stays empty and none of
     // the 63 ambient `UndeclaredGlobalProperty` decls appear in the dump.
     //

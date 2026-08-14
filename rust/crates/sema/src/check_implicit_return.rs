@@ -141,7 +141,7 @@ impl TerminationResult {
 /// Runs a conservative check to determine whether there are any possible
 /// paths through the function which end in an implicit 'undefined' return.
 ///
-/// Port of the class at CheckImplicitReturn.cpp:84-397. It holds no state —
+/// Port of the class at CheckImplicitReturn.cpp:84-388. It holds no state —
 /// as in C++, where the only constructor is `explicit CheckImplicitReturn()
 /// {}` — so it exists purely to group the five `checkTermination*` methods
 /// (and `isIrrefutableMatchPattern`, which is `static` in C++ too).
@@ -469,7 +469,7 @@ impl CheckImplicitReturn {
     }
 
     // The two helpers below are `#if HERMES_PARSE_FLOW` in C++
-    // (CheckImplicitReturn.cpp:342-396, upstream `653e49c60`); this port has
+    // (CheckImplicitReturn.cpp:333-387, upstream `653e49c60`); this port has
     // no build gate for the Flow grammar — see the `MatchStatement` arm of
     // [`Self::check_termination`].
 
@@ -540,7 +540,7 @@ impl CheckImplicitReturn {
 }
 
 /// Port of `mayReachImplicitReturn(ESTree::FunctionLikeNode *root)`
-/// (CheckImplicitReturn.cpp:401-413).
+/// (CheckImplicitReturn.cpp:392-404).
 ///
 /// \param body the function's body node **after** it has been visited by the
 ///   resolver — C++ takes the function-like node and calls
