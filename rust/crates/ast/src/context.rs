@@ -414,6 +414,20 @@ impl<'ast> Context<'ast> {
         self.atom_table.bytes(ident)
     }
 
+    /// Obtain the contents of an atom as a string, substituting U+FFFD for
+    /// anything unrepresentable. See [`AtomTable::bytes_str_lossy`].
+    #[inline]
+    pub fn bytes_str_lossy(&self, ident: AtomBytes) -> &str {
+        self.atom_table.bytes_str_lossy(ident)
+    }
+
+    /// Obtain the contents of an atom as a string, or `None` if they are not
+    /// valid UTF-8. See [`AtomTable::try_bytes_str`].
+    #[inline]
+    pub fn try_bytes_str(&self, ident: AtomBytes) -> Option<&str> {
+        self.atom_table.try_bytes_str(ident)
+    }
+
     /// Return true if strict mode has been forced globally.
     pub fn strict_mode(&self) -> bool {
         self.strict_mode
@@ -849,6 +863,24 @@ impl<'ast, 'ctx> GCLock<'ast, 'ctx> {
     #[inline]
     pub fn bytes(&self, ident: AtomBytes) -> &[u8] {
         self.ctx.bytes(ident)
+    }
+
+    /// Obtain the contents of an atom as a string, substituting U+FFFD for
+    /// anything unrepresentable. This is the usual way to print an
+    /// identifier's name: `gc.bytes_str_lossy(id.name.get())`. See
+    /// [`AtomTable::bytes_str_lossy`].
+    #[inline]
+    pub fn bytes_str_lossy(&self, ident: AtomBytes) -> &str {
+        self.ctx.bytes_str_lossy(ident)
+    }
+
+    /// Obtain the contents of an atom as a string, or `None` if they are not
+    /// valid UTF-8 — the right accessor for string-literal values, where
+    /// substitution would silently corrupt the program's data. See
+    /// [`AtomTable::try_bytes_str`].
+    #[inline]
+    pub fn try_bytes_str(&self, ident: AtomBytes) -> Option<&str> {
+        self.ctx.try_bytes_str(ident)
     }
 }
 
