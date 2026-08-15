@@ -12,7 +12,7 @@ shared between several options, help categories and hidden options. `--help` is
 generated from the declarations.
 
 The crate is Meta-authored and was copied from
-[`unsupported/juno/crates/command_line`](https://github.com/tmikov/hermes/tree/hermes-crates-v0.1.0/unsupported/juno/crates/command_line)
+[`unsupported/juno/crates/command_line`](https://github.com/tmikov/hermes/tree/hermes-crates-v0.1.1/unsupported/juno/crates/command_line)
 in the Hermes repository. It is *styled* after LLVM's `cl` library — it matches
 that library's command-line syntax and help layout — but it is not derived from
 LLVM source. Zero `unsafe` (`unsafe_code = "forbid"`) and no dependencies.
@@ -31,5 +31,5 @@ and it carries no stability guarantee of its own.
 
 **Version:** 0.1.0 — API docs at [docs.rs/hermes-command-line](https://docs.rs/hermes-command-line).
 
-See [the project README](https://github.com/tmikov/hermes/blob/hermes-crates-v0.1.0/rust/README.md) for the full
+See [the project README](https://github.com/tmikov/hermes/blob/hermes-crates-v0.1.1/rust/README.md) for the full
 documentation of the crate family.

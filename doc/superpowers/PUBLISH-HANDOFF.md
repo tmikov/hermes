@@ -116,7 +116,119 @@ raw OXC parse-vs-parse number; it makes the port look ~2× slower for doing more
   `resolve` façade takes a `hermes_parser::ParsedJS`, so it depends on
   `hermes-parser` (a normal dependency, not a dev-dependency).
 
-## Launch runbook (as of 2026-08-12 — Tasks 3,4,5,6,10 complete, final review APPROVED)
+## 0.1.0 IS PUBLISHED (2026-08-12). Next release: 0.1.1 — runbook below
+
+All seven crates went live on crates.io on 2026-08-12 at **0.1.0**. The
+"Launch runbook" further down is kept for its rationale, but it is history —
+follow this section for 0.1.1 and after.
+
+### What the 0.1.0 publish actually cost
+
+- **The new-crate rate limit is the only thing that slowed it down.** crates.io
+  caps *brand-new crate names* (at the time: a small burst, then one new name
+  per ~10 minutes). Publishing seven names cost **two ten-minute waits**
+  mid-run. cargo reported it as a 429 and the multi-package invocation had to
+  be re-issued for the crates that had not landed yet.
+- **That limit does NOT apply to a new version of an existing crate.** Updates
+  are governed by a far more generous limit. Every name in the family now
+  exists, so **0.1.1 (and every later release) should go through in a single
+  invocation with no waiting.** Do not pre-emptively split the command up or
+  add sleeps; if a 429 does appear, it will be the ordinary publish limit and
+  cargo prints the retry-after.
+
+### 0.1.1 — the partial-family release (prepared 2026-08-15)
+
+**Only four crates move.** Their packaged content was diffed against the real
+published 0.1.0 tarballs (`~/.cargo/registry/src/index.crates.io-*/`), not
+against a guess: `hermes-atom-table` (1 file), `hermes-ast` (3),
+`hermes-parser` (4), `hermes-sema` (4) changed; `hermes-unicode`,
+`hermes-support` and `hermes-command-line` are byte-identical and **stay at
+0.1.0**. Republishing unchanged content as a new version is noise, and a user
+who sees `hermes-unicode 0.1.0` correctly infers nothing changed.
+
+**Do not name the unchanged crates.** Verified with cargo 1.96.0: naming them
+is *not* a skip. `cargo publish --dry-run` with all seven prints
+
+```
+warning: crate hermes-support@0.1.0 already exists on crates.io index
+warning: crate hermes-unicode@0.1.0 already exists on crates.io index
+warning: crate hermes-command-line@0.1.0 already exists on crates.io index
+```
+
+and then still packages and reaches the `Uploading` step for all seven. On a
+real run the duplicate version is rejected by crates.io, not by cargo — and
+because cargo uploads in dependency order and each upload is irreversible,
+a rejection can abort the run with part of the release already live. (The
+exact server-side message was not observed here; only cargo's local
+behaviour above was.) Use that warning list as a pre-flight check: it names
+exactly the crates that must be dropped from the command.
+
+So the command is the four, in dependency order:
+
+```bash
+cargo login <token>
+cargo publish --manifest-path rust/Cargo.toml \
+  -p hermes-atom-table -p hermes-ast -p hermes-parser -p hermes-sema
+```
+
+The "all SEVEN must be named" rule below applies *within* a release: an
+omitted `-p` is silently skipped, so name every crate that is bumped.
+
+**Tag convention: one tag per release, `hermes-crates-vX.Y.Z`, cut at the
+commit you publish from, pushed to `private` before publishing.** The crate
+READMEs link to GitHub through the tag, and a published README cannot be
+edited without another release — so the links must already be correct when the
+.crate is uploaded. For 0.1.1 the tag is **`hermes-crates-v0.1.1`** and all
+ten README links were repointed to it in the release commit (the tag therefore
+points at the commit that contains the links naming it — self-consistent).
+
+- Never delete or move an old release tag: `hermes-crates-v0.1.0` must keep
+  resolving forever, because the frozen 0.1.0 READMEs on crates.io point at
+  it. That includes the three crates staying at 0.1.0 — their live pages keep
+  their v0.1.0 links, while the in-repo READMEs are already repointed to
+  v0.1.1 for whenever those crates next ship.
+- Push the tag, not just the branch: `git push private hermes-crates-v0.1.1`.
+
+**Three things in the READMEs are hand-maintained and go stale silently.**
+This bit 0.1.1 — all three were nearly shipped wrong, and a shipped README
+cannot be corrected without another release. Check every one of them against
+the manifests before tagging:
+
+1. `**Version:** X.Y.Z — API docs at …` at the top of every crate README.
+   It must equal that crate's own manifest version — so in a partial-family
+   release the unbumped crates keep the OLD number. A one-liner that must
+   print nothing:
+   ```bash
+   for c in atom_table ast parser sema unicode support command_line; do
+     m=$(grep -m1 '^version = ' rust/crates/$c/Cargo.toml | grep -o '0\.[0-9]*\.[0-9]*')
+     r=$(grep -m1 '^\*\*Version:\*\*' rust/crates/$c/README.md | grep -o '0\.[0-9]*\.[0-9]*')
+     [ "$m" = "$r" ] || echo "MISMATCH $c: manifest=$m readme=$r"
+   done
+   ```
+2. The `**Version:**` line in `rust/README.md`. It is not packaged, but all
+   ten shipped links point straight at it, so a reader arriving from a 0.1.1
+   crates.io page must not land on a page announcing the previous version.
+3. The `hermes-crates-vX.Y.Z` tag inside the ten links themselves.
+
+**Inter-crate version pins are correctness, not cosmetics.** In 0.x,
+`version = "0.1.0"` means `^0.1.0`, so a dependent would *accept* 0.1.0 of its
+dependency and a lockfile or `-Z minimal-versions` resolution can pick it.
+Every dependency edge that crosses newly added API must therefore be raised in
+the same commit as the version bump. For 0.1.1 that was `hermes-ast` →
+`hermes-atom-table` and `hermes-parser`/`hermes-sema` → `hermes-ast`; each
+raised pin carries a comment in the manifest saying which API forced it, so it
+does not get "tidied" back later. Edges that cross no new API were left alone
+(`hermes-sema` → `hermes-parser`) — over-pinning excludes working resolutions.
+
+### Post-publish
+
+Same as the 0.1.0 checklist below: verify each crate page, confirm the README
+links resolve (they need the pushed tag), and confirm docs.rs built
+`hermes-ast` / `hermes-parser` / `hermes-sema`.
+
+---
+
+## Launch runbook (as of 2026-08-12 — Tasks 3,4,5,6,10 complete, final review APPROVED) — HISTORICAL, 0.1.0 shipped
 
 All automated prep is done: crates renamed `hermes-*` @ 0.1.0, API documented
 (`missing_docs` clean), `parse()` façade + examples, bins in unpublished

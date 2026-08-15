@@ -13,5 +13,5 @@ closure requires it, and it carries no stability guarantee of its own.
 
 **Version:** 0.1.0 — API docs at [docs.rs/hermes-support](https://docs.rs/hermes-support).
 
-See [the project README](https://github.com/tmikov/hermes/blob/hermes-crates-v0.1.0/rust/README.md) for the full
+See [the project README](https://github.com/tmikov/hermes/blob/hermes-crates-v0.1.1/rust/README.md) for the full
 documentation of the crate family.

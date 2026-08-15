@@ -6,15 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.1.1] — unreleased
+## [0.1.1] — 2026-08-15
 
 Prompted by an external usability review of the published 0.1.0 crates
 (`doc/superpowers/2026-08-15-crate-usability-review.md`), whose findings were
 all documentation-level. **Additive:** no existing signature changes, no
 behavior change to parsing or resolution — everything below is new API, a new
 example, a fixed example, or documentation. Code written against 0.1.0
-compiles unchanged. (The crate manifests are bumped to 0.1.1 as part of the
-release step.)
+compiles unchanged.
+
+**This release covers four of the seven crates.** Only the crates whose
+packaged content actually changed are bumped:
+
+| crate | 0.1.1 | why |
+|---|---|---|
+| `hermes-atom-table` | **yes** | the two new `AtomTable` accessors |
+| `hermes-ast` | **yes** | the `GCLock` mirrors + the generated node accessors |
+| `hermes-parser` | **yes** | quickstart, `messages()`/`&mut self` docs, the `eprint!` fix, a new test |
+| `hermes-sema` | **yes** | quickstart, `&mut self` docs, `print_bindings.rs` |
+| `hermes-unicode` | no — stays **0.1.0** | byte-identical to the published 0.1.0 |
+| `hermes-support` | no — stays **0.1.0** | byte-identical to the published 0.1.0 |
+| `hermes-command-line` | no — stays **0.1.0** | byte-identical to the published 0.1.0 |
+
+Two inter-crate dependency pins were raised along with the versions, because
+`^0.1.0` would otherwise permit a resolution that does not compile:
+`hermes-ast` → `hermes-atom-table` **0.1.1** (its `GCLock` delegates to the
+new `AtomTable` methods) and `hermes-parser`/`hermes-sema` → `hermes-ast`
+**0.1.1** (their doctests, tests and example call the generated node
+accessors). `hermes-sema` → `hermes-parser` stays at `0.1.0`: `hermes-parser`
+0.1.1 adds no API.
 
 ### Added
 

@@ -1,6 +1,6 @@
 [package]
 name = "hermes-parser"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "A Rust port of the Hermes JavaScript/Flow/TypeScript parser (front-end) by Tzvetan Mikov, the architect of Hermes. Not an official Meta project."
 license = "MIT"
@@ -17,5 +17,10 @@ unsafe_code = "deny"   # the cursor module (later) gets a scoped #[allow]; token
 hermes_support = { path = "../support", version = "0.1.0", package = "hermes-support" }
 hermes_atom_table = { path = "../atom_table", version = "0.1.0", package = "hermes-atom-table" }
 hermes_unicode = { path = "../unicode", version = "0.1.0", package = "hermes-unicode" }
-hermes_ast = { path = "../ast", version = "0.1.0", package = "hermes-ast" }
+# 0.1.1, not 0.1.0: the lib.rs quickstart doctest and
+# tests/node_string_accessors.rs call the generated `<field>_str` /
+# `try_<field>_str` node accessors, which are new in hermes-ast 0.1.1, and
+# lib.rs intra-doc-links `ast::context::GCLock::bytes_str_lossy`. Both files
+# ship in the .crate, so the requirement is real for anyone who tests it.
+hermes_ast = { path = "../ast", version = "0.1.1", package = "hermes-ast" }
 bumpalo = "3.16"

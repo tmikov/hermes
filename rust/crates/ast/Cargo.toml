@@ -1,6 +1,6 @@
 [package]
 name = "hermes-ast"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "ESTree-compatible AST and JSON dumper for the Hermes Rust front-end."
 license = "MIT"
@@ -12,7 +12,11 @@ readme = "README.md"
 
 [dependencies]
 hermes_support = { path = "../support", version = "0.1.0", package = "hermes-support" }
-hermes_atom_table = { path = "../atom_table", version = "0.1.0", package = "hermes-atom-table" }
+# 0.1.1, not 0.1.0: `GCLock`/`Context` in src/context.rs delegate to
+# `AtomTable::bytes_str_lossy` and `AtomTable::try_bytes_str`, which do not
+# exist in the published hermes-atom-table 0.1.0. `^0.1.0` would let a
+# lockfile or a minimal-versions resolution pick 0.1.0 and fail to compile.
+hermes_atom_table = { path = "../atom_table", version = "0.1.1", package = "hermes-atom-table" }
 
 [lints.rust]
 unsafe_code = "deny"

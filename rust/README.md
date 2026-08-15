@@ -3,8 +3,12 @@
 > A Rust port of the Hermes front-end by Tzvetan Mikov, the architect of Hermes.
 > Not an official Meta project and not supported by Meta.
 
-**Version:** 0.1.0 — the initial release of the `hermes-parser` crate family on
-[crates.io](https://crates.io/crates/hermes-parser).
+**Version:** 0.1.1 — the `hermes-parser` crate family on
+[crates.io](https://crates.io/crates/hermes-parser). 0.1.1 is an additive
+release: `hermes-atom-table`, `hermes-ast`, `hermes-parser` and `hermes-sema`
+move to 0.1.1, while `hermes-unicode`, `hermes-support` and
+`hermes-command-line` are unchanged since 0.1.0 and stay there. See
+[`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 

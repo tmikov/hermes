@@ -10,7 +10,7 @@ checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
 
 [[package]]
 name = "hermes-ast"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "hermes-atom-table",
  "hermes-support",
@@ -18,7 +18,7 @@ dependencies = [
 
 [[package]]
 name = "hermes-atom-table"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "hermes-command-line"
@@ -26,7 +26,7 @@ version = "0.1.0"
 
 [[package]]
 name = "hermes-parser"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bumpalo",
  "hermes-ast",
@@ -37,7 +37,7 @@ dependencies = [
 
 [[package]]
 name = "hermes-sema"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "hermes-ast",
  "hermes-atom-table",
