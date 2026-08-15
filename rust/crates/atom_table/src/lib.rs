@@ -51,17 +51,19 @@ struct Inner {
     /// the lifetime of the key is effectively static.
     map_bytes: HashMap<&'static [u8], NumIndex>,
 
-    /// Lossy UTF-8 renderings of byte atoms that are *not* valid UTF-8, built
-    /// on demand. This is a lifetime anchor, not a cache: `bytes_str_lossy`
-    /// has to put the newly built replacement string somewhere in order to
-    /// hand out a `&str`. Atoms whose bytes are already valid UTF-8 never
+    /// String renderings of byte atoms that are *not* valid UTF-8, built on
+    /// demand. This is a lifetime anchor, not a cache: the conversion has to
+    /// put its newly built string somewhere in order for
+    /// [`AtomTable::bytes_str_lossy`] and [`AtomTable::try_bytes_str`] to hand
+    /// out a `&str`. Both share one entry per atom, so a given atom is
+    /// converted at most once. Atoms whose bytes are already valid UTF-8 never
     /// reach it — they are borrowed straight out of [`Inner::strings_bytes`] —
     /// so it stays empty unless a string literal (or a hand-built atom) holds
     /// surrogates; identifiers never can, because the lexer rejects unpaired
     /// surrogates there. Entries are never removed or mutated, so a returned
     /// `&str` stays valid (rehashing moves the `String` structs, never their
     /// heap buffers) — the same argument as [`Inner::strings_bytes`].
-    lossy_bytes: HashMap<AtomBytes, String>,
+    converted_bytes: HashMap<AtomBytes, Converted>,
 }
 
 /// This represents a unique string index in the table.
@@ -273,21 +275,34 @@ impl Inner {
         }
     }
 
-    /// Build the lossy rendering of `ident` unless one already exists. Only
-    /// ever called for atoms whose bytes failed UTF-8 validation.
-    fn ensure_lossy_bytes(&mut self, ident: AtomBytes) {
-        if !self.lossy_bytes.contains_key(&ident) {
-            let lossy = lossy_from_wtf8(self.bytes(ident));
-            self.lossy_bytes.insert(ident, lossy);
+    /// Convert `ident` and anchor the result unless that has already been
+    /// done. Only ever called for atoms whose bytes failed UTF-8 validation.
+    fn ensure_converted(&mut self, ident: AtomBytes) {
+        if !self.converted_bytes.contains_key(&ident) {
+            let converted = convert_wtf8(self.bytes(ident));
+            self.converted_bytes.insert(ident, converted);
         }
     }
 
-    /// Return the lossy rendering of `ident`, which must already have been
-    /// built by [`Inner::ensure_lossy_bytes`].
+    /// Return the conversion of `ident`, which must already have been built by
+    /// [`Inner::ensure_converted`].
     #[inline]
-    fn lossy_bytes_str(&self, ident: AtomBytes) -> &str {
-        self.lossy_bytes[&ident].as_str()
+    fn converted(&self, ident: AtomBytes) -> &Converted {
+        &self.converted_bytes[&ident]
     }
+}
+
+/// A byte atom rendered as a Rust string, owned by the table.
+struct Converted {
+    /// The rendering: surrogate pairs folded into the character they encode,
+    /// each unpaired surrogate and each other ill-formed subsequence replaced
+    /// by one U+FFFD.
+    text: String,
+    /// Whether anything was *replaced* — as opposed to merely folded. When
+    /// this is false, `text` is a faithful, lossless rendering of the atom's
+    /// bytes and [`AtomTable::try_bytes_str`] may hand it out; when it is
+    /// true, the atom holds something no `&str` can represent.
+    replaced: bool,
 }
 
 /// If `bytes` starts with the WTF-8 encoding of a surrogate, return that
@@ -306,21 +321,32 @@ fn surrogate_at(bytes: &[u8]) -> Option<u32> {
     }
 }
 
-/// Render `bytes` — WTF-8, or arbitrary bytes — as a valid Rust `String`.
+/// Render `bytes` — WTF-8, or arbitrary bytes — as a valid Rust `String`,
+/// reporting whether anything had to be replaced.
 ///
-/// A WTF-8 surrogate *pair* is folded back into the supplementary-plane
-/// character it encodes; an unpaired surrogate becomes exactly one U+FFFD, and
-/// so does every other maximal ill-formed subsequence. This matches the C++
-/// `convertSurrogatesInString` pipeline (`JSLexer.cpp:2486-2495`), which the
-/// lexer applies when its `convert_surrogates` option is on — and which it does
-/// *not* apply by default, so an astral character in a string literal is stored
-/// here as a surrogate pair and must be folded back rather than replaced.
+/// A WTF-8 surrogate *pair* is **folded** back into the supplementary-plane
+/// character it encodes, which loses nothing: the pair and the character are
+/// two encodings of the same string, so the result is exact and
+/// [`Converted::replaced`] stays false. An **unpaired** surrogate has no UTF-8
+/// form at all and becomes exactly one U+FFFD, as does every other maximal
+/// ill-formed subsequence; either sets [`Converted::replaced`].
+///
+/// This mirrors the C++ `convertSurrogatesInString` pipeline
+/// (`JSLexer.cpp:2486-2495`), which the lexer applies when its
+/// `convert_surrogates` option is on — and which it does *not* apply by
+/// default, so an astral character in a string literal is stored here in its
+/// surrogate-pair form and must be folded back rather than replaced.
+/// `convertToCodePointAt` (UTF8.cpp:77-96) pairs a high surrogate only with an
+/// immediately following low one, so a high surrogate at end of input, a high
+/// followed by another high, and a low followed by a high are each unpaired;
+/// the arms below reproduce that, one U+FFFD per surrogate.
 ///
 /// Deliberately not `String::from_utf8_lossy`: std has no notion of WTF-8, so
 /// it renders a lone surrogate's three bytes as three separate U+FFFD and an
 /// encoded astral character as six.
-fn lossy_from_wtf8(bytes: &[u8]) -> String {
+fn convert_wtf8(bytes: &[u8]) -> Converted {
     let mut out = String::with_capacity(bytes.len());
+    let mut replaced = false;
     let mut rest = bytes;
     loop {
         // std validates the bulk of the input; only what it rejects is
@@ -328,7 +354,10 @@ fn lossy_from_wtf8(bytes: &[u8]) -> String {
         let err = match std::str::from_utf8(rest) {
             Ok(valid) => {
                 out.push_str(valid);
-                return out;
+                return Converted {
+                    text: out,
+                    replaced,
+                };
             }
             Err(err) => err,
         };
@@ -338,7 +367,8 @@ fn lossy_from_wtf8(bytes: &[u8]) -> String {
 
         rest = match surrogate_at(invalid) {
             // A high surrogate directly followed by a low one is the WTF-8
-            // encoding of a single supplementary-plane character.
+            // encoding of a single supplementary-plane character. Folding it
+            // back is exact, so `replaced` is left alone.
             Some(high) if high < 0xDC00 => match surrogate_at(&invalid[3..]) {
                 Some(low) if low >= 0xDC00 => {
                     let cp = 0x10000 + ((high - 0xD800) << 10) + (low - 0xDC00);
@@ -347,14 +377,19 @@ fn lossy_from_wtf8(bytes: &[u8]) -> String {
                     out.push(char::from_u32(cp).unwrap_or(char::REPLACEMENT_CHARACTER));
                     &invalid[6..]
                 }
+                // A high surrogate with no low one after it: unpaired.
                 _ => {
                     out.push(char::REPLACEMENT_CHARACTER);
+                    replaced = true;
                     &invalid[3..]
                 }
             },
-            // An unpaired low surrogate.
+            // An unpaired low surrogate. Note this arm also takes a low
+            // surrogate that happens to precede a high one, which C++ likewise
+            // treats as two unpaired surrogates rather than a reversed pair.
             Some(_) => {
                 out.push(char::REPLACEMENT_CHARACTER);
+                replaced = true;
                 &invalid[3..]
             }
             // Not a surrogate: one U+FFFD for the maximal ill-formed
@@ -362,6 +397,7 @@ fn lossy_from_wtf8(bytes: &[u8]) -> String {
             // input simply ends mid-sequence, so everything left is consumed.
             None => {
                 out.push(char::REPLACEMENT_CHARACTER);
+                replaced = true;
                 &invalid[err.error_len().unwrap_or(invalid.len())..]
             }
         };
@@ -427,22 +463,26 @@ impl AtomTable {
         unsafe { &*self.0.get() }.try_bytes(ident)
     }
 
-    /// Return the contents of the specified atom bytes as a string, decoding
-    /// WTF-8 and substituting U+FFFD for anything that cannot be represented:
-    /// a surrogate pair is folded back into the supplementary-plane character
-    /// it encodes, while an unpaired surrogate — and any other ill-formed
-    /// sequence — becomes exactly one U+FFFD.
+    /// Return the contents of the specified atom bytes as a string,
+    /// substituting U+FFFD for anything that cannot be represented.
+    ///
+    /// The atom's bytes are WTF-8, so a surrogate *pair* is folded back into
+    /// the supplementary-plane character it encodes — that is exact, and it is
+    /// the common case, because with the lexer's default settings an astral
+    /// character in a string literal is stored in surrogate-pair form. An
+    /// *unpaired* surrogate has no UTF-8 form and becomes exactly one U+FFFD,
+    /// as does any other ill-formed sequence.
     ///
     /// When the bytes are already valid UTF-8, which is always the case for
     /// identifiers, the result borrows them directly with no allocation and no
-    /// lookup. Otherwise the replacement string is built once and owned by the
+    /// lookup. Otherwise the converted string is built once and owned by the
     /// table, so the returned reference stays valid for as long as the table
     /// does, whatever is interned afterwards.
     ///
     /// Use [`AtomTable::bytes`] when the exact bytes matter, and
     /// [`AtomTable::try_bytes_str`] when substitution would be data loss —
-    /// notably for JS string-literal values, where a lone surrogate is a legal
-    /// value rather than malformed data.
+    /// notably for JS string-literal values, where an unpaired surrogate is a
+    /// legal value rather than malformed data.
     ///
     /// # Panics
     ///
@@ -451,24 +491,51 @@ impl AtomTable {
     #[inline]
     pub fn bytes_str_lossy(&self, ident: AtomBytes) -> &str {
         // Validate first: on the overwhelmingly common valid path this borrows
-        // the atom's own bytes and never touches `lossy_bytes`.
+        // the atom's own bytes and never touches `converted_bytes`.
         if let Ok(s) = std::str::from_utf8(unsafe { &*self.0.get() }.bytes(ident)) {
             return s;
         }
-        unsafe { &mut *self.0.get() }.ensure_lossy_bytes(ident);
-        unsafe { &*self.0.get() }.lossy_bytes_str(ident)
+        unsafe { &mut *self.0.get() }.ensure_converted(ident);
+        unsafe { &*self.0.get() }.converted(ident).text.as_str()
     }
 
-    /// Return the contents of the specified atom bytes as a string, or `None`
-    /// if they are not valid UTF-8 (or if `ident` is not a valid atom of this
-    /// table). The result borrows the atom's bytes; nothing is allocated.
+    /// Return the contents of the specified atom bytes as a string whenever
+    /// they can be represented as one exactly, and `None` when they cannot.
+    ///
+    /// `None` means the atom holds an **unpaired surrogate** — a legal JS
+    /// string value with no UTF-8 form — or bytes that are not WTF-8 at all.
+    /// It does *not* mean merely "the bytes are not literally valid UTF-8":
+    /// a surrogate *pair* is folded back into the character it encodes and
+    /// returned as `Some`, since the pair and that character are two encodings
+    /// of the same string. An emoji in a string literal is stored in
+    /// surrogate-pair form and therefore comes back as `Some`, not `None`.
+    ///
+    /// Valid UTF-8 borrows the atom's bytes with no allocation; the folding
+    /// path builds the string once and anchors it in the table, sharing the
+    /// one entry with [`AtomTable::bytes_str_lossy`].
     ///
     /// Unlike [`AtomTable::bytes_str_lossy`] this never substitutes, so it is
-    /// the right accessor for JS string-literal values, whose bytes may hold
-    /// surrogates that no `&str` can represent.
+    /// the right accessor for JS string-literal values, where replacing an
+    /// unpaired surrogate with U+FFFD would silently corrupt the program's
+    /// data.
+    ///
+    /// Also returns `None` if `ident` is not a valid atom of this table, so
+    /// that — like [`AtomTable::try_bytes`] — it never panics.
     #[inline]
     pub fn try_bytes_str(&self, ident: AtomBytes) -> Option<&str> {
-        std::str::from_utf8(unsafe { &*self.0.get() }.try_bytes(ident)?).ok()
+        // Validate first: valid UTF-8 borrows the atom's own bytes and never
+        // touches `converted_bytes`.
+        let bytes = unsafe { &*self.0.get() }.try_bytes(ident)?;
+        if let Ok(s) = std::str::from_utf8(bytes) {
+            return Some(s);
+        }
+        unsafe { &mut *self.0.get() }.ensure_converted(ident);
+        let converted = unsafe { &*self.0.get() }.converted(ident);
+        if converted.replaced {
+            None
+        } else {
+            Some(converted.text.as_str())
+        }
     }
 
     /// Execute the callback in a context where this table is used for debug
@@ -616,6 +683,12 @@ mod tests {
         assert_eq!(t.bytes_str_lossy(a), "a\u{FFFD}b");
     }
 
+    /// How many atoms are anchored in the conversion map. Tests use it to pin
+    /// that the valid-UTF-8 path never touches it.
+    fn anchored(t: &AtomTable) -> usize {
+        unsafe { &*t.0.get() }.converted_bytes.len()
+    }
+
     #[test]
     fn surrogate_pair_folds_into_the_astral_char() {
         let t = AtomTable::new();
@@ -623,22 +696,88 @@ mod tests {
         // pair, which is *not* valid UTF-8 (see the `convert_surrogates` test
         // in the parser's lexer).
         let a = t.atom_bytes(vec![0xED, 0xA0, 0xBD, 0xED, 0xB8, 0x80]);
-        assert_eq!(t.try_bytes_str(a), None);
+        // A pair IS representable: folding it back loses nothing, so this is
+        // `Some`, not `None`. Returning `None` here would tell a
+        // correctness-sensitive caller that a perfectly ordinary emoji is
+        // corrupt.
+        assert_eq!(t.try_bytes_str(a), Some("\u{1F600}"));
         assert_eq!(t.bytes_str_lossy(a), "\u{1F600}");
+        // Both accessors share the one anchored string: converted once.
+        assert_eq!(
+            t.try_bytes_str(a).unwrap().as_ptr(),
+            t.bytes_str_lossy(a).as_ptr()
+        );
+        assert_eq!(anchored(&t), 1);
     }
 
     #[test]
+    fn a_pair_beside_an_unpaired_surrogate_is_not_representable() {
+        let t = AtomTable::new();
+        let mut v = vec![0xED, 0xA0, 0xBD, 0xED, 0xB8, 0x80]; // U+1F600
+        v.extend_from_slice(&[0xED, 0xA0, 0x80]); // unpaired U+D800
+        v.extend_from_slice(b"!");
+        let a = t.atom_bytes(v);
+        // The unpaired surrogate has no UTF-8 form, so nothing exact exists.
+        assert_eq!(t.try_bytes_str(a), None);
+        // But the emoji still survives the lossy rendering intact, and only
+        // the unpaired surrogate is replaced.
+        let s = t.bytes_str_lossy(a);
+        assert_eq!(s, "\u{1F600}\u{FFFD}!");
+        assert_eq!(s.chars().filter(|c| *c == '\u{FFFD}').count(), 1);
+    }
+
+    #[test]
+    fn the_valid_path_never_anchors() {
+        let t = AtomTable::new();
+        let a = t.atom_bytes(b"plain".as_slice());
+        // Zero-copy from both accessors, and the map is never touched.
+        assert_eq!(t.try_bytes_str(a), Some("plain"));
+        assert_eq!(t.try_bytes_str(a).unwrap().as_ptr(), t.bytes(a).as_ptr());
+        assert_eq!(t.bytes_str_lossy(a).as_ptr(), t.bytes(a).as_ptr());
+        assert_eq!(anchored(&t), 0);
+    }
+
+    #[test]
+    fn the_folded_result_is_stable_across_calls() {
+        let t = AtomTable::new();
+        let a = t.atom_bytes(vec![0xED, 0xA0, 0xBD, 0xED, 0xB8, 0x80]);
+        // Held live across everything below.
+        let first: &str = t.try_bytes_str(a).unwrap();
+        for i in 0..100u8 {
+            let b = t.atom_bytes(vec![0xED, 0xA0, 0xBD, 0xED, 0xB8, 0x80, i]);
+            assert!(t.try_bytes_str(b).unwrap().starts_with('\u{1F600}'));
+        }
+        assert_eq!(first, "\u{1F600}");
+        assert_eq!(t.try_bytes_str(a).unwrap().as_ptr(), first.as_ptr());
+    }
+
+    /// The pairing edge cases, matching `convertToCodePointAt`
+    /// (UTF8.cpp:77-96): a high surrogate pairs *only* with an immediately
+    /// following low one. Everything else is unpaired — one U+FFFD each, and
+    /// never representable.
+    #[test]
     fn unpaired_surrogates_are_one_replacement_each() {
         let t = AtomTable::new();
-        // Two high surrogates in a row: neither pairs, so two U+FFFD.
-        let a = t.atom_bytes(vec![0xED, 0xA0, 0x80, 0xED, 0xA0, 0x80]);
-        assert_eq!(t.bytes_str_lossy(a), "\u{FFFD}\u{FFFD}");
-        // A lone low surrogate followed by text.
-        let b = t.atom_bytes(vec![0xED, 0xB0, 0x80, b'z']);
-        assert_eq!(t.bytes_str_lossy(b), "\u{FFFD}z");
-        // A high surrogate whose successor is ordinary text, not a low one.
-        let c = t.atom_bytes(vec![0xED, 0xA0, 0x80, b'z']);
-        assert_eq!(t.bytes_str_lossy(c), "\u{FFFD}z");
+        let cases: &[(&[u8], &str)] = &[
+            // A high surrogate at end of input (C++ `cur + 1 == end`).
+            (&[0xED, 0xA0, 0x80], "\u{FFFD}"),
+            // Two high surrogates in a row: neither pairs.
+            (&[0xED, 0xA0, 0x80, 0xED, 0xA0, 0x80], "\u{FFFD}\u{FFFD}"),
+            // A low surrogate followed by a high one: NOT a reversed pair,
+            // two unpaired surrogates.
+            (&[0xED, 0xB0, 0x80, 0xED, 0xA0, 0x80], "\u{FFFD}\u{FFFD}"),
+            // Two low surrogates in a row.
+            (&[0xED, 0xB0, 0x80, 0xED, 0xB0, 0x80], "\u{FFFD}\u{FFFD}"),
+            // A lone low surrogate followed by text.
+            (&[0xED, 0xB0, 0x80, b'z'], "\u{FFFD}z"),
+            // A high surrogate whose successor is text, not a low surrogate.
+            (&[0xED, 0xA0, 0x80, b'z'], "\u{FFFD}z"),
+        ];
+        for (bytes, expected) in cases {
+            let a = t.atom_bytes(*bytes);
+            assert_eq!(t.bytes_str_lossy(a), *expected, "bytes {bytes:02X?}");
+            assert_eq!(t.try_bytes_str(a), None, "bytes {bytes:02X?}");
+        }
     }
 
     #[test]

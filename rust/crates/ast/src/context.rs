@@ -421,8 +421,9 @@ impl<'ast> Context<'ast> {
         self.atom_table.bytes_str_lossy(ident)
     }
 
-    /// Obtain the contents of an atom as a string, or `None` if they are not
-    /// valid UTF-8. See [`AtomTable::try_bytes_str`].
+    /// Obtain the contents of an atom as a string, or `None` if it holds an
+    /// unpaired surrogate, which has no UTF-8 form. See
+    /// [`AtomTable::try_bytes_str`].
     #[inline]
     pub fn try_bytes_str(&self, ident: AtomBytes) -> Option<&str> {
         self.atom_table.try_bytes_str(ident)
@@ -874,10 +875,12 @@ impl<'ast, 'ctx> GCLock<'ast, 'ctx> {
         self.ctx.bytes_str_lossy(ident)
     }
 
-    /// Obtain the contents of an atom as a string, or `None` if they are not
-    /// valid UTF-8 — the right accessor for string-literal values, where
-    /// substitution would silently corrupt the program's data. See
-    /// [`AtomTable::try_bytes_str`].
+    /// Obtain the contents of an atom as a string, or `None` if it holds an
+    /// unpaired surrogate — a legal JS string value with no UTF-8 form. This
+    /// is the right accessor for string-literal values, where substituting
+    /// U+FFFD would silently corrupt the program's data. Note a surrogate
+    /// *pair*, which is how an astral character is stored, comes back as
+    /// `Some`. See [`AtomTable::try_bytes_str`].
     #[inline]
     pub fn try_bytes_str(&self, ident: AtomBytes) -> Option<&str> {
         self.ctx.try_bytes_str(ident)
