@@ -48,6 +48,36 @@
 //! assert_eq!(kind, DeclKind::GlobalProperty);
 //! ```
 //!
+//! ## The compile path, and the `-dump-sema` text
+//!
+//! [`resolve()`] above is the *parser* path: no ambient declarations, no AST
+//! rewrites — what a tooling embedder wants. [`resolve_for_compile`] is the
+//! other entry point, the one `hermesc` itself uses: it declares the standard
+//! globals and performs sema's rewrites. [`ResolvedJS::to_sema_dump`] then
+//! renders the result in `hermesc -dump-sema`'s exact format.
+//!
+//! ```
+//! use hermes_parser::{parse, ParseFlags};
+//! use hermes_sema::{resolve_for_compile, CompileOptions};
+//!
+//! let parsed = parse("function f() { return 1; }", ParseFlags::default())
+//!     .expect("parse");
+//! let mut resolved =
+//!     resolve_for_compile(parsed, &CompileOptions::default()).expect("resolve");
+//!
+//! // Bytes, not a `String`: an identifier can be an unpaired surrogate, which
+//! // the dumper writes as WTF-8.
+//! let dump = resolved.to_sema_dump();
+//! let text = String::from_utf8_lossy(&dump);
+//! assert!(text.starts_with("SemContext\n"));
+//! // `Math` and friends are declared because this is the compile path.
+//! assert!(text.contains("'Math' UndeclaredGlobalProperty"));
+//! ```
+//!
+//! `crates/sema/examples/resolve_and_dump.rs` is this plus argument handling
+//! and a `--summary` mode that walks the tree with the visitor instead of
+//! dumping it.
+//!
 //! The pieces a consumer touches:
 //! - [`resolve()`] / [`resolve_for_parser`] / [`resolve_for_compile`] returning
 //!   [`ResolvedJS`] — the convenience façade over `hermes_parser`'s
