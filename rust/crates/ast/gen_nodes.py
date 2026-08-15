@@ -28,6 +28,12 @@ OUT = Path(__file__).resolve().parent / "src/node.rs"
 # is intentionally added or removed.
 EXPECTED_NODES = 271
 
+# Total NodeLabel / NodeString fields across all nodes — anti-drift guard for
+# the generated atom->string accessors (one method per label field, two per
+# string field). Update these when ESTree.def gains or loses such a field.
+EXPECTED_LABEL_FIELDS = 32
+EXPECTED_STRING_FIELDS = 10
+
 
 # --------------------------------------------------------------------------
 # -- Helpers: snake_case + keyword escaping --
@@ -196,6 +202,10 @@ def def_field_descriptor(ftype, fname, opt):
                 rust_type=f"Cell<{inner}>", child_kind="none",
                 new_arg_type=inner, cell=True, default_expr=None,
                 is_def_arg=True,
+                # Which atom→string accessors this field gets (see
+                # emit_atom_accessors); None for the non-atom value types.
+                atom_kind={"NodeLabel": "label",
+                           "NodeString": "string"}.get(ftype),
                 dump_kind={"NodeBoolean": "bool", "NodeNumber": "number",
                            "NodeLabel": "label", "NodeString": "label"}[ftype])
 
@@ -595,8 +605,147 @@ def emit_struct(node_name, fields, out):
             out.append(f"            {rf},")
     out.append("        }")
     out.append("    }")
+    emit_atom_accessors(fields, out)
     out.append("}")
     out.append("")
+
+
+# --------------------------------------------------------------------------
+# -- Atom -> string accessors (NodeLabel / NodeString fields) --
+# --------------------------------------------------------------------------
+# Both field types are the same underlying interned-bytes handle, but they mean
+# different things, so they get different accessors (design:
+# doc/superpowers/specs/2026-08-15-atom-string-accessors-design.md §5.2):
+#
+#   NodeLabel  -> `<field>_str`                       (lossy, ergonomic)
+#   NodeString -> `try_<field>_str` + `<field>_str_lossy`, and NO `<field>_str`
+#
+# An unrepresentable identifier means something is broken; an unrepresentable
+# string literal is legal JS that a codegen tool must not silently corrupt.
+#
+# Each paragraph below is one list element; emit_doc hard-wraps it to 80
+# columns, so do not pre-break lines.
+def pair_note(tail):
+    """The 'a surrogate pair is not the unrepresentable case' paragraph."""
+    return (
+        "Only an *unpaired* surrogate is unrepresentable. A WTF-8 surrogate "
+        "*pair* is not: the lexer interns an astral character in "
+        "surrogate-pair form, and it is folded back into the character it "
+        "encodes, so a `\"\U0001F600\"` literal " + tail
+    )
+
+
+
+BORROW_NOTE = "The returned `&str` borrows from `gc`, not from `self`."
+
+
+def label_accessor_doc(json_name):
+    """Doc paragraphs for the `<field>_str` accessor of a `NodeLabel` field."""
+    return [
+        f"The `{json_name}` label as UTF-8 text.",
+        "",
+        "Label fields hold identifier names, operators, keyword-like kinds and "
+        "raw source spans. An identifier cannot contain an unpaired surrogate "
+        "— the lexer rejects one with a dedicated diagnostic — and the "
+        "remaining labels are literal source text, so in practice the bytes "
+        "are already valid UTF-8 and this borrows them directly, allocating "
+        "nothing.",
+        "",
+        "A label that is nevertheless unrepresentable, which realistically "
+        "means a hand-built AST rather than a parsed one, has each unpaired "
+        "surrogate rendered as a single U+FFFD instead of being reported. "
+        "Only an unpaired surrogate is affected: a WTF-8 surrogate *pair* is "
+        "folded back into the character it encodes, so a `\"\U0001F600\"` "
+        "label comes out intact.",
+        "",
+        "Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact "
+        "bytes, or "
+        "[`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to "
+        "detect the substitution. " + BORROW_NOTE,
+    ]
+
+
+def try_string_accessor_doc(json_name, field):
+    """Doc paragraphs for the `try_<field>_str` accessor of a `NodeString`."""
+    return [
+        f"The `{json_name}` string value as UTF-8, or `None` if it has no "
+        f"UTF-8 form.",
+        "",
+        "A JS string value is a sequence of UTF-16 code units, so it may "
+        "legally contain an *unpaired* surrogate (`\"\\uD800\"` parses, and is "
+        "not an error). That, and only that, is what `None` reports: the "
+        "value is intact, it simply cannot be spelled in UTF-8. Read it "
+        "losslessly with [`GCLock::bytes`](crate::context::GCLock::bytes).",
+        "",
+        pair_note("yields `Some(\"\U0001F600\")`, not `None`."),
+        "",
+        f"There is deliberately no plain `{field}_str`: an unrepresentable "
+        f"identifier means something is broken, but an unrepresentable string "
+        f"literal is legal JS, and a codegen or refactoring tool that let "
+        f"U+FFFD be substituted here would silently rewrite the user's "
+        f"program. Reach for [`Self::{field}_str_lossy`] only when a "
+        f"best-effort rendering is what you want.",
+        "",
+        "Valid UTF-8 is borrowed from the atom's own bytes and allocates "
+        "nothing; folding a surrogate pair allocates once per atom, cached in "
+        "the context. " + BORROW_NOTE,
+    ]
+
+
+def lossy_string_accessor_doc(json_name, field):
+    """Doc paragraphs for the `<field>_str_lossy` accessor of a `NodeString`."""
+    return [
+        f"The `{json_name}` string value as UTF-8, substituting U+FFFD for "
+        f"anything unrepresentable.",
+        "",
+        "**This is lossy.** A JS string value may legally contain an unpaired "
+        "surrogate (`\"\\uD800\"` parses), which has no UTF-8 form; each one "
+        "becomes exactly one U+FFFD here. Do not use this to re-emit source: "
+        "a codegen or refactoring tool would silently rewrite the user's "
+        "program.",
+        "",
+        pair_note("comes out intact."),
+        "",
+        f"Use [`Self::try_{field}_str`] or "
+        f"[`GCLock::bytes`](crate::context::GCLock::bytes) when the exact "
+        f"value matters. " + BORROW_NOTE,
+    ]
+
+
+def emit_atom_accessors(fields, out):
+    """Emit the atom->string accessors for a leaf node's atom fields."""
+    for fd in fields:
+        atom_kind = fd.get("atom_kind")
+        if atom_kind is None:
+            continue
+        rf = fd["rust_field"]        # possibly `r#`-escaped: the field access
+        field = unraw(rf)            # plain name: the method-name stem
+        json_name = fd["json_name"]
+        if atom_kind == "label":
+            emit_doc(out, label_accessor_doc(json_name), "    ")
+            out.append(f"    pub fn {field}_str<'a>(")
+            out.append("        &self,")
+            out.append("        gc: &'a crate::context::GCLock<'_, '_>,")
+            out.append("    ) -> &'a str {")
+            out.append(f"        gc.bytes_str_lossy(self.{rf}.get())")
+            out.append("    }")
+        elif atom_kind == "string":
+            emit_doc(out, try_string_accessor_doc(json_name, field), "    ")
+            out.append(f"    pub fn try_{field}_str<'a>(")
+            out.append("        &self,")
+            out.append("        gc: &'a crate::context::GCLock<'_, '_>,")
+            out.append("    ) -> Option<&'a str> {")
+            out.append(f"        gc.try_bytes_str(self.{rf}.get())")
+            out.append("    }")
+            emit_doc(out, lossy_string_accessor_doc(json_name, field), "    ")
+            out.append(f"    pub fn {field}_str_lossy<'a>(")
+            out.append("        &self,")
+            out.append("        gc: &'a crate::context::GCLock<'_, '_>,")
+            out.append("    ) -> &'a str {")
+            out.append(f"        gc.bytes_str_lossy(self.{rf}.get())")
+            out.append("    }")
+        else:
+            sys.exit(f"error: bad atom_kind {atom_kind!r} on {json_name!r}")
 
 
 def emit_node_enum(nodes, out):
@@ -1029,6 +1178,35 @@ def generate():
     for leaf in LEAF_DECORATOR:
         if leaf not in node_names:
             sys.exit(f"error: LEAF_DECORATOR key {leaf!r} is not a node in ESTree.def")
+
+    # Validate: the generated atom->string accessors do not collide with each
+    # other, with `new`, or with a field name (which would shadow nothing but
+    # would read as an accessor for a field that is not there).
+    n_label = n_string = 0
+    for name, fields in nodes:
+        taken = {"new"} | {fd["rust_field"] for fd in fields}
+        for fd in fields:
+            atom_kind = fd.get("atom_kind")
+            if atom_kind is None:
+                continue
+            stem = unraw(fd["rust_field"])
+            if atom_kind == "label":
+                n_label += 1
+                methods = [f"{stem}_str"]
+            else:
+                n_string += 1
+                methods = [f"try_{stem}_str", f"{stem}_str_lossy"]
+            for m in methods:
+                if m in taken:
+                    sys.exit(f"error: {name}::{m} collides with an existing "
+                             f"item on the same struct")
+                taken.add(m)
+    if (n_label, n_string) != (EXPECTED_LABEL_FIELDS, EXPECTED_STRING_FIELDS):
+        sys.exit(
+            f"error: ESTree.def has {n_label} NodeLabel and {n_string} "
+            f"NodeString fields, expected {EXPECTED_LABEL_FIELDS} and "
+            f"{EXPECTED_STRING_FIELDS} (update the constants if intentional)"
+        )
 
     out = [HEADER]
     emit_node_kind(items, out)

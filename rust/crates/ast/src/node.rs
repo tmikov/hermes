@@ -1760,6 +1760,58 @@ impl<'gc> ExpressionStatement<'gc> {
             directive: Cell::new(directive),
         }
     }
+    /// The `directive` string value as UTF-8, or `None` if it has no UTF-8
+    /// form.
+    ///
+    /// A JS string value is a sequence of UTF-16 code units, so it may legally
+    /// contain an *unpaired* surrogate (`"\uD800"` parses, and is not an
+    /// error). That, and only that, is what `None` reports: the value is
+    /// intact, it simply cannot be spelled in UTF-8. Read it losslessly with
+    /// [`GCLock::bytes`](crate::context::GCLock::bytes).
+    ///
+    /// Only an *unpaired* surrogate is unrepresentable. A WTF-8 surrogate
+    /// *pair* is not: the lexer interns an astral character in surrogate-pair
+    /// form, and it is folded back into the character it encodes, so a `"😀"`
+    /// literal yields `Some("😀")`, not `None`.
+    ///
+    /// There is deliberately no plain `directive_str`: an unrepresentable
+    /// identifier means something is broken, but an unrepresentable string
+    /// literal is legal JS, and a codegen or refactoring tool that let U+FFFD
+    /// be substituted here would silently rewrite the user's program. Reach for
+    /// [`Self::directive_str_lossy`] only when a best-effort rendering is what
+    /// you want.
+    ///
+    /// Valid UTF-8 is borrowed from the atom's own bytes and allocates nothing;
+    /// folding a surrogate pair allocates once per atom, cached in the context.
+    /// The returned `&str` borrows from `gc`, not from `self`.
+    pub fn try_directive_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> Option<&'a str> {
+        gc.try_bytes_str(self.directive.get())
+    }
+    /// The `directive` string value as UTF-8, substituting U+FFFD for anything
+    /// unrepresentable.
+    ///
+    /// **This is lossy.** A JS string value may legally contain an unpaired
+    /// surrogate (`"\uD800"` parses), which has no UTF-8 form; each one becomes
+    /// exactly one U+FFFD here. Do not use this to re-emit source: a codegen or
+    /// refactoring tool would silently rewrite the user's program.
+    ///
+    /// Only an *unpaired* surrogate is unrepresentable. A WTF-8 surrogate
+    /// *pair* is not: the lexer interns an astral character in surrogate-pair
+    /// form, and it is folded back into the character it encodes, so a `"😀"`
+    /// literal comes out intact.
+    ///
+    /// Use [`Self::try_directive_str`] or
+    /// [`GCLock::bytes`](crate::context::GCLock::bytes) when the exact value
+    /// matters. The returned `&str` borrows from `gc`, not from `self`.
+    pub fn directive_str_lossy<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.directive.get())
+    }
 }
 
 /// The `TryStatement` AST node.
@@ -1882,6 +1934,57 @@ impl<'gc> StringLiteral<'gc> {
             value: Cell::new(value),
         }
     }
+    /// The `value` string value as UTF-8, or `None` if it has no UTF-8 form.
+    ///
+    /// A JS string value is a sequence of UTF-16 code units, so it may legally
+    /// contain an *unpaired* surrogate (`"\uD800"` parses, and is not an
+    /// error). That, and only that, is what `None` reports: the value is
+    /// intact, it simply cannot be spelled in UTF-8. Read it losslessly with
+    /// [`GCLock::bytes`](crate::context::GCLock::bytes).
+    ///
+    /// Only an *unpaired* surrogate is unrepresentable. A WTF-8 surrogate
+    /// *pair* is not: the lexer interns an astral character in surrogate-pair
+    /// form, and it is folded back into the character it encodes, so a `"😀"`
+    /// literal yields `Some("😀")`, not `None`.
+    ///
+    /// There is deliberately no plain `value_str`: an unrepresentable
+    /// identifier means something is broken, but an unrepresentable string
+    /// literal is legal JS, and a codegen or refactoring tool that let U+FFFD
+    /// be substituted here would silently rewrite the user's program. Reach for
+    /// [`Self::value_str_lossy`] only when a best-effort rendering is what you
+    /// want.
+    ///
+    /// Valid UTF-8 is borrowed from the atom's own bytes and allocates nothing;
+    /// folding a surrogate pair allocates once per atom, cached in the context.
+    /// The returned `&str` borrows from `gc`, not from `self`.
+    pub fn try_value_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> Option<&'a str> {
+        gc.try_bytes_str(self.value.get())
+    }
+    /// The `value` string value as UTF-8, substituting U+FFFD for anything
+    /// unrepresentable.
+    ///
+    /// **This is lossy.** A JS string value may legally contain an unpaired
+    /// surrogate (`"\uD800"` parses), which has no UTF-8 form; each one becomes
+    /// exactly one U+FFFD here. Do not use this to re-emit source: a codegen or
+    /// refactoring tool would silently rewrite the user's program.
+    ///
+    /// Only an *unpaired* surrogate is unrepresentable. A WTF-8 surrogate
+    /// *pair* is not: the lexer interns an astral character in surrogate-pair
+    /// form, and it is folded back into the character it encodes, so a `"😀"`
+    /// literal comes out intact.
+    ///
+    /// Use [`Self::try_value_str`] or
+    /// [`GCLock::bytes`](crate::context::GCLock::bytes) when the exact value
+    /// matters. The returned `&str` borrows from `gc`, not from `self`.
+    pub fn value_str_lossy<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.value.get())
+    }
 }
 
 /// The `NumericLiteral` AST node.
@@ -1930,6 +2033,56 @@ impl<'gc> RegExpLiteral<'gc> {
             flags: Cell::new(flags),
         }
     }
+    /// The `pattern` label as UTF-8 text.
+    ///
+    /// Label fields hold identifier names, operators, keyword-like kinds and
+    /// raw source spans. An identifier cannot contain an unpaired surrogate —
+    /// the lexer rejects one with a dedicated diagnostic — and the remaining
+    /// labels are literal source text, so in practice the bytes are already
+    /// valid UTF-8 and this borrows them directly, allocating nothing.
+    ///
+    /// A label that is nevertheless unrepresentable, which realistically means
+    /// a hand-built AST rather than a parsed one, has each unpaired surrogate
+    /// rendered as a single U+FFFD instead of being reported. Only an unpaired
+    /// surrogate is affected: a WTF-8 surrogate *pair* is folded back into the
+    /// character it encodes, so a `"😀"` label comes out intact.
+    ///
+    /// Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact
+    /// bytes, or
+    /// [`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to
+    /// detect the substitution. The returned `&str` borrows from `gc`, not from
+    /// `self`.
+    pub fn pattern_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.pattern.get())
+    }
+    /// The `flags` label as UTF-8 text.
+    ///
+    /// Label fields hold identifier names, operators, keyword-like kinds and
+    /// raw source spans. An identifier cannot contain an unpaired surrogate —
+    /// the lexer rejects one with a dedicated diagnostic — and the remaining
+    /// labels are literal source text, so in practice the bytes are already
+    /// valid UTF-8 and this borrows them directly, allocating nothing.
+    ///
+    /// A label that is nevertheless unrepresentable, which realistically means
+    /// a hand-built AST rather than a parsed one, has each unpaired surrogate
+    /// rendered as a single U+FFFD instead of being reported. Only an unpaired
+    /// surrogate is affected: a WTF-8 surrogate *pair* is folded back into the
+    /// character it encodes, so a `"😀"` label comes out intact.
+    ///
+    /// Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact
+    /// bytes, or
+    /// [`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to
+    /// detect the substitution. The returned `&str` borrows from `gc`, not from
+    /// `self`.
+    pub fn flags_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.flags.get())
+    }
 }
 
 /// The `BigIntLiteral` AST node.
@@ -1951,6 +2104,31 @@ impl<'gc> BigIntLiteral<'gc> {
             metadata,
             bigint: Cell::new(bigint),
         }
+    }
+    /// The `bigint` label as UTF-8 text.
+    ///
+    /// Label fields hold identifier names, operators, keyword-like kinds and
+    /// raw source spans. An identifier cannot contain an unpaired surrogate —
+    /// the lexer rejects one with a dedicated diagnostic — and the remaining
+    /// labels are literal source text, so in practice the bytes are already
+    /// valid UTF-8 and this borrows them directly, allocating nothing.
+    ///
+    /// A label that is nevertheless unrepresentable, which realistically means
+    /// a hand-built AST rather than a parsed one, has each unpaired surrogate
+    /// rendered as a single U+FFFD instead of being reported. Only an unpaired
+    /// surrogate is affected: a WTF-8 surrogate *pair* is folded back into the
+    /// character it encodes, so a `"😀"` label comes out intact.
+    ///
+    /// Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact
+    /// bytes, or
+    /// [`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to
+    /// detect the substitution. The returned `&str` borrows from `gc`, not from
+    /// `self`.
+    pub fn bigint_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.bigint.get())
     }
 }
 
@@ -2279,6 +2457,31 @@ impl<'gc> AssignmentExpression<'gc> {
             right,
         }
     }
+    /// The `operator` label as UTF-8 text.
+    ///
+    /// Label fields hold identifier names, operators, keyword-like kinds and
+    /// raw source spans. An identifier cannot contain an unpaired surrogate —
+    /// the lexer rejects one with a dedicated diagnostic — and the remaining
+    /// labels are literal source text, so in practice the bytes are already
+    /// valid UTF-8 and this borrows them directly, allocating nothing.
+    ///
+    /// A label that is nevertheless unrepresentable, which realistically means
+    /// a hand-built AST rather than a parsed one, has each unpaired surrogate
+    /// rendered as a single U+FFFD instead of being reported. Only an unpaired
+    /// surrogate is affected: a WTF-8 surrogate *pair* is folded back into the
+    /// character it encodes, so a `"😀"` label comes out intact.
+    ///
+    /// Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact
+    /// bytes, or
+    /// [`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to
+    /// detect the substitution. The returned `&str` borrows from `gc`, not from
+    /// `self`.
+    pub fn operator_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.operator.get())
+    }
 }
 
 /// The `UnaryExpression` AST node.
@@ -2309,6 +2512,31 @@ impl<'gc> UnaryExpression<'gc> {
             prefix: Cell::new(prefix),
         }
     }
+    /// The `operator` label as UTF-8 text.
+    ///
+    /// Label fields hold identifier names, operators, keyword-like kinds and
+    /// raw source spans. An identifier cannot contain an unpaired surrogate —
+    /// the lexer rejects one with a dedicated diagnostic — and the remaining
+    /// labels are literal source text, so in practice the bytes are already
+    /// valid UTF-8 and this borrows them directly, allocating nothing.
+    ///
+    /// A label that is nevertheless unrepresentable, which realistically means
+    /// a hand-built AST rather than a parsed one, has each unpaired surrogate
+    /// rendered as a single U+FFFD instead of being reported. Only an unpaired
+    /// surrogate is affected: a WTF-8 surrogate *pair* is folded back into the
+    /// character it encodes, so a `"😀"` label comes out intact.
+    ///
+    /// Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact
+    /// bytes, or
+    /// [`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to
+    /// detect the substitution. The returned `&str` borrows from `gc`, not from
+    /// `self`.
+    pub fn operator_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.operator.get())
+    }
 }
 
 /// The `UpdateExpression` AST node.
@@ -2338,6 +2566,31 @@ impl<'gc> UpdateExpression<'gc> {
             argument,
             prefix: Cell::new(prefix),
         }
+    }
+    /// The `operator` label as UTF-8 text.
+    ///
+    /// Label fields hold identifier names, operators, keyword-like kinds and
+    /// raw source spans. An identifier cannot contain an unpaired surrogate —
+    /// the lexer rejects one with a dedicated diagnostic — and the remaining
+    /// labels are literal source text, so in practice the bytes are already
+    /// valid UTF-8 and this borrows them directly, allocating nothing.
+    ///
+    /// A label that is nevertheless unrepresentable, which realistically means
+    /// a hand-built AST rather than a parsed one, has each unpaired surrogate
+    /// rendered as a single U+FFFD instead of being reported. Only an unpaired
+    /// surrogate is affected: a WTF-8 surrogate *pair* is folded back into the
+    /// character it encodes, so a `"😀"` label comes out intact.
+    ///
+    /// Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact
+    /// bytes, or
+    /// [`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to
+    /// detect the substitution. The returned `&str` borrows from `gc`, not from
+    /// `self`.
+    pub fn operator_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.operator.get())
     }
 }
 
@@ -2434,6 +2687,31 @@ impl<'gc> LogicalExpression<'gc> {
             operator: Cell::new(operator),
         }
     }
+    /// The `operator` label as UTF-8 text.
+    ///
+    /// Label fields hold identifier names, operators, keyword-like kinds and
+    /// raw source spans. An identifier cannot contain an unpaired surrogate —
+    /// the lexer rejects one with a dedicated diagnostic — and the remaining
+    /// labels are literal source text, so in practice the bytes are already
+    /// valid UTF-8 and this borrows them directly, allocating nothing.
+    ///
+    /// A label that is nevertheless unrepresentable, which realistically means
+    /// a hand-built AST rather than a parsed one, has each unpaired surrogate
+    /// rendered as a single U+FFFD instead of being reported. Only an unpaired
+    /// surrogate is affected: a WTF-8 surrogate *pair* is folded back into the
+    /// character it encodes, so a `"😀"` label comes out intact.
+    ///
+    /// Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact
+    /// bytes, or
+    /// [`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to
+    /// detect the substitution. The returned `&str` borrows from `gc`, not from
+    /// `self`.
+    pub fn operator_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.operator.get())
+    }
 }
 
 /// The `ConditionalExpression` AST node.
@@ -2494,6 +2772,31 @@ impl<'gc> BinaryExpression<'gc> {
             operator: Cell::new(operator),
         }
     }
+    /// The `operator` label as UTF-8 text.
+    ///
+    /// Label fields hold identifier names, operators, keyword-like kinds and
+    /// raw source spans. An identifier cannot contain an unpaired surrogate —
+    /// the lexer rejects one with a dedicated diagnostic — and the remaining
+    /// labels are literal source text, so in practice the bytes are already
+    /// valid UTF-8 and this borrows them directly, allocating nothing.
+    ///
+    /// A label that is nevertheless unrepresentable, which realistically means
+    /// a hand-built AST rather than a parsed one, has each unpaired surrogate
+    /// rendered as a single U+FFFD instead of being reported. Only an unpaired
+    /// surrogate is affected: a WTF-8 surrogate *pair* is folded back into the
+    /// character it encodes, so a `"😀"` label comes out intact.
+    ///
+    /// Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact
+    /// bytes, or
+    /// [`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to
+    /// detect the substitution. The returned `&str` borrows from `gc`, not from
+    /// `self`.
+    pub fn operator_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.operator.get())
+    }
 }
 
 /// The `Directive` AST node.
@@ -2538,6 +2841,57 @@ impl<'gc> DirectiveLiteral<'gc> {
             value: Cell::new(value),
         }
     }
+    /// The `value` string value as UTF-8, or `None` if it has no UTF-8 form.
+    ///
+    /// A JS string value is a sequence of UTF-16 code units, so it may legally
+    /// contain an *unpaired* surrogate (`"\uD800"` parses, and is not an
+    /// error). That, and only that, is what `None` reports: the value is
+    /// intact, it simply cannot be spelled in UTF-8. Read it losslessly with
+    /// [`GCLock::bytes`](crate::context::GCLock::bytes).
+    ///
+    /// Only an *unpaired* surrogate is unrepresentable. A WTF-8 surrogate
+    /// *pair* is not: the lexer interns an astral character in surrogate-pair
+    /// form, and it is folded back into the character it encodes, so a `"😀"`
+    /// literal yields `Some("😀")`, not `None`.
+    ///
+    /// There is deliberately no plain `value_str`: an unrepresentable
+    /// identifier means something is broken, but an unrepresentable string
+    /// literal is legal JS, and a codegen or refactoring tool that let U+FFFD
+    /// be substituted here would silently rewrite the user's program. Reach for
+    /// [`Self::value_str_lossy`] only when a best-effort rendering is what you
+    /// want.
+    ///
+    /// Valid UTF-8 is borrowed from the atom's own bytes and allocates nothing;
+    /// folding a surrogate pair allocates once per atom, cached in the context.
+    /// The returned `&str` borrows from `gc`, not from `self`.
+    pub fn try_value_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> Option<&'a str> {
+        gc.try_bytes_str(self.value.get())
+    }
+    /// The `value` string value as UTF-8, substituting U+FFFD for anything
+    /// unrepresentable.
+    ///
+    /// **This is lossy.** A JS string value may legally contain an unpaired
+    /// surrogate (`"\uD800"` parses), which has no UTF-8 form; each one becomes
+    /// exactly one U+FFFD here. Do not use this to re-emit source: a codegen or
+    /// refactoring tool would silently rewrite the user's program.
+    ///
+    /// Only an *unpaired* surrogate is unrepresentable. A WTF-8 surrogate
+    /// *pair* is not: the lexer interns an astral character in surrogate-pair
+    /// form, and it is folded back into the character it encodes, so a `"😀"`
+    /// literal comes out intact.
+    ///
+    /// Use [`Self::try_value_str`] or
+    /// [`GCLock::bytes`](crate::context::GCLock::bytes) when the exact value
+    /// matters. The returned `&str` borrows from `gc`, not from `self`.
+    pub fn value_str_lossy<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.value.get())
+    }
 }
 
 /// The `Identifier` AST node.
@@ -2579,6 +2933,31 @@ impl<'gc> Identifier<'gc> {
             decl_state: Cell::new(0),
             decl: Cell::new(None),
         }
+    }
+    /// The `name` label as UTF-8 text.
+    ///
+    /// Label fields hold identifier names, operators, keyword-like kinds and
+    /// raw source spans. An identifier cannot contain an unpaired surrogate —
+    /// the lexer rejects one with a dedicated diagnostic — and the remaining
+    /// labels are literal source text, so in practice the bytes are already
+    /// valid UTF-8 and this borrows them directly, allocating nothing.
+    ///
+    /// A label that is nevertheless unrepresentable, which realistically means
+    /// a hand-built AST rather than a parsed one, has each unpaired surrogate
+    /// rendered as a single U+FFFD instead of being reported. Only an unpaired
+    /// surrogate is affected: a WTF-8 surrogate *pair* is folded back into the
+    /// character it encodes, so a `"😀"` label comes out intact.
+    ///
+    /// Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact
+    /// bytes, or
+    /// [`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to
+    /// detect the substitution. The returned `&str` borrows from `gc`, not from
+    /// `self`.
+    pub fn name_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.name.get())
     }
 }
 
@@ -2736,6 +3115,31 @@ impl<'gc> VariableDeclaration<'gc> {
             declarations,
         }
     }
+    /// The `kind` label as UTF-8 text.
+    ///
+    /// Label fields hold identifier names, operators, keyword-like kinds and
+    /// raw source spans. An identifier cannot contain an unpaired surrogate —
+    /// the lexer rejects one with a dedicated diagnostic — and the remaining
+    /// labels are literal source text, so in practice the bytes are already
+    /// valid UTF-8 and this borrows them directly, allocating nothing.
+    ///
+    /// A label that is nevertheless unrepresentable, which realistically means
+    /// a hand-built AST rather than a parsed one, has each unpaired surrogate
+    /// rendered as a single U+FFFD instead of being reported. Only an unpaired
+    /// surrogate is affected: a WTF-8 surrogate *pair* is folded back into the
+    /// character it encodes, so a `"😀"` label comes out intact.
+    ///
+    /// Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact
+    /// bytes, or
+    /// [`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to
+    /// detect the substitution. The returned `&str` borrows from `gc`, not from
+    /// `self`.
+    pub fn kind_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.kind.get())
+    }
 }
 
 /// The `TemplateLiteral` AST node.
@@ -2819,6 +3223,82 @@ impl<'gc> TemplateElement<'gc> {
             raw: Cell::new(raw),
         }
     }
+    /// The `cooked` string value as UTF-8, or `None` if it has no UTF-8 form.
+    ///
+    /// A JS string value is a sequence of UTF-16 code units, so it may legally
+    /// contain an *unpaired* surrogate (`"\uD800"` parses, and is not an
+    /// error). That, and only that, is what `None` reports: the value is
+    /// intact, it simply cannot be spelled in UTF-8. Read it losslessly with
+    /// [`GCLock::bytes`](crate::context::GCLock::bytes).
+    ///
+    /// Only an *unpaired* surrogate is unrepresentable. A WTF-8 surrogate
+    /// *pair* is not: the lexer interns an astral character in surrogate-pair
+    /// form, and it is folded back into the character it encodes, so a `"😀"`
+    /// literal yields `Some("😀")`, not `None`.
+    ///
+    /// There is deliberately no plain `cooked_str`: an unrepresentable
+    /// identifier means something is broken, but an unrepresentable string
+    /// literal is legal JS, and a codegen or refactoring tool that let U+FFFD
+    /// be substituted here would silently rewrite the user's program. Reach for
+    /// [`Self::cooked_str_lossy`] only when a best-effort rendering is what you
+    /// want.
+    ///
+    /// Valid UTF-8 is borrowed from the atom's own bytes and allocates nothing;
+    /// folding a surrogate pair allocates once per atom, cached in the context.
+    /// The returned `&str` borrows from `gc`, not from `self`.
+    pub fn try_cooked_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> Option<&'a str> {
+        gc.try_bytes_str(self.cooked.get())
+    }
+    /// The `cooked` string value as UTF-8, substituting U+FFFD for anything
+    /// unrepresentable.
+    ///
+    /// **This is lossy.** A JS string value may legally contain an unpaired
+    /// surrogate (`"\uD800"` parses), which has no UTF-8 form; each one becomes
+    /// exactly one U+FFFD here. Do not use this to re-emit source: a codegen or
+    /// refactoring tool would silently rewrite the user's program.
+    ///
+    /// Only an *unpaired* surrogate is unrepresentable. A WTF-8 surrogate
+    /// *pair* is not: the lexer interns an astral character in surrogate-pair
+    /// form, and it is folded back into the character it encodes, so a `"😀"`
+    /// literal comes out intact.
+    ///
+    /// Use [`Self::try_cooked_str`] or
+    /// [`GCLock::bytes`](crate::context::GCLock::bytes) when the exact value
+    /// matters. The returned `&str` borrows from `gc`, not from `self`.
+    pub fn cooked_str_lossy<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.cooked.get())
+    }
+    /// The `raw` label as UTF-8 text.
+    ///
+    /// Label fields hold identifier names, operators, keyword-like kinds and
+    /// raw source spans. An identifier cannot contain an unpaired surrogate —
+    /// the lexer rejects one with a dedicated diagnostic — and the remaining
+    /// labels are literal source text, so in practice the bytes are already
+    /// valid UTF-8 and this borrows them directly, allocating nothing.
+    ///
+    /// A label that is nevertheless unrepresentable, which realistically means
+    /// a hand-built AST rather than a parsed one, has each unpaired surrogate
+    /// rendered as a single U+FFFD instead of being reported. Only an unpaired
+    /// surrogate is affected: a WTF-8 surrogate *pair* is folded back into the
+    /// character it encodes, so a `"😀"` label comes out intact.
+    ///
+    /// Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact
+    /// bytes, or
+    /// [`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to
+    /// detect the substitution. The returned `&str` borrows from `gc`, not from
+    /// `self`.
+    pub fn raw_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.raw.get())
+    }
 }
 
 /// The `Property` AST node.
@@ -2860,6 +3340,31 @@ impl<'gc> Property<'gc> {
             method: Cell::new(method),
             shorthand: Cell::new(shorthand),
         }
+    }
+    /// The `kind` label as UTF-8 text.
+    ///
+    /// Label fields hold identifier names, operators, keyword-like kinds and
+    /// raw source spans. An identifier cannot contain an unpaired surrogate —
+    /// the lexer rejects one with a dedicated diagnostic — and the remaining
+    /// labels are literal source text, so in practice the bytes are already
+    /// valid UTF-8 and this borrows them directly, allocating nothing.
+    ///
+    /// A label that is nevertheless unrepresentable, which realistically means
+    /// a hand-built AST rather than a parsed one, has each unpaired surrogate
+    /// rendered as a single U+FFFD instead of being reported. Only an unpaired
+    /// surrogate is affected: a WTF-8 surrogate *pair* is folded back into the
+    /// character it encodes, so a `"😀"` label comes out intact.
+    ///
+    /// Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact
+    /// bytes, or
+    /// [`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to
+    /// detect the substitution. The returned `&str` borrows from `gc`, not from
+    /// `self`.
+    pub fn kind_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.kind.get())
     }
 }
 
@@ -3183,6 +3688,31 @@ impl<'gc> MethodDefinition<'gc> {
             decorators,
         }
     }
+    /// The `kind` label as UTF-8 text.
+    ///
+    /// Label fields hold identifier names, operators, keyword-like kinds and
+    /// raw source spans. An identifier cannot contain an unpaired surrogate —
+    /// the lexer rejects one with a dedicated diagnostic — and the remaining
+    /// labels are literal source text, so in practice the bytes are already
+    /// valid UTF-8 and this borrows them directly, allocating nothing.
+    ///
+    /// A label that is nevertheless unrepresentable, which realistically means
+    /// a hand-built AST rather than a parsed one, has each unpaired surrogate
+    /// rendered as a single U+FFFD instead of being reported. Only an unpaired
+    /// surrogate is affected: a WTF-8 surrogate *pair* is folded back into the
+    /// character it encodes, so a `"😀"` label comes out intact.
+    ///
+    /// Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact
+    /// bytes, or
+    /// [`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to
+    /// detect the substitution. The returned `&str` borrows from `gc`, not from
+    /// `self`.
+    pub fn kind_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.kind.get())
+    }
 }
 
 /// The `ImportDeclaration` AST node.
@@ -3217,6 +3747,31 @@ impl<'gc> ImportDeclaration<'gc> {
             import_kind: Cell::new(import_kind),
         }
     }
+    /// The `importKind` label as UTF-8 text.
+    ///
+    /// Label fields hold identifier names, operators, keyword-like kinds and
+    /// raw source spans. An identifier cannot contain an unpaired surrogate —
+    /// the lexer rejects one with a dedicated diagnostic — and the remaining
+    /// labels are literal source text, so in practice the bytes are already
+    /// valid UTF-8 and this borrows them directly, allocating nothing.
+    ///
+    /// A label that is nevertheless unrepresentable, which realistically means
+    /// a hand-built AST rather than a parsed one, has each unpaired surrogate
+    /// rendered as a single U+FFFD instead of being reported. Only an unpaired
+    /// surrogate is affected: a WTF-8 surrogate *pair* is folded back into the
+    /// character it encodes, so a `"😀"` label comes out intact.
+    ///
+    /// Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact
+    /// bytes, or
+    /// [`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to
+    /// detect the substitution. The returned `&str` borrows from `gc`, not from
+    /// `self`.
+    pub fn import_kind_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.import_kind.get())
+    }
 }
 
 /// The `ImportSpecifier` AST node.
@@ -3246,6 +3801,31 @@ impl<'gc> ImportSpecifier<'gc> {
             local,
             import_kind: Cell::new(import_kind),
         }
+    }
+    /// The `importKind` label as UTF-8 text.
+    ///
+    /// Label fields hold identifier names, operators, keyword-like kinds and
+    /// raw source spans. An identifier cannot contain an unpaired surrogate —
+    /// the lexer rejects one with a dedicated diagnostic — and the remaining
+    /// labels are literal source text, so in practice the bytes are already
+    /// valid UTF-8 and this borrows them directly, allocating nothing.
+    ///
+    /// A label that is nevertheless unrepresentable, which realistically means
+    /// a hand-built AST rather than a parsed one, has each unpaired surrogate
+    /// rendered as a single U+FFFD instead of being reported. Only an unpaired
+    /// surrogate is affected: a WTF-8 surrogate *pair* is folded back into the
+    /// character it encodes, so a `"😀"` label comes out intact.
+    ///
+    /// Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact
+    /// bytes, or
+    /// [`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to
+    /// detect the substitution. The returned `&str` borrows from `gc`, not from
+    /// `self`.
+    pub fn import_kind_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.import_kind.get())
     }
 }
 
@@ -3354,6 +3934,31 @@ impl<'gc> ExportNamedDeclaration<'gc> {
             export_kind: Cell::new(export_kind),
         }
     }
+    /// The `exportKind` label as UTF-8 text.
+    ///
+    /// Label fields hold identifier names, operators, keyword-like kinds and
+    /// raw source spans. An identifier cannot contain an unpaired surrogate —
+    /// the lexer rejects one with a dedicated diagnostic — and the remaining
+    /// labels are literal source text, so in practice the bytes are already
+    /// valid UTF-8 and this borrows them directly, allocating nothing.
+    ///
+    /// A label that is nevertheless unrepresentable, which realistically means
+    /// a hand-built AST rather than a parsed one, has each unpaired surrogate
+    /// rendered as a single U+FFFD instead of being reported. Only an unpaired
+    /// surrogate is affected: a WTF-8 surrogate *pair* is folded back into the
+    /// character it encodes, so a `"😀"` label comes out intact.
+    ///
+    /// Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact
+    /// bytes, or
+    /// [`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to
+    /// detect the substitution. The returned `&str` borrows from `gc`, not from
+    /// `self`.
+    pub fn export_kind_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.export_kind.get())
+    }
 }
 
 /// The `ExportSpecifier` AST node.
@@ -3451,6 +4056,31 @@ impl<'gc> ExportAllDeclaration<'gc> {
             source,
             export_kind: Cell::new(export_kind),
         }
+    }
+    /// The `exportKind` label as UTF-8 text.
+    ///
+    /// Label fields hold identifier names, operators, keyword-like kinds and
+    /// raw source spans. An identifier cannot contain an unpaired surrogate —
+    /// the lexer rejects one with a dedicated diagnostic — and the remaining
+    /// labels are literal source text, so in practice the bytes are already
+    /// valid UTF-8 and this borrows them directly, allocating nothing.
+    ///
+    /// A label that is nevertheless unrepresentable, which realistically means
+    /// a hand-built AST rather than a parsed one, has each unpaired surrogate
+    /// rendered as a single U+FFFD instead of being reported. Only an unpaired
+    /// surrogate is affected: a WTF-8 surrogate *pair* is folded back into the
+    /// character it encodes, so a `"😀"` label comes out intact.
+    ///
+    /// Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact
+    /// bytes, or
+    /// [`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to
+    /// detect the substitution. The returned `&str` borrows from `gc`, not from
+    /// `self`.
+    pub fn export_kind_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.export_kind.get())
     }
 }
 
@@ -3704,6 +4334,31 @@ impl<'gc> MatchUnaryPattern<'gc> {
             operator: Cell::new(operator),
         }
     }
+    /// The `operator` label as UTF-8 text.
+    ///
+    /// Label fields hold identifier names, operators, keyword-like kinds and
+    /// raw source spans. An identifier cannot contain an unpaired surrogate —
+    /// the lexer rejects one with a dedicated diagnostic — and the remaining
+    /// labels are literal source text, so in practice the bytes are already
+    /// valid UTF-8 and this borrows them directly, allocating nothing.
+    ///
+    /// A label that is nevertheless unrepresentable, which realistically means
+    /// a hand-built AST rather than a parsed one, has each unpaired surrogate
+    /// rendered as a single U+FFFD instead of being reported. Only an unpaired
+    /// surrogate is affected: a WTF-8 surrogate *pair* is folded back into the
+    /// character it encodes, so a `"😀"` label comes out intact.
+    ///
+    /// Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact
+    /// bytes, or
+    /// [`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to
+    /// detect the substitution. The returned `&str` borrows from `gc`, not from
+    /// `self`.
+    pub fn operator_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.operator.get())
+    }
 }
 
 /// The `MatchIdentifierPattern` AST node.
@@ -3752,6 +4407,31 @@ impl<'gc> MatchBindingPattern<'gc> {
             id,
             kind: Cell::new(kind),
         }
+    }
+    /// The `kind` label as UTF-8 text.
+    ///
+    /// Label fields hold identifier names, operators, keyword-like kinds and
+    /// raw source spans. An identifier cannot contain an unpaired surrogate —
+    /// the lexer rejects one with a dedicated diagnostic — and the remaining
+    /// labels are literal source text, so in practice the bytes are already
+    /// valid UTF-8 and this borrows them directly, allocating nothing.
+    ///
+    /// A label that is nevertheless unrepresentable, which realistically means
+    /// a hand-built AST rather than a parsed one, has each unpaired surrogate
+    /// rendered as a single U+FFFD instead of being reported. Only an unpaired
+    /// surrogate is affected: a WTF-8 surrogate *pair* is folded back into the
+    /// character it encodes, so a `"😀"` label comes out intact.
+    ///
+    /// Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact
+    /// bytes, or
+    /// [`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to
+    /// detect the substitution. The returned `&str` borrows from `gc`, not from
+    /// `self`.
+    pub fn kind_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.kind.get())
     }
 }
 
@@ -4007,6 +4687,31 @@ impl<'gc> JSXIdentifier<'gc> {
             name: Cell::new(name),
         }
     }
+    /// The `name` label as UTF-8 text.
+    ///
+    /// Label fields hold identifier names, operators, keyword-like kinds and
+    /// raw source spans. An identifier cannot contain an unpaired surrogate —
+    /// the lexer rejects one with a dedicated diagnostic — and the remaining
+    /// labels are literal source text, so in practice the bytes are already
+    /// valid UTF-8 and this borrows them directly, allocating nothing.
+    ///
+    /// A label that is nevertheless unrepresentable, which realistically means
+    /// a hand-built AST rather than a parsed one, has each unpaired surrogate
+    /// rendered as a single U+FFFD instead of being reported. Only an unpaired
+    /// surrogate is affected: a WTF-8 surrogate *pair* is folded back into the
+    /// character it encodes, so a `"😀"` label comes out intact.
+    ///
+    /// Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact
+    /// bytes, or
+    /// [`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to
+    /// detect the substitution. The returned `&str` borrows from `gc`, not from
+    /// `self`.
+    pub fn name_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.name.get())
+    }
 }
 
 /// The `JSXMemberExpression` AST node.
@@ -4252,6 +4957,82 @@ impl<'gc> JSXStringLiteral<'gc> {
             raw: Cell::new(raw),
         }
     }
+    /// The `value` string value as UTF-8, or `None` if it has no UTF-8 form.
+    ///
+    /// A JS string value is a sequence of UTF-16 code units, so it may legally
+    /// contain an *unpaired* surrogate (`"\uD800"` parses, and is not an
+    /// error). That, and only that, is what `None` reports: the value is
+    /// intact, it simply cannot be spelled in UTF-8. Read it losslessly with
+    /// [`GCLock::bytes`](crate::context::GCLock::bytes).
+    ///
+    /// Only an *unpaired* surrogate is unrepresentable. A WTF-8 surrogate
+    /// *pair* is not: the lexer interns an astral character in surrogate-pair
+    /// form, and it is folded back into the character it encodes, so a `"😀"`
+    /// literal yields `Some("😀")`, not `None`.
+    ///
+    /// There is deliberately no plain `value_str`: an unrepresentable
+    /// identifier means something is broken, but an unrepresentable string
+    /// literal is legal JS, and a codegen or refactoring tool that let U+FFFD
+    /// be substituted here would silently rewrite the user's program. Reach for
+    /// [`Self::value_str_lossy`] only when a best-effort rendering is what you
+    /// want.
+    ///
+    /// Valid UTF-8 is borrowed from the atom's own bytes and allocates nothing;
+    /// folding a surrogate pair allocates once per atom, cached in the context.
+    /// The returned `&str` borrows from `gc`, not from `self`.
+    pub fn try_value_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> Option<&'a str> {
+        gc.try_bytes_str(self.value.get())
+    }
+    /// The `value` string value as UTF-8, substituting U+FFFD for anything
+    /// unrepresentable.
+    ///
+    /// **This is lossy.** A JS string value may legally contain an unpaired
+    /// surrogate (`"\uD800"` parses), which has no UTF-8 form; each one becomes
+    /// exactly one U+FFFD here. Do not use this to re-emit source: a codegen or
+    /// refactoring tool would silently rewrite the user's program.
+    ///
+    /// Only an *unpaired* surrogate is unrepresentable. A WTF-8 surrogate
+    /// *pair* is not: the lexer interns an astral character in surrogate-pair
+    /// form, and it is folded back into the character it encodes, so a `"😀"`
+    /// literal comes out intact.
+    ///
+    /// Use [`Self::try_value_str`] or
+    /// [`GCLock::bytes`](crate::context::GCLock::bytes) when the exact value
+    /// matters. The returned `&str` borrows from `gc`, not from `self`.
+    pub fn value_str_lossy<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.value.get())
+    }
+    /// The `raw` label as UTF-8 text.
+    ///
+    /// Label fields hold identifier names, operators, keyword-like kinds and
+    /// raw source spans. An identifier cannot contain an unpaired surrogate —
+    /// the lexer rejects one with a dedicated diagnostic — and the remaining
+    /// labels are literal source text, so in practice the bytes are already
+    /// valid UTF-8 and this borrows them directly, allocating nothing.
+    ///
+    /// A label that is nevertheless unrepresentable, which realistically means
+    /// a hand-built AST rather than a parsed one, has each unpaired surrogate
+    /// rendered as a single U+FFFD instead of being reported. Only an unpaired
+    /// surrogate is affected: a WTF-8 surrogate *pair* is folded back into the
+    /// character it encodes, so a `"😀"` label comes out intact.
+    ///
+    /// Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact
+    /// bytes, or
+    /// [`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to
+    /// detect the substitution. The returned `&str` borrows from `gc`, not from
+    /// `self`.
+    pub fn raw_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.raw.get())
+    }
 }
 
 /// The `JSXText` AST node.
@@ -4277,6 +5058,82 @@ impl<'gc> JSXText<'gc> {
             value: Cell::new(value),
             raw: Cell::new(raw),
         }
+    }
+    /// The `value` string value as UTF-8, or `None` if it has no UTF-8 form.
+    ///
+    /// A JS string value is a sequence of UTF-16 code units, so it may legally
+    /// contain an *unpaired* surrogate (`"\uD800"` parses, and is not an
+    /// error). That, and only that, is what `None` reports: the value is
+    /// intact, it simply cannot be spelled in UTF-8. Read it losslessly with
+    /// [`GCLock::bytes`](crate::context::GCLock::bytes).
+    ///
+    /// Only an *unpaired* surrogate is unrepresentable. A WTF-8 surrogate
+    /// *pair* is not: the lexer interns an astral character in surrogate-pair
+    /// form, and it is folded back into the character it encodes, so a `"😀"`
+    /// literal yields `Some("😀")`, not `None`.
+    ///
+    /// There is deliberately no plain `value_str`: an unrepresentable
+    /// identifier means something is broken, but an unrepresentable string
+    /// literal is legal JS, and a codegen or refactoring tool that let U+FFFD
+    /// be substituted here would silently rewrite the user's program. Reach for
+    /// [`Self::value_str_lossy`] only when a best-effort rendering is what you
+    /// want.
+    ///
+    /// Valid UTF-8 is borrowed from the atom's own bytes and allocates nothing;
+    /// folding a surrogate pair allocates once per atom, cached in the context.
+    /// The returned `&str` borrows from `gc`, not from `self`.
+    pub fn try_value_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> Option<&'a str> {
+        gc.try_bytes_str(self.value.get())
+    }
+    /// The `value` string value as UTF-8, substituting U+FFFD for anything
+    /// unrepresentable.
+    ///
+    /// **This is lossy.** A JS string value may legally contain an unpaired
+    /// surrogate (`"\uD800"` parses), which has no UTF-8 form; each one becomes
+    /// exactly one U+FFFD here. Do not use this to re-emit source: a codegen or
+    /// refactoring tool would silently rewrite the user's program.
+    ///
+    /// Only an *unpaired* surrogate is unrepresentable. A WTF-8 surrogate
+    /// *pair* is not: the lexer interns an astral character in surrogate-pair
+    /// form, and it is folded back into the character it encodes, so a `"😀"`
+    /// literal comes out intact.
+    ///
+    /// Use [`Self::try_value_str`] or
+    /// [`GCLock::bytes`](crate::context::GCLock::bytes) when the exact value
+    /// matters. The returned `&str` borrows from `gc`, not from `self`.
+    pub fn value_str_lossy<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.value.get())
+    }
+    /// The `raw` label as UTF-8 text.
+    ///
+    /// Label fields hold identifier names, operators, keyword-like kinds and
+    /// raw source spans. An identifier cannot contain an unpaired surrogate —
+    /// the lexer rejects one with a dedicated diagnostic — and the remaining
+    /// labels are literal source text, so in practice the bytes are already
+    /// valid UTF-8 and this borrows them directly, allocating nothing.
+    ///
+    /// A label that is nevertheless unrepresentable, which realistically means
+    /// a hand-built AST rather than a parsed one, has each unpaired surrogate
+    /// rendered as a single U+FFFD instead of being reported. Only an unpaired
+    /// surrogate is affected: a WTF-8 surrogate *pair* is folded back into the
+    /// character it encodes, so a `"😀"` label comes out intact.
+    ///
+    /// Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact
+    /// bytes, or
+    /// [`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to
+    /// detect the substitution. The returned `&str` borrows from `gc`, not from
+    /// `self`.
+    pub fn raw_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.raw.get())
     }
 }
 
@@ -4473,6 +5330,108 @@ impl<'gc> StringLiteralTypeAnnotation<'gc> {
             raw: Cell::new(raw),
         }
     }
+    /// The `value` string value as UTF-8, or `None` if it has no UTF-8 form.
+    ///
+    /// A JS string value is a sequence of UTF-16 code units, so it may legally
+    /// contain an *unpaired* surrogate (`"\uD800"` parses, and is not an
+    /// error). That, and only that, is what `None` reports: the value is
+    /// intact, it simply cannot be spelled in UTF-8. Read it losslessly with
+    /// [`GCLock::bytes`](crate::context::GCLock::bytes).
+    ///
+    /// Only an *unpaired* surrogate is unrepresentable. A WTF-8 surrogate
+    /// *pair* is not: the lexer interns an astral character in surrogate-pair
+    /// form, and it is folded back into the character it encodes, so a `"😀"`
+    /// literal yields `Some("😀")`, not `None`.
+    ///
+    /// There is deliberately no plain `value_str`: an unrepresentable
+    /// identifier means something is broken, but an unrepresentable string
+    /// literal is legal JS, and a codegen or refactoring tool that let U+FFFD
+    /// be substituted here would silently rewrite the user's program. Reach for
+    /// [`Self::value_str_lossy`] only when a best-effort rendering is what you
+    /// want.
+    ///
+    /// Valid UTF-8 is borrowed from the atom's own bytes and allocates nothing;
+    /// folding a surrogate pair allocates once per atom, cached in the context.
+    /// The returned `&str` borrows from `gc`, not from `self`.
+    pub fn try_value_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> Option<&'a str> {
+        gc.try_bytes_str(self.value.get())
+    }
+    /// The `value` string value as UTF-8, substituting U+FFFD for anything
+    /// unrepresentable.
+    ///
+    /// **This is lossy.** A JS string value may legally contain an unpaired
+    /// surrogate (`"\uD800"` parses), which has no UTF-8 form; each one becomes
+    /// exactly one U+FFFD here. Do not use this to re-emit source: a codegen or
+    /// refactoring tool would silently rewrite the user's program.
+    ///
+    /// Only an *unpaired* surrogate is unrepresentable. A WTF-8 surrogate
+    /// *pair* is not: the lexer interns an astral character in surrogate-pair
+    /// form, and it is folded back into the character it encodes, so a `"😀"`
+    /// literal comes out intact.
+    ///
+    /// Use [`Self::try_value_str`] or
+    /// [`GCLock::bytes`](crate::context::GCLock::bytes) when the exact value
+    /// matters. The returned `&str` borrows from `gc`, not from `self`.
+    pub fn value_str_lossy<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.value.get())
+    }
+    /// The `raw` string value as UTF-8, or `None` if it has no UTF-8 form.
+    ///
+    /// A JS string value is a sequence of UTF-16 code units, so it may legally
+    /// contain an *unpaired* surrogate (`"\uD800"` parses, and is not an
+    /// error). That, and only that, is what `None` reports: the value is
+    /// intact, it simply cannot be spelled in UTF-8. Read it losslessly with
+    /// [`GCLock::bytes`](crate::context::GCLock::bytes).
+    ///
+    /// Only an *unpaired* surrogate is unrepresentable. A WTF-8 surrogate
+    /// *pair* is not: the lexer interns an astral character in surrogate-pair
+    /// form, and it is folded back into the character it encodes, so a `"😀"`
+    /// literal yields `Some("😀")`, not `None`.
+    ///
+    /// There is deliberately no plain `raw_str`: an unrepresentable identifier
+    /// means something is broken, but an unrepresentable string literal is
+    /// legal JS, and a codegen or refactoring tool that let U+FFFD be
+    /// substituted here would silently rewrite the user's program. Reach for
+    /// [`Self::raw_str_lossy`] only when a best-effort rendering is what you
+    /// want.
+    ///
+    /// Valid UTF-8 is borrowed from the atom's own bytes and allocates nothing;
+    /// folding a surrogate pair allocates once per atom, cached in the context.
+    /// The returned `&str` borrows from `gc`, not from `self`.
+    pub fn try_raw_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> Option<&'a str> {
+        gc.try_bytes_str(self.raw.get())
+    }
+    /// The `raw` string value as UTF-8, substituting U+FFFD for anything
+    /// unrepresentable.
+    ///
+    /// **This is lossy.** A JS string value may legally contain an unpaired
+    /// surrogate (`"\uD800"` parses), which has no UTF-8 form; each one becomes
+    /// exactly one U+FFFD here. Do not use this to re-emit source: a codegen or
+    /// refactoring tool would silently rewrite the user's program.
+    ///
+    /// Only an *unpaired* surrogate is unrepresentable. A WTF-8 surrogate
+    /// *pair* is not: the lexer interns an astral character in surrogate-pair
+    /// form, and it is folded back into the character it encodes, so a `"😀"`
+    /// literal comes out intact.
+    ///
+    /// Use [`Self::try_raw_str`] or
+    /// [`GCLock::bytes`](crate::context::GCLock::bytes) when the exact value
+    /// matters. The returned `&str` borrows from `gc`, not from `self`.
+    pub fn raw_str_lossy<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.raw.get())
+    }
 }
 
 /// The `NumberLiteralTypeAnnotation` AST node.
@@ -4500,6 +5459,31 @@ impl<'gc> NumberLiteralTypeAnnotation<'gc> {
             raw: Cell::new(raw),
         }
     }
+    /// The `raw` label as UTF-8 text.
+    ///
+    /// Label fields hold identifier names, operators, keyword-like kinds and
+    /// raw source spans. An identifier cannot contain an unpaired surrogate —
+    /// the lexer rejects one with a dedicated diagnostic — and the remaining
+    /// labels are literal source text, so in practice the bytes are already
+    /// valid UTF-8 and this borrows them directly, allocating nothing.
+    ///
+    /// A label that is nevertheless unrepresentable, which realistically means
+    /// a hand-built AST rather than a parsed one, has each unpaired surrogate
+    /// rendered as a single U+FFFD instead of being reported. Only an unpaired
+    /// surrogate is affected: a WTF-8 surrogate *pair* is folded back into the
+    /// character it encodes, so a `"😀"` label comes out intact.
+    ///
+    /// Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact
+    /// bytes, or
+    /// [`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to
+    /// detect the substitution. The returned `&str` borrows from `gc`, not from
+    /// `self`.
+    pub fn raw_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.raw.get())
+    }
 }
 
 /// The `BigIntLiteralTypeAnnotation` AST node.
@@ -4522,6 +5506,31 @@ impl<'gc> BigIntLiteralTypeAnnotation<'gc> {
             metadata,
             raw: Cell::new(raw),
         }
+    }
+    /// The `raw` label as UTF-8 text.
+    ///
+    /// Label fields hold identifier names, operators, keyword-like kinds and
+    /// raw source spans. An identifier cannot contain an unpaired surrogate —
+    /// the lexer rejects one with a dedicated diagnostic — and the remaining
+    /// labels are literal source text, so in practice the bytes are already
+    /// valid UTF-8 and this borrows them directly, allocating nothing.
+    ///
+    /// A label that is nevertheless unrepresentable, which realistically means
+    /// a hand-built AST rather than a parsed one, has each unpaired surrogate
+    /// rendered as a single U+FFFD instead of being reported. Only an unpaired
+    /// surrogate is affected: a WTF-8 surrogate *pair* is folded back into the
+    /// character it encodes, so a `"😀"` label comes out intact.
+    ///
+    /// Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact
+    /// bytes, or
+    /// [`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to
+    /// detect the substitution. The returned `&str` borrows from `gc`, not from
+    /// `self`.
+    pub fn raw_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.raw.get())
     }
 }
 
@@ -4567,6 +5576,31 @@ impl<'gc> BooleanLiteralTypeAnnotation<'gc> {
             value: Cell::new(value),
             raw: Cell::new(raw),
         }
+    }
+    /// The `raw` label as UTF-8 text.
+    ///
+    /// Label fields hold identifier names, operators, keyword-like kinds and
+    /// raw source spans. An identifier cannot contain an unpaired surrogate —
+    /// the lexer rejects one with a dedicated diagnostic — and the remaining
+    /// labels are literal source text, so in practice the bytes are already
+    /// valid UTF-8 and this borrows them directly, allocating nothing.
+    ///
+    /// A label that is nevertheless unrepresentable, which realistically means
+    /// a hand-built AST rather than a parsed one, has each unpaired surrogate
+    /// rendered as a single U+FFFD instead of being reported. Only an unpaired
+    /// surrogate is affected: a WTF-8 surrogate *pair* is folded back into the
+    /// character it encodes, so a `"😀"` label comes out intact.
+    ///
+    /// Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact
+    /// bytes, or
+    /// [`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to
+    /// detect the substitution. The returned `&str` borrows from `gc`, not from
+    /// `self`.
+    pub fn raw_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.raw.get())
     }
 }
 
@@ -5025,6 +6059,31 @@ impl<'gc> TypeOperator<'gc> {
             type_annotation,
         }
     }
+    /// The `operator` label as UTF-8 text.
+    ///
+    /// Label fields hold identifier names, operators, keyword-like kinds and
+    /// raw source spans. An identifier cannot contain an unpaired surrogate —
+    /// the lexer rejects one with a dedicated diagnostic — and the remaining
+    /// labels are literal source text, so in practice the bytes are already
+    /// valid UTF-8 and this borrows them directly, allocating nothing.
+    ///
+    /// A label that is nevertheless unrepresentable, which realistically means
+    /// a hand-built AST rather than a parsed one, has each unpaired surrogate
+    /// rendered as a single U+FFFD instead of being reported. Only an unpaired
+    /// surrogate is affected: a WTF-8 surrogate *pair* is folded back into the
+    /// character it encodes, so a `"😀"` label comes out intact.
+    ///
+    /// Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact
+    /// bytes, or
+    /// [`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to
+    /// detect the substitution. The returned `&str` borrows from `gc`, not from
+    /// `self`.
+    pub fn operator_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.operator.get())
+    }
 }
 
 /// The `QualifiedTypeofIdentifier` AST node.
@@ -5376,6 +6435,57 @@ impl<'gc> TypePredicate<'gc> {
             type_annotation,
             kind: Cell::new(kind),
         }
+    }
+    /// The `kind` string value as UTF-8, or `None` if it has no UTF-8 form.
+    ///
+    /// A JS string value is a sequence of UTF-16 code units, so it may legally
+    /// contain an *unpaired* surrogate (`"\uD800"` parses, and is not an
+    /// error). That, and only that, is what `None` reports: the value is
+    /// intact, it simply cannot be spelled in UTF-8. Read it losslessly with
+    /// [`GCLock::bytes`](crate::context::GCLock::bytes).
+    ///
+    /// Only an *unpaired* surrogate is unrepresentable. A WTF-8 surrogate
+    /// *pair* is not: the lexer interns an astral character in surrogate-pair
+    /// form, and it is folded back into the character it encodes, so a `"😀"`
+    /// literal yields `Some("😀")`, not `None`.
+    ///
+    /// There is deliberately no plain `kind_str`: an unrepresentable identifier
+    /// means something is broken, but an unrepresentable string literal is
+    /// legal JS, and a codegen or refactoring tool that let U+FFFD be
+    /// substituted here would silently rewrite the user's program. Reach for
+    /// [`Self::kind_str_lossy`] only when a best-effort rendering is what you
+    /// want.
+    ///
+    /// Valid UTF-8 is borrowed from the atom's own bytes and allocates nothing;
+    /// folding a surrogate pair allocates once per atom, cached in the context.
+    /// The returned `&str` borrows from `gc`, not from `self`.
+    pub fn try_kind_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> Option<&'a str> {
+        gc.try_bytes_str(self.kind.get())
+    }
+    /// The `kind` string value as UTF-8, substituting U+FFFD for anything
+    /// unrepresentable.
+    ///
+    /// **This is lossy.** A JS string value may legally contain an unpaired
+    /// surrogate (`"\uD800"` parses), which has no UTF-8 form; each one becomes
+    /// exactly one U+FFFD here. Do not use this to re-emit source: a codegen or
+    /// refactoring tool would silently rewrite the user's program.
+    ///
+    /// Only an *unpaired* surrogate is unrepresentable. A WTF-8 surrogate
+    /// *pair* is not: the lexer interns an astral character in surrogate-pair
+    /// form, and it is folded back into the character it encodes, so a `"😀"`
+    /// literal comes out intact.
+    ///
+    /// Use [`Self::try_kind_str`] or
+    /// [`GCLock::bytes`](crate::context::GCLock::bytes) when the exact value
+    /// matters. The returned `&str` borrows from `gc`, not from `self`.
+    pub fn kind_str_lossy<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.kind.get())
     }
 }
 
@@ -5770,6 +6880,31 @@ impl<'gc> DeclareVariable<'gc> {
             kind: Cell::new(kind),
         }
     }
+    /// The `kind` label as UTF-8 text.
+    ///
+    /// Label fields hold identifier names, operators, keyword-like kinds and
+    /// raw source spans. An identifier cannot contain an unpaired surrogate —
+    /// the lexer rejects one with a dedicated diagnostic — and the remaining
+    /// labels are literal source text, so in practice the bytes are already
+    /// valid UTF-8 and this borrows them directly, allocating nothing.
+    ///
+    /// A label that is nevertheless unrepresentable, which realistically means
+    /// a hand-built AST rather than a parsed one, has each unpaired surrogate
+    /// rendered as a single U+FFFD instead of being reported. Only an unpaired
+    /// surrogate is affected: a WTF-8 surrogate *pair* is folded back into the
+    /// character it encodes, so a `"😀"` label comes out intact.
+    ///
+    /// Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact
+    /// bytes, or
+    /// [`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to
+    /// detect the substitution. The returned `&str` borrows from `gc`, not from
+    /// `self`.
+    pub fn kind_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.kind.get())
+    }
 }
 
 /// The `DeclareEnum` AST node.
@@ -6094,6 +7229,31 @@ impl<'gc> ObjectTypeProperty<'gc> {
             kind: Cell::new(kind),
         }
     }
+    /// The `kind` label as UTF-8 text.
+    ///
+    /// Label fields hold identifier names, operators, keyword-like kinds and
+    /// raw source spans. An identifier cannot contain an unpaired surrogate —
+    /// the lexer rejects one with a dedicated diagnostic — and the remaining
+    /// labels are literal source text, so in practice the bytes are already
+    /// valid UTF-8 and this borrows them directly, allocating nothing.
+    ///
+    /// A label that is nevertheless unrepresentable, which realistically means
+    /// a hand-built AST rather than a parsed one, has each unpaired surrogate
+    /// rendered as a single U+FFFD instead of being reported. Only an unpaired
+    /// surrogate is affected: a WTF-8 surrogate *pair* is folded back into the
+    /// character it encodes, so a `"😀"` label comes out intact.
+    ///
+    /// Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact
+    /// bytes, or
+    /// [`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to
+    /// detect the substitution. The returned `&str` borrows from `gc`, not from
+    /// `self`.
+    pub fn kind_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.kind.get())
+    }
 }
 
 /// The `ObjectTypeSpreadProperty` AST node.
@@ -6260,6 +7420,57 @@ impl<'gc> ObjectTypeMappedTypeProperty<'gc> {
             optional: Cell::new(optional),
         }
     }
+    /// The `optional` string value as UTF-8, or `None` if it has no UTF-8 form.
+    ///
+    /// A JS string value is a sequence of UTF-16 code units, so it may legally
+    /// contain an *unpaired* surrogate (`"\uD800"` parses, and is not an
+    /// error). That, and only that, is what `None` reports: the value is
+    /// intact, it simply cannot be spelled in UTF-8. Read it losslessly with
+    /// [`GCLock::bytes`](crate::context::GCLock::bytes).
+    ///
+    /// Only an *unpaired* surrogate is unrepresentable. A WTF-8 surrogate
+    /// *pair* is not: the lexer interns an astral character in surrogate-pair
+    /// form, and it is folded back into the character it encodes, so a `"😀"`
+    /// literal yields `Some("😀")`, not `None`.
+    ///
+    /// There is deliberately no plain `optional_str`: an unrepresentable
+    /// identifier means something is broken, but an unrepresentable string
+    /// literal is legal JS, and a codegen or refactoring tool that let U+FFFD
+    /// be substituted here would silently rewrite the user's program. Reach for
+    /// [`Self::optional_str_lossy`] only when a best-effort rendering is what
+    /// you want.
+    ///
+    /// Valid UTF-8 is borrowed from the atom's own bytes and allocates nothing;
+    /// folding a surrogate pair allocates once per atom, cached in the context.
+    /// The returned `&str` borrows from `gc`, not from `self`.
+    pub fn try_optional_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> Option<&'a str> {
+        gc.try_bytes_str(self.optional.get())
+    }
+    /// The `optional` string value as UTF-8, substituting U+FFFD for anything
+    /// unrepresentable.
+    ///
+    /// **This is lossy.** A JS string value may legally contain an unpaired
+    /// surrogate (`"\uD800"` parses), which has no UTF-8 form; each one becomes
+    /// exactly one U+FFFD here. Do not use this to re-emit source: a codegen or
+    /// refactoring tool would silently rewrite the user's program.
+    ///
+    /// Only an *unpaired* surrogate is unrepresentable. A WTF-8 surrogate
+    /// *pair* is not: the lexer interns an astral character in surrogate-pair
+    /// form, and it is folded back into the character it encodes, so a `"😀"`
+    /// literal comes out intact.
+    ///
+    /// Use [`Self::try_optional_str`] or
+    /// [`GCLock::bytes`](crate::context::GCLock::bytes) when the exact value
+    /// matters. The returned `&str` borrows from `gc`, not from `self`.
+    pub fn optional_str_lossy<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.optional.get())
+    }
 }
 
 /// The `Variance` AST node.
@@ -6281,6 +7492,31 @@ impl<'gc> Variance<'gc> {
             metadata,
             kind: Cell::new(kind),
         }
+    }
+    /// The `kind` label as UTF-8 text.
+    ///
+    /// Label fields hold identifier names, operators, keyword-like kinds and
+    /// raw source spans. An identifier cannot contain an unpaired surrogate —
+    /// the lexer rejects one with a dedicated diagnostic — and the remaining
+    /// labels are literal source text, so in practice the bytes are already
+    /// valid UTF-8 and this borrows them directly, allocating nothing.
+    ///
+    /// A label that is nevertheless unrepresentable, which realistically means
+    /// a hand-built AST rather than a parsed one, has each unpaired surrogate
+    /// rendered as a single U+FFFD instead of being reported. Only an unpaired
+    /// surrogate is affected: a WTF-8 surrogate *pair* is folded back into the
+    /// character it encodes, so a `"😀"` label comes out intact.
+    ///
+    /// Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact
+    /// bytes, or
+    /// [`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to
+    /// detect the substitution. The returned `&str` borrows from `gc`, not from
+    /// `self`.
+    pub fn kind_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.kind.get())
     }
 }
 
@@ -6346,6 +7582,31 @@ impl<'gc> TypeParameter<'gc> {
             default,
             uses_extends_bound: Cell::new(uses_extends_bound),
         }
+    }
+    /// The `name` label as UTF-8 text.
+    ///
+    /// Label fields hold identifier names, operators, keyword-like kinds and
+    /// raw source spans. An identifier cannot contain an unpaired surrogate —
+    /// the lexer rejects one with a dedicated diagnostic — and the remaining
+    /// labels are literal source text, so in practice the bytes are already
+    /// valid UTF-8 and this borrows them directly, allocating nothing.
+    ///
+    /// A label that is nevertheless unrepresentable, which realistically means
+    /// a hand-built AST rather than a parsed one, has each unpaired surrogate
+    /// rendered as a single U+FFFD instead of being reported. Only an unpaired
+    /// surrogate is affected: a WTF-8 surrogate *pair* is folded back into the
+    /// character it encodes, so a `"😀"` label comes out intact.
+    ///
+    /// Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact
+    /// bytes, or
+    /// [`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to
+    /// detect the substitution. The returned `&str` borrows from `gc`, not from
+    /// `self`.
+    pub fn name_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.name.get())
     }
 }
 
@@ -7550,6 +8811,31 @@ impl<'gc> TSParameterProperty<'gc> {
             export: Cell::new(export),
         }
     }
+    /// The `accessibility` label as UTF-8 text.
+    ///
+    /// Label fields hold identifier names, operators, keyword-like kinds and
+    /// raw source spans. An identifier cannot contain an unpaired surrogate —
+    /// the lexer rejects one with a dedicated diagnostic — and the remaining
+    /// labels are literal source text, so in practice the bytes are already
+    /// valid UTF-8 and this borrows them directly, allocating nothing.
+    ///
+    /// A label that is nevertheless unrepresentable, which realistically means
+    /// a hand-built AST rather than a parsed one, has each unpaired surrogate
+    /// rendered as a single U+FFFD instead of being reported. Only an unpaired
+    /// surrogate is affected: a WTF-8 surrogate *pair* is folded back into the
+    /// character it encodes, so a `"😀"` label comes out intact.
+    ///
+    /// Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact
+    /// bytes, or
+    /// [`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to
+    /// detect the substitution. The returned `&str` borrows from `gc`, not from
+    /// `self`.
+    pub fn accessibility_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.accessibility.get())
+    }
 }
 
 /// The `TSTypeAliasDeclaration` AST node.
@@ -8150,6 +9436,31 @@ impl<'gc> TSModifiers<'gc> {
             accessibility: Cell::new(accessibility),
             readonly: Cell::new(readonly),
         }
+    }
+    /// The `accessibility` label as UTF-8 text.
+    ///
+    /// Label fields hold identifier names, operators, keyword-like kinds and
+    /// raw source spans. An identifier cannot contain an unpaired surrogate —
+    /// the lexer rejects one with a dedicated diagnostic — and the remaining
+    /// labels are literal source text, so in practice the bytes are already
+    /// valid UTF-8 and this borrows them directly, allocating nothing.
+    ///
+    /// A label that is nevertheless unrepresentable, which realistically means
+    /// a hand-built AST rather than a parsed one, has each unpaired surrogate
+    /// rendered as a single U+FFFD instead of being reported. Only an unpaired
+    /// surrogate is affected: a WTF-8 surrogate *pair* is folded back into the
+    /// character it encodes, so a `"😀"` label comes out intact.
+    ///
+    /// Use [`GCLock::bytes`](crate::context::GCLock::bytes) for the exact
+    /// bytes, or
+    /// [`GCLock::try_bytes_str`](crate::context::GCLock::try_bytes_str) to
+    /// detect the substitution. The returned `&str` borrows from `gc`, not from
+    /// `self`.
+    pub fn accessibility_str<'a>(
+        &self,
+        gc: &'a crate::context::GCLock<'_, '_>,
+    ) -> &'a str {
+        gc.bytes_str_lossy(self.accessibility.get())
     }
 }
 
