@@ -33,6 +33,18 @@ The byte orientation comes from elsewhere: `NodeLabel` and `NodeString` are
 string fields, and a JS string literal genuinely can hold a lone surrogate
 (`var s = "\uD800";` parses and dumps as `"value": "\ud800"`).
 
+> **Correction (2026-08-15, found during implementation).** An earlier draft of
+> this spec claimed the non-UTF-8 path "is empty for every input that comes
+> from parsing". **That is false.** The lexer interns astral characters in
+> string literals as WTF-8 **surrogate pairs** rather than 4-byte UTF-8
+> (`crates/parser/src/lexer/mod.rs:1364-1375`), so every emoji literal reaches
+> it. This is not an error condition — a surrogate pair and the character it
+> encodes are two spellings of the same string — so both accessors **fold
+> pairs back** into the character, matching C++ `convertToCodePointAt`
+> (`UTF8.cpp:77-96`). Only an **unpaired** surrogate is unrepresentable.
+> Consequently the map below is populated by ordinary input, and the
+> exact/inexact distinction (not mere UTF-8 validity) is what `try_*` reports.
+
 **This asymmetry is the core of the design** and drives §5:
 
 - For an **identifier**, invalid UTF-8 means something is wrong — a bug or a
@@ -69,7 +81,10 @@ reference from a temporary. Something must own it. Therefore `Inner` gains:
 lossy_bytes: HashMap<AtomBytes, String>,
 ```
 
-consulted **only in the `Err` arm**, empty on every realistic input. Its
+consulted **only in the `Err` arm** — i.e. never on the valid-UTF-8 fast
+path, which stays zero-copy. Contrary to an earlier draft it is *not* empty in
+practice: every emoji string literal anchors one folded entry (see §2's
+correction). Its
 soundness is the house pattern already documented for `strings_bytes`:
 rehashing moves the `String` structs, never their heap buffers, so a previously
 returned `&str` stays valid.
@@ -87,7 +102,12 @@ per unpaired surrogate.
 ```rust
 /// The atom's bytes as UTF-8, substituting U+FFFD for anything unrepresentable.
 pub fn bytes_str_lossy(&self, a: AtomBytes) -> &str;
-/// The atom's bytes as UTF-8, or None if they are not valid UTF-8.
+/// The atom's bytes as UTF-8, or None if they contain an UNPAIRED surrogate.
+///
+/// Surrogate PAIRS are folded to the character they encode and return
+/// `Some` — they are representable, and reporting `None` for an emoji
+/// would answer a question about byte encoding rather than about the
+/// value, which is not what a caller is asking.
 pub fn try_bytes_str(&self, a: AtomBytes) -> Option<&str>;
 ```
 
