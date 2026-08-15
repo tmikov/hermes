@@ -29,6 +29,61 @@
 //! assert!(json.starts_with(r#"{"type":"Program""#));
 //! ```
 //!
+//! ## Names and string values: from atom to `&str`
+//!
+//! Text in the AST is *interned*: `id.name` is a `Cell<NodeLabel>`, an index
+//! into the arena's atom table, not a `String`. Every text field has a
+//! generated accessor that does the lookup against the [`ast::context::GCLock`],
+//! returning a `&str` that borrows the table's bytes — no allocation:
+//!
+//! ```
+//! use hermes_parser::ast::node::Node;
+//! use hermes_parser::{parse, ParseFlags};
+//!
+//! let src = r#"function greet(who) { return "hi"; }"#;
+//! let mut parsed = parse(src, ParseFlags::default()).expect("parse error");
+//!
+//! let names = parsed.with_program(|gc, program| {
+//!     let Node::Program(p) = program else { unreachable!() };
+//!     let Some(Node::FunctionDeclaration(f)) = p.body.iter().next()
+//!     else { unreachable!() };
+//!     let Some(Node::Identifier(id)) = f.id else { unreachable!() };
+//!     let Some(Node::Identifier(param)) = f.params.iter().next()
+//!     else { unreachable!() };
+//!     // `<field>_str` for a name-like field…
+//!     (id.name_str(gc).to_string(), param.name_str(gc).to_string())
+//! });
+//! assert_eq!(names, ("greet".to_string(), "who".to_string()));
+//!
+//! let mut parsed = parse(r#""hi";"#, ParseFlags::default()).expect("parse");
+//! let value = parsed.with_program(|gc, program| {
+//!     let Node::Program(p) = program else { unreachable!() };
+//!     let Some(Node::ExpressionStatement(st)) = p.body.iter().next()
+//!     else { unreachable!() };
+//!     let Node::StringLiteral(s) = st.expression else { unreachable!() };
+//!     // …but `try_<field>_str` for a string *value*, which can legally be an
+//!     // unpaired surrogate and then has no UTF-8 form at all.
+//!     s.try_value_str(gc).map(str::to_string)
+//! });
+//! assert_eq!(value.as_deref(), Some("hi"));
+//! ```
+//!
+//! The split is deliberate. Name-like fields (identifiers, operators,
+//! keyword-like kinds) get a plain `<field>_str` that substitutes U+FFFD in
+//! the case that should not arise — the lexer rejects an identifier containing
+//! an unpaired surrogate. String-literal values get `try_<field>_str`
+//! returning `Option<&str>` and an explicit `<field>_str_lossy`, because a
+//! lone surrogate there is a legal JS value, and silently replacing it would
+//! corrupt the program a codegen tool round-trips. An astral character such as
+//! `"😀"` is *not* the `None` case: it is stored as a WTF-8 surrogate pair and
+//! both accessors fold it back into the character. For the exact stored bytes,
+//! use [`ast::context::GCLock::bytes`]; [`ast::context::GCLock::bytes_str_lossy`]
+//! and [`ast::context::GCLock::try_bytes_str`] are the same conversions for an
+//! atom you already hold.
+//!
+//! `crates/sema/examples/print_bindings.rs` puts this together with a
+//! `Visitor` walk and name resolution.
+//!
 //! The pieces a consumer touches:
 //! - [`parse`] / [`parse_named`] returning [`ParsedJS`] — the convenience
 //!   façade, which assembles an [`hermes_ast::context::Context`], a

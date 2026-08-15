@@ -102,7 +102,24 @@ impl ResolvedJS {
     /// The bound is higher-ranked because [`Node`] is *invariant* in its
     /// lifetime: a walker ([`hermes_ast::visitor::Visitor`]) needs the node
     /// reference and the node's own lifetime to be the same `'gc`, which only
-    /// a `for<'gc>` closure can promise.
+    /// a `for<'gc>` closure can promise. A visitor that keeps the `&GCLock` in
+    /// a field must give the lock its own lifetime parameters rather than
+    /// reusing `'gc` — `GCLock<'ast, 'ctx>` is invariant in `'ast`, so the two
+    /// cannot be equated; `crates/sema/examples/print_bindings.rs` shows the
+    /// pattern and the error it avoids.
+    ///
+    /// ## Why `&mut self` for a read
+    ///
+    /// This locks the arena, and
+    /// [`Context::lock`](hermes_ast::context::Context::lock) takes
+    /// `&mut self`: the `GCLock` holds a `&mut Context`, which is what stops
+    /// [`Context::gc`](hermes_ast::context::Context::gc) — the mark-and-sweep
+    /// that would invalidate every outstanding `&Node` — from running while
+    /// the tree is being read. `&mut` therefore means "exclusive view of the
+    /// arena", not "the AST or the `SemContext` is modified"; the `SemContext`
+    /// is in fact handed to `f` as `&`. To share results, collect owned data
+    /// inside the closure. ([`sem_context`](Self::sem_context) needs no lock
+    /// and does take `&self`.)
     ///
     /// # Panics
     ///
@@ -140,6 +157,10 @@ impl ResolvedJS {
     /// Bytes rather than a `String` because an identifier in the source may
     /// be an unpaired surrogate, which the dumper writes out as WTF-8 — not
     /// valid UTF-8. For ordinary sources `String::from_utf8` succeeds.
+    ///
+    /// Takes `&mut self` although it only reads, for the reason
+    /// [`with_program`](Self::with_program) documents: dumping locks the
+    /// arena, and taking the lock needs exclusive access to the `Context`.
     ///
     /// # Panics
     ///
@@ -245,6 +266,11 @@ impl ResolveError {
 
     /// The diagnostics rendered one string each, LLVM-style (location line,
     /// message, source line, caret), without ANSI colors.
+    ///
+    /// **Each string already ends with a newline**, as
+    /// [`hermes_parser::ParseError::messages`] does — print them with
+    /// `print!`/`eprint!`, since `println!` adds a blank line between
+    /// diagnostics.
     pub fn messages(&self) -> Vec<String> {
         let opts = OutputOptions {
             show_colors: false,

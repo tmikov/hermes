@@ -46,9 +46,11 @@ fn main() {
         Ok(mut parsed) => print!("{}", parsed.to_estree_json(true)),
         Err(e) => {
             // `Display` is the one-line summary; `messages()` is the full
-            // LLVM-style rendering, which is what a CLI wants.
+            // LLVM-style rendering, which is what a CLI wants. Each string is
+            // already newline-terminated, so this is `eprint!`, not
+            // `eprintln!`.
             for m in e.messages() {
-                eprintln!("{m}");
+                eprint!("{m}");
             }
             std::process::exit(1);
         }

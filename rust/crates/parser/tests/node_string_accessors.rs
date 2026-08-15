@@ -17,9 +17,13 @@
 //!
 //! These tests live in the `hermes-parser` crate rather than beside the
 //! generator in `hermes-ast` because they need a real parse, and `hermes-ast`
-//! cannot dev-depend on `hermes-parser` (which depends on it) without making
-//! `hermes-ast`'s own publication depend on an already-published
-//! `hermes-parser`.
+//! must not dev-depend on `hermes-parser`. `hermes-ast` is published *before*
+//! `hermes-parser` in the documented publish order (it is the foundation the
+//! parser is built on), so at its own initial publication `hermes-parser` does
+//! not exist yet. Beyond that first release, pointing an earlier-published
+//! crate's dev-dependencies at a crate that depends on it makes every future
+//! version bump ordering-sensitive in both directions — a hazard with no
+//! upside when the parser crate can host the test unchanged.
 
 use hermes_ast::context::{Context, GCLock};
 use hermes_ast::node::{Node, NodeKind};

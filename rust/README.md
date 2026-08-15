@@ -147,8 +147,9 @@ fn main() {
     resolved.with_program(|gc, _root, sem| {
         for &id in &sem.scope(sem.get_global_scope()).decls {
             let decl = sem.decl(id);
-            let name = String::from_utf8_lossy(gc.bytes(decl.name));
-            println!("{name}\t{:?}", decl.kind);
+            // Names are interned atoms, not strings; `bytes_str_lossy` is the
+            // conversion (`gc.bytes` gives the exact WTF-8 bytes instead).
+            println!("{}\t{:?}", gc.bytes_str_lossy(decl.name), decl.kind);
         }
     });
     // greeting  Let
@@ -177,6 +178,14 @@ Expanded versions of both paths are in
 `walk_ast.rs` (walks a snippet with `hermes_parser::ast::visitor::Visitor` and
 prints a node-kind histogram). Run either with
 `cargo run -p hermes-parser --example <name>`.
+
+[`crates/sema/examples/`](crates/sema/examples) has the two-crate pipeline:
+`print_bindings.rs` (parse → resolve → walk, printing every identifier with
+the binding kind it resolved to) and `resolve_and_dump.rs` (the
+`hermesc -dump-sema` text, plus a `--summary` mode). `print_bindings.rs` is
+the one to read first — it is the shortest complete answer to "walk the tree
+and tell me what the names mean", and it shows both the atom→string accessors
+and how a visitor holds a `&GCLock` in a field.
 
 ## Crate family
 

@@ -62,6 +62,14 @@ asking, of a given identifier, which declaration it binds to.
 `ResolvedJS::into_parsed` gives the `ParsedJS` back (with the resolved tree)
 when you want the ESTree JSON dumper afterwards.
 
+`examples/print_bindings.rs` does exactly that for every identifier in a file
+(`counter -> Let`, `by -> Parameter`, `console -> UndeclaredGlobalProperty`).
+It is also where the two lifetime-shaped gotchas are written down: names are
+interned atoms, read with the generated `id.name_str(gc)` accessor, and a
+`Visitor` that keeps the `&GCLock` in a field must give the lock its own
+lifetime parameters — `GCLock<'ast, 'ctx>` is invariant in `'ast`, so reusing
+the visitor's `'gc` for it does not compile.
+
 ## Entry points
 
 Three functions over the two the C++ has:

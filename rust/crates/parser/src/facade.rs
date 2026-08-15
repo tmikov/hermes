@@ -164,6 +164,19 @@ impl ParsedJS {
     /// reference and the node's own lifetime to be the same `'gc`, which only
     /// a `for<'gc>` closure can promise.
     ///
+    /// ## Why `&mut self` for a read
+    ///
+    /// Reading the AST takes the arena lock, and
+    /// [`Context::lock`](hermes_ast::context::Context::lock) takes
+    /// `&mut self`: the `GCLock` holds a `&mut Context`, which is what stops
+    /// [`Context::gc`](hermes_ast::context::Context::gc) — the mark-and-sweep
+    /// that would invalidate every outstanding `&Node` — from running while
+    /// the tree is being read. So `&mut` here means "exclusive view of the
+    /// arena", not "the AST is modified"; nothing in this method writes to the
+    /// tree. Consequently a `ParsedJS` cannot be read through a shared
+    /// reference: to share a parse, collect what you need inside the closure
+    /// and hand out the owned result.
+    ///
     /// # Panics
     ///
     /// Panics if another [`GCLock`] is active on this thread — in particular
@@ -245,6 +258,10 @@ impl ParsedJS {
     /// `pretty` selects indented output. For other dumper settings use
     /// [`to_estree_json_with`](Self::to_estree_json_with).
     ///
+    /// Takes `&mut self` although it only reads the tree, for the reason
+    /// [`with_program`](Self::with_program) documents: dumping locks the
+    /// arena, and taking the lock needs exclusive access to the `Context`.
+    ///
     /// # Panics
     ///
     /// Takes the arena lock, so it panics if another [`GCLock`] is live on
@@ -262,6 +279,9 @@ impl ParsedJS {
     /// Dump the AST as ESTree JSON with full control over the dumper, which
     /// is [`hermes_ast::dump::dump_estree_json_with_sm`] — see it for what each
     /// argument does.
+    ///
+    /// `&mut self` for the same reason as
+    /// [`to_estree_json`](Self::to_estree_json): it takes the arena lock.
     ///
     /// # Panics
     ///
@@ -344,6 +364,21 @@ impl ParseError {
 
     /// The diagnostics rendered one string each, LLVM-style (location line,
     /// message, source line, caret), without ANSI colors.
+    ///
+    /// **Each string already ends with a newline** — it is multi-line, and
+    /// [`hermes_support::render::render_diagnostic`] terminates every line it
+    /// writes. Print them with `print!`/`eprint!`; `println!` adds a blank
+    /// line between diagnostics.
+    ///
+    /// ```
+    /// use hermes_parser::{parse, ParseFlags};
+    ///
+    /// let err = parse("1 +", ParseFlags::default()).expect_err("bad parse");
+    /// for m in err.messages() {
+    ///     assert!(m.ends_with('\n'), "{m:?}");
+    ///     eprint!("{m}");
+    /// }
+    /// ```
     pub fn messages(&self) -> Vec<String> {
         let opts = OutputOptions {
             show_colors: false,

@@ -6,6 +6,67 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.1.1] — unreleased
+
+Prompted by an external usability review of the published 0.1.0 crates
+(`doc/superpowers/2026-08-15-crate-usability-review.md`), whose findings were
+all documentation-level. **Additive:** no existing signature changes, no
+behavior change to parsing or resolution — everything below is new API, a new
+example, a fixed example, or documentation. Code written against 0.1.0
+compiles unchanged. (The crate manifests are bumped to 0.1.1 as part of the
+release step.)
+
+### Added
+
+#### Atom → string accessors (`hermes-atom-table`, `hermes-ast`)
+- `AtomTable::bytes_str_lossy` / `AtomTable::try_bytes_str`, mirrored on
+  `GCLock` so `gc.bytes_str_lossy(atom)` needs no trip through
+  `gc.ctx().atom_table()`. Atom bytes are WTF-8: a surrogate **pair** is
+  folded back into the supplementary-plane character it encodes, so `"😀"`
+  converts exactly and `try_bytes_str` returns `Some`. Only an **unpaired**
+  surrogate — a legal JS string value with no UTF-8 form — yields `None`, or
+  exactly one `U+FFFD` from the lossy form. `bytes()` is unchanged and remains
+  the exact-bytes accessor.
+- Generated per-field accessors on AST nodes (`gen_nodes.py`): `<field>_str`
+  for each of the 32 `NodeLabel` fields (identifier names, operators,
+  keyword-like kinds), and `try_<field>_str` + `<field>_str_lossy` — with no
+  plain `<field>_str` — for each of the 10 `NodeString` fields (string-literal
+  values, cooked template elements). The asymmetry is deliberate: a name with
+  no UTF-8 form means something is broken, while a string value with none is
+  legal JS that a codegen tool must not silently corrupt.
+
+#### Example (`hermes-sema`)
+- `examples/print_bindings.rs` — parse, resolve, walk with `Visitor`, and
+  print every identifier with the binding kind it resolved to
+  (`counter -> Let`, `by -> Parameter`,
+  `console -> UndeclaredGlobalProperty`). It demonstrates the atom→string
+  path and the pattern for holding a `&GCLock` inside a visitor: give the lock
+  its own lifetime parameters, since `GCLock<'ast, 'ctx>` is invariant in
+  `'ast` and cannot be tied to the visitor's `'gc`.
+
+### Fixed
+
+- `hermes-parser` `examples/parse_to_estree_json.rs` printed a spurious blank
+  line after every diagnostic: `ParseError::messages()` strings are already
+  newline-terminated, so the loop needs `eprint!`, not `eprintln!`
+  (`resolve_and_dump.rs` was already correct).
+
+### Documentation
+
+- `ParseError::messages` and `ResolveError::messages` now state that each
+  returned string ends with a newline — the omission is what caused the bug
+  above.
+- `ParsedJS::with_program` / `to_estree_json` / `to_estree_json_with` and
+  `ResolvedJS::with_program` / `to_sema_dump` explain why they take
+  `&mut self` for a logically read-only operation: reading the AST takes the
+  arena lock, `Context::lock` takes `&mut self`, and that exclusive borrow is
+  what prevents `Context::gc` from invalidating live `&Node`s mid-walk.
+- Both crates' quickstarts now show the atom→string path, name the
+  `try_*`/`_lossy` split for string values, and point at `GCLock::bytes` for
+  the exact bytes.
+
+---
+
 ## [0.1.0] — 2026-08-12
 
 ### Added

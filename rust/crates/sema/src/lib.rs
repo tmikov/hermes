@@ -27,7 +27,7 @@
 //! let mut resolved = hermes_sema::resolve(parsed).expect("resolve");
 //!
 //! // The reference `x` binds to the declaration `var x`.
-//! let decl = resolved.with_program(|_gc, program, sem| {
+//! let (name, decl) = resolved.with_program(|gc, program, sem| {
 //!     let body = match program {
 //!         Node::Program(p) => p.body,
 //!         _ => unreachable!("the root of a parse is always a Program"),
@@ -37,16 +37,34 @@
 //!         _ => unreachable!(),
 //!     };
 //!     match expr {
-//!         Node::Identifier(id) => sem.get_expression_decl(id),
+//!         // `name` is an interned atom, so read it through the generated
+//!         // `name_str` accessor, which borrows the atom table under `gc`.
+//!         Node::Identifier(id) => {
+//!             (id.name_str(gc).to_string(), sem.get_expression_decl(id))
+//!         }
 //!         _ => unreachable!(),
 //!     }
 //! });
+//! assert_eq!(name, "x");
 //! let decl = decl.expect("`x` must resolve");
 //!
 //! // A top-level `var` in a script declares a property of the global object.
 //! let kind = resolved.sem_context().decl(decl).kind;
 //! assert_eq!(kind, DeclKind::GlobalProperty);
 //! ```
+//!
+//! `crates/sema/examples/print_bindings.rs` is that query applied to every
+//! identifier in a file — the canonical use of the two crates — and it also
+//! shows how a [`hermes_parser::ast::visitor::Visitor`] can hold the
+//! `&GCLock` it needs for `name_str` in a field. (Give the lock its own
+//! lifetime parameters there; `GCLock<'ast, 'ctx>` is invariant in `'ast`, so
+//! reusing the visitor's `'gc` for it does not compile.)
+//!
+//! Text in the AST is interned rather than owned: `name_str` and the
+//! `try_<field>_str` / `<field>_str_lossy` pair for string *values* are
+//! documented in [`hermes_parser`]'s quickstart, and
+//! [`hermes_parser::ast::context::GCLock::bytes`] remains the exact-bytes
+//! accessor.
 //!
 //! ## The compile path, and the `-dump-sema` text
 //!
