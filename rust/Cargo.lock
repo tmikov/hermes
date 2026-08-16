@@ -25,6 +25,16 @@ name = "hermes-command-line"
 version = "0.1.0"
 
 [[package]]
+name = "hermes-gen-js"
+version = "0.1.0"
+dependencies = [
+ "hermes-ast",
+ "hermes-parser",
+ "hermes-sema",
+ "hermes-support",
+]
+
+[[package]]
 name = "hermes-parser"
 version = "0.1.1"
 dependencies = [
@@ -64,6 +74,7 @@ dependencies = [
  "hermes-ast",
  "hermes-atom-table",
  "hermes-command-line",
+ "hermes-gen-js",
  "hermes-parser",
  "hermes-sema",
  "hermes-support",

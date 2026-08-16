@@ -1,0 +1,45 @@
+[package]
+name = "hermes-gen-js"
+version = "0.1.0"
+edition = "2021"
+description = "A Rust port of juno's AST -> JavaScript generator (gen_js.rs) by Tzvetan Mikov, the architect of Hermes. Not an official Meta project."
+license = "MIT"
+repository = "https://github.com/tmikov/hermes"
+authors = ["Tzvetan Mikov <tmikov@gmail.com>"]
+keywords = ["javascript", "codegen", "ast", "generator", "ecmascript"]
+categories = ["development-tools", "compilers"]
+readme = "README.md"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[features]
+default = []
+# `Annotation::Sem` — print each identifier's resolved binding inline, from a
+# completed `hermes-sema` analysis. Off by default: it is a debugging aid, and
+# leaving it on would make every consumer of this crate compile `hermes-sema`
+# to get a feature most of them never enable. Nothing on the ordinary
+# generation path touches sema.
+#
+# `Annotation<'s>` and `Opt<'s>` keep the same arity either way (see
+# `src/gen.rs`), so a signature written against one feature state compiles
+# under the other.
+annotate = ["dep:hermes_sema"]
+
+[dependencies]
+hermes_support = { path = "../support", version = "0.1.0", package = "hermes-support" }
+hermes_ast = { path = "../ast", version = "0.1.1", package = "hermes-ast" }
+hermes_sema = { path = "../sema", version = "0.1.1", package = "hermes-sema", optional = true }
+# `to_js` (`src/lib.rs`) names `hermes_parser::ParsedJS` in its own public
+# signature, so this is a direct, non-optional dependency. That is also what
+# makes `to_js` a free function rather than an inherent `ParsedJS::to_js`:
+# with the edge pointing this way, `hermes-parser` cannot depend back on this
+# crate to host the method without a cycle.
+#
+# An earlier version of this comment credited `hermes-sema` for that ordering
+# (its `resolve` façade also takes a `ParsedJS`, so the edge existed
+# transitively). That was true when the decision was made but is no longer the
+# reason: `hermes-sema` is optional as of the `annotate` feature above, and
+# removing it would not free `to_js` to become an inherent method. The direct
+# dependency below is what settles it.
+hermes_parser = { path = "../parser", version = "0.1.1", package = "hermes-parser" }

@@ -1,4 +1,4 @@
 [workspace]
 resolver = "2"
-members = ["crates/support", "crates/parser", "crates/atom_table", "crates/unicode", "crates/ast", "crates/command_line", "crates/sema", "crates/tools"]
+members = ["crates/support", "crates/parser", "crates/atom_table", "crates/unicode", "crates/ast", "crates/command_line", "crates/sema", "crates/tools", "crates/gen_js"]
 exclude = ["crates/comparison"]
