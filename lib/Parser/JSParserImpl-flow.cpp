@@ -951,6 +951,18 @@ Optional<ESTree::Node *> JSParserImpl::tryParseMatchStatementFlow(Param param) {
             caseStartLoc))
       return None;
 
+    // A match *statement* case body must be a block; only a match
+    // *expression* case body may be an arbitrary expression. `parseBlock`
+    // asserts that the current token is '{', so without this check a
+    // non-block body such as `match (x) { _ => 1 };` fails that assertion
+    // in a debug build instead of reporting an error.
+    if (!need(
+            TokenKind::l_brace,
+            "in 'match' statement case body",
+            "location of pattern",
+            caseStartLoc))
+      return None;
+
     auto optBody = parseBlock(param.get(ParamReturn));
     if (!optBody)
       return None;
