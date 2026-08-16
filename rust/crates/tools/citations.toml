@@ -74,6 +74,10 @@
 # Where a basename exists more than once in the tree the choice was confirmed
 # by reading the cited lines; those entries carry a comment.
 [qualified]
+# The C++ AST->JS generator. The Rust generator is NOT a port of it (see
+# doc/superpowers/specs/2026-08-15-gen-js-port-design.md §1), so it is cited
+# only where the two deliberately differ.
+"AST2JS.cpp" = "lib/AST2JS/AST2JS.cpp"
 # Shorthands used throughout the parser port for the dialect files.
 "flow.cpp" = "lib/Parser/JSParserImpl-flow.cpp"
 "ts.cpp" = "lib/Parser/JSParserImpl-ts.cpp"
@@ -129,6 +133,11 @@
 # Only in external/llvh; `SourceMgr.cpp:238` is `SourceMgr::GetMessage`.
 "SourceMgr.cpp" = "external/llvh/lib/Support/SourceMgr.cpp"
 "CompilerDriver.cpp" = "lib/CompilerDriver/CompilerDriver.cpp"
+# The `shermes` driver, cited by `gen_js_sweep.rs` for the parser settings
+# `-typed` implies. Verified by reading `shermes.cpp:662`
+# (`context->setStrictMode(cli::Typed || cli::StrictMode);`) and `:707-710`
+# (the "no typed dialect parser is configured" error) against the citations.
+"shermes.cpp" = "tools/shermes/shermes.cpp"
 "CompilerDriver.h" = "include/hermes/CompilerDriver/CompilerDriver.h"
 "CompilerRuntimeFlags.h" = "include/hermes/Utils/CompilerRuntimeFlags.h"
 "Libhermes.h" = "include/hermes/Runtime/Libhermes.h"

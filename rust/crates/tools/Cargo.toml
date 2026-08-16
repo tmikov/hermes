@@ -36,11 +36,16 @@ path = "src/bin/sema_dump.rs"
 name = "citations"
 path = "src/bin/citations.rs"
 
+[[bin]]
+name = "gen-js-sweep"
+path = "src/bin/gen_js_sweep.rs"
+
 [dependencies]
 hermes_support = { path = "../support", package = "hermes-support" }
 hermes_atom_table = { path = "../atom_table", package = "hermes-atom-table" }
 hermes_ast = { path = "../ast", package = "hermes-ast" }
 hermes_parser = { path = "../parser", package = "hermes-parser" }
 hermes_sema = { path = "../sema", package = "hermes-sema" }
+hermes_gen_js = { path = "../gen_js", package = "hermes-gen-js" }
 hermes_command_line = { path = "../command_line", package = "hermes-command-line" }
 bumpalo = "3.16"
