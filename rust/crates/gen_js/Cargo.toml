@@ -9,6 +9,26 @@ authors = ["Tzvetan Mikov <tmikov@gmail.com>"]
 keywords = ["javascript", "codegen", "ast", "generator", "ecmascript"]
 categories = ["development-tools", "compilers"]
 readme = "README.md"
+# Two of the five test files only work inside this repository, so they are not
+# shipped: `cargo test` on a downloaded crate would panic on both.
+#
+#   tests/corpus.rs     walks up to sibling crates for the 421 parser/sema
+#                       corpus files (`../parser/tests/parser_corpus_flow`,
+#                       …), which do not exist in a published tarball.
+#   tests/exhaustive.rs reads `src/dispatch.rs` as source text to guard the
+#                       temporary catch-all's absence — a repo-shaped check,
+#                       and one the compiler already enforces for real.
+#
+# Same reasoning that puts the Tier 2 sweep in the unpublished `tools` crate:
+# a published crate cannot assume the trees these read are present. The three
+# that do ship — `roundtrip.rs`, `paren_matrix.rs`, `sweep_regressions.rs` —
+# are self-contained, and `paren_matrix.rs` is the one carrying most of the
+# crate's real parenthesization coverage anyway.
+#
+# They are excluded rather than made to skip a missing directory: a silent
+# skip would let a broken path pass in-repo, which is the failure mode this
+# port spent most of its review effort finding.
+exclude = ["tests/corpus.rs", "tests/exhaustive.rs"]
 
 [lints.rust]
 unsafe_code = "forbid"
@@ -42,4 +62,13 @@ hermes_sema = { path = "../sema", version = "0.1.1", package = "hermes-sema", op
 # reason: `hermes-sema` is optional as of the `annotate` feature above, and
 # removing it would not free `to_js` to become an inherent method. The direct
 # dependency below is what settles it.
+# Floor is 0.1.1, not the current 0.1.2, because that is the honest minimum:
+# nothing this crate ships requires 0.1.2's two Flow parser fixes. The
+# constructs they enable (`%checks` predicates, non-block `match` statement
+# case bodies) cannot reach the generator under 0.1.1 at all — 0.1.1 fails to
+# parse the first and panics on the second — so the round-trip property holds
+# for everything 0.1.1 can actually produce. Semver resolution gives users
+# 0.1.2 anyway; over-constraining here would only have forced a lockstep
+# upgrade for no correctness gain (and would make this crate unpublishable
+# until 0.1.2 is on crates.io).
 hermes_parser = { path = "../parser", version = "0.1.1", package = "hermes-parser" }
