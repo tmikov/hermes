@@ -738,7 +738,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let mut return_type: Option<&'gc Node<'gc>> = None;
         if self.check(TokenKind::colon) {
             let annot_start = self.advance(GrammarContext::Type).start;
-            if !self.check_name(b"checks") {
+            if !self.check_name(b"%checks") {
                 return_type = Some(self.parse_return_type_annotation_flow(
                     Some(annot_start),
                     AllowAnonFunctionType::Yes,
@@ -787,31 +787,31 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // checkRecordDeclarationFlow — 1621 in JSParserImpl-flow.cpp
+    // checkRecordDeclarationFlow — 1633 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Whether the current token starts a `record` declaration. Port of
-    /// `JSParserImpl::checkRecordDeclarationFlow` (flow.cpp:1619-1629). MUST be
+    /// `JSParserImpl::checkRecordDeclarationFlow` (flow.cpp:1631-1641). MUST be
     /// idempotent (it is called from the parse side, which reparses the token
     /// on a match), so the lookahead passes no expected token.
     pub(in crate::js) fn check_record_declaration_flow(&mut self) -> bool {
-        // C++ 1619-1620.
+        // C++ 1631-1632.
         if !self.check_name(b"record") {
             return false;
         }
-        // C++ 1622-1627: don't pass an `expectedToken` so we don't advance on a
+        // C++ 1634-1639: don't pass an `expectedToken` so we don't advance on a
         // match (lets `parseRecordDeclarationFlow` reparse the token), and so
         // this stays idempotent.
         self.lexer.lookahead1::<true>(None) == Some(TokenKind::identifier)
     }
 
     // -----------------------------------------------------------------------
-    // parseRecordDeclarationFlow — 1633 in JSParserImpl-flow.cpp
+    // parseRecordDeclarationFlow — 1645 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse a `record` declaration, with the cursor at `record` and `start` at
     /// the start of the declaration. Port of
-    /// `JSParserImpl::parseRecordDeclarationFlow` (flow.cpp:1631-1902).
+    /// `JSParserImpl::parseRecordDeclarationFlow` (flow.cpp:1643-1914).
     pub(in crate::js) fn parse_record_declaration_flow(
         &mut self,
         start: SMLoc,
@@ -820,9 +820,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         debug_assert!(self.check_name(b"record"));
         self.advance(GrammarContext::AllowRegExp);
 
-        // C++ 1634-1640.
+        // C++ 1646-1652.
         let Some(id) = self.parse_binding_identifier(Param::default()) else {
-            // C++ 1637-1639: errorExpected(identifier, "after 'record'",
+            // C++ 1649-1651: errorExpected(identifier, "after 'record'",
             // "location of 'record'", start).
             self.error_expected_msg(
                 "'identifier' expected after 'record'",
@@ -832,17 +832,17 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         };
 
-        // C++ 1642-1649.
+        // C++ 1654-1661.
         let mut type_params: Option<&'gc Node<'gc>> = None;
         if self.check(TokenKind::less) {
             type_params = Some(self.parse_type_params_flow()?);
         }
 
-        // C++ 1651-1667: an optional `implements` clause.
+        // C++ 1663-1679: an optional `implements` clause.
         let mut implements_list: Vec<&'gc Node<'gc>> = Vec::new();
         if self.check_name(b"implements") {
             self.advance(GrammarContext::Type);
-            // C++ 1655-1666: a do-while.
+            // C++ 1667-1678: a do-while.
             loop {
                 if !self.need_at(
                     TokenKind::identifier,
@@ -861,7 +861,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // C++ 1669-1675.
+        // C++ 1681-1687.
         if !self.need_at(
             TokenKind::l_brace,
             " in record declaration",
@@ -871,13 +871,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // C++ 1677-1679.
+        // C++ 1689-1691.
         let body_start = self.advance(GrammarContext::AllowRegExp).start;
         let mut body_elements: Vec<&'gc Node<'gc>> = Vec::new();
 
-        // C++ 1681-1879.
+        // C++ 1693-1891.
         while !self.check(TokenKind::r_brace) {
-            // C++ 1682-1689: errorExpected(r_brace, "in record body",
+            // C++ 1694-1701: errorExpected(r_brace, "in record body",
             // "start of record body", bodyStart).
             if self.check(TokenKind::eof) {
                 self.error_expected_msg(
@@ -888,13 +888,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 return None;
             }
 
-            // C++ 1691-1706: `isModifierKeyword` — distinguish a `static`/
+            // C++ 1703-1718: `isModifierKeyword` — distinguish a `static`/
             // `async` modifier keyword from a property name by looking at the
             // token that follows. If it is `:`/`<`/`(`/`}`/eof the keyword is
             // itself the property name, not a modifier.
             let prop_start_loc = self.cur_start();
 
-            // C++ 1710-1721: modifiers `static`, `async`, generator (`*`).
+            // C++ 1722-1733: modifiers `static`, `async`, generator (`*`).
             let mut is_static = false;
             if self.check_name(b"static") && self.is_record_modifier_keyword() {
                 self.advance(GrammarContext::AllowRegExp);
@@ -908,7 +908,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             let is_generator =
                 self.check_and_eat(TokenKind::star, GrammarContext::AllowRegExp);
 
-            // C++ 1723-1730.
+            // C++ 1735-1742.
             if self.check(TokenKind::l_square) {
                 self.error_at_loc(
                     self.cur_start(),
@@ -924,7 +924,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 return None;
             }
 
-            // C++ 1731-1742.
+            // C++ 1743-1754.
             let key = self.parse_property_name()?;
             if let Node::Identifier(key_ident) = key {
                 let constructor_atom =
@@ -940,7 +940,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
 
             if self.check(TokenKind::colon) {
-                // C++ 1744-1797: Property.
+                // C++ 1756-1809: Property.
                 if is_async || is_generator {
                     self.error_at(
                         key.range(),
@@ -948,14 +948,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     );
                     return None;
                 }
-                // C++ 1752-1756: eat the colon (in Type context).
+                // C++ 1764-1768: eat the colon (in Type context).
                 let annot_start = self.advance(GrammarContext::Type).start;
                 let type_annot = self.parse_type_annotation_flow(
                     Some(annot_start),
                     AllowAnonFunctionType::Yes,
                 )?;
 
-                // C++ 1758-1764. parseAssignmentExpression() defaults to
+                // C++ 1770-1776. parseAssignmentExpression() defaults to
                 // param=ParamIn (JSParserImpl.h:1132) — the `[In]` grammar
                 // parameter must be set so `in` is a relational operator inside
                 // a record property initializer.
@@ -971,12 +971,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     )?);
                 }
 
-                // C++ 1766-1785.
+                // C++ 1778-1797.
                 let prop = if is_static {
-                    // C++ 1767-1778: a static record property requires an
+                    // C++ 1779-1790: a static record property requires an
                     // initializer.
                     let Some(value) = value else {
-                        // C++ 1769-1772: error at key->getEndLoc().
+                        // C++ 1781-1784: error at key->getEndLoc().
                         self.error_at_loc(
                             key.range().end,
                             "static record properties must have an initializer",
@@ -993,7 +993,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     );
                     self.set_location(prop_start_loc, value.range().end, node)
                 } else {
-                    // C++ 1779-1784: the end loc is the initializer if present,
+                    // C++ 1791-1796: the end loc is the initializer if present,
                     // else the type annotation.
                     let end = value
                         .map(|v| v.range().end)
@@ -1010,7 +1010,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 };
                 body_elements.push(prop);
 
-                // C++ 1788-1797: a trailing `,` is required unless `}`/eof
+                // C++ 1800-1809: a trailing `,` is required unless `}`/eof
                 // follows.
                 if !self.check2(TokenKind::r_brace, TokenKind::eof)
                     && !self.eat_at(
@@ -1025,13 +1025,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 }
             } else if self.check(TokenKind::l_paren) || self.check(TokenKind::less)
             {
-                // C++ 1798-1872: Method.
+                // C++ 1810-1884: Method.
                 let mut method_type_params: Option<&'gc Node<'gc>> = None;
                 if self.check(TokenKind::less) {
                     method_type_params = Some(self.parse_type_params_flow()?);
                 }
 
-                // C++ 1808-1815: errorExpected(l_paren, "in method
+                // C++ 1820-1827: errorExpected(l_paren, "in method
                 // parameters", "start of method", propStartLoc).
                 if !self.check(TokenKind::l_paren) {
                     self.error_expected_msg(
@@ -1042,7 +1042,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     return None;
                 }
 
-                // C++ 1817-1819.
+                // C++ 1829-1831.
                 let mut param_list: Vec<&'gc Node<'gc>> = Vec::new();
                 if !self
                     .parse_formal_parameters(Param::default(), &mut param_list)
@@ -1051,7 +1051,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 }
                 let params = NodeList::from_iter(self.gc, param_list);
 
-                // C++ 1821-1828: an optional `: ReturnType`.
+                // C++ 1833-1840: an optional `: ReturnType`.
                 let mut return_type: Option<&'gc Node<'gc>> = None;
                 if self.check(TokenKind::colon) {
                     let annot_start = self.advance(GrammarContext::Type).start;
@@ -1061,7 +1061,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     )?);
                 }
 
-                // C++ 1830-1837: errorExpected(l_brace, "in method body",
+                // C++ 1842-1849: errorExpected(l_brace, "in method body",
                 // "start of method", propStartLoc).
                 if !self.check(TokenKind::l_brace) {
                     self.error_expected_msg(
@@ -1072,7 +1072,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     return None;
                 }
 
-                // C++ 1839-1852: paramYield_ = isGenerator, paramAwait_ =
+                // C++ 1851-1864: paramYield_ = isGenerator, paramAwait_ =
                 // isAsync around the body (mirrors the class-method pattern).
                 let body = {
                     let _guard_yield = self.save_param_yield(is_generator);
@@ -1088,7 +1088,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 };
                 let body_end = body.range().end;
 
-                // C++ 1854-1865.
+                // C++ 1866-1877.
                 let func = Node::FunctionExpression(FunctionExpression::new(
                     NodeMetadata::new(self.dummy_range()),
                     None,
@@ -1103,7 +1103,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 let func_expr =
                     self.set_location(prop_start_loc, body_end, func);
 
-                // C++ 1867-1872.
+                // C++ 1879-1884.
                 let method_ident =
                     self.gc.ctx().atom_table.atom_bytes(b"method");
                 let method = Node::MethodDefinition(MethodDefinition::new(
@@ -1118,7 +1118,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 body_elements
                     .push(self.set_location(prop_start_loc, body_end, method));
             } else {
-                // C++ 1873-1878.
+                // C++ 1885-1890.
                 self.error_at_loc(
                     key.range().end,
                     "expected ':' for property, '(' for method, or '<' for method with type parameters",
@@ -1127,7 +1127,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // C++ 1881-1888.
+        // C++ 1893-1900.
         if !self.eat_at(
             TokenKind::r_brace,
             GrammarContext::AllowRegExp,
@@ -1138,7 +1138,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // C++ 1890-1894.
+        // C++ 1902-1906.
         let body_node = Node::RecordDeclarationBody(RecordDeclarationBody::new(
             NodeMetadata::new(self.dummy_range()),
             NodeList::from_iter(self.gc, body_elements),
@@ -1149,7 +1149,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             body_node,
         );
 
-        // C++ 1896-1900.
+        // C++ 1908-1912.
         let end = body.range().end;
         let node = Node::RecordDeclaration(RecordDeclaration::new(
             NodeMetadata::new(self.dummy_range()),
@@ -1162,7 +1162,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     /// The `isModifierKeyword` lambda from `parseRecordDeclarationFlow`
-    /// (flow.cpp:1692-1707): a `static`/`async` token is a modifier (rather
+    /// (flow.cpp:1704-1719): a `static`/`async` token is a modifier (rather
     /// than a property name) only if the FOLLOWING token is not one of
     /// `:`/`<`/`(`/`}`/eof. Idempotent (`lookahead1(None)`).
     fn is_record_modifier_keyword(&mut self) -> bool {
@@ -1180,21 +1180,21 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseRecordDeclarationImplementsFlow — 1906 in JSParserImpl-flow.cpp
+    // parseRecordDeclarationImplementsFlow — 1918 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse one entry of a `record` `implements` clause: an Identifier with
     /// optional `<typeArgs>`, wrapped in a `RecordDeclarationImplements`. Port
     /// of `JSParserImpl::parseRecordDeclarationImplementsFlow`
-    /// (flow.cpp:1904-1928).
+    /// (flow.cpp:1916-1940).
     fn parse_record_declaration_implements_flow(
         &mut self,
     ) -> Option<&'gc Node<'gc>> {
-        // C++ 1905-1906.
+        // C++ 1917-1918.
         debug_assert!(self.check(TokenKind::identifier));
         let start = self.cur_start();
 
-        // C++ 1908-1913.
+        // C++ 1920-1925.
         let id_range = self.cur_range();
         let id_node = Node::Identifier(Identifier::new(
             NodeMetadata::new(self.dummy_range()),
@@ -1205,13 +1205,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let id = self.set_location(id_range.start, id_range.end, id_node);
         self.advance(GrammarContext::Type);
 
-        // C++ 1915-1921.
+        // C++ 1927-1933.
         let mut type_args: Option<&'gc Node<'gc>> = None;
         if self.check(TokenKind::less) {
             type_args = Some(self.parse_type_args_flow(GrammarContext::Type)?);
         }
 
-        // C++ 1923-1926.
+        // C++ 1935-1938.
         let node = Node::RecordDeclarationImplements(
             RecordDeclarationImplements::new(
                 NodeMetadata::new(self.dummy_range()),
@@ -1223,12 +1223,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseTypeAliasFlow — 1984 in JSParserImpl-flow.cpp
+    // parseTypeAliasFlow — 1996 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse a type alias, with `type` already consumed and `start` at the
     /// start of the declaration. Port of `JSParserImpl::parseTypeAliasFlow`
-    /// (flow.cpp:1982-2072). All four `TypeAliasKind` paths are implemented;
+    /// (flow.cpp:1994-2084). All four `TypeAliasKind` paths are implemented;
     /// the `Declare`/`DeclareOpaque` kinds become reachable with the
     /// `declare` statement routing (parseDeclareFLow) in P6.
     pub(super) fn parse_type_alias_flow(
@@ -1236,7 +1236,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         start: SMLoc,
         kind: TypeAliasKind,
     ) -> Option<&'gc Node<'gc>> {
-        // C++ 1984-1987.
+        // C++ 1996-1999.
         if !self.need_at(
             TokenKind::identifier,
             " in type alias",
@@ -1246,7 +1246,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // C++ 1988-1993.
+        // C++ 2000-2005.
         let id_range = self.cur_range();
         let id_node = Node::Identifier(Identifier::new(
             NodeMetadata::new(self.dummy_range()),
@@ -1257,25 +1257,25 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let id = self.set_location(id_range.start, id_range.end, id_node);
         self.advance(GrammarContext::Type);
 
-        // C++ 1995-2002.
+        // C++ 2007-2014.
         let mut type_params: Option<&'gc Node<'gc>> = None;
         if self.check(TokenKind::less) {
             type_params = Some(self.parse_type_params_flow()?);
         }
 
-        // C++ 2004-2026: the Opaque/DeclareOpaque `super`/`extends` bounds
+        // C++ 2016-2038: the Opaque/DeclareOpaque `super`/`extends` bounds
         // and the legacy `: Supertype` (only when neither bound was given).
         let mut lower_bound: Option<&'gc Node<'gc>> = None;
         let mut upper_bound: Option<&'gc Node<'gc>> = None;
         let mut legacy_supertype: Option<&'gc Node<'gc>> = None;
         if kind == TypeAliasKind::Opaque || kind == TypeAliasKind::DeclareOpaque
         {
-            // C++ 2007-2012: the lower bound is a UNION type annotation, not
+            // C++ 2019-2024: the lower bound is a UNION type annotation, not
             // a full one.
             if self.check_and_eat(TokenKind::rw_super, GrammarContext::Type) {
                 lower_bound = Some(self.parse_union_type_annotation_flow()?);
             }
-            // C++ 2013-2018.
+            // C++ 2025-2030.
             if self.check_and_eat(TokenKind::rw_extends, GrammarContext::Type)
             {
                 upper_bound = Some(self.parse_type_annotation_flow(
@@ -1283,7 +1283,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     AllowAnonFunctionType::Yes,
                 )?);
             }
-            // C++ 2019-2026.
+            // C++ 2031-2038.
             if lower_bound.is_none()
                 && upper_bound.is_none()
                 && self.check_and_eat(TokenKind::colon, GrammarContext::Type)
@@ -1295,7 +1295,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // C++ 2028-2042: DeclareOpaque has no `= T` right side.
+        // C++ 2040-2054: DeclareOpaque has no `= T` right side.
         let mut right: Option<&'gc Node<'gc>> = None;
         if kind != TypeAliasKind::DeclareOpaque {
             if !self.eat_at(
@@ -1315,15 +1315,15 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             );
         }
 
-        // C++ 2043-2044.
+        // C++ 2055-2056.
         if !self.eat_semi(false) {
             return None;
         }
 
-        // C++ 2046-2070.
+        // C++ 2058-2082.
         let end = self.lexer.prev_token_end();
         match kind {
-            // C++ 2046-2052.
+            // C++ 2058-2064.
             TypeAliasKind::DeclareOpaque => {
                 let node = Node::DeclareOpaqueType(DeclareOpaqueType::new(
                     NodeMetadata::new(self.dummy_range()),
@@ -1336,7 +1336,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 ));
                 Some(self.set_location(start, end, node))
             }
-            // C++ 2053-2058.
+            // C++ 2065-2070.
             TypeAliasKind::Declare => {
                 let node = Node::DeclareTypeAlias(DeclareTypeAlias::new(
                     NodeMetadata::new(self.dummy_range()),
@@ -1346,7 +1346,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 ));
                 Some(self.set_location(start, end, node))
             }
-            // C++ 2059-2065.
+            // C++ 2071-2077.
             TypeAliasKind::Opaque => {
                 let node = Node::OpaqueType(OpaqueType::new(
                     NodeMetadata::new(self.dummy_range()),
@@ -1360,7 +1360,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 ));
                 Some(self.set_location(start, end, node))
             }
-            // C++ 2066-2070.
+            // C++ 2078-2082.
             TypeAliasKind::None => {
                 let node = Node::TypeAlias(TypeAlias::new(
                     NodeMetadata::new(self.dummy_range()),
@@ -1374,13 +1374,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseInterfaceDeclarationFlow — 2076 in JSParserImpl-flow.cpp
+    // parseInterfaceDeclarationFlow — 2088 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse an interface declaration, with the current token at the
     /// `interface` keyword (`rw_interface` in strict mode, a plain identifier
     /// spelled "interface" in loose mode). Port of
-    /// `JSParserImpl::parseInterfaceDeclarationFlow` (flow.cpp:2074-2119).
+    /// `JSParserImpl::parseInterfaceDeclarationFlow` (flow.cpp:2086-2131).
     ///
     /// \param declare_start if `Some`, this is a `declare interface` and the
     ///   resulting `DeclareInterface` node spans from it (the `declare`
@@ -1389,16 +1389,16 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         &mut self,
         declare_start: Option<SMLoc>,
     ) -> Option<&'gc Node<'gc>> {
-        // C++ 2075.
+        // C++ 2087.
         debug_assert!(
             self.check(TokenKind::rw_interface)
                 || self.check_name(b"interface"),
             "must be at 'interface'"
         );
-        // C++ 2076.
+        // C++ 2088.
         let start = self.advance(GrammarContext::Type).start;
 
-        // C++ 2078-2084.
+        // C++ 2090-2096.
         if !self.need_at(
             TokenKind::identifier,
             " in interface declaration",
@@ -1408,7 +1408,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // C++ 2086-2091.
+        // C++ 2098-2103.
         let id_range = self.cur_range();
         let id_node = Node::Identifier(Identifier::new(
             NodeMetadata::new(self.dummy_range()),
@@ -1419,17 +1419,17 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let id = self.set_location(id_range.start, id_range.end, id_node);
         self.advance(GrammarContext::Type);
 
-        // C++ 2093-2099.
+        // C++ 2105-2111.
         let mut type_params: Option<&'gc Node<'gc>> = None;
         if self.check(TokenKind::less) {
             type_params = Some(self.parse_type_params_flow()?);
         }
 
-        // C++ 2101-2104.
+        // C++ 2113-2116.
         let mut extends: Vec<&'gc Node<'gc>> = Vec::new();
         let body = self.parse_interface_tail_flow(start, &mut extends)?;
 
-        // C++ 2106-2117: the end location is the body node's end.
+        // C++ 2118-2129: the end location is the body node's end.
         let end = body.metadata().range.get().end;
         if let Some(declare_start) = declare_start {
             let node = Node::DeclareInterface(DeclareInterface::new(
@@ -1456,20 +1456,20 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// declarations and `interface` type annotations, pushing the
     /// `InterfaceExtends` entries into `extends` and returning the
     /// `ObjectTypeAnnotation` body. Port of
-    /// `JSParserImpl::parseInterfaceTailFlow` (flow.cpp:2121-2142). `start`
+    /// `JSParserImpl::parseInterfaceTailFlow` (flow.cpp:2133-2154). `start`
     /// is the interface's start location, passed through unchanged from C++
     /// as the real `whatLoc`/`what="location of interface"` hint on both
-    /// `need` calls below (cpp:2128-2132, 2136).
+    /// `need` calls below (cpp:2140-2144, 2148).
     pub(super) fn parse_interface_tail_flow(
         &mut self,
         start: SMLoc,
         extends: &mut Vec<&'gc Node<'gc>>,
     ) -> Option<&'gc Node<'gc>> {
-        // C++ 2123: a bare `checkAndEat` — the default GrammarContext
+        // C++ 2135: a bare `checkAndEat` — the default GrammarContext
         // (AllowRegExp), NOT Type; deliberate.
         if self.check_and_eat(TokenKind::rw_extends, GrammarContext::AllowRegExp)
         {
-            // C++ 2124-2134: a do-while.
+            // C++ 2136-2146: a do-while.
             loop {
                 if !self.need_at(
                     TokenKind::identifier,
@@ -1489,7 +1489,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // C++ 2136-2137.
+        // C++ 2148-2149.
         if !self.need_at(
             TokenKind::l_brace,
             " in interface",
@@ -1499,7 +1499,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // C++ 2139-2140: spread properties are not allowed in interface
+        // C++ 2151-2152: spread properties are not allowed in interface
         // bodies.
         self.parse_object_type_annotation_flow(
             AllowProtoProperty::No,
@@ -1511,22 +1511,22 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Parse one entry of an interface `extends` clause: a generic type
     /// reference, unwrapped into an `InterfaceExtends` node spanning the same
     /// range, pushed onto `extends`. Returns false if an error was reported.
-    /// Port of `JSParserImpl::parseInterfaceExtends` (flow.cpp:2144-2158; the
+    /// Port of `JSParserImpl::parseInterfaceExtends` (flow.cpp:2156-2170; the
     /// C++ also takes an unused start location).
     fn parse_interface_extends(
         &mut self,
         extends: &mut Vec<&'gc Node<'gc>>,
     ) -> bool {
-        // C++ 2146.
+        // C++ 2158.
         debug_assert!(self.check(TokenKind::identifier));
-        // C++ 2147-2150.
+        // C++ 2159-2162.
         let Some(generic) = self.parse_generic_type_flow() else {
             return false;
         };
         let Node::GenericTypeAnnotation(g) = generic else {
             unreachable!("parse_generic_type_flow returns a GenericTypeAnnotation")
         };
-        // C++ 2151-2155: the InterfaceExtends node spans exactly the generic.
+        // C++ 2163-2167: the InterfaceExtends node spans exactly the generic.
         let range = generic.metadata().range.get();
         let node = Node::InterfaceExtends(InterfaceExtends::new(
             NodeMetadata::new(self.dummy_range()),
@@ -1723,23 +1723,23 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseDeclareFunctionOrHookFlow — 2162 in JSParserImpl-flow.cpp
+    // parseDeclareFunctionOrHookFlow — 2174 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse a `declare function`/`declare hook` declaration, with the cursor
     /// at the `function`/`hook` keyword and `start` at `declare`. The parsed
     /// signature is attached to the id's type annotation, then wrapped in a
     /// `DeclareFunction(id, predicate)` (or `DeclareHook(id)`). Port of
-    /// `JSParserImpl::parseDeclareFunctionOrHookFlow` (flow.cpp:2160-2259).
+    /// `JSParserImpl::parseDeclareFunctionOrHookFlow` (flow.cpp:2172-2271).
     fn parse_declare_function_or_hook_flow(
         &mut self,
         start: SMLoc,
         hook: bool,
     ) -> Option<&'gc Node<'gc>> {
-        // C++ 2162.
+        // C++ 2174.
         self.advance(GrammarContext::Type);
 
-        // C++ 2164-2169.
+        // C++ 2176-2181.
         if !self.need_at(
             TokenKind::identifier,
             " in declare function type",
@@ -1749,20 +1749,20 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // C++ 2171-2172.
+        // C++ 2183-2184.
         let id_name = self.lexer.token().get_identifier();
         let id_start = self.advance(GrammarContext::Type).start;
 
-        // C++ 2174.
+        // C++ 2186.
         let func_start = self.cur_start();
 
-        // C++ 2176-2182.
+        // C++ 2188-2194.
         let mut type_params: Option<&'gc Node<'gc>> = None;
         if self.check(TokenKind::less) {
             type_params = Some(self.parse_type_params_flow()?);
         }
 
-        // C++ 2184-2189.
+        // C++ 2196-2201.
         if !self.need_at(
             TokenKind::l_paren,
             " in declare function type",
@@ -1772,7 +1772,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // C++ 2191-2196.
+        // C++ 2203-2208.
         let mut params: Vec<&'gc Node<'gc>> = Vec::new();
         let mut this_constraint: Option<&'gc Node<'gc>> = None;
         let rest = self.parse_function_type_annotation_params_flow(
@@ -1781,7 +1781,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             hook,
         )?;
 
-        // C++ 2198-2204.
+        // C++ 2210-2216.
         if !self.eat_at(
             TokenKind::colon,
             GrammarContext::Type,
@@ -1792,7 +1792,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // C++ 2206-2210: parseReturnTypeAnnotationFlow() — defaults
+        // C++ 2218-2222: parseReturnTypeAnnotationFlow() — defaults
         // (None, AllowAnonFunctionType::Yes).
         let return_type = self.parse_return_type_annotation_flow(
             None,
@@ -1800,13 +1800,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         )?;
         let func_end = self.lexer.prev_token_end();
 
-        // C++ 2212-2218.
+        // C++ 2224-2230.
         let mut predicate: Option<&'gc Node<'gc>> = None;
-        if self.check_name(b"checks") && !hook {
+        if self.check_name(b"%checks") && !hook {
             predicate = Some(self.parse_predicate_flow()?);
         }
 
-        // C++ 2220-2221.
+        // C++ 2232-2233.
         if !self.eat_semi(false) {
             return None;
         }
@@ -1814,7 +1814,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let params_list = NodeList::from_iter(self.gc, params);
 
         if !hook {
-            // C++ 2223-2241.
+            // C++ 2235-2253.
             let fn_type =
                 Node::FunctionTypeAnnotation(FunctionTypeAnnotation::new(
                     NodeMetadata::new(self.dummy_range()),
@@ -1845,7 +1845,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             ));
             Some(self.set_location(start, self.lexer.prev_token_end(), node))
         } else {
-            // C++ 2242-2257.
+            // C++ 2254-2269.
             let hook_type =
                 Node::HookTypeAnnotation(HookTypeAnnotation::new(
                     NodeMetadata::new(self.dummy_range()),
@@ -1876,7 +1876,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
     }
 
-    /// `declare function`. Port of `parseDeclareFunctionFlow` (flow.cpp:2261).
+    /// `declare function`. Port of `parseDeclareFunctionFlow` (flow.cpp:2273).
     fn parse_declare_function_flow(
         &mut self,
         start: SMLoc,
@@ -1885,7 +1885,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         self.parse_declare_function_or_hook_flow(start, false)
     }
 
-    /// `declare hook`. Port of `parseDeclareHookFlow` (flow.cpp:2266).
+    /// `declare hook`. Port of `parseDeclareHookFlow` (flow.cpp:2278).
     fn parse_declare_hook_flow(
         &mut self,
         start: SMLoc,
@@ -1895,21 +1895,21 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseDeclareModuleFlow — 2273 in JSParserImpl-flow.cpp
+    // parseDeclareModuleFlow — 2285 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse `declare module ...`, with the cursor at `module` and `start` at
     /// `declare`. Port of `JSParserImpl::parseDeclareModuleFlow`
-    /// (flow.cpp:2271-2350).
+    /// (flow.cpp:2283-2362).
     fn parse_declare_module_flow(
         &mut self,
         start: SMLoc,
     ) -> Option<&'gc Node<'gc>> {
-        // C++ 2271-2272.
+        // C++ 2283-2284.
         debug_assert!(self.check_name(b"module"));
         self.advance(GrammarContext::Type);
 
-        // C++ 2274-2296: `declare module.exports: T`.
+        // C++ 2286-2308: `declare module.exports: T`.
         if self.check_and_eat(TokenKind::period, GrammarContext::Type) {
             if !self.check_name(b"exports") {
                 self.error_at(self.cur_range(), "expected module.exports declaration");
@@ -1931,7 +1931,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 Some(annot_start),
                 AllowAnonFunctionType::Yes,
             )?;
-            // C++ 2291: eatSemi(true) — the optional form for module.exports.
+            // C++ 2303: eatSemi(true) — the optional form for module.exports.
             self.eat_semi(true);
             let node = Node::DeclareModuleExports(DeclareModuleExports::new(
                 NodeMetadata::new(self.dummy_range()),
@@ -1944,7 +1944,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             ));
         }
 
-        // C++ 2298-2318: `declare module <string|ident> { ... }`.
+        // C++ 2310-2330: `declare module <string|ident> { ... }`.
         // Faithful to the C++ `ESTree::Node *id = nullptr;` branch-assign idiom.
         #[allow(clippy::needless_late_init)]
         let id: &'gc Node<'gc>;
@@ -1976,7 +1976,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
         self.advance(GrammarContext::Type);
 
-        // C++ 2321-2330.
+        // C++ 2333-2342.
         let body_start = self.cur_start();
         if !self.eat_at(
             TokenKind::l_brace,
@@ -1988,7 +1988,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // C++ 2332-2337: the body recurses into statement-list items (which
+        // C++ 2344-2349: the body recurses into statement-list items (which
         // include the `declare` statement branch).
         let mut declarations: Vec<&'gc Node<'gc>> = Vec::new();
         while !self.check(TokenKind::r_brace) {
@@ -2001,7 +2001,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // C++ 2339-2348.
+        // C++ 2351-2360.
         let body_end = self.advance(GrammarContext::Type).end;
         let body_node = Node::BlockStatement(BlockStatement::new(
             NodeMetadata::new(self.dummy_range()),
@@ -2018,21 +2018,21 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseDeclareNamespaceFlow — 2354 in JSParserImpl-flow.cpp
+    // parseDeclareNamespaceFlow — 2366 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse `declare namespace ...`, with the cursor at `namespace` and `start`
     /// at `declare`. Port of `JSParserImpl::parseDeclareNamespaceFlow`
-    /// (flow.cpp:2352-2399).
+    /// (flow.cpp:2364-2411).
     fn parse_declare_namespace_flow(
         &mut self,
         start: SMLoc,
     ) -> Option<&'gc Node<'gc>> {
-        // C++ 2352-2353.
+        // C++ 2364-2365.
         debug_assert!(self.check_name(b"namespace"));
         self.advance(GrammarContext::Type);
 
-        // C++ 2357-2368.
+        // C++ 2369-2380.
         if !self.need_at(
             TokenKind::identifier,
             " in namespace declaration",
@@ -2051,7 +2051,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let id = self.set_location(id_range.start, id_range.end, id_node);
         self.advance(GrammarContext::Type);
 
-        // C++ 2372-2379.
+        // C++ 2384-2391.
         let body_start = self.cur_start();
         if !self.eat_at(
             TokenKind::l_brace,
@@ -2063,7 +2063,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // C++ 2381-2386.
+        // C++ 2393-2398.
         let mut declarations: Vec<&'gc Node<'gc>> = Vec::new();
         while !self.check(TokenKind::r_brace) {
             if !self.parse_statement_list_item(
@@ -2075,7 +2075,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // C++ 2388-2397.
+        // C++ 2400-2409.
         let body_end = self.advance(GrammarContext::Type).end;
         let body_node = Node::BlockStatement(BlockStatement::new(
             NodeMetadata::new(self.dummy_range()),
@@ -2092,27 +2092,27 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseDeclareClassFlow — 2403 in JSParserImpl-flow.cpp
+    // parseDeclareClassFlow — 2415 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse `declare class ...`, with the cursor at `class` and `start` at
     /// `declare`. Port of `JSParserImpl::parseDeclareClassFlow`
-    /// (flow.cpp:2401-2497).
+    /// (flow.cpp:2413-2509).
     fn parse_declare_class_flow(
         &mut self,
         start: SMLoc,
     ) -> Option<&'gc Node<'gc>> {
-        // C++ 2401-2402.
+        // C++ 2413-2414.
         debug_assert!(self.check(TokenKind::rw_class));
         self.advance(GrammarContext::Type);
 
-        // C++ 2404-2406: class definitions are always strict-mode code.
+        // C++ 2416-2418: class definitions are always strict-mode code.
         let old_strict = self.lexer.is_strict_mode();
         self.lexer.set_strict_mode(true);
 
         let result = self.parse_declare_class_flow_inner(start);
 
-        // C++ 2405: SaveFunctionState restores strict mode on scope exit.
+        // C++ 2417: SaveFunctionState restores strict mode on scope exit.
         self.lexer.set_strict_mode(old_strict);
         result
     }
@@ -2123,7 +2123,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         &mut self,
         start: SMLoc,
     ) -> Option<&'gc Node<'gc>> {
-        // C++ 2408-2420.
+        // C++ 2420-2432.
         if !self.need_at(
             TokenKind::identifier,
             " in class declaration",
@@ -2142,13 +2142,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let id = self.set_location(id_range.start, id_range.end, id_node);
         self.advance(GrammarContext::Type);
 
-        // C++ 2422-2428.
+        // C++ 2434-2440.
         let mut type_params: Option<&'gc Node<'gc>> = None;
         if self.check(TokenKind::less) {
             type_params = Some(self.parse_type_params_flow()?);
         }
 
-        // C++ 2430-2440: `extends`.
+        // C++ 2442-2452: `extends`.
         let mut extends: Vec<&'gc Node<'gc>> = Vec::new();
         if self.check_and_eat(TokenKind::rw_extends, GrammarContext::AllowRegExp)
         {
@@ -2165,7 +2165,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // C++ 2442-2454: `mixins`.
+        // C++ 2454-2466: `mixins`.
         let mut mixins: Vec<&'gc Node<'gc>> = Vec::new();
         if self.check_name(b"mixins") {
             self.advance(GrammarContext::AllowRegExp);
@@ -2187,7 +2187,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // C++ 2456-2470: `implements`.
+        // C++ 2468-2482: `implements`.
         let mut implements: Vec<&'gc Node<'gc>> = Vec::new();
         if self.check_and_eat(TokenKind::rw_implements, GrammarContext::AllowRegExp)
         {
@@ -2208,7 +2208,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // C++ 2472-2484.
+        // C++ 2484-2496.
         if !self.need_at(
             TokenKind::l_brace,
             " in declared class",
@@ -2223,7 +2223,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             AllowSpreadProperty::No,
         )?;
 
-        // C++ 2486-2495.
+        // C++ 2498-2507.
         let end = body.range().end;
         let node = Node::DeclareClass(DeclareClass::new(
             NodeMetadata::new(self.dummy_range()),
@@ -2238,43 +2238,43 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseDeclareExportFlow — 2580 in JSParserImpl-flow.cpp
+    // parseDeclareExportFlow — 2592 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse `declare export ...`, with the cursor at `export` and `start` at
     /// `declare`. Port of `JSParserImpl::parseDeclareExportFlow`
-    /// (flow.cpp:2578-2882).
+    /// (flow.cpp:2590-2894).
     fn parse_declare_export_flow(
         &mut self,
         start: SMLoc,
     ) -> Option<&'gc Node<'gc>> {
-        // C++ 2578-2580.
+        // C++ 2590-2592.
         debug_assert!(self.check(TokenKind::rw_export));
         self.advance(GrammarContext::Type);
         let mut declare_start = self.cur_start();
 
-        // C++ 2582-2669: `declare export default ...`.
+        // C++ 2594-2681: `declare export default ...`.
         if self.check_and_eat(TokenKind::rw_default, GrammarContext::Type) {
             declare_start = self.cur_start();
-            // C++ 2584-2592: default function.
+            // C++ 2596-2604: default function.
             if self.check(TokenKind::rw_function) {
                 let func = self.parse_declare_function_flow(declare_start)?;
                 return self.wrap_declare_export(start, Some(func), true);
             }
-            // C++ 2594-2603: default hook.
+            // C++ 2606-2615: default hook.
             if self.parse_flow_component_syntax()
                 && self.check_hook_declaration_flow()
             {
                 let func = self.parse_declare_hook_flow(declare_start)?;
                 return self.wrap_declare_export(start, Some(func), true);
             }
-            // C++ 2604-2619: default async hook (error then hook).
+            // C++ 2616-2631: default async hook (error then hook).
             if self.parse_flow_component_syntax()
                 && self.check_unescaped_name(b"async")
                 && self.check_async_hook_flow()
             {
                 // Point location, NOT the current token's range: C++
-                // (flow.cpp:2608-2610) calls `error(tok_->getStartLoc(),
+                // (flow.cpp:2620-2622) calls `error(tok_->getStartLoc(),
                 // ...)` — the `error(SMLoc, Twine)` overload.
                 self.error_at_loc(
                     self.cur_start(),
@@ -2285,13 +2285,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 let hook = self.parse_declare_hook_flow(declare_start)?;
                 return self.wrap_declare_export(start, Some(hook), true);
             }
-            // C++ 2620-2636: default async component (error then component).
+            // C++ 2632-2648: default async component (error then component).
             if self.parse_flow_component_syntax()
                 && self.check_unescaped_name(b"async")
                 && self.check_async_component_flow()
             {
                 // Point location, NOT the current token's range: C++
-                // (flow.cpp:2624-2626) calls `error(tok_->getStartLoc(),
+                // (flow.cpp:2636-2638) calls `error(tok_->getStartLoc(),
                 // ...)` — the `error(SMLoc, Twine)` overload.
                 self.error_at_loc(
                     self.cur_start(),
@@ -2303,7 +2303,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     .parse_component_declaration_flow(start, true, true)?;
                 return self.wrap_declare_export(start, Some(comp), true);
             }
-            // C++ 2637-2648: default component.
+            // C++ 2649-2660: default component.
             if self.parse_flow_component_syntax()
                 && self.check_component_declaration_flow()
             {
@@ -2311,12 +2311,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     .parse_component_declaration_flow(start, true, false)?;
                 return self.wrap_declare_export(start, Some(comp), true);
             }
-            // C++ 2649-2658: default class.
+            // C++ 2661-2670: default class.
             if self.check(TokenKind::rw_class) {
                 let cls = self.parse_declare_class_flow(declare_start)?;
                 return self.wrap_declare_export(start, Some(cls), true);
             }
-            // C++ 2659-2668: default type annotation. NOTE the end loc here is
+            // C++ 2671-2680: default type annotation. NOTE the end loc here is
             // getPrevTokenEndLoc() (the semicolon), not the type's own end.
             let ty = self.parse_type_annotation_flow(
                 None,
@@ -2340,25 +2340,25 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             ));
         }
 
-        // C++ 2671-2680: function.
+        // C++ 2683-2692: function.
         if self.check(TokenKind::rw_function) {
             let func = self.parse_declare_function_flow(declare_start)?;
             return self.wrap_declare_export(start, Some(func), false);
         }
-        // C++ 2682-2691: hook.
+        // C++ 2694-2703: hook.
         if self.parse_flow_component_syntax()
             && self.check_hook_declaration_flow()
         {
             let func = self.parse_declare_hook_flow(declare_start)?;
             return self.wrap_declare_export(start, Some(func), false);
         }
-        // C++ 2693-2708: async hook (error then hook).
+        // C++ 2705-2720: async hook (error then hook).
         if self.parse_flow_component_syntax()
             && self.check_unescaped_name(b"async")
             && self.check_async_hook_flow()
         {
             // Point location, NOT the current token's range: C++
-            // (flow.cpp:2697-2699) calls `error(tok_->getStartLoc(), ...)`
+            // (flow.cpp:2709-2711) calls `error(tok_->getStartLoc(), ...)`
             // — the `error(SMLoc, Twine)` overload.
             self.error_at_loc(
                 self.cur_start(),
@@ -2369,18 +2369,18 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             let hook = self.parse_declare_hook_flow(declare_start)?;
             return self.wrap_declare_export(start, Some(hook), false);
         }
-        // C++ 2710-2719: class.
+        // C++ 2722-2731: class.
         if self.check(TokenKind::rw_class) {
             let cls = self.parse_declare_class_flow(declare_start)?;
             return self.wrap_declare_export(start, Some(cls), false);
         }
-        // C++ 2721-2737: async component (error then component).
+        // C++ 2733-2749: async component (error then component).
         if self.parse_flow_component_syntax()
             && self.check_unescaped_name(b"async")
             && self.check_async_component_flow()
         {
             // Point location, NOT the current token's range: C++
-            // (flow.cpp:2725-2727) calls `error(tok_->getStartLoc(), ...)`
+            // (flow.cpp:2737-2739) calls `error(tok_->getStartLoc(), ...)`
             // — the `error(SMLoc, Twine)` overload.
             self.error_at_loc(
                 self.cur_start(),
@@ -2392,7 +2392,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 self.parse_component_declaration_flow(start, true, true)?;
             return self.wrap_declare_export(start, Some(comp), false);
         }
-        // C++ 2739-2750: component.
+        // C++ 2751-2762: component.
         if self.parse_flow_component_syntax()
             && self.check_component_declaration_flow()
         {
@@ -2400,13 +2400,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 self.parse_component_declaration_flow(start, true, false)?;
             return self.wrap_declare_export(start, Some(comp), false);
         }
-        // C++ 2752-2761: enum.
+        // C++ 2764-2773: enum.
         if self.check(TokenKind::rw_enum) {
             let enum_decl = self.parse_enum_declaration_flow(start, true)?;
             return self.wrap_declare_export(start, Some(enum_decl), false);
         }
 
-        // C++ 2763-2795: var/const/let. NOTE the var-kind advance here IS
+        // C++ 2775-2807: var/const/let. NOTE the var-kind advance here IS
         // `Type` (asymmetric with parseDeclareFLow's default-ctx advance).
         if self.check2(TokenKind::rw_var, TokenKind::rw_const)
             || self.check_name(b"let")
@@ -2415,7 +2415,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             let var_start = self.advance(GrammarContext::Type).start;
             let Some(id) = self.parse_binding_identifier(Param::default())
             else {
-                // C++ 2767-2774: errorExpected(identifier, "in var
+                // C++ 2779-2786: errorExpected(identifier, "in var
                 // declaration", "start of declaration", start).
                 self.error_expected_msg(
                     "'identifier' expected in var declaration",
@@ -2443,12 +2443,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return self.wrap_declare_export(start, Some(var), false);
         }
 
-        // C++ 2797-2812: `declare export opaque type`.
+        // C++ 2809-2824: `declare export opaque type`.
         if self.check_name(b"opaque") {
             self.advance(GrammarContext::Type);
             if !self.check_name(b"type") {
                 // Point location, NOT the current token's range: C++
-                // (flow.cpp:2799-2800) calls `error(tok_->getStartLoc(),
+                // (flow.cpp:2811-2812) calls `error(tok_->getStartLoc(),
                 // ...)` — the `error(SMLoc, Twine)` overload.
                 self.error_at_loc(
                     self.cur_start(),
@@ -2464,7 +2464,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return self.wrap_declare_export(start, Some(ty), false);
         }
 
-        // C++ 2814-2824: `declare export type`.
+        // C++ 2826-2836: `declare export type`.
         if self.check_name(b"type") {
             self.advance(GrammarContext::Type);
             let ty = self
@@ -2472,18 +2472,18 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return self.wrap_declare_export(start, Some(ty), false);
         }
 
-        // C++ 2826-2835: `declare export interface` — NOTE the no-arg call
+        // C++ 2838-2847: `declare export interface` — NOTE the no-arg call
         // (→ InterfaceDeclaration, NOT DeclareInterface).
         if self.check(TokenKind::rw_interface) || self.check_name(b"interface") {
             let iface = self.parse_interface_declaration_flow(None)?;
             return self.wrap_declare_export(start, Some(iface), false);
         }
 
-        // C++ 2837-2854: `declare export * from 'foo'`.
+        // C++ 2849-2866: `declare export * from 'foo'`.
         if self.check_and_eat(TokenKind::star, GrammarContext::Type) {
             if !self.check_name(b"from") {
                 // Point location, NOT the current token's range: C++
-                // (flow.cpp:2841-2842) calls `error(tok_->getStartLoc(),
+                // (flow.cpp:2853-2854) calls `error(tok_->getStartLoc(),
                 // ...)` — the `error(SMLoc, Twine)` overload.
                 self.error_at_loc(
                     self.cur_start(),
@@ -2508,7 +2508,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             ));
         }
 
-        // C++ 2856-2880: `declare export { ... } [from]`.
+        // C++ 2868-2892: `declare export { ... } [from]`.
         if !self.need_at(
             TokenKind::l_brace,
             " in export specifier",
@@ -2564,23 +2564,23 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseExportTypeDeclarationFlow — 2501 in JSParserImpl-flow.cpp
+    // parseExportTypeDeclarationFlow — 2513 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse the tail of `export type ...` with the cursor at `type` and
     /// `start_loc` at `export`. Port of
-    /// `JSParserImpl::parseExportTypeDeclarationFlow` (flow.cpp:2499-2576).
+    /// `JSParserImpl::parseExportTypeDeclarationFlow` (flow.cpp:2511-2588).
     pub(in crate::js) fn parse_export_type_declaration_flow(
         &mut self,
         start_loc: SMLoc,
     ) -> Option<&'gc Node<'gc>> {
-        // C++ 2500-2501.
+        // C++ 2512-2513.
         debug_assert!(self.check_name(b"type"));
         let type_ident_loc = self.advance(GrammarContext::AllowRegExp).start;
         let type_ident = self.gc.ctx().atom_table.atom_bytes(b"type");
 
         if self.check_and_eat(TokenKind::star, GrammarContext::AllowRegExp) {
-            // export type * FromClause; (flow.cpp:2504-2519).
+            // export type * FromClause; (flow.cpp:2516-2531).
             let source = self.parse_from_clause()?;
             if !self.eat_semi(false) {
                 return None;
@@ -2598,18 +2598,18 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         if self.check(TokenKind::l_brace) {
-            // export type ExportClause [FromClause]; (flow.cpp:2521-2557).
+            // export type ExportClause [FromClause]; (flow.cpp:2533-2569).
             let mut specifiers: Vec<&'gc Node<'gc>> = Vec::new();
             let mut invalids: Vec<SMRange> = Vec::new();
             if !self.parse_export_clause(&mut specifiers, &mut invalids) {
                 return None;
             }
 
-            // `from` is a contextual ident (escape-insensitive). C++ 2530.
+            // `from` is a contextual ident (escape-insensitive). C++ 2542.
             let source = if self.check_name(b"from") {
                 Some(self.parse_from_clause()?)
             } else {
-                // C++ 2537-2545: no FromClause → the invalids are real errors.
+                // C++ 2549-2557: no FromClause → the invalids are real errors.
                 for range in &invalids {
                     self.error_at(*range, "Invalid exported name");
                 }
@@ -2635,7 +2635,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             ));
         }
 
-        // C++ 2557-2566.
+        // C++ 2569-2578.
         if self.check(TokenKind::identifier) {
             let alias = self
                 .parse_type_alias_flow(type_ident_loc, TypeAliasKind::None)?;
@@ -2654,7 +2654,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             ));
         }
 
-        // C++ 2569-2574: errorExpected(star, l_brace, identifier,
+        // C++ 2581-2586: errorExpected(star, l_brace, identifier,
         // "in export type declaration", "start of export", startLoc).
         self.error_expected3(
             TokenKind::star,
@@ -2668,12 +2668,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseEnumDeclarationFlow — 5151 in JSParserImpl-flow.cpp
+    // parseEnumDeclarationFlow — 5163 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse a Flow `enum` declaration, with the cursor at `enum` and `start`
     /// at the start of the declaration. Port of
-    /// `JSParserImpl::parseEnumDeclarationFlow` (flow.cpp:5149-5206).
+    /// `JSParserImpl::parseEnumDeclarationFlow` (flow.cpp:5161-5218).
     ///
     /// \param declare whether this is a `declare enum` (the `declare` routing
     ///   that passes `true` lands in P6.6).
@@ -2682,11 +2682,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         start: SMLoc,
         declare: bool,
     ) -> Option<&'gc Node<'gc>> {
-        // C++ 5151-5152.
+        // C++ 5163-5164.
         debug_assert!(self.check(TokenKind::rw_enum));
         self.advance(GrammarContext::AllowRegExp);
 
-        // C++ 5154-5161: errorExpected(identifier, "in enum declaration",
+        // C++ 5166-5173: errorExpected(identifier, "in enum declaration",
         // "start of declaration", start).
         if !self.need_at(
             TokenKind::identifier,
@@ -2696,7 +2696,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         ) {
             return None;
         }
-        // C++ 5162-5166.
+        // C++ 5174-5178.
         let id_range = self.cur_range();
         let id_node = Node::Identifier(Identifier::new(
             NodeMetadata::new(self.dummy_range()),
@@ -2705,16 +2705,16 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             false,
         ));
         let id = self.set_location(id_range.start, id_range.end, id_node);
-        // C++ 5167.
+        // C++ 5179.
         self.advance(GrammarContext::Type);
 
-        // C++ 5169-5185: an optional `of <kind>` explicit type.
+        // C++ 5181-5197: an optional `of <kind>` explicit type.
         let mut opt_kind: Option<EnumKind> = None;
         let mut explicit_type_start: Option<SMLoc> = None;
         if self.check_name(b"of") {
             explicit_type_start = Some(self.advance(GrammarContext::AllowRegExp).start);
 
-            // C++ 5174-5184: the five contextual kind idents. `checkAndEat` of
+            // C++ 5186-5196: the five contextual kind idents. `checkAndEat` of
             // a contextual ident → `check_name` + advance (default
             // GrammarContext::AllowRegExp).
             if self.check_name(b"string") {
@@ -2735,7 +2735,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // C++ 5187-5192.
+        // C++ 5199-5204.
         if !self.need_at(
             TokenKind::l_brace,
             " in enum declaration",
@@ -2745,10 +2745,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // C++ 5194-5196.
+        // C++ 5206-5208.
         let body = self.parse_enum_body_flow(opt_kind, explicit_type_start)?;
 
-        // C++ 5198-5204.
+        // C++ 5210-5216.
         let end = body.range().end;
         if declare {
             let node = Node::DeclareEnum(DeclareEnum::new(
@@ -2767,30 +2767,30 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseEnumBodyFlow — 5210 in JSParserImpl-flow.cpp
+    // parseEnumBodyFlow — 5222 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse the `{ ... }` body of an enum, with the cursor at `{`. `opt_kind`
     /// is the explicit kind from `of <kind>` (if any) and `explicit_type_start`
     /// is the location of that explicit type (if any). Port of
-    /// `JSParserImpl::parseEnumBodyFlow` (flow.cpp:5208-5353).
+    /// `JSParserImpl::parseEnumBodyFlow` (flow.cpp:5220-5365).
     fn parse_enum_body_flow(
         &mut self,
         opt_kind: Option<EnumKind>,
         explicit_type_start: Option<SMLoc>,
     ) -> Option<&'gc Node<'gc>> {
-        // C++ 5210-5211.
+        // C++ 5222-5223.
         debug_assert!(self.check(TokenKind::l_brace));
         let mut start = self.advance(GrammarContext::AllowRegExp).start;
 
         // The kind may be inferred from the members if it was not explicit.
         let mut opt_kind = opt_kind;
 
-        // C++ 5213-5261.
+        // C++ 5225-5273.
         let mut members: Vec<&'gc Node<'gc>> = Vec::new();
         let mut has_unknown_members = false;
         while !self.check(TokenKind::r_brace) {
-            // C++ 5216-5227: the inexact `...`, which must come last.
+            // C++ 5228-5239: the inexact `...`, which must come last.
             if self.check(TokenKind::dotdotdot) {
                 let dotdotdot_loc =
                     self.advance(GrammarContext::Type).start;
@@ -2805,7 +2805,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 has_unknown_members = true;
                 break;
             }
-            // C++ 5228-5233.
+            // C++ 5240-5245.
             if !self.need_at(
                 TokenKind::identifier,
                 " in enum declaration",
@@ -2815,11 +2815,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 return None;
             }
 
-            // C++ 5235-5239.
+            // C++ 5247-5251.
             let member = self.parse_enum_member_flow()?;
             let opt_member_kind = get_member_enum_kind_flow(member);
 
-            // C++ 5241-5256.
+            // C++ 5253-5268.
             if let Some(kind) = opt_kind {
                 // We've already figured out the type of the enum, so ensure
                 // that the new member is compatible with this.
@@ -2847,7 +2847,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 opt_kind = opt_member_kind;
             }
 
-            // C++ 5258-5260.
+            // C++ 5270-5272.
             members.push(member);
             if !self.check_and_eat(TokenKind::comma, GrammarContext::AllowRegExp)
             {
@@ -2855,7 +2855,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // C++ 5263-5292.
+        // C++ 5275-5304.
         if !members.is_empty() {
             // Ensure that enum members use initializers consistently.
             // This is vacuously true when `members` is empty, so just make
@@ -2884,7 +2884,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 }
             }
 
-            // C++ 5283-5291.
+            // C++ 5295-5303.
             if !uses_initializers {
                 // It's only legal to use defaulted members for string and
                 // symbol enums, because other kinds of enums can't infer
@@ -2901,7 +2901,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // C++ 5294-5301.
+        // C++ 5306-5313.
         let end = self.lexer.token().end_loc();
         if !self.eat_at(
             TokenKind::r_brace,
@@ -2913,7 +2913,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // C++ 5303-5306.
+        // C++ 5315-5318.
         let has_explicit_type = explicit_type_start.is_some();
         if let Some(ets) = explicit_type_start {
             start = ets;
@@ -2921,7 +2921,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         let members = NodeList::from_iter(self.gc, members);
 
-        // C++ 5308-5314: an untyped/empty enum is a string-body enum.
+        // C++ 5320-5326: an untyped/empty enum is a string-body enum.
         let Some(kind) = opt_kind else {
             let node = Node::EnumStringBody(EnumStringBody::new(
                 NodeMetadata::new(self.dummy_range()),
@@ -2932,7 +2932,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return Some(self.set_location(start, end, node));
         };
 
-        // C++ 5316-5351: there are different node kinds per enum kind.
+        // C++ 5328-5363: there are different node kinds per enum kind.
         let node = match kind {
             EnumKind::String => Node::EnumStringBody(EnumStringBody::new(
                 NodeMetadata::new(self.dummy_range()),
@@ -2959,7 +2959,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 has_unknown_members,
             )),
             EnumKind::Symbol => {
-                // C++ 5343-5344: symbol enums can only be made via explicit
+                // C++ 5355-5356: symbol enums can only be made via explicit
                 // type. EnumSymbolBody has no `explicit_type` field.
                 debug_assert!(
                     has_explicit_type,
@@ -2976,13 +2976,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseEnumMemberFlow — 5357 in JSParserImpl-flow.cpp
+    // parseEnumMemberFlow — 5369 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse one enum member, with the cursor at the member's identifier. Port
-    /// of `JSParserImpl::parseEnumMemberFlow` (flow.cpp:5355-5433).
+    /// of `JSParserImpl::parseEnumMemberFlow` (flow.cpp:5367-5445).
     fn parse_enum_member_flow(&mut self) -> Option<&'gc Node<'gc>> {
-        // C++ 5355-5360.
+        // C++ 5367-5372.
         debug_assert!(self.check(TokenKind::identifier));
         let id_range = self.cur_range();
         let id_node = Node::Identifier(Identifier::new(
@@ -2992,16 +2992,16 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             false,
         ));
         let id = self.set_location(id_range.start, id_range.end, id_node);
-        // C++ 5361.
+        // C++ 5373.
         self.advance(GrammarContext::AllowRegExp);
 
-        // C++ 5363-5428.
+        // C++ 5375-5440.
         let member: &'gc Node<'gc>;
         if self.check_and_eat(TokenKind::equal, GrammarContext::AllowRegExp) {
             // Parse initializer.
             let tok_range = self.cur_range();
             if self.check2(TokenKind::rw_true, TokenKind::rw_false) {
-                // C++ 5366-5372.
+                // C++ 5378-5384.
                 let value = self.check(TokenKind::rw_true);
                 let init_node = Node::BooleanLiteral(BooleanLiteral::new(
                     NodeMetadata::new(self.dummy_range()),
@@ -3023,7 +3023,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     m,
                 );
             } else if self.check(TokenKind::string_literal) {
-                // C++ 5373-5379.
+                // C++ 5385-5391.
                 let value = self.lexer.token().get_string_literal();
                 let init_node = Node::StringLiteral(StringLiteral::new(
                     NodeMetadata::new(self.dummy_range()),
@@ -3045,7 +3045,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     m,
                 );
             } else if self.check(TokenKind::minus) {
-                // C++ 5380-5397: a negated numeric literal.
+                // C++ 5392-5409: a negated numeric literal.
                 let minus_start = self.cur_start();
                 self.advance(GrammarContext::AllowRegExp);
                 if self.check(TokenKind::numeric_literal) {
@@ -3072,7 +3072,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                         m,
                     );
                 } else {
-                    // C++ 5390-5396: errorExpected(numeric_literal,
+                    // C++ 5402-5408: errorExpected(numeric_literal,
                     // "in negated enum member initializer",
                     // "start of negated enum member", id->getStartLoc()).
                     // `need_at` reports at the current token without
@@ -3086,7 +3086,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     return None;
                 }
             } else if self.check(TokenKind::numeric_literal) {
-                // C++ 5398-5404.
+                // C++ 5410-5416.
                 let value = self.lexer.token().get_numeric_literal();
                 let init_node = Node::NumericLiteral(NumericLiteral::new(
                     NodeMetadata::new(self.dummy_range()),
@@ -3108,7 +3108,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     m,
                 );
             } else if self.check(TokenKind::bigint_literal) {
-                // C++ 5405-5411.
+                // C++ 5417-5423.
                 let bigint = self.lexer.token().get_bigint_literal();
                 let init_node = Node::BigIntLiteral(BigIntLiteral::new(
                     NodeMetadata::new(self.dummy_range()),
@@ -3130,15 +3130,15 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     m,
                 );
             } else {
-                // C++ 5412-5422: errorExpected over the five literal token
+                // C++ 5424-5434: errorExpected over the five literal token
                 // kinds, whatLoc = id->getStartLoc() (real).
                 self.error_expected_enum_member_init(id.range().start);
                 return None;
             }
-            // C++ 5424.
+            // C++ 5436.
             self.advance(GrammarContext::AllowRegExp);
         } else {
-            // C++ 5425-5427.
+            // C++ 5437-5439.
             let m = Node::EnumDefaultedMember(EnumDefaultedMember::new(
                 NodeMetadata::new(self.dummy_range()),
                 id,
@@ -3146,13 +3146,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             member = self.set_location(id.range().start, id.range().end, m);
         }
 
-        // C++ 5430-5431.
+        // C++ 5442-5443.
         Some(member)
     }
 
     /// Report the five-token `errorExpected` for an enum member initializer
     /// (`true`, `false`, a string, a number, or a bigint). Port of the
-    /// initializer-list `errorExpected` at flow.cpp:5413-5423 (where =
+    /// initializer-list `errorExpected` at flow.cpp:5425-5435 (where =
     /// "in enum member initializer", what = "start of enum member", whatLoc =
     /// `id->getStartLoc()`, real). The Rust `error_expected*` family tops
     /// out at four tokens, so render the five-token list directly to stay

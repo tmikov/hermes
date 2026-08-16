@@ -49,11 +49,11 @@ use crate::token_kinds::{ord, TokenKind};
 
 impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     // -----------------------------------------------------------------------
-    // checkRecordExpressionFlow — 1932 in JSParserImpl-flow.cpp
+    // checkRecordExpressionFlow — 1944 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Whether `expr` followed by the current `{` forms a `record` expression.
-    /// Port of `JSParserImpl::checkRecordExpressionFlow` (flow.cpp:1930-1947).
+    /// Port of `JSParserImpl::checkRecordExpressionFlow` (flow.cpp:1942-1959).
     ///
     /// The current token must be `{` with no newline before it; `expr` must be
     /// either an Identifier with a non-empty name whose first character is NOT
@@ -62,13 +62,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         &self,
         expr: &Node<'gc>,
     ) -> bool {
-        // C++ 1930-1932.
+        // C++ 1942-1944.
         if !self.check(TokenKind::l_brace)
             || self.lexer.is_new_line_before_current_token()
         {
             return false;
         }
-        // C++ 1933-1940: record expression names cannot begin with lowercase
+        // C++ 1945-1952: record expression names cannot begin with lowercase
         // 'a'-'z'.
         if let Node::Identifier(ident) = expr {
             let name = self.gc.ctx().atom_table.bytes(ident.name.get());
@@ -77,34 +77,34 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
             return true;
         }
-        // C++ 1941-1944: member expressions are always allowed.
+        // C++ 1953-1956: member expressions are always allowed.
         matches!(expr, Node::MemberExpression(_))
     }
 
     // -----------------------------------------------------------------------
-    // parseRecordExpressionFlow — 1951 in JSParserImpl-flow.cpp
+    // parseRecordExpressionFlow — 1963 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse a `record` expression body — `Constructor[<TypeArgs>] { props }` —
     /// with the cursor at `{`. Port of
-    /// `JSParserImpl::parseRecordExpressionFlow` (flow.cpp:1949-1980).
+    /// `JSParserImpl::parseRecordExpressionFlow` (flow.cpp:1961-1992).
     pub(in crate::js) fn parse_record_expression_flow(
         &mut self,
         start_loc: SMLoc,
         constructor: &'gc Node<'gc>,
         type_args: Option<&'gc Node<'gc>>,
     ) -> Option<&'gc Node<'gc>> {
-        // C++ 1952-1953.
+        // C++ 1964-1965.
         debug_assert!(self.check(TokenKind::l_brace));
         let properties_start_loc = self.advance(GrammarContext::AllowRegExp).start;
 
-        // C++ 1955-1957.
+        // C++ 1967-1969.
         let mut elem_list: Vec<&'gc Node<'gc>> = Vec::new();
         if !self.parse_object_properties(&mut elem_list) {
             return None;
         }
 
-        // C++ 1959-1966: the record-expression `}` is eaten in AllowDiv.
+        // C++ 1971-1978: the record-expression `}` is eaten in AllowDiv.
         let end_loc = self.cur_range().end;
         if !self.eat_at(
             TokenKind::r_brace,
@@ -116,7 +116,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // C++ 1968-1972.
+        // C++ 1980-1984.
         let props_node = Node::RecordExpressionProperties(
             RecordExpressionProperties::new(
                 NodeMetadata::new(self.dummy_range()),
@@ -126,7 +126,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let properties =
             self.set_location(properties_start_loc, end_loc, props_node);
 
-        // C++ 1974-1978.
+        // C++ 1986-1990.
         let node = Node::RecordExpression(RecordExpression::new(
             NodeMetadata::new(self.dummy_range()),
             constructor,

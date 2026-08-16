@@ -24,23 +24,23 @@ use super::AllowAnonFunctionType;
 
 impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     // -----------------------------------------------------------------------
-    // parseTypeParamsFlow — 4693 in JSParserImpl-flow.cpp
+    // parseTypeParamsFlow — 4705 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse a type-parameter declaration `<T, U: B, ...>`, with the current
     /// token at `<`. At least one parameter is required (empty `<>` is an
     /// error); a trailing comma is allowed. Port of `parseTypeParamsFlow`
-    /// (flow.cpp:4691-4720).
+    /// (flow.cpp:4703-4732).
     pub(in crate::js) fn parse_type_params_flow(
         &mut self,
     ) -> Option<&'gc Node<'gc>> {
         debug_assert!(self.check(TokenKind::less));
-        // C++ 4692.
+        // C++ 4704.
         let start = self.advance(GrammarContext::Type).start;
 
         let mut params: Vec<&'gc Node<'gc>> = Vec::new();
 
-        // C++ 4696-4704: a do-while — at least one parameter is required.
+        // C++ 4708-4716: a do-while — at least one parameter is required.
         loop {
             params.push(self.parse_type_param_flow()?);
 
@@ -52,7 +52,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // C++ 4706-4713.
+        // C++ 4718-4725.
         let end = self.cur_range().end;
         if !self.eat_at(
             TokenKind::greater,
@@ -64,7 +64,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // C++ 4715-4718.
+        // C++ 4727-4730.
         let node = Node::TypeParameterDeclaration(
             TypeParameterDeclaration::new(
                 NodeMetadata::new(self.dummy_range()),
@@ -75,10 +75,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     /// Parse a single type parameter `[const] [variance] name [: B|extends B]
-    /// [= D]`. Port of `parseTypeParamFlow` (flow.cpp:4722-4815).
+    /// [= D]`. Port of `parseTypeParamFlow` (flow.cpp:4734-4827).
     fn parse_type_param_flow(&mut self) -> Option<&'gc Node<'gc>> {
         let start = self.cur_start();
-        // C++ 4723-4728.
+        // C++ 4735-4740.
         let mut is_const = false;
         let mut variance: Option<&'gc Node<'gc>> = None;
         if self.check(TokenKind::rw_const) {
@@ -90,7 +90,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // `<out T>`) vs name (`<in>`, `<out>`, `<in: T>`, `<in extends Foo>`).
         // Defer the decision: consume the keyword here, and below — once we
         // know the *actual* next token — either promote it to variance or
-        // treat it as the name itself. (C++ 4730-4749.)
+        // treat it as the name itself. (C++ 4742-4761.)
         let mut variance_keyword_range = self.dummy_range();
         let mut variance_keyword_kind: Option<NodeLabel> = None;
 
@@ -119,7 +119,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // because Flow reclassifies it to an identifier in TYPE lex mode
         // (matching `<in>`, `<in: T>`, `<in extends T>`, `<X, in, Y>`). `out`
         // is already a plain identifier in Hermes, so `<out>` etc. work
-        // without special handling. (C++ 4751-4776.)
+        // without special handling. (C++ 4763-4788.)
         let name: NodeLabel;
         if self.check(TokenKind::identifier) || self.check(TokenKind::rw_in) {
             if let Some(kind) = variance_keyword_kind {
@@ -144,7 +144,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // `<out: T>`, `<in extends T>`, `<out = T>`, `<X, in, Y>`.
             name = kind;
         } else {
-            // flow.cpp:4775: errorExpected(identifier, "in type parameter",
+            // flow.cpp:4787: errorExpected(identifier, "in type parameter",
             // nullptr, {}) — VERIFIED whatLoc-less in C++ (unlike its
             // sibling below), so the plain `need` (no location) is correct
             // as-is.
@@ -152,7 +152,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // C++ 4778-4799.
+        // C++ 4790-4811.
         let mut bound: Option<&'gc Node<'gc>> = None;
         let mut uses_extends_bound = false;
         if self.check(TokenKind::colon) {
@@ -184,7 +184,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             ));
         }
 
-        // C++ 4801-4807.
+        // C++ 4813-4819.
         let mut initializer: Option<&'gc Node<'gc>> = None;
         if self.check_and_eat(TokenKind::equal, GrammarContext::Type) {
             initializer = Some(self.parse_type_annotation_flow(
@@ -193,7 +193,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             )?);
         }
 
-        // C++ 4809-4813.
+        // C++ 4821-4825.
         let node = Node::TypeParameter(TypeParameter::new(
             NodeMetadata::new(self.dummy_range()),
             name,
@@ -207,25 +207,25 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseTypeArgsFlow — 4819 in JSParserImpl-flow.cpp
+    // parseTypeArgsFlow — 4831 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse type arguments `<T, U>`, with the current token at `<`.
     /// \param trailing_grammar_context the grammar context with which the
     ///   closing `>` is consumed (the C++ parameter defaults to Type, per
     ///   JSParserImpl.h:1506-1508; Rust callers pass it explicitly).
-    /// Port of `parseTypeArgsFlow` (flow.cpp:4817-4847).
+    /// Port of `parseTypeArgsFlow` (flow.cpp:4829-4859).
     pub(in crate::js) fn parse_type_args_flow(
         &mut self,
         trailing_grammar_context: GrammarContext,
     ) -> Option<&'gc Node<'gc>> {
         debug_assert!(self.check(TokenKind::less));
-        // C++ 4819.
+        // C++ 4831.
         let start = self.advance(GrammarContext::Type).start;
 
         let mut params: Vec<&'gc Node<'gc>> = Vec::new();
 
-        // C++ 4823-4831: a while-loop (not do-while) — empty `<>` IS allowed
+        // C++ 4835-4843: a while-loop (not do-while) — empty `<>` IS allowed
         // for type *arguments* (unlike type-parameter declarations).
         while !self.check(TokenKind::greater) {
             params.push(self.parse_type_annotation_flow(
@@ -238,7 +238,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // C++ 4833-4840: `end` is the `>` token's end, captured before
+        // C++ 4845-4852: `end` is the `>` token's end, captured before
         // consuming it with the caller's trailing grammar context.
         let end = self.cur_range().end;
         if !self.eat_at(
@@ -251,7 +251,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // C++ 4842-4845.
+        // C++ 4854-4857.
         let node = Node::TypeParameterInstantiation(
             TypeParameterInstantiation::new(
                 NodeMetadata::new(self.dummy_range()),
@@ -262,12 +262,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseGenericTypeFlow — 5010 in JSParserImpl-flow.cpp
+    // parseGenericTypeFlow — 5022 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse a (possibly qualified) generic type reference
     /// `Foo.Bar<Args>`, with the current token at the first identifier or
-    /// reserved word. Port of `parseGenericTypeFlow` (flow.cpp:5008-5051).
+    /// reserved word. Port of `parseGenericTypeFlow` (flow.cpp:5020-5063).
     pub(super) fn parse_generic_type_flow(&mut self) -> Option<&'gc Node<'gc>> {
         debug_assert!(
             self.check(TokenKind::identifier)
@@ -275,7 +275,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         );
         let start = self.cur_start();
 
-        // C++ 5012-5017.
+        // C++ 5024-5029.
         let id_range = self.cur_range();
         let id_node = Node::Identifier(Identifier::new(
             NodeMetadata::new(self.dummy_range()),
@@ -286,14 +286,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let mut id = self.set_location(id_range.start, id_range.end, id_node);
         self.advance(GrammarContext::Type);
 
-        // C++ 5019: GrammarContext::Type here (unlike the qualified-typeof
+        // C++ 5031: GrammarContext::Type here (unlike the qualified-typeof
         // chain, which uses the default).
         while self.check_and_eat(TokenKind::period, GrammarContext::Type) {
-            // C++ 5020-5027.
+            // C++ 5032-5039.
             if !self.check(TokenKind::identifier)
                 && !self.lexer.token().is_res_word()
             {
-                // flow.cpp:5021-5028: errorExpected(identifier, "in
+                // flow.cpp:5033-5040: errorExpected(identifier, "in
                 // qualified generic type name", "start of type name",
                 // start).
                 self.need_at(
@@ -304,7 +304,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 );
                 return None;
             }
-            // C++ 5028-5033.
+            // C++ 5040-5045.
             let next_range = self.cur_range();
             let next_node = Node::Identifier(Identifier::new(
                 NodeMetadata::new(self.dummy_range()),
@@ -318,7 +318,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 next_node,
             );
             self.advance(GrammarContext::Type);
-            // C++ 5034-5035.
+            // C++ 5046-5047.
             let q_node = Node::QualifiedTypeIdentifier(
                 QualifiedTypeIdentifier::new(
                     NodeMetadata::new(self.dummy_range()),
@@ -333,7 +333,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             );
         }
 
-        // C++ 5037-5044: `parseTypeArgsFlow()` is called with its default
+        // C++ 5049-5056: `parseTypeArgsFlow()` is called with its default
         // trailing grammar context (Type, per JSParserImpl.h:1506).
         let mut type_parameters: Option<&'gc Node<'gc>> = None;
         if self.check(TokenKind::less) {
@@ -341,7 +341,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 Some(self.parse_type_args_flow(GrammarContext::Type)?);
         }
 
-        // C++ 5046-5049.
+        // C++ 5058-5061.
         let node = Node::GenericTypeAnnotation(GenericTypeAnnotation::new(
             NodeMetadata::new(self.dummy_range()),
             id,
@@ -351,21 +351,21 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseClassImplementsFlow — 5055 in JSParserImpl-flow.cpp
+    // parseClassImplementsFlow — 5067 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse one entry of a class `implements` clause: `Name` or
     /// `Name<TypeArgs>`, with the current token at the identifier (an
     /// identifier ONLY — no reserved word, per the C++ assert). Port of
-    /// `JSParserImpl::parseClassImplementsFlow` (flow.cpp:5053-5077).
+    /// `JSParserImpl::parseClassImplementsFlow` (flow.cpp:5065-5089).
     pub(in crate::js) fn parse_class_implements_flow(
         &mut self,
     ) -> Option<&'gc Node<'gc>> {
-        // C++ 5054-5055.
+        // C++ 5066-5067.
         debug_assert!(self.check(TokenKind::identifier));
         let start = self.cur_start();
 
-        // C++ 5057-5062.
+        // C++ 5069-5074.
         let id_range = self.cur_range();
         let id_node = Node::Identifier(Identifier::new(
             NodeMetadata::new(self.dummy_range()),
@@ -376,7 +376,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let id = self.set_location(id_range.start, id_range.end, id_node);
         self.advance(GrammarContext::Type);
 
-        // C++ 5064-5069: `parseTypeArgsFlow()` is called with its default
+        // C++ 5076-5081: `parseTypeArgsFlow()` is called with its default
         // trailing grammar context (Type, per JSParserImpl.h:1506).
         let mut type_parameters: Option<&'gc Node<'gc>> = None;
         if self.check(TokenKind::less) {
@@ -384,7 +384,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 Some(self.parse_type_args_flow(GrammarContext::Type)?);
         }
 
-        // C++ 5071-5075.
+        // C++ 5083-5087.
         let node = Node::ClassImplements(ClassImplements::new(
             NodeMetadata::new(self.dummy_range()),
             id,

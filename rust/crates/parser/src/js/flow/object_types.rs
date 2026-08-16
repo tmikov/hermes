@@ -30,11 +30,11 @@ use super::{
 
 impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     // -----------------------------------------------------------------------
-    // parseObjectTypeAnnotationFlow — 4037 in JSParserImpl-flow.cpp
+    // parseObjectTypeAnnotationFlow — 4049 in JSParserImpl-flow.cpp
     // -----------------------------------------------------------------------
 
     /// Parse an object type annotation, with the current token at `{` or
-    /// `{|`. Port of `parseObjectTypeAnnotationFlow` (flow.cpp:4035-4086).
+    /// `{|`. Port of `parseObjectTypeAnnotationFlow` (flow.cpp:4047-4098).
     pub(super) fn parse_object_type_annotation_flow(
         &mut self,
         allow_proto_property: AllowProtoProperty,
@@ -51,7 +51,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let mut internal_slots: Vec<&'gc Node<'gc>> = Vec::new();
         let mut inexact = false;
 
-        // C++ 4048-4057.
+        // C++ 4060-4069.
         if !self.parse_object_type_properties_flow(
             allow_proto_property,
             allow_static_property,
@@ -65,7 +65,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // C++ 4059-4064.
+        // C++ 4071-4076.
         if exact && inexact {
             // Doesn't prevent parsing from continuing, but it is an error.
             self.error_at_loc(
@@ -74,7 +74,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             );
         }
 
-        // C++ 4066-4073.
+        // C++ 4078-4085.
         let end = self.cur_range().end;
         if !self.eat_at(
             if exact {
@@ -90,7 +90,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // C++ 4075-4084.
+        // C++ 4087-4096.
         let node = Node::ObjectTypeAnnotation(ObjectTypeAnnotation::new(
             NodeMetadata::new(self.dummy_range()),
             NodeList::from_iter(self.gc, properties),
@@ -106,7 +106,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Parse the members of an object type into the four out-lists, leaving
     /// the closing `}`/`|}` as the current token. Returns false if an error
     /// was reported. Port of `parseObjectTypePropertiesFlow`
-    /// (flow.cpp:4088-4152).
+    /// (flow.cpp:4100-4164).
     #[allow(clippy::too_many_arguments)] // faithful to the C++ signature.
     fn parse_object_type_properties_flow(
         &mut self,
@@ -125,7 +125,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 // Spread property or explicit '...' for inexact.
                 self.advance(GrammarContext::Type);
                 if self.check2(TokenKind::comma, TokenKind::semi) {
-                    // C++ 4101-4105.
+                    // C++ 4113-4117.
                     *inexact = true;
                     self.advance(GrammarContext::Type);
                     // Explicit '...' must be the last element in the type
@@ -135,11 +135,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     TokenKind::r_brace,
                     TokenKind::piper_brace,
                 ) {
-                    // C++ 4106-4108.
+                    // C++ 4118-4120.
                     *inexact = true;
                     return true;
                 } else {
-                    // C++ 4109-4121.
+                    // C++ 4121-4133.
                     if allow_spread_property == AllowSpreadProperty::No {
                         self.error_at_loc(
                             start,
@@ -166,7 +166,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     properties.push(located);
                 }
             } else {
-                // C++ 4122-4131.
+                // C++ 4134-4143.
                 if !self.parse_property_type_annotation_flow(
                     allow_proto_property,
                     allow_static_property,
@@ -179,13 +179,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 }
             }
 
-            // C++ 4133-4147.
+            // C++ 4145-4159.
             if self.check2(TokenKind::comma, TokenKind::semi) {
                 self.advance(GrammarContext::Type);
             } else if self.check2(TokenKind::r_brace, TokenKind::piper_brace) {
                 return true;
             } else {
-                // C++ 4133-4147: whatLoc is `start` (this property's start).
+                // C++ 4145-4159: whatLoc is `start` (this property's start).
                 self.error_expected4(
                     TokenKind::comma,
                     TokenKind::semi,
@@ -205,7 +205,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     /// Parse one object-type member (property, method, accessor, call
     /// property, indexer, mapped type, or internal slot), pushing it into the
     /// appropriate out-list. Returns false if an error was reported. Port of
-    /// `parsePropertyTypeAnnotationFlow` (flow.cpp:4154-4440).
+    /// `parsePropertyTypeAnnotationFlow` (flow.cpp:4166-4452).
     fn parse_property_type_annotation_flow(
         &mut self,
         allow_proto_property: AllowProtoProperty,
@@ -222,13 +222,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let mut is_static = false;
         let mut proto = false;
 
-        // C++ 4167-4170.
+        // C++ 4179-4182.
         if self.check_name(b"proto") {
             proto = true;
             self.advance(GrammarContext::Type);
         }
 
-        // C++ 4172-4175.
+        // C++ 4184-4187.
         if !proto
             && (self.check(TokenKind::rw_static) || self.check_name(b"static"))
         {
@@ -236,7 +236,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             self.advance(GrammarContext::Type);
         }
 
-        // C++ 4177-4190.
+        // C++ 4189-4202.
         if self.check2(TokenKind::plus, TokenKind::minus) {
             let kind: &[u8] = if self.check(TokenKind::plus) {
                 b"plus"
@@ -267,10 +267,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             self.advance(GrammarContext::Type);
         }
 
-        // C++ 4192-4315.
+        // C++ 4204-4327.
         if self.check_and_eat(TokenKind::l_square, GrammarContext::Type) {
             if self.check_and_eat(TokenKind::l_square, GrammarContext::Type) {
-                // Internal slot `[[id]]` (C++ 4193-4274).
+                // Internal slot `[[id]]` (C++ 4205-4286).
                 if let Some(variance) = variance {
                     let range = variance.metadata().range.get();
                     self.error_at(range, "Unexpected variance sigil");
@@ -283,11 +283,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 {
                     self.error_at(start_range, "invalid 'static' modifier");
                 }
-                // C++ 4204-4211.
+                // C++ 4216-4223.
                 if !self.check(TokenKind::identifier)
                     && !self.lexer.token().is_res_word()
                 {
-                    // C++ 4204-4211: errorExpected(identifier, "in internal
+                    // C++ 4216-4223: errorExpected(identifier, "in internal
                     // slot", "start of internal slot", start). `start` is
                     // real, so this routes through `need_at`.
                     self.need_at(
@@ -298,7 +298,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     );
                     return false;
                 }
-                // C++ 4212-4217.
+                // C++ 4224-4229.
                 let id_range = self.cur_range();
                 let id_node = Node::Identifier(Identifier::new(
                     NodeMetadata::new(self.dummy_range()),
@@ -313,7 +313,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 );
                 self.advance(GrammarContext::Type);
 
-                // C++ 4219-4232.
+                // C++ 4231-4244.
                 if !self.eat_at(
                     TokenKind::r_square,
                     GrammarContext::Type,
@@ -338,7 +338,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 let value;
 
                 if self.check2(TokenKind::less, TokenKind::l_paren) {
-                    // Type params and method (C++ 4238-4251).
+                    // Type params and method (C++ 4250-4263).
                     method = true;
                     let mut type_params: Option<&'gc Node<'gc>> = None;
                     if self.check(TokenKind::less) {
@@ -357,7 +357,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     };
                     value = methodish;
                 } else {
-                    // Standard type annotation (C++ 4252-4267).
+                    // Standard type annotation (C++ 4264-4279).
                     method = false;
                     optional = self.check_and_eat(
                         TokenKind::question,
@@ -381,7 +381,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     value = v;
                 }
 
-                // C++ 4269-4274.
+                // C++ 4281-4286.
                 let node = Node::ObjectTypeInternalSlot(
                     ObjectTypeInternalSlot::new(
                         NodeMetadata::new(self.dummy_range()),
@@ -399,7 +399,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 );
                 internal_slots.push(located);
             } else {
-                // Indexer or Mapped Type (C++ 4275-4313).
+                // Indexer or Mapped Type (C++ 4287-4325).
                 // We can have
                 // [ Identifier : TypeAnnotation ]
                 //   ^
@@ -434,7 +434,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     indexers.push(indexer);
                 }
 
-                // C++ 4307-4312.
+                // C++ 4319-4324.
                 if proto {
                     self.error_at(start_range, "invalid 'proto' modifier");
                 }
@@ -447,9 +447,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return true;
         }
 
-        // C++ 4319-4351.
+        // C++ 4331-4363.
         if self.check2(TokenKind::less, TokenKind::l_paren) {
-            // C++ 4320-4337: a consumed `static`/`proto` that is not allowed
+            // C++ 4332-4349: a consumed `static`/`proto` that is not allowed
             // as a modifier here was actually the method name.
             if (is_static && allow_static_property == AllowStaticProperty::No)
                 || (proto && allow_proto_property == AllowProtoProperty::No)
@@ -485,7 +485,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 properties.push(prop);
                 return true;
             }
-            // C++ 4338-4350.
+            // C++ 4350-4362.
             if let Some(variance) = variance {
                 let range = variance.metadata().range.get();
                 self.error_at(range, "call property must not specify variance");
@@ -501,7 +501,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return true;
         }
 
-        // C++ 4353-4369: a consumed `static`/`proto` directly followed by
+        // C++ 4365-4381: a consumed `static`/`proto` directly followed by
         // `:`/`?` was actually the property name.
         if (is_static || proto)
             && self.check2(TokenKind::colon, TokenKind::question)
@@ -536,12 +536,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return true;
         }
 
-        // C++ 4371-4374.
+        // C++ 4383-4386.
         let Some(key) = self.parse_property_name() else {
             return false;
         };
 
-        // C++ 4376-4391.
+        // C++ 4388-4403.
         if self.check2(TokenKind::less, TokenKind::l_paren) {
             if let Some(variance) = variance {
                 let range = variance.metadata().range.get();
@@ -562,7 +562,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return true;
         }
 
-        // C++ 4393-4405.
+        // C++ 4405-4417.
         if self.check2(TokenKind::colon, TokenKind::question) {
             if proto && allow_proto_property == AllowProtoProperty::No {
                 self.error_at(start_range, "invalid 'proto' modifier");
@@ -579,7 +579,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return true;
         }
 
-        // C++ 4407-4431: a `get`/`set` accessor — the parsed key was the
+        // C++ 4419-4443: a `get`/`set` accessor — the parsed key was the
         // accessor specifier and the real key follows.
         if let Node::Identifier(ident) = key {
             let (is_getter, is_setter) = {
@@ -616,7 +616,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // C++ 4433-4438: whatLoc is `start`.
+        // C++ 4445-4450: whatLoc is `start`.
         self.error_expected2(
             TokenKind::colon,
             TokenKind::question,
@@ -628,7 +628,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     /// Parse the `[?] : T` tail of a plain object-type property. Port of
-    /// `parseTypePropertyFlow` (flow.cpp:4442-4473).
+    /// `parseTypePropertyFlow` (flow.cpp:4454-4485).
     fn parse_type_property_flow(
         &mut self,
         start: SMLoc,
@@ -639,10 +639,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     ) -> Option<&'gc Node<'gc>> {
         debug_assert!(self.check2(TokenKind::colon, TokenKind::question));
 
-        // C++ 4449-4450.
+        // C++ 4461-4462.
         let optional =
             self.check_and_eat(TokenKind::question, GrammarContext::Type);
-        // C++ 4451-4457.
+        // C++ 4463-4469.
         if !self.eat_at(
             TokenKind::colon,
             GrammarContext::Type,
@@ -653,11 +653,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // C++ 4459-4462.
+        // C++ 4471-4474.
         let value = self
             .parse_type_annotation_flow(None, AllowAnonFunctionType::Yes)?;
 
-        // C++ 4464-4471.
+        // C++ 4476-4483.
         let node = Node::ObjectTypeProperty(ObjectTypeProperty::new(
             NodeMetadata::new(self.dummy_range()),
             key,
@@ -673,7 +673,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     /// Parse the `<T>(params): R` tail of an object-type method property.
-    /// Port of `parseMethodTypePropertyFlow` (flow.cpp:4475-4511).
+    /// Port of `parseMethodTypePropertyFlow` (flow.cpp:4487-4523).
     fn parse_method_type_property_flow(
         &mut self,
         start: SMLoc,
@@ -682,17 +682,17 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     ) -> Option<&'gc Node<'gc>> {
         debug_assert!(self.check2(TokenKind::less, TokenKind::l_paren));
 
-        // C++ 4480-4486.
+        // C++ 4492-4498.
         let mut type_params: Option<&'gc Node<'gc>> = None;
         if self.check(TokenKind::less) {
             type_params = Some(self.parse_type_params_flow()?);
         }
 
-        // C++ 4488-4491.
+        // C++ 4500-4503.
         let value =
             self.parse_methodish_type_annotation_flow(start, type_params)?;
 
-        // C++ 4493-4509.
+        // C++ 4505-4521.
         let node = Node::ObjectTypeProperty(ObjectTypeProperty::new(
             NodeMetadata::new(self.dummy_range()),
             key,
@@ -709,7 +709,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse the `(params): R` tail of an object-type accessor property,
     /// checking the accessor arity. Port of `parseGetOrSetTypePropertyFlow`
-    /// (flow.cpp:4513-4551).
+    /// (flow.cpp:4525-4563).
     fn parse_get_or_set_type_property_flow(
         &mut self,
         start: SMLoc,
@@ -717,14 +717,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         is_getter: bool,
         key: &'gc Node<'gc>,
     ) -> Option<&'gc Node<'gc>> {
-        // C++ 4517-4519.
+        // C++ 4529-4531.
         let value = self.parse_methodish_type_annotation_flow(start, None)?;
         let fta = value
             .as_function_type_annotation()
             .expect("methodish parser returns FunctionTypeAnnotation");
 
         // Check the number of parameters, but we can continue parsing anyway
-        // (C++ 4528-4537).
+        // (C++ 4540-4549).
         if is_getter {
             if !fta.params.is_empty() {
                 let range = value.metadata().range.get();
@@ -735,13 +735,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             self.error_at(range, "Setter must have 1 parameter");
         }
 
-        // C++ 4539-4543.
+        // C++ 4551-4555.
         if let Some(this_constraint) = fta.this {
             let range = this_constraint.metadata().range.get();
             self.error_at(range, "Accessors must not have 'this' annotations");
         }
 
-        // C++ 4545-4549.
+        // C++ 4557-4561.
         let kind: &[u8] = if is_getter { b"get" } else { b"set" };
         let node = Node::ObjectTypeProperty(ObjectTypeProperty::new(
             NodeMetadata::new(self.dummy_range()),
@@ -759,14 +759,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse the rest of a mapped type member `[K in T][+?/-?/?]: V`, with
     /// `left` the already-parsed key and `in` consumed. Port of
-    /// `parseTypeMappedTypePropertyFlow` (flow.cpp:4553-4621).
+    /// `parseTypeMappedTypePropertyFlow` (flow.cpp:4565-4633).
     fn parse_type_mapped_type_property_flow(
         &mut self,
         start: SMLoc,
         left: &'gc Node<'gc>,
         variance: Option<&'gc Node<'gc>>,
     ) -> Option<&'gc Node<'gc>> {
-        // C++ 4556-4564: the key reparses as a bare type parameter spanning
+        // C++ 4568-4576: the key reparses as a bare type parameter spanning
         // exactly `left`'s range.
         let id = self.reparse_type_annotation_as_id_flow(left)?;
         let left_range = left.metadata().range.get();
@@ -785,11 +785,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             key_tparam_node,
         );
 
-        // C++ 4566-4568.
+        // C++ 4578-4580.
         let source_type = self
             .parse_type_annotation_flow(None, AllowAnonFunctionType::Yes)?;
 
-        // C++ 4570-4576.
+        // C++ 4582-4588.
         if !self.eat_at(
             TokenKind::r_square,
             GrammarContext::Type,
@@ -800,7 +800,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // C++ 4578-4601: the optionality sigil. The C++ passes a null
+        // C++ 4590-4613: the optionality sigil. The C++ passes a null
         // UniqueString when there is no sigil; the dumper emits
         // `"optional": null` — INVALID_ATOM_BYTES is the Rust null
         // NodeString.
@@ -832,7 +832,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             optional = self.lexer.get_identifier(b"Optional");
         }
 
-        // C++ 4603-4609.
+        // C++ 4615-4621.
         if !self.eat_at(
             TokenKind::colon,
             GrammarContext::Type,
@@ -843,11 +843,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // C++ 4611-4613.
+        // C++ 4623-4625.
         let prop_type = self
             .parse_type_annotation_flow(None, AllowAnonFunctionType::Yes)?;
 
-        // C++ 4615-4619.
+        // C++ 4627-4631.
         let node = Node::ObjectTypeMappedTypeProperty(
             ObjectTypeMappedTypeProperty::new(
                 NodeMetadata::new(self.dummy_range()),
@@ -863,7 +863,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
     /// Parse the rest of an indexer member `[id: K]: V` / `[K]: V`, with
     /// `left` the already-parsed bracket contents (or its `id` part). Port of
-    /// `parseTypeIndexerPropertyFlow` (flow.cpp:4623-4670).
+    /// `parseTypeIndexerPropertyFlow` (flow.cpp:4635-4682).
     fn parse_type_indexer_property_flow(
         &mut self,
         start: SMLoc,
@@ -871,7 +871,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         variance: Option<&'gc Node<'gc>>,
         is_static: bool,
     ) -> Option<&'gc Node<'gc>> {
-        // C++ 4627-4641.
+        // C++ 4639-4653.
         let id: Option<&'gc Node<'gc>>;
         let key: &'gc Node<'gc>;
         if self.check_and_eat(TokenKind::colon, GrammarContext::Type) {
@@ -883,7 +883,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             key = left;
         }
 
-        // C++ 4643-4649.
+        // C++ 4655-4661.
         if !self.eat_at(
             TokenKind::r_square,
             GrammarContext::Type,
@@ -894,7 +894,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // C++ 4651-4657.
+        // C++ 4663-4669.
         if !self.eat_at(
             TokenKind::colon,
             GrammarContext::Type,
@@ -905,11 +905,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // C++ 4659-4662.
+        // C++ 4671-4674.
         let value = self
             .parse_type_annotation_flow(None, AllowAnonFunctionType::Yes)?;
 
-        // C++ 4664-4668.
+        // C++ 4676-4680.
         let node = Node::ObjectTypeIndexer(ObjectTypeIndexer::new(
             NodeMetadata::new(self.dummy_range()),
             id,
@@ -922,21 +922,21 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     /// Parse an object-type call property `<T>(params): R`. Port of
-    /// `parseTypeCallPropertyFlow` (flow.cpp:4672-4689).
+    /// `parseTypeCallPropertyFlow` (flow.cpp:4684-4701).
     fn parse_type_call_property_flow(
         &mut self,
         start: SMLoc,
         is_static: bool,
     ) -> Option<&'gc Node<'gc>> {
-        // C++ 4674-4680.
+        // C++ 4686-4692.
         let mut type_params: Option<&'gc Node<'gc>> = None;
         if self.check(TokenKind::less) {
             type_params = Some(self.parse_type_params_flow()?);
         }
-        // C++ 4681-4683.
+        // C++ 4693-4695.
         let value =
             self.parse_methodish_type_annotation_flow(start, type_params)?;
-        // C++ 4684-4687.
+        // C++ 4696-4699.
         let node = Node::ObjectTypeCallProperty(ObjectTypeCallProperty::new(
             NodeMetadata::new(self.dummy_range()),
             value,

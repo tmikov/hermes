@@ -43,7 +43,23 @@ fn render_flow_parse_errors(name: &str, src: &str) -> String {
     render_parse_errors_impl(name, src, true)
 }
 
+/// Like [`render_parse_errors`], but with Flow *match* syntax enabled
+/// (`-parse-flow -Xparse-flow-match`), which is the only way to reach the
+/// match-statement grammar at all.
+fn render_parse_errors_flow_match(name: &str, src: &str) -> String {
+    render_parse_errors_impl_full(name, src, true, true)
+}
+
 fn render_parse_errors_impl(name: &str, src: &str, flow: bool) -> String {
+    render_parse_errors_impl_full(name, src, flow, false)
+}
+
+fn render_parse_errors_impl_full(
+    name: &str,
+    src: &str,
+    flow: bool,
+    flow_match: bool,
+) -> String {
     let mut sm = SourceErrorManager::new();
     let opts = sm.output_options();
     sm.set_handler(Box::new(CollectingHandler::new()));
@@ -53,6 +69,9 @@ fn render_parse_errors_impl(name: &str, src: &str, flow: bool) -> String {
     if flow {
         ctx.set_parse_flow(true);
         ctx.set_parse_flow_ambiguous(true);
+    }
+    if flow_match {
+        ctx.set_parse_flow_match(true);
     }
     let gc = ctx.lock();
     {
@@ -263,5 +282,28 @@ fn optional_chain_tagged_template_note_underlines_the_whole_chain() {
          optchain.js:1:1: note: location of optional chain\n\
          a?.b.c`abc`;\n\
          ^~~~~~\n"
+    );
+}
+
+/// A match *statement* case body must be a block; only a match *expression*
+/// case body may be an arbitrary expression. `parse_block` asserts that the
+/// current token is `{`, so `match (x) { _ => 1 };` used to PANIC here
+/// rather than report — and C++ `hermesc` hit the equivalent
+/// `assert(check(TokenKind::l_brace))` in `parseBlock`
+/// (`JSParserImpl.cpp:978`). Both were fixed together; the C++ side is
+/// pinned by `test/Parser/flow/match/statement-non-block-body-error.js`.
+///
+/// The expected text below is byte-identical to that of
+/// `hermesc -parse-flow -Xparse-flow-match -dump-ast`, including the
+/// underline stretching back to the pattern (`need_at`'s `what_loc` is on
+/// the same line as the error token, so it renders as one combined range
+/// rather than a separate note).
+#[test]
+fn match_statement_non_block_case_body_reports_instead_of_panicking() {
+    assert_eq!(
+        render_parse_errors_flow_match("m.js", "match (x) { _ => 1 };\n"),
+        "m.js:1:18: error: '{' expected in 'match' statement case body\n\
+         match (x) { _ => 1 };\n            \
+         ~~~~~^\n"
     );
 }

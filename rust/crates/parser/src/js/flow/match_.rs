@@ -101,11 +101,11 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // tryParseMatchStatementFlow — flow.cpp:890-982
+    // tryParseMatchStatementFlow — flow.cpp:890-994
     // -----------------------------------------------------------------------
 
     /// Try to parse a `match` statement, with the cursor at `match`. Port of
-    /// `JSParserImpl::tryParseMatchStatementFlow` (flow.cpp:890-982).
+    /// `JSParserImpl::tryParseMatchStatementFlow` (flow.cpp:890-994).
     ///
     /// Tri-state, mirroring the C++ `Optional<Optional<Node*>>` idiom:
     /// - `None` — a hard error was reported; propagate with `?`.
@@ -160,7 +160,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         debug_assert!(self.check(TokenKind::l_brace));
         let lbrace_loc = self.advance(GrammarContext::AllowRegExp).start;
 
-        // flow.cpp:929-967.
+        // flow.cpp:929-979.
         let mut cases: Vec<&'gc Node<'gc>> = Vec::new();
         while !self.check(TokenKind::r_brace) {
             let case_start_loc = self.cur_start();
@@ -184,11 +184,26 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 return None;
             }
 
-            // flow.cpp:954-956: statement-case body is a block.
+            // flow.cpp:954-966: a match *statement* case body must be a
+            // block; only a match *expression* case body may be an arbitrary
+            // expression. `parse_block` asserts that the current token is
+            // '{', so without this check a non-block body such as
+            // `match (x) { _ => 1 };` panics instead of reporting an error.
+            // The C++ had the same defect and was fixed alongside this (see
+            // `test/Parser/flow/match/statement-non-block-body-error.js`).
+            if !self.need_at(
+                TokenKind::l_brace,
+                " in 'match' statement case body",
+                Some("location of pattern"),
+                case_start_loc,
+            ) {
+                return None;
+            }
+
             let body =
                 self.parse_block(param.get(PARAM_RETURN), GrammarContext::AllowRegExp, false)?;
 
-            // flow.cpp:958-962.
+            // flow.cpp:970-974.
             let node = Node::MatchStatementCase(MatchStatementCase::new(
                 NodeMetadata::new(self.dummy_range()),
                 pattern,
@@ -198,13 +213,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             let body_end = body.range().end;
             cases.push(self.set_location(case_start_loc, body_end, node));
 
-            // flow.cpp:964-966: the comma is optional between statement cases.
+            // flow.cpp:976-978: the comma is optional between statement cases.
             if self.check(TokenKind::comma) {
                 self.advance(GrammarContext::AllowRegExp);
             }
         }
 
-        // flow.cpp:969-976.
+        // flow.cpp:981-988.
         let end_loc = self.cur_range().end;
         if !self.eat_at(
             TokenKind::r_brace,
@@ -216,7 +231,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // flow.cpp:978-981.
+        // flow.cpp:990-993.
         let node = Node::MatchStatement(MatchStatement::new(
             NodeMetadata::new(self.dummy_range()),
             arg,
@@ -226,12 +241,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseMatchCallOrMatchExpressionFlow — flow.cpp:984-1019
+    // parseMatchCallOrMatchExpressionFlow — flow.cpp:996-1031
     // -----------------------------------------------------------------------
 
     /// Parse either a plain call to a function named `match`, or a `match`
     /// expression, with the cursor at `match`. Port of
-    /// `JSParserImpl::parseMatchCallOrMatchExpressionFlow` (flow.cpp:984-1019).
+    /// `JSParserImpl::parseMatchCallOrMatchExpressionFlow` (flow.cpp:996-1031).
     ///
     /// Unlike the statement form, this NEVER uses a `SavePoint`: it parses the
     /// argument list once and then either reinterprets it as a match argument
@@ -239,7 +254,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     pub(in crate::js) fn parse_match_call_or_match_expression_flow(
         &mut self,
     ) -> Option<&'gc Node<'gc>> {
-        // flow.cpp:985-990.
+        // flow.cpp:997-1002.
         let start_loc = self.cur_start();
         let match_ident_name = self.lexer.token().get_identifier();
         let ident_start = self.lexer.token().start_loc();
@@ -251,14 +266,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             false, // optional
         ));
         let match_ident_node = self.set_location(ident_start, ident_end, ident_node);
-        // flow.cpp:991.
+        // flow.cpp:1003.
         self.advance(GrammarContext::AllowRegExp);
 
-        // flow.cpp:993-998.
+        // flow.cpp:1005-1010.
         let paren_loc = self.cur_start();
         let (arg_list, end_loc) = self.parse_arguments()?;
 
-        // flow.cpp:1000-1004: a `{` (with no preceding newline) means this is a
+        // flow.cpp:1012-1016: a `{` (with no preceding newline) means this is a
         // match expression.
         if !self.lexer.is_new_line_before_current_token()
             && self.check(TokenKind::l_brace)
@@ -270,7 +285,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return self.parse_match_expression_flow(start_loc, arg);
         }
 
-        // flow.cpp:1006-1018: otherwise it's a real call; continue the LHS tail.
+        // flow.cpp:1018-1030: otherwise it's a real call; continue the LHS tail.
         let call_node = Node::CallExpression(CallExpression::new(
             NodeMetadata::new(self.dummy_range()),
             match_ident_node,
@@ -293,34 +308,34 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseMatchExpressionFlow — flow.cpp:1021-1079
+    // parseMatchExpressionFlow — flow.cpp:1033-1091
     // -----------------------------------------------------------------------
 
     /// Parse a `match` expression body, with the cursor at `{`. Port of
-    /// `JSParserImpl::parseMatchExpressionFlow` (flow.cpp:1021-1079).
+    /// `JSParserImpl::parseMatchExpressionFlow` (flow.cpp:1033-1091).
     fn parse_match_expression_flow(
         &mut self,
         start_loc: SMLoc,
         argument: &'gc Node<'gc>,
     ) -> Option<&'gc Node<'gc>> {
-        // flow.cpp:1024-1025.
+        // flow.cpp:1036-1037.
         debug_assert!(self.check(TokenKind::l_brace));
         let lbrace_loc = self.advance(GrammarContext::AllowRegExp).start;
 
-        // flow.cpp:1027-1064.
+        // flow.cpp:1039-1076.
         let mut cases: Vec<&'gc Node<'gc>> = Vec::new();
         while !self.check(TokenKind::r_brace) {
             let case_start_loc = self.cur_start();
 
             let pattern = self.parse_match_pattern_flow()?;
 
-            // flow.cpp:1036-1042.
+            // flow.cpp:1048-1054.
             let mut guard: Option<&'gc Node<'gc>> = None;
             if self.check(TokenKind::rw_if) {
                 guard = Some(self.parse_match_case_guard_flow()?);
             }
 
-            // flow.cpp:1044-1050.
+            // flow.cpp:1056-1062.
             if !self.eat_at(
                 TokenKind::equalgreater,
                 GrammarContext::AllowRegExp,
@@ -331,7 +346,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 return None;
             }
 
-            // flow.cpp:1052-1054: expression-case body is an assignment
+            // flow.cpp:1064-1066: expression-case body is an assignment
             // expression (with the header defaults Yes/Yes/None).
             let body = self.parse_assignment_expression(
                 PARAM_IN,
@@ -341,7 +356,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 None,
             )?;
 
-            // flow.cpp:1056-1060.
+            // flow.cpp:1068-1072.
             let node = Node::MatchExpressionCase(MatchExpressionCase::new(
                 NodeMetadata::new(self.dummy_range()),
                 pattern,
@@ -351,14 +366,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             let body_end = body.range().end;
             cases.push(self.set_location(case_start_loc, body_end, node));
 
-            // flow.cpp:1062-1063: the comma is required between expression cases
+            // flow.cpp:1074-1075: the comma is required between expression cases
             // (trailing comma allowed); its absence ends the loop.
             if !self.check_and_eat(TokenKind::comma, GrammarContext::AllowRegExp) {
                 break;
             }
         }
 
-        // flow.cpp:1066-1073.
+        // flow.cpp:1078-1085.
         let end_loc = self.cur_range().end;
         if !self.eat_at(
             TokenKind::r_brace,
@@ -370,7 +385,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return None;
         }
 
-        // flow.cpp:1075-1078.
+        // flow.cpp:1087-1090.
         let node = Node::MatchExpression(MatchExpression::new(
             NodeMetadata::new(self.dummy_range()),
             argument,
@@ -380,20 +395,20 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseMatchCaseGuardFlow — flow.cpp:1081-1103
+    // parseMatchCaseGuardFlow — flow.cpp:1093-1115
     // -----------------------------------------------------------------------
 
     /// Parse a `match` case guard `if ( <expr> )`, with the cursor at `if`.
-    /// Port of `JSParserImpl::parseMatchCaseGuardFlow` (flow.cpp:1081-1103).
+    /// Port of `JSParserImpl::parseMatchCaseGuardFlow` (flow.cpp:1093-1115).
     /// The guard keyword is the reserved `if`, NOT a contextual `when`.
     fn parse_match_case_guard_flow(&mut self) -> Option<&'gc Node<'gc>> {
-        // flow.cpp:1082-1083.
+        // flow.cpp:1094-1095.
         debug_assert!(self.check(TokenKind::rw_if));
         let start_loc = self.advance(GrammarContext::AllowRegExp).start;
-        // flow.cpp:1084: captured before the `(` is eaten, so it names the
+        // flow.cpp:1096: captured before the `(` is eaten, so it names the
         // guard's opening paren.
         let cond_loc = self.cur_start();
-        // flow.cpp:1085-1091.
+        // flow.cpp:1097-1103.
         if !self.eat_at(
             TokenKind::l_paren,
             GrammarContext::AllowRegExp,
@@ -403,9 +418,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         ) {
             return None;
         }
-        // flow.cpp:1092-1094.
+        // flow.cpp:1104-1106.
         let guard = self.parse_expression(PARAM_IN, CoverTypedParameters::No)?;
-        // flow.cpp:1095-1101.
+        // flow.cpp:1107-1113.
         if !self.eat_at(
             TokenKind::r_paren,
             GrammarContext::AllowRegExp,
@@ -419,22 +434,22 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseMatchPatternFlow — flow.cpp:1105-1148
+    // parseMatchPatternFlow — flow.cpp:1117-1160
     // -----------------------------------------------------------------------
 
     /// Parse a full match pattern (with leading `|`, or-patterns, and trailing
     /// `as` binding). Port of `JSParserImpl::parseMatchPatternFlow`
-    /// (flow.cpp:1105-1148).
+    /// (flow.cpp:1117-1160).
     fn parse_match_pattern_flow(&mut self) -> Option<&'gc Node<'gc>> {
-        // flow.cpp:1106-1107: optional leading `|`.
+        // flow.cpp:1118-1119: optional leading `|`.
         let start_loc = self.cur_start();
         self.check_and_eat(TokenKind::pipe, GrammarContext::AllowRegExp);
 
-        // flow.cpp:1108-1111.
+        // flow.cpp:1120-1123.
         let first_pattern = self.parse_match_subpattern_flow()?;
         let mut pattern = first_pattern;
 
-        // flow.cpp:1112-1125: or-pattern.
+        // flow.cpp:1124-1137: or-pattern.
         if self.check(TokenKind::pipe) {
             let mut patterns: Vec<&'gc Node<'gc>> = vec![first_pattern];
             while self.check_and_eat(TokenKind::pipe, GrammarContext::AllowRegExp) {
@@ -448,14 +463,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             pattern = self.set_location(start_loc, self.lexer.prev_token_end(), node);
         }
 
-        // flow.cpp:1126-1146: trailing `as` binding. C++ `checkAndEat(asIdent_)`
+        // flow.cpp:1138-1158: trailing `as` binding. C++ `checkAndEat(asIdent_)`
         // — `as` is a contextual identifier (not a token), so check by name and
         // advance manually (the default `checkAndEat` grammar context is
         // AllowRegExp).
         if self.check_name(b"as") {
             self.advance(GrammarContext::AllowRegExp);
             let target: &'gc Node<'gc>;
-            // flow.cpp:1128-1132: `as const`/`as var`/`as let` binding target.
+            // flow.cpp:1140-1144: `as const`/`as var`/`as let` binding target.
             // checkN(rw_const, rw_var, letIdent_) is MIXED — there is no
             // rw_let.
             if self.check(TokenKind::rw_const)
@@ -466,10 +481,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             } else if self.check(TokenKind::identifier)
                 || self.lexer.token().is_res_word()
             {
-                // flow.cpp:1133-1137.
+                // flow.cpp:1145-1149.
                 target = self.parse_match_binding_identifier_flow()?;
             } else {
-                // flow.cpp:1138-1141.
+                // flow.cpp:1150-1153.
                 self.error_cur("expected identifier or binding pattern");
                 return None;
             }
@@ -484,14 +499,14 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseMatchSubpatternFlow — flow.cpp:1150-1389
+    // parseMatchSubpatternFlow — flow.cpp:1162-1401
     // -----------------------------------------------------------------------
 
     /// Parse a single match subpattern (the big switch on token kind). Port of
-    /// `JSParserImpl::parseMatchSubpatternFlow` (flow.cpp:1150-1389).
+    /// `JSParserImpl::parseMatchSubpatternFlow` (flow.cpp:1162-1401).
     fn parse_match_subpattern_flow(&mut self) -> Option<&'gc Node<'gc>> {
         match self.cur_kind() {
-            // flow.cpp:1152-1159: null literal.
+            // flow.cpp:1164-1171: null literal.
             TokenKind::rw_null => {
                 let lit = self.make_match_null_literal();
                 let pat = self.wrap_match_literal_pattern(lit);
@@ -499,7 +514,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 Some(pat)
             }
 
-            // flow.cpp:1161-1172: boolean literal.
+            // flow.cpp:1173-1184: boolean literal.
             TokenKind::rw_true | TokenKind::rw_false => {
                 let value = self.cur_kind() == TokenKind::rw_true;
                 let tok_start = self.lexer.token().start_loc();
@@ -514,7 +529,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 Some(pat)
             }
 
-            // flow.cpp:1174-1183: numeric literal.
+            // flow.cpp:1186-1195: numeric literal.
             TokenKind::numeric_literal => {
                 let lit = self.make_match_numeric_literal();
                 let pat = self.wrap_match_literal_pattern(lit);
@@ -522,7 +537,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 Some(pat)
             }
 
-            // flow.cpp:1185-1194: bigint literal.
+            // flow.cpp:1197-1206: bigint literal.
             TokenKind::bigint_literal => {
                 let lit = self.make_match_bigint_literal();
                 let pat = self.wrap_match_literal_pattern(lit);
@@ -530,7 +545,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 Some(pat)
             }
 
-            // flow.cpp:1196-1205: string literal.
+            // flow.cpp:1208-1217: string literal.
             TokenKind::string_literal => {
                 let lit = self.make_match_string_literal();
                 let pat = self.wrap_match_literal_pattern(lit);
@@ -538,10 +553,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 Some(pat)
             }
 
-            // flow.cpp:1207-1317: identifier.
+            // flow.cpp:1219-1329: identifier.
             TokenKind::identifier => self.parse_match_identifier_subpattern_flow(),
 
-            // flow.cpp:1319-1352: unary `+`/`-` pattern.
+            // flow.cpp:1331-1364: unary `+`/`-` pattern.
             TokenKind::plus | TokenKind::minus => {
                 let op_bytes = match self.cur_kind() {
                     TokenKind::plus => b"+".as_slice(),
@@ -551,19 +566,19 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 let start_loc = self.advance(GrammarContext::AllowRegExp).start;
 
                 let argument = match self.cur_kind() {
-                    // flow.cpp:1326-1333.
+                    // flow.cpp:1338-1345.
                     TokenKind::numeric_literal => {
                         let lit = self.make_match_numeric_literal();
                         self.advance(GrammarContext::AllowDiv);
                         lit
                     }
-                    // flow.cpp:1335-1342.
+                    // flow.cpp:1347-1354.
                     TokenKind::bigint_literal => {
                         let lit = self.make_match_bigint_literal();
                         self.advance(GrammarContext::AllowDiv);
                         lit
                     }
-                    // flow.cpp:1344-1346. Point location, NOT the current
+                    // flow.cpp:1356-1358. Point location, NOT the current
                     // token's range: C++ calls `error(tok_->getStartLoc(),
                     // ...)` — the `error(SMLoc, Twine)` overload.
                     _ => {
@@ -582,16 +597,16 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 Some(self.set_location(start_loc, self.lexer.prev_token_end(), node))
             }
 
-            // flow.cpp:1354-1360: `const`/`var` binding.
+            // flow.cpp:1366-1372: `const`/`var` binding.
             TokenKind::rw_const | TokenKind::rw_var => {
                 self.parse_match_binding_pattern_flow()
             }
 
-            // flow.cpp:1362-1377: group pattern (no wrapper node).
+            // flow.cpp:1374-1389: group pattern (no wrapper node).
             TokenKind::l_paren => {
                 let start_loc = self.advance(GrammarContext::AllowRegExp).start;
                 let pattern = self.parse_match_pattern_flow()?;
-                // flow.cpp:1368-1374.
+                // flow.cpp:1380-1386.
                 if !self.eat_at(
                     TokenKind::r_paren,
                     GrammarContext::AllowDiv,
@@ -604,13 +619,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 Some(pattern)
             }
 
-            // flow.cpp:1379-1380.
+            // flow.cpp:1391-1392.
             TokenKind::l_brace => self.parse_match_object_pattern_flow(),
 
-            // flow.cpp:1382-1383.
+            // flow.cpp:1394-1395.
             TokenKind::l_square => self.parse_match_array_pattern_flow(),
 
-            // flow.cpp:1385-1387. Point location, NOT the current token's
+            // flow.cpp:1397-1399. Point location, NOT the current token's
             // range: C++ calls `error(tok_->getStartLoc(), ...)` — the
             // `error(SMLoc, Twine)` overload.
             _ => {
@@ -620,13 +635,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
     }
 
-    /// The `identifier` arm of `parseMatchSubpatternFlow` (flow.cpp:1207-1317):
+    /// The `identifier` arm of `parseMatchSubpatternFlow` (flow.cpp:1219-1329):
     /// wildcard `_`, `let` binding, or an identifier pattern optionally followed
     /// by a `.`/`[lit]` member chain and an instance `{ … }`.
     fn parse_match_identifier_subpattern_flow(
         &mut self,
     ) -> Option<&'gc Node<'gc>> {
-        // flow.cpp:1208-1213: wildcard `_`.
+        // flow.cpp:1220-1225: wildcard `_`.
         if self.check_name(b"_") {
             let tok_start = self.lexer.token().start_loc();
             let tok_end = self.lexer.token().end_loc();
@@ -637,12 +652,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             self.advance(GrammarContext::AllowDiv);
             return Some(pat);
         }
-        // flow.cpp:1214-1219: `let` binding.
+        // flow.cpp:1226-1231: `let` binding.
         if self.check_name(b"let") {
             return self.parse_match_binding_pattern_flow();
         }
 
-        // flow.cpp:1220-1228: identifier pattern.
+        // flow.cpp:1232-1240: identifier pattern.
         let start_loc = self.cur_start();
         let ident = self.make_match_current_identifier();
         let pat_node = Node::MatchIdentifierPattern(MatchIdentifierPattern::new(
@@ -654,10 +669,10 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let mut pat = self.set_location(tok_start, tok_end, pat_node);
         self.advance(GrammarContext::AllowDiv);
 
-        // flow.cpp:1230-1302: `.`/`[lit]` member chain.
+        // flow.cpp:1242-1314: `.`/`[lit]` member chain.
         while self.check2(TokenKind::period, TokenKind::l_square) {
             if self.check_and_eat(TokenKind::period, GrammarContext::AllowRegExp) {
-                // flow.cpp:1232-1236: need(identifier, "in match member
+                // flow.cpp:1244-1248: need(identifier, "in match member
                 // pattern", nullptr, {}) — a genuine no-hint call site (no
                 // `what`/`whatLoc` at all), so the plain 2-arg `need` form is
                 // correct here.
@@ -673,7 +688,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 ));
                 pat = self.set_location(start_loc, self.lexer.prev_token_end(), node);
             } else {
-                // flow.cpp:1248-1301: computed member `[lit]`.
+                // flow.cpp:1260-1313: computed member `[lit]`.
                 let computed_start_loc =
                     self.advance(GrammarContext::AllowRegExp).start; // Eat `[`
                 let property = match self.cur_kind() {
@@ -693,7 +708,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                         lit
                     }
                     _ => {
-                        // flow.cpp:1279-1288: whatLoc is `computedStartLoc`
+                        // flow.cpp:1291-1300: whatLoc is `computedStartLoc`
                         // (the `[` that opened the computed property).
                         self.error_expected3(
                             TokenKind::numeric_literal,
@@ -706,7 +721,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                         return None;
                     }
                 };
-                // flow.cpp:1290-1296.
+                // flow.cpp:1302-1308.
                 if !self.eat_at(
                     TokenKind::r_square,
                     GrammarContext::AllowDiv,
@@ -725,7 +740,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
         }
 
-        // flow.cpp:1304-1314: instance pattern with object fields.
+        // flow.cpp:1316-1326: instance pattern with object fields.
         if self.check(TokenKind::l_brace) {
             let props = self.parse_match_instance_object_pattern_flow()?;
             let node = Node::MatchInstancePattern(MatchInstancePattern::new(
@@ -736,18 +751,18 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return Some(self.set_location(start_loc, self.lexer.prev_token_end(), node));
         }
 
-        // flow.cpp:1316.
+        // flow.cpp:1328.
         Some(pat)
     }
 
     // -----------------------------------------------------------------------
-    // parseMatchBindingIdentifierFlow — flow.cpp:1391-1400
+    // parseMatchBindingIdentifierFlow — flow.cpp:1403-1412
     // -----------------------------------------------------------------------
 
     /// Parse a binding identifier inside a match pattern. Port of
-    /// `JSParserImpl::parseMatchBindingIdentifierFlow` (flow.cpp:1391-1400).
+    /// `JSParserImpl::parseMatchBindingIdentifierFlow` (flow.cpp:1403-1412).
     fn parse_match_binding_identifier_flow(&mut self) -> Option<&'gc Node<'gc>> {
-        // flow.cpp:1393-1396.
+        // flow.cpp:1405-1408.
         let id = self.lexer.token().get_res_word_or_identifier();
         let kind = self.cur_kind();
         let range = self.cur_range();
@@ -757,7 +772,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         if !self.validate_binding_identifier(range, &id_bytes, kind) {
             return None;
         }
-        // flow.cpp:1397-1399. NB: C++ builds the IdentifierNode with
+        // flow.cpp:1409-1411. NB: C++ builds the IdentifierNode with
         // setLocation(tok_, tok_, ...) AFTER advancing, so the location is the
         // token that FOLLOWS the identifier (a faithful quirk we preserve).
         self.advance(GrammarContext::AllowRegExp);
@@ -773,22 +788,22 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseMatchBindingPatternFlow — flow.cpp:1402-1423
+    // parseMatchBindingPatternFlow — flow.cpp:1414-1435
     // -----------------------------------------------------------------------
 
     /// Parse a `const`/`var`/`let` binding pattern in a match pattern. Port of
-    /// `JSParserImpl::parseMatchBindingPatternFlow` (flow.cpp:1402-1423).
+    /// `JSParserImpl::parseMatchBindingPatternFlow` (flow.cpp:1414-1435).
     fn parse_match_binding_pattern_flow(&mut self) -> Option<&'gc Node<'gc>> {
-        // flow.cpp:1404: checkN(rw_const, rw_var, letIdent_) is MIXED.
+        // flow.cpp:1416: checkN(rw_const, rw_var, letIdent_) is MIXED.
         debug_assert!(
             self.check(TokenKind::rw_const)
                 || self.check(TokenKind::rw_var)
                 || self.check_name(b"let")
         );
-        // flow.cpp:1405-1406.
+        // flow.cpp:1417-1418.
         let kind = self.lexer.token().get_res_word_or_identifier();
         let start_loc = self.advance(GrammarContext::AllowRegExp).start;
-        // flow.cpp:1407-1414: errorExpected(identifier, "in match binding
+        // flow.cpp:1419-1426: errorExpected(identifier, "in match binding
         // pattern", "start of binding pattern", startLoc), then bail out.
         // `startLoc` is real.
         //
@@ -809,9 +824,9 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             );
             return None;
         }
-        // flow.cpp:1415-1417.
+        // flow.cpp:1427-1429.
         let ident = self.parse_match_binding_identifier_flow()?;
-        // flow.cpp:1418-1422.
+        // flow.cpp:1430-1434.
         let node = Node::MatchBindingPattern(MatchBindingPattern::new(
             NodeMetadata::new(self.dummy_range()),
             ident,
@@ -821,18 +836,18 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseMatchRestPatternFlow — flow.cpp:1425-1439
+    // parseMatchRestPatternFlow — flow.cpp:1437-1451
     // -----------------------------------------------------------------------
 
     /// Parse a match rest pattern `... [const|var|let id]`. Port of
-    /// `JSParserImpl::parseMatchRestPatternFlow` (flow.cpp:1425-1439). The
+    /// `JSParserImpl::parseMatchRestPatternFlow` (flow.cpp:1437-1451). The
     /// binding is OPTIONAL; bare `...rest` (no binding keyword) is a parse error
     /// downstream — faithful to hermesc.
     fn parse_match_rest_pattern_flow(&mut self) -> Option<&'gc Node<'gc>> {
-        // flow.cpp:1426-1427.
+        // flow.cpp:1438-1439.
         debug_assert!(self.check(TokenKind::dotdotdot));
         let rest_start_loc = self.advance(GrammarContext::AllowRegExp).start;
-        // flow.cpp:1428-1434.
+        // flow.cpp:1440-1446.
         let mut arg: Option<&'gc Node<'gc>> = None;
         if self.check(TokenKind::rw_const)
             || self.check(TokenKind::rw_var)
@@ -840,7 +855,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         {
             arg = Some(self.parse_match_binding_pattern_flow()?);
         }
-        // flow.cpp:1435-1438.
+        // flow.cpp:1447-1450.
         let node = Node::MatchRestPattern(MatchRestPattern::new(
             NodeMetadata::new(self.dummy_range()),
             arg,
@@ -849,13 +864,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseMatchObjectPatternPropertiesFlow — flow.cpp:1441-1548
+    // parseMatchObjectPatternPropertiesFlow — flow.cpp:1453-1560
     // -----------------------------------------------------------------------
 
     /// Parse the body (properties + optional rest + closing `}`) shared by
     /// object and instance-object match patterns. Port of
     /// `JSParserImpl::parseMatchObjectPatternPropertiesFlow`
-    /// (flow.cpp:1441-1548). Returns the properties and the optional rest on
+    /// (flow.cpp:1453-1560). Returns the properties and the optional rest on
     /// success.
     fn parse_match_object_pattern_properties_flow(
         &mut self,
@@ -864,22 +879,22 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let mut properties: Vec<&'gc Node<'gc>> = Vec::new();
         let mut rest: Option<&'gc Node<'gc>> = None;
 
-        // flow.cpp:1445-1538.
+        // flow.cpp:1457-1550.
         while !self.check(TokenKind::r_brace) {
-            // flow.cpp:1446-1453: rest.
+            // flow.cpp:1458-1465: rest.
             if self.check(TokenKind::dotdotdot) {
                 rest = Some(self.parse_match_rest_pattern_flow()?);
                 break;
             }
 
             let prop_start_loc = self.cur_start();
-            // flow.cpp:1457-1467: shorthand `const x` ≡ `x: const x`.
+            // flow.cpp:1469-1479: shorthand `const x` ≡ `x: const x`.
             let prop = if self.check(TokenKind::rw_const)
                 || self.check(TokenKind::rw_var)
                 || self.check_name(b"let")
             {
                 let binding_pattern = self.parse_match_binding_pattern_flow()?;
-                // flow.cpp:1463-1467: key is bindingPattern->_id.
+                // flow.cpp:1475-1479: key is bindingPattern->_id.
                 let key = match binding_pattern {
                     Node::MatchBindingPattern(bp) => bp.id,
                     _ => unreachable!("parse_match_binding_pattern_flow returns MatchBindingPattern"),
@@ -894,35 +909,35 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 );
                 self.set_location(prop_start_loc, self.lexer.prev_token_end(), node)
             } else {
-                // flow.cpp:1468-1533: normal property `key: pattern`.
+                // flow.cpp:1480-1545: normal property `key: pattern`.
                 let key = match self.cur_kind() {
-                    // flow.cpp:1473-1480.
+                    // flow.cpp:1485-1492.
                     TokenKind::identifier => {
                         let k = self.make_match_current_identifier();
                         self.advance(GrammarContext::AllowDiv);
                         k
                     }
-                    // flow.cpp:1482-1490.
+                    // flow.cpp:1494-1502.
                     TokenKind::string_literal => {
                         let k = self.make_match_string_literal();
                         self.advance(GrammarContext::AllowDiv);
                         k
                     }
-                    // flow.cpp:1491-1498.
+                    // flow.cpp:1503-1510.
                     TokenKind::numeric_literal => {
                         let k = self.make_match_numeric_literal();
                         self.advance(GrammarContext::AllowDiv);
                         k
                     }
-                    // flow.cpp:1500-1508.
+                    // flow.cpp:1512-1520.
                     TokenKind::bigint_literal => {
                         let k = self.make_match_bigint_literal();
                         self.advance(GrammarContext::AllowDiv);
                         k
                     }
-                    // flow.cpp:1509-1519.
+                    // flow.cpp:1521-1531.
                     _ => {
-                        // flow.cpp:1509-1519: whatLoc is `propStartLoc`.
+                        // flow.cpp:1521-1531: whatLoc is `propStartLoc`.
                         self.error_expected4(
                             TokenKind::identifier,
                             TokenKind::string_literal,
@@ -935,7 +950,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                         return None;
                     }
                 };
-                // flow.cpp:1521-1527.
+                // flow.cpp:1533-1539.
                 if !self.eat_at(
                     TokenKind::colon,
                     GrammarContext::AllowRegExp,
@@ -945,7 +960,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 ) {
                     return None;
                 }
-                // flow.cpp:1528-1535. The `?` is upstream `ca6de21ce`
+                // flow.cpp:1540-1547. The `?` is upstream `ca6de21ce`
                 // ("Check the parsed value of a match object property"):
                 // C++ used to call `.getValue()` on this `Optional` without
                 // checking it, so a property value that failed to parse
@@ -969,12 +984,12 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 self.set_location(prop_start_loc, self.lexer.prev_token_end(), node)
             };
             properties.push(prop);
-            // flow.cpp:1536-1537.
+            // flow.cpp:1548-1549.
             if !self.check_and_eat(TokenKind::comma, GrammarContext::AllowRegExp) {
                 break;
             }
         }
-        // flow.cpp:1539-1545.
+        // flow.cpp:1551-1557.
         if !self.eat_at(
             TokenKind::r_brace,
             GrammarContext::AllowDiv,
@@ -988,19 +1003,19 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseMatchObjectPatternFlow — flow.cpp:1550-1563
+    // parseMatchObjectPatternFlow — flow.cpp:1562-1575
     // -----------------------------------------------------------------------
 
     /// Parse a match object pattern `{ … }`, with the cursor at `{`. Port of
-    /// `JSParserImpl::parseMatchObjectPatternFlow` (flow.cpp:1550-1563).
+    /// `JSParserImpl::parseMatchObjectPatternFlow` (flow.cpp:1562-1575).
     fn parse_match_object_pattern_flow(&mut self) -> Option<&'gc Node<'gc>> {
-        // flow.cpp:1551-1552.
+        // flow.cpp:1563-1564.
         debug_assert!(self.check(TokenKind::l_brace));
         let start_loc = self.advance(GrammarContext::AllowRegExp).start;
-        // flow.cpp:1556-1557.
+        // flow.cpp:1568-1569.
         let (properties, rest) =
             self.parse_match_object_pattern_properties_flow(start_loc)?;
-        // flow.cpp:1559-1563.
+        // flow.cpp:1571-1575.
         let node = Node::MatchObjectPattern(MatchObjectPattern::new(
             NodeMetadata::new(self.dummy_range()),
             NodeList::from_iter(self.gc, properties),
@@ -1010,21 +1025,21 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseMatchInstanceObjectPatternFlow — flow.cpp:1565-1578
+    // parseMatchInstanceObjectPatternFlow — flow.cpp:1577-1590
     // -----------------------------------------------------------------------
 
     /// Parse the `{ … }` fields of an instance match pattern. Port of
-    /// `JSParserImpl::parseMatchInstanceObjectPatternFlow` (flow.cpp:1565-1578).
+    /// `JSParserImpl::parseMatchInstanceObjectPatternFlow` (flow.cpp:1577-1590).
     fn parse_match_instance_object_pattern_flow(
         &mut self,
     ) -> Option<&'gc Node<'gc>> {
-        // flow.cpp:1567-1568.
+        // flow.cpp:1579-1580.
         debug_assert!(self.check(TokenKind::l_brace));
         let start_loc = self.advance(GrammarContext::AllowRegExp).start;
-        // flow.cpp:1572-1573.
+        // flow.cpp:1584-1585.
         let (properties, rest) =
             self.parse_match_object_pattern_properties_flow(start_loc)?;
-        // flow.cpp:1575-1579.
+        // flow.cpp:1587-1591.
         let node = Node::MatchInstanceObjectPattern(
             MatchInstanceObjectPattern::new(
                 NodeMetadata::new(self.dummy_range()),
@@ -1036,34 +1051,34 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     }
 
     // -----------------------------------------------------------------------
-    // parseMatchArrayPatternFlow — flow.cpp:1580-1617
+    // parseMatchArrayPatternFlow — flow.cpp:1592-1629
     // -----------------------------------------------------------------------
 
     /// Parse a match array pattern `[ … ]`, with the cursor at `[`. Port of
-    /// `JSParserImpl::parseMatchArrayPatternFlow` (flow.cpp:1580-1617).
+    /// `JSParserImpl::parseMatchArrayPatternFlow` (flow.cpp:1592-1629).
     fn parse_match_array_pattern_flow(&mut self) -> Option<&'gc Node<'gc>> {
-        // flow.cpp:1583-1584.
+        // flow.cpp:1595-1596.
         debug_assert!(self.check(TokenKind::l_square));
         let start_loc = self.advance(GrammarContext::AllowRegExp).start;
         let mut elements: Vec<&'gc Node<'gc>> = Vec::new();
         let mut rest: Option<&'gc Node<'gc>> = None;
 
-        // flow.cpp:1588-1604.
+        // flow.cpp:1600-1616.
         while !self.check(TokenKind::r_square) {
-            // flow.cpp:1589-1596: rest.
+            // flow.cpp:1601-1608: rest.
             if self.check(TokenKind::dotdotdot) {
                 rest = Some(self.parse_match_rest_pattern_flow()?);
                 break;
             }
-            // flow.cpp:1598-1601.
+            // flow.cpp:1610-1613.
             let pattern = self.parse_match_pattern_flow()?;
             elements.push(pattern);
-            // flow.cpp:1602-1603.
+            // flow.cpp:1614-1615.
             if !self.check_and_eat(TokenKind::comma, GrammarContext::AllowRegExp) {
                 break;
             }
         }
-        // flow.cpp:1605-1611.
+        // flow.cpp:1617-1623.
         if !self.eat_at(
             TokenKind::r_square,
             GrammarContext::AllowDiv,
@@ -1073,7 +1088,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         ) {
             return None;
         }
-        // flow.cpp:1613-1616.
+        // flow.cpp:1625-1628.
         let node = Node::MatchArrayPattern(MatchArrayPattern::new(
             NodeMetadata::new(self.dummy_range()),
             NodeList::from_iter(self.gc, elements),
