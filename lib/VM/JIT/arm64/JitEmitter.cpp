@@ -4603,8 +4603,24 @@ void Emitter::throwIfThisInitialized(FR frInput) {
 
   asmjit::Label slowPathLab = newSlowPathLabel();
 
-  // TODO: Add back the sync/free calls inside try.
+  // We have to sync registers when the throw is inside a try region
+  // because we could read from the FRs again in this function.
   // Outside a try it's not observable behavior.
+  // Note that only the sync is needed, not a free. A free is required when a
+  // call is emitted on a path that continues in this basic block, since temps
+  // are caller-saved. Here the only call is the non-returning throw in the
+  // out-of-line slow path; the fall-through path calls nothing, and the catch
+  // handler begins a new basic block, which re-normalizes temp state anyway.
+  // Freeing would only force needless reloads for the rest of the block.
+  //
+  // Cf. fastArrayLoad's #else (non-compressed-pointer) path, which syncs
+  // without freeing for the same reason. Its
+  // HERMESVM_COMPRESSED_POINTERS/HERMESVM_BOXED_DOUBLES path is not
+  // comparable: it emits an unconditional runtime call, so it must sync and
+  // free regardless of isInTry(). Cf. also throwInst, which syncs only under
+  // isInTry() but frees unconditionally, because it emits its call inline.
+  if (isInTry())
+    syncAllFRTempExcept({});
   HWReg hwInput = getOrAllocFRInGpX(frInput, true);
   HWReg hwTemp = allocTempGpX();
   freeReg(hwTemp);
