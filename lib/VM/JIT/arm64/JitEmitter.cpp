@@ -3307,9 +3307,10 @@ void Emitter::newObjectWithBuffer(
       }
     }
 
-    /// Store a simple SmallHermesValue into the current offset in the object.
-    void storeVal(SmallHermesValue val) {
-      em.loadSmallHermesValueInGpX(xTmp, val, "object literal buffer val");
+    /// Store whatever is already in xTmp into the current offset in the
+    /// object, falling back to a register offset when the displacement is too
+    /// large to encode.
+    void storeTmpAtCurrentOffset() {
       asmjit::Error err;
       EXPECT_ERROR(
           asmjit::kErrorInvalidDisplacement,
@@ -3318,6 +3319,12 @@ void Emitter::newObjectWithBuffer(
         em.a.mov(xTmp2, currentOffset());
         emit_store_shv(em.a, xTmp, a64::Mem(xObj, xTmp2));
       }
+    }
+
+    /// Store a simple SmallHermesValue into the current offset in the object.
+    void storeVal(SmallHermesValue val) {
+      em.loadSmallHermesValueInGpX(xTmp, val, "object literal buffer val");
+      storeTmpAtCurrentOffset();
     }
 
     /// Advance internal state to the next slot, updating the counter and any
@@ -3360,8 +3367,9 @@ void Emitter::newObjectWithBuffer(
       // We know it's not null because we allocated it at JIT compile time.
       emit_sh_cp_encode_non_null(em.a, xTmp);
       emit_shv_string(em.a, xTmp);
-      // Store to storage.
-      emit_store_shv(em.a, xTmp, a64::Mem(xObj, currentOffset()));
+      // Store to storage, falling back to a register offset when the
+      // displacement does not encode, as storeVal does.
+      storeTmpAtCurrentOffset();
 
       advance();
     }
