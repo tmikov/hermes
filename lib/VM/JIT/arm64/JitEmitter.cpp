@@ -612,6 +612,30 @@ void emit_cmp_imm32(
   }
 }
 
+/// Add an unsigned 24-bit immediate to a register, in place.
+/// ADD's immediate is 12 bits, optionally shifted left by 12, so a value that
+/// is neither small enough nor a clean multiple of 4096 needs two
+/// instructions. Splitting it that way avoids needing a scratch register,
+/// which matters at the call-setup sites where every argument register is
+/// already spoken for.
+void emit_add_imm_u24(a64::Assembler &a, const a64::GpX &xReg, uint32_t imm32) {
+  assert(
+      imm32 <= 0xFFFFFF &&
+      "immediate must fit in 24 bits; ADD has no shift-24 form");
+  if (a64::Utils::isAddSubImm(imm32)) {
+    a.add(xReg, xReg, imm32);
+    return;
+  }
+  uint32_t hi = imm32 & ~UINT32_C(0xFFF);
+  uint32_t lo = imm32 & UINT32_C(0xFFF);
+  assert(
+      a64::Utils::isAddSubImm(hi) &&
+      "high part should encode as a shifted immediate");
+  a.add(xReg, xReg, hi);
+  if (lo)
+    a.add(xReg, xReg, lo);
+}
+
 /// Load the slot16 from a cache entry.
 /// \param xResReg The register to load the slot16 into.
 /// \param xPropCacheReg The register containing the pointer to the start of
@@ -4313,7 +4337,7 @@ void Emitter::createThis(
   } else {
     a.ldr(a64::x3, a64::Mem(roDataLabel_, roOfsReadPropertyCachePtr_));
     if (cacheIdx != 0)
-      a.add(a64::x3, a64::x3, sizeof(SHReadPropertyCacheEntry) * cacheIdx);
+      emit_add_imm_u24(a, a64::x3, sizeof(SHReadPropertyCacheEntry) * cacheIdx);
   }
   EMIT_RUNTIME_CALL(
       *this,
@@ -5010,7 +5034,8 @@ class HERMES_ATTRIBUTE_INTERNAL_LINKAGE Emitter::GetByIdImpl {
     } else {
       a.ldr(a64::x3, a64::Mem(_.roDataLabel_, _.roOfsReadPropertyCachePtr_));
       if (cacheIdx != 0)
-        a.add(a64::x3, a64::x3, sizeof(SHReadPropertyCacheEntry) * cacheIdx);
+        emit_add_imm_u24(
+            a, a64::x3, sizeof(SHReadPropertyCacheEntry) * cacheIdx);
     }
     _.callThunkWithSavedIP((void *)shImpl, shImplName);
 
@@ -5335,7 +5360,7 @@ void Emitter::getByIdWithReceiver(
   } else {
     a.ldr(a64::x4, a64::Mem(roDataLabel_, roOfsReadPropertyCachePtr_));
     if (cacheIdx != 0)
-      a.add(a64::x4, a64::x4, sizeof(SHReadPropertyCacheEntry) * cacheIdx);
+      emit_add_imm_u24(a, a64::x4, sizeof(SHReadPropertyCacheEntry) * cacheIdx);
   }
   EMIT_RUNTIME_CALL(
       *this,
