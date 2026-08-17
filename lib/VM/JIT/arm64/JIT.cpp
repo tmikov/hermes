@@ -220,8 +220,14 @@ JITCompiledFunctionPtr JITContext::Compiler::compileCodeBlock() {
     // case the code was never installed and there is nothing for these targets
     // to point at; computing them from a null base would store bogus pointers
     // into the module's tables.
-    if (!res)
+    if (!res) {
+      // Nothing was installed, so the comments collected for this function
+      // have no code to attach to. Drop them, or they would be attributed to
+      // whichever function is compiled next.
+      if (jc_.perfJitDump_)
+        jc_.perfJitDump_->discardPendingCodeComments();
       return res;
+    }
 
     // Translate now-bound labels to targets.
     uint64_t funcStart = reinterpret_cast<uint64_t>(res);
@@ -271,6 +277,9 @@ JITCompiledFunctionPtr JITContext::Compiler::compileCodeBlock() {
         LLVM_DEBUG(printError(llvh::outs()));
       }
     }
+
+    if (jc_.perfJitDump_)
+      jc_.perfJitDump_->discardPendingCodeComments();
 
     codeBlock_->setDontJIT(true);
     return nullptr;
