@@ -5467,6 +5467,13 @@ void Emitter::jmpTypeOfIs(
     typesToCheck = invertedTypes;
   }
 
+  // Nothing left to check means the answer does not depend on the input: an
+  // empty origTypes matches nothing, so falling through is already right,
+  // while an all-bits origTypes inverts to empty and matches everything, so
+  // the branch is unconditional. None of the checks below are emitted.
+  if (typesToCheck.count() == 0 && invert)
+    a.b(target);
+
   // doneLab goes at the end of the instruction if there's multiple bits to
   // check, allowing short-circuiting the remaining checks if one of the
   // TypeOfIsTypes bits matches the kind of the input.
@@ -5639,6 +5646,14 @@ void Emitter::typeOfIs(FR frRes, FR frInput, TypeOfIsTypes origTypes) {
     invert = true;
     typesToCheck = invertedTypes;
   }
+
+  // Nothing left to check means the answer does not depend on the input: an
+  // empty origTypes matches nothing, and an all-bits origTypes inverts to
+  // empty and matches everything. Either way the result is the same constant
+  // the individual cases produce when no tag can match, and none of the checks
+  // below are emitted.
+  if (typesToCheck.count() == 0)
+    a.mov(xRes, invert ? 1 : 0);
 
   // matchLab goes directly to the end of the instruction if there are multiple
   // bits to check, allowing short-circuiting the remaining checks if one of the
