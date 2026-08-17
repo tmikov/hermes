@@ -1726,23 +1726,23 @@ void Emitter::callThunk(void *fn, const char *name) {
 
 void Emitter::callThunkWithSavedIP(void *fn, const char *name) {
   // Save the current IP in the runtime.
-  getBytecodeIP(a64::x16);
-  a.str(a64::x16, a64::Mem(xRuntime, RuntimeOffsets::currentIP));
+  getBytecodeIP(xScratch);
+  a.str(xScratch, a64::Mem(xRuntime, RuntimeOffsets::currentIP));
 
   // Call the passed function.
   callThunk(fn, name);
 
   if (emitAsserts_) {
     // Invalidate the current IP to make sure it is set before the next call.
-    a.mov(a64::x16, Runtime::kInvalidCurrentIP);
-    a.str(a64::x16, a64::Mem(xRuntime, RuntimeOffsets::currentIP));
+    a.mov(xScratch, Runtime::kInvalidCurrentIP);
+    a.str(xScratch, a64::Mem(xRuntime, RuntimeOffsets::currentIP));
   }
 }
 
 void Emitter::callWithoutThunk(void *fn, const char *name) {
   comment("// call %s", name);
-  loadBits64InGp(a64::x16, (uint64_t)fn, name);
-  a.blr(a64::x16);
+  loadBits64InGp(xScratch, (uint64_t)fn, name);
+  a.blr(xScratch);
 }
 
 void Emitter::emitIncrementCounter(JitCounter counter) {
@@ -6409,8 +6409,8 @@ void Emitter::emitThunks() {
   comment("// Thunks");
   for (const auto &th : thunks_) {
     a.bind(th.first);
-    a.ldr(a64::x16, a64::Mem(roDataLabel_, th.second));
-    a.br(a64::x16);
+    a.ldr(xScratch, a64::Mem(roDataLabel_, th.second));
+    a.br(xScratch);
   }
 }
 

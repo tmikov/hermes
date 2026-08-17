@@ -195,6 +195,11 @@ static constexpr auto xRuntime = a64::x19;
 // x20 is frame
 static constexpr auto xFrame = a64::x20;
 
+/// Scratch register. x16/x17 sit outside the register allocator and are used
+/// as scratch (thunk targets, IP materialization); nothing holds a value in
+/// them across an emitter call.
+static constexpr auto xScratch = a64::x16;
+
 /// GP arg registers (inclusive).
 // static constexpr std::pair<uint8_t, uint8_t> kGPArgs(0, 7);
 /// Temporary GP registers (inclusive).
@@ -915,12 +920,22 @@ class Emitter {
   void typedLoadParent(FR frRes, FR frObj);
 
  private:
+  /// \return the byte offset of \p fr's slot from xFrame.
+  static constexpr inline uint32_t frByteOffset(FR fr) {
+    return (fr.index() + hbc::StackFrameLayout::FirstLocal) *
+        sizeof(SHLegacyValue);
+  }
+
+  /// \return true if \p ofs encodes as the scaled immediate of an LDR/STR
+  /// of a 64-bit register. The immediate is 12 bits scaled by 8, and frame
+  /// offsets are always multiples of 8, so only the upper bound can fail.
+  static constexpr inline bool isFrameImmOffset(uint32_t ofs) {
+    return ofs <= 4095 * 8;
+  }
+
   /// Create an a64::Mem to a specifc frame register.
   static constexpr inline a64::Mem frA64Mem(FR fr) {
-    // FIXME: check if the offset fits
-    auto ofs = (fr.index() + hbc::StackFrameLayout::FirstLocal) *
-        sizeof(SHLegacyValue);
-    return a64::Mem(xFrame, ofs);
+    return a64::Mem(xFrame, frByteOffset(fr));
   }
 
   /// Return true if we are logging, false otherwise.
@@ -953,18 +968,34 @@ class Emitter {
       const a64::GpX &xTemp);
 
   void _loadFrame(HWReg dest, FR rFrom) {
-    // FIXME: check if the offset fits
+    uint32_t ofs = frByteOffset(rFrom);
+    if (LLVM_LIKELY(isFrameImmOffset(ofs))) {
+      if (dest.isGpX())
+        a.ldr(dest.a64GpX(), a64::Mem(xFrame, ofs));
+      else
+        a.ldr(dest.a64VecD(), a64::Mem(xFrame, ofs));
+      return;
+    }
+    a.mov(xScratch, ofs);
     if (dest.isGpX())
-      a.ldr(dest.a64GpX(), frA64Mem(rFrom));
+      a.ldr(dest.a64GpX(), a64::Mem(xFrame, xScratch));
     else
-      a.ldr(dest.a64VecD(), frA64Mem(rFrom));
+      a.ldr(dest.a64VecD(), a64::Mem(xFrame, xScratch));
   }
   void _storeFrame(HWReg src, FR rFrom) {
-    // FIXME: check if the offset fits
+    uint32_t ofs = frByteOffset(rFrom);
+    if (LLVM_LIKELY(isFrameImmOffset(ofs))) {
+      if (src.isGpX())
+        a.str(src.a64GpX(), a64::Mem(xFrame, ofs));
+      else
+        a.str(src.a64VecD(), a64::Mem(xFrame, ofs));
+      return;
+    }
+    a.mov(xScratch, ofs);
     if (src.isGpX())
-      a.str(src.a64GpX(), frA64Mem(rFrom));
+      a.str(src.a64GpX(), a64::Mem(xFrame, xScratch));
     else
-      a.str(src.a64VecD(), frA64Mem(rFrom));
+      a.str(src.a64VecD(), a64::Mem(xFrame, xScratch));
   }
 
   bool isTempGpX(HWReg hwReg) const {
