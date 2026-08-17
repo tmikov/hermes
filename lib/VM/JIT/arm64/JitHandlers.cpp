@@ -491,6 +491,11 @@ SHLegacyValue _jit_call_builtin(
     newFrame.getSHLocalsRef() = HermesValue::encodeNativePointer(nullptr);
     newFrame.getArgCountRef() = HermesValue::encodeNativeUInt32(argCount);
     newFrame.getNewTargetRef() = HermesValue::encodeUndefinedValue();
+    // "thisArg" is implicitly assumed to be "undefined": the bytecode never
+    // populates the slot (HBCISel::verifyCall asserts CallBuiltin's `this` is
+    // a non-register-allocated LiteralUndefined), so it must be set here, the
+    // same way the interpreter's implCallBuiltin does.
+    newFrame.getThisArgRef() = HermesValue::encodeUndefinedValue();
 
     auto callee =
         vmcast<NativeFunction>(runtime.getBuiltinCallable(builtinMethodID));

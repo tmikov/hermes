@@ -6532,7 +6532,10 @@ void Emitter::callBuiltin(FR frRes, uint32_t builtinIndex, uint32_t argc) {
       frRes.index(),
       getBuiltinMethodName(builtinIndex),
       argc);
-  // CallBuiltin internally sets "this", so we don't sync it to memory.
+  // The ThisArg slot is not populated by bytecode; _jit_call_builtin
+  // initializes it. Note that the syncAllFRTempExcept({}) below does write
+  // the ThisArg FR to memory along with everything else — it is simply that
+  // whatever it writes there is dead, since the handler overwrites it.
 #ifndef NDEBUG
   uint32_t nRegs = frameRegs_.size();
 
