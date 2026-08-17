@@ -47,11 +47,9 @@ The AST JSON dumps are compared byte-for-byte. Any divergence is a bug, not a
 known difference. This gate runs continuously and is the project's primary
 conformance claim.
 
-### 3. The only complete Flow parser in Rust
+### 3. The full Flow type grammar
 
-SWC has only partial, opt-in Flow support (type-stripping focus, shallower than
-this port); OXC and Biome have no Flow support. This port implements the **full**
-Flow type
+This port implements the whole Flow type
 grammar: type annotations, conditional/union/intersection types, function/object
 types, generics, predicates, `opaque type`, `interface` declarations, typed
 arrows, `as`/`as const` casts, `enum`, `component`/`hook`, `record`, `match`,
@@ -64,11 +62,7 @@ The parser produces the same AST as `hermesc -dump-ast`, with full source
 location information and ESTree JSON output. Downstream tooling that already
 speaks ESTree works unchanged.
 
-## Comparison with other Rust parsers
-
-See [`crates/comparison/FEATURE-MATRIX.md`](crates/comparison/FEATURE-MATRIX.md)
-for a detailed feature and conformance matrix comparing `hermes-parser`, SWC,
-OXC, Biome, and Boa.
+## Performance
 
 This project does not publish performance comparisons at this time. The
 headline is correctness: byte-for-byte agreement with the production C++
