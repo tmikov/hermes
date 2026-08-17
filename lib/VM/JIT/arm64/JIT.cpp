@@ -216,6 +216,12 @@ JITCompiledFunctionPtr JITContext::compileImpl(
 JITCompiledFunctionPtr JITContext::Compiler::compileCodeBlock() {
   if (_sh_setjmp(errorJmpBuf_) == 0) {
     auto res = compileCodeBlockImpl();
+    // compileCodeBlockImpl returns null when it hits the memory limit, in which
+    // case the code was never installed and there is nothing for these targets
+    // to point at; computing them from a null base would store bogus pointers
+    // into the module's tables.
+    if (!res)
+      return res;
 
     // Translate now-bound labels to targets.
     uint64_t funcStart = reinterpret_cast<uint64_t>(res);
