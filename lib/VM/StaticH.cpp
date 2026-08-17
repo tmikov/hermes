@@ -536,6 +536,11 @@ extern "C" SHLegacyValue _sh_ljs_call_builtin(
     newFrame.getSHLocalsRef() = HermesValue::encodeNativePointer(nullptr);
     newFrame.getArgCountRef() = HermesValue::encodeNativeUInt32(argCount);
     newFrame.getNewTargetRef() = HermesValue::encodeUndefinedValue();
+    // "thisArg" is implicitly assumed to be "undefined": the compiler never
+    // populates the slot (CallBuiltin's `this` is lowered to an
+    // ImplicitMovInst, which emits no code), so it must be set here, the same
+    // way the interpreter's implCallBuiltin does.
+    newFrame.getThisArgRef() = HermesValue::encodeUndefinedValue();
 
     auto callee =
         vmcast<NativeFunction>(runtime.getBuiltinCallable(builtinMethodID));
