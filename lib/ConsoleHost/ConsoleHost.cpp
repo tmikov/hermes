@@ -968,6 +968,7 @@ bool executeHBCBytecodeImpl(
   runtime->getJITContext().setCrashOnError(options.jitCrashOnError);
   runtime->getJITContext().setEmitAsserts(options.jitEmitAsserts);
   runtime->getJITContext().setEmitCounters(options.jitEmitCounters);
+  runtime->getJITContext().setHCIdLimit(options.jitHCIdLimit);
 
   if (options.perfProfJitDumpFd != -1) {
     runtime->getJITContext().initPerfProfData(

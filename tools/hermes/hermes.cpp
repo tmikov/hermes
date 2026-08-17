@@ -149,6 +149,7 @@ static int executeHBCBytecodeFromCL(
   options.jitCrashOnError = flags.JITCrashOnError;
   options.jitEmitAsserts = flags.JITEmitAsserts;
   options.jitEmitCounters = flags.JITEmitCounters;
+  options.jitHCIdLimit = flags.JITHCIdLimit;
   options.stopAfterInit = flags.StopAfterInit;
   options.forceGCBeforeStats = flags.GCBeforeStats;
   options.sampleProfiling = flags.SampleProfiling;

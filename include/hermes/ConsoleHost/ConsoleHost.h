@@ -173,6 +173,11 @@ struct ExecuteOptions {
   /// Emit counters in JIT'ed code.
   bool jitEmitCounters{false};
 
+  /// Largest lazy JIT id assignable to a HiddenClass. Lowered only by tests,
+  /// so that the exhaustion path can be reached without interning 65535
+  /// hidden classes.
+  uint32_t jitHCIdLimit{0xFFFF};
+
   /// If non-null, holds statistics for every garbage collection that occurs.
   const std::vector<::hermes::vm::GCAnalyticsEvent> *gcAnalyticsEvents{nullptr};
 

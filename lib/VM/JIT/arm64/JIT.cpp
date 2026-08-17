@@ -31,6 +31,11 @@ JITContext::JITContext(bool enable) : enabled_(enable) {
 
 JITContext::~JITContext() = default;
 
+void JITContext::setHCIdLimit(uint32_t hcIdLimit) {
+  if (impl_)
+    impl_->hcIdLimit = std::min<uint32_t>(hcIdLimit, Impl::kHCIdOverflow);
+}
+
 void JITContext::dumpCounters(llvh::raw_ostream &os) {
   static constexpr const char *kCounterNames[] = {
 #define COUNTER_NAME(name) #name,

@@ -1751,7 +1751,7 @@ uint16_t Emitter::initHCLazyIDMayAlloc(HiddenClass *hc) {
     return id;
 
   // Too many IDs. Fail.
-  if (jitImpl_.prevHCId == JITContext::Impl::kHCIdOverflow)
+  if (jitImpl_.prevHCId >= jitImpl_.hcIdLimit)
     return 0;
 
   struct : Locals {
@@ -5120,9 +5120,12 @@ class HERMES_ATTRIBUTE_INTERNAL_LINKAGE Emitter::GetByIdImpl {
           cacheEntry->clazz.getNoBarrierUnsafe() &&
           cacheEntry->negMatchClazz.getNoBarrierUnsafe()) {
         ++JITNumGetByIdSpec;
-        emitParentSpecialization(shvDecode, cacheEntry);
-        // We don't try other things after parent specialization.
-        return;
+        if (emitParentSpecialization(shvDecode, cacheEntry)) {
+          // We don't try other things after parent specialization.
+          return;
+        }
+        // If it emitted nothing, fall through to the generic tier below
+        // rather than leaving the site with no inline cache at all.
       }
     }
 
@@ -5218,14 +5221,18 @@ class HERMES_ATTRIBUTE_INTERNAL_LINKAGE Emitter::GetByIdImpl {
 
   /// Emit a specialization for accessing a property on the parent.
   /// Does not preserve temps. Assumes no fast path runs after it.
-  void emitParentSpecialization(
+  /// \return true if code was emitted. When it returns false nothing has been
+  ///   emitted, so the caller is free to emit another tier instead.
+  bool emitParentSpecialization(
       Emit_sh_shv_decode &shvDecode,
       ReadPropertyCacheEntry *cacheEntry) {
     // Obtain the HC IDs for the object's class and the parent class.
+    // NOTE: every bail-out below must happen before the first instruction is
+    // emitted, so that returning false leaves the caller a clean slate.
     auto clazzID = _.initHCLazyIDMayAlloc(
         cacheEntry->negMatchClazz.get(_.runtime_, _.runtime_.getHeap()));
     if (!clazzID)
-      return;
+      return false;
 
     // NOTE: the call above is a GC safepoint (it may create or grow the
     // usedHCs ArrayStorage), so cacheEntry->clazz, a WeakRoot, may have been
@@ -5237,7 +5244,7 @@ class HERMES_ATTRIBUTE_INTERNAL_LINKAGE Emitter::GetByIdImpl {
         cacheEntry->clazz.get(_.runtime_, _.runtime_.getHeap());
     auto parentClsID = _.initHCLazyIDMayAlloc(parentCls);
     if (!parentClsID)
-      return;
+      return false;
 
     _.comment("// Get from parent specialization");
 
@@ -5268,6 +5275,7 @@ class HERMES_ATTRIBUTE_INTERNAL_LINKAGE Emitter::GetByIdImpl {
     shvDecode.emitAll(a);
     a.b(contLab);
     a.bind(failSpecLab);
+    return true;
   }
 };
 
