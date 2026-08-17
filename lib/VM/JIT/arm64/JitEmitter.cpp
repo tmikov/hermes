@@ -4165,6 +4165,7 @@ void Emitter::createClosure(
       functionID);
   syncAllFRTempExcept(frRes != frEnv ? frRes : FR());
   syncToFrame(frEnv);
+  freeAllFRTempExcept({});
 
   a.mov(a64::x0, xRuntime);
   loadFrameAddr(a64::x1, frEnv);
@@ -4176,7 +4177,6 @@ void Emitter::createClosure(
           SHRuntime *, const SHLegacyValue *, SHRuntimeModule *, uint32_t),
       _sh_ljs_create_bytecode_closure);
 
-  freeAllFRTempExcept({});
   HWReg hwRes = getOrAllocFRInAnyReg(frRes, false, HWReg::gpX(0));
   movHWFromHW<false>(hwRes, HWReg::gpX(0));
   frUpdatedWithHW(frRes, hwRes);
@@ -4249,6 +4249,7 @@ void Emitter::createGenerator(
       functionID);
   syncAllFRTempExcept(frRes != frEnv ? frRes : FR());
   syncToFrame(frEnv);
+  freeAllFRTempExcept({});
 
   a.mov(a64::x0, xRuntime);
   a.mov(a64::x1, xFrame);
@@ -4265,7 +4266,6 @@ void Emitter::createGenerator(
           uint32_t),
       _interpreter_create_generator);
 
-  freeAllFRTempExcept({});
   HWReg hwRes = getOrAllocFRInAnyReg(frRes, false, HWReg::gpX(0));
   movHWFromHW<false>(hwRes, HWReg::gpX(0));
   frUpdatedWithHW(frRes, hwRes);
