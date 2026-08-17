@@ -5114,13 +5114,12 @@ class HERMES_ATTRIBUTE_INTERNAL_LINKAGE Emitter::GetByIdImpl {
         cacheEntry->numGoodChanges == 1) {
       if (cacheEntry->clazz.getNoBarrierUnsafe() &&
           !cacheEntry->negMatchClazz.getNoBarrierUnsafe()) {
-        ++JITNumGetByIdSpec;
-        emitObjectSpecialization(shvDecode, cacheEntry);
+        JITNumGetByIdSpec += emitObjectSpecialization(shvDecode, cacheEntry);
       } else if (
           cacheEntry->clazz.getNoBarrierUnsafe() &&
           cacheEntry->negMatchClazz.getNoBarrierUnsafe()) {
-        ++JITNumGetByIdSpec;
         if (emitParentSpecialization(shvDecode, cacheEntry)) {
+          ++JITNumGetByIdSpec;
           // We don't try other things after parent specialization.
           return;
         }
@@ -5191,14 +5190,16 @@ class HERMES_ATTRIBUTE_INTERNAL_LINKAGE Emitter::GetByIdImpl {
   }
 
   /// Emit a specialization for accessing a property on the object.
-  void emitObjectSpecialization(
+  /// \return true if code was emitted. When it returns false nothing has
+  ///   been emitted.
+  bool emitObjectSpecialization(
       Emit_sh_shv_decode &shvDecode,
       ReadPropertyCacheEntry *cacheEntry) {
     // Obtain the HC ID.
     auto clazzID = _.initHCLazyIDMayAlloc(
         cacheEntry->clazz.get(_.runtime_, _.runtime_.getHeap()));
     if (!clazzID)
-      return;
+      return false;
 
     _.comment("// Get from object specialization");
 
@@ -5217,6 +5218,7 @@ class HERMES_ATTRIBUTE_INTERNAL_LINKAGE Emitter::GetByIdImpl {
     shvDecode.emitFirstCase(a);
     a.b(contLab);
     a.bind(failSpecLab);
+    return true;
   }
 
   /// Emit a specialization for accessing a property on the parent.
