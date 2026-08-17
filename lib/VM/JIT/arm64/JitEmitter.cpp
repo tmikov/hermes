@@ -362,9 +362,7 @@ constexpr uint32_t kMaxInlineBaseOffset = maxNaturalBaseOffset(8);
 /// Load a value with the specified width from the base register with an
 /// unsigned immediate offset. The wrapper is necessary since the immediate
 /// offset for loads is limited to 12-bits and may not always be sufficient, in
-/// which case we need to use alternate techniques. The base and destination
-/// registers must not be the same, since in rare cases we need to use the
-/// destination register as scratch.
+/// which case we need to use alternate techniques.
 ///
 /// \param WIDTH The width of the load, in bytes. Must be one of 1, 2, 4, or 8.
 /// \param INLINE_LOAD If true, the offset must be less than or equal to
@@ -4075,11 +4073,15 @@ void Emitter::loadFromEnvironment(FR frRes, FR frEnv, uint32_t slot) {
   // get pointer.
   emit_sh_ljs_get_pointer(a, xTmp1, xTmp1);
 
-  a.ldr(
+  // xScratch is touched only if the offset is too large for the scaled
+  // immediate: LoadFromEnvironmentL carries a UInt16 slot, and past slot
+  // ~4092 the displacement no longer encodes.
+  emit_load_from_base_offset<sizeof(SHLegacyValue)>(
+      a,
       xTmp1,
-      a64::Mem(
-          xTmp1,
-          offsetof(SHEnvironment, slots) + sizeof(SHLegacyValue) * slot));
+      xTmp1,
+      xScratch,
+      offsetof(SHEnvironment, slots) + sizeof(SHLegacyValue) * slot);
 
   freeReg(hwTmp1);
   HWReg hwRes = getOrAllocFRInAnyReg(frRes, false, hwTmp1);
