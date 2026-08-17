@@ -3545,7 +3545,10 @@ void Emitter::newTypedObjectWithBuffer(
       valBufferOffset,
       nonEnumerable);
 
-  syncAllFRTempExcept(frRes != frParent ? frRes : FR{});
+  // We unconditionally skip frRes here because we handle frParent with the
+  // syncToFrame below.
+  syncAllFRTempExcept(frRes);
+  syncToFrame(frParent);
   freeAllFRTempExcept({});
   a.mov(a64::x0, xRuntime);
   loadBits64InGp(a64::x1, (uint64_t)codeBlock_, "CodeBlock");
@@ -5878,6 +5881,9 @@ void Emitter::stringSwitchImm(
 
   // End of the basic block.
   syncAllFRTempExcept({});
+  // The handler reads the value through the frame address passed below, so
+  // the slot has to hold the current value.
+  syncToFrame(frInput);
 
   a.mov(a64::x0, (uint64_t)runtimeModule);
   a.mov(a64::w1, tableIndex);
