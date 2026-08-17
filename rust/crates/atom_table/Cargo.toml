@@ -1,6 +1,6 @@
 [package]
 name = "hermes-atom-table"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "String interner for the Hermes Rust front-end (ported from juno)."
 license = "MIT"

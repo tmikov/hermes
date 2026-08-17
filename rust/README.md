@@ -3,12 +3,11 @@
 > A Rust port of the Hermes front-end by Tzvetan Mikov, the architect of Hermes.
 > Not an official Meta project and not supported by Meta.
 
-**Version:** 0.1.1 — the `hermes-parser` crate family on
-[crates.io](https://crates.io/crates/hermes-parser). 0.1.1 is an additive
-release: `hermes-atom-table`, `hermes-ast`, `hermes-parser` and `hermes-sema`
-move to 0.1.1, while `hermes-unicode`, `hermes-support` and
-`hermes-command-line` are unchanged since 0.1.0 and stay there. See
-[`CHANGELOG.md`](CHANGELOG.md).
+The `hermes-parser` crate family is on
+[crates.io](https://crates.io/crates/hermes-parser); each crate's current
+version is on its own crates.io page, and the per-release notes are in
+[`CHANGELOG.md`](CHANGELOG.md). Crates are versioned independently and only
+bumped when their content changes, so the numbers do not move in lockstep.
 
 ---
 
@@ -192,6 +191,7 @@ and how a visitor holds a `&GCLock` in a field.
 | `hermes-parser` | Lexer + parser + JSON parser — stable public surface |
 | `hermes-ast` | ESTree node set + JSON dumper — stable public surface, re-exported as `hermes_parser::ast` |
 | `hermes-sema` | Semantic analysis: declaration collection, scope/binding resolution, validation — stable *core* surface, plus advanced modules that may change |
+| `hermes-gen-js` | AST → JavaScript/Flow/TypeScript source. Round-trip guarantee: generated source reparses to the same AST |
 | `hermes-support` | `SourceErrorManager`, diagnostics, JSON emitter — support crate |
 | `hermes-atom-table` | String interner — support crate |
 | `hermes-unicode` | Unicode property tables — support crate |

@@ -168,5 +168,5 @@ directly testable, and is not meant to be called from outside this crate.
 
 Zero `unsafe` (`unsafe_code = "forbid"`).
 
-See [the project README](../../README.md) for the full documentation of the
+See [the project README](https://github.com/tmikov/hermes/blob/rust/rust/README.md) for the full documentation of the
 crate family.

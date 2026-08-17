@@ -1,6 +1,6 @@
 [package]
 name = "hermes-gen-js"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "A Rust port of juno's AST -> JavaScript generator (gen_js.rs) by Tzvetan Mikov, the architect of Hermes. Not an official Meta project."
 license = "MIT"

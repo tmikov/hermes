@@ -11,7 +11,7 @@ string literals.
 This is a support crate: it is published because `hermes-parser`'s dependency
 closure requires it, and it carries no stability guarantee of its own.
 
-**Version:** 0.1.1 — API docs at [docs.rs/hermes-atom-table](https://docs.rs/hermes-atom-table).
+API docs at [docs.rs/hermes-atom-table](https://docs.rs/hermes-atom-table).
 
-See [the project README](https://github.com/tmikov/hermes/blob/hermes-crates-v0.1.1/rust/README.md) for the full
+See [the project README](https://github.com/tmikov/hermes/blob/rust/rust/README.md) for the full
 documentation of the crate family.

@@ -138,16 +138,16 @@ binaries, comparing stdout, stderr and process exit status byte-for-byte:
   path), 5 of them successes.
 
 The corpora and their provenance are recorded in
-[`tests/sema_corpus/MANIFEST.md`](https://github.com/tmikov/hermes/blob/hermes-crates-v0.1.1/rust/crates/sema/tests/sema_corpus/MANIFEST.md)
+[`tests/sema_corpus/MANIFEST.md`](https://github.com/tmikov/hermes/blob/rust/rust/crates/sema/tests/sema_corpus/MANIFEST.md)
 and
-[`tests/sema_corpus_parser/MANIFEST.md`](https://github.com/tmikov/hermes/blob/hermes-crates-v0.1.1/rust/crates/sema/tests/sema_corpus_parser/MANIFEST.md).
+[`tests/sema_corpus_parser/MANIFEST.md`](https://github.com/tmikov/hermes/blob/rust/rust/crates/sema/tests/sema_corpus_parser/MANIFEST.md).
 On top of that, `SemContext`, `DeclCollector`, the AST folder and the dumpers
 carry unit tests transcribed switch-arm-for-switch-arm from the C++ sources
 they port.
 
 Zero `unsafe` (`unsafe_code = "forbid"`).
 
-**Version:** 0.1.1 — API docs at [docs.rs/hermes-sema](https://docs.rs/hermes-sema).
+API docs at [docs.rs/hermes-sema](https://docs.rs/hermes-sema).
 
-See [the project README](https://github.com/tmikov/hermes/blob/hermes-crates-v0.1.1/rust/README.md) for the full
+See [the project README](https://github.com/tmikov/hermes/blob/rust/rust/README.md) for the full
 documentation of the crate family.

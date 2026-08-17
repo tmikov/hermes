@@ -6,6 +6,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## 2026-08-16
+
+### `hermes-gen-js` 0.1.0 — new crate
+
+AST → JavaScript, Flow or TypeScript source. A port of juno's `gen_js.rs`,
+extended to the 106 node kinds it never printed. All 271 node kinds are
+handled, and that is compiler-enforced: the dispatch match has no catch-all,
+so a kind added to the AST without a printing arm is a build failure.
+
+The correctness bar is the round-trip property — generated source reparses to
+the same AST. There is no byte-exact C++ oracle for this component, unlike the
+rest of the family; `crates/gen_js/MANIFEST.md` records what was run, the 41
+defects found and fixed during the port, and what is deliberately not covered.
+
+`hermes-sema` is an optional `annotate` feature, off by default. It exists
+only for `Annotation::Sem`, which prints each identifier's resolved binding
+inline.
+
+### `hermes-parser` 0.1.2
+
+Two Flow parser fixes, both found by generating source from real trees and
+reparsing it:
+
+- `%checks` predicates after `declare function` / `declare hook` were never
+  recognized, so `declare function isString(x: mixed): boolean %checks;` did
+  not parse at all. Fixing it also repaired the `declare hook` diagnostic,
+  which had been reporting the wrong error.
+- A `match` statement whose case body was not a block panicked instead of
+  reporting an error. The equivalent assertion failure existed in C++ Hermes
+  and was fixed there too.
+
+### Documentation
+
+Crate READMEs no longer carry a hand-written version number — crates.io and
+docs.rs already show it, and a typed one goes stale the moment a crate is
+bumped (0.1.2 shipped a README saying 0.1.1). Links into the repository now
+follow the `rust` branch instead of being pinned to a release tag, so they do
+not rot against the next release.
+
+The project README drops the "only complete Flow parser in Rust" claim and the
+feature-matrix comparison against other Rust parsers.
+
+---
+
 ## [0.1.1] — 2026-08-15
 
 Prompted by an external usability review of the published 0.1.0 crates
