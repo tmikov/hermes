@@ -1721,6 +1721,13 @@ void Emitter::emitIncrementCounter(JitCounter counter) {
 }
 
 uint16_t Emitter::initHCLazyIDMayAlloc(HiddenClass *hc) {
+  // Callers pass the result of WeakRoot::get(), which is null if the GC has
+  // cleared the root. Since 0 already means "no id" and every caller checks
+  // for it, tolerating null here keeps all present and future call sites safe
+  // without each of them having to re-validate across safepoints.
+  if (!hc)
+    return 0;
+
   uint16_t id = hc->getLazyJITId();
   // Assign a new ID to the HC if we have to.
   if (id != 0)
@@ -5164,8 +5171,16 @@ class HERMES_ATTRIBUTE_INTERNAL_LINKAGE Emitter::GetByIdImpl {
         cacheEntry->negMatchClazz.get(_.runtime_, _.runtime_.getHeap()));
     if (!clazzID)
       return;
-    auto parentClsID = _.initHCLazyIDMayAlloc(
-        cacheEntry->clazz.get(_.runtime_, _.runtime_.getHeap()));
+
+    // NOTE: the call above is a GC safepoint (it may create or grow the
+    // usedHCs ArrayStorage), so cacheEntry->clazz, a WeakRoot, may have been
+    // cleared in the meantime. initHCLazyIDMayAlloc tolerates a null class,
+    // so this re-read is not load-bearing on its own; it is here to keep the
+    // safepoint visible at the point where it matters, since nothing else in
+    // this function suggests the previous line can collect.
+    HiddenClass *parentCls =
+        cacheEntry->clazz.get(_.runtime_, _.runtime_.getHeap());
+    auto parentClsID = _.initHCLazyIDMayAlloc(parentCls);
     if (!parentClsID)
       return;
 
