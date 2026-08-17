@@ -3295,7 +3295,7 @@ void Emitter::newObjectWithBuffer(
     // Populate the size.
     a.mov(xTmp, numIndirectSlots);
     a.str(
-        xTmp,
+        xTmp.w(),
         a64::Mem(
             xObj,
             heapAlignSize(cellSize<JSObject>()) +
