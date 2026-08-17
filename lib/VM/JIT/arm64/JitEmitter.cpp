@@ -25,6 +25,8 @@
 #include "hermes/VMLayouts/StackFrameLayout.h"
 #include "llvh/ADT/Statistic.h"
 
+#include <limits>
+
 #define DEBUG_TYPE "jit"
 
 STATISTIC(
@@ -2446,25 +2448,37 @@ void Emitter::loadParam(FR frRes, uint32_t paramIndex) {
 
   HWReg hwRes = getOrAllocFRInGpX(frRes, false);
 
-  // FIXME: handle integer overflow better?
-  int32_t ofs = ((int)StackFrameLayout::ThisArg - (int32_t)paramIndex) *
-      (int)sizeof(SHLegacyValue);
-  if (ofs >= 0)
-    hermes_fatal("JIT integer overflow");
-  EXPECT_ERROR(
-      asmjit::kErrorInvalidDisplacement,
-      err = a.ldur(hwRes.a64GpX(), a64::Mem(xFrame, ofs)));
-  // Does the offset fit in the 9-bit signed offset?
-  if (err) {
-    ofs = -ofs;
-    a64::GpX xRes = hwRes.a64GpX();
-    if (ofs <= 4095) {
-      a.sub(xRes, xFrame, ofs);
-    } else {
-      loadBits64InGp(xRes, ofs, nullptr);
-      a.sub(xRes, xFrame, xRes);
+  // Compute the frame offset in 64 bits. paramIndex is a UInt32 operand of
+  // LoadParamLong, and (ThisArg - paramIndex) * sizeof(SHLegacyValue)
+  // overflows int32 from paramIndex 2^28 upwards, long before that range is
+  // exhausted.
+  int64_t ofs64 = ((int64_t)StackFrameLayout::ThisArg - (int64_t)paramIndex) *
+      (int64_t)sizeof(SHLegacyValue);
+  assert(ofs64 < 0 && "frame offset of a parameter must be negative");
+
+  if (LLVM_UNLIKELY(ofs64 <= std::numeric_limits<int32_t>::min())) {
+    // The parameter is so far away that no argument count can reach it, so
+    // the comparison above always branches. Emit the branch unconditionally
+    // rather than a fast path that cannot be reached and whose offset would
+    // not encode; the slow path yields undefined, which is the right answer.
+    a.b(slowPathLab);
+  } else {
+    int32_t ofs = (int32_t)ofs64;
+    EXPECT_ERROR(
+        asmjit::kErrorInvalidDisplacement,
+        err = a.ldur(hwRes.a64GpX(), a64::Mem(xFrame, ofs)));
+    // Does the offset fit in the 9-bit signed offset?
+    if (err) {
+      ofs = -ofs;
+      a64::GpX xRes = hwRes.a64GpX();
+      if (ofs <= 4095) {
+        a.sub(xRes, xFrame, ofs);
+      } else {
+        loadBits64InGp(xRes, ofs, nullptr);
+        a.sub(xRes, xFrame, xRes);
+      }
+      a.ldr(xRes, a64::Mem(xRes));
     }
-    a.ldr(xRes, a64::Mem(xRes));
   }
 
   a.bind(contLab);
