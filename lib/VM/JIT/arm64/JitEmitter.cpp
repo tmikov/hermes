@@ -1737,9 +1737,6 @@ uint16_t Emitter::initHCLazyIDMayAlloc(HiddenClass *hc) {
   if (jitImpl_.prevHCId == JITContext::Impl::kHCIdOverflow)
     return 0;
 
-  id = ++jitImpl_.prevHCId;
-  hc->setLazyJITId(id);
-
   struct : Locals {
     PinnedValue<HiddenClass> hc;
   } lv;
@@ -1747,15 +1744,40 @@ uint16_t Emitter::initHCLazyIDMayAlloc(HiddenClass *hc) {
   lv.hc = hc;
 
   if (jitImpl_.usedHCs.isUndefined()) {
+    CallResult<HermesValue> cr = ArrayStorageSmall::create(runtime_, 8);
+    if (LLVM_UNLIKELY(cr == ExecutionStatus::EXCEPTION)) {
+      // Failing to pin is not fatal: report "no id" and let the caller fall
+      // back to a non-specialized path. Swallow the pending OOM, since we are
+      // in the compiler and there is nobody to propagate it to.
+      runtime_.clearThrownValue();
+      return 0;
+    }
     // We would like to use a long-lived object, but we can't, because
     // ArrayStorage cannot be long-lived: it can be allocated that way
     // initially, but when it grows, it is allocated "normally".
-    jitImpl_.usedHCs = runtime_.ignoreAllocationFailure(
-        ArrayStorageSmall::create(runtime_, 8));
+    jitImpl_.usedHCs = *cr;
   }
 
+  // Pin the class before assigning the id, so that the invariant
+  // "id != 0 implies the class is in usedHCs" cannot be broken by a failed
+  // allocation. usedHCs is the only strong root for these classes, and the id
+  // is baked into immutable machine code, so an id on an unpinned class would
+  // be a dangling reference.
   auto mh = MutableHandle<ArrayStorageSmall>::vmcast(&jitImpl_.usedHCs);
-  ArrayStorageSmall::push_back(mh, runtime_, lv.hc);
+  if (LLVM_UNLIKELY(
+          ArrayStorageSmall::push_back(mh, runtime_, lv.hc) ==
+          ExecutionStatus::EXCEPTION)) {
+    // Failing to pin is not fatal: report "no id" and let the caller fall
+    // back to a non-specialized path. Swallow the pending OOM, since we are
+    // in the compiler and there is nobody to propagate it to.
+    runtime_.clearThrownValue();
+    return 0;
+  }
+
+  id = ++jitImpl_.prevHCId;
+  // Note: use the pinned handle rather than the raw argument, which the
+  // allocation above may have invalidated by moving the object.
+  lv.hc->setLazyJITId(id);
 
   return id;
 }
