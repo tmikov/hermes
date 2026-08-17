@@ -1240,10 +1240,27 @@ void Emitter::enter(uint32_t numCount, uint32_t npCount) {
     frameRegs_[frIndex].globalType = FRType::UnknownNonPtr;
   }
 
-  if (!codeBlock_->getRuntimeModule()
-           ->getBytecode()
-           ->getExceptionTable(codeBlock_->getFunctionID())
-           .empty())
+  bool hasExceptionTable = !codeBlock_->getRuntimeModule()
+                                ->getBytecode()
+                                ->getExceptionTable(codeBlock_->getFunctionID())
+                                .empty();
+
+  // A function with exception handlers must end up with no global registers.
+  // longjmp restores callee-saved registers to their values at the setjmp,
+  // so a global register would present a stale value to a catch handler;
+  // correctness depends on every FR's canonical location being the memory
+  // frame, which is also what makes the isInTry() sync in the throwing
+  // emitters sufficient.
+  //
+  // Nothing here enforces that: it holds because
+  // RegisterAllocator::getRegClass (lib/BCGen/RegAlloc.cpp) forces
+  // RegClass::Other for any function containing a try, which leaves both
+  // counts at zero. That is a contract with another module, so check it.
+  assert(
+      (!hasExceptionTable || (numCount == 0 && npCount == 0)) &&
+      "function with exception handlers must have no global registers");
+
+  if (hasExceptionTable)
     catchTableLabel_ = a.newNamedLabel("CATCH_TABLE");
 
   frameSetup(
