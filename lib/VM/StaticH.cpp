@@ -529,22 +529,25 @@ extern "C" SHLegacyValue _sh_ljs_call_builtin(
     uint32_t builtinMethodID) {
   auto res = [&]() {
     Runtime &runtime = getRuntime(shr);
-    StackFramePtr newFrame(runtime.getStackPointer());
-    newFrame.getPreviousFrameRef() = HermesValue::encodeNativePointer(frame);
-    newFrame.getSavedIPRef() = HermesValue::encodeNativePointer(nullptr);
-    newFrame.getSavedCodeBlockRef() = HermesValue::encodeNativePointer(nullptr);
-    newFrame.getSHLocalsRef() = HermesValue::encodeNativePointer(nullptr);
-    newFrame.getArgCountRef() = HermesValue::encodeNativeUInt32(argCount);
-    newFrame.getNewTargetRef() = HermesValue::encodeUndefinedValue();
-    // "thisArg" is implicitly assumed to be "undefined": the compiler never
-    // populates the slot (CallBuiltin's `this` is lowered to an
-    // ImplicitMovInst, which emits no code), so it must be set here, the same
-    // way the interpreter's implCallBuiltin does.
-    newFrame.getThisArgRef() = HermesValue::encodeUndefinedValue();
-
+    // Non-allocating, so it is safe to resolve the callee before the frame
+    // exists.
     auto callee =
         vmcast<NativeFunction>(runtime.getBuiltinCallable(builtinMethodID));
-    newFrame.getCalleeClosureOrCBRef() = HermesValue::encodeObjectValue(callee);
+    auto newFrame = StackFramePtr::initFrame(
+        runtime.getStackPointer(),
+        StackFramePtr(toPHV(frame)),
+        /* savedIP */ nullptr,
+        /* savedCodeBlock */ nullptr,
+        /* locals */ nullptr,
+        argCount,
+        HermesValue::encodeObjectValue(callee),
+        HermesValue::encodeUndefinedValue());
+    // "thisArg" is implicitly assumed to be "undefined": the compiler never
+    // populates the slot (CallBuiltin's `this` is lowered to an
+    // ImplicitMovInst, which emits no code), and initFrame writes only the
+    // seven metadata slots, so it must be set here, the same way the
+    // interpreter's implCallBuiltin does.
+    newFrame.getThisArgRef() = HermesValue::encodeUndefinedValue();
 
     GCScopeMarkerRAII marker{runtime};
     return NativeFunction::_nativeCall(callee, runtime);
