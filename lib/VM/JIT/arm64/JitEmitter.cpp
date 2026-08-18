@@ -88,9 +88,9 @@ void emit_sh_ljs_tag_is_pointer(a64::Assembler &a, const a64::GpX &xTagReg) {
   static_assert(
       HERMESVALUE_VERSION == 2,
       "All tags above HVTag_FirstPointer are pointers");
-  // The valid pointer tags are: 0xfc (FirstPointer) to 0xff (LastTag), but
-  // all sign extended to 64 bits.
-  // We need an unsigned comparison (tag >= 0xfc) to catch all pointers.
+  // The valid pointer tags are: 0xfd (HVTag_FirstPointer) to 0xff
+  // (HVTag_Last), but all sign extended to 64 bits.
+  // We need an unsigned comparison (tag >= 0xfd) to catch all pointers.
   // Doubles may have 0 in the tag bits, e.g. so we have to use
   // unsigned condition codes to make sure they don't get detected as pointers.
   a.cmn(xTagReg, -HVTag_FirstPointer);
@@ -4109,7 +4109,8 @@ void Emitter::loadFromEnvironment(FR frRes, FR frEnv, uint32_t slot) {
 void Emitter::storeToEnvironment(bool np, FR frEnv, uint32_t slot, FR frValue) {
   // TODO: this should really be inlined!
   comment(
-      "// StoreNPToEnvironment r%u, %u, r%u",
+      np ? "// StoreNPToEnvironment r%u, %u, r%u"
+         : "// StoreToEnvironment r%u, %u, r%u",
       frEnv.index(),
       slot,
       frValue.index());
@@ -4430,10 +4431,7 @@ void Emitter::loadThisNS(FR frRes) {
        .hwRes = hwRes,
        .emittingIP = emittingIP,
        .emit = [](Emitter &em, SlowPath &sl) {
-         em.comment(
-             "// Slow path: LoadThisNS r%u, r%u",
-             sl.frRes.index(),
-             sl.frInput1.index());
+         em.comment("// Slow path: LoadThisNS r%u", sl.frRes.index());
          em.a.bind(sl.slowPathLab);
          em.a.mov(a64::x0, xRuntime);
          em.a.ldur(
@@ -6986,10 +6984,9 @@ void Emitter::bitNot(FR frRes, FR frInput) {
        .emittingIP = emittingIP,
        .emit = [](Emitter &em, SlowPath &sl) {
          em.comment(
-             "// bitNot r%u, r%u, r%u",
+             "// Slow path: bitNot r%u, r%u",
              sl.frRes.index(),
-             sl.frInput1.index(),
-             sl.frInput2.index());
+             sl.frInput1.index());
          em.a.bind(sl.slowPathLab);
          em.a.mov(a64::x0, xRuntime);
          em.loadFrameAddr(a64::x1, sl.frInput1);
