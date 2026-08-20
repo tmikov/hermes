@@ -51,3 +51,6 @@ boa_interner = "*"
 [[bench]]
 name = "parse_throughput"
 harness = false
+
+[profile.release]
+debug = true
