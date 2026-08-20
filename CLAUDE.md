@@ -30,13 +30,26 @@ cmake -B cmake-build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug \
 
 ### Other Build Configurations
 
+**Always pass `-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++`.**
+Without them CMake picks `/usr/bin/c++`, which on Ubuntu is GCC. A GCC-built
+Hermes is materially slower than a Clang-built one, so any performance
+comparison against Rust (built by rustc's LLVM) measures the compiler rather
+than the code. A GCC Release directory is worse than no Release directory: it
+looks authoritative and silently produces wrong numbers.
+
 ```bash
 # Plain Debug build (no sanitizer, for debugging with full symbols)
-cmake -B cmake-build-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake -B cmake-build-debug -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
 
 # Release build
-cmake -B cmake-build-release -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake -B cmake-build-release -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
 ```
+
+Before using an existing build directory for anything performance-related,
+check what it actually is:
+`grep -E "CMAKE_CXX_COMPILER:|CMAKE_BUILD_TYPE:" <dir>/CMakeCache.txt`.
 
 #### Common CMake Options
 

@@ -5,12 +5,92 @@
 > pinning; the C++ baseline showed ±30% session-to-session swing) and are kept
 > only as internal working data for a future hardened re-measurement.
 
-**Current numbers:** see [Re-measurement (2026-08-12, Clang baseline)](#re-measurement-2026-08-12-clang-baseline).  
+**Current numbers:** see [Re-measurement (2026-08-19, matched harness)](#re-measurement-2026-08-19-matched-harness).  
 **Platform:** Linux x86-64, single machine.
 
 The 2026-06-19 run below is kept as history. Its C++ Hermes column was built
 with GCC and is **superseded**; its Rust column mixed two process-isolation
 modes. Both problems are corrected in the 2026-08-12 re-measurement.
+
+---
+
+## Re-measurement (2026-08-19, matched harness)
+
+**Date:** 2026-08-19. **Tree:** `9c5ae6228`. Same machine as the two runs
+below. Port vs C++ Hermes only — OXC, SWC and Boa were not re-measured, so
+their 2026-08-12 figures stand.
+
+### What changed since 2026-08-12
+
+**Both sides now run the same measurement loop.** The 2026-08-12 port numbers
+came from Criterion while the C++ came from `parse-bench`; two different
+harnesses timing what is nominally the same thing. This run uses
+`examples/port_parse_bench.rs`, a direct mirror of
+`tools/parse-bench/parse-bench.cpp`'s default mode: one untimed warm-up, N
+timed iterations, median reported. Each timed iteration includes context
+setup, the parse, and teardown on both sides — the C++ `parseOnce` destroys
+its `Context` and parser before the clock is read, and dropping `ParsedJS`
+frees the arena the same way.
+
+The C++ baseline was rebuilt Clang/Release. The `cmake-build-release`
+directory found in the tree at the start of this run was configured with
+`/usr/bin/c++`, i.e. GCC — the exact confound corrected in the 2026-08-12 run,
+reappeared because `CLAUDE.md`'s documented Release recipe carried no compiler
+flags. That GCC directory has been deleted, `cmake-build-release` now holds a
+Clang build, and the recipe in `CLAUDE.md` now specifies the compiler, so the
+canonical name can be trusted. A GCC Release directory is worse than none: it
+looks authoritative and silently yields wrong numbers.
+
+### Results (MiB/s, median, FullParse/eager, one process per measurement)
+
+| Parser | react 107K | jquery 278K | three.min 654K | typescript 8.7M |
+|---|---|---|---|---|
+| **Hermes Rust port** | 94.8 | 73.4 | 42.1 | 61.5 |
+| **C++ Hermes (Clang, Release)** | 118.2 | 87.8 | 50.4 | 102.1 |
+
+Port as a fraction of the Clang-built C++ baseline:
+
+| | react | jquery | three.min | typescript |
+|---|---|---|---|---|
+| port / C++ Hermes | 80% | 84% | 84% | **60%** |
+
+Five isolated runs per parser on typescript (`--iters=20`), three on the other
+fixtures (`--iters=50`); the median of the per-run medians is reported.
+Run-to-run spread was tight on both sides: C++ typescript 101.3–103.9 MiB/s,
+port typescript 61.0–62.2 MiB/s. Nothing resembling the ±30% session swing
+that made the 2026-06-19 numbers untrustworthy. react's first C++ run (108.0)
+is a cold outlier against 118.5/118.2.
+
+### Reading
+
+1. **The port is 1.66× slower than C++ Hermes on the 8.7 MB typescript
+   fixture**, and 1.20–1.25× slower on the fixtures under a megabyte. The gap
+   is size-dependent, not uniform.
+2. **This reproduces 2026-08-12 closely** — 61.5 vs 61.5 MiB/s on typescript,
+   60% vs 61% of baseline — across a week, a squashed history, and a switch
+   from Criterion to the matched harness. Two independent harnesses agreeing
+   is the strongest evidence in this file that the large-file figure is real
+   and not an artifact of either one.
+3. **The AST-footprint root cause in §3 below still stands.** It was measured
+   on the port and is independent of both the C++ compiler and the harness.
+4. Do not compare MiB/s *across* fixtures. three.min looks slowest at 50 MiB/s
+   because minification packs more syntax into each byte, not because it is
+   harder to parse.
+
+### Reproducing this run
+
+```bash
+cmake -B cmake-build-release -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+cmake --build cmake-build-release --target parse-bench
+bash rust/crates/comparison/fetch_fixtures.sh
+cargo build --release --manifest-path rust/crates/comparison/Cargo.toml \
+  --example port_parse_bench
+
+F=rust/crates/comparison/fixtures/typescript.js
+./cmake-build-release/bin/parse-bench --iters=20 $F        # repeat, fresh process each time
+./rust/crates/comparison/target/release/examples/port_parse_bench --iters=20 $F
+```
 
 ---
 
