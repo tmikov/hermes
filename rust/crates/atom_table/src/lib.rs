@@ -10,9 +10,11 @@
 
 use std::cell::Cell;
 use std::cell::UnsafeCell;
-use std::collections::HashMap;
 use std::fmt::Formatter;
 use std::ptr::null;
+
+mod fxhash;
+use fxhash::FxHashMap;
 
 /// Type used to hold a string index internally.
 type NumIndex = u32;
@@ -33,14 +35,14 @@ struct Inner {
     /// Maps from a reference inside [`Inner::strings`] to the index in [`Inner::strings`].
     /// Since strings are never removed or modified, the lifetime of the key
     /// is effectively static.
-    map: HashMap<&'static str, NumIndex>,
+    map: FxHashMap<&'static str, NumIndex>,
 
     /// Strings are added here and never removed or mutated.
     strings_u16: Vec<Vec<u16>>,
     /// Maps from a reference inside [`Inner::strings_u16`] to the index in [`Inner::strings_u16`].
     /// Since strings are never removed or modified, the lifetime of the key
     /// is effectively static.
-    map_u16: HashMap<&'static [u16], NumIndex>,
+    map_u16: FxHashMap<&'static [u16], NumIndex>,
 
     /// Byte strings are added here and never removed or mutated.
     /// The bytes need not be valid UTF-8 (they may be WTF-8 or arbitrary byte
@@ -49,7 +51,7 @@ struct Inner {
     /// Maps from a reference inside [`Inner::strings_bytes`] to the index in
     /// [`Inner::strings_bytes`]. Since strings are never removed or modified,
     /// the lifetime of the key is effectively static.
-    map_bytes: HashMap<&'static [u8], NumIndex>,
+    map_bytes: FxHashMap<&'static [u8], NumIndex>,
 
     /// String renderings of byte atoms that are *not* valid UTF-8, built on
     /// demand. This is a lifetime anchor, not a cache: the conversion has to
@@ -63,7 +65,7 @@ struct Inner {
     /// surrogates there. Entries are never removed or mutated, so a returned
     /// `&str` stays valid (rehashing moves the `String` structs, never their
     /// heap buffers) — the same argument as [`Inner::strings_bytes`].
-    converted_bytes: HashMap<AtomBytes, Converted>,
+    converted_bytes: FxHashMap<AtomBytes, Converted>,
 }
 
 /// This represents a unique string index in the table.
