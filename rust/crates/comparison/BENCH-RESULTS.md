@@ -321,3 +321,16 @@ cmake -B cmake-build-release-clang -G Ninja -DCMAKE_BUILD_TYPE=Release \
 cmake --build cmake-build-release-clang --target parse-bench
 cmake-build-release-clang/bin/parse-bench --iters=30 <fixture>
 ```
+
+## Node footprint sweep (2026-08-20)
+
+Why the port trails C++ on the large fixture, measured rather than argued: the
+same parser built at seven different arena-entry sizes, from 104 to 256 bytes
+against a 136-byte baseline. Throughput moves 0.30% per byte removed and 0.15%
+per byte added, with LLC/dTLB misses and IPC moving in step. Full table and
+interpretation in
+`doc/superpowers/specs/2026-08-20-boxed-large-node-variants-design.md` §6;
+harness on the throwaway branch `bench-node-footprint`.
+
+Headline: footprint is real but accounts for roughly a third of the 1.66× gap,
+not all of it.
