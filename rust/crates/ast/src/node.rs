@@ -12,10 +12,9 @@
 #![allow(clippy::large_enum_variant)] // one enum over all nodes — boxing would defeat deep-match
 
 use std::cell::Cell;
-use crate::node_child::{NodeChild, NodeLabel, NodeList, NodeMetadata, NodeString, Strictness, INVALID_LABEL};
+use crate::node_child::{NodeChild, NodeLabel, NodeList, NodeMetadata, NodeString, SemaIdCell, Strictness, INVALID_LABEL};
 use crate::visitor::{Path, TransformResult, Visitor, VisitorMut};
 use crate::NodeId;
-use crate::SemaId;
 
 /// The kind discriminant of an AST node.
 ///
@@ -876,9 +875,9 @@ pub struct Program<'gc> {
     /// ESTree `body` property.
     pub body: NodeList<'gc>,
     /// Sema: the lexical scope created by this node, if any.
-    pub scope: Cell<Option<SemaId>>,
+    pub scope: SemaIdCell,
     /// Sema: `FunctionInfo` for this function.
-    pub sem_info: Cell<Option<SemaId>>,
+    pub sem_info: SemaIdCell,
     /// Sema: strict-mode state of this function.
     pub strictness: Cell<Strictness>,
     /// Whether this function is a method definition (getters and setters
@@ -900,8 +899,8 @@ impl<'gc> Program<'gc> {
         Program {
             metadata,
             body,
-            scope: Cell::new(None),
-            sem_info: Cell::new(None),
+            scope: SemaIdCell::none(),
+            sem_info: SemaIdCell::none(),
             strictness: Cell::new(Strictness::NotSet),
             is_method_definition: Cell::new(false),
             decorations: Cell::new(NodeList::empty()),
@@ -933,9 +932,9 @@ pub struct FunctionExpression<'gc> {
     /// ESTree `async` property.
     pub r#async: Cell<bool>,
     /// Sema: the lexical scope created by this node, if any.
-    pub scope: Cell<Option<SemaId>>,
+    pub scope: SemaIdCell,
     /// Sema: `FunctionInfo` for this function.
-    pub sem_info: Cell<Option<SemaId>>,
+    pub sem_info: SemaIdCell,
     /// Sema: strict-mode state of this function.
     pub strictness: Cell<Strictness>,
     /// Whether this function is a method definition (getters and setters
@@ -969,8 +968,8 @@ impl<'gc> FunctionExpression<'gc> {
             predicate,
             generator: Cell::new(generator),
             r#async: Cell::new(r#async),
-            scope: Cell::new(None),
-            sem_info: Cell::new(None),
+            scope: SemaIdCell::none(),
+            sem_info: SemaIdCell::none(),
             strictness: Cell::new(Strictness::NotSet),
             is_method_definition: Cell::new(false),
             decorations: Cell::new(NodeList::empty()),
@@ -999,9 +998,9 @@ pub struct ArrowFunctionExpression<'gc> {
     /// ESTree `async` property.
     pub r#async: Cell<bool>,
     /// Sema: the lexical scope created by this node, if any.
-    pub scope: Cell<Option<SemaId>>,
+    pub scope: SemaIdCell,
     /// Sema: `FunctionInfo` for this function.
-    pub sem_info: Cell<Option<SemaId>>,
+    pub sem_info: SemaIdCell,
     /// Sema: strict-mode state of this function.
     pub strictness: Cell<Strictness>,
     /// Whether this function is a method definition (getters and setters
@@ -1034,8 +1033,8 @@ impl<'gc> ArrowFunctionExpression<'gc> {
             predicate,
             expression: Cell::new(expression),
             r#async: Cell::new(r#async),
-            scope: Cell::new(None),
-            sem_info: Cell::new(None),
+            scope: SemaIdCell::none(),
+            sem_info: SemaIdCell::none(),
             strictness: Cell::new(Strictness::NotSet),
             is_method_definition: Cell::new(false),
             decorations: Cell::new(NodeList::empty()),
@@ -1066,9 +1065,9 @@ pub struct FunctionDeclaration<'gc> {
     /// ESTree `async` property.
     pub r#async: Cell<bool>,
     /// Sema: the lexical scope created by this node, if any.
-    pub scope: Cell<Option<SemaId>>,
+    pub scope: SemaIdCell,
     /// Sema: `FunctionInfo` for this function.
-    pub sem_info: Cell<Option<SemaId>>,
+    pub sem_info: SemaIdCell,
     /// Sema: strict-mode state of this function.
     pub strictness: Cell<Strictness>,
     /// Whether this function is a method definition (getters and setters
@@ -1102,8 +1101,8 @@ impl<'gc> FunctionDeclaration<'gc> {
             predicate,
             generator: Cell::new(generator),
             r#async: Cell::new(r#async),
-            scope: Cell::new(None),
-            sem_info: Cell::new(None),
+            scope: SemaIdCell::none(),
+            sem_info: SemaIdCell::none(),
             strictness: Cell::new(Strictness::NotSet),
             is_method_definition: Cell::new(false),
             decorations: Cell::new(NodeList::empty()),
@@ -1130,9 +1129,9 @@ pub struct ComponentDeclaration<'gc> {
     /// ESTree `async` property.
     pub r#async: Cell<bool>,
     /// Sema: the lexical scope created by this node, if any.
-    pub scope: Cell<Option<SemaId>>,
+    pub scope: SemaIdCell,
     /// Sema: `FunctionInfo` for this function.
-    pub sem_info: Cell<Option<SemaId>>,
+    pub sem_info: SemaIdCell,
     /// Sema: strict-mode state of this function.
     pub strictness: Cell<Strictness>,
     /// Whether this function is a method definition (getters and setters
@@ -1162,8 +1161,8 @@ impl<'gc> ComponentDeclaration<'gc> {
             type_parameters,
             renders_type,
             r#async: Cell::new(r#async),
-            scope: Cell::new(None),
-            sem_info: Cell::new(None),
+            scope: SemaIdCell::none(),
+            sem_info: SemaIdCell::none(),
             strictness: Cell::new(Strictness::NotSet),
             is_method_definition: Cell::new(false),
             decorations: Cell::new(NodeList::empty()),
@@ -1190,9 +1189,9 @@ pub struct HookDeclaration<'gc> {
     /// ESTree `async` property.
     pub r#async: Cell<bool>,
     /// Sema: the lexical scope created by this node, if any.
-    pub scope: Cell<Option<SemaId>>,
+    pub scope: SemaIdCell,
     /// Sema: `FunctionInfo` for this function.
-    pub sem_info: Cell<Option<SemaId>>,
+    pub sem_info: SemaIdCell,
     /// Sema: strict-mode state of this function.
     pub strictness: Cell<Strictness>,
     /// Whether this function is a method definition (getters and setters
@@ -1222,8 +1221,8 @@ impl<'gc> HookDeclaration<'gc> {
             type_parameters,
             return_type,
             r#async: Cell::new(r#async),
-            scope: Cell::new(None),
-            sem_info: Cell::new(None),
+            scope: SemaIdCell::none(),
+            sem_info: SemaIdCell::none(),
             strictness: Cell::new(Strictness::NotSet),
             is_method_definition: Cell::new(false),
             decorations: Cell::new(NodeList::empty()),
@@ -1332,7 +1331,7 @@ pub struct ForInStatement<'gc> {
     /// Sema: label index; `INVALID_LABEL` until set.
     pub label_index: Cell<u32>,
     /// Sema: the lexical scope created by this node, if any.
-    pub scope: Cell<Option<SemaId>>,
+    pub scope: SemaIdCell,
 }
 impl<'gc> ForInStatement<'gc> {
     /// Build `ForInStatement` from its metadata and `ESTree.def` fields.
@@ -1349,7 +1348,7 @@ impl<'gc> ForInStatement<'gc> {
             right,
             body,
             label_index: Cell::new(INVALID_LABEL),
-            scope: Cell::new(None),
+            scope: SemaIdCell::none(),
         }
     }
 }
@@ -1371,7 +1370,7 @@ pub struct ForOfStatement<'gc> {
     /// Sema: label index; `INVALID_LABEL` until set.
     pub label_index: Cell<u32>,
     /// Sema: the lexical scope created by this node, if any.
-    pub scope: Cell<Option<SemaId>>,
+    pub scope: SemaIdCell,
 }
 impl<'gc> ForOfStatement<'gc> {
     /// Build `ForOfStatement` from its metadata and `ESTree.def` fields.
@@ -1390,7 +1389,7 @@ impl<'gc> ForOfStatement<'gc> {
             body,
             r#await: Cell::new(r#await),
             label_index: Cell::new(INVALID_LABEL),
-            scope: Cell::new(None),
+            scope: SemaIdCell::none(),
         }
     }
 }
@@ -1412,7 +1411,7 @@ pub struct ForStatement<'gc> {
     /// Sema: label index; `INVALID_LABEL` until set.
     pub label_index: Cell<u32>,
     /// Sema: the lexical scope created by this node, if any.
-    pub scope: Cell<Option<SemaId>>,
+    pub scope: SemaIdCell,
 }
 impl<'gc> ForStatement<'gc> {
     /// Build `ForStatement` from its metadata and `ESTree.def` fields.
@@ -1431,7 +1430,7 @@ impl<'gc> ForStatement<'gc> {
             update,
             body,
             label_index: Cell::new(INVALID_LABEL),
-            scope: Cell::new(None),
+            scope: SemaIdCell::none(),
         }
     }
 }
@@ -1483,7 +1482,7 @@ pub struct BlockStatement<'gc> {
     /// ESTree `implicit` property.
     pub implicit: Cell<bool>,
     /// Sema: the lexical scope created by this node, if any.
-    pub scope: Cell<Option<SemaId>>,
+    pub scope: SemaIdCell,
     /// The source buffer id in which this block was found.
     pub buffer_id: Cell<u32>,
     /// True if this is a function body pruned while pre-parsing.
@@ -1511,7 +1510,7 @@ impl<'gc> BlockStatement<'gc> {
             metadata,
             body,
             implicit: Cell::new(implicit),
-            scope: Cell::new(None),
+            scope: SemaIdCell::none(),
             buffer_id: Cell::new(0),
             is_lazy_function_body: Cell::new(false),
             param_yield: Cell::new(false),
@@ -1531,9 +1530,9 @@ pub struct StaticBlock<'gc> {
     /// ESTree `body` property.
     pub body: NodeList<'gc>,
     /// Sema: the lexical scope created by this node, if any.
-    pub scope: Cell<Option<SemaId>>,
+    pub scope: SemaIdCell,
     /// Sema: `FunctionInfo` for this static block.
-    pub function_info: Cell<Option<SemaId>>,
+    pub function_info: SemaIdCell,
 }
 impl<'gc> StaticBlock<'gc> {
     /// Build `StaticBlock` from its metadata and `ESTree.def` fields.
@@ -1545,8 +1544,8 @@ impl<'gc> StaticBlock<'gc> {
         StaticBlock {
             metadata,
             body,
-            scope: Cell::new(None),
-            function_info: Cell::new(None),
+            scope: SemaIdCell::none(),
+            function_info: SemaIdCell::none(),
         }
     }
 }
@@ -1686,7 +1685,7 @@ pub struct SwitchStatement<'gc> {
     /// Sema: label index; `INVALID_LABEL` until set.
     pub label_index: Cell<u32>,
     /// Sema: the lexical scope created by this node, if any.
-    pub scope: Cell<Option<SemaId>>,
+    pub scope: SemaIdCell,
 }
 impl<'gc> SwitchStatement<'gc> {
     /// Build `SwitchStatement` from its metadata and `ESTree.def` fields.
@@ -1701,7 +1700,7 @@ impl<'gc> SwitchStatement<'gc> {
             discriminant,
             cases,
             label_index: Cell::new(INVALID_LABEL),
-            scope: Cell::new(None),
+            scope: SemaIdCell::none(),
         }
     }
 }
@@ -2913,7 +2912,7 @@ pub struct Identifier<'gc> {
     pub decl_state: Cell<u8>,
     /// Sema: the declaration this identifier resolves to; `None` until a
     /// resolution is recorded.
-    pub decl: Cell<Option<SemaId>>,
+    pub decl: SemaIdCell,
 }
 impl<'gc> Identifier<'gc> {
     /// Build `Identifier` from its metadata and `ESTree.def` fields.
@@ -2931,7 +2930,7 @@ impl<'gc> Identifier<'gc> {
             optional: Cell::new(optional),
             unresolvable: Cell::new(false),
             decl_state: Cell::new(0),
-            decl: Cell::new(None),
+            decl: SemaIdCell::none(),
         }
     }
     /// The `name` label as UTF-8 text.
@@ -3046,7 +3045,7 @@ pub struct CatchClause<'gc> {
     /// ESTree `body` property.
     pub body: &'gc Node<'gc>,
     /// Sema: the lexical scope created by this node, if any.
-    pub scope: Cell<Option<SemaId>>,
+    pub scope: SemaIdCell,
 }
 impl<'gc> CatchClause<'gc> {
     /// Build `CatchClause` from its metadata and `ESTree.def` fields.
@@ -3060,7 +3059,7 @@ impl<'gc> CatchClause<'gc> {
             metadata,
             param,
             body,
-            scope: Cell::new(None),
+            scope: SemaIdCell::none(),
         }
     }
 }
@@ -3411,16 +3410,16 @@ pub struct ClassDeclaration<'gc> {
     /// ESTree `body` property.
     pub body: &'gc Node<'gc>,
     /// Sema: the lexical scope created by this node, if any.
-    pub scope: Cell<Option<SemaId>>,
+    pub scope: SemaIdCell,
     /// Sema: `FunctionInfo` of the synthetic implicit constructor, if the
     /// class has one.
-    pub implicit_ctor_function_info: Cell<Option<SemaId>>,
+    pub implicit_ctor_function_info: SemaIdCell,
     /// Sema: `FunctionInfo` of the synthetic function that initializes the
     /// instance elements, if the class needs one.
-    pub instance_elements_init_function_info: Cell<Option<SemaId>>,
+    pub instance_elements_init_function_info: SemaIdCell,
     /// Sema: `FunctionInfo` of the synthetic function that runs the static
     /// field initializers, if the class has any.
-    pub static_elements_init_function_info: Cell<Option<SemaId>>,
+    pub static_elements_init_function_info: SemaIdCell,
 }
 impl<'gc> ClassDeclaration<'gc> {
     /// Build `ClassDeclaration` from its metadata and `ESTree.def` fields.
@@ -3444,10 +3443,10 @@ impl<'gc> ClassDeclaration<'gc> {
             implements,
             decorators,
             body,
-            scope: Cell::new(None),
-            implicit_ctor_function_info: Cell::new(None),
-            instance_elements_init_function_info: Cell::new(None),
-            static_elements_init_function_info: Cell::new(None),
+            scope: SemaIdCell::none(),
+            implicit_ctor_function_info: SemaIdCell::none(),
+            instance_elements_init_function_info: SemaIdCell::none(),
+            static_elements_init_function_info: SemaIdCell::none(),
         }
     }
 }
@@ -3473,16 +3472,16 @@ pub struct ClassExpression<'gc> {
     /// ESTree `body` property.
     pub body: &'gc Node<'gc>,
     /// Sema: the lexical scope created by this node, if any.
-    pub scope: Cell<Option<SemaId>>,
+    pub scope: SemaIdCell,
     /// Sema: `FunctionInfo` of the synthetic implicit constructor, if the
     /// class has one.
-    pub implicit_ctor_function_info: Cell<Option<SemaId>>,
+    pub implicit_ctor_function_info: SemaIdCell,
     /// Sema: `FunctionInfo` of the synthetic function that initializes the
     /// instance elements, if the class needs one.
-    pub instance_elements_init_function_info: Cell<Option<SemaId>>,
+    pub instance_elements_init_function_info: SemaIdCell,
     /// Sema: `FunctionInfo` of the synthetic function that runs the static
     /// field initializers, if the class has any.
-    pub static_elements_init_function_info: Cell<Option<SemaId>>,
+    pub static_elements_init_function_info: SemaIdCell,
 }
 impl<'gc> ClassExpression<'gc> {
     /// Build `ClassExpression` from its metadata and `ESTree.def` fields.
@@ -3506,10 +3505,10 @@ impl<'gc> ClassExpression<'gc> {
             implements,
             decorators,
             body,
-            scope: Cell::new(None),
-            implicit_ctor_function_info: Cell::new(None),
-            instance_elements_init_function_info: Cell::new(None),
-            static_elements_init_function_info: Cell::new(None),
+            scope: SemaIdCell::none(),
+            implicit_ctor_function_info: SemaIdCell::none(),
+            instance_elements_init_function_info: SemaIdCell::none(),
+            static_elements_init_function_info: SemaIdCell::none(),
         }
     }
 }
@@ -18038,8 +18037,8 @@ pub mod builder {
                 inner: super::Program {
                     metadata: node.metadata.duplicate(),
                     body: node.body.duplicate(),
-                    scope: Cell::new(node.scope.get()),
-                    sem_info: Cell::new(node.sem_info.get()),
+                    scope: SemaIdCell::new(node.scope.get()),
+                    sem_info: SemaIdCell::new(node.sem_info.get()),
                     strictness: Cell::new(node.strictness.get()),
                     is_method_definition: Cell::new(node.is_method_definition.get()),
                     decorations: Cell::new(node.decorations.get()),
@@ -18084,8 +18083,8 @@ pub mod builder {
                     predicate: node.predicate.duplicate(),
                     generator: Cell::new(node.generator.get()),
                     r#async: Cell::new(node.r#async.get()),
-                    scope: Cell::new(node.scope.get()),
-                    sem_info: Cell::new(node.sem_info.get()),
+                    scope: SemaIdCell::new(node.scope.get()),
+                    sem_info: SemaIdCell::new(node.sem_info.get()),
                     strictness: Cell::new(node.strictness.get()),
                     is_method_definition: Cell::new(node.is_method_definition.get()),
                     decorations: Cell::new(node.decorations.get()),
@@ -18138,8 +18137,8 @@ pub mod builder {
                     predicate: node.predicate.duplicate(),
                     expression: Cell::new(node.expression.get()),
                     r#async: Cell::new(node.r#async.get()),
-                    scope: Cell::new(node.scope.get()),
-                    sem_info: Cell::new(node.sem_info.get()),
+                    scope: SemaIdCell::new(node.scope.get()),
+                    sem_info: SemaIdCell::new(node.sem_info.get()),
                     strictness: Cell::new(node.strictness.get()),
                     is_method_definition: Cell::new(node.is_method_definition.get()),
                     decorations: Cell::new(node.decorations.get()),
@@ -18191,8 +18190,8 @@ pub mod builder {
                     predicate: node.predicate.duplicate(),
                     generator: Cell::new(node.generator.get()),
                     r#async: Cell::new(node.r#async.get()),
-                    scope: Cell::new(node.scope.get()),
-                    sem_info: Cell::new(node.sem_info.get()),
+                    scope: SemaIdCell::new(node.scope.get()),
+                    sem_info: SemaIdCell::new(node.sem_info.get()),
                     strictness: Cell::new(node.strictness.get()),
                     is_method_definition: Cell::new(node.is_method_definition.get()),
                     decorations: Cell::new(node.decorations.get()),
@@ -18244,8 +18243,8 @@ pub mod builder {
                     type_parameters: node.type_parameters.duplicate(),
                     renders_type: node.renders_type.duplicate(),
                     r#async: Cell::new(node.r#async.get()),
-                    scope: Cell::new(node.scope.get()),
-                    sem_info: Cell::new(node.sem_info.get()),
+                    scope: SemaIdCell::new(node.scope.get()),
+                    sem_info: SemaIdCell::new(node.sem_info.get()),
                     strictness: Cell::new(node.strictness.get()),
                     is_method_definition: Cell::new(node.is_method_definition.get()),
                     decorations: Cell::new(node.decorations.get()),
@@ -18295,8 +18294,8 @@ pub mod builder {
                     type_parameters: node.type_parameters.duplicate(),
                     return_type: node.return_type.duplicate(),
                     r#async: Cell::new(node.r#async.get()),
-                    scope: Cell::new(node.scope.get()),
-                    sem_info: Cell::new(node.sem_info.get()),
+                    scope: SemaIdCell::new(node.scope.get()),
+                    sem_info: SemaIdCell::new(node.sem_info.get()),
                     strictness: Cell::new(node.strictness.get()),
                     is_method_definition: Cell::new(node.is_method_definition.get()),
                     decorations: Cell::new(node.decorations.get()),
@@ -18454,7 +18453,7 @@ pub mod builder {
                     right: node.right.duplicate(),
                     body: node.body.duplicate(),
                     label_index: Cell::new(node.label_index.get()),
-                    scope: Cell::new(node.scope.get()),
+                    scope: SemaIdCell::new(node.scope.get()),
                 },
             }
         }
@@ -18496,7 +18495,7 @@ pub mod builder {
                     body: node.body.duplicate(),
                     r#await: Cell::new(node.r#await.get()),
                     label_index: Cell::new(node.label_index.get()),
-                    scope: Cell::new(node.scope.get()),
+                    scope: SemaIdCell::new(node.scope.get()),
                 },
             }
         }
@@ -18538,7 +18537,7 @@ pub mod builder {
                     update: node.update.duplicate(),
                     body: node.body.duplicate(),
                     label_index: Cell::new(node.label_index.get()),
-                    scope: Cell::new(node.scope.get()),
+                    scope: SemaIdCell::new(node.scope.get()),
                 },
             }
         }
@@ -18639,7 +18638,7 @@ pub mod builder {
                     metadata: node.metadata.duplicate(),
                     body: node.body.duplicate(),
                     implicit: Cell::new(node.implicit.get()),
-                    scope: Cell::new(node.scope.get()),
+                    scope: SemaIdCell::new(node.scope.get()),
                     buffer_id: Cell::new(node.buffer_id.get()),
                     is_lazy_function_body: Cell::new(node.is_lazy_function_body.get()),
                     param_yield: Cell::new(node.param_yield.get()),
@@ -18679,8 +18678,8 @@ pub mod builder {
                 inner: super::StaticBlock {
                     metadata: node.metadata.duplicate(),
                     body: node.body.duplicate(),
-                    scope: Cell::new(node.scope.get()),
-                    function_info: Cell::new(node.function_info.get()),
+                    scope: SemaIdCell::new(node.scope.get()),
+                    function_info: SemaIdCell::new(node.function_info.get()),
                 },
             }
         }
@@ -18886,7 +18885,7 @@ pub mod builder {
                     discriminant: node.discriminant.duplicate(),
                     cases: node.cases.duplicate(),
                     label_index: Cell::new(node.label_index.get()),
-                    scope: Cell::new(node.scope.get()),
+                    scope: SemaIdCell::new(node.scope.get()),
                 },
             }
         }
@@ -20034,7 +20033,7 @@ pub mod builder {
                     optional: Cell::new(node.optional.get()),
                     unresolvable: Cell::new(node.unresolvable.get()),
                     decl_state: Cell::new(node.decl_state.get()),
-                    decl: Cell::new(node.decl.get()),
+                    decl: SemaIdCell::new(node.decl.get()),
                 },
             }
         }
@@ -20174,7 +20173,7 @@ pub mod builder {
                     metadata: node.metadata.duplicate(),
                     param: node.param.duplicate(),
                     body: node.body.duplicate(),
-                    scope: Cell::new(node.scope.get()),
+                    scope: SemaIdCell::new(node.scope.get()),
                 },
             }
         }
@@ -20464,10 +20463,10 @@ pub mod builder {
                     implements: node.implements.duplicate(),
                     decorators: node.decorators.duplicate(),
                     body: node.body.duplicate(),
-                    scope: Cell::new(node.scope.get()),
-                    implicit_ctor_function_info: Cell::new(node.implicit_ctor_function_info.get()),
-                    instance_elements_init_function_info: Cell::new(node.instance_elements_init_function_info.get()),
-                    static_elements_init_function_info: Cell::new(node.static_elements_init_function_info.get()),
+                    scope: SemaIdCell::new(node.scope.get()),
+                    implicit_ctor_function_info: SemaIdCell::new(node.implicit_ctor_function_info.get()),
+                    instance_elements_init_function_info: SemaIdCell::new(node.instance_elements_init_function_info.get()),
+                    static_elements_init_function_info: SemaIdCell::new(node.static_elements_init_function_info.get()),
                 },
             }
         }
@@ -20519,10 +20518,10 @@ pub mod builder {
                     implements: node.implements.duplicate(),
                     decorators: node.decorators.duplicate(),
                     body: node.body.duplicate(),
-                    scope: Cell::new(node.scope.get()),
-                    implicit_ctor_function_info: Cell::new(node.implicit_ctor_function_info.get()),
-                    instance_elements_init_function_info: Cell::new(node.instance_elements_init_function_info.get()),
-                    static_elements_init_function_info: Cell::new(node.static_elements_init_function_info.get()),
+                    scope: SemaIdCell::new(node.scope.get()),
+                    implicit_ctor_function_info: SemaIdCell::new(node.implicit_ctor_function_info.get()),
+                    instance_elements_init_function_info: SemaIdCell::new(node.instance_elements_init_function_info.get()),
+                    static_elements_init_function_info: SemaIdCell::new(node.static_elements_init_function_info.get()),
                 },
             }
         }

@@ -219,7 +219,7 @@ def def_field_descriptor(ftype, fname, opt):
 DECORATIONS = {
     "ScopeDecorationBase": (
         [],
-        [("scope", "Cell<Option<SemaId>>", "Cell::new(None)")],
+        [("scope", "SemaIdCell", "SemaIdCell::none()")],
     ),
     "LabelDecorationBase": (
         [],
@@ -229,7 +229,7 @@ DECORATIONS = {
     "FunctionLikeDecoration": (
         ["ScopeDecorationBase"],
         [
-            ("semInfo", "Cell<Option<SemaId>>", "Cell::new(None)"),
+            ("semInfo", "SemaIdCell", "SemaIdCell::none()"),
             ("strictness", "Cell<Strictness>", "Cell::new(Strictness::NotSet)"),
             ("isMethodDefinition", "Cell<bool>", "Cell::new(false)"),
             ("decorations", "Cell<NodeList<'gc>>", "Cell::new(NodeList::empty())"),
@@ -261,7 +261,7 @@ DECORATIONS = {
     ),
     "StaticBlockDecoration": (
         ["ScopeDecorationBase"],
-        [("functionInfo", "Cell<Option<SemaId>>", "Cell::new(None)")],
+        [("functionInfo", "SemaIdCell", "SemaIdCell::none()")],
     ),
     "ForStatementDecoration": (["ScopeDecorationBase"], []),
     "ForInStatementDecoration": (["ScopeDecorationBase"], []),
@@ -270,11 +270,11 @@ DECORATIONS = {
     "ClassLikeDecoration": (
         ["ScopeDecorationBase"],
         [
-            ("implicitCtorFunctionInfo", "Cell<Option<SemaId>>", "Cell::new(None)"),
-            ("instanceElementsInitFunctionInfo", "Cell<Option<SemaId>>",
-             "Cell::new(None)"),
-            ("staticElementsInitFunctionInfo", "Cell<Option<SemaId>>",
-             "Cell::new(None)"),
+            ("implicitCtorFunctionInfo", "SemaIdCell", "SemaIdCell::none()"),
+            ("instanceElementsInitFunctionInfo", "SemaIdCell",
+             "SemaIdCell::none()"),
+            ("staticElementsInitFunctionInfo", "SemaIdCell",
+             "SemaIdCell::none()"),
         ],
     ),
     "IdentifierDecoration": (
@@ -282,7 +282,7 @@ DECORATIONS = {
         [
             ("unresolvable", "Cell<bool>", "Cell::new(false)"),
             ("declState", "Cell<u8>", "Cell::new(0)"),
-            ("decl", "Cell<Option<SemaId>>", "Cell::new(None)"),
+            ("decl", "SemaIdCell", "SemaIdCell::none()"),
         ],
     ),
     "JSXDecoration": ([], []),
@@ -512,10 +512,9 @@ HEADER = """\
 #![allow(clippy::large_enum_variant)] // one enum over all nodes — boxing would defeat deep-match
 
 use std::cell::Cell;
-use crate::node_child::{NodeChild, NodeLabel, NodeList, NodeMetadata, NodeString, Strictness, INVALID_LABEL};
+use crate::node_child::{NodeChild, NodeLabel, NodeList, NodeMetadata, NodeString, SemaIdCell, Strictness, INVALID_LABEL};
 use crate::visitor::{Path, TransformResult, Visitor, VisitorMut};
 use crate::NodeId;
-use crate::SemaId;
 """
 
 
@@ -1087,7 +1086,10 @@ def emit_builder_struct(name, fields, out):
         elif kind in ("single", "opt", "list"):
             out.append(f"                    {rf}: node.{rf}.duplicate(),")
         else:  # declist or value cell
-            out.append(f"                    {rf}: Cell::new(node.{rf}.get()),")
+            # The copy constructor is the field's own type: `Cell<T>`
+            # takes `Cell::new`, `SemaIdCell` takes `SemaIdCell::new`.
+            ctor = "SemaIdCell" if fd["rust_type"] == "SemaIdCell" else "Cell"
+            out.append(f"                    {rf}: {ctor}::new(node.{rf}.get()),")
     out.append("                },")
     out.append("            }")
     out.append("        }")

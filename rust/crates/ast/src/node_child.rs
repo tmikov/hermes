@@ -6,6 +6,7 @@ use hermes_support::location::{SMLoc, SMRange};
 
 use crate::context::{GCLock, NodeListElement};
 use crate::NodeId;
+use crate::SemaId;
 use crate::node::{EmptyStatement, Node};
 use crate::visitor::{Path, TransformResult, VisitorMut};
 
@@ -28,6 +29,75 @@ pub enum Strictness {
 
 /// Sentinel for an unset label index (mirrors `LabelDecorationBase::INVALID_LABEL`, `~0u`).
 pub const INVALID_LABEL: u32 = u32::MAX;
+
+/// A `Cell<Option<SemaId>>` in four bytes instead of eight.
+///
+/// [`SemaId`] is a plain `u32` with no niche, so `Option<SemaId>` costs eight
+/// bytes: four of payload, four of discriminant and padding. That waste is not
+/// spread evenly — these decorations cluster on the widest node variants
+/// (`ClassDeclaration` carries four of them, `FunctionDeclaration` two), and
+/// `size_of::<Node>()` is the size of the *widest* variant, so those bytes set
+/// the footprint of all 271 node kinds and every arena slot.
+///
+/// `u32::MAX` encodes `None`. It is not a reachable id: ids index sema's decl
+/// and scope tables, so reaching `u32::MAX - 1` of either would need far more
+/// memory than the tables could occupy. `set` debug-asserts it regardless,
+/// because a silent aliasing of `None` with a real id would be invisible until
+/// something far away resolved to the wrong declaration.
+///
+/// `get`/`set` take and return `Option<SemaId>`, exactly as `Cell` did, so this
+/// is a layout change and nothing else.
+#[derive(Debug, Clone)]
+pub struct SemaIdCell(Cell<u32>);
+
+/// The `None` encoding for [`SemaIdCell`].
+const SEMA_ID_NONE: u32 = u32::MAX;
+
+impl SemaIdCell {
+    /// An unset decoration.
+    pub const fn none() -> Self {
+        SemaIdCell(Cell::new(SEMA_ID_NONE))
+    }
+
+    /// A cell holding `value`.
+    pub fn new(value: Option<SemaId>) -> Self {
+        let cell = Self::none();
+        cell.set(value);
+        cell
+    }
+
+    /// The current value.
+    #[inline]
+    pub fn get(&self) -> Option<SemaId> {
+        let raw = self.0.get();
+        if raw == SEMA_ID_NONE {
+            None
+        } else {
+            Some(SemaId(raw))
+        }
+    }
+
+    /// Store `value`.
+    #[inline]
+    pub fn set(&self, value: Option<SemaId>) {
+        self.0.set(match value {
+            None => SEMA_ID_NONE,
+            Some(SemaId(raw)) => {
+                debug_assert!(
+                    raw != SEMA_ID_NONE,
+                    "SemaId({raw}) collides with the None encoding"
+                );
+                raw
+            }
+        });
+    }
+}
+
+impl Default for SemaIdCell {
+    fn default() -> Self {
+        Self::none()
+    }
+}
 
 /// Metadata common to all AST nodes.
 ///
