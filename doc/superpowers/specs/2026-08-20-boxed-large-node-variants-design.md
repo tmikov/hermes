@@ -218,3 +218,90 @@ a u8 `parens` and a u32 `id` — a real option, independent of this design.
 The sweep now prices that option directly: the 104 and 112 rows differ by
 exactly those 8 metadata bytes and by nothing else, and they differ by 2.2%.
 So the u24-delta packing is worth about 2%, not the ~5% guessed earlier.
+
+---
+
+## 7. Revision, 2026-08-21 — after the layout work
+
+Two changes landed since this was written, and both move the ground under it:
+the sema-id decorations went from 8 bytes to 4 (`SemaIdCell`), and
+`NodeMetadata` went from 32 to 24 by storing one `SourceId` per node instead of
+three. `Node` is now **104**, `StorageEntry` **112**, down from 128/136.
+
+### The boxed set shrank from 23 variants to 12
+
+Fresh census of all 271 variants:
+
+| size | count | variants |
+|---:|---:|---|
+| 96 | 4 | `Class{Declaration,Expression}`, `Function{Declaration,Expression}` |
+| 88 | 5 | `ArrowFunctionExpression`, `Class{,Private}Property`, `ComponentDeclaration`, `HookDeclaration` |
+| 72 | 3 | `DeclareClass`, `DeclareOpaqueType`, `OpaqueType` |
+| ≤64 | 259 | everything else |
+
+There is a cliff after the top 9. Boxing the 12 variants at ≥72 reaches
+`StorageEntry` = 80 — this document's original target — where it previously
+needed 23. Boxing the 9 at ≥88 reaches 88 and is probably the better trade.
+
+Construction sites are 26 direct `X::new` plus 11 builder references across all
+twelve kinds, not the 106 estimated in §5 for 23 kinds.
+
+### §3's storage design does not work as specified
+
+The `Payload` enum requires recovering a `PayloadEntry` from an interior
+`&ClassDeclaration`, which needs the byte offset of a variant's field within
+the enum. **Rust has no stable way to obtain that.** `offset_of!` does not
+accept enum variants (`offset_of_enum` is unstable). `#[repr(C, u8)]` defines
+the layout in principle, but reading the offset back means either hardcoding a
+constant that silently rots, or constructing a dummy `Payload` to measure —
+and node structs are not trivially constructible, since they hold `&Node`
+children.
+
+§4 called this "the one delicate piece" and cited `StorageEntry::from_node` as
+precedent. That precedent does not carry: `StorageEntry` is a struct, so
+`offset_of!(StorageEntry, inner)` is exact and stable. An enum variant is not.
+
+**Use per-kind pools instead**, of a plain struct:
+
+```rust
+#[repr(C)]
+struct Boxed<T> { header: Cell<u32>, value: T }
+```
+
+`offset_of!(Boxed<T>, value)` is stable and exact, so recovery is the same
+`container_of` already in `context.rs`. One `Deque<Boxed<K>>` and one free list
+per boxed kind, all generated. It costs more fields on `Context` (2 per kind)
+and buys back exactness plus tighter packing: a per-kind slot is that kind's
+own size, where the enum forces every payload to the width of the largest, the
+very effect being escaped.
+
+### The collector is simpler than §4 assumed
+
+A payload is owned 1:1 by exactly one node, so its liveness *is* its owner's.
+Payloads need **no mark bit and no marking pass**: when the sweep frees a
+`StorageEntry` whose node is a boxed variant, it frees that payload too. Both
+`Context::gc` and `AllocationScope::drop` need the same arm.
+
+### Dead end: packing `parens` into `id`
+
+Node structs hold pointers, so they are align-8. Shrinking `NodeMetadata` 24 →
+20 takes `ClassDeclaration` to 92, which rounds straight back to 96 — `Node`
+does not move at all. Metadata only pays again if it drops a full 8 bytes, to
+16: move `id` out to `StorageEntry` (where its own doc comment says it belongs
+— "belongs to the slot's occupant") and pack `parens` into spare bits of
+`debug`. That is worth ~2.4%, independent of boxing.
+
+### Where the numbers stand
+
+Measured on `typescript.js`, each step A/B-interleaved on an idle machine:
+
+| | entry | MiB/s | |
+|---|---:|---:|---|
+| before this work | 136 | 63.1 | |
+| FxHash in the atom table | 136 | 67.9 | +7.6% |
+| `SemaIdCell` | 120 | 70.1 | +3.2% |
+| one `SourceId` per node | 112 | 72.3 | +3.9% |
+| — boxing 9, projected | 88 | ~77 | ~+7% |
+
+Both layout steps met or beat the sweep's 0.30%-per-byte slope, so that slope
+is now a usable predictor rather than a description.
