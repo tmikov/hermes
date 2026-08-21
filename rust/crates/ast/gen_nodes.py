@@ -311,10 +311,18 @@ DECORATIONS = {
 # entry here and nothing else, because every per-kind artefact below is
 # generated from this set.
 BOXED = [
+    # 96 bytes each.
     "ClassDeclaration",
     "ClassExpression",
     "FunctionDeclaration",
     "FunctionExpression",
+    # 88 bytes each. Boxing these too takes the widest inline variant down to
+    # the 72-byte tier, so `Node` is 80 and a slot 88.
+    "ArrowFunctionExpression",
+    "ClassPrivateProperty",
+    "ClassProperty",
+    "ComponentDeclaration",
+    "HookDeclaration",
 ]
 
 

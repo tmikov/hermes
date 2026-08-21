@@ -1260,7 +1260,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let end = self.lexer.prev_token_end();
         let params = NodeList::from_iter(self.gc, param_list);
         let node =
-            Node::ArrowFunctionExpression(ArrowFunctionExpression::new(
+            Node::new_arrow_function_expression(self.gc, ArrowFunctionExpression::new(
                 NodeMetadata::new(self.dummy_range()),
                 params,
                 body,

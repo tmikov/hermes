@@ -1075,7 +1075,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 return Some(self.set_location(
                     prop.range().start,
                     end,
-                    Node::ClassPrivateProperty(ClassPrivateProperty::new(
+                    Node::new_class_private_property(self.gc, ClassPrivateProperty::new(
                         NodeMetadata::new(self.dummy_range()),
                         prop,
                         value,
@@ -1109,7 +1109,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             return Some(self.set_location(
                 start_range.start,
                 end,
-                Node::ClassProperty(ClassProperty::new(
+                Node::new_class_property(self.gc, ClassProperty::new(
                     NodeMetadata::new(self.dummy_range()),
                     prop,
                     value,

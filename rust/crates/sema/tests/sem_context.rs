@@ -246,7 +246,7 @@ fn node_is_arrow_no_for_none_and_non_arrow_and_yes_for_arrow() {
         NodeList::empty(),
         false,
     )));
-    let arrow = gc.alloc(Node::ArrowFunctionExpression(
+    let arrow = gc.alloc(Node::new_arrow_function_expression(&gc, 
         hermes_ast::node::ArrowFunctionExpression::new(
             NodeMetadata::new(r()),
             NodeList::empty(),

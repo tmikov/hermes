@@ -818,11 +818,12 @@ impl<'ast> Context<'ast> {
             }
             // Passed all checks, this entry is free.
             freed_node_ids.push(entry.inner.metadata().id.get());
-            // A boxed payload is owned by exactly one node, so its liveness is
-            // that node's: no separate mark pass, just free it here.
-            // SAFETY: the entry is dead and unreferenced (checked above), so
-            // its payload is live, unreferenced, and not already free.
-            unsafe { self.boxed.free_payload_of(&entry.inner) };
+            // A boxed payload is owned by exactly one node, so its liveness
+            // is that node's: no separate mark pass, just free it here. The
+            // entry is dead and unreferenced (checked above), so its payload
+            // is live, unreferenced, and not already free — the precondition
+            // `free_boxed` documents.
+            self.boxed.free_payload_of(&entry.inner);
             entry.ctx_id_markbit.set(FREE_ENTRY);
             free_nodes.push(unsafe { NonNull::new_unchecked(entry as *mut StorageEntry) });
         }

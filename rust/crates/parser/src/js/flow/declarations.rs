@@ -368,7 +368,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         // C++ 320-329.
         let end = body.range().end;
-        let node = Node::ComponentDeclaration(ComponentDeclaration::new(
+        let node = Node::new_component_declaration(self.gc, ComponentDeclaration::new(
             NodeMetadata::new(self.dummy_range()),
             id,
             params,
@@ -774,7 +774,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         // C++ 853-857.
         let end = body.range().end;
-        let node = Node::HookDeclaration(HookDeclaration::new(
+        let node = Node::new_hook_declaration(self.gc, HookDeclaration::new(
             NodeMetadata::new(self.dummy_range()),
             id,
             params,
