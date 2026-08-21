@@ -108,7 +108,7 @@ fn gc_traces_decorations_on_function_declaration() {
             NodeList::empty(),
             false, // implicit
         )));
-        let fd = gc.alloc(Node::FunctionDeclaration(FunctionDeclaration::new(
+        let fd = gc.alloc(Node::new_function_declaration(&gc, FunctionDeclaration::new(
             NodeMetadata::new(r()),
             None,              // id (NodePtr, optional)
             NodeList::empty(), // params

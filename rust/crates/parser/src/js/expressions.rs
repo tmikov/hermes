@@ -3947,7 +3947,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 let func_expr = self.set_location(
                     paren_loc,
                     body_end,
-                    Node::FunctionExpression(func),
+                    Node::new_function_expression(self.gc, func),
                 );
 
                 let get_kind = self.gc.ctx().atom_table.atom_bytes(b"get");
@@ -4108,7 +4108,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 let func_expr = self.set_location(
                     paren_loc,
                     body_end,
-                    Node::FunctionExpression(func),
+                    Node::new_function_expression(self.gc, func),
                 );
 
                 let set_kind = self.gc.ctx().atom_table.atom_bytes(b"set");
@@ -4383,7 +4383,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             value = self.set_location(
                 paren_loc,
                 body_end,
-                Node::FunctionExpression(func),
+                Node::new_function_expression(self.gc, func),
             );
         } else {
             // `: value` — standard property (C++ 3246-3259).

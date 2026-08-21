@@ -34,9 +34,21 @@ impl<T> Default for Deque<T> {
 
 impl<T> Deque<T> {
     pub fn new() -> Self {
+        Self::with_chunk_capacity(MIN_CHUNK_CAPACITY)
+    }
+
+    /// Like [`Deque::new`], but with an explicit capacity for the first chunk.
+    ///
+    /// The first chunk is allocated eagerly, so a deque that will hold a few
+    /// dozen elements should say so: the default 1024 is chosen for the node
+    /// and list-element arenas, and a pool sized for 2% of the nodes would
+    /// otherwise pay the same up-front chunk as they do. Capacity still
+    /// doubles per chunk up to [`MAX_CHUNK_CAPACITY`], so a pool that turns
+    /// out to be large converges on the same behaviour after a few chunks.
+    pub fn with_chunk_capacity(capacity: usize) -> Self {
         let mut result = Self {
             storage: Default::default(),
-            next_chunk_capacity: MIN_CHUNK_CAPACITY,
+            next_chunk_capacity: capacity.max(1),
         };
         result.new_chunk();
         result

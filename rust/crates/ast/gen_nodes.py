@@ -299,6 +299,25 @@ DECORATIONS = {
 # Reference C: every ESTREE_FIRST range NAME implicitly carries NAMEDecoration
 # (applied in compose_fields). The validation below enforces this at generation time.
 
+# Node variants stored behind an arena reference instead of inline.
+#
+# `size_of::<Node>()` is the size of its *widest* variant and every arena slot
+# pays it, so a handful of wide kinds set the footprint of all 271. These four
+# are 96 bytes where the next tier is 88 and the bulk is 48 or less.
+#
+# This is a size decision, not a semantic one. Re-run the variant census in
+# doc/superpowers/specs/2026-08-20-boxed-large-node-variants-design.md after any
+# layout change and widen or narrow the set to match; adding a kind costs one
+# entry here and nothing else, because every per-kind artefact below is
+# generated from this set.
+BOXED = [
+    "ClassDeclaration",
+    "ClassExpression",
+    "FunctionDeclaration",
+    "FunctionExpression",
+]
+
+
 # Reference D: leaf DecoratorTrait map, hand-transcribed from ESTree.h:530-581.
 # (only leaves with a non-Empty trait)
 LEAF_DECORATOR = {
@@ -760,8 +779,142 @@ def emit_node_enum(nodes, out):
     out.append("#[repr(C)]")
     out.append("pub enum Node<'gc> {")
     for name, _fields in nodes:
-        emit_doc(out, [f"A [`{name}`] node."], "    ")
-        out.append(f"    {name}({name}<'gc>),")
+        if name in BOXED:
+            emit_doc(out, [
+                f"A [`{name}`] node, held by reference: it is one of the",
+                "widest variants, and inline it would set",
+                "`size_of::<Node>()` for every kind. Match ergonomics make",
+                "the indirection invisible to a nested `match`.",
+            ], "    ")
+            out.append(f"    {name}(&'gc {name}<'gc>),")
+        else:
+            emit_doc(out, [f"A [`{name}`] node."], "    ")
+            out.append(f"    {name}({name}<'gc>),")
+    out.append("}")
+    out.append("")
+    emit_boxed_pools(out)
+
+
+def emit_boxed_pools(out):
+    """Per-kind payload arenas for the boxed variants, and their constructors."""
+    if not BOXED:
+        return
+    fields = [(name, camel_to_snake(name)) for name in BOXED]
+
+    emit_doc(out, [
+        "Payload arenas for the boxed [`Node`] variants, one per kind.",
+        "",
+        "Per kind rather than one shared pool for two reasons: a slot is",
+        "exactly its own kind's size instead of the widest kind's, and the",
+        "sweep can recover a slot from the interior reference a `Node` arm",
+        "holds with a plain `offset_of!` on a struct field. A shared",
+        "`repr(C)` enum would need the offset of a field *inside an enum",
+        "variant*, which has no stable accessor.",
+    ])
+    out.append("#[derive(Debug, Default)]")
+    out.append("pub(crate) struct BoxedPools<'gc> {")
+    for name, snake in fields:
+        emit_doc(out, [f"Payloads of [`Node::{name}`]."], "    ")
+        out.append(
+            f"    pub(crate) {snake}:"
+            f" crate::context::BoxedPool<{name}<'gc>>,")
+    out.append("}")
+    out.append("")
+
+    emit_doc(out, [
+        "One allocation watermark per boxed pool, for",
+        "`crate::context::AllocationScope`.",
+    ])
+    out.append("#[derive(Debug, Clone, Copy, Default)]")
+    out.append("pub(crate) struct BoxedWatermarks {")
+    for _name, snake in fields:
+        out.append(f"    pub(crate) {snake}: usize,")
+    out.append("}")
+    out.append("")
+
+    out.append("impl<'gc> BoxedPools<'gc> {")
+    emit_doc(out, ["Current length of every pool."], "    ")
+    out.append("    pub(crate) fn watermarks(&self) -> BoxedWatermarks {")
+    out.append("        BoxedWatermarks {")
+    for _name, snake in fields:
+        out.append(f"            {snake}: self.{snake}.len(),")
+    out.append("        }")
+    out.append("    }")
+    out.append("")
+    emit_doc(out, [
+        "Drop every payload allocated since `marks` were taken.",
+    ], "    ")
+    out.append("    pub(crate) fn truncate(&self, marks: &BoxedWatermarks) {")
+    for _name, snake in fields:
+        out.append(f"        self.{snake}.truncate(marks.{snake});")
+    out.append("    }")
+    out.append("")
+    emit_doc(out, ["Slots allocated across every pool, live or free."], "    ")
+    out.append("    pub(crate) fn len(&self) -> usize {")
+    out.append("        0")
+    for _name, snake in fields:
+        out.append(f"            + self.{snake}.len()")
+    out.append("    }")
+    out.append("")
+    emit_doc(out, ["Bytes held by every pool."], "    ")
+    out.append("    pub(crate) fn heap_size(&self) -> usize {")
+    out.append("        0")
+    for _name, snake in fields:
+        out.append(f"            + self.{snake}.heap_size()")
+    out.append("    }")
+    out.append("")
+    emit_doc(out, [
+        "Free the payload owned by `node`, if it is a boxed kind.",
+        "",
+        "A payload is owned by exactly one node, so the sweep calls this as",
+        "it frees that node; there is no separate mark pass for payloads.",
+        "",
+        "The caller must have established that `node` is dead and",
+        "unreferenced. The sweep is the only caller.",
+    ], "    ")
+    out.append("    pub(crate) fn free_payload_of(&self, node: &Node<'_>) {")
+    out.append("        match node {")
+    for name, snake in fields:
+        out.append(
+            f"            Node::{name}(value) =>"
+            f" crate::context::free_boxed(&self.{snake}, *value),")
+    out.append("            _ => {}")
+    out.append("        }")
+    out.append("    }")
+    out.append("}")
+    out.append("")
+
+    out.append("impl<'gc> Node<'gc> {")
+    for name, snake in fields:
+        emit_doc(out, [
+            "Allocate `value` in the payload arena and wrap it in",
+            f"[`Node::{name}`].",
+            "",
+            "Boxed variants cannot be built by naming the arm directly: the",
+            "arm holds a reference into the arena, so the payload has to be",
+            "allocated first.",
+        ], "    ")
+        out.append(
+            f"    pub fn new_{snake}(gc: &'gc crate::context::GCLock<'_, '_>,"
+            f" value: {name}<'gc>) -> Node<'gc> {{")
+        out.append(f"        Node::{name}(gc.alloc_payload_{snake}(value))")
+        out.append("    }")
+    out.append("}")
+    out.append("")
+
+    out.append("impl<'ast, 'ctx> crate::context::GCLock<'ast, 'ctx> {")
+    for name, snake in fields:
+        emit_doc(out, [
+            f"Allocate a [`{name}`] payload and hand back the interior",
+            "reference its `Node` arm holds.",
+        ], "    ")
+        out.append(
+            f"    pub(crate) fn alloc_payload_{snake}<'s>(&'s self,"
+            f" value: {name}<'s>) -> &'s {name}<'s> {{")
+        out.append(
+            "        crate::context::alloc_boxed(self,"
+            f" &self.context().boxed.{snake}, value)")
+        out.append("    }")
     out.append("}")
     out.append("")
 
@@ -1108,7 +1261,11 @@ def emit_builder_struct(name, fields, out):
     out.append(
         "        pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>)"
         " -> &'gc Node<'gc> {")
-    out.append(f"            gc.alloc(Node::{name}(self.inner))")
+    if name in BOXED:
+        out.append(
+            f"            gc.alloc(Node::new_{camel_to_snake(name)}(gc, self.inner))")
+    else:
+        out.append(f"            gc.alloc(Node::{name}(self.inner))")
     out.append("        }")
     for fd in structural_fields(fields):
         rf = fd["rust_field"]

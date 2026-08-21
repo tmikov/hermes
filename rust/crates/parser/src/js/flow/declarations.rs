@@ -1089,7 +1089,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 let body_end = body.range().end;
 
                 // C++ 1866-1877.
-                let func = Node::FunctionExpression(FunctionExpression::new(
+                let func = Node::new_function_expression(self.gc, FunctionExpression::new(
                     NodeMetadata::new(self.dummy_range()),
                     None,
                     params,

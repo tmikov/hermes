@@ -832,7 +832,7 @@ fn get_constructor_finds_the_constructor_method() {
     let sc = new_sem_context(&gc);
 
     let ctor_key = ident(&gc, "constructor");
-    let ctor_value = gc.alloc(Node::FunctionExpression(
+    let ctor_value = gc.alloc(Node::new_function_expression(&gc, 
         hermes_ast::node::FunctionExpression::new(
             NodeMetadata::new(r()),
             None,
@@ -860,7 +860,7 @@ fn get_constructor_finds_the_constructor_method() {
     )));
 
     let other_key = ident(&gc, "foo");
-    let other_value = gc.alloc(Node::FunctionExpression(
+    let other_value = gc.alloc(Node::new_function_expression(&gc, 
         hermes_ast::node::FunctionExpression::new(
             NodeMetadata::new(r()),
             None,
@@ -892,7 +892,7 @@ fn get_constructor_finds_the_constructor_method() {
         NodeMetadata::new(r()),
         body_list,
     )));
-    let class_decl = gc.alloc(Node::ClassDeclaration(ClassDeclaration::new(
+    let class_decl = gc.alloc(Node::new_class_declaration(&gc, ClassDeclaration::new(
         NodeMetadata::new(r()),
         None,
         None,
@@ -914,7 +914,7 @@ fn get_constructor_returns_none_when_absent() {
     let sc = new_sem_context(&gc);
 
     let other_key = ident(&gc, "foo");
-    let other_value = gc.alloc(Node::FunctionExpression(
+    let other_value = gc.alloc(Node::new_function_expression(&gc, 
         hermes_ast::node::FunctionExpression::new(
             NodeMetadata::new(r()),
             None,
@@ -944,7 +944,7 @@ fn get_constructor_returns_none_when_absent() {
         NodeMetadata::new(r()),
         NodeList::from_iter(&gc, [other_method]),
     )));
-    let class_expr = gc.alloc(Node::ClassExpression(
+    let class_expr = gc.alloc(Node::new_class_expression(&gc, 
         hermes_ast::node::ClassExpression::new(
             NodeMetadata::new(r()),
             None,
@@ -969,7 +969,7 @@ fn builtin_declarations_and_binding_table_accessors() {
     let mut sc = new_sem_context(&gc);
     assert!(sc.builtin_declarations().is_empty());
 
-    let fd = gc.alloc(Node::FunctionDeclaration(
+    let fd = gc.alloc(Node::new_function_declaration(&gc, 
         hermes_ast::node::FunctionDeclaration::new(
             NodeMetadata::new(r()),
             None,

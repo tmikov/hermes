@@ -250,7 +250,8 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             if self.compile() && func_decl.id.is_none() {
                 // If the default function declaration has no name, then
                 // change it to a FunctionExpression node for cleaner IRGen.
-                let func_expr = gc.alloc(Node::FunctionExpression(
+                let func_expr = gc.alloc(Node::new_function_expression(
+                    gc,
                     FunctionExpression::new(
                         // funcExpr->copyLocationFrom(funcDecl) (cpp:1554),
                         // hoisted into the constructor — see

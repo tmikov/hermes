@@ -505,7 +505,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let decorator_list = NodeList::from_iter(self.gc, decorators);
 
         let node = match kind {
-            ClassParseKind::Declaration => Node::ClassDeclaration(ClassDeclaration::new(
+            ClassParseKind::Declaration => Node::new_class_declaration(self.gc, ClassDeclaration::new(
                 NodeMetadata::new(self.dummy_range()),
                 name,
                 type_params,
@@ -515,7 +515,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 decorator_list,
                 body,
             )),
-            ClassParseKind::Expression => Node::ClassExpression(ClassExpression::new(
+            ClassParseKind::Expression => Node::new_class_expression(self.gc, ClassExpression::new(
                 NodeMetadata::new(self.dummy_range()),
                 name,
                 type_params,
@@ -1212,7 +1212,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let func_expr = self.set_location(
             func_expr_start_loc,
             body_end,
-            Node::FunctionExpression(func),
+            Node::new_function_expression(self.gc, func),
         );
 
         if special == SpecialKind::Get && params_len != 0 {

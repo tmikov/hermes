@@ -75,7 +75,7 @@ fn prints_global_function_scope_decls_and_nested_strict_function() {
         None,
         false,
     )));
-    let g_decl_node = gc.alloc(Node::FunctionDeclaration(
+    let g_decl_node = gc.alloc(Node::new_function_declaration(&gc, 
         FunctionDeclaration::new(
             NodeMetadata::new(r()),
             Some(g_id),

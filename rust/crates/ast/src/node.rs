@@ -9628,12 +9628,18 @@ pub enum Node<'gc> {
     Metadata(Metadata<'gc>),
     /// A [`Program`] node.
     Program(Program<'gc>),
-    /// A [`FunctionExpression`] node.
-    FunctionExpression(FunctionExpression<'gc>),
+    /// A [`FunctionExpression`] node, held by reference: it is one of the
+    /// widest variants, and inline it would set
+    /// `size_of::<Node>()` for every kind. Match ergonomics make
+    /// the indirection invisible to a nested `match`.
+    FunctionExpression(&'gc FunctionExpression<'gc>),
     /// A [`ArrowFunctionExpression`] node.
     ArrowFunctionExpression(ArrowFunctionExpression<'gc>),
-    /// A [`FunctionDeclaration`] node.
-    FunctionDeclaration(FunctionDeclaration<'gc>),
+    /// A [`FunctionDeclaration`] node, held by reference: it is one of the
+    /// widest variants, and inline it would set
+    /// `size_of::<Node>()` for every kind. Match ergonomics make
+    /// the indirection invisible to a nested `match`.
+    FunctionDeclaration(&'gc FunctionDeclaration<'gc>),
     /// A [`ComponentDeclaration`] node.
     ComponentDeclaration(ComponentDeclaration<'gc>),
     /// A [`HookDeclaration`] node.
@@ -9758,10 +9764,16 @@ pub enum Node<'gc> {
     Property(Property<'gc>),
     /// A [`Decorator`] node.
     Decorator(Decorator<'gc>),
-    /// A [`ClassDeclaration`] node.
-    ClassDeclaration(ClassDeclaration<'gc>),
-    /// A [`ClassExpression`] node.
-    ClassExpression(ClassExpression<'gc>),
+    /// A [`ClassDeclaration`] node, held by reference: it is one of the
+    /// widest variants, and inline it would set
+    /// `size_of::<Node>()` for every kind. Match ergonomics make
+    /// the indirection invisible to a nested `match`.
+    ClassDeclaration(&'gc ClassDeclaration<'gc>),
+    /// A [`ClassExpression`] node, held by reference: it is one of the
+    /// widest variants, and inline it would set
+    /// `size_of::<Node>()` for every kind. Match ergonomics make
+    /// the indirection invisible to a nested `match`.
+    ClassExpression(&'gc ClassExpression<'gc>),
     /// A [`ClassBody`] node.
     ClassBody(ClassBody<'gc>),
     /// A [`ClassProperty`] node.
@@ -10164,6 +10176,153 @@ pub enum Node<'gc> {
     SHBuiltin(SHBuiltin<'gc>),
     /// A [`ImplicitCheckedCast`] node.
     ImplicitCheckedCast(ImplicitCheckedCast<'gc>),
+}
+
+/// Payload arenas for the boxed [`Node`] variants, one per kind.
+///
+/// Per kind rather than one shared pool for two reasons: a slot is
+/// exactly its own kind's size instead of the widest kind's, and the
+/// sweep can recover a slot from the interior reference a `Node` arm
+/// holds with a plain `offset_of!` on a struct field. A shared
+/// `repr(C)` enum would need the offset of a field *inside an enum
+/// variant*, which has no stable accessor.
+#[derive(Debug, Default)]
+pub(crate) struct BoxedPools<'gc> {
+    /// Payloads of [`Node::ClassDeclaration`].
+    pub(crate) class_declaration: crate::context::BoxedPool<ClassDeclaration<'gc>>,
+    /// Payloads of [`Node::ClassExpression`].
+    pub(crate) class_expression: crate::context::BoxedPool<ClassExpression<'gc>>,
+    /// Payloads of [`Node::FunctionDeclaration`].
+    pub(crate) function_declaration: crate::context::BoxedPool<FunctionDeclaration<'gc>>,
+    /// Payloads of [`Node::FunctionExpression`].
+    pub(crate) function_expression: crate::context::BoxedPool<FunctionExpression<'gc>>,
+}
+
+/// One allocation watermark per boxed pool, for
+/// `crate::context::AllocationScope`.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct BoxedWatermarks {
+    pub(crate) class_declaration: usize,
+    pub(crate) class_expression: usize,
+    pub(crate) function_declaration: usize,
+    pub(crate) function_expression: usize,
+}
+
+impl<'gc> BoxedPools<'gc> {
+    /// Current length of every pool.
+    pub(crate) fn watermarks(&self) -> BoxedWatermarks {
+        BoxedWatermarks {
+            class_declaration: self.class_declaration.len(),
+            class_expression: self.class_expression.len(),
+            function_declaration: self.function_declaration.len(),
+            function_expression: self.function_expression.len(),
+        }
+    }
+
+    /// Drop every payload allocated since `marks` were taken.
+    pub(crate) fn truncate(&self, marks: &BoxedWatermarks) {
+        self.class_declaration.truncate(marks.class_declaration);
+        self.class_expression.truncate(marks.class_expression);
+        self.function_declaration.truncate(marks.function_declaration);
+        self.function_expression.truncate(marks.function_expression);
+    }
+
+    /// Slots allocated across every pool, live or free.
+    pub(crate) fn len(&self) -> usize {
+        0
+            + self.class_declaration.len()
+            + self.class_expression.len()
+            + self.function_declaration.len()
+            + self.function_expression.len()
+    }
+
+    /// Bytes held by every pool.
+    pub(crate) fn heap_size(&self) -> usize {
+        0
+            + self.class_declaration.heap_size()
+            + self.class_expression.heap_size()
+            + self.function_declaration.heap_size()
+            + self.function_expression.heap_size()
+    }
+
+    /// Free the payload owned by `node`, if it is a boxed kind.
+    ///
+    /// A payload is owned by exactly one node, so the sweep calls this as
+    /// it frees that node; there is no separate mark pass for payloads.
+    ///
+    /// The caller must have established that `node` is dead and
+    /// unreferenced. The sweep is the only caller.
+    pub(crate) fn free_payload_of(&self, node: &Node<'_>) {
+        match node {
+            Node::ClassDeclaration(value) => crate::context::free_boxed(&self.class_declaration, *value),
+            Node::ClassExpression(value) => crate::context::free_boxed(&self.class_expression, *value),
+            Node::FunctionDeclaration(value) => crate::context::free_boxed(&self.function_declaration, *value),
+            Node::FunctionExpression(value) => crate::context::free_boxed(&self.function_expression, *value),
+            _ => {}
+        }
+    }
+}
+
+impl<'gc> Node<'gc> {
+    /// Allocate `value` in the payload arena and wrap it in
+    /// [`Node::ClassDeclaration`].
+    ///
+    /// Boxed variants cannot be built by naming the arm directly: the
+    /// arm holds a reference into the arena, so the payload has to be
+    /// allocated first.
+    pub fn new_class_declaration(gc: &'gc crate::context::GCLock<'_, '_>, value: ClassDeclaration<'gc>) -> Node<'gc> {
+        Node::ClassDeclaration(gc.alloc_payload_class_declaration(value))
+    }
+    /// Allocate `value` in the payload arena and wrap it in
+    /// [`Node::ClassExpression`].
+    ///
+    /// Boxed variants cannot be built by naming the arm directly: the
+    /// arm holds a reference into the arena, so the payload has to be
+    /// allocated first.
+    pub fn new_class_expression(gc: &'gc crate::context::GCLock<'_, '_>, value: ClassExpression<'gc>) -> Node<'gc> {
+        Node::ClassExpression(gc.alloc_payload_class_expression(value))
+    }
+    /// Allocate `value` in the payload arena and wrap it in
+    /// [`Node::FunctionDeclaration`].
+    ///
+    /// Boxed variants cannot be built by naming the arm directly: the
+    /// arm holds a reference into the arena, so the payload has to be
+    /// allocated first.
+    pub fn new_function_declaration(gc: &'gc crate::context::GCLock<'_, '_>, value: FunctionDeclaration<'gc>) -> Node<'gc> {
+        Node::FunctionDeclaration(gc.alloc_payload_function_declaration(value))
+    }
+    /// Allocate `value` in the payload arena and wrap it in
+    /// [`Node::FunctionExpression`].
+    ///
+    /// Boxed variants cannot be built by naming the arm directly: the
+    /// arm holds a reference into the arena, so the payload has to be
+    /// allocated first.
+    pub fn new_function_expression(gc: &'gc crate::context::GCLock<'_, '_>, value: FunctionExpression<'gc>) -> Node<'gc> {
+        Node::FunctionExpression(gc.alloc_payload_function_expression(value))
+    }
+}
+
+impl<'ast, 'ctx> crate::context::GCLock<'ast, 'ctx> {
+    /// Allocate a [`ClassDeclaration`] payload and hand back the interior
+    /// reference its `Node` arm holds.
+    pub(crate) fn alloc_payload_class_declaration<'s>(&'s self, value: ClassDeclaration<'s>) -> &'s ClassDeclaration<'s> {
+        crate::context::alloc_boxed(self, &self.context().boxed.class_declaration, value)
+    }
+    /// Allocate a [`ClassExpression`] payload and hand back the interior
+    /// reference its `Node` arm holds.
+    pub(crate) fn alloc_payload_class_expression<'s>(&'s self, value: ClassExpression<'s>) -> &'s ClassExpression<'s> {
+        crate::context::alloc_boxed(self, &self.context().boxed.class_expression, value)
+    }
+    /// Allocate a [`FunctionDeclaration`] payload and hand back the interior
+    /// reference its `Node` arm holds.
+    pub(crate) fn alloc_payload_function_declaration<'s>(&'s self, value: FunctionDeclaration<'s>) -> &'s FunctionDeclaration<'s> {
+        crate::context::alloc_boxed(self, &self.context().boxed.function_declaration, value)
+    }
+    /// Allocate a [`FunctionExpression`] payload and hand back the interior
+    /// reference its `Node` arm holds.
+    pub(crate) fn alloc_payload_function_expression<'s>(&'s self, value: FunctionExpression<'s>) -> &'s FunctionExpression<'s> {
+        crate::context::alloc_boxed(self, &self.context().boxed.function_expression, value)
+    }
 }
 
 impl<'gc> Node<'gc> {
@@ -18102,7 +18261,7 @@ pub mod builder {
         }
         /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
-            gc.alloc(Node::FunctionExpression(self.inner))
+            gc.alloc(Node::new_function_expression(gc, self.inner))
         }
         /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.id = id; }
@@ -18209,7 +18368,7 @@ pub mod builder {
         }
         /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
-            gc.alloc(Node::FunctionDeclaration(self.inner))
+            gc.alloc(Node::new_function_declaration(gc, self.inner))
         }
         /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.id = id; }
@@ -20481,7 +20640,7 @@ pub mod builder {
         }
         /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
-            gc.alloc(Node::ClassDeclaration(self.inner))
+            gc.alloc(Node::new_class_declaration(gc, self.inner))
         }
         /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.id = id; }
@@ -20536,7 +20695,7 @@ pub mod builder {
         }
         /// Allocate the node unconditionally, changed or not.
         pub fn build_forced(self, gc: &'gc crate::context::GCLock<'_, '_>) -> &'gc Node<'gc> {
-            gc.alloc(Node::ClassExpression(self.inner))
+            gc.alloc(Node::new_class_expression(gc, self.inner))
         }
         /// Set the `id` field and mark the builder changed.
         pub fn id(&mut self, id: Option<&'gc Node<'gc>>) { self.is_changed = true; self.inner.id = id; }

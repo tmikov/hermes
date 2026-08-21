@@ -258,7 +258,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             ));
             let params = NodeList::from_iter(self.gc, param_list);
             let keeper = if is_declaration {
-                Node::FunctionDeclaration(FunctionDeclaration::new(
+                Node::new_function_declaration(self.gc, FunctionDeclaration::new(
                     NodeMetadata::new(self.dummy_range()),
                     opt_id,
                     params,
@@ -270,7 +270,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     is_async,
                 ))
             } else {
-                Node::FunctionExpression(FunctionExpression::new(
+                Node::new_function_expression(self.gc, FunctionExpression::new(
                     NodeMetadata::new(self.dummy_range()),
                     opt_id,
                     params,
@@ -323,7 +323,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let params = NodeList::from_iter(self.gc, param_list);
 
         let node = if is_declaration {
-            Node::FunctionDeclaration(FunctionDeclaration::new(
+            Node::new_function_declaration(self.gc, FunctionDeclaration::new(
                 NodeMetadata::new(self.dummy_range()),
                 opt_id,
                 params,
@@ -335,7 +335,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 is_async,
             ))
         } else {
-            Node::FunctionExpression(FunctionExpression::new(
+            Node::new_function_expression(self.gc, FunctionExpression::new(
                 NodeMetadata::new(self.dummy_range()),
                 opt_id,
                 params,

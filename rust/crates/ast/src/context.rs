@@ -111,6 +111,184 @@ impl<'ctx> StorageEntry<'ctx> {
     }
 }
 
+/// One arena slot holding the payload of a boxed [`Node`] variant.
+///
+/// The widest few node kinds are held by reference rather than inline, because
+/// `size_of::<Node>()` is the size of its widest variant and every arena slot
+/// pays it. Their payloads live here instead.
+///
+/// `#[repr(C)]` so `offset_of!(Boxed<T>, value)` is exact, which is what lets
+/// the sweep recover the slot from the interior reference a `Node` arm holds.
+/// This is why the payloads are *not* one `repr(C)` enum: a field's offset
+/// inside an enum variant has no stable accessor (`offset_of_enum` is
+/// unstable), so the enum shape could only be recovered by hardcoding a
+/// constant that would rot silently.
+#[repr(C)]
+#[derive(Debug)]
+pub(crate) struct Boxed<T> {
+    /// Owning context id, or `FREE_ENTRY` when this slot is on the free list.
+    /// Boxed payloads carry no mark bit: a payload is owned by exactly one
+    /// node, so its liveness is that node's, and the sweep frees it when it
+    /// frees the owner.
+    ctx_id: Cell<u32>,
+
+    /// The payload itself. A `Node` arm references this field directly.
+    value: T,
+}
+
+impl<T> Boxed<T> {
+    /// Recover the slot containing `value`.
+    ///
+    /// # Safety
+    ///
+    /// `value` must be the `value` field of a live `Boxed<T>`, which is true
+    /// of every reference handed out by [`BoxedPool::alloc`].
+    #[inline]
+    unsafe fn from_value(value: *const T) -> *const Boxed<T> {
+        // SAFETY: by the contract above `value` is at `offset_of` bytes into a
+        // live `Boxed<T>`, so stepping back that many *bytes* yields its base.
+        unsafe { container_of::<Boxed<T>, T>(value, core::mem::offset_of!(Boxed<T>, value)) }
+    }
+}
+
+/// The arena for one boxed node kind.
+///
+/// One pool per kind rather than one shared pool, so a slot is exactly its
+/// kind's size instead of the widest kind's, and so the `offset_of!` above is
+/// a plain struct field offset.
+#[derive(Debug)]
+pub(crate) struct BoxedPool<T> {
+    /// Every slot ever allocated for this kind. `Deque` for stable addresses.
+    slots: UnsafeCell<Deque<Boxed<T>>>,
+
+    /// Slots reclaimed by the sweep, ready to be handed out again.
+    free: UnsafeCell<Vec<NonNull<Boxed<T>>>>,
+}
+
+/// First-chunk capacity for a boxed pool.
+///
+/// The boxed kinds are a low single-digit percentage of nodes, so the arena
+/// default of 1024 would allocate roughly a megabyte across the pools before a
+/// byte of source is read — most of it never touched. Chunks still double, so
+/// a large parse converges on the same behaviour after a few of them.
+const BOXED_CHUNK_CAPACITY: usize = 16;
+
+impl<T> Default for BoxedPool<T> {
+    fn default() -> Self {
+        BoxedPool {
+            slots: UnsafeCell::new(Deque::with_chunk_capacity(BOXED_CHUNK_CAPACITY)),
+            free: UnsafeCell::new(Vec::new()),
+        }
+    }
+}
+
+impl<T> BoxedPool<T> {
+    /// Store `value` and hand back a reference to it that lives as long as the
+    /// pool. Reuses a swept slot when one is available.
+    #[inline]
+    pub(crate) fn alloc<'s>(&'s self, ctx_id: u32, value: T) -> &'s T {
+        let free = unsafe { &mut *self.free.get() };
+        let slot: &Boxed<T> = if let Some(mut slot) = free.pop() {
+            let slot: &mut Boxed<T> = unsafe { slot.as_mut() };
+            debug_assert!(slot.ctx_id.get() == FREE_ENTRY, "reused a live payload slot");
+            slot.ctx_id.set(ctx_id);
+            slot.value = value;
+            slot
+        } else {
+            let slots = unsafe { &mut *self.slots.get() };
+            slots.push(Boxed {
+                ctx_id: Cell::new(ctx_id),
+                value,
+            })
+        };
+        debug_assert!(
+            std::ptr::eq(unsafe { Boxed::from_value(&slot.value) }, slot),
+            "Boxed::from_value must round-trip the slot it was given"
+        );
+        &slot.value
+    }
+
+    /// Return the slot holding `value` to the free list. Called by the sweep
+    /// when the node that owned it dies.
+    ///
+    /// # Safety
+    ///
+    /// `value` must be a live payload of this pool, and unreferenced.
+    #[inline]
+    pub(crate) unsafe fn free_value(&self, value: *const T) {
+        let slot = unsafe { Boxed::from_value(value) };
+        debug_assert!(
+            unsafe { (*slot).ctx_id.get() } != FREE_ENTRY,
+            "double free of a boxed payload"
+        );
+        unsafe { (*slot).ctx_id.set(FREE_ENTRY) };
+        let free = unsafe { &mut *self.free.get() };
+        free.push(unsafe { NonNull::new_unchecked(slot as *mut Boxed<T>) });
+    }
+
+    /// Number of slots allocated, live or free.
+    pub(crate) fn len(&self) -> usize {
+        unsafe { &*self.slots.get() }.len()
+    }
+
+    /// Drop every slot past `watermark`, for `AllocationScope`.
+    pub(crate) fn truncate(&self, watermark: usize) {
+        unsafe { &mut *self.slots.get() }.truncate(watermark);
+    }
+
+    /// Bytes held by this pool's storage and free list.
+    pub(crate) fn heap_size(&self) -> usize {
+        unsafe { &*self.slots.get() }.heap_size()
+            + unsafe { &*self.free.get() }.heap_size()
+    }
+}
+
+/// Allocate `value` in `pool` and hand back a reference with the lock's
+/// lifetime.
+///
+/// `T` and `R` are the same node type at different lifetimes — the pool is
+/// parameterised by the arena's, the caller holds the lock's. Rust cannot state
+/// that equality, so this launders it, exactly as [`Context::alloc`] does for
+/// nodes. Both are checked to be the same size and alignment.
+///
+/// It lives here, rather than in the generated per-kind helpers, because this
+/// module is the one sanctioned home for `unsafe` in the crate; `node.rs` calls
+/// it and stays `unsafe`-free.
+pub(crate) fn alloc_boxed<'s, T, R>(
+    gc: &GCLock<'_, '_>,
+    pool: &'s BoxedPool<T>,
+    value: R,
+) -> &'s R {
+    debug_assert_eq!(std::mem::size_of::<T>(), std::mem::size_of::<R>());
+    debug_assert_eq!(std::mem::align_of::<T>(), std::mem::align_of::<R>());
+    let value = std::mem::ManuallyDrop::new(value);
+    // SAFETY: `R` is `T` at a different lifetime, so the two have identical
+    // layout. `ManuallyDrop` keeps the source from being dropped after the
+    // bitwise copy; these node structs own no resources in any case.
+    let value: T = unsafe { std::mem::transmute_copy(&value) };
+    let stored = pool.alloc(gc.context_id(), value);
+    // SAFETY: same-type-different-lifetime, as above.
+    unsafe { &*(stored as *const T as *const R) }
+}
+
+/// Return the slot holding `value` to `pool`'s free list.
+///
+/// Called by the sweep as it frees the node that owned the payload; a payload
+/// is owned by exactly one node, so there is no separate marking pass. `T`/`R`
+/// differ only in lifetime, as in [`alloc_boxed`].
+///
+/// The caller must have established that the owning node is dead and
+/// unreferenced. That is checked at the one call site — the sweep — rather
+/// than in the signature, matching how [`list_elem_parts`] treats its
+/// invariant.
+pub(crate) fn free_boxed<T, R>(pool: &BoxedPool<T>, value: &R) {
+    debug_assert_eq!(std::mem::size_of::<T>(), std::mem::size_of::<R>());
+    // SAFETY: `R` is `T` at a different lifetime, and `value` is a live
+    // payload of `pool` because the node that referenced it was allocated by
+    // `alloc_boxed` against this same pool.
+    unsafe { pool.free_value(value as *const R as *const T) };
+}
+
 /// A single entry in the NodeList storage.
 /// These are also immutable from the user's perspective, like `Node`s,
 /// but they are temporarily mutated here during construction only, in order to append elements.
@@ -196,6 +374,10 @@ pub struct Context<'ast> {
 
     /// Free list for `NodeListElement`s.
     free_list_elements: UnsafeCell<Vec<NonNull<NodeListElement<'ast>>>>,
+
+    /// Per-kind arenas for the payloads of the boxed `Node` variants.
+    /// Generated, one pool per boxed kind; see `crate::node::BoxedPools`.
+    pub(crate) boxed: crate::node::BoxedPools<'ast>,
 
     /// `NodeRc` count stored in a `Box` to ensure that `NodeRc`s can also point to it
     /// and decrement the count on drop.
@@ -289,6 +471,7 @@ impl<'ast> Context<'ast> {
             free_nodes: Default::default(),
             list_elements: Default::default(),
             free_list_elements: Default::default(),
+            boxed: Default::default(),
             noderc_count: Pin::new(Box::new(NodeRcCounter {
                 ctx_id: id,
                 count: Cell::new(0),
@@ -635,6 +818,11 @@ impl<'ast> Context<'ast> {
             }
             // Passed all checks, this entry is free.
             freed_node_ids.push(entry.inner.metadata().id.get());
+            // A boxed payload is owned by exactly one node, so its liveness is
+            // that node's: no separate mark pass, just free it here.
+            // SAFETY: the entry is dead and unreferenced (checked above), so
+            // its payload is live, unreferenced, and not already free.
+            unsafe { self.boxed.free_payload_of(&entry.inner) };
             entry.ctx_id_markbit.set(FREE_ENTRY);
             free_nodes.push(unsafe { NonNull::new_unchecked(entry as *mut StorageEntry) });
         }
@@ -679,6 +867,16 @@ impl<'ast> Context<'ast> {
         list_elements.len()
     }
 
+    /// Returns the number of payload slots allocated across all boxed-kind
+    /// pools, live or free.
+    ///
+    /// Public so tests can observe that the sweep reuses payload slots rather
+    /// than leaking them: a boxed payload has no mark bit and is freed with
+    /// the node that owns it, which nothing else can observe.
+    pub fn num_boxed_payloads(&self) -> usize {
+        self.boxed.len()
+    }
+
     /// Returns the number of node slots currently in the free list (i.e.
     /// allocated but unused, reclaimed by GC).
     pub fn num_free_nodes(&self) -> usize {
@@ -698,6 +896,7 @@ impl<'ast> Context<'ast> {
         result += free_nodes.heap_size();
         result += list_elements.heap_size();
         result += free_list_elements.heap_size();
+        result += self.boxed.heap_size();
         result
     }
 
@@ -752,6 +951,7 @@ impl HeapSize for Context<'_> {
         result += free_nodes.heap_size();
         result += list_elements.heap_size();
         result += free_list_elements.heap_size();
+        result += self.boxed.heap_size();
         result += std::mem::size_of::<NodeRcCounter>();
         result
     }
@@ -898,6 +1098,11 @@ pub struct AllocationScope<'gcl, 'ast, 'ctx> {
     lock: &'gcl GCLock<'ast, 'ctx>,
     nodes_watermark: usize,
     list_elements_watermark: usize,
+    /// One watermark per boxed pool. Without these, payloads allocated inside
+    /// a speculative scope would survive its truncation with no node left
+    /// referencing them — unreachable, and never swept, since the sweep only
+    /// frees a payload when it frees the node that owned it.
+    boxed_watermarks: crate::node::BoxedWatermarks,
 }
 
 impl Drop for AllocationScope<'_, '_, '_> {
@@ -925,10 +1130,34 @@ impl Drop for AllocationScope<'_, '_, '_> {
         nodes.truncate(self.nodes_watermark);
         let list_elements = unsafe { &mut *ctx.list_elements.get() };
         list_elements.truncate(self.list_elements_watermark);
+        ctx.boxed.truncate(&self.boxed_watermarks);
     }
 }
 
 impl<'ast, 'ctx> GCLock<'ast, 'ctx> {
+    /// The locked context, for the generated payload-allocation helpers in
+    /// `crate::node`.
+    #[inline]
+    pub(crate) fn context(&self) -> &Context<'ast> {
+        self.ctx
+    }
+
+    /// This context's id, stamped into every arena slot.
+    #[inline]
+    pub(crate) fn context_id(&self) -> u32 {
+        self.ctx.id
+    }
+
+    /// Payload slots allocated across the boxed pools, live or free.
+    ///
+    /// Mirrors [`Context::num_boxed_payloads`] for callers holding the lock,
+    /// which is the only way to observe an `AllocationScope`'s effect on the
+    /// pools — the scope guard borrows the lock, so the `Context` accessor is
+    /// unreachable while one is open.
+    pub fn num_boxed_payloads(&self) -> usize {
+        self.ctx.boxed.len()
+    }
+
     /// Open an allocation scope: everything allocated between this call and
     /// the returned guard's drop is reclaimed at drop (nodes and list
     /// elements). Mirrors the C++ `AllocationScope` discipline the PreParse
@@ -952,6 +1181,7 @@ impl<'ast, 'ctx> GCLock<'ast, 'ctx> {
             lock: self,
             nodes_watermark: nodes.len(),
             list_elements_watermark: list_elements.len(),
+            boxed_watermarks: self.ctx.boxed.watermarks(),
         }
     }
 }
