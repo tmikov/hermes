@@ -1,17 +1,23 @@
 # Boxing the large `Node` variants: design
 
-**Date:** 2026-08-20. **Status:** designed and surveyed, not implemented.
-**The §6 experiment has been run** — the hypothesis holds, but buys less than
-this design implies. Read §6 before §1.
+**Date:** 2026-08-20. **Status: BUILT, MEASURED, AND REJECTED — do not
+implement this.** The design below is superseded in two ways at once: §3's
+storage shape does not work at all, and the change it describes was carried
+out anyway (with a working storage shape) and bought +3.8%, which was judged
+not worth the complexity. §§7–8 record both. Read them before anything else.
+
+The implementation is preserved on branch `rust-node-boxing`
+(`9c8e05d02`) rather than deleted, so a future attempt starts from working
+code and a measurement instead of from this document.
 **Motive:** the Rust parser is 1.66× slower than C++ Hermes on the 8.7 MB
 typescript fixture but only 1.20–1.25× slower under a megabyte
 (`rust/crates/comparison/BENCH-RESULTS.md`, 2026-08-19). The gap is
 size-dependent, which points at AST footprint rather than parsing work.
 
-**The hypothesis has now been measured** (§6). Footprint genuinely drives
-throughput — about 0.3% per byte removed from the arena entry — but the whole
-change buys an estimated +8% to +17%, closing roughly a third of the gap
-against C++ Hermes rather than all of it.
+**The hypothesis was measured** (§6): footprint genuinely drives throughput,
+about 0.3% per byte removed from the arena entry. What §6 could not know is
+that *boxing* returns only about half that slope, because the sweep it rests on
+measured pure footprint with no indirection. See §8.
 
 ## 1. The problem, measured
 
@@ -218,3 +224,142 @@ a u8 `parens` and a u32 `id` — a real option, independent of this design.
 The sweep now prices that option directly: the 104 and 112 rows differ by
 exactly those 8 metadata bytes and by nothing else, and they differ by 2.2%.
 So the u24-delta packing is worth about 2%, not the ~5% guessed earlier.
+
+## 7. Revision, 2026-08-21 — after the layout work
+
+Two changes landed since this was written, and both move the ground under it:
+the sema-id decorations went from 8 bytes to 4 (`SemaIdCell`), and
+`NodeMetadata` went from 32 to 24 by storing one `SourceId` per node instead of
+three. `Node` is now **104**, `StorageEntry` **112**, down from 128/136.
+
+### The boxed set shrank from 23 variants to 12
+
+Fresh census of all 271 variants:
+
+| size | count | variants |
+|---:|---:|---|
+| 96 | 4 | `Class{Declaration,Expression}`, `Function{Declaration,Expression}` |
+| 88 | 5 | `ArrowFunctionExpression`, `Class{,Private}Property`, `ComponentDeclaration`, `HookDeclaration` |
+| 72 | 3 | `DeclareClass`, `DeclareOpaqueType`, `OpaqueType` |
+| ≤64 | 259 | everything else |
+
+There is a cliff after the top 9. Boxing the 12 variants at ≥72 reaches
+`StorageEntry` = 80 — this document's original target — where it previously
+needed 23. Boxing the 9 at ≥88 reaches 88 and is probably the better trade.
+
+Construction sites are 26 direct `X::new` plus 11 builder references across all
+twelve kinds, not the 106 estimated in §5 for 23 kinds.
+
+### §3's storage design does not work as specified
+
+The `Payload` enum requires recovering a `PayloadEntry` from an interior
+`&ClassDeclaration`, which needs the byte offset of a variant's field within
+the enum. **Rust has no stable way to obtain that.** `offset_of!` does not
+accept enum variants (`offset_of_enum` is unstable). `#[repr(C, u8)]` defines
+the layout in principle, but reading the offset back means either hardcoding a
+constant that silently rots, or constructing a dummy `Payload` to measure —
+and node structs are not trivially constructible, since they hold `&Node`
+children.
+
+§4 called this "the one delicate piece" and cited `StorageEntry::from_node` as
+precedent. That precedent does not carry: `StorageEntry` is a struct, so
+`offset_of!(StorageEntry, inner)` is exact and stable. An enum variant is not.
+
+**Use per-kind pools instead**, of a plain struct:
+
+```rust
+#[repr(C)]
+struct Boxed<T> { header: Cell<u32>, value: T }
+```
+
+`offset_of!(Boxed<T>, value)` is stable and exact, so recovery is the same
+`container_of` already in `context.rs`. One `Deque<Boxed<K>>` and one free list
+per boxed kind, all generated. It costs more fields on `Context` (2 per kind)
+and buys back exactness plus tighter packing: a per-kind slot is that kind's
+own size, where the enum forces every payload to the width of the largest, the
+very effect being escaped.
+
+### The collector is simpler than §4 assumed
+
+A payload is owned 1:1 by exactly one node, so its liveness *is* its owner's.
+Payloads need **no mark bit and no marking pass**: when the sweep frees a
+`StorageEntry` whose node is a boxed variant, it frees that payload too. Both
+`Context::gc` and `AllocationScope::drop` need the same arm.
+
+### Dead end: packing `parens` into `id`
+
+Node structs hold pointers, so they are align-8. Shrinking `NodeMetadata` 24 →
+20 takes `ClassDeclaration` to 92, which rounds straight back to 96 — `Node`
+does not move at all. Metadata only pays again if it drops a full 8 bytes, to
+16: move `id` out to `StorageEntry` (where its own doc comment says it belongs
+— "belongs to the slot's occupant") and pack `parens` into spare bits of
+`debug`. That is worth ~2.4%, independent of boxing.
+
+### Where the numbers stand
+
+Measured on `typescript.js`, each step A/B-interleaved on an idle machine:
+
+| | entry | MiB/s | |
+|---|---:|---:|---|
+| before this work | 136 | 63.1 | |
+| FxHash in the atom table | 136 | 67.9 | +7.6% |
+| `SemaIdCell` | 120 | 70.1 | +3.2% |
+| one `SourceId` per node | 112 | 72.3 | +3.9% |
+| — boxing 9, projected | 88 | ~77 | ~+7% |
+
+Both layout steps met or beat the sweep's 0.30%-per-byte slope, so that slope
+is now a usable predictor rather than a description.
+
+---
+
+## 8. Outcome, 2026-08-21 — built, measured, reverted
+
+Implemented in two steps on `rust`, then reverted. Both are preserved on
+`rust-node-boxing`:
+
+- `54c8cfc89` boxes the four variants at 96 bytes. `Node` 104 → 96.
+- `9c8e05d02` widens the set to the nine at ≥88. `Node` 96 → 80, slot 88.
+
+### What it cost and what it bought
+
+Direct interleaved A/B of the finished work against the tree immediately
+before it, 12 processes per variant on `typescript.js`:
+
+| | slot | MiB/s | |
+|---|---:|---:|---|
+| before boxing | 112 | 72.4 (71.7–73.5) | 120 ms |
+| after boxing | 88 | **75.2 (74.6–75.9)** | 116 ms |
+
+**+3.8%**, distributions disjoint. The sweep predicts +7.2% for those 24
+bytes, so **boxing returns a little over half the footprint slope**, and it did
+so consistently at both step sizes (+0.8% for 8 bytes, +3.3% for 16). The
+shortfall is the indirection: a boxed node costs a dereference to reach its
+fields and puts the payload in a different arena from the node, neither of
+which the padding-and-strip sweep could model.
+
+Against that, the exercise added a per-kind pool with `unsafe` in `context.rs`,
+`AllocationScope` watermarks, ~180 lines of generator emission, and three
+lifecycle tests. It was rejected on that trade, not on the number.
+
+### Judge it against the alternatives, which is why it lost
+
+Every other step of the same session was cheaper *and* larger:
+
+| change | gain | cost |
+|---|---:|---|
+| FxHash in the atom table | +7.6% | ~35 lines, no new dependency |
+| `SemaIdCell` niche | +5.2% | one generator edit, one cell type |
+| one `SourceId` per node | +3.9% | mechanical rewrite of 83 call sites |
+| **boxing nine variants** | **+3.8%** | **a new arena, new unsafe, new tests** |
+
+`63.1 → 72.3 MiB/s` on `typescript.js` came from the first three alone.
+
+### If someone tries again
+
+Two things must be true for it to be worth revisiting. The remaining variants
+have to be worth materially more than 24 bytes — the census in §7 says they are
+not; below the 72-byte tier the distribution collapses. And the indirection has
+to get cheaper, which means putting the payload adjacent to its node rather
+than in a separate arena, so the dereference stays in cache. Nothing in this
+document explores that, and it is the only version of the idea the measurement
+leaves room for.

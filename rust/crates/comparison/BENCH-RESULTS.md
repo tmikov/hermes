@@ -334,3 +334,23 @@ harness on the throwaway branch `bench-node-footprint`.
 
 Headline: footprint is real but accounts for roughly a third of the 1.66× gap,
 not all of it.
+
+## Layout work (2026-08-21)
+
+Acting on the sweep. Each step A/B-interleaved against the commit before it,
+12 processes per variant, `typescript.js`:
+
+| | slot | MiB/s | ms | |
+|---|---:|---:|---:|---|
+| starting point | 136 | 63.1 | 138 | |
+| FxHash in the atom table | 136 | 67.9 | 128 | +7.6% |
+| `SemaIdCell` (4-byte sema ids) | 120 | 70.1 | 124 | +3.2% |
+| one `SourceId` per node | 112 | 72.3 | 121 | +3.9% |
+| — boxing 9 variants | 88 | 75.2 | 116 | +3.8%, reverted |
+
+**63.1 → 72.3 MiB/s, +14.6%** on what is kept. The two pure-layout steps met or
+beat the sweep's 0.30%-per-byte slope, so it predicts well for changes that
+only move bytes. Boxing returned about half of it and was reverted as not worth
+the machinery; see §8 of
+`doc/superpowers/specs/2026-08-20-boxed-large-node-variants-design.md`, with the
+implementation on branch `rust-node-boxing`.
