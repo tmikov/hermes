@@ -1430,7 +1430,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let body = self.parse_interface_tail_flow(start, &mut extends)?;
 
         // C++ 2118-2129: the end location is the body node's end.
-        let end = body.metadata().range.get().end;
+        let end = body.metadata().range().end;
         if let Some(declare_start) = declare_start {
             let node = Node::DeclareInterface(DeclareInterface::new(
                 NodeMetadata::new(self.dummy_range()),
@@ -1527,7 +1527,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             unreachable!("parse_generic_type_flow returns a GenericTypeAnnotation")
         };
         // C++ 2163-2167: the InterfaceExtends node spans exactly the generic.
-        let range = generic.metadata().range.get();
+        let range = generic.metadata().range();
         let node = Node::InterfaceExtends(InterfaceExtends::new(
             NodeMetadata::new(self.dummy_range()),
             g.id,

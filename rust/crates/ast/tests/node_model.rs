@@ -158,12 +158,12 @@ fn node_metadata_debug_loc_defaults_to_start() {
     let start = SMLoc { source: SourceId::from_index(0), offset: 10 };
     let end = SMLoc { source: SourceId::from_index(0), offset: 20 };
     let md = NodeMetadata::new(SMRange { start, end });
-    assert_eq!(md.debug_loc.get(), start, "debug_loc must default to range start");
+    assert_eq!(md.debug_loc(), start, "debug_loc must default to range start");
 
     let dbg = SMLoc { source: SourceId::from_index(0), offset: 15 };
     let md2 = NodeMetadata::new_with_debug(SMRange { start, end }, dbg);
-    assert_eq!(md2.debug_loc.get(), dbg, "new_with_debug must set explicit debug_loc");
+    assert_eq!(md2.debug_loc(), dbg, "new_with_debug must set explicit debug_loc");
 
     let dup = md2.duplicate_pub_for_test();
-    assert_eq!(dup.debug_loc.get(), dbg, "duplicate must carry debug_loc");
+    assert_eq!(dup.debug_loc(), dbg, "duplicate must carry debug_loc");
 }

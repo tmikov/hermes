@@ -327,7 +327,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 ),
             );
             id = self.set_location(
-                id.metadata().range.get().start,
+                id.metadata().range().start,
                 next_range.end,
                 q_node,
             );

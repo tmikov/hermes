@@ -154,7 +154,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             .expect("parse_jsx_opening_element returns a JSXOpeningElement");
         // C++ 82-87: self-closing element has no children/closing.
         if opening_el.self_closing.get() {
-            let end = opening.metadata().range.get().end;
+            let end = opening.metadata().range().end;
             let node = Node::JSXElement(JSXElement::new(
                 NodeMetadata::new(self.dummy_range()),
                 opening,
@@ -173,16 +173,16 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         if let Node::JSXClosingElement(closing_el) = closing {
             let opening_name = opening_el.name;
             if !tag_names_match(opening_name, closing_el.name) {
-                let range = closing.metadata().range.get();
+                let range = closing.metadata().range();
                 self.error_at(range, "Closing tag must match opening");
             }
         } else {
-            let range = closing.metadata().range.get();
+            let range = closing.metadata().range();
             self.error_at(range, "Closing tag must not be a fragment");
         }
 
         // C++ 110-114.
-        let end = closing.metadata().range.get().end;
+        let end = closing.metadata().range().end;
         let node = Node::JSXElement(JSXElement::new(
             NodeMetadata::new(self.dummy_range()),
             opening,
@@ -302,13 +302,13 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // C++ 188-194: check that the closing is a fragment. The C++ `note`
         // secondary diagnostic is dropped per house style.
         if !matches!(closing, Node::JSXClosingFragment(_)) {
-            let range = closing.metadata().range.get();
+            let range = closing.metadata().range();
             self.error_at(range, "Closing tag must be a fragment");
             return None;
         }
 
         // C++ 196-200.
-        let end = closing.metadata().range.get().end;
+        let end = closing.metadata().range().end;
         let node = Node::JSXFragment(JSXFragment::new(
             NodeMetadata::new(self.dummy_range()),
             opening,
@@ -536,7 +536,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             TokenKind::equal,
             GrammarContext::AllowJSXIdentifier,
         ) {
-            let name_range = name.metadata().range.get();
+            let name_range = name.metadata().range();
             return Some(self.set_location(
                 name_range.start,
                 name_range.end,
@@ -614,7 +614,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         };
 
         // C++ 382-383.
-        let value_end = value.metadata().range.get().end;
+        let value_end = value.metadata().range().end;
         Some(self.set_location(
             start,
             value_end,
@@ -750,7 +750,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     self.lexer.token().get_res_word_or_identifier(),
                 )),
             );
-            let child_end = child.metadata().range.get().end;
+            let child_end = child.metadata().range().end;
             self.advance(GrammarContext::AllowJSXIdentifier);
             // C++ 460-463.
             return Some(self.set_location(
@@ -792,7 +792,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     self.lexer.token().get_res_word_or_identifier(),
                 )),
             );
-            let child_end = child.metadata().range.get().end;
+            let child_end = child.metadata().range().end;
             self.advance(GrammarContext::AllowJSXIdentifier);
 
             // C++ 487-490.
@@ -822,7 +822,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         if matches!(name, Node::JSXMemberExpression(_))
             && allow_jsx_member_expression == AllowJSXMemberExpression::No
         {
-            let range = name.metadata().range.get();
+            let range = name.metadata().range();
             self.error_at(range, "unexpected member expression");
         }
 

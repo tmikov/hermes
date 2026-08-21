@@ -958,8 +958,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     ) -> &'gc Node<'gc> {
         let allocated = self.gc.alloc(node);
         let md = allocated.metadata();
-        md.range.set(SMRange { start, end });
-        md.debug_loc.set(start);
+        md.set_range(SMRange { start, end });
+        md.set_debug_loc(start);
         allocated
     }
 
@@ -978,8 +978,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
     ) -> &'gc Node<'gc> {
         let allocated = self.gc.alloc(node);
         let md = allocated.metadata();
-        md.range.set(SMRange { start, end });
-        md.debug_loc.set(debug);
+        md.set_range(SMRange { start, end });
+        md.set_debug_loc(debug);
         allocated
     }
 
@@ -1035,7 +1035,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let end = if stmts.is_empty() {
             start
         } else {
-            stmts.last().unwrap().metadata().range.get().end
+            stmts.last().unwrap().metadata().range().end
         };
 
         let body = NodeList::from_iter(self.gc, stmts);

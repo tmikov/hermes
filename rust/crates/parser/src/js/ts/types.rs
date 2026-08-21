@@ -185,7 +185,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 opt_false,
             ));
             result = self.set_location(
-                result.metadata().range.get().start,
+                result.metadata().range().start,
                 self.lexer.prev_token_end(),
                 node,
             );
@@ -660,7 +660,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 Some(right),
             ));
             type_name = self.set_location(
-                type_name.metadata().range.get().start,
+                type_name.metadata().range().start,
                 self.lexer.prev_token_end(),
                 node,
             );
@@ -740,7 +740,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 Some(right),
             ));
             type_name = self.set_location(
-                type_name.metadata().range.get().start,
+                type_name.metadata().range().start,
                 self.lexer.prev_token_end(),
                 node,
             );
@@ -770,7 +770,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let Node::Identifier(id) = ident else {
             unreachable!("expected IdentifierNode");
         };
-        let range = ident.metadata().range.get();
+        let range = ident.metadata().range();
         let md = NodeMetadata::new(self.dummy_range());
         // C++ 1408-1427: map the known primitive names; the C++ compares the
         // interned `_name` atom, we compare its bytes.

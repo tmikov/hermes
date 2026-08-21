@@ -795,7 +795,7 @@ def emit_accessors(items, nodes, out):
     # range().
     out.append("    /// This node's source range.")
     out.append("    pub fn range(&self) -> hermes_support::location::SMRange {")
-    out.append("        self.metadata().range.get()")
+    out.append("        self.metadata().range()")
     out.append("    }")
     out.append("")
     # range predicates.

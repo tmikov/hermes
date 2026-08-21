@@ -220,7 +220,7 @@ impl<'gc> FuncBuilder<'gc> {
 /// here the location lives in the `NodeMetadata` a constructor takes, so the
 /// call becomes "build the metadata to construct it with".
 pub(super) fn copy_location_from<'gc>(src: &Node<'gc>) -> NodeMetadata<'gc> {
-    NodeMetadata::new_with_debug(src.range(), src.metadata().debug_loc.get())
+    NodeMetadata::new_with_debug(src.range(), src.metadata().debug_loc())
 }
 
 /// \return the `FunctionInfoId` a function-like node's `sem_info` decoration

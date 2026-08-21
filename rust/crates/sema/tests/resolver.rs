@@ -1329,15 +1329,15 @@ fn an_expression_bodied_arrow_is_rewritten_to_a_block_with_return() {
             "the returned expression is the original body"
         );
         // copyLocationFrom(arrowFunc->_body) — range AND debug location.
-        assert_eq!(block.metadata.range.get(), arg.range());
-        assert_eq!(ret.metadata.range.get(), arg.range());
+        assert_eq!(block.metadata.range(), arg.range());
+        assert_eq!(ret.metadata.range(), arg.range());
         assert_eq!(
-            block.metadata.debug_loc.get(),
-            arg.metadata().debug_loc.get()
+            block.metadata.debug_loc(),
+            arg.metadata().debug_loc()
         );
         assert_eq!(
-            ret.metadata.debug_loc.get(),
-            arg.metadata().debug_loc.get()
+            ret.metadata.debug_loc(),
+            arg.metadata().debug_loc()
         );
     });
 }
@@ -1655,7 +1655,7 @@ fn try_with_catch_and_finally_is_rewritten_into_nested_trys() {
         // nestedTry->setEndLoc(nestedTry->_handler->getEndLoc()).
         let whole = first_statement(resolved).range();
         let handler_range = nested.handler.unwrap().range();
-        let nested_range = nested.metadata.range.get();
+        let nested_range = nested.metadata.range();
         assert_eq!(nested_range.start, whole.start);
         assert_eq!(nested_range.end, handler_range.end);
         assert_ne!(
@@ -1663,7 +1663,7 @@ fn try_with_catch_and_finally_is_rewritten_into_nested_trys() {
             "a `finally` follows the handler, so the ranges must differ"
         );
         // tryStatement->_block->copyLocationFrom(nestedTry).
-        assert_eq!(wrapper.metadata.range.get(), nested_range);
+        assert_eq!(wrapper.metadata.range(), nested_range);
     });
 }
 
@@ -2653,7 +2653,7 @@ fn export_default_anonymous_function_is_rewritten_to_an_expression() {
          `export default async function` stays async"
     );
     // copyLocationFrom(funcDecl) (cpp:1554).
-    let range = func.metadata.range.get();
+    let range = func.metadata.range();
     assert_eq!(range.start, decl_range_before.start);
     assert_eq!(range.end, decl_range_before.end);
     // The function was still resolved as a function: `visitFunctionLike`

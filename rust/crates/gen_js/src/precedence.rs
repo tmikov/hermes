@@ -3633,7 +3633,7 @@ mod tests {
             };
             let bogus_op = gc.atom_bytes("not_a_real_operator");
             let hand_built = gc.alloc(Node::BinaryExpression(BinaryExpression::new(
-                NodeMetadata::new(metadata.range.get()),
+                NodeMetadata::new(metadata.range()),
                 left,
                 right,
                 bogus_op,

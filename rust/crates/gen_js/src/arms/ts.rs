@@ -1584,7 +1584,7 @@ mod tests {
                 "the body is a TSModuleBlock: {block:?}"
             );
             let hand_built = gc.alloc(Node::TSModuleDeclaration(TSModuleDeclaration::new(
-                NodeMetadata::new(metadata.range.get()),
+                NodeMetadata::new(metadata.range()),
                 id,
                 block,
             )));
@@ -1651,13 +1651,13 @@ mod tests {
                 panic!("member is not a TSPropertySignature");
             };
             let one = gc.alloc(Node::Identifier(Identifier::new(
-                NodeMetadata::new(metadata.range.get()),
+                NodeMetadata::new(metadata.range()),
                 gc.atom_bytes(&b"init"[..]),
                 None,
                 false,
             )));
             let hand_built = gc.alloc(Node::TSPropertySignature(TSPropertySignature::new(
-                NodeMetadata::new(metadata.range.get()),
+                NodeMetadata::new(metadata.range()),
                 key,
                 *prop_type,
                 Some(one),

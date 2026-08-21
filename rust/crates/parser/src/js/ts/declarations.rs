@@ -208,7 +208,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                     .expect("parseTSTypeReference returns a TSTypeReference");
                 let type_args = type_ref.type_parameters;
                 let expr = if type_args.is_some() {
-                    let ref_range = expr.metadata().range.get();
+                    let ref_range = expr.metadata().range();
                     let rebuilt =
                         Node::TSTypeReference(TSTypeReference::new(
                             NodeMetadata::new(self.dummy_range()),

@@ -249,7 +249,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             ),
         );
         Some(self.set_location(
-            check_type.metadata().range.get().start,
+            check_type.metadata().range().start,
             self.lexer.prev_token_end(),
             node,
         ))
@@ -332,7 +332,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             // "Reparse" the param into a FunctionTypeParam so it can be used
             // for parseFunctionTypeAnnotationWithParamsFlow. C++ 3228-3233:
             // it spans exactly the param's range.
-            let param_range = param.metadata().range.get();
+            let param_range = param.metadata().range();
             let ftp_node = Node::FunctionTypeParam(FunctionTypeParam::new(
                 NodeMetadata::new(self.dummy_range()),
                 None, // name
@@ -505,7 +505,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 let body =
                     self.parse_interface_tail_flow(start, &mut extends)?;
                 // The end location is the body node's end.
-                let end = body.metadata().range.get().end;
+                let end = body.metadata().range().end;
                 let node = Node::InterfaceTypeAnnotation(
                     InterfaceTypeAnnotation::new(
                         NodeMetadata::new(self.dummy_range()),
@@ -683,7 +683,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                         let body = self
                             .parse_interface_tail_flow(start, &mut extends)?;
                         // The end location is the body node's end.
-                        let end = body.metadata().range.get().end;
+                        let end = body.metadata().range().end;
                         let node = Node::InterfaceTypeAnnotation(
                             InterfaceTypeAnnotation::new(
                                 NodeMetadata::new(self.dummy_range()),
@@ -1000,7 +1000,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 ),
             );
             ident = self.set_location(
-                ident.metadata().range.get().start,
+                ident.metadata().range().start,
                 next_range.end,
                 q_node,
             );
@@ -1238,7 +1238,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         // C++ 3818-3823.
         if let Some(variance) = variance {
-            let range = variance.metadata().range.get();
+            let range = variance.metadata().range();
             self.error_at(
                 range,
                 "Variance can only be used with labeled tuple elements",
@@ -1301,7 +1301,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         if id.is_none() {
             // C++ 5139-5143.
-            let range = type_annotation.metadata().range.get();
+            let range = type_annotation.metadata().range();
             self.error_at(range, "identifier expected");
         }
         id
@@ -1317,7 +1317,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         let id = self.reparse_type_annotation_as_id_flow(type_annotation)?;
 
         // C++ 5153-5157.
-        let range = type_annotation.metadata().range.get();
+        let range = type_annotation.metadata().range();
         let node = Node::Identifier(Identifier::new(
             NodeMetadata::new(self.dummy_range()),
             id,

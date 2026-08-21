@@ -650,7 +650,7 @@ mod tests {
             };
             let value = gc.atom_bytes(&b"a\\b"[..]);
             let hand_built = gc.alloc(Node::DirectiveLiteral(DirectiveLiteral::new(
-                hermes_ast::node_child::NodeMetadata::new(metadata.range.get()),
+                hermes_ast::node_child::NodeMetadata::new(metadata.range()),
                 value,
             )));
             let js = gen_node_to_string(gc, hand_built);

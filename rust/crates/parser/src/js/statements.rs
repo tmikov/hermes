@@ -901,8 +901,8 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 self.parse_statement(param.get(PARAM_RETURN))?
             };
 
-            let label_start = id.metadata().range.get().start;
-            let body_end = body.metadata().range.get().end;
+            let label_start = id.metadata().range().start;
+            let body_end = body.metadata().range().end;
             let node = Node::LabeledStatement(LabeledStatement::new(
                 NodeMetadata::new(self.dummy_range()),
                 id,
@@ -1167,7 +1167,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
 
         let body = self.parse_statement(param.get(PARAM_RETURN))?;
 
-        let end = body.metadata().range.get().end;
+        let end = body.metadata().range().end;
         let node = Node::WithStatement(WithStatement::new(
             NodeMetadata::new(self.dummy_range()),
             object,

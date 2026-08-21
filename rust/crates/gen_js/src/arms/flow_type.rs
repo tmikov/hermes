@@ -954,7 +954,7 @@ mod tests {
                 panic!("root is not a Program");
             };
             let stmt = body.iter().next().expect("has a statement");
-            let range = stmt.metadata().range.get();
+            let range = stmt.metadata().range();
             let hand_built = gc.alloc(Node::InterfaceTypeAnnotation(InterfaceTypeAnnotation::new(
                 hermes_ast::node_child::NodeMetadata::new(range),
                 NodeList::empty(),
@@ -992,7 +992,7 @@ mod tests {
                 panic!("root is not a Program");
             };
             let stmt = body.iter().next().expect("has a statement");
-            let range = stmt.metadata().range.get();
+            let range = stmt.metadata().range();
             let value = gc.atom_bytes(&b"ab"[..]);
             let raw = gc.atom_bytes(&b"\"a\\u0062\""[..]);
             let hand_built = gc.alloc(Node::StringLiteralTypeAnnotation(
@@ -1025,7 +1025,7 @@ mod tests {
                 panic!("root is not a Program");
             };
             let stmt = body.iter().next().expect("has a statement");
-            let range = stmt.metadata().range.get();
+            let range = stmt.metadata().range();
             let interface = gc.alloc(Node::InterfaceTypeAnnotation(InterfaceTypeAnnotation::new(
                 hermes_ast::node_child::NodeMetadata::new(range),
                 NodeList::empty(),

@@ -272,7 +272,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             if self.check_and_eat(TokenKind::l_square, GrammarContext::Type) {
                 // Internal slot `[[id]]` (C++ 4205-4286).
                 if let Some(variance) = variance {
-                    let range = variance.metadata().range.get();
+                    let range = variance.metadata().range();
                     self.error_at(range, "Unexpected variance sigil");
                 }
                 if proto {
@@ -474,7 +474,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
                 // reset here.
                 is_static = false;
                 if let Some(variance) = variance {
-                    let range = variance.metadata().range.get();
+                    let range = variance.metadata().range();
                     self.error_at(range, "Unexpected variance sigil");
                 }
                 let Some(prop) =
@@ -487,7 +487,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             }
             // C++ 4350-4362.
             if let Some(variance) = variance {
-                let range = variance.metadata().range.get();
+                let range = variance.metadata().range();
                 self.error_at(range, "call property must not specify variance");
             }
             if proto {
@@ -507,7 +507,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             && self.check2(TokenKind::colon, TokenKind::question)
         {
             if let Some(variance) = variance {
-                let range = variance.metadata().range.get();
+                let range = variance.metadata().range();
                 self.error_at(range, "Unexpected variance sigil");
             }
             let key_node = Node::Identifier(Identifier::new(
@@ -544,7 +544,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // C++ 4388-4403.
         if self.check2(TokenKind::less, TokenKind::l_paren) {
             if let Some(variance) = variance {
-                let range = variance.metadata().range.get();
+                let range = variance.metadata().range();
                 self.error_at(range, "Unexpected variance sigil");
             }
             if proto {
@@ -589,7 +589,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             };
             if is_getter || is_setter {
                 if let Some(variance) = variance {
-                    let range = variance.metadata().range.get();
+                    let range = variance.metadata().range();
                     self.error_at(
                         range,
                         "accessor property must not specify variance",
@@ -727,17 +727,17 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // (C++ 4540-4549).
         if is_getter {
             if !fta.params.is_empty() {
-                let range = value.metadata().range.get();
+                let range = value.metadata().range();
                 self.error_at(range, "Getter must have 0 parameters");
             }
         } else if fta.params.iter().count() != 1 {
-            let range = value.metadata().range.get();
+            let range = value.metadata().range();
             self.error_at(range, "Setter must have 1 parameter");
         }
 
         // C++ 4551-4555.
         if let Some(this_constraint) = fta.this {
-            let range = this_constraint.metadata().range.get();
+            let range = this_constraint.metadata().range();
             self.error_at(range, "Accessors must not have 'this' annotations");
         }
 
@@ -769,7 +769,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         // C++ 4568-4576: the key reparses as a bare type parameter spanning
         // exactly `left`'s range.
         let id = self.reparse_type_annotation_as_id_flow(left)?;
-        let left_range = left.metadata().range.get();
+        let left_range = left.metadata().range();
         let key_tparam_node = Node::TypeParameter(TypeParameter::new(
             NodeMetadata::new(self.dummy_range()),
             id,

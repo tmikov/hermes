@@ -279,7 +279,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             if self.sem_ctx.decl(d).special == DeclSpecial::Arguments {
                 if self.forbid_special_arguments_reference {
                     self.sm.error_range(
-                        identifier.metadata.range.get(),
+                        identifier.metadata.range(),
                         "invalid use of 'arguments'",
                     );
                 }
@@ -292,7 +292,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             && self.forbid_await_as_identifier
         {
             self.sm.error_range(
-                identifier.metadata.range.get(),
+                identifier.metadata.range(),
                 "await is not a valid identifier name in an async function",
             );
         }
@@ -301,7 +301,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
             && self.forbid_arguments_as_identifier
         {
             self.sm.error_range(
-                identifier.metadata.range.get(),
+                identifier.metadata.range(),
                 "invalid use of 'arguments' as an identifier",
             );
         }
@@ -343,7 +343,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
                     .into_owned();
             self.sm.warning_range(
                 Warning::UndefinedVariable,
-                identifier.metadata.range.get(),
+                identifier.metadata.range(),
                 format!(
                     "the variable \"{ident_name}\" was not declared in \
                      {disp_name}"
@@ -462,7 +462,7 @@ impl<'bt, 'sc, 'sm, 'ad> SemanticResolver<'bt, 'sc, 'sm, 'ad> {
         // `tests/sema_corpus/error-shbuiltin.js`.
         if identifier.name.get() == self.kw().ident_sh_builtin {
             self.sm.error_range(
-                identifier.metadata.range.get(),
+                identifier.metadata.range(),
                 "invalid use of $SHBuiltin",
             );
         }

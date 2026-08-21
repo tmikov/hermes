@@ -1581,7 +1581,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         // Build fresh ArrayPattern at the AEN's location.
-        let aen_range = aen.metadata.range.get();
+        let aen_range = aen.metadata.range();
         let ap = Node::ArrayPattern(ArrayPattern::new(
             NodeMetadata::new(self.dummy_range()),
             NodeList::from_iter(self.gc, elements),
@@ -1755,7 +1755,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         }
 
         // Build fresh ObjectPattern at the OEN's location.
-        let oen_range = oen.metadata.range.get();
+        let oen_range = oen.metadata.range();
         let op = Node::ObjectPattern(ObjectPattern::new(
             NodeMetadata::new(self.dummy_range()),
             NodeList::from_iter(self.gc, properties),

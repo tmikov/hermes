@@ -839,9 +839,9 @@ impl SemanticResolver<'_, '_, '_, '_> {
                     let nested_meta = copy_location_from(node);
                     // nestedTry->setEndLoc(
                     //     nestedTry->_handler->getEndLoc());
-                    let mut nested_range = nested_meta.range.get();
+                    let mut nested_range = nested_meta.range();
                     nested_range.end = handler.range().end;
-                    nested_meta.range.set(nested_range);
+                    nested_meta.set_range(nested_range);
                     let nested_try =
                         gc.alloc(Node::TryStatement(TryStatement::new(
                             nested_meta,

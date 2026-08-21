@@ -533,7 +533,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
             let (local_name, local_range) = match spec {
                 Node::ImportSpecifier(is) => match is.local {
                     Node::Identifier(id) => {
-                        (id.name.get(), id.metadata.range.get())
+                        (id.name.get(), id.metadata.range())
                     }
                     _ => unreachable!("import specifier local is an Identifier"),
                 },
@@ -874,7 +874,7 @@ impl<'gc, 'ast, 'ctx, 'a> JSParserImpl<'gc, 'ast, 'ctx, 'a> {
         };
         // Bind the interned bytes to an owned buffer so the immutable borrow of
         // the atom table ends before the `&mut self` validate call.
-        let local_range = local_id.metadata.range.get();
+        let local_range = local_id.metadata.range();
         let id_bytes =
             self.gc.ctx().atom_table.bytes(local_id.name.get()).to_owned();
         if !self.validate_binding_identifier(local_range, &id_bytes, local_kind)

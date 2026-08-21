@@ -114,8 +114,8 @@ fn literal_parts<'gc>(node: &'gc Node<'gc>) -> (u64, SMRange, SMLoc, u8) {
     match node {
         Node::NumericLiteral(n) => (
             n.value.get().to_bits(),
-            n.metadata.range.get(),
-            n.metadata.debug_loc.get(),
+            n.metadata.range(),
+            n.metadata.debug_loc(),
             n.metadata.parens.get(),
         ),
         other => panic!("expected NumericLiteral, got {other:?}"),

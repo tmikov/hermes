@@ -10728,7 +10728,7 @@ impl<'gc> Node<'gc> {
 
     /// This node's source range.
     pub fn range(&self) -> hermes_support::location::SMRange {
-        self.metadata().range.get()
+        self.metadata().range()
     }
 
     /// Whether this node's kind is in the `FunctionLike` range.

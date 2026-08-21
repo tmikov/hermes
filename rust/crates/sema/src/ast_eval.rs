@@ -161,7 +161,7 @@ fn folded_metadata<'gc>(
     operand_metadata: &NodeMetadata<'gc>,
 ) -> NodeMetadata<'gc> {
     let md =
-        NodeMetadata::new_with_debug(range, operand_metadata.debug_loc.get());
+        NodeMetadata::new_with_debug(range, operand_metadata.debug_loc());
     md.parens.set(operand_metadata.parens.get());
     md
 }
@@ -219,7 +219,7 @@ pub fn ast_fold_binary_expression<'gc>(
     };
 
     // Reuse the left node's debug_loc/parens; range comes from `be`.
-    let md = folded_metadata(be.metadata.range.get(), &left_num.metadata);
+    let md = folded_metadata(be.metadata.range(), &left_num.metadata);
     Some(gc.alloc(Node::NumericLiteral(NumericLiteral::new(md, res))))
 }
 
@@ -254,7 +254,7 @@ pub fn ast_fold_unary_expression<'gc>(
     };
 
     // Reuse the argument node's debug_loc/parens; range comes from `ue`.
-    let md = folded_metadata(ue.metadata.range.get(), &num.metadata);
+    let md = folded_metadata(ue.metadata.range(), &num.metadata);
     Some(gc.alloc(Node::NumericLiteral(NumericLiteral::new(md, res))))
 }
 
