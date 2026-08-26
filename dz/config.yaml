@@ -1,3 +1,6 @@
 name: Hermes
 components:
-  - gc, jit
+  - compiler
+  - gc
+  - jit
+  - vm
