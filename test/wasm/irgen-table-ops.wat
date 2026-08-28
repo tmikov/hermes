@@ -1,0 +1,38 @@
+;; Copyright (c) Meta Platforms, Inc. and affiliates.
+;;
+;; This source code is licensed under the MIT license found in the
+;; LICENSE file in the root directory of this source tree.
+
+;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm --dump-ir -O0 %t.wasm 2>&1 | %FileCheck %s
+;; REQUIRES: wasm
+
+;; Test: table.set and table.grow IR generation.
+
+(module
+  (table 3 funcref)
+
+  (func $f0 (result i32) i32.const 42)
+
+  ;; table.set: store a value at an index
+  (func $set_entry (param i32 funcref)
+    local.get 0
+    local.get 1
+    table.set 0
+  )
+
+  ;; table.grow: attempts to grow the table (Phase 1: always returns -1)
+  (func $grow_table (param i32) (result i32)
+    ref.null func
+    local.get 0
+    table.grow 0
+  )
+)
+
+;; table.set: loads funcs array, stores value at index
+;; CHECK-LABEL: function wasm_func_1(p0: any, p1: any): any
+;; CHECK: LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_funcs]
+;; CHECK: StorePropertyStrictInst %{{.*}}: any, %{{.*}}: any, %{{.*}}: any
+
+;; table.grow: Phase 1 always pushes -1 as the result
+;; CHECK-LABEL: function wasm_func_2(p0: any): any
+;; CHECK: PhiInst (:number) -1: number

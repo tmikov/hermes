@@ -3,10 +3,11 @@
 ;; This source code is licensed under the MIT license found in the
 ;; LICENSE file in the root directory of this source tree.
 
-;; REQUIRES: wasm
-;; RUN: %wat2wasm %s -o %t.wasm
-;; RUN: wc -c < %t.wasm | %FileCheck %s
+;; Test that wat2wasm produces a valid minimal Wasm binary.
 
-;; CHECK: 8
+;; REQUIRES: wasm
+;; RUN: %wat2wasm %s -o %t.wasm && wc -c < %t.wasm | %FileCheck %s
 
 (module)
+
+;; CHECK: 8

@@ -1,0 +1,23 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-i64-trunc.wat.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+
+print("trunc_s_lo:", exports.trunc_s_lo());
+print("trunc_s_neg:", exports.trunc_s_neg());
+print("trunc_u_hi:", exports.trunc_u_hi());
+print("trunc_u_full:", exports.trunc_u_full());
+print("trunc_s_zero:", exports.trunc_s_zero());
+print("sat_s_nan:", exports.sat_s_nan());
+print("sat_u_neg:", exports.sat_u_neg());
+print("sat_s_overflow:", exports.sat_s_overflow());
+print("sat_u_large:", exports.sat_u_large());
+print("trunc_f32_s:", exports.trunc_f32_s());
+print("sat_f32_nan:", exports.sat_f32_nan());

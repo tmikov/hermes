@@ -1,0 +1,89 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-bulk-memory.wat.
+// Tests memory.fill, memory.copy, memory.init, and data.drop.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+
+// --- memory.fill ---
+print("=== memory.fill ===");
+exports.fill(20, 0xFF, 10);
+print("byte 20:", exports.get_byte(20));
+print("byte 21:", exports.get_byte(21));
+print("byte 29:", exports.get_byte(29));
+print("byte 30:", exports.get_byte(30));  // should be 0 (untouched)
+
+// --- memory.copy ---
+print("=== memory.copy ===");
+// "Hello" is at bytes 0..4 (from active data segment).
+exports.copy(100, 0, 5);
+print("byte 100:", exports.get_byte(100));  // 'H' = 72
+print("byte 101:", exports.get_byte(101));  // 'e' = 101
+print("byte 104:", exports.get_byte(104));  // 'o' = 111
+
+// --- memory.copy with overlapping regions (src < dest) ---
+print("=== memory.copy overlap (src < dest) ===");
+// Write [1,2,3,4] at bytes 50..53.
+exports.fill(50, 0, 10);  // clear the area first
+exports.fill(50, 1, 1);
+exports.fill(51, 2, 1);
+exports.fill(52, 3, 1);
+exports.fill(53, 4, 1);
+// Copy 4 bytes from 50 to 52 (overlapping: src < dest).
+// Expected: [1,2,1,2,3,4]
+exports.copy(52, 50, 4);
+print("byte 50:", exports.get_byte(50));  // 1
+print("byte 51:", exports.get_byte(51));  // 2
+print("byte 52:", exports.get_byte(52));  // 1
+print("byte 53:", exports.get_byte(53));  // 2
+print("byte 54:", exports.get_byte(54));  // 3
+print("byte 55:", exports.get_byte(55));  // 4
+
+// --- memory.init from passive segment 1 ---
+print("=== memory.init ===");
+// Segment 1 is [0x01, 0x02, 0x03, 0x04, 0x05].
+// Copy 3 bytes from segment offset 1 to memory offset 200.
+exports.init_seg1(200, 1, 3);
+print("byte 200:", exports.get_byte(200));  // 0x02 = 2
+print("byte 201:", exports.get_byte(201));  // 0x03 = 3
+print("byte 202:", exports.get_byte(202));  // 0x04 = 4
+
+// --- data.drop + memory.init after drop ---
+print("=== data.drop + init n=0 ===");
+exports.drop_seg1();
+print("drop_seg1 ok");
+
+// Per spec: memory.init with n=0 should succeed even for dropped segments.
+try {
+  exports.init_seg1(0, 0, 0);
+  print("init_seg1 n=0 ok");
+} catch (e) {
+  print("init_seg1 n=0 error:", e.message);
+}
+
+// memory.init with n>0 on a dropped segment should trap.
+try {
+  exports.init_seg1(0, 0, 1);
+  print("init_seg1 n=1 ok (should not happen)");
+} catch (e) {
+  print("init_seg1 n=1 trapped:", e.message);
+}
+
+// --- Active segment is implicitly dropped ---
+print("=== active segment dropped ===");
+// Segment 0 was active, so it's dropped after instantiation.
+// memory.init with n=0 should succeed.
+try {
+  exports.init_seg0_zero();
+  print("init_seg0_zero ok");
+} catch (e) {
+  print("init_seg0_zero error:", e.message);
+}
+
+print("done");

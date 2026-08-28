@@ -904,6 +904,7 @@ if(HERMES_ENABLE_TEST_SUITE)
     wasm_enabled=${HERMES_ENABLE_WASM}
     wat2wasm=${CMAKE_BINARY_DIR}/external/wabt/wabt/wat2wasm
     wast2json=${CMAKE_BINARY_DIR}/external/wabt/wabt/wast2json
+    wasm_testsuite=${CMAKE_SOURCE_DIR}/external/wasm-testsuite/tests
     )
 
   if(HERMES_ENABLE_NAPI)

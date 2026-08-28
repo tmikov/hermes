@@ -1,0 +1,27 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-globals.wat.
+// Loads the compiled Wasm module and exercises global get/set operations.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+
+// Read initial values.
+print("get_imm:", exports.get_imm());
+print("get_mut:", exports.get_mut());
+
+// Modify mutable global and re-read.
+exports.set_mut(200);
+print("set_mut(200)");
+print("get_mut:", exports.get_mut());
+
+// Read/write f64 global.
+print("get_f64:", exports.get_f64());
+exports.set_f64(6.28);
+print("set_f64(6.28)");
+print("get_f64:", exports.get_f64());

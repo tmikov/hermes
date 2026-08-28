@@ -1,0 +1,22 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// Driver for regress-nan-reinterpret.wat
+var args = hermescli.getScriptArgs();
+var hbcPath = args[0];
+var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+
+// Print as unsigned hex by converting via BigInt unsigned interpretation.
+function toHex64(bigint) {
+  // Convert to unsigned 64-bit representation.
+  var mask = (BigInt(1) << BigInt(64)) - BigInt(1);
+  var unsigned = bigint & mask;
+  return unsigned.toString(16);
+}
+
+print(toHex64(exports.reinterpret_nan()));
+print(toHex64(exports.reinterpret_neg_nan()));

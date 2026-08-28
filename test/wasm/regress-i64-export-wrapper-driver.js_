@@ -1,0 +1,15 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// Driver for regress-i64-export-wrapper.wat: calls test_neg_div with BigInt args.
+var args = hermescli.getScriptArgs();
+var hbcPath = args[0];
+var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+
+// i64 export wrappers expect BigInt arguments.
+var result = exports.test_neg_div(BigInt("-5"), BigInt("2"));
+print(result.toString());

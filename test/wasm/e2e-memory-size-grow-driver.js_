@@ -1,0 +1,38 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-memory-size-grow.wat.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+
+// 1. Initial memory.size should be 1 (1 page).
+print("initial size =", exports.size());
+
+// 2. Grow by 1 page. Returns old size (1). New size should be 2.
+print("grow(1) =", exports.grow(1));
+print("size after grow =", exports.size());
+
+// 3. Store data at address 65536 (start of second page, after grow).
+exports.store(65536, 42);
+print("store at 65536 ok");
+print("load from 65536 =", exports.load(65536));
+
+// 4. Grow by 1 more. Returns 2. New size should be 3.
+print("grow(1) =", exports.grow(1));
+print("size after second grow =", exports.size());
+
+// 5. Try to grow by 2 pages (would need 5 total, but max is 4). Returns -1.
+print("grow(2) =", exports.grow(2));
+print("size unchanged =", exports.size());
+
+// 6. Grow by 1 (to max 4). Returns 3.
+print("grow(1) =", exports.grow(1));
+print("size =", exports.size());
+
+// 7. Try to grow by 1 more (would exceed max of 4). Returns -1.
+print("grow(1) beyond max =", exports.grow(1));

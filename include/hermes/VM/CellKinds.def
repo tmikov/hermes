@@ -89,6 +89,13 @@ CELL_CLASS(JSGeneratorObject, "GeneratorObject")
 CELL_CLASS(JSProxy, "Proxy")
 CELL_CLASS(JSBigInt, "BigInt")
 CELL_CLASS(FastArray, "FastArray")
+CELL_CLASS(JSWebAssemblyModule, "WebAssemblyModule")
+CELL_CLASS(JSWebAssemblyInstance, "WebAssemblyInstance")
+CELL_CLASS(JSWebAssemblyMemory, "WebAssemblyMemory")
+CELL_CLASS(JSWebAssemblyTable, "WebAssemblyTable")
+CELL_CLASS(JSWebAssemblyGlobal, "WebAssemblyGlobal")
+CELL_CLASS(JSWebAssemblyTag, "WebAssemblyTag")
+CELL_CLASS(JSWebAssemblyException, "WebAssemblyException")
 
 // The ordering of Callables is set up carefully. We want to be able to
 // express overlapping regions: all Native functions, and functions

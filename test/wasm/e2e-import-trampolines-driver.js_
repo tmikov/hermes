@@ -1,0 +1,50 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-import-trampolines.wat.
+// Sets up import functions, loads the compiled Wasm module, and tests
+// that imported functions are called correctly.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+
+// Set up the imports object on globalThis so the Wasm module can find it.
+globalThis.__wasm_imports__ = {
+  env: {
+    // Test 1: log function that prints its argument.
+    log: function(x) {
+      print("log:", x);
+    },
+
+    // Test 2: add function that returns the sum.
+    add: function(a, b) {
+      return a + b;
+    },
+
+    // Test 3: function that throws.
+    throwing: function() {
+      throw new Error("import threw");
+    },
+  },
+};
+
+var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+
+// Test 1: call log.
+exports.call_log(42);
+exports.call_log(-7);
+
+// Test 2: call add and use result.
+print("add(3, 4) =", exports.call_add(3, 4));
+print("add(100, 200) =", exports.call_add(100, 200));
+
+// Test 3: call throwing function — verify exception propagates.
+try {
+  exports.call_throw();
+  print("ERROR: should have thrown");
+} catch (e) {
+  print("caught:", e.message);
+}

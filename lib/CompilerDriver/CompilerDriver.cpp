@@ -2348,20 +2348,82 @@ void printHermesVersion(
 }
 
 #ifdef HERMES_ENABLE_WASM
-/// Process a Wasm binary file: read it and invoke the Wasm compilation pipeline.
+/// Process a Wasm binary file: parse, generate IR, optimize, and produce
+/// bytecode output or execute.
 CompileResult processWasmFile(std::unique_ptr<llvh::MemoryBuffer> fileBuf) {
   auto *data = reinterpret_cast<const uint8_t *>(fileBuf->getBufferStart());
   size_t size = fileBuf->getBufferSize();
 
   // Create a Module for the Wasm compiler to populate.
-  // For now we just call the stub, which returns an error.
   auto context = std::make_shared<Context>();
-  Module M(context);
+  auto M = std::make_shared<Module>(context);
   std::string errorMsg;
-  if (!compileWasmModule(data, size, M, errorMsg)) {
+  if (!compileWasmModule(data, size, *M, errorMsg)) {
     llvh::errs() << "Error: " << errorMsg << '\n';
     return ParsingFailed;
   }
+
+  // Run the optimizer pipeline.
+  switch (cl::OptimizationLevel) {
+    case cl::OptLevel::O0:
+      runNoOptimizationPasses(*M);
+      break;
+    case cl::OptLevel::Og:
+      runDebugOptimizationPasses(*M);
+      break;
+    case cl::OptLevel::OMax:
+      runFullOptimizationPasses(*M);
+      break;
+    case cl::OptLevel::OFixedPoint:
+      runOptimizationPassesToFixedPoint(*M);
+      break;
+  }
+
+  if (cl::DumpTarget == DumpIR) {
+    M->dump();
+    return Success;
+  }
+
+  // Generate bytecode.
+  BytecodeGenerationOptions genOptions{cl::DumpTarget};
+  genOptions.optimizationEnabled = cl::OptimizationLevel > cl::OptLevel::Og;
+  genOptions.staticBuiltinsEnabled = context->getStaticBuiltinOptimization();
+  genOptions.verifyIR = cl::compilerRuntimeFlags.VerifyIR;
+
+  if (cl::DumpTarget == Execute) {
+    return generateBytecodeForExecution(
+        hbc::BCProviderFromSrc::CompilationData{genOptions, M, nullptr});
+  }
+
+  // Compute a source hash from the input buffer.
+  llvh::SHA1 hasher;
+  hasher.update(llvh::StringRef(
+      fileBuf->getBufferStart(), fileBuf->getBufferSize()));
+  auto rawHash = hasher.final();
+  SHA1 sourceHash{};
+  std::copy(rawHash.begin(), rawHash.end(), sourceHash.begin());
+
+  // Serialize bytecode to file or stdout.
+  BaseBytecodeMap baseBytecodeMap;
+  OutputStream fileOS{llvh::outs()};
+  llvh::StringRef base = cl::BytecodeOutputFilename;
+  if (!base.empty() && !fileOS.open(base, F_None)) {
+    return OutputFileError;
+  }
+  auto result = generateBytecodeForSerialization(
+      fileOS.os(),
+      M,
+      nullptr, /* semCtx */
+      genOptions,
+      sourceHash,
+      llvh::None,
+      nullptr, /* sourceMapGen */
+      baseBytecodeMap);
+  if (result.status != Success) {
+    return result;
+  }
+  if (!fileOS.close())
+    return OutputFileError;
 
   return Success;
 }

@@ -1,0 +1,20 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-i64-locals.wat.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+
+print("call_id_lo:", exports.call_id_lo());
+print("call_id_hi:", exports.call_id_hi());
+print("local_roundtrip:", exports.local_roundtrip());
+print("local_tee:", exports.local_tee());
+print("block_result:", exports.block_result());
+print("if_result_true:", exports.if_result_true());
+print("if_result_false:", exports.if_result_false());
+print("double_check:", exports.double_check());

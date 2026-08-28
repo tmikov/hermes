@@ -5,10 +5,14 @@
 
 add_hermes_library(hermesWasmFrontend
     WasmCompile.cpp
+    WasmModuleInfo.cpp
     BinaryReaderHermesIRGen.cpp
     LINK_OBJLIBS
     hermesWasmIRGen
     hermesFrontend
+    hermesOptimizer
+    hermesHBCBackend
+    hermesBackend
     hermesSupport
     LINK_LIBS
     wabt

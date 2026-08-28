@@ -7,11 +7,11 @@ set(WasmFrontendSources
   WasmCompileTest.cpp
   )
 
-add_hermes_unittest(WasmFrontendTest
+add_hermes_unittest(WasmFrontendTests
   ${WasmFrontendSources}
   )
 
-target_link_libraries(WasmFrontendTest
+target_link_libraries(WasmFrontendTests
   hermesWasmFrontend
   wabt
   )

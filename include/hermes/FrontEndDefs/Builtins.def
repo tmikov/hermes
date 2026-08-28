@@ -104,6 +104,7 @@ BUILTIN_METHOD(Math, cosh)
 BUILTIN_METHOD(Math, exp)
 BUILTIN_METHOD(Math, expm1)
 BUILTIN_METHOD(Math, floor)
+BUILTIN_METHOD(Math, fround)
 BUILTIN_METHOD(Math, hypot)
 BUILTIN_METHOD(Math, imul)
 BUILTIN_METHOD(Math, log)
@@ -172,6 +173,119 @@ PRIVATE_BUILTIN(functionPrototypeCall)
 
 PRIVATE_BUILTIN(fastArrayPop)
 PRIVATE_BUILTIN(fastArraySlice)
+
+// Wasm helper builtins. Called by Wasm-generated IR for operations that have
+// no direct JS/asm.js equivalent.
+PRIVATE_BUILTIN(wasmTrap)
+PRIVATE_BUILTIN(wasmI32DivS)
+PRIVATE_BUILTIN(wasmI32DivU)
+PRIVATE_BUILTIN(wasmI32RemS)
+PRIVATE_BUILTIN(wasmI32RemU)
+PRIVATE_BUILTIN(wasmI32Clz)
+PRIVATE_BUILTIN(wasmI32Ctz)
+PRIVATE_BUILTIN(wasmI32Popcnt)
+PRIVATE_BUILTIN(wasmI32Rotl)
+PRIVATE_BUILTIN(wasmI32Rotr)
+PRIVATE_BUILTIN(wasmI32TruncF64S)
+PRIVATE_BUILTIN(wasmI32TruncF64U)
+PRIVATE_BUILTIN(wasmI32TruncSatF64S)
+PRIVATE_BUILTIN(wasmI32TruncSatF64U)
+PRIVATE_BUILTIN(wasmI32ReinterpretF32)
+PRIVATE_BUILTIN(wasmF32ReinterpretI32)
+PRIVATE_BUILTIN(wasmF64Copysign)
+PRIVATE_BUILTIN(wasmF32Copysign)
+// i64 hi32 stash/retrieve helpers. Used for i64 function returns and i64
+// arithmetic helpers that return split lo/hi results.
+PRIVATE_BUILTIN(wasmI64HiStash)
+PRIVATE_BUILTIN(wasmI64HiResult)
+PRIVATE_BUILTIN(wasmI64Add)
+PRIVATE_BUILTIN(wasmI64Sub)
+PRIVATE_BUILTIN(wasmI64Mul)
+PRIVATE_BUILTIN(wasmI64DivS)
+PRIVATE_BUILTIN(wasmI64DivU)
+PRIVATE_BUILTIN(wasmI64RemS)
+PRIVATE_BUILTIN(wasmI64RemU)
+PRIVATE_BUILTIN(wasmI64Shl)
+PRIVATE_BUILTIN(wasmI64ShrS)
+PRIVATE_BUILTIN(wasmI64ShrU)
+PRIVATE_BUILTIN(wasmI64Rotl)
+PRIVATE_BUILTIN(wasmI64Rotr)
+// i64 unary helpers (return single i32 result, not split i64).
+PRIVATE_BUILTIN(wasmI64Clz)
+PRIVATE_BUILTIN(wasmI64Ctz)
+PRIVATE_BUILTIN(wasmI64Popcnt)
+// i64 comparison helpers (return i32: 0 or 1).
+PRIVATE_BUILTIN(wasmI64Eqz)
+PRIVATE_BUILTIN(wasmI64Eq)
+PRIVATE_BUILTIN(wasmI64Ne)
+PRIVATE_BUILTIN(wasmI64LtS)
+PRIVATE_BUILTIN(wasmI64GtS)
+PRIVATE_BUILTIN(wasmI64LeS)
+PRIVATE_BUILTIN(wasmI64GeS)
+PRIVATE_BUILTIN(wasmI64LtU)
+PRIVATE_BUILTIN(wasmI64GtU)
+PRIVATE_BUILTIN(wasmI64LeU)
+PRIVATE_BUILTIN(wasmI64GeU)
+// i64 conversion helpers (G.4b). Take a single f64 arg, return lo32; hi32
+// is stashed and retrieved via wasmI64HiResult.
+PRIVATE_BUILTIN(wasmI64TruncF64S)
+PRIVATE_BUILTIN(wasmI64TruncF64U)
+PRIVATE_BUILTIN(wasmI64TruncSatF64S)
+PRIVATE_BUILTIN(wasmI64TruncSatF64U)
+// i64 conversion helpers (G.4c). i64→float conversions take split lo/hi args
+// and return a single f64. Reinterpret takes/returns similarly.
+PRIVATE_BUILTIN(wasmF64ConvertI64S)
+PRIVATE_BUILTIN(wasmF64ConvertI64U)
+PRIVATE_BUILTIN(wasmF32ConvertI64S)
+PRIVATE_BUILTIN(wasmF32ConvertI64U)
+PRIVATE_BUILTIN(wasmI64ReinterpretF64)
+PRIVATE_BUILTIN(wasmF64ReinterpretI64)
+
+// memory.grow helper (H.2). Takes (heapu8View, delta, maxPages).
+// Returns new ArrayBuffer on success, or -1 on failure.
+PRIVATE_BUILTIN(wasmMemoryGrow)
+
+// call_indirect helper (J.2). Takes (funcsArr, typesArr, index, expectedTypeIdx).
+// Validates bounds, null, and type. Returns the closure on success, traps on
+// failure.
+PRIVATE_BUILTIN(wasmCallIndirect)
+
+// Exception handling (L.1).
+// wasmCreateException(tagIndex, v0, v1, ...): creates a Wasm exception object
+// with the given tag index and payload values.
+PRIVATE_BUILTIN(wasmCreateException)
+// wasmMatchException(caught, tagIndex): if caught is a Wasm exception with
+// matching tag, returns the payload values array; otherwise returns undefined.
+PRIVATE_BUILTIN(wasmMatchException)
+
+// Bulk memory operations (N.1).
+// wasmMemoryFill(heapu8, dest, value, size): fill memory with a byte value.
+PRIVATE_BUILTIN(wasmMemoryFill)
+// wasmMemoryCopy(heapu8, dest, src, size): copy within linear memory.
+PRIVATE_BUILTIN(wasmMemoryCopy)
+// wasmMemoryInit(heapu8, dataSegs, segIdx, dest, src, size): copy from data
+// segment into linear memory.
+PRIVATE_BUILTIN(wasmMemoryInit)
+// wasmDataDrop(dataSegs, segIdx): mark a data segment as dropped.
+PRIVATE_BUILTIN(wasmDataDrop)
+
+// BigInt ↔ i64 conversion helpers for export/import wrappers.
+// wasmBigIntToI64(bigint): extracts i64 from BigInt, returns lo32, stashes hi32.
+PRIVATE_BUILTIN(wasmBigIntToI64)
+// wasmI64ToBigInt(lo, hi): converts split lo/hi to BigInt.
+PRIVATE_BUILTIN(wasmI64ToBigInt)
+
+// Bulk table operations (N.2).
+// wasmTableFill(funcsArr, idx, val, count): fill table entries with val.
+PRIVATE_BUILTIN(wasmTableFill)
+// wasmTableCopy(dstFuncs, srcFuncs, dstTypes, srcTypes, dst, src, count):
+// copy entries between tables (both funcs and type-index arrays).
+PRIVATE_BUILTIN(wasmTableCopy)
+// wasmTableInit(funcsArr, typesArr, elemSegs, segIdx, dst, src, count):
+// copy from element segment into a table.
+PRIVATE_BUILTIN(wasmTableInit)
+// wasmElemDrop(elemSegs, segIdx): mark an element segment as dropped.
+PRIVATE_BUILTIN(wasmElemDrop)
 
 JS_BUILTIN(spawnAsync)
 MARK_FIRST_JS_BUILTIN(spawnAsync)

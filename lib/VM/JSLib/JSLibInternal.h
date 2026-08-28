@@ -504,6 +504,13 @@ CallResult<HermesValue> addEntriesFromIterable(
       "loop must terminate with 'return' when iteration is complete");
 }
 
+#ifdef HERMES_ENABLE_WASM
+/// Create and initialize the WebAssembly namespace object, including
+/// WebAssembly.CompileError, WebAssembly.LinkError,
+/// WebAssembly.RuntimeError.
+void createWebAssemblyObject(Runtime &runtime, MutableHandle<JSObject> result);
+#endif
+
 } // namespace vm
 
 #ifdef HERMES_ENABLE_INTL

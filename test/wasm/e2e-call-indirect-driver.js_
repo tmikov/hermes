@@ -1,0 +1,43 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-call-indirect.wat.
+// Tests correct dispatch, out-of-bounds, null entry, and type mismatch.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+
+// Test 1: Correct dispatch — call functions at known indices.
+print("call f0:", exports.call_type0(0));
+print("call f1:", exports.call_type0(1));
+
+// Test 2: Correct dispatch with arguments.
+print("call f2(5):", exports.call_type1(3, 5));
+
+// Test 3: Out of bounds index.
+try {
+  exports.call_type0(10);
+  print("ERROR: should have trapped");
+} catch (e) {
+  print("oob:", e.message);
+}
+
+// Test 4: Uninitialized table entry (index 2 was never set).
+try {
+  exports.call_type0(2);
+  print("ERROR: should have trapped");
+} catch (e) {
+  print("null entry:", e.message);
+}
+
+// Test 5: Type mismatch — call f2 (type 1) with type 0 signature.
+try {
+  exports.call_type0(3);
+  print("ERROR: should have trapped");
+} catch (e) {
+  print("type mismatch:", e.message);
+}

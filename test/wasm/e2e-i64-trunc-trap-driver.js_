@@ -1,0 +1,24 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-i64-trunc-trap.wat.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+
+function tryCall(name, fn) {
+  try {
+    fn();
+    print(name + ": no error");
+  } catch (e) {
+    print(name + ": " + e.message);
+  }
+}
+
+tryCall("trunc_nan", exports.trunc_nan);
+tryCall("trunc_overflow", exports.trunc_overflow);
+tryCall("trunc_u_neg", exports.trunc_u_neg);
