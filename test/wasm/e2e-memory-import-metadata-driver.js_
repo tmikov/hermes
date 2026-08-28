@@ -6,6 +6,11 @@
  */
 
 // JS driver for e2e-memory-import-metadata.wat.
+//
+// The module operates on the imported Memory's own buffer, so these have to
+// be real WebAssembly.Memory objects. __wasm_max__ is an ordinary property
+// the constructor writes, so it can still be redefined to misbehave -- which
+// is the point of the first two cases.
 
 var args = hermescli.getScriptArgs();
 var mod = new WebAssembly.Module(hermescli.loadFile(args[0]));
@@ -14,25 +19,29 @@ var modNoMax = new WebAssembly.Module(hermescli.loadFile(args[1]));
 // __wasm_max__ must be read exactly once: pass validation with 2, then try to
 // raise the ceiling on a later read.
 var maxReads = 0;
-var risingMax = {
-  __wasm_type__: 'memory',
-  __wasm_min__: 1,
-  get __wasm_max__() { return maxReads++ === 0 ? 2 : 65536; },
-};
+var risingMax = new WebAssembly.Memory({initial: 1, maximum: 2});
+Object.defineProperty(risingMax, '__wasm_max__', {
+  get: function () { return maxReads++ === 0 ? 2 : 65536; },
+  configurable: true,
+});
 var i1 = new WebAssembly.Instance(mod, {e: {m: risingMax}});
 print(
   'grow past max = ' + i1.exports.grow() +
   ', __wasm_max__ reads = ' + maxReads);
 
 // A non-number __wasm_max__ must not reach getNumber().
-var i2 = new WebAssembly.Instance(
-  modNoMax, {e: {m: {__wasm_type__: 'memory', __wasm_min__: 1,
-                     __wasm_max__: {}}}});
+var badMax = new WebAssembly.Memory({initial: 1});
+Object.defineProperty(badMax, '__wasm_max__', {value: {}, configurable: true});
+var i2 = new WebAssembly.Instance(modNoMax, {e: {m: badMax}});
 print('non-number max: grow = ' + i2.exports.grow());
 
 // A grow within the declared maximum must still succeed.
-var i3 = new WebAssembly.Instance(
-  mod, {e: {m: {__wasm_type__: 'memory', __wasm_min__: 1, __wasm_max__: 2}}});
+var ok = new WebAssembly.Memory({initial: 1, maximum: 2});
+var i3 = new WebAssembly.Instance(mod, {e: {m: ok}});
 print('grow within max = ' + i3.exports.grow1());
+
+// The grown memory is the embedder's: the imported object must see it.
+print('imported object followed grow: ' +
+      (ok.buffer.byteLength === 2 * 65536));
 
 print('done');

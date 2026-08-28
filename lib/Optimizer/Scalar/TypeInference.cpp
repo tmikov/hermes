@@ -808,6 +808,7 @@ class TypeInferenceImpl {
       case BuiltinMethod::Math_exp:
       case BuiltinMethod::Math_expm1:
       case BuiltinMethod::Math_floor:
+      case BuiltinMethod::Math_fround:
       case BuiltinMethod::Math_hypot:
       case BuiltinMethod::Math_imul:
       case BuiltinMethod::Math_log:
@@ -824,7 +825,75 @@ class TypeInferenceImpl {
       case BuiltinMethod::Math_tan:
       case BuiltinMethod::Math_tanh:
       case BuiltinMethod::Math_trunc:
+      // Wasm builtins that return Number.
+      // i32 arithmetic/bit manipulation:
+      case BuiltinMethod::HermesBuiltin_wasmI32DivS:
+      case BuiltinMethod::HermesBuiltin_wasmI32DivU:
+      case BuiltinMethod::HermesBuiltin_wasmI32RemS:
+      case BuiltinMethod::HermesBuiltin_wasmI32RemU:
+      case BuiltinMethod::HermesBuiltin_wasmI32Clz:
+      case BuiltinMethod::HermesBuiltin_wasmI32Ctz:
+      case BuiltinMethod::HermesBuiltin_wasmI32Popcnt:
+      case BuiltinMethod::HermesBuiltin_wasmI32Rotl:
+      case BuiltinMethod::HermesBuiltin_wasmI32Rotr:
+      case BuiltinMethod::HermesBuiltin_wasmI32TruncF64S:
+      case BuiltinMethod::HermesBuiltin_wasmI32TruncF64U:
+      case BuiltinMethod::HermesBuiltin_wasmI32TruncSatF64S:
+      case BuiltinMethod::HermesBuiltin_wasmI32TruncSatF64U:
+      case BuiltinMethod::HermesBuiltin_wasmI32ReinterpretF32:
+      case BuiltinMethod::HermesBuiltin_wasmF32ReinterpretI32:
+      case BuiltinMethod::HermesBuiltin_wasmF64Copysign:
+      case BuiltinMethod::HermesBuiltin_wasmF32Copysign:
+      case BuiltinMethod::HermesBuiltin_wasmNearest:
+      // i64 binary ops (write to retBuf, return lo32):
+      case BuiltinMethod::HermesBuiltin_wasmI64Add:
+      case BuiltinMethod::HermesBuiltin_wasmI64Sub:
+      case BuiltinMethod::HermesBuiltin_wasmI64Mul:
+      case BuiltinMethod::HermesBuiltin_wasmI64DivS:
+      case BuiltinMethod::HermesBuiltin_wasmI64DivU:
+      case BuiltinMethod::HermesBuiltin_wasmI64RemS:
+      case BuiltinMethod::HermesBuiltin_wasmI64RemU:
+      case BuiltinMethod::HermesBuiltin_wasmI64Shl:
+      case BuiltinMethod::HermesBuiltin_wasmI64ShrS:
+      case BuiltinMethod::HermesBuiltin_wasmI64ShrU:
+      case BuiltinMethod::HermesBuiltin_wasmI64Rotl:
+      case BuiltinMethod::HermesBuiltin_wasmI64Rotr:
+      // i64 unary ops (return i32):
+      case BuiltinMethod::HermesBuiltin_wasmI64Clz:
+      case BuiltinMethod::HermesBuiltin_wasmI64Ctz:
+      case BuiltinMethod::HermesBuiltin_wasmI64Popcnt:
+      // i64 conversions (write to retBuf, return lo32):
+      case BuiltinMethod::HermesBuiltin_wasmI64TruncF64S:
+      case BuiltinMethod::HermesBuiltin_wasmI64TruncF64U:
+      case BuiltinMethod::HermesBuiltin_wasmI64TruncSatF64S:
+      case BuiltinMethod::HermesBuiltin_wasmI64TruncSatF64U:
+      // i64→float conversions:
+      case BuiltinMethod::HermesBuiltin_wasmF64ConvertI64S:
+      case BuiltinMethod::HermesBuiltin_wasmF64ConvertI64U:
+      case BuiltinMethod::HermesBuiltin_wasmF32ConvertI64S:
+      case BuiltinMethod::HermesBuiltin_wasmF32ConvertI64U:
+      case BuiltinMethod::HermesBuiltin_wasmF64ReinterpretI64:
+      // Table grow (returns old size or -1):
+      case BuiltinMethod::HermesBuiltin_wasmTableGrow:
         return Type::createNumber();
+      // Memory grow (returns the new ArrayBuffer, or -1 on failure). The
+      // type is a GC-safety contract: number-typed frame registers may be
+      // kept in machine registers across allocating calls, which the GC
+      // does not update. Claiming Number here handed the returned
+      // ArrayBuffer a GC-invisible register.
+      case BuiltinMethod::HermesBuiltin_wasmMemoryGrow:
+        return inst->getModule()->getTypeContext().unionTy(
+            Type::createNumber(), Type::createObject());
+      // Match exception (returns the caught array or undefined):
+      case BuiltinMethod::HermesBuiltin_wasmMatchException:
+        return inst->getModule()->getTypeContext().unionTy(
+            Type::createObject(), Type::createUndefined());
+      // Wasm builtins that return Object.
+      case BuiltinMethod::HermesBuiltin_wasmCreateException:
+        return Type::createObject();
+      // Wasm builtins that return BigInt.
+      case BuiltinMethod::HermesBuiltin_wasmI64ToBigInt:
+        return Type::createBigInt();
       default:
         return Type::createAnyType();
     }

@@ -15,7 +15,7 @@
       (then (i32.const 42))
       (else (i32.const 99))))
 
-;; CHECK-LABEL: function wasm_func_0(): any
+;; CHECK-LABEL: function wasm_func_0(): number 
 ;; CHECK:         CondBranchInst 1: number, %BB2, %BB3
 ;; CHECK:       %BB2:
 ;; CHECK-NEXT:    BranchInst %BB4
@@ -30,7 +30,7 @@
       (then (i32.const 42))
       (else (i32.const 99))))
 
-;; CHECK-LABEL: function wasm_func_1(): any
+;; CHECK-LABEL: function wasm_func_1(): number 
 ;; CHECK:         CondBranchInst 0: number, %BB2, %BB3
 ;; CHECK:       %BB2:
 ;; CHECK-NEXT:    BranchInst %BB4
@@ -50,10 +50,10 @@
         (local.set 1)))
     (local.get 1))
 
-;; CHECK-LABEL: function wasm_func_2(p0: any): any
-;; CHECK:         CondBranchInst %[[COND:.*]]: any, %BB2, %BB3
+;; CHECK-LABEL: function wasm_func_2(p0: number): number 
+;; CHECK:         CondBranchInst %[[COND:.*]]: number, %BB2, %BB3
 ;; CHECK:       %BB2:
-;; CHECK-NEXT:    StoreStackInst 20: number, %[[LOCAL:.*]]: any
+;; CHECK-NEXT:    StoreStackInst 20: number, %[[LOCAL:.*]]: number
 ;; CHECK-NEXT:    BranchInst %BB4
 ;; CHECK:       %BB3:
 ;; CHECK-NEXT:    BranchInst %BB4
@@ -67,10 +67,10 @@
           (else (i32.const 2))))
       (else (i32.const 3)))))
 
-;; CHECK-LABEL: function wasm_func_3(p0: any, p1: any): any
-;; CHECK:         CondBranchInst %[[C0:.*]]: any, %BB2, %BB3
+;; CHECK-LABEL: function wasm_func_3(p0: number, p1: number): number 
+;; CHECK:         CondBranchInst %[[C0:.*]]: number, %BB2, %BB3
 ;; CHECK:       %BB2:
-;; CHECK:         CondBranchInst %[[C1:.*]]: any, %BB5, %BB6
+;; CHECK:         CondBranchInst %[[C1:.*]]: number, %BB5, %BB6
 ;; CHECK:       %BB3:
 ;; CHECK-NEXT:    BranchInst %BB4
 ;; CHECK:       %BB4:

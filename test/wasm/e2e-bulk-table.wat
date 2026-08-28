@@ -80,11 +80,11 @@
 ;; CHECK-NEXT: === elem.drop + init n=0 ===
 ;; CHECK-NEXT: drop_seg1 ok
 ;; CHECK-NEXT: init_seg1 n=0 ok
-;; CHECK-NEXT: init_seg1 n=1 trapped
+;; CHECK-NEXT: init_seg1 n=1 trapped: table.init: out of bounds element segment access
 ;; CHECK-NEXT: === active segment dropped ===
 ;; CHECK-NEXT: init_seg0_zero ok
 ;; CHECK-NEXT: === OOB checks ===
-;; CHECK-NEXT: fill oob trapped
-;; CHECK-NEXT: copy oob trapped
-;; CHECK-NEXT: init oob trapped
+;; CHECK-NEXT: fill oob trapped: table.fill: out of bounds table access
+;; CHECK-NEXT: copy oob trapped: table.copy: out of bounds table access
+;; CHECK-NEXT: init oob trapped: table.init: out of bounds element segment access
 ;; CHECK-NEXT: done

@@ -14,15 +14,15 @@
     local.get 0
     local.tee 0))
 
-;; CHECK-LABEL: function wasm_func_0(p0: any): any
+;; CHECK-LABEL: function wasm_func_0(p0: number): number 
 ;; CHECK-NEXT: %BB0:
-;; CHECK:   %[[L0:.*]] = AllocStackInst (:any) $local_0: any
-;; CHECK-NEXT:   %[[P0:.*]] = LoadParamInst (:any) %p0: any
-;; CHECK-NEXT:        StoreStackInst %[[P0]]: any, %[[L0]]: any
-;; CHECK-NEXT:   %[[V:.*]] = LoadStackInst (:any) %[[L0]]: any
-;; CHECK-NEXT:        StoreStackInst %[[V]]: any, %[[L0]]: any
+;; CHECK:   %[[L0:.*]] = AllocStackInst (:number) $local_0: any
+;; CHECK-NEXT:   %[[P0:.*]] = LoadParamInst (:number) %p0: number
+;; CHECK-NEXT:        StoreStackInst %[[P0]]: number, %[[L0]]: number
+;; CHECK-NEXT:   %[[V:.*]] = LoadStackInst (:number) %[[L0]]: number
+;; CHECK-NEXT:        StoreStackInst %[[V]]: number, %[[L0]]: number
 ;; CHECK-NEXT:        BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %[[PHI:.*]] = PhiInst (:any) %[[V]]: any, %BB0
-;; CHECK-NEXT:        ReturnInst %[[PHI]]: any
+;; CHECK-NEXT:   %[[PHI:.*]] = PhiInst (:number) %[[V]]: number, %BB0
+;; CHECK-NEXT:        ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end

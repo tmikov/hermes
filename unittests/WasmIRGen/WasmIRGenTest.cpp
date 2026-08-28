@@ -30,6 +30,19 @@ struct TestModule {
   TestModule() : ctx(std::make_shared<Context>()), mod(ctx) {}
 };
 
+/// Count the CallBuiltinInsts in \p bb that call builtin \p m. Tests that
+/// merely check "some CallBuiltinInst exists" cannot tell one wasm builtin
+/// from another -- emitting wasmI64Sub where wasmI64Add is expected would
+/// pass -- so assert the specific builtin instead.
+static unsigned countBuiltinCalls(BasicBlock &bb, BuiltinMethod::Enum m) {
+  unsigned n = 0;
+  for (auto &inst : bb)
+    if (auto *cbi = llvh::dyn_cast<CallBuiltinInst>(&inst))
+      if (cbi->getBuiltinIndex() == m)
+        ++n;
+  return n;
+}
+
 // --- createFunctions tests ---
 
 TEST(WasmIRGenTest, CreateFunctionsSingleNoParams) {
@@ -354,7 +367,7 @@ TEST(WasmIRGenTest, I32Add) {
   bool foundAdd = false;
   bool foundAsInt32 = false;
   for (auto &inst : bb) {
-    if (inst.getKind() == ValueKind::BinaryAddInstKind)
+    if (inst.getKind() == ValueKind::FAddInstKind)
       foundAdd = true;
     if (llvh::isa<AsInt32Inst>(&inst))
       foundAsInt32 = true;
@@ -381,13 +394,8 @@ TEST(WasmIRGenTest, I32Mul) {
   auto *func = irgen.getIRFunctions()[0];
   auto &bb = func->getBasicBlockList().front();
 
-  // Find CallBuiltinInst (Math.imul).
-  bool foundCallBuiltin = false;
-  for (auto &inst : bb) {
-    if (llvh::isa<CallBuiltinInst>(&inst))
-      foundCallBuiltin = true;
-  }
-  EXPECT_TRUE(foundCallBuiltin);
+  // i32.mul lowers to exactly one Math.imul call.
+  EXPECT_EQ(countBuiltinCalls(bb, BuiltinMethod::Math_imul), 1u);
 }
 
 TEST(WasmIRGenTest, I32BitwiseOps) {
@@ -631,17 +639,17 @@ TEST(WasmIRGenTest, I32EqNe) {
   auto *func = irgen.getIRFunctions()[0];
   auto &bb = func->getBasicBlockList().front();
 
-  // Should have BinaryStrictlyEqualInst followed by BinaryOrInst.
+  // Should have FEqualInst followed by AsInt32Inst (bool→i32).
   bool foundStrictlyEqual = false;
-  bool foundBitOr = false;
+  bool foundAsInt32 = false;
   for (auto &inst : bb) {
-    if (inst.getKind() == ValueKind::BinaryStrictlyEqualInstKind)
+    if (inst.getKind() == ValueKind::FEqualInstKind)
       foundStrictlyEqual = true;
-    if (inst.getKind() == ValueKind::BinaryOrInstKind)
-      foundBitOr = true;
+    if (llvh::isa<AsInt32Inst>(&inst))
+      foundAsInt32 = true;
   }
   EXPECT_TRUE(foundStrictlyEqual);
-  EXPECT_TRUE(foundBitOr);
+  EXPECT_TRUE(foundAsInt32);
 }
 
 TEST(WasmIRGenTest, I32SignedComparisons) {
@@ -662,21 +670,17 @@ TEST(WasmIRGenTest, I32SignedComparisons) {
   auto *func = irgen.getIRFunctions()[0];
   auto &bb = func->getBasicBlockList().front();
 
-  // Should have AsInt32Inst (x2), BinaryLessThanInst, BinaryOrInst.
+  // Should have AsInt32Inst (x2 for operands + x1 for bool→i32), FLessThanInst.
   unsigned asInt32Count = 0;
   bool foundLessThan = false;
-  bool foundBitOr = false;
   for (auto &inst : bb) {
     if (llvh::isa<AsInt32Inst>(&inst))
       ++asInt32Count;
-    if (inst.getKind() == ValueKind::BinaryLessThanInstKind)
+    if (inst.getKind() == ValueKind::FLessThanInstKind)
       foundLessThan = true;
-    if (inst.getKind() == ValueKind::BinaryOrInstKind)
-      foundBitOr = true;
   }
-  EXPECT_EQ(asInt32Count, 2u);
+  EXPECT_EQ(asInt32Count, 3u);
   EXPECT_TRUE(foundLessThan);
-  EXPECT_TRUE(foundBitOr);
 }
 
 TEST(WasmIRGenTest, I32UnsignedComparisons) {
@@ -697,21 +701,21 @@ TEST(WasmIRGenTest, I32UnsignedComparisons) {
   auto *func = irgen.getIRFunctions()[0];
   auto &bb = func->getBasicBlockList().front();
 
-  // Should have AsUint32Inst (x2), BinaryLessThanInst, BinaryOrInst.
+  // Should have AsUint32Inst (x2), FLessThanInst, AsInt32Inst (bool→i32).
   unsigned asUint32Count = 0;
   bool foundLessThan = false;
-  bool foundBitOr = false;
+  bool foundAsInt32 = false;
   for (auto &inst : bb) {
     if (llvh::isa<AsUint32Inst>(&inst))
       ++asUint32Count;
-    if (inst.getKind() == ValueKind::BinaryLessThanInstKind)
+    if (inst.getKind() == ValueKind::FLessThanInstKind)
       foundLessThan = true;
-    if (inst.getKind() == ValueKind::BinaryOrInstKind)
-      foundBitOr = true;
+    if (llvh::isa<AsInt32Inst>(&inst))
+      foundAsInt32 = true;
   }
   EXPECT_EQ(asUint32Count, 2u);
   EXPECT_TRUE(foundLessThan);
-  EXPECT_TRUE(foundBitOr);
+  EXPECT_TRUE(foundAsInt32);
 }
 
 TEST(WasmIRGenTest, I32Eqz) {
@@ -731,17 +735,17 @@ TEST(WasmIRGenTest, I32Eqz) {
   auto *func = irgen.getIRFunctions()[0];
   auto &bb = func->getBasicBlockList().front();
 
-  // Should have BinaryStrictlyEqualInst(val, 0) and BinaryOrInst.
+  // Should have FEqualInst(val, 0) and AsInt32Inst (bool→i32).
   bool foundStrictlyEqual = false;
-  bool foundBitOr = false;
+  bool foundAsInt32 = false;
   for (auto &inst : bb) {
-    if (inst.getKind() == ValueKind::BinaryStrictlyEqualInstKind)
+    if (inst.getKind() == ValueKind::FEqualInstKind)
       foundStrictlyEqual = true;
-    if (inst.getKind() == ValueKind::BinaryOrInstKind)
-      foundBitOr = true;
+    if (llvh::isa<AsInt32Inst>(&inst))
+      foundAsInt32 = true;
   }
   EXPECT_TRUE(foundStrictlyEqual);
-  EXPECT_TRUE(foundBitOr);
+  EXPECT_TRUE(foundAsInt32);
 }
 
 // --- Return and drop tests (D.5) ---
@@ -1991,13 +1995,13 @@ TEST(WasmIRGenTest, F64AddSubMulDiv) {
   bool foundAdd = false, foundSub = false;
   bool foundMul = false, foundDiv = false;
   for (auto &inst : bb) {
-    if (inst.getKind() == ValueKind::BinaryAddInstKind)
+    if (inst.getKind() == ValueKind::FAddInstKind)
       foundAdd = true;
-    if (inst.getKind() == ValueKind::BinarySubtractInstKind)
+    if (inst.getKind() == ValueKind::FSubtractInstKind)
       foundSub = true;
-    if (inst.getKind() == ValueKind::BinaryMultiplyInstKind)
+    if (inst.getKind() == ValueKind::FMultiplyInstKind)
       foundMul = true;
-    if (inst.getKind() == ValueKind::BinaryDivideInstKind)
+    if (inst.getKind() == ValueKind::FDivideInstKind)
       foundDiv = true;
   }
   EXPECT_TRUE(foundAdd);
@@ -2039,7 +2043,7 @@ TEST(WasmIRGenTest, F64NegAbsSqrt) {
   bool foundNeg = false;
   unsigned builtinCount = 0;
   for (auto &inst : bb) {
-    if (inst.getKind() == ValueKind::UnaryMinusInstKind)
+    if (inst.getKind() == ValueKind::FNegateKind)
       foundNeg = true;
     if (llvh::isa<CallBuiltinInst>(&inst))
       ++builtinCount;
@@ -2154,19 +2158,19 @@ TEST(WasmIRGenTest, F64Comparisons) {
 
   bool foundStrictEq = false;
   bool foundLt = false;
-  unsigned orCount = 0;
+  unsigned asInt32Count = 0;
   for (auto &inst : bb) {
-    if (inst.getKind() == ValueKind::BinaryStrictlyEqualInstKind)
+    if (inst.getKind() == ValueKind::FEqualInstKind)
       foundStrictEq = true;
-    if (inst.getKind() == ValueKind::BinaryLessThanInstKind)
+    if (inst.getKind() == ValueKind::FLessThanInstKind)
       foundLt = true;
-    if (inst.getKind() == ValueKind::BinaryOrInstKind)
-      ++orCount;
+    if (llvh::isa<AsInt32Inst>(&inst))
+      ++asInt32Count;
   }
   EXPECT_TRUE(foundStrictEq);
   EXPECT_TRUE(foundLt);
-  // Two comparisons, each followed by BinaryOr → 2 BinaryOrInsts
-  EXPECT_EQ(orCount, 2u);
+  // Two comparisons, each followed by AsInt32Inst → 2 AsInt32Insts
+  EXPECT_EQ(asInt32Count, 2u);
 }
 
 TEST(WasmIRGenTest, F64PromoteF32) {
@@ -2245,13 +2249,13 @@ TEST(WasmIRGenTest, F32AddSubMulDiv) {
   bool foundAdd = false, foundSub = false;
   bool foundMul = false, foundDiv = false;
   for (auto &inst : bb) {
-    if (inst.getKind() == ValueKind::BinaryAddInstKind)
+    if (inst.getKind() == ValueKind::FAddInstKind)
       foundAdd = true;
-    if (inst.getKind() == ValueKind::BinarySubtractInstKind)
+    if (inst.getKind() == ValueKind::FSubtractInstKind)
       foundSub = true;
-    if (inst.getKind() == ValueKind::BinaryMultiplyInstKind)
+    if (inst.getKind() == ValueKind::FMultiplyInstKind)
       foundMul = true;
-    if (inst.getKind() == ValueKind::BinaryDivideInstKind)
+    if (inst.getKind() == ValueKind::FDivideInstKind)
       foundDiv = true;
   }
   EXPECT_TRUE(foundAdd);
@@ -2293,7 +2297,7 @@ TEST(WasmIRGenTest, F32NegAbsSqrt) {
   bool foundNeg = false;
   unsigned builtinCount = 0;
   for (auto &inst : bb) {
-    if (inst.getKind() == ValueKind::UnaryMinusInstKind)
+    if (inst.getKind() == ValueKind::FNegateKind)
       foundNeg = true;
     if (llvh::isa<CallBuiltinInst>(&inst))
       ++builtinCount;
@@ -2436,22 +2440,22 @@ TEST(WasmIRGenTest, F32Comparisons) {
   bool foundStrictEq = false, foundStrictNe = false;
   bool foundLt = false, foundGt = false;
   bool foundLe = false, foundGe = false;
-  unsigned orCount = 0;
+  unsigned asInt32Count = 0;
   for (auto &inst : bb) {
-    if (inst.getKind() == ValueKind::BinaryStrictlyEqualInstKind)
+    if (inst.getKind() == ValueKind::FEqualInstKind)
       foundStrictEq = true;
-    if (inst.getKind() == ValueKind::BinaryStrictlyNotEqualInstKind)
+    if (inst.getKind() == ValueKind::FNotEqualInstKind)
       foundStrictNe = true;
-    if (inst.getKind() == ValueKind::BinaryLessThanInstKind)
+    if (inst.getKind() == ValueKind::FLessThanInstKind)
       foundLt = true;
-    if (inst.getKind() == ValueKind::BinaryGreaterThanInstKind)
+    if (inst.getKind() == ValueKind::FGreaterThanInstKind)
       foundGt = true;
-    if (inst.getKind() == ValueKind::BinaryLessThanOrEqualInstKind)
+    if (inst.getKind() == ValueKind::FLessThanOrEqualInstKind)
       foundLe = true;
-    if (inst.getKind() == ValueKind::BinaryGreaterThanOrEqualInstKind)
+    if (inst.getKind() == ValueKind::FGreaterThanOrEqualInstKind)
       foundGe = true;
-    if (inst.getKind() == ValueKind::BinaryOrInstKind)
-      ++orCount;
+    if (llvh::isa<AsInt32Inst>(&inst))
+      ++asInt32Count;
   }
   EXPECT_TRUE(foundStrictEq);
   EXPECT_TRUE(foundStrictNe);
@@ -2459,8 +2463,8 @@ TEST(WasmIRGenTest, F32Comparisons) {
   EXPECT_TRUE(foundGt);
   EXPECT_TRUE(foundLe);
   EXPECT_TRUE(foundGe);
-  // 6 comparisons, each with BinaryOr → 6 BinaryOrInsts
-  EXPECT_EQ(orCount, 6u);
+  // 6 comparisons, each with AsInt32Inst → 6 AsInt32Insts
+  EXPECT_EQ(asInt32Count, 6u);
 }
 
 TEST(WasmIRGenTest, F32DemoteF64) {
@@ -3399,12 +3403,18 @@ TEST(WasmIRGenTest, I64AddEmitsCallAndHi) {
   ASSERT_NE(hi, nullptr);
 
   // With the retBuf convention, lo and hi are AsInt32Inst wrapping
-  // LoadPropertyInst reading from retBufI_[0] and retBufI_[1].
+  // LoadPropertyInst reading from retBufI_[0] and retBufI_[1]. That much
+  // is identical for every i64 binop, so also assert the operation is
+  // specifically i64.add and not some other i64 builtin.
   auto *loInst = llvh::dyn_cast<AsInt32Inst>(lo);
   ASSERT_NE(loInst, nullptr);
 
   auto *hiInst = llvh::dyn_cast<AsInt32Inst>(hi);
   ASSERT_NE(hiInst, nullptr);
+
+  auto &bb = irgen.getIRFunctions()[0]->getBasicBlockList().front();
+  EXPECT_EQ(countBuiltinCalls(bb, BuiltinMethod::HermesBuiltin_wasmI64Add), 1u);
+  EXPECT_EQ(countBuiltinCalls(bb, BuiltinMethod::HermesBuiltin_wasmI64Sub), 0u);
 
   // Push i32 return value.
   irgen.onI32Const(0);
@@ -3454,14 +3464,31 @@ TEST(WasmIRGenTest, I64EqzReturnsI32) {
 
   irgen.onI64Const(42);
 
-  // i64.eqz takes i64, returns i32 — the function should end normally
-  // with the i32 result on the stack.
+  // i64.eqz takes i64, returns i32. It is lowered fully inline as
+  // AsInt32(FCompare((lo | hi), 0)) with no builtin call, so assert that
+  // shape rather than merely that the function exists: exactly one
+  // FCompareInst against literal 0, wrapped in an AsInt32Inst, and no
+  // CallBuiltinInst at all.
   irgen.onI64Eqz();
-
   irgen.endFunction();
 
-  auto *func = irgen.getIRFunctions()[0];
-  ASSERT_NE(func, nullptr);
+  auto &bb = irgen.getIRFunctions()[0]->getBasicBlockList().front();
+  unsigned fcmpCount = 0, callBuiltinCount = 0;
+  bool asInt32OfFCompare = false;
+  for (auto &inst : bb) {
+    if (auto *fc = llvh::dyn_cast<FCompareInst>(&inst)) {
+      ++fcmpCount;
+      EXPECT_TRUE(llvh::isa<LiteralNumber>(fc->getRight()));
+    }
+    if (llvh::isa<CallBuiltinInst>(&inst))
+      ++callBuiltinCount;
+    if (auto *ai = llvh::dyn_cast<AsInt32Inst>(&inst))
+      if (llvh::isa<FCompareInst>(ai->getSingleOperand()))
+        asInt32OfFCompare = true;
+  }
+  EXPECT_EQ(fcmpCount, 1u);
+  EXPECT_EQ(callBuiltinCount, 0u);
+  EXPECT_TRUE(asInt32OfFCompare);
 }
 
 TEST(WasmIRGenTest, I64EqEmitsCallBuiltin) {
@@ -3480,12 +3507,29 @@ TEST(WasmIRGenTest, I64EqEmitsCallBuiltin) {
   irgen.onI64Const(42);
   irgen.onI64Const(42);
   irgen.onI64Eq();
-
-  // The function should end with i32 on stack (no crash).
   irgen.endFunction();
 
-  auto *func = irgen.getIRFunctions()[0];
-  ASSERT_NE(func, nullptr);
+  // Despite the test name, i64.eq is lowered fully inline --
+  // AsInt32(FCompare((loA^loB) | (hiA^hiB), 0)) -- with no builtin call.
+  // Assert that shape: one FCompareInst against a literal, wrapped in
+  // AsInt32, and no CallBuiltinInst.
+  auto &bb = irgen.getIRFunctions()[0]->getBasicBlockList().front();
+  unsigned fcmpCount = 0, callBuiltinCount = 0;
+  bool asInt32OfFCompare = false;
+  for (auto &inst : bb) {
+    if (auto *fc = llvh::dyn_cast<FCompareInst>(&inst)) {
+      ++fcmpCount;
+      EXPECT_TRUE(llvh::isa<LiteralNumber>(fc->getRight()));
+    }
+    if (llvh::isa<CallBuiltinInst>(&inst))
+      ++callBuiltinCount;
+    if (auto *ai = llvh::dyn_cast<AsInt32Inst>(&inst))
+      if (llvh::isa<FCompareInst>(ai->getSingleOperand()))
+        asInt32OfFCompare = true;
+  }
+  EXPECT_EQ(fcmpCount, 1u);
+  EXPECT_EQ(callBuiltinCount, 0u);
+  EXPECT_TRUE(asInt32OfFCompare);
 }
 
 TEST(WasmIRGenTest, I64ClzReturnsI64WithZeroHi) {
@@ -3545,12 +3589,16 @@ TEST(WasmIRGenTest, I64ShlEmitsCallAndHi) {
   auto [lo, hi] = irgen.popI64();
 
   // With the retBuf convention, lo and hi are AsInt32Inst wrapping
-  // LoadPropertyInst reading from retBufI_[0] and retBufI_[1].
+  // LoadPropertyInst reading from retBufI_[0] and retBufI_[1]. Assert the
+  // operation is specifically i64.shl, not another retBuf builtin.
   auto *loInst = llvh::dyn_cast<AsInt32Inst>(lo);
   ASSERT_NE(loInst, nullptr);
 
   auto *hiInst = llvh::dyn_cast<AsInt32Inst>(hi);
   ASSERT_NE(hiInst, nullptr);
+
+  auto &bb = irgen.getIRFunctions()[0]->getBasicBlockList().front();
+  EXPECT_EQ(countBuiltinCalls(bb, BuiltinMethod::HermesBuiltin_wasmI64Shl), 1u);
 
   irgen.onI32Const(0);
   irgen.endFunction();
@@ -3576,12 +3624,18 @@ TEST(WasmIRGenTest, I64TruncF64SEmitsCallAndHi) {
   auto [lo, hi] = irgen.popI64();
 
   // With the retBuf convention, lo and hi are AsInt32Inst wrapping
-  // LoadPropertyInst.
+  // LoadPropertyInst -- identical across the trunc family, so assert the
+  // operation is specifically i64.trunc_f64_s.
   auto *loInst = llvh::dyn_cast<AsInt32Inst>(lo);
   ASSERT_NE(loInst, nullptr);
 
   auto *hiInst = llvh::dyn_cast<AsInt32Inst>(hi);
   ASSERT_NE(hiInst, nullptr);
+
+  auto &bb = irgen.getIRFunctions()[0]->getBasicBlockList().front();
+  EXPECT_EQ(
+      countBuiltinCalls(bb, BuiltinMethod::HermesBuiltin_wasmI64TruncF64S),
+      1u);
 
   irgen.onI32Const(0);
   irgen.endFunction();
@@ -3968,7 +4022,7 @@ TEST(WasmIRGenTest, ImportTrampolineF64Return) {
 
   auto &bb = funcs[0]->getBasicBlockList().front();
 
-  // f64 return: NO AsInt32Inst (return as-is).
+  // f64 return: converted with ToNumber, not coerced to int32.
   bool foundAsInt32 = false;
   bool foundCall = false;
   ReturnInst *retInst = nullptr;
@@ -3983,8 +4037,12 @@ TEST(WasmIRGenTest, ImportTrampolineF64Return) {
   EXPECT_TRUE(foundCall);
   EXPECT_FALSE(foundAsInt32); // f64 return is not coerced to int32
   ASSERT_NE(retInst, nullptr);
-  // Return value should be the CallInst result directly.
-  EXPECT_TRUE(llvh::isa<CallInst>(retInst->getOperand(0)));
+  // The JS callee is untyped, so the result must be converted rather than
+  // returned as-is: returning it directly leaves the value :any, and any
+  // float arithmetic on it then fails lowered-IR verification.
+  auto *asNum = llvh::dyn_cast<AsNumberInst>(retInst->getOperand(0));
+  ASSERT_NE(asNum, nullptr);
+  EXPECT_TRUE(llvh::isa<CallInst>(asNum->getOperand(0)));
 }
 
 TEST(WasmIRGenTest, ImportTrampolineI64Return) {

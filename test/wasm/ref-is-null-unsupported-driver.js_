@@ -1,0 +1,13 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for ref-is-null-unsupported.wat.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var inst = new WebAssembly.Instance(
+  new WebAssembly.Module(hermescli.loadFile(hbcPath)));
+print('is_null_local: ' + inst.exports.is_null_local());

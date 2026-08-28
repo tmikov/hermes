@@ -16,24 +16,24 @@
     local.set 2
     local.get 2))
 
-;; CHECK-LABEL: function wasm_func_0(p0: any, p1: any): any
+;; CHECK-LABEL: function wasm_func_0(p0: number, p1: number): number 
 ;; CHECK-NEXT: %BB0:
 ;; Scope instructions followed by params allocated and initialized.
-;; CHECK:   %[[L0:.*]] = AllocStackInst (:any) $local_0: any
-;; CHECK-NEXT:   %[[P0:.*]] = LoadParamInst (:any) %p0: any
-;; CHECK-NEXT:        StoreStackInst %[[P0]]: any, %[[L0]]: any
-;; CHECK-NEXT:   %[[L1:.*]] = AllocStackInst (:any) $local_1: any
-;; CHECK-NEXT:   %[[P1:.*]] = LoadParamInst (:any) %p1: any
-;; CHECK-NEXT:        StoreStackInst %[[P1]]: any, %[[L1]]: any
+;; CHECK:   %[[L0:.*]] = AllocStackInst (:number) $local_0: any
+;; CHECK-NEXT:   %[[P0:.*]] = LoadParamInst (:number) %p0: number
+;; CHECK-NEXT:        StoreStackInst %[[P0]]: number, %[[L0]]: number
+;; CHECK-NEXT:   %[[L1:.*]] = AllocStackInst (:number) $local_1: any
+;; CHECK-NEXT:   %[[P1:.*]] = LoadParamInst (:number) %p1: number
+;; CHECK-NEXT:        StoreStackInst %[[P1]]: number, %[[L1]]: number
 ;; Declared local initialized to zero.
-;; CHECK-NEXT:   %[[L2:.*]] = AllocStackInst (:any) $local_2: any
-;; CHECK-NEXT:        StoreStackInst 0: number, %[[L2]]: any
+;; CHECK-NEXT:   %[[L2:.*]] = AllocStackInst (:number) $local_2: any
+;; CHECK-NEXT:        StoreStackInst 0: number, %[[L2]]: number
 ;; local.get 0, local.set 2, local.get 2.
-;; CHECK-NEXT:   %[[V0:.*]] = LoadStackInst (:any) %[[L0]]: any
-;; CHECK-NEXT:         StoreStackInst %[[V0]]: any, %[[L2]]: any
-;; CHECK-NEXT:   %[[V2:.*]] = LoadStackInst (:any) %[[L2]]: any
+;; CHECK-NEXT:   %[[V0:.*]] = LoadStackInst (:number) %[[L0]]: number
+;; CHECK-NEXT:         StoreStackInst %[[V0]]: number, %[[L2]]: number
+;; CHECK-NEXT:   %[[V2:.*]] = LoadStackInst (:number) %[[L2]]: number
 ;; CHECK-NEXT:         BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %[[PHI:.*]] = PhiInst (:any) %[[V2]]: any, %BB0
-;; CHECK-NEXT:         ReturnInst %[[PHI]]: any
+;; CHECK-NEXT:   %[[PHI:.*]] = PhiInst (:number) %[[V2]]: number, %BB0
+;; CHECK-NEXT:         ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end

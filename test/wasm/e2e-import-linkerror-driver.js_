@@ -1,0 +1,46 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-import-linkerror.wat.
+
+var mod = new WebAssembly.Module(
+  hermescli.loadFile(hermescli.getScriptArgs()[0]));
+
+function attempt(label, imports) {
+  try {
+    var inst = new WebAssembly.Instance(mod, imports);
+    print(label + ': ' + inst.exports.run(7));
+  } catch (e) {
+    print(label + ': ' + e.name + ': ' + e.message);
+  }
+}
+
+var addOne = function (x) { return x + 1; };
+var mem = function () { return new WebAssembly.Memory({initial: 1}); };
+
+attempt('no namespace', {});
+attempt('missing function', {env: {memory: mem()}});
+attempt('wrong-typed function', {env: {host_add: 42, memory: mem()}});
+// Carrying a matching __wasm_type__ says what the value claims to be, not
+// that it can be called.
+attempt('non-callable with matching type',
+        {env: {host_add: {__wasm_type__: 'func:i:i'}, memory: mem()}});
+attempt('missing memory', {env: {host_add: addOne}});
+attempt('wrong-typed memory', {env: {host_add: addOne, memory: 42}});
+attempt('plain object as memory',
+        {env: {host_add: addOne,
+               memory: {__wasm_type__: 'memory', __wasm_min__: 1,
+                        __wasm_max__: -1}}});
+attempt('ArrayBuffer as memory',
+        {env: {host_add: addOne, memory: new ArrayBuffer(65536)}});
+// A real Memory, but smaller than the module declares: a limits failure, not
+// a brand failure, and the message has to say so.
+attempt('too-small memory',
+        {env: {host_add: addOne,
+               memory: new WebAssembly.Memory({initial: 0})}});
+attempt('all good', {env: {host_add: addOne, memory: mem()}});
+print('done');

@@ -20,16 +20,16 @@
     global.get 0
   )
 ;; Import trampoline for $log.
-;; CHECK-LABEL: function wasm_func_0(p0: any): any
+;; CHECK-LABEL: function wasm_func_0(p0: number): undefined 
 ;; CHECK: %BB0:
 ;; CHECK:   LoadFrameInst (:any) %{{.*}}: environment, [%VS0.import_func_0]: any
-;; CHECK:   LoadParamInst (:any) %p0: any
+;; CHECK:   LoadParamInst (:number) %p0: number
 ;; CHECK:   CallInst (:any)
 ;; CHECK:   ReturnInst undefined: undefined
 ;; CHECK-NEXT: function_end
 
 ;; First defined function — loads global_0 from parent scope.
-;; CHECK-LABEL: function wasm_func_1(): any
+;; CHECK-LABEL: function wasm_func_1(): number 
 ;; CHECK: %BB0:
 ;; CHECK:   %[[P:.*]] = GetParentScopeInst
 ;; CHECK:   %[[G:.*]] = LoadFrameInst (:any) %[[P]]{{.*}}, [%VS0.global_0]: any
@@ -45,14 +45,14 @@
     i32.const 1
     i32.add
   )
-;; CHECK-LABEL: function wasm_func_2(p0: any): any
+;; CHECK-LABEL: function wasm_func_2(p0: number): number 
 ;; CHECK: %BB0:
-;; CHECK:   %[[L0:.*]] = AllocStackInst (:any) $local_0: any
-;; CHECK-NEXT: %[[P0:.*]] = LoadParamInst (:any) %p0: any
-;; CHECK-NEXT:              StoreStackInst %[[P0]]: any, %[[L0]]: any
-;; CHECK:   %[[V:.*]] = LoadStackInst (:any) %[[L0]]: any
-;; CHECK-NEXT: %[[ADD:.*]] = BinaryAddInst (:any) %[[V]]: any, 1: number
-;; CHECK-NEXT: %[[TRUNC:.*]] = AsInt32Inst (:number) %[[ADD]]: any
+;; CHECK:   %[[L0:.*]] = AllocStackInst (:number) $local_0: any
+;; CHECK-NEXT: %[[P0:.*]] = LoadParamInst (:number) %p0: number
+;; CHECK-NEXT:              StoreStackInst %[[P0]]: number, %[[L0]]: number
+;; CHECK:   %[[V:.*]] = LoadStackInst (:number) %[[L0]]: number
+;; CHECK-NEXT: %[[ADD:.*]] = FAddInst (:number) %[[V]]: number, 1: number
+;; CHECK-NEXT: %[[TRUNC:.*]] = AsInt32Inst (:number) %[[ADD]]: number
 ;; CHECK-NEXT:                 BranchInst %BB1
 ;; CHECK: %BB1:
 ;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[TRUNC]]: number, %BB0

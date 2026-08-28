@@ -1,0 +1,45 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-imported-float-result.wat.
+
+var args = hermescli.getScriptArgs();
+var mod = new WebAssembly.Module(hermescli.loadFile(args[0]));
+
+function withReturn(v) {
+  function f() {
+    return v;
+  }
+  return new WebAssembly.Instance(mod, {e: {f64f: f, f32f: f, i32f: f}});
+}
+
+function report(label, v) {
+  try {
+    var e = withReturn(v).exports;
+    print(
+      label + ': f64_add=' + e.f64_add() +
+      ' f64_lt=' + e.f64_lt() +
+      ' f32_add=' + e.f32_add() +
+      ' i32_add=' + e.i32_add());
+  } catch (err) {
+    print(label + ': ' + err.name);
+  }
+}
+
+report('number 2.5', 2.5);
+report("string '3'", '3');
+report('object {}', {});
+report('valueOf 7', {valueOf: function () { return 7; }});
+report('bigint 5n', 5n);
+
+// 0.2 is not representable in single precision. f32_id performs no arithmetic
+// after the call, so the only rounding is the one the trampoline applies to the
+// imported result; without it this would print 0.2 exactly.
+var e = withReturn(0.2).exports;
+print('f32 trampoline rounding: ' + e.f32_id());
+
+print('done');

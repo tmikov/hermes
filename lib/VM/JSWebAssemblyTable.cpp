@@ -38,6 +38,7 @@ void JSWebAssemblyTableBuildMeta(
   const auto *self = static_cast<const JSWebAssemblyTable *>(cell);
   mb.setVTable(&JSWebAssemblyTable::vt);
   mb.addField("elements", &self->elements_);
+  mb.addField("types", &self->types_);
 }
 
 PseudoHandle<JSWebAssemblyTable> JSWebAssemblyTable::create(

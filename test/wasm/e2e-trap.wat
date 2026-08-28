@@ -8,7 +8,7 @@
 
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck --check-prefix=IRCHECK %s
-;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && ! %hermes -Xhermes-internal-test-methods %S/instantiate-hbc.js_ -- %t.hbc 2>&1 | %FileCheck --check-prefix=RUNCHECK %s
+;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && ( ! %hermes -Xhermes-internal-test-methods %S/instantiate-hbc.js_ -- %t.hbc 2>&1 ) | %FileCheck --check-prefix=RUNCHECK %s
 
 (module
   (func $trap_func
@@ -16,7 +16,7 @@
   (start $trap_func))
 
 ;; Verify IR: unreachable emits CallBuiltinInst(wasmTrap) + UnreachableInst.
-;; IRCHECK-LABEL: function wasm_func_0(): any
+;; IRCHECK-LABEL: function wasm_func_0(): undefined
 ;; IRCHECK:        CallBuiltinInst {{.*}}[HermesBuiltin.wasmTrap]
 ;; IRCHECK-NEXT:   UnreachableInst
 

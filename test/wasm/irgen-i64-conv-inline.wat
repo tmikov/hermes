@@ -16,7 +16,7 @@
     i64.const 0x1FFFFFFFF  ;; lo=0xFFFFFFFF, hi=1
     i32.wrap_i64)
 
-;; CHECK-LABEL: function wasm_func_0(): any
+;; CHECK-LABEL: function wasm_func_0(): number 
 ;; CHECK: PhiInst (:number) -1: number
 ;; CHECK-NEXT: ReturnInst %{{.*}}: number
 
@@ -30,7 +30,9 @@
 ;; CHECK-LABEL: function wasm_func_1
 ;; CHECK: AsInt32Inst
 ;; CHECK: BinaryRightShiftInst
-;; CHECK: CallBuiltinInst {{.*}}[HermesBuiltin.wasmI64Eqz]
+;; CHECK: BinaryOrInst
+;; CHECK: FEqualInst
+;; CHECK: AsInt32Inst
 
   ;; i64.extend_i32_s: sign-extend negative i32 to i64.
   ;; -1 -> lo=0xFFFFFFFF, hi=0xFFFFFFFF (sign bit propagated).
@@ -42,7 +44,9 @@
 ;; CHECK-LABEL: function wasm_func_2
 ;; CHECK: AsInt32Inst
 ;; CHECK: BinaryRightShiftInst
-;; CHECK: CallBuiltinInst {{.*}}[HermesBuiltin.wasmI64Eqz]
+;; CHECK: BinaryOrInst
+;; CHECK: FEqualInst
+;; CHECK: AsInt32Inst
 
   ;; i64.extend_i32_u: zero-extend i32 to i64.
   ;; -1 (0xFFFFFFFF) -> lo=0xFFFFFFFF, hi=0.
@@ -52,8 +56,11 @@
     i64.eqz)
 
 ;; CHECK-LABEL: function wasm_func_3
-;; CHECK-NOT: AsInt32Inst
-;; CHECK: CallBuiltinInst {{.*}}[HermesBuiltin.wasmI64Eqz]
+;; CHECK-NOT: BinaryRightShiftInst
+;; CHECK: AsInt32Inst
+;; CHECK: BinaryOrInst
+;; CHECK: FEqualInst
+;; CHECK: AsInt32Inst
 
   ;; i64.extend8_s: sign-extend lowest 8 bits of i64.
   (func $ext8s (result i32)
@@ -65,7 +72,9 @@
 ;; CHECK: BinaryLeftShiftInst
 ;; CHECK: BinaryRightShiftInst
 ;; CHECK: BinaryRightShiftInst
-;; CHECK: CallBuiltinInst {{.*}}[HermesBuiltin.wasmI64Eqz]
+;; CHECK: BinaryOrInst
+;; CHECK: FEqualInst
+;; CHECK: AsInt32Inst
 
   ;; i64.extend16_s: sign-extend lowest 16 bits of i64.
   (func $ext16s (result i32)
@@ -77,7 +86,9 @@
 ;; CHECK: BinaryLeftShiftInst
 ;; CHECK: BinaryRightShiftInst
 ;; CHECK: BinaryRightShiftInst
-;; CHECK: CallBuiltinInst {{.*}}[HermesBuiltin.wasmI64Eqz]
+;; CHECK: BinaryOrInst
+;; CHECK: FEqualInst
+;; CHECK: AsInt32Inst
 
   ;; i64.extend32_s: sign-extend lowest 32 bits of i64.
   (func $ext32s (result i32)
@@ -88,5 +99,7 @@
 ;; CHECK-LABEL: function wasm_func_6
 ;; CHECK: AsInt32Inst
 ;; CHECK: BinaryRightShiftInst
-;; CHECK: CallBuiltinInst {{.*}}[HermesBuiltin.wasmI64Eqz]
+;; CHECK: BinaryOrInst
+;; CHECK: FEqualInst
+;; CHECK: AsInt32Inst
 )

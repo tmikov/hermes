@@ -1,0 +1,27 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-memory-alias.wat.
+
+var e = new WebAssembly.Instance(
+  new WebAssembly.Module(hermescli.loadFile(hermescli.getScriptArgs()[0])))
+  .exports;
+
+var view = new DataView(e.mem.buffer);
+
+e.poke(16, 0xCAFE);
+print('wasm write visible to JS: ' + (view.getUint32(16, true) === 0xCAFE));
+
+view.setUint32(32, 0xBEEF, true);
+print('JS write visible to wasm: ' + (e.peek(32) === 0xBEEF));
+
+var before = e.mem.buffer.byteLength;
+print('grow returned old pages: ' + e.grow(1));
+print('exported buffer followed grow: ' +
+      (e.mem.buffer.byteLength === before + 65536));
+print('data survived grow: ' + (e.peek(16) === 0xCAFE));
+print('done');

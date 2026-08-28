@@ -68,11 +68,11 @@
   (start $start)
 )
 
-;; CHECK-LABEL: function wasm_func_0(p0: any, p1: any): any
+;; CHECK-LABEL: function wasm_func_0(p0: number, p1: number): number 
 ;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32DivS]
-;; CHECK-LABEL: function wasm_func_1(p0: any, p1: any): any
+;; CHECK-LABEL: function wasm_func_1(p0: number, p1: number): number 
 ;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32DivU]
-;; CHECK-LABEL: function wasm_func_2(p0: any, p1: any): any
+;; CHECK-LABEL: function wasm_func_2(p0: number, p1: number): number 
 ;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32RemS]
-;; CHECK-LABEL: function wasm_func_3(p0: any, p1: any): any
+;; CHECK-LABEL: function wasm_func_3(p0: number, p1: number): number 
 ;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32RemU]

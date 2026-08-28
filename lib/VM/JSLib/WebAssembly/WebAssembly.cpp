@@ -733,7 +733,6 @@ instantiateModuleImpl(Runtime &runtime, JSWebAssemblyModule *mod, Handle<> impor
     PinnedValue<JSObject> exportsObj;
     PinnedValue<> moduleInfoObj;
     PinnedValue<> instantiateFn;
-    PinnedValue<> oldImports;
   } lv;
   LocalsRAII lraii(runtime, &lv);
 
@@ -788,45 +787,18 @@ instantiateModuleImpl(Runtime &runtime, JSWebAssemblyModule *mod, Handle<> impor
     return ExecutionStatus::EXCEPTION;
   }
 
-  // Set globalThis.__wasm_imports__ to the import object so the instantiate
-  // function can resolve imports from it.
-  auto wasmImportsSymbol =
-      Predefined::getSymbolID(Predefined::__wasm_imports__);
-
-  // Save the previous value (if any) to restore it later.
-  auto prevRes = JSObject::getNamed_RJS(
-      runtime.getGlobal(), runtime, wasmImportsSymbol);
-  if (LLVM_UNLIKELY(prevRes == ExecutionStatus::EXCEPTION)) {
-    return ExecutionStatus::EXCEPTION;
-  }
-  lv.oldImports = std::move(*prevRes);
-
-  if (hasImports) {
-    auto putRes = JSObject::putNamed_RJS(
-        runtime.getGlobal(),
-        runtime,
-        wasmImportsSymbol,
-        importObj);
-    if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION)) {
-      return ExecutionStatus::EXCEPTION;
-    }
-  }
-
-  // Call instantiate() to perform initialization and get the exports object.
-  auto callRes = Callable::executeCall0(
+  // Call instantiate(imports) to perform initialization and get the exports
+  // object. The import object is passed as an argument rather than through a
+  // global: a global is observable and replaceable by any script running
+  // during instantiation -- an import-object getter or a Proxy trap -- and it
+  // makes instantiating one module twice with different imports impossible to
+  // express.
+  auto callRes = Callable::executeCall1(
       Handle<Callable>::vmcast(&lv.instantiateFn),
       runtime,
-      Runtime::getUndefinedValue());
-
-  // Restore the old __wasm_imports__ value regardless of success/failure.
-  {
-    auto restoreRes = JSObject::putNamed_RJS(
-        runtime.getGlobal(),
-        runtime,
-        wasmImportsSymbol,
-        lv.oldImports);
-    (void)restoreRes;
-  }
+      Runtime::getUndefinedValue(),
+      hasImports ? importObj.getHermesValue()
+                 : HermesValue::encodeUndefinedValue());
 
   if (LLVM_UNLIKELY(callRes == ExecutionStatus::EXCEPTION)) {
     return ExecutionStatus::EXCEPTION;
@@ -1504,6 +1476,7 @@ wasmTableConstructor(void *context, Runtime &runtime) {
     PinnedValue<> maximumVal;
     PinnedValue<JSWebAssemblyTable> tbl;
     PinnedValue<JSArray> arr;
+    PinnedValue<JSArray> typesArr;
   } lv;
   LocalsRAII lraii(runtime, &lv);
 
@@ -1568,8 +1541,12 @@ wasmTableConstructor(void *context, Runtime &runtime) {
   }
   uint32_t initialSize = static_cast<uint32_t>(initialDbl);
 
-  // Read "maximum" property (optional).
-  uint32_t maxSize = 0; // 0 means no explicit maximum.
+  // Read "maximum" property (optional). UINT32_MAX means no explicit
+  // maximum; 0 is a real maximum that forbids all growth. The distinction
+  // is observable: importing a {maximum: 0} table as (table 0 0 funcref)
+  // must link, and its metadata must say 0, not "unbounded".
+  bool hasMax = false;
+  uint32_t maxSize = UINT32_MAX;
   auto maximumRes = JSObject::getNamed_RJS(
       lv.options,
       runtime,
@@ -1590,6 +1567,7 @@ wasmTableConstructor(void *context, Runtime &runtime) {
       return runtime.raiseRangeError(
           "WebAssembly.Table(): 'maximum' must be a non-negative integer");
     }
+    hasMax = true;
     maxSize = static_cast<uint32_t>(maxDbl);
     if (initialSize > maxSize) {
       return runtime.raiseRangeError(
@@ -1622,6 +1600,37 @@ wasmTableConstructor(void *context, Runtime &runtime) {
 
   lv.tbl->setElements(runtime, *lv.arr);
 
+  // Create the parallel type-id array. Entries stay empty: values set from
+  // JS carry no interned Wasm type, and call_indirect refuses an empty
+  // type slot.
+  auto typesRes = JSArray::create(runtime, initialSize, initialSize);
+  if (LLVM_UNLIKELY(typesRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  lv.typesArr = std::move(*typesRes);
+  lv.tbl->setTypes(runtime, *lv.typesArr);
+
+  // Publish the backing arrays under the names the import wiring reads,
+  // as a Wasm-exported table does. They are the same objects the
+  // get/set/grow/length methods operate on, so a module importing this
+  // table and JS observe each other's changes.
+  {
+    auto putRes = JSObject::putNamed_RJS(
+        lv.tbl,
+        runtime,
+        Predefined::getSymbolID(Predefined::__wasm_funcs__),
+        lv.arr);
+    if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
+    putRes = JSObject::putNamed_RJS(
+        lv.tbl,
+        runtime,
+        Predefined::getSymbolID(Predefined::__wasm_types__),
+        lv.typesArr);
+    if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
+  }
+
   // Set type metadata for import validation.
   {
     auto typeRes = StringPrimitive::create(
@@ -1648,7 +1657,7 @@ wasmTableConstructor(void *context, Runtime &runtime) {
         runtime,
         Predefined::getSymbolID(Predefined::__wasm_max__),
         runtime.makeHandle(HermesValue::encodeTrustedNumberValue(
-            maxSize == 0 ? -1.0 : static_cast<double>(maxSize))));
+            hasMax ? static_cast<double>(maxSize) : -1.0)));
     if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION))
       return ExecutionStatus::EXCEPTION;
   }
@@ -1795,8 +1804,8 @@ wasmTableGrowMethod(void *context, Runtime &runtime) {
   struct : public Locals {
     PinnedValue<> deltaVal;
     PinnedValue<JSWebAssemblyTable> tblHandle;
-    PinnedValue<JSArray> oldArr;
-    PinnedValue<JSArray> newArr;
+    PinnedValue<JSArray> arr;
+    PinnedValue<JSArray> typesArr;
   } lv;
   LocalsRAII lraii(runtime, &lv);
 
@@ -1815,16 +1824,18 @@ wasmTableGrowMethod(void *context, Runtime &runtime) {
   }
   uint32_t delta = static_cast<uint32_t>(deltaDbl);
 
-  JSArray *oldArrPtr = lv.tblHandle->getElements(runtime);
+  JSArray *arrPtr = lv.tblHandle->getElements(runtime);
   uint32_t oldLen = 0;
-  if (oldArrPtr) {
-    lv.oldArr = oldArrPtr;
-    oldLen = JSArray::getLength(*lv.oldArr, runtime);
+  if (arrPtr) {
+    lv.arr = arrPtr;
+    oldLen = JSArray::getLength(*lv.arr, runtime);
   }
 
   uint64_t newLen64 = static_cast<uint64_t>(oldLen) + delta;
   uint32_t maxSize = lv.tblHandle->getMaxSize();
-  if (maxSize > 0 && newLen64 > maxSize) {
+  // maxSize is UINT32_MAX when no maximum was declared, which cannot be
+  // exceeded without also failing the 2^32-1 overflow check below.
+  if (newLen64 > maxSize) {
     return runtime.raiseRangeError(
         "WebAssembly.Table.prototype.grow: would exceed maximum");
   }
@@ -1832,36 +1843,65 @@ wasmTableGrowMethod(void *context, Runtime &runtime) {
     return runtime.raiseRangeError(
         "WebAssembly.Table.prototype.grow: would exceed maximum");
   }
+  // Largest table this engine will grow to; mirrors kMaxTableEntries in
+  // wasmTableGrow. Without it a huge delta under no maximum is not
+  // refused but attempted, filling entries for billions of iterations.
+  static constexpr uint64_t kMaxTableEntries = 10'000'000;
+  if (newLen64 > kMaxTableEntries) {
+    return runtime.raiseRangeError(
+        "WebAssembly.Table.prototype.grow: table too large");
+  }
   uint32_t newLen = static_cast<uint32_t>(newLen64);
 
-  // Create a new array with the larger size.
-  auto arrRes = JSArray::create(runtime, newLen, newLen);
-  if (LLVM_UNLIKELY(arrRes == ExecutionStatus::EXCEPTION)) {
-    return ExecutionStatus::EXCEPTION;
+  if (!arrPtr) {
+    // No backing array; nothing shares this table yet, so create one.
+    auto arrRes = JSArray::create(runtime, newLen, newLen);
+    if (LLVM_UNLIKELY(arrRes == ExecutionStatus::EXCEPTION)) {
+      return ExecutionStatus::EXCEPTION;
+    }
+    lv.arr = std::move(*arrRes);
+    lv.tblHandle->setElements(runtime, *lv.arr);
+  } else {
+    // Grow IN PLACE. A module importing this table shares these very
+    // array objects; replacing them here would silently disconnect the
+    // two, which is exactly what wasmTableGrow avoids by growing the
+    // shared arrays the same way.
+    auto lenRes = JSArray::setLengthProperty(lv.arr, runtime, newLen);
+    if (LLVM_UNLIKELY(lenRes == ExecutionStatus::EXCEPTION)) {
+      return ExecutionStatus::EXCEPTION;
+    }
   }
-  lv.newArr = std::move(*arrRes);
+  JSArray *typesPtr = lv.tblHandle->getTypes(runtime);
+  bool haveTypes = typesPtr != nullptr;
+  if (haveTypes) {
+    lv.typesArr = typesPtr;
+    auto lenRes = JSArray::setLengthProperty(lv.typesArr, runtime, newLen);
+    if (LLVM_UNLIKELY(lenRes == ExecutionStatus::EXCEPTION)) {
+      return ExecutionStatus::EXCEPTION;
+    }
+  }
 
   GCScopeMarkerRAII marker{runtime};
 
-  // Copy old entries.
-  for (uint32_t i = 0; i < oldLen; ++i) {
-    marker.flush();
-    HermesValue elem = lv.oldArr->at(runtime, i).unboxToHV(runtime);
-    (void)JSArray::setElementAt(
-        lv.newArr, runtime, i, runtime.makeHandle(elem));
-  }
-
-  // Initialize new entries to null.
+  // Initialize new entries to null. Type entries stay empty: these
+  // entries carry no interned Wasm type, and call_indirect refuses an
+  // empty type slot.
   for (uint32_t i = oldLen; i < newLen; ++i) {
     marker.flush();
-    (void)JSArray::setElementAt(
-        lv.newArr,
-        runtime,
-        i,
-        runtime.makeHandle(HermesValue::encodeNullValue()));
+    if (LLVM_UNLIKELY(
+            JSArray::setElementAt(
+                lv.arr, runtime, i, Runtime::getNullValue()) ==
+            ExecutionStatus::EXCEPTION)) {
+      // Could not allocate part-way through. Put the table back and
+      // report the failure as the spec's RangeError.
+      runtime.clearThrownValue();
+      (void)JSArray::setLengthProperty(lv.arr, runtime, oldLen);
+      if (haveTypes)
+        (void)JSArray::setLengthProperty(lv.typesArr, runtime, oldLen);
+      return runtime.raiseRangeError(
+          "WebAssembly.Table.prototype.grow: could not allocate");
+    }
   }
-
-  lv.tblHandle->setElements(runtime, *lv.newArr);
 
   return HermesValue::encodeTrustedNumberValue(oldLen);
 }

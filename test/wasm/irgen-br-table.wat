@@ -43,13 +43,13 @@
       (i32.const 40)
     )
   )
-;; CHECK-LABEL: function wasm_func_0(p0: any): any
+;; CHECK-LABEL: function wasm_func_0(p0: number): number 
 ;; CHECK: %BB0:
-;; CHECK:   %[[L0:.*]] = AllocStackInst (:any)
-;; CHECK:   %[[P0:.*]] = LoadParamInst (:any) %p0: any
-;; CHECK-NEXT:            StoreStackInst %[[P0]]: any, %[[L0]]: any
-;; CHECK:   %[[IDX:.*]] = LoadStackInst (:any) %[[L0]]: any
-;; CHECK-NEXT:             SwitchInst %[[IDX]]: any, %BB11, 0: number, %BB7, 1: number, %BB8, 2: number, %BB9, 3: number, %BB10
+;; CHECK:   %[[L0:.*]] = AllocStackInst (:number)
+;; CHECK:   %[[P0:.*]] = LoadParamInst (:number) %p0: number
+;; CHECK-NEXT:            StoreStackInst %[[P0]]: number, %[[L0]]: number
+;; CHECK:   %[[IDX:.*]] = LoadStackInst (:number) %[[L0]]: number
+;; CHECK-NEXT:             SwitchInst %[[IDX]]: number, %BB11, 0: number, %BB7, 1: number, %BB8, 2: number, %BB9, 3: number, %BB10
 ;; CHECK: %BB1:
 ;; CHECK-NEXT: %[[RET:.*]] = PhiInst (:number) %{{.*}}: number, %BB2
 ;; CHECK-NEXT:               ReturnInst %[[RET]]: number
@@ -65,10 +65,10 @@
       (br_table $out $out $out)
     )
   )
-;; CHECK-LABEL: function wasm_func_1(p0: any): any
+;; CHECK-LABEL: function wasm_func_1(p0: number): number 
 ;; CHECK: %BB0:
-;; CHECK:   %[[IDX1:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT:              SwitchInst %[[IDX1]]: any, %BB3, 0: number, %BB3, 1: number, %BB3
+;; CHECK:   %[[IDX1:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT:              SwitchInst %[[IDX1]]: number, %BB3, 0: number, %BB3, 1: number, %BB3
 ;; CHECK: %BB1:
 ;; CHECK-NEXT: %[[RET1:.*]] = PhiInst (:number) %{{.*}}: number, %BB2
 ;; CHECK-NEXT:                ReturnInst %[[RET1]]: number
@@ -90,21 +90,21 @@
     (local.get 1)
   )
 )
-;; CHECK-LABEL: function wasm_func_2(p0: any): any
+;; CHECK-LABEL: function wasm_func_2(p0: number): number 
 ;; CHECK: %BB0:
-;; CHECK:   %[[L0_2:.*]] = AllocStackInst (:any)
-;; CHECK:   %[[L1_2:.*]] = AllocStackInst (:any)
-;; CHECK:        StoreStackInst 0: number, %[[L1_2]]: any
+;; CHECK:   %[[L0_2:.*]] = AllocStackInst (:number)
+;; CHECK:   %[[L1_2:.*]] = AllocStackInst (:number)
+;; CHECK:        StoreStackInst 0: number, %[[L1_2]]: number
 ;; CHECK:        BranchInst %BB3
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI2:.*]] = PhiInst (:any) %{{.*}}: any, %BB2
-;; CHECK-NEXT:                ReturnInst %[[PHI2]]: any
+;; CHECK-NEXT: %[[PHI2:.*]] = PhiInst (:number) %{{.*}}: number, %BB2
+;; CHECK-NEXT:                ReturnInst %[[PHI2]]: number
 ;; CHECK: %BB2:
-;; CHECK-NEXT: %{{.*}} = LoadStackInst (:any) %[[L1_2]]: any
+;; CHECK-NEXT: %{{.*}} = LoadStackInst (:number) %[[L1_2]]: number
 ;; CHECK-NEXT:           BranchInst %BB1
 ;; CHECK: %BB3:
-;; CHECK-NEXT: %[[LIDX:.*]] = LoadStackInst (:any) %[[L0_2]]: any
-;; CHECK-NEXT:                SwitchInst %[[LIDX]]: any, %BB5, 0: number, %BB4, 1: number, %BB5
+;; CHECK-NEXT: %[[LIDX:.*]] = LoadStackInst (:number) %[[L0_2]]: number
+;; CHECK-NEXT:                SwitchInst %[[LIDX]]: number, %BB5, 0: number, %BB4, 1: number, %BB5
 ;; CHECK: %BB4:
 ;; CHECK-NEXT: BranchInst %BB3
 ;; CHECK: %BB5:

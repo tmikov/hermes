@@ -13,7 +13,7 @@
   (func (result i32)
     i32.const 42))
 
-;; CHECK-LABEL: function wasm_func_0(): any
+;; CHECK-LABEL: function wasm_func_0(): number 
 ;; CHECK-NEXT: %BB0:
 ;; CHECK:              BranchInst %BB1
 ;; CHECK-NEXT: %BB1:

@@ -1,0 +1,24 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-two-instances.wat.
+
+var mod = new WebAssembly.Module(
+  hermescli.loadFile(hermescli.getScriptArgs()[0]));
+
+var a = new WebAssembly.Instance(
+  mod, {e: {base: 100, f: function (x) { return x * 10; }}});
+var b = new WebAssembly.Instance(
+  mod, {e: {base: 2000, f: function (x) { return x; }}});
+
+print('a.run(1) = ' + a.exports.run(1));
+print('b.run(1) = ' + b.exports.run(1));
+// The first instance must be unaffected by the second's instantiation.
+print('a.run(1) again = ' + a.exports.run(1));
+print('no global leaked: ' +
+      (typeof globalThis.__wasm_imports__ === 'undefined'));
+print('done');

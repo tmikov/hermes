@@ -20,25 +20,31 @@
     local.get 1
     i32.add
   )
-  ;; Start function: calls add(3, 4).
+  ;; Start function: asserts add(3, 4) == 7 by trapping otherwise. Without
+  ;; the comparison the result was simply dropped, so the execution RUN line
+  ;; proved only that instantiation did not throw -- a wrong sum still passed.
   (func (export "_start")
     i32.const 3
     i32.const 4
     call $add
-    drop
+    i32.const 7
+    i32.ne
+    if
+      unreachable
+    end
   )
   (start 1)
 )
 
-;; CHECK-LABEL: function global(): any
+;; CHECK-LABEL: function global(): object
 ;; CHECK:   CreateScopeInst
 ;; CHECK:   CreateFunctionInst {{.*}}__wasm_instantiate__
 ;; CHECK:   ReturnInst
 
-;; CHECK-LABEL: function wasm_func_0(p0: any, p1: any): any
-;; CHECK:   BinaryAddInst
+;; CHECK-LABEL: function wasm_func_0(p0: number, p1: number): number 
+;; CHECK:   FAddInst
 ;; CHECK-NEXT:   AsInt32Inst
 
-;; CHECK-LABEL: function wasm_func_1(): any
+;; CHECK-LABEL: function wasm_func_1(): undefined 
 ;; CHECK:   LoadFrameInst
 ;; CHECK:   CallInst

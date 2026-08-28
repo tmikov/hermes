@@ -60,7 +60,7 @@
 
 ;; CHECK: scope %VS0 [wasm_type_id_0: any, wasm_type_id_1: any, retBufI: any, retBufF: any, closure_0: any, closure_1: any, closure_2: any, closure_3: any, closure_4: any, closure_5: any, closure_6: any, closure_7: any]
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function global(): any
+;; CHECK-NEXT: function global(): object
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = CreateScopeInst (:environment) %VS0: any, empty: any
 ;; CHECK-NEXT:   %1 = CreateFunctionInst (:object) %0: environment, %VS0: any, %__wasm_instantiate__(): functionCode
@@ -79,191 +79,191 @@
 ;; CHECK-NEXT:         ReturnInst %10: object
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_0(retbuf_I: any, retbuf_F: any, p0: any): any
+;; CHECK-NEXT: function wasm_func_0(retbuf_I: object, retbuf_F: object, p0: number): number
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
-;; CHECK-NEXT:   %1 = LoadParamInst (:any) %retbuf_I: any
-;; CHECK-NEXT:   %2 = LoadParamInst (:any) %retbuf_F: any
-;; CHECK-NEXT:   %3 = AllocStackInst (:any) $local_0: any
-;; CHECK-NEXT:   %4 = LoadParamInst (:any) %p0: any
-;; CHECK-NEXT:        StoreStackInst %4: any, %3: any
-;; CHECK-NEXT:   %6 = LoadStackInst (:any) %3: any
-;; CHECK-NEXT:   %7 = CallBuiltinInst (:any) [HermesBuiltin.wasmI64TruncF64S]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %1: any, %6: any
-;; CHECK-NEXT:   %8 = LoadPropertyInst (:any) %1: any, 0: number
-;; CHECK-NEXT:   %9 = LoadPropertyInst (:any) %1: any, 1: number
+;; CHECK-NEXT:   %1 = LoadParamInst (:object) %retbuf_I: object
+;; CHECK-NEXT:   %2 = LoadParamInst (:object) %retbuf_F: object
+;; CHECK-NEXT:   %3 = AllocStackInst (:number) $local_0: any
+;; CHECK-NEXT:   %4 = LoadParamInst (:number) %p0: number
+;; CHECK-NEXT:        StoreStackInst %4: number, %3: number
+;; CHECK-NEXT:   %6 = LoadStackInst (:number) %3: number
+;; CHECK-NEXT:   %7 = CallBuiltinInst (:number) [HermesBuiltin.wasmI64TruncF64S]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %1: object, %6: number
+;; CHECK-NEXT:   %8 = LoadPropertyInst (:any) %1: object, 0: number
+;; CHECK-NEXT:   %9 = LoadPropertyInst (:any) %1: object, 1: number
 ;; CHECK-NEXT:   %10 = AsInt32Inst (:number) %8: any
 ;; CHECK-NEXT:   %11 = AsInt32Inst (:number) %9: any
 ;; CHECK-NEXT:         BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
 ;; CHECK-NEXT:   %13 = PhiInst (:number) %10: number, %BB0
 ;; CHECK-NEXT:   %14 = PhiInst (:number) %11: number, %BB0
-;; CHECK-NEXT:         StorePropertyStrictInst %13: number, %1: any, 0: number
-;; CHECK-NEXT:         StorePropertyStrictInst %14: number, %1: any, 1: number
+;; CHECK-NEXT:         StorePropertyStrictInst %13: number, %1: object, 0: number
+;; CHECK-NEXT:         StorePropertyStrictInst %14: number, %1: object, 1: number
 ;; CHECK-NEXT:         ReturnInst 0: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_1(retbuf_I: any, retbuf_F: any, p0: any): any
+;; CHECK-NEXT: function wasm_func_1(retbuf_I: object, retbuf_F: object, p0: number): number
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
-;; CHECK-NEXT:   %1 = LoadParamInst (:any) %retbuf_I: any
-;; CHECK-NEXT:   %2 = LoadParamInst (:any) %retbuf_F: any
-;; CHECK-NEXT:   %3 = AllocStackInst (:any) $local_0: any
-;; CHECK-NEXT:   %4 = LoadParamInst (:any) %p0: any
-;; CHECK-NEXT:        StoreStackInst %4: any, %3: any
-;; CHECK-NEXT:   %6 = LoadStackInst (:any) %3: any
-;; CHECK-NEXT:   %7 = CallBuiltinInst (:any) [HermesBuiltin.wasmI64TruncF64U]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %1: any, %6: any
-;; CHECK-NEXT:   %8 = LoadPropertyInst (:any) %1: any, 0: number
-;; CHECK-NEXT:   %9 = LoadPropertyInst (:any) %1: any, 1: number
+;; CHECK-NEXT:   %1 = LoadParamInst (:object) %retbuf_I: object
+;; CHECK-NEXT:   %2 = LoadParamInst (:object) %retbuf_F: object
+;; CHECK-NEXT:   %3 = AllocStackInst (:number) $local_0: any
+;; CHECK-NEXT:   %4 = LoadParamInst (:number) %p0: number
+;; CHECK-NEXT:        StoreStackInst %4: number, %3: number
+;; CHECK-NEXT:   %6 = LoadStackInst (:number) %3: number
+;; CHECK-NEXT:   %7 = CallBuiltinInst (:number) [HermesBuiltin.wasmI64TruncF64U]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %1: object, %6: number
+;; CHECK-NEXT:   %8 = LoadPropertyInst (:any) %1: object, 0: number
+;; CHECK-NEXT:   %9 = LoadPropertyInst (:any) %1: object, 1: number
 ;; CHECK-NEXT:   %10 = AsInt32Inst (:number) %8: any
 ;; CHECK-NEXT:   %11 = AsInt32Inst (:number) %9: any
 ;; CHECK-NEXT:         BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
 ;; CHECK-NEXT:   %13 = PhiInst (:number) %10: number, %BB0
 ;; CHECK-NEXT:   %14 = PhiInst (:number) %11: number, %BB0
-;; CHECK-NEXT:         StorePropertyStrictInst %13: number, %1: any, 0: number
-;; CHECK-NEXT:         StorePropertyStrictInst %14: number, %1: any, 1: number
+;; CHECK-NEXT:         StorePropertyStrictInst %13: number, %1: object, 0: number
+;; CHECK-NEXT:         StorePropertyStrictInst %14: number, %1: object, 1: number
 ;; CHECK-NEXT:         ReturnInst 0: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_2(retbuf_I: any, retbuf_F: any, p0: any): any
+;; CHECK-NEXT: function wasm_func_2(retbuf_I: object, retbuf_F: object, p0: number): number
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
-;; CHECK-NEXT:   %1 = LoadParamInst (:any) %retbuf_I: any
-;; CHECK-NEXT:   %2 = LoadParamInst (:any) %retbuf_F: any
-;; CHECK-NEXT:   %3 = AllocStackInst (:any) $local_0: any
-;; CHECK-NEXT:   %4 = LoadParamInst (:any) %p0: any
-;; CHECK-NEXT:        StoreStackInst %4: any, %3: any
-;; CHECK-NEXT:   %6 = LoadStackInst (:any) %3: any
-;; CHECK-NEXT:   %7 = CallBuiltinInst (:any) [HermesBuiltin.wasmI64TruncF64S]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %1: any, %6: any
-;; CHECK-NEXT:   %8 = LoadPropertyInst (:any) %1: any, 0: number
-;; CHECK-NEXT:   %9 = LoadPropertyInst (:any) %1: any, 1: number
+;; CHECK-NEXT:   %1 = LoadParamInst (:object) %retbuf_I: object
+;; CHECK-NEXT:   %2 = LoadParamInst (:object) %retbuf_F: object
+;; CHECK-NEXT:   %3 = AllocStackInst (:number) $local_0: any
+;; CHECK-NEXT:   %4 = LoadParamInst (:number) %p0: number
+;; CHECK-NEXT:        StoreStackInst %4: number, %3: number
+;; CHECK-NEXT:   %6 = LoadStackInst (:number) %3: number
+;; CHECK-NEXT:   %7 = CallBuiltinInst (:number) [HermesBuiltin.wasmI64TruncF64S]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %1: object, %6: number
+;; CHECK-NEXT:   %8 = LoadPropertyInst (:any) %1: object, 0: number
+;; CHECK-NEXT:   %9 = LoadPropertyInst (:any) %1: object, 1: number
 ;; CHECK-NEXT:   %10 = AsInt32Inst (:number) %8: any
 ;; CHECK-NEXT:   %11 = AsInt32Inst (:number) %9: any
 ;; CHECK-NEXT:         BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
 ;; CHECK-NEXT:   %13 = PhiInst (:number) %10: number, %BB0
 ;; CHECK-NEXT:   %14 = PhiInst (:number) %11: number, %BB0
-;; CHECK-NEXT:         StorePropertyStrictInst %13: number, %1: any, 0: number
-;; CHECK-NEXT:         StorePropertyStrictInst %14: number, %1: any, 1: number
+;; CHECK-NEXT:         StorePropertyStrictInst %13: number, %1: object, 0: number
+;; CHECK-NEXT:         StorePropertyStrictInst %14: number, %1: object, 1: number
 ;; CHECK-NEXT:         ReturnInst 0: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_3(retbuf_I: any, retbuf_F: any, p0: any): any
+;; CHECK-NEXT: function wasm_func_3(retbuf_I: object, retbuf_F: object, p0: number): number
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
-;; CHECK-NEXT:   %1 = LoadParamInst (:any) %retbuf_I: any
-;; CHECK-NEXT:   %2 = LoadParamInst (:any) %retbuf_F: any
-;; CHECK-NEXT:   %3 = AllocStackInst (:any) $local_0: any
-;; CHECK-NEXT:   %4 = LoadParamInst (:any) %p0: any
-;; CHECK-NEXT:        StoreStackInst %4: any, %3: any
-;; CHECK-NEXT:   %6 = LoadStackInst (:any) %3: any
-;; CHECK-NEXT:   %7 = CallBuiltinInst (:any) [HermesBuiltin.wasmI64TruncF64U]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %1: any, %6: any
-;; CHECK-NEXT:   %8 = LoadPropertyInst (:any) %1: any, 0: number
-;; CHECK-NEXT:   %9 = LoadPropertyInst (:any) %1: any, 1: number
+;; CHECK-NEXT:   %1 = LoadParamInst (:object) %retbuf_I: object
+;; CHECK-NEXT:   %2 = LoadParamInst (:object) %retbuf_F: object
+;; CHECK-NEXT:   %3 = AllocStackInst (:number) $local_0: any
+;; CHECK-NEXT:   %4 = LoadParamInst (:number) %p0: number
+;; CHECK-NEXT:        StoreStackInst %4: number, %3: number
+;; CHECK-NEXT:   %6 = LoadStackInst (:number) %3: number
+;; CHECK-NEXT:   %7 = CallBuiltinInst (:number) [HermesBuiltin.wasmI64TruncF64U]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %1: object, %6: number
+;; CHECK-NEXT:   %8 = LoadPropertyInst (:any) %1: object, 0: number
+;; CHECK-NEXT:   %9 = LoadPropertyInst (:any) %1: object, 1: number
 ;; CHECK-NEXT:   %10 = AsInt32Inst (:number) %8: any
 ;; CHECK-NEXT:   %11 = AsInt32Inst (:number) %9: any
 ;; CHECK-NEXT:         BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
 ;; CHECK-NEXT:   %13 = PhiInst (:number) %10: number, %BB0
 ;; CHECK-NEXT:   %14 = PhiInst (:number) %11: number, %BB0
-;; CHECK-NEXT:         StorePropertyStrictInst %13: number, %1: any, 0: number
-;; CHECK-NEXT:         StorePropertyStrictInst %14: number, %1: any, 1: number
+;; CHECK-NEXT:         StorePropertyStrictInst %13: number, %1: object, 0: number
+;; CHECK-NEXT:         StorePropertyStrictInst %14: number, %1: object, 1: number
 ;; CHECK-NEXT:         ReturnInst 0: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_4(retbuf_I: any, retbuf_F: any, p0: any): any
+;; CHECK-NEXT: function wasm_func_4(retbuf_I: object, retbuf_F: object, p0: number): number
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
-;; CHECK-NEXT:   %1 = LoadParamInst (:any) %retbuf_I: any
-;; CHECK-NEXT:   %2 = LoadParamInst (:any) %retbuf_F: any
-;; CHECK-NEXT:   %3 = AllocStackInst (:any) $local_0: any
-;; CHECK-NEXT:   %4 = LoadParamInst (:any) %p0: any
-;; CHECK-NEXT:        StoreStackInst %4: any, %3: any
-;; CHECK-NEXT:   %6 = LoadStackInst (:any) %3: any
-;; CHECK-NEXT:   %7 = CallBuiltinInst (:any) [HermesBuiltin.wasmI64TruncSatF64S]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %1: any, %6: any
-;; CHECK-NEXT:   %8 = LoadPropertyInst (:any) %1: any, 0: number
-;; CHECK-NEXT:   %9 = LoadPropertyInst (:any) %1: any, 1: number
+;; CHECK-NEXT:   %1 = LoadParamInst (:object) %retbuf_I: object
+;; CHECK-NEXT:   %2 = LoadParamInst (:object) %retbuf_F: object
+;; CHECK-NEXT:   %3 = AllocStackInst (:number) $local_0: any
+;; CHECK-NEXT:   %4 = LoadParamInst (:number) %p0: number
+;; CHECK-NEXT:        StoreStackInst %4: number, %3: number
+;; CHECK-NEXT:   %6 = LoadStackInst (:number) %3: number
+;; CHECK-NEXT:   %7 = CallBuiltinInst (:number) [HermesBuiltin.wasmI64TruncSatF64S]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %1: object, %6: number
+;; CHECK-NEXT:   %8 = LoadPropertyInst (:any) %1: object, 0: number
+;; CHECK-NEXT:   %9 = LoadPropertyInst (:any) %1: object, 1: number
 ;; CHECK-NEXT:   %10 = AsInt32Inst (:number) %8: any
 ;; CHECK-NEXT:   %11 = AsInt32Inst (:number) %9: any
 ;; CHECK-NEXT:         BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
 ;; CHECK-NEXT:   %13 = PhiInst (:number) %10: number, %BB0
 ;; CHECK-NEXT:   %14 = PhiInst (:number) %11: number, %BB0
-;; CHECK-NEXT:         StorePropertyStrictInst %13: number, %1: any, 0: number
-;; CHECK-NEXT:         StorePropertyStrictInst %14: number, %1: any, 1: number
+;; CHECK-NEXT:         StorePropertyStrictInst %13: number, %1: object, 0: number
+;; CHECK-NEXT:         StorePropertyStrictInst %14: number, %1: object, 1: number
 ;; CHECK-NEXT:         ReturnInst 0: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_5(retbuf_I: any, retbuf_F: any, p0: any): any
+;; CHECK-NEXT: function wasm_func_5(retbuf_I: object, retbuf_F: object, p0: number): number
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
-;; CHECK-NEXT:   %1 = LoadParamInst (:any) %retbuf_I: any
-;; CHECK-NEXT:   %2 = LoadParamInst (:any) %retbuf_F: any
-;; CHECK-NEXT:   %3 = AllocStackInst (:any) $local_0: any
-;; CHECK-NEXT:   %4 = LoadParamInst (:any) %p0: any
-;; CHECK-NEXT:        StoreStackInst %4: any, %3: any
-;; CHECK-NEXT:   %6 = LoadStackInst (:any) %3: any
-;; CHECK-NEXT:   %7 = CallBuiltinInst (:any) [HermesBuiltin.wasmI64TruncSatF64U]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %1: any, %6: any
-;; CHECK-NEXT:   %8 = LoadPropertyInst (:any) %1: any, 0: number
-;; CHECK-NEXT:   %9 = LoadPropertyInst (:any) %1: any, 1: number
+;; CHECK-NEXT:   %1 = LoadParamInst (:object) %retbuf_I: object
+;; CHECK-NEXT:   %2 = LoadParamInst (:object) %retbuf_F: object
+;; CHECK-NEXT:   %3 = AllocStackInst (:number) $local_0: any
+;; CHECK-NEXT:   %4 = LoadParamInst (:number) %p0: number
+;; CHECK-NEXT:        StoreStackInst %4: number, %3: number
+;; CHECK-NEXT:   %6 = LoadStackInst (:number) %3: number
+;; CHECK-NEXT:   %7 = CallBuiltinInst (:number) [HermesBuiltin.wasmI64TruncSatF64U]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %1: object, %6: number
+;; CHECK-NEXT:   %8 = LoadPropertyInst (:any) %1: object, 0: number
+;; CHECK-NEXT:   %9 = LoadPropertyInst (:any) %1: object, 1: number
 ;; CHECK-NEXT:   %10 = AsInt32Inst (:number) %8: any
 ;; CHECK-NEXT:   %11 = AsInt32Inst (:number) %9: any
 ;; CHECK-NEXT:         BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
 ;; CHECK-NEXT:   %13 = PhiInst (:number) %10: number, %BB0
 ;; CHECK-NEXT:   %14 = PhiInst (:number) %11: number, %BB0
-;; CHECK-NEXT:         StorePropertyStrictInst %13: number, %1: any, 0: number
-;; CHECK-NEXT:         StorePropertyStrictInst %14: number, %1: any, 1: number
+;; CHECK-NEXT:         StorePropertyStrictInst %13: number, %1: object, 0: number
+;; CHECK-NEXT:         StorePropertyStrictInst %14: number, %1: object, 1: number
 ;; CHECK-NEXT:         ReturnInst 0: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_6(retbuf_I: any, retbuf_F: any, p0: any): any
+;; CHECK-NEXT: function wasm_func_6(retbuf_I: object, retbuf_F: object, p0: number): number
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
-;; CHECK-NEXT:   %1 = LoadParamInst (:any) %retbuf_I: any
-;; CHECK-NEXT:   %2 = LoadParamInst (:any) %retbuf_F: any
-;; CHECK-NEXT:   %3 = AllocStackInst (:any) $local_0: any
-;; CHECK-NEXT:   %4 = LoadParamInst (:any) %p0: any
-;; CHECK-NEXT:        StoreStackInst %4: any, %3: any
-;; CHECK-NEXT:   %6 = LoadStackInst (:any) %3: any
-;; CHECK-NEXT:   %7 = CallBuiltinInst (:any) [HermesBuiltin.wasmI64TruncSatF64S]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %1: any, %6: any
-;; CHECK-NEXT:   %8 = LoadPropertyInst (:any) %1: any, 0: number
-;; CHECK-NEXT:   %9 = LoadPropertyInst (:any) %1: any, 1: number
+;; CHECK-NEXT:   %1 = LoadParamInst (:object) %retbuf_I: object
+;; CHECK-NEXT:   %2 = LoadParamInst (:object) %retbuf_F: object
+;; CHECK-NEXT:   %3 = AllocStackInst (:number) $local_0: any
+;; CHECK-NEXT:   %4 = LoadParamInst (:number) %p0: number
+;; CHECK-NEXT:        StoreStackInst %4: number, %3: number
+;; CHECK-NEXT:   %6 = LoadStackInst (:number) %3: number
+;; CHECK-NEXT:   %7 = CallBuiltinInst (:number) [HermesBuiltin.wasmI64TruncSatF64S]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %1: object, %6: number
+;; CHECK-NEXT:   %8 = LoadPropertyInst (:any) %1: object, 0: number
+;; CHECK-NEXT:   %9 = LoadPropertyInst (:any) %1: object, 1: number
 ;; CHECK-NEXT:   %10 = AsInt32Inst (:number) %8: any
 ;; CHECK-NEXT:   %11 = AsInt32Inst (:number) %9: any
 ;; CHECK-NEXT:         BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
 ;; CHECK-NEXT:   %13 = PhiInst (:number) %10: number, %BB0
 ;; CHECK-NEXT:   %14 = PhiInst (:number) %11: number, %BB0
-;; CHECK-NEXT:         StorePropertyStrictInst %13: number, %1: any, 0: number
-;; CHECK-NEXT:         StorePropertyStrictInst %14: number, %1: any, 1: number
+;; CHECK-NEXT:         StorePropertyStrictInst %13: number, %1: object, 0: number
+;; CHECK-NEXT:         StorePropertyStrictInst %14: number, %1: object, 1: number
 ;; CHECK-NEXT:         ReturnInst 0: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_7(retbuf_I: any, retbuf_F: any, p0: any): any
+;; CHECK-NEXT: function wasm_func_7(retbuf_I: object, retbuf_F: object, p0: number): number
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
-;; CHECK-NEXT:   %1 = LoadParamInst (:any) %retbuf_I: any
-;; CHECK-NEXT:   %2 = LoadParamInst (:any) %retbuf_F: any
-;; CHECK-NEXT:   %3 = AllocStackInst (:any) $local_0: any
-;; CHECK-NEXT:   %4 = LoadParamInst (:any) %p0: any
-;; CHECK-NEXT:        StoreStackInst %4: any, %3: any
-;; CHECK-NEXT:   %6 = LoadStackInst (:any) %3: any
-;; CHECK-NEXT:   %7 = CallBuiltinInst (:any) [HermesBuiltin.wasmI64TruncSatF64U]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %1: any, %6: any
-;; CHECK-NEXT:   %8 = LoadPropertyInst (:any) %1: any, 0: number
-;; CHECK-NEXT:   %9 = LoadPropertyInst (:any) %1: any, 1: number
+;; CHECK-NEXT:   %1 = LoadParamInst (:object) %retbuf_I: object
+;; CHECK-NEXT:   %2 = LoadParamInst (:object) %retbuf_F: object
+;; CHECK-NEXT:   %3 = AllocStackInst (:number) $local_0: any
+;; CHECK-NEXT:   %4 = LoadParamInst (:number) %p0: number
+;; CHECK-NEXT:        StoreStackInst %4: number, %3: number
+;; CHECK-NEXT:   %6 = LoadStackInst (:number) %3: number
+;; CHECK-NEXT:   %7 = CallBuiltinInst (:number) [HermesBuiltin.wasmI64TruncSatF64U]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %1: object, %6: number
+;; CHECK-NEXT:   %8 = LoadPropertyInst (:any) %1: object, 0: number
+;; CHECK-NEXT:   %9 = LoadPropertyInst (:any) %1: object, 1: number
 ;; CHECK-NEXT:   %10 = AsInt32Inst (:number) %8: any
 ;; CHECK-NEXT:   %11 = AsInt32Inst (:number) %9: any
 ;; CHECK-NEXT:         BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
 ;; CHECK-NEXT:   %13 = PhiInst (:number) %10: number, %BB0
 ;; CHECK-NEXT:   %14 = PhiInst (:number) %11: number, %BB0
-;; CHECK-NEXT:         StorePropertyStrictInst %13: number, %1: any, 0: number
-;; CHECK-NEXT:         StorePropertyStrictInst %14: number, %1: any, 1: number
+;; CHECK-NEXT:         StorePropertyStrictInst %13: number, %1: object, 0: number
+;; CHECK-NEXT:         StorePropertyStrictInst %14: number, %1: object, 1: number
 ;; CHECK-NEXT:         ReturnInst 0: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function __wasm_instantiate__(): any
+;; CHECK-NEXT: function __wasm_instantiate__(imports: any): object
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = CreateScopeInst (:environment) %VS0: any, empty: any
 ;; CHECK-NEXT:   %1 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_func_0(): functionCode

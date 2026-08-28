@@ -1,0 +1,33 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-imported-memory-alias.wat.
+
+var mod = new WebAssembly.Module(
+  hermescli.loadFile(hermescli.getScriptArgs()[0]));
+
+// Two pages, though the import only declares a minimum of one: the module
+// must use what it was given, not what it asked for.
+var mem = new WebAssembly.Memory({initial: 2, maximum: 4});
+var e = new WebAssembly.Instance(mod, {e: {m: mem}}).exports;
+
+print('module sees 2 pages: ' + (e.size() === 2));
+
+new DataView(mem.buffer).setUint32(64, 0xBEEF, true);
+print('JS write visible to wasm: ' + (e.peek(64) === 0xBEEF));
+
+e.poke(128, 0xCAFE);
+print('wasm write visible to JS: ' +
+      (new DataView(mem.buffer).getUint32(128, true) === 0xCAFE));
+
+print('grow returned old pages: ' + e.grow(1));
+print('imported object followed grow: ' +
+      (mem.buffer.byteLength === 3 * 65536));
+print('data survived grow: ' + (e.peek(128) === 0xCAFE));
+
+print('re-export is the same object: ' + (e.m2 === mem));
+print('done');

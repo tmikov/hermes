@@ -213,18 +213,6 @@ PRIVATE_BUILTIN(wasmI64Rotr)
 PRIVATE_BUILTIN(wasmI64Clz)
 PRIVATE_BUILTIN(wasmI64Ctz)
 PRIVATE_BUILTIN(wasmI64Popcnt)
-// i64 comparison helpers (return i32: 0 or 1).
-PRIVATE_BUILTIN(wasmI64Eqz)
-PRIVATE_BUILTIN(wasmI64Eq)
-PRIVATE_BUILTIN(wasmI64Ne)
-PRIVATE_BUILTIN(wasmI64LtS)
-PRIVATE_BUILTIN(wasmI64GtS)
-PRIVATE_BUILTIN(wasmI64LeS)
-PRIVATE_BUILTIN(wasmI64GeS)
-PRIVATE_BUILTIN(wasmI64LtU)
-PRIVATE_BUILTIN(wasmI64GtU)
-PRIVATE_BUILTIN(wasmI64LeU)
-PRIVATE_BUILTIN(wasmI64GeU)
 // i64 conversion helpers (G.4b). Take (retBufI, f64_arg), write lo/hi result
 // to retBufI[0]/[1], return 0.
 PRIVATE_BUILTIN(wasmI64TruncF64S)
@@ -303,6 +291,10 @@ PRIVATE_BUILTIN(wasmLinkError)
 // process-wide stable integer id, so call_indirect can compare type identity
 // across modules with a plain integer compare.
 PRIVATE_BUILTIN(wasmInternType)
+// wasmCheckTableArrays(funcsArr, typesArr): raise a LinkError unless both are
+// genuine JSArrays. Called once per table at instantiation so that the hot
+// call_indirect path can cast them without re-checking.
+PRIVATE_BUILTIN(wasmCheckTableArrays)
 
 JS_BUILTIN(spawnAsync)
 MARK_FIRST_JS_BUILTIN(spawnAsync)

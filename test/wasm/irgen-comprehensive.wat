@@ -28,14 +28,14 @@
   local.get 0
 )
 
-;; CHECK-LABEL: function wasm_func_0(): any
-;; CHECK:   %[[L:.*]] = AllocStackInst (:any) $local_0
+;; CHECK-LABEL: function wasm_func_0(): number 
+;; CHECK:   %[[L:.*]] = AllocStackInst (:number) $local_0
 ;; CHECK:   StoreStackInst 0: number, %[[L]]
 ;; CHECK:   StoreStackInst 42: number, %[[L]]
-;; CHECK:   %[[V:.*]] = LoadStackInst (:any) %[[L]]
+;; CHECK:   %[[V:.*]] = LoadStackInst (:number) %[[L]]
 ;; CHECK:   BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK:   %[[PHI:.*]] = PhiInst (:any) %[[V]]: any, %BB0
+;; CHECK:   %[[PHI:.*]] = PhiInst (:number) %[[V]]: number, %BB0
 ;; CHECK:   ReturnInst %[[PHI]]
 ;; CHECK:   function_end
 
@@ -51,14 +51,14 @@
   i32.mul
 )
 
-;; CHECK-LABEL: function wasm_func_1(p0: any, p1: any): any
-;; CHECK:   BinaryAddInst
+;; CHECK-LABEL: function wasm_func_1(p0: number, p1: number): number 
+;; CHECK:   FAddInst
 ;; CHECK:   AsInt32Inst
-;; CHECK:   BinarySubtractInst
+;; CHECK:   FSubtractInst
 ;; CHECK:   AsInt32Inst
 ;; CHECK:   StoreStackInst
 ;; CHECK:   LoadStackInst
-;; CHECK:   CallBuiltinInst (:any) [Math.imul]
+;; CHECK:   CallBuiltinInst (:number) [Math.imul]
 ;; CHECK:   BranchInst %BB1
 ;; CHECK:   function_end
 
@@ -73,7 +73,7 @@
   i32.xor
 )
 
-;; CHECK-LABEL: function wasm_func_2(p0: any, p1: any): any
+;; CHECK-LABEL: function wasm_func_2(p0: number, p1: number): number 
 ;; CHECK:   BinaryAndInst
 ;; CHECK:   BinaryOrInst
 ;; CHECK:   BinaryXorInst
@@ -91,7 +91,7 @@
   i32.shr_u
 )
 
-;; CHECK-LABEL: function wasm_func_3(p0: any, p1: any): any
+;; CHECK-LABEL: function wasm_func_3(p0: number, p1: number): number 
 ;; CHECK:   BinaryLeftShiftInst
 ;; CHECK:   BinaryRightShiftInst
 ;; CHECK:   BinaryUnsignedRightShiftInst
@@ -109,13 +109,13 @@
   i32.lt_s
 )
 
-;; CHECK-LABEL: function wasm_func_4(p0: any, p1: any): any
-;; CHECK:   BinaryStrictlyEqualInst
-;; CHECK:   BinaryOrInst {{.*}} 0: number
+;; CHECK-LABEL: function wasm_func_4(p0: number, p1: number): number 
+;; CHECK:   FEqualInst
+;; CHECK:   AsInt32Inst (:number) {{.*}}: boolean
 ;; CHECK:   AsInt32Inst
 ;; CHECK:   AsInt32Inst
-;; CHECK:   BinaryLessThanInst
-;; CHECK:   BinaryOrInst {{.*}} 0: number
+;; CHECK:   FLessThanInst
+;; CHECK:   AsInt32Inst (:number) {{.*}}: boolean
 ;; CHECK:   BranchInst %BB1
 ;; CHECK:   function_end
 
@@ -125,9 +125,9 @@
   i32.eqz
 )
 
-;; CHECK-LABEL: function wasm_func_5(p0: any): any
-;; CHECK:   BinaryStrictlyEqualInst {{.*}} 0: number
-;; CHECK:   BinaryOrInst {{.*}} 0: number
+;; CHECK-LABEL: function wasm_func_5(p0: number): number 
+;; CHECK:   FEqualInst {{.*}} 0: number
+;; CHECK:   AsInt32Inst (:number) {{.*}}: boolean
 ;; CHECK:   BranchInst %BB1
 ;; CHECK:   function_end
 
@@ -138,7 +138,7 @@
   end
 )
 
-;; CHECK-LABEL: function wasm_func_6(): any
+;; CHECK-LABEL: function wasm_func_6(): undefined 
 ;; CHECK: %BB0:
 ;; CHECK:   BranchInst %BB2
 ;; CHECK: %BB1:
@@ -155,10 +155,10 @@
   )
 )
 
-;; CHECK-LABEL: function wasm_func_7(p0: any): any
+;; CHECK-LABEL: function wasm_func_7(p0: number): undefined 
 ;; CHECK:   BranchInst %BB2
 ;; CHECK: %BB2:
-;; CHECK:   BinarySubtractInst
+;; CHECK:   FSubtractInst
 ;; CHECK:   AsInt32Inst
 ;; CHECK:   StoreStackInst
 ;; CHECK:   LoadStackInst
@@ -175,7 +175,7 @@
   end
 )
 
-;; CHECK-LABEL: function wasm_func_8(p0: any): any
+;; CHECK-LABEL: function wasm_func_8(p0: number): number 
 ;; CHECK:   CondBranchInst {{.*}} %BB2, %BB3
 ;; CHECK: %BB2:
 ;; CHECK:   BranchInst %BB4
@@ -194,7 +194,7 @@
   select
 )
 
-;; CHECK-LABEL: function wasm_func_9(p0: any): any
+;; CHECK-LABEL: function wasm_func_9(p0: number): number 
 ;; CHECK:   CondBranchInst
 ;; CHECK: %BB2:
 ;; CHECK:   BranchInst %BB4
@@ -209,9 +209,9 @@
   call $constants_and_locals
 )
 
-;; CHECK-LABEL: function wasm_func_10(): any
+;; CHECK-LABEL: function wasm_func_10(): number 
 ;; CHECK:   LoadFrameInst (:any) {{.*}}[%VS0.closure_0]: any
-;; CHECK:   CallInst (:any)
+;; CHECK:   CallInst (:number)
 ;; CHECK:   BranchInst %BB1
 ;; CHECK:   function_end
 
@@ -222,7 +222,7 @@
   return
 )
 
-;; CHECK-LABEL: function wasm_func_11(): any
+;; CHECK-LABEL: function wasm_func_11(): number 
 ;; CHECK: %BB0:
 ;; CHECK:   ReturnInst 42: number
 ;; CHECK: %BB1:
@@ -233,7 +233,7 @@
   unreachable
 )
 
-;; CHECK-LABEL: function wasm_func_12(): any
+;; CHECK-LABEL: function wasm_func_12(): undefined 
 ;; CHECK: %BB0:
 ;; CHECK:   UnreachableInst
 ;; CHECK: %BB1:
@@ -252,9 +252,9 @@
   )
 )
 
-;; CHECK-LABEL: function wasm_func_13(p0: any): any
+;; CHECK-LABEL: function wasm_func_13(p0: number): number 
 ;; CHECK:   SwitchInst
 ;; CHECK:   PhiInst
-;; CHECK:   BinaryAddInst
+;; CHECK:   FAddInst
 ;; CHECK:   AsInt32Inst
 ;; CHECK:   function_end

@@ -15,7 +15,7 @@
   (func (export "load_i32_unaligned") (param i32) (result i32)
     (i32.load align=1 (local.get 0))
   )
-  ;; CHECK-LABEL: function wasm_func_0(p0: any): any
+  ;; CHECK-LABEL: function wasm_func_0(p0: number): number 
   ;; The unaligned path loads individual bytes from HEAPU8 and assembles them.
   ;; CHECK: [%VS0.HEAPU8]
   ;; CHECK: LoadPropertyInst
@@ -32,7 +32,7 @@
   (func (export "store_i32_unaligned") (param i32 i32)
     (i32.store align=1 (local.get 0) (local.get 1))
   )
-  ;; CHECK-LABEL: function wasm_func_1(p0: any, p1: any): any
+  ;; CHECK-LABEL: function wasm_func_1(p0: number, p1: number): undefined 
   ;; The unaligned store decomposes value into bytes via AND and shifts.
   ;; CHECK: [%VS0.HEAPU8]
   ;; CHECK: BinaryAndInst
@@ -46,7 +46,7 @@
   (func (export "load_i32_aligned") (param i32) (result i32)
     (i32.load (local.get 0))
   )
-  ;; CHECK-LABEL: function wasm_func_2(p0: any): any
+  ;; CHECK-LABEL: function wasm_func_2(p0: number): number 
   ;; Aligned path uses shift-right-by-2 then loads from HEAP32.
   ;; CHECK: BinaryUnsignedRightShiftInst
   ;; CHECK: [%VS0.HEAP32]
@@ -56,7 +56,7 @@
   (func (export "load_f64_unaligned") (param i32) (result f64)
     (f64.load align=1 (local.get 0))
   )
-  ;; CHECK-LABEL: function wasm_func_3(p0: any): any
+  ;; CHECK-LABEL: function wasm_func_3(p0: number): number 
   ;; f64 unaligned load: assemble lo 4 bytes, then hi 4 bytes, reinterpret.
   ;; CHECK: [%VS0.HEAPU8]
   ;; CHECK: LoadPropertyInst

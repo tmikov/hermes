@@ -66,18 +66,18 @@
   (start $start)
 )
 
-;; CHECK-LABEL: function wasm_func_0(p0: any, p1: any): any
-;; CHECK:   BinaryAddInst
+;; CHECK-LABEL: function wasm_func_0(p0: number, p1: number): number 
+;; CHECK:   FAddInst
 
-;; CHECK-LABEL: function wasm_func_1(p0: any, p1: any): any
-;; CHECK:   BinaryLessThanInst
-;; CHECK-NEXT:   BinaryOrInst
+;; CHECK-LABEL: function wasm_func_1(p0: number, p1: number): number 
+;; CHECK:   FLessThanInst
+;; CHECK-NEXT:   AsInt32Inst
 
-;; CHECK-LABEL: function wasm_func_2(p0: any): any
-;; CHECK:   UnaryMinusInst
+;; CHECK-LABEL: function wasm_func_2(p0: number): number 
+;; CHECK:   FNegate
 
-;; CHECK-LABEL: function wasm_func_3(p0: any): any
+;; CHECK-LABEL: function wasm_func_3(p0: number): number 
 ;; CHECK:   CallBuiltinInst {{.*}}[Math.abs]
 
-;; CHECK-LABEL: function wasm_func_4(p0: any, p1: any): any
+;; CHECK-LABEL: function wasm_func_4(p0: number, p1: number): number 
 ;; CHECK:   CallBuiltinInst {{.*}}[Math.min]

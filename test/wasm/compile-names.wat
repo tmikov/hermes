@@ -18,18 +18,18 @@
     local.get 1
     i32.add
   )
-;; CHECK-LABEL: function wasm_func_0(p0: any, p1: any): any
+;; CHECK-LABEL: function wasm_func_0(p0: number, p1: number): number 
 ;; CHECK: %BB0:
-;; CHECK:   %[[L0:.*]] = AllocStackInst (:any) $local_0: any
-;; CHECK-NEXT: %[[P0:.*]] = LoadParamInst (:any) %p0: any
-;; CHECK-NEXT:              StoreStackInst %[[P0]]: any, %[[L0]]: any
-;; CHECK:   %[[L1:.*]] = AllocStackInst (:any) $local_1: any
-;; CHECK-NEXT: %[[P1:.*]] = LoadParamInst (:any) %p1: any
-;; CHECK-NEXT:              StoreStackInst %[[P1]]: any, %[[L1]]: any
-;; CHECK:   %[[A:.*]] = LoadStackInst (:any) %[[L0]]: any
-;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any) %[[L1]]: any
-;; CHECK-NEXT: %[[ADD:.*]] = BinaryAddInst (:any) %[[A]]: any, %[[B]]: any
-;; CHECK-NEXT: %[[TRUNC:.*]] = AsInt32Inst (:number) %[[ADD]]: any
+;; CHECK:   %[[L0:.*]] = AllocStackInst (:number) $local_0: any
+;; CHECK-NEXT: %[[P0:.*]] = LoadParamInst (:number) %p0: number
+;; CHECK-NEXT:              StoreStackInst %[[P0]]: number, %[[L0]]: number
+;; CHECK:   %[[L1:.*]] = AllocStackInst (:number) $local_1: any
+;; CHECK-NEXT: %[[P1:.*]] = LoadParamInst (:number) %p1: number
+;; CHECK-NEXT:              StoreStackInst %[[P1]]: number, %[[L1]]: number
+;; CHECK:   %[[A:.*]] = LoadStackInst (:number) %[[L0]]: number
+;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:number) %[[L1]]: number
+;; CHECK-NEXT: %[[ADD:.*]] = FAddInst (:number) %[[A]]: number, %[[B]]: number
+;; CHECK-NEXT: %[[TRUNC:.*]] = AsInt32Inst (:number) %[[ADD]]: number
 ;; CHECK-NEXT:                 BranchInst %BB1
 ;; CHECK: %BB1:
 ;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[TRUNC]]: number, %BB0
@@ -42,10 +42,10 @@
     local.get 0
     i32.sub
   )
-;; CHECK-LABEL: function wasm_func_1(p0: any): any
-;; CHECK:   %[[V:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[SUB:.*]] = BinarySubtractInst (:any) 0: number, %[[V]]: any
-;; CHECK-NEXT: %[[TRUNC:.*]] = AsInt32Inst (:number) %[[SUB]]: any
+;; CHECK-LABEL: function wasm_func_1(p0: number): number 
+;; CHECK:   %[[V:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[SUB:.*]] = FSubtractInst (:number) 0: number, %[[V]]: number
+;; CHECK-NEXT: %[[TRUNC:.*]] = AsInt32Inst (:number) %[[SUB]]: number
 ;; CHECK-NEXT:                 BranchInst %BB1
 ;; CHECK: %BB1:
 ;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[TRUNC]]: number, %BB0

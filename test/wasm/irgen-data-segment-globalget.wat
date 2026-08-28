@@ -17,7 +17,7 @@
   (data (i32.add (i32.const 10) (i32.const 5)) "cd")
 )
 
-;; CHECK-LABEL: function __wasm_instantiate__()
+;; CHECK-LABEL: function __wasm_instantiate__(imports: any)
 ;; --- Segment 0: global.get offset ---
 ;; Load the global value (offset).
 ;; CHECK:       LoadFrameInst {{.*}}[%VS0.global_0]

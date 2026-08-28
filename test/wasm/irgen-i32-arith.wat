@@ -18,18 +18,18 @@
     local.get 0
     local.get 1
     i32.add)
-;; CHECK-LABEL: function wasm_func_0(p0: any, p1: any): any
+;; CHECK-LABEL: function wasm_func_0(p0: number, p1: number): number 
 ;; CHECK: %BB0:
-;; CHECK:   %[[L0_0:.*]] = AllocStackInst (:any)
-;; CHECK:   %[[P0_0:.*]] = LoadParamInst (:any) %p0: any
-;; CHECK-NEXT:              StoreStackInst %[[P0_0]]: any, %[[L0_0]]: any
-;; CHECK:   %[[L1_0:.*]] = AllocStackInst (:any)
-;; CHECK:   %[[P1_0:.*]] = LoadParamInst (:any) %p1: any
-;; CHECK-NEXT:              StoreStackInst %[[P1_0]]: any, %[[L1_0]]: any
-;; CHECK:   %[[A:.*]] = LoadStackInst (:any) %[[L0_0]]: any
-;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any) %[[L1_0]]: any
-;; CHECK-NEXT: %[[ADD:.*]] = BinaryAddInst (:any) %[[A]]: any, %[[B]]: any
-;; CHECK-NEXT: %[[TRUNC:.*]] = AsInt32Inst (:number) %[[ADD]]: any
+;; CHECK:   %[[L0_0:.*]] = AllocStackInst (:number)
+;; CHECK:   %[[P0_0:.*]] = LoadParamInst (:number) %p0: number
+;; CHECK-NEXT:              StoreStackInst %[[P0_0]]: number, %[[L0_0]]: number
+;; CHECK:   %[[L1_0:.*]] = AllocStackInst (:number)
+;; CHECK:   %[[P1_0:.*]] = LoadParamInst (:number) %p1: number
+;; CHECK-NEXT:              StoreStackInst %[[P1_0]]: number, %[[L1_0]]: number
+;; CHECK:   %[[A:.*]] = LoadStackInst (:number) %[[L0_0]]: number
+;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:number) %[[L1_0]]: number
+;; CHECK-NEXT: %[[ADD:.*]] = FAddInst (:number) %[[A]]: number, %[[B]]: number
+;; CHECK-NEXT: %[[TRUNC:.*]] = AsInt32Inst (:number) %[[ADD]]: number
 ;; CHECK-NEXT:                 BranchInst %BB1
 ;; CHECK: %BB1:
 ;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[TRUNC]]: number, %BB0
@@ -41,11 +41,11 @@
     local.get 0
     local.get 1
     i32.sub)
-;; CHECK-LABEL: function wasm_func_1(p0: any, p1: any): any
-;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[SUB:.*]] = BinarySubtractInst (:any) %[[A]]: any, %[[B]]: any
-;; CHECK-NEXT: %[[TRUNC:.*]] = AsInt32Inst (:number) %[[SUB]]: any
+;; CHECK-LABEL: function wasm_func_1(p0: number, p1: number): number 
+;; CHECK:   %[[A:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[SUB:.*]] = FSubtractInst (:number) %[[A]]: number, %[[B]]: number
+;; CHECK-NEXT: %[[TRUNC:.*]] = AsInt32Inst (:number) %[[SUB]]: number
 ;; CHECK-NEXT:                 BranchInst %BB1
 ;; CHECK: %BB1:
 ;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[TRUNC]]: number, %BB0
@@ -57,14 +57,14 @@
     local.get 0
     local.get 1
     i32.mul)
-;; CHECK-LABEL: function wasm_func_2(p0: any, p1: any): any
-;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[MUL:.*]] = CallBuiltinInst (:any) [Math.imul]{{.*}}, %[[A]]: any, %[[B]]: any
+;; CHECK-LABEL: function wasm_func_2(p0: number, p1: number): number 
+;; CHECK:   %[[A:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[MUL:.*]] = CallBuiltinInst (:number) [Math.imul]{{.*}}, %[[A]]: number, %[[B]]: number
 ;; CHECK-NEXT:               BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[MUL]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[MUL]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 3: i32.and(a, b)
@@ -72,14 +72,14 @@
     local.get 0
     local.get 1
     i32.and)
-;; CHECK-LABEL: function wasm_func_3(p0: any, p1: any): any
-;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[AND:.*]] = BinaryAndInst (:any) %[[A]]: any, %[[B]]: any
+;; CHECK-LABEL: function wasm_func_3(p0: number, p1: number): number 
+;; CHECK:   %[[A:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[AND:.*]] = BinaryAndInst (:number) %[[A]]: number, %[[B]]: number
 ;; CHECK-NEXT:               BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[AND]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[AND]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 4: i32.or(a, b)
@@ -87,14 +87,14 @@
     local.get 0
     local.get 1
     i32.or)
-;; CHECK-LABEL: function wasm_func_4(p0: any, p1: any): any
-;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[OR:.*]] = BinaryOrInst (:any) %[[A]]: any, %[[B]]: any
+;; CHECK-LABEL: function wasm_func_4(p0: number, p1: number): number 
+;; CHECK:   %[[A:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[OR:.*]] = BinaryOrInst (:number) %[[A]]: number, %[[B]]: number
 ;; CHECK-NEXT:              BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[OR]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[OR]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 5: i32.xor(a, b)
@@ -102,14 +102,14 @@
     local.get 0
     local.get 1
     i32.xor)
-;; CHECK-LABEL: function wasm_func_5(p0: any, p1: any): any
-;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[XOR:.*]] = BinaryXorInst (:any) %[[A]]: any, %[[B]]: any
+;; CHECK-LABEL: function wasm_func_5(p0: number, p1: number): number 
+;; CHECK:   %[[A:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[XOR:.*]] = BinaryXorInst (:number) %[[A]]: number, %[[B]]: number
 ;; CHECK-NEXT:               BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[XOR]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[XOR]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 6: i32.shl(a, b)
@@ -117,14 +117,14 @@
     local.get 0
     local.get 1
     i32.shl)
-;; CHECK-LABEL: function wasm_func_6(p0: any, p1: any): any
-;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[SHL:.*]] = BinaryLeftShiftInst (:any) %[[A]]: any, %[[B]]: any
+;; CHECK-LABEL: function wasm_func_6(p0: number, p1: number): number 
+;; CHECK:   %[[A:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[SHL:.*]] = BinaryLeftShiftInst (:number) %[[A]]: number, %[[B]]: number
 ;; CHECK-NEXT:               BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[SHL]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[SHL]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 7: i32.shr_s(a, b)
@@ -132,14 +132,14 @@
     local.get 0
     local.get 1
     i32.shr_s)
-;; CHECK-LABEL: function wasm_func_7(p0: any, p1: any): any
-;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[SHR:.*]] = BinaryRightShiftInst (:any) %[[A]]: any, %[[B]]: any
+;; CHECK-LABEL: function wasm_func_7(p0: number, p1: number): number 
+;; CHECK:   %[[A:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[SHR:.*]] = BinaryRightShiftInst (:number) %[[A]]: number, %[[B]]: number
 ;; CHECK-NEXT:               BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[SHR]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[SHR]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 
   ;; func 8: i32.shr_u(a, b)
@@ -147,13 +147,13 @@
     local.get 0
     local.get 1
     i32.shr_u)
-;; CHECK-LABEL: function wasm_func_8(p0: any, p1: any): any
-;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[USHR:.*]] = BinaryUnsignedRightShiftInst (:any) %[[A]]: any, %[[B]]: any
+;; CHECK-LABEL: function wasm_func_8(p0: number, p1: number): number 
+;; CHECK:   %[[A:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[B:.*]] = LoadStackInst (:number)
+;; CHECK-NEXT: %[[USHR:.*]] = BinaryUnsignedRightShiftInst (:number) %[[A]]: number, %[[B]]: number
 ;; CHECK-NEXT:                BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:any) %[[USHR]]: any, %BB0
-;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
+;; CHECK-NEXT: %[[PHI:.*]] = PhiInst (:number) %[[USHR]]: number, %BB0
+;; CHECK-NEXT:               ReturnInst %[[PHI]]: number
 ;; CHECK-NEXT: function_end
 )

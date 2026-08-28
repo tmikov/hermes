@@ -5,18 +5,6 @@ Hermes Wasm frontend: the module is AOT-compiled to bytecode with
 `hermesc --wasm`, and a ported version of the demo's JS bundle instantiates
 it and performs timezone conversions and formatting.
 
-> **Status on this branch: the demo compiles but does not yet run to
-> completion.** `run.sh` reaches the first string conversion and stops with
-> `RangeError: byteOffset + length * elementSize must be less than
-> buffer.byteLength`. The cause is that an exported `WebAssembly.Memory` here
-> is a separate ArrayBuffer rather than a view onto the module's own linear
-> memory: the exported object stays at the declared 80 pages while the
-> module's real memory grows past it, so `diplomat_alloc` returns 5,242,888
-> against a 5,242,880-byte exported buffer. Aliasing the two is scheduled
-> work; until it lands, treat this example as the acceptance test for it
-> rather than as a passing demo. The compile half — the slow, memory-hungry
-> half — does work and is worth running on its own.
-
 This lives in `examples/` rather than `test/` deliberately: compiling the
 module takes ~10 s at ~0.46 GB RSS with a **Release** `hermesc`, producing a
 13.3 MB `.hbc`. Under the default ASan build it is far slower — too slow for
@@ -42,11 +30,11 @@ ported loader installs goes unused.
   licenses and provenance for the two prebuilt files above. Read
   `THIRD-PARTY-NOTICES.md` before updating or replacing them.
 - `port.py` — mechanically ports the bundle to run under the Hermes CLI:
-  strips the Node imports, and replaces the `readFileSync` +
-  `WebAssembly.Instance` loader with the AOT path
-  (`hermescli.loadHBC(hermescli.loadFile(<hbc path>))`, imports passed via
-  the `__wasm_imports__` global). Everything else in the bundle runs
-  unmodified.
+  strips the Node imports, and replaces the `readFileSync` loader with the
+  AOT path: `WebAssembly.Module` takes the bytecode read from the `.hbc`
+  path given as the first script argument, and `WebAssembly.Instance`
+  instantiates it with the same import object the bundle already builds.
+  Everything else in the bundle runs unmodified.
 - `expected.txt` — the demo's expected stdout (deterministic: fixed input
   dates, fixed timezone list).
 - `run.sh` — ports, compiles (cached), runs, diffs against `expected.txt`.

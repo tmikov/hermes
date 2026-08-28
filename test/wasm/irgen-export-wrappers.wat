@@ -50,7 +50,7 @@
 
 ;; CHECK: scope %VS0 [wasm_type_id_0: any, wasm_type_id_1: any, wasm_type_id_2: any, wasm_type_id_3: any, wasm_type_id_4: any, retBufI: any, retBufF: any, closure_0: any, closure_1: any, closure_2: any, closure_3: any, closure_4: any]
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function global(): any
+;; CHECK-NEXT: function global(): object
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = CreateScopeInst (:environment) %VS0: any, empty: any
 ;; CHECK-NEXT:   %1 = CreateFunctionInst (:object) %0: environment, %VS0: any, %__wasm_instantiate__(): functionCode
@@ -89,27 +89,27 @@
 ;; CHECK-NEXT:         ReturnInst %30: object
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_0(p0: any, p1: any): any
+;; CHECK-NEXT: function wasm_func_0(p0: number, p1: number): number
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.retBufI]: any
-;; CHECK-NEXT:   %2 = AllocStackInst (:any) $local_0: any
-;; CHECK-NEXT:   %3 = LoadParamInst (:any) %p0: any
-;; CHECK-NEXT:        StoreStackInst %3: any, %2: any
-;; CHECK-NEXT:   %5 = AllocStackInst (:any) $local_1: any
-;; CHECK-NEXT:   %6 = LoadParamInst (:any) %p1: any
-;; CHECK-NEXT:        StoreStackInst %6: any, %5: any
-;; CHECK-NEXT:   %8 = LoadStackInst (:any) %2: any
-;; CHECK-NEXT:   %9 = LoadStackInst (:any) %5: any
-;; CHECK-NEXT:   %10 = BinaryAddInst (:any) %8: any, %9: any
-;; CHECK-NEXT:   %11 = AsInt32Inst (:number) %10: any
+;; CHECK-NEXT:   %2 = AllocStackInst (:number) $local_0: any
+;; CHECK-NEXT:   %3 = LoadParamInst (:number) %p0: number
+;; CHECK-NEXT:        StoreStackInst %3: number, %2: number
+;; CHECK-NEXT:   %5 = AllocStackInst (:number) $local_1: any
+;; CHECK-NEXT:   %6 = LoadParamInst (:number) %p1: number
+;; CHECK-NEXT:        StoreStackInst %6: number, %5: number
+;; CHECK-NEXT:   %8 = LoadStackInst (:number) %2: number
+;; CHECK-NEXT:   %9 = LoadStackInst (:number) %5: number
+;; CHECK-NEXT:   %10 = FAddInst (:number) %8: number, %9: number
+;; CHECK-NEXT:   %11 = AsInt32Inst (:number) %10: number
 ;; CHECK-NEXT:         BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
 ;; CHECK-NEXT:   %13 = PhiInst (:number) %11: number, %BB0
 ;; CHECK-NEXT:         ReturnInst %13: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_1(): any
+;; CHECK-NEXT: function wasm_func_1(): undefined
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.retBufI]: any
@@ -118,68 +118,68 @@
 ;; CHECK-NEXT:        ReturnInst undefined: undefined
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_2(p0: any, p1: any): any
+;; CHECK-NEXT: function wasm_func_2(p0: number, p1: number): number
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.retBufI]: any
-;; CHECK-NEXT:   %2 = AllocStackInst (:any) $local_0: any
-;; CHECK-NEXT:   %3 = LoadParamInst (:any) %p0: any
-;; CHECK-NEXT:        StoreStackInst %3: any, %2: any
-;; CHECK-NEXT:   %5 = AllocStackInst (:any) $local_1: any
-;; CHECK-NEXT:   %6 = LoadParamInst (:any) %p1: any
-;; CHECK-NEXT:        StoreStackInst %6: any, %5: any
-;; CHECK-NEXT:   %8 = LoadStackInst (:any) %2: any
-;; CHECK-NEXT:   %9 = LoadStackInst (:any) %5: any
-;; CHECK-NEXT:   %10 = BinaryAddInst (:any) %8: any, %9: any
+;; CHECK-NEXT:   %2 = AllocStackInst (:number) $local_0: any
+;; CHECK-NEXT:   %3 = LoadParamInst (:number) %p0: number
+;; CHECK-NEXT:        StoreStackInst %3: number, %2: number
+;; CHECK-NEXT:   %5 = AllocStackInst (:number) $local_1: any
+;; CHECK-NEXT:   %6 = LoadParamInst (:number) %p1: number
+;; CHECK-NEXT:        StoreStackInst %6: number, %5: number
+;; CHECK-NEXT:   %8 = LoadStackInst (:number) %2: number
+;; CHECK-NEXT:   %9 = LoadStackInst (:number) %5: number
+;; CHECK-NEXT:   %10 = FAddInst (:number) %8: number, %9: number
 ;; CHECK-NEXT:         BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %12 = PhiInst (:any) %10: any, %BB0
-;; CHECK-NEXT:         ReturnInst %12: any
+;; CHECK-NEXT:   %12 = PhiInst (:number) %10: number, %BB0
+;; CHECK-NEXT:         ReturnInst %12: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_3(p0: any, p1: any): any
+;; CHECK-NEXT: function wasm_func_3(p0: number, p1: number): number
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.retBufI]: any
-;; CHECK-NEXT:   %2 = AllocStackInst (:any) $local_0: any
-;; CHECK-NEXT:   %3 = LoadParamInst (:any) %p0: any
-;; CHECK-NEXT:        StoreStackInst %3: any, %2: any
-;; CHECK-NEXT:   %5 = AllocStackInst (:any) $local_1: any
-;; CHECK-NEXT:   %6 = LoadParamInst (:any) %p1: any
-;; CHECK-NEXT:        StoreStackInst %6: any, %5: any
-;; CHECK-NEXT:   %8 = LoadStackInst (:any) %2: any
-;; CHECK-NEXT:   %9 = AsInt32Inst (:number) %8: any
-;; CHECK-NEXT:   %10 = LoadStackInst (:any) %5: any
-;; CHECK-NEXT:   %11 = BinaryAddInst (:any) %9: number, %10: any
+;; CHECK-NEXT:   %2 = AllocStackInst (:number) $local_0: any
+;; CHECK-NEXT:   %3 = LoadParamInst (:number) %p0: number
+;; CHECK-NEXT:        StoreStackInst %3: number, %2: number
+;; CHECK-NEXT:   %5 = AllocStackInst (:number) $local_1: any
+;; CHECK-NEXT:   %6 = LoadParamInst (:number) %p1: number
+;; CHECK-NEXT:        StoreStackInst %6: number, %5: number
+;; CHECK-NEXT:   %8 = LoadStackInst (:number) %2: number
+;; CHECK-NEXT:   %9 = AsInt32Inst (:number) %8: number
+;; CHECK-NEXT:   %10 = LoadStackInst (:number) %5: number
+;; CHECK-NEXT:   %11 = FAddInst (:number) %9: number, %10: number
 ;; CHECK-NEXT:         BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %13 = PhiInst (:any) %11: any, %BB0
-;; CHECK-NEXT:         ReturnInst %13: any
+;; CHECK-NEXT:   %13 = PhiInst (:number) %11: number, %BB0
+;; CHECK-NEXT:         ReturnInst %13: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_4(retbuf_I: any, retbuf_F: any, p0_lo: any, p0_hi: any): any
+;; CHECK-NEXT: function wasm_func_4(retbuf_I: object, retbuf_F: object, p0_lo: number, p0_hi: number): number
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
-;; CHECK-NEXT:   %1 = LoadParamInst (:any) %retbuf_I: any
-;; CHECK-NEXT:   %2 = LoadParamInst (:any) %retbuf_F: any
-;; CHECK-NEXT:   %3 = AllocStackInst (:any) $local_0_lo: any
-;; CHECK-NEXT:   %4 = AllocStackInst (:any) $local_0_hi: any
-;; CHECK-NEXT:   %5 = LoadParamInst (:any) %p0_lo: any
-;; CHECK-NEXT:        StoreStackInst %5: any, %3: any
-;; CHECK-NEXT:   %7 = LoadParamInst (:any) %p0_hi: any
-;; CHECK-NEXT:        StoreStackInst %7: any, %4: any
-;; CHECK-NEXT:   %9 = LoadStackInst (:any) %3: any
-;; CHECK-NEXT:   %10 = LoadStackInst (:any) %4: any
+;; CHECK-NEXT:   %1 = LoadParamInst (:object) %retbuf_I: object
+;; CHECK-NEXT:   %2 = LoadParamInst (:object) %retbuf_F: object
+;; CHECK-NEXT:   %3 = AllocStackInst (:number) $local_0_lo: any
+;; CHECK-NEXT:   %4 = AllocStackInst (:number) $local_0_hi: any
+;; CHECK-NEXT:   %5 = LoadParamInst (:number) %p0_lo: number
+;; CHECK-NEXT:        StoreStackInst %5: number, %3: number
+;; CHECK-NEXT:   %7 = LoadParamInst (:number) %p0_hi: number
+;; CHECK-NEXT:        StoreStackInst %7: number, %4: number
+;; CHECK-NEXT:   %9 = LoadStackInst (:number) %3: number
+;; CHECK-NEXT:   %10 = LoadStackInst (:number) %4: number
 ;; CHECK-NEXT:         BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %12 = PhiInst (:any) %9: any, %BB0
-;; CHECK-NEXT:   %13 = PhiInst (:any) %10: any, %BB0
-;; CHECK-NEXT:         StorePropertyStrictInst %12: any, %1: any, 0: number
-;; CHECK-NEXT:         StorePropertyStrictInst %13: any, %1: any, 1: number
+;; CHECK-NEXT:   %12 = PhiInst (:number) %9: number, %BB0
+;; CHECK-NEXT:   %13 = PhiInst (:number) %10: number, %BB0
+;; CHECK-NEXT:         StorePropertyStrictInst %12: number, %1: object, 0: number
+;; CHECK-NEXT:         StorePropertyStrictInst %13: number, %1: object, 1: number
 ;; CHECK-NEXT:         ReturnInst 0: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function __wasm_instantiate__(): any
+;; CHECK-NEXT: function __wasm_instantiate__(imports: any): object
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = CreateScopeInst (:environment) %VS0: any, empty: any
 ;; CHECK-NEXT:   %1 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_func_0(): functionCode
@@ -250,9 +250,11 @@
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.closure_2]: any
 ;; CHECK-NEXT:   %2 = LoadParamInst (:any) %p0: any
-;; CHECK-NEXT:   %3 = LoadParamInst (:any) %p1: any
-;; CHECK-NEXT:   %4 = CallInst (:any) %1: any, %wasm_func_2(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined, %2: any, %3: any
-;; CHECK-NEXT:        ReturnInst %4: any
+;; CHECK-NEXT:   %3 = AsNumberInst (:number) %2: any
+;; CHECK-NEXT:   %4 = LoadParamInst (:any) %p1: any
+;; CHECK-NEXT:   %5 = AsNumberInst (:number) %4: any
+;; CHECK-NEXT:   %6 = CallInst (:any) %1: any, %wasm_func_2(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined, %3: number, %5: number
+;; CHECK-NEXT:        ReturnInst %6: any
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
 ;; CHECK-NEXT: function wasm_export_mixed(p0: any, p1: any): any
@@ -262,8 +264,9 @@
 ;; CHECK-NEXT:   %2 = LoadParamInst (:any) %p0: any
 ;; CHECK-NEXT:   %3 = AsInt32Inst (:number) %2: any
 ;; CHECK-NEXT:   %4 = LoadParamInst (:any) %p1: any
-;; CHECK-NEXT:   %5 = CallInst (:any) %1: any, %wasm_func_3(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined, %3: number, %4: any
-;; CHECK-NEXT:        ReturnInst %5: any
+;; CHECK-NEXT:   %5 = AsNumberInst (:number) %4: any
+;; CHECK-NEXT:   %6 = CallInst (:any) %1: any, %wasm_func_3(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined, %3: number, %5: number
+;; CHECK-NEXT:        ReturnInst %6: any
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
 ;; CHECK-NEXT: function wasm_export_id_i64(p0: any): any
@@ -281,6 +284,6 @@
 ;; CHECK-NEXT:   %10 = CallInst (:any) %1: any, %wasm_func_4(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined, %2: any, %3: any, %7: number, %9: number
 ;; CHECK-NEXT:   %11 = LoadPropertyInst (:any) %2: any, 0: number
 ;; CHECK-NEXT:   %12 = LoadPropertyInst (:any) %2: any, 1: number
-;; CHECK-NEXT:   %13 = CallBuiltinInst (:any) [HermesBuiltin.wasmI64ToBigInt]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %11: any, %12: any
-;; CHECK-NEXT:         ReturnInst %13: any
+;; CHECK-NEXT:   %13 = CallBuiltinInst (:bigint) [HermesBuiltin.wasmI64ToBigInt]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %11: any, %12: any
+;; CHECK-NEXT:         ReturnInst %13: bigint
 ;; CHECK-NEXT: function_end

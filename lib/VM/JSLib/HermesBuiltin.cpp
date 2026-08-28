@@ -17,6 +17,7 @@
 #include "hermes/VM/JSArrayBuffer.h"
 #include "hermes/VM/JSLib.h"
 #include "hermes/VM/JSTypedArray.h"
+#include "hermes/VM/JSWebAssemblyMemory.h"
 #include "hermes/VM/JSRegExp.h"
 #include "hermes/VM/Operations.h"
 #include "hermes/VM/PrimitiveBox.h"
@@ -471,13 +472,37 @@ static int64_t argsToI64(NativeArgs &args, int loIdx, int hiIdx) {
       (static_cast<uint64_t>(hi) << 32) | static_cast<uint64_t>(lo));
 }
 
+/// The Wasm builtins receive their linear-memory view and i64 return buffer
+/// as arguments the compiler emits, but those objects are constructed in
+/// generated IR through the replaceable globals \c globalThis.Uint32Array /
+/// \c ArrayBuffer. Script can override those, so arg0 is untrusted and must
+/// not be cast with \c vmcast, which only asserts. \p minByteLength is the
+/// number of bytes the caller is about to touch unconditionally (0 to skip).
+/// \return the attached view, or nullptr after raising a TypeError.
+static JSTypedArrayBase *wasmTypedArrayArg(
+    Runtime &runtime,
+    HermesValue v,
+    uint32_t minByteLength,
+    const char *msg) {
+  auto *arr = dyn_vmcast<JSTypedArrayBase>(v);
+  if (LLVM_UNLIKELY(!arr || !arr->attached(runtime) ||
+                    arr->getByteLength() < minByteLength)) {
+    runtime.raiseTypeError(msg);
+    return nullptr;
+  }
+  return arr;
+}
+
 /// Helper to write i64 result (lo32/hi32) to the return buffer (a Uint32Array).
 /// retBuf is arg(0), a JSTypedArrayBase. Writes lo to [0], hi to [1].
-static HermesValue writeI64ToRetBuf(
+static CallResult<HermesValue> writeI64ToRetBuf(
     Runtime &runtime,
     NativeArgs &args,
     int64_t val) {
-  auto *retBuf = vmcast<JSTypedArrayBase>(args.getArg(0));
+  auto *retBuf = wasmTypedArrayArg(
+      runtime, args.getArg(0), 8, "Wasm i64 return buffer is not a typed array");
+  if (LLVM_UNLIKELY(!retBuf))
+    return ExecutionStatus::EXCEPTION;
   auto *buf = reinterpret_cast<uint32_t *>(retBuf->data(runtime));
   buf[0] = static_cast<uint32_t>(static_cast<uint64_t>(val) & 0xFFFFFFFF);
   buf[1] = static_cast<uint32_t>(
@@ -486,11 +511,14 @@ static HermesValue writeI64ToRetBuf(
 }
 
 /// Helper to write unsigned i64 result to return buffer.
-static HermesValue writeU64ToRetBuf(
+static CallResult<HermesValue> writeU64ToRetBuf(
     Runtime &runtime,
     NativeArgs &args,
     uint64_t val) {
-  auto *retBuf = vmcast<JSTypedArrayBase>(args.getArg(0));
+  auto *retBuf = wasmTypedArrayArg(
+      runtime, args.getArg(0), 8, "Wasm i64 return buffer is not a typed array");
+  if (LLVM_UNLIKELY(!retBuf))
+    return ExecutionStatus::EXCEPTION;
   auto *buf = reinterpret_cast<uint32_t *>(retBuf->data(runtime));
   buf[0] = static_cast<uint32_t>(val & 0xFFFFFFFF);
   buf[1] = static_cast<uint32_t>((val >> 32) & 0xFFFFFFFF);
@@ -667,93 +695,6 @@ CallResult<HermesValue> wasmI64Popcnt(void *, Runtime &runtime) {
       static_cast<double>(__builtin_popcountll(a)));
 }
 
-/// i64.eqz: test if zero. Returns i32 (0 or 1).
-CallResult<HermesValue> wasmI64Eqz(void *, Runtime &runtime) {
-  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  int64_t a = argsToI64(args, 0, 1);
-  return HermesValue::encodeTrustedNumberValue(a == 0 ? 1 : 0);
-}
-
-/// i64.eq: Returns i32 (0 or 1).
-CallResult<HermesValue> wasmI64Eq(void *, Runtime &runtime) {
-  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  int64_t a = argsToI64(args, 0, 1);
-  int64_t b = argsToI64(args, 2, 3);
-  return HermesValue::encodeTrustedNumberValue(a == b ? 1 : 0);
-}
-
-/// i64.ne: Returns i32 (0 or 1).
-CallResult<HermesValue> wasmI64Ne(void *, Runtime &runtime) {
-  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  int64_t a = argsToI64(args, 0, 1);
-  int64_t b = argsToI64(args, 2, 3);
-  return HermesValue::encodeTrustedNumberValue(a != b ? 1 : 0);
-}
-
-/// i64.lt_s: signed less than. Returns i32.
-CallResult<HermesValue> wasmI64LtS(void *, Runtime &runtime) {
-  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  int64_t a = argsToI64(args, 0, 1);
-  int64_t b = argsToI64(args, 2, 3);
-  return HermesValue::encodeTrustedNumberValue(a < b ? 1 : 0);
-}
-
-/// i64.gt_s: signed greater than. Returns i32.
-CallResult<HermesValue> wasmI64GtS(void *, Runtime &runtime) {
-  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  int64_t a = argsToI64(args, 0, 1);
-  int64_t b = argsToI64(args, 2, 3);
-  return HermesValue::encodeTrustedNumberValue(a > b ? 1 : 0);
-}
-
-/// i64.le_s: signed less or equal. Returns i32.
-CallResult<HermesValue> wasmI64LeS(void *, Runtime &runtime) {
-  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  int64_t a = argsToI64(args, 0, 1);
-  int64_t b = argsToI64(args, 2, 3);
-  return HermesValue::encodeTrustedNumberValue(a <= b ? 1 : 0);
-}
-
-/// i64.ge_s: signed greater or equal. Returns i32.
-CallResult<HermesValue> wasmI64GeS(void *, Runtime &runtime) {
-  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  int64_t a = argsToI64(args, 0, 1);
-  int64_t b = argsToI64(args, 2, 3);
-  return HermesValue::encodeTrustedNumberValue(a >= b ? 1 : 0);
-}
-
-/// i64.lt_u: unsigned less than. Returns i32.
-CallResult<HermesValue> wasmI64LtU(void *, Runtime &runtime) {
-  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  uint64_t a = static_cast<uint64_t>(argsToI64(args, 0, 1));
-  uint64_t b = static_cast<uint64_t>(argsToI64(args, 2, 3));
-  return HermesValue::encodeTrustedNumberValue(a < b ? 1 : 0);
-}
-
-/// i64.gt_u: unsigned greater than. Returns i32.
-CallResult<HermesValue> wasmI64GtU(void *, Runtime &runtime) {
-  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  uint64_t a = static_cast<uint64_t>(argsToI64(args, 0, 1));
-  uint64_t b = static_cast<uint64_t>(argsToI64(args, 2, 3));
-  return HermesValue::encodeTrustedNumberValue(a > b ? 1 : 0);
-}
-
-/// i64.le_u: unsigned less or equal. Returns i32.
-CallResult<HermesValue> wasmI64LeU(void *, Runtime &runtime) {
-  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  uint64_t a = static_cast<uint64_t>(argsToI64(args, 0, 1));
-  uint64_t b = static_cast<uint64_t>(argsToI64(args, 2, 3));
-  return HermesValue::encodeTrustedNumberValue(a <= b ? 1 : 0);
-}
-
-/// i64.ge_u: unsigned greater or equal. Returns i32.
-CallResult<HermesValue> wasmI64GeU(void *, Runtime &runtime) {
-  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  uint64_t a = static_cast<uint64_t>(argsToI64(args, 0, 1));
-  uint64_t b = static_cast<uint64_t>(argsToI64(args, 2, 3));
-  return HermesValue::encodeTrustedNumberValue(a >= b ? 1 : 0);
-}
-
 /// i64.trunc_f64_s (also used for i64.trunc_f32_s):
 /// Truncate double to signed i64, trapping on NaN or out-of-range.
 /// Writes lo/hi to retBufI[0]/[1], returns 0.
@@ -877,14 +818,21 @@ CallResult<HermesValue> wasmF64ReinterpretI64(void *, Runtime &runtime) {
 }
 
 /// memory.grow helper (H.2).
-/// Args: (heapu8View, delta, maxPages).
+/// Args: (heapu8View, delta, maxPages, memObj).
 /// Creates a new, larger ArrayBuffer and copies the old data into it.
+/// \p memObj is the WebAssembly.Memory backing this linear memory, or
+/// undefined when there is none (an imported memory). When present, the new
+/// buffer is installed on it, so an exported reference to the memory sees the
+/// growth instead of holding the old, smaller buffer.
 /// Returns the new ArrayBuffer on success, or -1 on failure.
 CallResult<HermesValue> wasmMemoryGrow(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
 
   // arg0 is the HEAPU8 view (Uint8Array).
-  auto *heapu8 = vmcast<JSTypedArrayBase>(args.getArg(0));
+  auto *heapu8 = wasmTypedArrayArg(
+      runtime, args.getArg(0), 0, "Wasm memory view is not a typed array");
+  if (LLVM_UNLIKELY(!heapu8))
+    return ExecutionStatus::EXCEPTION;
   auto delta =
       static_cast<uint32_t>(truncateToInt32(args.getArg(1).getNumber()));
   auto maxPages =
@@ -908,10 +856,18 @@ CallResult<HermesValue> wasmMemoryGrow(void *, Runtime &runtime) {
   struct : public Locals {
     PinnedValue<JSArrayBuffer> newBuf;
     PinnedValue<JSArrayBuffer> oldBufHandle;
+    PinnedValue<JSWebAssemblyMemory> memObj;
   } lv;
   LocalsRAII lraii(runtime, &lv);
 
   lv.oldBufHandle = oldBuf;
+  // Pin the Memory before the allocations below: dyn_vmcast yields a raw
+  // pointer, and creating the new buffer is a safepoint.
+  bool haveMemObj = false;
+  if (auto *mem = dyn_vmcast<JSWebAssemblyMemory>(args.getArg(3))) {
+    lv.memObj = mem;
+    haveMemObj = true;
+  }
   lv.newBuf = JSArrayBuffer::create(
       runtime, Handle<JSObject>::vmcast(&runtime.arrayBufferPrototype));
 
@@ -929,7 +885,26 @@ CallResult<HermesValue> wasmMemoryGrow(void *, Runtime &runtime) {
         runtime, *lv.newBuf, 0, *lv.oldBufHandle, 0, oldSize);
   }
 
+  // Install the grown buffer on the Memory object so exported references
+  // follow the growth. The module reloads its own views from the returned
+  // buffer.
+  if (haveMemObj)
+    lv.memObj->setBuffer(runtime, *lv.newBuf);
+
   return lv.newBuf.getHermesValue();
+}
+
+/// Wasm table and segment arrays reach these builtins through values script
+/// controls: a table import supplies __wasm_funcs__/__wasm_types__ as plain
+/// properties, and the arrays are constructed via globalThis.Array. They are
+/// therefore untrusted and must not be cast with vmcast, which only asserts.
+/// \return the array, or nullptr after raising a TypeError.
+static JSArray *
+wasmArrayArg(Runtime &runtime, HermesValue v, const char *msg) {
+  auto *arr = dyn_vmcast<JSArray>(v);
+  if (LLVM_UNLIKELY(!arr))
+    runtime.raiseTypeError(msg);
+  return arr;
 }
 
 /// Wasm call_indirect helper (J.2).
@@ -939,6 +914,16 @@ CallResult<HermesValue> wasmMemoryGrow(void *, Runtime &runtime) {
 CallResult<HermesValue> wasmCallIndirect(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
 
+  // This is the indirect-call hot path, so the arrays are cast without
+  // re-checking. That is sound because wasmCheckTableArrays has already
+  // validated them once, at instantiation, for every way a table's storage can
+  // be produced: an imported __wasm_funcs__/__wasm_types__ pair, the fresh
+  // arrays created for a JS-API table import, and the arrays created for a
+  // module's own tables. Once validated the arrays live in a VariableScope
+  // slot that script cannot reach, and table.grow mutates them in place rather
+  // than replacing them, so the invariant holds for the life of the instance.
+  // Any new way of populating tableFuncVars_/tableTypeVars_ must call
+  // wasmCheckTableArrays too.
   auto *funcsArr = vmcast<JSArray>(args.getArg(0));
   auto *typesArr = vmcast<JSArray>(args.getArg(1));
   int32_t index = truncateToInt32(args.getArg(2).getNumber());
@@ -952,9 +937,13 @@ CallResult<HermesValue> wasmCallIndirect(void *, Runtime &runtime) {
         "call_indirect: undefined element");
   }
 
-  // Null/uninitialized check: at() returns empty for unset entries.
+  // Null/uninitialized check. A never-set entry reads as empty in a sparse
+  // array; a WebAssembly.Table (a JS-API table, or a defined table backed by
+  // one) initializes its entries to null. Both are an uninitialized funcref
+  // for call_indirect, which the spec traps as "uninitialized element".
   auto funcVal = funcsArr->at(runtime, static_cast<uint32_t>(index));
-  if (LLVM_UNLIKELY(funcVal.isEmpty())) {
+  if (LLVM_UNLIKELY(
+          funcVal.isEmpty() || funcVal.unboxToHV(runtime).isNull())) {
     return runtime.raiseError(
         "call_indirect: uninitialized element");
   }
@@ -1010,7 +999,10 @@ CallResult<HermesValue> wasmCreateException(void *, Runtime &runtime) {
 CallResult<HermesValue> wasmMatchException(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
   HermesValue caught = args.getArg(0);
-  double expectedTag = args.getArg(1).getNumber();
+  // The expected tag is the object identifying it, not a number: Wasm tag
+  // identity is nominal, so two tags with the same signature are distinct,
+  // and a module-local index means nothing in another module.
+  HermesValue expectedTag = args.getArg(1);
 
   // Check if caught is a JSArray.
   if (!caught.isObject())
@@ -1024,9 +1016,10 @@ CallResult<HermesValue> wasmMatchException(void *, Runtime &runtime) {
   if (tagVal.isEmpty())
     return HermesValue::encodeUndefinedValue();
   HermesValue tagHV = tagVal.unboxToHV(runtime);
-  if (!tagHV.isNumber())
+  // Identity comparison: the same tag object, not merely an equal value.
+  if (!tagHV.isObject() || !expectedTag.isObject())
     return HermesValue::encodeUndefinedValue();
-  if (tagHV.getNumber() != expectedTag)
+  if (tagHV.getObject(runtime) != expectedTag.getObject(runtime))
     return HermesValue::encodeUndefinedValue();
 
   // Match! Return the array.
@@ -1038,7 +1031,10 @@ CallResult<HermesValue> wasmMatchException(void *, Runtime &runtime) {
 /// Traps on out-of-bounds.
 CallResult<HermesValue> wasmMemoryFill(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  auto *heapu8 = vmcast<JSTypedArrayBase>(args.getArg(0));
+  auto *heapu8 = wasmTypedArrayArg(
+      runtime, args.getArg(0), 0, "Wasm memory view is not a typed array");
+  if (LLVM_UNLIKELY(!heapu8))
+    return ExecutionStatus::EXCEPTION;
   uint32_t dest =
       static_cast<uint32_t>(truncateToInt32(args.getArg(1).getNumber()));
   uint32_t value =
@@ -1070,7 +1066,10 @@ CallResult<HermesValue> wasmMemoryFill(void *, Runtime &runtime) {
 /// Traps on out-of-bounds. Handles overlapping regions correctly.
 CallResult<HermesValue> wasmMemoryCopy(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  auto *heapu8 = vmcast<JSTypedArrayBase>(args.getArg(0));
+  auto *heapu8 = wasmTypedArrayArg(
+      runtime, args.getArg(0), 0, "Wasm memory view is not a typed array");
+  if (LLVM_UNLIKELY(!heapu8))
+    return ExecutionStatus::EXCEPTION;
   uint32_t dest =
       static_cast<uint32_t>(truncateToInt32(args.getArg(1).getNumber()));
   uint32_t src =
@@ -1104,8 +1103,15 @@ CallResult<HermesValue> wasmMemoryCopy(void *, Runtime &runtime) {
 /// Traps on out-of-bounds or if the segment has been dropped (with n>0).
 CallResult<HermesValue> wasmMemoryInit(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  auto *heapu8 = vmcast<JSTypedArrayBase>(args.getArg(0));
-  auto *dataSegs = vmcast<JSArray>(args.getArg(1));
+  auto *heapu8 = wasmTypedArrayArg(
+      runtime, args.getArg(0), 0, "Wasm memory view is not a typed array");
+  if (LLVM_UNLIKELY(!heapu8))
+    return ExecutionStatus::EXCEPTION;
+  auto *arr13 = wasmArrayArg(runtime, args.getArg(1),
+      "Wasm data segment array is not an array");
+  if (LLVM_UNLIKELY(!arr13))
+    return ExecutionStatus::EXCEPTION;
+  auto *dataSegs = arr13;
   uint32_t segIdx =
       static_cast<uint32_t>(truncateToInt32(args.getArg(2).getNumber()));
   uint32_t dest =
@@ -1126,8 +1132,13 @@ CallResult<HermesValue> wasmMemoryInit(void *, Runtime &runtime) {
   uint32_t segLen = 0;
   JSTypedArrayBase *segArr = nullptr;
   if (!dropped) {
-    segArr = vmcast<JSTypedArrayBase>(
-        segVal.unboxToHV(runtime).getObject(runtime));
+    segArr = wasmTypedArrayArg(
+        runtime,
+        segVal.unboxToHV(runtime),
+        0,
+        "Wasm data segment is not a typed array");
+    if (LLVM_UNLIKELY(!segArr))
+      return ExecutionStatus::EXCEPTION;
     segLen = static_cast<uint32_t>(segArr->getLength());
   }
 
@@ -1167,7 +1178,11 @@ CallResult<HermesValue> wasmDataDrop(void *, Runtime &runtime) {
   LocalsRAII lraii(runtime, &lv);
 
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  lv.dataSegs = vmcast<JSArray>(args.getArg(0));
+  auto *arr12 = wasmArrayArg(runtime, args.getArg(0),
+      "Wasm data segment array is not an array");
+  if (LLVM_UNLIKELY(!arr12))
+    return ExecutionStatus::EXCEPTION;
+  lv.dataSegs = arr12;
   uint32_t segIdx =
       static_cast<uint32_t>(truncateToInt32(args.getArg(1).getNumber()));
 
@@ -1185,7 +1200,10 @@ CallResult<HermesValue> wasmDataDrop(void *, Runtime &runtime) {
 /// binaryDataStorage[blobOffset..blobOffset+length] to heapu8[dest..dest+length].
 CallResult<HermesValue> wasmDataSegmentInit(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  auto *heapu8 = vmcast<JSTypedArrayBase>(args.getArg(0));
+  auto *heapu8 = wasmTypedArrayArg(
+      runtime, args.getArg(0), 0, "Wasm memory view is not a typed array");
+  if (LLVM_UNLIKELY(!heapu8))
+    return ExecutionStatus::EXCEPTION;
   uint32_t blobOffset =
       static_cast<uint32_t>(truncateToInt32(args.getArg(1).getNumber()));
   uint32_t length =
@@ -1241,7 +1259,11 @@ CallResult<HermesValue> wasmTableFill(void *, Runtime &runtime) {
   LocalsRAII lraii(runtime, &lv);
 
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  lv.funcsArr = vmcast<JSArray>(args.getArg(0));
+  auto *arr11 = wasmArrayArg(runtime, args.getArg(0),
+      "Wasm table function array is not an array");
+  if (LLVM_UNLIKELY(!arr11))
+    return ExecutionStatus::EXCEPTION;
+  lv.funcsArr = arr11;
   uint32_t idx =
       static_cast<uint32_t>(truncateToInt32(args.getArg(1).getNumber()));
   lv.val = args.getArg(2);
@@ -1264,7 +1286,7 @@ CallResult<HermesValue> wasmTableFill(void *, Runtime &runtime) {
 }
 
 /// Wasm table.grow: grow table by delta entries, filling with fillVal.
-/// Args: (funcsArr, typesArr, delta, fillVal, maxEntries).
+/// Args: (funcsArr, typesArr, delta, fillVal, maxEntries, actualMax).
 /// Returns old size on success, -1 on failure.
 CallResult<HermesValue> wasmTableGrow(void *, Runtime &runtime) {
   struct : public Locals {
@@ -1275,19 +1297,50 @@ CallResult<HermesValue> wasmTableGrow(void *, Runtime &runtime) {
   LocalsRAII lraii(runtime, &lv);
 
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  lv.funcsArr = vmcast<JSArray>(args.getArg(0));
-  lv.typesArr = vmcast<JSArray>(args.getArg(1));
+  auto *arr10 = wasmArrayArg(runtime, args.getArg(0),
+      "Wasm table function array is not an array");
+  if (LLVM_UNLIKELY(!arr10))
+    return ExecutionStatus::EXCEPTION;
+  lv.funcsArr = arr10;
+  auto *arr9 = wasmArrayArg(runtime, args.getArg(1),
+      "Wasm table type array is not an array");
+  if (LLVM_UNLIKELY(!arr9))
+    return ExecutionStatus::EXCEPTION;
+  lv.typesArr = arr9;
   uint32_t delta =
       static_cast<uint32_t>(truncateToInt32(args.getArg(2).getNumber()));
   lv.fillVal = args.getArg(3);
   uint32_t maxEntries =
       static_cast<uint32_t>(truncateToInt32(args.getArg(4).getNumber()));
+  // An imported table's own maximum binds too. Link validation only checks
+  // that the supplied table's max is <= the declared one, so growing to the
+  // declared max would take a shared table past what its owner permits.
+  // -1 means the supplied table declares no maximum. Guard on isNumber:
+  // this arrives from the table object's metadata, which script can set.
+  HermesValue actualMaxVal = args.getArg(5);
+  if (actualMaxVal.isNumber()) {
+    double actualMaxNum = actualMaxVal.getNumber();
+    if (actualMaxNum >= 0) {
+      auto actualMax =
+          static_cast<uint32_t>(truncateToInt32(actualMaxNum));
+      if (actualMax < maxEntries)
+        maxEntries = actualMax;
+    }
+  }
 
   uint32_t oldLen = JSArray::getLength(*lv.funcsArr, runtime);
 
+  // Largest table this engine will grow to. The spec permits up to 2^32-1
+  // entries and requires table.grow to answer -1 when it cannot allocate.
+  // maxEntries is UINT32_MAX when the table declares no maximum, so without
+  // a limit of our own an enormous delta is not refused but attempted, and
+  // the fill loop below runs for billions of iterations, growing indexed
+  // storage each time, before any allocation actually fails.
+  static constexpr uint64_t kMaxTableEntries = 10'000'000;
+
   // Check for overflow and max limit.
   uint64_t newLen64 = static_cast<uint64_t>(oldLen) + delta;
-  if (newLen64 > maxEntries) {
+  if (newLen64 > maxEntries || newLen64 > kMaxTableEntries) {
     return HermesValue::encodeTrustedNumberValue(-1);
   }
   uint32_t newLen = static_cast<uint32_t>(newLen64);
@@ -1304,7 +1357,18 @@ CallResult<HermesValue> wasmTableGrow(void *, Runtime &runtime) {
   // (no type info for fill entries — they are not callable via
   // call_indirect).
   for (uint32_t i = oldLen; i < newLen; ++i) {
-    (void)JSArray::setElementAt(lv.funcsArr, runtime, i, lv.fillVal);
+    if (LLVM_UNLIKELY(
+            JSArray::setElementAt(lv.funcsArr, runtime, i, lv.fillVal) ==
+            ExecutionStatus::EXCEPTION)) {
+      // Out of memory part-way through. Put the table back and answer -1,
+      // which is how table.grow reports that it could not allocate.
+      // Returning normally with an exception pending, as this loop used to,
+      // leaves the caller to trip over it somewhere else entirely.
+      runtime.clearThrownValue();
+      (void)JSArray::setLengthProperty(lv.funcsArr, runtime, oldLen);
+      (void)JSArray::setLengthProperty(lv.typesArr, runtime, oldLen);
+      return HermesValue::encodeTrustedNumberValue(-1);
+    }
   }
 
   return HermesValue::encodeTrustedNumberValue(oldLen);
@@ -1324,10 +1388,26 @@ CallResult<HermesValue> wasmTableCopy(void *, Runtime &runtime) {
   LocalsRAII lraii(runtime, &lv);
 
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  lv.dstFuncs = vmcast<JSArray>(args.getArg(0));
-  lv.srcFuncs = vmcast<JSArray>(args.getArg(1));
-  lv.dstTypes = vmcast<JSArray>(args.getArg(2));
-  lv.srcTypes = vmcast<JSArray>(args.getArg(3));
+  auto *arr8 = wasmArrayArg(runtime, args.getArg(0),
+      "Wasm table function array is not an array");
+  if (LLVM_UNLIKELY(!arr8))
+    return ExecutionStatus::EXCEPTION;
+  lv.dstFuncs = arr8;
+  auto *arr7 = wasmArrayArg(runtime, args.getArg(1),
+      "Wasm table function array is not an array");
+  if (LLVM_UNLIKELY(!arr7))
+    return ExecutionStatus::EXCEPTION;
+  lv.srcFuncs = arr7;
+  auto *arr6 = wasmArrayArg(runtime, args.getArg(2),
+      "Wasm table type array is not an array");
+  if (LLVM_UNLIKELY(!arr6))
+    return ExecutionStatus::EXCEPTION;
+  lv.dstTypes = arr6;
+  auto *arr5 = wasmArrayArg(runtime, args.getArg(3),
+      "Wasm table type array is not an array");
+  if (LLVM_UNLIKELY(!arr5))
+    return ExecutionStatus::EXCEPTION;
+  lv.srcTypes = arr5;
   uint32_t dst =
       static_cast<uint32_t>(truncateToInt32(args.getArg(4).getNumber()));
   uint32_t src =
@@ -1400,9 +1480,21 @@ CallResult<HermesValue> wasmTableInit(void *, Runtime &runtime) {
   LocalsRAII lraii(runtime, &lv);
 
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  lv.funcsArr = vmcast<JSArray>(args.getArg(0));
-  lv.typesArr = vmcast<JSArray>(args.getArg(1));
-  lv.elemSegs = vmcast<JSArray>(args.getArg(2));
+  auto *arr4 = wasmArrayArg(runtime, args.getArg(0),
+      "Wasm table function array is not an array");
+  if (LLVM_UNLIKELY(!arr4))
+    return ExecutionStatus::EXCEPTION;
+  lv.funcsArr = arr4;
+  auto *arr3 = wasmArrayArg(runtime, args.getArg(1),
+      "Wasm table type array is not an array");
+  if (LLVM_UNLIKELY(!arr3))
+    return ExecutionStatus::EXCEPTION;
+  lv.typesArr = arr3;
+  auto *arr2 = wasmArrayArg(runtime, args.getArg(2),
+      "Wasm element segment array is not an array");
+  if (LLVM_UNLIKELY(!arr2))
+    return ExecutionStatus::EXCEPTION;
+  lv.elemSegs = arr2;
   uint32_t segIdx =
       static_cast<uint32_t>(truncateToInt32(args.getArg(3).getNumber()));
   uint32_t dst =
@@ -1420,8 +1512,15 @@ CallResult<HermesValue> wasmTableInit(void *, Runtime &runtime) {
   uint32_t segLen = 0;
   JSArray *segArr = nullptr;
   if (!dropped) {
-    segArr =
-        vmcast<JSArray>(segVal.unboxToHV(runtime).getObject(runtime));
+    // The segment entry is reachable from script-controlled state, so use a
+    // checked cast: dyn_vmcast also tolerates a non-pointer value, which
+    // getObject() would assert on.
+    segArr = wasmArrayArg(
+        runtime,
+        segVal.unboxToHV(runtime),
+        "Wasm element segment entry is not an array");
+    if (LLVM_UNLIKELY(!segArr))
+      return ExecutionStatus::EXCEPTION;
     // Each element has 2 slots (func, typeIdx), so entries = length / 2.
     segLen = JSArray::getLength(segArr, runtime) / 2;
   }
@@ -1467,7 +1566,11 @@ CallResult<HermesValue> wasmElemDrop(void *, Runtime &runtime) {
   LocalsRAII lraii(runtime, &lv);
 
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  lv.elemSegs = vmcast<JSArray>(args.getArg(0));
+  auto *arr1 = wasmArrayArg(runtime, args.getArg(0),
+      "Wasm element segment array is not an array");
+  if (LLVM_UNLIKELY(!arr1))
+    return ExecutionStatus::EXCEPTION;
+  lv.elemSegs = arr1;
   uint32_t segIdx =
       static_cast<uint32_t>(truncateToInt32(args.getArg(1).getNumber()));
 
@@ -1509,6 +1612,60 @@ CallResult<HermesValue> wasmInternType(void *, Runtime &runtime) {
   return HermesValue::encodeTrustedNumberValue(
       symRes->get().unsafeGetIndex());
 }
+/// \return the prototype for a Wasm LinkError. Without Wasm support the wasm*
+/// Runtime fields do not exist and these builtins are unreachable, but they
+/// must still compile: Builtins.def numbering is deliberately independent of
+/// HERMES_ENABLE_WASM, so the builtins cannot be #ifdef'd out.
+static Handle<JSObject> wasmLinkErrorProto(Runtime &runtime) {
+#ifdef HERMES_ENABLE_WASM
+  return Handle<JSObject>{runtime.wasmLinkErrorPrototype};
+#else
+  return Handle<JSObject>{runtime.ErrorPrototype};
+#endif
+}
+
+/// Raise a WebAssembly.LinkError with the ASCII message \p msg.
+static ExecutionStatus
+raiseWasmLinkError(Runtime &runtime, const char *msg) {
+  struct : public Locals {
+    PinnedValue<> msgHandle;
+    PinnedValue<JSError> err;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  auto strRes =
+      StringPrimitive::create(runtime, ASCIIRef(msg, strlen(msg)));
+  if (LLVM_UNLIKELY(strRes == ExecutionStatus::EXCEPTION))
+    return ExecutionStatus::EXCEPTION;
+  lv.msgHandle = *strRes;
+
+  lv.err = JSError::create(runtime, wasmLinkErrorProto(runtime));
+  if (LLVM_UNLIKELY(
+          JSError::setMessage(lv.err, runtime, lv.msgHandle) ==
+          ExecutionStatus::EXCEPTION))
+    return ExecutionStatus::EXCEPTION;
+  JSError::recordStackTrace(lv.err, runtime, true);
+  return runtime.setThrownValue(lv.err.getHermesValue());
+}
+
+/// Validate that a table's backing arrays are genuine JSArrays. Called once
+/// per table during instantiation, which establishes the invariant that lets
+/// wasmCallIndirect -- on the indirect-call hot path -- cast them without
+/// re-checking. Both the imported case (__wasm_funcs__/__wasm_types__ are
+/// plain properties script controls) and the freshly-created case (the arrays
+/// are built via globalThis.Array, which script can replace) go through here.
+/// wasmCheckTableArrays(funcsArr, typesArr).
+CallResult<HermesValue> wasmCheckTableArrays(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  if (LLVM_UNLIKELY(!dyn_vmcast<JSArray>(args.getArg(0))))
+    return raiseWasmLinkError(
+        runtime, "table function storage is not an array");
+  if (LLVM_UNLIKELY(!dyn_vmcast<JSArray>(args.getArg(1))))
+    return raiseWasmLinkError(
+        runtime, "table type storage is not an array");
+  return HermesValue::encodeUndefinedValue();
+}
+
 /// Wasm link error: creates and throws a WebAssembly.LinkError with the
 /// given message string. Used by Wasm-generated IR for import type
 /// validation at instantiation time.
@@ -1524,17 +1681,7 @@ CallResult<HermesValue> wasmLinkError(void *, Runtime &runtime) {
 
   lv.msgHandle = args.getArg(0);
 
-#ifdef HERMES_ENABLE_WASM
-  Handle<JSObject> proto{runtime.wasmLinkErrorPrototype};
-#else
-  // Without Wasm support no Wasm module can be instantiated, so this builtin
-  // is unreachable. It must still be defined, because Builtins.def numbering
-  // is deliberately independent of HERMES_ENABLE_WASM; fall back to Error so
-  // the file compiles when the wasm* Runtime fields do not exist.
-  Handle<JSObject> proto{runtime.ErrorPrototype};
-#endif
-
-  lv.err = JSError::create(runtime, proto);
+  lv.err = JSError::create(runtime, wasmLinkErrorProto(runtime));
 
   if (LLVM_UNLIKELY(
           JSError::setMessage(lv.err, runtime, lv.msgHandle) ==
@@ -2686,28 +2833,6 @@ void createHermesBuiltins(Runtime &runtime) {
       P::wasmI64Popcnt,
       wasmI64Popcnt,
       2);
-  defineInternMethod(
-      B::HermesBuiltin_wasmI64Eqz, P::wasmI64Eqz, wasmI64Eqz, 2);
-  defineInternMethod(
-      B::HermesBuiltin_wasmI64Eq, P::wasmI64Eq, wasmI64Eq, 4);
-  defineInternMethod(
-      B::HermesBuiltin_wasmI64Ne, P::wasmI64Ne, wasmI64Ne, 4);
-  defineInternMethod(
-      B::HermesBuiltin_wasmI64LtS, P::wasmI64LtS, wasmI64LtS, 4);
-  defineInternMethod(
-      B::HermesBuiltin_wasmI64GtS, P::wasmI64GtS, wasmI64GtS, 4);
-  defineInternMethod(
-      B::HermesBuiltin_wasmI64LeS, P::wasmI64LeS, wasmI64LeS, 4);
-  defineInternMethod(
-      B::HermesBuiltin_wasmI64GeS, P::wasmI64GeS, wasmI64GeS, 4);
-  defineInternMethod(
-      B::HermesBuiltin_wasmI64LtU, P::wasmI64LtU, wasmI64LtU, 4);
-  defineInternMethod(
-      B::HermesBuiltin_wasmI64GtU, P::wasmI64GtU, wasmI64GtU, 4);
-  defineInternMethod(
-      B::HermesBuiltin_wasmI64LeU, P::wasmI64LeU, wasmI64LeU, 4);
-  defineInternMethod(
-      B::HermesBuiltin_wasmI64GeU, P::wasmI64GeU, wasmI64GeU, 4);
   // i64 conversion helpers (G.4b).
   defineInternMethod(
       B::HermesBuiltin_wasmI64TruncF64S,
@@ -2862,6 +2987,11 @@ void createHermesBuiltins(Runtime &runtime) {
       P::wasmInternType,
       wasmInternType,
       1);
+  defineInternMethod(
+      B::HermesBuiltin_wasmCheckTableArrays,
+      P::wasmCheckTableArrays,
+      wasmCheckTableArrays,
+      2);
 }
 
 } // namespace vm

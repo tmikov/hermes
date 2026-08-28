@@ -1,0 +1,80 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-table-import-hostile.wat.
+// Supplies table imports whose __wasm_funcs__/__wasm_types__ are not arrays
+// and checks that calling through them raises a catchable error rather than
+// asserting (Debug) or segfaulting (Release).
+
+var args = hermescli.getScriptArgs();
+var mod = new WebAssembly.Module(hermescli.loadFile(args[0]));
+
+function makeTable(funcs, types) {
+  return {
+    __wasm_type__: 'table:funcref',
+    __wasm_min__: 2,
+    __wasm_max__: 10,
+    __wasm_funcs__: funcs,
+    __wasm_types__: types,
+  };
+}
+
+// Two real functions, so length and emptiness checks pass and the failure has
+// to come from the type array rather than from the func array.
+function realFuncs() {
+  return [
+    function () {
+      return 7;
+    },
+    function () {
+      return 8;
+    },
+  ];
+}
+
+// The invariant under test is that every hostile shape ends in a catchable
+// error rather than an assert or a segfault. Rejection may happen at either of
+// two points, so report which: at instantiation, when the value has no usable
+// .length, or inside the builtin, when it does.
+function check(label, funcs, types) {
+  var inst;
+  try {
+    inst = new WebAssembly.Instance(mod, {e: {t: makeTable(funcs, types)}});
+  } catch (e) {
+    print(label + ': instantiation ' + e.name);
+    return;
+  }
+  try {
+    var r = inst.exports.ci(0);
+    print(label + ': no throw, returned ' + r);
+  } catch (e) {
+    print(label + ': ' + e.name);
+  }
+}
+
+// __wasm_funcs__ is not an array. "AA" is the nastiest case: it is a real
+// GCCell whose .length is 2, so it satisfies the declared minimum.
+check('funcs=string', 'AA', [0, 0]);
+check('funcs=number', 1.5, [0, 0]);
+check('funcs=object', {length: 2}, [0, 0]);
+
+// __wasm_funcs__ is genuine, so execution reaches __wasm_types__. A
+// non-pointer here previously dereferenced a bogus pointer.
+check('types=number', realFuncs(), 1.5);
+check('types=string', realFuncs(), 'AA');
+
+// Both arrays well-formed but the recorded type index does not match the
+// call site: a normal Wasm trap, not a safety problem.
+check('well-formed', realFuncs(), [999, 999]);
+
+// A well-formed table still instantiates and works, so the validation is not
+// simply rejecting everything.
+var live = new WebAssembly.Instance(
+  mod, {e: {t: makeTable(realFuncs(), [0, 0])}});
+print('instantiation: ' + (live.exports.sz() === 2 ? 'ok' : 'wrong size'));
+
+print('done');

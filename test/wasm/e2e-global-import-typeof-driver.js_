@@ -1,0 +1,35 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-global-import-typeof.wat.
+
+var args = hermescli.getScriptArgs();
+var modI32 = new WebAssembly.Module(hermescli.loadFile(args[0]));
+var modI64 = new WebAssembly.Module(hermescli.loadFile(args[1]));
+var modMut = new WebAssembly.Module(hermescli.loadFile(args[2]));
+var modMut64 = new WebAssembly.Module(hermescli.loadFile(args[3]));
+
+function tryLink(mod, imp, label) {
+  try {
+    var inst = new WebAssembly.Instance(mod, {e: {g: imp}});
+    print(label + ': linked, get() = ' + inst.exports.get());
+  } catch (e) {
+    print(label + ': ' + e.name + ': ' + e.message);
+  }
+}
+
+tryLink(modI32, 42, 'i32 <- 42');
+tryLink(modI32, 1n, 'i32 <- 1n');
+tryLink(modI64, 5n, 'i64 <- 5n');
+tryLink(modI64, 5, 'i64 <- 5');
+tryLink(modMut, 7, 'mut i32 <- 7');
+tryLink(modMut, new WebAssembly.Global({value: 'i32', mutable: true}, 7),
+        'mut i32 <- Global(mut, 7)');
+tryLink(modMut64, 9n, 'mut i64 <- 9n');
+tryLink(modMut64, new WebAssembly.Global({value: 'i64', mutable: true}, 9n),
+        'mut i64 <- Global(mut, 9n)');
+print('done');

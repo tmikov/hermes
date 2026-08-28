@@ -1,0 +1,37 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-table-export-alias.wat.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var inst = new WebAssembly.Instance(
+    new WebAssembly.Module(hermescli.loadFile(hbcPath)), {});
+var tbl = inst.exports.tbl;
+
+print('exported is a Table: ' + (tbl instanceof WebAssembly.Table));
+print('tbl.get(0): ' + typeof tbl.get(0) +
+      ', module call(0): ' + inst.exports.call(0));
+print('tbl.length: ' + tbl.length + ', module size: ' + inst.exports.size());
+
+// JS grows the shared table; the module sees it.
+tbl.grow(2);
+print('after JS grow(2): tbl.length ' + tbl.length +
+      ', module size ' + inst.exports.size());
+
+// The module grows the shared table; JS sees it.
+inst.exports.grow2();
+print('after module grow2: tbl.length ' + tbl.length +
+      ', module size ' + inst.exports.size());
+
+// A slot the module never populated is uninitialized.
+try {
+  inst.exports.call(1);
+  print('call(1) on empty slot: no trap');
+} catch (e) {
+  print('call(1) on empty slot: ' + e.message.replace('call_indirect: ', ''));
+}
+print('done');

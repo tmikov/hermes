@@ -58,7 +58,7 @@
   (start $test_all)
 )
 
-;; CHECK-LABEL: function wasm_func_0(): any
+;; CHECK-LABEL: function wasm_func_0(): undefined 
 ;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32Clz]
 ;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32Ctz]
 ;; CHECK:   CallBuiltinInst {{.*}}[HermesBuiltin.wasmI32Popcnt]

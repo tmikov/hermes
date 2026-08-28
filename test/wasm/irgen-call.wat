@@ -42,7 +42,7 @@
 
 ;; CHECK: scope %VS0 [wasm_type_id_0: any, wasm_type_id_1: any, wasm_type_id_2: any, retBufI: any, retBufF: any, closure_0: any, closure_1: any, closure_2: any, closure_3: any, closure_4: any, closure_5: any]
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function global(): any
+;; CHECK-NEXT: function global(): object
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = CreateScopeInst (:environment) %VS0: any, empty: any
 ;; CHECK-NEXT:   %1 = CreateFunctionInst (:object) %0: environment, %VS0: any, %__wasm_instantiate__(): functionCode
@@ -61,7 +61,7 @@
 ;; CHECK-NEXT:         ReturnInst %10: object
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_0(): any
+;; CHECK-NEXT: function wasm_func_0(): number
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.retBufI]: any
@@ -71,51 +71,51 @@
 ;; CHECK-NEXT:        ReturnInst %3: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_1(): any
+;; CHECK-NEXT: function wasm_func_1(): number
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.retBufI]: any
 ;; CHECK-NEXT:   %2 = LoadFrameInst (:any) %0: environment, [%VS0.closure_0]: any
-;; CHECK-NEXT:   %3 = CallInst (:any) %2: any, %wasm_func_0(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined
+;; CHECK-NEXT:   %3 = CallInst (:number) %2: any, %wasm_func_0(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined
 ;; CHECK-NEXT:        BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %5 = PhiInst (:any) %3: any, %BB0
-;; CHECK-NEXT:        ReturnInst %5: any
+;; CHECK-NEXT:   %5 = PhiInst (:number) %3: number, %BB0
+;; CHECK-NEXT:        ReturnInst %5: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_2(p0: any, p1: any): any
+;; CHECK-NEXT: function wasm_func_2(p0: number, p1: number): number
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.retBufI]: any
-;; CHECK-NEXT:   %2 = AllocStackInst (:any) $local_0: any
-;; CHECK-NEXT:   %3 = LoadParamInst (:any) %p0: any
-;; CHECK-NEXT:        StoreStackInst %3: any, %2: any
-;; CHECK-NEXT:   %5 = AllocStackInst (:any) $local_1: any
-;; CHECK-NEXT:   %6 = LoadParamInst (:any) %p1: any
-;; CHECK-NEXT:        StoreStackInst %6: any, %5: any
-;; CHECK-NEXT:   %8 = LoadStackInst (:any) %2: any
-;; CHECK-NEXT:   %9 = LoadStackInst (:any) %5: any
-;; CHECK-NEXT:   %10 = BinaryAddInst (:any) %8: any, %9: any
-;; CHECK-NEXT:   %11 = AsInt32Inst (:number) %10: any
+;; CHECK-NEXT:   %2 = AllocStackInst (:number) $local_0: any
+;; CHECK-NEXT:   %3 = LoadParamInst (:number) %p0: number
+;; CHECK-NEXT:        StoreStackInst %3: number, %2: number
+;; CHECK-NEXT:   %5 = AllocStackInst (:number) $local_1: any
+;; CHECK-NEXT:   %6 = LoadParamInst (:number) %p1: number
+;; CHECK-NEXT:        StoreStackInst %6: number, %5: number
+;; CHECK-NEXT:   %8 = LoadStackInst (:number) %2: number
+;; CHECK-NEXT:   %9 = LoadStackInst (:number) %5: number
+;; CHECK-NEXT:   %10 = FAddInst (:number) %8: number, %9: number
+;; CHECK-NEXT:   %11 = AsInt32Inst (:number) %10: number
 ;; CHECK-NEXT:         BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
 ;; CHECK-NEXT:   %13 = PhiInst (:number) %11: number, %BB0
 ;; CHECK-NEXT:         ReturnInst %13: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_3(): any
+;; CHECK-NEXT: function wasm_func_3(): number
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.retBufI]: any
 ;; CHECK-NEXT:   %2 = LoadFrameInst (:any) %0: environment, [%VS0.closure_2]: any
-;; CHECK-NEXT:   %3 = CallInst (:any) %2: any, %wasm_func_2(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined, 10: number, 20: number
+;; CHECK-NEXT:   %3 = CallInst (:number) %2: any, %wasm_func_2(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined, 10: number, 20: number
 ;; CHECK-NEXT:        BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
-;; CHECK-NEXT:   %5 = PhiInst (:any) %3: any, %BB0
-;; CHECK-NEXT:        ReturnInst %5: any
+;; CHECK-NEXT:   %5 = PhiInst (:number) %3: number, %BB0
+;; CHECK-NEXT:        ReturnInst %5: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_4(): any
+;; CHECK-NEXT: function wasm_func_4(): undefined
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.retBufI]: any
@@ -124,18 +124,18 @@
 ;; CHECK-NEXT:        ReturnInst undefined: undefined
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_5(): any
+;; CHECK-NEXT: function wasm_func_5(): undefined
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
 ;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.retBufI]: any
 ;; CHECK-NEXT:   %2 = LoadFrameInst (:any) %0: environment, [%VS0.closure_4]: any
-;; CHECK-NEXT:   %3 = CallInst (:any) %2: any, %wasm_func_4(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined
+;; CHECK-NEXT:   %3 = CallInst (:undefined) %2: any, %wasm_func_4(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined
 ;; CHECK-NEXT:        BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
 ;; CHECK-NEXT:        ReturnInst undefined: undefined
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function __wasm_instantiate__(): any
+;; CHECK-NEXT: function __wasm_instantiate__(imports: any): object
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = CreateScopeInst (:environment) %VS0: any, empty: any
 ;; CHECK-NEXT:   %1 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_func_0(): functionCode

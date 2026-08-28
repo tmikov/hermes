@@ -1,0 +1,30 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-table-jsapi-import.wat.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var mod = new WebAssembly.Module(hermescli.loadFile(hbcPath));
+
+var tbl = new WebAssembly.Table({element: 'anyfunc', initial: 2, maximum: 10});
+print('initial length: ' + tbl.length);
+
+var inst = new WebAssembly.Instance(mod, {e: {t: tbl}});
+print('module size: ' + inst.exports.size());
+print('elem entry via tbl.get: ' + typeof tbl.get(0));
+print('call0: ' + inst.exports.call0());
+
+tbl.set(1, function() { return 9; });
+try {
+  print('call1 after JS set: ' + inst.exports.call1());
+} catch (e) {
+  print('call1 after JS set: ' + e.name + ': ' + e.message);
+}
+
+print('JS grow -> ' + tbl.grow(3) + ', module size: ' + inst.exports.size());
+print('module grow -> ' + inst.exports.grow2() + ', tbl.length: ' + tbl.length);
+print('done');

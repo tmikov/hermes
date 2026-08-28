@@ -291,8 +291,21 @@ wabt::Result BinaryReaderHermesIRGen::BeginGlobal(
 }
 
 wabt::Result BinaryReaderHermesIRGen::BeginGlobalInitExpr(wabt::Index index) {
+  // wabt's global index counts imported globals, but moduleInfo_.globals holds
+  // the defined ones only, so rebase onto the defined range. Without this a
+  // module with an imported global writes each defined global's initializer
+  // into the next global's slot and runs the last one off the end of the
+  // vector. This is the same trap as BeginFunctionBody, whose index also
+  // counts imports.
+  uint32_t numImported = moduleInfo_.importedGlobalCount();
+  if (index < numImported) {
+    // Unreachable for a well-formed module -- an imported global carries no
+    // init expression. Refuse rather than let the subtraction wrap into a
+    // wild index: the AOT path (hermesc --wasm) does not validate its input.
+    return wabt::Result::Error;
+  }
   initExprContext_ = InitExprContext::Global;
-  currentInitExprIndex_ = index;
+  currentInitExprIndex_ = index - numImported;
   return wabt::Result::Ok;
 }
 
@@ -731,6 +744,16 @@ wabt::Result BinaryReaderHermesIRGen::OnRefNullExpr(wabt::Type type) {
     auto &g = moduleInfo_.globals[currentInitExprIndex_];
     g.initKind = WasmGlobal::InitKind::RefNull;
   }
+  return wabt::Result::Ok;
+}
+
+wabt::Result BinaryReaderHermesIRGen::OnRefIsNullExpr() {
+  // Not implemented. Without an override wabt's default no-op runs, which
+  // leaves the operand on the value stack: the reference itself is then
+  // returned in place of the i32 result, silently and with no diagnostic.
+  // Warn and keep the stack consistent, as ref.null and ref.func do.
+  if (inFunctionBody_ && irgen_)
+    irgen_->warnUnsupported("ref.is_null", 1, 1);
   return wabt::Result::Ok;
 }
 

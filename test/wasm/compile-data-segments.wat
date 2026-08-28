@@ -23,7 +23,7 @@
     local.get 0
     i32.load8_u
   )
-;; CHECK-LABEL: function wasm_func_0(p0: any): any
+;; CHECK-LABEL: function wasm_func_0(p0: number): number 
 ;; CHECK: LoadFrameInst {{.*}}[%VS0.HEAPU8]
 ;; CHECK: LoadPropertyInst
 ;; CHECK: BinaryStrictlyEqualInst

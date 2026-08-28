@@ -68,7 +68,7 @@ try {
   exports.init_seg1(0, 0, 1);
   print("init_seg1 n=1 ok (should not happen)");
 } catch (e) {
-  print("init_seg1 n=1 trapped");
+  print("init_seg1 n=1 trapped:", e.message);
 }
 
 // --- Active segment is implicitly dropped ---
@@ -88,21 +88,21 @@ try {
   exports.fill_from(8, 0, 5);  // 8+5=13 > 10
   print("fill oob ok (should not happen)");
 } catch (e) {
-  print("fill oob trapped");
+  print("fill oob trapped:", e.message);
 }
 
 try {
   exports.copy(8, 0, 5);  // 8+5=13 > 10
   print("copy oob ok (should not happen)");
 } catch (e) {
-  print("copy oob trapped");
+  print("copy oob trapped:", e.message);
 }
 
 try {
   exports.init_seg1(8, 0, 5);  // segment already dropped, n=5 > 0
   print("init oob ok (should not happen)");
 } catch (e) {
-  print("init oob trapped");
+  print("init oob trapped:", e.message);
 }
 
 print("done");

@@ -13,6 +13,7 @@
 #include "hermes/WasmIRGen/WasmHelpers.h"
 
 #include "llvh/ADT/DenseMap.h"
+#include "llvh/ADT/DenseSet.h"
 
 namespace hermes {
 
@@ -38,6 +39,11 @@ class WasmIRGen {
   /// Called once after module-level parsing is complete, before any function
   /// bodies are translated.
   void createFunctions();
+
+  /// Populate escapableFuncs_ with the indices of functions whose closure
+  /// can reach JS directly (finding J4). Called once by createFunctions()
+  /// before any parameter is typed.
+  void computeEscapableFuncs();
 
   /// Finalize the top-level function after all sections have been parsed.
   /// Applies active data segments, calls the start function, builds the
@@ -473,6 +479,13 @@ class WasmIRGen {
   /// pre-created closure. Indexed by Wasm function index.
   std::vector<Variable *> closureVars_;
 
+  /// Function indices whose internal closure can reach JavaScript directly,
+  /// where it may be called with arbitrary arguments. Such a function's
+  /// float params must be coerced on entry rather than trusted (finding J4);
+  /// see computeEscapableFuncs() and beginFunction(). Populated once by
+  /// createFunctions().
+  llvh::DenseSet<uint32_t> escapableFuncs_;
+
   /// One Variable per imported function, holding the JS callable passed
   /// via the imports object. Indexed by import function order (0-based,
   /// same as Wasm function index for imports since they come first).
@@ -484,18 +497,18 @@ class WasmIRGen {
   /// to read the actual imported value.
   std::vector<Variable *> importGlobalVals_;
 
-  /// Variable holding the imported memory's __wasm_min__ value (number of
-  /// pages). Set during import validation when a memory import is present.
-  /// createMemoryViews() uses this to determine the actual initial size
-  /// instead of the import declaration's minimum (which is a lower bound,
-  /// not the actual size). nullptr if no memory is imported.
-  Variable *importedMemMinVar_ = nullptr;
-
   /// Variable holding the imported memory's __wasm_max__ value (max pages,
   /// or -1 if unbounded). Set during import validation. onMemoryGrow()
   /// uses this as the actual growth limit instead of the import
   /// declaration's maximum. nullptr if no memory is imported.
   Variable *importedMemMaxVar_ = nullptr;
+
+  /// Variable holding the WebAssembly.Memory object backing a locally
+  /// defined memory. The module's typed-array views are built over this
+  /// object's buffer, the memory export publishes it, and memory.grow
+  /// installs the grown buffer back onto it -- so all three refer to one
+  /// memory. nullptr when the module has no defined memory.
+  Variable *memObjVar_ = nullptr;
 
   /// One Variable per imported table, holding that table's actual current
   /// size (its __wasm_funcs__ length, or __wasm_min__ for a JS-API Table).
@@ -531,6 +544,13 @@ class WasmIRGen {
   std::vector<Variable *> tableFuncVars_;
   std::vector<Variable *> tableTypeVars_;
 
+  /// tableObjVars_[i] holds the WebAssembly.Table backing a locally defined
+  /// funcref table -- the object whose own funcs/types arrays are
+  /// tableFuncVars_[i]/tableTypeVars_[i], published on export so get/set/
+  /// grow/length operate on the module's real storage. Null for imported
+  /// tables and for externref tables (not built by the Table constructor).
+  std::vector<Variable *> tableObjVars_;
+
   /// Per-global Variables in the top-level scope.
   /// For non-i64 globals: one Variable per global.
   /// For i64 globals: two consecutive Variables (lo32, hi32).
@@ -555,6 +575,17 @@ class WasmIRGen {
   /// structural type string, so identical signatures agree regardless of which
   /// module declared them and in what order.
   std::vector<Variable *> typeIdVars_;
+
+  /// tagVars_[i] holds the object identifying tag i. Wasm tag identity is
+  /// NOMINAL, not structural: two tags with the same signature are distinct
+  /// and must not catch each other. Object identity models that exactly,
+  /// where a module-local tag index cannot -- another module numbers its tags
+  /// differently, so throw/catch across a boundary matched the wrong handler.
+  std::vector<Variable *> tagVars_;
+
+  /// Create the tag objects for this module's own tags. Imported tags are
+  /// stored into tagVars_ by import validation instead.
+  void createTagObjects(Instruction *tlScope);
 
   /// Emit the interning calls that populate typeIdVars_. Must run before
   /// anything that stores or compares a type id.
@@ -584,6 +615,12 @@ class WasmIRGen {
   /// Contains the initialization body (import resolution, closures, memory,
   /// tables, globals, trampolines, data/elem segments, start, exports).
   Function *instantiateFunc_ = nullptr;
+
+  /// The `imports` parameter of instantiateFunc_. Import resolution reads the
+  /// import object from here rather than from a process-global, so two
+  /// instances of one module can be created with different imports, and no
+  /// script running during instantiation can observe or replace it.
+  JSDynamicParam *importsParam_ = nullptr;
 
   /// The VariableScope for the top-level function.
   VariableScope *topLevelVS_ = nullptr;
@@ -709,6 +746,11 @@ class WasmIRGen {
 
   /// Wrap a value in Math.fround to produce f32 precision.
   Value *emitFround(Value *val);
+
+  /// Ensure \p val has type :number. If it already does, return it unchanged.
+  /// Otherwise insert a zero-cost UnionNarrowTrustedInst to narrow from :any
+  /// to :number. This is safe because Wasm values are statically typed.
+  Value *asNumber(Value *val);
 
   /// Check if the top of the value stack is the hi32 part of an i64.
   bool isTopI64() const;
@@ -871,6 +913,27 @@ class WasmIRGen {
   /// \return {vector of byte offsets per result, total buffer size}.
   static std::pair<std::vector<uint32_t>, uint32_t> computeRetBufLayout(
       const std::vector<WasmValType> &results);
+
+  /// Emit inline i64 ordered comparison: hiOp on the high words,
+  /// loOp on the low words. hiSigned selects AsInt32 vs AsUint32
+  /// interpretation of the high words.
+  /// \return the i32 result (0 or 1).
+  Value *emitI64OrderedCmp(
+      Value *loA,
+      Value *hiA,
+      Value *loB,
+      Value *hiB,
+      ValueKind hiOp,
+      ValueKind loOp,
+      bool hiSigned);
+
+  /// Return \p val as-is if it already produces a signed int32 value
+  /// (e.g., AsInt32Inst, bitwise ops), otherwise wrap in AsInt32Inst.
+  Value *ensureInt32(Value *val);
+
+  /// Return \p val as-is if it already produces an unsigned uint32 value
+  /// (e.g., AsUint32Inst, >>>), otherwise wrap in AsUint32Inst.
+  Value *ensureUint32(Value *val);
 
   /// Callee: pop results, store to buffer, return 0. Called from onReturn()
   /// and endFunction() when the function uses a return buffer.

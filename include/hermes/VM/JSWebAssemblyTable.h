@@ -48,7 +48,17 @@ class JSWebAssemblyTable final : public JSObject {
     elements_.set(runtime, arr, runtime.getHeap());
   }
 
-  /// Get the maximum table size (0 means no explicit maximum).
+  /// Get the underlying JSArray holding table entry type ids.
+  JSArray *getTypes(Runtime &runtime) const {
+    return types_.get(runtime);
+  }
+
+  /// Set the underlying JSArray holding table entry type ids.
+  void setTypes(Runtime &runtime, JSArray *arr) {
+    types_.set(runtime, arr, runtime.getHeap());
+  }
+
+  /// Get the maximum table size (UINT32_MAX means no explicit maximum).
   uint32_t getMaxSize() const {
     return maxSize_;
   }
@@ -64,7 +74,8 @@ class JSWebAssemblyTable final : public JSObject {
       Handle<JSObject> parent,
       Handle<HiddenClass> clazz)
       : JSObject(runtime, *parent, *clazz),
-        elements_(runtime, nullptr, runtime.getHeap()) {}
+        elements_(runtime, nullptr, runtime.getHeap()),
+        types_(runtime, nullptr, runtime.getHeap()) {}
 
   ~JSWebAssemblyTable() = default;
 
@@ -76,8 +87,16 @@ class JSWebAssemblyTable final : public JSObject {
   /// The JSArray backing the table entries.
   GCPointer<JSArray> elements_;
 
-  /// Maximum table size (0 = no explicit maximum).
-  uint32_t maxSize_{0};
+  /// The JSArray holding the interned type id of each entry, parallel to
+  /// \c elements_. Entries set from JS have no type id and read as empty,
+  /// which call_indirect refuses.
+  GCPointer<JSArray> types_;
+
+  /// Maximum table size. UINT32_MAX = no explicit maximum; the spec's
+  /// limit is 2^32-1 entries, so a genuine maximum of UINT32_MAX and no
+  /// maximum behave identically. 0 is a real, declarable maximum -- a
+  /// {initial: 0, maximum: 0} table must never grow.
+  uint32_t maxSize_{UINT32_MAX};
 };
 
 } // namespace vm

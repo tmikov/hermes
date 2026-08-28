@@ -16,7 +16,7 @@
       (i32.const 42)
       (br 0)))
 
-;; CHECK-LABEL: function wasm_func_0(): any
+;; CHECK-LABEL: function wasm_func_0(): number 
 ;; CHECK: %BB0:
 ;; CHECK:              BranchInst %BB2
 ;; CHECK: %BB1:
@@ -34,7 +34,7 @@
       (i32.const 1)
       (br_if 0)))
 
-;; CHECK-LABEL: function wasm_func_1(): any
+;; CHECK-LABEL: function wasm_func_1(): undefined 
 ;; CHECK: %BB0:
 ;; CHECK:              CondBranchInst 1: number, %BB2, %BB3
 ;; CHECK: %BB1:
@@ -53,7 +53,7 @@
       (br_if 0))
     (i32.const 99))
 
-;; CHECK-LABEL: function wasm_func_2(): any
+;; CHECK-LABEL: function wasm_func_2(): number 
 ;; CHECK: %BB0:
 ;; CHECK:              CondBranchInst 0: number, %BB2, %BB3
 ;; CHECK: %BB1:
@@ -74,7 +74,7 @@
         (br 1))
       (i32.const 0))))
 
-;; CHECK-LABEL: function wasm_func_3(): any
+;; CHECK-LABEL: function wasm_func_3(): number 
 ;; CHECK: %BB0:
 ;; CHECK:              BranchInst %BB2
 ;; CHECK: %BB1:

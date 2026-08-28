@@ -196,6 +196,7 @@ class BinaryReaderHermesIRGen : public wabt::BinaryReaderNop {
   wabt::Result OnGlobalGetExpr(wabt::Index globalIndex) override;
   wabt::Result OnRefNullExpr(wabt::Type type) override;
   wabt::Result OnRefFuncExpr(wabt::Index funcIndex) override;
+  wabt::Result OnRefIsNullExpr() override;
   wabt::Result OnLocalGetExpr(wabt::Index localIndex) override;
   wabt::Result OnLocalSetExpr(wabt::Index localIndex) override;
   wabt::Result OnLocalTeeExpr(wabt::Index localIndex) override;

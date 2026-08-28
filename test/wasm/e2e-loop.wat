@@ -44,20 +44,26 @@
     )
     local.get 2
   )
-  ;; Start function: calls sum(10) = 55.
+  ;; Start function: asserts sum(10) == 55 by trapping otherwise. Without
+  ;; the comparison the total was simply dropped, so the execution RUN line
+  ;; proved only that the loop terminated, not that it computed anything.
   (func (export "_start")
     i32.const 10
     call $sum
-    drop
+    i32.const 55
+    i32.ne
+    if
+      unreachable
+    end
   )
   (start 1)
 )
 
-;; CHECK-LABEL: function wasm_func_0(p0: any): any
+;; CHECK-LABEL: function wasm_func_0(p0: number): number 
 ;; CHECK:   AllocStackInst
 ;; CHECK:   CondBranchInst
-;; CHECK:   BinaryAddInst
+;; CHECK:   FAddInst
 
-;; CHECK-LABEL: function wasm_func_1(): any
+;; CHECK-LABEL: function wasm_func_1(): undefined 
 ;; CHECK:   LoadFrameInst
 ;; CHECK:   CallInst

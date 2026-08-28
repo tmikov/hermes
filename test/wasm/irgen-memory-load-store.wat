@@ -38,12 +38,12 @@
 )
 
 ;; Check that the top-level function builds the module info object.
-;; CHECK-LABEL: function global(): any
+;; CHECK-LABEL: function global(): object
 ;; CHECK:   CreateFunctionInst {{.*}}__wasm_instantiate__
 ;; CHECK:   ReturnInst
 
 ;; Check the i32 store/load function (wasm_func_0).
-;; CHECK-LABEL: function wasm_func_0(p0: any): any
+;; CHECK-LABEL: function wasm_func_0(p0: number): number 
 ;; CHECK: LoadFrameInst {{.*}}[%VS0.HEAP32]
 ;; CHECK: StorePropertyStrictInst
 ;; CHECK: LoadFrameInst {{.*}}[%VS0.HEAP32]
@@ -52,21 +52,26 @@
 ;; CHECK: CondBranchInst
 
 ;; Check the f64 store/load function (wasm_func_1).
-;; CHECK-LABEL: function wasm_func_1(p0: any): any
+;; CHECK-LABEL: function wasm_func_1(p0: number): number 
 ;; CHECK: LoadFrameInst {{.*}}[%VS0.HEAPF64]
 ;; CHECK: StorePropertyStrictInst
 ;; CHECK: LoadFrameInst {{.*}}[%VS0.HEAPF64]
 ;; CHECK: LoadPropertyInst
 
 ;; Check the load with offset function (wasm_func_2).
-;; CHECK-LABEL: function wasm_func_2(p0: any): any
+;; CHECK-LABEL: function wasm_func_2(p0: number): number 
 ;; CHECK: BinaryAddInst
 ;; CHECK: BinaryUnsignedRightShiftInst
 ;; CHECK: LoadFrameInst {{.*}}[%VS0.HEAP32]
 ;; CHECK: LoadPropertyInst
 
-;; Check that the instantiate function creates ArrayBuffer and typed array views.
-;; CHECK-LABEL: function __wasm_instantiate__(): any
-;; CHECK: TryLoadGlobalPropertyInst {{.*}}"ArrayBuffer"
+;; Check that the instantiate function backs a defined memory with a real
+;; WebAssembly.Memory and builds the typed array views over *its* buffer --
+;; not over a bare ArrayBuffer, which would leave an exported memory pointing
+;; at storage the module never writes to.
+;; CHECK-LABEL: function __wasm_instantiate__(imports: any): object
+;; CHECK: TryLoadGlobalPropertyInst {{.*}}"WebAssembly"
+;; CHECK: LoadPropertyInst {{.*}}"Memory"
+;; CHECK: LoadPropertyInst {{.*}}"buffer"
 ;; CHECK: TryLoadGlobalPropertyInst {{.*}}"Int8Array"
 ;; CHECK: TryLoadGlobalPropertyInst {{.*}}"Int32Array"

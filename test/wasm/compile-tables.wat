@@ -16,7 +16,7 @@
 
   ;; Two simple functions to put in the table.
   (func $f0 (result i32) (i32.const 10))
-;; CHECK-LABEL: function wasm_func_0(): any
+;; CHECK-LABEL: function wasm_func_0(): number 
 ;; CHECK: %BB0:
 ;; CHECK:   BranchInst %BB1
 ;; CHECK: %BB1:
@@ -25,7 +25,7 @@
 ;; CHECK-NEXT: function_end
 
   (func $f1 (result i32) (i32.const 20))
-;; CHECK-LABEL: function wasm_func_1(): any
+;; CHECK-LABEL: function wasm_func_1(): number 
 ;; CHECK: %BB0:
 ;; CHECK:   BranchInst %BB1
 ;; CHECK: %BB1:
@@ -41,22 +41,22 @@
     local.get 0
     call_indirect (result i32)
   )
-;; CHECK-LABEL: function wasm_func_2(p0: any): any
+;; CHECK-LABEL: function wasm_func_2(p0: number): number 
 ;; CHECK: %BB0:
-;; CHECK:   %[[L0:.*]] = AllocStackInst (:any) $local_0: any
-;; CHECK-NEXT: %[[P0:.*]] = LoadParamInst (:any) %p0: any
-;; CHECK-NEXT:              StoreStackInst %[[P0]]: any, %[[L0]]: any
-;; CHECK:   %[[IDX:.*]] = LoadStackInst (:any) %[[L0]]: any
+;; CHECK:   %[[L0:.*]] = AllocStackInst (:number) $local_0: any
+;; CHECK-NEXT: %[[P0:.*]] = LoadParamInst (:number) %p0: number
+;; CHECK-NEXT:              StoreStackInst %[[P0]]: number, %[[L0]]: number
+;; CHECK:   %[[IDX:.*]] = LoadStackInst (:number) %[[L0]]: number
 ;; CHECK-NEXT: %[[FUNCS:.*]] = LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_funcs]: any
 ;; CHECK-NEXT: %[[TYPES:.*]] = LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_types]: any
 ;; The expected type is the interned id for this signature, loaded from the
 ;; frame, not a module-local index literal.
 ;; CHECK-NEXT: %[[TYPEID:.*]] = LoadFrameInst (:any) %{{.*}}: environment, [%VS0.wasm_type_id_0]: any
 ;; CHECK-NEXT: %[[CLOSURE:.*]] = CallBuiltinInst (:any) [HermesBuiltin.wasmCallIndirect]
-;; CHECK-NEXT: %[[RES:.*]] = CallInst (:any) %[[CLOSURE]]: any
+;; CHECK-NEXT: %[[RES:.*]] = CallInst (:number) %[[CLOSURE]]: any
 ;; CHECK-NEXT:               BranchInst %BB1
 ;; CHECK: %BB1:
-;; CHECK-NEXT: %{{.*}} = PhiInst (:any) %[[RES]]: any, %BB0
+;; CHECK-NEXT: %{{.*}} = PhiInst (:number) %[[RES]]: number, %BB0
 ;; CHECK-NEXT:           ReturnInst
 ;; CHECK-NEXT: function_end
 )

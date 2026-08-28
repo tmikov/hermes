@@ -1,0 +1,25 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-table-grow-limits.wat.
+
+var args = hermescli.getScriptArgs();
+function load(i) {
+  return new WebAssembly.Module(hermescli.loadFile(args[i]));
+}
+
+var exporter = new WebAssembly.Instance(load(0), {}).exports;
+var importer = new WebAssembly.Instance(load(1), {e: {t: exporter.t}}).exports;
+
+print('grow past the exporter\'s max: ' + importer.grow(8));
+print('grow within both: ' + importer.grow(2));
+print('exporter sees size: ' + exporter.size());
+
+var unbounded = new WebAssembly.Instance(load(2), {}).exports;
+print('huge grow on unbounded table: ' + unbounded.grow(4000000000));
+print('unbounded table still usable, size: ' + unbounded.size());
+print('done');

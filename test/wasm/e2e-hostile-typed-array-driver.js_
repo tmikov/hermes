@@ -1,0 +1,37 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-hostile-typed-array.wat. Each module is compiled to HBC
+// and loaded AFTER the relevant global is replaced, so the module's own
+// buffers are constructed from the hostile replacement.
+
+var args = hermescli.getScriptArgs();
+var i64Path = args[0];
+var memPath = args[1];
+
+// i64 return buffer built from a hostile Uint32Array.
+globalThis.Uint32Array = function() { return {}; };
+try {
+  var i64Mod = new WebAssembly.Module(hermescli.loadFile(i64Path));
+  var i64Inst = new WebAssembly.Instance(i64Mod, {});
+  i64Inst.exports.add(1n, 2n);
+  print('i64 add with hostile Uint32Array: no error');
+} catch (e) {
+  print('i64 add with hostile Uint32Array: ' + e.name);
+}
+
+// Linear-memory view built from a hostile Uint8Array.
+globalThis.Uint8Array = function() { return {}; };
+try {
+  var memMod = new WebAssembly.Module(hermescli.loadFile(memPath));
+  var memInst = new WebAssembly.Instance(memMod, {});
+  memInst.exports.fill();
+  print('memory.fill with hostile Uint8Array: no trap');
+} catch (e) {
+  print('memory.fill with hostile Uint8Array: ' + e.name);
+}
+print('done');

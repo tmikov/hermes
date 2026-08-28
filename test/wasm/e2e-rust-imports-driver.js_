@@ -1,0 +1,31 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-rust-imports.js.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var memory = new WebAssembly.Memory({initial: 17});
+var logged = null;
+
+var mod = new WebAssembly.Module(hermescli.loadFile(hbcPath));
+var exports = new WebAssembly.Instance(mod, {
+  env: {
+    memory: memory,
+    host_add: function (a, b) { return a + b; },
+    host_log: function (ptr, len) {
+      var bytes = new Uint8Array(memory.buffer, ptr, len);
+      var s = '';
+      for (var i = 0; i < bytes.length; i++)
+        s += String.fromCharCode(bytes[i]);
+      logged = s;
+    },
+  },
+}).exports;
+
+print("run(41) =", exports.run(41));
+exports.greet();
+print("greet logged:", logged);

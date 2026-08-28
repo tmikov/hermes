@@ -13,6 +13,37 @@ Last updated: 2026-02-18 (branch `wasm`)
 | Assertions passing | 24,682 |
 | Assertions failing | 120 |
 
+> **These are conformance-under-test figures, not production conformance.**
+> `test/wasm/spec/run-spec-test.py` invokes `hermes` with `--test262`
+> unconditionally, and that flag changes two things about memory access that
+> are deliberately off in a normal build:
+>
+> - `emitMemoryBoundsCheck` is a no-op without it, so loads and stores are
+>   bounds-checked only under the flag;
+> - the byte-by-byte path for an access whose alignment hint understates the
+>   real alignment is forced only under the flag, so without it a misaligned
+>   `i32.load` reads through `HEAP32` and returns the wrong four bytes.
+>
+> Both are deliberate. Fixing either properly needs VM-level work — new
+> instructions and a real bounds-checked access path — and bounds-checking
+> every access, or always assembling multi-byte accesses a byte at a time,
+> would cost throughput on the hottest path in the engine. Real toolchains do
+> not emit alignment annotations that understate the actual alignment, so the
+> second case shows up almost only in synthetic tests. Note that Wasm's
+> `align` immediate is an advisory *upper* bound on expected alignment rather
+> than a guaranteed lower bound, so an engine cannot use it to select a fast
+> path in the first place.
+>
+> Recorded effect on individual suites, measured rather than extrapolated:
+> `address.wast` and `memory_redundancy.wast` pass **only** with the flag;
+> `load.wast` and `store.wast` pass either way; `float_memory.wast` fails
+> either way. Any suite whose failures are memory-access related should be
+> re-checked without `--test262` before being called passing.
+>
+> The other bounds checks on this branch — the compile-time and runtime data
+> segment checks, and `table.get`/`table.set` — are unconditional and do not
+> depend on the flag.
+
 ## How to Run
 
 ```bash

@@ -23,7 +23,7 @@
   (func (export "get_g_mut") (result i32)
     global.get 1
   )
-;; CHECK-LABEL: function wasm_func_0(): any
+;; CHECK-LABEL: function wasm_func_0(): number 
 ;; CHECK: %BB0:
 ;; CHECK:   %[[PARENT:.*]] = GetParentScopeInst
 ;; CHECK:   %[[VAL:.*]] = LoadFrameInst (:any) %[[PARENT]]{{.*}}, [%VS0.global_1]: any

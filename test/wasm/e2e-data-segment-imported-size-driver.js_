@@ -1,0 +1,25 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-data-segment-imported-size.wat.
+
+var mod = new WebAssembly.Module(
+  hermescli.loadFile(hermescli.getScriptArgs()[0]));
+
+function attempt(label, pages) {
+  try {
+    var e = new WebAssembly.Instance(
+      mod, {e: {m: new WebAssembly.Memory({initial: pages})}}).exports;
+    print(label + ': h=' + e.peek(65536) + ' i=' + e.peek(65537));
+  } catch (err) {
+    print(label + ': ' + err.name + ': ' + err.message);
+  }
+}
+
+attempt('two pages', 2);
+attempt('one page', 1);
+print('done');

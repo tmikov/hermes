@@ -29,7 +29,7 @@
 
 ;; The global function builds the module info object with descriptor arrays
 ;; and the instantiate closure, then returns it.
-;; CHECK-LABEL: function global(): any
+;; CHECK-LABEL: function global(): object
 ;; CHECK:   CreateScopeInst
 ;; CHECK:   CreateFunctionInst {{.*}}__wasm_instantiate__
 ;; CHECK:   StorePropertyStrictInst {{.*}}, {{.*}}, "instantiate"
@@ -38,16 +38,16 @@
 ;; CHECK-NEXT:   ReturnInst
 
 ;; The internal "add" function.
-;; CHECK-LABEL: function wasm_func_0(p0: any, p1: any): any
-;; CHECK:   BinaryAddInst
+;; CHECK-LABEL: function wasm_func_0(p0: number, p1: number): number 
+;; CHECK:   FAddInst
 ;; CHECK-NEXT:   AsInt32Inst
 
 ;; The internal helper (not exported).
-;; CHECK-LABEL: function wasm_func_1(p0: any): any
+;; CHECK-LABEL: function wasm_func_1(p0: number): number 
 
 ;; The internal "sub" function.
-;; CHECK-LABEL: function wasm_func_2(p0: any, p1: any): any
-;; CHECK:   BinarySubtractInst
+;; CHECK-LABEL: function wasm_func_2(p0: number, p1: number): number 
+;; CHECK:   FSubtractInst
 ;; CHECK-NEXT:   AsInt32Inst
 
 ;; Export wrapper for "add": coerces args, calls internal wasm_func_0.

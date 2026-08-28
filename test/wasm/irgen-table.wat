@@ -36,12 +36,12 @@
 )
 
 ;; table.size: loads the funcs array and reads .length
-;; CHECK-LABEL: function wasm_func_2(): any
+;; CHECK-LABEL: function wasm_func_2(): number 
 ;; CHECK: GetParentScopeInst
 ;; CHECK: LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_funcs]
 ;; CHECK: LoadPropertyInst (:any) %{{.*}}: any, "length": string
 
 ;; table.get: loads the funcs array and reads at the given index
-;; CHECK-LABEL: function wasm_func_3(p0: any): any
+;; CHECK-LABEL: function wasm_func_3(p0: number): object 
 ;; CHECK: LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_funcs]
-;; CHECK: LoadPropertyInst (:any) %{{.*}}: any, %{{.*}}: any
+;; CHECK: LoadPropertyInst (:any) %{{.*}}: any, %{{.*}}: number

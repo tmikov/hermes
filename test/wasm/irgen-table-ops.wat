@@ -29,12 +29,12 @@
 )
 
 ;; table.set: loads funcs array, stores value at index
-;; CHECK-LABEL: function wasm_func_1(p0: any, p1: any): any
+;; CHECK-LABEL: function wasm_func_1(p0: number, p1: object): undefined 
 ;; CHECK: LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_funcs]
-;; CHECK: StorePropertyStrictInst %{{.*}}: any, %{{.*}}: any, %{{.*}}: any
+;; CHECK: StorePropertyStrictInst %{{.*}}: object, %{{.*}}: any, %{{.*}}: number
 
 ;; table.grow: calls the wasmTableGrow builtin
-;; CHECK-LABEL: function wasm_func_2(p0: any): any
+;; CHECK-LABEL: function wasm_func_2(p0: number): number 
 ;; CHECK: LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_funcs]
 ;; CHECK: LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_types]
-;; CHECK: CallBuiltinInst (:any) [HermesBuiltin.wasmTableGrow]
+;; CHECK: CallBuiltinInst (:number) [HermesBuiltin.wasmTableGrow]

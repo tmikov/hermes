@@ -18,7 +18,7 @@
 
 ;; CHECK: scope %VS0 [wasm_type_id_0: any, retBufI: any, retBufF: any, closure_0: any]
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function global(): any
+;; CHECK-NEXT: function global(): object 
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = CreateScopeInst (:environment) %VS0: any, empty: any
 ;; CHECK-NEXT:   %1 = CreateFunctionInst (:object) %0: environment, %VS0: any, %__wasm_instantiate__(): functionCode
@@ -37,21 +37,21 @@
 ;; CHECK-NEXT:         ReturnInst %10: object
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function wasm_func_0(retbuf_I: any, retbuf_F: any): any
+;; CHECK-NEXT: function wasm_func_0(retbuf_I: object, retbuf_F: object): number 
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
-;; CHECK-NEXT:   %1 = LoadParamInst (:any) %retbuf_I: any
-;; CHECK-NEXT:   %2 = LoadParamInst (:any) %retbuf_F: any
+;; CHECK-NEXT:   %1 = LoadParamInst (:object) %retbuf_I: object
+;; CHECK-NEXT:   %2 = LoadParamInst (:object) %retbuf_F: object
 ;; CHECK-NEXT:        BranchInst %BB1
 ;; CHECK-NEXT: %BB1:
 ;; CHECK-NEXT:   %4 = PhiInst (:number) 2: number, %BB0
 ;; CHECK-NEXT:   %5 = PhiInst (:number) 1: number, %BB0
-;; CHECK-NEXT:        StorePropertyStrictInst %4: number, %1: any, 0: number
-;; CHECK-NEXT:        StorePropertyStrictInst %5: number, %1: any, 1: number
+;; CHECK-NEXT:        StorePropertyStrictInst %4: number, %1: object, 0: number
+;; CHECK-NEXT:        StorePropertyStrictInst %5: number, %1: object, 1: number
 ;; CHECK-NEXT:        ReturnInst 0: number
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
-;; CHECK-NEXT: function __wasm_instantiate__(): any
+;; CHECK-NEXT: function __wasm_instantiate__(imports: any): object 
 ;; CHECK-NEXT: %BB0:
 ;; CHECK-NEXT:   %0 = CreateScopeInst (:environment) %VS0: any, empty: any
 ;; CHECK-NEXT:   %1 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_func_0(): functionCode

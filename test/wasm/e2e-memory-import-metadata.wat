@@ -32,4 +32,7 @@
 ;; the previous size -- otherwise the -1 results above could be produced by a
 ;; blanket failure rather than by the checks under test.
 ;; CHECK-NEXT: grow within max = 1
+
+;; And the memory that grew is the embedder's own object, not a copy of it.
+;; CHECK-NEXT: imported object followed grow: true
 ;; CHECK-NEXT: done

@@ -1,0 +1,39 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-table-max-zero.wat.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var mod = new WebAssembly.Module(hermescli.loadFile(hbcPath));
+
+function importIt(t) {
+  return new WebAssembly.Instance(mod, {e: {t: t}});
+}
+
+var maxZero = new WebAssembly.Table(
+    {element: 'anyfunc', initial: 0, maximum: 0});
+try {
+  maxZero.grow(1);
+  print('max-0 grow(1): grew');
+} catch (e) {
+  print('max-0 grow(1): ' + e.name);
+}
+try {
+  print('max-0 import: linked, size = ' + importIt(maxZero).exports.size());
+} catch (e) {
+  print('max-0 import: ' + e.name);
+}
+
+var noMax = new WebAssembly.Table({element: 'anyfunc', initial: 0});
+print('no-max grow(1) -> ' + noMax.grow(1));
+try {
+  importIt(noMax);
+  print('no-max import: linked');
+} catch (e) {
+  print('no-max import: ' + e.name);
+}
+print('done');

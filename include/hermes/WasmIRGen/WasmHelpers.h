@@ -126,19 +126,6 @@ class WasmHelpers {
   Instruction *emitI64Ctz(Value *lo, Value *hi);
   Instruction *emitI64Popcnt(Value *lo, Value *hi);
 
-  /// i64 comparison ops. Take split args, return i32 (0 or 1).
-  Instruction *emitI64Eqz(Value *lo, Value *hi);
-  Instruction *emitI64Eq(Value *loA, Value *hiA, Value *loB, Value *hiB);
-  Instruction *emitI64Ne(Value *loA, Value *hiA, Value *loB, Value *hiB);
-  Instruction *emitI64LtS(Value *loA, Value *hiA, Value *loB, Value *hiB);
-  Instruction *emitI64GtS(Value *loA, Value *hiA, Value *loB, Value *hiB);
-  Instruction *emitI64LeS(Value *loA, Value *hiA, Value *loB, Value *hiB);
-  Instruction *emitI64GeS(Value *loA, Value *hiA, Value *loB, Value *hiB);
-  Instruction *emitI64LtU(Value *loA, Value *hiA, Value *loB, Value *hiB);
-  Instruction *emitI64GtU(Value *loA, Value *hiA, Value *loB, Value *hiB);
-  Instruction *emitI64LeU(Value *loA, Value *hiA, Value *loB, Value *hiB);
-  Instruction *emitI64GeU(Value *loA, Value *hiA, Value *loB, Value *hiB);
-
   // --- i64 conversion helpers (G.4b) ---
   // Take (retBufI, f64_arg), write lo/hi result to retBufI[0]/[1].
 
@@ -183,7 +170,15 @@ class WasmHelpers {
 
   /// Emit memory.grow: takes (heapu8View, delta, maxPages).
   /// Returns new ArrayBuffer on success, or -1 on failure.
-  Instruction *emitMemoryGrow(Value *heapu8, Value *delta, Value *maxPages);
+  /// \p memObj is the WebAssembly.Memory backing the linear memory, or
+  /// undefined for an imported memory that has none. When present the
+  /// builtin installs the grown buffer on it, so exported references to the
+  /// memory observe the growth.
+  Instruction *emitMemoryGrow(
+      Value *heapu8,
+      Value *delta,
+      Value *maxPages,
+      Value *memObj);
 
   // --- Table helpers (J.2) ---
 
@@ -278,7 +273,8 @@ class WasmHelpers {
       Value *typesArr,
       Value *delta,
       Value *fillVal,
-      Value *maxEntries);
+      Value *maxEntries,
+      Value *actualMax);
 
   // --- BigInt ↔ i64 conversion helpers ---
 

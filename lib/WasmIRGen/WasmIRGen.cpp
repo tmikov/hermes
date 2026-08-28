@@ -24,6 +24,20 @@
 namespace hermes {
 namespace wasm {
 
+/// Map a WasmValType to its spec name, for diagnostics.
+static const char *valTypeName(WasmValType vt) {
+  switch (vt) {
+    case WasmValType::I32: return "i32";
+    case WasmValType::I64: return "i64";
+    case WasmValType::F32: return "f32";
+    case WasmValType::F64: return "f64";
+    case WasmValType::FuncRef: return "funcref";
+    case WasmValType::ExternRef: return "externref";
+    case WasmValType::V128: return "v128";
+  }
+  return "unknown";
+}
+
 /// Map a WasmValType to a single character code for type strings.
 static char valTypeChar(WasmValType vt) {
   switch (vt) {
@@ -77,6 +91,36 @@ static std::string buildTagTypeString(const WasmFuncType &ft) {
 static std::string buildTableTypeString(const WasmTableType &tt) {
   return tt.elemType == WasmValType::FuncRef
       ? "table:funcref" : "table:externref";
+}
+
+/// Map a WasmValType to an IR Type.
+/// If \p val is an AsInt32Inst whose operand is boolean, return the boolean
+/// operand directly (suitable for use as a CondBranchInst condition).
+/// Otherwise return \p val unchanged.
+static Value *peekThroughAsInt32(Value *val) {
+  if (auto *ai = llvh::dyn_cast<AsInt32Inst>(val)) {
+    if (ai->getSingleOperand()->getType().isBooleanType())
+      return ai->getSingleOperand();
+  }
+  return val;
+}
+
+/// Map a WasmValType to an IR Type.
+static Type wasmValTypeToIRType(WasmValType vt) {
+  switch (vt) {
+    case WasmValType::I32:
+    case WasmValType::I64:
+    case WasmValType::F32:
+    case WasmValType::F64:
+      return Type::createNumber();
+    case WasmValType::FuncRef:
+      return Type::createObject();
+    case WasmValType::ExternRef:
+      return Type::createAnyType();
+    case WasmValType::V128:
+      return Type::createAnyType();
+  }
+  return Type::createAnyType();
 }
 
 WasmIRGen::WasmIRGen(Module &M, WasmModuleInfo &moduleInfo)
@@ -288,13 +332,47 @@ void WasmIRGen::buildCanonicalTypeMap() {
   }
 }
 
+void WasmIRGen::computeEscapableFuncs() {
+  // A function's internal closure reaches JS as a callable through exactly
+  // two routes in the supported feature set, both of which name the function
+  // by index in moduleInfo_:
+  //
+  //   1. Element segments -- the closure is placed in a table, reachable from
+  //      JS via WebAssembly.Table.prototype.get() or the __wasm_funcs__ array
+  //      (all segment modes; table.init/copy only move already-listed funcs).
+  //   2. A ref.func global initializer -- the closure is stored in a funcref
+  //      global, reachable via an exported WebAssembly.Global's .value.
+  //      Exporting a funcref global is not supported yet (finalizeModule
+  //      rejects it), so this route is latent; covering it here keeps the
+  //      set correct for when export support lands.
+  //
+  // ref.func inside a function body is unsupported (it warns and pushes a
+  // placeholder), so there is no dynamic way to materialize a funcref for an
+  // arbitrary function and table.set / store it. IF THAT CHANGES -- ref.func
+  // in code, or any new way to hand an internal closure to JS -- this set
+  // must grow to cover it, or float params of the newly-reachable functions
+  // will again be trusted unsoundly (J4). The safe fallback is to treat every
+  // function as escapable.
+  for (const auto &seg : moduleInfo_.elements)
+    for (uint32_t fi : seg.funcIndices)
+      escapableFuncs_.insert(fi);
+  for (const auto &g : moduleInfo_.globals)
+    if (g.initKind == WasmGlobal::InitKind::RefFunc)
+      escapableFuncs_.insert(g.initValue.funcIndex);
+}
+
 void WasmIRGen::createFunctions() {
   // Build canonical type index map for structural type comparison.
   buildCanonicalTypeMap();
 
+  // Determine which functions' closures can escape to JS before typing any
+  // params (beginFunction and the param typing below both consult the set).
+  computeEscapableFuncs();
+
   // Create the top-level function first (must be before other functions).
   auto *topLevel = builder_.createTopLevelFunction(
       "global", true /* strictMode */);
+  topLevel->setReturnType(Type::createObject());
   topLevel->setExpectedParamCountIncludingThis(1); // just "this"
 
   // Create a VariableScope for the top-level function (no parent).
@@ -325,6 +403,19 @@ void WasmIRGen::createFunctions() {
   // If the module has tables, create Variables for each table.
   // Each table gets two JS Arrays: one for function closures, one for type
   // indices (used by call_indirect for type checking).
+  // One variable per tag, holding the object that identifies it.
+  {
+    uint32_t numTags = moduleInfo_.totalTagCount();
+    tagVars_.resize(numTags, nullptr);
+    for (uint32_t i = 0; i < numTags; ++i) {
+      tagVars_[i] = builder_.createVariable(
+          topLevelVS_,
+          ("wasm_tag_" + llvh::Twine(i)),
+          Type::createAnyType(),
+          /* hidden */ true);
+    }
+  }
+
   // One variable per type, holding its interned id (see internTypeIds).
   typeIdVars_.resize(moduleInfo_.types.size(), nullptr);
   for (uint32_t i = 0; i < moduleInfo_.types.size(); ++i) {
@@ -339,6 +430,11 @@ void WasmIRGen::createFunctions() {
   if (numTables > 0) {
     tableFuncVars_.resize(numTables, nullptr);
     tableTypeVars_.resize(numTables, nullptr);
+    // A locally defined funcref table is backed by a WebAssembly.Table
+    // object, held here so createTables() and the table export publish and
+    // operate on the same one. Imported tables and externref tables (which
+    // the Table constructor does not build) leave their slot null.
+    tableObjVars_.resize(numTables, nullptr);
     for (uint32_t i = 0; i < numTables; ++i) {
       tableFuncVars_[i] = builder_.createVariable(
           topLevelVS_,
@@ -348,6 +444,11 @@ void WasmIRGen::createFunctions() {
       tableTypeVars_[i] = builder_.createVariable(
           topLevelVS_,
           ("table_" + llvh::Twine(i) + "_types"),
+          Type::createAnyType(),
+          /* hidden */ true);
+      tableObjVars_[i] = builder_.createVariable(
+          topLevelVS_,
+          ("table_" + llvh::Twine(i) + "_obj"),
           Type::createAnyType(),
           /* hidden */ true);
     }
@@ -423,19 +524,26 @@ void WasmIRGen::createFunctions() {
         /* hidden */ true);
   }
 
-  // If the module imports a memory, create variables to hold the imported
-  // memory's __wasm_min__ and __wasm_max__ values. These are the actual
-  // initial page count and maximum from the imported WebAssembly.Memory
-  // object, which may differ from the import declaration's bounds.
+  // If the module imports a memory, hold its declared maximum. Unlike the
+  // size, which is read from the memory itself, the maximum is not
+  // observable from the object and still comes from __wasm_max__.
   if (moduleInfo_.importedMemoryCount() > 0) {
-    importedMemMinVar_ = builder_.createVariable(
-        topLevelVS_,
-        "imported_mem_min",
-        Type::createAnyType(),
-        /* hidden */ true);
     importedMemMaxVar_ = builder_.createVariable(
         topLevelVS_,
         "imported_mem_max",
+        Type::createAnyType(),
+        /* hidden */ true);
+  }
+
+  // The linear memory is backed by a WebAssembly.Memory object -- constructed
+  // here for a defined memory, supplied by the embedder for an imported one.
+  // createMemoryViews(), the memory export and onMemoryGrow() all go through
+  // this one object, so the module, the embedder and any importer are looking
+  // at the same memory.
+  if (moduleInfo_.totalMemoryCount() > 0) {
+    memObjVar_ = builder_.createVariable(
+        topLevelVS_,
+        "mem_obj",
         Type::createAnyType(),
         /* hidden */ true);
   }
@@ -515,6 +623,14 @@ void WasmIRGen::createFunctions() {
         Function::DefinitionKind::ES5Function,
         true /* strictMode */);
 
+    // Set the return type based on the Wasm function type.
+    if (funcType.results.empty())
+      func->setReturnType(Type::createUndefined());
+    else if (!needsReturnBuffer(funcType))
+      func->setReturnType(wasmValTypeToIRType(funcType.results[0]));
+    else
+      func->setReturnType(Type::createNumber());
+
     // Create a variable in the top-level scope to hold the pre-created closure.
     closureVars_[i] = builder_.createVariable(
         topLevelVS_,
@@ -529,8 +645,10 @@ void WasmIRGen::createFunctions() {
     // prepend retBufI and retBufF parameters before the Wasm params.
     uint32_t jsParamCount = 0;
     if (needsReturnBuffer(funcType)) {
-      builder_.createJSDynamicParam(func, "retbuf_I");
-      builder_.createJSDynamicParam(func, "retbuf_F");
+      auto *rbI = builder_.createJSDynamicParam(func, "retbuf_I");
+      rbI->setType(Type::createObject());
+      auto *rbF = builder_.createJSDynamicParam(func, "retbuf_F");
+      rbF->setType(Type::createObject());
       jsParamCount += 2;
     }
 
@@ -538,14 +656,45 @@ void WasmIRGen::createFunctions() {
     // (lo32, hi32) for the split representation.
     for (uint32_t p = 0; p < funcType.params.size(); ++p) {
       if (funcType.params[p] == WasmValType::I64) {
-        builder_.createJSDynamicParam(
+        auto *lo = builder_.createJSDynamicParam(
             func, ("p" + llvh::Twine(p) + "_lo").str());
-        builder_.createJSDynamicParam(
+        lo->setType(Type::createNumber());
+        auto *hi = builder_.createJSDynamicParam(
             func, ("p" + llvh::Twine(p) + "_hi").str());
+        hi->setType(Type::createNumber());
         jsParamCount += 2;
       } else {
-        builder_.createJSDynamicParam(
+        auto *param = builder_.createJSDynamicParam(
             func, ("p" + llvh::Twine(p)).str());
+        // For a function whose closure can reach JS directly (see
+        // escapableFuncs_), an f32/f64 param is typed :any and coerced at
+        // function entry (beginFunction) instead of being typed :number here.
+        //
+        // Why: such a closure can be called from JS with any argument -- it
+        // is placed in a table (reachable via WebAssembly.Table.prototype.get
+        // or __wasm_funcs__) or stored in an exported funcref global. Its
+        // export wrapper coerces, but these routes bypass the wrapper.
+        // Declaring a float param :number would be an assertion the float
+        // backend trusts: FBinaryMathInst reads the raw double bits, so a
+        // non-number reaches getDouble() -- an assert in Debug, a Release
+        // segfault, from ordinary JS. This is finding J4. i32/i64 need no
+        // coercion: i32 re-runs ToInt32 (ensureInt32) and i64 crosses as a
+        // BigInt/lo-hi split, so both re-establish their value where used.
+        //
+        // A non-escapable function keeps :number: every caller is Wasm and
+        // genuinely passes a number, so the annotation is honest and the fast
+        // path is free. This is the cheap INTERIM fix for J4; the proper fix
+        // keeps JS off the internal closures entirely (internal slots on
+        // WebAssembly.Table so get() returns a wrapper, not the raw closure),
+        // after which even escapable params can be :number with no coercion.
+        // See handoff-artifacts/REVIEW.md sec 4.4 and 5.8. REVISIT THEN.
+        WasmValType pt = funcType.params[p];
+        bool floatParam =
+            pt == WasmValType::F32 || pt == WasmValType::F64;
+        param->setType(
+            (floatParam && escapableFuncs_.count(i))
+                ? Type::createAnyType()
+                : wasmValTypeToIRType(pt));
         jsParamCount += 1;
       }
     }
@@ -569,8 +718,11 @@ void WasmIRGen::createFunctions() {
       "__wasm_instantiate__",
       Function::DefinitionKind::ES5Function,
       true /* strictMode */);
-  instantiateFunc_->setExpectedParamCountIncludingThis(1); // just "this"
+  instantiateFunc_->setReturnType(Type::createObject());
+  // "this" plus the import object.
+  instantiateFunc_->setExpectedParamCountIncludingThis(2);
   builder_.createJSThisParam(instantiateFunc_);
+  importsParam_ = builder_.createJSDynamicParam(instantiateFunc_, "imports");
 
   // Populate the __wasm_instantiate__ function body.
   // Create all closures once and store them in the top-level scope.
@@ -583,7 +735,7 @@ void WasmIRGen::createFunctions() {
   auto *tlScope = tlScope_;
 
   // Resolve and validate ALL imports from the imports object.
-  // The imports object is read from the global `__wasm_imports__` property.
+  // The imports object arrives as instantiate()'s parameter.
   // It has the shape: { moduleName: { fieldName: value } }.
   // Each import is validated:
   //   - Module object must not be undefined.
@@ -593,14 +745,14 @@ void WasmIRGen::createFunctions() {
   // For global imports, plain JS numbers (no __wasm_type__) are accepted.
   // For table/memory imports, __wasm_type__ must be present and match.
   if (!moduleInfo_.imports.empty()) {
-    auto *importsVal = builder_.createTryLoadGlobalPropertyInst(
-        builder_.getLiteralString("__wasm_imports__"));
+    auto *importsVal = builder_.createLoadParamInst(importsParam_);
     auto *undefinedVal = builder_.getLiteralUndefined();
     auto *topLevelFunc = tlEntry_->getParent();
 
     uint32_t importFuncIdx = 0;
     uint32_t importGlobalIdx = 0;
     uint32_t importTableIdx = 0;
+    uint32_t importTagIdx = 0;
 
     // Cache module objects to avoid redundant loads for the same module.
     std::string lastModuleName;
@@ -624,8 +776,8 @@ void WasmIRGen::createFunctions() {
         builder_.createCondBranchInst(modIsUndef, modFailBB, modOkBB);
 
         builder_.setInsertionBlock(modFailBB);
-        helpers_.emitLinkError(
-            builder_.getLiteralString("unknown import module"));
+        helpers_.emitLinkError(builder_.getLiteralString(
+            "module has no import namespace " + imp.moduleName));
         builder_.createUnreachableInst();
 
         builder_.setInsertionBlock(modOkBB);
@@ -648,8 +800,8 @@ void WasmIRGen::createFunctions() {
       builder_.createCondBranchInst(impIsUndef, impFailBB, impOkBB);
 
       builder_.setInsertionBlock(impFailBB);
-      helpers_.emitLinkError(
-          builder_.getLiteralString("unknown import"));
+      helpers_.emitLinkError(builder_.getLiteralString(
+          "module has no import " + imp.moduleName + "." + imp.fieldName));
       builder_.createUnreachableInst();
 
       builder_.setInsertionBlock(impOkBB);
@@ -674,6 +826,10 @@ void WasmIRGen::createFunctions() {
               typeIsUndef, checkCallableBB, checkTypeBB);
 
           // Check that the import value is callable (typeof === "function").
+          // This runs on both paths: carrying a matching __wasm_type__ says
+          // what the value claims to be, not that it can be called, and a
+          // non-callable used to link happily and fail as a TypeError at the
+          // first call instead of a LinkError at instantiation.
           builder_.setInsertionBlock(checkCallableBB);
           auto *typeofVal = builder_.createTypeOfInst(importVal);
           auto *isFunc = builder_.createBinaryOperatorInst(
@@ -692,12 +848,23 @@ void WasmIRGen::createFunctions() {
               typeStr,
               builder_.getLiteralString(expectedType),
               ValueKind::BinaryStrictlyNotEqualInstKind);
+          auto *typedCallableBB =
+              builder_.createBasicBlock(topLevelFunc);
           builder_.createCondBranchInst(
-              mismatch, linkErrorBB, acceptBB);
+              mismatch, linkErrorBB, typedCallableBB);
+
+          builder_.setInsertionBlock(typedCallableBB);
+          auto *typedIsFunc = builder_.createBinaryOperatorInst(
+              builder_.createTypeOfInst(importVal),
+              builder_.getLiteralString("function"),
+              ValueKind::BinaryStrictlyEqualInstKind);
+          builder_.createCondBranchInst(
+              typedIsFunc, acceptBB, linkErrorBB);
 
           builder_.setInsertionBlock(linkErrorBB);
-          helpers_.emitLinkError(
-              builder_.getLiteralString("incompatible import type"));
+          helpers_.emitLinkError(builder_.getLiteralString(
+              "import " + imp.moduleName + "." + imp.fieldName +
+              " is not a function"));
           builder_.createUnreachableInst();
 
           builder_.setInsertionBlock(acceptBB);
@@ -717,35 +884,37 @@ void WasmIRGen::createFunctions() {
           auto *typeIsUndef = builder_.createBinaryOperatorInst(
               typeStr, undefinedVal,
               ValueKind::BinaryStrictlyEqualInstKind);
-          // If undefined → could be raw JS number. Check typeof.
-          auto *checkNumberBB =
-              builder_.createBasicBlock(topLevelFunc);
+          // If undefined → could be a raw JS value. What a raw value may
+          // be is decided per import at compile time, per spec: a raw
+          // value allocates an *immutable* global, so it can never
+          // satisfy a mutable import; an i64 import takes a BigInt, and
+          // every other type takes a Number. Accepting either typeof for
+          // every type would let a BigInt satisfy an i32 import and a
+          // Number an i64 one.
+          const bool isI64 = imp.globalType.type == WasmValType::I64;
+          const bool rawAllowed = !imp.globalType.mutable_;
           auto *checkTypeBB = builder_.createBasicBlock(topLevelFunc);
           auto *acceptBB = builder_.createBasicBlock(topLevelFunc);
           auto *linkErrorBB = builder_.createBasicBlock(topLevelFunc);
-          builder_.createCondBranchInst(
-              typeIsUndef, checkNumberBB, checkTypeBB);
+          auto *rawErrorBB = builder_.createBasicBlock(topLevelFunc);
+          BasicBlock *checkRawBB = nullptr;
+          if (rawAllowed) {
+            checkRawBB = builder_.createBasicBlock(topLevelFunc);
+            builder_.createCondBranchInst(
+                typeIsUndef, checkRawBB, checkTypeBB);
 
-          // Check that the import value is a number or bigint
-          // (typeof === "number" || typeof === "bigint").
-          builder_.setInsertionBlock(checkNumberBB);
-          auto *typeofVal = builder_.createTypeOfInst(importVal);
-          auto *isNum = builder_.createBinaryOperatorInst(
-              typeofVal,
-              builder_.getLiteralString("number"),
-              ValueKind::BinaryStrictlyEqualInstKind);
-          auto *checkBigIntBB =
-              builder_.createBasicBlock(topLevelFunc);
-          builder_.createCondBranchInst(
-              isNum, acceptBB, checkBigIntBB);
-
-          builder_.setInsertionBlock(checkBigIntBB);
-          auto *isBigInt = builder_.createBinaryOperatorInst(
-              typeofVal,
-              builder_.getLiteralString("bigint"),
-              ValueKind::BinaryStrictlyEqualInstKind);
-          builder_.createCondBranchInst(
-              isBigInt, acceptBB, linkErrorBB);
+            builder_.setInsertionBlock(checkRawBB);
+            auto *typeofVal = builder_.createTypeOfInst(importVal);
+            auto *rawOk = builder_.createBinaryOperatorInst(
+                typeofVal,
+                builder_.getLiteralString(isI64 ? "bigint" : "number"),
+                ValueKind::BinaryStrictlyEqualInstKind);
+            builder_.createCondBranchInst(
+                rawOk, acceptBB, rawErrorBB);
+          } else {
+            builder_.createCondBranchInst(
+                typeIsUndef, rawErrorBB, checkTypeBB);
+          }
 
           builder_.setInsertionBlock(checkTypeBB);
           std::string expectedType =
@@ -767,9 +936,29 @@ void WasmIRGen::createFunctions() {
           builder_.createBranchInst(acceptBB);
 
           builder_.setInsertionBlock(linkErrorBB);
-          helpers_.emitLinkError(
-              builder_.getLiteralString("incompatible import type"));
+          helpers_.emitLinkError(builder_.getLiteralString(
+              "import " + imp.moduleName + "." + imp.fieldName +
+              " is not a valid global import"));
           builder_.createUnreachableInst();
+
+          builder_.setInsertionBlock(rawErrorBB);
+          {
+            std::string rawErrMsg =
+                "import " + imp.moduleName + "." + imp.fieldName;
+            if (!rawAllowed)
+              rawErrMsg +=
+                  " must be a WebAssembly.Global to satisfy a mutable"
+                  " global import";
+            else if (isI64)
+              rawErrMsg += " must be a BigInt to satisfy an i64 global"
+                           " import";
+            else
+              rawErrMsg += " must be a Number to satisfy an " +
+                  std::string(valTypeName(imp.globalType.type)) +
+                  " global import";
+            helpers_.emitLinkError(builder_.getLiteralString(rawErrMsg));
+            builder_.createUnreachableInst();
+          }
 
           builder_.setInsertionBlock(acceptBB);
           tlEntry_ = acceptBB;
@@ -780,8 +969,8 @@ void WasmIRGen::createFunctions() {
           // differently the second time and send a WebAssembly.Global down
           // the raw-value path, storing the object itself into an i32 slot.
           auto *resolved = builder_.createPhiInst();
-          resolved->addEntry(importVal, checkNumberBB);
-          resolved->addEntry(importVal, checkBigIntBB);
+          if (checkRawBB)
+            resolved->addEntry(importVal, checkRawBB);
           resolved->addEntry(globalObjValue, loadValueBB);
 
           // Store the resolved value into importGlobalVals_ for later
@@ -902,8 +1091,9 @@ void WasmIRGen::createFunctions() {
           }
 
           builder_.setInsertionBlock(linkErrorBB);
-          helpers_.emitLinkError(
-              builder_.getLiteralString("incompatible import type"));
+          helpers_.emitLinkError(builder_.getLiteralString(
+              "import " + imp.moduleName + "." + imp.fieldName +
+              " is not a WebAssembly.Table"));
           builder_.createUnreachableInst();
 
           builder_.setInsertionBlock(acceptBB);
@@ -959,6 +1149,14 @@ void WasmIRGen::createFunctions() {
           typesResult->addEntry(expTypes, wireExportedBB);
           typesResult->addEntry(freshTypes, createFreshBB);
 
+          // Both branches yield values script controls: the exported
+          // __wasm_funcs__/__wasm_types__ properties, or arrays built from
+          // globalThis.Array. Validate once here so that call_indirect can
+          // cast them without re-checking on every indirect call.
+          builder_.createCallBuiltinInst(
+              BuiltinMethod::HermesBuiltin_wasmCheckTableArrays,
+              {funcsResult, typesResult});
+
           builder_.createStoreFrameInst(
               tlScope, funcsResult, tableFuncVars_[importTableIdx]);
           builder_.createStoreFrameInst(
@@ -970,27 +1168,33 @@ void WasmIRGen::createFunctions() {
         }
 
         case WasmExternalKind::Memory: {
-          // Load __wasm_type__ from the import value.
-          auto *typeStr = builder_.createLoadPropertyInst(
-              importVal, builder_.getLiteralString("__wasm_type__"));
-          auto *typeIsUndef = builder_.createBinaryOperatorInst(
-              typeStr, undefinedVal,
-              ValueKind::BinaryStrictlyEqualInstKind);
-          // If undefined → not a Wasm memory, reject.
-          auto *checkTypeBB = builder_.createBasicBlock(topLevelFunc);
+          // No __wasm_type__ read here: the brand check below subsumes it,
+          // and reading it would run a getter on the import object for
+          // nothing.
           auto *linkErrorBB = builder_.createBasicBlock(topLevelFunc);
+          // A memory that really is a Memory but does not satisfy the
+          // declared limits needs its own message: saying it "is not a
+          // WebAssembly.Memory" would be false and would send whoever reads
+          // it looking in the wrong place.
+          auto *limitsErrorBB = builder_.createBasicBlock(topLevelFunc);
           auto *acceptBB = builder_.createBasicBlock(topLevelFunc);
-          builder_.createCondBranchInst(
-              typeIsUndef, linkErrorBB, checkTypeBB);
 
-          builder_.setInsertionBlock(checkTypeBB);
-          auto *mismatch = builder_.createBinaryOperatorInst(
-              typeStr,
-              builder_.getLiteralString("memory"),
-              ValueKind::BinaryStrictlyNotEqualInstKind);
+          // The module's linear memory is this object's buffer, so it has to
+          // really be a WebAssembly.Memory. Testing the brand rather than the
+          // __wasm_type__ string turns what would otherwise be a confusing
+          // TypeError from `new Uint8Array(undefined)` into a LinkError that
+          // names the import. (Not proof against a forged prototype, and it
+          // trusts globalThis.WebAssembly -- a genuine brand check needs an
+          // internal slot, which neither line has yet.)
+          auto *wasmNS =
+              builder_.createTryLoadGlobalPropertyInst("WebAssembly");
+          auto *memCtorForCheck = builder_.createLoadPropertyInst(
+              wasmNS, builder_.getLiteralString("Memory"));
+          auto *isMemory = builder_.createBinaryOperatorInst(
+              importVal, memCtorForCheck, ValueKind::BinaryInstanceOfInstKind);
           auto *checkLimitsBB = builder_.createBasicBlock(topLevelFunc);
           builder_.createCondBranchInst(
-              mismatch, linkErrorBB, checkLimitsBB);
+              isMemory, checkLimitsBB, linkErrorBB);
 
           // Check limits: actualMin >= expectedMin
           builder_.setInsertionBlock(checkLimitsBB);
@@ -1019,7 +1223,7 @@ void WasmIRGen::createFunctions() {
             auto *checkMaxBB =
                 builder_.createBasicBlock(topLevelFunc);
             builder_.createCondBranchInst(
-                minOk, checkMaxBB, linkErrorBB);
+                minOk, checkMaxBB, limitsErrorBB);
 
             builder_.setInsertionBlock(checkMaxBB);
             auto *hasNoMax = builder_.createBinaryOperatorInst(
@@ -1029,7 +1233,7 @@ void WasmIRGen::createFunctions() {
             auto *checkMaxValBB =
                 builder_.createBasicBlock(topLevelFunc);
             builder_.createCondBranchInst(
-                hasNoMax, linkErrorBB, checkMaxValBB);
+                hasNoMax, limitsErrorBB, checkMaxValBB);
 
             builder_.setInsertionBlock(checkMaxValBB);
             auto *maxOk = builder_.createBinaryOperatorInst(
@@ -1039,22 +1243,29 @@ void WasmIRGen::createFunctions() {
                         imp.memoryType.limits.maximum)),
                 ValueKind::BinaryLessThanOrEqualInstKind);
             builder_.createCondBranchInst(
-                maxOk, acceptBB, linkErrorBB);
+                maxOk, acceptBB, limitsErrorBB);
           } else {
             builder_.createCondBranchInst(
-                minOk, acceptBB, linkErrorBB);
+                minOk, acceptBB, limitsErrorBB);
           }
 
           builder_.setInsertionBlock(linkErrorBB);
-          helpers_.emitLinkError(
-              builder_.getLiteralString("incompatible import type"));
+          helpers_.emitLinkError(builder_.getLiteralString(
+              "import " + imp.moduleName + "." + imp.fieldName +
+              " is not a WebAssembly.Memory"));
+          builder_.createUnreachableInst();
+
+          builder_.setInsertionBlock(limitsErrorBB);
+          helpers_.emitLinkError(builder_.getLiteralString(
+              "import " + imp.moduleName + "." + imp.fieldName +
+              " does not satisfy the declared memory limits"));
           builder_.createUnreachableInst();
 
           builder_.setInsertionBlock(acceptBB);
-          // Store the imported memory's actual page count and maximum for
-          // createMemoryViews() and onMemoryGrow() to use.
-          builder_.createStoreFrameInst(
-              tlScope, actualMin, importedMemMinVar_);
+          // Record the imported Memory itself. The module's views are built
+          // over its buffer, so the module operates on the embedder's memory
+          // rather than on a private copy sized from advertised metadata.
+          builder_.createStoreFrameInst(tlScope, importVal, memObjVar_);
           // The same value that was validated above, not a fresh read.
           builder_.createStoreFrameInst(
               tlScope, actualMax, importedMemMaxVar_);
@@ -1088,12 +1299,21 @@ void WasmIRGen::createFunctions() {
               mismatch, linkErrorBB, acceptBB);
 
           builder_.setInsertionBlock(linkErrorBB);
-          helpers_.emitLinkError(
-              builder_.getLiteralString("incompatible import type"));
+          helpers_.emitLinkError(builder_.getLiteralString(
+              "import " + imp.moduleName + "." + imp.fieldName +
+              " is not a valid tag import"));
           builder_.createUnreachableInst();
 
           builder_.setInsertionBlock(acceptBB);
           tlEntry_ = acceptBB;
+          // Store the imported tag object. Every other import kind stores its
+          // validated value; tags did not, so the object was validated and
+          // then discarded, leaving throw/catch nothing to compare identity
+          // against.
+          if (importTagIdx < tagVars_.size())
+            builder_.createStoreFrameInst(
+                tlScope, importVal, tagVars_[importTagIdx]);
+          ++importTagIdx;
           break;
         }
       }
@@ -1113,6 +1333,23 @@ void WasmIRGen::createFunctions() {
   }
 
   // Create the per-module return buffer if needed.
+  //
+  // REENTRANCY INVARIANT: there is exactly one return buffer per module
+  // instance, shared by every function that returns an i64 or a multi-value
+  // result. A function marshals its results into the buffer and its caller
+  // reads them straight back out, so the buffer must not be written again
+  // between those two points. Any operation that could re-enter Wasm --
+  // calling back into an export, or running arbitrary JS such as a property
+  // getter, valueOf, or a Proxy trap -- while a result sits unread in the
+  // buffer will overwrite it. The marshalling code therefore computes every
+  // result into an SSA value first and only then stores them (see
+  // emitRetBufLoads / the multi-value trampoline), so no user code runs
+  // between the write and the read.
+  //
+  // The buffer is built from globalThis.ArrayBuffer / Uint32Array /
+  // Float64Array, which a script can replace, so the native builtins that
+  // read it (writeI64ToRetBuf and friends) treat arg0 as untrusted and
+  // reject a non-typed-array rather than casting it blindly.
   if (retBufSize_ > 0) {
     auto *ArrayBufferCtor =
         builder_.createTryLoadGlobalPropertyInst("ArrayBuffer");
@@ -1129,7 +1366,13 @@ void WasmIRGen::createFunctions() {
     builder_.createStoreFrameInst(tlScope, retBufF, retBufFVar_);
   }
 
-  // Create and initialize tables, and apply element segments.
+  // Tag identity is needed by throw/catch whether or not the module has any
+  // tables, so this is not gated on numTables.
+  createTagObjects(tlScope);
+
+  // Create and initialize tables, and apply element segments. Interned type
+  // ids are only consumed by element segments and call_indirect, both of
+  // which require a table.
   if (numTables > 0) {
     internTypeIds(tlScope);
     createTables(tlScope);
@@ -1273,6 +1516,15 @@ void WasmIRGen::finalizeModule() {
   bool hasMemory = moduleInfo_.totalMemoryCount() > 0;
 
   // Ensure insertion is at the instantiate function's entry block.
+  // tlEntry_ names the block the instantiate body continues in. Every helper
+  // that splits that body into more blocks must leave tlEntry_ pointing at
+  // the last, still-open one; an already-terminated block here means one of
+  // them broke that contract and everything emitted below is unreachable.
+  assert(
+      !tlEntry_->getTerminator() &&
+      "tlEntry_ must name an unterminated block: helpers that split the "
+      "instantiate body must leave it pointing at the block emission "
+      "continues in");
   builder_.setInsertionBlock(tlEntry_);
 
   // Running offset into the binary data storage blob. Each data segment's
@@ -1337,13 +1589,13 @@ void WasmIRGen::finalizeModule() {
     // array and computes its own offsets.
     binaryDataOffset = 0;
     // Compute initial memory size for data segment bounds checking.
-    // For locally-defined memories, the initial size is known exactly.
-    // For imported memories, use the declared minimum as the actual size
-    // — Hermes creates a fresh ArrayBuffer of this size (imported
-    // Memory objects are not wired in yet). Compile-time bounds checking
-    // against this value is correct when the minimum is > 0. When the
-    // minimum is 0, we skip checking because the actual host-provided
-    // memory may be larger.
+    // Only a locally-defined memory has a size known at compile time. An
+    // import declaration states a *minimum*, and the module operates on
+    // whatever memory it is actually given, which may be larger -- so a
+    // segment past the declared minimum is not out of bounds, and refusing
+    // it at compile time rejects modules other engines accept. Those
+    // segments are left to the runtime bounds check, which measures the
+    // memory in hand.
     uint64_t memoryBytes = 0;
     bool canBoundsCheck = false;
     if (!moduleInfo_.memories.empty()) {
@@ -1351,17 +1603,6 @@ void WasmIRGen::finalizeModule() {
           static_cast<uint64_t>(moduleInfo_.memories[0].limits.initial) *
           65536;
       canBoundsCheck = true;
-    } else {
-      for (const auto &imp : moduleInfo_.imports) {
-        if (imp.kind == WasmExternalKind::Memory) {
-          memoryBytes =
-              static_cast<uint64_t>(imp.memoryType.limits.initial) *
-              65536;
-          if (memoryBytes > 0)
-            canBoundsCheck = true;
-          break;
-        }
-      }
     }
 
     for (uint32_t si = 0; si < moduleInfo_.dataSegments.size(); ++si) {
@@ -1642,7 +1883,12 @@ void WasmIRGen::finalizeModule() {
   }
 
   // Switch back to the instantiate function's entry block to emit closures
-  // and the exports object.
+  // and the exports object. As above, tlEntry_ must still be unterminated.
+  assert(
+      !tlEntry_->getTerminator() &&
+      "tlEntry_ must name an unterminated block: helpers that split the "
+      "instantiate body must leave it pointing at the block emission "
+      "continues in");
   builder_.setInsertionBlock(tlEntry_);
 
   auto *exportsObj = builder_.createAllocObjectLiteralInst({});
@@ -1758,78 +2004,28 @@ void WasmIRGen::finalizeModule() {
   for (const auto &exp : moduleInfo_.exports) {
     if (exp.kind != WasmExternalKind::Tag)
       continue;
-    const WasmFuncType &tagType = moduleInfo_.getTagType(exp.index);
-    std::string typeStr = buildTagTypeString(tagType);
-
-    auto *tagObj = builder_.createAllocObjectLiteralInst({});
-    builder_.createStorePropertyStrictInst(
-        builder_.getLiteralString(typeStr),
-        tagObj,
-        builder_.getLiteralString("__wasm_type__"));
+    // Export the object that identifies this tag, not a fresh one: an
+    // importer compares identity against it, so a copy would never match.
+    auto *tagObj = builder_.createLoadFrameInst(tlScope, tagVars_[exp.index]);
     builder_.createStorePropertyStrictInst(
         tagObj, exportsObj, builder_.getLiteralString(exp.name));
   }
 
-  // Add memory exports as WebAssembly.Memory objects.
-  // The Memory constructor sets __wasm_type__, __wasm_min__, __wasm_max__
-  // automatically. The Memory has its own buffer — it does NOT share the
-  // module's internal linear memory (buffer sharing is a separate change).
-  Value *wasmMemoryCtor = nullptr;
-  bool hasMemoryExports = std::any_of(
-      moduleInfo_.exports.begin(),
-      moduleInfo_.exports.end(),
-      [](const WasmExport &e) {
-        return e.kind == WasmExternalKind::Memory;
-      });
-  if (hasMemoryExports) {
-    auto *wasmObj =
-        builder_.createTryLoadGlobalPropertyInst("WebAssembly");
-    wasmMemoryCtor = builder_.createLoadPropertyInst(
-        wasmObj, builder_.getLiteralString("Memory"));
-  }
-
+  // Add memory exports. There is nothing to construct: the module already
+  // operates on a WebAssembly.Memory, and that is the object to publish.
   for (const auto &exp : moduleInfo_.exports) {
     if (exp.kind != WasmExternalKind::Memory)
       continue;
 
-    // Build descriptor: {initial: N} or {initial: N, maximum: M}
-    auto *descriptor = builder_.createAllocObjectLiteralInst({});
-
-    // Determine memory limits from the memory index space.
-    // Imported memories come first, then defined memories.
-    uint32_t numImportedMemories = moduleInfo_.importedMemoryCount();
-    if (exp.index < numImportedMemories) {
-      // Re-exporting an imported memory. The import declaration is only a
-      // lower bound on the memory that was actually supplied, so publishing
-      // it would understate the memory: a module importing "m2" with a
-      // minimum the real memory satisfies would fail to link. Publish the
-      // actual values recorded from the imported object at validation time.
-      emitRuntimeLimits(
-          descriptor,
-          builder_.createLoadFrameInst(tlScope, importedMemMinVar_),
-          builder_.createLoadFrameInst(tlScope, importedMemMaxVar_));
-    } else {
-      const WasmMemoryType &mType =
-          moduleInfo_.memories[exp.index - numImportedMemories];
-      builder_.createStorePropertyStrictInst(
-          builder_.getLiteralNumber(
-              static_cast<double>(mType.limits.initial)),
-          descriptor,
-          builder_.getLiteralString("initial"));
-      if (mType.limits.hasMaximum) {
-        builder_.createStorePropertyStrictInst(
-            builder_.getLiteralNumber(
-                static_cast<double>(mType.limits.maximum)),
-            descriptor,
-            builder_.getLiteralString("maximum"));
-      }
-    }
-
-    // Construct: new WebAssembly.Memory(descriptor)
-    auto *memObj = emitNew(wasmMemoryCtor, {descriptor});
-
+    // The memory the module operates on is a WebAssembly.Memory -- either
+    // constructed for a defined memory or supplied for an imported one.
+    // Export that same object. Re-exporting an import this way also gives
+    // the identity the spec requires, and its limits are its own, so nothing
+    // can understate them.
     builder_.createStorePropertyStrictInst(
-        memObj, exportsObj, builder_.getLiteralString(exp.name));
+        builder_.createLoadFrameInst(tlScope, memObjVar_),
+        exportsObj,
+        builder_.getLiteralString(exp.name));
   }
 
   // Add table exports as WebAssembly.Table objects.
@@ -1872,6 +2068,19 @@ void WasmIRGen::finalizeModule() {
       }
     } else {
       tType = moduleInfo_.tables[exp.index - numImportedTables];
+    }
+
+    // A defined funcref table already has a WebAssembly.Table -- the one whose
+    // funcs/types arrays are the module's storage. Publish that, so
+    // exports.tbl.get/set/grow/length operate on the module's real table
+    // rather than a disconnected copy. Its __wasm_funcs__/__wasm_types__ are
+    // already the module's arrays, so cross-module import still shares them.
+    if (!isImported && tType.elemType == WasmValType::FuncRef) {
+      builder_.createStorePropertyStrictInst(
+          builder_.createLoadFrameInst(tlScope, tableObjVars_[exp.index]),
+          exportsObj,
+          builder_.getLiteralString(exp.name));
+      continue;
     }
 
     // Build descriptor: {element: "anyfunc", initial: N}
@@ -2022,8 +2231,8 @@ Function *WasmIRGen::createExportWrapper(
       }
       case WasmValType::F32:
       case WasmValType::F64:
-        // Float/double: pass through (already a JS Number).
-        callArgs.push_back(paramVal);
+        // Coerce to number (ensures :number type for inlining correctness).
+        callArgs.push_back(builder_.createAsNumberInst(paramVal));
         break;
       default:
         // FuncRef, ExternRef, etc: pass through for now.
@@ -2227,9 +2436,14 @@ void WasmIRGen::createImportTrampoline(
             break;
           }
           case WasmValType::F32:
-          case WasmValType::F64:
-            vals.emplace_back(jsVal, nullptr);
+          case WasmValType::F64: {
+            // Same as the single-result case: the JS element is untyped.
+            Value *coerced = builder_.createAsNumberInst(jsVal);
+            if (funcType.results[i] == WasmValType::F32)
+              coerced = emitFround(coerced);
+            vals.emplace_back(coerced, nullptr);
             break;
+          }
           default:
             vals.emplace_back(jsVal, nullptr);
             break;
@@ -2269,9 +2483,14 @@ void WasmIRGen::createImportTrampoline(
             builder_.createAsInt32Inst(callResult));
         break;
       case WasmValType::F32:
+        // The JS callee can return anything, so convert rather than assume.
+        // Without this the result stays :any and any float arithmetic on it
+        // fails lowered-IR verification.
+        builder_.createReturnInst(
+            emitFround(builder_.createAsNumberInst(callResult)));
+        break;
       case WasmValType::F64:
-        // Float/double: return as-is (JS Numbers are doubles).
-        builder_.createReturnInst(callResult);
+        builder_.createReturnInst(builder_.createAsNumberInst(callResult));
         break;
       default:
         // FuncRef, ExternRef, etc: pass through for now.
@@ -2351,10 +2570,10 @@ void WasmIRGen::beginFunction(
       // i64 param: allocate lo and hi stack slots.
       auto *allocLo = builder_.createAllocStackInst(
           ("local_" + llvh::Twine(i) + "_lo").str(),
-          Type::createAnyType());
+          Type::createNumber());
       auto *allocHi = builder_.createAllocStackInst(
           ("local_" + llvh::Twine(i) + "_hi").str(),
-          Type::createAnyType());
+          Type::createNumber());
       locals_.push_back(allocLo);
       locals_.push_back(allocHi);
 
@@ -2368,12 +2587,28 @@ void WasmIRGen::beginFunction(
     } else {
       auto *alloc = builder_.createAllocStackInst(
           ("local_" + llvh::Twine(i)).str(),
-          Type::createAnyType());
+          wasmValTypeToIRType(funcType.params[i]));
       locals_.push_back(alloc);
 
       auto *param = currentFunc_->getJSDynamicParam(jsParamIdx);
-      builder_.createStoreStackInst(
-          builder_.createLoadParamInst(param), alloc);
+      Value *paramVal = builder_.createLoadParamInst(param);
+      // For an escapable function, coerce f32/f64 params to a genuine number
+      // before storing them into the :number local slot. The JSDynamicParam
+      // is :any there (see createFunctions / J4), so this AsNumberInst is not
+      // folded away and actually runs: a caller reaching this closure
+      // directly from JS may pass a non-number, and the float backend would
+      // otherwise read its raw bits. f32 additionally rounds to single
+      // precision. Non-escapable functions, and i32/i64 params, are stored
+      // raw -- their value is already established (a Wasm caller, or a
+      // re-coercion on use).
+      if (escapableFuncs_.count(funcIndex)) {
+        if (funcType.params[i] == WasmValType::F64) {
+          paramVal = builder_.createAsNumberInst(paramVal);
+        } else if (funcType.params[i] == WasmValType::F32) {
+          paramVal = emitFround(builder_.createAsNumberInst(paramVal));
+        }
+      }
+      builder_.createStoreStackInst(paramVal, alloc);
       jsParamIdx += 1;
     }
   }
@@ -2385,10 +2620,10 @@ void WasmIRGen::beginFunction(
       // i64 local: allocate lo and hi stack slots, both initialized to 0.
       auto *allocLo = builder_.createAllocStackInst(
           ("local_" + llvh::Twine(numParams + i) + "_lo").str(),
-          Type::createAnyType());
+          Type::createNumber());
       auto *allocHi = builder_.createAllocStackInst(
           ("local_" + llvh::Twine(numParams + i) + "_hi").str(),
-          Type::createAnyType());
+          Type::createNumber());
       locals_.push_back(allocLo);
       locals_.push_back(allocHi);
       builder_.createStoreStackInst(builder_.getLiteralNumber(0), allocLo);
@@ -2396,7 +2631,7 @@ void WasmIRGen::beginFunction(
     } else {
       auto *alloc = builder_.createAllocStackInst(
           ("local_" + llvh::Twine(numParams + i)).str(),
-          Type::createAnyType());
+          wasmValTypeToIRType(localTypes[i]));
       locals_.push_back(alloc);
 
       // Initialize locals to their zero value.
@@ -2641,19 +2876,18 @@ void WasmIRGen::onDrop() {
 // --- i32 arithmetic (D.3) ---
 
 void WasmIRGen::onI32Add() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *add = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryAddInstKind);
-  push(builder_.createAsInt32Inst(add));
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  push(builder_.createAsInt32Inst(
+      builder_.createFBinaryMathInst(ValueKind::FAddInstKind, lhs, rhs)));
 }
 
 void WasmIRGen::onI32Sub() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *sub = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinarySubtractInstKind);
-  push(builder_.createAsInt32Inst(sub));
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  push(builder_.createAsInt32Inst(
+      builder_.createFBinaryMathInst(
+          ValueKind::FSubtractInstKind, lhs, rhs)));
 }
 
 void WasmIRGen::onI32Mul() {
@@ -2663,49 +2897,62 @@ void WasmIRGen::onI32Mul() {
   Value *lhs = pop();
   auto *imul = builder_.createCallBuiltinInst(
       BuiltinMethod::Math_imul, {lhs, rhs});
+  imul->setType(Type::createNumber());
   push(imul);
 }
 
 void WasmIRGen::onI32And() {
   Value *rhs = pop();
   Value *lhs = pop();
-  push(builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryAndInstKind));
+  auto *inst = builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryAndInstKind);
+  inst->setType(Type::createNumber());
+  push(inst);
 }
 
 void WasmIRGen::onI32Or() {
   Value *rhs = pop();
   Value *lhs = pop();
-  push(builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryOrInstKind));
+  auto *inst = builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryOrInstKind);
+  inst->setType(Type::createNumber());
+  push(inst);
 }
 
 void WasmIRGen::onI32Xor() {
   Value *rhs = pop();
   Value *lhs = pop();
-  push(builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryXorInstKind));
+  auto *inst = builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryXorInstKind);
+  inst->setType(Type::createNumber());
+  push(inst);
 }
 
 void WasmIRGen::onI32Shl() {
   Value *rhs = pop();
   Value *lhs = pop();
-  push(builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryLeftShiftInstKind));
+  auto *inst = builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryLeftShiftInstKind);
+  inst->setType(Type::createNumber());
+  push(inst);
 }
 
 void WasmIRGen::onI32ShrS() {
   Value *rhs = pop();
   Value *lhs = pop();
-  push(builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryRightShiftInstKind));
+  auto *inst = builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryRightShiftInstKind);
+  inst->setType(Type::createNumber());
+  push(inst);
 }
 
 void WasmIRGen::onI32ShrU() {
   Value *rhs = pop();
   Value *lhs = pop();
-  push(builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryUnsignedRightShiftInstKind));
+  auto *inst = builder_.createBinaryOperatorInst(
+      lhs, rhs, ValueKind::BinaryUnsignedRightShiftInstKind);
+  inst->setType(Type::createNumber());
+  push(inst);
 }
 
 // --- i32 trapping division (F.2) ---
@@ -2788,10 +3035,13 @@ void WasmIRGen::onI32Extend8S() {
   // Sign-extend from 8 bits: (a << 24) >> 24
   auto *shifted = builder_.createBinaryOperatorInst(
       a, builder_.getLiteralNumber(24), ValueKind::BinaryLeftShiftInstKind);
-  push(builder_.createBinaryOperatorInst(
+  shifted->setType(Type::createNumber());
+  auto *result = builder_.createBinaryOperatorInst(
       shifted,
       builder_.getLiteralNumber(24),
-      ValueKind::BinaryRightShiftInstKind));
+      ValueKind::BinaryRightShiftInstKind);
+  result->setType(Type::createNumber());
+  push(result);
 }
 
 void WasmIRGen::onI32Extend16S() {
@@ -2801,31 +3051,34 @@ void WasmIRGen::onI32Extend16S() {
   // Sign-extend from 16 bits: (a << 16) >> 16
   auto *shifted = builder_.createBinaryOperatorInst(
       a, builder_.getLiteralNumber(16), ValueKind::BinaryLeftShiftInstKind);
-  push(builder_.createBinaryOperatorInst(
+  shifted->setType(Type::createNumber());
+  auto *result = builder_.createBinaryOperatorInst(
       shifted,
       builder_.getLiteralNumber(16),
-      ValueKind::BinaryRightShiftInstKind));
+      ValueKind::BinaryRightShiftInstKind);
+  result->setType(Type::createNumber());
+  push(result);
 }
 
 // --- i32 comparisons (D.4) ---
 
 void WasmIRGen::onI32Eq() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryStrictlyEqualInstKind);
-  // Convert boolean to i32 (true→1, false→0) via BitOr with 0.
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FEqualInstKind, lhs, rhs);
+  // Convert boolean to i32 (true→1, false→0).
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
+  push(asI32);
 }
 
 void WasmIRGen::onI32Ne() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryStrictlyNotEqualInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FNotEqualInstKind, lhs, rhs);
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
+  push(asI32);
 }
 
 void WasmIRGen::onI32LtS() {
@@ -2834,10 +3087,10 @@ void WasmIRGen::onI32LtS() {
   // Signed: cast both operands to int32 before comparing.
   auto *lhsI32 = builder_.createAsInt32Inst(lhs);
   auto *rhsI32 = builder_.createAsInt32Inst(rhs);
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhsI32, rhsI32, ValueKind::BinaryLessThanInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FLessThanInstKind, lhsI32, rhsI32);
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
+  push(asI32);
 }
 
 void WasmIRGen::onI32GtS() {
@@ -2845,10 +3098,10 @@ void WasmIRGen::onI32GtS() {
   Value *lhs = pop();
   auto *lhsI32 = builder_.createAsInt32Inst(lhs);
   auto *rhsI32 = builder_.createAsInt32Inst(rhs);
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhsI32, rhsI32, ValueKind::BinaryGreaterThanInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FGreaterThanInstKind, lhsI32, rhsI32);
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
+  push(asI32);
 }
 
 void WasmIRGen::onI32LeS() {
@@ -2856,10 +3109,10 @@ void WasmIRGen::onI32LeS() {
   Value *lhs = pop();
   auto *lhsI32 = builder_.createAsInt32Inst(lhs);
   auto *rhsI32 = builder_.createAsInt32Inst(rhs);
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhsI32, rhsI32, ValueKind::BinaryLessThanOrEqualInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FLessThanOrEqualInstKind, lhsI32, rhsI32);
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
+  push(asI32);
 }
 
 void WasmIRGen::onI32GeS() {
@@ -2867,10 +3120,10 @@ void WasmIRGen::onI32GeS() {
   Value *lhs = pop();
   auto *lhsI32 = builder_.createAsInt32Inst(lhs);
   auto *rhsI32 = builder_.createAsInt32Inst(rhs);
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhsI32, rhsI32, ValueKind::BinaryGreaterThanOrEqualInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FGreaterThanOrEqualInstKind, lhsI32, rhsI32);
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
+  push(asI32);
 }
 
 void WasmIRGen::onI32LtU() {
@@ -2879,10 +3132,10 @@ void WasmIRGen::onI32LtU() {
   // Unsigned: cast both operands to uint32 before comparing.
   auto *lhsU32 = builder_.createAsUint32Inst(lhs);
   auto *rhsU32 = builder_.createAsUint32Inst(rhs);
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhsU32, rhsU32, ValueKind::BinaryLessThanInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FLessThanInstKind, lhsU32, rhsU32);
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
+  push(asI32);
 }
 
 void WasmIRGen::onI32GtU() {
@@ -2890,10 +3143,10 @@ void WasmIRGen::onI32GtU() {
   Value *lhs = pop();
   auto *lhsU32 = builder_.createAsUint32Inst(lhs);
   auto *rhsU32 = builder_.createAsUint32Inst(rhs);
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhsU32, rhsU32, ValueKind::BinaryGreaterThanInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FGreaterThanInstKind, lhsU32, rhsU32);
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
+  push(asI32);
 }
 
 void WasmIRGen::onI32LeU() {
@@ -2901,10 +3154,10 @@ void WasmIRGen::onI32LeU() {
   Value *lhs = pop();
   auto *lhsU32 = builder_.createAsUint32Inst(lhs);
   auto *rhsU32 = builder_.createAsUint32Inst(rhs);
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhsU32, rhsU32, ValueKind::BinaryLessThanOrEqualInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FLessThanOrEqualInstKind, lhsU32, rhsU32);
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
+  push(asI32);
 }
 
 void WasmIRGen::onI32GeU() {
@@ -2912,21 +3165,21 @@ void WasmIRGen::onI32GeU() {
   Value *lhs = pop();
   auto *lhsU32 = builder_.createAsUint32Inst(lhs);
   auto *rhsU32 = builder_.createAsUint32Inst(rhs);
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhsU32, rhsU32, ValueKind::BinaryGreaterThanOrEqualInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FGreaterThanOrEqualInstKind, lhsU32, rhsU32);
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
+  push(asI32);
 }
 
 void WasmIRGen::onI32Eqz() {
-  Value *val = pop();
+  Value *val = asNumber(pop());
   // eqz(x) == (x === 0) → boolean → i32.
-  auto *cmp = builder_.createBinaryOperatorInst(
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FEqualInstKind,
       val,
-      builder_.getLiteralNumber(0),
-      ValueKind::BinaryStrictlyEqualInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+      builder_.getLiteralNumber(0));
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
+  push(asI32);
 }
 
 // --- Control flow (D.6, D.7) ---
@@ -3077,7 +3330,7 @@ void WasmIRGen::onIf(
   }
 
   // Pop the condition.
-  Value *cond = pop();
+  Value *cond = peekThroughAsInt32(pop());
 
   // Create thenBlock, elseBlock, mergeBlock.
   auto *thenBlock = builder_.createBasicBlock(currentFunc_);
@@ -3385,7 +3638,7 @@ void WasmIRGen::onBrIf(uint32_t depth) {
   entry.branchTargeted = true;
 
   // Pop the condition.
-  Value *cond = pop();
+  Value *cond = peekThroughAsInt32(pop());
 
   // Create a fallthrough block for when the condition is false.
   auto *fallthroughBlock = builder_.createBasicBlock(currentFunc_);
@@ -3621,6 +3874,14 @@ void WasmIRGen::onCall(uint32_t funcIndex) {
       /* thisValue */ builder_.getLiteralUndefined(),
       args);
 
+  // Set the return type on the CallInst based on the known callee signature.
+  if (funcType.results.empty())
+    call->setType(Type::createUndefined());
+  else if (!needsReturnBuffer(funcType))
+    call->setType(wasmValTypeToIRType(funcType.results[0]));
+  else
+    call->setType(Type::createNumber());
+
   // Push return values onto the stack.
   if (needsReturnBuffer(funcType)) {
     // All results are in the return buffer. Read them out.
@@ -3698,6 +3959,14 @@ void WasmIRGen::onCallIndirect(uint32_t sigIndex, uint32_t tableIndex) {
       /* newTarget */ builder_.getLiteralUndefined(),
       /* thisValue */ builder_.getLiteralUndefined(),
       args);
+
+  // Set the return type based on the call_indirect signature.
+  if (funcType.results.empty())
+    call->setType(Type::createUndefined());
+  else if (!needsReturnBuffer(funcType))
+    call->setType(wasmValTypeToIRType(funcType.results[0]));
+  else
+    call->setType(Type::createNumber());
 
   // Push return values onto the stack.
   if (needsReturnBuffer(funcType)) {
@@ -3792,8 +4061,10 @@ void WasmIRGen::onI64And() {
   auto [loA, hiA] = popI64();
   auto *lo = builder_.createBinaryOperatorInst(
       loA, loB, ValueKind::BinaryAndInstKind);
+  lo->setType(Type::createNumber());
   auto *hi = builder_.createBinaryOperatorInst(
       hiA, hiB, ValueKind::BinaryAndInstKind);
+  hi->setType(Type::createNumber());
   pushI64(lo, hi);
 }
 
@@ -3804,8 +4075,10 @@ void WasmIRGen::onI64Or() {
   auto [loA, hiA] = popI64();
   auto *lo = builder_.createBinaryOperatorInst(
       loA, loB, ValueKind::BinaryOrInstKind);
+  lo->setType(Type::createNumber());
   auto *hi = builder_.createBinaryOperatorInst(
       hiA, hiB, ValueKind::BinaryOrInstKind);
+  hi->setType(Type::createNumber());
   pushI64(lo, hi);
 }
 
@@ -3816,8 +4089,10 @@ void WasmIRGen::onI64Xor() {
   auto [loA, hiA] = popI64();
   auto *lo = builder_.createBinaryOperatorInst(
       loA, loB, ValueKind::BinaryXorInstKind);
+  lo->setType(Type::createNumber());
   auto *hi = builder_.createBinaryOperatorInst(
       hiA, hiB, ValueKind::BinaryXorInstKind);
+  hi->setType(Type::createNumber());
   pushI64(lo, hi);
 }
 
@@ -3903,12 +4178,23 @@ void WasmIRGen::onI64Popcnt() {
 // --- i64 comparisons (G.3) ---
 // These take i64 operands and return i32 (0 or 1). The result is pushed
 // as a single i32 value (not an i64 pair).
+// Inlined as IR rather than calling builtins, enabling subsequent
+// optimization passes (constant folding, DCE, compare-and-branch fusion).
 
 void WasmIRGen::onI64Eqz() {
   if (unreachable_)
     return;
   auto [lo, hi] = popI64();
-  push(helpers_.emitI64Eqz(lo, hi));
+  // Coerce to consistent encoding before comparing.
+  auto *loI = ensureInt32(lo);
+  auto *hiI = ensureInt32(hi);
+  // (lo | hi) == 0: non-zero if either half is non-zero.
+  auto *combined = builder_.createBinaryOperatorInst(
+      loI, hiI, ValueKind::BinaryOrInstKind);
+  combined->setType(Type::createNumber());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FEqualInstKind, combined, builder_.getLiteralNumber(0));
+  push(builder_.createAsInt32Inst(cmp));
 }
 
 void WasmIRGen::onI64Eq() {
@@ -3916,7 +4202,25 @@ void WasmIRGen::onI64Eq() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  push(helpers_.emitI64Eq(loA, hiA, loB, hiB));
+  // Coerce all halves to consistent encoding (signed int32) before XOR.
+  // Raw stack values may be signed or unsigned doubles for the same bits.
+  auto *loA_i = ensureInt32(loA);
+  auto *loB_i = ensureInt32(loB);
+  auto *hiA_i = ensureInt32(hiA);
+  auto *hiB_i = ensureInt32(hiB);
+  // XOR each half: 0 if equal. OR the results: 0 iff both halves equal.
+  auto *xorLo = builder_.createBinaryOperatorInst(
+      loA_i, loB_i, ValueKind::BinaryXorInstKind);
+  xorLo->setType(Type::createNumber());
+  auto *xorHi = builder_.createBinaryOperatorInst(
+      hiA_i, hiB_i, ValueKind::BinaryXorInstKind);
+  xorHi->setType(Type::createNumber());
+  auto *combined = builder_.createBinaryOperatorInst(
+      xorLo, xorHi, ValueKind::BinaryOrInstKind);
+  combined->setType(Type::createNumber());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FEqualInstKind, combined, builder_.getLiteralNumber(0));
+  push(builder_.createAsInt32Inst(cmp));
 }
 
 void WasmIRGen::onI64Ne() {
@@ -3924,7 +4228,87 @@ void WasmIRGen::onI64Ne() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  push(helpers_.emitI64Ne(loA, hiA, loB, hiB));
+  // Coerce all halves to consistent encoding before XOR.
+  auto *loA_i = ensureInt32(loA);
+  auto *loB_i = ensureInt32(loB);
+  auto *hiA_i = ensureInt32(hiA);
+  auto *hiB_i = ensureInt32(hiB);
+  // XOR each half, OR: non-zero iff any half differs.
+  auto *xorLo = builder_.createBinaryOperatorInst(
+      loA_i, loB_i, ValueKind::BinaryXorInstKind);
+  xorLo->setType(Type::createNumber());
+  auto *xorHi = builder_.createBinaryOperatorInst(
+      hiA_i, hiB_i, ValueKind::BinaryXorInstKind);
+  xorHi->setType(Type::createNumber());
+  auto *combined = builder_.createBinaryOperatorInst(
+      xorLo, xorHi, ValueKind::BinaryOrInstKind);
+  combined->setType(Type::createNumber());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FNotEqualInstKind, combined, builder_.getLiteralNumber(0));
+  push(builder_.createAsInt32Inst(cmp));
+}
+
+Value *WasmIRGen::ensureInt32(Value *val) {
+  switch (val->getKind()) {
+    case ValueKind::AsInt32InstKind:
+    case ValueKind::BinaryAndInstKind:
+    case ValueKind::BinaryOrInstKind:
+    case ValueKind::BinaryXorInstKind:
+    case ValueKind::BinaryLeftShiftInstKind:
+    case ValueKind::BinaryRightShiftInstKind:
+      return val;
+    default:
+      return builder_.createAsInt32Inst(val);
+  }
+}
+
+Value *WasmIRGen::ensureUint32(Value *val) {
+  switch (val->getKind()) {
+    case ValueKind::AsUint32InstKind:
+    case ValueKind::BinaryUnsignedRightShiftInstKind:
+      return val;
+    default:
+      return builder_.createAsUint32Inst(val);
+  }
+}
+
+Value *WasmIRGen::emitI64OrderedCmp(
+    Value *loA,
+    Value *hiA,
+    Value *loB,
+    Value *hiB,
+    ValueKind hiOp,
+    ValueKind loOp,
+    bool hiSigned) {
+  // Coerce hi words: signed (ensureInt32) or unsigned (ensureUint32).
+  Value *hiA_c = hiSigned ? ensureInt32(hiA) : ensureUint32(hiA);
+  Value *hiB_c = hiSigned ? ensureInt32(hiB) : ensureUint32(hiB);
+  // Lo words always use unsigned interpretation for ordering.
+  auto *loA_u = ensureUint32(loA);
+  auto *loB_u = ensureUint32(loB);
+
+  // hiOp on coerced hi words. FCompareInst auto-sets type to boolean.
+  auto *hiCmp = builder_.createFCompareInst(hiOp, hiA_c, hiB_c);
+  // Equality on coerced hi words. We reuse the same coerced values
+  // because raw stack values may have inconsistent encodings (signed
+  // vs unsigned doubles for the same 32-bit value).
+  auto *hiEq = builder_.createFCompareInst(
+      ValueKind::FEqualInstKind, hiA_c, hiB_c);
+  // loOp on unsigned lo words.
+  auto *loCmp = builder_.createFCompareInst(loOp, loA_u, loB_u);
+
+  // Combine: hiCmp || (hiEq && loCmp)
+  // AsInt32Inst converts boolean to i32 (auto-sets type).
+  auto *hiCmpI = builder_.createAsInt32Inst(hiCmp);
+  auto *hiEqI = builder_.createAsInt32Inst(hiEq);
+  auto *loCmpI = builder_.createAsInt32Inst(loCmp);
+  auto *eqAndLo = builder_.createBinaryOperatorInst(
+      hiEqI, loCmpI, ValueKind::BinaryAndInstKind);
+  eqAndLo->setType(Type::createNumber());
+  auto *result = builder_.createBinaryOperatorInst(
+      hiCmpI, eqAndLo, ValueKind::BinaryOrInstKind);
+  result->setType(Type::createNumber());
+  return result;
 }
 
 void WasmIRGen::onI64LtS() {
@@ -3932,7 +4316,9 @@ void WasmIRGen::onI64LtS() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  push(helpers_.emitI64LtS(loA, hiA, loB, hiB));
+  push(emitI64OrderedCmp(
+      loA, hiA, loB, hiB, ValueKind::FLessThanInstKind,
+      ValueKind::FLessThanInstKind, /*hiSigned=*/true));
 }
 
 void WasmIRGen::onI64GtS() {
@@ -3940,7 +4326,9 @@ void WasmIRGen::onI64GtS() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  push(helpers_.emitI64GtS(loA, hiA, loB, hiB));
+  push(emitI64OrderedCmp(
+      loA, hiA, loB, hiB, ValueKind::FGreaterThanInstKind,
+      ValueKind::FGreaterThanInstKind, /*hiSigned=*/true));
 }
 
 void WasmIRGen::onI64LeS() {
@@ -3948,7 +4336,9 @@ void WasmIRGen::onI64LeS() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  push(helpers_.emitI64LeS(loA, hiA, loB, hiB));
+  push(emitI64OrderedCmp(
+      loA, hiA, loB, hiB, ValueKind::FLessThanInstKind,
+      ValueKind::FLessThanOrEqualInstKind, /*hiSigned=*/true));
 }
 
 void WasmIRGen::onI64GeS() {
@@ -3956,7 +4346,9 @@ void WasmIRGen::onI64GeS() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  push(helpers_.emitI64GeS(loA, hiA, loB, hiB));
+  push(emitI64OrderedCmp(
+      loA, hiA, loB, hiB, ValueKind::FGreaterThanInstKind,
+      ValueKind::FGreaterThanOrEqualInstKind, /*hiSigned=*/true));
 }
 
 void WasmIRGen::onI64LtU() {
@@ -3964,7 +4356,9 @@ void WasmIRGen::onI64LtU() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  push(helpers_.emitI64LtU(loA, hiA, loB, hiB));
+  push(emitI64OrderedCmp(
+      loA, hiA, loB, hiB, ValueKind::FLessThanInstKind,
+      ValueKind::FLessThanInstKind, /*hiSigned=*/false));
 }
 
 void WasmIRGen::onI64GtU() {
@@ -3972,7 +4366,9 @@ void WasmIRGen::onI64GtU() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  push(helpers_.emitI64GtU(loA, hiA, loB, hiB));
+  push(emitI64OrderedCmp(
+      loA, hiA, loB, hiB, ValueKind::FGreaterThanInstKind,
+      ValueKind::FGreaterThanInstKind, /*hiSigned=*/false));
 }
 
 void WasmIRGen::onI64LeU() {
@@ -3980,7 +4376,9 @@ void WasmIRGen::onI64LeU() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  push(helpers_.emitI64LeU(loA, hiA, loB, hiB));
+  push(emitI64OrderedCmp(
+      loA, hiA, loB, hiB, ValueKind::FLessThanInstKind,
+      ValueKind::FLessThanOrEqualInstKind, /*hiSigned=*/false));
 }
 
 void WasmIRGen::onI64GeU() {
@@ -3988,7 +4386,9 @@ void WasmIRGen::onI64GeU() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  push(helpers_.emitI64GeU(loA, hiA, loB, hiB));
+  push(emitI64OrderedCmp(
+      loA, hiA, loB, hiB, ValueKind::FGreaterThanInstKind,
+      ValueKind::FGreaterThanOrEqualInstKind, /*hiSigned=*/false));
 }
 
 // --- i64 conversions: inline IR (G.4a) ---
@@ -4011,6 +4411,7 @@ void WasmIRGen::onI64ExtendI32S() {
       builder_.createAsInt32Inst(val),
       builder_.getLiteralNumber(31),
       ValueKind::BinaryRightShiftInstKind);
+  hi->setType(Type::createNumber());
   pushI64(val, hi);
 }
 
@@ -4030,14 +4431,17 @@ void WasmIRGen::onI64Extend8S() {
   // Sign-extend lowest 8 bits: lo = (lo << 24) >> 24, hi = (lo >> 31).
   auto *shifted = builder_.createBinaryOperatorInst(
       lo, builder_.getLiteralNumber(24), ValueKind::BinaryLeftShiftInstKind);
+  shifted->setType(Type::createNumber());
   auto *newLo = builder_.createBinaryOperatorInst(
       shifted,
       builder_.getLiteralNumber(24),
       ValueKind::BinaryRightShiftInstKind);
+  newLo->setType(Type::createNumber());
   auto *newHi = builder_.createBinaryOperatorInst(
       newLo,
       builder_.getLiteralNumber(31),
       ValueKind::BinaryRightShiftInstKind);
+  newHi->setType(Type::createNumber());
   pushI64(newLo, newHi);
 }
 
@@ -4049,14 +4453,17 @@ void WasmIRGen::onI64Extend16S() {
   // Sign-extend lowest 16 bits: lo = (lo << 16) >> 16, hi = (lo >> 31).
   auto *shifted = builder_.createBinaryOperatorInst(
       lo, builder_.getLiteralNumber(16), ValueKind::BinaryLeftShiftInstKind);
+  shifted->setType(Type::createNumber());
   auto *newLo = builder_.createBinaryOperatorInst(
       shifted,
       builder_.getLiteralNumber(16),
       ValueKind::BinaryRightShiftInstKind);
+  newLo->setType(Type::createNumber());
   auto *newHi = builder_.createBinaryOperatorInst(
       newLo,
       builder_.getLiteralNumber(31),
       ValueKind::BinaryRightShiftInstKind);
+  newHi->setType(Type::createNumber());
   pushI64(newLo, newHi);
 }
 
@@ -4070,47 +4477,49 @@ void WasmIRGen::onI64Extend32S() {
       builder_.createAsInt32Inst(lo),
       builder_.getLiteralNumber(31),
       ValueKind::BinaryRightShiftInstKind);
+  newHi->setType(Type::createNumber());
   pushI64(lo, newHi);
 }
 
 // --- f64 arithmetic (E.1) ---
 // We use BinaryOperatorInst (not FBinaryMathInst) because the F-prefixed
 // instructions require number-typed inputs, but our values are loaded from
-// AllocStackInst with :any type. The regular BinaryOperatorInst works
-// correctly on number values and can be optimized to F-instructions later.
+// Wasm operands are statically typed as :number, so we emit typed
+// F-instructions directly (FAddInst, FCompareInst, FNegate, etc.).
+// Values popped from the Wasm stack are wrapped in asNumber() to ensure
+// they are typed as :number, since some IR instructions (calls, loads)
+// produce :any even though the Wasm type system guarantees number.
 
 void WasmIRGen::onF64Add() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  push(builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryAddInstKind));
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  push(builder_.createFBinaryMathInst(ValueKind::FAddInstKind, lhs, rhs));
 }
 
 void WasmIRGen::onF64Sub() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  push(builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinarySubtractInstKind));
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  push(builder_.createFBinaryMathInst(
+      ValueKind::FSubtractInstKind, lhs, rhs));
 }
 
 void WasmIRGen::onF64Mul() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  push(builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryMultiplyInstKind));
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  push(builder_.createFBinaryMathInst(
+      ValueKind::FMultiplyInstKind, lhs, rhs));
 }
 
 void WasmIRGen::onF64Div() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  push(builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryDivideInstKind));
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  push(builder_.createFBinaryMathInst(
+      ValueKind::FDivideInstKind, lhs, rhs));
 }
 
 void WasmIRGen::onF64Neg() {
-  Value *val = pop();
-  push(builder_.createUnaryOperatorInst(
-      val, ValueKind::UnaryMinusInstKind));
+  Value *val = asNumber(pop());
+  push(builder_.createFUnaryMathInst(ValueKind::FNegateKind, val));
 }
 
 void WasmIRGen::onF64Abs() {
@@ -4156,64 +4565,61 @@ void WasmIRGen::onF64Max() {
 }
 
 // --- f64 comparisons (E.1) ---
-// Use BinaryStrictlyEqualInst/etc. (same pattern as i32 comparisons in D.4).
-// For float comparisons, strict equality works correctly: NaN !== NaN,
-// and the ordering comparisons follow IEEE 754 semantics (NaN comparisons
-// return false, which is correct for Wasm).
+// Use FCompareInst since both operands are :number. The result is :boolean,
+// converted to i32 (0/1) via |0.
 
 void WasmIRGen::onF64Eq() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryStrictlyEqualInstKind);
-  // Convert boolean to i32 (true→1, false→0) via BitOr with 0.
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FEqualInstKind, lhs, rhs);
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
+  push(asI32);
 }
 
 void WasmIRGen::onF64Ne() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryStrictlyNotEqualInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FNotEqualInstKind, lhs, rhs);
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
+  push(asI32);
 }
 
 void WasmIRGen::onF64Lt() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryLessThanInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FLessThanInstKind, lhs, rhs);
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
+  push(asI32);
 }
 
 void WasmIRGen::onF64Gt() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryGreaterThanInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FGreaterThanInstKind, lhs, rhs);
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
+  push(asI32);
 }
 
 void WasmIRGen::onF64Le() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryLessThanOrEqualInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FLessThanOrEqualInstKind, lhs, rhs);
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
+  push(asI32);
 }
 
 void WasmIRGen::onF64Ge() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryGreaterThanOrEqualInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FGreaterThanOrEqualInstKind, lhs, rhs);
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
+  push(asI32);
 }
 
 // --- f32 arithmetic (E.2) ---
@@ -4222,37 +4628,37 @@ void WasmIRGen::onF64Ge() {
 // onF32Const, so they don't need fround.
 
 void WasmIRGen::onF32Add() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  push(emitFround(builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryAddInstKind)));
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  push(emitFround(builder_.createFBinaryMathInst(
+      ValueKind::FAddInstKind, lhs, rhs)));
 }
 
 void WasmIRGen::onF32Sub() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  push(emitFround(builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinarySubtractInstKind)));
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  push(emitFround(builder_.createFBinaryMathInst(
+      ValueKind::FSubtractInstKind, lhs, rhs)));
 }
 
 void WasmIRGen::onF32Mul() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  push(emitFround(builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryMultiplyInstKind)));
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  push(emitFround(builder_.createFBinaryMathInst(
+      ValueKind::FMultiplyInstKind, lhs, rhs)));
 }
 
 void WasmIRGen::onF32Div() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  push(emitFround(builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryDivideInstKind)));
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  push(emitFround(builder_.createFBinaryMathInst(
+      ValueKind::FDivideInstKind, lhs, rhs)));
 }
 
 void WasmIRGen::onF32Neg() {
-  Value *val = pop();
-  push(emitFround(builder_.createUnaryOperatorInst(
-      val, ValueKind::UnaryMinusInstKind)));
+  Value *val = asNumber(pop());
+  push(emitFround(builder_.createFUnaryMathInst(
+      ValueKind::FNegateKind, val)));
 }
 
 void WasmIRGen::onF32Abs() {
@@ -4305,62 +4711,60 @@ void WasmIRGen::onF32Max() {
 }
 
 // --- f32 comparisons (E.3) ---
-// Same pattern as f64 comparisons. f32 values are represented as doubles
-// that are already f32-precise, so comparisons work correctly including
-// NaN handling (IEEE 754).
+// Same pattern as f64 comparisons. Use FCompareInst since operands are :number.
 
 void WasmIRGen::onF32Eq() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryStrictlyEqualInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FEqualInstKind, lhs, rhs);
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
+  push(asI32);
 }
 
 void WasmIRGen::onF32Ne() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryStrictlyNotEqualInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FNotEqualInstKind, lhs, rhs);
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
+  push(asI32);
 }
 
 void WasmIRGen::onF32Lt() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryLessThanInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FLessThanInstKind, lhs, rhs);
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
+  push(asI32);
 }
 
 void WasmIRGen::onF32Gt() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryGreaterThanInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FGreaterThanInstKind, lhs, rhs);
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
+  push(asI32);
 }
 
 void WasmIRGen::onF32Le() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryLessThanOrEqualInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FLessThanOrEqualInstKind, lhs, rhs);
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
+  push(asI32);
 }
 
 void WasmIRGen::onF32Ge() {
-  Value *rhs = pop();
-  Value *lhs = pop();
-  auto *cmp = builder_.createBinaryOperatorInst(
-      lhs, rhs, ValueKind::BinaryGreaterThanOrEqualInstKind);
-  push(builder_.createBinaryOperatorInst(
-      cmp, builder_.getLiteralNumber(0), ValueKind::BinaryOrInstKind));
+  Value *rhs = asNumber(pop());
+  Value *lhs = asNumber(pop());
+  auto *cmp = builder_.createFCompareInst(
+      ValueKind::FGreaterThanOrEqualInstKind, lhs, rhs);
+  auto *asI32 = builder_.createAsInt32Inst(cmp);
+  push(asI32);
 }
 
 // --- f64/f32 copysign (F.5) ---
@@ -4747,7 +5151,11 @@ void WasmIRGen::onCatch(uint32_t tagIndex) {
   }
 
   // Check if the caught exception matches this tag.
-  auto *tagLit = builder_.getLiteralNumber(static_cast<double>(tagIndex));
+  // The tag's identity, not its module-local index: another module numbers
+  // its tags differently, so an index matched the wrong handler across a
+  // module boundary.
+  auto *tagLit =
+      builder_.createLoadFrameInst(parentScopeInst_, tagVars_[tagIndex]);
   auto *matchResult = helpers_.emitMatchException(entry.caughtValue, tagLit);
 
   // Compare: matchResult !== undefined → match.
@@ -4863,7 +5271,11 @@ void WasmIRGen::onThrow(uint32_t tagIndex) {
   std::reverse(stackValues.begin(), stackValues.end());
 
   // Create the exception object via the builtin.
-  auto *tagLit = builder_.getLiteralNumber(static_cast<double>(tagIndex));
+  // The tag's identity, not its module-local index: another module numbers
+  // its tags differently, so an index matched the wrong handler across a
+  // module boundary.
+  auto *tagLit =
+      builder_.createLoadFrameInst(parentScopeInst_, tagVars_[tagIndex]);
   auto *exceptionObj = helpers_.emitCreateException(tagLit, stackValues);
 
   // Throw it.
@@ -4987,7 +5399,21 @@ void WasmIRGen::push(Value *v) {
 }
 
 Value *WasmIRGen::emitFround(Value *val) {
-  return builder_.createCallBuiltinInst(BuiltinMethod::Math_fround, {val});
+  auto *inst = builder_.createCallBuiltinInst(
+      BuiltinMethod::Math_fround, {val});
+  inst->setType(Type::createNumber());
+  return inst;
+}
+
+Value *WasmIRGen::asNumber(Value *val) {
+  if (val->getType().isNumberType())
+    return val;
+  // A real conversion, not UnionNarrowTrustedInst. The verifier does not check
+  // UnionNarrowTrustedInst, so asserting here would silence the very check that
+  // catches a non-number reaching FBinaryMathInst/FCompareInst. Values that are
+  // already numbers return above, so this only costs anything where the type is
+  // genuinely unknown -- which is exactly where the assertion would be unsound.
+  return builder_.createAsNumberInst(val);
 }
 
 void WasmIRGen::pushI64(Value *lo, Value *hi) {
@@ -5174,32 +5600,50 @@ Value *WasmIRGen::emitNew(Value *constructor, llvh::ArrayRef<Value *> args) {
 }
 
 void WasmIRGen::createMemoryViews(Instruction *tlScope) {
-  // Determine initial memory size in bytes.
-  // Use the first memory (Wasm MVP has at most one).
-  Value *memSize = nullptr;
-  if (!moduleInfo_.memories.empty()) {
-    // Locally-defined memory: use the declared initial size.
-    uint32_t initialPages = moduleInfo_.memories[0].limits.initial;
-    memSize = builder_.getLiteralNumber(
-        static_cast<double>(initialPages) * 65536.0);
-  } else if (importedMemMinVar_) {
-    // Imported memory: use the actual initial size from the imported
-    // WebAssembly.Memory object's __wasm_min__, not the import declaration's
-    // minimum (which is a lower bound, not the actual size).
-    auto *actualMin =
-        builder_.createLoadFrameInst(tlScope, importedMemMinVar_);
-    memSize = builder_.createBinaryOperatorInst(
-        actualMin,
-        builder_.getLiteralNumber(65536.0),
-        ValueKind::BinaryMultiplyInstKind);
+  // For a locally-defined memory, the backing store is a real
+  // WebAssembly.Memory rather than a bare ArrayBuffer, and the views below
+  // are built over *its* buffer. That is what makes an exported memory the
+  // same object the module operates on: exporting a separately-constructed
+  // Memory gives the embedder a buffer the module never writes to, and one
+  // that does not follow memory.grow. onMemoryGrow() installs the grown
+  // buffer back onto this object for the same reason.
+  //
+  // An imported memory still gets its own ArrayBuffer sized from the
+  // imported object's __wasm_min__; wiring the module's views onto the
+  // imported Memory itself is a separate change.
+  Value *buffer = nullptr;
+  if (memObjVar_ && moduleInfo_.memories.empty()) {
+    // Imported memory: the embedder's WebAssembly.Memory was recorded during
+    // import validation. Its buffer *is* the module's linear memory.
+    auto *memObj = builder_.createLoadFrameInst(tlScope, memObjVar_);
+    buffer = builder_.createLoadPropertyInst(
+        memObj, builder_.getLiteralString("buffer"));
+  } else if (!moduleInfo_.memories.empty()) {
+    const auto &limits = moduleInfo_.memories[0].limits;
+    auto *descriptor = builder_.createAllocObjectLiteralInst({});
+    builder_.createStorePropertyStrictInst(
+        builder_.getLiteralNumber(static_cast<double>(limits.initial)),
+        descriptor,
+        builder_.getLiteralString("initial"));
+    if (limits.hasMaximum) {
+      builder_.createStorePropertyStrictInst(
+          builder_.getLiteralNumber(static_cast<double>(limits.maximum)),
+          descriptor,
+          builder_.getLiteralString("maximum"));
+    }
+    auto *wasmObj = builder_.createTryLoadGlobalPropertyInst("WebAssembly");
+    auto *memCtor = builder_.createLoadPropertyInst(
+        wasmObj, builder_.getLiteralString("Memory"));
+    auto *memObj = emitNew(memCtor, {descriptor});
+    builder_.createStoreFrameInst(tlScope, memObj, memObjVar_);
+    buffer = builder_.createLoadPropertyInst(
+        memObj, builder_.getLiteralString("buffer"));
   } else {
-    // Fallback (shouldn't happen if hasMemory is checked before calling).
-    memSize = builder_.getLiteralNumber(0);
+    // No memory at all -- only reached if createMemoryViews() is called
+    // without a memory, which hasMemory guards against.
+    auto *abCtor = builder_.createTryLoadGlobalPropertyInst("ArrayBuffer");
+    buffer = emitNew(abCtor, {builder_.getLiteralNumber(0)});
   }
-
-  // Create: var buffer = new ArrayBuffer(memSize)
-  auto *abCtor = builder_.createTryLoadGlobalPropertyInst("ArrayBuffer");
-  auto *buffer = emitNew(abCtor, {memSize});
 
   // Create typed array views and store in top-level scope variables.
   static const char *ctorNames[NUM_MEM_VIEWS] = {
@@ -5285,24 +5729,30 @@ Value *WasmIRGen::emitUnalignedLoad(Value *addr, uint32_t numBytes) {
   builder_.createUnreachableInst();
 
   builder_.setInsertionBlock(okBlock);
+  // We proved b0 !== undefined, so it must be a Number.
+  auto *b0Typed = builder_.createUnionNarrowTrustedInst(
+      b0, Type::createNumber());
 
   if (numBytes == 1)
-    return b0;
+    return b0Typed;
 
   // Assemble multi-byte value: result = b0 | (b1 << 8) | (b2 << 16) | ...
-  Value *result = b0;
+  Value *result = b0Typed;
   for (uint32_t i = 1; i < numBytes; ++i) {
     auto *addrI = builder_.createBinaryOperatorInst(
         addr,
         builder_.getLiteralNumber(static_cast<double>(i)),
         ValueKind::BinaryAddInstKind);
+    addrI->setType(Type::createNumber());
     auto *bi = builder_.createLoadPropertyInst(view, addrI);
     auto *shifted = builder_.createBinaryOperatorInst(
         bi,
         builder_.getLiteralNumber(static_cast<double>(i * 8)),
         ValueKind::BinaryLeftShiftInstKind);
+    shifted->setType(Type::createNumber());
     result = builder_.createBinaryOperatorInst(
         result, shifted, ValueKind::BinaryOrInstKind);
+    result->setType(Type::createNumber());
   }
   return result;
 }
@@ -5319,6 +5769,7 @@ void WasmIRGen::emitUnalignedStore(
       value,
       builder_.getLiteralNumber(0xFF),
       ValueKind::BinaryAndInstKind);
+  b0->setType(Type::createNumber());
   builder_.createStorePropertyStrictInst(b0, view, addr);
 
   for (uint32_t i = 1; i < numBytes; ++i) {
@@ -5326,15 +5777,18 @@ void WasmIRGen::emitUnalignedStore(
         addr,
         builder_.getLiteralNumber(static_cast<double>(i)),
         ValueKind::BinaryAddInstKind);
+    addrI->setType(Type::createNumber());
     // Shift right by i*8, then mask to get byte i.
     auto *shifted = builder_.createBinaryOperatorInst(
         value,
         builder_.getLiteralNumber(static_cast<double>(i * 8)),
         ValueKind::BinaryUnsignedRightShiftInstKind);
+    shifted->setType(Type::createNumber());
     auto *bi = builder_.createBinaryOperatorInst(
         shifted,
         builder_.getLiteralNumber(0xFF),
         ValueKind::BinaryAndInstKind);
+    bi->setType(Type::createNumber());
     builder_.createStorePropertyStrictInst(bi, view, addrI);
   }
 }
@@ -5347,12 +5801,15 @@ Value *WasmIRGen::emitEffectiveAddr(Value *base, uint32_t offset) {
         base,
         builder_.getLiteralNumber(0),
         ValueKind::BinaryUnsignedRightShiftInstKind);
+    b->setType(Type::createNumber());
   }
   if (offset != 0) {
-    return builder_.createBinaryOperatorInst(
+    auto *addr = builder_.createBinaryOperatorInst(
         b,
         builder_.getLiteralNumber(static_cast<double>(offset)),
         ValueKind::BinaryAddInstKind);
+    addr->setType(Type::createNumber());
+    return addr;
   }
   return b;
 }
@@ -5364,6 +5821,7 @@ void WasmIRGen::emitMemoryBoundsCheck(Value *addr, uint32_t numBytes) {
       addr,
       builder_.getLiteralNumber(static_cast<double>(numBytes)),
       ValueKind::BinaryAddInstKind);
+  end->setType(Type::createNumber());
   auto *memLength = builder_.createLoadPropertyInst(
       loadMemView(HEAPU8), builder_.getLiteralString("length"));
   auto *isOOB = builder_.createBinaryOperatorInst(
@@ -5411,6 +5869,7 @@ void WasmIRGen::onLoad(
           addr,
           builder_.getLiteralNumber(4),
           ValueKind::BinaryAddInstKind);
+      addrHi->setType(Type::createNumber());
       auto *hi = emitUnalignedLoad(addrHi, 4);
       pushI64(lo, hi);
       return;
@@ -5421,6 +5880,7 @@ void WasmIRGen::onLoad(
         addr,
         builder_.getLiteralNumber(2),
         ValueKind::BinaryUnsignedRightShiftInstKind);
+    idx->setType(Type::createNumber());
     auto *lo = builder_.createLoadPropertyInst(view, idx);
     // Check OOB: if result === undefined, trap.
     auto *isUndef = builder_.createBinaryOperatorInst(
@@ -5436,13 +5896,20 @@ void WasmIRGen::onLoad(
     builder_.createUnreachableInst();
 
     builder_.setInsertionBlock(okBlock);
+    // We proved lo !== undefined, so it must be a Number.
+    auto *loTyped = builder_.createUnionNarrowTrustedInst(
+        lo, Type::createNumber());
     // Load the hi32 word at idx+1.
     auto *idx1 = builder_.createBinaryOperatorInst(
         idx,
         builder_.getLiteralNumber(1),
         ValueKind::BinaryAddInstKind);
+    idx1->setType(Type::createNumber());
     auto *hi = builder_.createLoadPropertyInst(view, idx1);
-    pushI64(lo, hi);
+    // hi is also a number from the typed array (we trust it since lo was valid).
+    auto *hiTyped = builder_.createUnionNarrowTrustedInst(
+        hi, Type::createNumber());
+    pushI64(loTyped, hiTyped);
     return;
   }
 
@@ -5465,8 +5932,11 @@ void WasmIRGen::onLoad(
     builder_.createUnreachableInst();
 
     builder_.setInsertionBlock(okBlock);
+    // We proved lo !== undefined, so it must be a Number.
+    auto *loNarrow = builder_.createUnionNarrowTrustedInst(
+        lo, Type::createNumber());
     // Result as i32 (lower byte), zero or sign extended.
-    auto *loI32 = builder_.createAsInt32Inst(lo);
+    auto *loI32 = builder_.createAsInt32Inst(loNarrow);
     // For i64: hi = sign-extended bits or 0.
     Value *hi;
     if (isSigned) {
@@ -5475,6 +5945,7 @@ void WasmIRGen::onLoad(
           loI32,
           builder_.getLiteralNumber(31),
           ValueKind::BinaryRightShiftInstKind);
+      hi->setType(Type::createNumber());
     } else {
       hi = builder_.getLiteralNumber(0);
     }
@@ -5496,10 +5967,12 @@ void WasmIRGen::onLoad(
             raw,
             builder_.getLiteralNumber(16),
             ValueKind::BinaryLeftShiftInstKind);
+        shifted->setType(Type::createNumber());
         loI32 = builder_.createBinaryOperatorInst(
             shifted,
             builder_.getLiteralNumber(16),
             ValueKind::BinaryRightShiftInstKind);
+        loI32->setType(Type::createNumber());
       } else {
         loI32 = raw;
       }
@@ -5509,6 +5982,7 @@ void WasmIRGen::onLoad(
             loI32,
             builder_.getLiteralNumber(31),
             ValueKind::BinaryRightShiftInstKind);
+        hi->setType(Type::createNumber());
       } else {
         hi = builder_.getLiteralNumber(0);
       }
@@ -5522,6 +5996,7 @@ void WasmIRGen::onLoad(
         addr,
         builder_.getLiteralNumber(1),
         ValueKind::BinaryUnsignedRightShiftInstKind);
+    idx->setType(Type::createNumber());
     auto *lo = builder_.createLoadPropertyInst(view, idx);
     auto *isUndef = builder_.createBinaryOperatorInst(
         lo,
@@ -5536,13 +6011,17 @@ void WasmIRGen::onLoad(
     builder_.createUnreachableInst();
 
     builder_.setInsertionBlock(okBlock);
-    auto *loI32 = builder_.createAsInt32Inst(lo);
+    // We proved lo !== undefined, so it must be a Number.
+    auto *loNarrow = builder_.createUnionNarrowTrustedInst(
+        lo, Type::createNumber());
+    auto *loI32 = builder_.createAsInt32Inst(loNarrow);
     Value *hi;
     if (isSigned) {
       hi = builder_.createBinaryOperatorInst(
           loI32,
           builder_.getLiteralNumber(31),
           ValueKind::BinaryRightShiftInstKind);
+      hi->setType(Type::createNumber());
     } else {
       hi = builder_.getLiteralNumber(0);
     }
@@ -5564,6 +6043,7 @@ void WasmIRGen::onLoad(
             loI32,
             builder_.getLiteralNumber(31),
             ValueKind::BinaryRightShiftInstKind);
+        hi->setType(Type::createNumber());
       } else {
         hi = builder_.getLiteralNumber(0);
       }
@@ -5577,6 +6057,7 @@ void WasmIRGen::onLoad(
         addr,
         builder_.getLiteralNumber(2),
         ValueKind::BinaryUnsignedRightShiftInstKind);
+    idx->setType(Type::createNumber());
     auto *lo = builder_.createLoadPropertyInst(view, idx);
     auto *isUndef = builder_.createBinaryOperatorInst(
         lo,
@@ -5591,19 +6072,23 @@ void WasmIRGen::onLoad(
     builder_.createUnreachableInst();
 
     builder_.setInsertionBlock(okBlock);
+    // We proved lo !== undefined, so it must be a Number.
+    auto *loNarrow = builder_.createUnionNarrowTrustedInst(
+        lo, Type::createNumber());
     Value *hi;
     if (isSigned) {
       // The HEAP32 (Int32Array) already returns a signed i32.
       // Sign-extend hi from bit 31.
-      auto *loI32 = builder_.createAsInt32Inst(lo);
+      auto *loI32 = builder_.createAsInt32Inst(loNarrow);
       hi = builder_.createBinaryOperatorInst(
           loI32,
           builder_.getLiteralNumber(31),
           ValueKind::BinaryRightShiftInstKind);
+      hi->setType(Type::createNumber());
     } else {
       hi = builder_.getLiteralNumber(0);
     }
-    pushI64(lo, hi);
+    pushI64(loNarrow, hi);
     return;
   }
 
@@ -5669,6 +6154,7 @@ void WasmIRGen::onLoad(
           addr,
           builder_.getLiteralNumber(4),
           ValueKind::BinaryAddInstKind);
+      addrHi->setType(Type::createNumber());
       auto *hi = emitUnalignedLoad(addrHi, 4);
       push(helpers_.emitF64ReinterpretI64(lo, hi));
     } else if (op == "f32.load") {
@@ -5683,10 +6169,13 @@ void WasmIRGen::onLoad(
           raw,
           builder_.getLiteralNumber(16),
           ValueKind::BinaryLeftShiftInstKind);
-      push(builder_.createBinaryOperatorInst(
+      shifted->setType(Type::createNumber());
+      auto *result = builder_.createBinaryOperatorInst(
           shifted,
           builder_.getLiteralNumber(16),
-          ValueKind::BinaryRightShiftInstKind));
+          ValueKind::BinaryRightShiftInstKind);
+      result->setType(Type::createNumber());
+      push(result);
     } else {
       auto *raw = emitUnalignedLoad(addr, numBytes);
       push(raw);
@@ -5703,6 +6192,7 @@ void WasmIRGen::onLoad(
         addr,
         builder_.getLiteralNumber(shift),
         ValueKind::BinaryUnsignedRightShiftInstKind);
+    idx->setType(Type::createNumber());
   } else {
     idx = addr;
   }
@@ -5725,7 +6215,10 @@ void WasmIRGen::onLoad(
   builder_.createUnreachableInst();
 
   builder_.setInsertionBlock(okBlock);
-  push(loaded);
+  // We proved loaded !== undefined, so it must be a Number.
+  auto *typed = builder_.createUnionNarrowTrustedInst(
+      loaded, Type::createNumber());
+  push(typed);
 }
 
 void WasmIRGen::onStore(
@@ -5757,6 +6250,7 @@ void WasmIRGen::onStore(
           addr,
           builder_.getLiteralNumber(4),
           ValueKind::BinaryAddInstKind);
+      addrHi->setType(Type::createNumber());
       emitUnalignedStore(addrHi, hi, 4);
       return;
     }
@@ -5767,11 +6261,13 @@ void WasmIRGen::onStore(
         addr,
         builder_.getLiteralNumber(2),
         ValueKind::BinaryUnsignedRightShiftInstKind);
+    idx->setType(Type::createNumber());
     builder_.createStorePropertyStrictInst(lo, view, idx);
     auto *idx1 = builder_.createBinaryOperatorInst(
         idx,
         builder_.getLiteralNumber(1),
         ValueKind::BinaryAddInstKind);
+    idx1->setType(Type::createNumber());
     builder_.createStorePropertyStrictInst(hi, view, idx1);
     return;
   }
@@ -5807,6 +6303,7 @@ void WasmIRGen::onStore(
         addr,
         builder_.getLiteralNumber(1),
         ValueKind::BinaryUnsignedRightShiftInstKind);
+    idx->setType(Type::createNumber());
     builder_.createStorePropertyStrictInst(lo, view, idx);
     return;
   }
@@ -5830,6 +6327,7 @@ void WasmIRGen::onStore(
         addr,
         builder_.getLiteralNumber(2),
         ValueKind::BinaryUnsignedRightShiftInstKind);
+    idx->setType(Type::createNumber());
     builder_.createStorePropertyStrictInst(lo, view, idx);
     return;
   }
@@ -5885,6 +6383,7 @@ void WasmIRGen::onStore(
           addr,
           builder_.getLiteralNumber(4),
           ValueKind::BinaryAddInstKind);
+      addrHi->setType(Type::createNumber());
       emitUnalignedStore(addrHi, hi, 4);
     } else if (op == "f32.store") {
       // Reinterpret f32 → i32, then byte-store.
@@ -5903,6 +6402,7 @@ void WasmIRGen::onStore(
         addr,
         builder_.getLiteralNumber(shift),
         ValueKind::BinaryUnsignedRightShiftInstKind);
+    idx->setType(Type::createNumber());
   } else {
     idx = addr;
   }
@@ -5927,6 +6427,7 @@ void WasmIRGen::onMemorySize() {
       len,
       builder_.getLiteralNumber(16),
       ValueKind::BinaryUnsignedRightShiftInstKind);
+  pages->setType(Type::createNumber());
 
   push(pages);
 }
@@ -5948,6 +6449,7 @@ void WasmIRGen::onMemoryGrow() {
       len,
       builder_.getLiteralNumber(16),
       ValueKind::BinaryUnsignedRightShiftInstKind);
+  oldPages->setType(Type::createNumber());
 
   // Get maximum page count.
   // For locally-defined memories, use the declared maximum (compile-time).
@@ -5970,7 +6472,15 @@ void WasmIRGen::onMemoryGrow() {
 
   // Call the grow builtin: wasmMemoryGrow(heapu8, delta, maxPages).
   // Returns new ArrayBuffer on success, or -1 on failure.
-  auto *result = helpers_.emitMemoryGrow(heapu8, delta, maxPagesVal);
+  // Pass the Memory object when there is one, so the builtin installs the
+  // grown buffer on it and exported references follow the growth. Imported
+  // memories have no such object yet and pass undefined.
+  Value *memObjArg = memObjVar_
+      ? static_cast<Value *>(
+            builder_.createLoadFrameInst(parentScopeInst_, memObjVar_))
+      : static_cast<Value *>(builder_.getLiteralUndefined());
+  auto *result =
+      helpers_.emitMemoryGrow(heapu8, delta, maxPagesVal, memObjArg);
 
   // Check if result === -1 (failure).
   auto *negOne = builder_.getLiteralNumber(-1);
@@ -6079,6 +6589,24 @@ void WasmIRGen::onDataDrop(uint32_t segmentIndex) {
 
 // --- Table operations (J.1) ---
 
+void WasmIRGen::createTagObjects(Instruction *tlScope) {
+  uint32_t numImported = moduleInfo_.importedTagCount();
+  for (uint32_t i = numImported; i < moduleInfo_.totalTagCount(); ++i) {
+    if (!tagVars_[i])
+      continue;
+    // One object per tag, created once per instance. Its identity is the
+    // tag's identity, so two tags with the same signature stay distinct and
+    // an imported tag stays equal to the exporter's.
+    auto *tagObj = builder_.createAllocObjectLiteralInst({});
+    builder_.createStorePropertyStrictInst(
+        builder_.getLiteralString(
+            buildTagTypeString(moduleInfo_.getTagType(i))),
+        tagObj,
+        builder_.getLiteralString("__wasm_type__"));
+    builder_.createStoreFrameInst(tlScope, tagObj, tagVars_[i]);
+  }
+}
+
 void WasmIRGen::internTypeIds(Instruction *tlScope) {
   for (uint32_t i = 0; i < moduleInfo_.types.size(); ++i) {
     if (!typeIdVars_[i])
@@ -6107,21 +6635,61 @@ void WasmIRGen::createTables(Instruction *tlScope) {
       continue;
     }
 
-    uint32_t initialSize =
-        moduleInfo_.tables[tblIdx - importedTables].limits.initial;
-
-    // Create the functions array: new Array(initialSize)
-    // This creates a sparse JS array with .length = initialSize.
-    // Uninitialized entries read as `undefined`.
-    auto *arrayCtor = builder_.createTryLoadGlobalPropertyInst("Array");
+    const WasmTableType &tType = moduleInfo_.tables[tblIdx - importedTables];
+    uint32_t initialSize = tType.limits.initial;
     auto *sizeVal = builder_.getLiteralNumber(static_cast<double>(initialSize));
-    auto *funcsArr = emitNew(arrayCtor, {sizeVal});
-    builder_.createStoreFrameInst(tlScope, funcsArr, tableFuncVars_[tblIdx]);
 
-    // Create the type-indices array: new Array(initialSize)
-    // Uninitialized entries are `undefined` (treated as -1 / no type).
-    auto *typesArr = emitNew(arrayCtor, {sizeVal});
-    builder_.createStoreFrameInst(tlScope, typesArr, tableTypeVars_[tblIdx]);
+    Value *funcsArr = nullptr;
+    Value *typesArr = nullptr;
+
+    if (tType.elemType == WasmValType::FuncRef) {
+      // Back a defined funcref table with a real WebAssembly.Table, and use
+      // *its* funcs/types arrays as the module's storage. Exporting that same
+      // object (see finalizeModule) then makes get/set/grow/length operate on
+      // the module's actual table -- publishing a fresh Table, or the arrays
+      // alone, leaves the exported object's own storage disconnected from the
+      // module's. The constructor publishes its backing arrays as
+      // __wasm_funcs__/__wasm_types__, which are genuine JSArrays, so no
+      // wasmCheckTableArrays call is needed here.
+      auto *descriptor = builder_.createAllocObjectLiteralInst({});
+      builder_.createStorePropertyStrictInst(
+          builder_.getLiteralString("anyfunc"),
+          descriptor,
+          builder_.getLiteralString("element"));
+      builder_.createStorePropertyStrictInst(
+          sizeVal, descriptor, builder_.getLiteralString("initial"));
+      if (tType.limits.hasMaximum) {
+        builder_.createStorePropertyStrictInst(
+            builder_.getLiteralNumber(
+                static_cast<double>(tType.limits.maximum)),
+            descriptor,
+            builder_.getLiteralString("maximum"));
+      }
+      auto *wasmObj = builder_.createTryLoadGlobalPropertyInst("WebAssembly");
+      auto *tableCtor = builder_.createLoadPropertyInst(
+          wasmObj, builder_.getLiteralString("Table"));
+      auto *tableObj = emitNew(tableCtor, {descriptor});
+      builder_.createStoreFrameInst(tlScope, tableObj, tableObjVars_[tblIdx]);
+      funcsArr = builder_.createLoadPropertyInst(
+          tableObj, builder_.getLiteralString("__wasm_funcs__"));
+      typesArr = builder_.createLoadPropertyInst(
+          tableObj, builder_.getLiteralString("__wasm_types__"));
+      builder_.createStoreFrameInst(tlScope, funcsArr, tableFuncVars_[tblIdx]);
+      builder_.createStoreFrameInst(tlScope, typesArr, tableTypeVars_[tblIdx]);
+    } else {
+      // externref tables are not built by the Table constructor, so keep the
+      // plain-array backing. These come from globalThis.Array, which script
+      // can replace, so validate once here to let call_indirect cast them
+      // without re-checking on every indirect call.
+      auto *arrayCtor = builder_.createTryLoadGlobalPropertyInst("Array");
+      funcsArr = emitNew(arrayCtor, {sizeVal});
+      builder_.createStoreFrameInst(tlScope, funcsArr, tableFuncVars_[tblIdx]);
+      typesArr = emitNew(arrayCtor, {sizeVal});
+      builder_.createStoreFrameInst(tlScope, typesArr, tableTypeVars_[tblIdx]);
+      builder_.createCallBuiltinInst(
+          BuiltinMethod::HermesBuiltin_wasmCheckTableArrays,
+          {funcsArr, typesArr});
+    }
   }
 
   // Apply active element segments.
@@ -6317,12 +6885,24 @@ void WasmIRGen::onTableGrow(uint32_t tableIndex) {
       maxEntries = tbl.limits.maximum;
   }
 
+  // For an imported table the declaration is not the only bound: the table
+  // actually supplied has a maximum of its own, and link validation only
+  // requires the actual max to be <= the declared one. Growing to the
+  // declared max would push a shared table past what its owner allows.
+  Value *actualMax = builder_.getLiteralNumber(-1);
+  if (tableIndex < importedTables &&
+      importedTableMaxVars_[tableIndex]) {
+    actualMax = builder_.createLoadFrameInst(
+        parentScopeInst_, importedTableMaxVars_[tableIndex]);
+  }
+
   auto *result = helpers_.emitTableGrow(
       funcsArr,
       typesArr,
       delta,
       fillVal,
-      builder_.getLiteralNumber(static_cast<double>(maxEntries)));
+      builder_.getLiteralNumber(static_cast<double>(maxEntries)),
+      actualMax);
 
   push(result);
 }
