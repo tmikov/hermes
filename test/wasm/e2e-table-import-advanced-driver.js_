@@ -1,0 +1,49 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-table-import-advanced.wat.
+// Tests: element segments on imported tables, imported + local table
+// coexistence, and grow visibility with multiple tables.
+
+var args = hermescli.getScriptArgs();
+var exporterHbcPath = args[0];
+var importerHbcPath = args[1];
+
+// Instantiate the exporter module.
+var exporterBytes = hermescli.loadFile(exporterHbcPath);
+var exporterMod = new WebAssembly.Module(exporterBytes);
+var exporter = new WebAssembly.Instance(exporterMod);
+
+// Instantiate the importer module.
+var importerBytes = hermescli.loadFile(importerHbcPath);
+var importerMod = new WebAssembly.Module(importerBytes);
+var importer = new WebAssembly.Instance(importerMod, {
+  exporter: exporter.exports,
+});
+
+// -- Test 1: element segment on imported table --
+// The exporter placed f100 at [0], f200 at [1]. Slot [2] was empty.
+// The importer's element segment placed f300 at [2] of the IMPORTED table.
+// Both modules should see f300 at [2].
+print("exporter size:", exporter.exports.size());
+print("importer imported_size:", importer.exports.imported_size());
+print("exporter call_at(0):", exporter.exports.call_at(0));
+print("exporter call_at(1):", exporter.exports.call_at(1));
+// The exporter can see f300 placed by the importer's element segment:
+print("exporter call_at(2):", exporter.exports.call_at(2));
+print("imported_call_at(2):", importer.exports.imported_call_at(2));
+
+// -- Test 2: local table is independent --
+// The importer's local table (index 1) has f400 at [0] from its own
+// element segment. Its size should be 2, unaffected by imported table.
+print("local_size:", importer.exports.local_size());
+print("local_call_at(0):", importer.exports.local_call_at(0));
+
+// -- Test 3: grow from exporter, visible in importer --
+print("exporter grow 2:", exporter.exports.grow(2));
+print("exporter size:", exporter.exports.size());
+print("importer imported_size:", importer.exports.imported_size());

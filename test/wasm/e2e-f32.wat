@@ -8,13 +8,10 @@
 
 ;; REQUIRES: wasm
 
-;; Test 1: Two-step compilation and execution.
-;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes %t.hbc
+;; Test 1: Two-step compilation and execution via WebAssembly API.
+;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods %S/load-hbc.js_ -- %t.hbc
 
-;; Test 2: Direct execution.
-;; RUN: %hermes --wasm %t.wasm
-
-;; Test 3: Verify IR structure.
+;; Test 2: Verify IR structure.
 ;; RUN: %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s
 
 (module

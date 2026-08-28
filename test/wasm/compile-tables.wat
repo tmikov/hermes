@@ -49,6 +49,9 @@
 ;; CHECK:   %[[IDX:.*]] = LoadStackInst (:any) %[[L0]]: any
 ;; CHECK-NEXT: %[[FUNCS:.*]] = LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_funcs]: any
 ;; CHECK-NEXT: %[[TYPES:.*]] = LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_types]: any
+;; The expected type is the interned id for this signature, loaded from the
+;; frame, not a module-local index literal.
+;; CHECK-NEXT: %[[TYPEID:.*]] = LoadFrameInst (:any) %{{.*}}: environment, [%VS0.wasm_type_id_0]: any
 ;; CHECK-NEXT: %[[CLOSURE:.*]] = CallBuiltinInst (:any) [HermesBuiltin.wasmCallIndirect]
 ;; CHECK-NEXT: %[[RES:.*]] = CallInst (:any) %[[CLOSURE]]: any
 ;; CHECK-NEXT:               BranchInst %BB1

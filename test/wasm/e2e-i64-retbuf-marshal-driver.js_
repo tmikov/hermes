@@ -1,0 +1,30 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-i64-retbuf-marshal.wat.
+
+var args = hermescli.getScriptArgs();
+var mod = new WebAssembly.Module(hermescli.loadFile(args[0]));
+var inst = new WebAssembly.Instance(mod, {
+  e: {
+    // Multi-value import: the i64 sits at a non-zero buffer offset, so its
+    // conversion is what used to overwrite the i32.
+    mv: function () { return [42, 7n]; },
+  },
+});
+var e = inst.exports;
+
+print('wrap(-1n) = ' + e.wrap(-1n));
+print('wrap(0xFFFFFFFFn) = ' + e.wrap(0xFFFFFFFFn));
+print('wrap(5n) = ' + e.wrap(5n));
+print('wrap_add(-1n) = ' + e.wrap_add(-1n));
+print('wrap_add(5n) = ' + e.wrap_add(5n));
+print('mv_i32() = ' + e.mv_i32());
+print('mv_i64() = ' + e.mv_i64());
+print('mvf_sum() = ' + e.mvf_sum());
+print('pair() = ' + JSON.stringify(e.pair()));
+print('done');

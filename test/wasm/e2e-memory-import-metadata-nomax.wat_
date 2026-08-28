@@ -1,0 +1,12 @@
+;; Copyright (c) Meta Platforms, Inc. and affiliates.
+;;
+;; This source code is licensed under the MIT license found in the
+;; LICENSE file in the root directory of this source tree.
+
+;; Companion module for e2e-memory-import-metadata.wat: a memory import with
+;; NO declared maximum, so nothing validates __wasm_max__ and whatever script
+;; supplies is stored and later handed to a native builtin.
+
+(module
+  (import "e" "m" (memory 1))
+  (func (export "grow") (result i32) (memory.grow (i32.const 1))))

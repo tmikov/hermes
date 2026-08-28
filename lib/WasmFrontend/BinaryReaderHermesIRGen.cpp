@@ -576,6 +576,8 @@ wabt::Result BinaryReaderHermesIRGen::OnI32ConstExpr(uint32_t value) {
       auto &g = moduleInfo_.globals[currentInitExprIndex_];
       g.initKind = WasmGlobal::InitKind::I32Const;
       g.initValue.i32Val = static_cast<int32_t>(value);
+      g.initExpr.push_back(
+          InitExprOp::makeI32Const(static_cast<int32_t>(value)));
       break;
     }
     case InitExprContext::ElemSegmentOffset: {
@@ -585,6 +587,8 @@ wabt::Result BinaryReaderHermesIRGen::OnI32ConstExpr(uint32_t value) {
       auto &seg = moduleInfo_.elements[currentInitExprIndex_];
       seg.offsetKind = WasmGlobal::InitKind::I32Const;
       seg.offsetValue = static_cast<int32_t>(value);
+      seg.offsetExpr.push_back(
+          InitExprOp::makeI32Const(static_cast<int32_t>(value)));
       break;
     }
     case InitExprContext::DataSegment: {
@@ -594,6 +598,8 @@ wabt::Result BinaryReaderHermesIRGen::OnI32ConstExpr(uint32_t value) {
       auto &seg = moduleInfo_.dataSegments[currentInitExprIndex_];
       seg.offsetKind = WasmGlobal::InitKind::I32Const;
       seg.offsetValue = static_cast<int32_t>(value);
+      seg.offsetExpr.push_back(
+          InitExprOp::makeI32Const(static_cast<int32_t>(value)));
       break;
     }
     case InitExprContext::ElemExpr:
@@ -679,6 +685,7 @@ wabt::Result BinaryReaderHermesIRGen::OnGlobalGetExpr(
       auto &g = moduleInfo_.globals[currentInitExprIndex_];
       g.initKind = WasmGlobal::InitKind::GlobalGet;
       g.initValue.globalIndex = globalIndex;
+      g.initExpr.push_back(InitExprOp::makeGlobalGet(globalIndex));
       break;
     }
     case InitExprContext::ElemSegmentOffset: {
@@ -688,6 +695,7 @@ wabt::Result BinaryReaderHermesIRGen::OnGlobalGetExpr(
       auto &seg = moduleInfo_.elements[currentInitExprIndex_];
       seg.offsetKind = WasmGlobal::InitKind::GlobalGet;
       seg.offsetGlobalIdx = globalIndex;
+      seg.offsetExpr.push_back(InitExprOp::makeGlobalGet(globalIndex));
       break;
     }
     case InitExprContext::DataSegment: {
@@ -697,6 +705,7 @@ wabt::Result BinaryReaderHermesIRGen::OnGlobalGetExpr(
       auto &seg = moduleInfo_.dataSegments[currentInitExprIndex_];
       seg.offsetKind = WasmGlobal::InitKind::GlobalGet;
       seg.offsetGlobalIdx = globalIndex;
+      seg.offsetExpr.push_back(InitExprOp::makeGlobalGet(globalIndex));
       break;
     }
     case InitExprContext::ElemExpr:
@@ -790,6 +799,41 @@ wabt::Result BinaryReaderHermesIRGen::OnLocalTeeExpr(
 // --- Binary (two-operand) instruction callback ---
 
 wabt::Result BinaryReaderHermesIRGen::OnBinaryExpr(wabt::Opcode opcode) {
+  // Handle binary ops in init expression contexts (extended const exprs).
+  if (initExprContext_ == InitExprContext::DataSegment ||
+      initExprContext_ == InitExprContext::ElemSegmentOffset ||
+      initExprContext_ == InitExprContext::Global) {
+    // Every sibling init-expr callback asserts the index before using it;
+    // do the same here rather than indexing blind.
+    assert(
+        currentInitExprIndex_ <
+            (initExprContext_ == InitExprContext::DataSegment
+                 ? moduleInfo_.dataSegments.size()
+                 : initExprContext_ == InitExprContext::ElemSegmentOffset
+                 ? moduleInfo_.elements.size()
+                 : moduleInfo_.globals.size()) &&
+        "init expr index out of range");
+    auto &expr = (initExprContext_ == InitExprContext::DataSegment)
+        ? moduleInfo_.dataSegments[currentInitExprIndex_].offsetExpr
+        : (initExprContext_ == InitExprContext::ElemSegmentOffset)
+        ? moduleInfo_.elements[currentInitExprIndex_].offsetExpr
+        : moduleInfo_.globals[currentInitExprIndex_].initExpr;
+    switch (static_cast<wabt::Opcode::Enum>(opcode)) {
+      case wabt::Opcode::I32Add:
+        expr.push_back(InitExprOp::makeAdd());
+        break;
+      case wabt::Opcode::I32Sub:
+        expr.push_back(InitExprOp::makeSub());
+        break;
+      case wabt::Opcode::I32Mul:
+        expr.push_back(InitExprOp::makeMul());
+        break;
+      default:
+        break;
+    }
+    return wabt::Result::Ok;
+  }
+
   if (!inFunctionBody_ || !irgen_)
     return wabt::Result::Ok;
 

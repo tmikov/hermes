@@ -1,0 +1,38 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-memory-import-metadata.wat.
+
+var args = hermescli.getScriptArgs();
+var mod = new WebAssembly.Module(hermescli.loadFile(args[0]));
+var modNoMax = new WebAssembly.Module(hermescli.loadFile(args[1]));
+
+// __wasm_max__ must be read exactly once: pass validation with 2, then try to
+// raise the ceiling on a later read.
+var maxReads = 0;
+var risingMax = {
+  __wasm_type__: 'memory',
+  __wasm_min__: 1,
+  get __wasm_max__() { return maxReads++ === 0 ? 2 : 65536; },
+};
+var i1 = new WebAssembly.Instance(mod, {e: {m: risingMax}});
+print(
+  'grow past max = ' + i1.exports.grow() +
+  ', __wasm_max__ reads = ' + maxReads);
+
+// A non-number __wasm_max__ must not reach getNumber().
+var i2 = new WebAssembly.Instance(
+  modNoMax, {e: {m: {__wasm_type__: 'memory', __wasm_min__: 1,
+                     __wasm_max__: {}}}});
+print('non-number max: grow = ' + i2.exports.grow());
+
+// A grow within the declared maximum must still succeed.
+var i3 = new WebAssembly.Instance(
+  mod, {e: {m: {__wasm_type__: 'memory', __wasm_min__: 1, __wasm_max__: 2}}});
+print('grow within max = ' + i3.exports.grow1());
+
+print('done');

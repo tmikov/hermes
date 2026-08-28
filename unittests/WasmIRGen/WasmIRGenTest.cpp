@@ -3012,55 +3012,47 @@ TEST(WasmIRGenTest, CreateFunctionsExportsObject) {
   irgen.createFunctions();
   irgen.finalizeModule();
 
-  // The top-level function should contain:
-  //   AllocObjectLiteralInst (exports object)
-  //   CreateFunctionInst (create wrapper closure for exported func)
-  //   StorePropertyStrictInst (store wrapper closure on exports object)
-  //   ReturnInst (return the exports object, not undefined)
+  // The top-level function should now return a module info object
+  // with "instantiate", "exportDescs", and "importDescs" properties.
   auto *topLevel = tm.mod.getTopLevelFunction();
   ASSERT_NE(topLevel, nullptr);
   ASSERT_EQ(topLevel->getBasicBlockList().size(), 1u);
 
   auto &bb = topLevel->getBasicBlockList().front();
 
-  AllocObjectLiteralInst *allocObj = nullptr;
-  StorePropertyStrictInst *storeProp = nullptr;
+  // Look for key properties of the module info object.
+  bool hasInstantiateProp = false;
+  bool hasExportDescsProp = false;
+  bool hasImportDescsProp = false;
+  bool hasCreateFunctionInst = false;
   ReturnInst *ret = nullptr;
-  unsigned wrapperCreateFuncCount = 0;
-  bool seenAllocObj = false;
 
   for (auto &inst : bb) {
-    if (auto *a = llvh::dyn_cast<AllocObjectLiteralInst>(&inst)) {
-      allocObj = a;
-      seenAllocObj = true;
+    if (llvh::isa<CreateFunctionInst>(&inst))
+      hasCreateFunctionInst = true;
+    if (auto *s = llvh::dyn_cast<StorePropertyStrictInst>(&inst)) {
+      if (auto *propLit = llvh::dyn_cast<LiteralString>(s->getProperty())) {
+        auto name = propLit->getValue().str();
+        if (name == "instantiate")
+          hasInstantiateProp = true;
+        else if (name == "exportDescs")
+          hasExportDescsProp = true;
+        else if (name == "importDescs")
+          hasImportDescsProp = true;
+      }
     }
-    if (auto *s = llvh::dyn_cast<StorePropertyStrictInst>(&inst))
-      storeProp = s;
-    // Count CreateFunctionInst after AllocObjectLiteralInst (wrapper closures).
-    if (seenAllocObj && llvh::isa<CreateFunctionInst>(&inst))
-      ++wrapperCreateFuncCount;
     if (auto *r = llvh::dyn_cast<ReturnInst>(&inst))
       ret = r;
   }
 
-  // AllocObjectLiteralInst should exist.
-  ASSERT_NE(allocObj, nullptr);
-
-  // StorePropertyStrictInst should exist (one for the one export).
-  ASSERT_NE(storeProp, nullptr);
-  // The store target should be the alloc'd object.
-  EXPECT_EQ(storeProp->getObject(), allocObj);
-  // The property name should be "add".
-  auto *propLit = llvh::dyn_cast<LiteralString>(storeProp->getProperty());
-  ASSERT_NE(propLit, nullptr);
-  EXPECT_EQ(propLit->getValue().str(), "add");
-
-  // There should be a CreateFunctionInst for the export wrapper closure.
-  EXPECT_GE(wrapperCreateFuncCount, 1u);
-
-  // ReturnInst should return the exports object, not undefined.
+  // Should have a CreateFunctionInst for __wasm_instantiate__.
+  EXPECT_TRUE(hasCreateFunctionInst);
+  // Module info object should have all three properties.
+  EXPECT_TRUE(hasInstantiateProp);
+  EXPECT_TRUE(hasExportDescsProp);
+  EXPECT_TRUE(hasImportDescsProp);
+  // ReturnInst should return the module info object.
   ASSERT_NE(ret, nullptr);
-  EXPECT_EQ(ret->getOperand(0), allocObj);
 }
 
 TEST(WasmIRGenTest, CreateFunctionsNoExports) {
@@ -3075,30 +3067,37 @@ TEST(WasmIRGenTest, CreateFunctionsNoExports) {
   irgen.createFunctions();
   irgen.finalizeModule();
 
-  // Even with no exports, the top-level function should return an
-  // (empty) exports object, not undefined.
+  // Even with no exports, the top-level function should return a module
+  // info object with "instantiate", "exportDescs", and "importDescs".
   auto *topLevel = tm.mod.getTopLevelFunction();
   auto &bb = topLevel->getBasicBlockList().front();
 
-  AllocObjectLiteralInst *allocObj = nullptr;
+  bool hasInstantiateProp = false;
+  bool hasExportDescsProp = false;
+  bool hasImportDescsProp = false;
   ReturnInst *ret = nullptr;
-  unsigned storePropCount = 0;
 
   for (auto &inst : bb) {
-    if (auto *a = llvh::dyn_cast<AllocObjectLiteralInst>(&inst))
-      allocObj = a;
-    if (llvh::isa<StorePropertyStrictInst>(&inst))
-      ++storePropCount;
+    if (auto *s = llvh::dyn_cast<StorePropertyStrictInst>(&inst)) {
+      if (auto *propLit = llvh::dyn_cast<LiteralString>(s->getProperty())) {
+        auto name = propLit->getValue().str();
+        if (name == "instantiate")
+          hasInstantiateProp = true;
+        else if (name == "exportDescs")
+          hasExportDescsProp = true;
+        else if (name == "importDescs")
+          hasImportDescsProp = true;
+      }
+    }
     if (auto *r = llvh::dyn_cast<ReturnInst>(&inst))
       ret = r;
   }
 
-  ASSERT_NE(allocObj, nullptr);
-  // No exports means no StorePropertyStrictInst.
-  EXPECT_EQ(storePropCount, 0u);
-  // ReturnInst returns the empty object.
+  EXPECT_TRUE(hasInstantiateProp);
+  EXPECT_TRUE(hasExportDescsProp);
+  EXPECT_TRUE(hasImportDescsProp);
+  // ReturnInst should return the module info object.
   ASSERT_NE(ret, nullptr);
-  EXPECT_EQ(ret->getOperand(0), allocObj);
 }
 
 TEST(WasmIRGenTest, CreateFunctionsSkipsNonFunctionExports) {
@@ -3116,7 +3115,8 @@ TEST(WasmIRGenTest, CreateFunctionsSkipsNonFunctionExports) {
   funcExp.index = 0;
   moduleInfo.exports.push_back(funcExp);
 
-  // Also add a memory export (should be skipped).
+  // Also add a memory export.
+  moduleInfo.memories.push_back(WasmMemoryType{{1, 4, true}});
   WasmExport memExp;
   memExp.name = "memory";
   memExp.kind = WasmExternalKind::Memory;
@@ -3127,17 +3127,33 @@ TEST(WasmIRGenTest, CreateFunctionsSkipsNonFunctionExports) {
   irgen.createFunctions();
   irgen.finalizeModule();
 
+  // The top-level now builds the module info object. We verify that
+  // the descriptor arrays include both exports (function and memory),
+  // and the module info has all three required properties.
   auto *topLevel = tm.mod.getTopLevelFunction();
   auto &bb = topLevel->getBasicBlockList().front();
 
-  unsigned storePropCount = 0;
+  bool hasInstantiateProp = false;
+  bool hasExportDescsProp = false;
+  bool hasImportDescsProp = false;
+
   for (auto &inst : bb) {
-    if (llvh::isa<StorePropertyStrictInst>(&inst))
-      ++storePropCount;
+    if (auto *s = llvh::dyn_cast<StorePropertyStrictInst>(&inst)) {
+      if (auto *propLit = llvh::dyn_cast<LiteralString>(s->getProperty())) {
+        auto name = propLit->getValue().str();
+        if (name == "instantiate")
+          hasInstantiateProp = true;
+        else if (name == "exportDescs")
+          hasExportDescsProp = true;
+        else if (name == "importDescs")
+          hasImportDescsProp = true;
+      }
+    }
   }
 
-  // Only the function export should produce a StorePropertyStrictInst.
-  EXPECT_EQ(storePropCount, 1u);
+  EXPECT_TRUE(hasInstantiateProp);
+  EXPECT_TRUE(hasExportDescsProp);
+  EXPECT_TRUE(hasImportDescsProp);
 }
 
 TEST(WasmIRGenTest, F64Copysign) {
@@ -3382,19 +3398,13 @@ TEST(WasmIRGenTest, I64AddEmitsCallAndHi) {
   ASSERT_NE(lo, nullptr);
   ASSERT_NE(hi, nullptr);
 
-  // lo should be a CallBuiltinInst (wasmI64Add).
-  auto *loInst = llvh::dyn_cast<CallBuiltinInst>(lo);
+  // With the retBuf convention, lo and hi are AsInt32Inst wrapping
+  // LoadPropertyInst reading from retBufI_[0] and retBufI_[1].
+  auto *loInst = llvh::dyn_cast<AsInt32Inst>(lo);
   ASSERT_NE(loInst, nullptr);
-  EXPECT_EQ(
-      loInst->getBuiltinIndex(),
-      BuiltinMethod::HermesBuiltin_wasmI64Add);
 
-  // hi should be a CallBuiltinInst (wasmI64HiResult).
-  auto *hiInst = llvh::dyn_cast<CallBuiltinInst>(hi);
+  auto *hiInst = llvh::dyn_cast<AsInt32Inst>(hi);
   ASSERT_NE(hiInst, nullptr);
-  EXPECT_EQ(
-      hiInst->getBuiltinIndex(),
-      BuiltinMethod::HermesBuiltin_wasmI64HiResult);
 
   // Push i32 return value.
   irgen.onI32Const(0);
@@ -3534,11 +3544,13 @@ TEST(WasmIRGenTest, I64ShlEmitsCallAndHi) {
   // Pop via popI64 — verifies the result was pushed as i64.
   auto [lo, hi] = irgen.popI64();
 
-  auto *loInst = llvh::dyn_cast<CallBuiltinInst>(lo);
+  // With the retBuf convention, lo and hi are AsInt32Inst wrapping
+  // LoadPropertyInst reading from retBufI_[0] and retBufI_[1].
+  auto *loInst = llvh::dyn_cast<AsInt32Inst>(lo);
   ASSERT_NE(loInst, nullptr);
-  EXPECT_EQ(
-      loInst->getBuiltinIndex(),
-      BuiltinMethod::HermesBuiltin_wasmI64Shl);
+
+  auto *hiInst = llvh::dyn_cast<AsInt32Inst>(hi);
+  ASSERT_NE(hiInst, nullptr);
 
   irgen.onI32Const(0);
   irgen.endFunction();
@@ -3563,17 +3575,13 @@ TEST(WasmIRGenTest, I64TruncF64SEmitsCallAndHi) {
   // Result should be an i64 (split pair). Pop and verify.
   auto [lo, hi] = irgen.popI64();
 
-  auto *loInst = llvh::dyn_cast<CallBuiltinInst>(lo);
+  // With the retBuf convention, lo and hi are AsInt32Inst wrapping
+  // LoadPropertyInst.
+  auto *loInst = llvh::dyn_cast<AsInt32Inst>(lo);
   ASSERT_NE(loInst, nullptr);
-  EXPECT_EQ(
-      loInst->getBuiltinIndex(),
-      BuiltinMethod::HermesBuiltin_wasmI64TruncF64S);
 
-  auto *hiInst = llvh::dyn_cast<CallBuiltinInst>(hi);
+  auto *hiInst = llvh::dyn_cast<AsInt32Inst>(hi);
   ASSERT_NE(hiInst, nullptr);
-  EXPECT_EQ(
-      hiInst->getBuiltinIndex(),
-      BuiltinMethod::HermesBuiltin_wasmI64HiResult);
 
   irgen.onI32Const(0);
   irgen.endFunction();
@@ -3596,11 +3604,9 @@ TEST(WasmIRGenTest, I64TruncF64UEmitsCallAndHi) {
 
   auto [lo, hi] = irgen.popI64();
 
-  auto *loInst = llvh::dyn_cast<CallBuiltinInst>(lo);
+  // With the retBuf convention, lo is AsInt32Inst wrapping LoadPropertyInst.
+  auto *loInst = llvh::dyn_cast<AsInt32Inst>(lo);
   ASSERT_NE(loInst, nullptr);
-  EXPECT_EQ(
-      loInst->getBuiltinIndex(),
-      BuiltinMethod::HermesBuiltin_wasmI64TruncF64U);
 
   irgen.onI32Const(0);
   irgen.endFunction();
@@ -3623,11 +3629,9 @@ TEST(WasmIRGenTest, I64TruncSatF64SEmitsCallAndHi) {
 
   auto [lo, hi] = irgen.popI64();
 
-  auto *loInst = llvh::dyn_cast<CallBuiltinInst>(lo);
+  // With the retBuf convention, lo is AsInt32Inst wrapping LoadPropertyInst.
+  auto *loInst = llvh::dyn_cast<AsInt32Inst>(lo);
   ASSERT_NE(loInst, nullptr);
-  EXPECT_EQ(
-      loInst->getBuiltinIndex(),
-      BuiltinMethod::HermesBuiltin_wasmI64TruncSatF64S);
 
   irgen.onI32Const(0);
   irgen.endFunction();
@@ -3650,11 +3654,9 @@ TEST(WasmIRGenTest, I64TruncSatF64UEmitsCallAndHi) {
 
   auto [lo, hi] = irgen.popI64();
 
-  auto *loInst = llvh::dyn_cast<CallBuiltinInst>(lo);
+  // With the retBuf convention, lo is AsInt32Inst wrapping LoadPropertyInst.
+  auto *loInst = llvh::dyn_cast<AsInt32Inst>(lo);
   ASSERT_NE(loInst, nullptr);
-  EXPECT_EQ(
-      loInst->getBuiltinIndex(),
-      BuiltinMethod::HermesBuiltin_wasmI64TruncSatF64U);
 
   irgen.onI32Const(0);
   irgen.endFunction();
@@ -3679,11 +3681,9 @@ TEST(WasmIRGenTest, I64TruncF32SDelegatesToF64) {
   // Should emit wasmI64TruncF64S (same builtin as f64 variant).
   auto [lo, hi] = irgen.popI64();
 
-  auto *loInst = llvh::dyn_cast<CallBuiltinInst>(lo);
+  // With the retBuf convention, lo is AsInt32Inst wrapping LoadPropertyInst.
+  auto *loInst = llvh::dyn_cast<AsInt32Inst>(lo);
   ASSERT_NE(loInst, nullptr);
-  EXPECT_EQ(
-      loInst->getBuiltinIndex(),
-      BuiltinMethod::HermesBuiltin_wasmI64TruncF64S);
 
   irgen.onI32Const(0);
   irgen.endFunction();

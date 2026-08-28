@@ -25,32 +25,6 @@
       i32.sub
       call $is_odd
     end)
-;; CHECK-LABEL: function wasm_func_0(p0: any): any
-;; CHECK: %BB0:
-;; CHECK:   %[[SCOPE0:.*]] = GetParentScopeInst (:environment)
-;; CHECK:   %[[L0:.*]] = AllocStackInst (:any)
-;; CHECK:   %[[P0:.*]] = LoadParamInst (:any) %p0: any
-;; CHECK-NEXT:            StoreStackInst %[[P0]]: any, %[[L0]]: any
-;; CHECK:   %[[N:.*]] = LoadStackInst (:any) %[[L0]]: any
-;; CHECK-NEXT: %[[EQZ:.*]] = BinaryStrictlyEqualInst (:any) %[[N]]: any, 0: number
-;; CHECK-NEXT: %[[COND:.*]] = BinaryOrInst (:any) %[[EQZ]]: any, 0: number
-;; CHECK-NEXT:                CondBranchInst %[[COND]]: any, %BB2, %BB3
-;; CHECK: %BB1:
-;; CHECK-NEXT: %[[RET:.*]] = PhiInst (:any) %{{.*}}: any, %BB4
-;; CHECK-NEXT:               ReturnInst %[[RET]]: any
-;; CHECK: %BB2:
-;; CHECK-NEXT: BranchInst %BB4
-;; CHECK: %BB3:
-;; CHECK:   %[[N2:.*]] = LoadStackInst (:any) %[[L0]]: any
-;; CHECK-NEXT: %[[SUB:.*]] = BinarySubtractInst (:any) %[[N2]]: any, 1: number
-;; CHECK-NEXT: %[[TRUNC:.*]] = AsInt32Inst (:number) %[[SUB]]: any
-;; CHECK-NEXT: %[[ODD:.*]] = LoadFrameInst (:any) %[[SCOPE0]]: environment, [%VS0.closure_1]: any
-;; CHECK-NEXT: %[[RES:.*]] = CallInst (:any) %[[ODD]]: any, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %[[TRUNC]]: number
-;; CHECK-NEXT:               BranchInst %BB4
-;; CHECK: %BB4:
-;; CHECK-NEXT: %{{.*}} = PhiInst (:any) 1: number, %BB2, %[[RES]]: any, %BB3
-;; CHECK-NEXT:           BranchInst %BB1
-;; CHECK-NEXT: function_end
 
   ;; func 1: is_odd — calls is_even (closure_0) in the else branch.
   (func $is_odd (param i32) (result i32)
@@ -65,26 +39,105 @@
       call $is_even
     end)
 )
-;; CHECK-LABEL: function wasm_func_1(p0: any): any
-;; CHECK: %BB0:
-;; CHECK:   %[[SCOPE1:.*]] = GetParentScopeInst (:environment)
-;; CHECK:   %[[N1:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[EQZ1:.*]] = BinaryStrictlyEqualInst (:any) %[[N1]]: any, 0: number
-;; CHECK-NEXT: %[[COND1:.*]] = BinaryOrInst (:any) %[[EQZ1]]: any, 0: number
-;; CHECK-NEXT:                 CondBranchInst %[[COND1]]: any, %BB2, %BB3
-;; CHECK: %BB1:
-;; CHECK-NEXT: %[[RET1:.*]] = PhiInst (:any) %{{.*}}: any, %BB4
-;; CHECK-NEXT:                ReturnInst %[[RET1]]: any
-;; CHECK: %BB2:
-;; CHECK-NEXT: BranchInst %BB4
-;; CHECK: %BB3:
-;; CHECK:   %[[N1B:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[SUB1:.*]] = BinarySubtractInst (:any) %[[N1B]]: any, 1: number
-;; CHECK-NEXT: %[[TRUNC1:.*]] = AsInt32Inst (:number) %[[SUB1]]: any
-;; CHECK-NEXT: %[[EVEN:.*]] = LoadFrameInst (:any) %[[SCOPE1]]: environment, [%VS0.closure_0]: any
-;; CHECK-NEXT: %[[RES1:.*]] = CallInst (:any) %[[EVEN]]: any, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %[[TRUNC1]]: number
-;; CHECK-NEXT:                BranchInst %BB4
-;; CHECK: %BB4:
-;; CHECK-NEXT: %{{.*}} = PhiInst (:any) 0: number, %BB2, %[[RES1]]: any, %BB3
-;; CHECK-NEXT:           BranchInst %BB1
+
+;; CHECK: scope %VS0 [wasm_type_id_0: any, retBufI: any, retBufF: any, closure_0: any, closure_1: any]
+;; CHECK-EMPTY:
+;; CHECK-NEXT: function global(): any
+;; CHECK-NEXT: %BB0:
+;; CHECK-NEXT:   %0 = CreateScopeInst (:environment) %VS0: any, empty: any
+;; CHECK-NEXT:   %1 = CreateFunctionInst (:object) %0: environment, %VS0: any, %__wasm_instantiate__(): functionCode
+;; CHECK-NEXT:   %2 = TryLoadGlobalPropertyInst (:any) globalObject: object, "Array": string
+;; CHECK-NEXT:   %3 = CreateThisInst (:any) %2: any, %2: any, empty: any
+;; CHECK-NEXT:   %4 = CallInst (:any) %2: any, empty: any, false: boolean, empty: any, %2: any, %3: any, 0: number
+;; CHECK-NEXT:   %5 = GetConstructedObjectInst (:object) %3: any, %4: any
+;; CHECK-NEXT:   %6 = TryLoadGlobalPropertyInst (:any) globalObject: object, "Array": string
+;; CHECK-NEXT:   %7 = CreateThisInst (:any) %6: any, %6: any, empty: any
+;; CHECK-NEXT:   %8 = CallInst (:any) %6: any, empty: any, false: boolean, empty: any, %6: any, %7: any, 0: number
+;; CHECK-NEXT:   %9 = GetConstructedObjectInst (:object) %7: any, %8: any
+;; CHECK-NEXT:   %10 = AllocObjectLiteralInst (:object) empty: any
+;; CHECK-NEXT:         StorePropertyStrictInst %1: object, %10: object, "instantiate": string
+;; CHECK-NEXT:         StorePropertyStrictInst %5: object, %10: object, "exportDescs": string
+;; CHECK-NEXT:         StorePropertyStrictInst %9: object, %10: object, "importDescs": string
+;; CHECK-NEXT:         ReturnInst %10: object
+;; CHECK-NEXT: function_end
+;; CHECK-EMPTY:
+;; CHECK-NEXT: function wasm_func_0(p0: any): any
+;; CHECK-NEXT: %BB0:
+;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
+;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.retBufI]: any
+;; CHECK-NEXT:   %2 = AllocStackInst (:any) $local_0: any
+;; CHECK-NEXT:   %3 = LoadParamInst (:any) %p0: any
+;; CHECK-NEXT:        StoreStackInst %3: any, %2: any
+;; CHECK-NEXT:   %5 = LoadStackInst (:any) %2: any
+;; CHECK-NEXT:   %6 = BinaryStrictlyEqualInst (:any) %5: any, 0: number
+;; CHECK-NEXT:   %7 = BinaryOrInst (:any) %6: any, 0: number
+;; CHECK-NEXT:        CondBranchInst %7: any, %BB2, %BB3
+;; CHECK-NEXT: %BB1:
+;; CHECK-NEXT:   %9 = PhiInst (:any) %18: any, %BB4
+;; CHECK-NEXT:         ReturnInst %9: any
+;; CHECK-NEXT: %BB2:
+;; CHECK-NEXT:         BranchInst %BB4
+;; CHECK-NEXT: %BB3:
+;; CHECK-NEXT:   %12 = LoadStackInst (:any) %2: any
+;; CHECK-NEXT:   %13 = BinarySubtractInst (:any) %12: any, 1: number
+;; CHECK-NEXT:   %14 = AsInt32Inst (:number) %13: any
+;; CHECK-NEXT:   %15 = LoadFrameInst (:any) %0: environment, [%VS0.closure_1]: any
+;; CHECK-NEXT:   %16 = CallInst (:any) %15: any, %wasm_func_1(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined, %14: number
+;; CHECK-NEXT:         BranchInst %BB4
+;; CHECK-NEXT: %BB4:
+;; CHECK-NEXT:   %18 = PhiInst (:any) 1: number, %BB2, %16: any, %BB3
+;; CHECK-NEXT:         BranchInst %BB1
+;; CHECK-NEXT: function_end
+;; CHECK-EMPTY:
+;; CHECK-NEXT: function wasm_func_1(p0: any): any
+;; CHECK-NEXT: %BB0:
+;; CHECK-NEXT:   %0 = GetParentScopeInst (:environment) %VS0: any, %parentScope: environment
+;; CHECK-NEXT:   %1 = LoadFrameInst (:any) %0: environment, [%VS0.retBufI]: any
+;; CHECK-NEXT:   %2 = AllocStackInst (:any) $local_0: any
+;; CHECK-NEXT:   %3 = LoadParamInst (:any) %p0: any
+;; CHECK-NEXT:        StoreStackInst %3: any, %2: any
+;; CHECK-NEXT:   %5 = LoadStackInst (:any) %2: any
+;; CHECK-NEXT:   %6 = BinaryStrictlyEqualInst (:any) %5: any, 0: number
+;; CHECK-NEXT:   %7 = BinaryOrInst (:any) %6: any, 0: number
+;; CHECK-NEXT:        CondBranchInst %7: any, %BB2, %BB3
+;; CHECK-NEXT: %BB1:
+;; CHECK-NEXT:   %9 = PhiInst (:any) %18: any, %BB4
+;; CHECK-NEXT:         ReturnInst %9: any
+;; CHECK-NEXT: %BB2:
+;; CHECK-NEXT:         BranchInst %BB4
+;; CHECK-NEXT: %BB3:
+;; CHECK-NEXT:   %12 = LoadStackInst (:any) %2: any
+;; CHECK-NEXT:   %13 = BinarySubtractInst (:any) %12: any, 1: number
+;; CHECK-NEXT:   %14 = AsInt32Inst (:number) %13: any
+;; CHECK-NEXT:   %15 = LoadFrameInst (:any) %0: environment, [%VS0.closure_0]: any
+;; CHECK-NEXT:   %16 = CallInst (:any) %15: any, %wasm_func_0(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined, %14: number
+;; CHECK-NEXT:         BranchInst %BB4
+;; CHECK-NEXT: %BB4:
+;; CHECK-NEXT:   %18 = PhiInst (:any) 0: number, %BB2, %16: any, %BB3
+;; CHECK-NEXT:         BranchInst %BB1
+;; CHECK-NEXT: function_end
+;; CHECK-EMPTY:
+;; CHECK-NEXT: function __wasm_instantiate__(): any
+;; CHECK-NEXT: %BB0:
+;; CHECK-NEXT:   %0 = CreateScopeInst (:environment) %VS0: any, empty: any
+;; CHECK-NEXT:   %1 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_func_0(): functionCode
+;; CHECK-NEXT:        StoreFrameInst %0: environment, %1: object, [%VS0.closure_0]: any
+;; CHECK-NEXT:   %3 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_func_1(): functionCode
+;; CHECK-NEXT:        StoreFrameInst %0: environment, %3: object, [%VS0.closure_1]: any
+;; CHECK-NEXT:   %5 = TryLoadGlobalPropertyInst (:any) globalObject: object, "ArrayBuffer": string
+;; CHECK-NEXT:   %6 = TryLoadGlobalPropertyInst (:any) globalObject: object, "Uint32Array": string
+;; CHECK-NEXT:   %7 = TryLoadGlobalPropertyInst (:any) globalObject: object, "Float64Array": string
+;; CHECK-NEXT:   %8 = CreateThisInst (:any) %5: any, %5: any, empty: any
+;; CHECK-NEXT:   %9 = CallInst (:any) %5: any, empty: any, false: boolean, empty: any, %5: any, %8: any, 8: number
+;; CHECK-NEXT:   %10 = GetConstructedObjectInst (:object) %8: any, %9: any
+;; CHECK-NEXT:   %11 = CreateThisInst (:any) %6: any, %6: any, empty: any
+;; CHECK-NEXT:   %12 = CallInst (:any) %6: any, empty: any, false: boolean, empty: any, %6: any, %11: any, %10: object
+;; CHECK-NEXT:   %13 = GetConstructedObjectInst (:object) %11: any, %12: any
+;; CHECK-NEXT:   %14 = CreateThisInst (:any) %7: any, %7: any, empty: any
+;; CHECK-NEXT:   %15 = CallInst (:any) %7: any, empty: any, false: boolean, empty: any, %7: any, %14: any, %10: object
+;; CHECK-NEXT:   %16 = GetConstructedObjectInst (:object) %14: any, %15: any
+;; CHECK-NEXT:         StoreFrameInst %0: environment, %13: object, [%VS0.retBufI]: any
+;; CHECK-NEXT:         StoreFrameInst %0: environment, %16: object, [%VS0.retBufF]: any
+;; CHECK-NEXT:   %19 = AllocObjectLiteralInst (:object) empty: any
+;; CHECK-NEXT:         ReturnInst %19: object
 ;; CHECK-NEXT: function_end

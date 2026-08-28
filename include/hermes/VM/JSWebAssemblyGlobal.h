@@ -39,7 +39,9 @@ class JSWebAssemblyGlobal final : public JSObject {
   /// Value type enum matching WebAssembly value types.
   enum class ValType : uint8_t { I32, I64, F32, F64 };
 
-  /// Get the stored value.
+  /// Get the stored value. Only meaningful for i32/f32/f64; an i64 global
+  /// stores its value in the 64-bit slot instead, because a double cannot
+  /// represent every i64 exactly.
   double getValue() const {
     return value_;
   }
@@ -47,6 +49,16 @@ class JSWebAssemblyGlobal final : public JSObject {
   /// Set the stored value.
   void setValue(double val) {
     value_ = val;
+  }
+
+  /// Get the stored i64 value. Only meaningful when getValType() is I64.
+  int64_t getI64Value() const {
+    return i64Value_;
+  }
+
+  /// Set the stored i64 value.
+  void setI64Value(int64_t val) {
+    i64Value_ = val;
   }
 
   /// Get the value type.
@@ -83,8 +95,13 @@ class JSWebAssemblyGlobal final : public JSObject {
       const GCCell *cell,
       Metadata::Builder &mb);
 
-  /// The global's current value (all Wasm numeric types fit in double).
+  /// The global's current value, for i32/f32/f64.
   double value_{0.0};
+
+  /// The global's current value, for i64. A double cannot hold every i64
+  /// exactly, so i64 globals are stored here and surfaced to JS as a BigInt,
+  /// which is also what the spec requires of Global.prototype.value.
+  int64_t i64Value_{0};
 
   /// The value type descriptor.
   ValType valType_{ValType::I32};

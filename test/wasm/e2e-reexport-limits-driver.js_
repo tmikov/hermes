@@ -1,0 +1,47 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-reexport-limits.wat.
+
+var args = hermescli.getScriptArgs();
+function load(i) {
+  return new WebAssembly.Module(hermescli.loadFile(args[i]));
+}
+function limits(label, o) {
+  print(label + ': min = ' + o.__wasm_min__ + ', max = ' + o.__wasm_max__);
+}
+
+// exporter -> re-exporter -> consumer.
+var exporter = new WebAssembly.Instance(load(0), {});
+var reexporter = new WebAssembly.Instance(load(1), {e: exporter.exports});
+
+limits('re-exported memory', reexporter.exports.mem2);
+limits('re-exported table', reexporter.exports.tbl2);
+
+try {
+  var consumer = new WebAssembly.Instance(
+    load(2), {e: {m: reexporter.exports.mem2, t: reexporter.exports.tbl2}});
+  print('consumer memory.size = ' + consumer.exports.size());
+  print('consumer call0 = ' + consumer.exports.call0());
+} catch (e) {
+  print('consumer: ' + e.name + ': ' + e.message);
+}
+
+// A memory and a table the module defines itself keep reporting their
+// declarations, including the absent maximum.
+var own = new WebAssembly.Instance(load(3), {});
+limits('own memory', own.exports.mem);
+limits('own table', own.exports.tbl);
+
+// The same re-exporter, now fed a memory with no maximum: "no maximum" has
+// to survive the round trip. Neither constructor accepts a maximum of -1,
+// so the property must be left out rather than passed through.
+var reexporter2 = new WebAssembly.Instance(load(1), {e: own.exports});
+limits('re-export of own memory', reexporter2.exports.mem2);
+limits('re-export of own table', reexporter2.exports.tbl2);
+
+print('done');

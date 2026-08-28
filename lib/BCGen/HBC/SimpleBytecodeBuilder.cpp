@@ -105,7 +105,8 @@ std::unique_ptr<Buffer> SimpleBytecodeBuilder::generateBytecodeBuffer() {
       0,
       0,
       0,
-      0,
+      0, // functionSourceCount
+      0, // binaryDataStorageSize
       debugOffset,
       options};
   // Write BytecodeFileHeader to the buffer.

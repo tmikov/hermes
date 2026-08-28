@@ -1,0 +1,19 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// Instantiation-only driver: loads a compiled Wasm HBC module and
+// instantiates it via WebAssembly API. Used for tests that expect
+// traps during instantiation (e.g., start function traps, OOB data
+// segments). The trap error will propagate to the caller.
+//
+// Usage: hermes -Xhermes-internal-test-methods instantiate-hbc.js_ -- <hbc-path>
+
+var args = hermescli.getScriptArgs();
+var hbcPath = args[0];
+var bytes = hermescli.loadFile(hbcPath);
+var mod = new WebAssembly.Module(bytes);
+var instance = new WebAssembly.Instance(mod);

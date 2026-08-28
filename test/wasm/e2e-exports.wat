@@ -27,21 +27,14 @@
   )
 )
 
-;; The global function creates internal closures, then export wrapper
-;; closures, builds the exports object, and returns it.
+;; The global function builds the module info object with descriptor arrays
+;; and the instantiate closure, then returns it.
 ;; CHECK-LABEL: function global(): any
 ;; CHECK:   CreateScopeInst
-;; CHECK-NEXT:   CreateFunctionInst
-;; CHECK-NEXT:   StoreFrameInst
-;; CHECK:   CreateFunctionInst
-;; CHECK-NEXT:   StoreFrameInst
-;; CHECK:   CreateFunctionInst
-;; CHECK-NEXT:   StoreFrameInst
-;; CHECK:   AllocObjectLiteralInst
-;; CHECK-NEXT:   CreateFunctionInst
-;; CHECK-NEXT:   StorePropertyStrictInst {{.*}}, {{.*}}, "add"
-;; CHECK-NEXT:   CreateFunctionInst
-;; CHECK-NEXT:   StorePropertyStrictInst {{.*}}, {{.*}}, "sub"
+;; CHECK:   CreateFunctionInst {{.*}}__wasm_instantiate__
+;; CHECK:   StorePropertyStrictInst {{.*}}, {{.*}}, "instantiate"
+;; CHECK:   StorePropertyStrictInst {{.*}}, {{.*}}, "exportDescs"
+;; CHECK:   StorePropertyStrictInst {{.*}}, {{.*}}, "importDescs"
 ;; CHECK-NEXT:   ReturnInst
 
 ;; The internal "add" function.

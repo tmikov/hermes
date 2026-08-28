@@ -89,28 +89,37 @@ class WasmHelpers {
   /// Emit f32.copysign(a, b): copy the sign bit of b onto the magnitude of a.
   Instruction *emitF32Copysign(Value *a, Value *b);
 
+  /// Emit f64.nearest / f32.nearest: IEEE 754 round-ties-to-even.
+  Instruction *emitNearest(Value *a);
+
   // --- i64 helpers (G.3) ---
-  // Binary ops return lo32; hi32 is stashed and retrieved via emitI64HiResult.
+  // Binary ops take retBufI as first arg, write lo/hi to retBufI[0]/[1].
 
-  /// Stash the hi32 part of an i64 value (for i64 function returns).
-  Instruction *emitI64HiStash(Value *hi);
-
-  /// Retrieve the hi32 part of the most recent i64 helper result.
-  Instruction *emitI64HiResult();
-
-  /// i64 binary arithmetic ops. Take (lo_a, hi_a, lo_b, hi_b), return lo32.
-  Instruction *emitI64Add(Value *loA, Value *hiA, Value *loB, Value *hiB);
-  Instruction *emitI64Sub(Value *loA, Value *hiA, Value *loB, Value *hiB);
-  Instruction *emitI64Mul(Value *loA, Value *hiA, Value *loB, Value *hiB);
-  Instruction *emitI64DivS(Value *loA, Value *hiA, Value *loB, Value *hiB);
-  Instruction *emitI64DivU(Value *loA, Value *hiA, Value *loB, Value *hiB);
-  Instruction *emitI64RemS(Value *loA, Value *hiA, Value *loB, Value *hiB);
-  Instruction *emitI64RemU(Value *loA, Value *hiA, Value *loB, Value *hiB);
-  Instruction *emitI64Shl(Value *loA, Value *hiA, Value *loB, Value *hiB);
-  Instruction *emitI64ShrS(Value *loA, Value *hiA, Value *loB, Value *hiB);
-  Instruction *emitI64ShrU(Value *loA, Value *hiA, Value *loB, Value *hiB);
-  Instruction *emitI64Rotl(Value *loA, Value *hiA, Value *loB, Value *hiB);
-  Instruction *emitI64Rotr(Value *loA, Value *hiA, Value *loB, Value *hiB);
+  /// i64 binary arithmetic ops. Take (retBufI, lo_a, hi_a, lo_b, hi_b).
+  Instruction *emitI64Add(
+      Value *retBufI, Value *loA, Value *hiA, Value *loB, Value *hiB);
+  Instruction *emitI64Sub(
+      Value *retBufI, Value *loA, Value *hiA, Value *loB, Value *hiB);
+  Instruction *emitI64Mul(
+      Value *retBufI, Value *loA, Value *hiA, Value *loB, Value *hiB);
+  Instruction *emitI64DivS(
+      Value *retBufI, Value *loA, Value *hiA, Value *loB, Value *hiB);
+  Instruction *emitI64DivU(
+      Value *retBufI, Value *loA, Value *hiA, Value *loB, Value *hiB);
+  Instruction *emitI64RemS(
+      Value *retBufI, Value *loA, Value *hiA, Value *loB, Value *hiB);
+  Instruction *emitI64RemU(
+      Value *retBufI, Value *loA, Value *hiA, Value *loB, Value *hiB);
+  Instruction *emitI64Shl(
+      Value *retBufI, Value *loA, Value *hiA, Value *loB, Value *hiB);
+  Instruction *emitI64ShrS(
+      Value *retBufI, Value *loA, Value *hiA, Value *loB, Value *hiB);
+  Instruction *emitI64ShrU(
+      Value *retBufI, Value *loA, Value *hiA, Value *loB, Value *hiB);
+  Instruction *emitI64Rotl(
+      Value *retBufI, Value *loA, Value *hiA, Value *loB, Value *hiB);
+  Instruction *emitI64Rotr(
+      Value *retBufI, Value *loA, Value *hiA, Value *loB, Value *hiB);
 
   /// i64 unary ops. Take (lo, hi), return a single i32 result.
   Instruction *emitI64Clz(Value *lo, Value *hi);
@@ -131,23 +140,23 @@ class WasmHelpers {
   Instruction *emitI64GeU(Value *loA, Value *hiA, Value *loB, Value *hiB);
 
   // --- i64 conversion helpers (G.4b) ---
-  // Take a single f64 arg, return lo32; hi32 is stashed.
+  // Take (retBufI, f64_arg), write lo/hi result to retBufI[0]/[1].
 
   /// i64.trunc_f64_s (also used for i64.trunc_f32_s):
   /// trapping truncation from double to signed i64.
-  Instruction *emitI64TruncF64S(Value *a);
+  Instruction *emitI64TruncF64S(Value *retBufI, Value *a);
 
   /// i64.trunc_f64_u (also used for i64.trunc_f32_u):
   /// trapping truncation from double to unsigned i64.
-  Instruction *emitI64TruncF64U(Value *a);
+  Instruction *emitI64TruncF64U(Value *retBufI, Value *a);
 
   /// i64.trunc_sat_f64_s (also used for i64.trunc_sat_f32_s):
   /// saturating truncation from double to signed i64.
-  Instruction *emitI64TruncSatF64S(Value *a);
+  Instruction *emitI64TruncSatF64S(Value *retBufI, Value *a);
 
   /// i64.trunc_sat_f64_u (also used for i64.trunc_sat_f32_u):
   /// saturating truncation from double to unsigned i64.
-  Instruction *emitI64TruncSatF64U(Value *a);
+  Instruction *emitI64TruncSatF64U(Value *retBufI, Value *a);
 
   // --- i64→float conversion helpers (G.4c) ---
   // Take split lo/hi i64 args, return a single f64.
@@ -164,8 +173,8 @@ class WasmHelpers {
   /// f32.convert_i64_u: convert unsigned i64 to f32 (as double).
   Instruction *emitF32ConvertI64U(Value *lo, Value *hi);
 
-  /// i64.reinterpret_f64: bitcast f64 to i64. Returns lo32; hi32 stashed.
-  Instruction *emitI64ReinterpretF64(Value *a);
+  /// i64.reinterpret_f64: bitcast f64 to i64. Writes lo/hi to retBufI.
+  Instruction *emitI64ReinterpretF64(Value *retBufI, Value *a);
 
   /// f64.reinterpret_i64: bitcast i64 to f64. Takes split lo/hi.
   Instruction *emitF64ReinterpretI64(Value *lo, Value *hi);
@@ -260,14 +269,37 @@ class WasmHelpers {
   /// \p elemSegs is the element segments array.
   Instruction *emitElemDrop(Value *elemSegs, Value *segIdx);
 
+  /// Emit table.grow: grows both funcs and types arrays by \p delta entries,
+  /// filling new func entries with \p fillVal.
+  /// \p maxEntries is the table's declared maximum size.
+  /// Returns old size on success, -1 on failure.
+  Instruction *emitTableGrow(
+      Value *funcsArr,
+      Value *typesArr,
+      Value *delta,
+      Value *fillVal,
+      Value *maxEntries);
+
   // --- BigInt ↔ i64 conversion helpers ---
 
-  /// Convert a JS BigInt to split (lo, hi). Returns lo32; hi32 is stashed
-  /// and can be retrieved via emitI64HiResult().
-  Instruction *emitBigIntToI64(Value *bigint);
+  /// Convert a JS BigInt to split (lo, hi). Writes lo/hi to retBufI[0]/[1].
+  Instruction *emitBigIntToI64(Value *retBufI, Value *bigint);
 
   /// Convert split (lo, hi) to a JS BigInt.
   Instruction *emitI64ToBigInt(Value *lo, Value *hi);
+
+  /// Emit a call to the wasmLinkError builtin, which creates and throws a
+  /// WebAssembly.LinkError with the given message string. Used for import
+  /// type validation at instantiation time.
+  Instruction *emitLinkError(Value *message);
+
+  /// Emit wasmDataSegmentInit: bulk-copy from binary data storage blob
+  /// into linear memory. Args: (heapu8, blobOffset, length, dest).
+  Instruction *emitDataSegmentInit(
+      Value *heapu8,
+      Value *blobOffset,
+      Value *length,
+      Value *dest);
 
  private:
   IRBuilder &builder_;

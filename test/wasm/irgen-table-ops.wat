@@ -20,7 +20,7 @@
     table.set 0
   )
 
-  ;; table.grow: attempts to grow the table (Phase 1: always returns -1)
+  ;; table.grow: grows the table, returns old size or -1 on failure
   (func $grow_table (param i32) (result i32)
     ref.null func
     local.get 0
@@ -33,6 +33,8 @@
 ;; CHECK: LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_funcs]
 ;; CHECK: StorePropertyStrictInst %{{.*}}: any, %{{.*}}: any, %{{.*}}: any
 
-;; table.grow: Phase 1 always pushes -1 as the result
+;; table.grow: calls the wasmTableGrow builtin
 ;; CHECK-LABEL: function wasm_func_2(p0: any): any
-;; CHECK: PhiInst (:number) -1: number
+;; CHECK: LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_funcs]
+;; CHECK: LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_types]
+;; CHECK: CallBuiltinInst (:any) [HermesBuiltin.wasmTableGrow]

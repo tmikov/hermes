@@ -19,7 +19,9 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wundef"
 #include "wabt/binary-reader.h"
+#include "wabt/binary-reader-ir.h"
 #include "wabt/binary-reader-nop.h"
+#include "wabt/validator.h"
 #pragma GCC diagnostic pop
 
 namespace hermes {
@@ -41,11 +43,19 @@ bool compileWasmModule(
   wabt::ReadBinaryOptions options;
   options.read_debug_names = true;
   options.features.enable_exceptions();
+  options.features.enable_extended_const();
   wabt::Result result =
       wabt::ReadBinary(buffer, size, &reader, options);
   if (!wabt::Succeeded(result)) {
     errorMsg = "Failed to parse Wasm binary";
     return false;
+  }
+
+  // Append all data segment bytes to the binary data storage blob on the
+  // IR Module. generateBytecodeModule() will transfer this to the
+  // BytecodeModule.
+  for (const auto &seg : moduleInfo.dataSegments) {
+    M.appendBinaryData(llvh::ArrayRef<uint8_t>(seg.data));
   }
 
   return true;
@@ -71,9 +81,21 @@ static const char *externalKindName(wasm::WasmExternalKind kind) {
 std::unique_ptr<WasmModuleData> compileWasmToModuleData(
     const uint8_t *buffer,
     size_t size,
-    std::string &errorMsg) {
+    std::string &errorMsg,
+    bool test262) {
+  // Validate the module first. The Wasm spec requires that
+  // new WebAssembly.Module() reject semantically invalid modules with a
+  // CompileError. Our compile path (ReadBinary + BinaryReaderHermesIRGen) only
+  // does structural parsing, so we run WABT's full semantic validator first.
+  if (!validateWasmBinary(buffer, size)) {
+    errorMsg = "Wasm module validation failed";
+    return nullptr;
+  }
+
   // Full compilation: parse → IR → optimize → bytecode.
-  auto context = std::make_shared<Context>();
+  CodeGenerationSettings codeGenOpts;
+  codeGenOpts.test262 = test262;
+  auto context = std::make_shared<Context>(std::move(codeGenOpts));
   auto M = std::make_shared<Module>(context);
 
   wasm::WasmModuleInfo moduleInfo;
@@ -84,6 +106,7 @@ std::unique_ptr<WasmModuleData> compileWasmToModuleData(
   wabt::ReadBinaryOptions options;
   options.read_debug_names = true;
   options.features.enable_exceptions();
+  options.features.enable_extended_const();
   wabt::Result result = wabt::ReadBinary(buffer, size, &reader, options);
   if (!wabt::Succeeded(result)) {
     errorMsg = "invalid Wasm binary";
@@ -92,6 +115,14 @@ std::unique_ptr<WasmModuleData> compileWasmToModuleData(
 
   // Run the optimization pipeline.
   runFullOptimizationPasses(*M);
+
+  // Append all data segment bytes to the binary data storage blob on the
+  // IR Module. generateBytecodeModule() will transfer this to the
+  // BytecodeModule. The segments are appended in order, matching the offsets
+  // computed during IR generation in WasmIRGen::finalizeModule().
+  for (const auto &seg : moduleInfo.dataSegments) {
+    M->appendBinaryData(llvh::ArrayRef<uint8_t>(seg.data));
+  }
 
   // Generate bytecode.
   BytecodeGenerationOptions genOptions{OutputFormatKind::Execute};
@@ -127,20 +158,21 @@ std::unique_ptr<WasmModuleData> compileWasmToModuleData(
 }
 
 bool validateWasmBinary(const uint8_t *buffer, size_t size) {
-  // Use a silent reader that suppresses error messages (OnError returns true
-  // = "handled", preventing wabt from printing to stderr).
-  class SilentReader : public wabt::BinaryReaderNop {
-   public:
-    bool OnError(const wabt::Error &) override {
-      return true;
-    }
-  };
+  wabt::Module module;
+  wabt::Errors errors;
+  wabt::ReadBinaryOptions readOptions;
+  readOptions.features.enable_exceptions();
+  readOptions.features.enable_extended_const();
 
-  SilentReader reader;
-  wabt::ReadBinaryOptions options;
-  options.features.enable_exceptions();
-  wabt::Result result = wabt::ReadBinary(buffer, size, &reader, options);
-  return wabt::Succeeded(result);
+  wabt::Result readResult = wabt::ReadBinaryIr(
+      "<validate>", buffer, size, readOptions, &errors, &module);
+  if (wabt::Failed(readResult))
+    return false;
+
+  wabt::ValidateOptions validateOptions(readOptions.features);
+  wabt::Result validateResult =
+      wabt::ValidateModule(&module, &errors, validateOptions);
+  return wabt::Succeeded(validateResult);
 }
 
 } // namespace hermes

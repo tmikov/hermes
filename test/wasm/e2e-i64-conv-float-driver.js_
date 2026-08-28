@@ -8,7 +8,10 @@
 // Driver script for e2e-i64-conv-float.wat
 
 var hbcPath = hermescli.getScriptArgs()[0];
-var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+var bytes = hermescli.loadFile(hbcPath);
+var mod = new WebAssembly.Module(bytes);
+var instance = new WebAssembly.Instance(mod);
+var exports = instance.exports;
 
 print("f64_convert_i64_s_small: " + exports.f64_convert_i64_s_small());
 print("f64_convert_i64_s_neg: " + exports.f64_convert_i64_s_neg());

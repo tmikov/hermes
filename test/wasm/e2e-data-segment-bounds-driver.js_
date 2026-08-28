@@ -1,0 +1,37 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-data-segment-bounds.wat.
+// Tests that active data segments with GlobalGet offsets and extended const
+// expressions are applied correctly.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+
+// Provide the imported global "env.g" = 0.
+var imports = { env: { g: 0 } };
+
+var bytes = hermescli.loadFile(hbcPath);
+var mod = new WebAssembly.Module(bytes);
+var instance = new WebAssembly.Instance(mod, imports);
+var exports = instance.exports;
+
+// GlobalGet segment: "Hi" at offset 0 (global 0 = 0).
+// 'H' = 72, 'i' = 105
+print("byte 0:", exports.get_byte(0));
+print("byte 1:", exports.get_byte(1));
+
+// I32Const segment: "OK" at offset 10.
+// 'O' = 79, 'K' = 75
+print("byte 10:", exports.get_byte(10));
+print("byte 11:", exports.get_byte(11));
+
+// Extended const expr segment: "EX" at offset 20 (10 + 10).
+// 'E' = 69, 'X' = 88
+print("byte 20:", exports.get_byte(20));
+print("byte 21:", exports.get_byte(21));
+
+print("done");

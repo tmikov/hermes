@@ -24,10 +24,274 @@
 namespace hermes {
 namespace wasm {
 
+/// Map a WasmValType to a single character code for type strings.
+static char valTypeChar(WasmValType vt) {
+  switch (vt) {
+    case WasmValType::I32: return 'i';
+    case WasmValType::I64: return 'l';
+    case WasmValType::F32: return 'f';
+    case WasmValType::F64: return 'd';
+    case WasmValType::FuncRef: return 'r';
+    case WasmValType::ExternRef: return 'e';
+    case WasmValType::V128: return 'v';
+  }
+  return '?';
+}
+
+/// Build a type string for a function type, e.g. "func:ii:i".
+static std::string buildFuncTypeString(const WasmFuncType &ft) {
+  std::string s = "func:";
+  for (auto p : ft.params)
+    s += valTypeChar(p);
+  s += ':';
+  for (auto r : ft.results)
+    s += valTypeChar(r);
+  return s;
+}
+
+/// Build a type string for a global type, e.g. "global:i32:const".
+static std::string buildGlobalTypeString(const WasmGlobalType &gt) {
+  std::string s = "global:";
+  switch (gt.type) {
+    case WasmValType::I32: s += "i32:"; break;
+    case WasmValType::I64: s += "i64:"; break;
+    case WasmValType::F32: s += "f32:"; break;
+    case WasmValType::F64: s += "f64:"; break;
+    default: s += "unknown:"; break;
+  }
+  s += gt.mutable_ ? "var" : "const";
+  return s;
+}
+
+/// Build a type string for a tag type, e.g. "tag:i:".
+/// Tags have parameters but no results per spec.
+static std::string buildTagTypeString(const WasmFuncType &ft) {
+  std::string s = "tag:";
+  for (auto p : ft.params)
+    s += valTypeChar(p);
+  s += ':';
+  return s;
+}
+
+/// Build a type string for a table type, e.g. "table:funcref".
+static std::string buildTableTypeString(const WasmTableType &tt) {
+  return tt.elemType == WasmValType::FuncRef
+      ? "table:funcref" : "table:externref";
+}
+
 WasmIRGen::WasmIRGen(Module &M, WasmModuleInfo &moduleInfo)
-    : moduleInfo_(moduleInfo), builder_(&M), helpers_(builder_) {}
+    : moduleInfo_(moduleInfo),
+      builder_(&M),
+      helpers_(builder_),
+      test262_(M.getContext().getCodeGenerationSettings().test262) {}
+
+bool WasmIRGen::needsReturnBuffer(const WasmFuncType &funcType) {
+  if (funcType.results.size() > 1)
+    return true;
+  if (funcType.results.size() == 1 && funcType.results[0] == WasmValType::I64)
+    return true;
+  return false;
+}
+
+std::pair<std::vector<uint32_t>, uint32_t> WasmIRGen::computeRetBufLayout(
+    const std::vector<WasmValType> &results) {
+  std::vector<uint32_t> offsets;
+  uint32_t offset = 0;
+  for (auto vt : results) {
+    switch (vt) {
+      case WasmValType::I32:
+        // Align to 4.
+        offset = (offset + 3) & ~3u;
+        offsets.push_back(offset);
+        offset += 4;
+        break;
+      case WasmValType::I64:
+        // Align to 4. Uses I[offset/4] (lo) + I[offset/4+1] (hi).
+        offset = (offset + 3) & ~3u;
+        offsets.push_back(offset);
+        offset += 8;
+        break;
+      case WasmValType::F32:
+      case WasmValType::F64:
+        // Align to 8. Uses F[offset/8].
+        offset = (offset + 7) & ~7u;
+        offsets.push_back(offset);
+        offset += 8;
+        break;
+      default:
+        // FuncRef, ExternRef, etc: treat like i32.
+        offset = (offset + 3) & ~3u;
+        offsets.push_back(offset);
+        offset += 4;
+        break;
+    }
+  }
+  return {offsets, offset};
+}
+
+std::pair<Value *, Value *> WasmIRGen::readI64FromRetBuf() {
+  auto *loRaw = builder_.createLoadPropertyInst(
+      retBufI_, builder_.getLiteralNumber(0));
+  auto *hiRaw = builder_.createLoadPropertyInst(
+      retBufI_, builder_.getLiteralNumber(1));
+  // Uint32Array returns unsigned values. Convert to signed int32 so that
+  // the split i64 representation is consistent (lo/hi are signed int32 values
+  // that reconstruct the i64 when combined). This ensures i32.wrap_i64 and
+  // other consumers see the correct signed value.
+  auto *lo = builder_.createAsInt32Inst(loRaw);
+  auto *hi = builder_.createAsInt32Inst(hiRaw);
+  return {lo, hi};
+}
+
+void WasmIRGen::emitRetBufStores(const WasmFuncType &funcType) {
+  auto [offsets, totalSize] = computeRetBufLayout(funcType.results);
+
+  // Collect all result values from the stack (pop in reverse order).
+  llvh::SmallVector<Value *, 8> resultVals;
+  // For i64, we store lo and hi separately.
+  llvh::SmallVector<Value *, 4> i64His;
+
+  // Pop in reverse order.
+  llvh::SmallVector<std::pair<Value *, Value *>, 8> poppedResults(
+      funcType.results.size());
+  for (size_t i = funcType.results.size(); i > 0; --i) {
+    if (funcType.results[i - 1] == WasmValType::I64) {
+      poppedResults[i - 1] = popI64();
+    } else {
+      poppedResults[i - 1] = {pop(), nullptr};
+    }
+  }
+
+  // Store each result into the buffer at its computed offset.
+  for (size_t i = 0; i < funcType.results.size(); ++i) {
+    uint32_t byteOff = offsets[i];
+    switch (funcType.results[i]) {
+      case WasmValType::I32: {
+        // I[byteOff / 4] = val
+        uint32_t idx = byteOff / 4;
+        builder_.createStorePropertyStrictInst(
+            poppedResults[i].first,
+            retBufI_,
+            builder_.getLiteralNumber(idx));
+        break;
+      }
+      case WasmValType::I64: {
+        // I[byteOff / 4] = lo, I[byteOff / 4 + 1] = hi
+        uint32_t idx = byteOff / 4;
+        builder_.createStorePropertyStrictInst(
+            poppedResults[i].first,
+            retBufI_,
+            builder_.getLiteralNumber(idx));
+        builder_.createStorePropertyStrictInst(
+            poppedResults[i].second,
+            retBufI_,
+            builder_.getLiteralNumber(idx + 1));
+        break;
+      }
+      case WasmValType::F32:
+      case WasmValType::F64: {
+        // F[byteOff / 8] = val
+        uint32_t idx = byteOff / 8;
+        builder_.createStorePropertyStrictInst(
+            poppedResults[i].first,
+            retBufF_,
+            builder_.getLiteralNumber(idx));
+        break;
+      }
+      default: {
+        uint32_t idx = byteOff / 4;
+        builder_.createStorePropertyStrictInst(
+            poppedResults[i].first,
+            retBufI_,
+            builder_.getLiteralNumber(idx));
+        break;
+      }
+    }
+  }
+
+  builder_.createReturnInst(builder_.getLiteralNumber(0));
+}
+
+void WasmIRGen::emitRetBufLoads(const WasmFuncType &funcType) {
+  auto [offsets, totalSize] = computeRetBufLayout(funcType.results);
+
+  // retBufF_ is the *current* function's float view, and it is set only when
+  // this function itself returns through the buffer. These loads read the
+  // results of a CALLEE, so a caller that returns nothing through the buffer
+  // still needs the view whenever the callee has an f32/f64 result. Load it
+  // on demand rather than in every function's preamble. There is one buffer
+  // per module, so the top-level view is the object the callee was handed.
+  Value *rbF = retBufF_;
+  auto getRbF = [&]() -> Value * {
+    if (!rbF)
+      rbF = builder_.createLoadFrameInst(parentScopeInst_, retBufFVar_);
+    return rbF;
+  };
+
+  for (size_t i = 0; i < funcType.results.size(); ++i) {
+    uint32_t byteOff = offsets[i];
+    switch (funcType.results[i]) {
+      case WasmValType::I32: {
+        uint32_t idx = byteOff / 4;
+        auto *raw = builder_.createLoadPropertyInst(
+            retBufI_, builder_.getLiteralNumber(idx));
+        // Convert Uint32Array unsigned value to signed int32.
+        push(builder_.createAsInt32Inst(raw));
+        break;
+      }
+      case WasmValType::I64: {
+        uint32_t idx = byteOff / 4;
+        auto *loRaw = builder_.createLoadPropertyInst(
+            retBufI_, builder_.getLiteralNumber(idx));
+        auto *hiRaw = builder_.createLoadPropertyInst(
+            retBufI_, builder_.getLiteralNumber(idx + 1));
+        // Convert Uint32Array unsigned values to signed int32.
+        pushI64(
+            builder_.createAsInt32Inst(loRaw),
+            builder_.createAsInt32Inst(hiRaw));
+        break;
+      }
+      case WasmValType::F32:
+      case WasmValType::F64: {
+        uint32_t idx = byteOff / 8;
+        auto *val = builder_.createLoadPropertyInst(
+            getRbF(), builder_.getLiteralNumber(idx));
+        push(val);
+        break;
+      }
+      default: {
+        uint32_t idx = byteOff / 4;
+        auto *raw = builder_.createLoadPropertyInst(
+            retBufI_, builder_.getLiteralNumber(idx));
+        push(builder_.createAsInt32Inst(raw));
+        break;
+      }
+    }
+  }
+}
+
+void WasmIRGen::buildCanonicalTypeMap() {
+  const auto &types = moduleInfo_.types;
+  canonicalTypeIndex_.resize(types.size());
+
+  for (uint32_t i = 0; i < types.size(); ++i) {
+    // Find the first type with the same signature.
+    uint32_t canon = i;
+    for (uint32_t j = 0; j < i; ++j) {
+      if (types[j].params == types[i].params &&
+          types[j].results == types[i].results) {
+        canon = canonicalTypeIndex_[j];
+        break;
+      }
+    }
+    canonicalTypeIndex_[i] = canon;
+  }
+}
 
 void WasmIRGen::createFunctions() {
+  // Build canonical type index map for structural type comparison.
+  buildCanonicalTypeMap();
+
   // Create the top-level function first (must be before other functions).
   auto *topLevel = builder_.createTopLevelFunction(
       "global", true /* strictMode */);
@@ -61,6 +325,16 @@ void WasmIRGen::createFunctions() {
   // If the module has tables, create Variables for each table.
   // Each table gets two JS Arrays: one for function closures, one for type
   // indices (used by call_indirect for type checking).
+  // One variable per type, holding its interned id (see internTypeIds).
+  typeIdVars_.resize(moduleInfo_.types.size(), nullptr);
+  for (uint32_t i = 0; i < moduleInfo_.types.size(); ++i) {
+    typeIdVars_[i] = builder_.createVariable(
+        topLevelVS_,
+        ("wasm_type_id_" + llvh::Twine(i)),
+        Type::createAnyType(),
+        /* hidden */ true);
+  }
+
   uint32_t numTables = moduleInfo_.totalTableCount();
   if (numTables > 0) {
     tableFuncVars_.resize(numTables, nullptr);
@@ -137,6 +411,87 @@ void WasmIRGen::createFunctions() {
         /* hidden */ true);
   }
 
+  // Create Variables for imported global values in the top-level scope.
+  // These hold the raw import value (WebAssembly.Global or JS number)
+  // loaded during import validation. initializeGlobals() reads from these.
+  importGlobalVals_.resize(numImportedGlobals, nullptr);
+  for (uint32_t i = 0; i < numImportedGlobals; ++i) {
+    importGlobalVals_[i] = builder_.createVariable(
+        topLevelVS_,
+        ("import_global_val_" + llvh::Twine(i)),
+        Type::createAnyType(),
+        /* hidden */ true);
+  }
+
+  // If the module imports a memory, create variables to hold the imported
+  // memory's __wasm_min__ and __wasm_max__ values. These are the actual
+  // initial page count and maximum from the imported WebAssembly.Memory
+  // object, which may differ from the import declaration's bounds.
+  if (moduleInfo_.importedMemoryCount() > 0) {
+    importedMemMinVar_ = builder_.createVariable(
+        topLevelVS_,
+        "imported_mem_min",
+        Type::createAnyType(),
+        /* hidden */ true);
+    importedMemMaxVar_ = builder_.createVariable(
+        topLevelVS_,
+        "imported_mem_max",
+        Type::createAnyType(),
+        /* hidden */ true);
+  }
+
+  // For each imported table, create variables to hold that table's actual
+  // current size and maximum, as read from the imported object during
+  // validation. Like the memory case above, the import declaration's limits
+  // are only a lower bound on what was actually supplied.
+  {
+    uint32_t numImportedTables = moduleInfo_.importedTableCount();
+    importedTableMinVars_.resize(numImportedTables, nullptr);
+    importedTableMaxVars_.resize(numImportedTables, nullptr);
+    for (uint32_t i = 0; i < numImportedTables; ++i) {
+      importedTableMinVars_[i] = builder_.createVariable(
+          topLevelVS_,
+          ("imported_table_min_" + llvh::Twine(i)),
+          Type::createAnyType(),
+          /* hidden */ true);
+      importedTableMaxVars_[i] = builder_.createVariable(
+          topLevelVS_,
+          ("imported_table_max_" + llvh::Twine(i)),
+          Type::createAnyType(),
+          /* hidden */ true);
+    }
+  }
+
+  // Determine the return buffer size. The buffer is used for i64 arithmetic
+  // builtins (which write lo/hi to retBufI[0]/[1]) and multi-value returns.
+  // We always create at least an 8-byte buffer because function bodies may
+  // use i64 operations even if no function type signature mentions i64.
+  {
+    uint32_t maxRetBufSize = 8; // Minimum for i64 arithmetic builtins.
+    for (const auto &ft : moduleInfo_.types) {
+      if (needsReturnBuffer(ft)) {
+        auto [offsets, size] = computeRetBufLayout(ft.results);
+        maxRetBufSize = std::max(maxRetBufSize, size);
+      }
+    }
+
+    // Round up to a multiple of 8 so Float64Array can be created on the
+    // same ArrayBuffer.
+    maxRetBufSize = (maxRetBufSize + 7) & ~7u;
+
+    retBufIVar_ = builder_.createVariable(
+        topLevelVS_,
+        "retBufI",
+        Type::createAnyType(),
+        /* hidden */ true);
+    retBufFVar_ = builder_.createVariable(
+        topLevelVS_,
+        "retBufF",
+        Type::createAnyType(),
+        /* hidden */ true);
+    retBufSize_ = maxRetBufSize;
+  }
+
   // Create all Wasm functions and a Variable in the top-level scope for each.
   uint32_t totalFuncs = moduleInfo_.totalFunctionCount();
   irFunctions_.resize(totalFuncs, nullptr);
@@ -170,9 +525,17 @@ void WasmIRGen::createFunctions() {
     // Add a "this" parameter (required by Hermes calling convention).
     builder_.createJSThisParam(func);
 
+    // For functions that need a return buffer (i64 or multi-value returns),
+    // prepend retBufI and retBufF parameters before the Wasm params.
+    uint32_t jsParamCount = 0;
+    if (needsReturnBuffer(funcType)) {
+      builder_.createJSDynamicParam(func, "retbuf_I");
+      builder_.createJSDynamicParam(func, "retbuf_F");
+      jsParamCount += 2;
+    }
+
     // Add JSDynamicParams per Wasm parameter. i64 params need two slots
     // (lo32, hi32) for the split representation.
-    uint32_t jsParamCount = 0;
     for (uint32_t p = 0; p < funcType.params.size(); ++p) {
       if (funcType.params[p] == WasmValType::I64) {
         builder_.createJSDynamicParam(
@@ -198,9 +561,20 @@ void WasmIRGen::createFunctions() {
     irFunctions_[i] = func;
   }
 
-  // Populate the top-level function body.
+  // Create the __wasm_instantiate__ function. This will contain all the
+  // initialization logic (import resolution, closures, memory views, tables,
+  // globals, trampolines). The top-level function will just return a module
+  // info object with an instantiate closure and descriptor arrays.
+  instantiateFunc_ = builder_.createFunction(
+      "__wasm_instantiate__",
+      Function::DefinitionKind::ES5Function,
+      true /* strictMode */);
+  instantiateFunc_->setExpectedParamCountIncludingThis(1); // just "this"
+  builder_.createJSThisParam(instantiateFunc_);
+
+  // Populate the __wasm_instantiate__ function body.
   // Create all closures once and store them in the top-level scope.
-  tlEntry_ = builder_.createBasicBlock(topLevel);
+  tlEntry_ = builder_.createBasicBlock(instantiateFunc_);
   builder_.setInsertionBlock(tlEntry_);
 
   // Create a scope for the top-level function.
@@ -208,27 +582,521 @@ void WasmIRGen::createFunctions() {
       topLevelVS_, builder_.getEmptySentinel());
   auto *tlScope = tlScope_;
 
-  // Resolve imported functions from the imports object.
+  // Resolve and validate ALL imports from the imports object.
   // The imports object is read from the global `__wasm_imports__` property.
-  // It has the shape: { moduleName: { fieldName: func } }.
-  // When M.4 (WebAssembly.Instance) is implemented, the imports will be
-  // passed via the Instance constructor and set on the global before
-  // evaluating the compiled module.
-  if (numImportedFuncs > 0) {
+  // It has the shape: { moduleName: { fieldName: value } }.
+  // Each import is validated:
+  //   - Module object must not be undefined.
+  //   - Import value must not be undefined.
+  //   - Type must match via __wasm_type__ string comparison.
+  // For function imports, plain JS callables (no __wasm_type__) are accepted.
+  // For global imports, plain JS numbers (no __wasm_type__) are accepted.
+  // For table/memory imports, __wasm_type__ must be present and match.
+  if (!moduleInfo_.imports.empty()) {
     auto *importsVal = builder_.createTryLoadGlobalPropertyInst(
         builder_.getLiteralString("__wasm_imports__"));
+    auto *undefinedVal = builder_.getLiteralUndefined();
+    auto *topLevelFunc = tlEntry_->getParent();
+
     uint32_t importFuncIdx = 0;
+    uint32_t importGlobalIdx = 0;
+    uint32_t importTableIdx = 0;
+
+    // Cache module objects to avoid redundant loads for the same module.
+    std::string lastModuleName;
+    Value *lastModuleObj = nullptr;
+
     for (const auto &imp : moduleInfo_.imports) {
-      if (imp.kind != WasmExternalKind::Function)
-        continue;
-      // imports[moduleName][fieldName]
-      auto *moduleObj = builder_.createLoadPropertyInst(
-          importsVal, builder_.getLiteralString(imp.moduleName));
-      auto *funcVal = builder_.createLoadPropertyInst(
+      // Load module object (deduplicate consecutive same-module loads).
+      Value *moduleObj;
+      if (imp.moduleName == lastModuleName && lastModuleObj) {
+        moduleObj = lastModuleObj;
+      } else {
+        moduleObj = builder_.createLoadPropertyInst(
+            importsVal, builder_.getLiteralString(imp.moduleName));
+
+        // Check module object is not undefined.
+        auto *modIsUndef = builder_.createBinaryOperatorInst(
+            moduleObj, undefinedVal,
+            ValueKind::BinaryStrictlyEqualInstKind);
+        auto *modFailBB = builder_.createBasicBlock(topLevelFunc);
+        auto *modOkBB = builder_.createBasicBlock(topLevelFunc);
+        builder_.createCondBranchInst(modIsUndef, modFailBB, modOkBB);
+
+        builder_.setInsertionBlock(modFailBB);
+        helpers_.emitLinkError(
+            builder_.getLiteralString("unknown import module"));
+        builder_.createUnreachableInst();
+
+        builder_.setInsertionBlock(modOkBB);
+        tlEntry_ = modOkBB;
+
+        lastModuleName = imp.moduleName;
+        lastModuleObj = moduleObj;
+      }
+
+      // Load the import value.
+      auto *importVal = builder_.createLoadPropertyInst(
           moduleObj, builder_.getLiteralString(imp.fieldName));
-      builder_.createStoreFrameInst(
-          tlScope, funcVal, importFuncVars_[importFuncIdx]);
-      ++importFuncIdx;
+
+      // Check import value is not undefined.
+      auto *impIsUndef = builder_.createBinaryOperatorInst(
+          importVal, undefinedVal,
+          ValueKind::BinaryStrictlyEqualInstKind);
+      auto *impFailBB = builder_.createBasicBlock(topLevelFunc);
+      auto *impOkBB = builder_.createBasicBlock(topLevelFunc);
+      builder_.createCondBranchInst(impIsUndef, impFailBB, impOkBB);
+
+      builder_.setInsertionBlock(impFailBB);
+      helpers_.emitLinkError(
+          builder_.getLiteralString("unknown import"));
+      builder_.createUnreachableInst();
+
+      builder_.setInsertionBlock(impOkBB);
+      tlEntry_ = impOkBB;
+
+      // Per-kind type validation.
+      switch (imp.kind) {
+        case WasmExternalKind::Function: {
+          // Load __wasm_type__ from the import value.
+          auto *typeStr = builder_.createLoadPropertyInst(
+              importVal, builder_.getLiteralString("__wasm_type__"));
+          auto *typeIsUndef = builder_.createBinaryOperatorInst(
+              typeStr, undefinedVal,
+              ValueKind::BinaryStrictlyEqualInstKind);
+          // If undefined → could be plain JS function. Check typeof.
+          auto *checkCallableBB =
+              builder_.createBasicBlock(topLevelFunc);
+          auto *checkTypeBB = builder_.createBasicBlock(topLevelFunc);
+          auto *acceptBB = builder_.createBasicBlock(topLevelFunc);
+          auto *linkErrorBB = builder_.createBasicBlock(topLevelFunc);
+          builder_.createCondBranchInst(
+              typeIsUndef, checkCallableBB, checkTypeBB);
+
+          // Check that the import value is callable (typeof === "function").
+          builder_.setInsertionBlock(checkCallableBB);
+          auto *typeofVal = builder_.createTypeOfInst(importVal);
+          auto *isFunc = builder_.createBinaryOperatorInst(
+              typeofVal,
+              builder_.getLiteralString("function"),
+              ValueKind::BinaryStrictlyEqualInstKind);
+          builder_.createCondBranchInst(
+              isFunc, acceptBB, linkErrorBB);
+
+          builder_.setInsertionBlock(checkTypeBB);
+          // Compare type string against expected.
+          std::string expectedType =
+              buildFuncTypeString(moduleInfo_.getFunctionType(
+                  importFuncIdx));
+          auto *mismatch = builder_.createBinaryOperatorInst(
+              typeStr,
+              builder_.getLiteralString(expectedType),
+              ValueKind::BinaryStrictlyNotEqualInstKind);
+          builder_.createCondBranchInst(
+              mismatch, linkErrorBB, acceptBB);
+
+          builder_.setInsertionBlock(linkErrorBB);
+          helpers_.emitLinkError(
+              builder_.getLiteralString("incompatible import type"));
+          builder_.createUnreachableInst();
+
+          builder_.setInsertionBlock(acceptBB);
+          tlEntry_ = acceptBB;
+
+          // Store the validated import function.
+          builder_.createStoreFrameInst(
+              tlScope, importVal, importFuncVars_[importFuncIdx]);
+          ++importFuncIdx;
+          break;
+        }
+
+        case WasmExternalKind::Global: {
+          // Load __wasm_type__ from the import value.
+          auto *typeStr = builder_.createLoadPropertyInst(
+              importVal, builder_.getLiteralString("__wasm_type__"));
+          auto *typeIsUndef = builder_.createBinaryOperatorInst(
+              typeStr, undefinedVal,
+              ValueKind::BinaryStrictlyEqualInstKind);
+          // If undefined → could be raw JS number. Check typeof.
+          auto *checkNumberBB =
+              builder_.createBasicBlock(topLevelFunc);
+          auto *checkTypeBB = builder_.createBasicBlock(topLevelFunc);
+          auto *acceptBB = builder_.createBasicBlock(topLevelFunc);
+          auto *linkErrorBB = builder_.createBasicBlock(topLevelFunc);
+          builder_.createCondBranchInst(
+              typeIsUndef, checkNumberBB, checkTypeBB);
+
+          // Check that the import value is a number or bigint
+          // (typeof === "number" || typeof === "bigint").
+          builder_.setInsertionBlock(checkNumberBB);
+          auto *typeofVal = builder_.createTypeOfInst(importVal);
+          auto *isNum = builder_.createBinaryOperatorInst(
+              typeofVal,
+              builder_.getLiteralString("number"),
+              ValueKind::BinaryStrictlyEqualInstKind);
+          auto *checkBigIntBB =
+              builder_.createBasicBlock(topLevelFunc);
+          builder_.createCondBranchInst(
+              isNum, acceptBB, checkBigIntBB);
+
+          builder_.setInsertionBlock(checkBigIntBB);
+          auto *isBigInt = builder_.createBinaryOperatorInst(
+              typeofVal,
+              builder_.getLiteralString("bigint"),
+              ValueKind::BinaryStrictlyEqualInstKind);
+          builder_.createCondBranchInst(
+              isBigInt, acceptBB, linkErrorBB);
+
+          builder_.setInsertionBlock(checkTypeBB);
+          std::string expectedType =
+              buildGlobalTypeString(imp.globalType);
+          auto *mismatch = builder_.createBinaryOperatorInst(
+              typeStr,
+              builder_.getLiteralString(expectedType),
+              ValueKind::BinaryStrictlyNotEqualInstKind);
+          // Resolve .value in its own block so the getter does not run on
+          // the mismatch path.
+          auto *loadValueBB = builder_.createBasicBlock(topLevelFunc);
+          builder_.createCondBranchInst(
+              mismatch, linkErrorBB, loadValueBB);
+
+          // WebAssembly.Global path: the value lives in .value.
+          builder_.setInsertionBlock(loadValueBB);
+          auto *globalObjValue = builder_.createLoadPropertyInst(
+              importVal, builder_.getLiteralString("value"));
+          builder_.createBranchInst(acceptBB);
+
+          builder_.setInsertionBlock(linkErrorBB);
+          helpers_.emitLinkError(
+              builder_.getLiteralString("incompatible import type"));
+          builder_.createUnreachableInst();
+
+          builder_.setInsertionBlock(acceptBB);
+          tlEntry_ = acceptBB;
+
+          // Resolve the value HERE, under the type check that was just
+          // performed, and store the resolved value. Deciding again later
+          // by re-reading __wasm_type__ would let a getter or Proxy answer
+          // differently the second time and send a WebAssembly.Global down
+          // the raw-value path, storing the object itself into an i32 slot.
+          auto *resolved = builder_.createPhiInst();
+          resolved->addEntry(importVal, checkNumberBB);
+          resolved->addEntry(importVal, checkBigIntBB);
+          resolved->addEntry(globalObjValue, loadValueBB);
+
+          // Store the resolved value into importGlobalVals_ for later
+          // use by initializeGlobals. We use a new Variable per
+          // imported global to pass the value.
+          if (importGlobalIdx < importGlobalVals_.size()) {
+            builder_.createStoreFrameInst(
+                tlScope, resolved,
+                importGlobalVals_[importGlobalIdx]);
+          }
+          ++importGlobalIdx;
+          break;
+        }
+
+        case WasmExternalKind::Table: {
+          // Load __wasm_type__ from the import value.
+          auto *typeStr = builder_.createLoadPropertyInst(
+              importVal, builder_.getLiteralString("__wasm_type__"));
+          auto *typeIsUndef = builder_.createBinaryOperatorInst(
+              typeStr, undefinedVal,
+              ValueKind::BinaryStrictlyEqualInstKind);
+          // If undefined → not a Wasm table, reject.
+          auto *checkTypeBB = builder_.createBasicBlock(topLevelFunc);
+          auto *linkErrorBB = builder_.createBasicBlock(topLevelFunc);
+          auto *acceptBB = builder_.createBasicBlock(topLevelFunc);
+          builder_.createCondBranchInst(
+              typeIsUndef, linkErrorBB, checkTypeBB);
+
+          builder_.setInsertionBlock(checkTypeBB);
+          std::string expectedType =
+              buildTableTypeString(imp.tableType);
+          auto *mismatch = builder_.createBinaryOperatorInst(
+              typeStr,
+              builder_.getLiteralString(expectedType),
+              ValueKind::BinaryStrictlyNotEqualInstKind);
+          auto *checkLimitsBB = builder_.createBasicBlock(topLevelFunc);
+          builder_.createCondBranchInst(
+              mismatch, linkErrorBB, checkLimitsBB);
+
+          // Check limits: actualMin >= expectedMin
+          // If __wasm_funcs__ exists (Wasm-exported table), use its .length
+          // as the actual current size (reflects table.grow). Otherwise
+          // fall back to __wasm_min__ (JS-API WebAssembly.Table).
+          builder_.setInsertionBlock(checkLimitsBB);
+          auto *funcsArrCheck = builder_.createLoadPropertyInst(
+              importVal, builder_.getLiteralString("__wasm_funcs__"));
+          auto *funcsIsUndef = builder_.createBinaryOperatorInst(
+              funcsArrCheck, undefinedVal,
+              ValueKind::BinaryStrictlyEqualInstKind);
+          auto *useFuncsLenBB =
+              builder_.createBasicBlock(topLevelFunc);
+          auto *useWasmMinBB =
+              builder_.createBasicBlock(topLevelFunc);
+          auto *checkMinBB = builder_.createBasicBlock(topLevelFunc);
+          builder_.createCondBranchInst(
+              funcsIsUndef, useWasmMinBB, useFuncsLenBB);
+
+          // Branch: __wasm_funcs__ exists → use .length
+          builder_.setInsertionBlock(useFuncsLenBB);
+          auto *funcsLen = builder_.createLoadPropertyInst(
+              funcsArrCheck, builder_.getLiteralString("length"));
+          builder_.createBranchInst(checkMinBB);
+
+          // Branch: no __wasm_funcs__ → use __wasm_min__
+          builder_.setInsertionBlock(useWasmMinBB);
+          auto *wasmMin = builder_.createLoadPropertyInst(
+              importVal, builder_.getLiteralString("__wasm_min__"));
+          builder_.createBranchInst(checkMinBB);
+
+          // Merge actualMin via Phi.
+          builder_.setInsertionBlock(checkMinBB);
+          auto *actualMin = builder_.createPhiInst();
+          actualMin->addEntry(funcsLen, useFuncsLenBB);
+          actualMin->addEntry(wasmMin, useWasmMinBB);
+          // Read __wasm_max__ exactly once, here rather than inside the
+          // maximum check, so that the same SSA value is both validated and
+          // recorded: this block dominates acceptBB on both paths. Coerce
+          // it like the memory case, so a forged non-number cannot travel
+          // on as the recorded maximum.
+          auto *actualMax = builder_.createAsNumberInst(
+              builder_.createLoadPropertyInst(
+                  importVal, builder_.getLiteralString("__wasm_max__")));
+          auto *minOk = builder_.createBinaryOperatorInst(
+              actualMin,
+              builder_.getLiteralNumber(
+                  static_cast<double>(imp.tableType.limits.initial)),
+              ValueKind::BinaryGreaterThanOrEqualInstKind);
+
+          if (imp.tableType.limits.hasMaximum) {
+            auto *checkMaxBB =
+                builder_.createBasicBlock(topLevelFunc);
+            builder_.createCondBranchInst(
+                minOk, checkMaxBB, linkErrorBB);
+
+            // If import requires max, actual must also have max.
+            builder_.setInsertionBlock(checkMaxBB);
+            auto *hasNoMax = builder_.createBinaryOperatorInst(
+                actualMax,
+                builder_.getLiteralNumber(-1),
+                ValueKind::BinaryStrictlyEqualInstKind);
+            auto *checkMaxValBB =
+                builder_.createBasicBlock(topLevelFunc);
+            builder_.createCondBranchInst(
+                hasNoMax, linkErrorBB, checkMaxValBB);
+
+            builder_.setInsertionBlock(checkMaxValBB);
+            auto *maxOk = builder_.createBinaryOperatorInst(
+                actualMax,
+                builder_.getLiteralNumber(
+                    static_cast<double>(
+                        imp.tableType.limits.maximum)),
+                ValueKind::BinaryLessThanOrEqualInstKind);
+            builder_.createCondBranchInst(
+                maxOk, acceptBB, linkErrorBB);
+          } else {
+            builder_.createCondBranchInst(
+                minOk, acceptBB, linkErrorBB);
+          }
+
+          builder_.setInsertionBlock(linkErrorBB);
+          helpers_.emitLinkError(
+              builder_.getLiteralString("incompatible import type"));
+          builder_.createUnreachableInst();
+
+          builder_.setInsertionBlock(acceptBB);
+
+          // Record the table's actual size and maximum, for the export loop
+          // to publish if this table is re-exported. The same SSA values
+          // that were validated above, not fresh reads.
+          builder_.createStoreFrameInst(
+              tlScope, actualMin, importedTableMinVars_[importTableIdx]);
+          builder_.createStoreFrameInst(
+              tlScope, actualMax, importedTableMaxVars_[importTableIdx]);
+
+          // Wire imported table arrays for sharing.
+          // If __wasm_funcs__ exists (Wasm-exported table), use the
+          // exported arrays. Otherwise (JS-API Table), create fresh arrays.
+          auto *impFuncsCheck = builder_.createLoadPropertyInst(
+              importVal, builder_.getLiteralString("__wasm_funcs__"));
+          auto *impFuncsIsUndef = builder_.createBinaryOperatorInst(
+              impFuncsCheck, undefinedVal,
+              ValueKind::BinaryStrictlyEqualInstKind);
+          auto *wireExportedBB =
+              builder_.createBasicBlock(topLevelFunc);
+          auto *createFreshBB =
+              builder_.createBasicBlock(topLevelFunc);
+          auto *wireDoneBB = builder_.createBasicBlock(topLevelFunc);
+          builder_.createCondBranchInst(
+              impFuncsIsUndef, createFreshBB, wireExportedBB);
+
+          // Branch: Wasm-exported table → use its arrays.
+          builder_.setInsertionBlock(wireExportedBB);
+          auto *expFuncs = impFuncsCheck;
+          auto *expTypes = builder_.createLoadPropertyInst(
+              importVal, builder_.getLiteralString("__wasm_types__"));
+          builder_.createBranchInst(wireDoneBB);
+
+          // Branch: JS-API table → create fresh arrays.
+          builder_.setInsertionBlock(createFreshBB);
+          auto *arrayCtor =
+              builder_.createTryLoadGlobalPropertyInst("Array");
+          auto *freshSize = builder_.getLiteralNumber(
+              static_cast<double>(imp.tableType.limits.initial));
+          auto *freshFuncs = emitNew(arrayCtor, {freshSize});
+          auto *freshTypes = emitNew(arrayCtor, {freshSize});
+          builder_.createBranchInst(wireDoneBB);
+
+          // Merge via Phi and store.
+          // All Phis must precede non-Phi instructions in a block.
+          builder_.setInsertionBlock(wireDoneBB);
+          auto *funcsResult = builder_.createPhiInst();
+          funcsResult->addEntry(expFuncs, wireExportedBB);
+          funcsResult->addEntry(freshFuncs, createFreshBB);
+          auto *typesResult = builder_.createPhiInst();
+          typesResult->addEntry(expTypes, wireExportedBB);
+          typesResult->addEntry(freshTypes, createFreshBB);
+
+          builder_.createStoreFrameInst(
+              tlScope, funcsResult, tableFuncVars_[importTableIdx]);
+          builder_.createStoreFrameInst(
+              tlScope, typesResult, tableTypeVars_[importTableIdx]);
+
+          ++importTableIdx;
+          tlEntry_ = wireDoneBB;
+          break;
+        }
+
+        case WasmExternalKind::Memory: {
+          // Load __wasm_type__ from the import value.
+          auto *typeStr = builder_.createLoadPropertyInst(
+              importVal, builder_.getLiteralString("__wasm_type__"));
+          auto *typeIsUndef = builder_.createBinaryOperatorInst(
+              typeStr, undefinedVal,
+              ValueKind::BinaryStrictlyEqualInstKind);
+          // If undefined → not a Wasm memory, reject.
+          auto *checkTypeBB = builder_.createBasicBlock(topLevelFunc);
+          auto *linkErrorBB = builder_.createBasicBlock(topLevelFunc);
+          auto *acceptBB = builder_.createBasicBlock(topLevelFunc);
+          builder_.createCondBranchInst(
+              typeIsUndef, linkErrorBB, checkTypeBB);
+
+          builder_.setInsertionBlock(checkTypeBB);
+          auto *mismatch = builder_.createBinaryOperatorInst(
+              typeStr,
+              builder_.getLiteralString("memory"),
+              ValueKind::BinaryStrictlyNotEqualInstKind);
+          auto *checkLimitsBB = builder_.createBasicBlock(topLevelFunc);
+          builder_.createCondBranchInst(
+              mismatch, linkErrorBB, checkLimitsBB);
+
+          // Check limits: actualMin >= expectedMin
+          builder_.setInsertionBlock(checkLimitsBB);
+          // Read each metadata property exactly ONCE and reuse the SSA value.
+          // These are ordinary properties on a script-supplied object, so a
+          // getter or Proxy can answer differently on each read: validating
+          // one value and then storing another lets memory.grow exceed the
+          // declared maximum. Coerce to a number here too -- the stored
+          // maximum reaches a native builtin that calls getNumber() on it,
+          // which asserts on a non-number.
+          // This block dominates acceptBB on both the hasMaximum and the
+          // no-maximum path, so both values are live at the stores below.
+          auto *actualMin = builder_.createAsNumberInst(
+              builder_.createLoadPropertyInst(
+                  importVal, builder_.getLiteralString("__wasm_min__")));
+          auto *actualMax = builder_.createAsNumberInst(
+              builder_.createLoadPropertyInst(
+                  importVal, builder_.getLiteralString("__wasm_max__")));
+          auto *minOk = builder_.createBinaryOperatorInst(
+              actualMin,
+              builder_.getLiteralNumber(
+                  static_cast<double>(imp.memoryType.limits.initial)),
+              ValueKind::BinaryGreaterThanOrEqualInstKind);
+
+          if (imp.memoryType.limits.hasMaximum) {
+            auto *checkMaxBB =
+                builder_.createBasicBlock(topLevelFunc);
+            builder_.createCondBranchInst(
+                minOk, checkMaxBB, linkErrorBB);
+
+            builder_.setInsertionBlock(checkMaxBB);
+            auto *hasNoMax = builder_.createBinaryOperatorInst(
+                actualMax,
+                builder_.getLiteralNumber(-1),
+                ValueKind::BinaryStrictlyEqualInstKind);
+            auto *checkMaxValBB =
+                builder_.createBasicBlock(topLevelFunc);
+            builder_.createCondBranchInst(
+                hasNoMax, linkErrorBB, checkMaxValBB);
+
+            builder_.setInsertionBlock(checkMaxValBB);
+            auto *maxOk = builder_.createBinaryOperatorInst(
+                actualMax,
+                builder_.getLiteralNumber(
+                    static_cast<double>(
+                        imp.memoryType.limits.maximum)),
+                ValueKind::BinaryLessThanOrEqualInstKind);
+            builder_.createCondBranchInst(
+                maxOk, acceptBB, linkErrorBB);
+          } else {
+            builder_.createCondBranchInst(
+                minOk, acceptBB, linkErrorBB);
+          }
+
+          builder_.setInsertionBlock(linkErrorBB);
+          helpers_.emitLinkError(
+              builder_.getLiteralString("incompatible import type"));
+          builder_.createUnreachableInst();
+
+          builder_.setInsertionBlock(acceptBB);
+          // Store the imported memory's actual page count and maximum for
+          // createMemoryViews() and onMemoryGrow() to use.
+          builder_.createStoreFrameInst(
+              tlScope, actualMin, importedMemMinVar_);
+          // The same value that was validated above, not a fresh read.
+          builder_.createStoreFrameInst(
+              tlScope, actualMax, importedMemMaxVar_);
+          tlEntry_ = acceptBB;
+          break;
+        }
+
+        case WasmExternalKind::Tag: {
+          // Load __wasm_type__ from the import value.
+          auto *typeStr = builder_.createLoadPropertyInst(
+              importVal, builder_.getLiteralString("__wasm_type__"));
+          auto *typeIsUndef = builder_.createBinaryOperatorInst(
+              typeStr, undefinedVal,
+              ValueKind::BinaryStrictlyEqualInstKind);
+          auto *acceptBB = builder_.createBasicBlock(topLevelFunc);
+          auto *checkTypeBB = builder_.createBasicBlock(topLevelFunc);
+          auto *linkErrorBB = builder_.createBasicBlock(topLevelFunc);
+          // If __wasm_type__ is undefined, accept (raw JS value as tag).
+          builder_.createCondBranchInst(
+              typeIsUndef, acceptBB, checkTypeBB);
+
+          builder_.setInsertionBlock(checkTypeBB);
+          const WasmFuncType &tagFuncType =
+              moduleInfo_.types[imp.tagTypeIndex];
+          std::string expectedType = buildTagTypeString(tagFuncType);
+          auto *mismatch = builder_.createBinaryOperatorInst(
+              typeStr,
+              builder_.getLiteralString(expectedType),
+              ValueKind::BinaryStrictlyNotEqualInstKind);
+          builder_.createCondBranchInst(
+              mismatch, linkErrorBB, acceptBB);
+
+          builder_.setInsertionBlock(linkErrorBB);
+          helpers_.emitLinkError(
+              builder_.getLiteralString("incompatible import type"));
+          builder_.createUnreachableInst();
+
+          builder_.setInsertionBlock(acceptBB);
+          tlEntry_ = acceptBB;
+          break;
+        }
+      }
     }
   }
 
@@ -244,8 +1112,26 @@ void WasmIRGen::createFunctions() {
     createMemoryViews(tlScope);
   }
 
+  // Create the per-module return buffer if needed.
+  if (retBufSize_ > 0) {
+    auto *ArrayBufferCtor =
+        builder_.createTryLoadGlobalPropertyInst("ArrayBuffer");
+    auto *Uint32ArrayCtor =
+        builder_.createTryLoadGlobalPropertyInst("Uint32Array");
+    auto *Float64ArrayCtor =
+        builder_.createTryLoadGlobalPropertyInst("Float64Array");
+    auto *buf = emitNew(
+        ArrayBufferCtor,
+        {builder_.getLiteralNumber(static_cast<double>(retBufSize_))});
+    auto *retBufI = emitNew(Uint32ArrayCtor, {buf});
+    auto *retBufF = emitNew(Float64ArrayCtor, {buf});
+    builder_.createStoreFrameInst(tlScope, retBufI, retBufIVar_);
+    builder_.createStoreFrameInst(tlScope, retBufF, retBufFVar_);
+  }
+
   // Create and initialize tables, and apply element segments.
   if (numTables > 0) {
+    internTypeIds(tlScope);
     createTables(tlScope);
   }
 
@@ -261,17 +1147,138 @@ void WasmIRGen::createFunctions() {
     createImportTrampoline(i, tlScope);
   }
 
-  // Switch back to the top-level entry block after creating trampolines.
-  // finalizeModule() will continue from here.
+  // Switch back to the instantiate function entry block after creating
+  // trampolines. finalizeModule() will continue building this function.
   builder_.setInsertionBlock(tlEntry_);
+
+  // --- Build the top-level function body ---
+  // The top-level function returns a module info object:
+  //   {instantiate: <closure>, exportDescs: [...], importDescs: [...]}
+  // This is a lightweight function; the real initialization happens when
+  // the instantiate closure is called.
+
+  auto *topLevelBody = builder_.createBasicBlock(topLevel);
+  builder_.setInsertionBlock(topLevelBody);
+
+  // Create a scope instance of topLevelVS_ so we can create the instantiate
+  // closure via CreateFunctionInst.
+  auto *topLevelScope = builder_.createCreateScopeInst(
+      topLevelVS_,
+      builder_.getEmptySentinel());
+
+  // Create the instantiate closure.
+  auto *instClosure = builder_.createCreateFunctionInst(
+      topLevelScope, instantiateFunc_);
+
+  // Helper: convert WasmExternalKind to a string literal.
+  auto kindToString = [this](WasmExternalKind kind) -> LiteralString * {
+    switch (kind) {
+      case WasmExternalKind::Function:
+        return builder_.getLiteralString("function");
+      case WasmExternalKind::Table:
+        return builder_.getLiteralString("table");
+      case WasmExternalKind::Memory:
+        return builder_.getLiteralString("memory");
+      case WasmExternalKind::Global:
+        return builder_.getLiteralString("global");
+      case WasmExternalKind::Tag:
+        return builder_.getLiteralString("tag");
+    }
+    return builder_.getLiteralString("function");
+  };
+
+  // Build exportDescs array.
+  auto *exportDescsArr = emitNew(
+      builder_.createTryLoadGlobalPropertyInst("Array"),
+      {builder_.getLiteralNumber(
+          static_cast<double>(moduleInfo_.exports.size()))});
+  for (uint32_t i = 0; i < moduleInfo_.exports.size(); ++i) {
+    const auto &exp = moduleInfo_.exports[i];
+    auto *desc = builder_.createAllocObjectLiteralInst({});
+    builder_.createStorePropertyStrictInst(
+        builder_.getLiteralString(exp.name), desc,
+        builder_.getLiteralString("name"));
+    builder_.createStorePropertyStrictInst(
+        kindToString(exp.kind), desc,
+        builder_.getLiteralString("kind"));
+    builder_.createStorePropertyStrictInst(
+        desc, exportDescsArr,
+        builder_.getLiteralNumber(static_cast<double>(i)));
+  }
+
+  // Build importDescs array.
+  auto *importDescsArr = emitNew(
+      builder_.createTryLoadGlobalPropertyInst("Array"),
+      {builder_.getLiteralNumber(
+          static_cast<double>(moduleInfo_.imports.size()))});
+  for (uint32_t i = 0; i < moduleInfo_.imports.size(); ++i) {
+    const auto &imp = moduleInfo_.imports[i];
+    auto *desc = builder_.createAllocObjectLiteralInst({});
+    builder_.createStorePropertyStrictInst(
+        builder_.getLiteralString(imp.moduleName), desc,
+        builder_.getLiteralString("module"));
+    builder_.createStorePropertyStrictInst(
+        builder_.getLiteralString(imp.fieldName), desc,
+        builder_.getLiteralString("name"));
+    builder_.createStorePropertyStrictInst(
+        kindToString(imp.kind), desc,
+        builder_.getLiteralString("kind"));
+    builder_.createStorePropertyStrictInst(
+        desc, importDescsArr,
+        builder_.getLiteralNumber(static_cast<double>(i)));
+  }
+
+  // Build module info object: {instantiate, exportDescs, importDescs}.
+  auto *moduleInfoObj = builder_.createAllocObjectLiteralInst({});
+  builder_.createStorePropertyStrictInst(
+      instClosure, moduleInfoObj,
+      builder_.getLiteralString("instantiate"));
+  builder_.createStorePropertyStrictInst(
+      exportDescsArr, moduleInfoObj,
+      builder_.getLiteralString("exportDescs"));
+  builder_.createStorePropertyStrictInst(
+      importDescsArr, moduleInfoObj,
+      builder_.getLiteralString("importDescs"));
+  builder_.createReturnInst(moduleInfoObj);
+}
+
+void WasmIRGen::emitRuntimeLimits(
+    Value *descriptor,
+    Value *actualMin,
+    Value *actualMax) {
+  builder_.createStorePropertyStrictInst(
+      actualMin, descriptor, builder_.getLiteralString("initial"));
+
+  // -1 means unbounded. Both the Memory and the Table constructor reject a
+  // negative `maximum` with a RangeError, so leave the property out.
+  auto *hasMax = builder_.createBinaryOperatorInst(
+      actualMax,
+      builder_.getLiteralNumber(-1),
+      ValueKind::BinaryStrictlyNotEqualInstKind);
+  auto *setMaxBB = builder_.createBasicBlock(tlEntry_->getParent());
+  auto *maxDoneBB = builder_.createBasicBlock(tlEntry_->getParent());
+  builder_.createCondBranchInst(hasMax, setMaxBB, maxDoneBB);
+
+  builder_.setInsertionBlock(setMaxBB);
+  builder_.createStorePropertyStrictInst(
+      actualMax, descriptor, builder_.getLiteralString("maximum"));
+  builder_.createBranchInst(maxDoneBB);
+
+  builder_.setInsertionBlock(maxDoneBB);
+  tlEntry_ = maxDoneBB;
 }
 
 void WasmIRGen::finalizeModule() {
   auto *tlScope = tlScope_;
   bool hasMemory = moduleInfo_.totalMemoryCount() > 0;
 
-  // Ensure insertion is at the top-level entry block.
+  // Ensure insertion is at the instantiate function's entry block.
   builder_.setInsertionBlock(tlEntry_);
+
+  // Running offset into the binary data storage blob. Each data segment's
+  // bytes are appended in order (by WasmCompile.cpp), so we compute each
+  // segment's blob offset by accumulating sizes.
+  uint32_t binaryDataOffset = 0;
 
   // Initialize the data segments array (for memory.init/data.drop).
   // Each element is a Uint8Array containing the segment's data bytes,
@@ -293,68 +1300,193 @@ void WasmIRGen::finalizeModule() {
             builder_.getLiteralNull(),
             segsArr,
             builder_.getLiteralNumber(static_cast<double>(si)));
+        // Still advance binaryDataOffset for consistency with the blob.
+        binaryDataOffset += seg.data.size();
         continue;
       }
 
-      // Create a Uint8Array and fill it with segment data.
+      // Create a Uint8Array and bulk-fill it from the binary data blob.
       auto *segArr = emitNew(
           Uint8ArrayCtor,
           {builder_.getLiteralNumber(
               static_cast<double>(seg.data.size()))});
-      for (uint32_t bi = 0; bi < seg.data.size(); ++bi) {
-        builder_.createStorePropertyStrictInst(
-            builder_.getLiteralNumber(
-                static_cast<double>(seg.data[bi])),
-            segArr,
-            builder_.getLiteralNumber(static_cast<double>(bi)));
-      }
+      helpers_.emitDataSegmentInit(
+          segArr,
+          builder_.getLiteralNumber(
+              static_cast<double>(binaryDataOffset)),
+          builder_.getLiteralNumber(
+              static_cast<double>(seg.data.size())),
+          builder_.getLiteralNumber(0));
+      binaryDataOffset += seg.data.size();
       builder_.createStorePropertyStrictInst(
           segArr,
           segsArr,
           builder_.getLiteralNumber(static_cast<double>(si)));
     }
+  } else {
+    // Even when dataSegVar_ is not set, we still need to advance
+    // binaryDataOffset for all segments.
+    for (const auto &seg : moduleInfo_.dataSegments) {
+      binaryDataOffset += seg.data.size();
+    }
   }
 
   // Apply active data segments: copy bytes into linear memory.
   if (hasMemory) {
+    // Reset binaryDataOffset — the active loop iterates the same segments
+    // array and computes its own offsets.
+    binaryDataOffset = 0;
+    // Compute initial memory size for data segment bounds checking.
+    // For locally-defined memories, the initial size is known exactly.
+    // For imported memories, use the declared minimum as the actual size
+    // — Hermes creates a fresh ArrayBuffer of this size (imported
+    // Memory objects are not wired in yet). Compile-time bounds checking
+    // against this value is correct when the minimum is > 0. When the
+    // minimum is 0, we skip checking because the actual host-provided
+    // memory may be larger.
+    uint64_t memoryBytes = 0;
+    bool canBoundsCheck = false;
+    if (!moduleInfo_.memories.empty()) {
+      memoryBytes =
+          static_cast<uint64_t>(moduleInfo_.memories[0].limits.initial) *
+          65536;
+      canBoundsCheck = true;
+    } else {
+      for (const auto &imp : moduleInfo_.imports) {
+        if (imp.kind == WasmExternalKind::Memory) {
+          memoryBytes =
+              static_cast<uint64_t>(imp.memoryType.limits.initial) *
+              65536;
+          if (memoryBytes > 0)
+            canBoundsCheck = true;
+          break;
+        }
+      }
+    }
+
     for (uint32_t si = 0; si < moduleInfo_.dataSegments.size(); ++si) {
       const auto &seg = moduleInfo_.dataSegments[si];
-      if (seg.mode != WasmDataSegment::Mode::Active)
-        continue;
-      if (seg.data.empty())
-        continue;
-
-      // Compute offset.
-      Value *offset = nullptr;
-      if (seg.offsetKind == WasmGlobal::InitKind::I32Const) {
-        offset = builder_.getLiteralNumber(
-            static_cast<double>(seg.offsetValue));
-      } else {
-        llvh::errs()
-            << "warning: unsupported data segment offset expression\n";
+      if (seg.mode != WasmDataSegment::Mode::Active) {
+        binaryDataOffset += seg.data.size();
         continue;
       }
 
-      // Load HEAPU8 view for byte-level writes.
+      // Step 1: Compute offset as an IR Value.
+      Value *offset = nullptr;
+      if (seg.offsetExpr.size() <= 1) {
+        // Simple case: single I32Const or GlobalGet.
+        if (seg.offsetKind == WasmGlobal::InitKind::I32Const) {
+          offset = builder_.getLiteralNumber(
+              static_cast<double>(seg.offsetValue));
+        } else if (seg.offsetKind == WasmGlobal::InitKind::GlobalGet) {
+          uint32_t slotIdx = globalSlotIndex_[seg.offsetGlobalIdx];
+          offset =
+              builder_.createLoadFrameInst(tlScope, globalVars_[slotIdx]);
+        } else {
+          llvh::errs()
+              << "warning: unsupported data segment offset expression\n";
+          binaryDataOffset += seg.data.size();
+          continue;
+        }
+      } else {
+        // Extended const expression: evaluate the stack machine.
+        offset = emitInitExpr(seg.offsetExpr, tlScope);
+        if (!offset) {
+          llvh::errs()
+              << "warning: malformed data segment offset expression\n";
+          continue;
+        }
+      }
+
+      // Step 2: Compile-time bounds check (locally-defined memory +
+      // I32Const offset only). An OOB segment traps unconditionally and
+      // prevents all further initialization.
+      if (canBoundsCheck && seg.offsetExpr.size() <= 1 &&
+          seg.offsetKind == WasmGlobal::InitKind::I32Const) {
+        uint64_t offsetU =
+            static_cast<uint64_t>(static_cast<uint32_t>(seg.offsetValue));
+        if (offsetU + seg.data.size() > memoryBytes) {
+          helpers_.emitTrap();
+          builder_.createUnreachableInst();
+          // Create a new dead block for remaining initialization code.
+          // Replace tlEntry_ so that code after createExportWrapper()
+          // (which resets insertion to tlEntry_) also goes into the dead
+          // block.
+          tlEntry_ = builder_.createBasicBlock(
+              tlEntry_->getParent());
+          builder_.setInsertionBlock(tlEntry_);
+          break;
+        }
+      }
+
+      // Step 3: Runtime bounds check when the offset is not a simple
+      // i32.const (unknown value at compile time). This includes
+      // GlobalGet offsets and extended const expressions. Emits:
+      // if (offset >>> 0 + data_size > HEAPU8.length) trap. Only applies
+      // when canBoundsCheck is true (memory size is reliable enough for
+      // checking — locally-defined memories always qualify; imported
+      // memories qualify when the declared minimum is > 0, since Hermes
+      // creates the memory with exactly that size).
+      if (canBoundsCheck &&
+          !(seg.offsetExpr.size() <= 1 &&
+            seg.offsetKind == WasmGlobal::InitKind::I32Const)) {
+        // Get memory byte length: HEAPU8.length
+        auto *heapu8Chk = builder_.createLoadFrameInst(
+            tlScope,
+            memViewVars_[static_cast<uint8_t>(MemView::HEAPU8)]);
+        auto *memLength = builder_.createLoadPropertyInst(
+            heapu8Chk, builder_.getLiteralString("length"));
+
+        // Treat offset as unsigned: offset >>> 0
+        auto *offsetU = builder_.createBinaryOperatorInst(
+            offset,
+            builder_.getLiteralNumber(0),
+            ValueKind::BinaryUnsignedRightShiftInstKind);
+
+        // end = offsetU + seg.data.size()
+        auto *end = builder_.createBinaryOperatorInst(
+            offsetU,
+            builder_.getLiteralNumber(
+                static_cast<double>(seg.data.size())),
+            ValueKind::BinaryAddInstKind);
+
+        // if (end > memLength) trap;
+        auto *isOOB = builder_.createBinaryOperatorInst(
+            end, memLength, ValueKind::BinaryGreaterThanInstKind);
+        auto *trapBlock =
+            builder_.createBasicBlock(tlEntry_->getParent());
+        auto *okBlock =
+            builder_.createBasicBlock(tlEntry_->getParent());
+        builder_.createCondBranchInst(isOOB, trapBlock, okBlock);
+
+        builder_.setInsertionBlock(trapBlock);
+        helpers_.emitTrap();
+        builder_.createUnreachableInst();
+
+        builder_.setInsertionBlock(okBlock);
+        // Update tlEntry_ so that code after createExportWrapper()
+        // (which resets insertion to tlEntry_) continues in the ok
+        // block rather than the now-terminated original entry block.
+        tlEntry_ = okBlock;
+      }
+
+      if (seg.data.empty()) {
+        binaryDataOffset += seg.data.size();
+        continue;
+      }
+
+      // Load HEAPU8 view and bulk-copy from the binary data blob.
       auto *heapu8 = builder_.createLoadFrameInst(
           tlScope, memViewVars_[static_cast<uint8_t>(MemView::HEAPU8)]);
 
-      // Store each byte of the data segment.
-      for (uint32_t i = 0; i < seg.data.size(); ++i) {
-        Value *idx;
-        if (i == 0) {
-          idx = offset;
-        } else {
-          idx = builder_.createBinaryOperatorInst(
-              offset,
-              builder_.getLiteralNumber(static_cast<double>(i)),
-              ValueKind::BinaryAddInstKind);
-        }
-        builder_.createStorePropertyStrictInst(
-            builder_.getLiteralNumber(static_cast<double>(seg.data[i])),
-            heapu8,
-            idx);
-      }
+      helpers_.emitDataSegmentInit(
+          heapu8,
+          builder_.getLiteralNumber(
+              static_cast<double>(binaryDataOffset)),
+          builder_.getLiteralNumber(
+              static_cast<double>(seg.data.size())),
+          offset);
+      binaryDataOffset += seg.data.size();
 
       // After applying an active data segment, mark it as dropped.
       if (dataSegVar_) {
@@ -424,7 +1556,7 @@ void WasmIRGen::finalizeModule() {
               builder_.getLiteralNumber(static_cast<double>(i * 2)));
         }
 
-        // Store the type index.
+        // Store the type index (canonical for structural comparison).
         uint32_t typeIdx = 0;
         if (funcIdx < moduleInfo_.importedFunctionCount()) {
           uint32_t importFuncIdx = 0;
@@ -443,8 +1575,10 @@ void WasmIRGen::finalizeModule() {
                                    moduleInfo_.importedFunctionCount()]
                         .typeIndex;
         }
+        // The interned id, not a module-local index: this array is shared
+        // with other modules, which number their type sections differently.
         builder_.createStorePropertyStrictInst(
-            builder_.getLiteralNumber(static_cast<double>(typeIdx)),
+            builder_.createLoadFrameInst(tlScope, typeIdVars_[typeIdx]),
             segArr,
             builder_.getLiteralNumber(static_cast<double>(i * 2 + 1)));
       }
@@ -473,6 +1607,9 @@ void WasmIRGen::finalizeModule() {
           tlScope, closureVars_[startIdx]);
       builder_.createCallInst(
           closure,
+          /* target */ irFunctions_[startIdx],
+          /* calleeIsAlwaysClosure */ true,
+          /* env */ builder_.getEmptySentinel(),
           /* newTarget */ builder_.getLiteralUndefined(),
           /* thisValue */ builder_.getLiteralUndefined(),
           {});
@@ -483,13 +1620,14 @@ void WasmIRGen::finalizeModule() {
   // For each exported function, create a wrapper that presents a clean
   // JS-compatible interface (1 param per Wasm param, argument coercion,
   // return value marshaling). The exports object maps export names to
-  // wrapper closures. Only function exports are handled; other export kinds
-  // (memory, table, global) are silently skipped for now.
+  // wrapper closures. Function, global, tag, memory, and table exports are
+  // handled.
 
   // Create wrapper functions first (this switches insertion point).
   struct ExportWrapperInfo {
     std::string name;
     Function *wrapperFunc;
+    uint32_t funcIndex;
   };
   std::vector<ExportWrapperInfo> wrappers;
   for (const auto &exp : moduleInfo_.exports) {
@@ -500,19 +1638,297 @@ void WasmIRGen::finalizeModule() {
         "export function index out of range");
     auto *wrapperFunc =
         createExportWrapper(exp.index, exp.name, tlScope);
-    wrappers.push_back({exp.name, wrapperFunc});
+    wrappers.push_back({exp.name, wrapperFunc, exp.index});
   }
 
-  // Switch back to the top-level entry block to emit closures and the
-  // exports object.
+  // Switch back to the instantiate function's entry block to emit closures
+  // and the exports object.
   builder_.setInsertionBlock(tlEntry_);
 
   auto *exportsObj = builder_.createAllocObjectLiteralInst({});
   for (const auto &w : wrappers) {
     auto *wrapperClosure = builder_.createCreateFunctionInst(
         tlScope, w.wrapperFunc);
+    // Set __wasm_type__ on the wrapper closure for import type validation.
+    std::string typeStr =
+        buildFuncTypeString(moduleInfo_.getFunctionType(w.funcIndex));
+    builder_.createStorePropertyStrictInst(
+        builder_.getLiteralString(typeStr),
+        wrapperClosure,
+        builder_.getLiteralString("__wasm_type__"));
     builder_.createStorePropertyStrictInst(
         wrapperClosure, exportsObj, builder_.getLiteralString(w.name));
+  }
+
+  // Add global exports as WebAssembly.Global objects. Each exported global
+  // is wrapped in a WebAssembly.Global so it carries __wasm_type__ metadata
+  // (e.g. "global:i32:const") for cross-module import type validation.
+  // The value is a snapshot at init time; mutable globals won't reflect
+  // later mutations (that would require live wiring, a separate change).
+
+  // Load WebAssembly.Global constructor once if there are global exports.
+  Value *wasmGlobalCtor = nullptr;
+  bool hasGlobalExports = std::any_of(
+      moduleInfo_.exports.begin(),
+      moduleInfo_.exports.end(),
+      [](const WasmExport &e) {
+        return e.kind == WasmExternalKind::Global;
+      });
+  if (hasGlobalExports) {
+    auto *wasmObj =
+        builder_.createTryLoadGlobalPropertyInst("WebAssembly");
+    wasmGlobalCtor = builder_.createLoadPropertyInst(
+        wasmObj, builder_.getLiteralString("Global"));
+  }
+
+  for (const auto &exp : moduleInfo_.exports) {
+    if (exp.kind != WasmExternalKind::Global)
+      continue;
+    assert(exp.index < globalSlotIndex_.size() && "global index out of range");
+    uint32_t slotIdx = globalSlotIndex_[exp.index];
+    auto *val = builder_.createLoadFrameInst(tlScope, globalVars_[slotIdx]);
+
+    // Determine the global's type and mutability.
+    uint32_t numImportedGlobals = moduleInfo_.importedGlobalCount();
+    WasmGlobalType gType{WasmValType::I32, false};
+    if (exp.index < numImportedGlobals) {
+      uint32_t idx = 0;
+      for (const auto &imp : moduleInfo_.imports) {
+        if (imp.kind != WasmExternalKind::Global)
+          continue;
+        if (idx == exp.index) {
+          gType = imp.globalType;
+          break;
+        }
+        ++idx;
+      }
+    } else {
+      gType = moduleInfo_.globals[exp.index - numImportedGlobals].type;
+    }
+
+    // The value for the Global constructor. An i64 global is stored as a
+    // split lo/hi pair, so recombine it into a BigInt: passing the lo32 half
+    // alone silently discards the upper word, and WebAssembly.Global now
+    // stores i64 exactly and exposes it as a BigInt, per spec.
+    Value *rawValue = val;
+    if (gType.type == WasmValType::I64) {
+      auto *hi =
+          builder_.createLoadFrameInst(tlScope, globalVars_[slotIdx + 1]);
+      rawValue = helpers_.emitI64ToBigInt(val, hi);
+    }
+
+    // Build the type descriptor string for the Global constructor.
+    const char *typeName;
+    switch (gType.type) {
+      case WasmValType::I32:
+        typeName = "i32";
+        break;
+      case WasmValType::I64:
+        typeName = "i64";
+        break;
+      case WasmValType::F32:
+        typeName = "f32";
+        break;
+      case WasmValType::F64:
+        typeName = "f64";
+        break;
+      default:
+        llvm_unreachable("unsupported global export type");
+    }
+
+    // Create descriptor: {value: "i32", mutable: false}
+    auto *descriptor = builder_.createAllocObjectLiteralInst({});
+    builder_.createStorePropertyStrictInst(
+        builder_.getLiteralString(typeName),
+        descriptor,
+        builder_.getLiteralString("value"));
+    builder_.createStorePropertyStrictInst(
+        builder_.getLiteralBool(gType.mutable_),
+        descriptor,
+        builder_.getLiteralString("mutable"));
+
+    // Construct: new WebAssembly.Global(descriptor, rawValue)
+    auto *globalObj = emitNew(wasmGlobalCtor, {descriptor, rawValue});
+
+    builder_.createStorePropertyStrictInst(
+        globalObj, exportsObj, builder_.getLiteralString(exp.name));
+  }
+
+  // Add tag exports as plain objects with __wasm_type__ metadata.
+  for (const auto &exp : moduleInfo_.exports) {
+    if (exp.kind != WasmExternalKind::Tag)
+      continue;
+    const WasmFuncType &tagType = moduleInfo_.getTagType(exp.index);
+    std::string typeStr = buildTagTypeString(tagType);
+
+    auto *tagObj = builder_.createAllocObjectLiteralInst({});
+    builder_.createStorePropertyStrictInst(
+        builder_.getLiteralString(typeStr),
+        tagObj,
+        builder_.getLiteralString("__wasm_type__"));
+    builder_.createStorePropertyStrictInst(
+        tagObj, exportsObj, builder_.getLiteralString(exp.name));
+  }
+
+  // Add memory exports as WebAssembly.Memory objects.
+  // The Memory constructor sets __wasm_type__, __wasm_min__, __wasm_max__
+  // automatically. The Memory has its own buffer — it does NOT share the
+  // module's internal linear memory (buffer sharing is a separate change).
+  Value *wasmMemoryCtor = nullptr;
+  bool hasMemoryExports = std::any_of(
+      moduleInfo_.exports.begin(),
+      moduleInfo_.exports.end(),
+      [](const WasmExport &e) {
+        return e.kind == WasmExternalKind::Memory;
+      });
+  if (hasMemoryExports) {
+    auto *wasmObj =
+        builder_.createTryLoadGlobalPropertyInst("WebAssembly");
+    wasmMemoryCtor = builder_.createLoadPropertyInst(
+        wasmObj, builder_.getLiteralString("Memory"));
+  }
+
+  for (const auto &exp : moduleInfo_.exports) {
+    if (exp.kind != WasmExternalKind::Memory)
+      continue;
+
+    // Build descriptor: {initial: N} or {initial: N, maximum: M}
+    auto *descriptor = builder_.createAllocObjectLiteralInst({});
+
+    // Determine memory limits from the memory index space.
+    // Imported memories come first, then defined memories.
+    uint32_t numImportedMemories = moduleInfo_.importedMemoryCount();
+    if (exp.index < numImportedMemories) {
+      // Re-exporting an imported memory. The import declaration is only a
+      // lower bound on the memory that was actually supplied, so publishing
+      // it would understate the memory: a module importing "m2" with a
+      // minimum the real memory satisfies would fail to link. Publish the
+      // actual values recorded from the imported object at validation time.
+      emitRuntimeLimits(
+          descriptor,
+          builder_.createLoadFrameInst(tlScope, importedMemMinVar_),
+          builder_.createLoadFrameInst(tlScope, importedMemMaxVar_));
+    } else {
+      const WasmMemoryType &mType =
+          moduleInfo_.memories[exp.index - numImportedMemories];
+      builder_.createStorePropertyStrictInst(
+          builder_.getLiteralNumber(
+              static_cast<double>(mType.limits.initial)),
+          descriptor,
+          builder_.getLiteralString("initial"));
+      if (mType.limits.hasMaximum) {
+        builder_.createStorePropertyStrictInst(
+            builder_.getLiteralNumber(
+                static_cast<double>(mType.limits.maximum)),
+            descriptor,
+            builder_.getLiteralString("maximum"));
+      }
+    }
+
+    // Construct: new WebAssembly.Memory(descriptor)
+    auto *memObj = emitNew(wasmMemoryCtor, {descriptor});
+
+    builder_.createStorePropertyStrictInst(
+        memObj, exportsObj, builder_.getLiteralString(exp.name));
+  }
+
+  // Add table exports as WebAssembly.Table objects.
+  // The Table constructor sets __wasm_type__, __wasm_min__, __wasm_max__
+  // automatically. We also store __wasm_funcs__ and __wasm_types__ arrays
+  // on the Table object to enable cross-module table sharing.
+  Value *wasmTableCtor = nullptr;
+  bool hasTableExports = std::any_of(
+      moduleInfo_.exports.begin(),
+      moduleInfo_.exports.end(),
+      [](const WasmExport &e) {
+        return e.kind == WasmExternalKind::Table;
+      });
+  if (hasTableExports) {
+    auto *wasmObj =
+        builder_.createTryLoadGlobalPropertyInst("WebAssembly");
+    wasmTableCtor = builder_.createLoadPropertyInst(
+        wasmObj, builder_.getLiteralString("Table"));
+  }
+
+  for (const auto &exp : moduleInfo_.exports) {
+    if (exp.kind != WasmExternalKind::Table)
+      continue;
+
+    // Determine table type from the table index space.
+    // Imported tables come first, then defined tables.
+    uint32_t numImportedTables = moduleInfo_.importedTableCount();
+    bool isImported = exp.index < numImportedTables;
+    WasmTableType tType{};
+    if (isImported) {
+      uint32_t idx = 0;
+      for (const auto &imp : moduleInfo_.imports) {
+        if (imp.kind != WasmExternalKind::Table)
+          continue;
+        if (idx == exp.index) {
+          tType = imp.tableType;
+          break;
+        }
+        ++idx;
+      }
+    } else {
+      tType = moduleInfo_.tables[exp.index - numImportedTables];
+    }
+
+    // Build descriptor: {element: "anyfunc", initial: N}
+    // or {element: "anyfunc", initial: N, maximum: M}
+    auto *descriptor = builder_.createAllocObjectLiteralInst({});
+    // The Table constructor accepts "anyfunc" or "funcref" for funcref
+    // tables. Use "anyfunc" for broadest compatibility. The element type
+    // comes from the declaration even for an imported table: validation has
+    // already established that the supplied table matches it.
+    builder_.createStorePropertyStrictInst(
+        builder_.getLiteralString(
+            tType.elemType == WasmValType::FuncRef ? "anyfunc"
+                                                   : "externref"),
+        descriptor,
+        builder_.getLiteralString("element"));
+    if (isImported) {
+      // Re-exporting an imported table: publish the table's actual size and
+      // maximum rather than the import declaration's, which is only a lower
+      // bound. See the memory export loop above.
+      emitRuntimeLimits(
+          descriptor,
+          builder_.createLoadFrameInst(
+              tlScope, importedTableMinVars_[exp.index]),
+          builder_.createLoadFrameInst(
+              tlScope, importedTableMaxVars_[exp.index]));
+    } else {
+      builder_.createStorePropertyStrictInst(
+          builder_.getLiteralNumber(
+              static_cast<double>(tType.limits.initial)),
+          descriptor,
+          builder_.getLiteralString("initial"));
+      if (tType.limits.hasMaximum) {
+        builder_.createStorePropertyStrictInst(
+            builder_.getLiteralNumber(
+                static_cast<double>(tType.limits.maximum)),
+            descriptor,
+            builder_.getLiteralString("maximum"));
+      }
+    }
+
+    // Construct: new WebAssembly.Table(descriptor)
+    auto *tableObj = emitNew(wasmTableCtor, {descriptor});
+
+    // Store internal table arrays for cross-module sharing.
+    auto *expFuncsArr = builder_.createLoadFrameInst(
+        tlScope, tableFuncVars_[exp.index]);
+    builder_.createStorePropertyStrictInst(
+        expFuncsArr, tableObj,
+        builder_.getLiteralString("__wasm_funcs__"));
+    auto *expTypesArr = builder_.createLoadFrameInst(
+        tlScope, tableTypeVars_[exp.index]);
+    builder_.createStorePropertyStrictInst(
+        expTypesArr, tableObj,
+        builder_.getLiteralString("__wasm_types__"));
+
+    builder_.createStorePropertyStrictInst(
+        tableObj, exportsObj, builder_.getLiteralString(exp.name));
   }
 
   builder_.createReturnInst(exportsObj);
@@ -554,6 +1970,29 @@ Function *WasmIRGen::createExportWrapper(
   // Marshal arguments: coerce each JS param to the expected Wasm type.
   // For i64 params, the internal function expects two JS args (lo, hi).
   llvh::SmallVector<Value *, 8> callArgs;
+
+  // Check if we need retBufI for any purpose (return buffer or i64 params).
+  bool hasI64Param = false;
+  for (auto p : funcType.params)
+    if (p == WasmValType::I64)
+      hasI64Param = true;
+
+  // Load retBuf views if needed.
+  Value *rbI = nullptr;
+  Value *rbF = nullptr;
+  if (retBufIVar_ && (needsReturnBuffer(funcType) || hasI64Param)) {
+    rbI = builder_.createLoadFrameInst(parentScope, retBufIVar_);
+  }
+  if (retBufFVar_ && needsReturnBuffer(funcType)) {
+    rbF = builder_.createLoadFrameInst(parentScope, retBufFVar_);
+  }
+
+  // If the internal function needs a return buffer, prepend retBufI/retBufF.
+  if (needsReturnBuffer(funcType)) {
+    callArgs.push_back(rbI);
+    callArgs.push_back(rbF);
+  }
+
   for (uint32_t i = 0; i < numParams; ++i) {
     // JS param index: 0=this, 1..N=user params. getJSDynamicParam(1+i).
     auto *jsParam = wrapperFunc->getJSDynamicParam(1 + i);
@@ -566,8 +2005,17 @@ Function *WasmIRGen::createExportWrapper(
         break;
       case WasmValType::I64: {
         // JS passes a BigInt. Convert to split (lo, hi) for internal call.
-        auto *lo = helpers_.emitBigIntToI64(paramVal);
-        auto *hi = helpers_.emitI64HiResult();
+        // emitBigIntToI64 writes lo/hi to retBufI[0]/[1].
+        helpers_.emitBigIntToI64(rbI, paramVal);
+        // rbI is a Uint32Array, so these read back unsigned. Narrow to int32
+        // like every other buffer read: the internal function's parameters
+        // are typed, and Wasm i32 halves are signed -- without this,
+        // i32.wrap_i64(-1n) yields 4294967295 instead of -1, and the
+        // untyped value reaches type-checked arithmetic.
+        auto *lo = builder_.createAsInt32Inst(builder_.createLoadPropertyInst(
+            rbI, builder_.getLiteralNumber(0)));
+        auto *hi = builder_.createAsInt32Inst(builder_.createLoadPropertyInst(
+            rbI, builder_.getLiteralNumber(1)));
         callArgs.push_back(lo);
         callArgs.push_back(hi);
         break;
@@ -587,6 +2035,9 @@ Function *WasmIRGen::createExportWrapper(
   // Call the internal Wasm function.
   auto *callResult = builder_.createCallInst(
       internalClosure,
+      /* target */ irFunctions_[funcIndex],
+      /* calleeIsAlwaysClosure */ true,
+      /* env */ builder_.getEmptySentinel(),
       /* newTarget */ builder_.getLiteralUndefined(),
       /* thisValue */ builder_.getLiteralUndefined(),
       callArgs);
@@ -595,13 +2046,65 @@ Function *WasmIRGen::createExportWrapper(
   if (funcType.results.empty()) {
     // Void function: return undefined.
     builder_.createReturnInst(builder_.getLiteralUndefined());
-  } else if (funcType.results[0] == WasmValType::I64) {
-    // Internal function returns lo32 and stashes hi32.
-    // Combine into a BigInt for JS.
-    auto *lo = callResult;
-    auto *hi = helpers_.emitI64HiResult();
-    auto *bigint = helpers_.emitI64ToBigInt(lo, hi);
-    builder_.createReturnInst(bigint);
+  } else if (needsReturnBuffer(funcType)) {
+    if (funcType.results.size() == 1 &&
+        funcType.results[0] == WasmValType::I64) {
+      // Single i64: read lo/hi from buffer, convert to BigInt.
+      auto *lo = builder_.createLoadPropertyInst(
+          rbI, builder_.getLiteralNumber(0));
+      auto *hi = builder_.createLoadPropertyInst(
+          rbI, builder_.getLiteralNumber(1));
+      auto *bigint = helpers_.emitI64ToBigInt(lo, hi);
+      builder_.createReturnInst(bigint);
+    } else {
+      // Multi-value: return a JS Array of results.
+      auto [offsets, totalSize] = computeRetBufLayout(funcType.results);
+      auto *ArrayCtor =
+          builder_.createTryLoadGlobalPropertyInst("Array");
+      auto *resultArr = emitNew(
+          ArrayCtor,
+          {builder_.getLiteralNumber(
+              static_cast<double>(funcType.results.size()))});
+      for (size_t i = 0; i < funcType.results.size(); ++i) {
+        uint32_t byteOff = offsets[i];
+        Value *val;
+        switch (funcType.results[i]) {
+          case WasmValType::I32: {
+            uint32_t idx = byteOff / 4;
+            auto *raw = builder_.createLoadPropertyInst(
+                rbI, builder_.getLiteralNumber(idx));
+            val = builder_.createAsInt32Inst(raw);
+            break;
+          }
+          case WasmValType::I64: {
+            uint32_t idx = byteOff / 4;
+            auto *lo = builder_.createLoadPropertyInst(
+                rbI, builder_.getLiteralNumber(idx));
+            auto *hi = builder_.createLoadPropertyInst(
+                rbI, builder_.getLiteralNumber(idx + 1));
+            val = helpers_.emitI64ToBigInt(lo, hi);
+            break;
+          }
+          case WasmValType::F32:
+          case WasmValType::F64: {
+            uint32_t idx = byteOff / 8;
+            val = builder_.createLoadPropertyInst(
+                rbF, builder_.getLiteralNumber(idx));
+            break;
+          }
+          default: {
+            uint32_t idx = byteOff / 4;
+            val = builder_.createLoadPropertyInst(
+                rbI, builder_.getLiteralNumber(idx));
+            break;
+          }
+        }
+        builder_.createStorePropertyStrictInst(
+            val, resultArr,
+            builder_.getLiteralNumber(static_cast<double>(i)));
+      }
+      builder_.createReturnInst(resultArr);
+    }
   } else {
     // i32/f32/f64: return the call result directly.
     builder_.createReturnInst(callResult);
@@ -641,7 +2144,18 @@ void WasmIRGen::createImportTrampoline(
   // i32/f32/f64 → pass through (already JS Numbers).
   // i64 → convert split (lo, hi) to BigInt for JS.
   llvh::SmallVector<Value *, 8> jsArgs;
-  uint32_t jsParamIdx = 1; // 0 = "this", skip it
+  // Skip retBuf params if present.
+  uint32_t jsParamIdx = needsReturnBuffer(funcType) ? 3 : 1; // 0 = "this"
+
+  // Load retBuf params if this function uses them.
+  Value *rbI = nullptr;
+  Value *rbF = nullptr;
+  if (needsReturnBuffer(funcType)) {
+    auto *paramI = func->getJSDynamicParam(1);
+    auto *paramF = func->getJSDynamicParam(2);
+    rbI = builder_.createLoadParamInst(paramI);
+    rbF = builder_.createLoadParamInst(paramF);
+  }
   for (uint32_t i = 0; i < funcType.params.size(); ++i) {
     auto *param = func->getJSDynamicParam(jsParamIdx);
     auto *paramVal = builder_.createLoadParamInst(param);
@@ -669,6 +2183,84 @@ void WasmIRGen::createImportTrampoline(
   if (funcType.results.empty()) {
     // Void: return undefined.
     builder_.createReturnInst(builder_.getLiteralUndefined());
+  } else if (needsReturnBuffer(funcType)) {
+    // Write results to the return buffer and return 0.
+    if (funcType.results.size() == 1 &&
+        funcType.results[0] == WasmValType::I64) {
+      // Single i64: JS import returns a BigInt. Convert to lo/hi in buffer.
+      helpers_.emitBigIntToI64(rbI, callResult);
+      builder_.createReturnInst(builder_.getLiteralNumber(0));
+    } else {
+      // Multi-value: JS import returns an Array. Read elements and store.
+      //
+      // In two passes. emitBigIntToI64 always writes its lo/hi through
+      // rbI[0]/rbI[1], using them as scratch, so converting an i64 result
+      // destroys whatever has already been stored at bytes 0-7 -- for
+      // (result i32 i64) that is result 0, which then reads back as the
+      // i64's low word. Compute every result into an SSA value first, so a
+      // later conversion's scratch use is harmless, and only then store them
+      // at their offsets.
+      auto [offsets, totalSize] = computeRetBufLayout(funcType.results);
+      // One entry per result: {first, second} is {lo, hi} for i64 and
+      // {value, nullptr} for everything else.
+      std::vector<std::pair<Value *, Value *>> vals;
+      vals.reserve(funcType.results.size());
+      for (size_t i = 0; i < funcType.results.size(); ++i) {
+        auto *jsVal = builder_.createLoadPropertyInst(
+            callResult,
+            builder_.getLiteralNumber(static_cast<double>(i)));
+        switch (funcType.results[i]) {
+          case WasmValType::I32:
+            vals.emplace_back(builder_.createAsInt32Inst(jsVal), nullptr);
+            break;
+          case WasmValType::I64: {
+            // JS element is a BigInt; convert to lo/hi and capture both
+            // before any later conversion overwrites the scratch slots.
+            helpers_.emitBigIntToI64(rbI, jsVal);
+            auto *lo = builder_.createAsInt32Inst(
+                builder_.createLoadPropertyInst(
+                    rbI, builder_.getLiteralNumber(0)));
+            auto *hi = builder_.createAsInt32Inst(
+                builder_.createLoadPropertyInst(
+                    rbI, builder_.getLiteralNumber(1)));
+            vals.emplace_back(lo, hi);
+            break;
+          }
+          case WasmValType::F32:
+          case WasmValType::F64:
+            vals.emplace_back(jsVal, nullptr);
+            break;
+          default:
+            vals.emplace_back(jsVal, nullptr);
+            break;
+        }
+      }
+      for (size_t i = 0; i < funcType.results.size(); ++i) {
+        uint32_t byteOff = offsets[i];
+        switch (funcType.results[i]) {
+          case WasmValType::I64:
+            builder_.createStorePropertyStrictInst(
+                vals[i].first, rbI,
+                builder_.getLiteralNumber(byteOff / 4));
+            builder_.createStorePropertyStrictInst(
+                vals[i].second, rbI,
+                builder_.getLiteralNumber(byteOff / 4 + 1));
+            break;
+          case WasmValType::F32:
+          case WasmValType::F64:
+            builder_.createStorePropertyStrictInst(
+                vals[i].first, rbF,
+                builder_.getLiteralNumber(byteOff / 8));
+            break;
+          default:
+            builder_.createStorePropertyStrictInst(
+                vals[i].first, rbI,
+                builder_.getLiteralNumber(byteOff / 4));
+            break;
+        }
+      }
+      builder_.createReturnInst(builder_.getLiteralNumber(0));
+    }
   } else {
     switch (funcType.results[0]) {
       case WasmValType::I32:
@@ -676,13 +2268,6 @@ void WasmIRGen::createImportTrampoline(
         builder_.createReturnInst(
             builder_.createAsInt32Inst(callResult));
         break;
-      case WasmValType::I64: {
-        // JS import returns a BigInt. Convert to split (lo, hi).
-        // emitBigIntToI64 returns lo32 and stashes hi32.
-        auto *lo = helpers_.emitBigIntToI64(callResult);
-        builder_.createReturnInst(lo);
-        break;
-      }
       case WasmValType::F32:
       case WasmValType::F64:
         // Float/double: return as-is (JS Numbers are doubles).
@@ -731,6 +2316,22 @@ void WasmIRGen::beginFunction(
   parentScopeInst_ = builder_.createGetParentScopeInst(
       topLevelVS_, currentFunc_->getParentScopeParam());
 
+  // Load return buffer views for this function.
+  retBufI_ = nullptr;
+  retBufF_ = nullptr;
+  if (needsReturnBuffer(funcType)) {
+    // Function receives retBufI and retBufF as its first two params.
+    auto *paramI = currentFunc_->getJSDynamicParam(1);
+    auto *paramF = currentFunc_->getJSDynamicParam(2);
+    retBufI_ = builder_.createLoadParamInst(paramI);
+    retBufF_ = builder_.createLoadParamInst(paramF);
+  } else if (retBufIVar_) {
+    // Function doesn't receive buffer params but may do i64 arithmetic.
+    // Load retBufI from the top-level scope.
+    retBufI_ = builder_.createLoadFrameInst(
+        parentScopeInst_, retBufIVar_);
+  }
+
   // Build local type map (params + declared locals).
   uint32_t numParams = funcType.params.size();
   for (uint32_t i = 0; i < numParams; ++i) {
@@ -742,7 +2343,8 @@ void WasmIRGen::beginFunction(
 
   // Create AllocStackInst for each parameter. i64 params use 2 slots.
   // JSDynamicParam index tracks the expanding JS param list.
-  uint32_t jsParamIdx = 1; // 0 = "this"
+  // Skip retBuf params (indices 1,2) if this function has them.
+  uint32_t jsParamIdx = needsReturnBuffer(funcType) ? 3 : 1; // 0 = "this"
   for (uint32_t i = 0; i < numParams; ++i) {
     localSlotIndex_.push_back(locals_.size());
     if (funcType.params[i] == WasmValType::I64) {
@@ -859,7 +2461,10 @@ void WasmIRGen::endFunction() {
     unreachable_ = false;
     const WasmFuncType &funcType =
         moduleInfo_.getFunctionType(currentFuncIndex_);
-    if (!funcType.results.empty() && !valueStack_.empty()) {
+    if (needsReturnBuffer(funcType) && !valueStack_.empty()) {
+      // Store all results to the return buffer and return 0.
+      emitRetBufStores(funcType);
+    } else if (!funcType.results.empty() && !valueStack_.empty()) {
       // Pop trailing results (index > 0) in reverse order and discard.
       for (size_t i = funcType.results.size(); i > 1; --i) {
         if (valueStack_.empty())
@@ -873,7 +2478,7 @@ void WasmIRGen::endFunction() {
       // Pop and return the first result.
       if (funcType.results[0] == WasmValType::I64 && isTopI64()) {
         auto [lo, hi] = popI64();
-        helpers_.emitI64HiStash(hi);
+        // Single i64 uses retBuf — should have been caught above.
         builder_.createReturnInst(lo);
       } else if (!valueStack_.empty()) {
         Value *result = pop();
@@ -905,6 +2510,8 @@ void WasmIRGen::endFunction() {
 
   currentFunc_ = nullptr;
   parentScopeInst_ = nullptr;
+  retBufI_ = nullptr;
+  retBufF_ = nullptr;
   valueStack_.clear();
   valueStackIsI64Hi_.clear();
   locals_.clear();
@@ -1002,27 +2609,13 @@ void WasmIRGen::onReturn() {
   const WasmFuncType &funcType =
       moduleInfo_.getFunctionType(currentFuncIndex_);
 
-  if (!funcType.results.empty()) {
-    // Pop all result values from the stack in reverse order (last result
-    // type is on top of stack). For multi-value returns, we discard all
-    // but the first result since JS functions can only return one value.
-    // Pop trailing results (index > 0) in reverse order and discard.
-    for (size_t i = funcType.results.size(); i > 1; --i) {
-      if (funcType.results[i - 1] == WasmValType::I64) {
-        popI64();
-      } else {
-        pop();
-      }
-    }
-    // Pop and return the first result.
-    if (funcType.results[0] == WasmValType::I64) {
-      auto [lo, hi] = popI64();
-      helpers_.emitI64HiStash(hi);
-      builder_.createReturnInst(lo);
-    } else {
-      Value *result = pop();
-      builder_.createReturnInst(result);
-    }
+  if (needsReturnBuffer(funcType)) {
+    // Store all results to the return buffer and return 0.
+    emitRetBufStores(funcType);
+  } else if (!funcType.results.empty()) {
+    // Single i32/f32/f64 result — pop and return directly.
+    Value *result = pop();
+    builder_.createReturnInst(result);
   } else {
     builder_.createReturnInst(builder_.getLiteralUndefined());
   }
@@ -1998,6 +3591,15 @@ void WasmIRGen::onCall(uint32_t funcIndex) {
     }
   }
   // Build the JS arg list in forward order.
+  // If the callee needs a return buffer, prepend retBufI and retBufF.
+  if (needsReturnBuffer(funcType)) {
+    auto *rbI = builder_.createLoadFrameInst(
+        parentScopeInst_, retBufIVar_);
+    auto *rbF = builder_.createLoadFrameInst(
+        parentScopeInst_, retBufFVar_);
+    args.push_back(rbI);
+    args.push_back(rbF);
+  }
   for (uint32_t i = 0; i < funcType.params.size(); ++i) {
     if (funcType.params[i] == WasmValType::I64) {
       args.push_back(wasmArgs[i].first); // lo
@@ -2012,30 +3614,20 @@ void WasmIRGen::onCall(uint32_t funcIndex) {
       parentScopeInst_, closureVars_[funcIndex]);
   auto *call = builder_.createCallInst(
       closure,
+      /* target */ irFunctions_[funcIndex],
+      /* calleeIsAlwaysClosure */ true,
+      /* env */ builder_.getEmptySentinel(),
       /* newTarget */ builder_.getLiteralUndefined(),
       /* thisValue */ builder_.getLiteralUndefined(),
       args);
 
-  // Push return values onto the stack. The JS call only returns a single
-  // value (the first result), so additional results get placeholders.
-  if (!funcType.results.empty()) {
-    // Push the first result (available from the JS return value).
-    if (funcType.results[0] == WasmValType::I64) {
-      auto *hi = helpers_.emitI64HiResult();
-      pushI64(call, hi);
-    } else {
-      push(call);
-    }
-    // Push undefined placeholders for additional results (multi-value).
-    for (size_t i = 1; i < funcType.results.size(); ++i) {
-      if (funcType.results[i] == WasmValType::I64) {
-        pushI64(
-            builder_.getLiteralUndefined(),
-            builder_.getLiteralUndefined());
-      } else {
-        push(builder_.getLiteralUndefined());
-      }
-    }
+  // Push return values onto the stack.
+  if (needsReturnBuffer(funcType)) {
+    // All results are in the return buffer. Read them out.
+    emitRetBufLoads(funcType);
+  } else if (!funcType.results.empty()) {
+    // Single non-buffer result: push the JS return value.
+    push(call);
   }
 }
 
@@ -2067,6 +3659,15 @@ void WasmIRGen::onCallIndirect(uint32_t sigIndex, uint32_t tableIndex) {
     }
   }
   // Build the JS arg list in forward order.
+  // If the callee needs a return buffer, prepend retBufI and retBufF.
+  if (needsReturnBuffer(funcType)) {
+    auto *rbI = builder_.createLoadFrameInst(
+        parentScopeInst_, retBufIVar_);
+    auto *rbF = builder_.createLoadFrameInst(
+        parentScopeInst_, retBufFVar_);
+    args.push_back(rbI);
+    args.push_back(rbF);
+  }
   for (uint32_t i = 0; i < funcType.params.size(); ++i) {
     if (funcType.params[i] == WasmValType::I64) {
       args.push_back(wasmArgs[i].first); // lo
@@ -2082,7 +3683,12 @@ void WasmIRGen::onCallIndirect(uint32_t sigIndex, uint32_t tableIndex) {
 
   // Call the builtin helper to validate and get the closure.
   // Takes (funcsArr, typesArr, index, expectedTypeIdx).
-  auto *sigIdxLit = builder_.getLiteralNumber(sigIndex);
+  // Compare interned ids, which agree across modules. A module-local index
+  // would not: the same signature can be numbered differently in another
+  // module (a spurious trap) and different signatures identically (a missed
+  // trap). Still a plain integer compare in the builtin.
+  auto *sigIdxLit =
+      builder_.createLoadFrameInst(parentScopeInst_, typeIdVars_[sigIndex]);
   auto *closure =
       helpers_.emitCallIndirect(funcsArr, typesArr, tableIdx, sigIdxLit);
 
@@ -2093,42 +3699,29 @@ void WasmIRGen::onCallIndirect(uint32_t sigIndex, uint32_t tableIndex) {
       /* thisValue */ builder_.getLiteralUndefined(),
       args);
 
-  // Push return values onto the stack. The JS call only returns a single
-  // value (the first result), so additional results get placeholders.
-  if (!funcType.results.empty()) {
-    // Push the first result (available from the JS return value).
-    if (funcType.results[0] == WasmValType::I64) {
-      auto *hi = helpers_.emitI64HiResult();
-      pushI64(call, hi);
-    } else {
-      push(call);
-    }
-    // Push undefined placeholders for additional results (multi-value).
-    for (size_t i = 1; i < funcType.results.size(); ++i) {
-      if (funcType.results[i] == WasmValType::I64) {
-        pushI64(
-            builder_.getLiteralUndefined(),
-            builder_.getLiteralUndefined());
-      } else {
-        push(builder_.getLiteralUndefined());
-      }
-    }
+  // Push return values onto the stack.
+  if (needsReturnBuffer(funcType)) {
+    // All results are in the return buffer. Read them out.
+    emitRetBufLoads(funcType);
+  } else if (!funcType.results.empty()) {
+    // Single non-buffer result: push the JS return value.
+    push(call);
   }
 }
 
 // --- i64 arithmetic (G.3) ---
 // i64 values are represented as two i32 values on the stack [lo, hi].
 // Binary operations pop two i64 pairs and push one i64 pair.
-// For operations that need a native helper: the helper returns lo32 and
-// stashes hi32, which is retrieved via a second call to emitI64HiResult().
+// For operations that need a native helper: the helper takes retBufI as
+// its first arg and writes lo/hi to retBufI[0]/[1].
 
 void WasmIRGen::onI64Add() {
   if (unreachable_)
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  auto *lo = helpers_.emitI64Add(loA, hiA, loB, hiB);
-  auto *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64Add(retBufI_, loA, hiA, loB, hiB);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -2137,8 +3730,8 @@ void WasmIRGen::onI64Sub() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  auto *lo = helpers_.emitI64Sub(loA, hiA, loB, hiB);
-  auto *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64Sub(retBufI_, loA, hiA, loB, hiB);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -2147,8 +3740,8 @@ void WasmIRGen::onI64Mul() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  auto *lo = helpers_.emitI64Mul(loA, hiA, loB, hiB);
-  auto *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64Mul(retBufI_, loA, hiA, loB, hiB);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -2157,8 +3750,8 @@ void WasmIRGen::onI64DivS() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  auto *lo = helpers_.emitI64DivS(loA, hiA, loB, hiB);
-  auto *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64DivS(retBufI_, loA, hiA, loB, hiB);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -2167,8 +3760,8 @@ void WasmIRGen::onI64DivU() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  auto *lo = helpers_.emitI64DivU(loA, hiA, loB, hiB);
-  auto *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64DivU(retBufI_, loA, hiA, loB, hiB);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -2177,8 +3770,8 @@ void WasmIRGen::onI64RemS() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  auto *lo = helpers_.emitI64RemS(loA, hiA, loB, hiB);
-  auto *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64RemS(retBufI_, loA, hiA, loB, hiB);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -2187,8 +3780,8 @@ void WasmIRGen::onI64RemU() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  auto *lo = helpers_.emitI64RemU(loA, hiA, loB, hiB);
-  auto *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64RemU(retBufI_, loA, hiA, loB, hiB);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -2233,8 +3826,8 @@ void WasmIRGen::onI64Shl() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  auto *lo = helpers_.emitI64Shl(loA, hiA, loB, hiB);
-  auto *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64Shl(retBufI_, loA, hiA, loB, hiB);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -2243,8 +3836,8 @@ void WasmIRGen::onI64ShrS() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  auto *lo = helpers_.emitI64ShrS(loA, hiA, loB, hiB);
-  auto *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64ShrS(retBufI_, loA, hiA, loB, hiB);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -2253,8 +3846,8 @@ void WasmIRGen::onI64ShrU() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  auto *lo = helpers_.emitI64ShrU(loA, hiA, loB, hiB);
-  auto *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64ShrU(retBufI_, loA, hiA, loB, hiB);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -2263,8 +3856,8 @@ void WasmIRGen::onI64Rotl() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  auto *lo = helpers_.emitI64Rotl(loA, hiA, loB, hiB);
-  auto *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64Rotl(retBufI_, loA, hiA, loB, hiB);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -2273,8 +3866,8 @@ void WasmIRGen::onI64Rotr() {
     return;
   auto [loB, hiB] = popI64();
   auto [loA, hiA] = popI64();
-  auto *lo = helpers_.emitI64Rotr(loA, hiA, loB, hiB);
-  auto *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64Rotr(retBufI_, loA, hiA, loB, hiB);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -2546,10 +4139,8 @@ void WasmIRGen::onF64Trunc() {
 }
 
 void WasmIRGen::onF64Nearest() {
-  // Note: Wasm nearest is "round ties to even" (IEEE 754), while Math.round
-  // rounds ties to +infinity. This is a known approximation for Phase 1.
   Value *val = pop();
-  push(builder_.createCallBuiltinInst(BuiltinMethod::Math_round, {val}));
+  push(helpers_.emitNearest(val));
 }
 
 void WasmIRGen::onF64Min() {
@@ -2695,10 +4286,8 @@ void WasmIRGen::onF32Trunc() {
 }
 
 void WasmIRGen::onF32Nearest() {
-  // Same approximation as f64.nearest: Math.round instead of round-ties-even.
   Value *val = pop();
-  push(emitFround(
-      builder_.createCallBuiltinInst(BuiltinMethod::Math_round, {val})));
+  push(emitFround(helpers_.emitNearest(val)));
 }
 
 void WasmIRGen::onF32Min() {
@@ -2935,8 +4524,8 @@ void WasmIRGen::onI64TruncF64S() {
   if (unreachable_)
     return;
   Value *a = pop();
-  Value *lo = helpers_.emitI64TruncF64S(a);
-  Value *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64TruncF64S(retBufI_, a);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -2949,8 +4538,8 @@ void WasmIRGen::onI64TruncF64U() {
   if (unreachable_)
     return;
   Value *a = pop();
-  Value *lo = helpers_.emitI64TruncF64U(a);
-  Value *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64TruncF64U(retBufI_, a);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -2963,8 +4552,8 @@ void WasmIRGen::onI64TruncSatF64S() {
   if (unreachable_)
     return;
   Value *a = pop();
-  Value *lo = helpers_.emitI64TruncSatF64S(a);
-  Value *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64TruncSatF64S(retBufI_, a);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -2977,8 +4566,8 @@ void WasmIRGen::onI64TruncSatF64U() {
   if (unreachable_)
     return;
   Value *a = pop();
-  Value *lo = helpers_.emitI64TruncSatF64U(a);
-  Value *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64TruncSatF64U(retBufI_, a);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -3033,8 +4622,8 @@ void WasmIRGen::onI64ReinterpretF64() {
         builder_.getLiteralNumber(static_cast<double>(hi)));
     return;
   }
-  Value *lo = helpers_.emitI64ReinterpretF64(a);
-  Value *hi = helpers_.emitI64HiResult();
+  helpers_.emitI64ReinterpretF64(retBufI_, a);
+  auto [lo, hi] = readI64FromRetBuf();
   pushI64(lo, hi);
 }
 
@@ -3587,21 +5176,26 @@ Value *WasmIRGen::emitNew(Value *constructor, llvh::ArrayRef<Value *> args) {
 void WasmIRGen::createMemoryViews(Instruction *tlScope) {
   // Determine initial memory size in bytes.
   // Use the first memory (Wasm MVP has at most one).
-  uint32_t initialPages = 0;
+  Value *memSize = nullptr;
   if (!moduleInfo_.memories.empty()) {
-    initialPages = moduleInfo_.memories[0].limits.initial;
+    // Locally-defined memory: use the declared initial size.
+    uint32_t initialPages = moduleInfo_.memories[0].limits.initial;
+    memSize = builder_.getLiteralNumber(
+        static_cast<double>(initialPages) * 65536.0);
+  } else if (importedMemMinVar_) {
+    // Imported memory: use the actual initial size from the imported
+    // WebAssembly.Memory object's __wasm_min__, not the import declaration's
+    // minimum (which is a lower bound, not the actual size).
+    auto *actualMin =
+        builder_.createLoadFrameInst(tlScope, importedMemMinVar_);
+    memSize = builder_.createBinaryOperatorInst(
+        actualMin,
+        builder_.getLiteralNumber(65536.0),
+        ValueKind::BinaryMultiplyInstKind);
   } else {
-    // Check imported memories.
-    for (auto &imp : moduleInfo_.imports) {
-      if (imp.kind == WasmExternalKind::Memory) {
-        initialPages = imp.memoryType.limits.initial;
-        break;
-      }
-    }
+    // Fallback (shouldn't happen if hasMemory is checked before calling).
+    memSize = builder_.getLiteralNumber(0);
   }
-
-  auto *memSize = builder_.getLiteralNumber(
-      static_cast<double>(initialPages) * 65536.0);
 
   // Create: var buffer = new ArrayBuffer(memSize)
   auto *abCtor = builder_.createTryLoadGlobalPropertyInst("ArrayBuffer");
@@ -3745,6 +5339,44 @@ void WasmIRGen::emitUnalignedStore(
   }
 }
 
+Value *WasmIRGen::emitEffectiveAddr(Value *base, uint32_t offset) {
+  Value *b = base;
+  if (test262_) {
+    // Treat the base as unsigned: base >>> 0.
+    b = builder_.createBinaryOperatorInst(
+        base,
+        builder_.getLiteralNumber(0),
+        ValueKind::BinaryUnsignedRightShiftInstKind);
+  }
+  if (offset != 0) {
+    return builder_.createBinaryOperatorInst(
+        b,
+        builder_.getLiteralNumber(static_cast<double>(offset)),
+        ValueKind::BinaryAddInstKind);
+  }
+  return b;
+}
+
+void WasmIRGen::emitMemoryBoundsCheck(Value *addr, uint32_t numBytes) {
+  if (!test262_)
+    return;
+  auto *end = builder_.createBinaryOperatorInst(
+      addr,
+      builder_.getLiteralNumber(static_cast<double>(numBytes)),
+      ValueKind::BinaryAddInstKind);
+  auto *memLength = builder_.createLoadPropertyInst(
+      loadMemView(HEAPU8), builder_.getLiteralString("length"));
+  auto *isOOB = builder_.createBinaryOperatorInst(
+      end, memLength, ValueKind::BinaryGreaterThanInstKind);
+  auto *trapBlock = builder_.createBasicBlock(currentFunc_);
+  auto *okBlock = builder_.createBasicBlock(currentFunc_);
+  builder_.createCondBranchInst(isOOB, trapBlock, okBlock);
+  builder_.setInsertionBlock(trapBlock);
+  helpers_.emitTrap();
+  builder_.createUnreachableInst();
+  builder_.setInsertionBlock(okBlock);
+}
+
 void WasmIRGen::onLoad(
     const char *opcodeName,
     uint32_t alignLog2,
@@ -3755,25 +5387,23 @@ void WasmIRGen::onLoad(
   // Pop the base address.
   Value *base = pop();
 
-  // Compute effective address: base + offset.
-  Value *addr;
-  if (offset != 0) {
-    addr = builder_.createBinaryOperatorInst(
-        base,
-        builder_.getLiteralNumber(static_cast<double>(offset)),
-        ValueKind::BinaryAddInstKind);
-  } else {
-    addr = base;
-  }
+  // Compute effective address: base + offset (with unsigned base in test262).
+  Value *addr = emitEffectiveAddr(base, offset);
 
   // Determine which view to use and the element shift based on the opcode.
   llvh::StringRef op(opcodeName);
 
   // Check if we need the unaligned (byte-assembly) path.
   uint8_t naturalAlign = getNaturalAlignLog2(op);
+  // When test262_, ignore alignment hints and always use the byte-assembly
+  // path. The Wasm spec says alignment hints are advisory; engines must
+  // produce correct results regardless of actual alignment.
+  if (test262_)
+    alignLog2 = 0;
 
   // i64 loads: handled specially (split into lo/hi).
   if (op == "i64.load") {
+    emitMemoryBoundsCheck(addr, 8);
     if (alignLog2 < naturalAlign) {
       // Unaligned: byte-assemble lo32 and hi32 separately.
       auto *lo = emitUnalignedLoad(addr, 4);
@@ -3817,6 +5447,7 @@ void WasmIRGen::onLoad(
   }
 
   if (op == "i64.load8_s" || op == "i64.load8_u") {
+    emitMemoryBoundsCheck(addr, 1);
     bool isSigned = (op == "i64.load8_s");
     auto *view = loadMemView(isSigned ? HEAP8 : HEAPU8);
     auto *lo = builder_.createLoadPropertyInst(view, addr);
@@ -3852,6 +5483,7 @@ void WasmIRGen::onLoad(
   }
 
   if (op == "i64.load16_s" || op == "i64.load16_u") {
+    emitMemoryBoundsCheck(addr, 2);
     bool isSigned = (op == "i64.load16_s");
 
     if (alignLog2 < naturalAlign) {
@@ -3919,6 +5551,7 @@ void WasmIRGen::onLoad(
   }
 
   if (op == "i64.load32_s" || op == "i64.load32_u") {
+    emitMemoryBoundsCheck(addr, 4);
     bool isSigned = (op == "i64.load32_s");
 
     if (alignLog2 < naturalAlign) {
@@ -4024,6 +5657,8 @@ void WasmIRGen::onLoad(
     return;
   }
 
+  emitMemoryBoundsCheck(addr, numBytes);
+
   // Unaligned path: byte-assemble from HEAPU8.
   if (alignLog2 < naturalAlign) {
     if (op == "f64.load") {
@@ -4102,20 +5737,18 @@ void WasmIRGen::onStore(
 
   llvh::StringRef op(opcodeName);
   uint8_t naturalAlign = getNaturalAlignLog2(op);
+  // When test262_, ignore alignment hints and always use the byte-assembly
+  // path. The Wasm spec says alignment hints are advisory; engines must
+  // produce correct results regardless of actual alignment.
+  if (test262_)
+    alignLog2 = 0;
 
   // i64 stores: pop i64 pair (lo, hi) then base address.
   if (op == "i64.store") {
     auto [lo, hi] = popI64();
     Value *base = pop();
-    Value *addr;
-    if (offset != 0) {
-      addr = builder_.createBinaryOperatorInst(
-          base,
-          builder_.getLiteralNumber(static_cast<double>(offset)),
-          ValueKind::BinaryAddInstKind);
-    } else {
-      addr = base;
-    }
+    Value *addr = emitEffectiveAddr(base, offset);
+    emitMemoryBoundsCheck(addr, 8);
 
     if (alignLog2 < naturalAlign) {
       // Unaligned: byte-store lo32 and hi32 separately.
@@ -4147,15 +5780,8 @@ void WasmIRGen::onStore(
     auto [lo, hi] = popI64();
     (void)hi;
     Value *base = pop();
-    Value *addr;
-    if (offset != 0) {
-      addr = builder_.createBinaryOperatorInst(
-          base,
-          builder_.getLiteralNumber(static_cast<double>(offset)),
-          ValueKind::BinaryAddInstKind);
-    } else {
-      addr = base;
-    }
+    Value *addr = emitEffectiveAddr(base, offset);
+    emitMemoryBoundsCheck(addr, 1);
     // Byte stores are always naturally aligned (natural align = 0).
     auto *view = loadMemView(HEAPU8);
     builder_.createStorePropertyStrictInst(lo, view, addr);
@@ -4166,15 +5792,8 @@ void WasmIRGen::onStore(
     auto [lo, hi] = popI64();
     (void)hi;
     Value *base = pop();
-    Value *addr;
-    if (offset != 0) {
-      addr = builder_.createBinaryOperatorInst(
-          base,
-          builder_.getLiteralNumber(static_cast<double>(offset)),
-          ValueKind::BinaryAddInstKind);
-    } else {
-      addr = base;
-    }
+    Value *addr = emitEffectiveAddr(base, offset);
+    emitMemoryBoundsCheck(addr, 2);
 
     if (alignLog2 < naturalAlign) {
       // Unaligned: byte-store the lo 2 bytes.
@@ -4196,15 +5815,8 @@ void WasmIRGen::onStore(
     auto [lo, hi] = popI64();
     (void)hi;
     Value *base = pop();
-    Value *addr;
-    if (offset != 0) {
-      addr = builder_.createBinaryOperatorInst(
-          base,
-          builder_.getLiteralNumber(static_cast<double>(offset)),
-          ValueKind::BinaryAddInstKind);
-    } else {
-      addr = base;
-    }
+    Value *addr = emitEffectiveAddr(base, offset);
+    emitMemoryBoundsCheck(addr, 4);
 
     if (alignLog2 < naturalAlign) {
       // Unaligned: byte-store 4 bytes.
@@ -4226,15 +5838,7 @@ void WasmIRGen::onStore(
   Value *value = pop();
   Value *base = pop();
 
-  Value *addr;
-  if (offset != 0) {
-    addr = builder_.createBinaryOperatorInst(
-        base,
-        builder_.getLiteralNumber(static_cast<double>(offset)),
-        ValueKind::BinaryAddInstKind);
-  } else {
-    addr = base;
-  }
+  Value *addr = emitEffectiveAddr(base, offset);
 
   MemView view;
   uint8_t shift = 0;
@@ -4265,13 +5869,18 @@ void WasmIRGen::onStore(
     return;
   }
 
+  emitMemoryBoundsCheck(addr, numBytes);
+
   // Unaligned path: byte-store to HEAPU8.
   if (alignLog2 < naturalAlign) {
     if (op == "f64.store") {
       // Reinterpret f64 → i64 (split lo/hi), then byte-store each half.
-      auto *reinterp = helpers_.emitI64ReinterpretF64(value);
-      auto *hi = helpers_.emitI64HiResult();
-      emitUnalignedStore(addr, reinterp, 4);
+      helpers_.emitI64ReinterpretF64(retBufI_, value);
+      auto *lo = builder_.createLoadPropertyInst(
+          retBufI_, builder_.getLiteralNumber(0));
+      auto *hi = builder_.createLoadPropertyInst(
+          retBufI_, builder_.getLiteralNumber(1));
+      emitUnalignedStore(addr, lo, 4);
       auto *addrHi = builder_.createBinaryOperatorInst(
           addr,
           builder_.getLiteralNumber(4),
@@ -4340,27 +5949,28 @@ void WasmIRGen::onMemoryGrow() {
       builder_.getLiteralNumber(16),
       ValueKind::BinaryUnsignedRightShiftInstKind);
 
-  // Get maximum page count from module info.
-  uint32_t maxPages = 65536; // Default: 4GB (max Wasm memory).
+  // Get maximum page count.
+  // For locally-defined memories, use the declared maximum (compile-time).
+  // For imported memories, use the actual __wasm_max__ from the imported
+  // WebAssembly.Memory object (runtime), which may be more restrictive
+  // than the import declaration's maximum.
+  Value *maxPagesVal = nullptr;
   if (!moduleInfo_.memories.empty()) {
+    uint32_t maxPages = 65536; // Default: 4GB (max Wasm memory).
     if (moduleInfo_.memories[0].limits.hasMaximum) {
       maxPages = moduleInfo_.memories[0].limits.maximum;
     }
+    maxPagesVal = builder_.getLiteralNumber(maxPages);
+  } else if (importedMemMaxVar_) {
+    maxPagesVal =
+        builder_.createLoadFrameInst(parentScopeInst_, importedMemMaxVar_);
   } else {
-    for (auto &imp : moduleInfo_.imports) {
-      if (imp.kind == WasmExternalKind::Memory) {
-        if (imp.memoryType.limits.hasMaximum) {
-          maxPages = imp.memoryType.limits.maximum;
-        }
-        break;
-      }
-    }
+    maxPagesVal = builder_.getLiteralNumber(65536);
   }
 
   // Call the grow builtin: wasmMemoryGrow(heapu8, delta, maxPages).
   // Returns new ArrayBuffer on success, or -1 on failure.
-  auto *result = helpers_.emitMemoryGrow(
-      heapu8, delta, builder_.getLiteralNumber(maxPages));
+  auto *result = helpers_.emitMemoryGrow(heapu8, delta, maxPagesVal);
 
   // Check if result === -1 (failure).
   auto *negOne = builder_.getLiteralNumber(-1);
@@ -4469,30 +6079,36 @@ void WasmIRGen::onDataDrop(uint32_t segmentIndex) {
 
 // --- Table operations (J.1) ---
 
+void WasmIRGen::internTypeIds(Instruction *tlScope) {
+  for (uint32_t i = 0; i < moduleInfo_.types.size(); ++i) {
+    if (!typeIdVars_[i])
+      continue;
+    // Intern the STRUCTURAL string, so the id depends only on the signature.
+    // This also subsumes canonicalTypeIndex_: two structurally identical types
+    // produce the same string and therefore the same id.
+    auto *id = builder_.createCallBuiltinInst(
+        BuiltinMethod::HermesBuiltin_wasmInternType,
+        {builder_.getLiteralString(
+            buildFuncTypeString(moduleInfo_.types[i]))});
+    builder_.createStoreFrameInst(tlScope, id, typeIdVars_[i]);
+  }
+}
+
 void WasmIRGen::createTables(Instruction *tlScope) {
   // Determine initial size for each table. Tables may be defined in the
   // table section or imported.
   uint32_t numTables = moduleInfo_.totalTableCount();
 
   for (uint32_t tblIdx = 0; tblIdx < numTables; ++tblIdx) {
-    uint32_t initialSize = 0;
     uint32_t importedTables = moduleInfo_.importedTableCount();
 
     if (tblIdx < importedTables) {
-      // Imported table — find the corresponding import.
-      uint32_t importTableIdx = 0;
-      for (const auto &imp : moduleInfo_.imports) {
-        if (imp.kind != WasmExternalKind::Table)
-          continue;
-        if (importTableIdx == tblIdx) {
-          initialSize = imp.tableType.limits.initial;
-          break;
-        }
-        ++importTableIdx;
-      }
-    } else {
-      initialSize = moduleInfo_.tables[tblIdx - importedTables].limits.initial;
+      // Imported table — arrays already wired during import validation.
+      continue;
     }
+
+    uint32_t initialSize =
+        moduleInfo_.tables[tblIdx - importedTables].limits.initial;
 
     // Create the functions array: new Array(initialSize)
     // This creates a sparse JS array with .length = initialSize.
@@ -4516,10 +6132,24 @@ void WasmIRGen::createTables(Instruction *tlScope) {
     // The offset for active segments. For Phase 1, only i32.const offsets
     // are supported (global.get offsets would require globals to be
     // initialized first, which is not yet implemented).
+    // An extended constant expression carries the whole computation. The
+    // scalar offsetKind/offsetValue fields only record the LAST constant
+    // parsed, so using them for such a segment silently places the elements
+    // at the wrong index.
     Value *offset = nullptr;
-    if (seg.offsetKind == WasmGlobal::InitKind::I32Const) {
+    if (seg.offsetExpr.size() > 1) {
+      offset = emitInitExpr(seg.offsetExpr, tlScope);
+      if (!offset) {
+        llvh::errs()
+            << "warning: malformed element segment offset expression\n";
+        continue;
+      }
+    } else if (seg.offsetKind == WasmGlobal::InitKind::I32Const) {
       offset = builder_.getLiteralNumber(
           static_cast<double>(seg.offsetValue));
+    } else if (seg.offsetKind == WasmGlobal::InitKind::GlobalGet) {
+      uint32_t slotIdx = globalSlotIndex_[seg.offsetGlobalIdx];
+      offset = builder_.createLoadFrameInst(tlScope, globalVars_[slotIdx]);
     } else {
       // Unsupported offset expression — skip this segment.
       llvh::errs()
@@ -4553,7 +6183,7 @@ void WasmIRGen::createTables(Instruction *tlScope) {
             tlScope, closureVars_[funcIdx]);
         builder_.createStorePropertyStrictInst(closure, funcsArr, idx);
 
-        // Store the type index into the type-indices array.
+        // Store the type index (canonical for structural comparison).
         uint32_t typeIdx = moduleInfo_.getFunctionType(funcIdx).params.size();
         // Actually, we need the type index from the function's type, not the
         // param count. The type index is used for call_indirect matching.
@@ -4576,8 +6206,9 @@ void WasmIRGen::createTables(Instruction *tlScope) {
                                    moduleInfo_.importedFunctionCount()]
                         .typeIndex;
         }
+        // The interned id, not a module-local index; see internTypeIds.
         builder_.createStorePropertyStrictInst(
-            builder_.getLiteralNumber(static_cast<double>(typeIdx)),
+            builder_.createLoadFrameInst(tlScope, typeIdVars_[typeIdx]),
             typesArr,
             idx);
       }
@@ -4599,12 +6230,34 @@ Value *WasmIRGen::loadTableTypes(uint32_t tableIndex) {
       parentScopeInst_, tableTypeVars_[tableIndex]);
 }
 
+void WasmIRGen::emitTableBoundsCheck(Value *idx, Value *funcsArr) {
+  auto *length = builder_.createLoadPropertyInst(
+      funcsArr, builder_.getLiteralString("length"));
+  // Unsigned comparison: (idx >>> 0) >= length
+  auto *idxU = builder_.createBinaryOperatorInst(
+      idx,
+      builder_.getLiteralNumber(0),
+      ValueKind::BinaryUnsignedRightShiftInstKind);
+  auto *isOOB = builder_.createBinaryOperatorInst(
+      idxU, length, ValueKind::BinaryGreaterThanOrEqualInstKind);
+  auto *trapBlock = builder_.createBasicBlock(currentFunc_);
+  auto *okBlock = builder_.createBasicBlock(currentFunc_);
+  builder_.createCondBranchInst(isOOB, trapBlock, okBlock);
+
+  builder_.setInsertionBlock(trapBlock);
+  helpers_.emitTrap();
+  builder_.createUnreachableInst();
+
+  builder_.setInsertionBlock(okBlock);
+}
+
 void WasmIRGen::onTableGet(uint32_t tableIndex) {
   if (unreachable_)
     return;
 
   Value *idx = pop();
   auto *funcsArr = loadTableFuncs(tableIndex);
+  emitTableBoundsCheck(idx, funcsArr);
   auto *result = builder_.createLoadPropertyInst(funcsArr, idx);
   push(result);
 }
@@ -4616,6 +6269,7 @@ void WasmIRGen::onTableSet(uint32_t tableIndex) {
   Value *val = pop();
   Value *idx = pop();
   auto *funcsArr = loadTableFuncs(tableIndex);
+  emitTableBoundsCheck(idx, funcsArr);
   builder_.createStorePropertyStrictInst(val, funcsArr, idx);
 }
 
@@ -4635,11 +6289,42 @@ void WasmIRGen::onTableGrow(uint32_t tableIndex) {
 
   // table.grow pops: delta (top), fill value.
   // Pushes: old size on success, -1 on failure.
-  // Phase 1: not fully implemented — always returns -1 (failure).
-  // This is valid per the Wasm spec (grow can fail).
-  pop(); // delta
-  pop(); // fill value
-  push(builder_.getLiteralNumber(-1));
+  auto *delta = pop();
+  auto *fillVal = pop();
+
+  auto *funcsArr = loadTableFuncs(tableIndex);
+  auto *typesArr = loadTableTypes(tableIndex);
+
+  // Get maximum table size from module info.
+  uint32_t maxEntries = UINT32_MAX;
+  uint32_t importedTables = moduleInfo_.importedTableCount();
+  if (tableIndex < importedTables) {
+    uint32_t importTableIdx = 0;
+    for (const auto &imp : moduleInfo_.imports) {
+      if (imp.kind != WasmExternalKind::Table)
+        continue;
+      if (importTableIdx == tableIndex) {
+        if (imp.tableType.limits.hasMaximum)
+          maxEntries = imp.tableType.limits.maximum;
+        break;
+      }
+      ++importTableIdx;
+    }
+  } else {
+    const auto &tbl =
+        moduleInfo_.tables[tableIndex - importedTables];
+    if (tbl.limits.hasMaximum)
+      maxEntries = tbl.limits.maximum;
+  }
+
+  auto *result = helpers_.emitTableGrow(
+      funcsArr,
+      typesArr,
+      delta,
+      fillVal,
+      builder_.getLiteralNumber(static_cast<double>(maxEntries)));
+
+  push(result);
 }
 
 // --- Bulk table operations (N.2) ---
@@ -4710,14 +6395,60 @@ void WasmIRGen::onElemDrop(uint32_t segmentIndex) {
 
 // --- Globals (K.1) ---
 
+Value *WasmIRGen::emitInitExpr(
+    const std::vector<InitExprOp> &expr,
+    Instruction *tlScope) {
+  llvh::SmallVector<Value *, 4> stack;
+  for (const auto &op : expr) {
+    switch (op.kind) {
+      case InitExprOp::Kind::I32Const:
+        stack.push_back(
+            builder_.getLiteralNumber(static_cast<double>(op.i32Val)));
+        break;
+      case InitExprOp::Kind::GlobalGet: {
+        if (op.globalIdx >= globalSlotIndex_.size())
+          return nullptr;
+        uint32_t slotIdx = globalSlotIndex_[op.globalIdx];
+        stack.push_back(
+            builder_.createLoadFrameInst(tlScope, globalVars_[slotIdx]));
+        break;
+      }
+      case InitExprOp::Kind::I32Add:
+      case InitExprOp::Kind::I32Sub:
+      case InitExprOp::Kind::I32Mul: {
+        // Not an assert: the AOT path does not validate, so a malformed
+        // module can under-run this stack. Popping an empty SmallVector
+        // wraps its size and corrupts memory.
+        if (stack.size() < 2)
+          return nullptr;
+        Value *rhs = stack.pop_back_val();
+        Value *lhs = stack.pop_back_val();
+        ValueKind binOp = op.kind == InitExprOp::Kind::I32Add
+            ? ValueKind::BinaryAddInstKind
+            : op.kind == InitExprOp::Kind::I32Sub
+            ? ValueKind::BinarySubtractInstKind
+            : ValueKind::BinaryMultiplyInstKind;
+        stack.push_back(builder_.createBinaryOperatorInst(
+            builder_.createBinaryOperatorInst(lhs, rhs, binOp),
+            builder_.getLiteralNumber(0),
+            ValueKind::BinaryOrInstKind));
+        break;
+      }
+    }
+  }
+  if (stack.size() != 1)
+    return nullptr;
+  return stack[0];
+}
+
 void WasmIRGen::initializeGlobals(Instruction *tlScope) {
   uint32_t numImportedGlobals = moduleInfo_.importedGlobalCount();
 
-  // Initialize imported globals from the imports object.
-  // Imported globals are read from __wasm_imports__[module][field].value
-  // (for WebAssembly.Global objects) or directly as numbers.
-  // Phase 1: treat imported globals as their numeric initial value (0).
-  // This will be properly implemented when M.7 (WebAssembly.Global) exists.
+  // Initialize imported globals from the validated import values.
+  // During import validation, the raw import value was stored in
+  // importGlobalVals_[i]. If the import has __wasm_type__ (i.e., it is
+  // a WebAssembly.Global), we read its .value property; otherwise we
+  // use the import value directly (raw JS number).
   for (uint32_t i = 0; i < numImportedGlobals; ++i) {
     uint32_t slotIdx = globalSlotIndex_[i];
 
@@ -4734,16 +6465,52 @@ void WasmIRGen::initializeGlobals(Instruction *tlScope) {
       ++importGlobalIdx;
     }
 
-    // Phase 1: initialize imported globals to 0.
-    builder_.createStoreFrameInst(
-        tlScope,
-        builder_.getLiteralNumber(0),
-        globalVars_[slotIdx]);
+    // The value was already resolved during import validation, under the
+    // __wasm_type__ check performed there. Re-deriving it here by reading
+    // __wasm_type__ a second time would be a TOCTOU: a getter or Proxy can
+    // answer differently on the second read.
+    Value *resolvedVal = builder_.createLoadFrameInst(
+        tlScope, importGlobalVals_[i]);
+
+    // Coerce to the declared Wasm type. The import is a JS value -- either a
+    // raw number or a WebAssembly.Global's .value -- and nothing has
+    // constrained it, so without this an object or a fractional number lands
+    // in a slot the rest of the compiler treats as an i32/f32/f64.
+    // i64 is left alone: it goes through the BigInt lo/hi split below.
+    switch (gType) {
+      case WasmValType::I32:
+        resolvedVal = builder_.createAsInt32Inst(resolvedVal);
+        break;
+      case WasmValType::F32:
+        resolvedVal = emitFround(builder_.createAsNumberInst(resolvedVal));
+        break;
+      case WasmValType::F64:
+        resolvedVal = builder_.createAsNumberInst(resolvedVal);
+        break;
+      default:
+        break;
+    }
+
     if (gType == WasmValType::I64) {
+      // An i64 global's value is a BigInt. Split it into the lo/hi pair the
+      // compiler represents i64 with; storing it raw would put a BigInt where
+      // every i64 operation expects a Number, and hard-coding hi to 0
+      // silently truncated every imported i64 to its low word.
+      auto *rbI = builder_.createLoadFrameInst(tlScope, retBufIVar_);
+      helpers_.emitBigIntToI64(rbI, resolvedVal);
       builder_.createStoreFrameInst(
           tlScope,
-          builder_.getLiteralNumber(0),
+          builder_.createLoadPropertyInst(
+              rbI, builder_.getLiteralNumber(0)),
+          globalVars_[slotIdx]);
+      builder_.createStoreFrameInst(
+          tlScope,
+          builder_.createLoadPropertyInst(
+              rbI, builder_.getLiteralNumber(1)),
           globalVars_[slotIdx + 1]);
+    } else {
+      builder_.createStoreFrameInst(
+          tlScope, resolvedVal, globalVars_[slotIdx]);
     }
   }
 
@@ -4752,6 +6519,19 @@ void WasmIRGen::initializeGlobals(Instruction *tlScope) {
     uint32_t globalIdx = numImportedGlobals + di;
     uint32_t slotIdx = globalSlotIndex_[globalIdx];
     const WasmGlobal &g = moduleInfo_.globals[di];
+
+    // An extended constant expression carries the whole computation. The
+    // scalar initKind/initValue fields only record the LAST constant parsed,
+    // so using them for such a global silently initializes it to that
+    // constant instead of the computed value.
+    if (g.initExpr.size() > 1) {
+      if (Value *init = emitInitExpr(g.initExpr, tlScope)) {
+        builder_.createStoreFrameInst(tlScope, init, globalVars_[slotIdx]);
+        continue;
+      }
+      llvh::errs()
+          << "warning: malformed global init expression\n";
+    }
 
     switch (g.initKind) {
       case WasmGlobal::InitKind::I32Const:

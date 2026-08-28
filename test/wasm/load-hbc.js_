@@ -13,11 +13,17 @@
 var args = hermescli.getScriptArgs();
 var hbcPath = args[0];
 var funcName = args[1];
-var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+var bytes = hermescli.loadFile(hbcPath);
+var mod = new WebAssembly.Module(bytes);
+var instance = new WebAssembly.Instance(mod);
+var exports = instance.exports;
 
-var callArgs = [];
-for (var i = 2; i < args.length; i++) {
-  callArgs.push(+args[i]);
+// If no function name is given, just instantiate (start function runs
+// automatically during instantiation).
+if (funcName !== undefined && funcName !== "") {
+  var callArgs = [];
+  for (var i = 2; i < args.length; i++) {
+    callArgs.push(+args[i]);
+  }
+  print(exports[funcName].apply(null, callArgs));
 }
-
-print(exports[funcName].apply(null, callArgs));

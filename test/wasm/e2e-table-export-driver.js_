@@ -1,0 +1,28 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-table-export.wat.
+// Verifies that exported tables are WebAssembly.Table objects with
+// __wasm_type__ metadata and __wasm_funcs__/__wasm_types__ arrays.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var bytes = hermescli.loadFile(hbcPath);
+var mod = new WebAssembly.Module(bytes);
+var instance = new WebAssembly.Instance(mod);
+var exports = instance.exports;
+
+// The exported table should be a WebAssembly.Table object.
+print("tbl type:", typeof exports.tbl);
+print("tbl __wasm_type__:", exports.tbl.__wasm_type__);
+print("tbl __wasm_min__:", exports.tbl.__wasm_min__);
+print("tbl __wasm_max__:", exports.tbl.__wasm_max__);
+
+// Verify internal table arrays are exposed for cross-module sharing.
+print("tbl __wasm_funcs__ type:", typeof exports.tbl.__wasm_funcs__);
+print("tbl __wasm_funcs__ length:", exports.tbl.__wasm_funcs__.length);
+print("tbl __wasm_types__ type:", typeof exports.tbl.__wasm_types__);
+print("tbl __wasm_types__ length:", exports.tbl.__wasm_types__.length);

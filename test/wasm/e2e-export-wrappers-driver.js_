@@ -9,7 +9,10 @@
 // Tests export wrapper functions with various argument types.
 
 var hbcPath = hermescli.getScriptArgs()[0];
-var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+var bytes = hermescli.loadFile(hbcPath);
+var mod = new WebAssembly.Module(bytes);
+var instance = new WebAssembly.Instance(mod);
+var exports = instance.exports;
 
 // Test 1: basic i32 add.
 print("add(3, 4) =", exports.add(3, 4));

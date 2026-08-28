@@ -450,16 +450,18 @@ CallResult<HermesValue> wasmF32Copysign(void *, Runtime &runtime) {
       static_cast<double>(std::copysign(a, b)));
 }
 
+/// Wasm f64.nearest / f32.nearest: IEEE 754 round-ties-to-even.
+CallResult<HermesValue> wasmNearest(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  double val = args.getArg(0).getNumber();
+  return HermesValue::encodeTrustedNumberValue(std::nearbyint(val));
+}
+
 // ===== i64 split-pair helpers (G.3) =====
 //
 // Phase 1 represents i64 values as two i32 halves (lo, hi). Arithmetic
-// helpers take (lo_a, hi_a, lo_b, hi_b) and return lo_result directly.
-// The hi_result is stashed in a thread-local and retrieved by a subsequent
-// call to wasmI64HiResult(). This is safe because Hermes is single-threaded
-// within a Runtime.
-
-/// Thread-local stash for the hi32 part of the most recent i64 result.
-static thread_local double wasmI64HiStash_ = 0;
+// helpers take (retBufI, lo_a, hi_a, lo_b, hi_b) and write the lo/hi
+// result to retBufI[0]/retBufI[1], returning 0.
 
 /// Helper to reconstruct a 64-bit value from split lo/hi args.
 static int64_t argsToI64(NativeArgs &args, int loIdx, int hiIdx) {
@@ -469,44 +471,41 @@ static int64_t argsToI64(NativeArgs &args, int loIdx, int hiIdx) {
       (static_cast<uint64_t>(hi) << 32) | static_cast<uint64_t>(lo));
 }
 
-/// Helper to split a 64-bit result into lo (returned) and hi (stashed).
-static HermesValue splitI64Result(int64_t val) {
-  auto lo = static_cast<int32_t>(static_cast<uint64_t>(val) & 0xFFFFFFFF);
-  auto hi = static_cast<int32_t>(
+/// Helper to write i64 result (lo32/hi32) to the return buffer (a Uint32Array).
+/// retBuf is arg(0), a JSTypedArrayBase. Writes lo to [0], hi to [1].
+static HermesValue writeI64ToRetBuf(
+    Runtime &runtime,
+    NativeArgs &args,
+    int64_t val) {
+  auto *retBuf = vmcast<JSTypedArrayBase>(args.getArg(0));
+  auto *buf = reinterpret_cast<uint32_t *>(retBuf->data(runtime));
+  buf[0] = static_cast<uint32_t>(static_cast<uint64_t>(val) & 0xFFFFFFFF);
+  buf[1] = static_cast<uint32_t>(
       (static_cast<uint64_t>(val) >> 32) & 0xFFFFFFFF);
-  wasmI64HiStash_ = static_cast<double>(hi);
-  return HermesValue::encodeTrustedNumberValue(static_cast<double>(lo));
-}
-
-static HermesValue splitU64Result(uint64_t val) {
-  auto lo = static_cast<int32_t>(val & 0xFFFFFFFF);
-  auto hi = static_cast<int32_t>((val >> 32) & 0xFFFFFFFF);
-  wasmI64HiStash_ = static_cast<double>(hi);
-  return HermesValue::encodeTrustedNumberValue(static_cast<double>(lo));
-}
-
-/// Store the hi32 part of an i64 value into the stash. Used when a Wasm
-/// function returns an i64 — the callee stashes hi32 before returning lo32.
-CallResult<HermesValue> wasmI64HiStash(void *, Runtime &runtime) {
-  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  wasmI64HiStash_ = args.getArg(0).getNumber();
   return HermesValue::encodeTrustedNumberValue(0);
 }
 
-/// Retrieve the hi32 part of the most recent i64 result.
-CallResult<HermesValue> wasmI64HiResult(void *, Runtime &) {
-  return HermesValue::encodeTrustedNumberValue(wasmI64HiStash_);
+/// Helper to write unsigned i64 result to return buffer.
+static HermesValue writeU64ToRetBuf(
+    Runtime &runtime,
+    NativeArgs &args,
+    uint64_t val) {
+  auto *retBuf = vmcast<JSTypedArrayBase>(args.getArg(0));
+  auto *buf = reinterpret_cast<uint32_t *>(retBuf->data(runtime));
+  buf[0] = static_cast<uint32_t>(val & 0xFFFFFFFF);
+  buf[1] = static_cast<uint32_t>((val >> 32) & 0xFFFFFFFF);
+  return HermesValue::encodeTrustedNumberValue(0);
 }
 
-/// wasmBigIntToI64(bigintVal): Takes a BigInt, extracts the i64 value.
-/// Returns lo32 (as Number), stashes hi32 via wasmI64HiStash_.
+/// wasmBigIntToI64(retBufI, bigintVal): Takes a BigInt, extracts the i64
+/// value. Writes lo32/hi32 to retBufI[0]/[1], returns 0.
 CallResult<HermesValue> wasmBigIntToI64(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  auto val = args.getArg(0);
+  auto val = args.getArg(1);
   if (LLVM_UNLIKELY(!val.isBigInt()))
     return runtime.raiseTypeError("i64 argument must be a BigInt");
   uint64_t bits = val.getBigInt()->truncateToSingleDigit();
-  return splitI64Result(static_cast<int64_t>(bits));
+  return writeI64ToRetBuf(runtime, args, static_cast<int64_t>(bits));
 }
 
 /// wasmI64ToBigInt(lo, hi): Takes lo32/hi32 as Numbers, returns a BigInt.
@@ -519,118 +518,118 @@ CallResult<HermesValue> wasmI64ToBigInt(void *, Runtime &runtime) {
 /// i64.add
 CallResult<HermesValue> wasmI64Add(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  int64_t a = argsToI64(args, 0, 1);
-  int64_t b = argsToI64(args, 2, 3);
-  return splitI64Result(a + b);
+  int64_t a = argsToI64(args, 1, 2);
+  int64_t b = argsToI64(args, 3, 4);
+  return writeI64ToRetBuf(runtime, args, a + b);
 }
 
 /// i64.sub
 CallResult<HermesValue> wasmI64Sub(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  int64_t a = argsToI64(args, 0, 1);
-  int64_t b = argsToI64(args, 2, 3);
-  return splitI64Result(a - b);
+  int64_t a = argsToI64(args, 1, 2);
+  int64_t b = argsToI64(args, 3, 4);
+  return writeI64ToRetBuf(runtime, args, a - b);
 }
 
 /// i64.mul
 CallResult<HermesValue> wasmI64Mul(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  int64_t a = argsToI64(args, 0, 1);
-  int64_t b = argsToI64(args, 2, 3);
-  return splitI64Result(a * b);
+  int64_t a = argsToI64(args, 1, 2);
+  int64_t b = argsToI64(args, 3, 4);
+  return writeI64ToRetBuf(runtime, args, a * b);
 }
 
 /// i64.div_s: signed division, traps on div by zero and INT64_MIN / -1.
 CallResult<HermesValue> wasmI64DivS(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  int64_t a = argsToI64(args, 0, 1);
-  int64_t b = argsToI64(args, 2, 3);
+  int64_t a = argsToI64(args, 1, 2);
+  int64_t b = argsToI64(args, 3, 4);
   if (LLVM_UNLIKELY(b == 0))
     return runtime.raiseError("integer divide by zero");
   if (LLVM_UNLIKELY(a == INT64_MIN && b == -1))
     return runtime.raiseError("integer overflow");
-  return splitI64Result(a / b);
+  return writeI64ToRetBuf(runtime, args, a / b);
 }
 
 /// i64.div_u: unsigned division, traps on div by zero.
 CallResult<HermesValue> wasmI64DivU(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  uint64_t a = static_cast<uint64_t>(argsToI64(args, 0, 1));
-  uint64_t b = static_cast<uint64_t>(argsToI64(args, 2, 3));
+  uint64_t a = static_cast<uint64_t>(argsToI64(args, 1, 2));
+  uint64_t b = static_cast<uint64_t>(argsToI64(args, 3, 4));
   if (LLVM_UNLIKELY(b == 0))
     return runtime.raiseError("integer divide by zero");
-  return splitU64Result(a / b);
+  return writeU64ToRetBuf(runtime, args, a / b);
 }
 
 /// i64.rem_s: signed remainder, traps on div by zero.
 /// INT64_MIN % -1 = 0 (not a trap).
 CallResult<HermesValue> wasmI64RemS(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  int64_t a = argsToI64(args, 0, 1);
-  int64_t b = argsToI64(args, 2, 3);
+  int64_t a = argsToI64(args, 1, 2);
+  int64_t b = argsToI64(args, 3, 4);
   if (LLVM_UNLIKELY(b == 0))
     return runtime.raiseError("integer divide by zero");
   // INT64_MIN % -1 is 0. Must handle explicitly to avoid potential UB
   // on platforms where the division traps (x86 idiv).
   if (LLVM_UNLIKELY(a == INT64_MIN && b == -1))
-    return splitI64Result(0);
-  return splitI64Result(a % b);
+    return writeI64ToRetBuf(runtime, args, 0);
+  return writeI64ToRetBuf(runtime, args, a % b);
 }
 
 /// i64.rem_u: unsigned remainder, traps on div by zero.
 CallResult<HermesValue> wasmI64RemU(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  uint64_t a = static_cast<uint64_t>(argsToI64(args, 0, 1));
-  uint64_t b = static_cast<uint64_t>(argsToI64(args, 2, 3));
+  uint64_t a = static_cast<uint64_t>(argsToI64(args, 1, 2));
+  uint64_t b = static_cast<uint64_t>(argsToI64(args, 3, 4));
   if (LLVM_UNLIKELY(b == 0))
     return runtime.raiseError("integer divide by zero");
-  return splitU64Result(a % b);
+  return writeU64ToRetBuf(runtime, args, a % b);
 }
 
 /// i64.shl
 CallResult<HermesValue> wasmI64Shl(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  uint64_t a = static_cast<uint64_t>(argsToI64(args, 0, 1));
-  uint64_t b = static_cast<uint64_t>(argsToI64(args, 2, 3));
-  return splitU64Result(a << (b & 63));
+  uint64_t a = static_cast<uint64_t>(argsToI64(args, 1, 2));
+  uint64_t b = static_cast<uint64_t>(argsToI64(args, 3, 4));
+  return writeU64ToRetBuf(runtime, args, a << (b & 63));
 }
 
 /// i64.shr_s (arithmetic shift right)
 CallResult<HermesValue> wasmI64ShrS(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  int64_t a = argsToI64(args, 0, 1);
-  uint64_t b = static_cast<uint64_t>(argsToI64(args, 2, 3));
+  int64_t a = argsToI64(args, 1, 2);
+  uint64_t b = static_cast<uint64_t>(argsToI64(args, 3, 4));
   // C++ arithmetic right shift on signed is implementation-defined but
   // in practice always sign-extends on two's complement platforms.
-  return splitI64Result(a >> (b & 63));
+  return writeI64ToRetBuf(runtime, args, a >> (b & 63));
 }
 
 /// i64.shr_u (logical shift right)
 CallResult<HermesValue> wasmI64ShrU(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  uint64_t a = static_cast<uint64_t>(argsToI64(args, 0, 1));
-  uint64_t b = static_cast<uint64_t>(argsToI64(args, 2, 3));
-  return splitU64Result(a >> (b & 63));
+  uint64_t a = static_cast<uint64_t>(argsToI64(args, 1, 2));
+  uint64_t b = static_cast<uint64_t>(argsToI64(args, 3, 4));
+  return writeU64ToRetBuf(runtime, args, a >> (b & 63));
 }
 
 /// i64.rotl
 CallResult<HermesValue> wasmI64Rotl(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  uint64_t a = static_cast<uint64_t>(argsToI64(args, 0, 1));
-  uint64_t b = static_cast<uint64_t>(argsToI64(args, 2, 3));
+  uint64_t a = static_cast<uint64_t>(argsToI64(args, 1, 2));
+  uint64_t b = static_cast<uint64_t>(argsToI64(args, 3, 4));
   uint64_t shift = b & 63;
   uint64_t result = shift == 0 ? a : (a << shift) | (a >> (64 - shift));
-  return splitU64Result(result);
+  return writeU64ToRetBuf(runtime, args, result);
 }
 
 /// i64.rotr
 CallResult<HermesValue> wasmI64Rotr(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  uint64_t a = static_cast<uint64_t>(argsToI64(args, 0, 1));
-  uint64_t b = static_cast<uint64_t>(argsToI64(args, 2, 3));
+  uint64_t a = static_cast<uint64_t>(argsToI64(args, 1, 2));
+  uint64_t b = static_cast<uint64_t>(argsToI64(args, 3, 4));
   uint64_t shift = b & 63;
   uint64_t result = shift == 0 ? a : (a >> shift) | (a << (64 - shift));
-  return splitU64Result(result);
+  return writeU64ToRetBuf(runtime, args, result);
 }
 
 /// i64.clz: count leading zeros. Result fits in [0, 64].
@@ -757,10 +756,10 @@ CallResult<HermesValue> wasmI64GeU(void *, Runtime &runtime) {
 
 /// i64.trunc_f64_s (also used for i64.trunc_f32_s):
 /// Truncate double to signed i64, trapping on NaN or out-of-range.
-/// Returns lo32; hi32 is stashed.
+/// Writes lo/hi to retBufI[0]/[1], returns 0.
 CallResult<HermesValue> wasmI64TruncF64S(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  double a = args.getArg(0).getNumber();
+  double a = args.getArg(1).getNumber();
   if (LLVM_UNLIKELY(std::isnan(a)))
     return runtime.raiseError("invalid conversion to integer");
   double t = std::trunc(a);
@@ -769,15 +768,15 @@ CallResult<HermesValue> wasmI64TruncF64S(void *, Runtime &runtime) {
   // the closest double is 9223372036854775808.0 (2^63). So we check < 2^63.
   if (LLVM_UNLIKELY(t < -9223372036854775808.0 || t >= 9223372036854775808.0))
     return runtime.raiseError("integer overflow");
-  return splitI64Result(static_cast<int64_t>(t));
+  return writeI64ToRetBuf(runtime, args, static_cast<int64_t>(t));
 }
 
 /// i64.trunc_f64_u (also used for i64.trunc_f32_u):
 /// Truncate double to unsigned i64, trapping on NaN or out-of-range.
-/// Returns lo32; hi32 is stashed.
+/// Writes lo/hi to retBufI[0]/[1], returns 0.
 CallResult<HermesValue> wasmI64TruncF64U(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  double a = args.getArg(0).getNumber();
+  double a = args.getArg(1).getNumber();
   if (LLVM_UNLIKELY(std::isnan(a)))
     return runtime.raiseError("invalid conversion to integer");
   double t = std::trunc(a);
@@ -786,39 +785,39 @@ CallResult<HermesValue> wasmI64TruncF64U(void *, Runtime &runtime) {
   // 18446744073709551616.0 (2^64). So we check < 2^64.
   if (LLVM_UNLIKELY(t < 0.0 || t >= 18446744073709551616.0))
     return runtime.raiseError("integer overflow");
-  return splitU64Result(static_cast<uint64_t>(t));
+  return writeU64ToRetBuf(runtime, args, static_cast<uint64_t>(t));
 }
 
 /// i64.trunc_sat_f64_s (also used for i64.trunc_sat_f32_s):
 /// Saturating truncation to signed i64. NaN -> 0.
-/// Returns lo32; hi32 is stashed.
+/// Writes lo/hi to retBufI[0]/[1], returns 0.
 CallResult<HermesValue> wasmI64TruncSatF64S(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  double a = args.getArg(0).getNumber();
+  double a = args.getArg(1).getNumber();
   if (LLVM_UNLIKELY(std::isnan(a)))
-    return splitI64Result(0);
+    return writeI64ToRetBuf(runtime, args, 0);
   double t = std::trunc(a);
   if (t < -9223372036854775808.0)
-    return splitI64Result(INT64_MIN);
+    return writeI64ToRetBuf(runtime, args, INT64_MIN);
   if (t >= 9223372036854775808.0)
-    return splitI64Result(INT64_MAX);
-  return splitI64Result(static_cast<int64_t>(t));
+    return writeI64ToRetBuf(runtime, args, INT64_MAX);
+  return writeI64ToRetBuf(runtime, args, static_cast<int64_t>(t));
 }
 
 /// i64.trunc_sat_f64_u (also used for i64.trunc_sat_f32_u):
 /// Saturating truncation to unsigned i64. NaN -> 0.
-/// Returns lo32; hi32 is stashed.
+/// Writes lo/hi to retBufI[0]/[1], returns 0.
 CallResult<HermesValue> wasmI64TruncSatF64U(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  double a = args.getArg(0).getNumber();
+  double a = args.getArg(1).getNumber();
   if (LLVM_UNLIKELY(std::isnan(a)))
-    return splitU64Result(0);
+    return writeU64ToRetBuf(runtime, args, 0);
   double t = std::trunc(a);
   if (t < 0.0)
-    return splitU64Result(0);
+    return writeU64ToRetBuf(runtime, args, 0);
   if (t >= 18446744073709551616.0)
-    return splitU64Result(UINT64_MAX);
-  return splitU64Result(static_cast<uint64_t>(t));
+    return writeU64ToRetBuf(runtime, args, UINT64_MAX);
+  return writeU64ToRetBuf(runtime, args, static_cast<uint64_t>(t));
 }
 
 /// f64.convert_i64_s: convert signed i64 to f64.
@@ -856,13 +855,13 @@ CallResult<HermesValue> wasmF32ConvertI64U(void *, Runtime &runtime) {
 }
 
 /// i64.reinterpret_f64: bitcast f64 to i64.
-/// Takes a single f64 arg, returns lo32; hi32 is stashed.
+/// Takes (retBufI, f64_arg), writes lo/hi to retBufI[0]/[1], returns 0.
 CallResult<HermesValue> wasmI64ReinterpretF64(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  double a = args.getArg(0).getNumber();
+  double a = args.getArg(1).getNumber();
   uint64_t bits;
   memcpy(&bits, &a, sizeof(bits));
-  return splitU64Result(bits);
+  return writeU64ToRetBuf(runtime, args, bits);
 }
 
 /// f64.reinterpret_i64: bitcast i64 to f64.
@@ -1179,6 +1178,58 @@ CallResult<HermesValue> wasmDataDrop(void *, Runtime &runtime) {
   return HermesValue::encodeUndefinedValue();
 }
 
+/// Wasm binary data segment init: bulk-copy from binary data storage blob
+/// into linear memory (a typed array).
+/// Args: (heapu8, blobOffset, length, dest).
+/// Walks the stack to find the caller's RuntimeModule, then copies
+/// binaryDataStorage[blobOffset..blobOffset+length] to heapu8[dest..dest+length].
+CallResult<HermesValue> wasmDataSegmentInit(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  auto *heapu8 = vmcast<JSTypedArrayBase>(args.getArg(0));
+  uint32_t blobOffset =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(1).getNumber()));
+  uint32_t length =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(2).getNumber()));
+  uint32_t dest =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(3).getNumber()));
+
+  if (length == 0)
+    return HermesValue::encodeUndefinedValue();
+
+  // Walk stack to get caller's CodeBlock → RuntimeModule.
+  auto frames = runtime.getStackFrames();
+  auto it = frames.begin();
+  if (LLVM_UNLIKELY(++it == frames.end()))
+    return runtime.raiseTypeError("Cannot be called directly");
+  auto *callerCB = it->getCalleeCodeBlock();
+  if (LLVM_UNLIKELY(!callerCB))
+    return runtime.raiseTypeError("Cannot be called from native code");
+  RuntimeModule *runtimeModule = callerCB->getRuntimeModule();
+
+  auto storage = runtimeModule->getBinaryDataStorage();
+
+  // Bounds check against binary data storage.
+  if (LLVM_UNLIKELY(
+          static_cast<uint64_t>(blobOffset) + length > storage.size())) {
+    return runtime.raiseError(
+        "wasmDataSegmentInit: out of bounds binary data access");
+  }
+
+  // Bounds check against linear memory.
+  uint32_t memSize = static_cast<uint32_t>(heapu8->getLength());
+  if (LLVM_UNLIKELY(static_cast<uint64_t>(dest) + length > memSize)) {
+    return runtime.raiseError(
+        "wasmDataSegmentInit: out of bounds memory access");
+  }
+
+  // Perform the bulk copy.
+  JSArrayBuffer *memBuf = heapu8->getBuffer(runtime);
+  uint8_t *memData = memBuf->getDataBlock();
+  std::memcpy(memData + dest, storage.data() + blobOffset, length);
+
+  return HermesValue::encodeUndefinedValue();
+}
+
 /// Wasm table.fill: fill \p count entries at \p idx with \p val.
 /// Args: (funcsArr, idx, val, count).
 /// Traps on out-of-bounds.
@@ -1210,6 +1261,53 @@ CallResult<HermesValue> wasmTableFill(void *, Runtime &runtime) {
   }
 
   return HermesValue::encodeUndefinedValue();
+}
+
+/// Wasm table.grow: grow table by delta entries, filling with fillVal.
+/// Args: (funcsArr, typesArr, delta, fillVal, maxEntries).
+/// Returns old size on success, -1 on failure.
+CallResult<HermesValue> wasmTableGrow(void *, Runtime &runtime) {
+  struct : public Locals {
+    PinnedValue<JSArray> funcsArr;
+    PinnedValue<JSArray> typesArr;
+    PinnedValue<> fillVal;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  lv.funcsArr = vmcast<JSArray>(args.getArg(0));
+  lv.typesArr = vmcast<JSArray>(args.getArg(1));
+  uint32_t delta =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(2).getNumber()));
+  lv.fillVal = args.getArg(3);
+  uint32_t maxEntries =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(4).getNumber()));
+
+  uint32_t oldLen = JSArray::getLength(*lv.funcsArr, runtime);
+
+  // Check for overflow and max limit.
+  uint64_t newLen64 = static_cast<uint64_t>(oldLen) + delta;
+  if (newLen64 > maxEntries) {
+    return HermesValue::encodeTrustedNumberValue(-1);
+  }
+  uint32_t newLen = static_cast<uint32_t>(newLen64);
+
+  // Grow both arrays by setting their length.
+  auto res1 = JSArray::setLengthProperty(lv.funcsArr, runtime, newLen);
+  if (LLVM_UNLIKELY(res1 == ExecutionStatus::EXCEPTION))
+    return ExecutionStatus::EXCEPTION;
+  auto res2 = JSArray::setLengthProperty(lv.typesArr, runtime, newLen);
+  if (LLVM_UNLIKELY(res2 == ExecutionStatus::EXCEPTION))
+    return ExecutionStatus::EXCEPTION;
+
+  // Fill new func entries with fillVal. Type entries remain undefined
+  // (no type info for fill entries — they are not callable via
+  // call_indirect).
+  for (uint32_t i = oldLen; i < newLen; ++i) {
+    (void)JSArray::setElementAt(lv.funcsArr, runtime, i, lv.fillVal);
+  }
+
+  return HermesValue::encodeTrustedNumberValue(oldLen);
 }
 
 /// Wasm table.copy: copy \p count entries from src table to dst table.
@@ -1378,6 +1476,75 @@ CallResult<HermesValue> wasmElemDrop(void *, Runtime &runtime) {
   (void)JSArray::setElementAt(lv.elemSegs, runtime, segIdx, lv.nullVal);
 
   return HermesValue::encodeUndefinedValue();
+}
+
+
+
+/// Map a structural Wasm function-type string to a stable integer id.
+/// call_indirect must compare type identity across module boundaries, and a
+/// module-local type index cannot do that: two modules number their type
+/// sections independently, so the same signature can get different indices
+/// (a spurious trap) and different signatures the same index (a missed trap).
+/// The identifier table already uniques strings per Runtime, so its symbol
+/// index is exactly the process-wide id needed, with no extra state.
+/// wasmInternType(typeString).
+CallResult<HermesValue> wasmInternType(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  struct : public Locals {
+    PinnedValue<StringPrimitive> str;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  auto *strPrim = dyn_vmcast<StringPrimitive>(args.getArg(0));
+  if (LLVM_UNLIKELY(!strPrim))
+    return runtime.raiseTypeError("Wasm type id must be a string");
+  lv.str = strPrim;
+
+  auto symRes = runtime.getIdentifierTable().getSymbolHandleFromPrimitive(
+      runtime, createPseudoHandle(lv.str.get()));
+  if (LLVM_UNLIKELY(symRes == ExecutionStatus::EXCEPTION))
+    return ExecutionStatus::EXCEPTION;
+
+  return HermesValue::encodeTrustedNumberValue(
+      symRes->get().unsafeGetIndex());
+}
+/// Wasm link error: creates and throws a WebAssembly.LinkError with the
+/// given message string. Used by Wasm-generated IR for import type
+/// validation at instantiation time.
+/// Args: (message).
+CallResult<HermesValue> wasmLinkError(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  struct : public Locals {
+    PinnedValue<> msgHandle;
+    PinnedValue<JSError> err;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  lv.msgHandle = args.getArg(0);
+
+#ifdef HERMES_ENABLE_WASM
+  Handle<JSObject> proto{runtime.wasmLinkErrorPrototype};
+#else
+  // Without Wasm support no Wasm module can be instantiated, so this builtin
+  // is unreachable. It must still be defined, because Builtins.def numbering
+  // is deliberately independent of HERMES_ENABLE_WASM; fall back to Error so
+  // the file compiles when the wasm* Runtime fields do not exist.
+  Handle<JSObject> proto{runtime.ErrorPrototype};
+#endif
+
+  lv.err = JSError::create(runtime, proto);
+
+  if (LLVM_UNLIKELY(
+          JSError::setMessage(lv.err, runtime, lv.msgHandle) ==
+          ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+
+  JSError::recordStackTrace(lv.err, runtime, true);
+
+  return runtime.setThrownValue(lv.err.getHermesValue());
 }
 
 namespace {
@@ -2480,41 +2647,36 @@ void createHermesBuiltins(Runtime &runtime) {
       P::wasmF32Copysign,
       wasmF32Copysign,
       2);
-  // i64 helpers (G.3, G.5).
   defineInternMethod(
-      B::HermesBuiltin_wasmI64HiStash,
-      P::wasmI64HiStash,
-      wasmI64HiStash,
+      B::HermesBuiltin_wasmNearest,
+      P::wasmNearest,
+      wasmNearest,
       1);
+  // i64 helpers (G.3).
   defineInternMethod(
-      B::HermesBuiltin_wasmI64HiResult,
-      P::wasmI64HiResult,
-      wasmI64HiResult,
-      0);
+      B::HermesBuiltin_wasmI64Add, P::wasmI64Add, wasmI64Add, 5);
   defineInternMethod(
-      B::HermesBuiltin_wasmI64Add, P::wasmI64Add, wasmI64Add, 4);
+      B::HermesBuiltin_wasmI64Sub, P::wasmI64Sub, wasmI64Sub, 5);
   defineInternMethod(
-      B::HermesBuiltin_wasmI64Sub, P::wasmI64Sub, wasmI64Sub, 4);
+      B::HermesBuiltin_wasmI64Mul, P::wasmI64Mul, wasmI64Mul, 5);
   defineInternMethod(
-      B::HermesBuiltin_wasmI64Mul, P::wasmI64Mul, wasmI64Mul, 4);
+      B::HermesBuiltin_wasmI64DivS, P::wasmI64DivS, wasmI64DivS, 5);
   defineInternMethod(
-      B::HermesBuiltin_wasmI64DivS, P::wasmI64DivS, wasmI64DivS, 4);
+      B::HermesBuiltin_wasmI64DivU, P::wasmI64DivU, wasmI64DivU, 5);
   defineInternMethod(
-      B::HermesBuiltin_wasmI64DivU, P::wasmI64DivU, wasmI64DivU, 4);
+      B::HermesBuiltin_wasmI64RemS, P::wasmI64RemS, wasmI64RemS, 5);
   defineInternMethod(
-      B::HermesBuiltin_wasmI64RemS, P::wasmI64RemS, wasmI64RemS, 4);
+      B::HermesBuiltin_wasmI64RemU, P::wasmI64RemU, wasmI64RemU, 5);
   defineInternMethod(
-      B::HermesBuiltin_wasmI64RemU, P::wasmI64RemU, wasmI64RemU, 4);
+      B::HermesBuiltin_wasmI64Shl, P::wasmI64Shl, wasmI64Shl, 5);
   defineInternMethod(
-      B::HermesBuiltin_wasmI64Shl, P::wasmI64Shl, wasmI64Shl, 4);
+      B::HermesBuiltin_wasmI64ShrS, P::wasmI64ShrS, wasmI64ShrS, 5);
   defineInternMethod(
-      B::HermesBuiltin_wasmI64ShrS, P::wasmI64ShrS, wasmI64ShrS, 4);
+      B::HermesBuiltin_wasmI64ShrU, P::wasmI64ShrU, wasmI64ShrU, 5);
   defineInternMethod(
-      B::HermesBuiltin_wasmI64ShrU, P::wasmI64ShrU, wasmI64ShrU, 4);
+      B::HermesBuiltin_wasmI64Rotl, P::wasmI64Rotl, wasmI64Rotl, 5);
   defineInternMethod(
-      B::HermesBuiltin_wasmI64Rotl, P::wasmI64Rotl, wasmI64Rotl, 4);
-  defineInternMethod(
-      B::HermesBuiltin_wasmI64Rotr, P::wasmI64Rotr, wasmI64Rotr, 4);
+      B::HermesBuiltin_wasmI64Rotr, P::wasmI64Rotr, wasmI64Rotr, 5);
   defineInternMethod(
       B::HermesBuiltin_wasmI64Clz, P::wasmI64Clz, wasmI64Clz, 2);
   defineInternMethod(
@@ -2551,22 +2713,22 @@ void createHermesBuiltins(Runtime &runtime) {
       B::HermesBuiltin_wasmI64TruncF64S,
       P::wasmI64TruncF64S,
       wasmI64TruncF64S,
-      1);
+      2);
   defineInternMethod(
       B::HermesBuiltin_wasmI64TruncF64U,
       P::wasmI64TruncF64U,
       wasmI64TruncF64U,
-      1);
+      2);
   defineInternMethod(
       B::HermesBuiltin_wasmI64TruncSatF64S,
       P::wasmI64TruncSatF64S,
       wasmI64TruncSatF64S,
-      1);
+      2);
   defineInternMethod(
       B::HermesBuiltin_wasmI64TruncSatF64U,
       P::wasmI64TruncSatF64U,
       wasmI64TruncSatF64U,
-      1);
+      2);
   // i64 conversion helpers (G.4c): i64→float and reinterpret.
   defineInternMethod(
       B::HermesBuiltin_wasmF64ConvertI64S,
@@ -2592,7 +2754,7 @@ void createHermesBuiltins(Runtime &runtime) {
       B::HermesBuiltin_wasmI64ReinterpretF64,
       P::wasmI64ReinterpretF64,
       wasmI64ReinterpretF64,
-      1);
+      2);
   defineInternMethod(
       B::HermesBuiltin_wasmF64ReinterpretI64,
       P::wasmF64ReinterpretI64,
@@ -2645,13 +2807,18 @@ void createHermesBuiltins(Runtime &runtime) {
       P::wasmDataDrop,
       wasmDataDrop,
       2);
+  defineInternMethod(
+      B::HermesBuiltin_wasmDataSegmentInit,
+      P::wasmDataSegmentInit,
+      wasmDataSegmentInit,
+      4);
 
   // BigInt ↔ i64 conversion helpers.
   defineInternMethod(
       B::HermesBuiltin_wasmBigIntToI64,
       P::wasmBigIntToI64,
       wasmBigIntToI64,
-      1);
+      2);
   defineInternMethod(
       B::HermesBuiltin_wasmI64ToBigInt,
       P::wasmI64ToBigInt,
@@ -2679,6 +2846,22 @@ void createHermesBuiltins(Runtime &runtime) {
       P::wasmElemDrop,
       wasmElemDrop,
       2);
+  defineInternMethod(
+      B::HermesBuiltin_wasmTableGrow,
+      P::wasmTableGrow,
+      wasmTableGrow,
+      5);
+  defineInternMethod(
+      B::HermesBuiltin_wasmLinkError,
+      P::wasmLinkError,
+      wasmLinkError,
+      1);
+
+  defineInternMethod(
+      B::HermesBuiltin_wasmInternType,
+      P::wasmInternType,
+      wasmInternType,
+      1);
 }
 
 } // namespace vm

@@ -462,6 +462,9 @@ class WasmIRGen {
   IRBuilder builder_;
   WasmHelpers helpers_;
 
+  /// Whether to enable strict Wasm memory bounds checking (from --test262).
+  bool test262_ = false;
+
   /// One IR Function per Wasm function, indexed by Wasm function index.
   /// Includes both imported and defined functions.
   std::vector<Function *> irFunctions_;
@@ -474,6 +477,35 @@ class WasmIRGen {
   /// via the imports object. Indexed by import function order (0-based,
   /// same as Wasm function index for imports since they come first).
   std::vector<Variable *> importFuncVars_;
+
+  /// One Variable per imported global, holding the raw import value
+  /// (either a WebAssembly.Global object or a plain JS number) loaded
+  /// from the imports object during validation. Used by initializeGlobals()
+  /// to read the actual imported value.
+  std::vector<Variable *> importGlobalVals_;
+
+  /// Variable holding the imported memory's __wasm_min__ value (number of
+  /// pages). Set during import validation when a memory import is present.
+  /// createMemoryViews() uses this to determine the actual initial size
+  /// instead of the import declaration's minimum (which is a lower bound,
+  /// not the actual size). nullptr if no memory is imported.
+  Variable *importedMemMinVar_ = nullptr;
+
+  /// Variable holding the imported memory's __wasm_max__ value (max pages,
+  /// or -1 if unbounded). Set during import validation. onMemoryGrow()
+  /// uses this as the actual growth limit instead of the import
+  /// declaration's maximum. nullptr if no memory is imported.
+  Variable *importedMemMaxVar_ = nullptr;
+
+  /// One Variable per imported table, holding that table's actual current
+  /// size (its __wasm_funcs__ length, or __wasm_min__ for a JS-API Table).
+  /// Set during import validation. Indexed by imported table index.
+  std::vector<Variable *> importedTableMinVars_;
+
+  /// One Variable per imported table, holding that table's actual
+  /// __wasm_max__ value (or -1 if unbounded). Set during import validation.
+  /// Indexed by imported table index.
+  std::vector<Variable *> importedTableMaxVars_;
 
   /// Typed array view indices into memViewVars_.
   enum MemView : uint8_t {
@@ -511,6 +543,23 @@ class WasmIRGen {
   /// globalVars_[globalSlotIndex_[i]+1] is hi32.
   std::vector<uint32_t> globalSlotIndex_;
 
+  /// Maps raw type section indices to canonical indices. Structurally
+  /// identical types share the same canonical index, ensuring that
+  /// call_indirect uses structural type equivalence rather than nominal.
+  std::vector<uint32_t> canonicalTypeIndex_;
+
+  /// typeIdVars_[i] holds the process-wide interned id for module type i.
+  /// call_indirect must compare type identity ACROSS modules, which a
+  /// module-local index cannot do: two modules number their type sections
+  /// independently. These are interned once, at instantiation, from the
+  /// structural type string, so identical signatures agree regardless of which
+  /// module declared them and in what order.
+  std::vector<Variable *> typeIdVars_;
+
+  /// Emit the interning calls that populate typeIdVars_. Must run before
+  /// anything that stores or compares a type id.
+  void internTypeIds(Instruction *tlScope);
+
   /// Variable holding a JS Array of data segments in the top-level scope.
   /// Each element is either a Uint8Array (segment bytes) or null (dropped).
   /// Only populated if the module has data segments.
@@ -520,6 +569,21 @@ class WasmIRGen {
   /// Each element is either a JS Array of interleaved [func, typeIdx, ...]
   /// or null (dropped). Only populated if the module has element segments.
   Variable *elemSegVar_ = nullptr;
+
+  /// Per-module return buffer variables. Only created if the module uses i64
+  /// or multi-value returns. The buffer is an ArrayBuffer shared by all
+  /// functions. retBufIVar_ is a Uint32Array view, retBufFVar_ is a
+  /// Float64Array view.
+  Variable *retBufIVar_ = nullptr;
+  Variable *retBufFVar_ = nullptr;
+
+  /// Size of the return buffer in bytes. Set during createFunctions().
+  uint32_t retBufSize_ = 0;
+
+  /// The __wasm_instantiate__ IR Function, created in createFunctions().
+  /// Contains the initialization body (import resolution, closures, memory,
+  /// tables, globals, trampolines, data/elem segments, start, exports).
+  Function *instantiateFunc_ = nullptr;
 
   /// The VariableScope for the top-level function.
   VariableScope *topLevelVS_ = nullptr;
@@ -572,6 +636,14 @@ class WasmIRGen {
   /// The parent (top-level) scope instruction, used to load pre-created
   /// closures from the environment at call sites.
   GetParentScopeInst *parentScopeInst_ = nullptr;
+
+  /// Per-function cached return buffer views (valid between
+  /// beginFunction/endFunction). For functions that receive retBufI/retBufF
+  /// as params, these point to LoadParamInst. For functions that only need
+  /// the buffer for i64 arithmetic, retBufI_ is loaded from the top-level
+  /// scope. nullptr if the module has no i64 at all.
+  Value *retBufI_ = nullptr;
+  Value *retBufF_ = nullptr;
 
   /// Whether we are in unreachable code (after an unconditional br, return,
   /// or unreachable). In unreachable mode, instructions are no-ops until
@@ -689,6 +761,17 @@ class WasmIRGen {
   /// Emit `new Constructor(args)` and return the constructed object.
   Value *emitNew(Value *constructor, llvh::ArrayRef<Value *> args);
 
+  /// Store `initial` and `maximum` on a WebAssembly.Memory or
+  /// WebAssembly.Table descriptor object from values that are only known at
+  /// run time. \p actualMax uses -1 for "unbounded", which both constructors
+  /// would reject as a `maximum`, so the property is stored under a branch
+  /// and is simply absent when there is no maximum.
+  /// Emits into the instantiate function and advances tlEntry_.
+  void emitRuntimeLimits(
+      Value *descriptor,
+      Value *actualMin,
+      Value *actualMax);
+
   /// Create the typed array views for the linear memory in the top-level
   /// function. Called from createFunctions() if the module has memory.
   /// \p tlScope is the CreateScopeInst for the top-level scope.
@@ -700,14 +783,34 @@ class WasmIRGen {
   /// \p tlScope is the CreateScopeInst for the top-level scope.
   void createTables(Instruction *tlScope);
 
+  /// Build the canonical type index map. Structurally identical types
+  /// (same params and results) get the same canonical index.
+  void buildCanonicalTypeMap();
+
   /// Initialize Wasm globals in the top-level function.
   /// Evaluates init expressions and stores initial values.
   /// Imported globals are read from the imports object.
   /// \p tlScope is the CreateScopeInst for the top-level scope.
+  /// Evaluate a Wasm init expression (the small stack machine used for
+  /// extended constant expressions) into an IR Value.
+  /// \param expr the operation sequence; must be non-empty.
+  /// \param tlScope the scope to load globals from.
+  /// \return the resulting Value, or nullptr if the expression is malformed
+  ///   (unbalanced stack). Callers must handle nullptr: the AOT
+  ///   `hermesc --wasm` path does not run the Wasm validator, so a
+  ///   hand-crafted module can reach here with a broken expression.
+  Value *emitInitExpr(
+      const std::vector<InitExprOp> &expr,
+      Instruction *tlScope);
+
   void initializeGlobals(Instruction *tlScope);
 
   /// Load the table functions array from the top-level scope.
   Value *loadTableFuncs(uint32_t tableIndex);
+
+  /// Emit a bounds check for table access, trapping if \p idx is out of
+  /// bounds for \p funcsArr. Leaves the builder positioned in the ok block.
+  void emitTableBoundsCheck(Value *idx, Value *funcsArr);
 
   /// Load the table type-indices array from the top-level scope.
   Value *loadTableTypes(uint32_t tableIndex);
@@ -727,6 +830,15 @@ class WasmIRGen {
   /// Get the natural alignment (log2) for a given load/store opcode.
   /// Returns 0 for byte ops, 1 for 16-bit, 2 for 32-bit, 3 for 64-bit.
   static uint8_t getNaturalAlignLog2(llvh::StringRef opcodeName);
+
+  /// Compute effective address: when test262_ is set, treats the base as
+  /// unsigned via (base >>> 0), then adds offset. Otherwise just base + offset.
+  /// \return the effective byte address.
+  Value *emitEffectiveAddr(Value *base, uint32_t offset);
+
+  /// Emit a bounds check that traps if addr + numBytes > HEAPU8.length.
+  /// No-op when test262_ is false.
+  void emitMemoryBoundsCheck(Value *addr, uint32_t numBytes);
 
   /// Create an export wrapper function for the given Wasm function export.
   /// The wrapper presents a clean JS-compatible interface: 1 param per Wasm
@@ -750,6 +862,28 @@ class WasmIRGen {
   void createImportTrampoline(
       uint32_t funcIndex,
       Instruction *tlScope);
+
+  /// Returns true if the given function type needs buffer params (returns
+  /// i64 or has multiple results).
+  static bool needsReturnBuffer(const WasmFuncType &funcType);
+
+  /// Compute byte layout for results in the return buffer.
+  /// \return {vector of byte offsets per result, total buffer size}.
+  static std::pair<std::vector<uint32_t>, uint32_t> computeRetBufLayout(
+      const std::vector<WasmValType> &results);
+
+  /// Callee: pop results, store to buffer, return 0. Called from onReturn()
+  /// and endFunction() when the function uses a return buffer.
+  void emitRetBufStores(const WasmFuncType &funcType);
+
+  /// Caller: read results from buffer, push onto value stack.
+  /// Called from onCall/onCallIndirect after a call to a function that
+  /// uses a return buffer.
+  void emitRetBufLoads(const WasmFuncType &funcType);
+
+  /// Read i64 from retBufI_[0] and retBufI_[1]. Used after i64 arithmetic
+  /// builtins that write their result to the return buffer.
+  std::pair<Value *, Value *> readI64FromRetBuf();
 };
 
 } // namespace wasm

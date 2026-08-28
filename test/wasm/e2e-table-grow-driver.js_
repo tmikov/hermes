@@ -1,0 +1,22 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-table-grow.wat.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var bytes = hermescli.loadFile(hbcPath);
+var mod = new WebAssembly.Module(bytes);
+var instance = new WebAssembly.Instance(mod);
+var exports = instance.exports;
+
+print("initial size:", exports.size());
+print("grow 3:", exports.grow(3));
+print("after grow:", exports.size());
+print("grow 5:", exports.grow(5));
+print("after grow2:", exports.size());
+print("grow 1 (over max):", exports.grow(1));
+print("still 10:", exports.size());

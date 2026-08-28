@@ -2263,6 +2263,10 @@ class Module : public Value {
   /// Extra data to be shared between optimization passes.
   OptimizationContext optContext_{};
 
+  /// Binary data storage blob (e.g. Wasm data segments).
+  /// Populated by frontends, transferred to BytecodeModule during codegen.
+  std::vector<uint8_t> binaryDataStorage_{};
+
  public:
   explicit Module(std::shared_ptr<Context> ctx)
       : Value(ValueKind::ModuleKind), Ctx(std::move(ctx)) {}
@@ -2362,6 +2366,17 @@ class Module : public Value {
   }
   const OptimizationContext &getOptimizationContext() const {
     return optContext_;
+  }
+
+  /// Append bytes to the binary data storage blob.
+  void appendBinaryData(llvh::ArrayRef<uint8_t> data) {
+    binaryDataStorage_.insert(
+        binaryDataStorage_.end(), data.begin(), data.end());
+  }
+
+  /// \return a reference to the binary data storage blob.
+  llvh::ArrayRef<uint8_t> getBinaryDataStorage() const {
+    return binaryDataStorage_;
   }
 
   /// Assign indices to Variables in newly-created VariableScopes.

@@ -1,0 +1,28 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-cross-module-type-identity.wat.
+
+var args = hermescli.getScriptArgs();
+var exporter = new WebAssembly.Instance(
+  new WebAssembly.Module(hermescli.loadFile(args[0])));
+var importer = new WebAssembly.Instance(
+  new WebAssembly.Module(hermescli.loadFile(args[1])),
+  {exporter: exporter.exports});
+
+function report(label, f) {
+  try {
+    print(label + ': ' + f());
+  } catch (e) {
+    print(label + ': trapped');
+  }
+}
+
+report('exporter call_at(0)', function () { return exporter.exports.call_at(0); });
+report('importer call_at(0)', function () { return importer.exports.call_at(0); });
+report('importer call_at(1)', function () { return importer.exports.call_at(1); });
+print('done');

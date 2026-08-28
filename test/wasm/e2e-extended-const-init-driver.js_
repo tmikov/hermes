@@ -1,0 +1,31 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-extended-const-init.wat.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var bytes = hermescli.loadFile(hbcPath);
+var mod = new WebAssembly.Module(bytes);
+var e = new WebAssembly.Instance(mod).exports;
+
+print('g_add = ' + e.g_add());
+print('g_sub = ' + e.g_sub());
+print('g_mul = ' + e.g_mul());
+print('g_nest = ' + e.g_nest());
+print('g_plain = ' + e.g_plain());
+
+// The element segment must be at the computed index.
+print('at(105) = ' + e.at(105));
+
+// ...and not at the last constant of the expression.
+try {
+  print('at(5) = ' + e.at(5));
+} catch (err) {
+  print('at(5) trapped');
+}
+
+print('done');

@@ -1,0 +1,24 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-i64-global.wat.
+
+var args = hermescli.getScriptArgs();
+var exporter = new WebAssembly.Instance(
+  new WebAssembly.Module(hermescli.loadFile(args[0])));
+var e = exporter.exports;
+
+for (var k of ['big', 'neg', 'small']) {
+  print(k + ': ' + e[k].value + ' ' + typeof e[k].value);
+}
+
+var importer = new WebAssembly.Instance(
+  new WebAssembly.Module(hermescli.loadFile(args[1])),
+  {exporter: e});
+print('imported lo: ' + importer.exports.lo());
+print('imported hi: ' + importer.exports.hi());
+print('done');

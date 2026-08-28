@@ -6,7 +6,7 @@
 ;; Test i64.div_s traps on division by zero.
 
 ;; REQUIRES: wasm
-;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && ! %hermes %t.hbc 2>&1 | %FileCheck --match-full-lines %s
+;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && ! %hermes -Xhermes-internal-test-methods %S/instantiate-hbc.js_ -- %t.hbc 2>&1 | %FileCheck --match-full-lines %s
 
 (module
   (func $start

@@ -2391,8 +2391,11 @@ CompileResult processWasmFile(std::unique_ptr<llvh::MemoryBuffer> fileBuf) {
   genOptions.verifyIR = cl::compilerRuntimeFlags.VerifyIR;
 
   if (cl::DumpTarget == Execute) {
-    return generateBytecodeForExecution(
-        hbc::BCProviderFromSrc::CompilationData{genOptions, M, nullptr});
+    llvh::errs()
+        << "Error: direct execution of Wasm modules is not supported. "
+           "Use hermesc --wasm -emit-binary to compile, then run via "
+           "WebAssembly.Module/Instance API.\n";
+    return InvalidFlags;
   }
 
   // Compute a source hash from the input buffer.

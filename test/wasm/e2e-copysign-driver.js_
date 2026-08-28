@@ -8,7 +8,10 @@
 // JS driver for e2e-copysign.wat.
 
 var hbcPath = hermescli.getScriptArgs()[0];
-var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+var bytes = hermescli.loadFile(hbcPath);
+var mod = new WebAssembly.Module(bytes);
+var instance = new WebAssembly.Instance(mod);
+var exports = instance.exports;
 
 print("f64.copysign(1, -1) =", exports.f64_copysign(1, -1));
 print("f64.copysign(-1, 1) =", exports.f64_copysign(-1, 1));

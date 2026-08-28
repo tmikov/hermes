@@ -169,13 +169,13 @@
 ;; CHECK-NEXT:               ReturnInst %[[PHI]]: any
 ;; CHECK-NEXT: function_end
 
-  ;; func 10: f32.nearest(a) — CallBuiltinInst [Math.round] + Math.fround
+  ;; func 10: f32.nearest(a) — CallBuiltinInst [HermesBuiltin.wasmNearest] + Math.fround
   (func $f32_nearest (param f32) (result f32)
     local.get 0
     f32.nearest)
 ;; CHECK-LABEL: function wasm_func_10(p0: any): any
 ;; CHECK:   %[[A:.*]] = LoadStackInst (:any)
-;; CHECK-NEXT: %[[ROUND:.*]] = CallBuiltinInst (:any) [Math.round]{{.*}}, %[[A]]: any
+;; CHECK-NEXT: %[[ROUND:.*]] = CallBuiltinInst (:any) [HermesBuiltin.wasmNearest]{{.*}}, %[[A]]: any
 ;; CHECK-NEXT: %[[FR:.*]] = CallBuiltinInst (:any) [Math.fround]{{.*}}, %[[ROUND]]: any
 ;; CHECK-NEXT:              BranchInst %BB1
 ;; CHECK: %BB1:

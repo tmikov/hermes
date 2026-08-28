@@ -1,0 +1,44 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-table-import.wat.
+// Instantiates the exporter module first, then passes its exported table
+// as an import to the importer module. Verifies that both modules share
+// the same table storage.
+
+var args = hermescli.getScriptArgs();
+var exporterHbcPath = args[0];
+var importerHbcPath = args[1];
+
+// Instantiate the exporter module.
+var exporterBytes = hermescli.loadFile(exporterHbcPath);
+var exporterMod = new WebAssembly.Module(exporterBytes);
+var exporter = new WebAssembly.Instance(exporterMod);
+
+// Verify exporter's table state.
+print("exporter size:", exporter.exports.size());
+
+// Instantiate the importer module, passing the exporter's table.
+var importerBytes = hermescli.loadFile(importerHbcPath);
+var importerMod = new WebAssembly.Module(importerBytes);
+var importer = new WebAssembly.Instance(importerMod, {
+  exporter: exporter.exports,
+});
+
+// Verify importer sees the same table size.
+print("importer size:", importer.exports.imported_size());
+
+// Verify importer can call functions placed in the table by the exporter.
+print("call_at(0):", importer.exports.call_at(0));
+print("call_at(1):", importer.exports.call_at(1));
+
+// Grow the table from the exporter side.
+print("exporter grow 1:", exporter.exports.grow(1));
+print("exporter size after grow:", exporter.exports.size());
+
+// Verify the importer sees the grown table.
+print("importer size after grow:", importer.exports.imported_size());

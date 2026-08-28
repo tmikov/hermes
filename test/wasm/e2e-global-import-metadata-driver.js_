@@ -1,0 +1,41 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-global-import-metadata.wat.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var mod = new WebAssembly.Module(hermescli.loadFile(hbcPath));
+
+function globalOf(g) {
+  return new WebAssembly.Instance(mod, {e: {g: g}}).exports.get();
+}
+
+// __wasm_type__ must be read exactly once.
+var typeReads = 0;
+var toctou = new Proxy({value: 42}, {
+  get: function (t, k) {
+    if (k === '__wasm_type__')
+      return typeReads++ === 0 ? 'global:i32:const' : undefined;
+    return t[k];
+  },
+});
+var v = globalOf(toctou);
+print(
+  'toctou global: reads = ' + typeReads +
+  ', typeof = ' + typeof v + ', value = ' + v);
+
+// The resolved value is coerced to the declared type.
+print('object value -> ' + globalOf({__wasm_type__: 'global:i32:const',
+                                     value: {}}));
+print('3.7 -> ' + globalOf(3.7));
+print('-1 -> ' + globalOf(-1));
+print('2^32+5 -> ' + globalOf(Math.pow(2, 32) + 5));
+
+print('WebAssembly.Global(77) -> ' +
+      globalOf(new WebAssembly.Global({value: 'i32'}, 77)));
+print('raw number 123 -> ' + globalOf(123));
+print('done');

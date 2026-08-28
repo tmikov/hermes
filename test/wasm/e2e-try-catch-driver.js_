@@ -10,7 +10,7 @@
 
 var hbcPath = hermescli.getScriptArgs()[0];
 
-globalThis.__wasm_imports__ = {
+var imports = {
   env: {
     print: function(x) {
       print(x);
@@ -18,6 +18,9 @@ globalThis.__wasm_imports__ = {
   },
 };
 
-var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+var bytes = hermescli.loadFile(hbcPath);
+var mod = new WebAssembly.Module(bytes);
+var instance = new WebAssembly.Instance(mod, imports);
+var exports = instance.exports;
 
 exports._main();

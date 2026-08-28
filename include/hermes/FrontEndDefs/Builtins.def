@@ -194,10 +194,9 @@ PRIVATE_BUILTIN(wasmI32ReinterpretF32)
 PRIVATE_BUILTIN(wasmF32ReinterpretI32)
 PRIVATE_BUILTIN(wasmF64Copysign)
 PRIVATE_BUILTIN(wasmF32Copysign)
-// i64 hi32 stash/retrieve helpers. Used for i64 function returns and i64
-// arithmetic helpers that return split lo/hi results.
-PRIVATE_BUILTIN(wasmI64HiStash)
-PRIVATE_BUILTIN(wasmI64HiResult)
+PRIVATE_BUILTIN(wasmNearest)
+// i64 binary arithmetic helpers. Take (retBufI, lo_a, hi_a, lo_b, hi_b),
+// write lo/hi result to retBufI[0]/[1], return 0.
 PRIVATE_BUILTIN(wasmI64Add)
 PRIVATE_BUILTIN(wasmI64Sub)
 PRIVATE_BUILTIN(wasmI64Mul)
@@ -226,8 +225,8 @@ PRIVATE_BUILTIN(wasmI64LtU)
 PRIVATE_BUILTIN(wasmI64GtU)
 PRIVATE_BUILTIN(wasmI64LeU)
 PRIVATE_BUILTIN(wasmI64GeU)
-// i64 conversion helpers (G.4b). Take a single f64 arg, return lo32; hi32
-// is stashed and retrieved via wasmI64HiResult.
+// i64 conversion helpers (G.4b). Take (retBufI, f64_arg), write lo/hi result
+// to retBufI[0]/[1], return 0.
 PRIVATE_BUILTIN(wasmI64TruncF64S)
 PRIVATE_BUILTIN(wasmI64TruncF64U)
 PRIVATE_BUILTIN(wasmI64TruncSatF64S)
@@ -269,8 +268,13 @@ PRIVATE_BUILTIN(wasmMemoryInit)
 // wasmDataDrop(dataSegs, segIdx): mark a data segment as dropped.
 PRIVATE_BUILTIN(wasmDataDrop)
 
+// wasmDataSegmentInit(heapu8, blobOffset, length, dest): bulk-copy from
+// binary data storage into linear memory.
+PRIVATE_BUILTIN(wasmDataSegmentInit)
+
 // BigInt ↔ i64 conversion helpers for export/import wrappers.
-// wasmBigIntToI64(bigint): extracts i64 from BigInt, returns lo32, stashes hi32.
+// wasmBigIntToI64(retBufI, bigint): extracts i64 from BigInt, writes lo/hi
+// to retBufI[0]/[1], returns 0.
 PRIVATE_BUILTIN(wasmBigIntToI64)
 // wasmI64ToBigInt(lo, hi): converts split lo/hi to BigInt.
 PRIVATE_BUILTIN(wasmI64ToBigInt)
@@ -286,6 +290,19 @@ PRIVATE_BUILTIN(wasmTableCopy)
 PRIVATE_BUILTIN(wasmTableInit)
 // wasmElemDrop(elemSegs, segIdx): mark an element segment as dropped.
 PRIVATE_BUILTIN(wasmElemDrop)
+// wasmTableGrow(funcsArr, typesArr, delta, fillVal, maxEntries):
+// grow table by delta entries, filling with fillVal. Returns old size on
+// success, -1 on failure.
+PRIVATE_BUILTIN(wasmTableGrow)
+
+// Import type validation (Category 4).
+// wasmLinkError(message): creates and throws a WebAssembly.LinkError with the
+// given message string. Used by Wasm-generated IR during instantiation.
+PRIVATE_BUILTIN(wasmLinkError)
+// wasmInternType(typeString): map a structural Wasm function-type string to a
+// process-wide stable integer id, so call_indirect can compare type identity
+// across modules with a plain integer compare.
+PRIVATE_BUILTIN(wasmInternType)
 
 JS_BUILTIN(spawnAsync)
 MARK_FIRST_JS_BUILTIN(spawnAsync)

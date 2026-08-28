@@ -258,6 +258,9 @@ class BytecodeModule {
   /// runtime.
   BytecodeOptions options_{};
 
+  /// Binary data storage blob (e.g. Wasm data segments).
+  std::vector<uint8_t> binaryDataStorage_{};
+
  public:
   /// Create a simple BytecodeModule with only functionCount set.
   explicit BytecodeModule(uint32_t functionCount) {
@@ -522,6 +525,17 @@ class BytecodeModule {
   }
   BytecodeOptions getBytecodeOptions() const {
     return options_;
+  }
+
+  /// Append bytes to the binary data storage blob.
+  void appendBinaryData(llvh::ArrayRef<uint8_t> data) {
+    binaryDataStorage_.insert(
+        binaryDataStorage_.end(), data.begin(), data.end());
+  }
+
+  /// \return a reference to the binary data storage blob.
+  llvh::ArrayRef<uint8_t> getBinaryDataStorage() const {
+    return binaryDataStorage_;
   }
 };
 

@@ -1,0 +1,31 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-nearest.wat.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var bytes = hermescli.loadFile(hbcPath);
+var mod = new WebAssembly.Module(bytes);
+var instance = new WebAssembly.Instance(mod);
+var exports = instance.exports;
+
+// Ties-to-even: 0.5 rounds to 0 (even), 1.5 rounds to 2 (even), etc.
+print("f64.nearest(0.5) =", exports.f64_nearest(0.5));
+print("f64.nearest(-0.5) =", exports.f64_nearest(-0.5));
+print("f64.nearest(1.5) =", exports.f64_nearest(1.5));
+print("f64.nearest(-1.5) =", exports.f64_nearest(-1.5));
+print("f64.nearest(2.5) =", exports.f64_nearest(2.5));
+// Non-tie cases.
+print("f64.nearest(1.4) =", exports.f64_nearest(1.4));
+print("f64.nearest(1.6) =", exports.f64_nearest(1.6));
+print("f64.nearest(-1.4) =", exports.f64_nearest(-1.4));
+print("f64.nearest(-1.6) =", exports.f64_nearest(-1.6));
+// f32 ties-to-even.
+print("f32.nearest(0.5) =", exports.f32_nearest(0.5));
+print("f32.nearest(-0.5) =", exports.f32_nearest(-0.5));
+print("f32.nearest(1.5) =", exports.f32_nearest(1.5));
+print("f32.nearest(2.5) =", exports.f32_nearest(2.5));

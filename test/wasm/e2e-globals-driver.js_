@@ -9,7 +9,10 @@
 // Loads the compiled Wasm module and exercises global get/set operations.
 
 var hbcPath = hermescli.getScriptArgs()[0];
-var exports = hermescli.loadHBC(hermescli.loadFile(hbcPath));
+var bytes = hermescli.loadFile(hbcPath);
+var mod = new WebAssembly.Module(bytes);
+var instance = new WebAssembly.Instance(mod);
+var exports = instance.exports;
 
 // Read initial values.
 print("get_imm:", exports.get_imm());

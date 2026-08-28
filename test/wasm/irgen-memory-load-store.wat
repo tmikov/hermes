@@ -37,11 +37,10 @@
   )
 )
 
-;; Check that the top-level function creates ArrayBuffer and typed array views.
+;; Check that the top-level function builds the module info object.
 ;; CHECK-LABEL: function global(): any
-;; CHECK: TryLoadGlobalPropertyInst {{.*}}"ArrayBuffer"
-;; CHECK: TryLoadGlobalPropertyInst {{.*}}"Int8Array"
-;; CHECK: TryLoadGlobalPropertyInst {{.*}}"Int32Array"
+;; CHECK:   CreateFunctionInst {{.*}}__wasm_instantiate__
+;; CHECK:   ReturnInst
 
 ;; Check the i32 store/load function (wasm_func_0).
 ;; CHECK-LABEL: function wasm_func_0(p0: any): any
@@ -65,3 +64,9 @@
 ;; CHECK: BinaryUnsignedRightShiftInst
 ;; CHECK: LoadFrameInst {{.*}}[%VS0.HEAP32]
 ;; CHECK: LoadPropertyInst
+
+;; Check that the instantiate function creates ArrayBuffer and typed array views.
+;; CHECK-LABEL: function __wasm_instantiate__(): any
+;; CHECK: TryLoadGlobalPropertyInst {{.*}}"ArrayBuffer"
+;; CHECK: TryLoadGlobalPropertyInst {{.*}}"Int8Array"
+;; CHECK: TryLoadGlobalPropertyInst {{.*}}"Int32Array"

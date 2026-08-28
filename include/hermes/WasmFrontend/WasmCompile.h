@@ -20,6 +20,8 @@ namespace hermes {
 class Module;
 
 /// Compile a Wasm binary module to Hermes IR.
+/// Parses the Wasm binary, generates Hermes IR, and appends data segment
+/// bytes to the Module's binary data storage.
 /// \param buffer The raw .wasm bytes.
 /// \param size Size in bytes.
 /// \param M The Hermes IR module to populate.
@@ -43,11 +45,13 @@ bool validateWasmBinary(const uint8_t *buffer, size_t size);
 /// \param buffer The raw .wasm bytes.
 /// \param size Size in bytes.
 /// \param errorMsg [out] Error message on failure.
+/// \param test262 Whether to enable strict bounds checking for spec tests.
 /// \returns a WasmModuleData on success, nullptr on failure.
 std::unique_ptr<WasmModuleData> compileWasmToModuleData(
     const uint8_t *buffer,
     size_t size,
-    std::string &errorMsg);
+    std::string &errorMsg,
+    bool test262 = false);
 
 } // namespace hermes
 

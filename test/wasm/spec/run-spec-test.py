@@ -120,52 +120,63 @@ def escape_js_string(s):
 
 
 def gen_expected_check(expected, result_var):
-    """Generate JS code to check an expected value against a result."""
+    """Generate JS code to check expected value(s) against a result.
+
+    For single-value returns, result_var is the value directly.
+    For multi-value returns (len(expected) > 1), result_var is an Array.
+    """
     if not expected:
         return f"true /* void */"
 
-    val = expected[0]
+    if len(expected) == 1:
+        return gen_single_expected_check(expected[0], result_var)
+
+    # Multi-value: result_var is an Array. Check each element.
+    checks = []
+    for i, val in enumerate(expected):
+        check = gen_single_expected_check(val, f"{result_var}[{i}]")
+        checks.append(check)
+    return " && ".join(checks)
+
+
+def gen_single_expected_check(val, result_expr):
+    """Generate JS code to check a single expected value."""
     typ = val['type']
     v = val.get('value', None)
 
     if v is None:
-        # No value specified (e.g., assert_trap expected type only)
         return "true"
 
     if v == "nan:canonical" or v == "nan:arithmetic":
-        return f"Number.isNaN({result_var})"
+        return f"Number.isNaN({result_expr})"
 
     if typ == 'i32':
-        # Use bitwise OR to normalize both to signed int32 for comparison.
-        # This handles the case where runtime returns unsigned (e.g., 2147483648)
-        # but spec expects the same bit pattern interpreted as signed (-2147483648).
         expected_js = i32_value_to_js(v)
-        return f"(({result_var} | 0) === ({expected_js} | 0))"
+        return f"(({result_expr} | 0) === ({expected_js} | 0))"
     elif typ == 'i64':
         expected_js = i64_value_to_bigint_literal(v)
-        return f"({result_var} === {expected_js})"
+        return f"({result_expr} === {expected_js})"
     elif typ == 'f32':
         bits = int(v) & 0xFFFFFFFF
-        # Check special float values
         if (bits & 0x7F800000) == 0x7F800000 and (bits & 0x007FFFFF) != 0:
-            return f"Number.isNaN({result_var})"
+            return f"Number.isNaN({result_expr})"
         js_val = f32_bits_to_js(v)
         if js_val == "-0.0":
-            return f"(Object.is({result_var}, -0))"
+            return f"(Object.is({result_expr}, -0))"
         if js_val == "0.0":
-            return f"({result_var} === 0 && !Object.is({result_var}, -0))"
-        return f"({result_var} === {js_val})"
+            return f"({result_expr} === 0 && !Object.is({result_expr}, -0))"
+        return f"({result_expr} === {js_val})"
     elif typ == 'f64':
         bits = int(v) & 0xFFFFFFFFFFFFFFFF
         if (bits & 0x7FF0000000000000) == 0x7FF0000000000000 and \
            (bits & 0x000FFFFFFFFFFFFF) != 0:
-            return f"Number.isNaN({result_var})"
+            return f"Number.isNaN({result_expr})"
         js_val = f64_bits_to_js(v)
         if js_val == "-0.0":
-            return f"(Object.is({result_var}, -0))"
+            return f"(Object.is({result_expr}, -0))"
         if js_val == "0.0":
-            return f"({result_var} === 0 && !Object.is({result_var}, -0))"
-        return f"({result_var} === {js_val})"
+            return f"({result_expr} === 0 && !Object.is({result_expr}, -0))"
+        return f"({result_expr} === {js_val})"
     else:
         return "true"
 
@@ -201,6 +212,26 @@ def generate_js_harness(spec, wasm_dir):
     lines.append("")
 
     # Helper to build import object from registry
+    lines.append("// Standard spectest module per the Wasm spec")
+    lines.append("var spectest = {")
+    lines.append("  print_i32: function() {},")
+    lines.append("  print_i64: function() {},")
+    lines.append("  print_f32: function() {},")
+    lines.append("  print_f64: function() {},")
+    lines.append("  print_i32_f32: function() {},")
+    lines.append("  print_f64_f64: function() {},")
+    lines.append("  print: function() {},")
+    lines.append("  global_i32: new WebAssembly.Global({value: 'i32', mutable: false}, 666),")
+    # An i64 global takes a BigInt: a Number cannot represent every i64
+    # exactly, and Global.prototype.value is a BigInt for i64 per spec.
+    lines.append("  global_i64: new WebAssembly.Global({value: 'i64', mutable: false}, 666n),")
+    lines.append("  global_f32: new WebAssembly.Global({value: 'f32', mutable: false}, 666.6),")
+    lines.append("  global_f64: new WebAssembly.Global({value: 'f64', mutable: false}, 666.6),")
+    lines.append("  table: new WebAssembly.Table({element: 'anyfunc', initial: 10, maximum: 20}),")
+    lines.append("  memory: new WebAssembly.Memory({initial: 1, maximum: 2}),")
+    lines.append("};")
+    lines.append("registry['spectest'] = spectest;")
+    lines.append("")
     lines.append("function buildImports(mod) {")
     lines.append("  var imports = WebAssembly.Module.imports(mod);")
     lines.append("  var importObj = {};")
@@ -210,17 +241,6 @@ def generate_js_harness(spec, wasm_dir):
     lines.append("    if (!importObj[modName]) importObj[modName] = {};")
     lines.append("    if (registry[modName] && registry[modName][imp.name] !== undefined) {")
     lines.append("      importObj[modName][imp.name] = registry[modName][imp.name];")
-    lines.append("    } else if (modName === 'spectest') {")
-    lines.append("      // Provide spectest module defaults")
-    lines.append("      if (imp.kind === 'function') {")
-    lines.append("        importObj[modName][imp.name] = function() {};")
-    lines.append("      } else if (imp.kind === 'memory') {")
-    lines.append("        importObj[modName][imp.name] = new WebAssembly.Memory({initial: 1, maximum: 2});")
-    lines.append("      } else if (imp.kind === 'table') {")
-    lines.append("        importObj[modName][imp.name] = new WebAssembly.Table({element: 'anyfunc', initial: 10, maximum: 20});")
-    lines.append("      } else if (imp.kind === 'global') {")
-    lines.append("        importObj[modName][imp.name] = new WebAssembly.Global({value: 'i32', mutable: false}, 0);")
-    lines.append("      }")
     lines.append("    }")
     lines.append("  }")
     lines.append("  return importObj;")
@@ -535,6 +555,7 @@ def main():
         hermes_cmd = [
             args.hermes,
             '-O0',
+            '--test262',
             '-Xhermes-internal-test-methods',
         ] + args.hermes_arg + [js_file]
         if args.verbose:

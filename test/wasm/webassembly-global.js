@@ -70,10 +70,32 @@ var gf32 = new WebAssembly.Global({value: "f32"}, 1.1);
 print(gf32.value);
 // CHECK-NEXT: 1.100000023841858
 
-// --- i64 global (stores as double, Phase 1 limitation) ---
-var gi64 = new WebAssembly.Global({value: "i64", mutable: true}, 99);
+// --- i64 global: a BigInt, stored exactly ---
+// A double cannot represent every i64, so an i64 global takes and returns a
+// BigInt, as the spec requires. Storing the low 32 bits as a Number silently
+// discarded the upper word.
+var gi64 = new WebAssembly.Global({value: "i64", mutable: true}, 99n);
+print(gi64.value + " " + typeof gi64.value);
+// CHECK-NEXT: 99 bigint
+
+// A value that does not fit in 32 bits must survive intact.
+gi64.value = 2n ** 40n;
 print(gi64.value);
-// CHECK-NEXT: 99
+// CHECK-NEXT: 1099511627776
+
+// Negative values round-trip too.
+gi64.value = -(2n ** 40n);
+print(gi64.value);
+// CHECK-NEXT: -1099511627776
+
+// A Number is not accepted for i64.
+try {
+  new WebAssembly.Global({value: "i64"}, 1);
+  print("no throw");
+} catch (e) {
+  print(e.name);
+}
+// CHECK-NEXT: TypeError
 
 // --- Default initial value is 0 ---
 var gDef = new WebAssembly.Global({value: "i32"});

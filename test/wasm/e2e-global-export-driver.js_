@@ -1,0 +1,29 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-global-export.wat.
+// Verifies that exported globals are WebAssembly.Global objects with
+// __wasm_type__ metadata, not raw numeric values.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var bytes = hermescli.loadFile(hbcPath);
+var mod = new WebAssembly.Module(bytes);
+var instance = new WebAssembly.Instance(mod);
+var exports = instance.exports;
+
+// Each exported global should be a WebAssembly.Global object, not a number.
+print("g_i32 type:", typeof exports.g_i32);
+print("g_i32 __wasm_type__:", exports.g_i32.__wasm_type__);
+print("g_i32 value:", exports.g_i32.value);
+
+print("g_f64 type:", typeof exports.g_f64);
+print("g_f64 __wasm_type__:", exports.g_f64.__wasm_type__);
+print("g_f64 value:", exports.g_f64.value);
+
+print("g_mut type:", typeof exports.g_mut);
+print("g_mut __wasm_type__:", exports.g_mut.__wasm_type__);
+print("g_mut value:", exports.g_mut.value);
