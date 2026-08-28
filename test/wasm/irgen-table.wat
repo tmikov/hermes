@@ -41,7 +41,12 @@
 ;; CHECK: LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_funcs]
 ;; CHECK: LoadPropertyInst (:any) %{{.*}}: any, "length": string
 
-;; table.get: loads the funcs array and reads at the given index
-;; CHECK-LABEL: function wasm_func_3(p0: number): object 
+;; table.get: bounds-checks against the funcs array, then reads the slot's
+;; Exported Function through the builtin. Not a LoadPropertyInst: the array can
+;; come from a table import, and an accessor at an index would run user JS
+;; inside a Wasm function body.
+;; CHECK-LABEL: function wasm_func_3(p0: number): object
 ;; CHECK: LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_funcs]
-;; CHECK: LoadPropertyInst (:any) %{{.*}}: any, %{{.*}}: number
+;; CHECK: LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_exported]
+;; CHECK: CallBuiltinInst (:any) [HermesBuiltin.wasmTableGetSlot]
+;; CHECK-NOT: LoadPropertyInst (:any) %{{.*}}: any, %{{.*}}: number

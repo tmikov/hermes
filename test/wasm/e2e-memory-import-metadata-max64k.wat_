@@ -1,0 +1,16 @@
+;; Copyright (c) Meta Platforms, Inc. and affiliates.
+;;
+;; This source code is licensed under the MIT license found in the
+;; LICENSE file in the root directory of this source tree.
+
+;; Companion module for e2e-memory-import-metadata.wat, declaring a maximum of
+;; 65536 -- the largest a Wasm memory can have. It exists to separate "declares
+;; no maximum" from "declares the largest possible maximum", which every other
+;; case in that file conflates: an unbounded memory fails a declaration with a
+;; maximum of 2 because 65536 > 2, so a build that reported unbounded AS 65536
+;; would still refuse it. Here it would not, and per the spec it must: limits
+;; match only if the supplied memory HAS a maximum.
+
+(module
+  (import "e" "m" (memory 1 65536))
+  (func (export "size") (result i32) memory.size))

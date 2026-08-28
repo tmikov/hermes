@@ -1,0 +1,12 @@
+;; Copyright (c) Meta Platforms, Inc. and affiliates.
+;;
+;; This source code is licensed under the MIT license found in the
+;; LICENSE file in the root directory of this source tree.
+
+;; Companion module for e2e-global-export.wat: imports an IMMUTABLE i32
+;; global, so it distinguishes both halves of wasmLinkGlobal's match -- a
+;; mutable global and an f64 global must each fail against it.
+
+(module
+  (import "e" "g" (global i32))
+  (func (export "get") (result i32) global.get 0))

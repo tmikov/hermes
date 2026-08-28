@@ -6,24 +6,61 @@
  */
 
 // JS driver for e2e-global-export.wat.
-// Verifies that exported globals are WebAssembly.Global objects with
-// __wasm_type__ metadata, not raw numeric values.
+// Each exported global is a WebAssembly.Global carrying no metadata: its type
+// and mutability live in internal fields, and are observable only through the
+// `.value` accessor and through what will link against it.
 
-var hbcPath = hermescli.getScriptArgs()[0];
-var bytes = hermescli.loadFile(hbcPath);
-var mod = WebAssembly.Module.fromHermesBytecode(bytes);
-var instance = new WebAssembly.Instance(mod);
+var args = hermescli.getScriptArgs();
+function load(i) {
+  return WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[i]));
+}
+var instance = new WebAssembly.Instance(load(0));
+var constMod = load(1);
+var mutMod = load(2);
 var exports = instance.exports;
 
-// Each exported global should be a WebAssembly.Global object, not a number.
-print("g_i32 type:", typeof exports.g_i32);
-print("g_i32 __wasm_type__:", exports.g_i32.__wasm_type__);
-print("g_i32 value:", exports.g_i32.value);
+function describe(name) {
+  var g = exports[name];
+  print(name + " type: " + typeof g);
+  print(name + " own props: [" + Object.getOwnPropertyNames(g).join(", ") +
+        "]");
+}
 
-print("g_f64 type:", typeof exports.g_f64);
-print("g_f64 __wasm_type__:", exports.g_f64.__wasm_type__);
-print("g_f64 value:", exports.g_f64.value);
+describe("g_i32");
+print("g_i32 JSON: " + JSON.stringify(exports.g_i32));
+print("g_i32 __wasm_type__: " + exports.g_i32.__wasm_type__);
+print("g_i32 value: " + exports.g_i32.value);
+describe("g_f64");
+print("g_f64 value: " + exports.g_f64.value);
+describe("g_mut");
+print("g_mut value: " + exports.g_mut.value);
 
-print("g_mut type:", typeof exports.g_mut);
-print("g_mut __wasm_type__:", exports.g_mut.__wasm_type__);
-print("g_mut value:", exports.g_mut.value);
+// Mutability is observable through the accessor.
+try {
+  exports.g_i32.value = 1;
+  print("g_i32.value = 1: " + exports.g_i32.value);
+} catch (e) {
+  print("g_i32.value = 1: " + e.name);
+}
+exports.g_mut.value = 1;
+print("g_mut.value = 1: " + exports.g_mut.value);
+
+// ...and through what links.
+function linkAs(mod, label, g) {
+  try {
+    print(label + ": " +
+          new WebAssembly.Instance(mod, {e: {g: g}}).exports.get());
+  } catch (e) {
+    print(label + ": " + e.name + ": " + e.message);
+  }
+}
+
+linkAs(constMod, "const import <- g_i32", exports.g_i32);
+linkAs(constMod, "const import <- g_f64", exports.g_f64);
+linkAs(constMod, "const import <- g_mut", exports.g_mut);
+
+linkAs(mutMod, "mut import <- g_mut", exports.g_mut);
+linkAs(mutMod, "mut import <- g_i32", exports.g_i32);
+linkAs(mutMod, "mut import <- 5", 5);
+
+print("done");

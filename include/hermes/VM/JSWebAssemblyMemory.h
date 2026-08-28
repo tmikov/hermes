@@ -48,7 +48,10 @@ class JSWebAssemblyMemory final : public JSObject {
     buffer_.set(runtime, buf, runtime.getHeap());
   }
 
-  /// Get the maximum number of pages (0 means no explicit maximum).
+  /// Get the maximum number of pages (UINT32_MAX means no explicit maximum).
+  /// The distinction matters at link time: a module declaring a maximum can
+  /// only import a memory that declares one too, so "no explicit maximum" and
+  /// "the largest maximum Wasm allows" must not spell the same thing.
   uint32_t getMaxPages() const {
     return maxPages_;
   }
@@ -76,8 +79,10 @@ class JSWebAssemblyMemory final : public JSObject {
   /// The underlying ArrayBuffer backing the linear memory.
   GCPointer<JSArrayBuffer> buffer_;
 
-  /// Maximum number of pages (0 = no explicit maximum, up to 65536).
-  uint32_t maxPages_{0};
+  /// Maximum number of pages (UINT32_MAX = no explicit maximum). Growth is
+  /// additionally capped at 65536 pages -- the Wasm maximum -- everywhere,
+  /// so the sentinel never lets a memory exceed that.
+  uint32_t maxPages_{UINT32_MAX};
 };
 
 } // namespace vm

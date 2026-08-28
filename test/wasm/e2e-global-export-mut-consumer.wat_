@@ -1,0 +1,12 @@
+;; Copyright (c) Meta Platforms, Inc. and affiliates.
+;;
+;; This source code is licensed under the MIT license found in the
+;; LICENSE file in the root directory of this source tree.
+
+;; Companion module for e2e-global-export.wat: imports a MUTABLE i32 global.
+;; A mutable import cannot be satisfied by a raw JS value at all, so this is
+;; also the module that shows the "must be a WebAssembly.Global" diagnostic.
+
+(module
+  (import "e" "g" (global (mut i32)))
+  (func (export "get") (result i32) global.get 0))

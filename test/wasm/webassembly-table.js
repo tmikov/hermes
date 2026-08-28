@@ -35,16 +35,33 @@ print(tbl.get(1));
 print(tbl.get(2));
 // CHECK-NEXT: null
 
-// --- set and get a function ---
+// --- set refuses a plain JS function ---
+// ToWebAssemblyValue for funcref admits null and an Exported Function only; a
+// plain function is a host reference, whose type does not match funcref. There
+// is no module here to produce an Exported Function, so the accepting side is
+// covered by test/wasm/e2e-table-js-methods.wat.
 function myFunc() { return 42; }
-tbl.set(1, myFunc);
-print(tbl.get(1) === myFunc);
-// CHECK-NEXT: true
+try {
+  tbl.set(1, myFunc);
+  print('accepted');
+} catch (e) {
+  print(e instanceof TypeError);
+  // CHECK-NEXT: true
+}
+print(tbl.get(1));
+// CHECK-NEXT: null
 print(tbl.get(0));
 // CHECK-NEXT: null
 
 // --- set to null clears the entry ---
 tbl.set(1, null);
+print(tbl.get(1));
+// CHECK-NEXT: null
+
+// --- an omitted value is the element type's default, i.e. null ---
+// This is not the same as passing `undefined`, which is refused below: WebIDL
+// declares the argument `optional any` with no default value.
+tbl.set(1);
 print(tbl.get(1));
 // CHECK-NEXT: null
 
@@ -69,13 +86,13 @@ print(tblGrow.get(2));
 print(tblGrow.get(3));
 // CHECK-NEXT: null
 
-// --- Old entries survive grow ---
-function fn1() {}
+// --- grow extends the table and leaves the old entries alone ---
+// The surviving-entry case needs a value that can actually be stored, so it
+// lives in e2e-table-js-methods.wat where a module supplies one.
 var tblSurvive = new WebAssembly.Table({element: "anyfunc", initial: 2, maximum: 4});
-tblSurvive.set(0, fn1);
 tblSurvive.grow(1);
-print(tblSurvive.get(0) === fn1);
-// CHECK-NEXT: true
+print(tblSurvive.length);
+// CHECK-NEXT: 3
 
 // --- grow by 0 is a no-op ---
 var sz = tblSurvive.grow(0);
@@ -164,6 +181,15 @@ try {
 // --- Error: set non-function value ---
 try {
   tbl.set(0, 42);
+} catch (e) {
+  print(e instanceof TypeError);
+  // CHECK-NEXT: true
+}
+
+// --- Error: set an explicit undefined ---
+// Distinct from omitting the argument, which clears the slot.
+try {
+  tbl.set(0, undefined);
 } catch (e) {
   print(e instanceof TypeError);
   // CHECK-NEXT: true

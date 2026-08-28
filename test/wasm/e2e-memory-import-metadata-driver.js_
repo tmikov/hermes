@@ -8,34 +8,26 @@
 // JS driver for e2e-memory-import-metadata.wat.
 //
 // The module operates on the imported Memory's own buffer, so these have to
-// be real WebAssembly.Memory objects. __wasm_max__ is an ordinary property
-// the constructor writes, so it can still be redefined to misbehave -- which
-// is the point of the first two cases.
+// be real WebAssembly.Memory objects -- nothing else links any more. What
+// varies between the cases is the memory's OWN maximum, which is the value
+// the engine reads.
 
 var args = hermescli.getScriptArgs();
 var mod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[0]));
 var modNoMax = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[1]));
+var modMax64k = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[2]));
 
-// __wasm_max__ must be read exactly once: pass validation with 2, then try to
-// raise the ceiling on a later read.
-var maxReads = 0;
-var risingMax = new WebAssembly.Memory({initial: 1, maximum: 2});
-Object.defineProperty(risingMax, '__wasm_max__', {
-  get: function () { return maxReads++ === 0 ? 2 : 65536; },
-  configurable: true,
-});
-var i1 = new WebAssembly.Instance(mod, {e: {m: risingMax}});
-print(
-  'grow past max = ' + i1.exports.grow() +
-  ', __wasm_max__ reads = ' + maxReads);
+// A Memory is an ordinary extensible object, so script can still write
+// __wasm_max__ onto it. It is simply never read.
+var forged = new WebAssembly.Memory({initial: 1, maximum: 2});
+Object.defineProperty(forged, '__wasm_max__', {value: 65536,
+                                               configurable: true});
+print('forged __wasm_max__ is an own property: ' +
+      (Object.getOwnPropertyNames(forged).indexOf('__wasm_max__') >= 0));
+var i1 = new WebAssembly.Instance(mod, {e: {m: forged}});
+print('grow past max = ' + i1.exports.grow());
 
-// A non-number __wasm_max__ must not reach getNumber().
-var badMax = new WebAssembly.Memory({initial: 1});
-Object.defineProperty(badMax, '__wasm_max__', {value: {}, configurable: true});
-var i2 = new WebAssembly.Instance(modNoMax, {e: {m: badMax}});
-print('non-number max: grow = ' + i2.exports.grow());
-
-// A grow within the declared maximum must still succeed.
+// A grow within the memory's own maximum must still succeed.
 var ok = new WebAssembly.Memory({initial: 1, maximum: 2});
 var i3 = new WebAssembly.Instance(mod, {e: {m: ok}});
 print('grow within max = ' + i3.exports.grow1());
@@ -43,5 +35,48 @@ print('grow within max = ' + i3.exports.grow1());
 // The grown memory is the embedder's: the imported object must see it.
 print('imported object followed grow: ' +
       (ok.buffer.byteLength === 2 * 65536));
+
+// With no declared maximum, the memory's own maximum is still the ceiling.
+var bounded = new WebAssembly.Memory({initial: 1, maximum: 1});
+print('undeclared max, memory max 1: grow = ' +
+      new WebAssembly.Instance(modNoMax, {e: {m: bounded}}).exports.grow());
+var unbounded = new WebAssembly.Memory({initial: 1});
+print('undeclared max, unbounded memory: grow = ' +
+      new WebAssembly.Instance(modNoMax, {e: {m: unbounded}}).exports.grow());
+
+// The declaration (memory 1 2) requires the supplied memory to declare a
+// maximum, and one no greater than 2.
+function linkTo12(label, m) {
+  try {
+    new WebAssembly.Instance(mod, {e: {m: m}});
+    print(label + ': linked');
+  } catch (e) {
+    print(label + ': ' + e.name + ': ' + e.message);
+  }
+}
+linkTo12('unbounded memory vs (memory 1 2)',
+         new WebAssembly.Memory({initial: 1}));
+linkTo12('max-3 memory vs (memory 1 2)',
+         new WebAssembly.Memory({initial: 1, maximum: 3}));
+linkTo12('max-2 memory vs (memory 1 2)',
+         new WebAssembly.Memory({initial: 1, maximum: 2}));
+
+// "no maximum" and "the largest maximum there is" are different things, and
+// every case above conflates them: an unbounded memory fails (memory 1 2)
+// because 65536 > 2 whichever way the sentinel is spelled. Against a declared
+// maximum of 65536 only the sentinel decides, and the spec is clear -- limits
+// match only if the supplied memory HAS a maximum.
+function linkTo64k(label, m) {
+  try {
+    print(label + ': linked, size = ' +
+          new WebAssembly.Instance(modMax64k, {e: {m: m}}).exports.size());
+  } catch (e) {
+    print(label + ': ' + e.name + ': ' + e.message);
+  }
+}
+linkTo64k('unbounded memory vs (memory 1 65536)',
+          new WebAssembly.Memory({initial: 1}));
+linkTo64k('max-65536 memory vs (memory 1 65536)',
+          new WebAssembly.Memory({initial: 1, maximum: 65536}));
 
 print('done');

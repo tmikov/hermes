@@ -509,6 +509,70 @@ CallResult<HermesValue> addEntriesFromIterable(
 /// WebAssembly.CompileError, WebAssembly.LinkError,
 /// WebAssembly.RuntimeError.
 void createWebAssemblyObject(Runtime &runtime, MutableHandle<JSObject> result);
+
+/// \return true if \p value is a WebAssembly Exported Function. The brand is
+/// an internal property that only the Wasm code generator's wrapper builder
+/// creates and that script can neither name nor write, so it cannot be forged
+/// by script. (wasmSetFuncInfo, which stamps it, is a PRIVATE_BUILTIN and so
+/// is reachable from any bytecode; it type-checks its arguments for that
+/// reason.)
+/// This is the predicate the JS API needs for ToWebAssemblyValue's funcref
+/// case, which admits null and an Exported Function and nothing else. Defined
+/// in HermesBuiltin.cpp next to the funnel that relies on the same brand.
+bool isWasmExportedFunction(Runtime &runtime, Handle<> value);
+
+/// Read the funcref in one Wasm table slot: the slot's Exported Function, or
+/// null. \p index must already be bounds-checked against the table's length.
+/// A slot that no writer has touched reads as empty in the backing array, and
+/// the funcref value for an uninitialized slot is null. Defined in
+/// HermesBuiltin.cpp and shared with the wasmTableGetSlot builtin, so that
+/// `table.get` and `WebAssembly.Table.prototype.get` cannot disagree about
+/// what an empty slot means. Reads the indexed storage directly, which cannot
+/// run an accessor.
+///
+/// The index is UNSIGNED. Callers holding a signed index must reject a
+/// negative one themselves rather than narrowing into this, which would turn
+/// an index at or above 2^31 into a negative one and silently change the
+/// answer.
+HermesValue
+readWasmTableSlot(Runtime &runtime, JSArray *exportedArr, uint32_t index);
+
+/// Write one slot of a Wasm table, the only way any of the three parallel
+/// arrays -- the internal closures, their interned type ids, and the Exported
+/// Functions -- is ever written. In a funcref table \p value is null or an
+/// Exported Function; anything else is a TypeError. Defined in
+/// HermesBuiltin.cpp, where generated Wasm code reaches it through the
+/// wasmTableSetSlot builtin; the JS-API Table methods call it directly,
+/// because they hold the table object rather than the three arrays.
+/// \param isFuncRef false for an externref table, whose values carry no
+///   wrapper and no type id and are stored as they stand.
+ExecutionStatus setWasmTableSlot(
+    Runtime &runtime,
+    Handle<JSArray> funcsArr,
+    Handle<JSArray> typesArr,
+    Handle<JSArray> exportedArr,
+    uint32_t index,
+    Handle<> value,
+    bool isFuncRef);
+
+/// Store \p val into \p glob's numeric value field, coerced to the canonical
+/// representation of the global's declared type per ToWebAssemblyValue: an i32
+/// global holds an int32-valued double, an f32 global a float-representable
+/// one, an f64 global the double as it stands.
+///
+/// EVERY writer of that field goes through here -- the Global constructor, the
+/// `value` setter, and the wasmGlobalSet builtin that generated Wasm code uses
+/// -- so "value_ is canonical for valType_" is a property of this one function
+/// rather than an assumption spread over three call sites. wasmGlobalGet and
+/// wasmLinkGlobal hand that field straight to generated code, which treats an
+/// i32 global's value as an int32 everywhere downstream.
+///
+/// Must not be called on an i64 global: its value lives in i64Value_, because
+/// a double cannot represent every i64 exactly. Defined in HermesBuiltin.cpp,
+/// which unlike WebAssembly.cpp is compiled whether or not HERMES_ENABLE_WASM
+/// is set -- the wasm* builtins that call it are.
+class JSWebAssemblyGlobal;
+void setWasmGlobalNumber(JSWebAssemblyGlobal *glob, double val);
 #endif
 
 } // namespace vm

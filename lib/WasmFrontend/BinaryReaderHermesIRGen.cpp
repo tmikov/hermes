@@ -729,9 +729,13 @@ wabt::Result BinaryReaderHermesIRGen::OnGlobalGetExpr(
 }
 
 wabt::Result BinaryReaderHermesIRGen::OnRefNullExpr(wabt::Type type) {
-  // In a function body, ref.null is handled by a later step.
+  // A null reference is JS null, for funcref and externref alike -- the same
+  // value a global initialized with ref.null already gets. It is supported,
+  // not merely tolerated: pushing `undefined` instead (as the unsupported-
+  // opcode path does) makes a null funcref indistinguishable from a JS caller
+  // who simply omitted an argument.
   if (inFunctionBody_ && irgen_) {
-    irgen_->warnUnsupported("ref.null", 0, 1);
+    irgen_->onRefNull();
     return wabt::Result::Ok;
   }
   if (inFunctionBody_)
@@ -1730,8 +1734,13 @@ wabt::Result BinaryReaderHermesIRGen::EndModule() {
   // Finalize the module: apply data segments, call start function, build
   // exports object, and emit the return instruction. This must happen after
   // all sections (including the data section) have been parsed.
+  // finalizeModule() refuses a module whose exports name indices that do not
+  // exist. Propagating that as a read failure is what turns it into a
+  // diagnostic from the compiler driver rather than an out-of-bounds read;
+  // WasmCompile.cpp reports irgen's message in place of the generic one.
   if (irgen_) {
-    irgen_->finalizeModule();
+    if (!irgen_->finalizeModule())
+      return wabt::Result::Error;
   }
   return wabt::Result::Ok;
 }

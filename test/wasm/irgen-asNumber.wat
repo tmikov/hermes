@@ -31,7 +31,7 @@
     f64.add)
 )
 
-;; CHECK: scope %VS0 [wasm_type_id_0: any, global_0: any, retBufI: any, retBufF: any, closure_0: any]
+;; CHECK: scope %VS0 [wasm_type_id_0: any, global_0: any, retBufI: any, retBufF: any, closure_0: any, exported_func_0: any]
 ;; CHECK-EMPTY:
 ;; CHECK-NEXT: function global(): object
 ;; CHECK-NEXT: %BB0:
@@ -92,12 +92,19 @@
 ;; CHECK-NEXT:   %14 = GetConstructedObjectInst (:object) %12: any, %13: any
 ;; CHECK-NEXT:         StoreFrameInst %0: environment, %11: object, [%VS0.retBufI]: any
 ;; CHECK-NEXT:         StoreFrameInst %0: environment, %14: object, [%VS0.retBufF]: any
-;; CHECK-NEXT:         StoreFrameInst %0: environment, 1: number, [%VS0.global_0]: any
-;; CHECK-NEXT:   %18 = AllocObjectLiteralInst (:object) empty: any
+;; CHECK-NEXT:   %17 = CallBuiltinInst (:any) [HermesBuiltin.wasmInternType]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "func:d:d": string
+;; CHECK-NEXT:         StoreFrameInst %0: environment, %17: any, [%VS0.wasm_type_id_0]: any
 ;; CHECK-NEXT:   %19 = CreateFunctionInst (:object) %0: environment, %VS0: any, %wasm_export_add_global(): functionCode
 ;; CHECK-NEXT:         StorePropertyStrictInst "func:d:d": string, %19: object, "__wasm_type__": string
-;; CHECK-NEXT:         StorePropertyStrictInst %19: object, %18: object, "add_global": string
-;; CHECK-NEXT:         ReturnInst %18: object
+;; CHECK-NEXT:   %21 = LoadFrameInst (:any) %0: environment, [%VS0.closure_0]: any
+;; CHECK-NEXT:   %22 = LoadFrameInst (:any) %0: environment, [%VS0.wasm_type_id_0]: any
+;; CHECK-NEXT:   %23 = CallBuiltinInst (:any) [HermesBuiltin.wasmSetFuncInfo]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %19: object, %21: any, %22: any
+;; CHECK-NEXT:         StoreFrameInst %0: environment, %19: object, [%VS0.exported_func_0]: any
+;; CHECK-NEXT:         StoreFrameInst %0: environment, 1: number, [%VS0.global_0]: any
+;; CHECK-NEXT:   %26 = AllocObjectLiteralInst (:object) empty: any
+;; CHECK-NEXT:   %27 = LoadFrameInst (:any) %0: environment, [%VS0.exported_func_0]: any
+;; CHECK-NEXT:         StorePropertyStrictInst %27: any, %26: object, "add_global": string
+;; CHECK-NEXT:         ReturnInst %26: object
 ;; CHECK-NEXT: function_end
 ;; CHECK-EMPTY:
 ;; CHECK-NEXT: function wasm_export_add_global(p0: any): any

@@ -267,20 +267,42 @@ PRIVATE_BUILTIN(wasmBigIntToI64)
 // wasmI64ToBigInt(lo, hi): converts split lo/hi to BigInt.
 PRIVATE_BUILTIN(wasmI64ToBigInt)
 
-// Bulk table operations (N.2).
-// wasmTableFill(funcsArr, idx, val, count): fill table entries with val.
+// A table slot is a triple -- the internal closure, its interned type id and
+// the Exported Function wrapping both -- spread over three parallel arrays.
+// Every write from generated Wasm code goes through one of the two helpers
+// below, which is what keeps the three in step. (The JS-API
+// WebAssembly.Table.prototype methods still write their arrays directly; they
+// are converted in a later change.)
+// wasmTableGetSlot(exportedArr, idx): read one slot's Exported Function, or
+// null. Not a plain property read: the array comes from a table import, so
+// script chooses it, and an accessor at an index would otherwise run user JS
+// inside a Wasm function body.
+PRIVATE_BUILTIN(wasmTableGetSlot)
+// wasmTableSetSlot(funcsArr, typesArr, exportedArr, idx, exportedFnOrNull):
+// write one slot. The closure and type id are derived from the Exported
+// Function's internal properties, so they cannot disagree with it; a value
+// that is neither null nor an Exported Function is a TypeError. A refused
+// write (a frozen array) is an error, not a silent no-op, and the type id is
+// cleared first so a failure part-way leaves the slot uncallable.
+PRIVATE_BUILTIN(wasmTableSetSlot)
+// wasmTableCopySlots(dstFuncs, dstTypes, dstExported, srcFuncs, srcTypes,
+// srcExported, dst, src, count): copy a range of slots across all three
+// arrays, handling overlap.
+PRIVATE_BUILTIN(wasmTableCopySlots)
+
+// Bulk table operations (N.2). All of these write slots through
+// wasmTableSetSlot's implementation.
+// wasmTableFill(funcsArr, typesArr, exportedArr, idx, val, count): fill table
+// entries with val.
 PRIVATE_BUILTIN(wasmTableFill)
-// wasmTableCopy(dstFuncs, srcFuncs, dstTypes, srcTypes, dst, src, count):
-// copy entries between tables (both funcs and type-index arrays).
-PRIVATE_BUILTIN(wasmTableCopy)
-// wasmTableInit(funcsArr, typesArr, elemSegs, segIdx, dst, src, count):
-// copy from element segment into a table.
+// wasmTableInit(funcsArr, typesArr, exportedArr, elemSegs, segIdx, dst, src,
+// count): copy from element segment into a table.
 PRIVATE_BUILTIN(wasmTableInit)
 // wasmElemDrop(elemSegs, segIdx): mark an element segment as dropped.
 PRIVATE_BUILTIN(wasmElemDrop)
-// wasmTableGrow(funcsArr, typesArr, delta, fillVal, maxEntries):
-// grow table by delta entries, filling with fillVal. Returns old size on
-// success, -1 on failure.
+// wasmTableGrow(funcsArr, typesArr, exportedArr, delta, fillVal, maxEntries,
+// actualMax): grow table by delta entries, filling with fillVal. Returns old
+// size on success, -1 on failure.
 PRIVATE_BUILTIN(wasmTableGrow)
 
 // Import type validation (Category 4).
@@ -291,10 +313,59 @@ PRIVATE_BUILTIN(wasmLinkError)
 // process-wide stable integer id, so call_indirect can compare type identity
 // across modules with a plain integer compare.
 PRIVATE_BUILTIN(wasmInternType)
-// wasmCheckTableArrays(funcsArr, typesArr): raise a LinkError unless both are
-// genuine JSArrays. Called once per table at instantiation so that the hot
-// call_indirect path can cast them without re-checking.
+// wasmCheckTableArrays(funcsArr, typesArr, exportedArr): raise a LinkError
+// unless all three are genuine JSArrays. Called once per table at
+// instantiation so that the hot call_indirect path can cast them without
+// re-checking. Only externref tables still need it: their backing arrays come
+// from globalThis.Array, which script can replace. A funcref table's arrays
+// are the internal fields of a genuine WebAssembly.Table, which wasmLinkTable
+// establishes.
 PRIVATE_BUILTIN(wasmCheckTableArrays)
+// wasmLinkTable(importVal, declaredIsFuncRef): the brand check that replaced
+// the __wasm_funcs__/__wasm_types__/__wasm_exported__ publications. Returns
+// the table's three backing arrays and its own maximum as
+// [funcs, types, exported, max], or null if `importVal` is not a genuine
+// WebAssembly.Table (a dyn_vmcast, which no object literal and no forged
+// prototype can satisfy) or if the importing module declared a non-funcref
+// element type, which no constructible table can satisfy.
+// The arrays are the table's internal fields themselves, NOT copies: two
+// modules importing one table must write the same slots.
+PRIVATE_BUILTIN(wasmLinkTable)
+// wasmLinkMemory(importVal): the brand check that replaced the
+// __wasm_type__/__wasm_min__/__wasm_max__ publication on a memory. Returns
+// [currentPages, max, buffer], or null if `importVal` is not a genuine
+// WebAssembly.Memory (a dyn_vmcast, which no object literal and no forged
+// prototype can satisfy). currentPages is the buffer's size, so it follows
+// every grow; max is -1 when the memory declared none; the buffer is returned
+// so that the views the module builds are over the very buffer whose size was
+// validated.
+PRIVATE_BUILTIN(wasmLinkMemory)
+// wasmLinkGlobal(importVal, expectedValType, expectedMutable): the brand
+// check that replaced the __wasm_type__ publication on a global. Returns the
+// global's value (a Number, or a BigInt for i64), or undefined if it is a
+// Global whose type or mutability does not match, or null if it is not a
+// WebAssembly.Global at all -- three outcomes because they need three
+// different diagnostics. expectedValType is a JSWebAssemblyGlobal::ValType,
+// or 0xFF for a Wasm type no Global can have.
+PRIVATE_BUILTIN(wasmLinkGlobal)
+// wasmGlobalGet(globalObj) / wasmGlobalSet(globalObj, value): the shared
+// state of an imported MUTABLE global, read and written where `.value` used
+// to be. A mutable import is not snapshotted -- the module and the host must
+// see each other's writes -- so the object is kept and consulted at every
+// global.get and global.set. `value` is a CONFIGURABLE accessor on
+// WebAssembly.Global.prototype, so doing that through the property let script
+// feed the module any value it liked and swallow every write the module made.
+// These reach the same internal field the accessor does, past a dyn_vmcast,
+// so the sharing survives and the interposition does not.
+PRIVATE_BUILTIN(wasmGlobalGet)
+PRIVATE_BUILTIN(wasmGlobalSet)
+// wasmSetFuncInfo(exportedFn, closure, typeId): stamp the two internal
+// properties that make `exportedFn` a WebAssembly Exported Function -- the
+// internal closure it wraps and the interned id of its signature. Script
+// cannot name either property, so the pair is unforgeable BY SCRIPT. (A
+// PRIVATE_BUILTIN is reachable from any bytecode emitting a CallBuiltin with
+// its index, so wasmSetFuncInfo type-checks its arguments.)
+PRIVATE_BUILTIN(wasmSetFuncInfo)
 
 JS_BUILTIN(spawnAsync)
 MARK_FIRST_JS_BUILTIN(spawnAsync)

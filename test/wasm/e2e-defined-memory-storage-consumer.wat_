@@ -1,0 +1,15 @@
+;; Copyright (c) Meta Platforms, Inc. and affiliates.
+;;
+;; This source code is licensed under the MIT license found in the
+;; LICENSE file in the root directory of this source tree.
+
+;; Consumer for e2e-defined-memory-storage.wat: imports the exporter's
+;; memory and reads from it. Its own link path already brand-checks the
+;; supplied object and takes the buffer out of the internal field, so if it
+;; reads zeros the fault is on the exporting side.
+
+(module
+  (import "a" "mem" (memory 1 4))
+  (func (export "peek") (param i32) (result i32)
+    local.get 0
+    i32.load))

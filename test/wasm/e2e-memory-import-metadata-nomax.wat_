@@ -4,8 +4,11 @@
 ;; LICENSE file in the root directory of this source tree.
 
 ;; Companion module for e2e-memory-import-metadata.wat: a memory import with
-;; NO declared maximum, so nothing validates __wasm_max__ and whatever script
-;; supplies is stored and later handed to a native builtin.
+;; NO declared maximum. Nothing in the declaration bounds growth, so the
+;; ceiling memory.grow enforces can only come from the supplied memory itself
+;; -- which is what this module is here to show. (It used to come from a
+;; __wasm_max__ property nothing validated, which then reached a native
+;; builtin that calls getNumber() on it.)
 
 (module
   (import "e" "m" (memory 1))

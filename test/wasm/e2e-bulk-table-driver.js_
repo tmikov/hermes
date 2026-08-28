@@ -22,6 +22,17 @@ function tryCall(idx) {
   }
 }
 
+// The funcref itself, not the result of an indirect call: call_indirect reads
+// the closure and the type id, so it stays happy even if the slot's Exported
+// Function was not maintained. Calling the funcref is what checks that.
+function refAt(idx) {
+  var f = exports.get_at(idx);
+  if (typeof f !== "function") {
+    return "not a function (" + f + ")";
+  }
+  return f();
+}
+
 // --- table.copy ---
 // Test first since it preserves type info from active segment.
 print("=== table.copy ===");
@@ -31,6 +42,19 @@ exports.copy(4, 0, 2);
 print("copy 4,0,2: ok");
 print("call_at 4:", tryCall(4));  // 10
 print("call_at 5:", tryCall(5));  // 20
+print("get_at 4:", refAt(4));  // 10
+print("get_at 5:", refAt(5));  // 20
+
+// A copy onto itself is a no-op per spec. It is also the aliasing case the
+// slot-write ordering has to account for: the destination slot IS the source
+// slot, so clearing the destination type id before reading the source one
+// would erase the type ids of the whole range and leave every entry
+// uncallable while still looking right to table.get.
+exports.copy(0, 0, 2);
+print("copy 0,0,2 (self): ok");
+print("call_at 0:", tryCall(0));  // 10
+print("call_at 1:", tryCall(1));  // 20
+print("get_at 0:", refAt(0));  // 10
 
 // --- table.init from passive segment 1 ---
 print("=== table.init ===");
@@ -41,13 +65,18 @@ print("init_seg1 7,0,3: ok");
 print("call_at 7:", tryCall(7));  // 30
 print("call_at 8:", tryCall(8));  // 40
 print("call_at 9:", tryCall(9));  // 50
+print("get_at 7:", refAt(7));  // 30
 
 // --- table.fill ---
-// table.fill doesn't preserve type info, so we can't use call_indirect
-// to verify filled entries. Just verify it doesn't crash and respects bounds.
-print("=== table.fill (no call_indirect) ===");
+// table.fill carries the type id along with the closure now, so a filled
+// entry is callable through call_indirect. It used to write the closure
+// array only, leaving whatever type id the slot had before -- which refused
+// the call here, and accepted it for a function of the wrong signature.
+print("=== table.fill ===");
 exports.fill_from(2, 0, 3);  // fill 3 entries at idx 2 with table[0]'s ref
 print("fill_from 2,0,3: ok");
+print("call_at 2:", tryCall(2));  // 10
+print("get_at 2:", refAt(2));  // 10
 print("size:", exports.get_size());  // 10 (unchanged)
 
 // --- elem.drop + table.init after drop ---

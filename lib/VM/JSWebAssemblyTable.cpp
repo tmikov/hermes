@@ -39,6 +39,7 @@ void JSWebAssemblyTableBuildMeta(
   mb.setVTable(&JSWebAssemblyTable::vt);
   mb.addField("elements", &self->elements_);
   mb.addField("types", &self->types_);
+  mb.addField("exported", &self->exported_);
 }
 
 PseudoHandle<JSWebAssemblyTable> JSWebAssemblyTable::create(

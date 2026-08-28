@@ -6,20 +6,23 @@
  */
 
 // JS driver for e2e-table-import-hostile.wat.
-// Supplies table imports whose __wasm_funcs__/__wasm_types__ are not arrays
-// and checks that calling through them raises a catchable error rather than
-// asserting (Debug) or segfaulting (Release).
+// Every forged table shape must end in a catchable LinkError rather than an
+// assert (Debug) or a segfault (Release). They now all fail for one reason --
+// the object is not a WebAssembly.Table -- but the shapes are kept, because
+// each of them once reached an unchecked cast or an unchecked getNumber().
 
 var args = hermescli.getScriptArgs();
 var mod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[0]));
+var donorMod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[1]));
 
-function makeTable(funcs, types) {
+function makeTable(funcs, types, exported) {
   return {
     __wasm_type__: 'table:funcref',
     __wasm_min__: 2,
     __wasm_max__: 10,
     __wasm_funcs__: funcs,
     __wasm_types__: types,
+    __wasm_exported__: exported,
   };
 }
 
@@ -36,45 +39,79 @@ function realFuncs() {
   ];
 }
 
-// The invariant under test is that every hostile shape ends in a catchable
-// error rather than an assert or a segfault. Rejection may happen at either of
-// two points, so report which: at instantiation, when the value has no usable
-// .length, or inside the builtin, when it does.
-function check(label, funcs, types) {
+function check2(label, table) {
   var inst;
   try {
-    inst = new WebAssembly.Instance(mod, {e: {t: makeTable(funcs, types)}});
+    inst = new WebAssembly.Instance(mod, {e: {t: table}});
   } catch (e) {
-    print(label + ': instantiation ' + e.name);
-    return;
+    // The MESSAGE, not just e.name. With the name alone all ten shapes below
+    // print the identical line, so any replacement check that happened to
+    // refuse these literals for an unrelated reason would keep every row
+    // green. The message is what says WHICH refusal ran.
+    print(label + ': instantiation ' + e.name + ': ' + e.message);
+    return null;
   }
-  try {
-    var r = inst.exports.ci(0);
-    print(label + ': no throw, returned ' + r);
-  } catch (e) {
-    print(label + ': ' + e.name);
-  }
+  print(label + ': instantiated (should not happen)');
+  return inst;
+}
+
+function check(label, funcs, types, exported) {
+  check2(label, makeTable(funcs, types, exported));
 }
 
 // __wasm_funcs__ is not an array. "AA" is the nastiest case: it is a real
-// GCCell whose .length is 2, so it satisfies the declared minimum.
+// GCCell whose .length is 2, so it satisfied the declared minimum.
 check('funcs=string', 'AA', [0, 0]);
 check('funcs=number', 1.5, [0, 0]);
 check('funcs=object', {length: 2}, [0, 0]);
 
-// __wasm_funcs__ is genuine, so execution reaches __wasm_types__. A
-// non-pointer here previously dereferenced a bogus pointer.
+// __wasm_types__ had no length-based check at all, so a genuine funcs array
+// let execution reach it and dereference a bogus pointer.
 check('types=number', realFuncs(), 1.5);
 check('types=string', realFuncs(), 'AA');
 
-// Both arrays well-formed but the recorded type index does not match the
-// call site: a normal Wasm trap, not a safety problem.
-check('well-formed', realFuncs(), [999, 999]);
+// A genuine array of NON-NUMBERS. call_indirect read a slot's type id with
+// getNumber(), which asserts on an object in a Debug build and reinterprets
+// object bits as a double in a Release one. No check ever covered this shape;
+// the brand removes the possibility of reaching it.
+check('types=objects', realFuncs(), [{}, {}]);
 
-// A well-formed table still instantiates and works, so the validation is not
-// simply rejecting everything.
-var live = new WebAssembly.Instance(
-  mod, {e: {t: makeTable(realFuncs(), [0, 0])}});
-print('instantiation: ' + (live.exports.sz() === 2 ? 'ok' : 'wrong size'));
+// Every array well-formed: this used to instantiate, and only the call was
+// refused. It is now refused at the boundary.
+check('well-formed', realFuncs(), [999, 999], [null, null]);
+
+// The Exported Function array is read by table.get.
+check('exported=object', realFuncs(), [0, 0], {length: 2});
+
+// A GENUINE array carrying an accessor at an index: an ordinary property read
+// would run user JS in the middle of a Wasm function body. The flag is read
+// AFTER the attempt and asserted, not merely set -- it says the import was
+// refused before anything read the array, which is a real ordering claim that
+// a future check placed after a storage read would break. (Where the accessor
+// is actually made to run against live storage is
+// e2e-table-slot-invariant.wat, on an externref table.)
+var trap = [null, null];
+var getterRan = false;
+Object.defineProperty(trap, 0, {
+  get: function () { getterRan = true; return 'PWNED'; },
+  configurable: true,
+});
+check('exported=accessor array', realFuncs(), [0, 0], trap);
+print('accessor never ran: ' + !getterRan);
+
+// The metadata on its own, which is all the old validation ever looked at.
+check2('metadata only', {
+  __wasm_type__: 'table:funcref',
+  __wasm_min__: 2,
+  __wasm_max__: 10,
+});
+
+// A genuine table links and works.
+var donor = new WebAssembly.Instance(donorMod).exports.tbl;
+var live = new WebAssembly.Instance(mod, {e: {t: donor}});
+print('genuine table: instantiated, size ' + live.exports.sz());
+print('genuine table: ci(0) = ' + live.exports.ci(0));
+print('genuine table: g(1) is a function: ' +
+      (typeof live.exports.g(1) === 'function'));
 
 print('done');

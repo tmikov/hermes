@@ -1,0 +1,15 @@
+;; Copyright (c) Meta Platforms, Inc. and affiliates.
+;;
+;; This source code is licensed under the MIT license found in the
+;; LICENSE file in the root directory of this source tree.
+
+;; Donor module for e2e-table-import-hostile.wat: the one genuine table in
+;; that test, so that "everything is refused" can be shown not to be the
+;; reason every row says LinkError. Its limits (2, 10) match the importer's
+;; declaration exactly.
+
+(module
+  (table (export "tbl") 2 10 funcref)
+  (elem (i32.const 0) $seven $eight)
+  (func $seven (result i32) (i32.const 7))
+  (func $eight (result i32) (i32.const 8)))

@@ -63,6 +63,7 @@
 ;; CHECK-NEXT: exporter call_at(1): 200
 ;; CHECK-NEXT: exporter call_at(2): 300
 ;; CHECK-NEXT: imported_call_at(2): 300
+;; CHECK-NEXT: exporter tbl.get(2): 300
 ;;
 ;; -- Test 2: local table is independent --
 ;; CHECK-NEXT: local_size: 2

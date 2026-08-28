@@ -1,0 +1,205 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-table-slot-invariant.wat.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var bytes = hermescli.loadFile(hbcPath);
+var mod = WebAssembly.Module.fromHermesBytecode(bytes);
+
+function fresh() {
+  return new WebAssembly.Instance(mod);
+}
+
+// Report the trap MESSAGE, not just the fact of a trap, so that "returned
+// undefined instead of trapping" cannot be mistaken for a trap and a correct
+// type-mismatch trap cannot be mistaken for an "uninitialized element" trap
+// caused by the slot having been cleared instead of written.
+function callAsT0(inst, i) {
+  try {
+    return String(inst.exports.callAsT0(i));
+  } catch (e) {
+    return 'trap: ' + e.message;
+  }
+}
+
+var inst = fresh();
+
+// The element segment put $a (result i32) at [0] and $b (param i32 i32 i32)
+// at [1]. Only [0] matches $t0.
+print('callAsT0(0): ' + callAsT0(inst, 0));
+print('callAsT0(1): ' + callAsT0(inst, 1));
+
+// table.set must carry the type id along with the closure.
+inst.exports.copySlot(0, 1);
+print('copySlot(0, 1); callAsT0(1): ' + callAsT0(inst, 1));
+
+// So must table.fill.
+inst.exports.fillSlot(1, 0);
+print('fillSlot(1, 0); callAsT0(1): ' + callAsT0(inst, 1));
+
+// The security case, on a FRESH instance: the two mutations above have already
+// overwritten slot 1 with $a, and nothing can put $b back -- copySlot and
+// fillSlot only move what the table already holds. A new instance re-runs the
+// element segment, so slot 1 is $b again.
+var inst2 = fresh();
+inst2.exports.copySlot(1, 0);
+print('copySlot(1, 0); callAsT0(0): ' + callAsT0(inst2, 0));
+
+// A funcref crossing from JS into Wasm. `undefined` is not a funcref, and the
+// caller who omits the argument must get the same error as one who passes a
+// plain function or a number.
+var inst3 = fresh();
+function put(inst, args) {
+  try {
+    inst.exports.put.apply(null, args);
+    return 'accepted';
+  } catch (e) {
+    return e.name;
+  }
+}
+print('put(0) [missing arg]: ' + put(inst3, [0]));
+print('put(0, plainFn): ' + put(inst3, [0, function () { return 1; }]));
+print('put(0, 42): ' + put(inst3, [0, 42]));
+print('put(0, tbl.get(0)) then callAsT0(0): ' +
+      (put(inst3, [0, inst3.exports.tbl.get(0)]) === 'accepted'
+           ? callAsT0(inst3, 0)
+           : 'rejected'));
+
+// ref.null is a genuine null funcref, so the slot becomes uninitialized.
+inst3.exports.clear(0);
+print('clear(0); callAsT0(0): ' + callAsT0(inst3, 0));
+
+// A frozen backing array refuses element writes, and reports success while
+// doing so. If the funnel believes that report it writes some of the three
+// arrays and leaves the rest, which is exactly the desynchronization this
+// test exists to forbid.
+//
+// A funcref table's arrays are internal fields of a WebAssembly.Table and no
+// longer reachable from script at all. An EXTERNREF table's are still built
+// with `new Array(n)` off globalThis.Array, so replacing that constructor is
+// the remaining way to hand the engine storage it does not control -- and it
+// reaches the very same funnel and the very same checked store.
+//
+// The externref table is the only thing in this module that allocates an
+// array of length 5, which is how `pick` singles out its three arrays: index
+// 0 is funcs, 1 is types, 2 is exported, in creation order.
+var RealArray = Array;
+function withHostileArray(pick, run) {
+  var n = 0;
+  globalThis.Array = function (len) {
+    var a = new RealArray(len);
+    return len === 5 ? pick(n++, a) : a;
+  };
+  try {
+    return run();
+  } finally {
+    globalThis.Array = RealArray;
+  }
+}
+
+function freezeNth(which) {
+  return function (i, a) {
+    if (i === which) Object.freeze(a);
+    return a;
+  };
+}
+
+function extProbe(label, pick) {
+  var inst;
+  try {
+    inst = withHostileArray(pick, fresh);
+  } catch (e) {
+    print(label + ': ' + e.name);
+    return;
+  }
+  try {
+    inst.exports.extSet(0, {tag: 'x'});
+    print(label + ': extSet ok, extGet: ' + inst.exports.extGet(0).tag);
+    return;
+  } catch (e) {
+    print(label + ': extSet: ' + e.name + ': ' + e.message);
+  }
+  print(label.replace(':', ';') + '; extGet(0): ' + inst.exports.extGet(0));
+}
+
+extProbe('sane externref table', function (i, a) { return a; });
+extProbe('frozen funcs', freezeNth(0));
+extProbe('frozen types', freezeNth(1));
+extProbe('frozen exported', freezeNth(2));
+
+// Storage that is not an array at all is refused at instantiation, before any
+// cast in the table builtins.
+extProbe('non-array storage', function (i, a) {
+  return i === 0 ? {length: 5} : a;
+});
+
+// A genuine array carrying an accessor at an index: reading the slot with an
+// ordinary property read would run user JS inside a Wasm function body, which
+// the return buffer's reentrancy invariant forbids.
+var getterRan = false;
+var accessorInst = withHostileArray(function (i, a) {
+  if (i === 2) {
+    Object.defineProperty(a, 0, {
+      get: function () { getterRan = true; return 'PWNED'; },
+      configurable: true,
+    });
+  }
+  return a;
+}, fresh);
+// Read the slot BEFORE reading the flag: `'...' + getterRan + '...' + get()`
+// evaluates the flag first and would report `false` even when the getter had
+// just run.
+var accessorGot = accessorInst.exports.extGet(0);
+print('accessor ran: ' + getterRan + ', extGet(0): ' + accessorGot);
+
+// table.grow over storage that refuses to lengthen. Reported as the spec's
+// "could not grow" answer, -1, with the size unchanged -- not as a successful
+// grow over three arrays that ended up different lengths. (The JS-API
+// Table.prototype.grow has the same rollback, but its arrays are internal
+// fields script cannot reach, so only this side is reachable and only this
+// side is tested.)
+//
+// All THREE lengths are printed, not just extSize(). extSize() compiles to
+// funcs.length alone, and in the `frozen funcs` row Object.freeze pins
+// funcs.length at 5 whatever the engine does -- so that row's "size still 5"
+// half could not fail, while types and exported are precisely the two arrays
+// the rollback has to put back. Deleting the rollback in wasmTableGrow leaves
+// 5/7/7 here with extSize() still reporting 5.
+//
+// The arrays are captured as they are handed over, which is the only handle
+// on them: they are the table's storage, not anything the exports expose.
+function recordAndFreeze(arrays, which) {
+  return function (i, a) {
+    arrays[i] = a;
+    if (i === which) Object.freeze(a);
+    return a;
+  };
+}
+function lengths(arrays) {
+  return arrays[0].length + '/' + arrays[1].length + '/' + arrays[2].length;
+}
+function growProbe(label, which) {
+  var arrays = [];
+  var inst = withHostileArray(recordAndFreeze(arrays, which), fresh);
+  var r = inst.exports.extGrow(2);
+  print(label + ': ' + r + ', lengths ' + lengths(arrays) +
+        ', size still ' + inst.exports.extSize());
+}
+// The successful grow is measured the same way, so "lengths 5/5/5" below
+// cannot be an artifact of reading the wrong three objects.
+var saneArrays = [];
+var saneGrow = withHostileArray(recordAndFreeze(saneArrays, -1), fresh);
+var saneBefore = saneGrow.exports.extSize();
+var saneRet = saneGrow.exports.extGrow(2);
+print('sane grow: ' + saneBefore + ' -> ' + saneGrow.exports.extSize() +
+      ', lengths ' + lengths(saneArrays) + ', extGrow returned ' + saneRet);
+growProbe('frozen funcs grow', 0);
+growProbe('frozen types grow', 1);
+growProbe('frozen exported grow', 2);
+
+print('done');

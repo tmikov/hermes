@@ -13,29 +13,51 @@ var mod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(hbcPath));
 function globalOf(g) {
   return new WebAssembly.Instance(mod, {e: {g: g}}).exports.get();
 }
+function attempt(label, g) {
+  try {
+    print(label + ': ' + globalOf(g));
+  } catch (e) {
+    print(label + ': ' + e.name + ': ' + e.message);
+  }
+}
 
-// __wasm_type__ must be read exactly once.
+var real = new WebAssembly.Global({value: 'i32'}, 77);
+
+attempt('forged literal', {__wasm_type__: 'global:i32:const', value: 1234});
+
+// The old TOCTOU: answer with the right type string the first time and
+// "undefined" the second. There is no second read to exploit, and no first
+// one either.
 var typeReads = 0;
-var toctou = new Proxy({value: 42}, {
+attempt('toctou Proxy', new Proxy({value: 42}, {
   get: function (t, k) {
     if (k === '__wasm_type__')
       return typeReads++ === 0 ? 'global:i32:const' : undefined;
     return t[k];
   },
+}));
+
+// A prototype-chain forgery: `instanceof` accepts it, and it inherited the
+// published __wasm_type__ too.
+attempt('Object.create(genuine global)', Object.create(real));
+attempt('object with a value property', {value: 55});
+
+// The value is read from the internal field, not through the accessor. The
+// `value` property on WebAssembly.Global.prototype is configurable, so this
+// really does replace the route the link path used to take.
+var savedValue =
+    Object.getOwnPropertyDescriptor(WebAssembly.Global.prototype, 'value');
+Object.defineProperty(WebAssembly.Global.prototype, 'value', {
+  get: function () { return 999; },
+  configurable: true,
 });
-var v = globalOf(toctou);
-print(
-  'toctou global: reads = ' + typeReads +
-  ', typeof = ' + typeof v + ', value = ' + v);
+print('hijacked prototype accessor reads: ' + real.value);
+attempt('WebAssembly.Global(77) with hijacked accessor', real);
+Object.defineProperty(WebAssembly.Global.prototype, 'value', savedValue);
 
-// The resolved value is coerced to the declared type.
-print('object value -> ' + globalOf({__wasm_type__: 'global:i32:const',
-                                     value: {}}));
-print('3.7 -> ' + globalOf(3.7));
-print('-1 -> ' + globalOf(-1));
-print('2^32+5 -> ' + globalOf(Math.pow(2, 32) + 5));
-
-print('WebAssembly.Global(77) -> ' +
-      globalOf(new WebAssembly.Global({value: 'i32'}, 77)));
-print('raw number 123 -> ' + globalOf(123));
+// A raw JS value is still accepted for an immutable import, and coerced.
+attempt('3.7', 3.7);
+attempt('-1', -1);
+attempt('2^32+5', Math.pow(2, 32) + 5);
+attempt('raw number 123', 123);
 print('done');

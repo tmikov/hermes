@@ -3014,7 +3014,7 @@ TEST(WasmIRGenTest, CreateFunctionsExportsObject) {
 
   WasmIRGen irgen(tm.mod, moduleInfo);
   irgen.createFunctions();
-  irgen.finalizeModule();
+  ASSERT_TRUE(irgen.finalizeModule());
 
   // The top-level function should now return a module info object
   // with "instantiate", "exportDescs", and "importDescs" properties.
@@ -3069,7 +3069,7 @@ TEST(WasmIRGenTest, CreateFunctionsNoExports) {
 
   WasmIRGen irgen(tm.mod, moduleInfo);
   irgen.createFunctions();
-  irgen.finalizeModule();
+  ASSERT_TRUE(irgen.finalizeModule());
 
   // Even with no exports, the top-level function should return a module
   // info object with "instantiate", "exportDescs", and "importDescs".
@@ -3129,7 +3129,7 @@ TEST(WasmIRGenTest, CreateFunctionsSkipsNonFunctionExports) {
 
   WasmIRGen irgen(tm.mod, moduleInfo);
   irgen.createFunctions();
-  irgen.finalizeModule();
+  ASSERT_TRUE(irgen.finalizeModule());
 
   // The top-level now builds the module info object. We verify that
   // the descriptor arrays include both exports (function and memory),

@@ -17,7 +17,9 @@
 #include "hermes/VM/JSArrayBuffer.h"
 #include "hermes/VM/JSLib.h"
 #include "hermes/VM/JSTypedArray.h"
+#include "hermes/VM/JSWebAssemblyGlobal.h"
 #include "hermes/VM/JSWebAssemblyMemory.h"
+#include "hermes/VM/JSWebAssemblyTable.h"
 #include "hermes/VM/JSRegExp.h"
 #include "hermes/VM/Operations.h"
 #include "hermes/VM/PrimitiveBox.h"
@@ -894,10 +896,15 @@ CallResult<HermesValue> wasmMemoryGrow(void *, Runtime &runtime) {
   return lv.newBuf.getHermesValue();
 }
 
-/// Wasm table and segment arrays reach these builtins through values script
-/// controls: a table import supplies __wasm_funcs__/__wasm_types__ as plain
-/// properties, and the arrays are constructed via globalThis.Array. They are
-/// therefore untrusted and must not be cast with vmcast, which only asserts.
+/// Some Wasm table and segment arrays reach these builtins through values
+/// script controls: an EXTERNREF table's three arrays are built with
+/// `new Array(n)` off globalThis.Array, which script can replace, and the
+/// element-segment arrays are built the same way. Those are untrusted and must
+/// not be cast with vmcast, which only asserts. (A FUNCREF table's arrays are
+/// the internal fields of a genuine WebAssembly.Table, established by
+/// wasmLinkTable's brand check; they are JSArrays by construction. The checked
+/// cast still runs for them -- these builtins do not know which kind they were
+/// handed -- and costs one branch on a cold path.)
 /// \return the array, or nullptr after raising a TypeError.
 static JSArray *
 wasmArrayArg(Runtime &runtime, HermesValue v, const char *msg) {
@@ -915,15 +922,32 @@ CallResult<HermesValue> wasmCallIndirect(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
 
   // This is the indirect-call hot path, so the arrays are cast without
-  // re-checking. That is sound because wasmCheckTableArrays has already
-  // validated them once, at instantiation, for every way a table's storage can
-  // be produced: an imported __wasm_funcs__/__wasm_types__ pair, the fresh
-  // arrays created for a JS-API table import, and the arrays created for a
-  // module's own tables. Once validated the arrays live in a VariableScope
-  // slot that script cannot reach, and table.grow mutates them in place rather
-  // than replacing them, so the invariant holds for the life of the instance.
-  // Any new way of populating tableFuncVars_/tableTypeVars_ must call
-  // wasmCheckTableArrays too.
+  // re-checking. TWO separate arguments cover the two kinds of table that can
+  // reach here, and both are needed:
+  //
+  //  * FUNCREF, the only kind a *valid* module can name here. Its two arrays
+  //    are the `elements_`/`types_` fields of a genuine WebAssembly.Table,
+  //    reached through wasmLinkTable's dyn_vmcast. Those fields are
+  //    `GCPointer<JSArray>` -- JSArrays by their static type, not by a check
+  //    that ran earlier and might not run again.
+  //  * EXTERNREF, which a valid module cannot name here but an INVALID one
+  //    can. `wasmCheckTableArrays` validates that table's three arrays once at
+  //    instantiation (`WasmIRGen::createTables`), which is what keeps this
+  //    cast safe for it. Do not delete that call believing it dead.
+  //
+  // The second bullet is not hypothetical. `WebAssembly.Module` validates
+  // (`validateWasmBinary` runs `wabt::ValidateModule`), but `hermesc --wasm`
+  // DOES NOT -- `compileWasmModule` only runs `wabt::ReadBinary` -- so a
+  // module built with `wat2wasm --no-check` and compiled ahead of time can
+  // call_indirect through an externref table whose arrays script chose via a
+  // replaced globalThis.Array. The cast survives that; the reads below do NOT
+  // (see the type check). Tracked as H19 in handoff-artifacts/REVIEW.md; the
+  // fix is module validation on the compile path and does not belong here.
+  //
+  // Once linked the arrays live in a VariableScope slot that script cannot
+  // reach, and table.grow mutates them in place rather than replacing them, so
+  // the invariant holds for the life of the instance. Any new way of
+  // populating tableFuncVars_/tableTypeVars_ must preserve it.
   auto *funcsArr = vmcast<JSArray>(args.getArg(0));
   auto *typesArr = vmcast<JSArray>(args.getArg(1));
   int32_t index = truncateToInt32(args.getArg(2).getNumber());
@@ -949,6 +973,17 @@ CallResult<HermesValue> wasmCallIndirect(void *, Runtime &runtime) {
   }
 
   // Type check.
+  //
+  // `getNumber()` assumes the slot holds a number, and on a funcref table it
+  // does: the only writer is the funnel, which takes every id from an Exported
+  // Function's WasmFuncTypeId internal property, always a wasmInternType
+  // result. It is NOT guaranteed on an externref table reached by an invalid
+  // module (see the note at the top of this function): a replaced
+  // globalThis.Array can seed the types array with an object, and this line
+  // then asserts in a Debug build and reinterprets object bits as a double in
+  // a Release one. That is H19, whose fix is validation on the compile path,
+  // not a check here -- adding one would put a branch on the indirect-call hot
+  // path to compensate for a module the engine should never have accepted.
   auto typeVal = typesArr->at(runtime, static_cast<uint32_t>(index));
   int32_t actualTypeIdx = typeVal.isEmpty()
       ? -1
@@ -1248,27 +1283,380 @@ CallResult<HermesValue> wasmDataSegmentInit(void *, Runtime &runtime) {
   return HermesValue::encodeUndefinedValue();
 }
 
-/// Wasm table.fill: fill \p count entries at \p idx with \p val.
-/// Args: (funcsArr, idx, val, count).
-/// Traps on out-of-bounds.
-CallResult<HermesValue> wasmTableFill(void *, Runtime &runtime) {
+/// Read the internal state of a WebAssembly Exported Function. The brand is
+/// the presence of the WasmFuncClosure internal property: only wasmSetFuncInfo
+/// creates it, and script can neither name it nor write it, so it cannot be
+/// forged *by script*. The qualification matters on the write side:
+/// wasmSetFuncInfo is a PRIVATE_BUILTIN and so is reachable from any bytecode
+/// emitting a CallBuiltin with its index. Bytecode is trusted, so that is out
+/// of the threat model, but it is why that builtin type-checks its arguments
+/// rather than resting on this sentence -- do not delete those checks on the
+/// strength of the brand being unforgeable.
+/// Because that builtin writes the type id FIRST and the brand LAST,
+/// carrying the brand implies carrying the type id.
+/// On success \p closure and \p typeId are set; on failure they are untouched.
+/// \return false if \p value is not an Exported Function. No exception raised.
+static bool readWasmFuncInfo(
+    Runtime &runtime,
+    Handle<> value,
+    PinnedValue<> &closure,
+    PinnedValue<> &typeId) {
+  if (!value->isObject())
+    return false;
+  auto obj = Handle<JSObject>::vmcast(value);
+
+  // The internal property is a plain own data property on a plain object.
+  // Anything else -- an accessor, a Proxy, a host object -- is not something
+  // wasmSetFuncInfo produced, so refuse it rather than reading through it.
+  auto readOwnInternal =
+      [&runtime, &obj](Predefined::IProp name, PinnedValue<> &out) -> bool {
+    NamedPropertyDescriptor desc;
+    if (!JSObject::getOwnNamedDescriptor(
+            obj, runtime, Predefined::getSymbolID(name), desc))
+      return false;
+    if (LLVM_UNLIKELY(
+            desc.flags.accessor || desc.flags.proxyObject ||
+            desc.flags.hostObject))
+      return false;
+    out = JSObject::getNamedSlotValueUnsafe(obj.get(), runtime, desc)
+              .unboxToHV(runtime);
+    return true;
+  };
+
+  if (!readOwnInternal(Predefined::InternalPropertyWasmFuncClosure, closure))
+    return false;
+  if (LLVM_UNLIKELY(
+          !readOwnInternal(Predefined::InternalPropertyWasmFuncTypeId, typeId)))
+    return false;
+  return true;
+}
+
+// Defined here rather than in WebAssembly.cpp, alongside isWasmExportedFunction
+// and setWasmTableSlot and for the same reason: WebAssembly.cpp is compiled
+// only when HERMES_ENABLE_WASM is on, while the wasm* builtins below are
+// compiled unconditionally, because Builtins.def numbering is deliberately
+// independent of the flag (see the note above wasmLinkErrorProto). A helper
+// those builtins call therefore has to live in a translation unit that is
+// always built -- defining it there broke the default WASM=OFF build.
+void setWasmGlobalNumber(JSWebAssemblyGlobal *glob, double val) {
+  // Every enumerator is spelled out and there is NO `default:`, on purpose.
+  // ValType is documented as an ABI and the JS API has reference-typed
+  // globals, so a fifth type is a plausible future addition; under a
+  // `default:` it would fall through to an unconverted store and silently
+  // break the "value_ is canonical for valType_" invariant in release builds
+  // -- the invariant wasmGlobalGet, wasmLinkGlobal and the now-no-op
+  // coerceImportedGlobalValue all lean on.
+  //
+  // Verified by adding a fifth enumerator: -Wswitch reports "enumeration
+  // value 'ExternRef' not handled in switch" here. Being precise about what
+  // that buys, since this build has HERMES_ENABLE_WERROR=OFF -- it is an
+  // ERROR only under -Werror and a warning otherwise. It is still the whole
+  // of the automatic signal: this is the only `switch` over ValType in the
+  // tree, every other consumer comparing with `==`.
+  switch (glob->getValType()) {
+    case JSWebAssemblyGlobal::ValType::I32:
+      // truncateToInt32 is ES ToInt32, which is how ToWebAssemblyValue's i32
+      // case is defined. It replaces an open-coded
+      // static_cast<int32_t>(static_cast<int64_t>(val)), which agrees with it
+      // for every |val| < 2^63 and is undefined behaviour above that -- NaN
+      // and Infinity included.
+      val = static_cast<double>(truncateToInt32(val));
+      break;
+    case JSWebAssemblyGlobal::ValType::F32:
+      val = static_cast<double>(static_cast<float>(val));
+      break;
+    case JSWebAssemblyGlobal::ValType::F64:
+      // The double as it stands.
+      break;
+    case JSWebAssemblyGlobal::ValType::I64:
+      // Precondition violation: an i64 global's value lives in i64Value_,
+      // because a double cannot represent every i64 exactly. Leave value_
+      // alone rather than writing a lossy copy of the value into the field
+      // nothing reads for an i64 global.
+      assert(false && "an i64 global's value lives in i64Value_, not value_");
+      return;
+  }
+  glob->setValue(val);
+}
+
+/// The brand check on its own, for callers that need to REFUSE a value rather
+/// than derive a slot from it. Declared in JSLibInternal.h and used by
+/// WebAssembly.Table.prototype.set, which raises a TypeError naming the method
+/// instead of the funnel's generic one. It shares readWasmFuncInfo's notion of
+/// the brand deliberately: two independent definitions of "is an Exported
+/// Function" are two things that can drift apart, and the gap between them
+/// would be a value the JS API admits and the funnel then refuses -- or worse,
+/// the other way round.
+bool isWasmExportedFunction(Runtime &runtime, Handle<> value) {
+  struct : public Locals {
+    PinnedValue<> closure;
+    PinnedValue<> typeId;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+  return readWasmFuncInfo(runtime, value, lv.closure, lv.typeId);
+}
+
+/// Store one element of one table array, and REPORT A REFUSED WRITE.
+/// `JSArray::setElementAt` throws the answer away: a frozen array returns
+/// `false` from `_setOwnIndexedImpl` with no exception raised, so the status
+/// alone cannot tell a store that happened from one that was silently
+/// dropped. For ordinary array code that only loses a value; for a table slot,
+/// which is a triple, it DESYNCHRONIZES -- freezing the closure array lets the
+/// type id and the wrapper land while the closure stays put, and
+/// call_indirect then accepts a function of the wrong signature. So the bool
+/// is checked, and a refusal is an error rather than a silent no-op.
+static ExecutionStatus wasmStoreTableElement(
+    Runtime &runtime,
+    Handle<JSArray> arr,
+    uint32_t index,
+    Handle<> value) {
+  auto res = JSObject::setOwnIndexed(arr, runtime, index, value);
+  if (LLVM_UNLIKELY(res == ExecutionStatus::EXCEPTION))
+    return ExecutionStatus::EXCEPTION;
+  if (LLVM_UNLIKELY(!*res))
+    return runtime.raiseTypeError("Wasm table storage is not writable");
+  return ExecutionStatus::RETURNED;
+}
+
+/// Write one table slot, the only way any of the three parallel arrays is ever
+/// written. A slot is a triple -- the internal closure that call_indirect
+/// calls, its interned type id that call_indirect checks, and the Exported
+/// Function that every JS boundary crossing sees -- and the closure and the
+/// type id are DERIVED from the Exported Function rather than passed in
+/// alongside it, so they cannot disagree with it. Writing one array and
+/// leaving another stale is what made a function callable through another
+/// function's signature.
+/// In a FUNCREF table \p value is null to clear the slot, or an Exported
+/// Function; anything else, undefined included, is a TypeError. In an
+/// EXTERNREF table there is no such thing as a wrapper: an externref is any JS
+/// value at all, so the value is stored as it stands and the slot carries no
+/// interned type, which is what makes call_indirect refuse it.
+///
+/// The four writes are ordered so that ANY of them failing leaves the slot
+/// fail-closed rather than confused: the type id is cleared first and only
+/// restored last, so at every point in between the slot carries no interned
+/// type and call_indirect refuses it. Together with the checked store above,
+/// that makes the invariant hold even when one of the three arrays refuses
+/// writes -- which script can arrange by freezing an array it can reach.
+///
+/// Declared in JSLibInternal.h: generated Wasm code reaches this through the
+/// wasmTableSetSlot builtin below, and WebAssembly.Table.prototype.set/grow
+/// call it directly, since they hold the table object rather than its arrays.
+ExecutionStatus setWasmTableSlot(
+    Runtime &runtime,
+    Handle<JSArray> funcsArr,
+    Handle<JSArray> typesArr,
+    Handle<JSArray> exportedArr,
+    uint32_t index,
+    Handle<> value,
+    bool isFuncRef) {
+  struct : public Locals {
+    PinnedValue<> closure;
+    PinnedValue<> typeId;
+    PinnedValue<> empty;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  if (!isFuncRef) {
+    // An externref is any JS value, so there is nothing to brand-check and
+    // nothing to derive: store it as it stands, with no interned type, which
+    // is what makes call_indirect refuse the slot.
+    //
+    // NOTE: isFuncRef comes from the MODULE'S DECLARATION of the table. That
+    // used to be a hole: a module could declare an imported table externref
+    // while the supplied table was a genuine funcref table, reach this branch,
+    // and write its slots with no funcref brand check. It is closed at the
+    // link path instead of here -- wasmLinkTable refuses a non-funcref
+    // declaration outright, because nothing this engine builds can satisfy one
+    // -- so an externref declaration can no longer be paired with funcref
+    // storage. Pinned by e2e-table-abi-private.wat.
+    lv.closure = *value;
+    lv.typeId = HermesValue::encodeEmptyValue();
+  } else if (value->isNull()) {
+    // An empty slot in all three arrays: null where call_indirect and
+    // table.get look for a reference, and empty in the type array, which is
+    // how a slot that carries no interned Wasm type reads.
+    lv.closure = HermesValue::encodeNullValue();
+    lv.typeId = HermesValue::encodeEmptyValue();
+  } else if (LLVM_UNLIKELY(
+                 !readWasmFuncInfo(runtime, value, lv.closure, lv.typeId))) {
+    return runtime.raiseTypeError(
+        "Wasm table entry must be null or a WebAssembly exported function");
+  }
+
+  // 1. Disarm the slot. Anything that goes wrong from here on leaves it
+  //    uncallable rather than callable through the wrong signature.
+  //
+  //    This deliberately DESTROYS a previously valid slot on a refused write:
+  //    if the closure array is frozen and the type array is not, step 2 raises
+  //    and the slot keeps its old closure and old wrapper with no type id, so
+  //    call_indirect refuses it from then on even though it used to work. That
+  //    is the trade -- a permanently uncallable slot is preferable to one
+  //    callable through the wrong signature -- and it is not observable in the
+  //    tests, because a slot with a stale type id and one with none both
+  //    report "call_indirect: type mismatch". Do not "fix" the partial clear
+  //    by restoring the old type id on failure; that is precisely the state
+  //    the ordering exists to prevent.
+  lv.empty = HermesValue::encodeEmptyValue();
+  if (LLVM_UNLIKELY(
+          wasmStoreTableElement(runtime, typesArr, index, lv.empty) ==
+          ExecutionStatus::EXCEPTION))
+    return ExecutionStatus::EXCEPTION;
+  // 2. The closure call_indirect calls.
+  if (LLVM_UNLIKELY(
+          wasmStoreTableElement(runtime, funcsArr, index, lv.closure) ==
+          ExecutionStatus::EXCEPTION))
+    return ExecutionStatus::EXCEPTION;
+  // 3. The wrapper, or null. Note that a cleared slot stores null here rather
+  //    than empty: table.get hands this value straight to the value stack,
+  //    where an empty slot would read as undefined, not as a null funcref.
+  if (LLVM_UNLIKELY(
+          wasmStoreTableElement(runtime, exportedArr, index, value) ==
+          ExecutionStatus::EXCEPTION))
+    return ExecutionStatus::EXCEPTION;
+  // 4. Arm it.
+  if (LLVM_UNLIKELY(
+          wasmStoreTableElement(runtime, typesArr, index, lv.typeId) ==
+          ExecutionStatus::EXCEPTION))
+    return ExecutionStatus::EXCEPTION;
+  return ExecutionStatus::RETURNED;
+}
+
+/// Fetch the three parallel table arrays from consecutive arguments starting
+/// at \p firstArg. \return false after raising a TypeError if any of them is
+/// not a genuine array.
+static bool wasmTableArrayArgs(
+    Runtime &runtime,
+    NativeArgs &args,
+    unsigned firstArg,
+    PinnedValue<JSArray> &funcsArr,
+    PinnedValue<JSArray> &typesArr,
+    PinnedValue<JSArray> &exportedArr) {
+  auto *funcs = wasmArrayArg(
+      runtime,
+      args.getArg(firstArg),
+      "Wasm table function array is not an array");
+  if (LLVM_UNLIKELY(!funcs))
+    return false;
+  funcsArr = funcs;
+  auto *types = wasmArrayArg(
+      runtime,
+      args.getArg(firstArg + 1),
+      "Wasm table type array is not an array");
+  if (LLVM_UNLIKELY(!types))
+    return false;
+  typesArr = types;
+  auto *exported = wasmArrayArg(
+      runtime,
+      args.getArg(firstArg + 2),
+      "Wasm table exported-function array is not an array");
+  if (LLVM_UNLIKELY(!exported))
+    return false;
+  exportedArr = exported;
+  return true;
+}
+
+/// Read the funcref in one table slot: the slot's Exported Function, or null.
+/// Args: (exportedArr, idx).
+///
+/// This exists rather than a plain property read in generated code because the
+/// array reaches us from a table import, so script chooses it -- and an
+/// accessor installed at an index runs on an ordinary property read, EVEN ON A
+/// GENUINE ARRAY. That would run user JS in the middle of a Wasm function
+/// body, which the return buffer's reentrancy invariant forbids. Reading the
+/// indexed storage directly cannot call anything.
+///
+/// The read itself is shared with WebAssembly.Table.prototype.get, which needs
+/// exactly the same one: two definitions of "what an empty funcref slot reads
+/// as" are two things that can drift, and the gap between them would be a slot
+/// Wasm sees as null and the JS API does not, or the reverse. Sharing it also
+/// gives the empty-slot mapping a reachable test -- an externref table's
+/// storage is holes throughout (`new Array(n)`, no clear loop), whereas a
+/// WebAssembly.Table's slots are all explicitly cleared by its constructor.
+HermesValue
+readWasmTableSlot(Runtime &runtime, JSArray *exportedArr, uint32_t index) {
+  // The caller has already bounds-checked against the table's length. A slot
+  // inside that range but never written reads as empty; the funcref value for
+  // an uninitialized slot is null.
+  auto elem = exportedArr->at(runtime, index);
+  if (elem.isEmpty())
+    return HermesValue::encodeNullValue();
+  return elem.unboxToHV(runtime);
+}
+
+CallResult<HermesValue> wasmTableGetSlot(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  auto *exportedArr = wasmArrayArg(
+      runtime,
+      args.getArg(0),
+      "Wasm table exported-function array is not an array");
+  if (LLVM_UNLIKELY(!exportedArr))
+    return ExecutionStatus::EXCEPTION;
+  // The index arrives as a signed i32 off the Wasm value stack, so the
+  // negative case is handled here, where a negative value can actually occur,
+  // rather than by narrowing into the unsigned helper.
+  int32_t index = truncateToInt32(args.getArg(1).getNumber());
+  if (LLVM_UNLIKELY(index < 0))
+    return HermesValue::encodeNullValue();
+  return readWasmTableSlot(
+      runtime, exportedArr, static_cast<uint32_t>(index));
+}
+
+/// Wasm table slot write, the funnel every writer goes through.
+/// Args: (funcsArr, typesArr, exportedArr, idx, exportedFnOrNull).
+CallResult<HermesValue> wasmTableSetSlot(void *, Runtime &runtime) {
   struct : public Locals {
     PinnedValue<JSArray> funcsArr;
+    PinnedValue<JSArray> typesArr;
+    PinnedValue<JSArray> exportedArr;
     PinnedValue<> val;
   } lv;
   LocalsRAII lraii(runtime, &lv);
 
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  auto *arr11 = wasmArrayArg(runtime, args.getArg(0),
-      "Wasm table function array is not an array");
-  if (LLVM_UNLIKELY(!arr11))
+  if (LLVM_UNLIKELY(!wasmTableArrayArgs(
+          runtime, args, 0, lv.funcsArr, lv.typesArr, lv.exportedArr)))
     return ExecutionStatus::EXCEPTION;
-  lv.funcsArr = arr11;
   uint32_t idx =
-      static_cast<uint32_t>(truncateToInt32(args.getArg(1).getNumber()));
-  lv.val = args.getArg(2);
-  uint32_t count =
       static_cast<uint32_t>(truncateToInt32(args.getArg(3).getNumber()));
+  lv.val = args.getArg(4);
+  bool isFuncRef = args.getArg(5).getNumber() != 0;
+
+  if (LLVM_UNLIKELY(
+          setWasmTableSlot(
+              runtime,
+              lv.funcsArr,
+              lv.typesArr,
+              lv.exportedArr,
+              idx,
+              lv.val,
+              isFuncRef) == ExecutionStatus::EXCEPTION))
+    return ExecutionStatus::EXCEPTION;
+  return HermesValue::encodeUndefinedValue();
+}
+
+/// Wasm table.fill: fill \p count entries at \p idx with \p val.
+/// Args: (funcsArr, typesArr, exportedArr, idx, val, count).
+/// Traps on out-of-bounds.
+CallResult<HermesValue> wasmTableFill(void *, Runtime &runtime) {
+  struct : public Locals {
+    PinnedValue<JSArray> funcsArr;
+    PinnedValue<JSArray> typesArr;
+    PinnedValue<JSArray> exportedArr;
+    PinnedValue<> val;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  if (LLVM_UNLIKELY(!wasmTableArrayArgs(
+          runtime, args, 0, lv.funcsArr, lv.typesArr, lv.exportedArr)))
+    return ExecutionStatus::EXCEPTION;
+  uint32_t idx =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(3).getNumber()));
+  lv.val = args.getArg(4);
+  uint32_t count =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(5).getNumber()));
+  bool isFuncRef = args.getArg(6).getNumber() != 0;
 
   uint32_t tableLen = JSArray::getLength(*lv.funcsArr, runtime);
   // Bounds check: idx + count must not exceed table size.
@@ -1277,47 +1665,53 @@ CallResult<HermesValue> wasmTableFill(void *, Runtime &runtime) {
         "table.fill: out of bounds table access");
   }
 
-  // Perform the fill.
+  // Perform the fill, through the slot funnel: filling only the closure array
+  // left the old type ids in place, so a fill could make a function callable
+  // through the signature of whatever it replaced.
   for (uint32_t i = 0; i < count; ++i) {
-    (void)JSArray::setElementAt(lv.funcsArr, runtime, idx + i, lv.val);
+    if (LLVM_UNLIKELY(
+            setWasmTableSlot(
+                runtime,
+                lv.funcsArr,
+                lv.typesArr,
+                lv.exportedArr,
+                idx + i,
+                lv.val,
+                isFuncRef) == ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
   }
 
   return HermesValue::encodeUndefinedValue();
 }
 
 /// Wasm table.grow: grow table by delta entries, filling with fillVal.
-/// Args: (funcsArr, typesArr, delta, fillVal, maxEntries, actualMax).
-/// Returns old size on success, -1 on failure.
+/// Args: (funcsArr, typesArr, exportedArr, delta, fillVal, maxEntries,
+/// actualMax). Returns old size on success, -1 on failure.
 CallResult<HermesValue> wasmTableGrow(void *, Runtime &runtime) {
   struct : public Locals {
     PinnedValue<JSArray> funcsArr;
     PinnedValue<JSArray> typesArr;
+    PinnedValue<JSArray> exportedArr;
     PinnedValue<> fillVal;
   } lv;
   LocalsRAII lraii(runtime, &lv);
 
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  auto *arr10 = wasmArrayArg(runtime, args.getArg(0),
-      "Wasm table function array is not an array");
-  if (LLVM_UNLIKELY(!arr10))
+  if (LLVM_UNLIKELY(!wasmTableArrayArgs(
+          runtime, args, 0, lv.funcsArr, lv.typesArr, lv.exportedArr)))
     return ExecutionStatus::EXCEPTION;
-  lv.funcsArr = arr10;
-  auto *arr9 = wasmArrayArg(runtime, args.getArg(1),
-      "Wasm table type array is not an array");
-  if (LLVM_UNLIKELY(!arr9))
-    return ExecutionStatus::EXCEPTION;
-  lv.typesArr = arr9;
   uint32_t delta =
-      static_cast<uint32_t>(truncateToInt32(args.getArg(2).getNumber()));
-  lv.fillVal = args.getArg(3);
+      static_cast<uint32_t>(truncateToInt32(args.getArg(3).getNumber()));
+  lv.fillVal = args.getArg(4);
   uint32_t maxEntries =
-      static_cast<uint32_t>(truncateToInt32(args.getArg(4).getNumber()));
+      static_cast<uint32_t>(truncateToInt32(args.getArg(5).getNumber()));
+  bool isFuncRef = args.getArg(7).getNumber() != 0;
   // An imported table's own maximum binds too. Link validation only checks
   // that the supplied table's max is <= the declared one, so growing to the
   // declared max would take a shared table past what its owner permits.
   // -1 means the supplied table declares no maximum. Guard on isNumber:
   // this arrives from the table object's metadata, which script can set.
-  HermesValue actualMaxVal = args.getArg(5);
+  HermesValue actualMaxVal = args.getArg(6);
   if (actualMaxVal.isNumber()) {
     double actualMaxNum = actualMaxVal.getNumber();
     if (actualMaxNum >= 0) {
@@ -1345,21 +1739,43 @@ CallResult<HermesValue> wasmTableGrow(void *, Runtime &runtime) {
   }
   uint32_t newLen = static_cast<uint32_t>(newLen64);
 
-  // Grow both arrays by setting their length.
+  // A fill value that is not null and not an Exported Function cannot be
+  // stored in a slot at all, so refuse before growing rather than leaving the
+  // table half-filled. table.grow answers -1 for "could not grow".
+  if (isFuncRef && !lv.fillVal->isNull()) {
+    struct : public Locals {
+      PinnedValue<> closure;
+      PinnedValue<> typeId;
+    } probe;
+    LocalsRAII probeRAII(runtime, &probe);
+    if (LLVM_UNLIKELY(!readWasmFuncInfo(
+            runtime, lv.fillVal, probe.closure, probe.typeId)))
+      return HermesValue::encodeTrustedNumberValue(-1);
+  }
+
+  // Grow all three arrays by setting their length.
   auto res1 = JSArray::setLengthProperty(lv.funcsArr, runtime, newLen);
   if (LLVM_UNLIKELY(res1 == ExecutionStatus::EXCEPTION))
     return ExecutionStatus::EXCEPTION;
   auto res2 = JSArray::setLengthProperty(lv.typesArr, runtime, newLen);
   if (LLVM_UNLIKELY(res2 == ExecutionStatus::EXCEPTION))
     return ExecutionStatus::EXCEPTION;
+  auto res3 = JSArray::setLengthProperty(lv.exportedArr, runtime, newLen);
+  if (LLVM_UNLIKELY(res3 == ExecutionStatus::EXCEPTION))
+    return ExecutionStatus::EXCEPTION;
 
-  // Fill new func entries with fillVal. Type entries remain undefined
-  // (no type info for fill entries — they are not callable via
-  // call_indirect).
+  // Fill the new entries through the slot funnel, so a non-null fill value
+  // brings its type id with it and a null one leaves nothing callable behind.
   for (uint32_t i = oldLen; i < newLen; ++i) {
     if (LLVM_UNLIKELY(
-            JSArray::setElementAt(lv.funcsArr, runtime, i, lv.fillVal) ==
-            ExecutionStatus::EXCEPTION)) {
+            setWasmTableSlot(
+                runtime,
+                lv.funcsArr,
+                lv.typesArr,
+                lv.exportedArr,
+                i,
+                lv.fillVal,
+                isFuncRef) == ExecutionStatus::EXCEPTION)) {
       // Out of memory part-way through. Put the table back and answer -1,
       // which is how table.grow reports that it could not allocate.
       // Returning normally with an exception pending, as this loop used to,
@@ -1367,6 +1783,7 @@ CallResult<HermesValue> wasmTableGrow(void *, Runtime &runtime) {
       runtime.clearThrownValue();
       (void)JSArray::setLengthProperty(lv.funcsArr, runtime, oldLen);
       (void)JSArray::setLengthProperty(lv.typesArr, runtime, oldLen);
+      (void)JSArray::setLengthProperty(lv.exportedArr, runtime, oldLen);
       return HermesValue::encodeTrustedNumberValue(-1);
     }
   }
@@ -1374,46 +1791,40 @@ CallResult<HermesValue> wasmTableGrow(void *, Runtime &runtime) {
   return HermesValue::encodeTrustedNumberValue(oldLen);
 }
 
-/// Wasm table.copy: copy \p count entries from src table to dst table.
-/// Args: (dstFuncs, srcFuncs, dstTypes, srcTypes, dst, src, count).
+/// Wasm table.copy: copy \p count slots from src table to dst table.
+/// Args: (dstFuncs, dstTypes, dstExported, srcFuncs, srcTypes, srcExported,
+/// dst, src, count).
+/// All three arrays move together, so a copied slot arrives with the type id
+/// and the Exported Function that belong to the closure it carries.
 /// Traps on out-of-bounds. Handles overlapping regions correctly.
-CallResult<HermesValue> wasmTableCopy(void *, Runtime &runtime) {
+CallResult<HermesValue> wasmTableCopySlots(void *, Runtime &runtime) {
   struct : public Locals {
     PinnedValue<JSArray> dstFuncs;
-    PinnedValue<JSArray> srcFuncs;
     PinnedValue<JSArray> dstTypes;
+    PinnedValue<JSArray> dstExported;
+    PinnedValue<JSArray> srcFuncs;
     PinnedValue<JSArray> srcTypes;
+    PinnedValue<JSArray> srcExported;
+    PinnedValue<> srcFuncVal;
+    PinnedValue<> srcExpVal;
+    PinnedValue<> srcTypeVal;
     PinnedValue<> tmpVal;
   } lv;
   LocalsRAII lraii(runtime, &lv);
 
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  auto *arr8 = wasmArrayArg(runtime, args.getArg(0),
-      "Wasm table function array is not an array");
-  if (LLVM_UNLIKELY(!arr8))
+  if (LLVM_UNLIKELY(!wasmTableArrayArgs(
+          runtime, args, 0, lv.dstFuncs, lv.dstTypes, lv.dstExported)))
     return ExecutionStatus::EXCEPTION;
-  lv.dstFuncs = arr8;
-  auto *arr7 = wasmArrayArg(runtime, args.getArg(1),
-      "Wasm table function array is not an array");
-  if (LLVM_UNLIKELY(!arr7))
+  if (LLVM_UNLIKELY(!wasmTableArrayArgs(
+          runtime, args, 3, lv.srcFuncs, lv.srcTypes, lv.srcExported)))
     return ExecutionStatus::EXCEPTION;
-  lv.srcFuncs = arr7;
-  auto *arr6 = wasmArrayArg(runtime, args.getArg(2),
-      "Wasm table type array is not an array");
-  if (LLVM_UNLIKELY(!arr6))
-    return ExecutionStatus::EXCEPTION;
-  lv.dstTypes = arr6;
-  auto *arr5 = wasmArrayArg(runtime, args.getArg(3),
-      "Wasm table type array is not an array");
-  if (LLVM_UNLIKELY(!arr5))
-    return ExecutionStatus::EXCEPTION;
-  lv.srcTypes = arr5;
   uint32_t dst =
-      static_cast<uint32_t>(truncateToInt32(args.getArg(4).getNumber()));
-  uint32_t src =
-      static_cast<uint32_t>(truncateToInt32(args.getArg(5).getNumber()));
-  uint32_t count =
       static_cast<uint32_t>(truncateToInt32(args.getArg(6).getNumber()));
+  uint32_t src =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(7).getNumber()));
+  uint32_t count =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(8).getNumber()));
 
   uint32_t dstLen = JSArray::getLength(*lv.dstFuncs, runtime);
   uint32_t srcLen = JSArray::getLength(*lv.srcFuncs, runtime);
@@ -1429,100 +1840,161 @@ CallResult<HermesValue> wasmTableCopy(void *, Runtime &runtime) {
   if (count == 0)
     return HermesValue::encodeUndefinedValue();
 
-  // Handle overlapping copy correctly (like memmove).
-  // If dst <= src or different tables, copy forward; otherwise copy backward.
-  bool sameTable = lv.dstFuncs.getHermesValue().getRaw() ==
-      lv.srcFuncs.getHermesValue().getRaw();
-  if (!sameTable || dst <= src) {
-    for (uint32_t i = 0; i < count; ++i) {
-      auto funcVal = lv.srcFuncs->at(runtime, src + i);
-      lv.tmpVal = funcVal.isEmpty() ? HermesValue::encodeEmptyValue()
-                                    : funcVal.unboxToHV(runtime);
-      (void)JSArray::setElementAt(lv.dstFuncs, runtime, dst + i, lv.tmpVal);
+  // Handle overlapping copy correctly (like memmove): with dst > src into the
+  // same storage, a forward loop reads elements it has already overwritten.
+  //
+  // The direction must be chosen from ALL SIX arrays, not from the funcs pair
+  // alone, because two tables can share ONE of their three arrays without
+  // sharing the others. Deciding on funcs alone then takes the forward branch
+  // for what is, inside the shared array, an overlapping self-copy, and smears
+  // one entry across the range.
+  //
+  // This is reachable, and it is not fail-closed. A FUNCREF table's three
+  // arrays travel together out of one object's internal fields, so two funcref
+  // tables share all six or none -- but an EXTERNREF table's three arrays are
+  // three independent `new Array(n)` calls off globalThis.Array, and
+  // wasmCheckTableArrays only checks that each is an array, not that they are
+  // distinct. A replaced Array constructor hands two externref tables a shared
+  // array for one role and private ones for the others; a forward copy then
+  // smears, and `table.get` hands out the wrong reference. Pinned by
+  // e2e-table-copy-alias.wat's externref section. Do not narrow this to the
+  // same-role funcs pair.
+  //
+  // Backward is equally correct when the arrays are distinct -- order is
+  // irrelevant then -- so erring towards backward costs nothing.
+  //
+  // Every destination is compared against every source, not just the pair with
+  // the same role, because a cross-role alias (a table whose funcs array is
+  // another's types array) has exactly the same hazard.
+  auto raw = [](const PinnedValue<JSArray> &pv) {
+    return pv.getHermesValue().getRaw();
+  };
+  const uint64_t dstRaw[3] = {
+      raw(lv.dstFuncs), raw(lv.dstTypes), raw(lv.dstExported)};
+  const uint64_t srcRaw[3] = {
+      raw(lv.srcFuncs), raw(lv.srcTypes), raw(lv.srcExported)};
+  bool anyAlias = false;
+  for (const uint64_t d : dstRaw)
+    for (const uint64_t s : srcRaw)
+      anyAlias |= (d == s);
+  // Move one slot -- all three arrays -- from src index to dst index. The
+  // source already satisfies the slot invariant, so copying the three values
+  // as they stand preserves it, and does so without re-deriving anything.
+  //
+  // Same write order and same checked store as setWasmTableSlot, and for the
+  // same reason: a refused write reports success, so an unchecked copy into a
+  // frozen array desynchronizes the triple instead of failing. Clearing the
+  // destination type id first means a failure part-way leaves the slot
+  // uncallable rather than callable through the wrong signature.
+  //
+  // ALL THREE SOURCE VALUES ARE READ BEFORE ANY WRITE, because the destination
+  // slot can BE the source slot: `table.copy` with d == s is a no-op per spec
+  // and takes the forward branch below, so a disarming write to dstTypes would
+  // destroy the very type id read back at the end -- silently converting a
+  // no-op into "erase the type ids of the whole range". Reading first also
+  // means no store can invalidate a value still to be copied.
+  auto copyOne = [&runtime, &lv](
+                     uint32_t srcIdx, uint32_t dstIdx) -> ExecutionStatus {
+    auto funcVal = lv.srcFuncs->at(runtime, srcIdx);
+    lv.srcFuncVal = funcVal.isEmpty() ? HermesValue::encodeEmptyValue()
+                                      : funcVal.unboxToHV(runtime);
+    auto expVal = lv.srcExported->at(runtime, srcIdx);
+    lv.srcExpVal = expVal.isEmpty() ? HermesValue::encodeEmptyValue()
+                                    : expVal.unboxToHV(runtime);
+    auto typeVal = lv.srcTypes->at(runtime, srcIdx);
+    lv.srcTypeVal = typeVal.isEmpty() ? HermesValue::encodeEmptyValue()
+                                      : typeVal.unboxToHV(runtime);
 
-      auto typeVal = lv.srcTypes->at(runtime, src + i);
-      lv.tmpVal = typeVal.isEmpty() ? HermesValue::encodeEmptyValue()
-                                    : typeVal.unboxToHV(runtime);
-      (void)JSArray::setElementAt(lv.dstTypes, runtime, dst + i, lv.tmpVal);
-    }
+    lv.tmpVal = HermesValue::encodeEmptyValue();
+    if (LLVM_UNLIKELY(
+            wasmStoreTableElement(runtime, lv.dstTypes, dstIdx, lv.tmpVal) ==
+            ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
+    if (LLVM_UNLIKELY(
+            wasmStoreTableElement(
+                runtime, lv.dstFuncs, dstIdx, lv.srcFuncVal) ==
+            ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
+    if (LLVM_UNLIKELY(
+            wasmStoreTableElement(
+                runtime, lv.dstExported, dstIdx, lv.srcExpVal) ==
+            ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
+    return wasmStoreTableElement(
+        runtime, lv.dstTypes, dstIdx, lv.srcTypeVal);
+  };
+
+  if (!anyAlias || dst <= src) {
+    for (uint32_t i = 0; i < count; ++i)
+      if (LLVM_UNLIKELY(
+              copyOne(src + i, dst + i) == ExecutionStatus::EXCEPTION))
+        return ExecutionStatus::EXCEPTION;
   } else {
-    // Copy backward for overlapping same-table copy where dst > src.
-    for (uint32_t i = count; i > 0; --i) {
-      auto funcVal = lv.srcFuncs->at(runtime, src + i - 1);
-      lv.tmpVal = funcVal.isEmpty() ? HermesValue::encodeEmptyValue()
-                                    : funcVal.unboxToHV(runtime);
-      (void)JSArray::setElementAt(
-          lv.dstFuncs, runtime, dst + i - 1, lv.tmpVal);
-
-      auto typeVal = lv.srcTypes->at(runtime, src + i - 1);
-      lv.tmpVal = typeVal.isEmpty() ? HermesValue::encodeEmptyValue()
-                                    : typeVal.unboxToHV(runtime);
-      (void)JSArray::setElementAt(
-          lv.dstTypes, runtime, dst + i - 1, lv.tmpVal);
-    }
+    // Copy backward when any array is shared and dst > src.
+    for (uint32_t i = count; i > 0; --i)
+      if (LLVM_UNLIKELY(
+              copyOne(src + i - 1, dst + i - 1) == ExecutionStatus::EXCEPTION))
+        return ExecutionStatus::EXCEPTION;
   }
 
   return HermesValue::encodeUndefinedValue();
 }
 
 /// Wasm table.init: copy entries from element segment into a table.
-/// Args: (funcsArr, typesArr, elemSegs, segIdx, dst, src, count).
-/// elemSegs is a JSArray where each element is either a JSArray of
-/// interleaved [func0, typeIdx0, func1, typeIdx1, ...] or null (dropped).
+/// Args: (funcsArr, typesArr, exportedArr, elemSegs, segIdx, dst, src, count).
+/// elemSegs is a JSArray where each element is either a JSArray of Exported
+/// Functions (one per entry, null where the function index is unknown) or null
+/// for a dropped segment. The segment carries only the wrapper because the
+/// closure and the type id are derived from it, which is what keeps a
+/// table.init'ed slot's three arrays in agreement.
 /// Traps on out-of-bounds or if the segment has been dropped (with n>0).
 CallResult<HermesValue> wasmTableInit(void *, Runtime &runtime) {
   struct : public Locals {
     PinnedValue<JSArray> funcsArr;
     PinnedValue<JSArray> typesArr;
+    PinnedValue<JSArray> exportedArr;
     PinnedValue<JSArray> elemSegs;
+    PinnedValue<JSArray> segArr;
     PinnedValue<> tmpVal;
   } lv;
   LocalsRAII lraii(runtime, &lv);
 
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  auto *arr4 = wasmArrayArg(runtime, args.getArg(0),
-      "Wasm table function array is not an array");
-  if (LLVM_UNLIKELY(!arr4))
+  if (LLVM_UNLIKELY(!wasmTableArrayArgs(
+          runtime, args, 0, lv.funcsArr, lv.typesArr, lv.exportedArr)))
     return ExecutionStatus::EXCEPTION;
-  lv.funcsArr = arr4;
-  auto *arr3 = wasmArrayArg(runtime, args.getArg(1),
-      "Wasm table type array is not an array");
-  if (LLVM_UNLIKELY(!arr3))
-    return ExecutionStatus::EXCEPTION;
-  lv.typesArr = arr3;
-  auto *arr2 = wasmArrayArg(runtime, args.getArg(2),
+  auto *arr2 = wasmArrayArg(runtime, args.getArg(3),
       "Wasm element segment array is not an array");
   if (LLVM_UNLIKELY(!arr2))
     return ExecutionStatus::EXCEPTION;
   lv.elemSegs = arr2;
   uint32_t segIdx =
-      static_cast<uint32_t>(truncateToInt32(args.getArg(3).getNumber()));
-  uint32_t dst =
       static_cast<uint32_t>(truncateToInt32(args.getArg(4).getNumber()));
-  uint32_t src =
+  uint32_t dst =
       static_cast<uint32_t>(truncateToInt32(args.getArg(5).getNumber()));
-  uint32_t count =
+  uint32_t src =
       static_cast<uint32_t>(truncateToInt32(args.getArg(6).getNumber()));
+  uint32_t count =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(7).getNumber()));
 
   // Look up the element segment.
   auto segVal = lv.elemSegs->at(runtime, segIdx);
   bool dropped = segVal.isEmpty() || segVal.unboxToHV(runtime).isNull();
 
-  // Segment length = number of entries (pairs / 2).
   uint32_t segLen = 0;
-  JSArray *segArr = nullptr;
   if (!dropped) {
     // The segment entry is reachable from script-controlled state, so use a
     // checked cast: dyn_vmcast also tolerates a non-pointer value, which
     // getObject() would assert on.
-    segArr = wasmArrayArg(
+    auto *segArr = wasmArrayArg(
         runtime,
         segVal.unboxToHV(runtime),
         "Wasm element segment entry is not an array");
     if (LLVM_UNLIKELY(!segArr))
       return ExecutionStatus::EXCEPTION;
-    // Each element has 2 slots (func, typeIdx), so entries = length / 2.
-    segLen = JSArray::getLength(segArr, runtime) / 2;
+    lv.segArr = segArr;
+    // One slot per entry: the Exported Function.
+    segLen = JSArray::getLength(segArr, runtime);
   }
 
   // Bounds check against element segment.
@@ -1538,18 +2010,21 @@ CallResult<HermesValue> wasmTableInit(void *, Runtime &runtime) {
         "table.init: out of bounds table access");
   }
 
-  // Copy entries from segment to table.
+  // Copy entries from segment to table, through the slot funnel.
   for (uint32_t i = 0; i < count; ++i) {
-    // Read func and typeIdx from interleaved segment array.
-    auto funcVal = segArr->at(runtime, (src + i) * 2);
-    lv.tmpVal = funcVal.isEmpty() ? HermesValue::encodeEmptyValue()
+    auto funcVal = lv.segArr->at(runtime, src + i);
+    lv.tmpVal = funcVal.isEmpty() ? HermesValue::encodeNullValue()
                                   : funcVal.unboxToHV(runtime);
-    (void)JSArray::setElementAt(lv.funcsArr, runtime, dst + i, lv.tmpVal);
-
-    auto typeVal = segArr->at(runtime, (src + i) * 2 + 1);
-    lv.tmpVal = typeVal.isEmpty() ? HermesValue::encodeEmptyValue()
-                                  : typeVal.unboxToHV(runtime);
-    (void)JSArray::setElementAt(lv.typesArr, runtime, dst + i, lv.tmpVal);
+    if (LLVM_UNLIKELY(
+            setWasmTableSlot(
+                runtime,
+                lv.funcsArr,
+                lv.typesArr,
+                lv.exportedArr,
+                dst + i,
+                lv.tmpVal,
+                /* isFuncRef */ true) == ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
   }
 
   return HermesValue::encodeUndefinedValue();
@@ -1651,10 +2126,14 @@ raiseWasmLinkError(Runtime &runtime, const char *msg) {
 /// Validate that a table's backing arrays are genuine JSArrays. Called once
 /// per table during instantiation, which establishes the invariant that lets
 /// wasmCallIndirect -- on the indirect-call hot path -- cast them without
-/// re-checking. Both the imported case (__wasm_funcs__/__wasm_types__ are
-/// plain properties script controls) and the freshly-created case (the arrays
-/// are built via globalThis.Array, which script can replace) go through here.
-/// wasmCheckTableArrays(funcsArr, typesArr).
+/// re-checking.
+///
+/// Only EXTERNREF tables still need this. Their three arrays are built with
+/// `new Array(n)` off globalThis.Array, which script can replace with anything
+/// at all. A funcref table's arrays are the internal fields of a genuine
+/// WebAssembly.Table, which wasmLinkTable below establishes by brand check, so
+/// they are JSArrays by construction.
+/// wasmCheckTableArrays(funcsArr, typesArr, exportedArr).
 CallResult<HermesValue> wasmCheckTableArrays(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
   if (LLVM_UNLIKELY(!dyn_vmcast<JSArray>(args.getArg(0))))
@@ -1663,6 +2142,430 @@ CallResult<HermesValue> wasmCheckTableArrays(void *, Runtime &runtime) {
   if (LLVM_UNLIKELY(!dyn_vmcast<JSArray>(args.getArg(1))))
     return raiseWasmLinkError(
         runtime, "table type storage is not an array");
+  if (LLVM_UNLIKELY(!dyn_vmcast<JSArray>(args.getArg(2))))
+    return raiseWasmLinkError(
+        runtime, "table exported-function storage is not an array");
+  return HermesValue::encodeUndefinedValue();
+}
+
+/// The link-time brand check for a table, and the only route by which a
+/// table's backing storage leaves the engine.
+/// wasmLinkTable(importVal, declaredIsFuncRef)
+///   -> [funcs, types, exported, max], or null.
+///
+/// `dyn_vmcast<JSWebAssemblyTable>` is the whole point: the storage used to be
+/// published as ordinary `__wasm_funcs__`/`__wasm_types__`/`__wasm_exported__`
+/// properties, so an object literal carrying three arrays of the caller's
+/// choosing linked as a table -- which let script hand `call_indirect` a
+/// forged type id, and hand itself the internal closures that abort the VM
+/// when called with JS arguments. A brand check admits only objects this
+/// engine built. It is strictly stronger than `instanceof`, which a forged
+/// prototype chain can satisfy.
+///
+/// `declaredIsFuncRef` is the importing module's declared element type. Every
+/// constructible table is funcref (the constructor accepts only "anyfunc" and
+/// "funcref"), so a module declaring an externref table import cannot be
+/// satisfied at all, and saying so here is what closes the bypass in which an
+/// externref DECLARATION over a genuine funcref table skipped the funcref
+/// brand check on every write.
+///
+/// The three arrays are returned as they stand, not copied: a table imported
+/// by two modules is one table, and both must write the same slots. The
+/// maximum is the table's own (-1 for unbounded), so `table.grow` is bounded
+/// by what the table's owner declared rather than by the importer's
+/// declaration, which is only an upper bound on it.
+CallResult<HermesValue> wasmLinkTable(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  struct : public Locals {
+    PinnedValue<JSWebAssemblyTable> tbl;
+    PinnedValue<JSArray> out;
+    PinnedValue<> tmp;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  auto *tbl = dyn_vmcast<JSWebAssemblyTable>(args.getArg(0));
+  if (LLVM_UNLIKELY(!tbl))
+    return HermesValue::encodeNullValue();
+  // A non-funcref declaration can never be satisfied; see above.
+  if (LLVM_UNLIKELY(
+          !args.getArg(1).isBool() || !args.getArg(1).getBool()))
+    return HermesValue::encodeNullValue();
+  lv.tbl = tbl;
+
+  uint32_t maxSize = lv.tbl->getMaxSize();
+  // The three fields are set together by the constructor and never cleared,
+  // so this is a defensive check rather than a reachable state; treating it
+  // as "not a usable table" is the fail-closed answer either way.
+  if (LLVM_UNLIKELY(
+          !lv.tbl->getElements(runtime) || !lv.tbl->getTypes(runtime) ||
+          !lv.tbl->getExported(runtime)))
+    return HermesValue::encodeNullValue();
+
+  auto arrRes = JSArray::create(runtime, 4, 4);
+  if (LLVM_UNLIKELY(arrRes == ExecutionStatus::EXCEPTION))
+    return ExecutionStatus::EXCEPTION;
+  lv.out = std::move(*arrRes);
+
+  // Re-read each field after the allocation above: a GC may have moved the
+  // table, and `lv.tbl` is what stays valid across it.
+  auto store = [&runtime, &lv](uint32_t idx, HermesValue hv) {
+    lv.tmp = hv;
+    return JSArray::setElementAt(lv.out, runtime, idx, lv.tmp);
+  };
+  if (LLVM_UNLIKELY(
+          store(0, HermesValue::encodeObjectValue(
+                       lv.tbl->getElements(runtime))) ==
+          ExecutionStatus::EXCEPTION))
+    return ExecutionStatus::EXCEPTION;
+  if (LLVM_UNLIKELY(
+          store(1, HermesValue::encodeObjectValue(lv.tbl->getTypes(runtime))) ==
+          ExecutionStatus::EXCEPTION))
+    return ExecutionStatus::EXCEPTION;
+  if (LLVM_UNLIKELY(
+          store(
+              2,
+              HermesValue::encodeObjectValue(lv.tbl->getExported(runtime))) ==
+          ExecutionStatus::EXCEPTION))
+    return ExecutionStatus::EXCEPTION;
+  // UINT32_MAX is the "no explicit maximum" sentinel; -1 is how the generated
+  // code spells the same thing.
+  if (LLVM_UNLIKELY(
+          store(
+              3,
+              HermesValue::encodeTrustedNumberValue(
+                  maxSize == UINT32_MAX ? -1.0
+                                        : static_cast<double>(maxSize))) ==
+          ExecutionStatus::EXCEPTION))
+    return ExecutionStatus::EXCEPTION;
+
+  return lv.out.getHermesValue();
+}
+
+/// The link-time brand check for a memory, and the only route by which a
+/// memory's backing buffer and limits leave the engine.
+/// wasmLinkMemory(importVal) -> [currentPages, max, buffer], or null.
+///
+/// `dyn_vmcast<JSWebAssemblyMemory>` is the whole point. The limits used to be
+/// published as ordinary `__wasm_type__`/`__wasm_min__`/`__wasm_max__`
+/// properties, so an object literal carrying them -- or, worse, any object
+/// merely INHERITING from a genuine Memory, which `instanceof` accepts --
+/// described itself as a memory. A brand check admits only objects this engine
+/// built, and no prototype chain can satisfy it.
+///
+/// All three results come from the memory itself, at the moment of the call:
+///   - `currentPages` is the buffer's size, so it reflects every grow so far.
+///     The old `__wasm_min__` was a snapshot written by the constructor and
+///     never updated, which is H7: a memory grown from one page to two still
+///     claimed a minimum of one and failed to satisfy a (memory 2) import.
+///   - `max` is the memory's own maximum, -1 when it declared none. The
+///     generated code spells "unbounded" as -1, and wasmMemoryGrow truncates
+///     that to UINT32_MAX, which its 65536-page cap then dominates.
+///   - `buffer` is returned rather than left to a `.buffer` property read so
+///     that the buffer the module builds its views over is the SAME one whose
+///     size was just validated. Two independent reads are a TOCTOU: the
+///     accessor lives on a replaceable prototype.
+CallResult<HermesValue> wasmLinkMemory(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  struct : public Locals {
+    PinnedValue<JSWebAssemblyMemory> mem;
+    PinnedValue<JSArray> out;
+    PinnedValue<> tmp;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  auto *mem = dyn_vmcast<JSWebAssemblyMemory>(args.getArg(0));
+  if (LLVM_UNLIKELY(!mem))
+    return HermesValue::encodeNullValue();
+  lv.mem = mem;
+
+  uint32_t maxPages = lv.mem->getMaxPages();
+  // The constructor sets the buffer before it returns and nothing clears it,
+  // so this is a defensive check rather than a reachable state; treating it
+  // as "not a usable memory" is the fail-closed answer either way.
+  if (LLVM_UNLIKELY(!lv.mem->getBuffer(runtime)))
+    return HermesValue::encodeNullValue();
+  double currentPages =
+      static_cast<double>(lv.mem->getBuffer(runtime)->size() / 65536);
+
+  auto arrRes = JSArray::create(runtime, 3, 3);
+  if (LLVM_UNLIKELY(arrRes == ExecutionStatus::EXCEPTION))
+    return ExecutionStatus::EXCEPTION;
+  lv.out = std::move(*arrRes);
+
+  auto store = [&runtime, &lv](uint32_t idx, HermesValue hv) {
+    lv.tmp = hv;
+    return JSArray::setElementAt(lv.out, runtime, idx, lv.tmp);
+  };
+  if (LLVM_UNLIKELY(
+          store(0, HermesValue::encodeTrustedNumberValue(currentPages)) ==
+          ExecutionStatus::EXCEPTION))
+    return ExecutionStatus::EXCEPTION;
+  // UINT32_MAX is the "no explicit maximum" sentinel; -1 is how the generated
+  // code spells the same thing.
+  if (LLVM_UNLIKELY(
+          store(
+              1,
+              HermesValue::encodeTrustedNumberValue(
+                  maxPages == UINT32_MAX ? -1.0
+                                         : static_cast<double>(maxPages))) ==
+          ExecutionStatus::EXCEPTION))
+    return ExecutionStatus::EXCEPTION;
+  // Re-read the buffer after the allocation above: a GC may have moved it,
+  // and `lv.mem` is what stays valid across it.
+  if (LLVM_UNLIKELY(
+          store(
+              2,
+              HermesValue::encodeObjectValue(lv.mem->getBuffer(runtime))) ==
+          ExecutionStatus::EXCEPTION))
+    return ExecutionStatus::EXCEPTION;
+
+  return lv.out.getHermesValue();
+}
+
+/// The link-time brand check for a global.
+/// wasmLinkGlobal(importVal, expectedValType, expectedMutable)
+///   -> the global's value, or undefined, or null.
+///
+/// Three outcomes, deliberately distinguishable, because they call for three
+/// different diagnostics and collapsing them names the one thing that was not
+/// wrong:
+///   - null: `importVal` is not a WebAssembly.Global at all. The caller then
+///     decides whether a raw JS value is acceptable for this import, which
+///     depends on the declaration and not on the value.
+///   - undefined: it IS a Global, but its value type or its mutability does
+///     not match the declaration.
+///   - anything else: the global's current value -- a Number for i32/f32/f64,
+///     a BigInt for i64. A Wasm global's value is never null or undefined, so
+///     neither sentinel is ambiguous.
+///
+/// This replaced a `__wasm_type__` string comparison, and a global is the one
+/// kind where that comparison was not merely weak but useless: the string was
+/// an ordinary own property, so `{__wasm_type__: 'global:i32:const', value:
+/// 1234}` linked and handed the module 1234.
+///
+/// \p expectedValType is a JSWebAssemblyGlobal::ValType, or 0xFF for a Wasm
+/// type this engine has no Global representation for (a reference type). No
+/// constructible Global can match 0xFF, which preserves the old behaviour
+/// exactly: no `__wasm_type__` string the constructor writes ever matched a
+/// reference-typed declaration either.
+CallResult<HermesValue> wasmLinkGlobal(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  auto *glob = dyn_vmcast<JSWebAssemblyGlobal>(args.getArg(0));
+  if (LLVM_UNLIKELY(!glob))
+    return HermesValue::encodeNullValue();
+
+  // Both are compile-time literals emitted by WasmIRGen alongside the call,
+  // never anything the import object supplied, so they are the declared type
+  // and mutability by construction. Checked rather than asserted anyway, as
+  // wasmLinkTable checks its own declaredIsFuncRef argument: an unchecked
+  // getNumber()/getBool() would be a Debug-only abort, and "not a usable
+  // global" is the fail-closed answer if the contract is ever broken.
+  if (LLVM_UNLIKELY(!args.getArg(1).isNumber() || !args.getArg(2).isBool()))
+    return HermesValue::encodeNullValue();
+  auto expectedType =
+      static_cast<uint8_t>(args.getArg(1).getNumberAs<uint32_t>());
+  bool expectedMutable = args.getArg(2).getBool();
+  if (LLVM_UNLIKELY(
+          static_cast<uint8_t>(glob->getValType()) != expectedType ||
+          glob->isMutable() != expectedMutable))
+    return HermesValue::encodeUndefinedValue();
+
+  // An i64 global's value is a BigInt, both here and in
+  // Global.prototype.value: a double cannot represent every i64 exactly.
+  // Nothing above this point holds a raw pointer, so the allocation is safe.
+  if (glob->getValType() == JSWebAssemblyGlobal::ValType::I64)
+    return BigIntPrimitive::fromSigned(runtime, glob->getI64Value());
+
+  return HermesValue::encodeTrustedNumberValue(glob->getValue());
+}
+
+/// The two halves of an imported MUTABLE global's shared state.
+/// wasmGlobalGet(globalObj) -> the global's current value.
+/// wasmGlobalSet(globalObj, value) -> undefined.
+///
+/// A mutable global import is not snapshotted -- per spec it is genuinely
+/// shared with the host's WebAssembly.Global, so a global.set inside the
+/// module must be visible through `.value` and a host write to `.value` must
+/// be visible to the next global.get. That is H12, and it must not regress.
+/// The sharing was implemented by keeping the object and reading and writing
+/// `.value` on it at every global.get and global.set, plus once at
+/// instantiation for the snapshot the constant expressions use.
+///
+/// `value` is a CONFIGURABLE accessor on WebAssembly.Global.prototype, so all
+/// three of those were script-replaceable. Measured before the change: a
+/// hijacked getter fed the module 999 for a global holding 77, the module's
+/// `global.set(5)` was swallowed and the real global still read 77, and three
+/// user-JS callbacks ran inside instantiation.
+///
+/// These reach the same internal field the accessor reaches -- value_, or
+/// i64Value_ for an i64 global -- past a dyn_vmcast. Snapshotting instead
+/// would be H12 all over again.
+///
+/// The brand check is not decoration, and its real justification is the VM
+/// side rather than the compiler side. A PRIVATE_BUILTIN is reachable from
+/// ANY bytecode that emits a CallBuiltin with this index: `builtins_[]` is
+/// indexed straight from the operand and nothing types the arguments. That
+/// channel is not hypothetical -- it is the one every test in test/wasm uses,
+/// via -Xenable-untrusted-bytecode-from-js. So this is the entry guard, and
+/// an unchecked vmcast here would be a Debug-only assert and a wild pointer
+/// in a release build.
+///
+/// On the compiler side it is unreachable: the object comes from a hidden
+/// frame Variable written only in the accept block of the global import path,
+/// with the object wasmLinkGlobal admitted. I could not construct a call with
+/// anything else, and did not prove that none exists.
+CallResult<HermesValue> wasmGlobalGet(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  auto *glob = dyn_vmcast<JSWebAssemblyGlobal>(args.getArg(0));
+  if (LLVM_UNLIKELY(!glob))
+    return runtime.raiseTypeError(
+        "Wasm global.get: the imported global is not a WebAssembly.Global");
+
+  // An i64 global's value is a BigInt, here and in Global.prototype.value: a
+  // double cannot represent every i64 exactly. The digit is read out of the
+  // field before fromSigned allocates, so no raw pointer crosses the
+  // safepoint.
+  if (glob->getValType() == JSWebAssemblyGlobal::ValType::I64)
+    return BigIntPrimitive::fromSigned(runtime, glob->getI64Value());
+
+  return HermesValue::encodeTrustedNumberValue(glob->getValue());
+}
+
+CallResult<HermesValue> wasmGlobalSet(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  auto *glob = dyn_vmcast<JSWebAssemblyGlobal>(args.getArg(0));
+  if (LLVM_UNLIKELY(!glob))
+    return runtime.raiseTypeError(
+        "Wasm global.set: the imported global is not a WebAssembly.Global");
+
+  // Reachable the same way the cast above is: any bytecode can call this
+  // builtin with any Global, so this is the entry guard, not a compiler
+  // invariant restated. Through compiler-generated IR it cannot fire -- only
+  // a MUTABLE import keeps its object and reaches here, an immutable one is
+  // snapshotted into a frame slot at link time, wasmLinkGlobal refuses an
+  // immutable Global for a mutable declaration, and mutable_ is written only
+  // by the constructor. Writing an immutable global would be a spec
+  // violation, so the check stays regardless.
+  if (LLVM_UNLIKELY(!glob->isMutable()))
+    return runtime.raiseTypeError(
+        "Wasm global.set: the imported global is immutable");
+
+  HermesValue val = args.getArg(1);
+  if (glob->getValType() == JSWebAssemblyGlobal::ValType::I64) {
+    if (LLVM_UNLIKELY(!val.isBigInt()))
+      return runtime.raiseTypeError(
+          "Wasm global.set: an i64 global requires a BigInt value");
+    glob->setI64Value(
+        static_cast<int64_t>(val.getBigInt()->truncateToSingleDigit()));
+    return HermesValue::encodeUndefinedValue();
+  }
+  if (LLVM_UNLIKELY(!val.isNumber()))
+    return runtime.raiseTypeError(
+        "Wasm global.set: a numeric global requires a Number value");
+  // setWasmGlobalNumber, not setValue: it is the one writer of value_, so an
+  // i32 global's field is int32-valued and an f32 global's float-valued
+  // whichever of the three writers wrote it. The values generated code pushes
+  // here are already in that form, so this cannot be observed to do anything
+  // -- it makes the invariant a property of the setter rather than of the
+  // whole compiler, and keeps the three writers from drifting apart.
+  setWasmGlobalNumber(glob, val.getNumber());
+  return HermesValue::encodeUndefinedValue();
+}
+
+/// Stamp the internal state that makes an object a WebAssembly Exported
+/// Function: the internal closure it wraps and the interned id of its
+/// signature. Both live in named internal properties, which script can neither
+/// name, enumerate nor write, so their presence is a brand that cannot be
+/// forged BY SCRIPT.
+/// The type id is the *interned* one (see wasmInternType), not a module-local
+/// type index, because the wrapper is compared against ids minted by other
+/// modules.
+/// wasmSetFuncInfo(exportedFn, closure, typeId).
+///
+/// The qualification matters, and it is why the two argument checks below are
+/// what they are. A PRIVATE_BUILTIN is reachable from ANY bytecode that emits
+/// a CallBuiltin with its index: `builtins_[]` is indexed straight from the
+/// operand and nothing types the arguments. That is the same VM-side entry
+/// channel Task 5b's Minor 2 established for wasmGlobalGet/Set, and every test
+/// in test/wasm uses it, via -Xenable-untrusted-bytecode-from-js. Under that
+/// doctrine an `dyn_vmcast<JSObject>` on arg 0 alone would let a caller stamp
+/// the brand onto an arbitrary object with an arbitrary "closure", and the
+/// brand is what readWasmFuncInfo trusts to hand a value to call_indirect.
+///
+/// So both arg 0 and arg 1 must be CALLABLE, which is what the compiler always
+/// passes: arg 0 is a CreateFunctionInst result (the export wrapper) and arg 1
+/// is closureVars_[i], written only by a CreateFunctionInst. Neither check can
+/// fire on compiler-generated IR, exactly like the wasmGlobalGet/Set guards,
+/// and neither is dead for that reason. `.hbc` is trusted and this is out of
+/// the threat model either way; the point is that the doctrine is applied
+/// consistently rather than at whichever site happened to get reviewed.
+CallResult<HermesValue> wasmSetFuncInfo(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  struct : public Locals {
+    PinnedValue<JSObject> fn;
+    PinnedValue<> closure;
+    PinnedValue<> typeId;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+  // defineOwnProperty allocates handles in the caller's scope; this builtin
+  // runs once per exported function at instantiation, so release them here
+  // rather than letting them pile up across a module's wrappers.
+  GCScopeMarkerRAII marker{runtime};
+
+  auto *fn = dyn_vmcast<Callable>(args.getArg(0));
+  if (LLVM_UNLIKELY(!fn))
+    return runtime.raiseTypeError(
+        "Wasm exported function state can only be set on a function");
+  if (LLVM_UNLIKELY(!vmisa<Callable>(args.getArg(1))))
+    return runtime.raiseTypeError(
+        "a Wasm exported function must wrap a function");
+  lv.fn = fn;
+  lv.closure = args.getArg(1);
+  lv.typeId = args.getArg(2);
+
+  // Non-enumerable, non-configurable and non-writable: nothing outside this
+  // builtin ever rewrites these, and the brand must not be removable.
+  DefinePropertyFlags dpf = DefinePropertyFlags::getNewNonEnumerableFlags();
+  dpf.writable = 0;
+  dpf.configurable = 0;
+
+  // The type id goes on FIRST and the brand LAST, so that a function carrying
+  // WasmFuncClosure always carries WasmFuncTypeId too. A refusal is not
+  // possible today -- the caller hands us a fresh, extensible closure -- but
+  // it must not be ignored: presence of WasmFuncClosure is the brand, so a
+  // half-branded function would pass a brand check and then read undefined as
+  // its type id. Raise rather than assert, so a release build fails the
+  // instantiation instead of publishing the half-branded object.
+  auto typeRes = JSObject::defineOwnProperty(
+      lv.fn,
+      runtime,
+      Predefined::getSymbolID(Predefined::InternalPropertyWasmFuncTypeId),
+      dpf,
+      lv.typeId);
+  if (LLVM_UNLIKELY(typeRes == ExecutionStatus::EXCEPTION))
+    return ExecutionStatus::EXCEPTION;
+  if (LLVM_UNLIKELY(!*typeRes))
+    return runtime.raiseTypeError(
+        "Wasm exported function refused its type id");
+
+  auto closureRes = JSObject::defineOwnProperty(
+      lv.fn,
+      runtime,
+      Predefined::getSymbolID(Predefined::InternalPropertyWasmFuncClosure),
+      dpf,
+      lv.closure);
+  if (LLVM_UNLIKELY(closureRes == ExecutionStatus::EXCEPTION))
+    return ExecutionStatus::EXCEPTION;
+  if (LLVM_UNLIKELY(!*closureRes))
+    return runtime.raiseTypeError(
+        "Wasm exported function refused its closure");
+
   return HermesValue::encodeUndefinedValue();
 }
 
@@ -2950,22 +3853,34 @@ void createHermesBuiltins(Runtime &runtime) {
       wasmI64ToBigInt,
       2);
 
+  // The table slot accessors.
+  defineInternMethod(
+      B::HermesBuiltin_wasmTableGetSlot,
+      P::wasmTableGetSlot,
+      wasmTableGetSlot,
+      2);
+  defineInternMethod(
+      B::HermesBuiltin_wasmTableSetSlot,
+      P::wasmTableSetSlot,
+      wasmTableSetSlot,
+      6);
+  defineInternMethod(
+      B::HermesBuiltin_wasmTableCopySlots,
+      P::wasmTableCopySlots,
+      wasmTableCopySlots,
+      9);
+
   // Bulk table helpers (N.2).
   defineInternMethod(
       B::HermesBuiltin_wasmTableFill,
       P::wasmTableFill,
       wasmTableFill,
-      4);
-  defineInternMethod(
-      B::HermesBuiltin_wasmTableCopy,
-      P::wasmTableCopy,
-      wasmTableCopy,
       7);
   defineInternMethod(
       B::HermesBuiltin_wasmTableInit,
       P::wasmTableInit,
       wasmTableInit,
-      7);
+      8);
   defineInternMethod(
       B::HermesBuiltin_wasmElemDrop,
       P::wasmElemDrop,
@@ -2975,7 +3890,7 @@ void createHermesBuiltins(Runtime &runtime) {
       B::HermesBuiltin_wasmTableGrow,
       P::wasmTableGrow,
       wasmTableGrow,
-      5);
+      8);
   defineInternMethod(
       B::HermesBuiltin_wasmLinkError,
       P::wasmLinkError,
@@ -2991,7 +3906,37 @@ void createHermesBuiltins(Runtime &runtime) {
       B::HermesBuiltin_wasmCheckTableArrays,
       P::wasmCheckTableArrays,
       wasmCheckTableArrays,
+      3);
+  defineInternMethod(
+      B::HermesBuiltin_wasmLinkTable,
+      P::wasmLinkTable,
+      wasmLinkTable,
       2);
+  defineInternMethod(
+      B::HermesBuiltin_wasmLinkMemory,
+      P::wasmLinkMemory,
+      wasmLinkMemory,
+      1);
+  defineInternMethod(
+      B::HermesBuiltin_wasmLinkGlobal,
+      P::wasmLinkGlobal,
+      wasmLinkGlobal,
+      3);
+  defineInternMethod(
+      B::HermesBuiltin_wasmGlobalGet,
+      P::wasmGlobalGet,
+      wasmGlobalGet,
+      1);
+  defineInternMethod(
+      B::HermesBuiltin_wasmGlobalSet,
+      P::wasmGlobalSet,
+      wasmGlobalSet,
+      2);
+  defineInternMethod(
+      B::HermesBuiltin_wasmSetFuncInfo,
+      P::wasmSetFuncInfo,
+      wasmSetFuncInfo,
+      3);
 }
 
 } // namespace vm

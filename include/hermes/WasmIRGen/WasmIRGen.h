@@ -40,9 +40,10 @@ class WasmIRGen {
   /// bodies are translated.
   void createFunctions();
 
-  /// Populate escapableFuncs_ with the indices of functions whose closure
-  /// can reach JS directly (finding J4). Called once by createFunctions()
-  /// before any parameter is typed.
+  /// Populate escapableFuncs_ with the indices of functions for which a
+  /// funcref value can exist. Called once by createFunctions(), before
+  /// exportedFuncVars_ is sized, because that set decides which indices get a
+  /// canonical Exported Function.
   void computeEscapableFuncs();
 
   /// Finalize the top-level function after all sections have been parsed.
@@ -50,7 +51,15 @@ class WasmIRGen {
   /// exports object, and emits the return instruction.
   /// Must be called after createFunctions() and after all function bodies
   /// and data sections have been processed.
-  void finalizeModule();
+  /// \return false, with getErrorMessage() describing why, if the module is
+  ///   malformed in a way only detectable here. The IR module is left
+  ///   half-built in that case and must be discarded.
+  bool finalizeModule();
+
+  /// Why finalizeModule() returned false. Empty while it has not failed.
+  llvh::StringRef getErrorMessage() const {
+    return errorMsg_;
+  }
 
   // --- Per-function translation (called by BinaryReaderHermesIRGen) ---
 
@@ -448,6 +457,14 @@ class WasmIRGen {
   /// elem.drop: mark element segment as no longer needed.
   void onElemDrop(uint32_t segmentIndex);
 
+  /// ref.null: push the null reference. A funcref is an Exported Function or
+  /// null, so the null reference is JS null -- there is nothing to synthesize
+  /// and nothing unsupported about it. It used to go through
+  /// warnUnsupported(), which pushed `undefined`; that value then had to be
+  /// tolerated by every consumer of a funcref, and a slot cleared with it
+  /// could not be told apart from one cleared by a missing JS argument.
+  void onRefNull();
+
   // --- Unsupported opcode handling (D.13) ---
 
   /// Emit a warning for an unsupported opcode. Pops \p numInputs values
@@ -468,6 +485,14 @@ class WasmIRGen {
   IRBuilder builder_;
   WasmHelpers helpers_;
 
+  /// Set by finalizeModule() when it refuses the module; see
+  /// getErrorMessage().
+  std::string errorMsg_;
+
+  /// Check that every export names an index that exists in its index space.
+  /// \return false, having set errorMsg_, for the first one that does not.
+  bool validateExportIndices();
+
   /// Whether to enable strict Wasm memory bounds checking (from --test262).
   bool test262_ = false;
 
@@ -479,11 +504,29 @@ class WasmIRGen {
   /// pre-created closure. Indexed by Wasm function index.
   std::vector<Variable *> closureVars_;
 
-  /// Function indices whose internal closure can reach JavaScript directly,
-  /// where it may be called with arbitrary arguments. Such a function's
-  /// float params must be coerced on entry rather than trusted (finding J4);
-  /// see computeEscapableFuncs() and beginFunction(). Populated once by
-  /// createFunctions().
+  /// One Variable per Wasm function index holding that function's CANONICAL
+  /// Exported Function -- the single JS-visible wrapper object for the index,
+  /// created once in the instantiate body and used by every view of the
+  /// function (each export name, and later every table slot), so all of them
+  /// are the same object. Each wrapper carries the WasmFuncClosure and
+  /// WasmFuncTypeId internal properties.
+  ///
+  /// A slot is null when the index needs no wrapper: only indices that are
+  /// exported, imported, or in escapableFuncs_ (element segments and ref.func
+  /// global initializers) can have their function reach script at all.
+  std::vector<Variable *> exportedFuncVars_;
+
+  /// Function indices a funcref VALUE can name -- those listed by an element
+  /// segment or by a ref.func global initializer. Such a function needs a
+  /// canonical Exported Function even when it is neither exported nor
+  /// imported, because that wrapper is what a table slot, a funcref result, a
+  /// funcref global and an import-trampoline argument all carry.
+  ///
+  /// The name is historical and now overstates things: these indices are the
+  /// ones whose function can be NAMED by a funcref, not ones whose internal
+  /// closure escapes. Nothing hands the closure out any more, which is what
+  /// let the J4 parameter coercion go (see createFunctions()). Populated once
+  /// by createFunctions(); read only when sizing exportedFuncVars_.
   llvh::DenseSet<uint32_t> escapableFuncs_;
 
   /// One Variable per imported function, holding the JS callable passed
@@ -500,11 +543,20 @@ class WasmIRGen {
   /// its `.value` so writes are visible in both directions.
   std::vector<Variable *> importGlobalVals_;
 
-  /// Variable holding the imported memory's __wasm_max__ value (max pages,
-  /// or -1 if unbounded). Set during import validation. onMemoryGrow()
-  /// uses this as the actual growth limit instead of the import
-  /// declaration's maximum. nullptr if no memory is imported.
+  /// Variable holding the imported memory's OWN maximum (max pages, or -1 if
+  /// unbounded), read out of the memory's internal field by wasmLinkMemory
+  /// during import validation. onMemoryGrow() uses this as the actual growth
+  /// limit instead of the import declaration's maximum, which is only an
+  /// upper bound on it. nullptr if no memory is imported.
   Variable *importedMemMaxVar_ = nullptr;
+
+  /// Variable holding the imported memory's ArrayBuffer, as returned by the
+  /// same wasmLinkMemory call that measured it. createMemoryViews() builds
+  /// the module's typed-array views over this rather than re-reading
+  /// `.buffer`, which is a prototype accessor script can replace: two reads
+  /// could yield two different buffers, and only the first was validated.
+  /// nullptr if no memory is imported.
+  Variable *importedMemBufVar_ = nullptr;
 
   /// Variable holding the WebAssembly.Memory object backing a locally
   /// defined memory. The module's typed-array views are built over this
@@ -513,14 +565,11 @@ class WasmIRGen {
   /// memory. nullptr when the module has no defined memory.
   Variable *memObjVar_ = nullptr;
 
-  /// One Variable per imported table, holding that table's actual current
-  /// size (its __wasm_funcs__ length, or __wasm_min__ for a JS-API Table).
-  /// Set during import validation. Indexed by imported table index.
-  std::vector<Variable *> importedTableMinVars_;
-
-  /// One Variable per imported table, holding that table's actual
-  /// __wasm_max__ value (or -1 if unbounded). Set during import validation.
-  /// Indexed by imported table index.
+  /// One Variable per imported table, holding that table's OWN maximum (or
+  /// -1 if unbounded), read from the table itself during import validation.
+  /// Indexed by imported table index. table.grow reads it, so that growing an
+  /// imported table respects the maximum its owner declared rather than the
+  /// importer's declaration, which is only an upper bound on it.
   std::vector<Variable *> importedTableMaxVars_;
 
   /// Typed array view indices into memViewVars_.
@@ -540,18 +589,25 @@ class WasmIRGen {
   /// Only populated if the module has a memory section.
   Variable *memViewVars_[NUM_MEM_VIEWS] = {};
 
-  /// Per-table Variables in the top-level scope.
-  /// tableFuncVars_[i] holds a JS Array of closures (null = uninitialized).
-  /// tableTypeVars_[i] holds a JS Array of type indices (-1 = uninitialized).
-  /// Indexed by Wasm table index.
+  /// Per-table Variables in the top-level scope. Indexed by Wasm table index.
+  /// A table slot is spread over three parallel arrays, all of the same
+  /// length, and every write goes through wasmTableSetSlot /
+  /// wasmTableCopySlots so that the three agree slot by slot.
+  /// tableFuncVars_[i] holds a JS Array of internal closures (call_indirect's
+  ///   hot path reads this one, so it is NOT the Exported Function).
+  /// tableTypeVars_[i] holds a JS Array of interned type ids.
+  /// tableExportVars_[i] holds a JS Array of Exported Functions or null --
+  ///   the funcref value everything outside call_indirect sees.
   std::vector<Variable *> tableFuncVars_;
   std::vector<Variable *> tableTypeVars_;
+  std::vector<Variable *> tableExportVars_;
 
-  /// tableObjVars_[i] holds the WebAssembly.Table backing a locally defined
-  /// funcref table -- the object whose own funcs/types arrays are
-  /// tableFuncVars_[i]/tableTypeVars_[i], published on export so get/set/
-  /// grow/length operate on the module's real storage. Null for imported
-  /// tables and for externref tables (not built by the Table constructor).
+  /// tableObjVars_[i] holds the WebAssembly.Table whose internal fields are
+  /// tableFuncVars_[i]/tableTypeVars_[i]/tableExportVars_[i]: the object the
+  /// module constructed for a locally defined funcref table, or the object
+  /// that satisfied a table import. Either way exporting it publishes the
+  /// module's real storage, so get/set/grow/length operate on it. Unset for
+  /// externref tables, which the Table constructor does not build.
   std::vector<Variable *> tableObjVars_;
 
   /// Per-global Variables in the top-level scope.
@@ -588,6 +644,12 @@ class WasmIRGen {
   /// structural type string, so identical signatures agree regardless of which
   /// module declared them and in what order.
   std::vector<Variable *> typeIdVars_;
+
+  /// Whether internTypeIds() has run. The Variables in typeIdVars_ are created
+  /// unconditionally, so their non-nullness says nothing; only this says the
+  /// interning calls were actually emitted and the slots hold real ids rather
+  /// than undefined. Anything that loads a type id must assert on this.
+  bool internedTypeIds_ = false;
 
   /// tagVars_[i] holds the object identifying tag i. Wasm tag identity is
   /// NOMINAL, not structural: two tags with the same signature are distinct
@@ -846,6 +908,8 @@ class WasmIRGen {
   /// Create the typed array views for the linear memory in the top-level
   /// function. Called from createFunctions() if the module has memory.
   /// \p tlScope is the CreateScopeInst for the top-level scope.
+  /// For a DEFINED memory this brand-checks the constructor's result, so it
+  /// splits the instantiate body and advances tlEntry_.
   void createMemoryViews(Instruction *tlScope);
 
   /// Create and initialize tables in the top-level function.
@@ -877,11 +941,24 @@ class WasmIRGen {
   void initializeGlobals(Instruction *tlScope);
 
   /// Coerce \p value, an arbitrary JS value read from a global import, to the
-  /// declared Wasm type \p type, per ToWebAssemblyValue. Nothing constrains
-  /// what the imports object hands us -- __wasm_type__ is an ordinary
-  /// property, so even the "WebAssembly.Global" arm can produce any value --
-  /// and without this an object or a fractional number would land in a slot
-  /// the rest of the compiler treats as an i32/f32/f64.
+  /// declared Wasm type \p type, per ToWebAssemblyValue. Without this an
+  /// object or a fractional number would land in a slot the rest of the
+  /// compiler treats as an i32/f32/f64.
+  ///
+  /// STILL REQUIRED after the link path became a brand check, for ONE reason
+  /// that has nothing to do with the deleted __wasm_type__ string: an
+  /// IMMUTABLE global import may be satisfied by a RAW JS value, which is only
+  /// checked with `typeof`, so 3.7 and 2^32+5 both arrive. That is Task 6's
+  /// J4 item and it is load-bearing today.
+  ///
+  /// The second reason this comment used to give -- a mutable import being
+  /// read at every global.get through the replaceable `.value` accessor -- is
+  /// GONE: that read is the wasmGlobalGet builtin now, and the field it
+  /// returns is written only by setWasmGlobalNumber, which canonicalises it.
+  /// The call on the mutable global.get path is therefore a no-op; it is kept
+  /// only so that its retirement happens once, with J4, rather than in two
+  /// places. Do not read its presence there as evidence that the value is
+  /// untrusted.
   /// \return the coerced value; \p value unchanged for I64 (converted from a
   ///   BigInt by the caller) and for reference types.
   Value *coerceImportedGlobalValue(Value *value, WasmValType type);
@@ -895,6 +972,19 @@ class WasmIRGen {
 
   /// Load the table type-indices array from the top-level scope.
   Value *loadTableTypes(uint32_t tableIndex);
+
+  /// Load the table Exported Function array from the top-level scope.
+  Value *loadTableExported(uint32_t tableIndex);
+
+  /// \return true if table \p tableIndex holds funcrefs. An externref table
+  /// holds arbitrary JS values instead, so its slots carry no Exported
+  /// Function and no interned type id, and the write funnel must store what it
+  /// is given rather than deriving a triple from it.
+  bool tableIsFuncRef(uint32_t tableIndex) const;
+
+  /// \return a literal 1 or 0 for tableIsFuncRef(\p tableIndex), to pass to
+  /// the table helpers.
+  Value *tableIsFuncRefLiteral(uint32_t tableIndex);
 
   /// Emit a byte-by-byte load from HEAPU8 for unaligned access.
   /// \p addr is the effective byte address.
@@ -921,18 +1011,45 @@ class WasmIRGen {
   /// No-op when test262_ is false.
   void emitMemoryBoundsCheck(Value *addr, uint32_t numBytes);
 
-  /// Create an export wrapper function for the given Wasm function export.
+  /// Build every canonical Exported Function the module needs -- one per
+  /// non-null slot of exportedFuncVars_ -- stamp each with the closure it
+  /// wraps and the interned id of its signature, and store it into its
+  /// Variable.
+  ///
+  /// This runs BEFORE createTables(), because a table slot holds the Exported
+  /// Function: an element segment applied at instantiate time would otherwise
+  /// read a Variable that has not been stored yet.
+  ///
+  /// \p tlScope is the CreateScopeInst for the top-level scope.
+  /// NOTE: createExportWrapper switches the insertion block, so this restores
+  /// insertion to tlEntry_ before returning.
+  void createExportedFunctions(BaseScopeInst *tlScope);
+
+  /// Create the body of the canonical Exported Function for a Wasm function.
   /// The wrapper presents a clean JS-compatible interface: 1 param per Wasm
   /// param, argument coercion, and return value marshaling.
-  /// \p funcIndex is the Wasm function index of the exported function.
-  /// \p exportName is the export name used for the wrapper function name.
+  /// Called once per function index, not once per export name.
+  /// \p funcIndex is the Wasm function index being wrapped.
+  /// \p wrapperName names the wrapper IR Function (the first export name of
+  ///   \p funcIndex if it has one, otherwise a synthesized name).
   /// \p tlScope is the CreateScopeInst for the top-level scope, used to
   ///   load the internal function's closure.
   /// \return the created wrapper IR Function.
+  ///
+  /// NOTE: this leaves the insertion point inside the wrapper's own body. It
+  /// does not touch tlEntry_, so the caller must restore insertion to
+  /// tlEntry_ before emitting more of the instantiate body.
   Function *createExportWrapper(
       uint32_t funcIndex,
-      llvh::StringRef exportName,
+      llvh::StringRef wrapperName,
       Instruction *tlScope);
+
+  /// \return the name to give the canonical Exported Function wrapper of
+  ///   \p funcIndex: "wasm_export_<first export name>" when the index is
+  ///   exported, so the common case keeps the name it always had, and
+  ///   "wasm_funcref_<index>" for a wrapper that exists only because the
+  ///   function can reach script through a table or a funcref global.
+  std::string exportWrapperName(uint32_t funcIndex) const;
 
   /// Create an import trampoline function for the given imported function.
   /// The trampoline loads the imported JS function from the top-level scope,

@@ -63,19 +63,41 @@
   (func $get_size (export "get_size") (result i32)
     table.size 0
   )
+
+  ;; The funcref in a slot, as opposed to the result of calling it. Every
+  ;; bulk operation has to maintain the slot's Exported Function alongside its
+  ;; closure and type id, and call_indirect -- which reads only the other two
+  ;; -- cannot tell whether it did.
+  (func $get_at (export "get_at") (param i32) (result funcref)
+    (table.get 0 (local.get 0))
+  )
 )
 
 ;; CHECK: === table.copy ===
 ;; CHECK-NEXT: copy 4,0,2: ok
 ;; CHECK-NEXT: call_at 4: 10
 ;; CHECK-NEXT: call_at 5: 20
+;; CHECK-NEXT: get_at 4: 10
+;; CHECK-NEXT: get_at 5: 20
+
+;; table.copy with dst == src is a no-op, and is the aliasing case the slot
+;; write ordering has to handle: the destination type id is cleared before the
+;; slot is rewritten, and when the two indices are the same that clear would
+;; otherwise destroy the value read back at the end.
+;; CHECK-NEXT: copy 0,0,2 (self): ok
+;; CHECK-NEXT: call_at 0: 10
+;; CHECK-NEXT: call_at 1: 20
+;; CHECK-NEXT: get_at 0: 10
 ;; CHECK-NEXT: === table.init ===
 ;; CHECK-NEXT: init_seg1 7,0,3: ok
 ;; CHECK-NEXT: call_at 7: 30
 ;; CHECK-NEXT: call_at 8: 40
 ;; CHECK-NEXT: call_at 9: 50
-;; CHECK-NEXT: === table.fill (no call_indirect) ===
+;; CHECK-NEXT: get_at 7: 30
+;; CHECK-NEXT: === table.fill ===
 ;; CHECK-NEXT: fill_from 2,0,3: ok
+;; CHECK-NEXT: call_at 2: 10
+;; CHECK-NEXT: get_at 2: 10
 ;; CHECK-NEXT: size: 10
 ;; CHECK-NEXT: === elem.drop + init n=0 ===
 ;; CHECK-NEXT: drop_seg1 ok

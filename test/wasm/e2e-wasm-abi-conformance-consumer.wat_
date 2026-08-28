@@ -1,0 +1,14 @@
+;; Copyright (c) Meta Platforms, Inc. and affiliates.
+;;
+;; This source code is licensed under the MIT license found in the
+;; LICENSE file in the root directory of this source tree.
+
+;; Companion module for e2e-wasm-abi-conformance.wat: imports one of each
+;; kind, in declaration order memory / global / table, so a bad value for one
+;; kind is reported against that kind while the other two are genuine.
+
+(module
+  (import "e" "m" (memory 1))
+  (import "e" "g" (global i32))
+  (import "e" "t" (table 1 funcref))
+  (func (export "probe") (result i32) global.get 0))

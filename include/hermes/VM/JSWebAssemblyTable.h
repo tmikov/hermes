@@ -58,6 +58,16 @@ class JSWebAssemblyTable final : public JSObject {
     types_.set(runtime, arr, runtime.getHeap());
   }
 
+  /// Get the underlying JSArray holding the Exported Function of each entry.
+  JSArray *getExported(Runtime &runtime) const {
+    return exported_.get(runtime);
+  }
+
+  /// Set the underlying JSArray holding the Exported Function of each entry.
+  void setExported(Runtime &runtime, JSArray *arr) {
+    exported_.set(runtime, arr, runtime.getHeap());
+  }
+
   /// Get the maximum table size (UINT32_MAX means no explicit maximum).
   uint32_t getMaxSize() const {
     return maxSize_;
@@ -75,7 +85,8 @@ class JSWebAssemblyTable final : public JSObject {
       Handle<HiddenClass> clazz)
       : JSObject(runtime, *parent, *clazz),
         elements_(runtime, nullptr, runtime.getHeap()),
-        types_(runtime, nullptr, runtime.getHeap()) {}
+        types_(runtime, nullptr, runtime.getHeap()),
+        exported_(runtime, nullptr, runtime.getHeap()) {}
 
   ~JSWebAssemblyTable() = default;
 
@@ -91,6 +102,19 @@ class JSWebAssemblyTable final : public JSObject {
   /// \c elements_. Entries set from JS have no type id and read as empty,
   /// which call_indirect refuses.
   GCPointer<JSArray> types_;
+
+  /// The JSArray holding the Exported Function of each entry (or null),
+  /// parallel to \c elements_. This is the funcref value everything outside
+  /// call_indirect sees: table.get, Table.prototype.get, and every funcref
+  /// that travels on the Wasm value stack. \c elements_ keeps the internal
+  /// closure instead, so the indirect-call hot path is unchanged.
+  ///
+  /// The three arrays agree slot by slot: either all three are null/empty, or
+  /// \c elements_[i] is the closure, \c types_[i] its interned type id, and
+  /// \c exported_[i] the wrapper carrying that same pair. The invariant is
+  /// maintained by funnelling every write through wasmTableSetSlot /
+  /// wasmTableCopySlots rather than by discipline at each writer.
+  GCPointer<JSArray> exported_;
 
   /// Maximum table size. UINT32_MAX = no explicit maximum; the spec's
   /// limit is 2^32-1 entries, so a genuine maximum of UINT32_MAX and no

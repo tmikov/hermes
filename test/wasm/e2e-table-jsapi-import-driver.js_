@@ -18,12 +18,41 @@ print('module size: ' + inst.exports.size());
 print('elem entry via tbl.get: ' + typeof tbl.get(0));
 print('call0: ' + inst.exports.call0());
 
-tbl.set(1, function() { return 9; });
+// A plain JS function is not a funcref and cannot enter the table at all.
+try {
+  tbl.set(1, function() { return 9; });
+  print('JS set of a plain function: accepted');
+} catch (e) {
+  print('JS set of a plain function: ' + e.name);
+}
+
+// An Exported Function can, and it brings its own interned type id with it, so
+// the module's call_indirect accepts it. `call0` has signature (result i32),
+// which is what call1's call_indirect asks for; calling it runs slot 0, the
+// element segment's $f42.
+tbl.set(1, inst.exports.call0);
 try {
   print('call1 after JS set: ' + inst.exports.call1());
 } catch (e) {
   print('call1 after JS set: ' + e.name + ': ' + e.message);
 }
+
+// An Exported Function of a DIFFERENT signature is a funcref too, so it is
+// stored -- but it arrives with its OWN type id, so call_indirect, which asks
+// for (result i32), traps rather than calling `id` with no argument. Every
+// other export of this module happens to be (result i32), so `id` exists for
+// this line alone: with only matching signatures around, a slot that kept its
+// old type id would be indistinguishable from one that carried the new.
+tbl.set(1, inst.exports.id);
+try {
+  print('call1 after mismatching JS set: ' + inst.exports.call1());
+} catch (e) {
+  print('call1 after mismatching JS set: ' + e.name + ': ' + e.message);
+}
+
+// Put a matching one back so the growth assertions below start from a table
+// whose slots are armed.
+tbl.set(1, inst.exports.call0);
 
 print('JS grow -> ' + tbl.grow(3) + ', module size: ' + inst.exports.size());
 print('module grow -> ' + inst.exports.grow2() + ', tbl.length: ' + tbl.length);

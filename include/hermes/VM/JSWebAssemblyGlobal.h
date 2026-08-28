@@ -37,7 +37,22 @@ class JSWebAssemblyGlobal final : public JSObject {
       Handle<JSObject> prototype);
 
   /// Value type enum matching WebAssembly value types.
+  ///
+  /// THESE NUMERIC VALUES ARE AN ABI, not an implementation detail.
+  /// `WasmIRGen::globalValTypeCode` hardcodes 0/1/2/3 and emits them as IR
+  /// literals into the wasmLinkGlobal call that validates every global
+  /// import, because the Wasm frontend does not depend on VM headers.
+  /// Reordering this enum without updating that function would silently make
+  /// every global import accept the wrong type. The static_asserts below turn
+  /// that into a build error.
   enum class ValType : uint8_t { I32, I64, F32, F64 };
+  static_assert(
+      static_cast<uint8_t>(ValType::I32) == 0 &&
+          static_cast<uint8_t>(ValType::I64) == 1 &&
+          static_cast<uint8_t>(ValType::F32) == 2 &&
+          static_cast<uint8_t>(ValType::F64) == 3,
+      "ValType codes are baked into WasmIRGen::globalValTypeCode; update it "
+      "before changing them");
 
   /// Get the stored value. Only meaningful for i32/f32/f64; an i64 global
   /// stores its value in the 64-bit slot instead, because a double cannot

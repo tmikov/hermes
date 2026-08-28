@@ -1,0 +1,12 @@
+;; Copyright (c) Meta Platforms, Inc. and affiliates.
+;;
+;; This source code is licensed under the MIT license found in the
+;; LICENSE file in the root directory of this source tree.
+
+;; Consumer module for e2e-table-abi-private.wat. It imports a funcref table
+;; and does nothing with it but report its size, so that "did this value link
+;; as a table?" is the only thing the driver is asking.
+
+(module
+  (import "e" "t" (table 2 funcref))
+  (func (export "size") (result i32) (table.size 0)))

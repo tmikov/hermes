@@ -45,4 +45,14 @@
 
 ;; And re-exporting an import gives back the very same object.
 ;; CHECK-NEXT: re-export is the same object: true
+
+;; The buffer is taken from the memory's internal field by the same
+;; wasmLinkMemory call that measured it, not from the `buffer` accessor. That
+;; accessor is a configurable property of WebAssembly.Memory.prototype, so a
+;; module that re-read it could be handed different storage from the one whose
+;; page count satisfied the declaration -- and would then write where the
+;; embedder cannot see.
+;; CHECK-NEXT: hijacked buffer accessor was in force: true
+;; CHECK-NEXT: wasm wrote to the real buffer: true
+;; CHECK-NEXT: wasm did not write to the decoy: true
 ;; CHECK-NEXT: done

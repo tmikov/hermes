@@ -94,7 +94,19 @@ def value_to_js_arg(val):
         return f32_bits_to_js(v)
     elif typ == 'f64':
         return f64_bits_to_js(v)
+    elif v == "null":
+        # A null reference -- funcref or externref -- is JS null, which is what
+        # the JS API's ToWebAssemblyValue accepts for both. Passing `undefined`
+        # instead (as every reference type used to) made a null funcref
+        # indistinguishable from an omitted argument, and table.set now refuses
+        # the latter.
+        return "null"
     else:
+        # A non-null reference the harness cannot construct: `ref.extern N` is
+        # a host reference with no JS spelling here, and there is no way to
+        # build a funcref at all. Reference-typed expectations are not checked
+        # (see gen_single_expected_check), so this only has to be a value the
+        # callee will accept.
         return "undefined"
 
 

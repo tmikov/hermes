@@ -6,8 +6,9 @@
  */
 
 // JS driver for e2e-table-export.wat.
-// Verifies that exported tables are WebAssembly.Table objects with
-// __wasm_type__ metadata and __wasm_funcs__/__wasm_types__ arrays.
+// The exported table is a genuine WebAssembly.Table with no own properties:
+// the metadata and backing arrays it used to publish were the linking ABI,
+// and the link path now reads them from internal fields behind a brand check.
 
 var hbcPath = hermescli.getScriptArgs()[0];
 var bytes = hermescli.loadFile(hbcPath);
@@ -15,14 +16,21 @@ var mod = WebAssembly.Module.fromHermesBytecode(bytes);
 var instance = new WebAssembly.Instance(mod);
 var exports = instance.exports;
 
-// The exported table should be a WebAssembly.Table object.
 print("tbl type:", typeof exports.tbl);
-print("tbl __wasm_type__:", exports.tbl.__wasm_type__);
-print("tbl __wasm_min__:", exports.tbl.__wasm_min__);
-print("tbl __wasm_max__:", exports.tbl.__wasm_max__);
+print("tbl instanceof WebAssembly.Table:",
+      exports.tbl instanceof WebAssembly.Table);
+print("tbl.length:", exports.tbl.length);
+print("tbl own props: [" +
+      Object.getOwnPropertyNames(exports.tbl).join(", ") + "]");
+print("tbl JSON: " + JSON.stringify(exports.tbl));
 
-// Verify internal table arrays are exposed for cross-module sharing.
-print("tbl __wasm_funcs__ type:", typeof exports.tbl.__wasm_funcs__);
-print("tbl __wasm_funcs__ length:", exports.tbl.__wasm_funcs__.length);
-print("tbl __wasm_types__ type:", typeof exports.tbl.__wasm_types__);
-print("tbl __wasm_types__ length:", exports.tbl.__wasm_types__.length);
+// The maximum is no longer reported anywhere, so the only way to see that it
+// survived is to grow against it.
+print("grow to the maximum: " + exports.tbl.grow(5) +
+      ", length " + exports.tbl.length);
+try {
+  exports.tbl.grow(1);
+  print("grow past the maximum: grew, length " + exports.tbl.length);
+} catch (e) {
+  print("grow past the maximum: " + e.name + ", length " + exports.tbl.length);
+}

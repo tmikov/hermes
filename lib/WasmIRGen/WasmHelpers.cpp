@@ -442,34 +442,66 @@ Instruction *WasmHelpers::emitDataDrop(Value *dataSegs, Value *segIdx) {
       BuiltinMethod::HermesBuiltin_wasmDataDrop, {dataSegs, segIdx});
 }
 
-Instruction *WasmHelpers::emitTableFill(
+Instruction *WasmHelpers::emitTableGetSlot(Value *exportedArr, Value *idx) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmTableGetSlot, {exportedArr, idx});
+}
+
+Instruction *WasmHelpers::emitTableSetSlot(
     Value *funcsArr,
+    Value *typesArr,
+    Value *exportedArr,
     Value *idx,
     Value *val,
-    Value *count) {
+    Value *isFuncRef) {
+  // No meaningful return value.
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmTableSetSlot,
+      {funcsArr, typesArr, exportedArr, idx, val, isFuncRef});
+}
+
+Instruction *WasmHelpers::emitTableFill(
+    Value *funcsArr,
+    Value *typesArr,
+    Value *exportedArr,
+    Value *idx,
+    Value *val,
+    Value *count,
+    Value *isFuncRef) {
   // No meaningful return value.
   return builder_.createCallBuiltinInst(
       BuiltinMethod::HermesBuiltin_wasmTableFill,
-      {funcsArr, idx, val, count});
+      {funcsArr, typesArr, exportedArr, idx, val, count, isFuncRef});
 }
 
-Instruction *WasmHelpers::emitTableCopy(
+Instruction *WasmHelpers::emitTableCopySlots(
     Value *dstFuncs,
-    Value *srcFuncs,
     Value *dstTypes,
+    Value *dstExported,
+    Value *srcFuncs,
     Value *srcTypes,
+    Value *srcExported,
     Value *dst,
     Value *src,
     Value *count) {
   // No meaningful return value.
   return builder_.createCallBuiltinInst(
-      BuiltinMethod::HermesBuiltin_wasmTableCopy,
-      {dstFuncs, srcFuncs, dstTypes, srcTypes, dst, src, count});
+      BuiltinMethod::HermesBuiltin_wasmTableCopySlots,
+      {dstFuncs,
+       dstTypes,
+       dstExported,
+       srcFuncs,
+       srcTypes,
+       srcExported,
+       dst,
+       src,
+       count});
 }
 
 Instruction *WasmHelpers::emitTableInit(
     Value *funcsArr,
     Value *typesArr,
+    Value *exportedArr,
     Value *elemSegs,
     Value *segIdx,
     Value *dst,
@@ -478,7 +510,7 @@ Instruction *WasmHelpers::emitTableInit(
   // No meaningful return value.
   return builder_.createCallBuiltinInst(
       BuiltinMethod::HermesBuiltin_wasmTableInit,
-      {funcsArr, typesArr, elemSegs, segIdx, dst, src, count});
+      {funcsArr, typesArr, exportedArr, elemSegs, segIdx, dst, src, count});
 }
 
 Instruction *WasmHelpers::emitElemDrop(Value *elemSegs, Value *segIdx) {
@@ -490,13 +522,22 @@ Instruction *WasmHelpers::emitElemDrop(Value *elemSegs, Value *segIdx) {
 Instruction *WasmHelpers::emitTableGrow(
     Value *funcsArr,
     Value *typesArr,
+    Value *exportedArr,
     Value *delta,
     Value *fillVal,
     Value *maxEntries,
-    Value *actualMax) {
+    Value *actualMax,
+    Value *isFuncRef) {
   auto *inst = builder_.createCallBuiltinInst(
       BuiltinMethod::HermesBuiltin_wasmTableGrow,
-      {funcsArr, typesArr, delta, fillVal, maxEntries, actualMax});
+      {funcsArr,
+       typesArr,
+       exportedArr,
+       delta,
+       fillVal,
+       maxEntries,
+       actualMax,
+       isFuncRef});
   inst->setType(Type::createNumber());
   return inst;
 }
@@ -520,6 +561,38 @@ Instruction *WasmHelpers::emitLinkError(Value *message) {
   // No return value (noreturn).
   return builder_.createCallBuiltinInst(
       BuiltinMethod::HermesBuiltin_wasmLinkError, {message});
+}
+
+Instruction *WasmHelpers::emitLinkTable(
+    Value *importVal,
+    Value *declaredIsFuncRef) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmLinkTable,
+      {importVal, declaredIsFuncRef});
+}
+
+Instruction *WasmHelpers::emitLinkMemory(Value *importVal) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmLinkMemory, {importVal});
+}
+
+Instruction *WasmHelpers::emitLinkGlobal(
+    Value *importVal,
+    Value *expectedValType,
+    Value *expectedMutable) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmLinkGlobal,
+      {importVal, expectedValType, expectedMutable});
+}
+
+Instruction *WasmHelpers::emitGlobalGet(Value *globalObj) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmGlobalGet, {globalObj});
+}
+
+Instruction *WasmHelpers::emitGlobalSet(Value *globalObj, Value *value) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmGlobalSet, {globalObj, value});
 }
 
 Instruction *WasmHelpers::emitDataSegmentInit(

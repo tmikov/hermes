@@ -227,33 +227,62 @@ class WasmHelpers {
   /// \p dataSegs is the data segments array.
   Instruction *emitDataDrop(Value *dataSegs, Value *segIdx);
 
-  // --- Bulk table helpers (N.2) ---
+  // --- Table slot accesses ---
 
-  /// Emit table.fill: fills \p count entries at \p idx with \p val.
-  /// \p funcsArr is the table's functions JS Array.
-  Instruction *emitTableFill(
+  /// Emit a read of one table slot's Exported Function (or null). A builtin
+  /// rather than a LoadPropertyInst: the array can come from a table import,
+  /// and an accessor installed at an index would run user JS inside a Wasm
+  /// function body.
+  Instruction *emitTableGetSlot(Value *exportedArr, Value *idx);
+
+  /// Emit a write of one table slot. This is the ONLY way generated code
+  /// writes a table: the closure and the interned type id are derived from
+  /// \p val, the Exported Function (or null), so the three parallel arrays
+  /// cannot drift apart. \p val must be null or an Exported Function; anything
+  /// else raises a TypeError at runtime.
+  /// \p isFuncRef is a literal 1 for a funcref table and 0 for an externref
+  /// one, whose slots hold arbitrary JS values and no wrapper at all.
+  Instruction *emitTableSetSlot(
       Value *funcsArr,
+      Value *typesArr,
+      Value *exportedArr,
       Value *idx,
       Value *val,
-      Value *count);
+      Value *isFuncRef);
 
-  /// Emit table.copy: copies \p count entries from src to dst table.
-  /// Both funcs and types arrays are copied.
-  Instruction *emitTableCopy(
+  /// Emit table.copy: copies \p count slots from src to dst table. All three
+  /// arrays of each table are copied together.
+  Instruction *emitTableCopySlots(
       Value *dstFuncs,
-      Value *srcFuncs,
       Value *dstTypes,
+      Value *dstExported,
+      Value *srcFuncs,
       Value *srcTypes,
+      Value *srcExported,
       Value *dst,
       Value *src,
       Value *count);
 
+  // --- Bulk table helpers (N.2) ---
+
+  /// Emit table.fill: fills \p count entries at \p idx with \p val.
+  /// The three arguments are the table's three parallel arrays.
+  Instruction *emitTableFill(
+      Value *funcsArr,
+      Value *typesArr,
+      Value *exportedArr,
+      Value *idx,
+      Value *val,
+      Value *count,
+      Value *isFuncRef);
+
   /// Emit table.init: copies \p count entries from element segment to table.
-  /// \p funcsArr and \p typesArr are the table's arrays.
+  /// The first three arguments are the table's three parallel arrays.
   /// \p elemSegs is the element segments array, \p segIdx is the segment index.
   Instruction *emitTableInit(
       Value *funcsArr,
       Value *typesArr,
+      Value *exportedArr,
       Value *elemSegs,
       Value *segIdx,
       Value *dst,
@@ -264,17 +293,19 @@ class WasmHelpers {
   /// \p elemSegs is the element segments array.
   Instruction *emitElemDrop(Value *elemSegs, Value *segIdx);
 
-  /// Emit table.grow: grows both funcs and types arrays by \p delta entries,
-  /// filling new func entries with \p fillVal.
+  /// Emit table.grow: grows all three of the table's arrays by \p delta
+  /// entries, filling the new slots with \p fillVal.
   /// \p maxEntries is the table's declared maximum size.
   /// Returns old size on success, -1 on failure.
   Instruction *emitTableGrow(
       Value *funcsArr,
       Value *typesArr,
+      Value *exportedArr,
       Value *delta,
       Value *fillVal,
       Value *maxEntries,
-      Value *actualMax);
+      Value *actualMax,
+      Value *isFuncRef);
 
   // --- BigInt ↔ i64 conversion helpers ---
 
@@ -288,6 +319,41 @@ class WasmHelpers {
   /// WebAssembly.LinkError with the given message string. Used for import
   /// type validation at instantiation time.
   Instruction *emitLinkError(Value *message);
+
+  /// Emit wasmLinkTable: brand-check \p importVal as a genuine
+  /// WebAssembly.Table and yield its three backing arrays and its own maximum
+  /// as [funcs, types, exported, max], or null if it is not one (or if
+  /// \p declaredIsFuncRef is false, which no table can satisfy).
+  /// The arrays are the table's internal fields themselves, so two modules
+  /// importing one table write the same slots.
+  Instruction *emitLinkTable(Value *importVal, Value *declaredIsFuncRef);
+
+  /// Emit wasmLinkMemory: brand-check \p importVal as a genuine
+  /// WebAssembly.Memory and yield [currentPages, max, buffer], or null if it
+  /// is not one. The page count is read from the buffer at the moment of the
+  /// call, so it follows every grow, and the buffer comes back with it so the
+  /// module's views are built over the very buffer that was measured.
+  Instruction *emitLinkMemory(Value *importVal);
+
+  /// Emit wasmLinkGlobal: brand-check \p importVal as a genuine
+  /// WebAssembly.Global of the declared type and mutability, and yield its
+  /// value. Yields undefined if it is a Global that does not match, and null
+  /// if it is not a Global at all -- the caller needs the two apart, because
+  /// only the second can legitimately be a raw JS value.
+  Instruction *emitLinkGlobal(
+      Value *importVal,
+      Value *expectedValType,
+      Value *expectedMutable);
+
+  /// Emit wasmGlobalGet / wasmGlobalSet: read or write the shared value of an
+  /// imported MUTABLE global, \p globalObj, in its internal field. That is
+  /// what `.value` used to be used for, and `value` is a CONFIGURABLE accessor
+  /// on WebAssembly.Global.prototype: replacing it let script decide what
+  /// every global.get returned and discard every global.set the module made.
+  /// The object is kept rather than snapshotted because a mutable import is
+  /// genuinely shared state -- snapshotting it is H12.
+  Instruction *emitGlobalGet(Value *globalObj);
+  Instruction *emitGlobalSet(Value *globalObj, Value *value);
 
   /// Emit wasmDataSegmentInit: bulk-copy from binary data storage blob
   /// into linear memory. Args: (heapu8, blobOffset, length, dest).

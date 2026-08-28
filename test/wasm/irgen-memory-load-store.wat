@@ -7,7 +7,7 @@
 
 ;; REQUIRES: wasm
 
-;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s
+;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s --implicit-check-not=buffer
 
 (module
   (memory 1)
@@ -69,9 +69,37 @@
 ;; WebAssembly.Memory and builds the typed array views over *its* buffer --
 ;; not over a bare ArrayBuffer, which would leave an exported memory pointing
 ;; at storage the module never writes to.
+;;
+;; The buffer is taken out of the memory's internal field by wasmLinkMemory,
+;; which is also the brand check on what the (replaceable) constructor
+;; returned. It used to be a `.buffer` property read, and that accessor is a
+;; configurable property of WebAssembly.Memory.prototype: replacing it
+;; substituted the module's whole linear memory while the Memory it exported
+;; -- which an importer brand-checks and trusts -- still held its own,
+;; untouched buffer. `--implicit-check-not=buffer` on the RUN line is the real
+;; assertion here: a regression that re-added the property read ALONGSIDE the
+;; builtin would satisfy every positive check below.
 ;; CHECK-LABEL: function __wasm_instantiate__(imports: any): object
 ;; CHECK: TryLoadGlobalPropertyInst {{.*}}"WebAssembly"
 ;; CHECK: LoadPropertyInst {{.*}}"Memory"
-;; CHECK: LoadPropertyInst {{.*}}"buffer"
+;; CHECK: CallBuiltinInst {{.*}}[HermesBuiltin.wasmLinkMemory]
+;; CHECK: BinaryStrictlyEqualInst {{.*}}null: null
+;; CHECK: CondBranchInst
+;; CHECK: CallBuiltinInst {{.*}}[HermesBuiltin.wasmLinkError]{{.*}}"WebAssembly.Memory did not construct a memory for this module's memory 0": string
+
+;; The brand is not the whole check. A replaced constructor can return a
+;; GENUINE Memory carrying limits of its own, and a defined memory's declared
+;; limits are what the module ASKED FOR, not what came back -- memory.grow
+;; then uses the compile-time literal and can grow the substitute past its own
+;; maximum. Both numbers are compared, by exact equality: this module declares
+;; (memory 1), so one page and the -1 that means "no maximum".
+;; CHECK: [[PAGES:%[0-9]+]] = LoadPropertyInst {{.*}}0: number
+;; CHECK-NEXT: [[MAX:%[0-9]+]] = LoadPropertyInst {{.*}}1: number
+;; CHECK-NEXT: BinaryStrictlyEqualInst (:any) [[PAGES]]: any, 1: number
+;; CHECK: CallBuiltinInst {{.*}}[HermesBuiltin.wasmLinkError]{{.*}}"WebAssembly.Memory did not construct a memory with this module's declared limits for memory 0": string
+;; CHECK: BinaryStrictlyEqualInst (:any) [[MAX]]: any, -1: number
+
+;; Only then is the buffer taken, and the views built over it.
+;; CHECK: LoadPropertyInst {{.*}}2: number
 ;; CHECK: TryLoadGlobalPropertyInst {{.*}}"Int8Array"
 ;; CHECK: TryLoadGlobalPropertyInst {{.*}}"Int32Array"

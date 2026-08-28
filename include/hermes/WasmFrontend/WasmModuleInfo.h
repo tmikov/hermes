@@ -49,6 +49,10 @@ struct WasmModuleInfo {
   uint32_t importedFunctionCount() const;
   /// \return the type of the function at the given index (handles imports).
   const WasmFuncType &getFunctionType(uint32_t funcIndex) const;
+  /// \return the index into \c types of the function at the given index
+  ///   (handles imports). Module-local: it names a slot in THIS module's type
+  ///   section, so it must not be compared against another module's.
+  uint32_t getFunctionTypeIndex(uint32_t funcIndex) const;
 
   /// \return total number of globals (imported + defined).
   uint32_t totalGlobalCount() const;

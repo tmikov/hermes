@@ -36,8 +36,7 @@ uint32_t WasmModuleInfo::importedFunctionCount() const {
   return countImportsByKind(imports, WasmExternalKind::Function);
 }
 
-const WasmFuncType &WasmModuleInfo::getFunctionType(
-    uint32_t funcIndex) const {
+uint32_t WasmModuleInfo::getFunctionTypeIndex(uint32_t funcIndex) const {
   uint32_t numImported = importedFunctionCount();
   if (funcIndex < numImported) {
     // Find the N-th function import.
@@ -46,19 +45,27 @@ const WasmFuncType &WasmModuleInfo::getFunctionType(
       if (imp.kind == WasmExternalKind::Function) {
         if (count == funcIndex) {
           assert(imp.typeIndex < types.size() && "type index out of range");
-          return types[imp.typeIndex];
+          return imp.typeIndex;
         }
         ++count;
       }
     }
+    // importedFunctionCount() counts the same imports this loop walks, so
+    // reaching here means funcIndex was out of range to begin with.
     assert(false && "funcIndex out of range for imported functions");
+    return 0;
   }
   uint32_t definedIdx = funcIndex - numImported;
   assert(definedIdx < functions.size() && "funcIndex out of range");
   assert(
       functions[definedIdx].typeIndex < types.size() &&
       "type index out of range");
-  return types[functions[definedIdx].typeIndex];
+  return functions[definedIdx].typeIndex;
+}
+
+const WasmFuncType &WasmModuleInfo::getFunctionType(
+    uint32_t funcIndex) const {
+  return types[getFunctionTypeIndex(funcIndex)];
 }
 
 uint32_t WasmModuleInfo::totalGlobalCount() const {

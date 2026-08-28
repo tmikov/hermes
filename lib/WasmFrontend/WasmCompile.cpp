@@ -47,7 +47,13 @@ bool compileWasmModule(
   wabt::Result result =
       wabt::ReadBinary(buffer, size, &reader, options);
   if (!wabt::Succeeded(result)) {
-    errorMsg = "Failed to parse Wasm binary";
+    // The IRGen refuses some malformed modules that wabt's structural read
+    // accepts (an export naming an index that does not exist, for one), and
+    // it says which. Prefer that over the generic message, which would send
+    // the reader looking for a truncated file.
+    errorMsg = irgen.getErrorMessage().empty()
+        ? "Failed to parse Wasm binary"
+        : irgen.getErrorMessage().str();
     return false;
   }
 
@@ -109,7 +115,9 @@ std::unique_ptr<WasmModuleData> compileWasmToModuleData(
   options.features.enable_extended_const();
   wabt::Result result = wabt::ReadBinary(buffer, size, &reader, options);
   if (!wabt::Succeeded(result)) {
-    errorMsg = "invalid Wasm binary";
+    errorMsg = irgen.getErrorMessage().empty()
+        ? "invalid Wasm binary"
+        : irgen.getErrorMessage().str();
     return nullptr;
   }
 

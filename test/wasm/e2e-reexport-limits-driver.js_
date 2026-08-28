@@ -11,16 +11,30 @@ var args = hermescli.getScriptArgs();
 function load(i) {
   return WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[i]));
 }
-function limits(label, o) {
-  print(label + ': min = ' + o.__wasm_min__ + ', max = ' + o.__wasm_max__);
+function pages(o) {
+  return o.buffer.byteLength / 65536;
 }
 
 // exporter -> re-exporter -> consumer.
 var exporter = new WebAssembly.Instance(load(0), {});
 var reexporter = new WebAssembly.Instance(load(1), {e: exporter.exports});
 
-limits('re-exported memory', reexporter.exports.mem2);
-limits('re-exported table', reexporter.exports.tbl2);
+// A memory publishes no limits any more either. As with the table, the
+// re-export of an imported memory IS the imported object, so it cannot
+// disagree with it; its current size is its buffer's, and its maximum is
+// observable only by what will link against it (the consumer below) or by
+// growing.
+print('re-exported memory is the exporter\'s own object: ' +
+      (reexporter.exports.mem2 === exporter.exports.mem));
+print('re-exported memory pages: ' + pages(reexporter.exports.mem2));
+// A table publishes no limits any more -- they moved into internal state
+// along with the rest of the linking ABI. The re-export of an imported table
+// is the imported object itself, so it cannot disagree with it about
+// anything; its current size is its length, and its maximum is observable
+// only by what will link against it (the consumer below) or by growing.
+print('re-exported table is the exporter\'s own object: ' +
+      (reexporter.exports.tbl2 === exporter.exports.tbl));
+print('re-exported table length: ' + reexporter.exports.tbl2.length);
 
 try {
   var consumer = new WebAssembly.Instance(
@@ -34,14 +48,39 @@ try {
 // A memory and a table the module defines itself keep reporting their
 // declarations, including the absent maximum.
 var own = new WebAssembly.Instance(load(3), {});
-limits('own memory', own.exports.mem);
-limits('own table', own.exports.tbl);
+print('own memory pages: ' + pages(own.exports.mem));
+print('own table length: ' + own.exports.tbl.length);
 
-// The same re-exporter, now fed a memory with no maximum: "no maximum" has
-// to survive the round trip. Neither constructor accepts a maximum of -1,
-// so the property must be left out rather than passed through.
+// The same re-exporter, now fed a memory with NO maximum. -1 is the sentinel
+// for that, and it has to survive the round trip in both directions: the
+// re-exported memory must still be growable past its initial page, and it
+// must still fail to satisfy a declaration that requires a maximum.
 var reexporter2 = new WebAssembly.Instance(load(1), {e: own.exports});
-limits('re-export of own memory', reexporter2.exports.mem2);
-limits('re-export of own table', reexporter2.exports.tbl2);
+print('re-export of own memory is the same object: ' +
+      (reexporter2.exports.mem2 === own.exports.mem));
+reexporter2.exports.mem2.grow(2);
+print('re-export of own memory grew to: ' +
+      pages(reexporter2.exports.mem2) + ' pages');
+try {
+  new WebAssembly.Instance(
+    load(2), {e: {m: reexporter2.exports.mem2, t: own.exports.tbl}});
+  print('unbounded memory vs (memory 2 3): linked (should not happen)');
+} catch (e) {
+  print('unbounded memory vs (memory 2 3): ' + e.name + ': ' + e.message);
+}
+print('re-export of own table is the same object: ' +
+      (reexporter2.exports.tbl2 === own.exports.tbl));
+
+// The table's declared maximum of 7 is now observable only by growing into
+// it. Last, because it mutates.
+print('own table grow(4): ' + own.exports.tbl.grow(4) +
+      ', length ' + own.exports.tbl.length);
+try {
+  own.exports.tbl.grow(1);
+  print('own table grow(1): grew, length ' + own.exports.tbl.length);
+} catch (e) {
+  print('own table grow(1): ' + e.name +
+        ', length ' + own.exports.tbl.length);
+}
 
 print('done');

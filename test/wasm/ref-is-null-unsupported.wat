@@ -3,9 +3,10 @@
 ;; This source code is licensed under the MIT license found in the
 ;; LICENSE file in the root directory of this source tree.
 
-;; ref.is_null is not implemented. Its siblings ref.null and ref.func route
-;; through warnUnsupported(), which reports the opcode and keeps the value
-;; stack consistent by popping the inputs and pushing placeholder outputs.
+;; ref.is_null is not implemented. Its sibling ref.func routes through
+;; warnUnsupported(), which reports the opcode and keeps the value stack
+;; consistent by popping the inputs and pushing placeholder outputs. (ref.null
+;; is implemented -- it pushes null.)
 ;; ref.is_null had no override at all, so wabt's default no-op ran: the operand
 ;; was left on the stack and the reference itself was returned in place of the
 ;; i32 result, with no diagnostic. A module using it compiled and produced a

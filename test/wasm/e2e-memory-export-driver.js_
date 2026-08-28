@@ -6,20 +6,34 @@
  */
 
 // JS driver for e2e-memory-export.wat.
-// Verifies that exported memories are WebAssembly.Memory objects with
-// __wasm_type__ metadata, not undefined.
+// The exported memory is a real WebAssembly.Memory carrying no metadata: its
+// limits live in internal fields and are observable only through the buffer
+// and through what grow() allows.
 
 var hbcPath = hermescli.getScriptArgs()[0];
 var bytes = hermescli.loadFile(hbcPath);
 var mod = WebAssembly.Module.fromHermesBytecode(bytes);
 var instance = new WebAssembly.Instance(mod);
-var exports = instance.exports;
+var mem = instance.exports.mem;
 
-// The exported memory should be a WebAssembly.Memory object.
-print("mem type:", typeof exports.mem);
-print("mem __wasm_type__:", exports.mem.__wasm_type__);
-print("mem __wasm_min__:", exports.mem.__wasm_min__);
-print("mem __wasm_max__:", exports.mem.__wasm_max__);
-print("mem has buffer:", exports.mem.buffer instanceof ArrayBuffer);
+print("mem type:", typeof mem);
+print("mem instanceof WebAssembly.Memory:", mem instanceof WebAssembly.Memory);
+
+print("mem own props: [" + Object.getOwnPropertyNames(mem).join(", ") + "]");
+print("mem JSON: " + JSON.stringify(mem));
+print("mem __wasm_type__: " + mem.__wasm_type__);
+
+print("mem has buffer:", mem.buffer instanceof ArrayBuffer);
 // 2 pages * 65536 bytes/page = 131072
-print("mem buffer size:", exports.mem.buffer.byteLength);
+print("mem buffer size:", mem.buffer.byteLength);
+
+// The declared maximum of 8 is enforced.
+print("mem grow(6): " + mem.grow(6) +
+      ", pages now " + mem.buffer.byteLength / 65536);
+try {
+  mem.grow(1);
+  print("mem grow(1): grew, pages now " + mem.buffer.byteLength / 65536);
+} catch (e) {
+  print("mem grow(1): " + e.name +
+        ", pages still " + mem.buffer.byteLength / 65536);
+}

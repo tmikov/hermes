@@ -28,13 +28,19 @@
   )
 )
 
-;; table.set: loads funcs array, stores value at index
-;; CHECK-LABEL: function wasm_func_1(p0: number, p1: object): undefined 
-;; CHECK: LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_funcs]
-;; CHECK: StorePropertyStrictInst %{{.*}}: object, %{{.*}}: any, %{{.*}}: number
-
-;; table.grow: calls the wasmTableGrow builtin
-;; CHECK-LABEL: function wasm_func_2(p0: number): number 
+;; table.set: bounds-checks against the funcs array, then writes the slot
+;; through the funnel rather than storing into an array directly -- storing
+;; only the closure left the previous entry's type id in place.
+;; CHECK-LABEL: function wasm_func_1(p0: number, p1: object): undefined
 ;; CHECK: LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_funcs]
 ;; CHECK: LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_types]
+;; CHECK: LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_exported]
+;; CHECK: CallBuiltinInst (:any) [HermesBuiltin.wasmTableSetSlot]
+;; CHECK-NOT: StorePropertyStrictInst
+
+;; table.grow: calls the wasmTableGrow builtin with all three arrays
+;; CHECK-LABEL: function wasm_func_2(p0: number): number
+;; CHECK: LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_funcs]
+;; CHECK: LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_types]
+;; CHECK: LoadFrameInst (:any) %{{.*}}: environment, [%VS0.table_0_exported]
 ;; CHECK: CallBuiltinInst (:number) [HermesBuiltin.wasmTableGrow]

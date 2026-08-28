@@ -197,12 +197,18 @@ a trap block on OOB. This follows the same pattern used for data segment OOB
 checks.
 
 The remaining 4 table_grow failures were due to imported tables not being wired
-into the compiled module. Fixed by storing `__wasm_funcs__` and `__wasm_types__`
-arrays on exported `WebAssembly.Table` objects and extracting them during import
-validation. The import min check now uses `__wasm_funcs__.length` (actual
-current size after `table.grow`) instead of `__wasm_min__` (original declared
-size). `createTables()` skips imported tables since their arrays are already
-wired during import processing.
+into the compiled module. Fixed by sharing the exported `WebAssembly.Table`'s
+backing arrays with the importing module, and by taking the import's minimum
+check from the table's *actual* current size (which reflects every
+`table.grow`) rather than from its originally declared size.
+`createTables()` skips imported tables since their arrays are already wired
+during import processing.
+
+(The sharing was originally done by publishing `__wasm_funcs__` /
+`__wasm_types__` properties on the Table object and reading them back at import
+time. That publication is **gone** — it was the linking ABI, and it was
+writable and enumerable by script. The arrays are now internal fields reached
+through the `wasmLinkTable` brand check; see "Table imports" below.)
 
 Results: table_get (4 → 0), table_set (8 → 0), table_grow (14 → 0).
 
@@ -215,10 +221,14 @@ Modules that should be rejected at instantiation time are accepted by Hermes.
 The spec requires validation between parsing and execution; Hermes skips some
 of these checks, so errors surface later (or not at all) as wrong results.
 
-**imports (0 failures):** Import type validation is now implemented using
-`__wasm_type__` string comparison at instantiation time. The compiled IR
-checks each import value against the expected type string, throwing a
-`WebAssembly.LinkError` on mismatch. This covers:
+**imports (0 failures):** Import type validation is implemented at
+instantiation time; the compiled IR checks each import value and throws a
+`WebAssembly.LinkError` on mismatch. **Tables, memories and globals are
+satisfied only by genuine `WebAssembly.Table`/`Memory`/`Global` objects**,
+established by a `dyn_vmcast` brand check that no object literal and no forged
+prototype can pass (see "Table imports" and "Memory imports" below). Functions
+and tags are still checked by comparing a `__wasm_type__` string carried on the
+supplied object. This covers:
 
 - Function signature mismatches (Wasm-to-Wasm and JS-to-Wasm)
 - Global type and mutability mismatches (via `WebAssembly.Global` wrappers)
@@ -238,8 +248,11 @@ All sub-issues have been resolved:
   97–98), and the cross-kind mismatch at line 256 is now correctly
   rejected.
 - **~~Raw global exports lack type metadata (12):~~** Fixed. Global exports
-  are now wrapped in `WebAssembly.Global` objects with `__wasm_type__`
-  metadata, enabling cross-module global type and mutability validation.
+  are now wrapped in `WebAssembly.Global` objects, enabling cross-module global
+  type and mutability validation. (They originally carried a `__wasm_type__`
+  string, which was what the importer compared; the type and the mutability now
+  live in the Global's internal fields and are compared by the `wasmLinkGlobal`
+  brand check, so a `WebAssembly.Global` has no own properties at all.)
 - **~~Table/memory exports not implemented (26):~~** Fixed. Memory exports are
   now implemented as `WebAssembly.Memory` objects (13 fixed) and table exports
   as `WebAssembly.Table` objects (12 fixed). All 25 table/memory import
@@ -249,12 +262,14 @@ All sub-issues have been resolved:
   routing all multi-byte operations through the byte-assembly (unaligned) path.
   This ensures correct results regardless of actual alignment, as the spec
   requires.
-- **~~`memory.grow` on imported memory (4):~~** Fixed. When a module imports
-  a memory, `createMemoryViews()` now uses the imported memory's actual
-  `__wasm_min__` (initial page count) instead of the import declaration's
-  minimum. Similarly, `onMemoryGrow()` uses the imported memory's actual
-  `__wasm_max__` limit. This ensures the locally-created ArrayBuffer has
-  the correct initial size and growth limit.
+- **~~`memory.grow` on imported memory (4):~~** Fixed. A module that imports a
+  memory builds its views over the imported memory's own `ArrayBuffer`, and
+  `onMemoryGrow()` respects the imported memory's own maximum rather than the
+  import declaration's. Both values, and the current page count the limits are
+  checked against, come out of the memory's internal fields through one
+  `wasmLinkMemory` call. (They were originally read from `__wasm_min__` and
+  `__wasm_max__` properties on the supplied object; `__wasm_min__` in
+  particular was a snapshot the constructor wrote and `grow` never updated.)
 
 **Affected tests:** imports (2)
 
@@ -411,17 +426,58 @@ property of what the import points at, not of the import-wiring code itself.
   Wasm-exported function). A plain JS function with no `__wasm_type__` is
   accepted as an import with no signature check beyond being callable.
 
-- **Global imports** accept a `WebAssembly.Global`, read through its `.value`
-  property, or — only when the declared import is *immutable* — a raw JS
-  value. A raw value is never accepted for a mutable global import, since a
-  raw value has no way to observe a subsequent write from the exporting side.
-  Where a raw value is allowed, its JS type must match what the declared Wasm
-  type requires: `bigint` for an `i64` import, `number` for everything else;
-  a `WebAssembly.Global` of the wrong `__wasm_type__` is also rejected. The
-  value is resolved exactly once, under the validating branch, and reused
-  rather than re-read later — re-reading `__wasm_type__` or `.value` a second
-  time would let a getter or Proxy answer differently and slip past the
-  check that already ran. At global-initialization time the resolved value is
+- **Global imports** accept a **genuine `WebAssembly.Global`** or — only when
+  the declared import is *immutable* — a raw JS value. A raw value is never
+  accepted for a mutable global import, since a raw value has no way to
+  observe a subsequent write from the exporting side. Where a raw value is
+  allowed, its JS type must match what the declared Wasm type requires:
+  `bigint` for an `i64` import, `number` for everything else. The link path
+  brand-checks with `dyn_vmcast<JSWebAssemblyGlobal>` and compares the
+  declared type and mutability against the Global's `valType_`/`mutable_`
+  fields, returning the value out of the internal field rather than through
+  the `.value` accessor — so an object literal, a forged prototype chain and a
+  `Proxy` are all `LinkError`s. (The type used to be *published* as a writable
+  `__wasm_type__` string and compared as such, which made a global the one
+  kind where a plain object literal linked outright; a `WebAssembly.Global`
+  now has no own properties at all.) The value is resolved exactly once, under
+  the validating branch, and reused rather than re-read later — asking the
+  object a second time would let a getter or Proxy answer differently and slip
+  past the check that already ran.
+
+  **The two kinds resolve differently, and the distinction matters.** For an
+  immutable import the resolved value is a snapshot and nothing reads the
+  object again. A **mutable** import keeps the object, because per spec it is
+  genuinely shared state: a `global.set` inside the module must be visible to
+  JS through `.value`, and a JS write to `.value` must be visible to the next
+  `global.get`. Every `global.get`/`global.set` therefore consults the object,
+  and so does instantiation, once, for the constant-expression snapshot.
+
+  All three used to do that through `.value`, which is a `configurable`
+  accessor. Measured before it was fixed:
+
+  ```
+  link-time / honest read: 77
+  MUTABLE global.get through hijacked accessor: 999
+  after wasm global.set(5), real global.value: 77   <- the module's write was swallowed
+  ```
+
+  They now go through the `wasmGlobalGet`/`wasmGlobalSet` builtins, which
+  brand-check with `dyn_vmcast` and read or write `value_`/`i64Value_`
+  directly. Note what the fix is *not*: the value is still not snapshotted, and
+  must not be — that is H12, which cost both directions of the sharing when it
+  was the design. Reaching the same shared field without a replaceable property
+  in the way is the whole of it. `e2e-global-import-mutable-hijack.wat` pins
+  both halves, including that instantiation now runs no user JS at all through
+  that accessor; `e2e-imported-mutable-global.wat` is where the sharing itself
+  is pinned.
+
+  Every writer of `value_` — the `Global` constructor, the `value` setter, and
+  the `wasmGlobalSet` builtin — goes through one function,
+  `setWasmGlobalNumber`, so an `i32` global's field is int32-valued and an
+  `f32` global's float-valued whichever wrote it. Generated code and
+  `wasmLinkGlobal` both hand that field straight to code that assumes as much.
+
+  At global-initialization time the resolved value is
   coerced to the declared type (`ToInt32` for `i32`, `fround` for `f32`,
   `ToNumber` for `f64`; a `bigint` is split into the lo/hi pair the compiler
   represents `i64` with) before it lands in the global's slot, so an
@@ -432,58 +488,165 @@ property of what the import points at, not of the import-wiring code itself.
   limits (an imported table's *actual* current size and maximum, not just
   the import declaration's lower bound, so a table grown before it was
   imported links correctly and a `table.grow` afterward is bound correctly
-  too). Storage sharing follows from what constructs the table: both a
-  Wasm-exported table and a table constructed directly via `new
-  WebAssembly.Table(...)` publish `__wasm_funcs__`/`__wasm_types__`
-  properties pointing at the real arrays their own `get`/`set`/`length`/
-  `grow` operate on, so an import wired from either source shares genuine,
-  live storage with its source. See "Export Objects" below for the one
-  remaining gap, which is on the *re-export* path, not here.
+  too). The value must be a **genuine `WebAssembly.Table`**: the link path
+  brand-checks it with `dyn_vmcast<JSWebAssemblyTable>` and reads its
+  `elements_`/`types_`/`exported_` fields directly, so an object literal, a
+  forged prototype chain and a `Proxy` are all `LinkError`s, and an importer
+  shares the very arrays the source's own `get`/`set`/`length`/`grow` operate
+  on. (A table's storage and limits used to be *published* as writable
+  `__wasm_funcs__`/`__wasm_types__`/`__wasm_exported__`/`__wasm_min__`/
+  `__wasm_max__` properties; a `WebAssembly.Table` now has no own properties at
+  all.) The declared element type is checked against what the engine can build
+  rather than against a string on the supplied object, so an `externref` table
+  import cannot be satisfied at all -- nothing constructs one.
 
-- **Memory imports** are validated by an `instanceof WebAssembly.Memory`
-  brand check (not proof against a forged prototype, but enough to turn a
-  bad import into a named `LinkError` instead of a confusing `TypeError`
-  from constructing a typed array over `undefined`) and against the
-  memory's actual current `__wasm_min__`/`__wasm_max__`. The module's linear
-  memory views are then built directly over the imported object's buffer —
-  see "Export Objects" below for what that does and does not share, and
+- **Memory imports** require a **genuine `WebAssembly.Memory`**: the link path
+  brand-checks it with `dyn_vmcast<JSWebAssemblyMemory>`, so an object literal,
+  a forged prototype chain and a `Proxy` are all `LinkError`s. (It used to be
+  an `instanceof` plus a `__wasm_type__` string, neither of which an object
+  merely *inheriting* from a real memory failed.) The same call returns the
+  memory's current page count, its own maximum, and its `ArrayBuffer`, all
+  read out of internal fields: the page count is the buffer's size, so a
+  memory grown before it was imported links correctly, and the buffer the
+  module's views are built over is the very one whose size was validated —
+  see "Export Objects" below for what that shares, and
   "Shared Memory — Instances Diverge After `grow`" for the caveat that
-  follows from it.
+  follows from it. **A memory the module DEFINES gets none of this**; see
+  "Export Objects" below.
 
-### Export Objects — Partial Storage Sharing
+### The JS → Wasm Value Boundary
+
+Every route by which a Wasm function value reaches JavaScript hands out the
+**canonical Exported Function** — the wrapper — and never the internal closure.
+That is load-bearing rather than cosmetic: the internal closure declares its
+`f32`/`f64` parameters as numbers (the float backend reads the raw double bits),
+takes an `i64` as a pair of signed 32-bit halves, and returns multi-value and
+`i64` results through a per-module buffer. Calling one from JS with `"x"` or
+`5n` was a VM abort. `test/wasm/e2e-no-closure-escape.wat` enumerates the
+routes — export wrappers, `Table.prototype.get`, `table.get`, funcref results
+including the return buffer's reference slots, funcref globals, arguments to
+imported JS functions, exception payloads, read-back after every table writer,
+and a second module adopting the same table — and brand-checks what each yields.
+
+The wrapper is therefore where `ToWebAssemblyValue` happens: `ToInt32` for
+`i32`, BigInt split for `i64`, `ToNumber` for `f64`, and `ToNumber` followed by
+rounding to single precision for `f32`. **The `f32` rounding was missing until
+2026-08-26** for all but a small class of functions, so
+`(func (export "id") (param f32) (result f32) (local.get 0))` called with `1.1`
+answered `1.1` instead of `1.100000023841858`. The spec suite cannot see this:
+every `f32` literal it passes is already exactly representable in single
+precision, so the rounding is a no-op on all of them.
+`test/wasm/e2e-float-param-boundary.wat` covers it.
+
+### Known Gaps in the JS API Surface
+
+- **`WebAssembly.Table.prototype.grow` ignores its optional fill value.** WebIDL
+  declares `grow(delta, optional any value)`; this implementation always fills
+  the new slots with `DefaultValue(funcref)`, i.e. `null`. Pinned by
+  `e2e-no-closure-escape.wat` so that implementing it is a deliberate change.
+
+- **A funcref global cannot be exported.** The export path has no case for a
+  reference type and reaches an `llvm_unreachable`, which aborts `hermesc`
+  rather than diagnosing. `global.get` of such a global works; only the export
+  is missing.
+
+### Export Objects — Storage Sharing
 
 The exports object includes function exports (with `__wasm_type__` metadata),
 global exports (wrapped in `WebAssembly.Global`), tag exports (plain objects
-with `__wasm_type__`), memory exports (wrapped in `WebAssembly.Memory`), and
-table exports (wrapped in `WebAssembly.Table`). All export kinds are handled.
+with `__wasm_type__`), memory exports (`WebAssembly.Memory`), and table exports
+(`WebAssembly.Table`). All export kinds are handled. Of these, only the
+function wrappers and the tag objects still carry a `__wasm_type__` string: a
+Memory, a Global and a Table each have no own properties at all, and an
+importer reads what it needs out of their internal fields.
 
 Memory exports publish the real `WebAssembly.Memory` the module operates
 on — the same object `createMemoryViews()` constructs for a defined memory,
 or the imported object itself, re-exported unchanged for an imported one.
 There is nothing to construct and no copy involved, so `mem.buffer` seen
-from JS is exactly the buffer the compiled code reads and writes. (Growing
-a memory that more than one instance shares this way is its own story —
-see "Shared Memory — Instances Diverge After `grow`" below.)
+from JS is exactly the buffer the compiled code reads and writes.
+(Growing a memory that more than one instance shares this way is its own story
+— see "Shared Memory — Instances Diverge After `grow`" below.)
 
-Table exports reach the same state for the common case: a defined `funcref`
-table is created as a real `WebAssembly.Table` up front, in `createTables()`,
-and that same object — whose internal element/type arrays are the module's
-own table storage — is what gets exported, so `get`/`set`/`length`/`grow`
-called on the export operate on the arrays `call_indirect` reads.
+That last sentence was only *normally* true until recently, and the gap was a
+correctness one. `createMemoryViews()` built a defined memory with
+`new globalThis.WebAssembly.Memory(descriptor)` and then read `.buffer` as an
+ordinary property. Both are replaceable — `WebAssembly.Memory.prototype.buffer`
+is a `configurable` accessor — so replacing it across instantiation gave the
+module a linear memory of the embedder's choosing while the exported
+`WebAssembly.Memory`, which is genuine and which an importing module
+brand-checks and therefore trusts, pointed at a different, untouched buffer.
+Measured against the build before the fix:
 
-One case still falls short: re-exporting an *imported* table. There,
-`finalizeModule()`'s export loop constructs a fresh `WebAssembly.Table` from
-the import's descriptor and then overwrites its `__wasm_funcs__` /
-`__wasm_types__` *properties* to point at the module's real (shared) table
-arrays — but the Table object's internal element/type storage, the fields its
-own `get`/`set`/`length`/`grow` methods actually read
-(`JSWebAssemblyTable::getElements`/`getTypes`), was already fixed at
-construction time to a private pair of arrays nobody else touches. A further
-module that imports this re-export reads the `__wasm_funcs__` property and
-lands on the correct, module-shared arrays, so Wasm-to-Wasm import chains
-still work end to end; but calling `.get()`/`.set()`/`.grow()` directly on
-the re-exported object, or reading its `.length`, touches storage that never
-reflects, or affects, what the module or any other importer sees.
+```
+DEFINED memory: wasm wrote into the script-supplied decoy: true
+DEFINED memory: real buffer untouched: true
+exported memory is a genuine Memory: true
+B links against A's exported Memory (brand check passes): true
+A wrote 0xABCD at 512; B reads: 0x0
+```
+
+`wasmLinkMemory` would hand a second module a buffer that was provably not the
+first module's linear memory — the same "validate one object, use another"
+class the import path fixed, left live on the defined side. The constructed
+memory is now brand-checked with the same `wasmLinkMemory` call and its buffer
+comes back from that call, so there is no second, replaceable read. A
+constructor that does not return a memory is refused by name
+(`LinkError: WebAssembly.Memory did not construct a memory for this module's
+memory 0`) rather than leaving the module running on a zero-length view, which
+is what a `.buffer` of `undefined` used to produce.
+
+The brand is not the whole check. A replaced constructor can return a **genuine**
+`WebAssembly.Memory` carrying limits of its own, and a defined memory's declared
+limits are what the module asked for, not what came back — `memory.grow` on a
+defined memory uses the compile-time literal. Measured before the limits check
+existed, on a module declaring `(memory 1 4)` handed a memory built with
+`{initial: 1, maximum: 2}`:
+
+```
+substituted maximum is 2; module grow(3) -> 1
+buffer now 4 pages
+mem.grow(0) at 4 pages -> RangeError: would exceed maximum
+```
+
+The module ran on limits nobody agreed to and left the exported object's
+`maxPages_` inconsistent with its own buffer. Never memory-unsafe — every access
+is bounds-checked against the real buffer — and it was the behaviour before the
+brand check too, so it is not a regression from it. Both numbers are now
+compared by **exact** equality, since the question is "did the constructor build
+what this module asked for", not the import path's "does this satisfy a
+declaration". `test/wasm/e2e-defined-memory-storage.wat` pins all of it,
+including the cross-module consequence and one row per number so that a check
+comparing only one of the two cannot pass.
+
+Global re-exports are split. An imported **mutable** global is re-exported as
+the very object that was imported — it is shared state, and a snapshot would
+track neither side's writes. An imported **immutable** global is not: the
+export loop builds a fresh `WebAssembly.Global` around its link-time value, so
+`instance.exports.g2 !== theGlobalThatWasImported`. That is invisible to Wasm
+(an immutable global's value cannot change, so the copy can never disagree)
+and it is what the value-snapshot design implies, but it does differ from the
+identity a memory or a table re-export preserves, and it differs from what the
+JS API says an export of an import is.
+
+Table exports reach the same state. A defined `funcref` table is created as a
+real `WebAssembly.Table` up front, in `createTables()`, and that same object —
+whose internal element/type arrays are the module's own table storage — is what
+gets exported, so `get`/`set`/`length`/`grow` called on the export operate on
+the arrays `call_indirect` reads.
+
+Re-exporting an *imported* table used to fall short here, and no longer does.
+`finalizeModule()`'s export loop constructed a fresh `WebAssembly.Table` from
+the import's descriptor and overwrote its `__wasm_funcs__`/`__wasm_types__`
+*properties* to point at the module's real, shared arrays — while the object's
+internal element/type storage, the fields its own `get`/`set`/`length`/`grow`
+actually read, stayed fixed to a private pair nobody else touched. Import
+chains worked, but calling `.get()`/`.set()`/`.grow()` on the re-exported
+object, or reading its `.length`, touched storage disconnected from everything
+else. The export loop now publishes **the imported object itself**, which is
+both what the JS API requires (an export of an imported table is the same
+table) and, with the storage in internal fields, the only way it can be
+shared.
 
 ### Shared Memory — Instances Diverge After `grow`
 
@@ -572,12 +735,18 @@ wrong bytes when the actual address is not aligned.
 In practice, well-formed Wasm compilers (LLVM, Binaryen) emit correct
 alignment hints, so production code is unaffected by this limitation.
 
-### Cross-Module `call_indirect` Type Indices
+### Cross-Module `call_indirect` Type Indices — FIXED
 
-The canonical type index map (commit d1907f2a3) is built per-module. If two
-modules define the same function signature, they may assign different canonical
-indices. When a function from module A is placed in module B's table (via shared
-`WebAssembly.Table`), `call_indirect` in module B will compare module B's
-canonical index against the index stored when module A populated the table — a
-mismatch. Fixing this requires either a runtime-level cross-module type
-registry or structural signature comparison at call time.
+This used to be a limitation, and the paragraph describing it outlived the fix.
+The canonical type index map is built per module, so two modules can number the
+same signature differently; comparing those numbers across a shared
+`WebAssembly.Table` was wrong in both directions — the same signature trapped,
+and two different signatures that happened to share an ordinal matched, so
+`call_indirect` called a function through the wrong signature.
+
+Type identity is now an **interned id** derived from the structural signature
+string, held in a runtime-wide table (`wasmInternType`) and stamped onto each
+Exported Function, so it agrees across modules regardless of declaration order.
+`test/wasm/e2e-cross-module-type-identity.wat` pins both directions: an importer
+that deliberately shifts its own numbering still calls the exporter's function,
+and a slot holding a different signature traps.

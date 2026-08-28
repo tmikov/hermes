@@ -30,4 +30,30 @@ print('imported object followed grow: ' +
 print('data survived grow: ' + (e.peek(128) === 0xCAFE));
 
 print('re-export is the same object: ' + (e.m2 === mem));
+
+// The buffer the module's views are built over comes out of the memory's
+// internal field, in the same call that measured it -- not from the `buffer`
+// accessor, which lives on a configurable prototype property and can be
+// replaced. If the module took the accessor's answer it would operate on
+// storage the embedder chose and the memory it was handed would see nothing.
+var decoy = new ArrayBuffer(4 * 65536);
+var savedBuffer =
+    Object.getOwnPropertyDescriptor(WebAssembly.Memory.prototype, 'buffer');
+Object.defineProperty(WebAssembly.Memory.prototype, 'buffer', {
+  get: function () { return decoy; },
+  configurable: true,
+});
+var mem2 = new WebAssembly.Memory({initial: 2, maximum: 4});
+// Read through the property while the hijack is installed, so the line below
+// states what was actually true during instantiation rather than what the
+// native getter says afterwards.
+var hijackInForce = (mem2.buffer === decoy);
+var e2 = new WebAssembly.Instance(mod, {e: {m: mem2}}).exports;
+e2.poke(256, 0x1234);
+Object.defineProperty(WebAssembly.Memory.prototype, 'buffer', savedBuffer);
+print('hijacked buffer accessor was in force: ' + hijackInForce);
+print('wasm wrote to the real buffer: ' +
+      (new DataView(mem2.buffer).getUint32(256, true) === 0x1234));
+print('wasm did not write to the decoy: ' +
+      (new DataView(decoy).getUint32(256, true) === 0));
 print('done');

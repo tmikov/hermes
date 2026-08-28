@@ -37,6 +37,14 @@ print("exporter call_at(1):", exporter.exports.call_at(1));
 print("exporter call_at(2):", exporter.exports.call_at(2));
 print("imported_call_at(2):", importer.exports.imported_call_at(2));
 
+// All THREE of a table's parallel arrays are shared, not just the two
+// call_indirect reads. The exporter's JS view of slot 2 is the Exported
+// Function the importer's element segment put there; if the importer had
+// adopted only the closure and type arrays, this would be null.
+var slot2 = exporter.exports.tbl.get(2);
+print("exporter tbl.get(2):",
+      typeof slot2 === "function" ? slot2() : "not a function (" + slot2 + ")");
+
 // -- Test 2: local table is independent --
 // The importer's local table (index 1) has f400 at [0] from its own
 // element segment. Its size should be 2, unaffected by imported table.

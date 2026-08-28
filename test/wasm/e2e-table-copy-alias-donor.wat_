@@ -1,0 +1,21 @@
+;; Copyright (c) Meta Platforms, Inc. and affiliates.
+;;
+;; This source code is licensed under the MIT license found in the
+;; LICENSE file in the root directory of this source tree.
+
+;; Donor module for e2e-table-copy-alias.wat. Its only job is to produce four
+;; real table slots -- genuine internal closures, genuine interned type ids and
+;; genuine Exported Functions -- for the driver to build forged table imports
+;; out of.
+;;
+;; The four signatures are all DIFFERENT, which is what makes the defect
+;; visible: with one shared signature every slot carries the same interned id,
+;; so smearing one id across the range changes nothing observable.
+
+(module
+  (table (export "tbl") 4 funcref)
+  (elem (i32.const 0) $f0 $f1 $f2 $f3)
+  (func $f0 (result i32) (i32.const 10))
+  (func $f1 (param i32) (result i32) (i32.const 11))
+  (func $f2 (param i32 i32) (result i32) (i32.const 12))
+  (func $f3 (param i32 i32 i32) (result i32) (i32.const 13)))

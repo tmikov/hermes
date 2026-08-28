@@ -28,6 +28,7 @@
 #include "hermes/VM/Runtime.h"
 #include "hermes/VM/RuntimeModule.h"
 #include "hermes/BCGen/HBC/BCProvider.h"
+#include "hermes/Support/Conversions.h"
 #include "hermes/Support/MemoryBuffer.h"
 #include "hermes/Support/UTF8.h"
 #include "hermes/WasmFrontend/WasmCompile.h"
@@ -1391,8 +1392,9 @@ wasmMemoryConstructor(void *context, Runtime &runtime) {
   }
   uint32_t initialPages = static_cast<uint32_t>(initialDbl);
 
-  // Read "maximum" property (optional).
-  uint32_t maxPages = 65536; // Default: no explicit maximum (Wasm max).
+  // Read "maximum" property (optional). UINT32_MAX is the "no explicit
+  // maximum" sentinel; growth is capped at 65536 pages regardless.
+  uint32_t maxPages = UINT32_MAX;
   auto maximumRes = JSObject::getNamed_RJS(
       lv.options,
       runtime,
@@ -1439,38 +1441,25 @@ wasmMemoryConstructor(void *context, Runtime &runtime) {
 
   lv.mem->setBuffer(runtime, *lv.buf);
 
-  // Set type metadata for import validation.
-  {
-    auto typeRes = StringPrimitive::create(
-        runtime, ASCIIRef("memory", 6));
-    if (LLVM_UNLIKELY(typeRes == ExecutionStatus::EXCEPTION))
-      return ExecutionStatus::EXCEPTION;
-    auto putRes = JSObject::putNamed_RJS(
-        lv.mem,
-        runtime,
-        Predefined::getSymbolID(Predefined::__wasm_type__),
-        runtime.makeHandle(std::move(*typeRes)));
-    if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION))
-      return ExecutionStatus::EXCEPTION;
-    putRes = JSObject::putNamed_RJS(
-        lv.mem,
-        runtime,
-        Predefined::getSymbolID(Predefined::__wasm_min__),
-        runtime.makeHandle(HermesValue::encodeTrustedNumberValue(
-            initialPages)));
-    if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION))
-      return ExecutionStatus::EXCEPTION;
-    putRes = JSObject::putNamed_RJS(
-        lv.mem,
-        runtime,
-        Predefined::getSymbolID(Predefined::__wasm_max__),
-        runtime.makeHandle(HermesValue::encodeTrustedNumberValue(
-            lv.maximumVal->isUndefined()
-                ? -1.0
-                : static_cast<double>(maxPages))));
-    if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION))
-      return ExecutionStatus::EXCEPTION;
-  }
+  // NOTHING IS PUBLISHED ON THE MEMORY. It used to carry three ordinary,
+  // writable, enumerable own properties -- __wasm_type__, __wasm_min__ and
+  // __wasm_max__ -- which the link path read to decide whether a memory
+  // import was satisfied. That had three consequences, all closed here:
+  //
+  //   * a plain object literal carrying those names described itself as a
+  //     memory, and so did any object INHERITING from a real one;
+  //   * __wasm_min__ was a snapshot of the size at construction that grow()
+  //     never updated, so a memory grown from one page to two still claimed
+  //     a minimum of one and failed to satisfy a (memory 2) import (H7);
+  //   * the writes went through putNamed_RJS, which walks the prototype
+  //     chain, so a setter on WebAssembly.Memory.prototype ran arbitrary user
+  //     JS inside this constructor on a half-built object (H2).
+  //
+  // The link path now reads buffer_ and maxPages_ through the wasmLinkMemory
+  // builtin, whose dyn_vmcast is the brand check that replaced the
+  // __wasm_type__ string comparison, and whose size comes from the buffer --
+  // so it cannot go stale after a grow. A WebAssembly.Memory now has no own
+  // properties at all, which is also what the spec requires of it.
 
   return lv.mem.getHermesValue();
 }
@@ -1580,6 +1569,36 @@ wasmMemoryGrowMethod(void *context, Runtime &runtime) {
 // WebAssembly.Table
 //===----------------------------------------------------------------------===//
 
+/// Fetch a Table's three parallel backing arrays: the internal closures that
+/// call_indirect calls, their interned type ids that it checks, and the
+/// Exported Functions that every JS boundary crossing sees. Every method that
+/// touches slots needs all three, because a slot is the triple and not any one
+/// of them.
+///
+/// The constructor creates all three together and nothing ever clears them, so
+/// a table missing one is not a state script can reach; the check is here
+/// because the fields are nullable and a half-built table must not be written
+/// through, rather than because it is expected to fire.
+/// \return false with a TypeError pending if any array is missing.
+static bool wasmTableArrays(
+    Runtime &runtime,
+    Handle<JSWebAssemblyTable> tbl,
+    PinnedValue<JSArray> &funcsArr,
+    PinnedValue<JSArray> &typesArr,
+    PinnedValue<JSArray> &exportedArr) {
+  JSArray *funcs = tbl->getElements(runtime);
+  JSArray *types = tbl->getTypes(runtime);
+  JSArray *exported = tbl->getExported(runtime);
+  if (LLVM_UNLIKELY(!funcs || !types || !exported)) {
+    (void)runtime.raiseTypeError("WebAssembly.Table has no backing storage");
+    return false;
+  }
+  funcsArr = funcs;
+  typesArr = types;
+  exportedArr = exported;
+  return true;
+}
+
 /// new WebAssembly.Table({element: "anyfunc", initial: N, maximum: M}) —
 /// create a table for function references.
 static CallResult<HermesValue>
@@ -1605,6 +1624,7 @@ wasmTableConstructor(void *context, Runtime &runtime) {
     PinnedValue<JSWebAssemblyTable> tbl;
     PinnedValue<JSArray> arr;
     PinnedValue<JSArray> typesArr;
+    PinnedValue<JSArray> exportedArr;
   } lv;
   LocalsRAII lraii(runtime, &lv);
 
@@ -1673,7 +1693,6 @@ wasmTableConstructor(void *context, Runtime &runtime) {
   // maximum; 0 is a real maximum that forbids all growth. The distinction
   // is observable: importing a {maximum: 0} table as (table 0 0 funcref)
   // must link, and its metadata must say 0, not "unbounded".
-  bool hasMax = false;
   uint32_t maxSize = UINT32_MAX;
   auto maximumRes = JSObject::getNamed_RJS(
       lv.options,
@@ -1695,7 +1714,6 @@ wasmTableConstructor(void *context, Runtime &runtime) {
       return runtime.raiseRangeError(
           "WebAssembly.Table(): 'maximum' must be a non-negative integer");
     }
-    hasMax = true;
     maxSize = static_cast<uint32_t>(maxDbl);
     if (initialSize > maxSize) {
       return runtime.raiseRangeError(
@@ -1714,23 +1732,11 @@ wasmTableConstructor(void *context, Runtime &runtime) {
     return ExecutionStatus::EXCEPTION;
   }
   lv.arr = std::move(*arrRes);
-
-  // Initialize all entries to null.
-  GCScopeMarkerRAII marker{runtime};
-  for (uint32_t i = 0; i < initialSize; ++i) {
-    marker.flush();
-    (void)JSArray::setElementAt(
-        lv.arr,
-        runtime,
-        i,
-        runtime.makeHandle(HermesValue::encodeNullValue()));
-  }
-
   lv.tbl->setElements(runtime, *lv.arr);
 
-  // Create the parallel type-id array. Entries stay empty: values set from
-  // JS carry no interned Wasm type, and call_indirect refuses an empty
-  // type slot.
+  // The parallel type-id array. A slot's entry is the interned Wasm type of
+  // the function in it; an empty entry means "no interned type", which is what
+  // makes call_indirect refuse the slot.
   auto typesRes = JSArray::create(runtime, initialSize, initialSize);
   if (LLVM_UNLIKELY(typesRes == ExecutionStatus::EXCEPTION)) {
     return ExecutionStatus::EXCEPTION;
@@ -1738,57 +1744,66 @@ wasmTableConstructor(void *context, Runtime &runtime) {
   lv.typesArr = std::move(*typesRes);
   lv.tbl->setTypes(runtime, *lv.typesArr);
 
-  // Publish the backing arrays under the names the import wiring reads,
-  // as a Wasm-exported table does. They are the same objects the
-  // get/set/grow/length methods operate on, so a module importing this
-  // table and JS observe each other's changes.
+  // The parallel Exported Function array. This is what table.get and
+  // Table.prototype.get hand out.
+  auto exportedRes = JSArray::create(runtime, initialSize, initialSize);
+  if (LLVM_UNLIKELY(exportedRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  lv.exportedArr = std::move(*exportedRes);
+  lv.tbl->setExported(runtime, *lv.exportedArr);
+
+  // Clear every slot through the slot funnel, the one writer of a table array.
+  // Doing it by hand would produce the same three values today, but it would
+  // be a second definition of "an empty slot" sitting next to the funnel's and
+  // free to drift from it; and the spec's initial value for a funcref table is
+  // exactly DefaultValue(funcref), which is the null this passes.
+  //
+  // NO TEST CAN SEE THIS LOOP, and that is now a property of the design rather
+  // than a gap. While the backing arrays were published, an explicit null and
+  // a never-written hole were distinguishable through `Object.keys` and `in`.
+  // They are not reachable any more, and every remaining reader maps the two
+  // to the same answer: wasmCallIndirect reports "uninitialized element" for
+  // either, and wasmTableGetSlot and Table.prototype.get both return null for
+  // either. Deleting the loop outright leaves the whole suite green -- checked,
+  // not assumed. It is kept because "the funnel is the only writer" is an
+  // invariant later changes lean on, and because an externref table's arrays
+  // are holes throughout, so a reader that ever starts telling the two apart
+  // would be wrong about externref tables as well. Anyone removing it for its
+  // instantiate-time cost should say so as a deliberate trade, not as a
+  // cleanup covered by tests.
   {
-    auto putRes = JSObject::putNamed_RJS(
-        lv.tbl,
-        runtime,
-        Predefined::getSymbolID(Predefined::__wasm_funcs__),
-        lv.arr);
-    if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION))
-      return ExecutionStatus::EXCEPTION;
-    putRes = JSObject::putNamed_RJS(
-        lv.tbl,
-        runtime,
-        Predefined::getSymbolID(Predefined::__wasm_types__),
-        lv.typesArr);
-    if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION))
-      return ExecutionStatus::EXCEPTION;
+    GCScopeMarkerRAII marker{runtime};
+    for (uint32_t i = 0; i < initialSize; ++i) {
+      marker.flush();
+      if (LLVM_UNLIKELY(
+              setWasmTableSlot(
+                  runtime,
+                  lv.arr,
+                  lv.typesArr,
+                  lv.exportedArr,
+                  i,
+                  Runtime::getNullValue(),
+                  /* isFuncRef */ true) == ExecutionStatus::EXCEPTION))
+        return ExecutionStatus::EXCEPTION;
+    }
   }
 
-  // Set type metadata for import validation.
-  {
-    auto typeRes = StringPrimitive::create(
-        runtime, ASCIIRef("table:funcref", 13));
-    if (LLVM_UNLIKELY(typeRes == ExecutionStatus::EXCEPTION))
-      return ExecutionStatus::EXCEPTION;
-    auto putRes = JSObject::putNamed_RJS(
-        lv.tbl,
-        runtime,
-        Predefined::getSymbolID(Predefined::__wasm_type__),
-        runtime.makeHandle(std::move(*typeRes)));
-    if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION))
-      return ExecutionStatus::EXCEPTION;
-    putRes = JSObject::putNamed_RJS(
-        lv.tbl,
-        runtime,
-        Predefined::getSymbolID(Predefined::__wasm_min__),
-        runtime.makeHandle(HermesValue::encodeTrustedNumberValue(
-            initialSize)));
-    if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION))
-      return ExecutionStatus::EXCEPTION;
-    putRes = JSObject::putNamed_RJS(
-        lv.tbl,
-        runtime,
-        Predefined::getSymbolID(Predefined::__wasm_max__),
-        runtime.makeHandle(HermesValue::encodeTrustedNumberValue(
-            hasMax ? static_cast<double>(maxSize) : -1.0)));
-    if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION))
-      return ExecutionStatus::EXCEPTION;
-  }
+  // NOTHING IS PUBLISHED ON THE TABLE. It used to carry six own properties --
+  // __wasm_funcs__/__wasm_types__/__wasm_exported__ (the backing storage) and
+  // __wasm_type__/__wasm_min__/__wasm_max__ (the metadata the link path
+  // compared against) -- all of them ordinary, writable and enumerable. That
+  // published the entire linking ABI to script: the arrays could be read,
+  // frozen and handed to another module, the internal closures in them could
+  // be called directly (which aborts the VM), the type ids could be forged to
+  // defeat call_indirect's check, and an object literal carrying the same six
+  // names linked as a table. A WebAssembly.Table now has no own properties at
+  // all, which is also what the spec requires of it.
+  //
+  // The link path reads elements_/types_/exported_ and maxSize_ through the
+  // wasmLinkTable builtin, whose dyn_vmcast is the brand check that replaced
+  // the __wasm_type__ string comparison. The current size is the storage's
+  // length, so it needs no snapshot and cannot go stale after a grow.
 
   return lv.tbl.getHermesValue();
 }
@@ -1828,9 +1843,17 @@ wasmTableGetMethod(void *context, Runtime &runtime) {
 
   struct : public Locals {
     PinnedValue<> indexVal;
+    PinnedValue<JSWebAssemblyTable> tblHandle;
     PinnedValue<JSArray> arr;
+    PinnedValue<JSArray> typesArr;
+    PinnedValue<JSArray> exportedArr;
   } lv;
   LocalsRAII lraii(runtime, &lv);
+
+  // Pin the table BEFORE anything that can run JS. toNumber_RJS below calls a
+  // user valueOf, which can allocate and move the table; the raw `tbl` would
+  // be stale from that point on. The set and grow methods already do this.
+  lv.tblHandle = tbl;
 
   lv.indexVal = args.getArg(0);
   auto indexRes = toNumber_RJS(runtime, lv.indexVal);
@@ -1839,12 +1862,19 @@ wasmTableGetMethod(void *context, Runtime &runtime) {
   }
   double indexDbl = indexRes->getDouble();
 
-  JSArray *arrPtr = tbl->getElements(runtime);
-  if (!arrPtr) {
-    return runtime.raiseRangeError(
-        "WebAssembly.Table.prototype.get: index out of bounds");
-  }
-  lv.arr = arrPtr;
+  // The length is the closure array's, but the value handed out is the
+  // EXPORTED FUNCTION. Returning elements_[i] hands script the internal
+  // closure, whose calling convention is the internal one -- an i64 as a
+  // lo/hi pair, results through a return buffer -- so calling it with the
+  // spec-legal 5n read a BigInt as a double and aborted the VM.
+  //
+  // This does not need the type array, but it goes through the same helper as
+  // set and grow so that a table missing any of its storage reports that, and
+  // reports it the same way. It used to answer "index out of bounds", which
+  // named the one thing that was not wrong.
+  if (LLVM_UNLIKELY(!wasmTableArrays(
+          runtime, lv.tblHandle, lv.arr, lv.typesArr, lv.exportedArr)))
+    return ExecutionStatus::EXCEPTION;
 
   uint32_t len = JSArray::getLength(*lv.arr, runtime);
   if (indexDbl < 0 || indexDbl >= len ||
@@ -1854,8 +1884,12 @@ wasmTableGetMethod(void *context, Runtime &runtime) {
   }
   uint32_t index = static_cast<uint32_t>(indexDbl);
 
-  HermesValue elem = lv.arr->at(runtime, index).unboxToHV(runtime);
-  return elem;
+  // The SAME read `table.get` uses, deliberately: see readWasmTableSlot. On a
+  // WebAssembly.Table the empty case cannot arise -- the constructor clears
+  // every slot through the funnel and grow fills the new ones -- but sharing
+  // the read is what stops the two ever disagreeing, and it is what gives that
+  // mapping a reachable test (an externref table's storage is holes).
+  return readWasmTableSlot(runtime, *lv.exportedArr, index);
 }
 
 /// WebAssembly.Table.prototype.set(index, value) — set the element.
@@ -1875,9 +1909,13 @@ wasmTableSetMethod(void *context, Runtime &runtime) {
     PinnedValue<> funcVal;
     PinnedValue<JSWebAssemblyTable> tblHandle;
     PinnedValue<JSArray> arr;
+    PinnedValue<JSArray> typesArr;
+    PinnedValue<JSArray> exportedArr;
   } lv;
   LocalsRAII lraii(runtime, &lv);
 
+  // Pin the table BEFORE anything that can run JS: toNumber_RJS below calls a
+  // user valueOf, which can allocate and move the table.
   lv.tblHandle = tbl;
 
   lv.indexVal = args.getArg(0);
@@ -1887,12 +1925,36 @@ wasmTableSetMethod(void *context, Runtime &runtime) {
   }
   double indexDbl = indexRes->getDouble();
 
-  JSArray *arrPtr = lv.tblHandle->getElements(runtime);
-  if (!arrPtr) {
-    return runtime.raiseRangeError(
-        "WebAssembly.Table.prototype.set: index out of bounds");
+  // ToWebAssemblyValue for funcref admits null and an Exported Function, and
+  // nothing else: every other value takes the spec's host-reference branch,
+  // whose type does not match `ref null func`, so it is a TypeError. A plain
+  // JS function is therefore refused -- it is a host reference, not a funcref
+  // -- and so is `undefined`.
+  //
+  // OMITTING the value is a different thing from passing `undefined`. WebIDL
+  // declares it `optional any value` with no default, so an absent argument is
+  // DefaultValue(funcref), which is null, while an explicit `undefined` is an
+  // ordinary value that fails the check. wpt wasm/jsapi/table/get-set.any.js
+  // pins both halves.
+  //
+  // The funnel would refuse the same values, but this check is not redundant:
+  // the spec converts the value BEFORE the write, so an out-of-range index and
+  // a bad value must report the value's TypeError rather than the index's
+  // RangeError, and the message can name the method that the caller actually
+  // called.
+  if (args.getArgCount() >= 2)
+    lv.funcVal = args.getArg(1);
+  else
+    lv.funcVal = HermesValue::encodeNullValue();
+  if (!lv.funcVal->isNull() && !isWasmExportedFunction(runtime, lv.funcVal)) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Table.prototype.set: value must be null or a "
+        "WebAssembly exported function");
   }
-  lv.arr = arrPtr;
+
+  if (LLVM_UNLIKELY(!wasmTableArrays(
+          runtime, lv.tblHandle, lv.arr, lv.typesArr, lv.exportedArr)))
+    return ExecutionStatus::EXCEPTION;
 
   uint32_t len = JSArray::getLength(*lv.arr, runtime);
   if (indexDbl < 0 || indexDbl >= len ||
@@ -1902,17 +1964,24 @@ wasmTableSetMethod(void *context, Runtime &runtime) {
   }
   uint32_t index = static_cast<uint32_t>(indexDbl);
 
-  // The value must be null or a callable function.
-  lv.funcVal = args.getArg(1);
-  if (!lv.funcVal->isNull()) {
-    if (!dyn_vmcast<Callable>(*lv.funcVal)) {
-      return runtime.raiseTypeError(
-          "WebAssembly.Table.prototype.set: value must be null or a "
-          "function");
-    }
-  }
-
-  (void)JSArray::setElementAt(lv.arr, runtime, index, lv.funcVal);
+  // Through the funnel, so the closure and the interned type id are DERIVED
+  // from the Exported Function rather than guessed at here. Writing the
+  // wrapper and leaving the type id alone -- which is what this method used to
+  // do -- left the slot's old signature in place, and call_indirect then
+  // called the new function through it.
+  //
+  // A JS-API table is always funcref: the constructor accepts only "anyfunc"
+  // and "funcref".
+  if (LLVM_UNLIKELY(
+          setWasmTableSlot(
+              runtime,
+              lv.arr,
+              lv.typesArr,
+              lv.exportedArr,
+              index,
+              lv.funcVal,
+              /* isFuncRef */ true) == ExecutionStatus::EXCEPTION))
+    return ExecutionStatus::EXCEPTION;
 
   return HermesValue::encodeUndefinedValue();
 }
@@ -1934,6 +2003,7 @@ wasmTableGrowMethod(void *context, Runtime &runtime) {
     PinnedValue<JSWebAssemblyTable> tblHandle;
     PinnedValue<JSArray> arr;
     PinnedValue<JSArray> typesArr;
+    PinnedValue<JSArray> exportedArr;
   } lv;
   LocalsRAII lraii(runtime, &lv);
 
@@ -1952,12 +2022,10 @@ wasmTableGrowMethod(void *context, Runtime &runtime) {
   }
   uint32_t delta = static_cast<uint32_t>(deltaDbl);
 
-  JSArray *arrPtr = lv.tblHandle->getElements(runtime);
-  uint32_t oldLen = 0;
-  if (arrPtr) {
-    lv.arr = arrPtr;
-    oldLen = JSArray::getLength(*lv.arr, runtime);
-  }
+  if (LLVM_UNLIKELY(!wasmTableArrays(
+          runtime, lv.tblHandle, lv.arr, lv.typesArr, lv.exportedArr)))
+    return ExecutionStatus::EXCEPTION;
+  uint32_t oldLen = JSArray::getLength(*lv.arr, runtime);
 
   uint64_t newLen64 = static_cast<uint64_t>(oldLen) + delta;
   uint32_t maxSize = lv.tblHandle->getMaxSize();
@@ -1981,51 +2049,72 @@ wasmTableGrowMethod(void *context, Runtime &runtime) {
   }
   uint32_t newLen = static_cast<uint32_t>(newLen64);
 
-  if (!arrPtr) {
-    // No backing array; nothing shares this table yet, so create one.
-    auto arrRes = JSArray::create(runtime, newLen, newLen);
-    if (LLVM_UNLIKELY(arrRes == ExecutionStatus::EXCEPTION)) {
-      return ExecutionStatus::EXCEPTION;
-    }
-    lv.arr = std::move(*arrRes);
-    lv.tblHandle->setElements(runtime, *lv.arr);
-  } else {
-    // Grow IN PLACE. A module importing this table shares these very
-    // array objects; replacing them here would silently disconnect the
-    // two, which is exactly what wasmTableGrow avoids by growing the
-    // shared arrays the same way.
+  // Grow all three IN PLACE. A module importing this table shares these very
+  // array objects; replacing them here would silently disconnect the two,
+  // which is exactly what the Wasm-side table.grow avoids by growing the
+  // shared arrays the same way. Leaving any one of the three short
+  // desynchronizes the triple, and a later write to a grown slot would land in
+  // some arrays and extend others.
+  //
+  // The `bool` half of each CallResult is deliberately discarded here, unlike
+  // the element writes in the funnel, where discarding it is the whole defect.
+  // The difference is that a refused LENGTH write is caught downstream: it
+  // leaves that array short, the fill loop below then writes an index the
+  // array will not take, and the checked element store turns that into the
+  // rollback and the RangeError. When delta is 0 no fill loop runs, but then
+  // there is also nothing to write.
+  //
+  // NOTHING PINS THAT ANY MORE, and the reason is worth stating rather than
+  // leaving to be rediscovered. It used to be pinned by three frozen-array
+  // cases in e2e-table-js-methods.wat, which froze a table's backing arrays
+  // through the __wasm_funcs__ publication; those publications are deleted, a
+  // WebAssembly.Table's storage is internal fields script cannot name, and so
+  // no JS-API table can be handed an array that refuses writes. The rollback
+  // below is unreachable from this method and untested. The equivalent
+  // downstream-catch on the WASM side IS reachable and is tested -- an
+  // externref table's arrays come from globalThis.Array; see wasmTableGrow and
+  // the frozen-storage cases in e2e-table-slot-invariant.wat.
+  {
     auto lenRes = JSArray::setLengthProperty(lv.arr, runtime, newLen);
-    if (LLVM_UNLIKELY(lenRes == ExecutionStatus::EXCEPTION)) {
+    if (LLVM_UNLIKELY(lenRes == ExecutionStatus::EXCEPTION))
       return ExecutionStatus::EXCEPTION;
-    }
-  }
-  JSArray *typesPtr = lv.tblHandle->getTypes(runtime);
-  bool haveTypes = typesPtr != nullptr;
-  if (haveTypes) {
-    lv.typesArr = typesPtr;
-    auto lenRes = JSArray::setLengthProperty(lv.typesArr, runtime, newLen);
-    if (LLVM_UNLIKELY(lenRes == ExecutionStatus::EXCEPTION)) {
+    lenRes = JSArray::setLengthProperty(lv.typesArr, runtime, newLen);
+    if (LLVM_UNLIKELY(lenRes == ExecutionStatus::EXCEPTION))
       return ExecutionStatus::EXCEPTION;
-    }
+    lenRes = JSArray::setLengthProperty(lv.exportedArr, runtime, newLen);
+    if (LLVM_UNLIKELY(lenRes == ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
   }
 
+  // Clear the new entries through the slot funnel, like every other write to
+  // a table array. The fill value is null because this method does not accept
+  // the spec's optional second argument, so it is always
+  // DefaultValue(funcref).
   GCScopeMarkerRAII marker{runtime};
-
-  // Initialize new entries to null. Type entries stay empty: these
-  // entries carry no interned Wasm type, and call_indirect refuses an
-  // empty type slot.
   for (uint32_t i = oldLen; i < newLen; ++i) {
     marker.flush();
     if (LLVM_UNLIKELY(
-            JSArray::setElementAt(
-                lv.arr, runtime, i, Runtime::getNullValue()) ==
-            ExecutionStatus::EXCEPTION)) {
-      // Could not allocate part-way through. Put the table back and
-      // report the failure as the spec's RangeError.
+            setWasmTableSlot(
+                runtime,
+                lv.arr,
+                lv.typesArr,
+                lv.exportedArr,
+                i,
+                Runtime::getNullValue(),
+                /* isFuncRef */ true) == ExecutionStatus::EXCEPTION)) {
+      // Could not write part-way through -- out of memory, or one of the
+      // arrays refusing writes because script froze it. Put the table back to
+      // its old length and report it the way the spec reports a failed grow,
+      // as a RangeError; returning with a foreign exception pending would
+      // leave a table grown but not filled.
+      //
+      // Best-effort cleanup on a path that is already reporting failure: an
+      // array that refuses to shrink is one that never grew, so ignoring the
+      // result cannot leave the table longer than it started.
       runtime.clearThrownValue();
       (void)JSArray::setLengthProperty(lv.arr, runtime, oldLen);
-      if (haveTypes)
-        (void)JSArray::setLengthProperty(lv.typesArr, runtime, oldLen);
+      (void)JSArray::setLengthProperty(lv.typesArr, runtime, oldLen);
+      (void)JSArray::setLengthProperty(lv.exportedArr, runtime, oldLen);
       return runtime.raiseRangeError(
           "WebAssembly.Table.prototype.grow: could not allocate");
     }
@@ -2141,15 +2230,6 @@ wasmGlobalConstructor(void *context, Runtime &runtime) {
       return ExecutionStatus::EXCEPTION;
     }
     initValue = initRes->getDouble();
-
-    // For integer types, truncate to the appropriate range.
-    if (valType == JSWebAssemblyGlobal::ValType::I32) {
-      initValue = static_cast<double>(
-          static_cast<int32_t>(static_cast<int64_t>(initValue)));
-    } else if (valType == JSWebAssemblyGlobal::ValType::F32) {
-      initValue = static_cast<double>(static_cast<float>(initValue));
-    }
-    // i64 and f64 keep the full double value.
   }
 
   // Create the Global object.
@@ -2157,39 +2237,28 @@ wasmGlobalConstructor(void *context, Runtime &runtime) {
   lv.glob = JSWebAssemblyGlobal::create(runtime, globalPrototype);
   lv.glob->setValType(valType);
   lv.glob->setMutable(isMutable);
-  lv.glob->setValue(initValue);
   lv.glob->setI64Value(initI64);
+  // The type must already be set: setWasmGlobalNumber coerces to it, and it
+  // is the one place value_ is written, so an i32 global never holds a
+  // fractional double however it was constructed. i64 keeps initValue at 0
+  // and carries its value in i64Value_ above.
+  if (valType != JSWebAssemblyGlobal::ValType::I64)
+    setWasmGlobalNumber(lv.glob.get(), initValue);
 
-  // Set type metadata for import validation.
-  // Format: "global:<type>:<mut>" e.g. "global:i32:const" or "global:f64:var"
-  {
-    const char *typeName;
-    switch (valType) {
-      case JSWebAssemblyGlobal::ValType::I32:
-        typeName = isMutable ? "global:i32:var" : "global:i32:const";
-        break;
-      case JSWebAssemblyGlobal::ValType::I64:
-        typeName = isMutable ? "global:i64:var" : "global:i64:const";
-        break;
-      case JSWebAssemblyGlobal::ValType::F32:
-        typeName = isMutable ? "global:f32:var" : "global:f32:const";
-        break;
-      case JSWebAssemblyGlobal::ValType::F64:
-        typeName = isMutable ? "global:f64:var" : "global:f64:const";
-        break;
-    }
-    auto typeRes = StringPrimitive::create(
-        runtime, ASCIIRef(typeName, strlen(typeName)));
-    if (LLVM_UNLIKELY(typeRes == ExecutionStatus::EXCEPTION))
-      return ExecutionStatus::EXCEPTION;
-    auto putRes = JSObject::putNamed_RJS(
-        lv.glob,
-        runtime,
-        Predefined::getSymbolID(Predefined::__wasm_type__),
-        runtime.makeHandle(std::move(*typeRes)));
-    if (LLVM_UNLIKELY(putRes == ExecutionStatus::EXCEPTION))
-      return ExecutionStatus::EXCEPTION;
-  }
+  // NOTHING IS PUBLISHED ON THE GLOBAL. It used to carry one ordinary,
+  // writable, enumerable own property, __wasm_type__, holding a string such
+  // as "global:i32:const" that the link path compared against the importing
+  // module's declaration. Because that was the whole of the check, an object
+  // literal carrying the right string and a `value` LINKED as a global and
+  // handed the module its own `value` -- the only one of the three kinds
+  // where a plain forgery succeeded outright. The write also went through
+  // putNamed_RJS, which walks the prototype chain, so a setter on
+  // WebAssembly.Global.prototype ran user JS inside this constructor (H2).
+  //
+  // The link path now reads valType_/mutable_ and the value itself through
+  // the wasmLinkGlobal builtin, whose dyn_vmcast is the brand check that
+  // replaced the string comparison. A WebAssembly.Global now has no own
+  // properties at all, which is also what the spec requires of it.
 
   return lv.glob.getHermesValue();
 }
@@ -2252,18 +2321,10 @@ wasmGlobalValueSetter(void *context, Runtime &runtime) {
   if (LLVM_UNLIKELY(numRes == ExecutionStatus::EXCEPTION)) {
     return ExecutionStatus::EXCEPTION;
   }
-  double val = numRes->getDouble();
-
-  // Truncate for integer/float types.
-  auto valType = glob->getValType();
-  if (valType == JSWebAssemblyGlobal::ValType::I32) {
-    val = static_cast<double>(
-        static_cast<int32_t>(static_cast<int64_t>(val)));
-  } else if (valType == JSWebAssemblyGlobal::ValType::F32) {
-    val = static_cast<double>(static_cast<float>(val));
-  }
-
-  glob->setValue(val);
+  // toNumber_RJS is a safepoint and `glob` is a raw pointer, so re-derive it
+  // rather than trusting the one taken before the call.
+  glob = vmcast<JSWebAssemblyGlobal>(args.getThisArg());
+  setWasmGlobalNumber(glob, numRes->getDouble());
   return HermesValue::encodeUndefinedValue();
 }
 

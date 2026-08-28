@@ -1,0 +1,55 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-defined-table-limits.wat. The module declares
+// `(table 1 2 funcref)`.
+
+var args = hermescli.getScriptArgs();
+var mod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[0]));
+
+// The honest instance first. If everything here were a LinkError the rows
+// below would prove nothing.
+var e = new WebAssembly.Instance(mod).exports;
+print('honest: size ' + e.size() + ', call0 ' + e.call0() +
+      ', t.length ' + e.t.length);
+
+// globalThis.WebAssembly.Table is an ordinary property. What comes back here
+// is a GENUINE WebAssembly.Table -- the brand check passes -- built with
+// limits of the substitute's choosing rather than the module's.
+function withSubstitute(label, descriptor) {
+  var saved = WebAssembly.Table;
+  WebAssembly.Table = function () { return new saved(descriptor); };
+  try {
+    var ex = new WebAssembly.Instance(mod).exports;
+    print(label + ': size ' + ex.size() + ', call0 ' + ex.call0());
+  } catch (err) {
+    print(label + ': ' + err.name + ': ' + err.message);
+  }
+  WebAssembly.Table = saved;
+}
+withSubstitute('substituted 1 entry, no maximum', {element: 'anyfunc', initial: 1});
+withSubstitute('substituted 1 entry, maximum 1',
+               {element: 'anyfunc', initial: 1, maximum: 1});
+withSubstitute('substituted 2 entries, maximum 2',
+               {element: 'anyfunc', initial: 2, maximum: 2});
+withSubstitute('substituted exactly as declared',
+               {element: 'anyfunc', initial: 1, maximum: 2});
+
+// The module's own table.grow uses the compile-time maximum, 2. On the honest
+// table that agrees with the object's own maxSize_, so growing to 2 succeeds
+// and growing past it is refused from BOTH sides. That agreement is exactly
+// what a substituted table with a smaller maximum destroyed.
+var grown = e.grow(1);
+var jsGrow;
+try {
+  jsGrow = String(e.t.grow(1));
+} catch (err) {
+  jsGrow = err.name + ': ' + err.message;
+}
+print('honest grow(1) -> ' + grown + ', t.length ' + e.t.length +
+      ', wasm grow(1) -> ' + e.grow(1) + ', JS t.grow(1) -> ' + jsGrow);
+print('done');
