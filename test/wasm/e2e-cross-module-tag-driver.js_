@@ -9,9 +9,9 @@
 
 var args = hermescli.getScriptArgs();
 var exporter = new WebAssembly.Instance(
-  new WebAssembly.Module(hermescli.loadFile(args[0])));
+  WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[0])));
 var importer = new WebAssembly.Instance(
-  new WebAssembly.Module(hermescli.loadFile(args[1])),
+  WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[1])),
   {exporter: exporter.exports});
 
 print('catches_a: ' + importer.exports.catches_a(7));

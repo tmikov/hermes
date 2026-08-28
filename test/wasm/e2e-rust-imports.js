@@ -11,7 +11,7 @@
 
 // REQUIRES: wasm
 
-// RUN: %hermesc --wasm -emit-binary -out %t.hbc %S/fixtures/rust-imports.wasm && %hermes -Xhermes-internal-test-methods %S/e2e-rust-imports-driver.js_ -- %t.hbc | %FileCheck --match-full-lines %s
+// RUN: %hermesc --wasm -emit-binary -out %t.hbc %S/fixtures/rust-imports.wasm && %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js %S/e2e-rust-imports-driver.js_ -- %t.hbc | %FileCheck --match-full-lines %s
 
 // CHECK: run(41) = 42
 // CHECK-NEXT: greet logged: hello from rust

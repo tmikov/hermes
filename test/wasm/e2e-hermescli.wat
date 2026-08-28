@@ -10,7 +10,7 @@
 
 ;; Compile .wat -> .wasm -> .hbc, then run the JS driver with the .hbc
 ;; path passed as a script argument.
-;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods %S/e2e-hermescli-driver.js_ -- %t.hbc | %FileCheck --match-full-lines %s
+;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js %S/e2e-hermescli-driver.js_ -- %t.hbc | %FileCheck --match-full-lines %s
 
 (module
   (func $add (export "add") (param i32 i32) (result i32)

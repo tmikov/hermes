@@ -1,0 +1,29 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for mv-ref-result.wat.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var inst = new WebAssembly.Instance(
+  WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(hbcPath)));
+
+// Calling the returned funcref is what distinguishes a real closure from a
+// number that merely prints plausibly: 0 is not callable.
+var r = inst.exports.mv();
+print('mv: [' + r[0] + ', ' + typeof r[1] + ' calls -> ' + r[1]() + ']');
+
+var s = inst.exports.single();
+print('single: ' + typeof s + ' calls -> ' + s());
+
+// Identity, not just type: the externref must be the very object passed in.
+var token = {tag: 'host'};
+var e = inst.exports.mvExtern(token);
+print('mvExtern: [' + e[0] + ', same=' + (e[1] === token) + ']');
+
+var t = inst.exports.mvTwo(token);
+print('mvTwo: [' + typeof t[0] + ' calls -> ' + t[0]() + ', same=' +
+      (t[1] === token) + ', ' + t[2] + ']');

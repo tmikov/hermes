@@ -8,7 +8,7 @@
 ;; values like -5 were treated as unsigned 4294967291 instead of -5.
 
 ;; REQUIRES: wasm
-;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods %S/regress-i64-export-wrapper-driver.js_ -- %t.hbc | %FileCheck --match-full-lines %s
+;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js %S/regress-i64-export-wrapper-driver.js_ -- %t.hbc | %FileCheck --match-full-lines %s
 
 (module
   ;; div_s(-5, 2) should return -2n (BigInt).

@@ -16,7 +16,7 @@
 
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm 2>&1 | %FileCheck --match-full-lines %s
-;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm 2>/dev/null && %hermes -Xhermes-internal-test-methods %S/ref-is-null-unsupported-driver.js_ -- %t.hbc | %FileCheck --check-prefix=EXEC --match-full-lines %s
+;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm 2>/dev/null && %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js %S/ref-is-null-unsupported-driver.js_ -- %t.hbc | %FileCheck --check-prefix=EXEC --match-full-lines %s
 
 (module
   (func (export "is_null_local") (result i32)

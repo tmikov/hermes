@@ -292,7 +292,8 @@ class HermesRuntimeImpl final : public HermesRuntime,
                                 private IHermesTestHelpers,
                                 private InstallHermesFatalErrorHandler,
                                 private jsi::Instrumentation,
-                                public ISetEventLoopControl
+                                public ISetEventLoopControl,
+                                public IWasmModuleProvider
 #ifdef JSI_UNSTABLE
     ,
                                 public jsi::ISerialization,
@@ -766,6 +767,12 @@ class HermesRuntimeImpl final : public HermesRuntime,
 
   void setEventLoopControl(IEventLoopControl *eventLoopControl) override;
   IEventLoopControl *getEventLoopControl() override;
+
+  void registerWasmBytecode(
+      std::string url,
+      std::shared_ptr<const jsi::Buffer> bytecode) override;
+  void setWasmModuleResolver(jsi::ICast *resolver) override;
+  jsi::ICast *getWasmModuleResolver() override;
 
   // Concrete declarations of jsi::Runtime pure virtual methods
   std::shared_ptr<const jsi::PreparedJavaScript> prepareJavaScript(
@@ -1409,6 +1416,27 @@ class HermesRuntimeImpl final : public HermesRuntime,
   /// thread to check a posted message.
   IEventLoopControl *eventLoopControl_{nullptr};
 
+  /// Trusted Wasm module bytecode registered by the embedder, keyed by URL.
+  /// The shared_ptrs keep the buffers alive for as long as the registration
+  /// stands, which is at least until the runtime is destroyed.
+  std::unordered_map<std::string, std::shared_ptr<const jsi::Buffer>>
+      wasmRegistry_;
+
+  /// Integrator-provided Wasm module resolver (opaque jsi::ICast*), owned by
+  /// the integrator; may be null. Consulted before wasmRegistry_.
+  jsi::ICast *wasmResolver_{nullptr};
+
+  /// Whether the vm::Runtime resolver hook has been installed. The VM binds a
+  /// reference to its std::function member for the duration of a resolution,
+  /// so the hook is installed exactly once (on the first registration or
+  /// resolver change) and thereafter only reads wasmResolver_/wasmRegistry_.
+  /// Re-installing it would be free to dangle under a live resolution.
+  bool wasmHookInstalled_{false};
+
+  /// Install the vm::Runtime Wasm resolver hook if it is not installed yet.
+  /// See wasmHookInstalled_ for why this happens at most once per runtime.
+  void ensureWasmHookInstalled();
+
   /// Tracking status when the current execution enters/exits the mutator from
   /// JSI.
   struct MutatorScope {
@@ -1674,6 +1702,8 @@ jsi::ICast *HermesRuntimeImpl::castInterface(const jsi::UUID &interfaceUUID) {
 #endif
   else if (interfaceUUID == ISetEventLoopControl::uuid) {
     return static_cast<ISetEventLoopControl *>(this);
+  } else if (interfaceUUID == IWasmModuleProvider::uuid) {
+    return static_cast<IWasmModuleProvider *>(this);
   }
   return nullptr;
 }
@@ -1780,6 +1810,82 @@ void HermesRuntimeImpl::setEventLoopControl(
 
 IEventLoopControl *HermesRuntimeImpl::getEventLoopControl() {
   return eventLoopControl_;
+}
+
+void HermesRuntimeImpl::ensureWasmHookInstalled() {
+  if (wasmHookInstalled_)
+    return;
+  wasmHookInstalled_ = true;
+  // Installed exactly once per runtime, so a later registration -- possibly
+  // one made from inside a running resolver -- never replaces the
+  // std::function the VM is calling through. Instead the lambda reads the
+  // mutable state (wasmResolver_, wasmRegistry_) on every call.
+  runtime_.setWasmModuleResolver(
+      [this](
+          const std::string &url,
+          std::string &bytecodeOut,
+          std::string &errorOut) -> bool {
+        // This runs inside a live JS frame of a VM compiled without exception
+        // support, and it calls integrator code. Nothing may unwind past this
+        // lambda, so every failure is reported by returning false.
+        try {
+          // The resolver is asked first and its answer wins over the registry.
+          std::shared_ptr<const jsi::Buffer> resolved;
+          if (auto *resolver =
+                  jsi::castInterface<IWasmModuleResolver>(wasmResolver_)) {
+            try {
+              std::string error;
+              resolved = resolver->resolve(url, error);
+              // Keep the reason a declining resolver gave, so the eventual
+              // failure can say more than "no module for URL". The caller only
+              // reads it when the whole lookup fails, so a subsequent registry
+              // hit makes it moot.
+              if (!resolved)
+                errorOut = std::move(error);
+            } catch (...) {
+              // A throwing integrator is treated as declining, exactly like a
+              // null return, so the registry still gets its turn.
+              resolved = nullptr;
+              errorOut = "resolver threw";
+            }
+          }
+          // The buffer only has to outlive the copy below; nothing retains it.
+          if (resolved) {
+            bytecodeOut.assign(
+                reinterpret_cast<const char *>(resolved->data()),
+                resolved->size());
+            return true;
+          }
+
+          // Registry fallback.
+          auto it = wasmRegistry_.find(url);
+          if (it != wasmRegistry_.end() && it->second) {
+            bytecodeOut.assign(
+                reinterpret_cast<const char *>(it->second->data()),
+                it->second->size());
+            return true;
+          }
+        } catch (...) {
+          // Fall through and decline.
+        }
+        return false;
+      });
+}
+
+void HermesRuntimeImpl::registerWasmBytecode(
+    std::string url,
+    std::shared_ptr<const jsi::Buffer> bytecode) {
+  ensureWasmHookInstalled();
+  wasmRegistry_[std::move(url)] = std::move(bytecode);
+}
+
+void HermesRuntimeImpl::setWasmModuleResolver(jsi::ICast *resolver) {
+  ensureWasmHookInstalled();
+  wasmResolver_ = resolver;
+}
+
+jsi::ICast *HermesRuntimeImpl::getWasmModuleResolver() {
+  return wasmResolver_;
 }
 
 sampling_profiler::Profile HermesRuntimeImpl::dumpSampledTraceToProfile() {

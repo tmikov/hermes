@@ -10,7 +10,7 @@
 
 var hbcPath = hermescli.getScriptArgs()[0];
 var bytes = hermescli.loadFile(hbcPath);
-var mod = new WebAssembly.Module(bytes);
+var mod = WebAssembly.Module.fromHermesBytecode(bytes);
 var instance = new WebAssembly.Instance(mod);
 var exports = instance.exports;
 

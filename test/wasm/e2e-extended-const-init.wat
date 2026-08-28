@@ -12,7 +12,7 @@
 ;; functions at index 5. Both were silent -- no diagnostic, wrong result.
 
 ;; REQUIRES: wasm
-;; RUN: %wat2wasm --enable-extended-const %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods %S/e2e-extended-const-init-driver.js_ -- %t.hbc | %FileCheck --match-full-lines %s
+;; RUN: %wat2wasm --enable-extended-const %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js %S/e2e-extended-const-init-driver.js_ -- %t.hbc | %FileCheck --match-full-lines %s
 
 (module
   (type $v_i32 (func (result i32)))

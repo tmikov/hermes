@@ -17,7 +17,7 @@
 ;; already use.
 
 ;; REQUIRES: wasm
-;; RUN: %wat2wasm %S/e2e-reexport-limits-exporter.wat_ -o %t-exp.wasm && %hermesc --wasm -emit-binary -out %t-exp.hbc %t-exp.wasm && %wat2wasm %S/e2e-reexport-limits-consumer.wat_ -o %t-cons.wasm && %hermesc --wasm -emit-binary -out %t-cons.hbc %t-cons.wasm && %wat2wasm %S/e2e-reexport-limits-own.wat_ -o %t-own.wasm && %hermesc --wasm -emit-binary -out %t-own.hbc %t-own.wasm && %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods %S/e2e-reexport-limits-driver.js_ -- %t-exp.hbc %t.hbc %t-cons.hbc %t-own.hbc | %FileCheck --match-full-lines %s
+;; RUN: %wat2wasm %S/e2e-reexport-limits-exporter.wat_ -o %t-exp.wasm && %hermesc --wasm -emit-binary -out %t-exp.hbc %t-exp.wasm && %wat2wasm %S/e2e-reexport-limits-consumer.wat_ -o %t-cons.wasm && %hermesc --wasm -emit-binary -out %t-cons.hbc %t-cons.wasm && %wat2wasm %S/e2e-reexport-limits-own.wat_ -o %t-own.wasm && %hermesc --wasm -emit-binary -out %t-own.hbc %t-own.wasm && %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js %S/e2e-reexport-limits-driver.js_ -- %t-exp.hbc %t.hbc %t-cons.hbc %t-own.hbc | %FileCheck --match-full-lines %s
 
 (module
   (import "e" "mem" (memory 0))

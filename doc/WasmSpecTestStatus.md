@@ -395,34 +395,60 @@ These limitations are not yet surfaced as spec test failures because the
 Unsupported proposal (cat 7). They will become visible once cross-module tests
 can run.
 
-### Non-Function Imports Not Fully Wired
+### Import Validation and Coercion
 
-**Function imports**, **global imports**, and **table imports** are resolved
-from the imports object and connected to the compiled module. Function imports
-are validated for type compatibility using `__wasm_type__` strings. Global
-imports read their value from the import object (either a
-`WebAssembly.Global`'s `.value` property or a raw JS number). Table imports
-from Wasm-exported tables share the exporter's internal arrays
-(`__wasm_funcs__` and `__wasm_types__`) so that `table.grow`, `table.get`,
-`table.set`, and `call_indirect` operate on the same storage. Tables imported
-from JS-API `WebAssembly.Table` objects get fresh arrays (no sharing).
+All four import kinds that carry a value — function, global, table, and
+memory — are resolved from the imports object, validated against the
+module's declaration, and connected to the compiled module; none is stubbed.
+What is worth documenting here is how each is validated and, for globals,
+how its value is coerced. Where storage is actually *shared* across modules
+is covered by "Export Objects" and "Shared Memory" below, since that is a
+property of what the import points at, not of the import-wiring code itself.
 
-Other import kinds are stubbed:
+- **Function imports** are checked for callability (`typeof === "function"`)
+  regardless of origin, and additionally against the expected `__wasm_type__`
+  signature string when the import value carries one (i.e., it is itself a
+  Wasm-exported function). A plain JS function with no `__wasm_type__` is
+  accepted as an import with no signature check beyond being callable.
 
-- **Memory imports partially wired:** The compiled code creates a fresh
-  `ArrayBuffer` sized to the imported memory's actual `__wasm_min__` (not
-  the import declaration's lower bound). `memory.grow` also respects the
-  imported memory's `__wasm_max__` limit. However, the actual buffer from
-  the imported `WebAssembly.Memory` object is not used — two modules
-  cannot share linear memory contents.
+- **Global imports** accept a `WebAssembly.Global`, read through its `.value`
+  property, or — only when the declared import is *immutable* — a raw JS
+  value. A raw value is never accepted for a mutable global import, since a
+  raw value has no way to observe a subsequent write from the exporting side.
+  Where a raw value is allowed, its JS type must match what the declared Wasm
+  type requires: `bigint` for an `i64` import, `number` for everything else;
+  a `WebAssembly.Global` of the wrong `__wasm_type__` is also rejected. The
+  value is resolved exactly once, under the validating branch, and reused
+  rather than re-read later — re-reading `__wasm_type__` or `.value` a second
+  time would let a getter or Proxy answer differently and slip past the
+  check that already ran. At global-initialization time the resolved value is
+  coerced to the declared type (`ToInt32` for `i32`, `fround` for `f32`,
+  `ToNumber` for `f64`; a `bigint` is split into the lo/hi pair the compiler
+  represents `i64` with) before it lands in the global's slot, so an
+  out-of-range or fractional JS value cannot reach code that assumes the
+  slot already holds a well-formed value of that type.
 
-- **Table imports wired for Wasm-exported tables:** When a module imports a
-  table that was exported by another Wasm module, the importing module uses the
-  exporter's `__wasm_funcs__` and `__wasm_types__` arrays directly.
-  `table.grow` in either module affects both (since `JSArray::setLengthProperty`
-  grows arrays in-place). Tables imported from JS-API `WebAssembly.Table`
-  objects (without `__wasm_funcs__`) get fresh empty arrays — the Table's
-  internal storage is not shared.
+- **Table imports** are validated against the declared element type and
+  limits (an imported table's *actual* current size and maximum, not just
+  the import declaration's lower bound, so a table grown before it was
+  imported links correctly and a `table.grow` afterward is bound correctly
+  too). Storage sharing follows from what constructs the table: both a
+  Wasm-exported table and a table constructed directly via `new
+  WebAssembly.Table(...)` publish `__wasm_funcs__`/`__wasm_types__`
+  properties pointing at the real arrays their own `get`/`set`/`length`/
+  `grow` operate on, so an import wired from either source shares genuine,
+  live storage with its source. See "Export Objects" below for the one
+  remaining gap, which is on the *re-export* path, not here.
+
+- **Memory imports** are validated by an `instanceof WebAssembly.Memory`
+  brand check (not proof against a forged prototype, but enough to turn a
+  bad import into a named `LinkError` instead of a confusing `TypeError`
+  from constructing a typed array over `undefined`) and against the
+  memory's actual current `__wasm_min__`/`__wasm_max__`. The module's linear
+  memory views are then built directly over the imported object's buffer —
+  see "Export Objects" below for what that does and does not share, and
+  "Shared Memory — Instances Diverge After `grow`" for the caveat that
+  follows from it.
 
 ### Export Objects — Partial Storage Sharing
 
@@ -431,15 +457,94 @@ global exports (wrapped in `WebAssembly.Global`), tag exports (plain objects
 with `__wasm_type__`), memory exports (wrapped in `WebAssembly.Memory`), and
 table exports (wrapped in `WebAssembly.Table`). All export kinds are handled.
 
-Exported `WebAssembly.Table` objects now carry `__wasm_funcs__` and
-`__wasm_types__` properties pointing to the module's internal table arrays,
-enabling cross-module table sharing via imports.
+Memory exports publish the real `WebAssembly.Memory` the module operates
+on — the same object `createMemoryViews()` constructs for a defined memory,
+or the imported object itself, re-exported unchanged for an imported one.
+There is nothing to construct and no copy involved, so `mem.buffer` seen
+from JS is exactly the buffer the compiled code reads and writes. (Growing
+a memory that more than one instance shares this way is its own story —
+see "Shared Memory — Instances Diverge After `grow`" below.)
 
-However, exported `WebAssembly.Memory` objects still have their own separate
-storage — they do NOT share the module's internal linear memory. Import *type
-validation* works (initial/maximum limit checks pass), but cross-module
-memory sharing does not. Wiring imported memory buffers into the compiled
-module is a separate change.
+Table exports reach the same state for the common case: a defined `funcref`
+table is created as a real `WebAssembly.Table` up front, in `createTables()`,
+and that same object — whose internal element/type arrays are the module's
+own table storage — is what gets exported, so `get`/`set`/`length`/`grow`
+called on the export operate on the arrays `call_indirect` reads.
+
+One case still falls short: re-exporting an *imported* table. There,
+`finalizeModule()`'s export loop constructs a fresh `WebAssembly.Table` from
+the import's descriptor and then overwrites its `__wasm_funcs__` /
+`__wasm_types__` *properties* to point at the module's real (shared) table
+arrays — but the Table object's internal element/type storage, the fields its
+own `get`/`set`/`length`/`grow` methods actually read
+(`JSWebAssemblyTable::getElements`/`getTypes`), was already fixed at
+construction time to a private pair of arrays nobody else touches. A further
+module that imports this re-export reads the `__wasm_funcs__` property and
+lands on the correct, module-shared arrays, so Wasm-to-Wasm import chains
+still work end to end; but calling `.get()`/`.set()`/`.grow()` directly on
+the re-exported object, or reading its `.length`, touches storage that never
+reflects, or affects, what the module or any other importer sees.
+
+### Shared Memory — Instances Diverge After `grow`
+
+When two Wasm instances import the **same** `WebAssembly.Memory`, they agree
+on its contents only until either one calls `memory.grow`. `wasmMemoryGrow()`
+(H.2, `HermesBuiltin.cpp`) allocates a brand-new `ArrayBuffer`, copies the old
+bytes into it, and installs the new buffer onto the `WebAssembly.Memory`
+object — but `onMemoryGrow()` only rebuilds the *growing* module's own
+typed-array views (`memViewVars_`) from the buffer it gets back. Every other
+instance that imported the same memory keeps its `HEAP8`/`HEAP32`/etc. views
+bound to the old, now-orphaned `ArrayBuffer`: it reports the pre-grow size
+and goes on silently reading and writing storage no other instance can see.
+Observed:
+
+```
+B sees A write (before grow): true
+A size after grow: 2,  B size: 1
+B sees A write (after grow): false
+```
+
+The JS side is unaffected: `mem.buffer` is a getter that reads the Memory
+object's current buffer fresh on every access, so JS code always observes
+the post-grow state. It is only compiled Wasm code holding cached views that
+diverges. Growing from the JS side (`WebAssembly.Memory.prototype.grow`) has
+the identical effect on any instance that already cached views over the old
+buffer.
+
+This divergence was *exposed*, not introduced, by wiring imported memories
+through to the real `WebAssembly.Memory` object (see "Export Objects" above,
+and the commit "Operate on the imported Wasm memory instead of a private
+copy"). Before that change, instances did not share any storage at all, so
+there was nothing for a grow in one to pull out from under another.
+
+Three fixes were considered and none was taken:
+
+- **Resizable `ArrayBuffer`** — grow the buffer in place (`maxByteLength` +
+  `resize()`) so every existing view stays valid across `grow`. This is the
+  clean fix, but Hermes's `ArrayBuffer` has no `maxByteLength`/`resize`
+  support at all yet, on any code path — it is a prerequisite feature, not a
+  Wasm-specific change.
+- **Reach views through the Memory object** on every access, instead of
+  caching `HEAP32` etc. in module-scope variables.
+- **A generation counter**, checked on every access, that invalidates and
+  re-fetches cached views when the memory has grown since they were built.
+
+The latter two are both correct, but both add work to every single
+`i32.load`/`i32.store` and its siblings — the hottest path in the engine —
+to cover a case (two instances sharing one growable memory) most modules
+never hit.
+
+Detaching the old buffer on grow, so a stale access fails loudly instead of
+silently, was considered and rejected. It would only make the *bulk-memory*
+builtins (`memory.fill`/`memory.copy`/`memory.init`) trap: they take their
+view through `wasmTypedArrayArg()`, which already checks `attached()` and
+raises on a detached buffer. Plain `i32.load`/`i32.store` compile to direct
+element access on the cached typed-array views, which do not consult the
+buffer's detached state — indexing a view over a detached buffer simply
+yields `undefined` (reads) or a silent no-op (writes) per the JS spec, so
+those would keep executing, just trading stale-but-coherent data for
+`undefined` propagating silently into arithmetic. Detaching does not fail
+safe on the path that matters most.
 
 ### Alignment Hints Trusted (without `--test262`)
 

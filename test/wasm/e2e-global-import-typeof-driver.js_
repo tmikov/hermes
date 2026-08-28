@@ -8,10 +8,10 @@
 // JS driver for e2e-global-import-typeof.wat.
 
 var args = hermescli.getScriptArgs();
-var modI32 = new WebAssembly.Module(hermescli.loadFile(args[0]));
-var modI64 = new WebAssembly.Module(hermescli.loadFile(args[1]));
-var modMut = new WebAssembly.Module(hermescli.loadFile(args[2]));
-var modMut64 = new WebAssembly.Module(hermescli.loadFile(args[3]));
+var modI32 = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[0]));
+var modI64 = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[1]));
+var modMut = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[2]));
+var modMut64 = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[3]));
 
 function tryLink(mod, imp, label) {
   try {

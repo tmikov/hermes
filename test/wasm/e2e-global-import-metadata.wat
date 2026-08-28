@@ -12,7 +12,7 @@
 ;; check that validated it, and coerced to the declared type.
 
 ;; REQUIRES: wasm
-;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods %S/e2e-global-import-metadata-driver.js_ -- %t.hbc | %FileCheck --match-full-lines %s
+;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js %S/e2e-global-import-metadata-driver.js_ -- %t.hbc | %FileCheck --match-full-lines %s
 
 (module
   (import "e" "g" (global i32))

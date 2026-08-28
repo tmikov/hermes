@@ -8,7 +8,7 @@
 ;; and i64 comparisons (i64.eq) to test full 64-bit results.
 
 ;; REQUIRES: wasm
-;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods %S/e2e-i64-trunc-driver.js_ -- %t.hbc | %FileCheck --match-full-lines %s
+;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js %S/e2e-i64-trunc-driver.js_ -- %t.hbc | %FileCheck --match-full-lines %s
 
 (module
   ;; i64.trunc_f64_s(42.7) -> 42, wrap -> 42

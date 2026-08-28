@@ -19,7 +19,7 @@
 ;; order.
 
 ;; REQUIRES: wasm
-;; RUN: %wat2wasm %S/e2e-cross-module-type-identity-exporter.wat_ -o %t-exp.wasm && %hermesc --wasm -emit-binary -out %t-exp.hbc %t-exp.wasm && %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods %S/e2e-cross-module-type-identity-driver.js_ -- %t-exp.hbc %t.hbc | %FileCheck --match-full-lines %s
+;; RUN: %wat2wasm %S/e2e-cross-module-type-identity-exporter.wat_ -o %t-exp.wasm && %hermesc --wasm -emit-binary -out %t-exp.hbc %t-exp.wasm && %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js %S/e2e-cross-module-type-identity-driver.js_ -- %t-exp.hbc %t.hbc | %FileCheck --match-full-lines %s
 
 (module
   ;; Unused, but declared first: shifts this module's numbering so that

@@ -13,8 +13,8 @@
 // is the point of the first two cases.
 
 var args = hermescli.getScriptArgs();
-var mod = new WebAssembly.Module(hermescli.loadFile(args[0]));
-var modNoMax = new WebAssembly.Module(hermescli.loadFile(args[1]));
+var mod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[0]));
+var modNoMax = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[1]));
 
 // __wasm_max__ must be read exactly once: pass validation with 2, then try to
 // raise the ceiling on a later read.

@@ -11,7 +11,7 @@
 // asserting (Debug) or segfaulting (Release).
 
 var args = hermescli.getScriptArgs();
-var mod = new WebAssembly.Module(hermescli.loadFile(args[0]));
+var mod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[0]));
 
 function makeTable(funcs, types) {
   return {

@@ -8,7 +8,7 @@
 // JS driver for e2e-i64-retbuf-marshal.wat.
 
 var args = hermescli.getScriptArgs();
-var mod = new WebAssembly.Module(hermescli.loadFile(args[0]));
+var mod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[0]));
 var inst = new WebAssembly.Instance(mod, {
   e: {
     // Multi-value import: the i64 sits at a non-zero buffer offset, so its

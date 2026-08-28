@@ -39,11 +39,18 @@ const wasmInstance = new WebAssembly.Instance(wasmModule, imports);
 wasm = wasmInstance.exports;
 """
 NEW_LOAD = """// Hermes: the module is precompiled to .hbc by `hermesc --wasm`; the path is
-// passed as the first script argument. WebAssembly.Module accepts the
-// bytecode, and instantiation happens through the standard API, with the
-// import object passed to the Instance constructor.
+// passed as the first script argument. It is loaded with the explicit
+// fromHermesBytecode() entry point rather than by handing the bytes to
+// WebAssembly.Module: that used to work by content-sniffing the .hbc, which
+// is off by default because it is a JS-reachable path into a format the
+// engine trusts without re-validating. Instantiation is then the standard
+// API, with the import object passed to the Instance constructor.
+//
+// fromHermesBytecode is itself gated on EnableUntrustedBytecodeFromJS, which
+// run.sh passes as -Xenable-untrusted-bytecode-from-js.
 const hbcPath = hermescli.getScriptArgs()[0];
-const wasmModule = new WebAssembly.Module(hermescli.loadFile(hbcPath));
+const wasmModule =
+    WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(hbcPath));
 wasm = new WebAssembly.Instance(wasmModule, imports).exports;
 """
 assert OLD_LOAD in text, "loader block not found"

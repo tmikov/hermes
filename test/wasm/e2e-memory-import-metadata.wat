@@ -13,7 +13,7 @@
 ;; read once, in a block dominating both paths, and coerced to a number.
 
 ;; REQUIRES: wasm
-;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %wat2wasm %S/e2e-memory-import-metadata-nomax.wat_ -o %t-nomax.wasm && %hermesc --wasm -emit-binary -out %t-nomax.hbc %t-nomax.wasm && %hermes -Xhermes-internal-test-methods %S/e2e-memory-import-metadata-driver.js_ -- %t.hbc %t-nomax.hbc | %FileCheck --match-full-lines %s
+;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %wat2wasm %S/e2e-memory-import-metadata-nomax.wat_ -o %t-nomax.wasm && %hermesc --wasm -emit-binary -out %t-nomax.hbc %t-nomax.wasm && %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js %S/e2e-memory-import-metadata-driver.js_ -- %t.hbc %t-nomax.hbc | %FileCheck --match-full-lines %s
 
 (module
   (import "e" "m" (memory 1 2))

@@ -7,7 +7,7 @@
 
 // JS driver for e2e-imported-memory-alias.wat.
 
-var mod = new WebAssembly.Module(
+var mod = WebAssembly.Module.fromHermesBytecode(
   hermescli.loadFile(hermescli.getScriptArgs()[0]));
 
 // Two pages, though the import only declares a minimum of one: the module

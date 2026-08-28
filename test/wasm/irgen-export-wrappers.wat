@@ -283,7 +283,9 @@
 ;; CHECK-NEXT:   %9 = AsInt32Inst (:number) %8: any
 ;; CHECK-NEXT:   %10 = CallInst (:any) %1: any, %wasm_func_4(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined, %2: any, %3: any, %7: number, %9: number
 ;; CHECK-NEXT:   %11 = LoadPropertyInst (:any) %2: any, 0: number
-;; CHECK-NEXT:   %12 = LoadPropertyInst (:any) %2: any, 1: number
-;; CHECK-NEXT:   %13 = CallBuiltinInst (:bigint) [HermesBuiltin.wasmI64ToBigInt]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %11: any, %12: any
-;; CHECK-NEXT:         ReturnInst %13: bigint
+;; CHECK-NEXT:   %12 = AsInt32Inst (:number) %11: any
+;; CHECK-NEXT:   %13 = LoadPropertyInst (:any) %2: any, 1: number
+;; CHECK-NEXT:   %14 = AsInt32Inst (:number) %13: any
+;; CHECK-NEXT:   %15 = CallBuiltinInst (:bigint) [HermesBuiltin.wasmI64ToBigInt]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %12: number, %14: number
+;; CHECK-NEXT:         ReturnInst %15: bigint
 ;; CHECK-NEXT: function_end

@@ -15,7 +15,7 @@
 ;; the tag's identity, shared with importers through the export.
 
 ;; REQUIRES: wasm
-;; RUN: %wat2wasm --enable-exceptions %S/e2e-cross-module-tag-exporter.wat_ -o %t-exp.wasm && %hermesc --wasm -emit-binary -out %t-exp.hbc %t-exp.wasm && %wat2wasm --enable-exceptions %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods %S/e2e-cross-module-tag-driver.js_ -- %t-exp.hbc %t.hbc | %FileCheck --match-full-lines %s
+;; RUN: %wat2wasm --enable-exceptions %S/e2e-cross-module-tag-exporter.wat_ -o %t-exp.wasm && %hermesc --wasm -emit-binary -out %t-exp.hbc %t-exp.wasm && %wat2wasm --enable-exceptions %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js %S/e2e-cross-module-tag-driver.js_ -- %t-exp.hbc %t.hbc | %FileCheck --match-full-lines %s
 
 (module
   ;; b is imported FIRST, so a is tag index 1 here but index 0 in the exporter.

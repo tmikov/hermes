@@ -62,7 +62,7 @@ hermesc --wasm -emit-binary -out bench.hbc bench.wasm
 Then run the bytecode (same `run.js` — it accepts both formats):
 
 ```bash
-hermes -Xhermes-internal-test-methods run.js -- bench.hbc
+hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js run.js -- bench.hbc
 ```
 
 ### Option C: Verify with Node.js

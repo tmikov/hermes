@@ -15,12 +15,12 @@ var importerHbcPath = args[1];
 
 // Instantiate the exporter module.
 var exporterBytes = hermescli.loadFile(exporterHbcPath);
-var exporterMod = new WebAssembly.Module(exporterBytes);
+var exporterMod = WebAssembly.Module.fromHermesBytecode(exporterBytes);
 var exporter = new WebAssembly.Instance(exporterMod);
 
 // Instantiate the importer module.
 var importerBytes = hermescli.loadFile(importerHbcPath);
-var importerMod = new WebAssembly.Module(importerBytes);
+var importerMod = WebAssembly.Module.fromHermesBytecode(importerBytes);
 var importer = new WebAssembly.Instance(importerMod, {
   exporter: exporter.exports,
 });

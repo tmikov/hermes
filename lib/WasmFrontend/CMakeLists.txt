@@ -17,3 +17,13 @@ add_hermes_library(hermesWasmFrontend
     LINK_LIBS
     wabt
 )
+
+# The lean counterpart of hermesWasmFrontend, mirroring the
+# hermesHBCBackend/hermesHBCBackendLean pair. It provides only the entry points
+# that the VM's WebAssembly.cpp calls, so that the lean VM archive can link
+# without dragging in the Wasm compiler. Exactly one of these two libraries
+# must be present in any given archive; see WasmCompileStub.cpp for why weak
+# symbols cannot be used instead.
+add_hermes_library(hermesWasmFrontendLean
+    WasmCompileStub.cpp
+)

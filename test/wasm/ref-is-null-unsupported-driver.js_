@@ -9,5 +9,5 @@
 
 var hbcPath = hermescli.getScriptArgs()[0];
 var inst = new WebAssembly.Instance(
-  new WebAssembly.Module(hermescli.loadFile(hbcPath)));
+  WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(hbcPath)));
 print('is_null_local: ' + inst.exports.is_null_local());

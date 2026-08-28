@@ -9,7 +9,7 @@
 
 var hbcPath = hermescli.getScriptArgs()[0];
 var inst = new WebAssembly.Instance(
-    new WebAssembly.Module(hermescli.loadFile(hbcPath)), {});
+    WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(hbcPath)), {});
 var tbl = inst.exports.tbl;
 
 print('exported is a Table: ' + (tbl instanceof WebAssembly.Table));

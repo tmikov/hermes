@@ -29,33 +29,13 @@
 #include "hermes/VM/RuntimeModule.h"
 #include "hermes/BCGen/HBC/BCProvider.h"
 #include "hermes/Support/MemoryBuffer.h"
+#include "hermes/Support/UTF8.h"
+#include "hermes/WasmFrontend/WasmCompile.h"
 #include "hermes/WasmFrontend/WasmModuleData.h"
 
 #include <cmath>
 
 namespace hermes {
-
-/// Weak declaration of validateWasmBinary from WasmFrontend.
-/// When the WasmFrontend library is linked (full VM), this resolves to the
-/// real implementation. When it's not linked (lean VM), it resolves to the
-/// weak default which returns false.
-__attribute__((__weak__)) bool
-validateWasmBinary(const uint8_t *buffer, size_t size) {
-  return false;
-}
-
-/// Weak declaration of compileWasmToModuleData from WasmFrontend.
-/// Returns nullptr in the lean VM (wasm not supported).
-__attribute__((__weak__)) std::unique_ptr<WasmModuleData>
-compileWasmToModuleData(
-    const uint8_t *buffer,
-    size_t size,
-    std::string &errorMsg,
-    bool test262) {
-  errorMsg = "WebAssembly support not compiled";
-  return nullptr;
-}
-
 namespace vm {
 
 //===----------------------------------------------------------------------===//
@@ -571,20 +551,62 @@ static ExecutionStatus extractDescriptorsFromModuleInfo(
   return ExecutionStatus::RETURNED;
 }
 
+/// How a byte buffer handed to a WebAssembly entry point is interpreted.
+enum class WasmBytesMode {
+  /// Spec entry (Module/compile/instantiate). Treat as .wasm unless the
+  /// content-sniffing gate is on AND the bytes are .hbc, which additionally
+  /// requires the untrusted-bytecode gate; a detected-but-ungated .hbc is
+  /// refused with a CompileError.
+  SpecEntry,
+  /// Trusted bytecode from the embedder (fromHermesURL). Always loaded as
+  /// bytecode; never sniffed; not gated.
+  TrustedBytecode,
+  /// Explicit untrusted bytecode from JS (fromHermesBytecode). Always loaded
+  /// as bytecode; the caller has already checked the untrusted gate.
+  UntrustedBytecode,
+};
+
 /// Shared helper: create a WasmModuleData from raw bytes.
-/// Detects whether the bytes are a precompiled .hbc file or a .wasm binary,
-/// compiles/loads accordingly, runs the lightweight top-level to extract
-/// descriptors, and returns a populated WasmModuleData.
+/// \p mode says how the bytes are to be interpreted; the bytes are never
+/// content-sniffed unless \p mode is SpecEntry and the embedder has opted
+/// into sniffing. Compiles/loads accordingly, runs the lightweight top-level
+/// to extract descriptors, and returns a populated WasmModuleData.
 /// Returns nullptr on error (errorMsg is set, or an exception is thrown).
 static std::unique_ptr<WasmModuleData> createModuleFromBytes(
     Runtime &runtime,
     const uint8_t *data,
     size_t size,
+    WasmBytesMode mode,
     std::string &errorMsg) {
   std::shared_ptr<hbc::BCProviderBase> bcProvider;
 
-  if (hbc::BCProviderFromBuffer::isBytecodeStream(
-          llvh::ArrayRef<uint8_t>(data, size))) {
+  bool loadAsBytecode = false;
+  switch (mode) {
+    case WasmBytesMode::TrustedBytecode:
+    case WasmBytesMode::UntrustedBytecode:
+      loadAsBytecode = true;
+      break;
+    case WasmBytesMode::SpecEntry:
+      // Only ever treat spec-entry bytes as bytecode when the embedder has
+      // explicitly opted into BOTH sniffing and untrusted bytecode; otherwise
+      // the bytes are .wasm (or a refused .hbc).
+      if (runtime.enableWasmBytecodeContentSniffing &&
+          hbc::BCProviderFromBuffer::isBytecodeStream(
+              llvh::ArrayRef<uint8_t>(data, size))) {
+        if (!runtime.enableUntrustedBytecodeFromJS) {
+          errorMsg =
+              "refusing to load Hermes bytecode: untrusted bytecode from JS "
+              "is disabled";
+          return nullptr;
+        }
+        loadAsBytecode = true;
+      } else {
+        loadAsBytecode = false;
+      }
+      break;
+  }
+
+  if (loadAsBytecode) {
     // Precompiled HBC path — load directly.
     auto llvmBuf = llvh::MemoryBuffer::getMemBufferCopy(
         llvh::StringRef(reinterpret_cast<const char *>(data), size));
@@ -684,9 +706,10 @@ wasmCompile(void *context, Runtime &runtime) {
         "typed array");
   }
 
-  // Compile from .wasm or load from .hbc (auto-detected).
+  // Spec entry: the bytes are .wasm unless the embedder gates say otherwise.
   std::string errorMsg;
-  auto moduleData = createModuleFromBytes(runtime, data, size, errorMsg);
+  auto moduleData = createModuleFromBytes(
+      runtime, data, size, WasmBytesMode::SpecEntry, errorMsg);
   if (!moduleData) {
     // Create a CompileError and return a rejected Promise.
     if (runtime.getThrownValue().isEmpty()) {
@@ -885,9 +908,10 @@ wasmInstantiate(void *context, Runtime &runtime) {
         "WebAssembly.Module, ArrayBuffer, or typed array");
   }
 
-  // Compile from .wasm or load from .hbc (auto-detected).
+  // Spec entry: the bytes are .wasm unless the embedder gates say otherwise.
   std::string errorMsg;
-  auto moduleData = createModuleFromBytes(runtime, data, size, errorMsg);
+  auto moduleData = createModuleFromBytes(
+      runtime, data, size, WasmBytesMode::SpecEntry, errorMsg);
   if (!moduleData) {
     if (runtime.getThrownValue().isEmpty()) {
       raiseCompileError(runtime, errorMsg.c_str());
@@ -939,6 +963,38 @@ wasmInstantiate(void *context, Runtime &runtime) {
 // WebAssembly.Module
 //===----------------------------------------------------------------------===//
 
+/// Interpret \p data / \p size according to \p mode and wrap the result in a
+/// new WebAssembly.Module JS object. On failure raises a CompileError (unless
+/// an exception is already pending) and returns EXCEPTION. Shared by the
+/// Module constructor and the explicit Module.fromXXX entry points, which
+/// differ only in the mode they pass. The returned value is unrooted --
+/// callers must return it directly, not store it.
+static CallResult<HermesValue> createAndBuildModule(
+    Runtime &runtime,
+    const uint8_t *data,
+    size_t size,
+    WasmBytesMode mode) {
+  std::string errorMsg;
+  auto moduleData = createModuleFromBytes(runtime, data, size, mode, errorMsg);
+  if (!moduleData) {
+    if (runtime.getThrownValue().isEmpty()) {
+      raiseCompileError(runtime, errorMsg.c_str());
+    }
+    return ExecutionStatus::EXCEPTION;
+  }
+
+  struct : public Locals {
+    PinnedValue<JSWebAssemblyModule> mod;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  Handle<JSObject> prototype{runtime.wasmModulePrototype};
+  lv.mod = JSWebAssemblyModule::create(runtime, prototype);
+  lv.mod->setModuleData(std::move(moduleData));
+
+  return lv.mod.getHermesValue();
+}
+
 /// new WebAssembly.Module(bytes) — compile a Wasm binary module or load
 /// a precompiled .hbc module.
 static CallResult<HermesValue>
@@ -958,26 +1014,98 @@ wasmModuleConstructor(void *context, Runtime &runtime) {
         "typed array");
   }
 
-  // Compile from .wasm or load from .hbc (auto-detected).
-  std::string errorMsg;
-  auto moduleData = createModuleFromBytes(runtime, data, size, errorMsg);
-  if (!moduleData) {
-    if (runtime.getThrownValue().isEmpty()) {
-      raiseCompileError(runtime, errorMsg.c_str());
-    }
-    return ExecutionStatus::EXCEPTION;
+  // Spec entry: the bytes are .wasm unless the embedder gates say otherwise.
+  return createAndBuildModule(runtime, data, size, WasmBytesMode::SpecEntry);
+}
+
+/// WebAssembly.Module.fromHermesBytecode(bytes) — load a precompiled Hermes
+/// bytecode module. The caller declares that the bytes are .hbc, so nothing
+/// is inferred from their content. Gated by EnableUntrustedBytecodeFromJS:
+/// the bytes come from JS, and bytecode runs with full VM authority without
+/// the checks the compiler would otherwise guarantee.
+static CallResult<HermesValue>
+wasmModuleFromHermesBytecode(void *context, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  if (!runtime.enableUntrustedBytecodeFromJS) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Module.fromHermesBytecode() is disabled "
+        "(EnableUntrustedBytecodeFromJS is off)");
   }
 
+  const uint8_t *data = nullptr;
+  size_t size = 0;
+  if (!extractBufferSourceBytes(runtime, args.getArgHandle(0), data, size)) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Module.fromHermesBytecode(): argument must be an "
+        "ArrayBuffer or typed array");
+  }
+
+  // The caller declares the bytes to be Hermes bytecode, so they are loaded
+  // as bytecode without sniffing. The untrusted gate was checked above.
+  return createAndBuildModule(
+      runtime, data, size, WasmBytesMode::UntrustedBytecode);
+}
+
+/// WebAssembly.Module.fromHermesURL(url) — resolve \p url to trusted Hermes
+/// bytecode via the embedder-installed resolver and load it. The bytes never
+/// pass through JS, so there is nothing for JS to falsify: this entry point is
+/// not config-gated, and its authorization is simply that the embedder
+/// installed a resolver which produced bytes for the URL. Never sniffs, never
+/// compiles .wasm.
+static CallResult<HermesValue>
+wasmModuleFromHermesURL(void *context, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
   struct : public Locals {
-    PinnedValue<JSWebAssemblyModule> mod;
+    PinnedValue<StringPrimitive> urlStr;
   } lv;
   LocalsRAII lraii(runtime, &lv);
 
-  Handle<JSObject> prototype{runtime.wasmModulePrototype};
-  lv.mod = JSWebAssemblyModule::create(runtime, prototype);
-  lv.mod->setModuleData(std::move(moduleData));
+  // ToString(url). This may allocate and may run user JS (a toString method),
+  // so the result is pinned before anything else happens.
+  auto strRes = toString_RJS(runtime, args.getArgHandle(0));
+  if (LLVM_UNLIKELY(strRes == ExecutionStatus::EXCEPTION)) {
+    return ExecutionStatus::EXCEPTION;
+  }
+  lv.urlStr = std::move(*strRes);
 
-  return lv.mod.getHermesValue();
+  llvh::SmallVector<char16_t, 64> urlBuf;
+  lv.urlStr->appendUTF16String(urlBuf);
+  std::string url;
+  convertUTF16ToUTF8WithReplacements(url, urlBuf);
+
+  // A copy, not a reference into the Runtime member: this calls out to
+  // embedder code, and the member must not be the only thing keeping the
+  // callable alive while it runs. Installation is one-shot today, so nothing
+  // can reassign it -- but that invariant lives in the API layer, and this
+  // copy makes the VM side not depend on it.
+  auto resolver = runtime.getWasmModuleResolver();
+  std::string bytecode;
+  std::string resolverError;
+  if (!resolver || !resolver(url, bytecode, resolverError)) {
+    // Name the URL, and the reason if the embedder offered one; without both,
+    // "no module for URL" cannot distinguish a missing resolver from one that
+    // declined from a registry miss.
+    std::string msg = "WebAssembly.Module.fromHermesURL: no module for URL '";
+    msg += url;
+    msg += '\'';
+    if (!resolver) {
+      msg += ": no Wasm module resolver installed";
+    } else if (!resolverError.empty()) {
+      msg += ": ";
+      msg += resolverError;
+    }
+    return runtime.raiseTypeError(llvh::StringRef(msg));
+  }
+
+  // The embedder declares these bytes to be Hermes bytecode and is trusted to
+  // do so, so they are loaded as bytecode without sniffing.
+  return createAndBuildModule(
+      runtime,
+      reinterpret_cast<const uint8_t *>(bytecode.data()),
+      bytecode.size(),
+      WasmBytesMode::TrustedBytecode);
 }
 
 /// Return the Predefined string for an export/import kind.
@@ -2627,6 +2755,22 @@ void createWebAssemblyObject(Runtime &runtime, MutableHandle<JSObject> result) {
       Predefined::getSymbolID(Predefined::imports),
       nullptr,
       wasmModuleImports,
+      1);
+
+  defineMethod(
+      runtime,
+      lv.moduleCons,
+      Predefined::getSymbolID(Predefined::fromHermesBytecode),
+      nullptr,
+      wasmModuleFromHermesBytecode,
+      1);
+
+  defineMethod(
+      runtime,
+      lv.moduleCons,
+      Predefined::getSymbolID(Predefined::fromHermesURL),
+      nullptr,
+      wasmModuleFromHermesURL,
       1);
 
   // Register Module constructor as a property of WebAssembly.

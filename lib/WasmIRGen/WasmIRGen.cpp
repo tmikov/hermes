@@ -206,6 +206,19 @@ void WasmIRGen::emitRetBufStores(const WasmFuncType &funcType) {
     }
   }
 
+  // The reference array is not a parameter -- the calling convention passes
+  // only the two typed-array views -- so reach it through the top-level scope
+  // on demand. There is one buffer per module, so the top-level array is the
+  // same object the caller will read from (the same aliasing the float view
+  // already relies on; see emitRetBufLoads).
+  Value *rbR = nullptr;
+  auto getRbR = [&]() -> Value * {
+    assert(retBufRVar_ && "reference result but no reference array");
+    if (!rbR)
+      rbR = builder_.createLoadFrameInst(parentScopeInst_, retBufRVar_);
+    return rbR;
+  };
+
   // Store each result into the buffer at its computed offset.
   for (size_t i = 0; i < funcType.results.size(); ++i) {
     uint32_t byteOff = offsets[i];
@@ -242,7 +255,20 @@ void WasmIRGen::emitRetBufStores(const WasmFuncType &funcType) {
             builder_.getLiteralNumber(idx));
         break;
       }
+      case WasmValType::FuncRef:
+      case WasmValType::ExternRef: {
+        // R[byteOff / 4] = val. A funcref is a JS closure and an externref an
+        // arbitrary JS value; neither survives a store into the Uint32Array
+        // view, which coerces it to NaN and then to 0.
+        uint32_t idx = byteOff / 4;
+        builder_.createStorePropertyStrictInst(
+            poppedResults[i].first,
+            getRbR(),
+            builder_.getLiteralNumber(idx));
+        break;
+      }
       default: {
+        // V128: still unsupported. Keep the existing behavior.
         uint32_t idx = byteOff / 4;
         builder_.createStorePropertyStrictInst(
             poppedResults[i].first,
@@ -270,6 +296,17 @@ void WasmIRGen::emitRetBufLoads(const WasmFuncType &funcType) {
     if (!rbF)
       rbF = builder_.createLoadFrameInst(parentScopeInst_, retBufFVar_);
     return rbF;
+  };
+
+  // The reference array is never a parameter, so it is always loaded from the
+  // top-level scope, for the same reason and under the same one-buffer-per-
+  // module assumption as getRbF() above.
+  Value *rbR = nullptr;
+  auto getRbR = [&]() -> Value * {
+    assert(retBufRVar_ && "reference result but no reference array");
+    if (!rbR)
+      rbR = builder_.createLoadFrameInst(parentScopeInst_, retBufRVar_);
+    return rbR;
   };
 
   for (size_t i = 0; i < funcType.results.size(); ++i) {
@@ -303,7 +340,18 @@ void WasmIRGen::emitRetBufLoads(const WasmFuncType &funcType) {
         push(val);
         break;
       }
+      case WasmValType::FuncRef:
+      case WasmValType::ExternRef: {
+        // Read the reference back from the parallel array. No AsInt32Inst
+        // here: that narrowing exists to undo the Uint32Array's unsigned
+        // reads, and a reference is not a number.
+        uint32_t idx = byteOff / 4;
+        push(builder_.createLoadPropertyInst(
+            getRbR(), builder_.getLiteralNumber(idx)));
+        break;
+      }
       default: {
+        // V128: still unsupported. Keep the existing behavior.
         uint32_t idx = byteOff / 4;
         auto *raw = builder_.createLoadPropertyInst(
             retBufI_, builder_.getLiteralNumber(idx));
@@ -473,6 +521,11 @@ void WasmIRGen::createFunctions() {
             continue;
           if (importGlobalIdx == i) {
             gType = imp.globalType.type;
+            // A mutable imported global is shared state: it is read and
+            // written through the host's WebAssembly.Global, not through
+            // the frame slot allocated below.
+            if (imp.globalType.mutable_)
+              importedMutableGlobals_.insert(i);
             break;
           }
           ++importGlobalIdx;
@@ -512,9 +565,10 @@ void WasmIRGen::createFunctions() {
         /* hidden */ true);
   }
 
-  // Create Variables for imported global values in the top-level scope.
-  // These hold the raw import value (WebAssembly.Global or JS number)
-  // loaded during import validation. initializeGlobals() reads from these.
+  // Create Variables for imported globals in the top-level scope. These hold
+  // the import resolved during validation: its value for an immutable
+  // import, the WebAssembly.Global object itself for a mutable one, which
+  // global.get/global.set then read and write through.
   importGlobalVals_.resize(numImportedGlobals, nullptr);
   for (uint32_t i = 0; i < numImportedGlobals; ++i) {
     importGlobalVals_[i] = builder_.createVariable(
@@ -580,6 +634,16 @@ void WasmIRGen::createFunctions() {
       if (needsReturnBuffer(ft)) {
         auto [offsets, size] = computeRetBufLayout(ft.results);
         maxRetBufSize = std::max(maxRetBufSize, size);
+        // A reference result cannot be stored in the ArrayBuffer views, so
+        // such a module also needs the parallel reference array. Gate it:
+        // creating the array unconditionally would add an allocation to every
+        // module that merely does i64 arithmetic, and would churn the golden
+        // IR of every Wasm test. V128 is deliberately excluded -- it stays
+        // unsupported and keeps its diagnostic.
+        for (auto vt : ft.results) {
+          if (vt == WasmValType::FuncRef || vt == WasmValType::ExternRef)
+            retBufHasRefResult_ = true;
+        }
       }
     }
 
@@ -597,6 +661,13 @@ void WasmIRGen::createFunctions() {
         "retBufF",
         Type::createAnyType(),
         /* hidden */ true);
+    if (retBufHasRefResult_) {
+      retBufRVar_ = builder_.createVariable(
+          topLevelVS_,
+          "retBufR",
+          Type::createAnyType(),
+          /* hidden */ true);
+    }
     retBufSize_ = maxRetBufSize;
   }
 
@@ -929,10 +1000,15 @@ void WasmIRGen::createFunctions() {
           builder_.createCondBranchInst(
               mismatch, linkErrorBB, loadValueBB);
 
-          // WebAssembly.Global path: the value lives in .value.
+          // WebAssembly.Global path. For an immutable import the value
+          // lives in .value and is snapshotted; for a mutable one the
+          // object itself is what must be kept, because the module and the
+          // host share the global and each must see the other's writes.
           builder_.setInsertionBlock(loadValueBB);
-          auto *globalObjValue = builder_.createLoadPropertyInst(
-              importVal, builder_.getLiteralString("value"));
+          Value *globalObjValue = imp.globalType.mutable_
+              ? static_cast<Value *>(importVal)
+              : builder_.createLoadPropertyInst(
+                    importVal, builder_.getLiteralString("value"));
           builder_.createBranchInst(acceptBB);
 
           builder_.setInsertionBlock(linkErrorBB);
@@ -963,8 +1039,8 @@ void WasmIRGen::createFunctions() {
           builder_.setInsertionBlock(acceptBB);
           tlEntry_ = acceptBB;
 
-          // Resolve the value HERE, under the type check that was just
-          // performed, and store the resolved value. Deciding again later
+          // Resolve the import HERE, under the type check that was just
+          // performed, and store the result. Deciding again later
           // by re-reading __wasm_type__ would let a getter or Proxy answer
           // differently the second time and send a WebAssembly.Global down
           // the raw-value path, storing the object itself into an i32 slot.
@@ -973,9 +1049,11 @@ void WasmIRGen::createFunctions() {
             resolved->addEntry(importVal, checkRawBB);
           resolved->addEntry(globalObjValue, loadValueBB);
 
-          // Store the resolved value into importGlobalVals_ for later
-          // use by initializeGlobals. We use a new Variable per
-          // imported global to pass the value.
+          // Store the resolved import into importGlobalVals_ -- its value
+          // for an immutable import, the WebAssembly.Global object itself
+          // for a mutable one. We use a new Variable per imported global to
+          // pass it to initializeGlobals() and, for a mutable import, to
+          // every global.get/global.set of it.
           if (importGlobalIdx < importGlobalVals_.size()) {
             builder_.createStoreFrameInst(
                 tlScope, resolved,
@@ -1364,6 +1442,17 @@ void WasmIRGen::createFunctions() {
     auto *retBufF = emitNew(Float64ArrayCtor, {buf});
     builder_.createStoreFrameInst(tlScope, retBufI, retBufIVar_);
     builder_.createStoreFrameInst(tlScope, retBufF, retBufFVar_);
+    if (retBufRVar_) {
+      // Parallel reference slots, indexed like the Uint32Array view. This
+      // array holds the last reference written to each slot until it is
+      // overwritten -- bounded by retBufSize_/4 entries per instance, so it
+      // retains a little longer than strictly necessary but does not grow.
+      auto *ArrayCtor = builder_.createTryLoadGlobalPropertyInst("Array");
+      auto *retBufR = emitNew(
+          ArrayCtor,
+          {builder_.getLiteralNumber(static_cast<double>(retBufSize_ / 4))});
+      builder_.createStoreFrameInst(tlScope, retBufR, retBufRVar_);
+    }
   }
 
   // Tag identity is needed by throw/catch whether or not the module has any
@@ -1914,11 +2003,14 @@ void WasmIRGen::finalizeModule() {
 
   // Load WebAssembly.Global constructor once if there are global exports.
   Value *wasmGlobalCtor = nullptr;
+  // An imported mutable global is re-exported as the object it was imported
+  // as, so it does not need the constructor.
   bool hasGlobalExports = std::any_of(
       moduleInfo_.exports.begin(),
       moduleInfo_.exports.end(),
-      [](const WasmExport &e) {
-        return e.kind == WasmExternalKind::Global;
+      [this](const WasmExport &e) {
+        return e.kind == WasmExternalKind::Global &&
+            !importedMutableGlobals_.count(e.index);
       });
   if (hasGlobalExports) {
     auto *wasmObj =
@@ -1931,6 +2023,19 @@ void WasmIRGen::finalizeModule() {
     if (exp.kind != WasmExternalKind::Global)
       continue;
     assert(exp.index < globalSlotIndex_.size() && "global index out of range");
+
+    // Re-exporting an imported mutable global publishes the very global that
+    // was imported: it is shared state, and both this module and the host
+    // write it. Wrapping a copy of its link-time value in a fresh
+    // WebAssembly.Global would hand out a snapshot that tracks neither.
+    if (importedMutableGlobals_.count(exp.index)) {
+      auto *globalObj = builder_.createLoadFrameInst(
+          tlScope, importGlobalVals_[exp.index]);
+      builder_.createStorePropertyStrictInst(
+          globalObj, exportsObj, builder_.getLiteralString(exp.name));
+      continue;
+    }
+
     uint32_t slotIdx = globalSlotIndex_[exp.index];
     auto *val = builder_.createLoadFrameInst(tlScope, globalVars_[slotIdx]);
 
@@ -2195,6 +2300,15 @@ Function *WasmIRGen::createExportWrapper(
   if (retBufFVar_ && needsReturnBuffer(funcType)) {
     rbF = builder_.createLoadFrameInst(parentScope, retBufFVar_);
   }
+  // The reference array is not part of the calling convention; it is reached
+  // through the top-level scope like every other per-module object.
+  Value *rbR = nullptr;
+  auto getRbR = [&]() -> Value * {
+    assert(retBufRVar_ && "reference result but no reference array");
+    if (!rbR)
+      rbR = builder_.createLoadFrameInst(parentScope, retBufRVar_);
+    return rbR;
+  };
 
   // If the internal function needs a return buffer, prepend retBufI/retBufF.
   if (needsReturnBuffer(funcType)) {
@@ -2259,10 +2373,16 @@ Function *WasmIRGen::createExportWrapper(
     if (funcType.results.size() == 1 &&
         funcType.results[0] == WasmValType::I64) {
       // Single i64: read lo/hi from buffer, convert to BigInt.
-      auto *lo = builder_.createLoadPropertyInst(
-          rbI, builder_.getLiteralNumber(0));
-      auto *hi = builder_.createLoadPropertyInst(
-          rbI, builder_.getLiteralNumber(1));
+      // rbI is a Uint32Array, so the halves read back unsigned. Narrow to
+      // int32 like every other return-buffer read (see emitRetBufLoads and
+      // the I32 case below): the split i64 convention is a pair of *signed*
+      // int32 halves. wasmI64ToBigInt happens to re-truncate its arguments,
+      // so this is not a behavior change -- it keeps the invariant visible at
+      // the read site instead of resting on the builtin's internals.
+      auto *lo = builder_.createAsInt32Inst(builder_.createLoadPropertyInst(
+          rbI, builder_.getLiteralNumber(0)));
+      auto *hi = builder_.createAsInt32Inst(builder_.createLoadPropertyInst(
+          rbI, builder_.getLiteralNumber(1)));
       auto *bigint = helpers_.emitI64ToBigInt(lo, hi);
       builder_.createReturnInst(bigint);
     } else {
@@ -2286,11 +2406,15 @@ Function *WasmIRGen::createExportWrapper(
             break;
           }
           case WasmValType::I64: {
+            // Narrow both halves for the same reason as the I32 case above:
+            // rbI is a Uint32Array and the split i64 halves are signed int32.
             uint32_t idx = byteOff / 4;
-            auto *lo = builder_.createLoadPropertyInst(
-                rbI, builder_.getLiteralNumber(idx));
-            auto *hi = builder_.createLoadPropertyInst(
-                rbI, builder_.getLiteralNumber(idx + 1));
+            auto *lo =
+                builder_.createAsInt32Inst(builder_.createLoadPropertyInst(
+                    rbI, builder_.getLiteralNumber(idx)));
+            auto *hi =
+                builder_.createAsInt32Inst(builder_.createLoadPropertyInst(
+                    rbI, builder_.getLiteralNumber(idx + 1)));
             val = helpers_.emitI64ToBigInt(lo, hi);
             break;
           }
@@ -2301,10 +2425,26 @@ Function *WasmIRGen::createExportWrapper(
                 rbF, builder_.getLiteralNumber(idx));
             break;
           }
-          default: {
+          case WasmValType::FuncRef:
+          case WasmValType::ExternRef: {
+            // The reference was stored into the parallel reference array, not
+            // into the Uint32Array view, so the real value is still here.
+            // No AsInt32Inst: a reference is not a number.
             uint32_t idx = byteOff / 4;
             val = builder_.createLoadPropertyInst(
-                rbI, builder_.getLiteralNumber(idx));
+                getRbR(), builder_.getLiteralNumber(idx));
+            break;
+          }
+          default: {
+            // V128 only. It has no representation in either the buffer or the
+            // reference array, so keep failing loudly rather than silently
+            // misleading: report the construct and substitute the undefined
+            // placeholder, which cannot be mistaken for a real result.
+            llvh::errs() << "warning: unsupported Wasm result type: "
+                         << valTypeName(funcType.results[i]) << " (export \""
+                         << exportName << "\", result " << i
+                         << "); returning undefined\n";
+            val = builder_.getLiteralUndefined();
             break;
           }
         }
@@ -2365,6 +2505,15 @@ void WasmIRGen::createImportTrampoline(
     rbI = builder_.createLoadParamInst(paramI);
     rbF = builder_.createLoadParamInst(paramF);
   }
+  // The reference array is not a parameter; reach it through the top-level
+  // scope on demand, as the other reference-array users do.
+  Value *rbR = nullptr;
+  auto getRbR = [&]() -> Value * {
+    assert(retBufRVar_ && "reference result but no reference array");
+    if (!rbR)
+      rbR = builder_.createLoadFrameInst(parentScope, retBufRVar_);
+    return rbR;
+  };
   for (uint32_t i = 0; i < funcType.params.size(); ++i) {
     auto *param = func->getJSDynamicParam(jsParamIdx);
     auto *paramVal = builder_.createLoadParamInst(param);
@@ -2466,7 +2615,18 @@ void WasmIRGen::createImportTrampoline(
                 vals[i].first, rbF,
                 builder_.getLiteralNumber(byteOff / 8));
             break;
+          case WasmValType::FuncRef:
+          case WasmValType::ExternRef:
+            // The JS value passes through untouched on the way in (see the
+            // parameter loop above); on the way out it must go to the
+            // reference array, since the Uint32Array view would coerce it
+            // to 0.
+            builder_.createStorePropertyStrictInst(
+                vals[i].first, getRbR(),
+                builder_.getLiteralNumber(byteOff / 4));
+            break;
           default:
+            // V128: still unsupported. Keep the existing behavior.
             builder_.createStorePropertyStrictInst(
                 vals[i].first, rbI,
                 builder_.getLiteralNumber(byteOff / 4));
@@ -7025,10 +7185,9 @@ void WasmIRGen::initializeGlobals(Instruction *tlScope) {
   uint32_t numImportedGlobals = moduleInfo_.importedGlobalCount();
 
   // Initialize imported globals from the validated import values.
-  // During import validation, the raw import value was stored in
-  // importGlobalVals_[i]. If the import has __wasm_type__ (i.e., it is
-  // a WebAssembly.Global), we read its .value property; otherwise we
-  // use the import value directly (raw JS number).
+  // During import validation, the resolved import was stored in
+  // importGlobalVals_[i]: the value for an immutable import, the
+  // WebAssembly.Global object for a mutable one.
   for (uint32_t i = 0; i < numImportedGlobals; ++i) {
     uint32_t slotIdx = globalSlotIndex_[i];
 
@@ -7045,31 +7204,27 @@ void WasmIRGen::initializeGlobals(Instruction *tlScope) {
       ++importGlobalIdx;
     }
 
-    // The value was already resolved during import validation, under the
+    // The import was already resolved during import validation, under the
     // __wasm_type__ check performed there. Re-deriving it here by reading
     // __wasm_type__ a second time would be a TOCTOU: a getter or Proxy can
     // answer differently on the second read.
     Value *resolvedVal = builder_.createLoadFrameInst(
         tlScope, importGlobalVals_[i]);
 
-    // Coerce to the declared Wasm type. The import is a JS value -- either a
-    // raw number or a WebAssembly.Global's .value -- and nothing has
-    // constrained it, so without this an object or a fractional number lands
-    // in a slot the rest of the compiler treats as an i32/f32/f64.
-    // i64 is left alone: it goes through the BigInt lo/hi split below.
-    switch (gType) {
-      case WasmValType::I32:
-        resolvedVal = builder_.createAsInt32Inst(resolvedVal);
-        break;
-      case WasmValType::F32:
-        resolvedVal = emitFround(builder_.createAsNumberInst(resolvedVal));
-        break;
-      case WasmValType::F64:
-        resolvedVal = builder_.createAsNumberInst(resolvedVal);
-        break;
-      default:
-        break;
+    // A mutable import resolves to the WebAssembly.Global object, which
+    // global.get/global.set read and write directly. The frame slots below
+    // therefore only hold a link-time snapshot of it, for the constant
+    // expressions (data/element offsets, defined-global initializers) that
+    // read a global's slot -- and Wasm validation restricts those to
+    // immutable imported globals anyway.
+    if (importedMutableGlobals_.count(i)) {
+      resolvedVal = builder_.createLoadPropertyInst(
+          resolvedVal, builder_.getLiteralString("value"));
     }
+
+    // Coerce to the declared Wasm type. i64 is left alone: it goes through
+    // the BigInt lo/hi split below.
+    resolvedVal = coerceImportedGlobalValue(resolvedVal, gType);
 
     if (gType == WasmValType::I64) {
       // An i64 global's value is a BigInt. Split it into the lo/hi pair the
@@ -7078,15 +7233,22 @@ void WasmIRGen::initializeGlobals(Instruction *tlScope) {
       // silently truncated every imported i64 to its low word.
       auto *rbI = builder_.createLoadFrameInst(tlScope, retBufIVar_);
       helpers_.emitBigIntToI64(rbI, resolvedVal);
+      // rbI is a Uint32Array, so these read back unsigned, but an i64 half
+      // is a signed int32 everywhere else in the pipeline (see
+      // emitRetBufLoads / the mutable-global path below): narrow with
+      // AsInt32Inst like every other buffer read, or i32.wrap_i64 on an
+      // imported global of e.g. -1n yields 4294967295 instead of -1. Same
+      // mistake as C2 (the export-wrapper i64 param unmarshal), here in the
+      // immutable-import snapshot.
       builder_.createStoreFrameInst(
           tlScope,
-          builder_.createLoadPropertyInst(
-              rbI, builder_.getLiteralNumber(0)),
+          builder_.createAsInt32Inst(builder_.createLoadPropertyInst(
+              rbI, builder_.getLiteralNumber(0))),
           globalVars_[slotIdx]);
       builder_.createStoreFrameInst(
           tlScope,
-          builder_.createLoadPropertyInst(
-              rbI, builder_.getLiteralNumber(1)),
+          builder_.createAsInt32Inst(builder_.createLoadPropertyInst(
+              rbI, builder_.getLiteralNumber(1))),
           globalVars_[slotIdx + 1]);
     } else {
       builder_.createStoreFrameInst(
@@ -7199,6 +7361,19 @@ void WasmIRGen::initializeGlobals(Instruction *tlScope) {
   }
 }
 
+Value *WasmIRGen::coerceImportedGlobalValue(Value *value, WasmValType type) {
+  switch (type) {
+    case WasmValType::I32:
+      return builder_.createAsInt32Inst(value);
+    case WasmValType::F32:
+      return emitFround(builder_.createAsNumberInst(value));
+    case WasmValType::F64:
+      return builder_.createAsNumberInst(value);
+    default:
+      return value;
+  }
+}
+
 void WasmIRGen::onGlobalGet(uint32_t globalIndex) {
   if (unreachable_)
     return;
@@ -7222,6 +7397,40 @@ void WasmIRGen::onGlobalGet(uint32_t globalIndex) {
     }
   } else {
     gType = moduleInfo_.globals[globalIndex - numImportedGlobals].type.type;
+  }
+
+  // An imported mutable global is shared state: its value lives in the
+  // host's WebAssembly.Global, which the host can write at any time. Read it
+  // through the object's `.value`; the frame slot only holds the link-time
+  // snapshot, so reading that would miss every write since instantiation.
+  if (importedMutableGlobals_.count(globalIndex)) {
+    auto *globalObj = builder_.createLoadFrameInst(
+        parentScopeInst_, importGlobalVals_[globalIndex]);
+    auto *value = builder_.createLoadPropertyInst(
+        globalObj, builder_.getLiteralString("value"));
+    if (gType == WasmValType::I64) {
+      // An i64 global's value crosses the JS boundary as a BigInt. Split it
+      // into the lo/hi pair the compiler represents i64 with.
+      auto *rbI = builder_.createLoadFrameInst(
+          parentScopeInst_, retBufIVar_);
+      helpers_.emitBigIntToI64(rbI, value);
+      auto *lo = builder_.createLoadPropertyInst(
+          rbI, builder_.getLiteralNumber(0));
+      auto *hi = builder_.createLoadPropertyInst(
+          rbI, builder_.getLiteralNumber(1));
+      // The buffer is a Uint32Array, but an i64 half is a signed int32
+      // everywhere else in the pipeline (see emitRetBufLoads), so convert.
+      // Pushing the unsigned value would let i32.wrap_i64 yield 4294967295
+      // where the Wasm value is -1.
+      pushI64(
+          builder_.createAsInt32Inst(lo), builder_.createAsInt32Inst(hi));
+    } else {
+      // The property read is unconstrained -- __wasm_type__ is an ordinary
+      // property, so a hostile object can pass validation and then hand back
+      // a string -- so coerce it the same way the link-time snapshot is.
+      push(coerceImportedGlobalValue(value, gType));
+    }
+    return;
   }
 
   auto *val = builder_.createLoadFrameInst(
@@ -7259,6 +7468,26 @@ void WasmIRGen::onGlobalSet(uint32_t globalIndex) {
     }
   } else {
     gType = moduleInfo_.globals[globalIndex - numImportedGlobals].type.type;
+  }
+
+  // An imported mutable global is shared state: write through the host's
+  // WebAssembly.Global, which is what makes the write visible to the host
+  // and to every other module importing the same global. Writing the frame
+  // slot instead would leave the write inside this instance.
+  if (importedMutableGlobals_.count(globalIndex)) {
+    Value *value;
+    if (gType == WasmValType::I64) {
+      // An i64 global's value crosses the JS boundary as a BigInt.
+      auto [lo, hi] = popI64();
+      value = helpers_.emitI64ToBigInt(lo, hi);
+    } else {
+      value = pop();
+    }
+    auto *globalObj = builder_.createLoadFrameInst(
+        parentScopeInst_, importGlobalVals_[globalIndex]);
+    builder_.createStorePropertyStrictInst(
+        value, globalObj, builder_.getLiteralString("value"));
+    return;
   }
 
   if (gType == WasmValType::I64) {

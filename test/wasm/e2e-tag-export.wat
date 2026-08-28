@@ -7,7 +7,7 @@
 ;; Verifies that exported tags carry correct type strings.
 
 ;; REQUIRES: wasm
-;; RUN: %wat2wasm %s --enable-exceptions -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods %S/e2e-tag-export-driver.js_ -- %t.hbc | %FileCheck --match-full-lines %s
+;; RUN: %wat2wasm %s --enable-exceptions -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js %S/e2e-tag-export-driver.js_ -- %t.hbc | %FileCheck --match-full-lines %s
 
 (module
   (tag (export "tag_empty"))

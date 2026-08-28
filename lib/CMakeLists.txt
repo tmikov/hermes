@@ -321,6 +321,13 @@ if(HERMES_ENABLE_WASM)
     hermesWasmIRGen_obj
     wabt
     )
+  # The lean VM contains WebAssembly.cpp (it is part of hermesVMRuntime_obj)
+  # but not the Wasm compiler, so it needs the stub definitions of the frontend
+  # entry points. Only when Wasm is enabled: otherwise WebAssembly.cpp is not
+  # compiled at all and nothing references those symbols.
+  target_link_libraries(hermesvmlean_a PUBLIC
+    hermesWasmFrontendLean_obj
+    )
 endif()
 
 # Construct the HermesVM model string

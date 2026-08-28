@@ -28,10 +28,13 @@ python3 port.py timezone-demo.bundle.mjs timezone-demo.js
 echo "== compiling icu_capi.wasm (slow; Release ~76s, ASan ~4.5h) =="
 time "$HERMESC" --wasm -emit-binary -out icu_capi.hbc icu_capi.wasm
 
-# 3. Run the demo. hermescli.* (loadFile/loadHBC/getScriptArgs) is gated
-#    behind -Xhermes-internal-test-methods; the .hbc path is passed as the
-#    script argument.
-"$HERMES" -Xhermes-internal-test-methods timezone-demo.js -- icu_capi.hbc > out.txt
+# 3. Run the demo. hermescli.* (loadFile/getScriptArgs) is gated behind
+#    -Xhermes-internal-test-methods, and WebAssembly.Module.fromHermesBytecode
+#    behind -Xenable-untrusted-bytecode-from-js, because loading Hermes
+#    bytecode handed over by script is a trust boundary the embedder opts into.
+#    The .hbc path is passed as the script argument.
+"$HERMES" -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js \
+    timezone-demo.js -- icu_capi.hbc > out.txt
 
 # 4. Verify.
 if diff -u expected.txt out.txt; then

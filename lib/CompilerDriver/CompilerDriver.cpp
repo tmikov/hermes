@@ -1051,12 +1051,12 @@ bool validateFlags() {
     }
   };
 
-#ifdef HERMES_ENABLE_WASM
-  // Wasm mode is mutually exclusive with bytecode mode and most other flags.
-  if (cl::WasmMode && cl::BytecodeMode) {
-    err("Error! Cannot use both -wasm and -b");
-  }
-#endif
+  // NOTE: -wasm and -b are *not* mutually exclusive. -wasm means "the input
+  // is a WebAssembly module", which is true both of a .wasm binary (compiled
+  // here) and of a .hbc produced earlier by "hermesc -wasm" (loaded as
+  // bytecode). In the latter case -b, which setFlagDefaults() infers from the
+  // .hbc extension, selects the bytecode path and -wasm only records that the
+  // result must be instantiated rather than merely run.
 
   // Validate strict vs non strict mode.
   if (cl::NonStrictMode && cl::StrictMode) {
@@ -2391,11 +2391,11 @@ CompileResult processWasmFile(std::unique_ptr<llvh::MemoryBuffer> fileBuf) {
   genOptions.verifyIR = cl::compilerRuntimeFlags.VerifyIR;
 
   if (cl::DumpTarget == Execute) {
-    llvh::errs()
-        << "Error: direct execution of Wasm modules is not supported. "
-           "Use hermesc --wasm -emit-binary to compile, then run via "
-           "WebAssembly.Module/Instance API.\n";
-    return InvalidFlags;
+    // NOTE: compileFromCommandLineOptions() marks the result isWasmModule,
+    // so the VM driver knows to call the instantiate() factory carried by the
+    // module object that this bytecode's top level returns.
+    return generateBytecodeForExecution(
+        hbc::BCProviderFromSrc::CompilationData{genOptions, M, nullptr});
   }
 
   // Compute a source hash from the input buffer.
@@ -2450,7 +2450,9 @@ OutputFormatKind outputFormatFromCommandLineOptions() {
   return cl::DumpTarget;
 }
 
-CompileResult compileFromCommandLineOptions() {
+/// Do the actual work of compileFromCommandLineOptions(). The wrapper is
+/// responsible for post-processing that must apply to every path out of here.
+static CompileResult compileFromCommandLineOptionsImpl() {
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_STATS)
   if (cl::PrintStats)
     hermes::EnableStatistics();
@@ -2546,6 +2548,20 @@ CompileResult compileFromCommandLineOptions() {
         createContext(std::move(resolutionTable), std::move(segments));
     return processSourceFiles(context, std::move(fileBufs));
   }
+}
+
+CompileResult compileFromCommandLineOptions() {
+  CompileResult result = compileFromCommandLineOptionsImpl();
+#ifdef HERMES_ENABLE_WASM
+  // -wasm declares that the input is a WebAssembly module, however the
+  // bytecode was obtained: compiled here from a .wasm binary, or loaded from
+  // a .hbc that "hermesc -wasm" produced earlier. Either way its top level
+  // only returns a module object carrying an instantiate() factory, which the
+  // VM driver must call.
+  if (cl::WasmMode)
+    result.isWasmModule = true;
+#endif
+  return result;
 }
 } // namespace driver
 } // namespace hermes

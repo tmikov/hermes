@@ -16,9 +16,20 @@
 #include <jsi/instrumentation.h>
 #include <jsi/test/testlib.h>
 
+#ifdef HERMES_ENABLE_WASM
+// NOTE: deliberately no hermes/IR/*.h here. This TU is compiled with RTTI
+// enabled, while LLVHSupport is not, so instantiating the IR's FoldingSet
+// templates would emit typeinfo referencing a symbol that does not exist.
+#include <hermes/BCGen/HBC/BCProvider.h>
+#include <hermes/BCGen/HBC/BytecodeStream.h>
+#include <hermes/WasmFrontend/WasmCompile.h>
+#endif
+
 #include <atomic>
+#include <stdexcept>
 #include <thread>
 #include <tuple>
+#include <vector>
 
 using namespace facebook::jsi;
 using namespace facebook::hermes;
@@ -3605,6 +3616,289 @@ TEST_P(HermesRuntimeTest, CreateErrorTest) {
     }
   }
 }
+
+#ifdef HERMES_ENABLE_WASM
+
+/// A minimal .wasm module exporting `f: () -> i32` returning \p value, i.e.
+/// `(module (func (export "f") (result i32) (i32.const <value>)))`. Assembled
+/// by hand (byte-for-byte identical to wat2wasm's output for that text) so the
+/// test needs no external tool and no checked-in binary fixture.
+std::vector<uint8_t> makeWasmReturningConst(uint8_t value) {
+  return {// Magic and version.
+          0x00,
+          0x61,
+          0x73,
+          0x6d,
+          0x01,
+          0x00,
+          0x00,
+          0x00,
+          // Type section: one type, `() -> i32`.
+          0x01,
+          0x05,
+          0x01,
+          0x60,
+          0x00,
+          0x01,
+          0x7f,
+          // Function section: one function, of type 0.
+          0x03,
+          0x02,
+          0x01,
+          0x00,
+          // Export section: one export, "f", func 0.
+          0x07,
+          0x05,
+          0x01,
+          0x01,
+          0x66,
+          0x00,
+          0x00,
+          // Code section: one body, no locals, `i32.const <value>; end`.
+          0x0a,
+          0x06,
+          0x01,
+          0x04,
+          0x00,
+          0x41,
+          value,
+          0x0b};
+}
+
+/// Compile the module from makeWasmReturningConst(\p value) to precompiled
+/// Hermes bytecode: the same artifact `hermesc --wasm -emit-binary` produces,
+/// but built in-process so the fixture can never go stale against the current
+/// bytecode version.
+std::shared_ptr<const Buffer> compileWasmToHbc(uint8_t value) {
+  std::vector<uint8_t> wasm = makeWasmReturningConst(value);
+  std::string error;
+  auto data =
+      ::hermes::compileWasmToModuleData(wasm.data(), wasm.size(), error);
+  if (!data) {
+    // Dereferencing null here would take down the whole test binary and hide
+    // every case after this one.
+    ADD_FAILURE() << error;
+    return nullptr;
+  }
+  auto *BM = data->bytecodeProvider->getBytecodeModule();
+  if (!BM) {
+    ADD_FAILURE() << "no bytecode module";
+    return nullptr;
+  }
+
+  ::hermes::BytecodeGenerationOptions genOptions{::hermes::EmitBundle};
+  genOptions.optimizationEnabled = true;
+  std::string bytecode;
+  llvh::raw_string_ostream os(bytecode);
+  ::hermes::hbc::serializeBytecodeModule(*BM, ::hermes::SHA1{}, os, genOptions);
+  os.flush();
+  return std::make_shared<StringBuffer>(std::move(bytecode));
+}
+
+/// Integrator-side resolver used by the tests: answers exactly one URL, counts
+/// its invocations, and can be told to throw so we can prove that a throwing
+/// resolver cannot escape into the VM.
+class TestWasmResolver : public IWasmModuleResolver {
+ public:
+  TestWasmResolver(std::string url, std::shared_ptr<const Buffer> bytecode)
+      : url_(std::move(url)), bytecode_(std::move(bytecode)) {}
+  virtual ~TestWasmResolver() = default;
+
+  ICast *castInterface(const UUID &interfaceUUID) override {
+    if (interfaceUUID == IWasmModuleResolver::uuid) {
+      return static_cast<IWasmModuleResolver *>(this);
+    }
+    return nullptr;
+  }
+
+  std::shared_ptr<const Buffer> resolve(
+      const std::string &url,
+      std::string &error) override {
+    ++calls;
+    if (shouldThrow) {
+      throw std::runtime_error("resolver blew up");
+    }
+    if (url == url_) {
+      return bytecode_;
+    }
+    error = "no module for " + url;
+    return nullptr;
+  }
+
+  /// Number of times resolve() was called.
+  int calls{0};
+  /// When set, resolve() throws instead of answering.
+  bool shouldThrow{false};
+
+ private:
+  std::string url_;
+  std::shared_ptr<const Buffer> bytecode_;
+};
+
+/// Evaluate \p code and return the result.
+Value evalIn(Runtime &rt, const char *code) {
+  return rt.global().getPropertyAsFunction(rt, "eval").call(rt, code);
+}
+
+/// Instantiate the module at \p url via fromHermesURL and call its "f" export.
+Value callExportedF(Runtime &rt, const char *url) {
+  std::string code = std::string(
+                         "(function() {"
+                         "  var m = WebAssembly.Module.fromHermesURL('") +
+      url +
+      "');"
+      "  return new WebAssembly.Instance(m).exports.f();"
+      "})()";
+  return evalIn(rt, code.c_str());
+}
+
+/// The registry is the common case: the embedder names the URL and hands over
+/// the bytes, and JS reaches them through fromHermesURL.
+TEST(HermesWasmModuleProviderTest, RegistryHitBuildsRunnableModule) {
+  auto rt = makeHermesRuntime();
+  auto *provider = castInterface<IWasmModuleProvider>(rt.get());
+  ASSERT_NE(provider, nullptr);
+
+  provider->registerWasmBytecode("app://seven.wasm", compileWasmToHbc(7));
+  EXPECT_EQ(callExportedF(*rt, "app://seven.wasm").asNumber(), 7);
+}
+
+/// With neither a registry entry nor a resolver, fromHermesURL throws.
+TEST(HermesWasmModuleProviderTest, NoProviderThrows) {
+  auto rt = makeHermesRuntime();
+  auto *provider = castInterface<IWasmModuleProvider>(rt.get());
+  ASSERT_NE(provider, nullptr);
+
+  // Register an unrelated URL so the hook is installed but declines.
+  provider->registerWasmBytecode("app://other.wasm", compileWasmToHbc(7));
+  EXPECT_THROW(callExportedF(*rt, "app://missing.wasm"), JSError);
+
+  // And with nothing registered at all.
+  auto rt2 = makeHermesRuntime();
+  EXPECT_THROW(callExportedF(*rt2, "app://missing.wasm"), JSError);
+}
+
+/// A registered resolver serves URLs it recognizes.
+TEST(HermesWasmModuleProviderTest, ResolverHit) {
+  auto rt = makeHermesRuntime();
+  auto *provider = castInterface<IWasmModuleProvider>(rt.get());
+  ASSERT_NE(provider, nullptr);
+
+  TestWasmResolver resolver{"app://resolved.wasm", compileWasmToHbc(42)};
+  provider->setWasmModuleResolver(&resolver);
+  EXPECT_EQ(provider->getWasmModuleResolver(), static_cast<ICast *>(&resolver));
+
+  EXPECT_EQ(callExportedF(*rt, "app://resolved.wasm").asNumber(), 42);
+  EXPECT_EQ(resolver.calls, 1);
+}
+
+/// The resolver is consulted first: when both it and the registry can answer a
+/// URL, the resolver's answer wins.
+TEST(HermesWasmModuleProviderTest, ResolverBeatsRegistry) {
+  auto rt = makeHermesRuntime();
+  auto *provider = castInterface<IWasmModuleProvider>(rt.get());
+  ASSERT_NE(provider, nullptr);
+
+  // The registry says 7 for this URL; the resolver says 42.
+  provider->registerWasmBytecode("app://both.wasm", compileWasmToHbc(7));
+  TestWasmResolver resolver{"app://both.wasm", compileWasmToHbc(42)};
+  provider->setWasmModuleResolver(&resolver);
+
+  EXPECT_EQ(callExportedF(*rt, "app://both.wasm").asNumber(), 42);
+  EXPECT_EQ(resolver.calls, 1);
+}
+
+/// ... and the registry is the fallback for whatever the resolver declines.
+TEST(HermesWasmModuleProviderTest, RegistryServesWhatResolverDeclines) {
+  auto rt = makeHermesRuntime();
+  auto *provider = castInterface<IWasmModuleProvider>(rt.get());
+  ASSERT_NE(provider, nullptr);
+
+  provider->registerWasmBytecode("app://registry.wasm", compileWasmToHbc(7));
+  TestWasmResolver resolver{"app://resolver.wasm", compileWasmToHbc(42)};
+  provider->setWasmModuleResolver(&resolver);
+
+  EXPECT_EQ(callExportedF(*rt, "app://registry.wasm").asNumber(), 7);
+  EXPECT_EQ(resolver.calls, 1);
+  EXPECT_EQ(callExportedF(*rt, "app://resolver.wasm").asNumber(), 42);
+  EXPECT_EQ(resolver.calls, 2);
+
+  // Neither knows this one.
+  EXPECT_THROW(callExportedF(*rt, "app://nobody.wasm"), JSError);
+  EXPECT_EQ(resolver.calls, 3);
+}
+
+/// An exception thrown by integrator code must never unwind through the VM,
+/// which is compiled without exception support. A throwing resolver simply
+/// declines, and the registry still gets its turn.
+TEST(HermesWasmModuleProviderTest, ThrowingResolverIsContained) {
+  auto rt = makeHermesRuntime();
+  auto *provider = castInterface<IWasmModuleProvider>(rt.get());
+  ASSERT_NE(provider, nullptr);
+
+  provider->registerWasmBytecode("app://fallback.wasm", compileWasmToHbc(7));
+  TestWasmResolver resolver{"app://fallback.wasm", compileWasmToHbc(42)};
+  resolver.shouldThrow = true;
+  provider->setWasmModuleResolver(&resolver);
+
+  // The resolver throws, so it is treated as declining and the registry wins.
+  EXPECT_EQ(callExportedF(*rt, "app://fallback.wasm").asNumber(), 7);
+  EXPECT_EQ(resolver.calls, 1);
+
+  // And a URL nobody has still produces a clean JS TypeError.
+  EXPECT_THROW(callExportedF(*rt, "app://boom.wasm"), JSError);
+}
+
+/// Registering from inside a running resolver must be safe and must take
+/// effect. The VM binds a reference to its resolver std::function for the
+/// duration of a call, which is why the hook is installed exactly once (see
+/// HermesRuntimeImpl::ensureWasmHookInstalled) and registrations only mutate
+/// the state that hook reads. This exercises that re-entrant path; note it
+/// cannot by itself detect a hook that reinstalls itself, since the resulting
+/// lifetime bug is silent for a capture this small.
+TEST(HermesWasmModuleProviderTest, RegisteringDuringResolutionIsSafe) {
+  auto rt = makeHermesRuntime();
+  auto *provider = castInterface<IWasmModuleProvider>(rt.get());
+  ASSERT_NE(provider, nullptr);
+
+  /// A resolver that registers new bytecode while it is running.
+  class ReentrantResolver : public IWasmModuleResolver {
+   public:
+    ReentrantResolver(
+        IWasmModuleProvider *provider,
+        std::shared_ptr<const Buffer> buf)
+        : provider_(provider), buf_(std::move(buf)) {}
+    virtual ~ReentrantResolver() = default;
+    ICast *castInterface(const UUID &interfaceUUID) override {
+      return interfaceUUID == IWasmModuleResolver::uuid
+          ? static_cast<IWasmModuleResolver *>(this)
+          : nullptr;
+    }
+    std::shared_ptr<const Buffer> resolve(
+        const std::string &,
+        std::string &error) override {
+      // Mutate the provider's state from inside the live hook.
+      provider_->registerWasmBytecode("app://late.wasm", buf_);
+      error = "declined";
+      return nullptr;
+    }
+
+   private:
+    IWasmModuleProvider *provider_;
+    std::shared_ptr<const Buffer> buf_;
+  };
+
+  ReentrantResolver resolver{provider, compileWasmToHbc(7)};
+  provider->setWasmModuleResolver(&resolver);
+
+  // The resolver declines this URL, and nothing has registered it, so it
+  // throws -- but the resolver registered "app://late.wasm" while running.
+  EXPECT_THROW(callExportedF(*rt, "app://early.wasm"), JSError);
+  // The registration made from inside the live hook took effect.
+  EXPECT_EQ(callExportedF(*rt, "app://late.wasm").asNumber(), 7);
+}
+
+#endif // HERMES_ENABLE_WASM
 
 INSTANTIATE_TEST_CASE_P(
     Runtimes,

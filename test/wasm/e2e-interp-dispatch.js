@@ -6,12 +6,12 @@
  */
 
 // End-to-end test for the interp-dispatch Wasm example.
-// Tests both the AOT (.hbc) and runtime (.wasm) paths using the same
-// WebAssembly API (WebAssembly.Module accepts both formats).
+// Tests both the AOT (.hbc, via WebAssembly.Module.fromHermesBytecode) and
+// runtime (.wasm, via WebAssembly.Module) paths.
 
 // REQUIRES: wasm
 
-// RUN: %hermesc --wasm -emit-binary -out %t.hbc %S/../../examples/wasm/interp-dispatch/bench.wasm && %hermes -Xhermes-internal-test-methods %s -- %t.hbc | %FileCheck --match-full-lines %s
+// RUN: %hermesc --wasm -emit-binary -out %t.hbc %S/../../examples/wasm/interp-dispatch/bench.wasm && %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js %s -- %t.hbc | %FileCheck --match-full-lines %s
 // RUN: %hermes -Xhermes-internal-test-methods %s -- %S/../../examples/wasm/interp-dispatch/bench.wasm | %FileCheck --match-full-lines %s
 
 var path = hermescli.getScriptArgs()[0];
@@ -22,7 +22,9 @@ var imports = {
 };
 
 var bytes = hermescli.loadFile(path);
-var mod = new WebAssembly.Module(bytes);
+var mod = path.endsWith('.hbc')
+  ? WebAssembly.Module.fromHermesBytecode(bytes)
+  : new WebAssembly.Module(bytes);
 var instance = new WebAssembly.Instance(mod, imports);
 var exports = instance.exports;
 

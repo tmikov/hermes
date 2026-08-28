@@ -9,7 +9,7 @@
 
 var args = hermescli.getScriptArgs();
 function load(i) {
-  return new WebAssembly.Module(hermescli.loadFile(args[i]));
+  return WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[i]));
 }
 function limits(label, o) {
   print(label + ': min = ' + o.__wasm_min__ + ', max = ' + o.__wasm_max__);

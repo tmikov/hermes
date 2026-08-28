@@ -990,6 +990,81 @@ class NapiHostAdapter final {
 };
 #endif
 
+/// Instantiate a WebAssembly module whose bytecode has just been run.
+///
+/// A module compiled from WebAssembly does not instantiate itself: its top
+/// level only builds and returns a module object
+/// {instantiate, exportDescs, importDescs}. Calling instantiate() is what
+/// creates the memory, globals, tables and closures and runs the start
+/// function, so under -wasm the driver must call it for anything to happen.
+///
+/// It is called with an empty import object; imports are not synthesised. A
+/// module that declares imports therefore raises WebAssembly.LinkError naming
+/// the missing import, which is the correct diagnosis of running it with
+/// nothing to link against.
+///
+/// \param topLevelResult the value the module's top level returned.
+/// \return true if the module was instantiated, false otherwise, in which case
+///   either a diagnostic or the thrown exception has already been printed.
+static bool instantiateWasmModule(
+    vm::Runtime &runtime,
+    vm::HermesValue topLevelResult) {
+  vm::GCScopeMarkerRAII marker{runtime};
+
+  struct : public vm::Locals {
+    vm::PinnedValue<> moduleObj;
+    vm::PinnedValue<> instantiateFn;
+    vm::PinnedValue<vm::JSObject> imports;
+  } lv;
+  vm::LocalsRAII lraii{runtime, &lv};
+  // Pin the top-level result before anything that can allocate: it is not a
+  // root.
+  lv.moduleObj = topLevelResult;
+
+  // Report a thrown exception exactly as the top level's own exceptions are
+  // reported, so that a trap in the start function fails the process in the
+  // same way an uncaught JS exception does.
+  auto reportException = [&runtime]() {
+    llvh::outs().flush();
+    runtime.printException(
+        llvh::errs(), runtime.makeHandle(runtime.getThrownValue()));
+    return false;
+  };
+
+  if (lv.moduleObj->isObject()) {
+    auto propRes = vm::JSObject::getNamed_RJS(
+        vm::Handle<vm::JSObject>::vmcast(&lv.moduleObj),
+        runtime,
+        vm::Predefined::getSymbolID(vm::Predefined::instantiate));
+    if (LLVM_UNLIKELY(propRes == vm::ExecutionStatus::EXCEPTION))
+      return reportException();
+    lv.instantiateFn = std::move(*propRes);
+  }
+
+  // Nothing in the bytecode records that it was compiled from Wasm, so this
+  // is the only place where the claim made by -wasm is actually tested.
+  if (!vm::vmisa<vm::Callable>(*lv.instantiateFn)) {
+    llvh::outs().flush();
+    llvh::errs()
+        << "Error: --wasm was specified, but the bytecode did not return a "
+           "WebAssembly module object with a callable instantiate property.\n"
+        << "The input is not a WebAssembly module, nor bytecode compiled "
+           "from one.\n";
+    return false;
+  }
+
+  lv.imports = vm::JSObject::create(runtime);
+  auto callRes = vm::Callable::executeCall1(
+      vm::Handle<vm::Callable>::vmcast(&lv.instantiateFn),
+      runtime,
+      vm::Runtime::getUndefinedValue(),
+      lv.imports.getHermesValue());
+  if (LLVM_UNLIKELY(callRes == vm::ExecutionStatus::EXCEPTION))
+    return reportException();
+
+  return true;
+}
+
 bool executeHBCBytecodeImpl(
     std::shared_ptr<hbc::BCProvider> &&bytecode,
     const ExecuteOptions &options,
@@ -1127,6 +1202,13 @@ bool executeHBCBytecodeImpl(
     llvh::outs().flush();
     runtime->printException(
         llvh::errs(), runtime->makeHandle(runtime->getThrownValue()));
+  }
+
+  // -wasm says the input is a WebAssembly module. Running its bytecode only
+  // built the module object; instantiating it is the actual run.
+  if (!threwException && options.wasmModule &&
+      !instantiateWasmModule(*runtime, *status)) {
+    threwException = true;
   }
 
   // Perform a microtask checkpoint after running script.

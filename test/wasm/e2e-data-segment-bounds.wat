@@ -7,7 +7,7 @@
 ;; Tests that GlobalGet offsets work correctly and that OOB data segments trap.
 
 ;; REQUIRES: wasm
-;; RUN: %wat2wasm --enable-extended-const %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods %S/e2e-data-segment-bounds-driver.js_ -- %t.hbc | %FileCheck --match-full-lines %s
+;; RUN: %wat2wasm --enable-extended-const %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js %S/e2e-data-segment-bounds-driver.js_ -- %t.hbc | %FileCheck --match-full-lines %s
 
 (module
   (import "env" "g" (global i32))

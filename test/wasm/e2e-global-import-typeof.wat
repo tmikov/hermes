@@ -14,7 +14,7 @@
 ;; (mut i32) and (mut i64) imports.
 
 ;; REQUIRES: wasm
-;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %wat2wasm %S/e2e-global-import-typeof-i64.wat_ -o %t-i64.wasm && %hermesc --wasm -emit-binary -out %t-i64.hbc %t-i64.wasm && %wat2wasm %S/e2e-global-import-typeof-mut.wat_ -o %t-mut.wasm && %hermesc --wasm -emit-binary -out %t-mut.hbc %t-mut.wasm && %wat2wasm %S/e2e-global-import-typeof-mut64.wat_ -o %t-mut64.wasm && %hermesc --wasm -emit-binary -out %t-mut64.hbc %t-mut64.wasm && %hermes -Xhermes-internal-test-methods %S/e2e-global-import-typeof-driver.js_ -- %t.hbc %t-i64.hbc %t-mut.hbc %t-mut64.hbc | %FileCheck --match-full-lines %s
+;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %wat2wasm %S/e2e-global-import-typeof-i64.wat_ -o %t-i64.wasm && %hermesc --wasm -emit-binary -out %t-i64.hbc %t-i64.wasm && %wat2wasm %S/e2e-global-import-typeof-mut.wat_ -o %t-mut.wasm && %hermesc --wasm -emit-binary -out %t-mut.hbc %t-mut.wasm && %wat2wasm %S/e2e-global-import-typeof-mut64.wat_ -o %t-mut64.wasm && %hermesc --wasm -emit-binary -out %t-mut64.hbc %t-mut64.wasm && %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js %S/e2e-global-import-typeof-driver.js_ -- %t.hbc %t-i64.hbc %t-mut.hbc %t-mut64.hbc | %FileCheck --match-full-lines %s
 
 (module
   (import "e" "g" (global i32))

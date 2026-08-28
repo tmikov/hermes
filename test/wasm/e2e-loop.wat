@@ -9,7 +9,7 @@
 ;; REQUIRES: wasm
 
 ;; Test 1: Two-step compilation (hermesc -emit-binary, then WebAssembly API).
-;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods %S/load-hbc.js_ -- %t.hbc _start
+;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js %S/load-hbc.js_ -- %t.hbc _start
 
 ;; Test 2: Verify IR is well-formed (optimizer doesn't crash).
 ;; RUN: %hermesc --wasm --dump-ir -O0 %t.wasm | %FileCheck %s

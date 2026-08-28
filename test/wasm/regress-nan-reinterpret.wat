@@ -9,7 +9,7 @@
 ;; i64.reinterpret_f64 must return the exact bit pattern as BigInt.
 
 ;; REQUIRES: wasm
-;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods %S/regress-nan-reinterpret-driver.js_ -- %t.hbc | %FileCheck --match-full-lines %s
+;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js %S/regress-nan-reinterpret-driver.js_ -- %t.hbc | %FileCheck --match-full-lines %s
 
 (module
   ;; i64.reinterpret_f64(nan) should be 0x7FF8000000000000 = 9218868437227405312

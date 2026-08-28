@@ -64,7 +64,7 @@ hermes -Xhermes-internal-test-methods run.js -- life.wasm
 
 ```bash
 hermesc --wasm -emit-binary -out life.hbc life.wasm
-hermes -Xhermes-internal-test-methods run.js -- life.hbc
+hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js run.js -- life.hbc
 ```
 
 ### Pure JavaScript

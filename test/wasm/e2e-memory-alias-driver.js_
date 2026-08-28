@@ -8,7 +8,7 @@
 // JS driver for e2e-memory-alias.wat.
 
 var e = new WebAssembly.Instance(
-  new WebAssembly.Module(hermescli.loadFile(hermescli.getScriptArgs()[0])))
+  WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(hermescli.getScriptArgs()[0])))
   .exports;
 
 var view = new DataView(e.mem.buffer);

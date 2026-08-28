@@ -12,7 +12,7 @@
 ;; raises a TypeError instead.
 
 ;; REQUIRES: wasm
-;; RUN: %wat2wasm %S/e2e-hostile-typed-array-i64.wat_ -o %t-i64.wasm && %hermesc --wasm -emit-binary -out %t-i64.hbc %t-i64.wasm && %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods %S/e2e-hostile-typed-array-driver.js_ -- %t-i64.hbc %t.hbc | %FileCheck --match-full-lines %s
+;; RUN: %wat2wasm %S/e2e-hostile-typed-array-i64.wat_ -o %t-i64.wasm && %hermesc --wasm -emit-binary -out %t-i64.hbc %t-i64.wasm && %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js %S/e2e-hostile-typed-array-driver.js_ -- %t-i64.hbc %t.hbc | %FileCheck --match-full-lines %s
 
 (module
   (memory 1)

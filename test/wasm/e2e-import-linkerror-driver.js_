@@ -7,7 +7,7 @@
 
 // JS driver for e2e-import-linkerror.wat.
 
-var mod = new WebAssembly.Module(
+var mod = WebAssembly.Module.fromHermesBytecode(
   hermescli.loadFile(hermescli.getScriptArgs()[0]));
 
 function attempt(label, imports) {

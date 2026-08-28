@@ -19,7 +19,7 @@ var imports = {
 };
 
 var bytes = hermescli.loadFile(hbcPath);
-var mod = new WebAssembly.Module(bytes);
+var mod = WebAssembly.Module.fromHermesBytecode(bytes);
 var instance = new WebAssembly.Instance(mod, imports);
 var exports = instance.exports;
 

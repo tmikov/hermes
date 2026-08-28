@@ -8,7 +8,7 @@
 
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm
-;; RUN: %hermes -Xhermes-internal-test-methods %S/load-hbc.js_ -- %t.hbc loop_param_brif | %FileCheck --match-full-lines %s
+;; RUN: %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js %S/load-hbc.js_ -- %t.hbc loop_param_brif | %FileCheck --match-full-lines %s
 
 ;; CHECK: 13
 

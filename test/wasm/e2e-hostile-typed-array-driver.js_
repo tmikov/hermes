@@ -16,7 +16,7 @@ var memPath = args[1];
 // i64 return buffer built from a hostile Uint32Array.
 globalThis.Uint32Array = function() { return {}; };
 try {
-  var i64Mod = new WebAssembly.Module(hermescli.loadFile(i64Path));
+  var i64Mod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(i64Path));
   var i64Inst = new WebAssembly.Instance(i64Mod, {});
   i64Inst.exports.add(1n, 2n);
   print('i64 add with hostile Uint32Array: no error');
@@ -27,7 +27,7 @@ try {
 // Linear-memory view built from a hostile Uint8Array.
 globalThis.Uint8Array = function() { return {}; };
 try {
-  var memMod = new WebAssembly.Module(hermescli.loadFile(memPath));
+  var memMod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(memPath));
   var memInst = new WebAssembly.Instance(memMod, {});
   memInst.exports.fill();
   print('memory.fill with hostile Uint8Array: no trap');

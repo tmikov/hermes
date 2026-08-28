@@ -8,7 +8,7 @@
 // JS driver for e2e-table-max-zero.wat.
 
 var hbcPath = hermescli.getScriptArgs()[0];
-var mod = new WebAssembly.Module(hermescli.loadFile(hbcPath));
+var mod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(hbcPath));
 
 function importIt(t) {
   return new WebAssembly.Instance(mod, {e: {t: t}});

@@ -10,12 +10,14 @@
 // Usage:
 //   hermes -Xhermes-internal-test-methods run.js -- life.wasm
 //   hermesc --wasm -emit-binary -out life.hbc life.wasm
-//   hermes -Xhermes-internal-test-methods run.js -- life.hbc
+//   hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js run.js -- life.hbc
 
 var path = hermescli.getScriptArgs()[0];
 var bytes = hermescli.loadFile(path);
 
-var mod = new WebAssembly.Module(bytes);
+var mod = path.endsWith('.hbc')
+  ? WebAssembly.Module.fromHermesBytecode(bytes)
+  : new WebAssembly.Module(bytes);
 var instance = new WebAssembly.Instance(mod, {
   env: {
     log: function(value) { console.log(value); }

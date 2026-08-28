@@ -9,7 +9,7 @@
 
 var hbcPath = hermescli.getScriptArgs()[0];
 var inst = new WebAssembly.Instance(
-    new WebAssembly.Module(hermescli.loadFile(hbcPath)), {});
+    WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(hbcPath)), {});
 
 // The internal closures, reached directly via the exported table.
 var f64 = inst.exports.tbl.get(0);

@@ -51,6 +51,7 @@
 #include <chrono>
 #include <functional>
 #include <memory>
+#include <string>
 #include <type_traits>
 #include <vector>
 
@@ -268,6 +269,30 @@ class Runtime : public RuntimeBase, public HandleRootOwner {
   /// (e.g., a napi_env whose NativeState finalizers were called by
   /// finalizeAll). Deleters run in registration order.
   void addPostShutdownDeleter(std::function<void()> deleter);
+
+  /// Resolves a Wasm module URL to trusted Hermes bytecode. Installed by the
+  /// embedder (via the API layer). Returns true and fills \p bytecodeOut with
+  /// a COPY of the .hbc bytes, or false if the URL is not provided. On false,
+  /// \p errorOut may be filled with a human-readable reason (for instance the
+  /// message an embedder resolver produced); an empty \p errorOut just means
+  /// no reason was offered. The VM never depends on jsi types; the API layer
+  /// adapts its provider to this.
+  using WasmModuleResolver = std::function<
+      bool(const std::string &url,
+           std::string &bytecodeOut,
+           std::string &errorOut)>;
+
+  /// Install the resolver used by WebAssembly.Module.fromHermesURL(). There is
+  /// at most one; installing replaces any previous one.
+  void setWasmModuleResolver(WasmModuleResolver resolver) {
+    wasmModuleResolver_ = std::move(resolver);
+  }
+
+  /// \return the installed Wasm module resolver, or an empty std::function if
+  /// the embedder has not installed one.
+  const WasmModuleResolver &getWasmModuleResolver() const {
+    return wasmModuleResolver_;
+  }
 
   /// Add a custom function that will be executed sometime during garbage
   /// collection to mark additional weak GC roots that may not be known to the
@@ -928,6 +953,10 @@ class Runtime : public RuntimeBase, public HandleRootOwner {
   const bool asyncBreakCheckInEval : 1;
   /// Whether to increase compliance with test262.
   const bool test262 : 1;
+  /// Whether JS APIs may load untrusted (JS-supplied) Hermes bytecode.
+  const bool enableUntrustedBytecodeFromJS : 1;
+  /// Whether the WebAssembly entry points may content-sniff .hbc.
+  const bool enableWasmBytecodeContentSniffing : 1;
 
   const SynthTraceMode traceMode;
 
@@ -1264,6 +1293,10 @@ class Runtime : public RuntimeBase, public HandleRootOwner {
   std::vector<std::function<void()>> drainJobsCallbacks_;
   std::vector<std::function<void()>> shutdownCallbacks_;
   std::vector<std::function<void()>> postShutdownDeleters_;
+
+  /// Resolves a Wasm module URL to trusted Hermes bytecode; empty unless the
+  /// embedder installed one. See setWasmModuleResolver().
+  WasmModuleResolver wasmModuleResolver_;
 
   /// All state related to JIT compilation.
   JITContext jitContext_;

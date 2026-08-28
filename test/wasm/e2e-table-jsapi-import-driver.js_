@@ -8,7 +8,7 @@
 // JS driver for e2e-table-jsapi-import.wat.
 
 var hbcPath = hermescli.getScriptArgs()[0];
-var mod = new WebAssembly.Module(hermescli.loadFile(hbcPath));
+var mod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(hbcPath));
 
 var tbl = new WebAssembly.Table({element: 'anyfunc', initial: 2, maximum: 10});
 print('initial length: ' + tbl.length);

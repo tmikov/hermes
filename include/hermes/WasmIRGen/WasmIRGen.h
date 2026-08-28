@@ -491,10 +491,13 @@ class WasmIRGen {
   /// same as Wasm function index for imports since they come first).
   std::vector<Variable *> importFuncVars_;
 
-  /// One Variable per imported global, holding the raw import value
-  /// (either a WebAssembly.Global object or a plain JS number) loaded
-  /// from the imports object during validation. Used by initializeGlobals()
-  /// to read the actual imported value.
+  /// One Variable per imported global, holding the import resolved during
+  /// validation. For an immutable import this is its value (a plain JS
+  /// number/BigInt, or the WebAssembly.Global's `.value`), which
+  /// initializeGlobals() snapshots into the global's frame slot. For a
+  /// mutable import it is the WebAssembly.Global OBJECT itself, because a
+  /// mutable global is shared state: global.get/global.set must go through
+  /// its `.value` so writes are visible in both directions.
   std::vector<Variable *> importGlobalVals_;
 
   /// Variable holding the imported memory's __wasm_max__ value (max pages,
@@ -563,6 +566,16 @@ class WasmIRGen {
   /// globalVars_[globalSlotIndex_[i]+1] is hi32.
   std::vector<uint32_t> globalSlotIndex_;
 
+  /// Wasm indices of imported MUTABLE globals. Their value lives in the
+  /// host's WebAssembly.Global, held in importGlobalVals_, not in the frame
+  /// slots in globalVars_: global.get/global.set for these go through the
+  /// object's `.value` property so that the module and the host see the same
+  /// global. The frame slots still hold the link-time snapshot, which only
+  /// constant expressions (data/element offsets, defined-global
+  /// initializers) read, and Wasm validation restricts those to immutable
+  /// imported globals.
+  llvh::DenseSet<uint32_t> importedMutableGlobals_;
+
   /// Maps raw type section indices to canonical indices. Structurally
   /// identical types share the same canonical index, ensuring that
   /// call_indirect uses structural type equivalence rather than nominal.
@@ -607,6 +620,22 @@ class WasmIRGen {
   /// Float64Array view.
   Variable *retBufIVar_ = nullptr;
   Variable *retBufFVar_ = nullptr;
+
+  /// Parallel reference slots for the return buffer: a plain JS Array of
+  /// retBufSize_/4 elements, indexed identically to the Uint32Array view.
+  /// A funcref is a JS closure and an externref is an arbitrary JS value;
+  /// neither can live in an ArrayBuffer, so storing one through retBufIVar_
+  /// coerces it to NaN and then to 0, destroying it at the store. Reference
+  /// results reserve their 4 bytes in computeRetBufLayout() exactly like an
+  /// i32 and use the same byteOff/4 slot index here, so no layout arithmetic
+  /// changes. Only created when some function type that needs a return buffer
+  /// actually has a reference result (see retBufHasRefResult_).
+  Variable *retBufRVar_ = nullptr;
+
+  /// True when some function type that needsReturnBuffer() has a FuncRef or
+  /// ExternRef result, i.e. when retBufRVar_ must exist. V128 does not count:
+  /// it remains unsupported and keeps its diagnostic.
+  bool retBufHasRefResult_ = false;
 
   /// Size of the return buffer in bytes. Set during createFunctions().
   uint32_t retBufSize_ = 0;
@@ -846,6 +875,16 @@ class WasmIRGen {
       Instruction *tlScope);
 
   void initializeGlobals(Instruction *tlScope);
+
+  /// Coerce \p value, an arbitrary JS value read from a global import, to the
+  /// declared Wasm type \p type, per ToWebAssemblyValue. Nothing constrains
+  /// what the imports object hands us -- __wasm_type__ is an ordinary
+  /// property, so even the "WebAssembly.Global" arm can produce any value --
+  /// and without this an object or a fractional number would land in a slot
+  /// the rest of the compiler treats as an i32/f32/f64.
+  /// \return the coerced value; \p value unchanged for I64 (converted from a
+  ///   BigInt by the caller) and for reference types.
+  Value *coerceImportedGlobalValue(Value *value, WasmValType type);
 
   /// Load the table functions array from the top-level scope.
   Value *loadTableFuncs(uint32_t tableIndex);

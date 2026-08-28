@@ -68,10 +68,14 @@ std::vector<std::string> scriptArgsFromCL;
 } // namespace
 
 /// Execute Hermes bytecode \p bytecode, respecting command line arguments.
+/// \param isWasmModule true if the input is a WebAssembly module, in which
+///   case running \p bytecode only builds the module object and the driver
+///   must call its instantiate() to actually run the module.
 /// \return an exit status.
 static int executeHBCBytecodeFromCL(
     std::unique_ptr<hbc::BCProvider> bytecode,
-    const driver::BytecodeBufferInfo &info) {
+    const driver::BytecodeBufferInfo &info,
+    bool isWasmModule) {
 #if !HERMESVM_JIT
   if (flags.DumpJITCode || flags.JIT != cli::VMOnlyRuntimeFlags::JITMode::Off) {
     llvh::errs() << "JIT is not enabled in this build\n";
@@ -125,6 +129,10 @@ static int executeHBCBytecodeFromCL(
           .withAsyncBreakCheckInEval(
               cl::compilerRuntimeFlags.EmitAsyncBreakCheck)
           .withVMExperimentFlags(flags.VMExperimentFlags)
+          .withEnableUntrustedBytecodeFromJS(
+              flags.EnableUntrustedBytecodeFromJS)
+          .withEnableWasmBytecodeContentSniffing(
+              flags.EnableWasmBytecodeContentSniffing)
           .withES6Proxy(flags.ES6Proxy)
           .withIntl(flags.Intl)
           .withMicrotaskQueue(flags.MicrotaskQueue)
@@ -157,6 +165,7 @@ static int executeHBCBytecodeFromCL(
   options.heapTimeline = flags.HeapTimeline;
 
   options.scriptArgs = scriptArgsFromCL;
+  options.wasmModule = isWasmModule;
 
 #ifdef HERMES_ENABLE_PERF_PROF
   std::string jitdumpFile;
@@ -304,7 +313,9 @@ int main(int argc, char **argv) {
   driver::CompileResult res = driver::compileFromCommandLineOptions();
   if (res.bytecodeProvider) {
     auto ret = executeHBCBytecodeFromCL(
-        std::move(res.bytecodeProvider), res.bytecodeBufferInfo);
+        std::move(res.bytecodeProvider),
+        res.bytecodeBufferInfo,
+        res.isWasmModule);
     return ret;
   } else {
     return res.status;

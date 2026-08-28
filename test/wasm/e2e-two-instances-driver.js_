@@ -7,7 +7,7 @@
 
 // JS driver for e2e-two-instances.wat.
 
-var mod = new WebAssembly.Module(
+var mod = WebAssembly.Module.fromHermesBytecode(
   hermescli.loadFile(hermescli.getScriptArgs()[0]));
 
 var a = new WebAssembly.Instance(

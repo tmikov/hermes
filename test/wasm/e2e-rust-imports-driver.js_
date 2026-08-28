@@ -11,7 +11,7 @@ var hbcPath = hermescli.getScriptArgs()[0];
 var memory = new WebAssembly.Memory({initial: 17});
 var logged = null;
 
-var mod = new WebAssembly.Module(hermescli.loadFile(hbcPath));
+var mod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(hbcPath));
 var exports = new WebAssembly.Instance(mod, {
   env: {
     memory: memory,

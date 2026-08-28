@@ -602,6 +602,8 @@ STR(require, "require")
 STR(requireFast, "requireFast")
 STR(context, "context")
 STR(exports, "exports")
+STR(fromHermesBytecode, "fromHermesBytecode")
+STR(fromHermesURL, "fromHermesURL")
 STR(dotSlash, "./")
 STR(defaultExport, "?default")
 

@@ -8,8 +8,8 @@
 
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm
-;; RUN: %hermes -Xhermes-internal-test-methods %S/load-hbc.js_ -- %t.hbc test_add_precision | %FileCheck --match-full-lines --check-prefix=ADD %s
-;; RUN: %hermes -Xhermes-internal-test-methods %S/load-hbc.js_ -- %t.hbc test_demote_precision | %FileCheck --match-full-lines --check-prefix=DEMOTE %s
+;; RUN: %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js %S/load-hbc.js_ -- %t.hbc test_add_precision | %FileCheck --match-full-lines --check-prefix=ADD %s
+;; RUN: %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js %S/load-hbc.js_ -- %t.hbc test_demote_precision | %FileCheck --match-full-lines --check-prefix=DEMOTE %s
 
 ;; In f32: 1.0f + 2^-24 = 1.0f (the added bit is at the ULP boundary, rounds down).
 ;; In f64: 1.0  + 2^-24 = 1.000000059604644775390625 (exact, no rounding).
