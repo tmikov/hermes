@@ -380,9 +380,7 @@ class Emitter {
   /// Whether to verify FR type assumptions in the JIT'ed code.
   bool const emitTypeAsserts_;
   /// Whether to emit counters in the JIT'ed code.
-  // x86-64: unreferenced in the milestone-1 tree -- used from milestone 2;
-  // keeps -Wunused-private-field clean until then.
-  [[maybe_unused]] bool const emitCounters_;
+  bool const emitCounters_;
 
 #ifndef ASMJIT_NO_LOGGING
   std::unique_ptr<asmjit::Logger> logger_{};
@@ -517,6 +515,11 @@ class Emitter {
   /// Label to branch to when catching an exception with setjmp.
   /// Invalid if there's no try/catch in the function.
   asmjit::Label catchTableLabel_{};
+
+  /// Label to branch to when attempting to call a non-object. The callee and
+  /// saved IP must already be in the right position on the stack. This is
+  /// initialized lazily by the first call, and shared across all calls.
+  asmjit::Label nonObjCallLabel_{};
 
   /// The bytecode codeblock.
   CodeBlock *const codeBlock_;
@@ -1322,6 +1325,45 @@ class Emitter {
   /// emitTypeAsserts_ themselves; this does not.
   void recordFRWriteForAssert(FR fr);
 
+  /// Get the current bytecode IP in \p out.
+  /// x86-64: the whole address is a single 64-bit immediate, so unlike arm64
+  /// there is no "materialize the function start, then add the offset" chain
+  /// and no immediate-range special case.
+  void getBytecodeIP(const x86::Gp &out);
+
+  /// If counters are enabled, emit code to increment \p counter.
+  /// Clobbers xScratch and EFLAGS; call it only where both are dead.
+  void emitIncrementCounter(JitCounter counter);
+
+  /// Set up the call frame and perform the call. The caller should have
+  /// already populated the arg count and new target registers.
+  /// \param frRes is the frame register that will contain the result.
+  /// \param frCallee is a frame register containing the callee.
+  ///
+  /// The register contract of the call sequence in the definition below.
+  /// Both the fast path (a direct call into another JIT compiled function)
+  /// and the slow path (an indirect call through VTable::jitCallArray)
+  /// arrive at contLab having prepared the same three registers, so that
+  /// contLab itself is a single shared call sequence:
+  ///   eax - the callee's CellKind. Produced by the fast path's type check
+  ///         and consumed by the slow path, which indexes jitCallArray with
+  ///         it. It is dead at contLab, and is deliberately the register
+  ///         the call's return value lands in.
+  ///   rsi - the Callable *, i.e. the second argument of an
+  ///         ObjectJitCallPtr. A JIT compiled function ignores it; the
+  ///         jitCall thunks do not.
+  ///   rdx - the address to call. It cannot be xScratch (r11): the slow
+  ///         path needs a free register to materialize
+  ///         &VTable::jitCallArray into before indexing it, and xScratch is
+  ///         the only one guaranteed to be free there.
+  /// contLab then adds the first argument, rdi = Runtime, and calls rdx.
+  /// Every temp is free at this point (everything was synced above), which
+  /// is what lets the two paths agree on fixed registers at all. rsp % 16
+  /// == 0 holds throughout the function body -- nothing moves rsp after
+  /// the prologue -- so the call site is SysV-aligned without any
+  /// adjustment here.
+  void callImpl(FR frRes, FR frCallee);
+
   /// Load the address of \p frameReg's frame slot into \p dst.
   /// x86-64: every frame slot is reachable through lea's signed 32-bit
   /// displacement, so unlike arm64 there is no immediate-range fallback.
@@ -1442,6 +1484,12 @@ class Emitter {
   /// \param temp1 is a temporary register.
   /// \param temp2 is a temporary register.
   /// \param slowPathLab is the label to jump to if the allocation fails.
+  ///
+  /// Precondition (ASan builds only): no live value may be held in any
+  /// vector temp, nor in xScratch (r11), across this call -- the ASan
+  /// save loop pushes only the 8 GP temps (kGPTemp1/kGPTemp2), since SysV
+  /// has no callee-saved xmm registers. \p out, \p temp1, and \p temp2
+  /// must not be xScratch either, since it is not part of that saved set.
   void bumpAllocAndUnpoison(
       uint32_t sz,
       const x86::Gp &out,
@@ -1468,6 +1516,10 @@ class Emitter {
   /// \param temp1 is a temporary register.
   /// \param temp2 is a temporary register.
   /// \param slowPathLab is the label to jump to if the allocation fails.
+  ///
+  /// Precondition (ASan builds only): same as bumpAllocAndUnpoison() --
+  /// no live value in any vector temp or xScratch across the call, and
+  /// \p out, \p temp1, \p temp2 must not be xScratch.
   void allocInYoung(
       CellKind kind,
       uint32_t sz,
@@ -1486,6 +1538,10 @@ class Emitter {
   /// \param out2 is the register to store the address of the second object.
   /// \param temp is a temporary register.
   /// \param slowPathLab is the label to jump to if the allocation fails.
+  ///
+  /// Precondition (ASan builds only): same as bumpAllocAndUnpoison() --
+  /// no live value in any vector temp or xScratch across the call, and
+  /// \p out1, \p out2, \p temp must not be xScratch.
   void alloc2InYoung(
       CellKind kind1,
       uint32_t sz1,
