@@ -22,31 +22,26 @@
 // tier reads no property cache, so it does not need the function to have run
 // interpreted first. Every one of its guards is dynamic.
 //
-// Today arm64 only has the tier in the default heap-value mode --
-// HERMES_JIT_INLINE_SAFE_STORE excludes compressed pointers and boxed doubles
-// there until the SmallHermesValue encoder is ported -- so HV64 is the only
-// mode with an arm64 tree, and this file has never been run under another
-// prefix. What is pinned under plain SPEC is what will still hold in every
-// mode: instruction shapes, ordering, and the immediates that come from the
-// object model rather than from the slot width. Field displacements are
-// wildcarded for the same reason the x86-64 pin test wildcards them -- they
-// move under compressed pointers. What is genuinely HV64-shaped carries the
-// mode prefix instead -- the width of the indexed-storage load, of the
-// element-slot load and of the store, the eight-byte element scale, and the
-// ETag form of the hole test.
+// The tier exists in every heap-value mode, and so does this file: what is
+// the same in all three is pinned under plain SPEC, and what differs under
+// SPEC-HV64, SPEC-HV32 or SPEC-BOXED, of which exactly one is active in a
+// given build (test/lit.cfg's %hv-mode). Field displacements are wildcarded
+// throughout, because they move under compressed pointers.
 //
-// Stage 5c has to re-split this file, not merely add prefixes to it: under
-// compressed pointers the hole test compares a whole encoded
-// SmallHermesValue instead of an ETag, and the jumbo gate gains an `and` that
-// masks the kind out of the 24-bit size field -- a line that has no SPEC-HV32
-// counterpart here because no such line is emitted today.
+// Four things are genuinely mode-shaped here, and all four are consequences
+// of the slot width rather than of the encoding: the width of the
+// indexed-storage load, the presence of the mask that clears the cell kind
+// out of a 24-bit size field, the element scale, and the form of the hole
+// test -- an ETag test where a slot is eight bytes, a comparison against the
+// whole encoded empty value where it is four. On top of those, the two boxed
+// modes encode the value into a SmallHermesValue before any guard runs; the
+// shape of that dispatch is pinned by putbyid-inline-emitted-arm64.js and
+// only its comment line is checked here.
 //
 // UNSUPPORTED under HERMESVM_SANITIZE_HANDLES (the `handle_san` lit feature)
-// for the same reason its siblings are: no arm64 handle-sanitized tree exists
-// in the matrix, and in the boxed modes that build implies, the encoder the
-// arm64 gate is still waiting on declines every number outright -- a
-// deliberate emission difference that the behavioral tests, not this file,
-// are there to cover.
+// for the same reason its siblings are: there the runtime boxes every number,
+// so the encoder declines the whole inline-value case and the emitted shape
+// differs deliberately. The behavioral tests are what cover such a build.
 
 function store(arr, i, v) {
   arr[i] = v;
@@ -61,12 +56,22 @@ print(a[1]);
 // SPEC-LABEL:store:
 // SPEC: // Inline fast array store
 //
+// Under boxed doubles the value is encoded into a SmallHermesValue first,
+// ahead of every guard, so that a value with no inline encoding is rejected
+// before the tier pays for anything else. Nothing is emitted here in HV64.
+// SPEC-HV32: // Encode the value as a SmallHermesValue
+// SPEC-HV32: b.ne [[SLOW:L[0-9]+]]
+// SPEC-BOXED: // Encode the value as a SmallHermesValue
+// SPEC-BOXED: b.ne [[SLOW:L[0-9]+]]
+//
 // The shape guards, in the order putByValWithReceiver_RJS makes them. arm64
 // tests a tag by shifting it down and adding, so "is an object" is
 // `asr`+`cmn` rather than x86-64's `sar`+`cmp`.
 // SPEC: asr {{x[0-9]+}}, {{x[0-9]+}}, 0x30
 // SPEC: cmn {{x[0-9]+}}, 1
-// SPEC: b.ne [[SLOW:L[0-9]+]]
+// SPEC-HV64: b.ne [[SLOW:L[0-9]+]]
+// SPEC-HV32: b.ne [[SLOW]]
+// SPEC-BOXED: b.ne [[SLOW]]
 // SPEC: and {{x[0-9]+}}, {{x[0-9]+}}, 0xFFFFFFFFFFFF
 // ... of cell kind JSArray exactly ...
 // SPEC: ldrb {{w[0-9]+}}, [{{x[0-9]+}}, {{[0-9]+}}]
@@ -74,10 +79,11 @@ print(a[1]);
 // SPEC: b.ne [[SLOW]]
 // ... with fastIndexProperties set and frozen clear. The mask is two
 // non-adjacent bits, which is not an AArch64 logical immediate, so unlike
-// x86-64 it has to be materialized first.
+// x86-64 it has to be materialized first -- in x16, because the other
+// temporary is carrying the encoded value in the two boxed modes.
 // SPEC: ldr {{w[0-9]+}}, [{{x[0-9]+}}, {{[0-9]+}}]
-// SPEC: mov {{w[0-9]+}}, 0x14
-// SPEC: and {{w[0-9]+}}, {{w[0-9]+}}, {{w[0-9]+}}
+// SPEC: mov w16, 0x14
+// SPEC: and {{w[0-9]+}}, {{w[0-9]+}}, w16
 // SPEC: cmp {{w[0-9]+}}, 0x10
 // SPEC: b.ne [[SLOW]]
 // ... a key that converts to a uint32 and back unchanged. There is no second
@@ -101,27 +107,47 @@ print(a[1]);
 // too, must be below RuntimeOffsets::kMaxInlineStorage. This gate is what
 // satisfies the barrier predicate's first-unit precondition; removing it
 // makes putbyval-inline.js fail on HadesGC's verifyCardTable().
-// The indexed-storage load is a compressed-pointer load: eight bytes here,
-// four under compressed pointers, which is why it carries a mode prefix while
-// the cell-header load below it does not.
+//
+// The indexed-storage load is a compressed-pointer load: four bytes under
+// compressed pointers, eight otherwise. The cell-header load below it is
+// always 32 bits, but KindAndSize packs an 8-bit kind above the size, so
+// where that header is only four bytes wide the kind has to be masked off
+// before the size compare.
 // SPEC-HV64: ldr {{x[0-9]+}}, [{{x[0-9]+}}, {{[0-9]+}}]
-// SPEC: ldr {{w[0-9]+}}, [{{x[0-9]+}}]
+// SPEC-HV64: ldr {{w[0-9]+}}, [{{x[0-9]+}}]
+// SPEC-HV32: ldr {{w[0-9]+}}, [{{x[0-9]+}}, {{[0-9]+}}]
+// SPEC-HV32: add {{x[0-9]+}}, x19, {{x[0-9]+}}
+// SPEC-HV32: ldr {{w[0-9]+}}, [{{x[0-9]+}}]
+// SPEC-HV32: and {{w[0-9]+}}, {{w[0-9]+}}, 0xFFFFFF
+// SPEC-BOXED: ldr {{x[0-9]+}}, [{{x[0-9]+}}, {{[0-9]+}}]
+// SPEC-BOXED: ldr {{w[0-9]+}}, [{{x[0-9]+}}]
 // SPEC: sub {{w[0-9]+}}, {{w[0-9]+}}, 1
-// SPEC: mov {{w[0-9]+}}, 0x3EBDFF
-// SPEC: cmp {{w[0-9]+}}, {{w[0-9]+}}
+// SPEC: mov w16, 0x3EBDFF
+// SPEC: cmp {{w[0-9]+}}, w16
 // SPEC: b.hi [[SLOW]]
-// The element address: the index scaled by the width of one slot, which is
-// eight bytes in this mode, then the offset of the first element. Only the
-// scale is pinned; the displacement is where ArrayStorageSmall's elements
-// begin, and a GCCell carries two debug-only fields that move it.
+// The element address: the index scaled by the width of one slot, four bytes
+// under compressed pointers and eight otherwise, then the offset of the first
+// element. Only the scale is pinned; the displacement is where
+// ArrayStorageSmall's elements begin, and a GCCell carries two debug-only
+// fields that move it.
 // SPEC-HV64: add {{x[0-9]+}}, {{x[0-9]+}}, {{x[0-9]+}}, 3
+// SPEC-HV32: add {{x[0-9]+}}, {{x[0-9]+}}, {{x[0-9]+}}, 2
+// SPEC-BOXED: add {{x[0-9]+}}, {{x[0-9]+}}, {{x[0-9]+}}, 3
 // SPEC: add {{x[0-9]+}}, {{x[0-9]+}}, {{0x[0-9A-F]+}}
 // ... at an address that does not currently hold a hole. Where a slot is
-// eight bytes an inline value holds the HermesValue's bits unshifted, so
-// this is HermesValue's own ETag test.
+// eight bytes an inline value holds the HermesValue's bits unshifted, so this
+// is HermesValue's own ETag test; where it is four those bits have been
+// shifted down out of ETag position, so the whole encoded empty value is
+// compared instead.
 // SPEC-HV64: ldr {{x[0-9]+}}, [{{x[0-9]+}}]
 // SPEC-HV64: asr {{x[0-9]+}}, {{x[0-9]+}}, 0x2F
 // SPEC-HV64: cmn {{x[0-9]+}}, 0xE
+// SPEC-HV32: ldr {{w[0-9]+}}, [{{x[0-9]+}}]
+// SPEC-HV32: mov w16, 0xFFF90000
+// SPEC-HV32: cmp {{w[0-9]+}}, w16
+// SPEC-BOXED: ldr {{x[0-9]+}}, [{{x[0-9]+}}]
+// SPEC-BOXED: asr {{x[0-9]+}}, {{x[0-9]+}}, 0x2F
+// SPEC-BOXED: cmn {{x[0-9]+}}, 0xE
 // SPEC: b.eq [[SLOW]]
 //
 // Then the shared barrier predicate, whose own shape is pinned by
@@ -129,6 +155,8 @@ print(a[1]);
 // SPEC: // Inline store with barrier predicate
 // SPEC: and {{x[0-9]+}}, {{x[0-9]+}}, 0xFFFFFFFFFFC00000
 // SPEC-HV64: str {{x[0-9]+}}, {{\[}}{{x[0-9]+}}]
+// SPEC-HV32: str {{w[0-9]+}}, {{\[}}{{x[0-9]+}}]
+// SPEC-BOXED: str {{x[0-9]+}}, {{\[}}{{x[0-9]+}}]
 // SPEC: mov w16, 1
 // SPEC: strb w16, {{\[}}{{x[0-9]+}}, {{x[0-9]+}}]
 //
