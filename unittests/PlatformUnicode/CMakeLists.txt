@@ -9,6 +9,7 @@ set(PlatformUnicodeSources
   NormalizationConformanceTest.cpp
   CaseConversionTest.cpp
   CollationTest.cpp
+  CollationConformanceTest.cpp
   )
 
 add_hermes_unittest(PlatformUnicodeTests
