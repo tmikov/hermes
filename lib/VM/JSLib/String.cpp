@@ -944,7 +944,7 @@ static CallResult<HermesValue> convertCase(
   S->appendUTF16String(buff);
   UTF16Ref str = buff.arrayRef();
 
-  if (!useCurrentLocale) {
+  if (!useCurrentLocale || !platform_unicode::localeAffectsCasing()) {
     // Try a fast path for ASCII strings.
     // First, bitwise-or all the characters to see if any one isn't ASCII.
     char16_t mask = 0;
