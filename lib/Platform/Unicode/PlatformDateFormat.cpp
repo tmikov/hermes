@@ -209,6 +209,12 @@ void formatDateTimeFixed(
     append(buf, ", ");
     // Years are not padded beyond four digits, and a negative year keeps its
     // sign, so the whole Date range round-trips legibly.
+    //
+    // Years below 1000 are zero-padded to four digits ("0500"), which is a
+    // deliberate divergence from ICU: ICU's en-US medium date format emitted
+    // "500". Padding keeps every year the same width, and years before 1000
+    // are far outside what any real application formats. See
+    // DateFormatTest.PadsYearsBelowOneThousand, which pins this.
     appendNumber(buf, civil.year, civil.year < 0 ? 5 : 4);
   }
 
