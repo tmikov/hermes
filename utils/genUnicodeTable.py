@@ -1689,7 +1689,7 @@ struct CompEntry { uint32_t starter; uint32_t combining; uint32_t composite; };
 
 def print_codepoint_array(name, decl, values, per_line=8):
     print(f"static constexpr {decl} {name}[] = {{")
-    for chunk in batched(values, per_line):
+    for chunk in batched(values, per_line):  # noqa: B911 (local shim, not itertools)
         print("  " + " ".join(f"{as_hex(c)}," for c in chunk))
     print("};")
     print("")
