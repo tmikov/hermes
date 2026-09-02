@@ -28,6 +28,7 @@
 #include <new>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace hermes::vm::arm64 {
 
@@ -200,10 +201,11 @@ static constexpr auto xRuntime = a64::x19;
 // x20 is frame
 static constexpr auto xFrame = a64::x20;
 
-/// Scratch register. x16/x17 sit outside the register allocator and are used
-/// as scratch (call targets, IP materialization); nothing holds a value in
-/// them across an emitter call.
+/// Scratch registers. x16/x17 sit outside the register allocator and are
+/// used as scratch (call targets, IP materialization, type assert check
+/// sequences); nothing holds a value in them across an emitter call.
 static constexpr auto xScratch = a64::x16;
+static constexpr auto xScratch2 = a64::x17;
 
 /// GP arg registers (inclusive).
 // static constexpr std::pair<uint8_t, uint8_t> kGPArgs(0, 7);
@@ -296,6 +298,43 @@ class TempRegAlloc {
 
  private:
 };
+
+/// A property of an FR's value that a fast path relies on. These are the
+/// predicates the emitters actually exploit, which is narrower and more
+/// useful than the declared FRType.
+enum class TypePred : uint8_t {
+  /// Unsigned-below (HVTag_First << kHV_NumDataBits).
+  IsNumber,
+  /// ETag == HVETag_Bool.
+  IsBool,
+  /// Tag unsigned-below the pointer range. This is the GC-safety predicate.
+  NotPointer,
+  /// NotPointer && !IsNumber: the raw bits are the value's identity under
+  /// strict equality, so `===` is a bit compare. Doubles are excluded
+  /// because NaN is not equal to itself while its bits are, and -0 and +0
+  /// are equal while their bits are not; pointers because strings compare
+  /// by content rather than address.
+  BitComparable,
+  /// Tag == HVTag_Object.
+  IsObject,
+};
+
+/// \return a human-readable name for \p pred, for diagnostics.
+const char *typePredName(TypePred pred);
+
+/// One emitted type check, recorded so the failure handler can name it.
+struct TypeAssertSite {
+  CodeBlock *codeBlock;
+  uint32_t bytecodeOfs;
+  uint16_t frIndex;
+  TypePred pred;
+};
+
+/// Report a failed JIT type assertion and abort. Called only from JIT'ed
+/// code, and never returns, so it needs no register or frame preservation.
+[[noreturn]] void _jit_type_assert_failed(
+    uint32_t siteIdx,
+    const std::vector<TypeAssertSite> *sites);
 
 class Emitter {
   Runtime &runtime_;
@@ -401,6 +440,13 @@ class Emitter {
   };
   /// Queue of slow paths.
   std::deque<SlowPath> slowPaths_{};
+
+  /// Records for every emitted type check, in site-index order. Owned by
+  /// JITContext::Impl, which outlives the emitted code that refers to it;
+  /// this is only a pointer to that entry, claimed on first use.
+  std::vector<TypeAssertSite> *typeAssertSites_ = nullptr;
+  /// The shared failure tail, bound only if there is at least one site.
+  asmjit::Label typeAssertFailLab_{};
 
   /// Descriptor for a single RO data entry.
   struct DataDesc {
@@ -967,6 +1013,17 @@ class Emitter {
   void loadParentNoTraps(FR frRes, FR frObj);
   void typedLoadParent(FR frRes, FR frObj);
 
+  /// Emit, only when emitTypeAsserts_ is set, a trap-on-violation check
+  /// that the value of \p fr, currently held in \p hwVal, satisfies
+  /// \p pred.
+  ///
+  /// Uses only xScratch/xScratch2 and never touches the register
+  /// allocator, so it is a pure insertion. It clobbers NZCV, so the caller
+  /// must have verified that flags are dead at the insertion point. That
+  /// is an obligation, not a property emitters have in general: see
+  /// selectObject, which holds flags across getOrAllocFRInGpX.
+  void emitTypeAssert(FR fr, HWReg hwVal, TypePred pred);
+
  private:
   /// \return the byte offset of \p fr's slot from xFrame.
   static constexpr inline uint32_t frByteOffset(FR fr) {
@@ -1254,6 +1311,14 @@ class Emitter {
   void emitCatchTable(llvh::ArrayRef<const asmjit::Label *> exceptionHandlers);
   void emitSlowPaths();
   void emitROData();
+
+  /// Emit \c emitTypeAssert's check sequence for \p pred against \p xVal,
+  /// which holds the current value of \p fr, recording a TypeAssertSite.
+  void emitTypeAssertGpX(FR fr, const a64::GpX &xVal, TypePred pred);
+
+  /// Emit the shared out-of-line tail that all type assert failure stubs
+  /// jump to, if any type assert was emitted for this function.
+  void emitTypeAssertFailTail();
 
  private:
   /// Set up the call frame and perform the call. The caller should have already
