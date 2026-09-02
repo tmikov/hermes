@@ -10,6 +10,7 @@ set(PlatformUnicodeSources
   CaseConversionTest.cpp
   CollationTest.cpp
   CollationConformanceTest.cpp
+  DateFormatTest.cpp
   )
 
 add_hermes_unittest(PlatformUnicodeTests
@@ -18,4 +19,5 @@ add_hermes_unittest(PlatformUnicodeTests
 
 target_link_libraries(PlatformUnicodeTests
   hermesPlatformUnicode
+  hermesSupport
   )
