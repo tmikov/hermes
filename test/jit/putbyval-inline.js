@@ -43,6 +43,12 @@
 // run above anyway, since the two modes reach the emitter with different
 // register assignments.
 //
+// ARCHITECTURE-INDEPENDENT. This file checks values, never instructions, so
+// it lives here and runs on every backend, including one whose element store
+// still goes through the helper. That the tier is emitted at all is pinned
+// separately, per backend: x86-64/putbyval-inline-emitted.js and
+// putbyval-inline-emitted-arm64.js.
+//
 // EVERY CHECK THE RUNTIME MAKES IS MADE HERE TOO, or the store declines to
 // the helper. The list, from putByValWithReceiver_RJS (StaticH.cpp), which
 // is itself JSObject::putComputedWithReceiver_RJS's first branch: the target
