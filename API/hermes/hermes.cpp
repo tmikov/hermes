@@ -1508,7 +1508,14 @@ static void loadAndInstallExtensions(HermesRuntimeImpl &runtime) {
     ::hermes::hermes_fatal("Extensions bytecode threw exception");
   }
   jsi::Object extensions = runtime.valueFromHermesValue(*res).asObject(runtime);
-  installExtensions(runtime, std::move(extensions));
+  // Built here because this is where the live vm::Runtime is: it retains the
+  // flags as bitfields, while the RuntimeConfig they came from is not kept by
+  // anything. Adding a field means one more line here, not a new parameter in
+  // every layer down to the extension.
+  ExtensionsConfig extensionsConfig;
+  extensionsConfig.allowUntrustedBytecodeFromJS =
+      runtime.runtime_.enableUntrustedBytecodeFromJS;
+  installExtensions(runtime, std::move(extensions), extensionsConfig);
 }
 #endif // HERMES_ENABLE_CORE_EXTENSIONS
 

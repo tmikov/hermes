@@ -21,7 +21,10 @@
 namespace facebook {
 namespace hermes {
 
-void installExtensions(jsi::Runtime &rt, jsi::Object extensions) {
+void installExtensions(
+    jsi::Runtime &rt,
+    jsi::Object extensions,
+    const ExtensionsConfig &config) {
   // Capture intrinsics before any extension code runs.
   captureIntrinsics(rt);
 
@@ -31,7 +34,7 @@ void installExtensions(jsi::Runtime &rt, jsi::Object extensions) {
 
 #ifdef JSI_UNSTABLE
   // Workers rely on features in JSI_UNSTABLE currently.
-  installWorker(rt, extensions);
+  installWorker(rt, extensions, config);
 #endif
 
 #if HERMES_ENABLE_CONTRIB_EXTENSIONS
