@@ -1540,6 +1540,15 @@ TEST_P(HermesRuntimeTest, UTF16ConversionTest) {
   EXPECT_EQ(loneLowSurrogate.utf16(*rt), std::u16string(u"\xdc4d"));
 }
 
+TEST_P(HermesRuntimeTest, PropNameIDForPredefinedStringUtf16Test) {
+  // Predefined strings are registered as lazy identifiers, so their
+  // StringPrimitive is only created when it is first requested. Reading a
+  // PropNameID for one must not do that from inside a no-allocation scope.
+  auto prop = PropNameID::forAscii(*rt, "+Infinity");
+  EXPECT_EQ(prop.utf16(*rt), u"+Infinity");
+  EXPECT_EQ(prop.utf8(*rt), "+Infinity");
+}
+
 TEST_P(HermesRuntimeTest, CreateFromUtf16Test) {
   std::u16string utf16 = u"foobar";
 

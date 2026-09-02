@@ -2558,7 +2558,7 @@ std::u16string HermesRuntimeImpl::utf16(const jsi::String &str) {
 }
 
 std::u16string HermesRuntimeImpl::utf16(const jsi::PropNameID &sym) {
-  vm::NoMutatorScope noMutatorScope{runtime_};
+  ExecutionScopeRAII scopeRAII(mutatorScope);
   vm::SymbolID id = phv(sym).getSymbol();
   auto *stringPrim = runtime_.getStringPrimFromSymbolID(id);
   if (stringPrim->isASCII()) {
@@ -2588,7 +2588,7 @@ void HermesRuntimeImpl::getPropNameIdData(
     const jsi::PropNameID &sym,
     void *ctx,
     void (*cb)(void *ctx, bool ascii, const void *data, size_t num)) {
-  vm::NoMutatorScope noMutatorScope{runtime_};
+  ExecutionScopeRAII scopeRAII(mutatorScope);
   vm::SymbolID id = phv(sym).getSymbol();
   auto *stringPrim = runtime_.getStringPrimFromSymbolID(id);
   if (stringPrim->isASCII()) {
