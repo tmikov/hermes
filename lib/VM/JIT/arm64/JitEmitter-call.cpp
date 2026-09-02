@@ -9,7 +9,7 @@
 #if HERMESVM_JIT
 #include "JitEmitter-internal.h"
 #include "JitEmitter.h"
-#include "JitHandlers.h"
+#include "../JitHandlers.h"
 
 #include "hermes/FrontEndDefs/Builtins.h"
 #include "hermes/VM/VTable.h"
