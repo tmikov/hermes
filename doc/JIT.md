@@ -471,6 +471,21 @@ don't-JIT.
   code — and for A/B-ing arm64 against a future x86-64 backend at the
   "same fast/slow path decisions" level.
 
+### Working on the JIT without arm64 hardware
+
+`aarch64/README.md` describes how to cross-compile for aarch64 Linux and
+run the result under `qemu-user`, which compiles *and executes* JIT'ed code
+on an x86-64 host: a host `hermesc`/`shermes` build feeds
+`IMPORT_HOST_COMPILERS`, and `QEMU_RUN_PREFIX` (already wired into lit)
+makes `check-hermes` run target binaries under emulation. `test/jit` passes
+there. Two traps worth knowing even if you never use the setup:
+`HERMESVM_ALLOW_JIT` must be **2**, not 1 — `=1` builds a working JIT but
+leaves the lit feature unset, so the whole JIT suite silently skips while
+reporting success; and ASan cannot be combined with qemu-user, so
+emulation catches logic divergence but not the memory bugs an ASan build on
+real hardware would. arm64 macOS remains a supported (and much faster)
+JIT host — see the Config.h row in the source layout table.
+
 ## x86-64 porting notes
 
 Observations from this analysis, to be refined into a plan:
@@ -545,7 +560,7 @@ JIT bail (use `-Xdump-jitcode=2` for compile status and
 are described as unconstructible under current invariants; 15 is Linux `perf`
 jitdump and cannot be exercised on an arm64 macOS host at all.
 
-Note when testing: the 39 tests under `test/jit` are gated on the lit feature
+Note when testing: the tests under `test/jit` are gated on the lit feature
 `jit_enabled == "2"`, i.e. they are silently skipped as "Unsupported" unless
 the build is configured with `-DHERMESVM_ALLOW_JIT=2`. A `=1` build runs none
 of them.
