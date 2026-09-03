@@ -1,4 +1,4 @@
-/**
+/*
  * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
  * This source code is licensed under the MIT license found in the
@@ -32,6 +32,11 @@ enum class NormalizationForm { C, D, KC, KD };
 void normalizeUTF16(
     llvh::SmallVectorImpl<char16_t> &buf,
     NormalizationForm form);
+
+/// \return the canonical combining class of \p cp, or 0 if it has none.
+/// Exposed because the case conversion conditional rules need it and should
+/// not duplicate the table.
+uint8_t getCanonicalCombiningClass(uint32_t cp);
 
 } // namespace unicode
 } // namespace hermes
