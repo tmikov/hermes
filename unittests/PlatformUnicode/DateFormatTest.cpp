@@ -135,6 +135,17 @@ TEST_F(DateFormatTest, HandlesTheExtremesOfTheJavaScriptDateRange) {
   EXPECT_EQ(fmt(-8.64e15, true, true), "Apr 19, -271821, 7:00:00 PM");
 }
 
+TEST_F(DateFormatTest, PadsYearsBelowOneThousand) {
+  // A deliberate divergence from ICU, pinned here rather than fixed: ICU's
+  // en-US medium format emitted "Mar 15, 500", while this formatter pads the
+  // year to four digits. Both timestamps are local noon under TZ=EST+5, so
+  // the day cannot shift.
+  EXPECT_EQ(fmt(-46382310000000.0, true, true), "Mar 15, 0500, 12:00:00 PM");
+  EXPECT_EQ(fmt(-62135449200000.0, true, true), "Jan 2, 0001, 12:00:00 PM");
+  // 999 is the last padded year; 1000 onwards is four digits anyway.
+  EXPECT_EQ(fmt(-30610249200000.0, true, false), "Dec 31, 0999");
+}
+
 TEST_F(DateFormatTest, EmitsNothingWhenBothFlagsAreClear) {
   EXPECT_EQ(fmt(112, false, false), "");
 }
