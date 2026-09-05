@@ -89,6 +89,11 @@ CELL_CLASS(JSGeneratorObject, "GeneratorObject")
 CELL_CLASS(JSProxy, "Proxy")
 CELL_CLASS(JSBigInt, "BigInt")
 CELL_CLASS(FastArray, "FastArray")
+// The Wasm object model. No CELL_RANGE names any of these, and the ranges that
+// span them (Object, AllCells) only shrink when they are absent, so the block
+// may be conditional. Cell kinds are runtime-only -- unlike builtin ids they
+// are not encoded in bytecode -- so renumbering them costs nothing.
+#ifdef HERMES_ENABLE_WASM
 CELL_CLASS(JSWebAssemblyModule, "WebAssemblyModule")
 CELL_CLASS(JSWebAssemblyInstance, "WebAssemblyInstance")
 CELL_CLASS(JSWebAssemblyMemory, "WebAssemblyMemory")
@@ -96,6 +101,7 @@ CELL_CLASS(JSWebAssemblyTable, "WebAssemblyTable")
 CELL_CLASS(JSWebAssemblyGlobal, "WebAssemblyGlobal")
 CELL_CLASS(JSWebAssemblyTag, "WebAssemblyTag")
 CELL_CLASS(JSWebAssemblyException, "WebAssemblyException")
+#endif // HERMES_ENABLE_WASM
 
 // The ordering of Callables is set up carefully. We want to be able to
 // express overlapping regions: all Native functions, and functions

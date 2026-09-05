@@ -42,13 +42,6 @@ set(source_files
   JSNativeFunctions.cpp
   JSTypedArray.cpp
   JSWeakMapImpl.cpp
-  JSWebAssemblyGlobal.cpp
-  JSWebAssemblyTag.cpp
-  JSWebAssemblyException.cpp
-  JSWebAssemblyInstance.cpp
-  JSWebAssemblyMemory.cpp
-  JSWebAssemblyModule.cpp
-  JSWebAssemblyTable.cpp
   JSWeakRef.cpp
   JSFinalizationRegistry.cpp
   LimitedStorageProvider.cpp
@@ -193,6 +186,13 @@ list(APPEND source_files
 if (HERMES_ENABLE_WASM)
   list(APPEND source_files
     JSLib/WebAssembly/WebAssembly.cpp
+    JSWebAssemblyGlobal.cpp
+    JSWebAssemblyTag.cpp
+    JSWebAssemblyException.cpp
+    JSWebAssemblyInstance.cpp
+    JSWebAssemblyMemory.cpp
+    JSWebAssemblyModule.cpp
+    JSWebAssemblyTable.cpp
   )
 endif()
 

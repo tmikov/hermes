@@ -18,9 +18,11 @@
 #include "hermes/VM/JSLib.h"
 #include "hermes/VM/JSRegExp.h"
 #include "hermes/VM/JSTypedArray.h"
+#ifdef HERMES_ENABLE_WASM
 #include "hermes/VM/JSWebAssemblyGlobal.h"
 #include "hermes/VM/JSWebAssemblyMemory.h"
 #include "hermes/VM/JSWebAssemblyTable.h"
+#endif
 #include "hermes/VM/Operations.h"
 #include "hermes/VM/PrimitiveBox.h"
 #include "hermes/VM/StackFrame-inline.h"
