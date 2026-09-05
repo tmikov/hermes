@@ -1,0 +1,39 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-exported-function-identity.wat.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var bytes = hermescli.loadFile(hbcPath);
+var mod = WebAssembly.Module.fromHermesBytecode(bytes);
+var inst = new WebAssembly.Instance(mod);
+
+// One Wasm function index, two export names, one object.
+print('a === b: ' + (inst.exports.a === inst.exports.b));
+
+// Two function indices with the SAME signature are still two objects: the
+// canonical wrapper is keyed by function index, not by (canonical) type.
+print('a === c: ' + (inst.exports.a === inst.exports.c));
+
+// The table holds the same object, not the internal closure it wraps --
+// through the JS API and through the Wasm-side table.get alike.
+print('a === tbl.get(0): ' + (inst.exports.a === inst.exports.tbl.get(0)));
+print('a === getViaWasm(): ' + (inst.exports.a === inst.exports.getViaWasm()));
+
+// Every name still calls its own function, so identity was not bought by
+// breaking or confusing the wrappers.
+print('a() = ' + inst.exports.a());
+print('b() = ' + inst.exports.b());
+print('c() = ' + inst.exports.c());
+
+// The Exported Function's linking state (its backing closure and its interned
+// type id) lives in named internal properties, which script can neither read
+// nor enumerate. Nothing below may name them. `__wasm_type__` is a separate,
+// still-published property and is expected here until it is removed.
+print('names: ' + Object.getOwnPropertyNames(inst.exports.a).join(','));
+print('keys: ' + Object.keys(inst.exports.a).join(','));
+print('symbols: ' + Object.getOwnPropertySymbols(inst.exports.a).length);

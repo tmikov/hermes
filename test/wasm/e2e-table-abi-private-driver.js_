@@ -1,0 +1,147 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-table-abi-private.wat.
+
+var args = hermescli.getScriptArgs();
+function load(i) {
+  return WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[i]));
+}
+var mod = load(0);
+var externrefMod = load(1);
+var consumerMod = load(2);
+
+var inst = new WebAssembly.Instance(mod, {});
+var tbl = inst.exports.tbl;
+
+// -- Nothing is published --
+print('exported tbl own props: [' +
+      Object.getOwnPropertyNames(tbl).join(', ') + ']');
+print('exported tbl JSON: ' + JSON.stringify(tbl));
+print('exported tbl symbols: [' +
+      Object.getOwnPropertySymbols(tbl).join(', ') + ']');
+print('JS-API tbl own props: [' +
+      Object.getOwnPropertyNames(
+          new WebAssembly.Table({element: 'anyfunc', initial: 2}))
+          .join(', ') + ']');
+
+// -- The abort is unreachable, not merely fixed --
+print('tbl.__wasm_funcs__: ' + tbl.__wasm_funcs__);
+try {
+  // Before this change the property was the module's internal closure array
+  // and this line aborted the VM on the BigInt argument.
+  print('tbl.__wasm_funcs__[0](5n): ' + tbl.__wasm_funcs__[0](5n));
+} catch (e) {
+  print('tbl.__wasm_funcs__[0](5n): ' + e.name);
+}
+
+// -- The spec route works --
+print('tbl.get(0)(5n): ' + tbl.get(0)(5n));
+
+// -- A wrong-signature indirect call still traps --
+try {
+  print('callAsI64(1, 5n): ' + inst.exports.callAsI64(1, 5n));
+} catch (e) {
+  print('callAsI64(1, 5n): trap: ' + e.message);
+}
+
+// -- Only a genuine table links --
+function linkAs(m, t) {
+  try {
+    return 'linked, size = ' + new WebAssembly.Instance(m, {e: {t: t}})
+        .exports.size();
+  } catch (e) {
+    return e.name;
+  }
+}
+
+// As linkAs, but reports the message too, for the rows where the message is
+// the thing under test.
+function linkMsg(m, t) {
+  try {
+    new WebAssembly.Instance(m, {e: {t: t}});
+    return 'linked (should not happen)';
+  } catch (e) {
+    return e.name + ': ' + e.message;
+  }
+}
+
+function forge(funcs, types, exported) {
+  return {
+    __wasm_type__: 'table:funcref',
+    __wasm_min__: 2,
+    __wasm_max__: -1,
+    __wasm_funcs__: funcs,
+    __wasm_types__: types,
+    __wasm_exported__: exported,
+  };
+}
+
+print('forged literal: ' +
+      linkAs(consumerMod,
+             forge([null, null], [], [null, null])));
+
+// The shape that used to hand a module another module's real storage: the
+// arrays are gone, so the closest a forgery can now come is a table's own
+// exported functions -- which is not the ABI and never links.
+print('forged literal, arrays borrowed from a real table: ' +
+      linkAs(consumerMod, forge([tbl.get(0), tbl.get(1)], [0, 0],
+                                [tbl.get(0), tbl.get(1)])));
+
+// A prototype-chain forgery: instanceof accepts it, the brand check does not.
+var inherited = Object.create(tbl);
+print('Object.create(realTable) instanceof WebAssembly.Table: ' +
+      (inherited instanceof WebAssembly.Table));
+print('Object.create(realTable) as import: ' + linkAs(consumerMod, inherited));
+
+print('Proxy(realTable) as import: ' +
+      linkAs(consumerMod, new Proxy(tbl, {})));
+
+print('genuine module table: ' + linkAs(consumerMod, tbl));
+print('genuine JS-API table: ' +
+      linkAs(consumerMod,
+             new WebAssembly.Table({element: 'anyfunc', initial: 4})));
+
+// -- An externref declaration cannot be satisfied --
+// The message must not say "is not a WebAssembly.Table" of a genuine table:
+// that is the same false-message class as reporting a limits failure as a
+// brand failure.
+print('externref-declared import of a funcref table: ' +
+      linkMsg(externrefMod, tbl));
+print('externref-declared import of a forged externref literal: ' +
+      linkAs(externrefMod, {
+        __wasm_type__: 'table:externref',
+        __wasm_min__: 2,
+        __wasm_max__: -1,
+        __wasm_funcs__: [null, null],
+        __wasm_types__: [],
+        __wasm_exported__: [null, null],
+      }));
+
+// -- An unwritten slot is null --
+print('module tbl.get(2) [never written]: ' + tbl.get(2));
+print('fresh JS-API tbl.get(0): ' +
+      new WebAssembly.Table({element: 'anyfunc', initial: 1}).get(0));
+
+// -- A replaced Table constructor --
+// A module's own funcref table is built with globalThis.WebAssembly.Table,
+// which script can replace. The brand check catches that too; without a branch
+// on it the failure surfaces as "Cannot read property 0 of null" from inside
+// generated code, which names nothing.
+var savedTableCtor = WebAssembly.Table;
+WebAssembly.Table = function () { return {}; };
+var hijacked;
+try {
+  new WebAssembly.Instance(mod, {});
+  hijacked = 'instantiated (should not happen)';
+} catch (e) {
+  hijacked = e.name + ': ' + e.message;
+}
+WebAssembly.Table = savedTableCtor;
+print('replaced WebAssembly.Table: ' + hijacked);
+
+print('done');

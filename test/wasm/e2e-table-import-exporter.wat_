@@ -1,0 +1,26 @@
+;; Copyright (c) Meta Platforms, Inc. and affiliates.
+;;
+;; This source code is licensed under the MIT license found in the
+;; LICENSE file in the root directory of this source tree.
+
+;; Helper module for e2e-table-import.wat — not a standalone test.
+;; Exports a table, populates it, and provides grow/size functions.
+
+(module
+  (table (export "tbl") 2 10 funcref)
+
+  ;; Two functions to place in the table.
+  (func $f1 (result i32) i32.const 10)
+  (func $f2 (result i32) i32.const 20)
+
+  ;; Populate table entries via element segment.
+  (elem (i32.const 0) $f1 $f2)
+
+  ;; Export table operations so the driver can exercise them.
+  (func (export "size") (result i32)
+    table.size 0)
+  (func (export "grow") (param i32) (result i32)
+    ref.null func
+    local.get 0
+    table.grow 0)
+)

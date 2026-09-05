@@ -318,6 +318,11 @@ bool BytecodeFileFields<Mutable>::populateFromBuffer(
       f.functionSourceTable = castArrayRef<std::pair<uint32_t, uint32_t>>(
           buf, h->functionSourceCount, end);
     }
+    void visitBinaryDataStorage() {
+      align(buf);
+      f.binaryDataStorage =
+          castArrayRef<uint8_t>(buf, h->binaryDataStorageSize, end);
+    }
   };
 
   BytecodeFileFieldsPopulator populator{*this, buffer.data(), buffer.end()};
@@ -585,6 +590,7 @@ BCProviderFromBuffer::BCProviderFromBuffer(
   bigIntStorage_ = fields.bigIntStorage;
   regExpTable_ = fields.regExpTable;
   regExpStorage_ = fields.regExpStorage;
+  binaryDataStorage_ = fields.binaryDataStorage;
   segmentID_ = fileHeader->segmentID;
   cjsModuleTable_ = fields.cjsModuleTable;
   cjsModuleTableStatic_ = fields.cjsModuleTableStatic;

@@ -15,6 +15,7 @@
 #include "hermes/VM/Domain.h"
 #include "hermes/VM/JSArray.h"
 #include "hermes/VM/JSArrayBuffer.h"
+#include "hermes/VM/JSLib.h"
 #include "hermes/VM/JSObject.h"
 #include "hermes/VM/JSTypedArray.h"
 #include "hermes/VM/NativeArgs.h"
@@ -310,6 +311,53 @@ static vm::CallResult<vm::HermesValue> clearTimeout(
   return HermesValue::encodeUndefinedValue();
 }
 
+/// console.log/console.info/console.debug — format like print(), on stdout.
+static vm::CallResult<vm::HermesValue> consoleLog(
+    void *,
+    vm::Runtime &runtime) {
+  if (LLVM_UNLIKELY(
+          vm::printArgsToStream(runtime, llvh::outs(), 0) ==
+          vm::ExecutionStatus::EXCEPTION))
+    return vm::ExecutionStatus::EXCEPTION;
+  return vm::HermesValue::encodeUndefinedValue();
+}
+
+/// console.warn/console.error — like console.log, but on stderr.
+static vm::CallResult<vm::HermesValue> consoleError(
+    void *,
+    vm::Runtime &runtime) {
+  if (LLVM_UNLIKELY(
+          vm::printArgsToStream(runtime, llvh::errs(), 0) ==
+          vm::ExecutionStatus::EXCEPTION))
+    return vm::ExecutionStatus::EXCEPTION;
+  return vm::HermesValue::encodeUndefinedValue();
+}
+
+/// console.assert(condition, ...data) — if condition is falsy, write
+/// "Assertion failed" followed by the remaining arguments to stderr.
+static vm::CallResult<vm::HermesValue> consoleAssert(
+    void *,
+    vm::Runtime &runtime) {
+  using namespace vm;
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  if (toBoolean(args.getArg(0)))
+    return HermesValue::encodeUndefinedValue();
+
+  if (args.getArgCount() <= 1) {
+    llvh::errs() << "Assertion failed\n";
+    llvh::errs().flush();
+    return HermesValue::encodeUndefinedValue();
+  }
+
+  llvh::errs() << "Assertion failed: ";
+  if (LLVM_UNLIKELY(
+          printArgsToStream(runtime, llvh::errs(), 1) ==
+          ExecutionStatus::EXCEPTION))
+    return ExecutionStatus::EXCEPTION;
+  return HermesValue::encodeUndefinedValue();
+}
+
 /// Synchronously read a file and return its contents as a Uint8Array.
 static vm::CallResult<vm::HermesValue> hermescliLoadFile(
     void *,
@@ -542,7 +590,6 @@ void installConsoleBindings(
 
   struct : public vm::Locals {
     vm::PinnedValue<vm::JSObject> console;
-    vm::PinnedValue<> print;
   } lv;
   vm::LocalsRAII lraii{runtime, &lv};
 
@@ -656,18 +703,36 @@ void installConsoleBindings(
               .get(),
           normalDPF,
           lv.console));
-  lv.print = runtime.ignoreAllocationFailure(
-      vm::JSObject::getNamed_RJS(
-          runtime.getGlobal(),
-          runtime,
-          vm::Predefined::getSymbolID(vm::Predefined::print)));
-  runtime.ignoreAllocationFailure(
-      vm::JSObject::defineOwnProperty(
-          lv.console,
-          runtime,
-          vm::Predefined::getSymbolID(vm::Predefined::log),
-          normalDPF,
-          lv.print));
+  // console.log/info/debug all write to stdout, like print(). warn and error
+  // write to stderr. assert reports only when its condition is falsy.
+  auto defineConsoleMethod = [&](const char *name,
+                                 vm::NativeFunctionPtr functionPtr,
+                                 unsigned paramCount) -> void {
+    vm::GCScopeMarkerRAII marker{runtime};
+    auto sym = runtime
+                   .ignoreAllocationFailure(
+                       runtime.getIdentifierTable().getSymbolHandle(
+                           runtime, llvh::createASCIIRef(name)))
+                   .get();
+    auto func = vm::NativeFunction::create(
+        runtime,
+        runtime.functionPrototype,
+        vm::Runtime::makeNullHandle<vm::Environment>(),
+        nullptr,
+        functionPtr,
+        sym,
+        paramCount,
+        vm::Runtime::makeNullHandle<vm::JSObject>());
+    runtime.ignoreAllocationFailure(vm::JSObject::defineOwnProperty(
+        lv.console, runtime, sym, normalDPF, func));
+  };
+
+  defineConsoleMethod("log", consoleLog, 0);
+  defineConsoleMethod("info", consoleLog, 0);
+  defineConsoleMethod("debug", consoleLog, 0);
+  defineConsoleMethod("warn", consoleError, 0);
+  defineConsoleMethod("error", consoleError, 0);
+  defineConsoleMethod("assert", consoleAssert, 0);
 
   initTest262Harness(runtime);
 
@@ -925,6 +990,81 @@ class NapiHostAdapter final {
 };
 #endif
 
+/// Instantiate a WebAssembly module whose bytecode has just been run.
+///
+/// A module compiled from WebAssembly does not instantiate itself: its top
+/// level only builds and returns a module object
+/// {instantiate, exportDescs, importDescs}. Calling instantiate() is what
+/// creates the memory, globals, tables and closures and runs the start
+/// function, so under -wasm the driver must call it for anything to happen.
+///
+/// It is called with an empty import object; imports are not synthesised. A
+/// module that declares imports therefore raises WebAssembly.LinkError naming
+/// the missing import, which is the correct diagnosis of running it with
+/// nothing to link against.
+///
+/// \param topLevelResult the value the module's top level returned.
+/// \return true if the module was instantiated, false otherwise, in which case
+///   either a diagnostic or the thrown exception has already been printed.
+static bool instantiateWasmModule(
+    vm::Runtime &runtime,
+    vm::HermesValue topLevelResult) {
+  vm::GCScopeMarkerRAII marker{runtime};
+
+  struct : public vm::Locals {
+    vm::PinnedValue<> moduleObj;
+    vm::PinnedValue<> instantiateFn;
+    vm::PinnedValue<vm::JSObject> imports;
+  } lv;
+  vm::LocalsRAII lraii{runtime, &lv};
+  // Pin the top-level result before anything that can allocate: it is not a
+  // root.
+  lv.moduleObj = topLevelResult;
+
+  // Report a thrown exception exactly as the top level's own exceptions are
+  // reported, so that a trap in the start function fails the process in the
+  // same way an uncaught JS exception does.
+  auto reportException = [&runtime]() {
+    llvh::outs().flush();
+    runtime.printException(
+        llvh::errs(), runtime.makeHandle(runtime.getThrownValue()));
+    return false;
+  };
+
+  if (lv.moduleObj->isObject()) {
+    auto propRes = vm::JSObject::getNamed_RJS(
+        vm::Handle<vm::JSObject>::vmcast(&lv.moduleObj),
+        runtime,
+        vm::Predefined::getSymbolID(vm::Predefined::instantiate));
+    if (LLVM_UNLIKELY(propRes == vm::ExecutionStatus::EXCEPTION))
+      return reportException();
+    lv.instantiateFn = std::move(*propRes);
+  }
+
+  // Nothing in the bytecode records that it was compiled from Wasm, so this
+  // is the only place where the claim made by -wasm is actually tested.
+  if (!vm::vmisa<vm::Callable>(*lv.instantiateFn)) {
+    llvh::outs().flush();
+    llvh::errs()
+        << "Error: --wasm was specified, but the bytecode did not return a "
+           "WebAssembly module object with a callable instantiate property.\n"
+        << "The input is not a WebAssembly module, nor bytecode compiled "
+           "from one.\n";
+    return false;
+  }
+
+  lv.imports = vm::JSObject::create(runtime);
+  auto callRes = vm::Callable::executeCall1(
+      vm::Handle<vm::Callable>::vmcast(&lv.instantiateFn),
+      runtime,
+      vm::Runtime::getUndefinedValue(),
+      lv.imports.getHermesValue());
+  if (LLVM_UNLIKELY(callRes == vm::ExecutionStatus::EXCEPTION))
+    return reportException();
+
+  return true;
+}
+
 bool executeHBCBytecodeImpl(
     std::shared_ptr<hbc::BCProvider> &&bytecode,
     const ExecuteOptions &options,
@@ -1062,6 +1202,13 @@ bool executeHBCBytecodeImpl(
     llvh::outs().flush();
     runtime->printException(
         llvh::errs(), runtime->makeHandle(runtime->getThrownValue()));
+  }
+
+  // -wasm says the input is a WebAssembly module. Running its bytecode only
+  // built the module object; instantiating it is the actual run.
+  if (!threwException && options.wasmModule &&
+      !instantiateWasmModule(*runtime, *status)) {
+    threwException = true;
   }
 
   // Perform a microtask checkpoint after running script.

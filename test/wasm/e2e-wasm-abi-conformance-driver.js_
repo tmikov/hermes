@@ -1,0 +1,149 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-wasm-abi-conformance.wat.
+
+var args = hermescli.getScriptArgs();
+function load(i) {
+  return WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[i]));
+}
+var mod = load(0);
+var consumerMod = load(1);
+var grownMod = load(2);
+
+var inst = new WebAssembly.Instance(mod, {});
+var mem = inst.exports.mem;
+var glob = inst.exports.g;
+var tbl = inst.exports.tbl;
+
+var jsMem = new WebAssembly.Memory({initial: 1, maximum: 4});
+var jsGlob = new WebAssembly.Global({value: 'i32'}, 42);
+var jsTbl = new WebAssembly.Table({element: 'anyfunc', initial: 1});
+
+// -- Nothing is published, on any of the three kinds --
+// Four separate enumerations because they are four separate filters: an
+// internal property is hidden from all of them, an own property defined
+// non-enumerably would still show in getOwnPropertyNames, and a symbol-keyed
+// one only in getOwnPropertySymbols.
+function abi(label, o) {
+  print(label + ' getOwnPropertyNames: [' +
+        Object.getOwnPropertyNames(o).join(', ') + ']');
+  print(label + ' keys: [' + Object.keys(o).join(', ') + ']');
+  print(label + ' symbols: [' + Object.getOwnPropertySymbols(o).join(', ') +
+        ']');
+  print(label + ' JSON: ' + JSON.stringify(o));
+}
+
+abi('exported memory', mem);
+abi('exported global', glob);
+abi('exported table', tbl);
+abi('JS-API memory', jsMem);
+abi('JS-API global', jsGlob);
+abi('JS-API table', jsTbl);
+
+// -- Only genuine objects link --
+function linkWith(over) {
+  var imports = {e: {m: jsMem, g: jsGlob, t: jsTbl}};
+  for (var k in over)
+    imports.e[k] = over[k];
+  try {
+    return 'linked, probe = ' +
+        new WebAssembly.Instance(consumerMod, imports).exports.probe();
+  } catch (e) {
+    return e.name;
+  }
+}
+
+print('genuine module objects: ' +
+      linkWith({m: mem, g: glob, t: tbl}));
+print('genuine JS-API objects: ' + linkWith({}));
+
+// A plain object shaped like the old published ABI. For a global this used to
+// LINK and hand the module the literal's `value`; for a memory and a table it
+// failed, but only because `instanceof` and a property probe happened to say
+// so, not because of anything unforgeable.
+print('forged memory literal: ' +
+      linkWith({m: {__wasm_type__: 'memory', __wasm_min__: 1,
+                    __wasm_max__: -1}}));
+print('forged global literal: ' +
+      linkWith({g: {__wasm_type__: 'global:i32:const', value: 1234}}));
+print('forged table literal: ' +
+      linkWith({t: {__wasm_type__: 'table:funcref', __wasm_min__: 1,
+                    __wasm_max__: -1, __wasm_funcs__: [null],
+                    __wasm_types__: [0], __wasm_exported__: [null]}}));
+
+// An object that INHERITS from a genuine one. `instanceof` says yes to all
+// three, and the published metadata was inherited too, so this is the forgery
+// a prototype check cannot see.
+print('Object.create(memory) instanceof WebAssembly.Memory: ' +
+      (Object.create(mem) instanceof WebAssembly.Memory));
+print('Object.create(memory) as import: ' + linkWith({m: Object.create(mem)}));
+print('Object.create(global) instanceof WebAssembly.Global: ' +
+      (Object.create(glob) instanceof WebAssembly.Global));
+print('Object.create(global) as import: ' + linkWith({g: Object.create(glob)}));
+print('Object.create(table) as import: ' + linkWith({t: Object.create(tbl)}));
+
+// Nor a Proxy wrapping a genuine one.
+print('Proxy(memory) as import: ' + linkWith({m: new Proxy(mem, {})}));
+print('Proxy(global) as import: ' + linkWith({g: new Proxy(glob, {})}));
+print('Proxy(table) as import: ' + linkWith({t: new Proxy(tbl, {})}));
+
+// -- H7: a limit is read at use time, not snapshotted at construction --
+// grownMod declares (memory 2). This memory was built with one page and grown
+// to two, so it satisfies the declaration -- unless the size the link path
+// compares against was recorded when the memory was constructed.
+var grown = new WebAssembly.Memory({initial: 1, maximum: 4});
+grown.grow(1);
+try {
+  print('grown memory links: memory.size = ' +
+        new WebAssembly.Instance(grownMod, {e: {m: grown}}).exports.size());
+} catch (e) {
+  print('grown memory links: ' + e.name + ': ' + e.message);
+}
+// And a memory that really is too small is still refused, so the line above
+// is not the result of a check that stopped running.
+try {
+  new WebAssembly.Instance(
+      grownMod, {e: {m: new WebAssembly.Memory({initial: 1})}});
+  print('ungrown memory links: yes (should not happen)');
+} catch (e) {
+  print('ungrown memory links: ' + e.name + ': ' + e.message);
+}
+
+// -- H2: no user JS runs inside the native constructors --
+// The metadata was written with putNamed_RJS, which walks the prototype
+// chain. A setter installed on the prototype therefore ran, with the
+// half-built object as `this`, inside a native constructor that was not
+// written to expect re-entrancy.
+var setterRan = [];
+var protos = [
+  ['Memory', WebAssembly.Memory.prototype],
+  ['Global', WebAssembly.Global.prototype],
+  ['Table', WebAssembly.Table.prototype],
+];
+var names = ['__wasm_type__', '__wasm_min__', '__wasm_max__'];
+for (var i = 0; i < protos.length; ++i) {
+  for (var j = 0; j < names.length; ++j) {
+    (function (kind, proto, name) {
+      Object.defineProperty(proto, name, {
+        set: function (v) { setterRan.push(kind + '.' + name); },
+        get: function () { return undefined; },
+        configurable: true,
+      });
+    })(protos[i][0], protos[i][1], names[j]);
+  }
+}
+new WebAssembly.Memory({initial: 1});
+new WebAssembly.Global({value: 'i32'}, 1);
+new WebAssembly.Table({element: 'anyfunc', initial: 1});
+for (var i = 0; i < protos.length; ++i)
+  for (var j = 0; j < names.length; ++j)
+    delete protos[i][1][names[j]];
+print('prototype setters that ran inside a constructor: [' +
+      setterRan.join(', ') + ']');
+
+print('done');

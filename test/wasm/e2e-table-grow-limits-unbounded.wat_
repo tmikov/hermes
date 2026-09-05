@@ -1,0 +1,8 @@
+;; Copyright (c) Meta Platforms, Inc. and affiliates.
+;;
+;; This source code is licensed under the MIT license found in the
+;; LICENSE file in the root directory of this source tree.
+
+(module (table 1 funcref)
+  (func (export "grow") (param i32) (result i32) (ref.null func) (local.get 0) (table.grow 0))
+  (func (export "size") (result i32) (table.size 0)))

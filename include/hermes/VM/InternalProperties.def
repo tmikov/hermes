@@ -33,6 +33,16 @@ NAMED_PROP(NapiData)
 NAMED_PROP(ArrayBufferExternalFinalizer)
 NAMED_PROP(ExternalMemoryPressure)
 
+/// State of a WebAssembly Exported Function. WasmFuncClosure holds the
+/// internal closure the exported function wraps (the import trampoline for an
+/// imported function index); its mere presence is the brand that identifies an
+/// Exported Function, which is why script must not be able to name it.
+/// WasmFuncTypeId holds the *interned* type id of the function's signature --
+/// interned rather than module-local because two modules number their type
+/// sections independently.
+NAMED_PROP(WasmFuncClosure)
+NAMED_PROP(WasmFuncTypeId)
+
 /// A reserved symbol ID to use for the HC transition to the frozen state.
 NAMED_PROP(FreezeTransition)
 

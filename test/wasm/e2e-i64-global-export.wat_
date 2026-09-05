@@ -1,0 +1,12 @@
+;; Copyright (c) Meta Platforms, Inc. and affiliates.
+;;
+;; This source code is licensed under the MIT license found in the
+;; LICENSE file in the root directory of this source tree.
+
+;; Exporter for e2e-i64-global.wat: i64 globals whose values do not fit in 32
+;; bits, so truncation to the low word is visible.
+
+(module
+  (global (export "big") i64 (i64.const 0x100000000))
+  (global (export "neg") i64 (i64.const -1099511627776))
+  (global (export "small") i64 (i64.const 42)))

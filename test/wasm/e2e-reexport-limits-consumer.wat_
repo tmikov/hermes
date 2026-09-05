@@ -1,0 +1,16 @@
+;; Copyright (c) Meta Platforms, Inc. and affiliates.
+;;
+;; This source code is licensed under the MIT license found in the
+;; LICENSE file in the root directory of this source tree.
+
+;; Consumer for e2e-reexport-limits.wat. Its declared minimums and maximums
+;; are exactly what the original exporter supplied, so linking against the
+;; re-exported memory and table must succeed.
+
+(module
+  (type $v_i32 (func (result i32)))
+  (import "e" "m" (memory 2 3))
+  (import "e" "t" (table 2 5 funcref))
+  (func (export "size") (result i32) memory.size)
+  (func (export "call0") (result i32)
+    (call_indirect (type $v_i32) (i32.const 0))))

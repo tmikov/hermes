@@ -1,0 +1,89 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-table-copy-alias.wat.
+
+var args = hermescli.getScriptArgs();
+var donorMod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[0]));
+var mod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[1]));
+
+// Four real slots, each with a DIFFERENT signature -- with one shared
+// signature every slot carries the same interned type id and a smear across
+// the range changes nothing observable.
+var donor = new WebAssembly.Instance(donorMod).exports.tbl;
+
+// One table satisfying both imports: table 0 and table 1 are one storage.
+var inst = new WebAssembly.Instance(mod, {e: {a: donor, b: donor}});
+
+function call0Row() {
+  var out = [];
+  for (var i = 0; i < 4; ++i) {
+    try {
+      out.push(inst.exports.call0(i));
+    } catch (e) {
+      out.push('trap');
+    }
+  }
+  return out.join(' | ');
+}
+
+print('call0 before copy: ' + call0Row());
+inst.exports.copyAcross(1, 0, 3);
+print('call0 after copy: ' + call0Row());
+
+// Only table.get reads the third array, so a smear there is invisible to
+// call_indirect and shows up as the wrong function coming back out.
+var refs = [];
+for (var j = 0; j < 4; ++j) {
+  var f = inst.exports.getAt(j);
+  // Each donor function ignores its parameters and returns a distinct number,
+  // so calling the wrapper says which one landed in the slot.
+  refs.push(typeof f === 'function' ? f(0, 0, 0) : 'not a function');
+}
+print('getAt after copy: ' + refs.join(' | '));
+
+// --- Partial aliasing between two EXTERNREF tables ---
+// A funcref table's three arrays are internal fields that travel together, so
+// two of them share all six or none. An externref table's are three separate
+// `new Array(n)` calls off globalThis.Array, and wasmCheckTableArrays checks
+// only that each is an array -- not that they are distinct. Replacing the
+// constructor gives the two tables a shared EXPORTED array (the one table.get
+// reads) while their funcs and types arrays stay private, which is exactly the
+// case a same-role funcs-pair predicate cannot see.
+//
+// Allocation order is funcs, types, exported, per table, and both tables have
+// size 4; nothing else in this module allocates an array of length 4.
+var RealArray = Array;
+var n = 0;
+var sharedExported = null;
+globalThis.Array = function (len) {
+  if (len !== 4) return new RealArray(len);
+  var role = n++ % 3;
+  if (role !== 2) return new RealArray(len);
+  if (!sharedExported) sharedExported = new RealArray(len);
+  return sharedExported;
+};
+var xinst = new WebAssembly.Instance(mod, {e: {a: donor, b: donor}});
+globalThis.Array = RealArray;
+
+function xrow() {
+  var out = [];
+  for (var i = 0; i < 4; ++i) {
+    var v = xinst.exports.xGet(i);
+    out.push(v ? v.tag : String(v));
+  }
+  return out.join(',');
+}
+
+xinst.exports.xSet(0, {tag: 'a'});
+xinst.exports.xSet(1, {tag: 'b'});
+xinst.exports.xSet(2, {tag: 'c'});
+print('shared exported before: ' + xrow());
+xinst.exports.xCopyAcross(1, 0, 3);
+print('shared exported after: ' + xrow());
+
+print('done');

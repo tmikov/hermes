@@ -10,6 +10,8 @@
 #ifndef HERMES_EXTENSIONS_WORKER_H
 #define HERMES_EXTENSIONS_WORKER_H
 
+#include "Extensions.h"
+
 #include <jsi/jsi.h>
 
 namespace facebook {
@@ -19,7 +21,15 @@ namespace hermes {
 /// \param runtime The JSI runtime to install into.
 /// \param extensions The precompiled extensions object containing setup
 ///   functions.
-void installWorker(jsi::Runtime &rt, jsi::Object &extensions);
+/// \p config carries the host-runtime facts this extension needs; see
+/// ExtensionsConfig. The Worker constructor takes raw bytes from JS and runs
+/// them through evaluateJavaScript, which decides source-vs-bytecode by
+/// content, so it consults config.allowUntrustedBytecodeFromJS before running
+/// anything that turns out to be bytecode.
+void installWorker(
+    jsi::Runtime &rt,
+    jsi::Object &extensions,
+    const ExtensionsConfig &config);
 
 } // namespace hermes
 } // namespace facebook

@@ -108,6 +108,7 @@ class BytecodeSerializer {
   void visitRegExpStorage();
   void visitCJSModuleTable();
   void visitFunctionSourceTable();
+  void visitBinaryDataStorage();
 
  public:
   explicit BytecodeSerializer(
@@ -148,6 +149,7 @@ void BytecodeSerializer::serialize(BytecodeModule &BM, const SHA1 &sourceHash) {
       BM.getSegmentID(),
       cjsModuleCount,
       static_cast<uint32_t>(BM.getFunctionSourceTable().size()),
+      static_cast<uint32_t>(BM.getBinaryDataStorage().size()),
       debugInfoOffset_,
       BM.getBytecodeOptions()};
   writeBinary(header);
@@ -445,6 +447,11 @@ void BytecodeSerializer::visitCJSModuleTable() {
 void BytecodeSerializer::visitFunctionSourceTable() {
   pad(BYTECODE_ALIGNMENT);
   serializeFunctionSourceTable(*bytecodeModule_);
+}
+
+void BytecodeSerializer::visitBinaryDataStorage() {
+  pad(BYTECODE_ALIGNMENT);
+  writeBinaryArray(bytecodeModule_->getBinaryDataStorage());
 }
 } // namespace
 

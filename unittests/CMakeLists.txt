@@ -42,3 +42,8 @@ add_subdirectory(Optimizer)
 if(HERMES_ENABLE_NAPI)
   add_subdirectory(napi)
 endif()
+
+if(HERMES_ENABLE_WASM)
+  add_subdirectory(WasmFrontend)
+  add_subdirectory(WasmIRGen)
+endif()

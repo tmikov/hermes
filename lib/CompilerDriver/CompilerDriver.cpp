@@ -57,6 +57,10 @@
 
 #include "zip/src/zip.h"
 
+#ifdef HERMES_ENABLE_WASM
+#include "hermes/WasmFrontend/WasmCompile.h"
+#endif
+
 #include <sstream>
 
 #define DEBUG_TYPE "hermes"
@@ -311,6 +315,12 @@ static opt<bool> unused_HermesParser(
 static opt<bool> BytecodeMode(
     "b",
     desc("Treat the input as executable bytecode"));
+
+#ifdef HERMES_ENABLE_WASM
+static opt<bool> WasmMode(
+    "wasm",
+    desc("Treat the input as a WebAssembly binary module"));
+#endif
 
 static opt<bool> NonStrictMode(
     "non-strict",
@@ -1011,6 +1021,14 @@ void setFlagDefaults() {
     cl::BytecodeMode = true;
   }
 
+#ifdef HERMES_ENABLE_WASM
+  // Auto-detect .wasm extension.
+  if (!cl::WasmMode && cl::InputFilenames.size() == 1 &&
+      llvh::sys::path::extension(cl::InputFilenames[0]) == ".wasm") {
+    cl::WasmMode = true;
+  }
+#endif
+
   if (cl::LazyCompilation && cl::OptimizationLevel > cl::OptLevel::Og) {
     cl::OptimizationLevel = cl::OptLevel::Og;
   }
@@ -1032,6 +1050,13 @@ bool validateFlags() {
       errored = true;
     }
   };
+
+  // NOTE: -wasm and -b are *not* mutually exclusive. -wasm means "the input
+  // is a WebAssembly module", which is true both of a .wasm binary (compiled
+  // here) and of a .hbc produced earlier by "hermesc -wasm" (loaded as
+  // bytecode). In the latter case -b, which setFlagDefaults() infers from the
+  // .hbc extension, selects the bytecode path and -wasm only records that the
+  // result must be instantiated rather than merely run.
 
   // Validate strict vs non strict mode.
   if (cl::NonStrictMode && cl::StrictMode) {
@@ -2322,6 +2347,91 @@ void printHermesVersion(
   }
 }
 
+#ifdef HERMES_ENABLE_WASM
+/// Process a Wasm binary file: parse, generate IR, optimize, and produce
+/// bytecode output or execute.
+CompileResult processWasmFile(std::unique_ptr<llvh::MemoryBuffer> fileBuf) {
+  auto *data = reinterpret_cast<const uint8_t *>(fileBuf->getBufferStart());
+  size_t size = fileBuf->getBufferSize();
+
+  // Create a Module for the Wasm compiler to populate.
+  auto context = std::make_shared<Context>();
+  auto M = std::make_shared<Module>(context);
+  std::string errorMsg;
+  if (!compileWasmModule(data, size, *M, errorMsg)) {
+    llvh::errs() << "Error: " << errorMsg << '\n';
+    return ParsingFailed;
+  }
+
+  // Run the optimizer pipeline.
+  switch (cl::OptimizationLevel) {
+    case cl::OptLevel::O0:
+      runNoOptimizationPasses(*M);
+      break;
+    case cl::OptLevel::Og:
+      runDebugOptimizationPasses(*M);
+      break;
+    case cl::OptLevel::OMax:
+      runFullOptimizationPasses(*M);
+      break;
+    case cl::OptLevel::OFixedPoint:
+      runOptimizationPassesToFixedPoint(*M);
+      break;
+  }
+
+  if (cl::DumpTarget == DumpIR) {
+    M->dump();
+    return Success;
+  }
+
+  // Generate bytecode.
+  BytecodeGenerationOptions genOptions{cl::DumpTarget};
+  genOptions.optimizationEnabled = cl::OptimizationLevel > cl::OptLevel::Og;
+  genOptions.staticBuiltinsEnabled = context->getStaticBuiltinOptimization();
+  genOptions.verifyIR = cl::compilerRuntimeFlags.VerifyIR;
+
+  if (cl::DumpTarget == Execute) {
+    // NOTE: compileFromCommandLineOptions() marks the result isWasmModule,
+    // so the VM driver knows to call the instantiate() factory carried by the
+    // module object that this bytecode's top level returns.
+    return generateBytecodeForExecution(
+        hbc::BCProviderFromSrc::CompilationData{genOptions, M, nullptr});
+  }
+
+  // Compute a source hash from the input buffer.
+  llvh::SHA1 hasher;
+  hasher.update(llvh::StringRef(
+      fileBuf->getBufferStart(), fileBuf->getBufferSize()));
+  auto rawHash = hasher.final();
+  SHA1 sourceHash{};
+  std::copy(rawHash.begin(), rawHash.end(), sourceHash.begin());
+
+  // Serialize bytecode to file or stdout.
+  BaseBytecodeMap baseBytecodeMap;
+  OutputStream fileOS{llvh::outs()};
+  llvh::StringRef base = cl::BytecodeOutputFilename;
+  if (!base.empty() && !fileOS.open(base, F_None)) {
+    return OutputFileError;
+  }
+  auto result = generateBytecodeForSerialization(
+      fileOS.os(),
+      M,
+      nullptr, /* semCtx */
+      genOptions,
+      sourceHash,
+      llvh::None,
+      nullptr, /* sourceMapGen */
+      baseBytecodeMap);
+  if (result.status != Success) {
+    return result;
+  }
+  if (!fileOS.close())
+    return OutputFileError;
+
+  return Success;
+}
+#endif
+
 } // namespace
 
 namespace hermes {
@@ -2340,7 +2450,9 @@ OutputFormatKind outputFormatFromCommandLineOptions() {
   return cl::DumpTarget;
 }
 
-CompileResult compileFromCommandLineOptions() {
+/// Do the actual work of compileFromCommandLineOptions(). The wrapper is
+/// responsible for post-processing that must apply to every path out of here.
+static CompileResult compileFromCommandLineOptionsImpl() {
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_STATS)
   if (cl::PrintStats)
     hermes::EnableStatistics();
@@ -2420,11 +2532,36 @@ CompileResult compileFromCommandLineOptions() {
         fileBufs.size() == 1 && fileBufs[0].size() == 1 &&
         "validateFlags() should enforce exactly one bytecode input file");
     return processBytecodeFile(std::move(fileBufs[0][0].file));
-  } else {
+  }
+
+#ifdef HERMES_ENABLE_WASM
+  if (cl::WasmMode) {
+    assert(
+        fileBufs.size() == 1 && fileBufs[0].size() == 1 &&
+        "validateFlags() should enforce exactly one wasm input file");
+    return processWasmFile(std::move(fileBufs[0][0].file));
+  }
+#endif
+
+  {
     std::shared_ptr<Context> context =
         createContext(std::move(resolutionTable), std::move(segments));
     return processSourceFiles(context, std::move(fileBufs));
   }
+}
+
+CompileResult compileFromCommandLineOptions() {
+  CompileResult result = compileFromCommandLineOptionsImpl();
+#ifdef HERMES_ENABLE_WASM
+  // -wasm declares that the input is a WebAssembly module, however the
+  // bytecode was obtained: compiled here from a .wasm binary, or loaded from
+  // a .hbc that "hermesc -wasm" produced earlier. Either way its top level
+  // only returns a module object carrying an instantiate() factory, which the
+  // VM driver must call.
+  if (cl::WasmMode)
+    result.isWasmModule = true;
+#endif
+  return result;
 }
 } // namespace driver
 } // namespace hermes

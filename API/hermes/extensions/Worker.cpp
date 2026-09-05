@@ -531,6 +531,38 @@ void checkBufferAttached(jsi::Runtime &rt, const jsi::ArrayBuffer &ab) {
   }
 }
 
+/// Reject \p script if it is Hermes bytecode and the embedder has not opened
+/// the JS-supplied-bytecode trust boundary.
+///
+/// A Worker runs whatever bytes it is given through evaluateJavaScript, which
+/// decides source-vs-bytecode by content. Bytecode is trusted by construction
+/// -- it is not re-validated the way source is -- so bytes arriving from JS
+/// that happen to be bytecode are a trust boundary, gated by
+/// RuntimeConfig::EnableUntrustedBytecodeFromJS.
+///
+/// Only actual bytecode is refused. Source in an ArrayBuffer is a documented,
+/// tested feature (worker-from-buffer.js) and has nothing to do with trust, so
+/// refusing every binary input would remove a working feature to close a hole
+/// it is not part of. The string constructor path needs no check at all: a JS
+/// string is re-encoded as UTF-8 on the way in and cannot carry bytecode
+/// through intact.
+void checkBytecodeAllowed(
+    jsi::Runtime &rt,
+    const std::string &script,
+    const ExtensionsConfig &config) {
+  if (config.allowUntrustedBytecodeFromJS) {
+    return;
+  }
+  auto *api = jsi::castInterface<IHermesRootAPI>(makeHermesRootAPI());
+  if (api->isHermesBytecode(
+          reinterpret_cast<const uint8_t *>(script.data()), script.size())) {
+    throwTypeError(
+        rt,
+        "Cannot create Worker from Hermes bytecode "
+        "(EnableUntrustedBytecodeFromJS is off)");
+  }
+}
+
 /// Copy \p length bytes starting at \p offset of \p ab into a std::string.
 /// Throws TypeError if the range is empty. std::string carries arbitrary
 /// binary faithfully (no UTF-8 re-encoding).
@@ -580,9 +612,9 @@ void startWorker(jsi::Runtime &rt, jsi::Object self, std::string script) {
 /// 2. the script to be executed by the Worker
 jsi::Value initializeWorker(
     jsi::Runtime &rt,
-    const jsi::Value &,
     const jsi::Value *args,
-    size_t count) {
+    size_t count,
+    const ExtensionsConfig &config) {
   // This is only called by the Worker extension script in `11-Worker.js`, so we
   // can guarantee that the argument count is 2.
   assert(count == 2);
@@ -619,6 +651,10 @@ jsi::Value initializeWorker(
           rt,
           "Worker script must be a string, ArrayBuffer, TypedArray, or DataView");
     }
+    // One gate for all three binary shapes, after the bytes exist: the check
+    // inspects them, so it cannot be hoisted above the copy. The string arm
+    // above deliberately does not reach here.
+    checkBytecodeAllowed(rt, script, config);
   } else {
     throwTypeError(
         rt,
@@ -709,12 +745,24 @@ jsi::Value postMessageToWorker(
 
 } // namespace
 
-void installWorker(jsi::Runtime &rt, jsi::Object &extensions) {
+void installWorker(
+    jsi::Runtime &rt,
+    jsi::Object &extensions,
+    const ExtensionsConfig &config) {
   // Set up function specified in `11-Worker.js`.
   jsi::Function setup = extensions.getPropertyAsFunction(rt, "Worker");
 
   jsi::Function initWorker = jsi::Function::createFromHostFunction(
-      rt, jsi::PropNameID::forAscii(rt, "initWorker"), 2, initializeWorker);
+      rt,
+      jsi::PropNameID::forAscii(rt, "initWorker"),
+      2,
+      [config](
+          jsi::Runtime &rt,
+          const jsi::Value &,
+          const jsi::Value *args,
+          size_t count) {
+        return initializeWorker(rt, args, count, config);
+      });
 
   jsi::Function terminateWorkerFunc = jsi::Function::createFromHostFunction(
       rt, jsi::PropNameID::forAscii(rt, "terminateWorker"), 0, terminateWorker);

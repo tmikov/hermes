@@ -1,0 +1,98 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-defined-memory-storage.wat.
+
+var args = hermescli.getScriptArgs();
+function load(i) {
+  return WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[i]));
+}
+var mod = load(0);
+var consumerMod = load(1);
+
+// --- The decoy buffer -----------------------------------------------------
+//
+// Replace WebAssembly.Memory.prototype.buffer for the duration of the
+// instantiation. The descriptor is configurable, so this really does replace
+// the route createMemoryViews() used to take when it built the module's own
+// memory.
+var decoy = new ArrayBuffer(4 * 65536);
+var savedBuffer =
+    Object.getOwnPropertyDescriptor(WebAssembly.Memory.prototype, 'buffer');
+Object.defineProperty(WebAssembly.Memory.prototype, 'buffer', {
+  get: function () { return decoy; },
+  configurable: true,
+});
+// Observed through the property while the hijack is installed, so the line
+// printed states what was true during instantiation and not what the native
+// getter says once it is back.
+var probe = new WebAssembly.Memory({initial: 1});
+var hijackInForce = (probe.buffer === decoy);
+var e = new WebAssembly.Instance(mod).exports;
+Object.defineProperty(WebAssembly.Memory.prototype, 'buffer', savedBuffer);
+
+print('hijacked buffer accessor was in force: ' + hijackInForce);
+
+e.poke(512, 0xABCD);
+print('wasm wrote into the script-supplied decoy: ' +
+      (new DataView(decoy).getUint32(512, true) === 0xABCD));
+print('wasm wrote into the exported memory: ' +
+      (new DataView(e.mem.buffer).getUint32(512, true) === 0xABCD));
+
+// --- The cross-module consequence -----------------------------------------
+print('exported memory is a genuine Memory: ' +
+      (e.mem instanceof WebAssembly.Memory));
+var consumer = null;
+try {
+  consumer = new WebAssembly.Instance(consumerMod, {a: {mem: e.mem}}).exports;
+  print('consumer links against the exported Memory: true');
+} catch (err) {
+  print('consumer links against the exported Memory: ' + err.name + ': ' +
+        err.message);
+}
+print('exporter wrote 43981 at 512; consumer reads: ' +
+      (consumer ? consumer.peek(512) : 'n/a'));
+
+// --- A replaced constructor -----------------------------------------------
+//
+// globalThis.WebAssembly.Memory is an ordinary property. What it returns is
+// not a memory at all, and the module must say so rather than run on it.
+var savedCtor = WebAssembly.Memory;
+WebAssembly.Memory = function () { return {}; };
+try {
+  new WebAssembly.Instance(mod);
+  print('replaced Memory constructor: linked');
+} catch (err) {
+  print('replaced Memory constructor: ' + err.name + ': ' + err.message);
+}
+WebAssembly.Memory = savedCtor;
+
+// --- A replaced constructor returning a GENUINE memory --------------------
+//
+// The brand check alone does not settle this: what comes back can be a real
+// WebAssembly.Memory with limits of its own. The declaration is what this
+// module asked for, not what it got, and memory.grow on a defined memory uses
+// the compile-time literal -- so a substituted memory with a smaller maximum
+// gets grown past its own ceiling and ends up with maxPages_ inconsistent
+// with its buffer.
+function withSubstitute(label, descriptor) {
+  var saved = WebAssembly.Memory;
+  WebAssembly.Memory = function () { return new saved(descriptor); };
+  try {
+    var ex = new WebAssembly.Instance(mod).exports;
+    print(label + ': linked, size = ' + ex.size());
+  } catch (err) {
+    print(label + ': ' + err.name + ': ' + err.message);
+  }
+  WebAssembly.Memory = saved;
+}
+// The module declares (memory 1 4).
+withSubstitute('substituted 1 page, no maximum', {initial: 1});
+withSubstitute('substituted 1 page, maximum 2', {initial: 1, maximum: 2});
+withSubstitute('substituted 2 pages, maximum 4', {initial: 2, maximum: 4});
+withSubstitute('substituted exactly as declared', {initial: 1, maximum: 4});
+print('done');

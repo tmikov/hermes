@@ -1,0 +1,35 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-float-param-boundary.wat.
+
+var hbcPath = hermescli.getScriptArgs()[0];
+var inst = new WebAssembly.Instance(
+    WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(hbcPath)), {});
+var E = inst.exports;
+
+// The escapable functions, reached through the table. Every route hands out
+// the canonical Exported Function -- e2e-no-closure-escape.wat is what proves
+// that -- so these are wrappers and behave exactly like E.id_f32 below.
+var t0 = E.tbl.get(0); // $id32,   escapable
+var t1 = E.tbl.get(1); // $addf64, escapable
+
+// 1.1 is not exactly representable in f32, so rounding is observable. Nothing
+// in the spec suite passes such a value.
+print('id_f32(1.1) = ' + E.id_f32(1.1));
+print('tbl.get(0)(1.1) = ' + t0(1.1));
+print('id_f32("1.1") = ' + E.id_f32('1.1'));
+
+print('id_f32("x") = ' + E.id_f32('x'));
+print('id_f64("x") = ' + E.id_f64('x'));
+print('tbl.get(0)("x") = ' + t0('x'));
+print('tbl.get(1)("x", "y") = ' + t1('x', 'y'));
+
+print('id_f64(1.1) = ' + E.id_f64(1.1));
+
+print('add_direct(10.5, 0.25) = ' + E.add_direct(10.5, 0.25));
+print('done');
