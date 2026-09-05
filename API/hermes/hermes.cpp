@@ -292,8 +292,11 @@ class HermesRuntimeImpl final : public HermesRuntime,
                                 private IHermesTestHelpers,
                                 private InstallHermesFatalErrorHandler,
                                 private jsi::Instrumentation,
-                                public ISetEventLoopControl,
+                                public ISetEventLoopControl
+#ifdef HERMES_ENABLE_WASM
+    ,
                                 public IWasmModuleProvider
+#endif
 #ifdef JSI_UNSTABLE
     ,
                                 public jsi::ISerialization,
@@ -768,11 +771,13 @@ class HermesRuntimeImpl final : public HermesRuntime,
   void setEventLoopControl(IEventLoopControl *eventLoopControl) override;
   IEventLoopControl *getEventLoopControl() override;
 
+#ifdef HERMES_ENABLE_WASM
   void registerWasmBytecode(
       std::string url,
       std::shared_ptr<const jsi::Buffer> bytecode) override;
   void setWasmModuleResolver(jsi::ICast *resolver) override;
   jsi::ICast *getWasmModuleResolver() override;
+#endif
 
   // Concrete declarations of jsi::Runtime pure virtual methods
   std::shared_ptr<const jsi::PreparedJavaScript> prepareJavaScript(
@@ -1416,6 +1421,7 @@ class HermesRuntimeImpl final : public HermesRuntime,
   /// thread to check a posted message.
   IEventLoopControl *eventLoopControl_{nullptr};
 
+#ifdef HERMES_ENABLE_WASM
   /// Trusted Wasm module bytecode registered by the embedder, keyed by URL.
   /// The shared_ptrs keep the buffers alive for as long as the registration
   /// stands, which is at least until the runtime is destroyed.
@@ -1436,6 +1442,7 @@ class HermesRuntimeImpl final : public HermesRuntime,
   /// Install the vm::Runtime Wasm resolver hook if it is not installed yet.
   /// See wasmHookInstalled_ for why this happens at most once per runtime.
   void ensureWasmHookInstalled();
+#endif // HERMES_ENABLE_WASM
 
   /// Tracking status when the current execution enters/exits the mutator from
   /// JSI.
@@ -1709,9 +1716,12 @@ jsi::ICast *HermesRuntimeImpl::castInterface(const jsi::UUID &interfaceUUID) {
 #endif
   else if (interfaceUUID == ISetEventLoopControl::uuid) {
     return static_cast<ISetEventLoopControl *>(this);
-  } else if (interfaceUUID == IWasmModuleProvider::uuid) {
+  }
+#ifdef HERMES_ENABLE_WASM
+  else if (interfaceUUID == IWasmModuleProvider::uuid) {
     return static_cast<IWasmModuleProvider *>(this);
   }
+#endif
   return nullptr;
 }
 
@@ -1819,6 +1829,7 @@ IEventLoopControl *HermesRuntimeImpl::getEventLoopControl() {
   return eventLoopControl_;
 }
 
+#ifdef HERMES_ENABLE_WASM
 void HermesRuntimeImpl::ensureWasmHookInstalled() {
   if (wasmHookInstalled_)
     return;
@@ -1894,6 +1905,7 @@ void HermesRuntimeImpl::setWasmModuleResolver(jsi::ICast *resolver) {
 jsi::ICast *HermesRuntimeImpl::getWasmModuleResolver() {
   return wasmResolver_;
 }
+#endif // HERMES_ENABLE_WASM
 
 sampling_profiler::Profile HermesRuntimeImpl::dumpSampledTraceToProfile() {
 #if HERMESVM_SAMPLING_PROFILER_AVAILABLE

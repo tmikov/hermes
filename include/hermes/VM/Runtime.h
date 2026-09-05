@@ -277,6 +277,7 @@ class Runtime : public RuntimeBase, public HandleRootOwner {
   /// message an embedder resolver produced); an empty \p errorOut just means
   /// no reason was offered. The VM never depends on jsi types; the API layer
   /// adapts its provider to this.
+#ifdef HERMES_ENABLE_WASM
   using WasmModuleResolver = std::function<
       bool(const std::string &url,
            std::string &bytecodeOut,
@@ -293,6 +294,7 @@ class Runtime : public RuntimeBase, public HandleRootOwner {
   const WasmModuleResolver &getWasmModuleResolver() const {
     return wasmModuleResolver_;
   }
+#endif // HERMES_ENABLE_WASM
 
   /// Add a custom function that will be executed sometime during garbage
   /// collection to mark additional weak GC roots that may not be known to the
@@ -1296,7 +1298,9 @@ class Runtime : public RuntimeBase, public HandleRootOwner {
 
   /// Resolves a Wasm module URL to trusted Hermes bytecode; empty unless the
   /// embedder installed one. See setWasmModuleResolver().
+#ifdef HERMES_ENABLE_WASM
   WasmModuleResolver wasmModuleResolver_;
+#endif
 
   /// All state related to JIT compilation.
   JITContext jitContext_;
