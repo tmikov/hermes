@@ -421,6 +421,11 @@ NATIVE_FUNCTION(finalizationRegistryConstructor)
 NATIVE_FUNCTION(finalizationRegistryPrototypeRegister)
 NATIVE_FUNCTION(finalizationRegistryPrototypeUnregister)
 
+#ifdef HERMES_ENABLE_WASM
+// Names for the profiler and debugger only -- not builtin ids, so unlike
+// Builtins.def this list may be conditional. Without Wasm the functions
+// are not compiled, so listing them would leave the pointer table in
+// JSNativeFunctions.cpp referencing symbols that do not exist.
 NATIVE_FUNCTION(wasmTrap)
 NATIVE_FUNCTION(wasmI32DivS)
 NATIVE_FUNCTION(wasmI32DivU)
@@ -485,6 +490,7 @@ NATIVE_FUNCTION(wasmCheckTableArrays)
 NATIVE_FUNCTION(wasmSetFuncInfo)
 NATIVE_FUNCTION(wasmBigIntToI64)
 NATIVE_FUNCTION(wasmI64ToBigInt)
+#endif // HERMES_ENABLE_WASM
 
 #define ALL_ERROR_TYPE(name) NATIVE_FUNCTION(name##Constructor)
 #include "hermes/VM/NativeErrorTypes.def"

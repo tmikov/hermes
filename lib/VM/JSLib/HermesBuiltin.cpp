@@ -10,17 +10,17 @@
 #include "hermes/FrontEndDefs/Builtins.h"
 #include "hermes/FrontEndDefs/Typeof.h"
 #include "hermes/Support/Base64vlq.h"
+#include "hermes/VM/BigIntPrimitive.h"
 #include "hermes/VM/Callable.h"
 #include "hermes/VM/FastArray.h"
 #include "hermes/VM/JSArray.h"
-#include "hermes/VM/BigIntPrimitive.h"
 #include "hermes/VM/JSArrayBuffer.h"
 #include "hermes/VM/JSLib.h"
+#include "hermes/VM/JSRegExp.h"
 #include "hermes/VM/JSTypedArray.h"
 #include "hermes/VM/JSWebAssemblyGlobal.h"
 #include "hermes/VM/JSWebAssemblyMemory.h"
 #include "hermes/VM/JSWebAssemblyTable.h"
-#include "hermes/VM/JSRegExp.h"
 #include "hermes/VM/Operations.h"
 #include "hermes/VM/PrimitiveBox.h"
 #include "hermes/VM/StackFrame-inline.h"
@@ -28,9 +28,11 @@
 #include "hermes/VM/StringView.h"
 
 #include "hermes/Support/Conversions.h"
+#include "hermes/Support/ErrorHandling.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <random>
 
@@ -236,6 +238,35 @@ CallResult<HermesValue> hermesBuiltinThrowReferenceError(
 /// Wasm trap: throws a RuntimeError (currently a generic Error).
 /// Called by Wasm-generated IR for the `unreachable` instruction.
 /// Takes no meaningful arguments — the trap message is fixed.
+#ifndef HERMES_ENABLE_WASM
+/// The body of every wasm* builtin in a build without Wasm support.
+///
+/// Builtins.def numbering is deliberately independent of HERMES_ENABLE_WASM,
+/// so every wasm builtin id must still resolve to something (see the note
+/// above wasmLinkErrorProto). It need not resolve to 71 DIFFERENT somethings:
+/// the ids are distinct, the behaviour is not. So the whole block of wasm
+/// implementations below is compiled out and every id points here instead.
+///
+/// Which builtin was called arrives as the context pointer, so one format
+/// string serves all of them; 71 distinct messages would put a good part of
+/// the saving straight back into .rodata.
+///
+/// Nothing can reach here. Without Wasm there is no WebAssembly object to call
+/// these through and no compiled Wasm module to emit calls to them, so arriving
+/// is an engine bug rather than anything a program did -- hence fatal rather
+/// than a thrown error.
+[[noreturn]] static CallResult<HermesValue> wasmDisabled(void *ctx, Runtime &) {
+  char buf[64];
+  snprintf(
+      buf,
+      sizeof(buf),
+      "Wasm builtin %u in a build without Wasm",
+      static_cast<unsigned>(reinterpret_cast<uintptr_t>(ctx)));
+  hermes_fatal(buf);
+}
+#endif
+
+#ifdef HERMES_ENABLE_WASM
 CallResult<HermesValue> wasmTrap(void *, Runtime &runtime) {
   return runtime.raiseError("unreachable executed");
 }
@@ -257,8 +288,10 @@ CallResult<HermesValue> wasmI32DivS(void *, Runtime &runtime) {
 /// Traps on division by zero.
 CallResult<HermesValue> wasmI32DivU(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  uint32_t a = static_cast<uint32_t>(truncateToInt32(args.getArg(0).getNumber()));
-  uint32_t b = static_cast<uint32_t>(truncateToInt32(args.getArg(1).getNumber()));
+  uint32_t a =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(0).getNumber()));
+  uint32_t b =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(1).getNumber()));
   if (LLVM_UNLIKELY(b == 0))
     return runtime.raiseError("integer divide by zero");
   return HermesValue::encodeTrustedNumberValue(a / b);
@@ -284,8 +317,10 @@ CallResult<HermesValue> wasmI32RemS(void *, Runtime &runtime) {
 /// Traps on division by zero.
 CallResult<HermesValue> wasmI32RemU(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  uint32_t a = static_cast<uint32_t>(truncateToInt32(args.getArg(0).getNumber()));
-  uint32_t b = static_cast<uint32_t>(truncateToInt32(args.getArg(1).getNumber()));
+  uint32_t a =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(0).getNumber()));
+  uint32_t b =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(1).getNumber()));
   if (LLVM_UNLIKELY(b == 0))
     return runtime.raiseError("integer divide by zero");
   return HermesValue::encodeTrustedNumberValue(a % b);
@@ -468,8 +503,10 @@ CallResult<HermesValue> wasmNearest(void *, Runtime &runtime) {
 
 /// Helper to reconstruct a 64-bit value from split lo/hi args.
 static int64_t argsToI64(NativeArgs &args, int loIdx, int hiIdx) {
-  auto lo = static_cast<uint32_t>(truncateToInt32(args.getArg(loIdx).getNumber()));
-  auto hi = static_cast<uint32_t>(truncateToInt32(args.getArg(hiIdx).getNumber()));
+  auto lo =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(loIdx).getNumber()));
+  auto hi =
+      static_cast<uint32_t>(truncateToInt32(args.getArg(hiIdx).getNumber()));
   return static_cast<int64_t>(
       (static_cast<uint64_t>(hi) << 32) | static_cast<uint64_t>(lo));
 }
@@ -487,8 +524,9 @@ static JSTypedArrayBase *wasmTypedArrayArg(
     uint32_t minByteLength,
     const char *msg) {
   auto *arr = dyn_vmcast<JSTypedArrayBase>(v);
-  if (LLVM_UNLIKELY(!arr || !arr->attached(runtime) ||
-                    arr->getByteLength() < minByteLength)) {
+  if (LLVM_UNLIKELY(
+          !arr || !arr->attached(runtime) ||
+          arr->getByteLength() < minByteLength)) {
     runtime.raiseTypeError(msg);
     return nullptr;
   }
@@ -497,28 +535,30 @@ static JSTypedArrayBase *wasmTypedArrayArg(
 
 /// Helper to write i64 result (lo32/hi32) to the return buffer (a Uint32Array).
 /// retBuf is arg(0), a JSTypedArrayBase. Writes lo to [0], hi to [1].
-static CallResult<HermesValue> writeI64ToRetBuf(
-    Runtime &runtime,
-    NativeArgs &args,
-    int64_t val) {
+static CallResult<HermesValue>
+writeI64ToRetBuf(Runtime &runtime, NativeArgs &args, int64_t val) {
   auto *retBuf = wasmTypedArrayArg(
-      runtime, args.getArg(0), 8, "Wasm i64 return buffer is not a typed array");
+      runtime,
+      args.getArg(0),
+      8,
+      "Wasm i64 return buffer is not a typed array");
   if (LLVM_UNLIKELY(!retBuf))
     return ExecutionStatus::EXCEPTION;
   auto *buf = reinterpret_cast<uint32_t *>(retBuf->data(runtime));
   buf[0] = static_cast<uint32_t>(static_cast<uint64_t>(val) & 0xFFFFFFFF);
-  buf[1] = static_cast<uint32_t>(
-      (static_cast<uint64_t>(val) >> 32) & 0xFFFFFFFF);
+  buf[1] =
+      static_cast<uint32_t>((static_cast<uint64_t>(val) >> 32) & 0xFFFFFFFF);
   return HermesValue::encodeTrustedNumberValue(0);
 }
 
 /// Helper to write unsigned i64 result to return buffer.
-static CallResult<HermesValue> writeU64ToRetBuf(
-    Runtime &runtime,
-    NativeArgs &args,
-    uint64_t val) {
+static CallResult<HermesValue>
+writeU64ToRetBuf(Runtime &runtime, NativeArgs &args, uint64_t val) {
   auto *retBuf = wasmTypedArrayArg(
-      runtime, args.getArg(0), 8, "Wasm i64 return buffer is not a typed array");
+      runtime,
+      args.getArg(0),
+      8,
+      "Wasm i64 return buffer is not a typed array");
   if (LLVM_UNLIKELY(!retBuf))
     return ExecutionStatus::EXCEPTION;
   auto *buf = reinterpret_cast<uint32_t *>(retBuf->data(runtime));
@@ -906,8 +946,7 @@ CallResult<HermesValue> wasmMemoryGrow(void *, Runtime &runtime) {
 /// cast still runs for them -- these builtins do not know which kind they were
 /// handed -- and costs one branch on a cold path.)
 /// \return the array, or nullptr after raising a TypeError.
-static JSArray *
-wasmArrayArg(Runtime &runtime, HermesValue v, const char *msg) {
+static JSArray *wasmArrayArg(Runtime &runtime, HermesValue v, const char *msg) {
   auto *arr = dyn_vmcast<JSArray>(v);
   if (LLVM_UNLIKELY(!arr))
     runtime.raiseTypeError(msg);
@@ -955,10 +994,8 @@ CallResult<HermesValue> wasmCallIndirect(void *, Runtime &runtime) {
 
   // Bounds check.
   uint32_t tableLen = JSArray::getLength(funcsArr, runtime);
-  if (LLVM_UNLIKELY(
-          index < 0 || static_cast<uint32_t>(index) >= tableLen)) {
-    return runtime.raiseError(
-        "call_indirect: undefined element");
+  if (LLVM_UNLIKELY(index < 0 || static_cast<uint32_t>(index) >= tableLen)) {
+    return runtime.raiseError("call_indirect: undefined element");
   }
 
   // Null/uninitialized check. A never-set entry reads as empty in a sparse
@@ -966,10 +1003,8 @@ CallResult<HermesValue> wasmCallIndirect(void *, Runtime &runtime) {
   // one) initializes its entries to null. Both are an uninitialized funcref
   // for call_indirect, which the spec traps as "uninitialized element".
   auto funcVal = funcsArr->at(runtime, static_cast<uint32_t>(index));
-  if (LLVM_UNLIKELY(
-          funcVal.isEmpty() || funcVal.unboxToHV(runtime).isNull())) {
-    return runtime.raiseError(
-        "call_indirect: uninitialized element");
+  if (LLVM_UNLIKELY(funcVal.isEmpty() || funcVal.unboxToHV(runtime).isNull())) {
+    return runtime.raiseError("call_indirect: uninitialized element");
   }
 
   // Type check.
@@ -989,8 +1024,7 @@ CallResult<HermesValue> wasmCallIndirect(void *, Runtime &runtime) {
       ? -1
       : truncateToInt32(typeVal.unboxToHV(runtime).getNumber());
   if (LLVM_UNLIKELY(actualTypeIdx != expectedTypeIdx)) {
-    return runtime.raiseError(
-        "call_indirect: type mismatch");
+    return runtime.raiseError("call_indirect: type mismatch");
   }
 
   return funcVal.unboxToHV(runtime);
@@ -1080,10 +1114,8 @@ CallResult<HermesValue> wasmMemoryFill(void *, Runtime &runtime) {
   uint32_t memSize = static_cast<uint32_t>(heapu8->getLength());
   // Bounds check: dest + size must not exceed memory size.
   // Use uint64_t to avoid overflow.
-  if (LLVM_UNLIKELY(
-          static_cast<uint64_t>(dest) + size > memSize)) {
-    return runtime.raiseError(
-        "memory.fill: out of bounds memory access");
+  if (LLVM_UNLIKELY(static_cast<uint64_t>(dest) + size > memSize)) {
+    return runtime.raiseError("memory.fill: out of bounds memory access");
   }
 
   // Perform the fill.
@@ -1117,8 +1149,7 @@ CallResult<HermesValue> wasmMemoryCopy(void *, Runtime &runtime) {
   if (LLVM_UNLIKELY(
           static_cast<uint64_t>(src) + size > memSize ||
           static_cast<uint64_t>(dest) + size > memSize)) {
-    return runtime.raiseError(
-        "memory.copy: out of bounds memory access");
+    return runtime.raiseError("memory.copy: out of bounds memory access");
   }
 
   // Perform the copy (memmove handles overlapping regions).
@@ -1142,8 +1173,8 @@ CallResult<HermesValue> wasmMemoryInit(void *, Runtime &runtime) {
       runtime, args.getArg(0), 0, "Wasm memory view is not a typed array");
   if (LLVM_UNLIKELY(!heapu8))
     return ExecutionStatus::EXCEPTION;
-  auto *arr13 = wasmArrayArg(runtime, args.getArg(1),
-      "Wasm data segment array is not an array");
+  auto *arr13 = wasmArrayArg(
+      runtime, args.getArg(1), "Wasm data segment array is not an array");
   if (LLVM_UNLIKELY(!arr13))
     return ExecutionStatus::EXCEPTION;
   auto *dataSegs = arr13;
@@ -1158,8 +1189,7 @@ CallResult<HermesValue> wasmMemoryInit(void *, Runtime &runtime) {
 
   // Look up the data segment.
   auto segVal = dataSegs->at(runtime, segIdx);
-  bool dropped = segVal.isEmpty() ||
-      segVal.unboxToHV(runtime).isNull();
+  bool dropped = segVal.isEmpty() || segVal.unboxToHV(runtime).isNull();
 
   // If size is 0, check bounds but don't fail on dropped segments.
   // Per spec: memory.init with n=0 succeeds even for dropped segments,
@@ -1179,15 +1209,13 @@ CallResult<HermesValue> wasmMemoryInit(void *, Runtime &runtime) {
 
   // Bounds check against data segment.
   if (LLVM_UNLIKELY(static_cast<uint64_t>(src) + size > segLen)) {
-    return runtime.raiseError(
-        "memory.init: out of bounds data segment access");
+    return runtime.raiseError("memory.init: out of bounds data segment access");
   }
 
   // Bounds check against linear memory.
   uint32_t memSize = static_cast<uint32_t>(heapu8->getLength());
   if (LLVM_UNLIKELY(static_cast<uint64_t>(dest) + size > memSize)) {
-    return runtime.raiseError(
-        "memory.init: out of bounds memory access");
+    return runtime.raiseError("memory.init: out of bounds memory access");
   }
 
   // Perform the copy.
@@ -1213,8 +1241,8 @@ CallResult<HermesValue> wasmDataDrop(void *, Runtime &runtime) {
   LocalsRAII lraii(runtime, &lv);
 
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  auto *arr12 = wasmArrayArg(runtime, args.getArg(0),
-      "Wasm data segment array is not an array");
+  auto *arr12 = wasmArrayArg(
+      runtime, args.getArg(0), "Wasm data segment array is not an array");
   if (LLVM_UNLIKELY(!arr12))
     return ExecutionStatus::EXCEPTION;
   lv.dataSegs = arr12;
@@ -1232,7 +1260,8 @@ CallResult<HermesValue> wasmDataDrop(void *, Runtime &runtime) {
 /// into linear memory (a typed array).
 /// Args: (heapu8, blobOffset, length, dest).
 /// Walks the stack to find the caller's RuntimeModule, then copies
-/// binaryDataStorage[blobOffset..blobOffset+length] to heapu8[dest..dest+length].
+/// binaryDataStorage[blobOffset..blobOffset+length] to
+/// heapu8[dest..dest+length].
 CallResult<HermesValue> wasmDataSegmentInit(void *, Runtime &runtime) {
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
   auto *heapu8 = wasmTypedArrayArg(
@@ -1598,8 +1627,7 @@ CallResult<HermesValue> wasmTableGetSlot(void *, Runtime &runtime) {
   int32_t index = truncateToInt32(args.getArg(1).getNumber());
   if (LLVM_UNLIKELY(index < 0))
     return HermesValue::encodeNullValue();
-  return readWasmTableSlot(
-      runtime, exportedArr, static_cast<uint32_t>(index));
+  return readWasmTableSlot(runtime, exportedArr, static_cast<uint32_t>(index));
 }
 
 /// Wasm table slot write, the funnel every writer goes through.
@@ -1661,8 +1689,7 @@ CallResult<HermesValue> wasmTableFill(void *, Runtime &runtime) {
   uint32_t tableLen = JSArray::getLength(*lv.funcsArr, runtime);
   // Bounds check: idx + count must not exceed table size.
   if (LLVM_UNLIKELY(static_cast<uint64_t>(idx) + count > tableLen)) {
-    return runtime.raiseError(
-        "table.fill: out of bounds table access");
+    return runtime.raiseError("table.fill: out of bounds table access");
   }
 
   // Perform the fill, through the slot funnel: filling only the closure array
@@ -1715,8 +1742,7 @@ CallResult<HermesValue> wasmTableGrow(void *, Runtime &runtime) {
   if (actualMaxVal.isNumber()) {
     double actualMaxNum = actualMaxVal.getNumber();
     if (actualMaxNum >= 0) {
-      auto actualMax =
-          static_cast<uint32_t>(truncateToInt32(actualMaxNum));
+      auto actualMax = static_cast<uint32_t>(truncateToInt32(actualMaxNum));
       if (actualMax < maxEntries)
         maxEntries = actualMax;
     }
@@ -1833,8 +1859,7 @@ CallResult<HermesValue> wasmTableCopySlots(void *, Runtime &runtime) {
   if (LLVM_UNLIKELY(
           static_cast<uint64_t>(dst) + count > dstLen ||
           static_cast<uint64_t>(src) + count > srcLen)) {
-    return runtime.raiseError(
-        "table.copy: out of bounds table access");
+    return runtime.raiseError("table.copy: out of bounds table access");
   }
 
   if (count == 0)
@@ -1920,8 +1945,7 @@ CallResult<HermesValue> wasmTableCopySlots(void *, Runtime &runtime) {
                 runtime, lv.dstExported, dstIdx, lv.srcExpVal) ==
             ExecutionStatus::EXCEPTION))
       return ExecutionStatus::EXCEPTION;
-    return wasmStoreTableElement(
-        runtime, lv.dstTypes, dstIdx, lv.srcTypeVal);
+    return wasmStoreTableElement(runtime, lv.dstTypes, dstIdx, lv.srcTypeVal);
   };
 
   if (!anyAlias || dst <= src) {
@@ -1963,8 +1987,8 @@ CallResult<HermesValue> wasmTableInit(void *, Runtime &runtime) {
   if (LLVM_UNLIKELY(!wasmTableArrayArgs(
           runtime, args, 0, lv.funcsArr, lv.typesArr, lv.exportedArr)))
     return ExecutionStatus::EXCEPTION;
-  auto *arr2 = wasmArrayArg(runtime, args.getArg(3),
-      "Wasm element segment array is not an array");
+  auto *arr2 = wasmArrayArg(
+      runtime, args.getArg(3), "Wasm element segment array is not an array");
   if (LLVM_UNLIKELY(!arr2))
     return ExecutionStatus::EXCEPTION;
   lv.elemSegs = arr2;
@@ -2006,8 +2030,7 @@ CallResult<HermesValue> wasmTableInit(void *, Runtime &runtime) {
   // Bounds check against table.
   uint32_t tableLen = JSArray::getLength(*lv.funcsArr, runtime);
   if (LLVM_UNLIKELY(static_cast<uint64_t>(dst) + count > tableLen)) {
-    return runtime.raiseError(
-        "table.init: out of bounds table access");
+    return runtime.raiseError("table.init: out of bounds table access");
   }
 
   // Copy entries from segment to table, through the slot funnel.
@@ -2041,8 +2064,8 @@ CallResult<HermesValue> wasmElemDrop(void *, Runtime &runtime) {
   LocalsRAII lraii(runtime, &lv);
 
   NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
-  auto *arr1 = wasmArrayArg(runtime, args.getArg(0),
-      "Wasm element segment array is not an array");
+  auto *arr1 = wasmArrayArg(
+      runtime, args.getArg(0), "Wasm element segment array is not an array");
   if (LLVM_UNLIKELY(!arr1))
     return ExecutionStatus::EXCEPTION;
   lv.elemSegs = arr1;
@@ -2055,8 +2078,6 @@ CallResult<HermesValue> wasmElemDrop(void *, Runtime &runtime) {
 
   return HermesValue::encodeUndefinedValue();
 }
-
-
 
 /// Map a structural Wasm function-type string to a stable integer id.
 /// call_indirect must compare type identity across module boundaries, and a
@@ -2084,8 +2105,7 @@ CallResult<HermesValue> wasmInternType(void *, Runtime &runtime) {
   if (LLVM_UNLIKELY(symRes == ExecutionStatus::EXCEPTION))
     return ExecutionStatus::EXCEPTION;
 
-  return HermesValue::encodeTrustedNumberValue(
-      symRes->get().unsafeGetIndex());
+  return HermesValue::encodeTrustedNumberValue(symRes->get().unsafeGetIndex());
 }
 /// \return the prototype for a Wasm LinkError. Without Wasm support the wasm*
 /// Runtime fields do not exist and these builtins are unreachable, but they
@@ -2100,16 +2120,14 @@ static Handle<JSObject> wasmLinkErrorProto(Runtime &runtime) {
 }
 
 /// Raise a WebAssembly.LinkError with the ASCII message \p msg.
-static ExecutionStatus
-raiseWasmLinkError(Runtime &runtime, const char *msg) {
+static ExecutionStatus raiseWasmLinkError(Runtime &runtime, const char *msg) {
   struct : public Locals {
     PinnedValue<> msgHandle;
     PinnedValue<JSError> err;
   } lv;
   LocalsRAII lraii(runtime, &lv);
 
-  auto strRes =
-      StringPrimitive::create(runtime, ASCIIRef(msg, strlen(msg)));
+  auto strRes = StringPrimitive::create(runtime, ASCIIRef(msg, strlen(msg)));
   if (LLVM_UNLIKELY(strRes == ExecutionStatus::EXCEPTION))
     return ExecutionStatus::EXCEPTION;
   lv.msgHandle = *strRes;
@@ -2140,8 +2158,7 @@ CallResult<HermesValue> wasmCheckTableArrays(void *, Runtime &runtime) {
     return raiseWasmLinkError(
         runtime, "table function storage is not an array");
   if (LLVM_UNLIKELY(!dyn_vmcast<JSArray>(args.getArg(1))))
-    return raiseWasmLinkError(
-        runtime, "table type storage is not an array");
+    return raiseWasmLinkError(runtime, "table type storage is not an array");
   if (LLVM_UNLIKELY(!dyn_vmcast<JSArray>(args.getArg(2))))
     return raiseWasmLinkError(
         runtime, "table exported-function storage is not an array");
@@ -2188,8 +2205,7 @@ CallResult<HermesValue> wasmLinkTable(void *, Runtime &runtime) {
   if (LLVM_UNLIKELY(!tbl))
     return HermesValue::encodeNullValue();
   // A non-funcref declaration can never be satisfied; see above.
-  if (LLVM_UNLIKELY(
-          !args.getArg(1).isBool() || !args.getArg(1).getBool()))
+  if (LLVM_UNLIKELY(!args.getArg(1).isBool() || !args.getArg(1).getBool()))
     return HermesValue::encodeNullValue();
   lv.tbl = tbl;
 
@@ -2214,8 +2230,9 @@ CallResult<HermesValue> wasmLinkTable(void *, Runtime &runtime) {
     return JSArray::setElementAt(lv.out, runtime, idx, lv.tmp);
   };
   if (LLVM_UNLIKELY(
-          store(0, HermesValue::encodeObjectValue(
-                       lv.tbl->getElements(runtime))) ==
+          store(
+              0,
+              HermesValue::encodeObjectValue(lv.tbl->getElements(runtime))) ==
           ExecutionStatus::EXCEPTION))
     return ExecutionStatus::EXCEPTION;
   if (LLVM_UNLIKELY(
@@ -2316,8 +2333,7 @@ CallResult<HermesValue> wasmLinkMemory(void *, Runtime &runtime) {
   // and `lv.mem` is what stays valid across it.
   if (LLVM_UNLIKELY(
           store(
-              2,
-              HermesValue::encodeObjectValue(lv.mem->getBuffer(runtime))) ==
+              2, HermesValue::encodeObjectValue(lv.mem->getBuffer(runtime))) ==
           ExecutionStatus::EXCEPTION))
     return ExecutionStatus::EXCEPTION;
 
@@ -2551,8 +2567,7 @@ CallResult<HermesValue> wasmSetFuncInfo(void *, Runtime &runtime) {
   if (LLVM_UNLIKELY(typeRes == ExecutionStatus::EXCEPTION))
     return ExecutionStatus::EXCEPTION;
   if (LLVM_UNLIKELY(!*typeRes))
-    return runtime.raiseTypeError(
-        "Wasm exported function refused its type id");
+    return runtime.raiseTypeError("Wasm exported function refused its type id");
 
   auto closureRes = JSObject::defineOwnProperty(
       lv.fn,
@@ -2563,8 +2578,7 @@ CallResult<HermesValue> wasmSetFuncInfo(void *, Runtime &runtime) {
   if (LLVM_UNLIKELY(closureRes == ExecutionStatus::EXCEPTION))
     return ExecutionStatus::EXCEPTION;
   if (LLVM_UNLIKELY(!*closureRes))
-    return runtime.raiseTypeError(
-        "Wasm exported function refused its closure");
+    return runtime.raiseTypeError("Wasm exported function refused its closure");
 
   return HermesValue::encodeUndefinedValue();
 }
@@ -2596,6 +2610,7 @@ CallResult<HermesValue> wasmLinkError(void *, Runtime &runtime) {
 
   return runtime.setThrownValue(lv.err.getHermesValue());
 }
+#endif // HERMES_ENABLE_WASM
 
 namespace {
 
@@ -2965,8 +2980,8 @@ CallResult<HermesValue> hermesBuiltinArraySpread(void *, Runtime &runtime) {
     // Copying from an array, first check and make sure that
     // `arr[Symbol.iterator]` hasn't been changed by the user.
     NamedPropertyDescriptor desc;
-    PseudoHandle<JSObject> propObj = createPseudoHandle(
-        JSObject::getNamedDescriptorPredefined(
+    PseudoHandle<JSObject> propObj =
+        createPseudoHandle(JSObject::getNamedDescriptorPredefined(
             arr, runtime, Predefined::SymbolIterator, desc));
     if (LLVM_LIKELY(propObj) && LLVM_LIKELY(!desc.flags.proxyObject)) {
       SmallHermesValue slotValue =
@@ -3531,7 +3546,10 @@ void createHermesBuiltins(Runtime &runtime) {
         runtime,
         Handle<JSObject>::vmcast(&runtime.functionPrototype),
         Runtime::makeNullHandle<Environment>(),
-        nullptr /* context */,
+        // The builtin's own id as context. No builtin reads its context
+        // today, but a build without Wasm points every wasm* id at one shared
+        // body, which needs this to say which builtin was called.
+        reinterpret_cast<void *>(builtinIndex),
         func,
         Predefined::getSymbolID(symID),
         count,
@@ -3637,6 +3655,7 @@ void createHermesBuiltins(Runtime &runtime) {
   defineInternMethod(
       B::HermesBuiltin_requireFast, P::requireFast, requireFast, 1);
 
+#ifdef HERMES_ENABLE_WASM
   // Wasm helper builtins.
   defineInternMethod(B::HermesBuiltin_wasmTrap, P::wasmTrap, wasmTrap, 0);
   defineInternMethod(
@@ -3647,10 +3666,8 @@ void createHermesBuiltins(Runtime &runtime) {
       B::HermesBuiltin_wasmI32RemS, P::wasmI32RemS, wasmI32RemS, 2);
   defineInternMethod(
       B::HermesBuiltin_wasmI32RemU, P::wasmI32RemU, wasmI32RemU, 2);
-  defineInternMethod(
-      B::HermesBuiltin_wasmI32Clz, P::wasmI32Clz, wasmI32Clz, 1);
-  defineInternMethod(
-      B::HermesBuiltin_wasmI32Ctz, P::wasmI32Ctz, wasmI32Ctz, 1);
+  defineInternMethod(B::HermesBuiltin_wasmI32Clz, P::wasmI32Clz, wasmI32Clz, 1);
+  defineInternMethod(B::HermesBuiltin_wasmI32Ctz, P::wasmI32Ctz, wasmI32Ctz, 1);
   defineInternMethod(
       B::HermesBuiltin_wasmI32Popcnt, P::wasmI32Popcnt, wasmI32Popcnt, 1);
   defineInternMethod(
@@ -3688,27 +3705,15 @@ void createHermesBuiltins(Runtime &runtime) {
       wasmF32ReinterpretI32,
       1);
   defineInternMethod(
-      B::HermesBuiltin_wasmF64Copysign,
-      P::wasmF64Copysign,
-      wasmF64Copysign,
-      2);
+      B::HermesBuiltin_wasmF64Copysign, P::wasmF64Copysign, wasmF64Copysign, 2);
   defineInternMethod(
-      B::HermesBuiltin_wasmF32Copysign,
-      P::wasmF32Copysign,
-      wasmF32Copysign,
-      2);
+      B::HermesBuiltin_wasmF32Copysign, P::wasmF32Copysign, wasmF32Copysign, 2);
   defineInternMethod(
-      B::HermesBuiltin_wasmNearest,
-      P::wasmNearest,
-      wasmNearest,
-      1);
+      B::HermesBuiltin_wasmNearest, P::wasmNearest, wasmNearest, 1);
   // i64 helpers (G.3).
-  defineInternMethod(
-      B::HermesBuiltin_wasmI64Add, P::wasmI64Add, wasmI64Add, 5);
-  defineInternMethod(
-      B::HermesBuiltin_wasmI64Sub, P::wasmI64Sub, wasmI64Sub, 5);
-  defineInternMethod(
-      B::HermesBuiltin_wasmI64Mul, P::wasmI64Mul, wasmI64Mul, 5);
+  defineInternMethod(B::HermesBuiltin_wasmI64Add, P::wasmI64Add, wasmI64Add, 5);
+  defineInternMethod(B::HermesBuiltin_wasmI64Sub, P::wasmI64Sub, wasmI64Sub, 5);
+  defineInternMethod(B::HermesBuiltin_wasmI64Mul, P::wasmI64Mul, wasmI64Mul, 5);
   defineInternMethod(
       B::HermesBuiltin_wasmI64DivS, P::wasmI64DivS, wasmI64DivS, 5);
   defineInternMethod(
@@ -3717,8 +3722,7 @@ void createHermesBuiltins(Runtime &runtime) {
       B::HermesBuiltin_wasmI64RemS, P::wasmI64RemS, wasmI64RemS, 5);
   defineInternMethod(
       B::HermesBuiltin_wasmI64RemU, P::wasmI64RemU, wasmI64RemU, 5);
-  defineInternMethod(
-      B::HermesBuiltin_wasmI64Shl, P::wasmI64Shl, wasmI64Shl, 5);
+  defineInternMethod(B::HermesBuiltin_wasmI64Shl, P::wasmI64Shl, wasmI64Shl, 5);
   defineInternMethod(
       B::HermesBuiltin_wasmI64ShrS, P::wasmI64ShrS, wasmI64ShrS, 5);
   defineInternMethod(
@@ -3727,15 +3731,10 @@ void createHermesBuiltins(Runtime &runtime) {
       B::HermesBuiltin_wasmI64Rotl, P::wasmI64Rotl, wasmI64Rotl, 5);
   defineInternMethod(
       B::HermesBuiltin_wasmI64Rotr, P::wasmI64Rotr, wasmI64Rotr, 5);
+  defineInternMethod(B::HermesBuiltin_wasmI64Clz, P::wasmI64Clz, wasmI64Clz, 2);
+  defineInternMethod(B::HermesBuiltin_wasmI64Ctz, P::wasmI64Ctz, wasmI64Ctz, 2);
   defineInternMethod(
-      B::HermesBuiltin_wasmI64Clz, P::wasmI64Clz, wasmI64Clz, 2);
-  defineInternMethod(
-      B::HermesBuiltin_wasmI64Ctz, P::wasmI64Ctz, wasmI64Ctz, 2);
-  defineInternMethod(
-      B::HermesBuiltin_wasmI64Popcnt,
-      P::wasmI64Popcnt,
-      wasmI64Popcnt,
-      2);
+      B::HermesBuiltin_wasmI64Popcnt, P::wasmI64Popcnt, wasmI64Popcnt, 2);
   // i64 conversion helpers (G.4b).
   defineInternMethod(
       B::HermesBuiltin_wasmI64TruncF64S,
@@ -3790,10 +3789,7 @@ void createHermesBuiltins(Runtime &runtime) {
       2);
   // Memory helpers (H.2).
   defineInternMethod(
-      B::HermesBuiltin_wasmMemoryGrow,
-      P::wasmMemoryGrow,
-      wasmMemoryGrow,
-      3);
+      B::HermesBuiltin_wasmMemoryGrow, P::wasmMemoryGrow, wasmMemoryGrow, 3);
 
   // Table helpers (J.2).
   defineInternMethod(
@@ -3816,25 +3812,13 @@ void createHermesBuiltins(Runtime &runtime) {
 
   // Bulk memory helpers (N.1).
   defineInternMethod(
-      B::HermesBuiltin_wasmMemoryFill,
-      P::wasmMemoryFill,
-      wasmMemoryFill,
-      4);
+      B::HermesBuiltin_wasmMemoryFill, P::wasmMemoryFill, wasmMemoryFill, 4);
   defineInternMethod(
-      B::HermesBuiltin_wasmMemoryCopy,
-      P::wasmMemoryCopy,
-      wasmMemoryCopy,
-      4);
+      B::HermesBuiltin_wasmMemoryCopy, P::wasmMemoryCopy, wasmMemoryCopy, 4);
   defineInternMethod(
-      B::HermesBuiltin_wasmMemoryInit,
-      P::wasmMemoryInit,
-      wasmMemoryInit,
-      6);
+      B::HermesBuiltin_wasmMemoryInit, P::wasmMemoryInit, wasmMemoryInit, 6);
   defineInternMethod(
-      B::HermesBuiltin_wasmDataDrop,
-      P::wasmDataDrop,
-      wasmDataDrop,
-      2);
+      B::HermesBuiltin_wasmDataDrop, P::wasmDataDrop, wasmDataDrop, 2);
   defineInternMethod(
       B::HermesBuiltin_wasmDataSegmentInit,
       P::wasmDataSegmentInit,
@@ -3843,15 +3827,9 @@ void createHermesBuiltins(Runtime &runtime) {
 
   // BigInt ↔ i64 conversion helpers.
   defineInternMethod(
-      B::HermesBuiltin_wasmBigIntToI64,
-      P::wasmBigIntToI64,
-      wasmBigIntToI64,
-      2);
+      B::HermesBuiltin_wasmBigIntToI64, P::wasmBigIntToI64, wasmBigIntToI64, 2);
   defineInternMethod(
-      B::HermesBuiltin_wasmI64ToBigInt,
-      P::wasmI64ToBigInt,
-      wasmI64ToBigInt,
-      2);
+      B::HermesBuiltin_wasmI64ToBigInt, P::wasmI64ToBigInt, wasmI64ToBigInt, 2);
 
   // The table slot accessors.
   defineInternMethod(
@@ -3872,71 +3850,53 @@ void createHermesBuiltins(Runtime &runtime) {
 
   // Bulk table helpers (N.2).
   defineInternMethod(
-      B::HermesBuiltin_wasmTableFill,
-      P::wasmTableFill,
-      wasmTableFill,
-      7);
+      B::HermesBuiltin_wasmTableFill, P::wasmTableFill, wasmTableFill, 7);
   defineInternMethod(
-      B::HermesBuiltin_wasmTableInit,
-      P::wasmTableInit,
-      wasmTableInit,
-      8);
+      B::HermesBuiltin_wasmTableInit, P::wasmTableInit, wasmTableInit, 8);
   defineInternMethod(
-      B::HermesBuiltin_wasmElemDrop,
-      P::wasmElemDrop,
-      wasmElemDrop,
-      2);
+      B::HermesBuiltin_wasmElemDrop, P::wasmElemDrop, wasmElemDrop, 2);
   defineInternMethod(
-      B::HermesBuiltin_wasmTableGrow,
-      P::wasmTableGrow,
-      wasmTableGrow,
-      8);
+      B::HermesBuiltin_wasmTableGrow, P::wasmTableGrow, wasmTableGrow, 8);
   defineInternMethod(
-      B::HermesBuiltin_wasmLinkError,
-      P::wasmLinkError,
-      wasmLinkError,
-      1);
+      B::HermesBuiltin_wasmLinkError, P::wasmLinkError, wasmLinkError, 1);
 
   defineInternMethod(
-      B::HermesBuiltin_wasmInternType,
-      P::wasmInternType,
-      wasmInternType,
-      1);
+      B::HermesBuiltin_wasmInternType, P::wasmInternType, wasmInternType, 1);
   defineInternMethod(
       B::HermesBuiltin_wasmCheckTableArrays,
       P::wasmCheckTableArrays,
       wasmCheckTableArrays,
       3);
   defineInternMethod(
-      B::HermesBuiltin_wasmLinkTable,
-      P::wasmLinkTable,
-      wasmLinkTable,
-      2);
+      B::HermesBuiltin_wasmLinkTable, P::wasmLinkTable, wasmLinkTable, 2);
   defineInternMethod(
-      B::HermesBuiltin_wasmLinkMemory,
-      P::wasmLinkMemory,
-      wasmLinkMemory,
-      1);
+      B::HermesBuiltin_wasmLinkMemory, P::wasmLinkMemory, wasmLinkMemory, 1);
   defineInternMethod(
-      B::HermesBuiltin_wasmLinkGlobal,
-      P::wasmLinkGlobal,
-      wasmLinkGlobal,
-      3);
+      B::HermesBuiltin_wasmLinkGlobal, P::wasmLinkGlobal, wasmLinkGlobal, 3);
   defineInternMethod(
-      B::HermesBuiltin_wasmGlobalGet,
-      P::wasmGlobalGet,
-      wasmGlobalGet,
-      1);
+      B::HermesBuiltin_wasmGlobalGet, P::wasmGlobalGet, wasmGlobalGet, 1);
   defineInternMethod(
-      B::HermesBuiltin_wasmGlobalSet,
-      P::wasmGlobalSet,
-      wasmGlobalSet,
-      2);
+      B::HermesBuiltin_wasmGlobalSet, P::wasmGlobalSet, wasmGlobalSet, 2);
   defineInternMethod(
-      B::HermesBuiltin_wasmSetFuncInfo,
-      P::wasmSetFuncInfo,
-      wasmSetFuncInfo,
-      3);
+      B::HermesBuiltin_wasmSetFuncInfo, P::wasmSetFuncInfo, wasmSetFuncInfo, 3);
+#else
+  // Without Wasm the bodies above are not compiled and the names are not even
+  // predefined strings, but Builtins.def numbering stays independent of
+  // HERMES_ENABLE_WASM -- builtin ids are encoded as CallBuiltin operands in
+  // bytecode -- so every wasm id must still resolve to something.
+  //
+  // It need not resolve to 71 different somethings, and none of them needs a
+  // name: these are private builtins, so they are not properties of any object
+  // and nothing looks them up by name (assertBuiltinsUnmodified walks only the
+  // public builtins). The ids are the last contiguous run of private builtins,
+  // so one loop over that range registers them all against the shared body.
+  for (unsigned i = B::HermesBuiltin_wasmTrap;
+       i <= B::HermesBuiltin_wasmSetFuncInfo;
+       ++i) {
+    defineInternMethod(
+        static_cast<B::Enum>(i), P::emptyString, wasmDisabled, 0);
+  }
+#endif // HERMES_ENABLE_WASM
 }
 
 } // namespace vm
