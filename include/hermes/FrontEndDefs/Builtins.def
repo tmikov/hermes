@@ -57,6 +57,13 @@
 #ifndef PRIVATE_BUILTIN
 #define PRIVATE_BUILTIN(name)
 #endif
+/// A private builtin that exists only to serve Wasm. It is spelled differently
+/// only so a consumer can treat the 71 of them as a group; by default it IS a
+/// PRIVATE_BUILTIN, and the ids it produces are identical either way, so this
+/// spelling does not touch the bytecode ABI.
+#ifndef WASM_BUILTIN
+#define WASM_BUILTIN(name) PRIVATE_BUILTIN(name)
+#endif
 #ifndef MARK_FIRST_PRIVATE_BUILTIN
 #define MARK_FIRST_PRIVATE_BUILTIN(name)
 #endif
@@ -176,96 +183,96 @@ PRIVATE_BUILTIN(fastArraySlice)
 
 // Wasm helper builtins. Called by Wasm-generated IR for operations that have
 // no direct JS/asm.js equivalent.
-PRIVATE_BUILTIN(wasmTrap)
-PRIVATE_BUILTIN(wasmI32DivS)
-PRIVATE_BUILTIN(wasmI32DivU)
-PRIVATE_BUILTIN(wasmI32RemS)
-PRIVATE_BUILTIN(wasmI32RemU)
-PRIVATE_BUILTIN(wasmI32Clz)
-PRIVATE_BUILTIN(wasmI32Ctz)
-PRIVATE_BUILTIN(wasmI32Popcnt)
-PRIVATE_BUILTIN(wasmI32Rotl)
-PRIVATE_BUILTIN(wasmI32Rotr)
-PRIVATE_BUILTIN(wasmI32TruncF64S)
-PRIVATE_BUILTIN(wasmI32TruncF64U)
-PRIVATE_BUILTIN(wasmI32TruncSatF64S)
-PRIVATE_BUILTIN(wasmI32TruncSatF64U)
-PRIVATE_BUILTIN(wasmI32ReinterpretF32)
-PRIVATE_BUILTIN(wasmF32ReinterpretI32)
-PRIVATE_BUILTIN(wasmF64Copysign)
-PRIVATE_BUILTIN(wasmF32Copysign)
-PRIVATE_BUILTIN(wasmNearest)
+WASM_BUILTIN(wasmTrap)
+WASM_BUILTIN(wasmI32DivS)
+WASM_BUILTIN(wasmI32DivU)
+WASM_BUILTIN(wasmI32RemS)
+WASM_BUILTIN(wasmI32RemU)
+WASM_BUILTIN(wasmI32Clz)
+WASM_BUILTIN(wasmI32Ctz)
+WASM_BUILTIN(wasmI32Popcnt)
+WASM_BUILTIN(wasmI32Rotl)
+WASM_BUILTIN(wasmI32Rotr)
+WASM_BUILTIN(wasmI32TruncF64S)
+WASM_BUILTIN(wasmI32TruncF64U)
+WASM_BUILTIN(wasmI32TruncSatF64S)
+WASM_BUILTIN(wasmI32TruncSatF64U)
+WASM_BUILTIN(wasmI32ReinterpretF32)
+WASM_BUILTIN(wasmF32ReinterpretI32)
+WASM_BUILTIN(wasmF64Copysign)
+WASM_BUILTIN(wasmF32Copysign)
+WASM_BUILTIN(wasmNearest)
 // i64 binary arithmetic helpers. Take (retBufI, lo_a, hi_a, lo_b, hi_b),
 // write lo/hi result to retBufI[0]/[1], return 0.
-PRIVATE_BUILTIN(wasmI64Add)
-PRIVATE_BUILTIN(wasmI64Sub)
-PRIVATE_BUILTIN(wasmI64Mul)
-PRIVATE_BUILTIN(wasmI64DivS)
-PRIVATE_BUILTIN(wasmI64DivU)
-PRIVATE_BUILTIN(wasmI64RemS)
-PRIVATE_BUILTIN(wasmI64RemU)
-PRIVATE_BUILTIN(wasmI64Shl)
-PRIVATE_BUILTIN(wasmI64ShrS)
-PRIVATE_BUILTIN(wasmI64ShrU)
-PRIVATE_BUILTIN(wasmI64Rotl)
-PRIVATE_BUILTIN(wasmI64Rotr)
+WASM_BUILTIN(wasmI64Add)
+WASM_BUILTIN(wasmI64Sub)
+WASM_BUILTIN(wasmI64Mul)
+WASM_BUILTIN(wasmI64DivS)
+WASM_BUILTIN(wasmI64DivU)
+WASM_BUILTIN(wasmI64RemS)
+WASM_BUILTIN(wasmI64RemU)
+WASM_BUILTIN(wasmI64Shl)
+WASM_BUILTIN(wasmI64ShrS)
+WASM_BUILTIN(wasmI64ShrU)
+WASM_BUILTIN(wasmI64Rotl)
+WASM_BUILTIN(wasmI64Rotr)
 // i64 unary helpers (return single i32 result, not split i64).
-PRIVATE_BUILTIN(wasmI64Clz)
-PRIVATE_BUILTIN(wasmI64Ctz)
-PRIVATE_BUILTIN(wasmI64Popcnt)
+WASM_BUILTIN(wasmI64Clz)
+WASM_BUILTIN(wasmI64Ctz)
+WASM_BUILTIN(wasmI64Popcnt)
 // i64 conversion helpers (G.4b). Take (retBufI, f64_arg), write lo/hi result
 // to retBufI[0]/[1], return 0.
-PRIVATE_BUILTIN(wasmI64TruncF64S)
-PRIVATE_BUILTIN(wasmI64TruncF64U)
-PRIVATE_BUILTIN(wasmI64TruncSatF64S)
-PRIVATE_BUILTIN(wasmI64TruncSatF64U)
+WASM_BUILTIN(wasmI64TruncF64S)
+WASM_BUILTIN(wasmI64TruncF64U)
+WASM_BUILTIN(wasmI64TruncSatF64S)
+WASM_BUILTIN(wasmI64TruncSatF64U)
 // i64 conversion helpers (G.4c). i64→float conversions take split lo/hi args
 // and return a single f64. Reinterpret takes/returns similarly.
-PRIVATE_BUILTIN(wasmF64ConvertI64S)
-PRIVATE_BUILTIN(wasmF64ConvertI64U)
-PRIVATE_BUILTIN(wasmF32ConvertI64S)
-PRIVATE_BUILTIN(wasmF32ConvertI64U)
-PRIVATE_BUILTIN(wasmI64ReinterpretF64)
-PRIVATE_BUILTIN(wasmF64ReinterpretI64)
+WASM_BUILTIN(wasmF64ConvertI64S)
+WASM_BUILTIN(wasmF64ConvertI64U)
+WASM_BUILTIN(wasmF32ConvertI64S)
+WASM_BUILTIN(wasmF32ConvertI64U)
+WASM_BUILTIN(wasmI64ReinterpretF64)
+WASM_BUILTIN(wasmF64ReinterpretI64)
 
 // memory.grow helper (H.2). Takes (heapu8View, delta, maxPages).
 // Returns new ArrayBuffer on success, or -1 on failure.
-PRIVATE_BUILTIN(wasmMemoryGrow)
+WASM_BUILTIN(wasmMemoryGrow)
 
 // call_indirect helper (J.2). Takes (funcsArr, typesArr, index, expectedTypeIdx).
 // Validates bounds, null, and type. Returns the closure on success, traps on
 // failure.
-PRIVATE_BUILTIN(wasmCallIndirect)
+WASM_BUILTIN(wasmCallIndirect)
 
 // Exception handling (L.1).
 // wasmCreateException(tagIndex, v0, v1, ...): creates a Wasm exception object
 // with the given tag index and payload values.
-PRIVATE_BUILTIN(wasmCreateException)
+WASM_BUILTIN(wasmCreateException)
 // wasmMatchException(caught, tagIndex): if caught is a Wasm exception with
 // matching tag, returns the payload values array; otherwise returns undefined.
-PRIVATE_BUILTIN(wasmMatchException)
+WASM_BUILTIN(wasmMatchException)
 
 // Bulk memory operations (N.1).
 // wasmMemoryFill(heapu8, dest, value, size): fill memory with a byte value.
-PRIVATE_BUILTIN(wasmMemoryFill)
+WASM_BUILTIN(wasmMemoryFill)
 // wasmMemoryCopy(heapu8, dest, src, size): copy within linear memory.
-PRIVATE_BUILTIN(wasmMemoryCopy)
+WASM_BUILTIN(wasmMemoryCopy)
 // wasmMemoryInit(heapu8, dataSegs, segIdx, dest, src, size): copy from data
 // segment into linear memory.
-PRIVATE_BUILTIN(wasmMemoryInit)
+WASM_BUILTIN(wasmMemoryInit)
 // wasmDataDrop(dataSegs, segIdx): mark a data segment as dropped.
-PRIVATE_BUILTIN(wasmDataDrop)
+WASM_BUILTIN(wasmDataDrop)
 
 // wasmDataSegmentInit(heapu8, blobOffset, length, dest): bulk-copy from
 // binary data storage into linear memory.
-PRIVATE_BUILTIN(wasmDataSegmentInit)
+WASM_BUILTIN(wasmDataSegmentInit)
 
 // BigInt ↔ i64 conversion helpers for export/import wrappers.
 // wasmBigIntToI64(retBufI, bigint): extracts i64 from BigInt, writes lo/hi
 // to retBufI[0]/[1], returns 0.
-PRIVATE_BUILTIN(wasmBigIntToI64)
+WASM_BUILTIN(wasmBigIntToI64)
 // wasmI64ToBigInt(lo, hi): converts split lo/hi to BigInt.
-PRIVATE_BUILTIN(wasmI64ToBigInt)
+WASM_BUILTIN(wasmI64ToBigInt)
 
 // A table slot is a triple -- the internal closure, its interned type id and
 // the Exported Function wrapping both -- spread over three parallel arrays.
@@ -277,42 +284,42 @@ PRIVATE_BUILTIN(wasmI64ToBigInt)
 // null. Not a plain property read: the array comes from a table import, so
 // script chooses it, and an accessor at an index would otherwise run user JS
 // inside a Wasm function body.
-PRIVATE_BUILTIN(wasmTableGetSlot)
+WASM_BUILTIN(wasmTableGetSlot)
 // wasmTableSetSlot(funcsArr, typesArr, exportedArr, idx, exportedFnOrNull):
 // write one slot. The closure and type id are derived from the Exported
 // Function's internal properties, so they cannot disagree with it; a value
 // that is neither null nor an Exported Function is a TypeError. A refused
 // write (a frozen array) is an error, not a silent no-op, and the type id is
 // cleared first so a failure part-way leaves the slot uncallable.
-PRIVATE_BUILTIN(wasmTableSetSlot)
+WASM_BUILTIN(wasmTableSetSlot)
 // wasmTableCopySlots(dstFuncs, dstTypes, dstExported, srcFuncs, srcTypes,
 // srcExported, dst, src, count): copy a range of slots across all three
 // arrays, handling overlap.
-PRIVATE_BUILTIN(wasmTableCopySlots)
+WASM_BUILTIN(wasmTableCopySlots)
 
 // Bulk table operations (N.2). All of these write slots through
 // wasmTableSetSlot's implementation.
 // wasmTableFill(funcsArr, typesArr, exportedArr, idx, val, count): fill table
 // entries with val.
-PRIVATE_BUILTIN(wasmTableFill)
+WASM_BUILTIN(wasmTableFill)
 // wasmTableInit(funcsArr, typesArr, exportedArr, elemSegs, segIdx, dst, src,
 // count): copy from element segment into a table.
-PRIVATE_BUILTIN(wasmTableInit)
+WASM_BUILTIN(wasmTableInit)
 // wasmElemDrop(elemSegs, segIdx): mark an element segment as dropped.
-PRIVATE_BUILTIN(wasmElemDrop)
+WASM_BUILTIN(wasmElemDrop)
 // wasmTableGrow(funcsArr, typesArr, exportedArr, delta, fillVal, maxEntries,
 // actualMax): grow table by delta entries, filling with fillVal. Returns old
 // size on success, -1 on failure.
-PRIVATE_BUILTIN(wasmTableGrow)
+WASM_BUILTIN(wasmTableGrow)
 
 // Import type validation (Category 4).
 // wasmLinkError(message): creates and throws a WebAssembly.LinkError with the
 // given message string. Used by Wasm-generated IR during instantiation.
-PRIVATE_BUILTIN(wasmLinkError)
+WASM_BUILTIN(wasmLinkError)
 // wasmInternType(typeString): map a structural Wasm function-type string to a
 // process-wide stable integer id, so call_indirect can compare type identity
 // across modules with a plain integer compare.
-PRIVATE_BUILTIN(wasmInternType)
+WASM_BUILTIN(wasmInternType)
 // wasmCheckTableArrays(funcsArr, typesArr, exportedArr): raise a LinkError
 // unless all three are genuine JSArrays. Called once per table at
 // instantiation so that the hot call_indirect path can cast them without
@@ -320,7 +327,7 @@ PRIVATE_BUILTIN(wasmInternType)
 // from globalThis.Array, which script can replace. A funcref table's arrays
 // are the internal fields of a genuine WebAssembly.Table, which wasmLinkTable
 // establishes.
-PRIVATE_BUILTIN(wasmCheckTableArrays)
+WASM_BUILTIN(wasmCheckTableArrays)
 // wasmLinkTable(importVal, declaredIsFuncRef): the brand check that replaced
 // the __wasm_funcs__/__wasm_types__/__wasm_exported__ publications. Returns
 // the table's three backing arrays and its own maximum as
@@ -330,7 +337,7 @@ PRIVATE_BUILTIN(wasmCheckTableArrays)
 // element type, which no constructible table can satisfy.
 // The arrays are the table's internal fields themselves, NOT copies: two
 // modules importing one table must write the same slots.
-PRIVATE_BUILTIN(wasmLinkTable)
+WASM_BUILTIN(wasmLinkTable)
 // wasmLinkMemory(importVal): the brand check that replaced the
 // __wasm_type__/__wasm_min__/__wasm_max__ publication on a memory. Returns
 // [currentPages, max, buffer], or null if `importVal` is not a genuine
@@ -339,7 +346,7 @@ PRIVATE_BUILTIN(wasmLinkTable)
 // every grow; max is -1 when the memory declared none; the buffer is returned
 // so that the views the module builds are over the very buffer whose size was
 // validated.
-PRIVATE_BUILTIN(wasmLinkMemory)
+WASM_BUILTIN(wasmLinkMemory)
 // wasmLinkGlobal(importVal, expectedValType, expectedMutable): the brand
 // check that replaced the __wasm_type__ publication on a global. Returns the
 // global's value (a Number, or a BigInt for i64), or undefined if it is a
@@ -347,7 +354,7 @@ PRIVATE_BUILTIN(wasmLinkMemory)
 // WebAssembly.Global at all -- three outcomes because they need three
 // different diagnostics. expectedValType is a JSWebAssemblyGlobal::ValType,
 // or 0xFF for a Wasm type no Global can have.
-PRIVATE_BUILTIN(wasmLinkGlobal)
+WASM_BUILTIN(wasmLinkGlobal)
 // wasmGlobalGet(globalObj) / wasmGlobalSet(globalObj, value): the shared
 // state of an imported MUTABLE global, read and written where `.value` used
 // to be. A mutable import is not snapshotted -- the module and the host must
@@ -357,15 +364,15 @@ PRIVATE_BUILTIN(wasmLinkGlobal)
 // feed the module any value it liked and swallow every write the module made.
 // These reach the same internal field the accessor does, past a dyn_vmcast,
 // so the sharing survives and the interposition does not.
-PRIVATE_BUILTIN(wasmGlobalGet)
-PRIVATE_BUILTIN(wasmGlobalSet)
+WASM_BUILTIN(wasmGlobalGet)
+WASM_BUILTIN(wasmGlobalSet)
 // wasmSetFuncInfo(exportedFn, closure, typeId): stamp the two internal
 // properties that make `exportedFn` a WebAssembly Exported Function -- the
 // internal closure it wraps and the interned id of its signature. Script
 // cannot name either property, so the pair is unforgeable BY SCRIPT. (A
 // PRIVATE_BUILTIN is reachable from any bytecode emitting a CallBuiltin with
 // its index, so wasmSetFuncInfo type-checks its arguments.)
-PRIVATE_BUILTIN(wasmSetFuncInfo)
+WASM_BUILTIN(wasmSetFuncInfo)
 
 JS_BUILTIN(spawnAsync)
 MARK_FIRST_JS_BUILTIN(spawnAsync)
@@ -377,6 +384,7 @@ JS_BUILTIN(awaitAsyncGenerator)
 #undef BUILTIN_OBJECT
 #undef BUILTIN_METHOD
 #undef PRIVATE_BUILTIN
+#undef WASM_BUILTIN
 #undef MARK_FIRST_PRIVATE_BUILTIN
 #undef JS_BUILTIN
 #undef MARK_FIRST_JS_BUILTIN
