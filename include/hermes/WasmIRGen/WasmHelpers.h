@@ -355,6 +355,16 @@ class WasmHelpers {
   Instruction *emitGlobalGet(Value *globalObj);
   Instruction *emitGlobalSet(Value *globalObj, Value *value);
 
+  /// Emit the wasmMakeGlobal builtin call that builds the WebAssembly.Global
+  /// published for an exported global. \p valueOrGetter is the getter closure
+  /// for a live global and the snapshot value otherwise; \p setterOrUndefined
+  /// is the setter closure for a live mutable global and undefined otherwise.
+  Instruction *emitMakeGlobal(
+      Value *valTypeCode,
+      Value *isMutable,
+      Value *valueOrGetter,
+      Value *setterOrUndefined);
+
   /// Emit wasmDataSegmentInit: bulk-copy from binary data storage blob
   /// into linear memory. Args: (heapu8, blobOffset, length, dest).
   Instruction *emitDataSegmentInit(

@@ -2047,27 +2047,17 @@ bool WasmIRGen::finalizeModule() {
   // wasmLinkGlobal. (They used to be published as a __wasm_type__ string on
   // the wrapper, which is what the importer compared; that publication is
   // gone and a WebAssembly.Global has no own properties at all.)
-  // The value is a snapshot at init time; mutable globals won't reflect
-  // later mutations (that would require live wiring, a separate change).
-
-  // Load WebAssembly.Global constructor once if there are global exports.
-  Value *wasmGlobalCtor = nullptr;
-  // An imported mutable global is re-exported as the object it was imported
-  // as, so it does not need the constructor.
-  bool hasGlobalExports = std::any_of(
-      moduleInfo_.exports.begin(),
-      moduleInfo_.exports.end(),
-      [this](const WasmExport &e) {
-        return e.kind == WasmExternalKind::Global &&
-            !importedMutableGlobals_.count(e.index);
-      });
-  if (hasGlobalExports) {
-    auto *wasmObj =
-        builder_.createTryLoadGlobalPropertyInst("WebAssembly");
-    wasmGlobalCtor = builder_.createLoadPropertyInst(
-        wasmObj, builder_.getLiteralString("Global"));
-  }
-
+  //
+  // A MUTABLE global this module defines is published LIVE: the Global is
+  // backed by getter/setter closures over the module's own frame slot, so
+  // the slot is the single source of truth and writes are visible in both
+  // directions. An immutable one is still a snapshot, which is exact,
+  // because its value cannot change.
+  //
+  // The object is built by the wasmMakeGlobal builtin rather than by reading
+  // globalThis.WebAssembly.Global: that read let script replace the
+  // constructor and decide what a module's exported globals were. The memory
+  // and table export paths already refused that.
   for (const auto &exp : moduleInfo_.exports) {
     if (exp.kind != WasmExternalKind::Global)
       continue;
@@ -2088,9 +2078,6 @@ bool WasmIRGen::finalizeModule() {
       continue;
     }
 
-    uint32_t slotIdx = globalSlotIndex_[exp.index];
-    auto *val = builder_.createLoadFrameInst(tlScope, globalVars_[slotIdx]);
-
     // Determine the global's type and mutability.
     uint32_t numImportedGlobals = moduleInfo_.importedGlobalCount();
     WasmGlobalType gType{WasmValType::I32, false};
@@ -2109,50 +2096,49 @@ bool WasmIRGen::finalizeModule() {
       gType = moduleInfo_.globals[exp.index - numImportedGlobals].type;
     }
 
-    // The value for the Global constructor. An i64 global is stored as a
-    // split lo/hi pair, so recombine it into a BigInt: passing the lo32 half
-    // alone silently discards the upper word, and WebAssembly.Global now
-    // stores i64 exactly and exposes it as a BigInt, per spec.
-    Value *rawValue = val;
-    if (gType.type == WasmValType::I64) {
-      auto *hi =
-          builder_.createLoadFrameInst(tlScope, globalVars_[slotIdx + 1]);
-      rawValue = helpers_.emitI64ToBigInt(val, hi);
+    // Only a MUTABLE global this module DEFINES is published live. An
+    // immutable one cannot go stale, and an imported mutable one is
+    // re-exported as the object it arrived as, above.
+    bool live = gType.mutable_ && exp.index >= numImportedGlobals;
+
+    Value *valueOrGetter = nullptr;
+    Value *setterOrUndefined = builder_.getLiteralUndefined();
+    if (live) {
+      auto *getterFn = createGlobalAccessor(exp.index, false, tlScope);
+      auto *setterFn = createGlobalAccessor(exp.index, true, tlScope);
+      // createGlobalAccessor emits into its own function; restore the
+      // insertion point before continuing to build the instantiate body.
+      // tlEntry_ must still be unterminated: it names the block the
+      // instantiate body continues in, and createGlobalAccessor does not
+      // touch it.
+      assert(
+          !tlEntry_->getTerminator() &&
+          "tlEntry_ must name an unterminated block: helpers that split "
+          "the instantiate body must leave it pointing at the block "
+          "emission continues in");
+      builder_.setInsertionBlock(tlEntry_);
+      valueOrGetter = builder_.createCreateFunctionInst(tlScope, getterFn);
+      setterOrUndefined = builder_.createCreateFunctionInst(tlScope, setterFn);
+    } else {
+      // The snapshot value. An i64 global is stored as a split lo/hi pair, so
+      // recombine it into a BigInt: passing the lo32 half alone silently
+      // discards the upper word.
+      uint32_t slotIdx = globalSlotIndex_[exp.index];
+      valueOrGetter =
+          builder_.createLoadFrameInst(tlScope, globalVars_[slotIdx]);
+      if (gType.type == WasmValType::I64) {
+        auto *hi =
+            builder_.createLoadFrameInst(tlScope, globalVars_[slotIdx + 1]);
+        valueOrGetter = helpers_.emitI64ToBigInt(valueOrGetter, hi);
+      }
     }
 
-    // Build the type descriptor string for the Global constructor.
-    const char *typeName;
-    switch (gType.type) {
-      case WasmValType::I32:
-        typeName = "i32";
-        break;
-      case WasmValType::I64:
-        typeName = "i64";
-        break;
-      case WasmValType::F32:
-        typeName = "f32";
-        break;
-      case WasmValType::F64:
-        typeName = "f64";
-        break;
-      default:
-        llvm_unreachable("unsupported global export type");
-    }
-
-    // Create descriptor: {value: "i32", mutable: false}
-    auto *descriptor = builder_.createAllocObjectLiteralInst({});
-    builder_.createStorePropertyStrictInst(
-        builder_.getLiteralString(typeName),
-        descriptor,
-        builder_.getLiteralString("value"));
-    builder_.createStorePropertyStrictInst(
+    auto *globalObj = helpers_.emitMakeGlobal(
+        builder_.getLiteralNumber(
+            static_cast<double>(globalValTypeCode(gType.type))),
         builder_.getLiteralBool(gType.mutable_),
-        descriptor,
-        builder_.getLiteralString("mutable"));
-
-    // Construct: new WebAssembly.Global(descriptor, rawValue)
-    auto *globalObj = emitNew(wasmGlobalCtor, {descriptor, rawValue});
-
+        valueOrGetter,
+        setterOrUndefined);
     builder_.createStorePropertyStrictInst(
         globalObj, exportsObj, builder_.getLiteralString(exp.name));
   }
@@ -2348,6 +2334,97 @@ std::string WasmIRGen::exportWrapperName(uint32_t funcIndex) const {
     if (exp.kind == WasmExternalKind::Function && exp.index == funcIndex)
       return ("wasm_export_" + exp.name);
   return ("wasm_funcref_" + llvh::Twine(funcIndex)).str();
+}
+
+Function *WasmIRGen::createGlobalAccessor(
+    uint32_t globalIndex,
+    bool isSetter,
+    Instruction *tlScope) {
+  uint32_t numImportedGlobals = moduleInfo_.importedGlobalCount();
+  assert(
+      globalIndex >= numImportedGlobals &&
+      "only a global this module defines gets accessors");
+  const WasmGlobalType &gType =
+      moduleInfo_.globals[globalIndex - numImportedGlobals].type;
+  uint32_t slotIdx = globalSlotIndex_[globalIndex];
+
+  auto *fn = builder_.createFunction(
+      ("wasm_global_" + llvh::Twine(globalIndex) + (isSetter ? "_set" : "_get"))
+          .str(),
+      Function::DefinitionKind::ES5Function,
+      true /* strictMode */);
+  builder_.createJSThisParam(fn);
+  if (isSetter)
+    builder_.createJSDynamicParam(fn, "v");
+  fn->setExpectedParamCountIncludingThis(isSetter ? 2 : 1);
+
+  auto *entryBB = builder_.createBasicBlock(fn);
+  builder_.setInsertionBlock(entryBB);
+  auto *parentScope =
+      builder_.createGetParentScopeInst(topLevelVS_, fn->getParentScopeParam());
+
+  if (!isSetter) {
+    auto *lo = builder_.createLoadFrameInst(parentScope, globalVars_[slotIdx]);
+    if (gType.type == WasmValType::I64) {
+      // An i64 global is stored as a lo/hi pair; JS sees a BigInt. This is
+      // the same assembly the export path used to do inline.
+      auto *hi =
+          builder_.createLoadFrameInst(parentScope, globalVars_[slotIdx + 1]);
+      builder_.createReturnInst(helpers_.emitI64ToBigInt(lo, hi));
+    } else {
+      builder_.createReturnInst(lo);
+    }
+    return fn;
+  }
+
+  // Index 0 is `this`; the first declared parameter is 1 (IR.h:1866, and
+  // createExportWrapper uses `1 + i` for the same reason). Reading 0 here
+  // would silently store the `this` the native callers pass -- undefined --
+  // instead of the value.
+  auto *param = builder_.createLoadParamInst(fn->getJSDynamicParam(1));
+  if (gType.type == WasmValType::I64) {
+    // The caller has already refused a non-BigInt. emitBigIntToI64 writes the
+    // shared retBuf scratch view and this reads it back with nothing in
+    // between that can run JS, so the buffer cannot be clobbered mid-use --
+    // the same straight-line pattern initializeGlobals already relies on.
+    // retBufIVar_ is always non-null: createFunctions() allocates it for
+    // every module with an 8-byte minimum, precisely because a body may do
+    // i64 arithmetic even when no signature mentions i64, so no guard is
+    // needed here.
+    auto *rbI = builder_.createLoadFrameInst(parentScope, retBufIVar_);
+    helpers_.emitBigIntToI64(rbI, param);
+    builder_.createStoreFrameInst(
+        parentScope,
+        builder_.createAsInt32Inst(
+            builder_.createLoadPropertyInst(rbI, builder_.getLiteralNumber(0))),
+        globalVars_[slotIdx]);
+    builder_.createStoreFrameInst(
+        parentScope,
+        builder_.createAsInt32Inst(
+            builder_.createLoadPropertyInst(rbI, builder_.getLiteralNumber(1))),
+        globalVars_[slotIdx + 1]);
+  } else {
+    // The caller has already run ToNumber. Narrow to the declared Wasm type
+    // with AsInt32Inst for i32, emitFround for f32, and AsNumberInst for
+    // f64, matching coerceImportedGlobalValue. NOT the module's own
+    // global.set, which narrows nothing because the value it stores is
+    // already typed. The f64 AsNumberInst is free here -- the setter has
+    // already run ToNumber, so it never converts anything -- but it is what
+    // keeps the Variable typed as `number` instead of widening to `any`;
+    // without it, type inference joins this LoadParamInst (:any) with the
+    // module's own number-typed stores and every in-module global.get grows
+    // an AsNumberInst it does not need.
+    Value *narrowed = param;
+    if (gType.type == WasmValType::I32)
+      narrowed = builder_.createAsInt32Inst(param);
+    else if (gType.type == WasmValType::F32)
+      narrowed = emitFround(builder_.createAsNumberInst(param));
+    else if (gType.type == WasmValType::F64)
+      narrowed = builder_.createAsNumberInst(param);
+    builder_.createStoreFrameInst(parentScope, narrowed, globalVars_[slotIdx]);
+  }
+  builder_.createReturnInst(builder_.getLiteralUndefined());
+  return fn;
 }
 
 Function *WasmIRGen::createExportWrapper(
@@ -7555,6 +7632,38 @@ void WasmIRGen::initializeGlobals(Instruction *tlScope) {
       ++importGlobalIdx;
     }
 
+    if (importedMutableGlobals_.count(i)) {
+      // A mutable import's frame slot is never read as a snapshot: Wasm
+      // validation refuses a mutable global.get throughout
+      // constant-expression context, and every other reader
+      // (global.get/global.set, the export loop) takes the object path
+      // first. So this is not a value anyone reads; it exists only to give
+      // the slot's Variable a definition. Without a store here the Variable
+      // has zero StoreFrameInsts, and an invalid module that still manages
+      // to read the slot (see below) turns the load into a PhiInst with no
+      // incoming values, which fails lowered-IR verification.
+      //
+      // Storing a cheap literal, rather than the actual imported value,
+      // keeps the property that motivated skipping the snapshot in the
+      // first place: reading the real value costs an eager wasmGlobalGet
+      // per import, and once the exporting module's global is
+      // closure-backed, that call would run the EXPORTER's getter inside
+      // the IMPORTER's instantiation, for a value nothing needs.
+      //
+      // "No valid module": hermesc --wasm does not validate (01a0460b-1ea9),
+      // so an invalid AOT input can still reach a constant expression that
+      // reads this slot. It will read this placeholder literal rather than
+      // either a snapshot or the live value; that is invalid-input
+      // behavior, not a correctness guarantee being dropped.
+      builder_.createStoreFrameInst(
+          tlScope, builder_.getLiteralNumber(0), globalVars_[slotIdx]);
+      if (gType == WasmValType::I64) {
+        builder_.createStoreFrameInst(
+            tlScope, builder_.getLiteralNumber(0), globalVars_[slotIdx + 1]);
+      }
+      continue;
+    }
+
     // The import was already resolved during import validation, under the
     // brand check performed there. Asking the supplied object again here --
     // whether by re-running the check or by reading anything off it -- would
@@ -7562,35 +7671,11 @@ void WasmIRGen::initializeGlobals(Instruction *tlScope) {
     Value *resolvedVal = builder_.createLoadFrameInst(
         tlScope, importGlobalVals_[i]);
 
-    // A mutable import resolves to the WebAssembly.Global object, which
-    // global.get/global.set read and write directly. The frame slots below
-    // therefore only hold a link-time snapshot of it, for the constant
-    // expressions (data/element offsets, defined-global initializers) that
-    // read a global's slot -- and Wasm validation restricts those to
-    // immutable imported globals anyway.
-    //
-    // Through the builtin, not through `.value`: that accessor is
-    // configurable, so taking the snapshot as a property read ran user JS
-    // inside instantiation -- once per mutable global import -- and let it
-    // choose the value every constant expression would then see.
-    if (importedMutableGlobals_.count(i)) {
-      resolvedVal = helpers_.emitGlobalGet(resolvedVal);
-    }
-
     // Coerce to the declared Wasm type. i64 is left alone: it goes through
     // the BigInt lo/hi split below. This is load-bearing for an IMMUTABLE
     // import satisfied by a raw JS value -- `typeof x === 'number'` admits
-    // 3.7 and 2^32+5 -- and a NO-OP for a mutable one, whose value came out
-    // of an internal field two lines up.
-    //
-    // Narrowing it to the immutable case is a one-line `if`, not a phi split:
-    // the two kinds are decided here at compile time by
-    // importedMutableGlobals_, and a mutable import's `resolved` phi has
-    // exactly ONE entry anyway, because rawAllowed is !mutable_ so checkRawBB
-    // is never created for it. It is left unnarrowed deliberately, so that it
-    // is retired in one place together with the raw-value path it is really
-    // there for -- Task 6's J4 item. That is a scheduling choice; there is no
-    // structural obstacle.
+    // 3.7 and 2^32+5. Only immutable imports reach here: the mutable ones
+    // took the `continue` above.
     resolvedVal = coerceImportedGlobalValue(resolvedVal, gType);
 
     if (gType == WasmValType::I64) {

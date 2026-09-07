@@ -349,11 +349,14 @@ WASM_BUILTIN(wasmLinkTable)
 WASM_BUILTIN(wasmLinkMemory)
 // wasmLinkGlobal(importVal, expectedValType, expectedMutable): the brand
 // check that replaced the __wasm_type__ publication on a global. Returns the
-// global's value (a Number, or a BigInt for i64), or undefined if it is a
-// Global whose type or mutability does not match, or null if it is not a
-// WebAssembly.Global at all -- three outcomes because they need three
-// different diagnostics. expectedValType is a JSWebAssemblyGlobal::ValType,
-// or 0xFF for a Wasm type no Global can have.
+// global's value (a Number, or a BigInt for i64) for a matching snapshot
+// global, or the matched Global object itself for a matching LIVE global
+// (which has no value of its own -- its storage is another module's frame
+// slot), or undefined if it is a Global whose type or mutability does not
+// match, or null if it is not a WebAssembly.Global at all -- four outcomes
+// because they need different diagnostics or different handling by the
+// caller. expectedValType is a JSWebAssemblyGlobal::ValType, or 0xFF for a
+// Wasm type no Global can have.
 WASM_BUILTIN(wasmLinkGlobal)
 // wasmGlobalGet(globalObj) / wasmGlobalSet(globalObj, value): the shared
 // state of an imported MUTABLE global, read and written where `.value` used
@@ -373,6 +376,20 @@ WASM_BUILTIN(wasmGlobalSet)
 // PRIVATE_BUILTIN is reachable from any bytecode emitting a CallBuiltin with
 // its index, so wasmSetFuncInfo type-checks its arguments.)
 WASM_BUILTIN(wasmSetFuncInfo)
+// wasmMakeGlobal(valTypeCode, isMutable, valueOrGetter, setterOrUndefined):
+// build the WebAssembly.Global a module publishes for an exported global,
+// without going through globalThis.WebAssembly.Global -- that is an ordinary
+// property read, and replacing it let script decide what a module's exports
+// ARE. A defined memory and a defined FUNCREF table already refuse that,
+// being brand-checked at construction; the externref table export does not,
+// and is a separate defect.
+// When valueOrGetter is callable the global is LIVE: it stores no value and
+// reads and writes the module's frame slot through the two closures, so an
+// exported mutable global is a two-way view rather than a snapshot. Otherwise
+// it is a snapshot initialized to valueOrGetter, which is correct only for an
+// immutable global and is what this builtin requires.
+// valTypeCode is a JSWebAssemblyGlobal::ValType.
+WASM_BUILTIN(wasmMakeGlobal)
 
 JS_BUILTIN(spawnAsync)
 MARK_FIRST_JS_BUILTIN(spawnAsync)

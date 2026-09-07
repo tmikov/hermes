@@ -2344,19 +2344,28 @@ CallResult<HermesValue> wasmLinkMemory(void *, Runtime &runtime) {
 
 /// The link-time brand check for a global.
 /// wasmLinkGlobal(importVal, expectedValType, expectedMutable)
-///   -> the global's value, or undefined, or null.
+///   -> the matched Global object, or the global's value, or undefined, or
+///   null.
 ///
-/// Three outcomes, deliberately distinguishable, because they call for three
-/// different diagnostics and collapsing them names the one thing that was not
-/// wrong:
+/// Four outcomes, deliberately distinguishable, because they call for
+/// different diagnostics (or, for the first two, different handling by the
+/// caller) and collapsing them names the one thing that was not wrong:
 ///   - null: `importVal` is not a WebAssembly.Global at all. The caller then
 ///     decides whether a raw JS value is acceptable for this import, which
 ///     depends on the declaration and not on the value.
 ///   - undefined: it IS a Global, but its value type or its mutability does
 ///     not match the declaration.
+///   - the matched Global object itself: the type and mutability match and
+///     the global is LIVE -- it has no value of its own to return, its
+///     storage is another module's frame slot reached through its closures.
+///     A live global is always mutable, so only a mutable import can produce
+///     this outcome, and `WasmIRGen.cpp` keeps the object rather than this
+///     return value for a mutable import regardless, so the object is what
+///     the caller needed anyway.
 ///   - anything else: the global's current value -- a Number for i32/f32/f64,
 ///     a BigInt for i64. A Wasm global's value is never null or undefined, so
-///     neither sentinel is ambiguous.
+///     neither sentinel is ambiguous, and a snapshot global is never
+///     LIVE, so this outcome and the previous one cannot be confused either.
 ///
 /// This replaced a `__wasm_type__` string comparison, and a global is the one
 /// kind where that comparison was not merely weak but useless: the string was
@@ -2391,6 +2400,19 @@ CallResult<HermesValue> wasmLinkGlobal(void *, Runtime &runtime) {
           glob->isMutable() != expectedMutable))
     return HermesValue::encodeUndefinedValue();
 
+  // A live global's value is not readable here, and does not need to be: only
+  // an IMMUTABLE import consumes the value this builtin returns (see
+  // globalObjValue in WasmIRGen::finalizeModule's import loop), a live global
+  // is always mutable, and the mutability check above has already refused a
+  // mutable Global for an immutable declaration.
+  //
+  // The matched object IS the success answer -- it is neither of the two
+  // failure sentinels, so no third protocol state is introduced. The caller
+  // stores importVal for a mutable import regardless, so what is returned
+  // here is discarded on exactly the path that can produce a live global.
+  if (glob->isLive(runtime))
+    return args.getArg(0);
+
   // An i64 global's value is a BigInt, both here and in
   // Global.prototype.value: a double cannot represent every i64 exactly.
   // Nothing above this point holds a raw pointer, so the allocation is safe.
@@ -2398,6 +2420,108 @@ CallResult<HermesValue> wasmLinkGlobal(void *, Runtime &runtime) {
     return BigIntPrimitive::fromSigned(runtime, glob->getI64Value());
 
   return HermesValue::encodeTrustedNumberValue(glob->getValue());
+}
+
+/// wasmMakeGlobal(valTypeCode, isMutable, valueOrGetter, setterOrUndefined)
+///   -> a JSWebAssemblyGlobal.
+///
+/// See the note in Builtins.def for why the export path does not use the
+/// public constructor. A PRIVATE_BUILTIN is reachable from any bytecode
+/// emitting a CallBuiltin with its index, so every argument is checked here
+/// rather than asserted: the compiler's contract is not a guarantee about
+/// what reaches this function.
+CallResult<HermesValue> wasmMakeGlobal(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+
+  if (LLVM_UNLIKELY(!args.getArg(0).isNumber() || !args.getArg(1).isBool()))
+    return runtime.raiseTypeError(
+        "wasmMakeGlobal: bad type code or mutability");
+  // Range-check the DOUBLE before converting. getNumberAs<uint32_t>()
+  // asserts its argument is exactly representable and casts unchecked
+  // otherwise (HermesValue.h:430-436), so NaN, an infinity or a negative
+  // would abort a Debug build and be undefined in a release one -- and any
+  // bytecode can call a private builtin with any argument. (wasmLinkGlobal
+  // at HermesBuiltin.cpp:2387 has the same shape and predates this; worth
+  // its own fix, not this one's.)
+  double rawCode = args.getArg(0).getNumber();
+  if (LLVM_UNLIKELY(
+          !(rawCode >= 0) ||
+          rawCode > static_cast<double>(JSWebAssemblyGlobal::ValType::F64) ||
+          rawCode != std::floor(rawCode)))
+    return runtime.raiseTypeError("wasmMakeGlobal: unknown value type");
+  auto valType =
+      static_cast<JSWebAssemblyGlobal::ValType>(static_cast<uint8_t>(rawCode));
+  bool isMutable = args.getArg(1).getBool();
+
+  struct : public Locals {
+    PinnedValue<Callable> getter;
+    PinnedValue<Callable> setter;
+    PinnedValue<JSWebAssemblyGlobal> glob;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+
+  // Pin both closures BEFORE create() below, which allocates: a raw pointer
+  // taken from an argument does not survive a safepoint.
+  bool live = false;
+  if (auto *getter = dyn_vmcast<Callable>(args.getArg(2))) {
+    // LIVE IMPLIES MUTABLE, enforced here rather than assumed. wasmLinkGlobal
+    // returns the matched OBJECT for a live global on the reasoning that only
+    // an immutable import consumes the returned value and a live global can
+    // never satisfy an immutable declaration. An immutable live Global would
+    // pass the type/mutability match at HermesBuiltin.cpp:2389 and hand that
+    // object to an immutable import as its VALUE -- and for i64 straight into
+    // the BigInt splitter, which rejects it. A compiler that never emits the
+    // combination is not the same as a builtin that refuses it.
+    if (LLVM_UNLIKELY(!isMutable))
+      return runtime.raiseTypeError(
+          "wasmMakeGlobal: an immutable global must be a snapshot");
+    live = true;
+    lv.getter = getter;
+    auto *setter = dyn_vmcast<Callable>(args.getArg(3));
+    if (LLVM_UNLIKELY(!setter))
+      return runtime.raiseTypeError(
+          "wasmMakeGlobal: a live global needs a setter");
+    lv.setter = setter;
+  } else if (LLVM_UNLIKELY(isMutable)) {
+    // A snapshot cannot be mutable: its writes would go nowhere, which is
+    // exactly the bug this builtin exists to fix.
+    return runtime.raiseTypeError(
+        "wasmMakeGlobal: a mutable global must be live");
+  }
+
+  // An i64 snapshot's value is a BigInt, matching Global.prototype.value.
+  int64_t initI64 = 0;
+  double initValue = 0.0;
+  if (!live) {
+    if (valType == JSWebAssemblyGlobal::ValType::I64) {
+      if (LLVM_UNLIKELY(!args.getArg(2).isBigInt()))
+        return runtime.raiseTypeError(
+            "wasmMakeGlobal: an i64 global requires a BigInt value");
+      initI64 = static_cast<int64_t>(
+          args.getArg(2).getBigInt()->truncateToSingleDigit());
+    } else {
+      if (LLVM_UNLIKELY(!args.getArg(2).isNumber()))
+        return runtime.raiseTypeError(
+            "wasmMakeGlobal: a snapshot global requires a Number value");
+      initValue = args.getArg(2).getNumber();
+    }
+  }
+
+  Handle<JSObject> globalPrototype{runtime.wasmGlobalPrototype};
+  lv.glob = JSWebAssemblyGlobal::create(runtime, globalPrototype);
+  // The type must be set before setWasmGlobalNumber, which coerces to it.
+  lv.glob->setValType(valType);
+  lv.glob->setMutable(isMutable);
+  if (live) {
+    // live implies mutable, refused above otherwise, so both are present.
+    lv.glob->setGetter(runtime, lv.getter.get());
+    lv.glob->setSetter(runtime, lv.setter.get());
+  } else {
+    lv.glob->setI64Value(initI64);
+    if (valType != JSWebAssemblyGlobal::ValType::I64)
+      setWasmGlobalNumber(lv.glob.get(), initValue);
+  }
+  return lv.glob.getHermesValue();
 }
 
 /// The two halves of an imported MUTABLE global's shared state.
@@ -2443,6 +2567,37 @@ CallResult<HermesValue> wasmGlobalGet(void *, Runtime &runtime) {
     return runtime.raiseTypeError(
         "Wasm global.get: the imported global is not a WebAssembly.Global");
 
+  // A live global's storage is another module's frame slot. This is the one
+  // place a builtin invokes compiler-generated IR: the closure body is a
+  // frame load plus, for i64, the BigInt assembly. The closure is normally
+  // compiler-generated, but that is not something this builtin can enforce:
+  // wasmMakeGlobal type-checks its arguments but cannot verify a Callable's
+  // origin, and a PRIVATE_BUILTIN is reachable from arbitrary bytecode, so a
+  // caller can install an arbitrary JS closure here. Safety does not rest on
+  // the closure being well-behaved -- it rests on what every caller of this
+  // builtin already does with the result: coerceImportedGlobalValue and
+  // emitBigIntToI64 coerce or type-check whatever value comes back before
+  // using it, the CallBuiltinInst that invokes this builtin is an opaque
+  // call so the compiler hoists nothing across it, and every memory view is
+  // re-loaded per access rather than cached across the call.
+  //
+  // Be precise about what is new here. This builtin ALREADY throws on a bad
+  // argument and ALREADY allocates a BigInt for an i64 global, so neither
+  // allocation nor an exception is introduced. What is new is interpreted
+  // execution and the rooting obligations that come with it.
+  if (Callable *fn = glob->getGetter(runtime)) {
+    struct : public Locals {
+      PinnedValue<Callable> fn;
+    } lv;
+    LocalsRAII lraii(runtime, &lv);
+    lv.fn = fn;
+    auto res = Callable::executeCall0(
+        lv.fn, runtime, Runtime::getUndefinedValue());
+    if (LLVM_UNLIKELY(res == ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
+    return res->getHermesValue();
+  }
+
   // An i64 global's value is a BigInt, here and in Global.prototype.value: a
   // double cannot represent every i64 exactly. The digit is read out of the
   // field before fromSigned allocates, so no raw pointer crosses the
@@ -2473,11 +2628,41 @@ CallResult<HermesValue> wasmGlobalSet(void *, Runtime &runtime) {
     return runtime.raiseTypeError(
         "Wasm global.set: the imported global is immutable");
 
+  // A live global's storage is another module's frame slot; the closure
+  // writes it. The type checks below are unchanged and still run first.
+  //
+  // The raw Callable* is consumed immediately and only a BOOL survives.
+  // Unlike the public setter this builtin never calls toNumber_RJS -- it
+  // type-checks its argument directly -- so the only safepoint here is the
+  // executeCall1 itself. Pinning anyway keeps the two setters the same shape
+  // and survives anyone later adding a coercion above the call.
+  struct : public Locals {
+    PinnedValue<Callable> fn;
+    PinnedValue<> arg;
+  } lv;
+  LocalsRAII lraii(runtime, &lv);
+  bool hasSetter = false;
+  if (Callable *setterFn = glob->getSetter(runtime)) {
+    lv.fn = setterFn;
+    hasSetter = true;
+  }
+
   HermesValue val = args.getArg(1);
   if (glob->getValType() == JSWebAssemblyGlobal::ValType::I64) {
     if (LLVM_UNLIKELY(!val.isBigInt()))
       return runtime.raiseTypeError(
           "Wasm global.set: an i64 global requires a BigInt value");
+    if (hasSetter) {
+      lv.arg = val;
+      auto res = Callable::executeCall1(
+          lv.fn,
+          runtime,
+          Runtime::getUndefinedValue(),
+          lv.arg.getHermesValue());
+      if (LLVM_UNLIKELY(res == ExecutionStatus::EXCEPTION))
+        return ExecutionStatus::EXCEPTION;
+      return HermesValue::encodeUndefinedValue();
+    }
     glob->setI64Value(
         static_cast<int64_t>(val.getBigInt()->truncateToSingleDigit()));
     return HermesValue::encodeUndefinedValue();
@@ -2485,6 +2670,17 @@ CallResult<HermesValue> wasmGlobalSet(void *, Runtime &runtime) {
   if (LLVM_UNLIKELY(!val.isNumber()))
     return runtime.raiseTypeError(
         "Wasm global.set: a numeric global requires a Number value");
+  if (hasSetter) {
+    lv.arg = val;
+    auto res = Callable::executeCall1(
+        lv.fn,
+        runtime,
+        Runtime::getUndefinedValue(),
+        lv.arg.getHermesValue());
+    if (LLVM_UNLIKELY(res == ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
+    return HermesValue::encodeUndefinedValue();
+  }
   // setWasmGlobalNumber, not setValue: it is the one writer of value_, so an
   // i32 global's field is int32-valued and an f32 global's float-valued
   // whichever of the three writers wrote it. The values generated code pushes
@@ -3881,6 +4077,8 @@ void createHermesBuiltins(Runtime &runtime) {
       B::HermesBuiltin_wasmGlobalSet, P::wasmGlobalSet, wasmGlobalSet, 2);
   defineInternMethod(
       B::HermesBuiltin_wasmSetFuncInfo, P::wasmSetFuncInfo, wasmSetFuncInfo, 3);
+  defineInternMethod(
+      B::HermesBuiltin_wasmMakeGlobal, P::wasmMakeGlobal, wasmMakeGlobal, 4);
 #else
   // Without Wasm the bodies above are not compiled and the names are not even
   // predefined strings, but Builtins.def numbering stays independent of
@@ -3893,7 +4091,7 @@ void createHermesBuiltins(Runtime &runtime) {
   // public builtins). The ids are the last contiguous run of private builtins,
   // so one loop over that range registers them all against the shared body.
   for (unsigned i = B::HermesBuiltin_wasmTrap;
-       i <= B::HermesBuiltin_wasmSetFuncInfo;
+       i <= B::HermesBuiltin_wasmMakeGlobal;
        ++i) {
     defineInternMethod(
         static_cast<B::Enum>(i), P::emptyString, wasmDisabled, 0);

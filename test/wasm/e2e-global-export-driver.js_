@@ -63,4 +63,12 @@ linkAs(mutMod, "mut import <- g_mut", exports.g_mut);
 linkAs(mutMod, "mut import <- g_i32", exports.g_i32);
 linkAs(mutMod, "mut import <- 5", 5);
 
+// A write through the mutable import is a write to the SAME shared global,
+// not a copy: it must show up through the exporting module's own
+// global.get, and through the exported WebAssembly.Global's `.value`.
+var mutInst = new WebAssembly.Instance(mutMod, {e: {g: exports.g_mut}});
+mutInst.exports.set(777);
+print("mut set(777), exporter's global.get sees = " + exports.get_g_mut());
+print("mut set(777), exported .value sees = " + exports.g_mut.value);
+
 print("done");

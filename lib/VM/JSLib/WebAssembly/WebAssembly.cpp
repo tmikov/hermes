@@ -2275,6 +2275,22 @@ wasmGlobalValueGetter(void *context, Runtime &runtime) {
         "WebAssembly.Global");
   }
 
+  // A live global holds no value: its storage is the module's frame slot,
+  // reached through the closure. The closure returns the value already in JS
+  // form -- a Number, or a BigInt for i64 -- so nothing is coerced here.
+  if (Callable *fn = glob->getGetter(runtime)) {
+    struct : public Locals {
+      PinnedValue<Callable> fn;
+    } lv;
+    LocalsRAII lraii(runtime, &lv);
+    lv.fn = fn;
+    auto res = Callable::executeCall0(
+        lv.fn, runtime, Runtime::getUndefinedValue());
+    if (LLVM_UNLIKELY(res == ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
+    return res->getHermesValue();
+  }
+
   if (glob->getValType() == JSWebAssemblyGlobal::ValType::I64) {
     // Exact, and a BigInt as the spec requires. Returning the low 32 bits as
     // a Number would silently discard the upper half.
@@ -2303,20 +2319,46 @@ wasmGlobalValueSetter(void *context, Runtime &runtime) {
 
   struct : public Locals {
     PinnedValue<> newVal;
+    PinnedValue<Callable> fn;
   } lv;
   LocalsRAII lraii(runtime, &lv);
 
   lv.newVal = args.getArg(0);
+  // Only a BOOL survives past this point. toNumber_RJS below is a safepoint,
+  // and a raw Callable* held across it is stale even where it is merely
+  // tested for null; lv.fn is what the call uses, and PinnedValue is what the
+  // GC updates.
+  bool hasSetter = false;
+  if (Callable *setterFn = glob->getSetter(runtime)) {
+    lv.fn = setterFn;
+    hasSetter = true;
+  }
+
   if (glob->getValType() == JSWebAssemblyGlobal::ValType::I64) {
     if (!lv.newVal->isBigInt()) {
       return runtime.raiseTypeError(
           "WebAssembly.Global.prototype.value: an i64 global requires a "
           "BigInt value");
     }
+    if (hasSetter) {
+      // The closure splits the BigInt into the lo/hi pair the compiler
+      // represents i64 with; doing it here would put the compiler's storage
+      // layout in the runtime.
+      auto res = Callable::executeCall1(
+          lv.fn,
+          runtime,
+          Runtime::getUndefinedValue(),
+          lv.newVal.getHermesValue());
+      if (LLVM_UNLIKELY(res == ExecutionStatus::EXCEPTION))
+        return ExecutionStatus::EXCEPTION;
+      return HermesValue::encodeUndefinedValue();
+    }
+    glob = vmcast<JSWebAssemblyGlobal>(args.getThisArg());
     glob->setI64Value(
         static_cast<int64_t>(lv.newVal->getBigInt()->truncateToSingleDigit()));
     return HermesValue::encodeUndefinedValue();
   }
+
   auto numRes = toNumber_RJS(runtime, lv.newVal);
   if (LLVM_UNLIKELY(numRes == ExecutionStatus::EXCEPTION)) {
     return ExecutionStatus::EXCEPTION;
@@ -2324,6 +2366,22 @@ wasmGlobalValueSetter(void *context, Runtime &runtime) {
   // toNumber_RJS is a safepoint and `glob` is a raw pointer, so re-derive it
   // rather than trusting the one taken before the call.
   glob = vmcast<JSWebAssemblyGlobal>(args.getThisArg());
+  if (hasSetter) {
+    // ToNumber has run; the closure narrows to the declared Wasm type in IR
+    // with AsInt32Inst for i32 and emitFround for f32 -- the instructions
+    // coerceImportedGlobalValue (WasmIRGen.cpp:7736) uses, NOT the module's
+    // own global.set, which narrows nothing and stores an already-typed
+    // value (WasmIRGen.cpp:7884). A live global and a snapshot one must
+    // coerce identically, and setWasmGlobalNumber is what a snapshot does.
+    auto res = Callable::executeCall1(
+        lv.fn,
+        runtime,
+        Runtime::getUndefinedValue(),
+        HermesValue::encodeTrustedNumberValue(numRes->getDouble()));
+    if (LLVM_UNLIKELY(res == ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
+    return HermesValue::encodeUndefinedValue();
+  }
   setWasmGlobalNumber(glob, numRes->getDouble());
   return HermesValue::encodeUndefinedValue();
 }

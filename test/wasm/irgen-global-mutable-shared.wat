@@ -10,8 +10,7 @@
 ;; A mutable global import is genuinely shared with the host's
 ;; WebAssembly.Global -- both sides must see each other's writes -- so the
 ;; object is kept rather than snapshotted, and consulted at every global.get
-;; and global.set plus once at instantiation for the constant-expression
-;; snapshot. All three used to be ordinary `.value` accesses, and `value` is a
+;; and global.set. Both used to be ordinary `.value` accesses, and `value` is a
 ;; CONFIGURABLE accessor pair on WebAssembly.Global.prototype: a replaced
 ;; getter fed the module 999 for a global holding 77 and a replaced setter
 ;; swallowed every write the module made.
@@ -53,9 +52,13 @@
 ;; CHECK: [[G2:%[0-9]+]] = LoadFrameInst (:any) {{.*}}, [%VS0.import_global_val_0]: any
 ;; CHECK-NEXT: CallBuiltinInst (:any) [HermesBuiltin.wasmGlobalSet]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, [[G2]]: any
 
-;; The instantiate body's link-time snapshot goes through the same builtin.
-;; It used to be a property read, so instantiating a module ran user JS once
-;; per mutable global import.
+;; The instantiate body links the import and then does NOT read its value.
+;; The frame slot used to be seeded with a link-time snapshot, which cost a
+;; wasmGlobalGet per mutable global import; nothing reads that slot, because
+;; every reader (global.get, global.set, the export loop) takes the object
+;; path above. The call also has to go: once an exporting module publishes a
+;; closure-backed Global, it would run the EXPORTER's getter inside the
+;; IMPORTER's instantiation.
 ;; CHECK-LABEL: function __wasm_instantiate__(imports: any): object
 ;; CHECK: [HermesBuiltin.wasmLinkGlobal]
-;; CHECK: [HermesBuiltin.wasmGlobalGet]
+;; CHECK-NOT: [HermesBuiltin.wasmGlobalGet]

@@ -18,6 +18,14 @@
 ;; immutable import, nor an f64 global an i32 one -- because a brand check
 ;; that ignored either half would still let every genuine global link, and
 ;; every positive assertion here would go on passing.
+;;
+;; It also pins the write direction of the live two-way view across the
+;; module boundary, which the read-only `get` in the mut-consumer fixture
+;; never exercised: the consumer's `set` writes g_mut, and get_g_mut below
+;; reads it back through THIS module's own global.get, not through the
+;; WebAssembly.Global object at all. That is the other half of the H12
+;; contract from the consumer's `get` direction and from
+;; e2e-imported-mutable-global.wat's host-side writes.
 
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %wat2wasm %S/e2e-global-export-const-consumer.wat_ -o %t-const.wasm && %hermesc --wasm -emit-binary -out %t-const.hbc %t-const.wasm && %wat2wasm %S/e2e-global-export-mut-consumer.wat_ -o %t-mut.wasm && %hermesc --wasm -emit-binary -out %t-mut.hbc %t-mut.wasm && %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js %S/e2e-global-export-driver.js_ -- %t.hbc %t-const.hbc %t-mut.hbc | %FileCheck --match-full-lines %s
@@ -26,6 +34,11 @@
   (global (export "g_i32") i32 (i32.const 42))
   (global (export "g_f64") f64 (f64.const 3.14))
   (global (export "g_mut") (mut i32) (i32.const 100))
+
+  ;; Reads g_mut through this module's own frame slot, not through the
+  ;; exported WebAssembly.Global. Used to observe a write made by another
+  ;; module that imported g_mut.
+  (func (export "get_g_mut") (result i32) global.get 2)
 )
 
 ;; Each export is a real WebAssembly.Global carrying no metadata at all.
@@ -57,4 +70,9 @@
 ;; CHECK-NEXT: mut import <- g_mut: 1
 ;; CHECK-NEXT: mut import <- g_i32: LinkError: import e.g is a WebAssembly.Global that does not match the declared mutable i32 global import
 ;; CHECK-NEXT: mut import <- 5: LinkError: import e.g must be a WebAssembly.Global to satisfy a mutable global import
+
+;; A write made through the import must be visible on both sides: the
+;; exporting module's own global.get, and the exported Global's `.value`.
+;; CHECK-NEXT: mut set(777), exporter's global.get sees = 777
+;; CHECK-NEXT: mut set(777), exported .value sees = 777
 ;; CHECK-NEXT: done

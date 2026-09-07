@@ -1044,6 +1044,27 @@ class WasmIRGen {
       llvh::StringRef wrapperName,
       Instruction *tlScope);
 
+  /// Create the getter (or, with \p isSetter, the setter) closure for a live
+  /// exported global. The closure reads or writes the global's frame slot
+  /// directly, so the module's own global.get/global.set stay plain frame
+  /// accesses and pay nothing for the export being live.
+  /// \param globalIndex an index into the module's global index space; it
+  ///   must name a global this module DEFINES, not an import.
+  /// \p isSetter selects the setter body instead of the getter body.
+  /// \p tlScope is the CreateScopeInst for the top-level scope. It is not
+  ///   used inside the closure -- the body reaches the module's Variables
+  ///   through its own GetParentScopeInst -- but it names the scope the
+  ///   caller creates the closure in.
+  /// \return the created Function; the caller emits the CreateFunctionInst.
+  ///
+  /// NOTE: like createExportWrapper, this leaves the insertion point inside
+  /// the closure's own body, so the caller must restore insertion to tlEntry_
+  /// before emitting more of the instantiate body.
+  Function *createGlobalAccessor(
+      uint32_t globalIndex,
+      bool isSetter,
+      Instruction *tlScope);
+
   /// \return the name to give the canonical Exported Function wrapper of
   ///   \p funcIndex: "wasm_export_<first export name>" when the index is
   ///   exported, so the common case keeps the name it always had, and

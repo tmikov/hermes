@@ -8,6 +8,7 @@
 #ifndef HERMES_VM_JSWEBASSEMBLYGLOBAL_H
 #define HERMES_VM_JSWEBASSEMBLYGLOBAL_H
 
+#include "hermes/VM/Callable.h"
 #include "hermes/VM/JSObject.h"
 #include "hermes/VM/Runtime.h"
 
@@ -96,12 +97,44 @@ class JSWebAssemblyGlobal final : public JSObject {
     mutable_ = m;
   }
 
+  /// \return the closure that reads a live global's storage, or nullptr if
+  /// this global is a snapshot.
+  Callable *getGetter(Runtime &runtime) const {
+    return getter_.get(runtime);
+  }
+
+  /// Set the closure that reads a live global's storage.
+  void setGetter(Runtime &runtime, Callable *fn) {
+    getter_.set(runtime, fn, runtime.getHeap());
+  }
+
+  /// \return the closure that writes a live mutable global's storage, or
+  /// nullptr if this global is a snapshot or is immutable.
+  Callable *getSetter(Runtime &runtime) const {
+    return setter_.get(runtime);
+  }
+
+  /// Set the closure that writes a live mutable global's storage.
+  void setSetter(Runtime &runtime, Callable *fn) {
+    setter_.set(runtime, fn, runtime.getHeap());
+  }
+
+  /// \return true if this global reads and writes a module's storage through
+  /// closures rather than holding a value of its own. A live global is always
+  /// mutable and therefore always has both closures; wasmMakeGlobal refuses
+  /// any other combination, and wasmLinkGlobal depends on that.
+  bool isLive(Runtime &runtime) const {
+    return getter_.get(runtime) != nullptr;
+  }
+
  public:
   JSWebAssemblyGlobal(
       Runtime &runtime,
       Handle<JSObject> parent,
       Handle<HiddenClass> clazz)
-      : JSObject(runtime, *parent, *clazz) {}
+      : JSObject(runtime, *parent, *clazz),
+        getter_(runtime, nullptr, runtime.getHeap()),
+        setter_(runtime, nullptr, runtime.getHeap()) {}
 
   ~JSWebAssemblyGlobal() = default;
 
@@ -123,6 +156,19 @@ class JSWebAssemblyGlobal final : public JSObject {
 
   /// Whether the global is mutable.
   bool mutable_{false};
+
+  /// For a LIVE global, the closure that reads the module's storage; null for
+  /// a snapshot global. A live global stores no value of its own: value_ and
+  /// i64Value_ are unused and the module's frame Variable is the single
+  /// source of truth, which is what makes an exported mutable global a
+  /// two-way view rather than a copy taken at instantiation.
+  GCPointer<Callable> getter_;
+
+  /// For a live global, the closure that writes the module's storage; null
+  /// for a snapshot one. Non-null exactly when getter_ is: a live global is
+  /// always mutable (wasmMakeGlobal refuses an immutable live global, and
+  /// wasmLinkGlobal's success answer depends on that invariant).
+  GCPointer<Callable> setter_;
 };
 
 } // namespace vm

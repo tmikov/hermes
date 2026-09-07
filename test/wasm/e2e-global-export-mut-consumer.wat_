@@ -6,7 +6,13 @@
 ;; Companion module for e2e-global-export.wat: imports a MUTABLE i32 global.
 ;; A mutable import cannot be satisfied by a raw JS value at all, so this is
 ;; also the module that shows the "must be a WebAssembly.Global" diagnostic.
+;;
+;; `set` exercises the write direction of the live two-way view across the
+;; module boundary: a global.set in THIS module must be visible both through
+;; the exporting module's own global.get and through the exported
+;; WebAssembly.Global's `.value`.
 
 (module
   (import "e" "g" (global (mut i32)))
-  (func (export "get") (result i32) global.get 0))
+  (func (export "get") (result i32) global.get 0)
+  (func (export "set") (param i32) local.get 0 global.set 0))

@@ -35,8 +35,13 @@ void JSWebAssemblyGlobalBuildMeta(
   mb.addJSObjectOverlapSlots(
       JSObject::numOverlapSlots<JSWebAssemblyGlobal>());
   JSObjectBuildMeta(cell, mb);
+  const auto *self = static_cast<const JSWebAssemblyGlobal *>(cell);
   mb.setVTable(&JSWebAssemblyGlobal::vt);
-  // No GC pointer fields — value_ is a plain double, not a GC reference.
+  // value_ and i64Value_ are plain scalars and are not registered. The two
+  // closures are GC references and must be, or a live global's accessor is
+  // collected out from under it.
+  mb.addField("getter", &self->getter_);
+  mb.addField("setter", &self->setter_);
 }
 
 PseudoHandle<JSWebAssemblyGlobal> JSWebAssemblyGlobal::create(

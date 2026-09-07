@@ -595,6 +595,16 @@ Instruction *WasmHelpers::emitGlobalSet(Value *globalObj, Value *value) {
       BuiltinMethod::HermesBuiltin_wasmGlobalSet, {globalObj, value});
 }
 
+Instruction *WasmHelpers::emitMakeGlobal(
+    Value *valTypeCode,
+    Value *isMutable,
+    Value *valueOrGetter,
+    Value *setterOrUndefined) {
+  return builder_.createCallBuiltinInst(
+      BuiltinMethod::HermesBuiltin_wasmMakeGlobal,
+      {valTypeCode, isMutable, valueOrGetter, setterOrUndefined});
+}
+
 Instruction *WasmHelpers::emitDataSegmentInit(
     Value *heapu8,
     Value *blobOffset,
