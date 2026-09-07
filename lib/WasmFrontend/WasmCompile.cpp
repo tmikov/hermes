@@ -8,12 +8,16 @@
 #include "hermes/WasmFrontend/WasmCompile.h"
 
 #include "hermes/BCGen/HBC/BCProviderFromSrc.h"
+#include "hermes/BCGen/HBC/BytecodeStream.h"
 #include "hermes/BCGen/HBC/HBC.h"
 #include "hermes/IR/IR.h"
 #include "hermes/Optimizer/PassManager/Pipeline.h"
 #include "hermes/WasmFrontend/BinaryReaderHermesIRGen.h"
 #include "hermes/WasmFrontend/WasmModuleInfo.h"
 #include "hermes/WasmIRGen/WasmIRGen.h"
+
+#include "llvh/Support/SHA1.h"
+#include "llvh/Support/raw_ostream.h"
 
 // wabt headers use #if on macros that may not be defined, triggering -Wundef.
 #pragma GCC diagnostic push
@@ -122,7 +126,8 @@ std::unique_ptr<WasmModuleData> compileWasmToModuleData(
     const uint8_t *buffer,
     size_t size,
     std::string &errorMsg,
-    bool test262) {
+    bool test262,
+    std::string *serializedOut) {
   // Full compilation: validate → parse → IR → optimize → bytecode.
   // compileWasmModule() does the validate + parse + IR part; it is the same
   // implementation `hermesc --wasm` uses, so both entry points agree on what
@@ -155,6 +160,25 @@ std::unique_ptr<WasmModuleData> compileWasmToModuleData(
   auto provider = hbc::BCProviderFromSrc::createFromBytecodeModule(
       std::move(BM),
       hbc::BCProviderFromSrc::CompilationData{genOptions, M, nullptr});
+
+  if (serializedOut) {
+    // EmitBundle, not the Execute options used for generation: serialization
+    // needs the bundle form, exactly as hermes_compile_to_bytecode does it
+    // (API/napi/hermes_napi_compile.cpp).
+    BytecodeGenerationOptions serOptions{OutputFormatKind::EmitBundle};
+    serOptions.optimizationEnabled = true;
+    serOptions.staticBuiltinsEnabled = context->getStaticBuiltinOptimization();
+
+    // The .hbc header carries a source hash. There is no JavaScript source
+    // here, so hash the Wasm bytes: it is the thing this bytecode was
+    // produced from.
+    auto sourceHash = llvh::SHA1::hash(llvh::makeArrayRef(buffer, size));
+
+    llvh::raw_string_ostream os(*serializedOut);
+    hbc::serializeBytecodeModule(
+        *provider->getBytecodeModule(), sourceHash, os, serOptions);
+    os.flush();
+  }
 
   auto data = std::make_unique<WasmModuleData>();
   data->bytecodeProvider = std::move(provider);
