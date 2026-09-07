@@ -118,6 +118,7 @@ set(napi_test_sources
   NapiTypedArrayTest.cpp
   NapiTypeTagTest.cpp
   NapiValueTest.cpp
+  NapiWasmCacheTest.cpp
   NapiWrapTest.cpp
 )
 
