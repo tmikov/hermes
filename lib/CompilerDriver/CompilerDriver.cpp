@@ -59,6 +59,7 @@
 
 #ifdef HERMES_ENABLE_WASM
 #include "hermes/WasmFrontend/WasmCompile.h"
+#include "hermes/WasmFrontend/WasmModuleInfo.h"
 #endif
 
 #include <sstream>
@@ -2357,8 +2358,9 @@ CompileResult processWasmFile(std::unique_ptr<llvh::MemoryBuffer> fileBuf) {
   // Create a Module for the Wasm compiler to populate.
   auto context = std::make_shared<Context>();
   auto M = std::make_shared<Module>(context);
+  wasm::WasmModuleInfo moduleInfo;
   std::string errorMsg;
-  if (!compileWasmModule(data, size, *M, errorMsg)) {
+  if (!compileWasmModule(data, size, *M, moduleInfo, errorMsg)) {
     llvh::errs() << "Error: " << errorMsg << '\n';
     return ParsingFailed;
   }

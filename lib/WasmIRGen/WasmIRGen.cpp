@@ -1691,10 +1691,11 @@ bool WasmIRGen::finalizeModule() {
   bool hasMemory = moduleInfo_.totalMemoryCount() > 0;
 
   // Every export names an index into one of the module's five index spaces,
-  // and a MALFORMED module can name one past the end. That reaches the export
-  // loops below directly, because `hermesc --wasm` does not validate its
-  // input: compileWasmModule() runs wabt::ReadBinary only, never
-  // wabt::ValidateModule (H19). The table export's
+  // and a MALFORMED module can name one past the end. `compileWasmModule()`
+  // now refuses such a module up front, via `validateWasmBinary`, before
+  // IRGen ever runs (H19); this check is kept as defense in depth rather
+  // than removed, since it is cheap and this function's contract should not
+  // depend on what its caller already checked. The table export's
   // `moduleInfo_.tables[exp.index - numImportedTables]` was a
   // heap-buffer-overflow read under ASan on a .wasm whose export index had
   // been patched by hand; the global export had a bare `assert`, which is not

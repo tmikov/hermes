@@ -4,19 +4,26 @@
 ;; LICENSE file in the root directory of this source tree.
 
 ;; An export names an index into one of the module's five index spaces, and a
-;; malformed module can name one that does not exist. `hermesc --wasm` DOES NOT
-;; VALIDATE its input -- compileWasmModule() runs wabt::ReadBinary only, never
-;; wabt::ValidateModule (H19) -- so such a module reaches WasmIRGen's export
-;; loops directly. The table case was a heap-buffer-overflow READ under ASan:
+;; malformed module can name one that does not exist. `hermesc --wasm` USED TO
+;; NOT VALIDATE its input -- compileWasmModule() ran wabt::ReadBinary only,
+;; never wabt::ValidateModule (H19) -- so such a module reached WasmIRGen's
+;; export loops directly. The table case was a heap-buffer-overflow READ
+;; under ASan:
 ;;
 ;;   ==ERROR: AddressSanitizer: heap-buffer-overflow READ of size 1
 ;;       #0 WasmIRGen::finalizeModule() WasmIRGen.cpp:2159
 ;;       #1 BinaryReaderHermesIRGen::EndModule() BinaryReaderHermesIRGen.cpp:1738
 ;;
 ;; the global case was a bare `assert`, which is not a diagnostic in a release
-;; build, and the tag case had no check at all. All five are now refused by
-;; WasmIRGen::validateExportIndices() with a message naming the export, the
-;; index space, the bad index and the real count.
+;; build, and the tag case had no check at all. All five were plugged by
+;; WasmIRGen::validateExportIndices(), with a message naming the export, the
+;; index space, the bad index and the real count. That check is kept as
+;; defense in depth, but is no longer what this test observes: H19's fix made
+;; compileWasmModule() call wabt's own validator before IRGen ever runs, and
+;; that validator rejects an out-of-range export index too -- with its own
+;; message, naming the index space and both numbers but not the export. Since
+;; that is the earlier and now-authoritative gate, it is what the CHECK lines
+;; below pin.
 ;;
 ;; HOW THE MALFORMED MODULES ARE MADE. `wat2wasm` will not emit one, so each
 ;; module below is assembled normally and then has its LAST BYTE overwritten
@@ -26,10 +33,11 @@
 ;; defining one. What keeps a layout change from quietly voiding this test is
 ;; NOT the unpatched compile -- that still succeeds if the patch lands in a
 ;; later section, as was checked by appending a code section. It is the
-;; full-message CHECK below: a byte patched into the wrong section yields the
-;; generic "Failed to parse Wasm binary", which no expected line matches. The
-;; unpatched compile stays because it proves the module is otherwise valid, so
-;; a failure is attributable to the patch.
+;; full-message CHECK below: a byte patched into the wrong section yields
+;; some other diagnostic -- a structural parse failure, or a validator
+;; complaint about a different index space -- and none of those match the
+;; expected text. The unpatched compile stays because it proves the module is
+;; otherwise valid, so a failure is attributable to the patch.
 
 ;; REQUIRES: wasm
 
@@ -62,11 +70,10 @@
 (module (table 1 funcref) (export "tt" (table 0)))
 
 ;; The message names the index space and BOTH numbers. A check for "Error:"
-;; alone would pass on any refusal at all, including the generic "Failed to
-;; parse Wasm binary" that a truncated file produces -- which is what this
-;; used to be, before the reader's failure carried a reason.
-;; TABLE: Error: export "tt" names table index 5, but the module has 1 of them
-;; GLOBAL: Error: export "gg" names global index 5, but the module has 1 of them
-;; TAG: Error: export "ee" names tag index 5, but the module has 1 of them
-;; FUNC: Error: export "ff" names function index 5, but the module has 1 of them
-;; MEM: Error: export "mm" names memory index 5, but the module has 1 of them
+;; alone would pass on any refusal at all, including a generic parse failure
+;; that a truncated file produces.
+;; TABLE: Error:{{.*}}table variable out of range: 5 (max 1)
+;; GLOBAL: Error:{{.*}}global variable out of range: 5 (max 1)
+;; TAG: Error:{{.*}}tag variable out of range: 5 (max 1)
+;; FUNC: Error:{{.*}}function variable out of range: 5 (max 1)
+;; MEM: Error:{{.*}}memory variable out of range: 5 (max 1)

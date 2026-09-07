@@ -1227,9 +1227,10 @@ TEST(CompileWasmTest, ValidModule) {
   auto binary = buildMinimalWasm();
   auto context = std::make_shared<hermes::Context>();
   hermes::Module M(context);
+  WasmModuleInfo moduleInfo;
   std::string errorMsg;
-  EXPECT_TRUE(
-      hermes::compileWasmModule(binary.data(), binary.size(), M, errorMsg));
+  EXPECT_TRUE(hermes::compileWasmModule(
+      binary.data(), binary.size(), M, moduleInfo, errorMsg));
   EXPECT_TRUE(errorMsg.empty());
 }
 
@@ -1239,17 +1240,20 @@ TEST(CompileWasmTest, InvalidModule) {
       0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00};
   auto context = std::make_shared<hermes::Context>();
   hermes::Module M(context);
+  WasmModuleInfo moduleInfo;
   std::string errorMsg;
-  EXPECT_FALSE(
-      hermes::compileWasmModule(binary.data(), binary.size(), M, errorMsg));
+  EXPECT_FALSE(hermes::compileWasmModule(
+      binary.data(), binary.size(), M, moduleInfo, errorMsg));
   EXPECT_FALSE(errorMsg.empty());
 }
 
 TEST(CompileWasmTest, EmptyBuffer) {
   auto context = std::make_shared<hermes::Context>();
   hermes::Module M(context);
+  WasmModuleInfo moduleInfo;
   std::string errorMsg;
-  EXPECT_FALSE(hermes::compileWasmModule(nullptr, 0, M, errorMsg));
+  EXPECT_FALSE(
+      hermes::compileWasmModule(nullptr, 0, M, moduleInfo, errorMsg));
   EXPECT_FALSE(errorMsg.empty());
 }
 

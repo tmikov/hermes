@@ -21,29 +21,61 @@
 #include "wabt/binary-reader.h"
 #include "wabt/binary-reader-ir.h"
 #include "wabt/binary-reader-nop.h"
+#include "wabt/error-formatter.h"
 #include "wabt/validator.h"
 #pragma GCC diagnostic pop
 
 namespace hermes {
 
+namespace {
+
+/// The single definition of the wabt feature set the Wasm frontend enables.
+/// Used both to configure the structural reader and to configure
+/// `validateWasmBinary`'s semantic validator, so the two can never drift
+/// apart and disagree about what is a legal module.
+wabt::Features wasmFeatures() {
+  wabt::Features features;
+  features.enable_exceptions();
+  features.enable_extended_const();
+  return features;
+}
+
+} // namespace
+
 bool compileWasmModule(
     const uint8_t *buffer,
     size_t size,
     Module &M,
+    wasm::WasmModuleInfo &moduleInfo,
     std::string &errorMsg) {
+  // Start from empty. The reader APPENDS to every section vector as the
+  // callbacks fire and never clears them, so a caller that reused a
+  // WasmModuleInfo would silently compile this module with the previous
+  // one's globals, exports and data segments still in place -- and the
+  // export/import descriptors built from it afterwards would describe both.
+  // Owning that here makes the parameter a true out-param rather than a
+  // precondition every caller has to know about.
+  moduleInfo = wasm::WasmModuleInfo{};
+
+  // Reject a semantically invalid module before doing anything else, so
+  // there is no way to reach IRGen -- from `hermesc --wasm` or from
+  // `new WebAssembly.Module()` -- with a module the Wasm engine itself
+  // would refuse. See H19.
+  if (!validateWasmBinary(buffer, size, errorMsg)) {
+    return false;
+  }
+
   // Parse the Wasm binary and generate Hermes IR in a single pass.
   // The BinaryReaderHermesIRGen populates WasmModuleInfo during module-level
   // sections and dispatches function body callbacks to WasmIRGen for IR
   // generation.
-  wasm::WasmModuleInfo moduleInfo;
   wasm::WasmIRGen irgen(M, moduleInfo);
   wasm::BinaryReaderHermesIRGen reader(moduleInfo);
   reader.setIRGen(&irgen);
 
   wabt::ReadBinaryOptions options;
   options.read_debug_names = true;
-  options.features.enable_exceptions();
-  options.features.enable_extended_const();
+  options.features = wasmFeatures();
   wabt::Result result =
       wabt::ReadBinary(buffer, size, &reader, options);
   if (!wabt::Succeeded(result)) {
@@ -89,48 +121,22 @@ std::unique_ptr<WasmModuleData> compileWasmToModuleData(
     size_t size,
     std::string &errorMsg,
     bool test262) {
-  // Validate the module first. The Wasm spec requires that
-  // new WebAssembly.Module() reject semantically invalid modules with a
-  // CompileError. Our compile path (ReadBinary + BinaryReaderHermesIRGen) only
-  // does structural parsing, so we run WABT's full semantic validator first.
-  if (!validateWasmBinary(buffer, size)) {
-    errorMsg = "Wasm module validation failed";
-    return nullptr;
-  }
-
-  // Full compilation: parse → IR → optimize → bytecode.
+  // Full compilation: validate → parse → IR → optimize → bytecode.
+  // compileWasmModule() does the validate + parse + IR part; it is the same
+  // implementation `hermesc --wasm` uses, so both entry points agree on what
+  // counts as a valid module.
   CodeGenerationSettings codeGenOpts;
   codeGenOpts.test262 = test262;
   auto context = std::make_shared<Context>(std::move(codeGenOpts));
   auto M = std::make_shared<Module>(context);
 
   wasm::WasmModuleInfo moduleInfo;
-  wasm::WasmIRGen irgen(*M, moduleInfo);
-  wasm::BinaryReaderHermesIRGen reader(moduleInfo);
-  reader.setIRGen(&irgen);
-
-  wabt::ReadBinaryOptions options;
-  options.read_debug_names = true;
-  options.features.enable_exceptions();
-  options.features.enable_extended_const();
-  wabt::Result result = wabt::ReadBinary(buffer, size, &reader, options);
-  if (!wabt::Succeeded(result)) {
-    errorMsg = irgen.getErrorMessage().empty()
-        ? "invalid Wasm binary"
-        : irgen.getErrorMessage().str();
+  if (!compileWasmModule(buffer, size, *M, moduleInfo, errorMsg)) {
     return nullptr;
   }
 
   // Run the optimization pipeline.
   runFullOptimizationPasses(*M);
-
-  // Append all data segment bytes to the binary data storage blob on the
-  // IR Module. generateBytecodeModule() will transfer this to the
-  // BytecodeModule. The segments are appended in order, matching the offsets
-  // computed during IR generation in WasmIRGen::finalizeModule().
-  for (const auto &seg : moduleInfo.dataSegments) {
-    M->appendBinaryData(llvh::ArrayRef<uint8_t>(seg.data));
-  }
 
   // Generate bytecode.
   BytecodeGenerationOptions genOptions{OutputFormatKind::Execute};
@@ -165,22 +171,32 @@ std::unique_ptr<WasmModuleData> compileWasmToModuleData(
   return data;
 }
 
-bool validateWasmBinary(const uint8_t *buffer, size_t size) {
+bool validateWasmBinary(
+    const uint8_t *buffer,
+    size_t size,
+    std::string &errorMsg) {
   wabt::Module module;
   wabt::Errors errors;
   wabt::ReadBinaryOptions readOptions;
-  readOptions.features.enable_exceptions();
-  readOptions.features.enable_extended_const();
+  readOptions.features = wasmFeatures();
 
-  wabt::Result readResult = wabt::ReadBinaryIr(
+  wabt::Result result = wabt::ReadBinaryIr(
       "<validate>", buffer, size, readOptions, &errors, &module);
-  if (wabt::Failed(readResult))
+  if (wabt::Succeeded(result)) {
+    wabt::ValidateOptions validateOptions(readOptions.features);
+    result = wabt::ValidateModule(&module, &errors, validateOptions);
+  }
+  if (wabt::Failed(result)) {
+    errorMsg =
+        wabt::FormatErrorsToString(errors, wabt::Location::Type::Binary);
     return false;
+  }
+  return true;
+}
 
-  wabt::ValidateOptions validateOptions(readOptions.features);
-  wabt::Result validateResult =
-      wabt::ValidateModule(&module, &errors, validateOptions);
-  return wabt::Succeeded(validateResult);
+bool validateWasmBinary(const uint8_t *buffer, size_t size) {
+  std::string errorMsg;
+  return validateWasmBinary(buffer, size, errorMsg);
 }
 
 } // namespace hermes

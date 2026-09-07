@@ -976,14 +976,17 @@ CallResult<HermesValue> wasmCallIndirect(void *, Runtime &runtime) {
   //    instantiation (`WasmIRGen::createTables`), which is what keeps this
   //    cast safe for it. Do not delete that call believing it dead.
   //
-  // The second bullet is not hypothetical. `WebAssembly.Module` validates
-  // (`validateWasmBinary` runs `wabt::ValidateModule`), but `hermesc --wasm`
-  // DOES NOT -- `compileWasmModule` only runs `wabt::ReadBinary` -- so a
-  // module built with `wat2wasm --no-check` and compiled ahead of time can
-  // call_indirect through an externref table whose arrays script chose via a
-  // replaced globalThis.Array. The cast survives that; the reads below do NOT
-  // (see the type check). Tracked as H19 in handoff-artifacts/REVIEW.md; the
-  // fix is module validation on the compile path and does not belong here.
+  // The second bullet used to not be hypothetical: `WebAssembly.Module`
+  // validates (`validateWasmBinary` runs `wabt::ValidateModule`), but
+  // `hermesc --wasm` did not -- `compileWasmModule` ran `wabt::ReadBinary`
+  // only -- so a module built with `wat2wasm --no-check` and compiled ahead
+  // of time could call_indirect through an externref table whose arrays
+  // script chose via a replaced globalThis.Array. The cast survives that;
+  // the reads below do NOT (see the type check). `compileWasmModule` now
+  // calls `validateWasmBinary` too (H19), so both compile entry points
+  // agree and this branch is unreachable through them. The check is kept
+  // regardless: this is the indirect-call hot path, not a place to trust a
+  // fact about the caller instead of the value in hand.
   //
   // Once linked the arrays live in a VariableScope slot that script cannot
   // reach, and table.grow mutates them in place rather than replacing them, so
