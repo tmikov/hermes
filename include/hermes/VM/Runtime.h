@@ -43,6 +43,7 @@
 #include "hermes/VM/TimeLimitMonitor.h"
 #include "hermes/VM/TwineChar16.h"
 #include "hermes/VM/VMExperiments.h"
+#include "hermes/VM/WasmCacheHooks.h"
 
 #include "llvh/ADT/DenseMap.h"
 #include "llvh/ADT/SmallVector.h"
@@ -293,6 +294,19 @@ class Runtime : public RuntimeBase, public HandleRootOwner {
   /// the embedder has not installed one.
   const WasmModuleResolver &getWasmModuleResolver() const {
     return wasmModuleResolver_;
+  }
+
+  /// Install the cache consulted before compiling a Wasm module, and asked to
+  /// persist the result afterwards. There is at most one; installing replaces
+  /// any previous one. See WasmCacheHooks for the ownership contract.
+  void setWasmCacheHooks(const WasmCacheHooks &hooks) {
+    wasmCacheHooks_ = hooks;
+  }
+
+  /// \return the installed hooks; `installed()` is false if the embedder has
+  /// not installed any.
+  const WasmCacheHooks &getWasmCacheHooks() const {
+    return wasmCacheHooks_;
   }
 #endif // HERMES_ENABLE_WASM
 
@@ -1310,6 +1324,10 @@ class Runtime : public RuntimeBase, public HandleRootOwner {
   /// embedder installed one. See setWasmModuleResolver().
 #ifdef HERMES_ENABLE_WASM
   WasmModuleResolver wasmModuleResolver_;
+
+  /// Embedder Wasm bytecode cache, empty unless one was installed.
+  /// See setWasmCacheHooks().
+  WasmCacheHooks wasmCacheHooks_{};
 #endif
 
   /// All state related to JIT compilation.

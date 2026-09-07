@@ -31,6 +31,7 @@
 #include "hermes/Support/Conversions.h"
 #include "hermes/Support/MemoryBuffer.h"
 #include "hermes/Support/UTF8.h"
+#include "hermes/WasmFrontend/WasmCodegenVersion.h"
 #include "hermes/WasmFrontend/WasmCompile.h"
 #include "hermes/WasmFrontend/WasmModuleData.h"
 
@@ -552,6 +553,28 @@ static ExecutionStatus extractDescriptorsFromModuleInfo(
   return ExecutionStatus::RETURNED;
 }
 
+/// The compile-time configuration that changes generated Wasm code, as a
+/// value the embedder folds into its cache key. Anything added here that
+/// affects codegen MUST be added to this value, or a cache will serve
+/// bytecode built under different rules.
+/// Everything about this build that affects the code the Wasm frontend
+/// generates, as an opaque, self-describing blob for the cache hooks to key
+/// on. An embedder must not have to know what belongs in here: keying on
+/// this alone has to be sufficient, which is why the bytecode version is
+/// included even though a given embedder may already track it.
+///
+/// Legible on purpose. It ends up inside a cache key, and "why did this
+/// miss?" is a question someone will ask of a hexdump.
+static std::string wasmCodegenConfig(Runtime &runtime) {
+  std::string out("hermes-wasm;bc=");
+  out += std::to_string(hbc::BYTECODE_VERSION);
+  out += ";cg=";
+  out += std::to_string(WASM_CODEGEN_VERSION);
+  out += ";t262=";
+  out += runtime.test262 ? '1' : '0';
+  return out;
+}
+
 /// How a byte buffer handed to a WebAssembly entry point is interpreted.
 enum class WasmBytesMode {
   /// Spec entry (Module/compile/instantiate). Treat as .wasm unless the
@@ -620,13 +643,91 @@ static std::unique_ptr<WasmModuleData> createModuleFromBytes(
     }
     bcProvider = std::shared_ptr<hbc::BCProviderBase>(std::move(ret.first));
   } else {
-    // .wasm path — compile to HBC first.
-    auto compiledData = hermes::compileWasmToModuleData(
-        data, size, errorMsg, runtime.test262);
-    if (!compiledData) {
-      return nullptr;
+    // .wasm path — consult the embedder cache, then compile if needed.
+    const WasmCacheHooks &hooks = runtime.getWasmCacheHooks();
+    // Lives across the lookup call below, which is the whole of its
+    // documented lifetime.
+    const std::string codegenConfig = wasmCodegenConfig(runtime);
+    void *storeToken = nullptr;
+    // Tracked separately from storeToken's VALUE: the contract is that
+    // lookup() always sets the token and that we then call exactly one of
+    // store() or discard() for it, and nothing in that contract requires the
+    // token to be non-null. An embedder that tracks the pending operation in
+    // its ctx and hands back a null token is conforming, and testing the
+    // pointer would silently skip its completion call.
+    bool tokenOutstanding = false;
+    bool cacheUsable = hooks.installed();
+
+    if (cacheUsable) {
+      const uint8_t *cachedHbc = nullptr;
+      size_t cachedSize = 0;
+      void (*finalizeCb)(const uint8_t *, size_t, void *) = nullptr;
+      void *finalizeHint = nullptr;
+      const bool cacheHit = hooks.lookup(
+          hooks.ctx, data, size,
+          reinterpret_cast<const uint8_t *>(codegenConfig.data()),
+          codegenConfig.size(), &cachedHbc, &cachedSize, &finalizeCb,
+          &finalizeHint, &storeToken);
+      tokenOutstanding = true;
+      if (cacheHit) {
+        auto llvmBuf = llvh::MemoryBuffer::getMemBufferCopy(llvh::StringRef(
+            reinterpret_cast<const char *>(cachedHbc), cachedSize));
+        auto ret = hbc::BCProviderFromBuffer::createBCProviderFromBuffer(
+            std::make_unique<OwnedMemoryBuffer>(std::move(llvmBuf)));
+        if (finalizeCb)
+          finalizeCb(cachedHbc, cachedSize, finalizeHint);
+        if (ret.first) {
+          // A good hit: the token is not needed.
+          hooks.discard(hooks.ctx, storeToken);
+          tokenOutstanding = false;
+          bcProvider =
+              std::shared_ptr<hbc::BCProviderBase>(std::move(ret.first));
+          cacheUsable = false; // nothing left to store
+          storeToken = nullptr;
+        }
+        // A rejected hit keeps storeToken and falls through to compiling,
+        // which overwrites the bad entry because the key is content-derived.
+      }
     }
-    bcProvider = compiledData->bytecodeProvider;
+
+    if (!bcProvider) {
+      std::string serialized;
+      auto compiledData = hermes::compileWasmToModuleData(
+          data, size, errorMsg, runtime.test262,
+          cacheUsable ? &serialized : nullptr);
+      if (!compiledData) {
+        if (tokenOutstanding) {
+          hooks.discard(hooks.ctx, storeToken);
+          tokenOutstanding = false;
+        }
+        return nullptr;
+      }
+
+      if (cacheUsable && !serialized.empty()) {
+        hooks.store(
+            hooks.ctx, storeToken,
+            reinterpret_cast<const uint8_t *>(serialized.data()),
+            serialized.size());
+        tokenOutstanding = false;
+        storeToken = nullptr;
+        // Load from the bytes that were stored, so a hit and a miss run
+        // identical bytecode.
+        auto llvmBuf = llvh::MemoryBuffer::getMemBufferCopy(
+            llvh::StringRef(serialized.data(), serialized.size()));
+        auto ret = hbc::BCProviderFromBuffer::createBCProviderFromBuffer(
+            std::make_unique<OwnedMemoryBuffer>(std::move(llvmBuf)));
+        if (ret.first)
+          bcProvider =
+              std::shared_ptr<hbc::BCProviderBase>(std::move(ret.first));
+      }
+      if (tokenOutstanding) {
+        hooks.discard(hooks.ctx, storeToken);
+        tokenOutstanding = false;
+        storeToken = nullptr;
+      }
+      if (!bcProvider)
+        bcProvider = compiledData->bytecodeProvider;
+    }
   }
 
   // Run the lightweight top-level to extract descriptors.

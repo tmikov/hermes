@@ -23,6 +23,7 @@ add_hermes_library(hermesNapi
   hermes_napi_typedarray.cpp
   hermes_napi_typetag.cpp
   hermes_napi_value.cpp
+  hermes_napi_wasm_cache.cpp
   hermes_napi_wrap.cpp
   LINK_OBJLIBS hermesVMRuntime hermesPublic
 )
