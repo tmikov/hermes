@@ -12,7 +12,7 @@ add_hermes_library(hermesBackend
   SerializedLiteralGenerator.cpp
   OptEnvironmentInit.cpp
   LiteralBufferBuilder.cpp
-  LINK_OBJLIBS hermesFrontend hermesOptimizer
+  LINK_OBJLIBS hermesFrontend hermesOptimizer hermesInst
 )
 
 add_subdirectory(HBC)
