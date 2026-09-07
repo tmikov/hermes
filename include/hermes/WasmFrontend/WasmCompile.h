@@ -46,12 +46,17 @@ bool validateWasmBinary(const uint8_t *buffer, size_t size);
 /// \param size Size in bytes.
 /// \param errorMsg [out] Error message on failure.
 /// \param test262 Whether to enable strict bounds checking for spec tests.
+/// \param serializedOut If non-null, receives the serialized .hbc bytes of
+///   the compiled module. This is what lets an embedder cache the result of
+///   a compile, and what a build-time producer would use to bake bytecode
+///   into an artifact. Serialization is skipped entirely when null.
 /// \returns a WasmModuleData on success, nullptr on failure.
 std::unique_ptr<WasmModuleData> compileWasmToModuleData(
     const uint8_t *buffer,
     size_t size,
     std::string &errorMsg,
-    bool test262 = false);
+    bool test262 = false,
+    std::string *serializedOut = nullptr);
 
 } // namespace hermes
 

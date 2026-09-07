@@ -11,7 +11,9 @@
 #include "hermes/WasmFrontend/WasmTypes.h"
 
 #include "hermes/AST/Context.h"
+#include "hermes/BCGen/HBC/BCProvider.h"
 #include "hermes/IR/IR.h"
+#include "hermes/Support/MemoryBuffer.h"
 
 // wabt headers use #if on macros that may not be defined, triggering -Wundef.
 #pragma GCC diagnostic push
@@ -21,6 +23,8 @@
 #pragma GCC diagnostic pop
 
 #include "gtest/gtest.h"
+
+#include "llvh/Support/MemoryBuffer.h"
 
 using namespace hermes::wasm;
 
@@ -1251,6 +1255,45 @@ TEST(CompileWasmTest, EmptyBuffer) {
   std::string errorMsg;
   EXPECT_FALSE(hermes::compileWasmModule(nullptr, 0, M, errorMsg));
   EXPECT_FALSE(errorMsg.empty());
+}
+
+/// wat2wasm output for:
+///   (module (func (export "add") (param i32 i32) (result i32)
+///     (i32.add (local.get 0) (local.get 1))))
+/// At file scope so both tests below share one definition.
+static const uint8_t kAdd[] = {
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x07, 0x01, 0x60,
+    0x02, 0x7f, 0x7f, 0x01, 0x7f, 0x03, 0x02, 0x01, 0x00, 0x07, 0x07, 0x01,
+    0x03, 0x61, 0x64, 0x64, 0x00, 0x00, 0x0a, 0x09, 0x01, 0x07, 0x00, 0x20,
+    0x00, 0x20, 0x01, 0x6a, 0x0b};
+
+TEST(WasmCompileTest, SerializesToLoadableBytecode) {
+  std::string errorMsg;
+  std::string serialized;
+  auto data = hermes::compileWasmToModuleData(
+      kAdd, sizeof(kAdd), errorMsg, /*test262*/ false, &serialized);
+
+  ASSERT_TRUE(data) << errorMsg;
+  EXPECT_FALSE(serialized.empty());
+
+  // The bytes must be recognizable as Hermes bytecode and loadable.
+  auto ref = llvh::ArrayRef<uint8_t>(
+      reinterpret_cast<const uint8_t *>(serialized.data()), serialized.size());
+  EXPECT_TRUE(hermes::hbc::BCProviderFromBuffer::isBytecodeStream(ref));
+
+  auto buf = llvh::MemoryBuffer::getMemBufferCopy(
+      llvh::StringRef(serialized.data(), serialized.size()));
+  auto loaded = hermes::hbc::BCProviderFromBuffer::createBCProviderFromBuffer(
+      std::make_unique<hermes::OwnedMemoryBuffer>(std::move(buf)));
+  EXPECT_TRUE(loaded.first) << loaded.second;
+}
+
+TEST(WasmCompileTest, SerializationIsOptional) {
+  std::string errorMsg;
+  auto data =
+      hermes::compileWasmToModuleData(kAdd, sizeof(kAdd), errorMsg);
+  ASSERT_TRUE(data) << errorMsg;
+  EXPECT_TRUE(data->bytecodeProvider);
 }
 
 } // namespace
