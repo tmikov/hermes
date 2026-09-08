@@ -390,49 +390,49 @@
 ;; CHECK-NEXT:  %192 = LoadFrameInst (:any) %0: environment, [%VS0.wasm_type_id_1]: any
 ;; CHECK-NEXT:  %193 = CallBuiltinInst (:any) [HermesBuiltin.wasmSetFuncInfo]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %189: object, %191: any, %192: any
 ;; CHECK-NEXT:         StoreFrameInst %0: environment, %189: object, [%VS0.exported_func_4]: any
-;; CHECK-NEXT:  %195 = AllocObjectLiteralInst (:object) empty: any
-;; CHECK-NEXT:         StorePropertyStrictInst "anyfunc": string, %195: object, "element": string
-;; CHECK-NEXT:         StorePropertyStrictInst 4: number, %195: object, "initial": string
-;; CHECK-NEXT:  %198 = TryLoadGlobalPropertyInst (:any) globalObject: object, "WebAssembly": string
-;; CHECK-NEXT:  %199 = LoadPropertyInst (:any) %198: any, "Table": string
-;; CHECK-NEXT:  %200 = CreateThisInst (:any) %199: any, %199: any, empty: any
-;; CHECK-NEXT:  %201 = CallInst (:any) %199: any, empty: any, false: boolean, empty: any, %199: any, %200: any, %195: object
-;; CHECK-NEXT:  %202 = GetConstructedObjectInst (:object) %200: any, %201: any
-;; CHECK-NEXT:         StoreFrameInst %0: environment, %202: object, [%VS0.table_0_obj]: any
-;; CHECK-NEXT:  %204 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkTable]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %202: object, true: boolean
-;; CHECK-NEXT:  %205 = BinaryStrictlyEqualInst (:any) %204: any, null: null
-;; CHECK-NEXT:         CondBranchInst %205: any, %BB38, %BB39
+;; CHECK-NEXT:  %195 = LoadFrameInst (:any) %0: environment, [%VS0.import_global_val_0]: any
+;; CHECK-NEXT:  %196 = AsInt32Inst (:number) %195: any
+;; CHECK-NEXT:         StoreFrameInst %0: environment, %196: number, [%VS0.global_0]: any
+;; CHECK-NEXT:  %198 = AllocObjectLiteralInst (:object) empty: any
+;; CHECK-NEXT:         StorePropertyStrictInst "anyfunc": string, %198: object, "element": string
+;; CHECK-NEXT:         StorePropertyStrictInst 4: number, %198: object, "initial": string
+;; CHECK-NEXT:  %201 = TryLoadGlobalPropertyInst (:any) globalObject: object, "WebAssembly": string
+;; CHECK-NEXT:  %202 = LoadPropertyInst (:any) %201: any, "Table": string
+;; CHECK-NEXT:  %203 = CreateThisInst (:any) %202: any, %202: any, empty: any
+;; CHECK-NEXT:  %204 = CallInst (:any) %202: any, empty: any, false: boolean, empty: any, %202: any, %203: any, %198: object
+;; CHECK-NEXT:  %205 = GetConstructedObjectInst (:object) %203: any, %204: any
+;; CHECK-NEXT:         StoreFrameInst %0: environment, %205: object, [%VS0.table_0_obj]: any
+;; CHECK-NEXT:  %207 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkTable]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, %205: object, true: boolean
+;; CHECK-NEXT:  %208 = BinaryStrictlyEqualInst (:any) %207: any, null: null
+;; CHECK-NEXT:         CondBranchInst %208: any, %BB38, %BB39
 ;; CHECK-NEXT:%BB36:
-;; CHECK-NEXT:  %207 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "import math.square is not a function": string
+;; CHECK-NEXT:  %210 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "import math.square is not a function": string
 ;; CHECK-NEXT:         UnreachableInst
 ;; CHECK-NEXT:%BB37:
-;; CHECK-NEXT:  %209 = TypeOfInst (:string) %84: any
-;; CHECK-NEXT:  %210 = BinaryStrictlyEqualInst (:any) %209: string, "function": string
-;; CHECK-NEXT:         CondBranchInst %210: any, %BB35, %BB36
+;; CHECK-NEXT:  %212 = TypeOfInst (:string) %84: any
+;; CHECK-NEXT:  %213 = BinaryStrictlyEqualInst (:any) %212: string, "function": string
+;; CHECK-NEXT:         CondBranchInst %213: any, %BB35, %BB36
 ;; CHECK-NEXT:%BB38:
-;; CHECK-NEXT:  %212 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "WebAssembly.Table did not construct a table for this module's table 0": string
+;; CHECK-NEXT:  %215 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "WebAssembly.Table did not construct a table for this module's table 0": string
 ;; CHECK-NEXT:         UnreachableInst
 ;; CHECK-NEXT:%BB39:
-;; CHECK-NEXT:  %214 = LoadPropertyInst (:any) %204: any, 0: number
-;; CHECK-NEXT:  %215 = LoadPropertyInst (:any) %204: any, 1: number
-;; CHECK-NEXT:  %216 = LoadPropertyInst (:any) %204: any, 2: number
-;; CHECK-NEXT:  %217 = LoadPropertyInst (:any) %214: any, "length": string
-;; CHECK-NEXT:  %218 = LoadPropertyInst (:any) %204: any, 3: number
-;; CHECK-NEXT:  %219 = BinaryStrictlyEqualInst (:any) %217: any, 4: number
-;; CHECK-NEXT:         CondBranchInst %219: any, %BB41, %BB40
+;; CHECK-NEXT:  %217 = LoadPropertyInst (:any) %207: any, 0: number
+;; CHECK-NEXT:  %218 = LoadPropertyInst (:any) %207: any, 1: number
+;; CHECK-NEXT:  %219 = LoadPropertyInst (:any) %207: any, 2: number
+;; CHECK-NEXT:  %220 = LoadPropertyInst (:any) %217: any, "length": string
+;; CHECK-NEXT:  %221 = LoadPropertyInst (:any) %207: any, 3: number
+;; CHECK-NEXT:  %222 = BinaryStrictlyEqualInst (:any) %220: any, 4: number
+;; CHECK-NEXT:         CondBranchInst %222: any, %BB41, %BB40
 ;; CHECK-NEXT:%BB40:
-;; CHECK-NEXT:  %221 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "WebAssembly.Table did not construct a table with this module's declared limits for table 0": string
+;; CHECK-NEXT:  %224 = CallBuiltinInst (:any) [HermesBuiltin.wasmLinkError]: number, empty: any, false: boolean, empty: any, undefined: undefined, undefined: undefined, "WebAssembly.Table did not construct a table with this module's declared limits for table 0": string
 ;; CHECK-NEXT:         UnreachableInst
 ;; CHECK-NEXT:%BB41:
-;; CHECK-NEXT:  %223 = BinaryStrictlyEqualInst (:any) %218: any, -1: number
-;; CHECK-NEXT:         CondBranchInst %223: any, %BB42, %BB40
+;; CHECK-NEXT:  %226 = BinaryStrictlyEqualInst (:any) %221: any, -1: number
+;; CHECK-NEXT:         CondBranchInst %226: any, %BB42, %BB40
 ;; CHECK-NEXT:%BB42:
-;; CHECK-NEXT:         StoreFrameInst %0: environment, %214: any, [%VS0.table_0_funcs]: any
-;; CHECK-NEXT:         StoreFrameInst %0: environment, %215: any, [%VS0.table_0_types]: any
-;; CHECK-NEXT:         StoreFrameInst %0: environment, %216: any, [%VS0.table_0_exported]: any
-;; CHECK-NEXT:  %228 = LoadFrameInst (:any) %0: environment, [%VS0.import_global_val_0]: any
-;; CHECK-NEXT:  %229 = AsInt32Inst (:number) %228: any
-;; CHECK-NEXT:         StoreFrameInst %0: environment, %229: number, [%VS0.global_0]: any
+;; CHECK-NEXT:         StoreFrameInst %0: environment, %217: any, [%VS0.table_0_funcs]: any
+;; CHECK-NEXT:         StoreFrameInst %0: environment, %218: any, [%VS0.table_0_types]: any
+;; CHECK-NEXT:         StoreFrameInst %0: environment, %219: any, [%VS0.table_0_exported]: any
 ;; CHECK-NEXT:  %231 = LoadFrameInst (:any) %0: environment, [%VS0.closure_2]: any
 ;; CHECK-NEXT:  %232 = CallInst (:any) %231: any, %wasm_func_2(): functionCode, true: boolean, empty: any, undefined: undefined, undefined: undefined
 ;; CHECK-NEXT:  %233 = AllocObjectLiteralInst (:object) empty: any

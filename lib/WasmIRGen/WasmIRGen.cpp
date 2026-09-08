@@ -1501,21 +1501,26 @@ void WasmIRGen::createFunctions() {
   if (numTables > 0 || hasExportedFuncs)
     internTypeIds(tlScope);
 
-  // Build the canonical Exported Functions. This must precede createTables():
-  // a table slot holds the Exported Function, so an element segment applied
-  // below loads exportedFuncVars_ and would otherwise read a Variable that has
-  // not been stored yet. It must follow internTypeIds() and the closure
-  // pre-creation above, both of which it reads.
+  // Build the canonical Exported Functions. This must precede createTables()
+  // and initializeGlobals(): a table slot holds the Exported Function, so an
+  // element segment applied by createTables() loads exportedFuncVars_, and a
+  // `ref.func` global init expression handled by initializeGlobals() does the
+  // same -- both would otherwise read a Variable that has not been stored
+  // yet. It must follow internTypeIds() and the closure pre-creation above,
+  // both of which it reads.
   createExportedFunctions(tlScope);
+
+  // Initialize Wasm globals (both imported and defined) BEFORE createTables():
+  // an active element segment's offset may be a `global.get`, which
+  // createTables() loads from globalVars_. Initializing globals first ensures
+  // that load sees the real value instead of the slot's undefined placeholder.
+  if (numGlobals > 0) {
+    initializeGlobals(tlScope);
+  }
 
   // Create and initialize tables, and apply element segments.
   if (numTables > 0)
     createTables(tlScope);
-
-  // Initialize Wasm globals (both imported and defined).
-  if (numGlobals > 0) {
-    initializeGlobals(tlScope);
-  }
 
   // Create import trampoline bodies for all imported functions.
   // This replaces the stub bodies (ReturnInst(undefined)) with actual
@@ -7239,9 +7244,7 @@ void WasmIRGen::createTables(Instruction *tlScope) {
     if (seg.mode != WasmElemSegment::Mode::Active)
       continue;
 
-    // The offset for active segments. For Phase 1, only i32.const offsets
-    // are supported (global.get offsets would require globals to be
-    // initialized first, which is not yet implemented).
+    // The offset for active segments.
     // An extended constant expression carries the whole computation. The
     // scalar offsetKind/offsetValue fields only record the LAST constant
     // parsed, so using them for such a segment silently places the elements
@@ -7267,6 +7270,19 @@ void WasmIRGen::createTables(Instruction *tlScope) {
       continue;
     }
 
+    // True only when `offset` above is the literal 0: the plain scalar
+    // fields say I32Const/0 AND they are actually authoritative (the
+    // segment is not an extended constant expression whose LAST parsed
+    // constant happens to be 0 -- offsetExpr.size() <= 1 is what makes
+    // offsetKind/offsetValue meaningful at all). Do not drop the
+    // offsetExpr.size() conjunct as redundant: without it, an offset like
+    // `(i32.add (i32.const 2) (i32.const 0))` or
+    // `(i32.add (global.get $g) (i32.const 0))` would misreport as offset 0
+    // even though `offset` above was computed by emitInitExpr.
+    bool firstIdxIsZero = seg.offsetExpr.size() <= 1 &&
+        seg.offsetKind == WasmGlobal::InitKind::I32Const &&
+        seg.offsetValue == 0;
+
     // Load the table arrays.
     auto *funcsArr = builder_.createLoadFrameInst(
         tlScope, tableFuncVars_[seg.tableIndex]);
@@ -7282,7 +7298,7 @@ void WasmIRGen::createTables(Instruction *tlScope) {
       uint32_t funcIdx = seg.funcIndices[i];
       // Compute the table index: offset + i.
       Value *idx;
-      if (i == 0 && seg.offsetValue == 0) {
+      if (i == 0 && firstIdxIsZero) {
         idx = builder_.getLiteralNumber(0);
       } else {
         idx = builder_.createBinaryOperatorInst(
