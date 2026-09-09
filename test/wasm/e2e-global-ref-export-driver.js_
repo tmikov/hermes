@@ -1,0 +1,81 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-global-ref-export.wat.
+
+var args = hermescli.getScriptArgs();
+var mod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[0]));
+
+function attempt(f) {
+  try {
+    return String(f());
+  } catch (e) {
+    return e.name + ': ' + e.message;
+  }
+}
+
+// The import is a WebAssembly.Global rather than a raw JS value: the raw
+// branch of the import path admits a Number and nothing else today, so an
+// object reaches the module only through a Global.
+var hostValue = {tag: 'host'};
+var hostRef = new WebAssembly.Global({value: 'externref'}, hostValue);
+var ex = new WebAssembly.Instance(mod, {e: {hostref: hostRef}}).exports;
+
+// Instantiating at all is the first assertion: every one of the six globals
+// below is wrapped by wasmMakeGlobal during the export loop, and the whole
+// instantiation used to throw on the first of them.
+print('instantiated: ' + (typeof ex.h === 'function'));
+
+// --- Each export is a real WebAssembly.Global ---
+var names = ['g_null', 'g_host', 'g_func', 'g_hidden', 'g_nullfunc', 'g_mut'];
+var allGlobals = true;
+var ownProps = 0;
+for (var i = 0; i < names.length; i++) {
+  var g = ex[names[i]];
+  if (!(g instanceof WebAssembly.Global)) {
+    allGlobals = false;
+    print(names[i] + ' is not a WebAssembly.Global: ' + typeof g);
+  }
+  ownProps += Object.getOwnPropertyNames(g).length;
+}
+print('all six are Globals with no own properties: ' +
+      allGlobals + ' ' + ownProps);
+
+// --- externref ---
+print('g_null: ' + String(ex.g_null.value));
+// The host's own object, through the import, the module's global initializer,
+// and the export wrapper.
+print('g_host === hostValue: ' + (ex.g_host.value === hostValue));
+
+// --- funcref: the identity assertion ---
+// g_func must be the module's own exported function -- the same object `h`
+// names -- and not merely something callable.
+print('g_func === h: ' + (ex.g_func.value === ex.h));
+print('g_func calls: ' + ex.g_func.value(41));
+
+// A funcref global naming a function the module does not export still gets a
+// wrapper, so script can call it through the global and nowhere else.
+print('g_hidden is a function: ' + (typeof ex.g_hidden.value));
+print('g_hidden calls: ' + ex.g_hidden.value());
+print('g_hidden is not h: ' + (ex.g_hidden.value !== ex.h));
+
+print('g_nullfunc: ' + String(ex.g_nullfunc.value));
+
+// --- The mutable one is LIVE, so its value comes back through a closure ---
+print('g_mut === hostValue: ' + (ex.g_mut.value === hostValue));
+// INTERIM: deleted by the setter task, which stores the value instead.
+print('g_mut write: ' + attempt(function () {
+  ex.g_mut.value = null;
+  return 'wrote';
+}));
+print('g_mut unchanged: ' + (ex.g_mut.value === hostValue));
+
+// An immutable one is refused for being immutable, before that.
+print('g_func write: ' + attempt(function () {
+  ex.g_func.value = null;
+  return 'wrote';
+}));

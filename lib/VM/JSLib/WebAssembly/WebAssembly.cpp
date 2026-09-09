@@ -2393,12 +2393,12 @@ wasmGlobalConstructor(void *context, Runtime &runtime) {
   // Create the Global object.
   Handle<JSObject> globalPrototype{runtime.wasmGlobalPrototype};
   lv.glob = JSWebAssemblyGlobal::create(runtime, globalPrototype);
-  // The type must be set before any of the three stores below:
-  // setWasmGlobalNumber coerces to it, and every write to an i32, f32 or f64
-  // global's slot goes through it, so such a global never holds an
-  // unnarrowed double however it was constructed; setI64Value asserts on it;
-  // and setValue requires the caller to have made the value canonical for it,
-  // which for a reference is the reference itself.
+  // The type must be set before any store below: setWasmGlobalNumber coerces
+  // to it, and every write to an i32, f32 or f64 global's slot goes through
+  // it, so such a global never holds an unnarrowed double however it was
+  // constructed; setI64Value asserts on it; and setValue requires the caller
+  // to have made the value canonical for it, which for a reference is the
+  // reference itself.
   lv.glob->setValType(valType);
   lv.glob->setMutable(isMutable);
   if (isRef) {

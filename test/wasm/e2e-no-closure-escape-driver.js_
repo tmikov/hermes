@@ -88,10 +88,11 @@ report('05 tbl.get(3) elem segment, import trampoline', tbl.get(3));
 
 report('06 wasm table.get -> funcref result', E.getAt(1), REF32);
 report('07 wasm table.get -> multi-value ref slot', E.mvAt(1)[1], REF32);
-// A funcref global CANNOT be exported: finalizeModule's export loop has no
-// case for a reference type and aborts the compiler on one (llvm_unreachable
-// at WasmIRGen.cpp, "unsupported global export type"). global.get is
-// therefore the only way its value is observed, and it is covered here.
+// A funcref global is observed two ways: the module's own global.get, here,
+// and the WebAssembly.Global its export produces, at 21. An earlier version
+// of this comment said exporting one aborted the compiler on an
+// llvm_unreachable named "unsupported global export type"; there is no such
+// case and no such string in the tree.
 report('08 funcref global -> global.get', E.fromGlobal(), REF32);
 
 E.sendToJs(1);
@@ -145,6 +146,12 @@ report('19 cross-module: importer of the table, wasm table.get',
        consumer.exports.getAt(1), REF32);
 report('20 cross-module: importer\'s own Table.prototype.get',
        consumer.exports.tbl.get(1), REF32);
+// The newest route: a funcref global EXPORT. Every exported global is wrapped
+// by the wasmMakeGlobal builtin, which refuses a funcref value that is not
+// null or an Exported Function -- so this route yields a wrapper by
+// construction, and it is enumerated here because this file is where a route
+// that hands script a function value has to be enumerated.
+report('21 funcref global export, .value', E.gfx.value, REF32);
 
 // ---------------------------------------------------------------------------
 // The publications are gone, so there is no array of closures to read.

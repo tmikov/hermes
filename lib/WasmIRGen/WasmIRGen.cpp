@@ -423,13 +423,16 @@ void WasmIRGen::computeEscapableFuncs() {
   // of these functions `:any` and coerced them at entry, and that is gone now
   // that no route yields the closure (see createFunctions()).
   //
-  // A funcref global cannot currently be EXPORTED at all: finalizeModule's
-  // export loop has no case for a reference type and hits an llvm_unreachable
-  // ("unsupported global export type"), which aborts hermesc rather than
-  // diagnosing. Covering ref.func initializers here is still right -- the
-  // value reaches the value stack through global.get regardless -- and the
-  // abort is recorded as a separate defect rather than being described as a
-  // rejection here.
+  // A funcref global IS exportable, and covering ref.func initializers here
+  // is what makes that work rather than merely tidy. finalizeModule's export
+  // loop wraps every exported global with the wasmMakeGlobal builtin, whose
+  // funcref arm accepts null or an Exported Function and refuses anything
+  // else -- so an exported `(global funcref (ref.func $f))` links only
+  // because $f is in this set and therefore has a canonical wrapper. An
+  // earlier version of this comment said such an export hit an
+  // llvm_unreachable named "unsupported global export type"; there is no such
+  // case and no such string in the tree, and e2e-global-ref-export.wat pins
+  // the export working, identity included.
   for (const auto &seg : moduleInfo_.elements)
     for (uint32_t fi : seg.funcIndices)
       escapableFuncs_.insert(fi);

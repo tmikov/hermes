@@ -69,9 +69,11 @@
   ;; Passive segment 1, for table.init.
   (elem func $addf32 $inc64)
 
-  ;; A funcref global initialized with ref.func. Exporting one is not
-  ;; supported (see the driver's note), so global.get is how it is observed.
-  (global $g funcref (ref.func $addf32))
+  ;; A funcref global initialized with ref.func, observed two ways: through
+  ;; this module's own global.get, and through the WebAssembly.Global the
+  ;; export produces. Exporting one used to be refused by wasmMakeGlobal,
+  ;; whose type-code bound stopped at f64.
+  (global $g (export "gfx") funcref (ref.func $addf32))
 
   ;; --- the routes, as Wasm sees them ---
 
@@ -146,6 +148,7 @@
 ;; CHECK-NEXT: 18 JS Table.prototype.grow ignores its fill value, slot is: null
 ;; CHECK-NEXT: 19 cross-module: importer of the table, wasm table.get: wrapper same=true
 ;; CHECK-NEXT: 20 cross-module: importer's own Table.prototype.get: wrapper same=true
+;; CHECK-NEXT: 21 funcref global export, .value: wrapper same=true
 
 ;; Nothing about the linking ABI is a property any more, so there is no array
 ;; of closures to read even if one existed.

@@ -2430,8 +2430,8 @@ CallResult<HermesValue> wasmLinkMemory(void *, Runtime &runtime) {
 ///     confused.
 ///
 /// The four answers tell those branches apart FOR A NUMERIC TYPE. They do not
-/// for a reference type, and this is the one place where the protocol is
-/// currently wrong rather than merely partial.
+/// for a reference type: the protocol this function speaks is not merely
+/// incomplete there, it reports failures that did not happen.
 ///
 /// `null` and `undefined` are both legal values of an externref global, and
 /// `null` of a funcref one, so the last branch can return either sentinel: a
@@ -2692,10 +2692,11 @@ CallResult<HermesValue> wasmMakeGlobal(void *, Runtime &runtime) {
 /// side rather than the compiler side. A PRIVATE_BUILTIN is reachable from
 /// ANY bytecode that emits a CallBuiltin with this index: `builtins_[]` is
 /// indexed straight from the operand and nothing types the arguments. That
-/// channel is not hypothetical -- it is the one every test in test/wasm uses,
-/// via -Xenable-untrusted-bytecode-from-js. So this is the entry guard, and
-/// an unchecked vmcast here would be a Debug-only assert and a wild pointer
-/// in a release build.
+/// channel is not hypothetical: every test in test/wasm that loads a module
+/// from precompiled bytecode passes -Xenable-untrusted-bytecode-from-js, and
+/// bytecode reaching this builtin that way is bytecode this VM did not
+/// produce in this run. So this is the entry guard, and an unchecked vmcast
+/// here would be a Debug-only assert and a wild pointer in a release build.
 ///
 /// On the compiler side it is unreachable: the object comes from a hidden
 /// frame Variable written only in the accept block of the global import path,
@@ -2709,9 +2710,12 @@ CallResult<HermesValue> wasmGlobalGet(void *, Runtime &runtime) {
     return runtime.raiseTypeError(
         "Wasm global.get: the imported global is not a WebAssembly.Global");
 
-  // A live global's storage is another module's frame slot. This is the one
-  // place a builtin invokes compiler-generated IR: the closure body is a
-  // frame load plus, for i64, the BigInt assembly. The closure is normally
+  // A live global's storage is another module's frame slot, so reading it
+  // means invoking compiler-generated IR from inside a builtin: the closure
+  // body is a frame load plus, for i64, the BigInt assembly. wasmGlobalSet
+  // does the same thing in the other direction, through the live setter
+  // closure, and the rooting obligation below is the same one. The closure is
+  // normally
   // compiler-generated, but that is not something this builtin can enforce:
   // wasmMakeGlobal type-checks its arguments but cannot verify a Callable's
   // origin, and a PRIVATE_BUILTIN is reachable from arbitrary bytecode, so a
@@ -2764,9 +2768,9 @@ CallResult<HermesValue> wasmGlobalSet(void *, Runtime &runtime) {
   // invariant restated. Through compiler-generated IR it cannot fire -- only
   // a MUTABLE import keeps its object and reaches here, an immutable one is
   // snapshotted into a frame slot at link time, wasmLinkGlobal refuses an
-  // immutable Global for a mutable declaration, and mutable_ is written only
-  // by the constructor. Writing an immutable global would be a spec
-  // violation, so the check stays regardless.
+  // immutable Global for a mutable declaration, and mutable_ is written at
+  // construction and never afterwards. Writing an immutable global would be a
+  // spec violation, so the check stays regardless.
   if (LLVM_UNLIKELY(!glob->isMutable()))
     return runtime.raiseTypeError(
         "Wasm global.set: the imported global is immutable");
@@ -2776,10 +2780,13 @@ CallResult<HermesValue> wasmGlobalSet(void *, Runtime &runtime) {
   //
   // The raw Callable* is consumed immediately and only a BOOL survives.
   // Unlike the public setter this builtin never calls toNumber_RJS -- it
-  // type-checks its argument directly. There are TWO safepoints below: the
-  // executeCall1 on the live path, and the i64 snapshot store, which now
-  // materializes a BigInt. lv.glob is the root for the second. Anyone adding
-  // a third -- a reference-typed brand check, say -- must root across it too.
+  // type-checks its argument directly. What allocates below is each
+  // executeCall1 on the live path, the i64 snapshot store, which materializes
+  // a BigInt, and every raiseTypeError -- and only the first two have to be
+  // survived, since a raise is returned from immediately. lv.arg carries the
+  // value across the calls and lv.glob the destination across the store.
+  // Anything added here that allocates -- a reference-typed brand check, say
+  // -- must be rooted across the same way.
   struct : public Locals {
     PinnedValue<Callable> fn;
     PinnedValue<> arg;
@@ -2808,7 +2815,7 @@ CallResult<HermesValue> wasmGlobalSet(void *, Runtime &runtime) {
   // The per-type dispatch this becomes (externref stored as it stands,
   // funcref validated as null or an Exported Function, both before any
   // closure invocation) is the internal setter's own task in the
-  // reference-types plan. Deleting these three lines is that task's, and
+  // reference-types plan. Deleting this block is that task's, and
   // e2e-global-ref-construct.wat pins the behaviour so the deletion is a
   // visible change rather than a silent one.
   if (LLVM_UNLIKELY(
