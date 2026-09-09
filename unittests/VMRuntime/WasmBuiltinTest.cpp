@@ -11,10 +11,12 @@
 #include "gtest/gtest.h"
 
 #include "hermes/FrontEndDefs/Builtins.h"
+#include "hermes/Support/UTF8.h"
 #include "hermes/VM/Callable.h"
 #include "hermes/VM/JSNativeFunctions.h"
 #include "hermes/VM/JSObject.h"
 #include "hermes/VM/JSWebAssemblyGlobal.h"
+#include "hermes/VM/StringPrimitive.h"
 
 using namespace hermes::vm;
 
@@ -55,6 +57,25 @@ static Handle<> evalExpr(Runtime &runtime, llvh::StringRef src) {
 /// export is, unlike the NativeFunction above.
 static Handle<> makeJSClosure(Runtime &runtime) {
   return evalExpr(runtime, "(function jsClosure() {})");
+}
+
+/// \return \p val as UTF-8 if it is a string, and "" otherwise. Reads the
+/// StringPrimitive immediately and allocates nothing, so a bare HermesValue is
+/// safe to pass. Used to report an exception's kind AND message, so that a
+/// refusal can be asserted as the specific TypeError it is meant to be rather
+/// than as "something threw".
+static std::string stringOf(HermesValue val) {
+  if (!val.isString())
+    return "";
+  auto *str = vmcast<StringPrimitive>(val);
+  if (str->isASCII()) {
+    auto ref = str->getStringRef<char>();
+    return std::string(ref.data(), ref.size());
+  }
+  std::string result;
+  hermes::convertUTF16ToUTF8WithReplacements(
+      result, str->getStringRef<char16_t>());
+  return result;
 }
 
 /// \return a REAL WebAssembly Exported Function: a module compiled and
@@ -517,10 +538,24 @@ TEST_F(WasmBuiltinTest, WasmGlobalSetValidatesBeforeStoringOrCalling) {
   auto setter = evalExpr(runtime, "__set");
 
   auto reset = [&]() { evalExpr(runtime, "__st.slot = 0; __st.calls = 0; 0"); };
-  auto calls = [&]() {
-    return evalExpr(runtime, "__st.calls").getHermesValue().getNumber();
-  };
-  auto slot = [&]() { return evalExpr(runtime, "__st.slot").getHermesValue(); };
+  auto calls = [&]() { return evalExpr(runtime, "__st.calls")->getNumber(); };
+
+  /// The value the setter closure last stored, as a ROOTED handle.
+  ///
+  /// Rooted, and assigned to a named local before it is compared, because
+  /// reading it RUNS JS and may collect. `EXPECT_EQ(expected->getRaw(),
+  /// slot().getRaw())` does not order its operands: the expected pointer bits
+  /// can be read first, and a moving collection then updates the handle rather
+  /// than the copy already taken. That would report unequal identities for
+  /// storage that is correct -- and be read as a reference-identity
+  /// regression, which is the thing this plan is about.
+  auto slot = [&]() { return evalExpr(runtime, "__st.slot"); };
+
+  // Describes an exception the way the .wat drivers' attempt() does. Written
+  // in JS so that `e.name` is the engine's own answer rather than a C++
+  // reconstruction of it.
+  auto describe = evalExpr(
+      runtime, "(function (e) { return e.name + ': ' + e.message; })");
 
   /// A LIVE global of type \p code, whose closures are the counting pair
   /// above. wasmMakeGlobal reads its mode from isMutable, so `true` is what
@@ -551,20 +586,54 @@ TEST_F(WasmBuiltinTest, WasmGlobalSetValidatesBeforeStoringOrCalling) {
         vmcast<JSWebAssemblyGlobal>(evalExpr(runtime, js).getHermesValue()));
   };
 
-  /// Call the builtin. \return true if it REFUSED the write.
-  auto callSet = [&](Handle<JSWebAssemblyGlobal> glob, HermesValue v) -> bool {
+  /// Call the builtin. \return "" if it stored, or "<name>: <message>" for
+  /// the exception it raised.
+  ///
+  /// The description, not a bool. Clearing the exception and returning "it
+  /// refused" -- which this used to do -- made every refusal look alike, so a
+  /// guard changed to raise a RangeError, or the wrong guard firing with the
+  /// wrong reason, satisfied the rejection check, the unchanged-storage check,
+  /// the zero-call check and the accepted write that follows. The .wat drivers
+  /// match exact messages; so does this.
+  auto callSet = [&](Handle<JSWebAssemblyGlobal> glob,
+                     HermesValue v) -> std::string {
     auto res = Callable::executeCall2(
         globalSet,
         runtime,
         Runtime::getUndefinedValue(),
         glob.getHermesValue(),
         v);
-    if (res == ExecutionStatus::EXCEPTION) {
+    if (res != ExecutionStatus::EXCEPTION)
+      return "";
+    // Rooted before it is cleared: describing it runs JS.
+    auto thrown = runtime.makeHandle(runtime.getThrownValue());
+    runtime.clearThrownValue();
+    auto desc = Callable::executeCall1(
+        Handle<Callable>::vmcast(describe),
+        runtime,
+        Runtime::getUndefinedValue(),
+        thrown.getHermesValue());
+    if (desc == ExecutionStatus::EXCEPTION) {
       runtime.clearThrownValue();
-      return true;
+      return "<undescribable>";
     }
-    return false;
+    return stringOf(desc->get());
   };
+
+  // The exact diagnostics, so that a refusal is asserted as the specific one
+  // it is meant to be. "" means the write was stored.
+  const std::string kMsgNumeric =
+      "TypeError: Wasm global.set: a numeric global requires a Number value";
+  const std::string kMsgI64 =
+      "TypeError: Wasm global.set: an i64 global requires a BigInt value";
+  const std::string kMsgFuncRef =
+      "TypeError: Wasm global.set: a funcref global requires null or a "
+      "WebAssembly exported function";
+  const std::string kMsgImmutable =
+      "TypeError: Wasm global.set: the imported global is immutable";
+  const std::string kMsgNotGlobal =
+      "TypeError: Wasm global.set: the imported global is not a "
+      "WebAssembly.Global";
 
   auto str37 = evalExpr(runtime, "'3.7'");
 
@@ -573,16 +642,16 @@ TEST_F(WasmBuiltinTest, WasmGlobalSetValidatesBeforeStoringOrCalling) {
     auto g = makeLive(kF64);
     ASSERT_TRUE(*g);
     reset();
-    EXPECT_TRUE(callSet(g, str37.getHermesValue()))
+    EXPECT_EQ(kMsgNumeric, callSet(g, str37.getHermesValue()))
         << "a string must not satisfy an f64 global";
     EXPECT_EQ(0.0, calls()) << "a refusal must not reach the setter closure";
-    EXPECT_EQ(0.0, slot().getNumber()) << "and must not store";
+    EXPECT_EQ(0.0, slot()->getNumber()) << "and must not store";
 
     // The accepted write DOES run it, so the zero above is a property of the
     // refusal rather than of a closure that never works.
-    EXPECT_FALSE(callSet(g, HermesValue::encodeTrustedNumberValue(1.5)));
+    EXPECT_EQ("", callSet(g, HermesValue::encodeTrustedNumberValue(1.5)));
     EXPECT_EQ(1.0, calls());
-    EXPECT_EQ(1.5, slot().getNumber());
+    EXPECT_EQ(1.5, slot()->getNumber());
   }
 
   // The same refusal with a SNAPSHOT destination, where the storage funnel
@@ -590,7 +659,7 @@ TEST_F(WasmBuiltinTest, WasmGlobalSetValidatesBeforeStoringOrCalling) {
   {
     auto g = makeSnapshot(
         "new WebAssembly.Global({value: 'f64', mutable: true}, 1.5)");
-    EXPECT_TRUE(callSet(g, str37.getHermesValue()));
+    EXPECT_EQ(kMsgNumeric, callSet(g, str37.getHermesValue()));
     EXPECT_EQ(1.5, g->getValue().getNumber());
   }
 
@@ -600,7 +669,7 @@ TEST_F(WasmBuiltinTest, WasmGlobalSetValidatesBeforeStoringOrCalling) {
   {
     auto g = makeSnapshot(
         "new WebAssembly.Global({value: 'i64', mutable: true}, 7n)");
-    EXPECT_TRUE(callSet(g, HermesValue::encodeTrustedNumberValue(5)));
+    EXPECT_EQ(kMsgI64, callSet(g, HermesValue::encodeTrustedNumberValue(5)));
     auto isSeven = evalExpr(runtime, "(function (v) { return v === 7n; })");
     auto kept = Callable::executeCall1(
         Handle<Callable>::vmcast(isSeven),
@@ -611,7 +680,7 @@ TEST_F(WasmBuiltinTest, WasmGlobalSetValidatesBeforeStoringOrCalling) {
     EXPECT_TRUE(kept->get().getBool()) << "a refused write must not store";
 
     auto big = evalExpr(runtime, "2n ** 100n + 5n");
-    EXPECT_FALSE(callSet(g, big.getHermesValue()));
+    EXPECT_EQ("", callSet(g, big.getHermesValue()));
     auto isFive = evalExpr(runtime, "(function (v) { return v === 5n; })");
     auto wrapped = Callable::executeCall1(
         Handle<Callable>::vmcast(isFive),
@@ -627,28 +696,32 @@ TEST_F(WasmBuiltinTest, WasmGlobalSetValidatesBeforeStoringOrCalling) {
     auto g = makeLive(kFuncRef);
     ASSERT_TRUE(*g);
     reset();
-    EXPECT_TRUE(callSet(g, jsClosure.getHermesValue()))
+    EXPECT_EQ(kMsgFuncRef, callSet(g, jsClosure.getHermesValue()))
         << "a plain JS closure is a host reference, not a funcref";
-    EXPECT_TRUE(callSet(g, HermesValue::encodeUndefinedValue()));
-    EXPECT_TRUE(callSet(g, HermesValue::encodeTrustedNumberValue(5)));
-    EXPECT_TRUE(callSet(g, str37.getHermesValue()));
+    EXPECT_EQ(kMsgFuncRef, callSet(g, HermesValue::encodeUndefinedValue()));
+    EXPECT_EQ(
+        kMsgFuncRef, callSet(g, HermesValue::encodeTrustedNumberValue(5)));
+    EXPECT_EQ(kMsgFuncRef, callSet(g, str37.getHermesValue()));
     EXPECT_EQ(0.0, calls()) << "no refusal may reach the setter closure";
 
-    EXPECT_FALSE(callSet(g, realExport.getHermesValue()));
+    EXPECT_EQ("", callSet(g, realExport.getHermesValue()));
     EXPECT_EQ(1.0, calls());
-    EXPECT_EQ(realExport->getRaw(), slot().getRaw());
-    EXPECT_FALSE(callSet(g, HermesValue::encodeNullValue()));
+    // Two rooted handles, read with nothing in between: see slot() above.
+    auto storedFn = slot();
+    EXPECT_EQ(realExport->getRaw(), storedFn->getRaw());
+    EXPECT_EQ("", callSet(g, HermesValue::encodeNullValue()));
     EXPECT_EQ(2.0, calls());
-    EXPECT_TRUE(slot().isNull());
+    EXPECT_TRUE(slot()->isNull());
   }
 
   // The same rules with a snapshot destination, which is the funnel's arm.
   {
     auto g = makeSnapshot(
         "new WebAssembly.Global({value: 'anyfunc', mutable: true}, null)");
-    EXPECT_TRUE(callSet(g, jsClosure.getHermesValue()));
+    EXPECT_EQ(kMsgFuncRef, callSet(g, jsClosure.getHermesValue()));
     EXPECT_TRUE(g->getValue().isNull()) << "a refused write must not store";
-    EXPECT_FALSE(callSet(g, realExport.getHermesValue()));
+    EXPECT_EQ("", callSet(g, realExport.getHermesValue()));
+    // Both operands read a rooted handle and neither allocates.
     EXPECT_EQ(realExport->getRaw(), g->getValue().getRaw());
   }
 
@@ -658,13 +731,14 @@ TEST_F(WasmBuiltinTest, WasmGlobalSetValidatesBeforeStoringOrCalling) {
     auto g = makeLive(kExternRef);
     ASSERT_TRUE(*g);
     reset();
-    EXPECT_FALSE(callSet(g, HermesValue::encodeUndefinedValue()));
-    EXPECT_FALSE(callSet(g, HermesValue::encodeNullValue()));
-    EXPECT_FALSE(callSet(g, HermesValue::encodeTrustedNumberValue(7)));
-    EXPECT_FALSE(callSet(g, jsClosure.getHermesValue()));
-    EXPECT_FALSE(callSet(g, str37.getHermesValue()));
+    EXPECT_EQ("", callSet(g, HermesValue::encodeUndefinedValue()));
+    EXPECT_EQ("", callSet(g, HermesValue::encodeNullValue()));
+    EXPECT_EQ("", callSet(g, HermesValue::encodeTrustedNumberValue(7)));
+    EXPECT_EQ("", callSet(g, jsClosure.getHermesValue()));
+    EXPECT_EQ("", callSet(g, str37.getHermesValue()));
     EXPECT_EQ(5.0, calls());
-    EXPECT_EQ(str37->getRaw(), slot().getRaw());
+    auto storedStr = slot();
+    EXPECT_EQ(str37->getRaw(), storedStr->getRaw());
   }
 
   // The entry guards, which are this builtin's own and not the compiler's: a
@@ -672,20 +746,30 @@ TEST_F(WasmBuiltinTest, WasmGlobalSetValidatesBeforeStoringOrCalling) {
   // with its index.
   {
     auto imm = makeSnapshot("new WebAssembly.Global({value: 'i32'}, 1)");
-    EXPECT_TRUE(callSet(imm, HermesValue::encodeTrustedNumberValue(2)))
+    EXPECT_EQ(
+        kMsgImmutable, callSet(imm, HermesValue::encodeTrustedNumberValue(2)))
         << "an immutable global must be refused";
     EXPECT_EQ(1.0, imm->getValue().getNumber());
 
+    // Not a Global at all. Called through executeCall2 directly, because
+    // callSet's parameter type would not admit one.
     auto res = Callable::executeCall2(
         globalSet,
         runtime,
         Runtime::getUndefinedValue(),
         jsClosure.getHermesValue(),
         HermesValue::encodeTrustedNumberValue(2));
-    EXPECT_EQ(ExecutionStatus::EXCEPTION, res.getStatus())
+    ASSERT_EQ(ExecutionStatus::EXCEPTION, res.getStatus())
         << "an object that is not a WebAssembly.Global must be refused";
-    if (res == ExecutionStatus::EXCEPTION)
-      runtime.clearThrownValue();
+    auto thrown = runtime.makeHandle(runtime.getThrownValue());
+    runtime.clearThrownValue();
+    auto desc = Callable::executeCall1(
+        Handle<Callable>::vmcast(describe),
+        runtime,
+        Runtime::getUndefinedValue(),
+        thrown.getHermesValue());
+    ASSERT_EQ(ExecutionStatus::RETURNED, desc.getStatus());
+    EXPECT_EQ(kMsgNotGlobal, stringOf(desc->get()));
   }
 }
 

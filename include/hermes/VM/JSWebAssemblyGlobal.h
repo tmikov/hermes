@@ -159,15 +159,17 @@ class JSWebAssemblyGlobal final : public JSObject {
       const GCCell *cell,
       Metadata::Builder &mb);
 
-  /// The storage funnel, and the reason the two stores below are private.
-  /// What access control buys is narrow and worth stating exactly: code
-  /// OUTSIDE this class cannot write value_ except through this function, so
-  /// a new writer added elsewhere is a build error. It does not make the slot
-  /// canonical -- the funnel's arms narrow, but its funcref assertion admits
-  /// any object, setValType can change the type out from under a stored
-  /// value, and a member added to this class keeps private access, as
-  /// setI64Value does. Canonicality is still the callers' dispatch; this only
-  /// keeps the set of callers small enough to read.
+  /// The storage funnel. The two stores below are private, so only members
+  /// and friends can call them; the store paths today are setWasmGlobalValue
+  /// and setI64Value, with validation supplied by their callers.
+  ///
+  /// That is all access control gives here, and saying it narrowly is the
+  /// point: it does NOT make the slot canonical. The funnel's numeric arms
+  /// narrow, but its funcref assertion admits any object; setValType is
+  /// public and can change the type out from under a stored value; and
+  /// setI64Value is itself public, so a caller can reach the slot without
+  /// going through the funnel. Canonicality is a property of what each caller
+  /// validates before it stores.
   friend void setWasmGlobalValue(
       Runtime &runtime,
       JSWebAssemblyGlobal *glob,
@@ -206,10 +208,10 @@ class JSWebAssemblyGlobal final : public JSObject {
   /// snapshot readers do no per-type dispatch. Two functions write this field
   /// -- setWasmGlobalValue, which narrows the first three rows and stores the
   /// last two as they stand, and setI64Value, which builds the fourth's
-  /// BigInt. The private setters above keep any writer OUTSIDE this class to
-  /// the first of those; a member of this class could still add a third, and
-  /// the table itself is kept true by what each caller validates before it
-  /// stores.
+  /// BigInt. Nothing enforces that there are only those two: the private
+  /// setters above stop code outside this class calling them directly, but
+  /// setI64Value is public and a new member would need no permission at all.
+  /// What keeps the table true is what each caller validates before storing.
   ///
   /// This replaced a `double value_` plus an `int64_t i64Value_`. It is a
   /// GCHermesValue -- a full 64-bit HermesValue in every heap mode, unlike
