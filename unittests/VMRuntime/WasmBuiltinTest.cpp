@@ -14,6 +14,7 @@
 #include "hermes/VM/Callable.h"
 #include "hermes/VM/JSNativeFunctions.h"
 #include "hermes/VM/JSObject.h"
+#include "hermes/VM/JSWebAssemblyGlobal.h"
 
 using namespace hermes::vm;
 
@@ -301,6 +302,160 @@ TEST_F(WasmBuiltinSanitizeTest, WasmIsExportedFunctionMovesTheHeap) {
     ASSERT_EQ(ExecutionStatus::RETURNED, no.getStatus());
     ASSERT_TRUE(no->get().isBool());
     EXPECT_FALSE(no->get().getBool()) << "iteration " << i;
+  }
+}
+
+/// wasmMakeGlobal's MODE DISCRIMINATOR and its snapshot validation.
+///
+/// The builtin used to decide "live" by asking whether argument 2 was
+/// callable. An immutable funcref global's snapshot VALUE is an Exported
+/// Function -- callable -- so it was read as a getter closure and then
+/// refused, because a live global must be mutable. The mode is now
+/// isMutable, and argument 2 means the value or the getter accordingly.
+///
+/// This is a gtest rather than a .wat test because no compiled module can
+/// reach these arms: WasmIRGen refuses to export a reference-typed global
+/// ("unsupported global export type"), so a snapshot of one exists only when
+/// something calls this builtin directly. A PRIVATE_BUILTIN is reachable from
+/// any bytecode emitting a CallBuiltin with its index, which is exactly what
+/// this test does.
+TEST_F(WasmBuiltinTest, WasmMakeGlobalModeAndSnapshotValidation) {
+  GCScope scope{runtime, "WasmMakeGlobalModeAndSnapshotValidation"};
+
+  Callable *makeRaw = runtime.getBuiltinCallable(
+      hermes::BuiltinMethod::HermesBuiltin_wasmMakeGlobal);
+  ASSERT_NE(nullptr, makeRaw);
+  auto make = runtime.makeHandle(makeRaw);
+
+  // JSWebAssemblyGlobal::ValType, spelled out the way WasmIRGen emits it.
+  constexpr double kI32 = 0, kI64 = 1, kF64 = 3, kExternRef = 4, kFuncRef = 5;
+
+  /// Call the builtin. \return the Global it built, or a null handle with the
+  /// exception cleared if it refused. A refusal and a non-Global result are
+  /// deliberately the same answer here: neither is a usable global.
+  auto build = [&](double code,
+                   bool isMutable,
+                   HermesValue arg2,
+                   HermesValue arg3) -> Handle<JSWebAssemblyGlobal> {
+    auto res = Callable::executeCall4(
+        make,
+        runtime,
+        Runtime::getUndefinedValue(),
+        HermesValue::encodeTrustedNumberValue(code),
+        HermesValue::encodeBoolValue(isMutable),
+        arg2,
+        arg3);
+    if (res == ExecutionStatus::EXCEPTION) {
+      runtime.clearThrownValue();
+      return Runtime::makeNullHandle<JSWebAssemblyGlobal>();
+    }
+    auto *glob = dyn_vmcast<JSWebAssemblyGlobal>(res->getHermesValue());
+    if (!glob)
+      return Runtime::makeNullHandle<JSWebAssemblyGlobal>();
+    return runtime.makeHandle(glob);
+  };
+
+  auto undef = HermesValue::encodeUndefinedValue();
+  auto nul = HermesValue::encodeNullValue();
+  auto realExport = makeRealExport(runtime);
+  auto jsClosure = makeJSClosure(runtime);
+  ASSERT_TRUE(vmisa<JSFunction>(*realExport));
+
+  // THE CASE THE OLD DISCRIMINATOR GOT WRONG: an immutable funcref snapshot
+  // whose value is callable. It is a snapshot, not a live global, and it
+  // holds the export itself.
+  {
+    auto glob = build(kFuncRef, false, realExport.getHermesValue(), undef);
+    ASSERT_TRUE(*glob) << "an immutable funcref snapshot must be built";
+    EXPECT_EQ(JSWebAssemblyGlobal::ValType::FuncRef, glob->getValType());
+    EXPECT_FALSE(glob->isMutable());
+    EXPECT_FALSE(glob->isLive(runtime))
+        << "a callable VALUE must not be read as a getter closure";
+    EXPECT_EQ(realExport->getRaw(), glob->getValue().getRaw());
+  }
+
+  // The same misreading reached an externref global holding any function at
+  // all, branded or not. LIVE IMPLIES MUTABLE is what survives here: an
+  // immutable global is a snapshot however callable its value is.
+  {
+    auto glob = build(kExternRef, false, jsClosure.getHermesValue(), undef);
+    ASSERT_TRUE(*glob);
+    EXPECT_FALSE(glob->isLive(runtime));
+    EXPECT_EQ(jsClosure->getRaw(), glob->getValue().getRaw());
+  }
+
+  // An externref admits ANY JS value: a check on this path would be a bug.
+  {
+    auto glob = build(kExternRef, false, undef, undef);
+    ASSERT_TRUE(*glob);
+    EXPECT_TRUE(glob->getValue().isUndefined());
+
+    glob = build(kExternRef, false, nul, undef);
+    ASSERT_TRUE(*glob);
+    EXPECT_TRUE(glob->getValue().isNull());
+
+    glob = build(
+        kExternRef, false, HermesValue::encodeTrustedNumberValue(7), undef);
+    ASSERT_TRUE(*glob);
+    EXPECT_EQ(7.0, glob->getValue().getNumber());
+  }
+
+  // A funcref admits null or an Exported Function, and nothing else. The
+  // brand check is isWasmExportedFunction, the same one the JS API uses, so
+  // an unbranded closure of the very kind a real export is fails it.
+  {
+    auto glob = build(kFuncRef, false, nul, undef);
+    ASSERT_TRUE(*glob);
+    EXPECT_TRUE(glob->getValue().isNull());
+
+    EXPECT_FALSE(*build(kFuncRef, false, jsClosure.getHermesValue(), undef))
+        << "a plain JS closure is a host reference, not a funcref";
+    EXPECT_FALSE(*build(kFuncRef, false, undef, undef))
+        << "undefined is not a funcref";
+    EXPECT_FALSE(*build(
+        kFuncRef, false, HermesValue::encodeTrustedNumberValue(0), undef));
+  }
+
+  // The numeric validation is unchanged: a Number for a numeric type, a
+  // BigInt for i64, and neither in the other's place.
+  {
+    auto glob =
+        build(kF64, false, HermesValue::encodeTrustedNumberValue(1.5), undef);
+    ASSERT_TRUE(*glob);
+    EXPECT_EQ(1.5, glob->getValue().getNumber());
+
+    EXPECT_FALSE(*build(kI32, false, jsClosure.getHermesValue(), undef));
+    EXPECT_FALSE(*build(
+        kI64, false, HermesValue::encodeTrustedNumberValue(1), undef));
+  }
+
+  // A MUTABLE global is live: arguments 2 and 3 are the two closures.
+  {
+    auto glob = build(
+        kI32, true, jsClosure.getHermesValue(), realExport.getHermesValue());
+    ASSERT_TRUE(*glob);
+    EXPECT_TRUE(glob->isMutable());
+    EXPECT_TRUE(glob->isLive(runtime));
+
+    // ...and both must be there. A mutable snapshot is what this builtin
+    // exists to refuse -- its writes would go nowhere -- even though mutable
+    // snapshots are perfectly legal when the public constructor builds one.
+    EXPECT_FALSE(*build(
+        kI32, true, HermesValue::encodeTrustedNumberValue(1), undef))
+        << "a mutable global must be live";
+    EXPECT_FALSE(*build(kI32, true, jsClosure.getHermesValue(), undef))
+        << "a live global needs a setter";
+  }
+
+  // The range check. It bounds the type code with an ordering comparison,
+  // which -Wswitch cannot flag, so it is asserted rather than trusted: 5 is
+  // the highest enumerator and 6 is not one.
+  {
+    EXPECT_TRUE(*build(kFuncRef, false, nul, undef));
+    EXPECT_FALSE(*build(6, false, HermesValue::encodeTrustedNumberValue(0),
+                        undef));
+    EXPECT_FALSE(*build(-1, false, HermesValue::encodeTrustedNumberValue(0),
+                        undef));
   }
 }
 

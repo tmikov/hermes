@@ -1,0 +1,157 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-global-ref-construct.wat.
+//
+// The descriptor table for reference-typed globals, measured against node
+// v24.13.1: "externref" and "anyfunc" are accepted, "funcref" and "v128" are
+// refused. "funcref" being refused while "anyfunc" is accepted is not a typo
+// -- the JS API's ToValueType lists `anyfunc` -- and it matters because an
+// importing module brand-checks against whatever this constructor produced.
+//
+// Only the funcref rows validate anything. An externref admits ANY JS value,
+// so a case here that refused one would be asserting a bug.
+
+var args = hermescli.getScriptArgs();
+var mod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[0]));
+var ex = new WebAssembly.Instance(mod).exports;
+// A real Exported Function: an ordinary JS closure that WasmIRGen built and
+// the module's own generated code branded.
+var add = ex.add;
+print('fixture: ' + typeof add + ' ' + add(2, 3));
+
+function attempt(f) {
+  try {
+    return String(f());
+  } catch (e) {
+    return e.name + ': ' + e.message;
+  }
+}
+
+// --- Row 1: "externref" is accepted and defaults to undefined ---
+var gExt = new WebAssembly.Global({value: 'externref'});
+print('externref default: ' + String(gExt.value) + ' / ' + typeof gExt.value);
+
+// --- Row 2: "anyfunc" is accepted and defaults to null ---
+var gFn = new WebAssembly.Global({value: 'anyfunc'});
+print('anyfunc default: ' + String(gFn.value) + ' / ' + typeof gFn.value);
+
+// --- Row 3: "funcref" is a TypeError, deliberately ---
+print('funcref: ' + attempt(function () {
+  return new WebAssembly.Global({value: 'funcref'});
+}));
+
+// --- Row 4: "v128" is a TypeError whose message names SIMD ---
+// This is the DESCRIPTOR path only. A module exporting a v128 global is
+// refused elsewhere and with a different message.
+print('v128: ' + attempt(function () {
+  return new WebAssembly.Global({value: 'v128'});
+}));
+
+// An unknown name still names every type that IS accepted.
+print('bogus: ' + attempt(function () {
+  return new WebAssembly.Global({value: 'anyref'});
+}));
+
+// --- An explicit funcref value: null or an Exported Function, nothing else ---
+print('anyfunc from a real export: ' +
+      (new WebAssembly.Global({value: 'anyfunc'}, add).value === add));
+
+print('anyfunc null: ' +
+      String(new WebAssembly.Global({value: 'anyfunc'}, null).value));
+
+// A plain JS function is a HOST REFERENCE, not a funcref.
+print('anyfunc from a plain function: ' + attempt(function () {
+  return new WebAssembly.Global({value: 'anyfunc'}, function () {});
+}));
+
+// Omitting the argument is DefaultValue(funcref), which is null; passing
+// `undefined` explicitly is an ordinary value that fails the check. The two
+// are different, as they are for WebAssembly.Table.prototype.set.
+print('anyfunc explicit undefined: ' + attempt(function () {
+  return new WebAssembly.Global({value: 'anyfunc'}, undefined);
+}));
+
+print('anyfunc from an object: ' + attempt(function () {
+  return new WebAssembly.Global({value: 'anyfunc'}, {});
+}));
+
+// --- An externref takes every JS value there is, unchanged ---
+var externrefCases =
+    [undefined, null, 0, -0, NaN, '', 'x', true, {a: 1}, [1, 2],
+     function () {}, add, 7n, Symbol('s')];
+var storedAsIs = true;
+for (var i = 0; i < externrefCases.length; i++) {
+  var want = externrefCases[i];
+  var got = new WebAssembly.Global({value: 'externref'}, want).value;
+  // NaN is not === itself, and -0 === 0, so compare on Object.is terms.
+  var same = got === want ? (want !== 0 || 1 / got === 1 / want)
+                          : (got !== got && want !== want);
+  if (!same) {
+    storedAsIs = false;
+    print('externref changed case ' + i + ': ' + String(got));
+  }
+}
+print('externref stores every JS value as it stands: ' + storedAsIs);
+
+// --- Mutable reference SNAPSHOTS exist and must keep working ---
+// "A snapshot is always immutable" is a property of wasmMakeGlobal's callers,
+// not of Global: this constructor takes mutability from the descriptor.
+var gmExt = new WebAssembly.Global({value: 'externref', mutable: true}, add);
+var gmFn = new WebAssembly.Global({value: 'anyfunc', mutable: true}, add);
+print('mutable reference snapshots: ' +
+      (gmExt.value === add) + ' ' + (gmFn.value === add));
+
+// --- The brand check is a safepoint, and an externref value is a GC pointer
+// Both loops allocate between constructions, so under -gc-sanitize-handles=1
+// the heap has moved by the time the next construction reads its argument and
+// the next read-back reads the slot.
+var N = 40;
+var funcGlobals = [];
+for (var i = 0; i < N; i++) {
+  funcGlobals.push(new WebAssembly.Global({value: 'anyfunc'}, add));
+  var junk = {i: i, a: [i, i + 1, i + 2]};
+}
+var ok = true;
+for (var i = 0; i < N; i++) {
+  if (funcGlobals[i].value !== add) {
+    ok = false;
+    print('funcref mismatch at ' + i + ': ' + String(funcGlobals[i].value));
+    break;
+  }
+}
+print('funcref constructions intact: ' + ok);
+
+var objects = [];
+var extGlobals = [];
+for (var i = 0; i < N; i++) {
+  var o = {n: i, pad: [i, i]};
+  objects.push(o);
+  extGlobals.push(new WebAssembly.Global({value: 'externref'}, o));
+}
+ok = true;
+for (var i = 0; i < N; i++) {
+  var v = extGlobals[i].value;
+  if (v !== objects[i] || v.n !== i) {
+    ok = false;
+    print('externref mismatch at ' + i + ': ' + JSON.stringify(v));
+    break;
+  }
+}
+print('externref values traced across collections: ' + ok);
+
+// --- The numeric global exports, through the compiler ---
+// wasmMakeGlobal now selects its mode on isMutable: g_const takes the
+// snapshot arm, g_mut the live one. A live global is a two-way view, so the
+// write below is visible to the module's own global.get.
+print('g_const: ' + ex.g_const.value + ' ' + attempt(function () {
+  ex.g_const.value = 1;
+  return 'wrote';
+}));
+print('g_mut: ' + ex.g_mut.value + ' / ' + ex.get_mut());
+ex.g_mut.value = 7;
+print('g_mut after a host write: ' + ex.g_mut.value + ' / ' + ex.get_mut());

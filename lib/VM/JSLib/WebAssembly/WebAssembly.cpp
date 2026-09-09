@@ -2288,10 +2288,35 @@ wasmGlobalConstructor(void *context, Runtime &runtime) {
     valType = JSWebAssemblyGlobal::ValType::F32;
   } else if (matchStr("f64", 3)) {
     valType = JSWebAssemblyGlobal::ValType::F64;
+  } else if (matchStr("externref", 9)) {
+    valType = JSWebAssemblyGlobal::ValType::ExternRef;
+  } else if (matchStr("anyfunc", 7)) {
+    // "anyfunc" IS the funcref spelling here. The JS API's ToValueType lists
+    // `anyfunc` and not `funcref`, so a JS-built funcref global is spelt this
+    // way and the next arm refuses the other spelling. Measured on node
+    // v24.13.1, which does exactly this.
+    valType = JSWebAssemblyGlobal::ValType::FuncRef;
+  } else if (matchStr("funcref", 7)) {
+    // Refused, not accepted as a synonym, and not a typo: an importing module
+    // brand-checks against whatever this constructor produced, so being
+    // lenient here would admit a Global that node's would have refused
+    // outright. WebAssembly.Table's `element` descriptor is a different
+    // enumeration and does take both spellings.
+    return runtime.raiseTypeError(
+        "WebAssembly.Global(): 'funcref' is not a value type in the JS API; "
+        "use 'anyfunc'");
+  } else if (matchStr("v128", 4)) {
+    // A v128 global cannot be represented: JSWebAssemblyGlobal::ValType has
+    // no arm for it and nothing in this engine can hold a 128-bit vector as
+    // a JS value. This covers the DESCRIPTOR only -- a module EXPORTING a
+    // v128 global is refused elsewhere and with a different message, and
+    // diagnosing v128 comprehensively is still outstanding.
+    return runtime.raiseTypeError(
+        "WebAssembly.Global(): 'v128' requires SIMD, which is not supported");
   } else {
     return runtime.raiseTypeError(
         "WebAssembly.Global(): 'value' must be "
-        "'i32', 'i64', 'f32', or 'f64'");
+        "'i32', 'i64', 'f32', 'f64', 'externref' or 'anyfunc'");
   }
 
   // Read "mutable" property (optional, defaults to false).
@@ -2305,13 +2330,48 @@ wasmGlobalConstructor(void *context, Runtime &runtime) {
   lv.mutableVal = std::move(*mutableRes);
   bool isMutable = toBoolean(lv.mutableVal.getHermesValue());
 
-  // Read initial value (second argument, optional, defaults to 0).
+  // Read the initial value (second argument, optional). An absent argument
+  // is DefaultValue(valType): 0 for a numeric type, 0n for i64, `undefined`
+  // for externref and `null` for funcref.
+  //
   // An i64 global takes a BigInt, not a Number: a double cannot represent
   // every i64 exactly, and the spec defines Global.prototype.value as a
   // BigInt for i64.
   double initValue = 0.0;
   int64_t initI64 = 0;
-  if (valType == JSWebAssemblyGlobal::ValType::I64) {
+  const bool isRef = valType == JSWebAssemblyGlobal::ValType::ExternRef ||
+      valType == JSWebAssemblyGlobal::ValType::FuncRef;
+  if (isRef) {
+    if (args.getArgCount() >= 2) {
+      lv.initVal = args.getArg(1);
+    } else {
+      lv.initVal = valType == JSWebAssemblyGlobal::ValType::ExternRef
+          ? HermesValue::encodeUndefinedValue()
+          : HermesValue::encodeNullValue();
+    }
+    // An externref admits ANY JS value, `undefined` and `null` included, so
+    // it is stored with no check at all; a check on this path would be a bug.
+    // A funcref admits `null` or an Exported Function and nothing else: a
+    // plain JS function is a host reference, not a funcref.
+    //
+    // OMITTING the argument differs from passing `undefined` for funcref --
+    // absent is DefaultValue(funcref), which is null, while an explicit
+    // `undefined` is an ordinary value that fails the check. Same rule as
+    // WebAssembly.Table.prototype.set.
+    //
+    // isWasmExportedFunction ALLOCATES: it reaches
+    // HiddenClass::findPropertyNoMap, which initializes a missing property
+    // map, and it roots its own arguments rather than this frame's. Every
+    // value this function still needs across it -- the descriptor and the
+    // initial value -- is a PinnedValue, and the global does not exist yet.
+    if (valType == JSWebAssemblyGlobal::ValType::FuncRef &&
+        !lv.initVal->isNull() &&
+        !isWasmExportedFunction(runtime, lv.initVal)) {
+      return runtime.raiseTypeError(
+          "WebAssembly.Global(): an 'anyfunc' global requires null or a "
+          "WebAssembly exported function");
+    }
+  } else if (valType == JSWebAssemblyGlobal::ValType::I64) {
     if (args.getArgCount() >= 2) {
       lv.initVal = args.getArg(1);
       if (!lv.initVal->isBigInt()) {
@@ -2339,7 +2399,13 @@ wasmGlobalConstructor(void *context, Runtime &runtime) {
   // on it.
   lv.glob->setValType(valType);
   lv.glob->setMutable(isMutable);
-  if (valType == JSWebAssemblyGlobal::ValType::I64) {
+  if (isRef) {
+    // The reference itself is the canonical slot content, so it is stored as
+    // it stands, already validated above. lv.initVal is a PinnedValue, so
+    // create() cannot have staled it; setValue writes the barrier and
+    // allocates nothing.
+    lv.glob->setValue(runtime, lv.initVal.getHermesValue());
+  } else if (valType == JSWebAssemblyGlobal::ValType::I64) {
     // An allocating store now -- the slot holds the BigInt itself rather than
     // a scalar -- so it needs a rooted destination and can fail. lv.glob is
     // that root.
@@ -2397,9 +2463,10 @@ wasmGlobalValueGetter(void *context, Runtime &runtime) {
     return res->getHermesValue();
   }
 
-  // The slot is canonical for valType_ -- a Number for i32/f32/f64, and for
-  // i64 the BigInt the spec requires, wrapped at store time -- so the answer
-  // is the slot, with no per-type dispatch and nothing allocated here.
+  // The slot is canonical for valType_ -- a Number for i32/f32/f64, for i64
+  // the BigInt the spec requires, and for externref/funcref the reference
+  // itself, each put in that form at store time -- so the answer is the slot,
+  // with no per-type dispatch and nothing allocated here.
   return glob->getValue();
 }
 
@@ -2418,6 +2485,20 @@ wasmGlobalValueSetter(void *context, Runtime &runtime) {
   if (!glob->isMutable()) {
     return runtime.raiseTypeError(
         "WebAssembly.Global.prototype.value: cannot set an immutable global");
+  }
+
+  // INTERIM, and deliberately fail-closed. A mutable reference-typed Global
+  // is constructible as of this commit, and the rest of this function
+  // coerces with toNumber_RJS -- which would turn an externref object into
+  // NaN and then store that Number in a reference slot, tripping
+  // setWasmGlobalNumber's assertion. The per-type dispatch that replaces
+  // this (externref stored as it stands, funcref validated as null or an
+  // Exported Function) is the setter's own task in the reference-types plan.
+  if (glob->getValType() == JSWebAssemblyGlobal::ValType::ExternRef ||
+      glob->getValType() == JSWebAssemblyGlobal::ValType::FuncRef) {
+    return runtime.raiseTypeError(
+        "WebAssembly.Global.prototype.value: writing a reference-typed "
+        "global is not implemented yet");
   }
 
   struct : public Locals {

@@ -383,11 +383,15 @@ WASM_BUILTIN(wasmSetFuncInfo)
 // ARE. A defined memory and a defined FUNCREF table already refuse that,
 // being brand-checked at construction; the externref table export does not,
 // and is a separate defect.
-// When valueOrGetter is callable the global is LIVE: it stores no value and
-// reads and writes the module's frame slot through the two closures, so an
-// exported mutable global is a two-way view rather than a snapshot. Otherwise
-// it is a snapshot initialized to valueOrGetter, which is correct only for an
-// immutable global and is what this builtin requires.
+// isMutable selects what the last two arguments mean. When it is true the
+// global is LIVE: valueOrGetter and setterOrUndefined are the two closures,
+// the global stores no value of its own and reads and writes the module's
+// frame slot through them, so an exported mutable global is a two-way view
+// rather than a snapshot. When it is false the global is a SNAPSHOT
+// initialized to valueOrGetter, and setterOrUndefined is unused.
+// The mode used to be read off valueOrGetter being callable, which misread
+// an immutable funcref global -- whose snapshot value IS callable -- as a
+// live one and refused it.
 // valTypeCode is a JSWebAssemblyGlobal::ValType.
 WASM_BUILTIN(wasmMakeGlobal)
 // wasmIsExportedFunction(value) -> boolean: is `value` a WebAssembly
