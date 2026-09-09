@@ -73,11 +73,18 @@ static std::string buildFuncTypeString(const WasmFuncType &ft) {
 /// naming this function -- reordering the enum is a build error, not a
 /// silently wrong type check.
 /// 0xFF remains "a Wasm type no Global can have", which is now only v128. It
-/// matches nothing, so a v128 global import reports a mismatch and a v128
-/// global export is refused by wasmMakeGlobal as an unknown value type. That
-/// is the only thing keeping v128 out of the runtime today: a proper
-/// frontend diagnostic, with a message naming SIMD, is Task 12 of the
-/// reference-types plan.
+/// matches nothing, so a v128 import satisfied by a WebAssembly.Global
+/// reports a mismatch, and a v128 global export is refused by wasmMakeGlobal
+/// as an unknown value type.
+///
+/// That is the Global-OBJECT route only, and it is NOT comprehensive
+/// rejection of v128. An immutable global import may also be satisfied by a
+/// RAW JS value, and the raw branch below splits on i64 versus everything
+/// else (`isI64` at the import loop): every non-i64 type, v128 included,
+/// takes the `typeof === "number"` arm, so a raw Number satisfies a v128
+/// immutable import today. Diagnosing v128 properly, with a message naming
+/// SIMD, is Task 12 of the reference-types plan; Task 5 rewrites the raw
+/// branch. Do not read this code as a v128 guard.
 static uint8_t globalValTypeCode(WasmValType vt) {
   switch (vt) {
     case WasmValType::I32: return 0; // JSWebAssemblyGlobal::ValType::I32

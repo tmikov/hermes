@@ -281,13 +281,26 @@ raiseLinkError(Runtime &runtime, const char *msg) {
 
 /// Look up globalThis.Promise.resolve and call it with \p value.
 /// Returns the resolved Promise object.
+///
+/// \p value arrives as a raw HermesValue and every caller passes something
+/// that carries a GC pointer -- a Module, an Instance, the {module, instance}
+/// result object, or a thrown error. It is pinned FIRST, before either lookup
+/// below: `globalThis.Promise` and `Promise.resolve` are both replaceable, so
+/// each getNamed_RJS allocates and can run a user getter, and the value used
+/// to be handed to executeCall1 still holding whatever address it had two
+/// safepoints earlier.
 static CallResult<HermesValue>
 callPromiseResolve(Runtime &runtime, HermesValue value) {
   struct : public Locals {
+    PinnedValue<> value;
     PinnedValue<> promiseCons;
     PinnedValue<> resolveFn;
   } lv;
   LocalsRAII lraii(runtime, &lv);
+
+  // Rooted before anything allocates. Nothing below may use the `value`
+  // parameter again.
+  lv.value = value;
 
   // Get globalThis.Promise.
   auto promiseRes = JSObject::getNamed_RJS(
@@ -317,12 +330,13 @@ callPromiseResolve(Runtime &runtime, HermesValue value) {
     return runtime.raiseTypeError("Promise.resolve is not callable");
   }
 
-  // Call Promise.resolve(value).
+  // Call Promise.resolve(value), passing the ROOTED copy: the parameter is
+  // two safepoints stale by now.
   auto callRes = Callable::executeCall1(
       Handle<Callable>::vmcast(&lv.resolveFn),
       runtime,
       lv.promiseCons,
-      value);
+      lv.value.getHermesValue());
   if (LLVM_UNLIKELY(callRes == ExecutionStatus::EXCEPTION)) {
     return ExecutionStatus::EXCEPTION;
   }
@@ -331,13 +345,24 @@ callPromiseResolve(Runtime &runtime, HermesValue value) {
 
 /// Look up globalThis.Promise.reject and call it with \p error.
 /// Returns the rejected Promise object.
+///
+/// Same rooting obligation as callPromiseResolve, and more pressing: every
+/// caller reaches here by taking the thrown value out of the runtime and
+/// calling clearThrownValue(), so the exception root is already gone and this
+/// raw parameter is the ONLY thing referring to the error object across the
+/// two replaceable-property lookups below. Pin it first.
 static CallResult<HermesValue>
 callPromiseReject(Runtime &runtime, HermesValue error) {
   struct : public Locals {
+    PinnedValue<> error;
     PinnedValue<> promiseCons;
     PinnedValue<> rejectFn;
   } lv;
   LocalsRAII lraii(runtime, &lv);
+
+  // Rooted before anything allocates. Nothing below may use the `error`
+  // parameter again.
+  lv.error = error;
 
   // Get globalThis.Promise.
   auto promiseRes = JSObject::getNamed_RJS(
@@ -367,12 +392,13 @@ callPromiseReject(Runtime &runtime, HermesValue error) {
     return runtime.raiseTypeError("Promise.reject is not callable");
   }
 
-  // Call Promise.reject(error).
+  // Call Promise.reject(error), passing the ROOTED copy: the parameter is two
+  // safepoints stale by now.
   auto callRes = Callable::executeCall1(
       Handle<Callable>::vmcast(&lv.rejectFn),
       runtime,
       lv.promiseCons,
-      error);
+      lv.error.getHermesValue());
   if (LLVM_UNLIKELY(callRes == ExecutionStatus::EXCEPTION)) {
     return ExecutionStatus::EXCEPTION;
   }
