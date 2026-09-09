@@ -72,7 +72,7 @@
 ;; CHECK-NEXT: funcref: TypeError: WebAssembly.Global(): 'funcref' is not a value type in the JS API; use 'anyfunc'
 ;; CHECK-NEXT: v128: TypeError: WebAssembly.Global(): 'v128' requires SIMD, which is not supported
 ;; CHECK-NEXT: bogus: TypeError: WebAssembly.Global(): 'value' must be 'i32', 'i64', 'f32', 'f64', 'externref' or 'anyfunc'
-;; CHECK-NEXT: anyfunc null: null
+;; CHECK-NEXT: anyfunc null is null: true
 ;; CHECK-NEXT: anyfunc from a plain function: TypeError: WebAssembly.Global(): an 'anyfunc' global requires null or a WebAssembly exported function
 ;; CHECK-NEXT: anyfunc explicit undefined: TypeError: WebAssembly.Global(): an 'anyfunc' global requires null or a WebAssembly exported function
 ;; CHECK-NEXT: anyfunc from an object: TypeError: WebAssembly.Global(): an 'anyfunc' global requires null or a WebAssembly exported function

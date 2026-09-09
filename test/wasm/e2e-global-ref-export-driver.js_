@@ -40,13 +40,15 @@ for (var i = 0; i < names.length; i++) {
     allGlobals = false;
     print(names[i] + ' is not a WebAssembly.Global: ' + typeof g);
   }
-  ownProps += Object.getOwnPropertyNames(g).length;
+  // Reflect.ownKeys, not getOwnPropertyNames: a symbol-keyed publication
+  // would satisfy the latter.
+  ownProps += Reflect.ownKeys(g).length;
 }
 print('all six are Globals with no own properties: ' +
       allGlobals + ' ' + ownProps);
 
 // --- externref ---
-print('g_null: ' + String(ex.g_null.value));
+print('g_null is null: ' + (ex.g_null.value === null));
 // The host's own object, through the import, the module's global initializer,
 // and the export wrapper.
 print('g_host === hostValue: ' + (ex.g_host.value === hostValue));
@@ -63,16 +65,32 @@ print('g_hidden is a function: ' + (typeof ex.g_hidden.value));
 print('g_hidden calls: ' + ex.g_hidden.value());
 print('g_hidden is not h: ' + (ex.g_hidden.value !== ex.h));
 
-print('g_nullfunc: ' + String(ex.g_nullfunc.value));
+print('g_nullfunc is null: ' + (ex.g_nullfunc.value === null));
 
 // --- The mutable one is LIVE, so its value comes back through a closure ---
 print('g_mut === hostValue: ' + (ex.g_mut.value === hostValue));
+
+// The assertion that distinguishes live from a snapshot of the same initial
+// value. The reference is taken BEFORE the module writes the slot: reading
+// ex.g_mut fresh afterwards would pass against a snapshot too, and so would
+// reading it twice with an unchanged value in between.
+//
+// The write goes through the module's own global.set, which stores into the
+// frame slot; writing a reference-typed global through either setter is
+// refused for now, and that refusal is the next case.
+var retained = ex.g_mut;
+var written = {tag: 'written'};
+ex.set_mut(written);
+print('a retained live Global sees a later global.set: ' +
+      (retained.value === written));
+
 // INTERIM: deleted by the setter task, which stores the value instead.
 print('g_mut write: ' + attempt(function () {
   ex.g_mut.value = null;
   return 'wrote';
 }));
-print('g_mut unchanged: ' + (ex.g_mut.value === hostValue));
+print('g_mut unchanged by the refused write: ' +
+      (ex.g_mut.value === written));
 
 // An immutable one is refused for being immutable, before that.
 print('g_func write: ' + attempt(function () {

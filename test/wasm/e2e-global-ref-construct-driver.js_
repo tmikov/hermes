@@ -62,8 +62,10 @@ print('bogus: ' + attempt(function () {
 
 // --- An explicit funcref value: null or an Exported Function, nothing else.
 // The Exported Function half needs the module and is below.
-print('anyfunc null: ' +
-      String(new WebAssembly.Global({value: 'anyfunc'}, null).value));
+// Identity, not the string form: a global holding the STRING "null" passes a
+// stringified check.
+print('anyfunc null is null: ' +
+      (new WebAssembly.Global({value: 'anyfunc'}, null).value === null));
 
 // A plain JS function is a HOST REFERENCE, not a funcref.
 print('anyfunc from a plain function: ' + attempt(function () {

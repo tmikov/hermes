@@ -52,6 +52,14 @@
   (func $h (export "h") (param i32) (result i32)
     (i32.add (local.get 0) (i32.const 1)))
 
+  ;; Writes the mutable global from inside the module. A module-defined
+  ;; global.set stores straight into the frame slot, so this is the one write
+  ;; direction that works while writing a reference-typed global through
+  ;; either setter is refused -- and it is what tells a LIVE export from a
+  ;; snapshot of the same initial value.
+  (func (export "set_mut") (param externref)
+    (global.set $g_mut (local.get 0)))
+
   ;; Escapable but NOT exported under any name: the only way script reaches
   ;; this function is through the funcref global below.
   (func $hidden (result i32)
@@ -63,23 +71,27 @@
   (global (export "g_hidden") funcref (ref.func $hidden))
   (global (export "g_nullfunc") funcref (ref.null func))
   ;; Mutable, so this one is exported LIVE: it holds no value of its own and
-  ;; reads the module's frame slot through a closure.
-  (global (export "g_mut") (mut externref) (global.get $imp))
+  ;; reads the module's frame slot through a closure. set_mut above writes
+  ;; that slot, and the driver reads it back through a reference to the Global
+  ;; it took BEFORE the write -- which a snapshot, or a getter closed over the
+  ;; initial value, would fail.
+  (global $g_mut (export "g_mut") (mut externref) (global.get $imp))
 )
 
 ;; The expected output. It lives here rather than in the driver because
 ;; FileCheck reads this file.
 ;; CHECK: instantiated: true
 ;; CHECK-NEXT: all six are Globals with no own properties: true 0
-;; CHECK-NEXT: g_null: null
+;; CHECK-NEXT: g_null is null: true
 ;; CHECK-NEXT: g_host === hostValue: true
 ;; CHECK-NEXT: g_func === h: true
 ;; CHECK-NEXT: g_func calls: 42
 ;; CHECK-NEXT: g_hidden is a function: function
 ;; CHECK-NEXT: g_hidden calls: 5
 ;; CHECK-NEXT: g_hidden is not h: true
-;; CHECK-NEXT: g_nullfunc: null
+;; CHECK-NEXT: g_nullfunc is null: true
 ;; CHECK-NEXT: g_mut === hostValue: true
+;; CHECK-NEXT: a retained live Global sees a later global.set: true
 ;; CHECK-NEXT: g_mut write: TypeError: WebAssembly.Global.prototype.value: writing a reference-typed global is not implemented yet
-;; CHECK-NEXT: g_mut unchanged: true
+;; CHECK-NEXT: g_mut unchanged by the refused write: true
 ;; CHECK-NEXT: g_func write: TypeError: WebAssembly.Global.prototype.value: cannot set an immutable global
