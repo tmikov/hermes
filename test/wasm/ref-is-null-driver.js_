@@ -8,9 +8,9 @@
 // JS driver for ref-is-null.wat.
 //
 // The assertions print the raw result rather than a boolean derived from it,
-// so a result of `true`, `undefined` or a reference is visibly not 1. That
-// still cannot tell 1 from Number(1) or from a string "1", so the `shape`
-// line at the end checks typeof separately.
+// so a result of `true`, `undefined` or a reference is visibly not 1. String
+// concatenation still cannot tell the number 0 from the string "0", so the
+// `shape` line at the end checks typeof and value for both answers.
 
 var args = hermescli.getScriptArgs();
 var mod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[0]));
@@ -55,12 +55,21 @@ print('ind_f(null/fn): ' + x.ind_f(0) + ' ' + x.ind_f(1));
 print('ind_e(null/undefined/object): ' + x.ind_e(2) + ' ' + x.ind_e(3) + ' ' +
       x.ind_e(4));
 
-// The result is an i32. `| 0` is identity on 1 and 0 but maps `true` to 1
-// and `undefined` to 0, so it is printed next to typeof rather than instead
-// of it. A boolean, `undefined` and a reference each fail the typeof half; a
-// number that is not 1 or 0 fails the other half.
+// The i32 as a branch condition rather than a returned value: 10 for null,
+// 20 for non-null.
+print('brif_f(null/fn): ' + x.brif_f(null) + ' ' + x.brif_f(fn));
+print('brif_e(null/undefined/object): ' + x.brif_e(null) + ' ' +
+      x.brif_e(undefined) + ' ' + x.brif_e(obj));
+
+// The result is the number 1 or the number 0. Both answers are checked, and
+// each with two halves, because every line above went through string
+// concatenation: typeof refuses a boolean, `undefined` and a reference, and
+// `=== 1` / `=== 0` refuses a string, since '0' === 0 is false. Checking only
+// the null answer would leave the non-null one free to be the string "0",
+// which prints identically everywhere above.
 var one = x.param_f(null);
 var zero = x.param_f(fn);
-print('shape: ' + typeof one + ' ' + (one | 0) + ' ' + (zero | 0));
+print('shape: ' + typeof one + ' ' + (one === 1) + ' / ' +
+      typeof zero + ' ' + (zero === 0));
 
 print('done');

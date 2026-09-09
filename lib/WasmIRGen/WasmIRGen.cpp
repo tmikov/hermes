@@ -130,8 +130,8 @@ static Type wasmValTypeToIRType(WasmValType vt) {
       return Type::createNumber();
     case WasmValType::FuncRef:
       // ObjectOrNull, not Object: a funcref value is an Exported Function or
-      // null. Null is not a corner case here -- a declared funcref local is
-      // zero-initialized to it a few hundred lines below, in genFunctionBody.
+      // null. Null is not a corner case here -- beginFunction() below
+      // zero-initializes a declared funcref local with getLiteralNull().
       // Object excludes null, and InstSimplify folds a strict comparison
       // between disjoint types to a constant without testing anything, so an
       // Object annotation would make `ref === null` answer false for a null

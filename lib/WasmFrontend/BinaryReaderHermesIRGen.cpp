@@ -752,9 +752,8 @@ wabt::Result BinaryReaderHermesIRGen::OnRefNullExpr(wabt::Type type) {
 }
 
 wabt::Result BinaryReaderHermesIRGen::OnRefIsNullExpr() {
-  // ref.is_null is not a constant expression -- the initializer positions
-  // this reader also drives admit const, global.get, ref.null and ref.func
-  // -- so only a function body has anything to hand the IR generator.
+  // ref.is_null is not a constant expression, so the initializer positions
+  // this reader also drives have nothing to hand the IR generator.
   if (inFunctionBody_ && irgen_)
     irgen_->onRefIsNull();
   return wabt::Result::Ok;
