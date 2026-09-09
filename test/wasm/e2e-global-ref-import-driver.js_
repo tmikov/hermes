@@ -93,11 +93,13 @@ var ex6 = instantiate({e: {a: objA, f: null, n: 0}});
 print('an absent externref import satisfies it too: ' +
       (ex6.get_b() === undefined) + ' ' + (ex6.get_a() === objA));
 
-// The exemption is externref-only, and this is what says so. A funcref and a
-// numeric global still take the missing-import guard, present-and-undefined
-// or absent alike, and keep the message they had. (Naming a missing import
-// where node names a type error is dz 01a0855d-6b5b; whoever changes those
-// messages will find these four lines.)
+// The exemption is IMMUTABLE-externref-only, and these four lines say so for
+// two of the three other sides: a funcref and a numeric global still take the
+// missing-import guard, present-and-undefined or absent alike, and keep the
+// message they had. The third side, a MUTABLE externref import, is pinned in
+// e2e-global-ref-mut-reexport.wat, which has a mutable declaration to supply.
+// (Naming a missing import where node names a type error is dz
+// 01a0855d-6b5b; whoever changes those messages will find these four lines.)
 attempt('funcref <- undefined', objA, objB, undefined);
 attemptRaw('funcref <- absent', {e: {a: objA, b: objB, n: 0}});
 attemptRaw('i32 <- undefined',
