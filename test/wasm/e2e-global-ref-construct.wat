@@ -29,12 +29,11 @@
 ;; HERMESVM_SANITIZE_HANDLES the flag is ignored and this is an ordinary
 ;; behavioural test.
 ;;
-;; Some cases below pin INTERIM behaviour -- the ones whose expected message
-;; says a write is "not implemented yet". Both setters refuse a
-;; reference-typed global outright for now, which means a legal operation
-;; currently throws. It is pinned here so that the setter task's deletion of
-;; those refusals is a visible change with a test to update rather than a
-;; silent one. Those cases are to be rewritten then, not routed around.
+;; The write direction is here as well as the read one, now that both setters
+;; dispatch per type: a mutable reference snapshot round-trips through
+;; `.value`, and the module's own `global.set` on the imported mutable
+;; externref global reaches the internal setter and stores whatever it is
+;; given -- a Number included, which is an ordinary externref value.
 
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js -gc-sanitize-handles=1 %S/e2e-global-ref-construct-driver.js_ -- %t.hbc | %FileCheck --match-full-lines %s
@@ -48,8 +47,8 @@
   (func (export "add") (param i32 i32) (result i32)
     (i32.add (local.get 0) (local.get 1)))
 
-  ;; The read direction works: global.get on the import hands the host's own
-  ;; value back. The write direction is refused for now; see the header.
+  ;; Both directions on the import: global.get hands the host's own value
+  ;; back, and global.set writes it through the internal setter.
   (func (export "get_ref") (result externref)
     (global.get $eref))
   (func (export "put_ref") (param externref)
@@ -79,18 +78,22 @@
 ;; CHECK-NEXT: externref stores every JS value as it stands: true
 ;; CHECK-NEXT: mutable reference snapshots hold their value: true true
 ;; CHECK-NEXT: immutable externref write: TypeError: WebAssembly.Global.prototype.value: cannot set an immutable global
-;; CHECK-NEXT: mutable externref write: TypeError: WebAssembly.Global.prototype.value: writing a reference-typed global is not implemented yet
-;; CHECK-NEXT: mutable anyfunc write: TypeError: WebAssembly.Global.prototype.value: writing a reference-typed global is not implemented yet
+;; CHECK-NEXT: mutable externref write: true
+;; CHECK-NEXT: mutable externref write null: true
+;; CHECK-NEXT: mutable anyfunc write a plain function: TypeError: WebAssembly.Global.prototype.value: an 'anyfunc' global requires null or a WebAssembly exported function
 ;; CHECK-NEXT: mutable numeric snapshot round-trips: 2
 ;; CHECK-NEXT: externref values traced across collections: true
 ;; CHECK-NEXT: fixture: function 5
 ;; CHECK-NEXT: anyfunc from a real export: true
 ;; CHECK-NEXT: externref holds an export too: true
 ;; CHECK-NEXT: funcref constructions intact: true
+;; CHECK-NEXT: anyfunc write an export: true
+;; CHECK-NEXT: anyfunc write back to null: true
 ;; CHECK-NEXT: g_const: 42 TypeError: WebAssembly.Global.prototype.value: cannot set an immutable global
 ;; CHECK-NEXT: g_mut: 100 / 100
 ;; CHECK-NEXT: g_mut after a host write: 7 / 7
 ;; CHECK-NEXT: global.get sees the host value: true
-;; CHECK-NEXT: put_ref an object: TypeError: Wasm global.set: writing a reference-typed global is not implemented yet
-;; CHECK-NEXT: put_ref a number: TypeError: Wasm global.set: writing a reference-typed global is not implemented yet
-;; CHECK-NEXT: the host value is untouched: true
+;; CHECK-NEXT: put_ref an object: true true
+;; CHECK-NEXT: put_ref a number: true true
+;; CHECK-NEXT: put_ref undefined: true
+;; CHECK-NEXT: .value write is seen by global.get: true

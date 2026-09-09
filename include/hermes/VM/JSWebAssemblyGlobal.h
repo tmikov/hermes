@@ -74,21 +74,6 @@ class JSWebAssemblyGlobal final : public JSObject {
     return value_;
   }
 
-  /// Store \p val, which the caller must have already made canonical for
-  /// getValType(). Performs the write barrier. Does not allocate, so a raw
-  /// pointer to this global stays valid across it.
-  void setValue(Runtime &runtime, HermesValue val) {
-    value_.set(val, runtime.getHeap());
-  }
-
-  /// Store the number \p val, which the caller must have already narrowed to
-  /// getValType(). i32/f32/f64 only -- setWasmGlobalNumber is the narrowing
-  /// funnel and the only intended caller. Does not allocate.
-  void setNumberValue(Runtime &runtime, double val) {
-    value_.setNonPtr(
-        HermesValue::encodeTrustedNumberValue(val), runtime.getHeap());
-  }
-
   /// Store \p val as this global's i64 value: a BigIntPrimitive wrapped to
   /// 64 bits, which is both the canonical slot content for an I64 global and
   /// what Global.prototype.value must return.
@@ -174,6 +159,31 @@ class JSWebAssemblyGlobal final : public JSObject {
       const GCCell *cell,
       Metadata::Builder &mb);
 
+  /// The storage funnel, which dispatches on valType_ and is the reason the
+  /// two stores below are private rather than public: with them reachable
+  /// only from here and from setI64Value, "value_ is canonical for valType_"
+  /// is enforced by the compiler instead of by everyone remembering. Adding a
+  /// writer elsewhere is a build error, not a silently broken invariant.
+  friend void setWasmGlobalValue(
+      Runtime &runtime,
+      JSWebAssemblyGlobal *glob,
+      HermesValue val);
+
+  /// Store \p val, which the caller must have already made canonical for
+  /// getValType(). Performs the write barrier. Does not allocate, so a raw
+  /// pointer to this global stays valid across it.
+  void setValue(Runtime &runtime, HermesValue val) {
+    value_.set(val, runtime.getHeap());
+  }
+
+  /// Store the number \p val, which the caller must have already narrowed to
+  /// getValType(). i32/f32/f64 only; setWasmGlobalValue is what narrows.
+  /// Does not allocate.
+  void setNumberValue(Runtime &runtime, double val) {
+    value_.setNonPtr(
+        HermesValue::encodeTrustedNumberValue(val), runtime.getHeap());
+  }
+
   /// The global's current value, in the canonical JS form for valType_.
   /// A SNAPSHOT global's single source of truth; unused by a live one, whose
   /// storage is the module's frame Variable (see getter_ below).
@@ -189,9 +199,10 @@ class JSWebAssemblyGlobal final : public JSObject {
   ///
   /// The narrowing and the wrapping happen at STORE time, so every reader is
   /// a plain slot read: getValue() is the answer for every type and the
-  /// snapshot readers do no per-type dispatch. setWasmGlobalNumber is the
-  /// numeric funnel that keeps the first three rows true, and setI64Value the
-  /// fourth.
+  /// snapshot readers do no per-type dispatch. Two functions write this field
+  /// -- setWasmGlobalValue, which narrows the first three rows and stores the
+  /// last two as they stand, and setI64Value, which builds the fourth's
+  /// BigInt -- and the private setters above are what keep it to those two.
   ///
   /// This replaced a `double value_` plus an `int64_t i64Value_`. It is a
   /// GCHermesValue -- a full 64-bit HermesValue in every heap mode, unlike

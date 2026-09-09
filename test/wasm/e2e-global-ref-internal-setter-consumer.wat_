@@ -1,0 +1,34 @@
+;; Copyright (c) Meta Platforms, Inc. and affiliates.
+;;
+;; This source code is licensed under the MIT license found in the
+;; LICENSE file in the root directory of this source tree.
+
+;; Companion module for e2e-global-ref-internal-setter.wat. Every global here
+;; is IMPORTED, which is what makes each global.set below compile to a
+;; wasmGlobalSet call rather than a frame store: a module writing a global it
+;; defines never reaches the builtin.
+;;
+;; $ext and $fn come from the provider and are live; $jsfn is a JS-built
+;; snapshot Global, so the same builtin takes its other arm for it. $seed is
+;; immutable and exists only to give the start function a value to write --
+;; ref.func in a function body is not implemented yet, and ref.null and
+;; global.get are the constant expressions left.
+
+(module
+  (import "e" "ext" (global $ext (mut externref)))
+  (import "e" "fn" (global $fn (mut funcref)))
+  (import "e" "jsfn" (global $jsfn (mut funcref)))
+  (import "e" "seed" (global $seed externref))
+
+  ;; Runs during instantiation, before any export of this module exists.
+  (func $start
+    (global.set $ext (global.get $seed)))
+  (start $start)
+
+  (func (export "put_ext") (param externref)
+    (global.set $ext (local.get 0)))
+  (func (export "put_fn") (param funcref)
+    (global.set $fn (local.get 0)))
+  (func (export "put_jsfn") (param funcref)
+    (global.set $jsfn (local.get 0)))
+)

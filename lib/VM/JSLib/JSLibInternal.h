@@ -555,35 +555,34 @@ ExecutionStatus setWasmTableSlot(
     Handle<> value,
     bool isFuncRef);
 
-/// Store \p val into \p glob's numeric value field, coerced to the canonical
-/// representation of the global's declared type per ToWebAssemblyValue: an i32
-/// global holds an int32-valued double, an f32 global a float-representable
-/// one, an f64 global the double as it stands.
+/// Store \p val into \p glob's value slot, in the canonical form of the
+/// global's declared type: an i32 global holds an int32-valued double, an f32
+/// global a float-representable one, an f64 global the double as it stands,
+/// and a reference-typed global the reference itself.
 ///
-/// Every NUMERIC writer of that slot goes through here -- the Global
-/// constructor, the `value` setter, and the wasmGlobalSet builtin that
-/// generated Wasm code uses -- so "value_ is canonical for valType_" is a
-/// property of this one function for the numeric rows of the table, rather
-/// than an assumption spread over three call sites. The i64 row has its own
-/// writer, JSWebAssemblyGlobal::setI64Value, because it allocates.
-/// wasmGlobalGet and wasmLinkGlobal hand the slot straight to generated code,
-/// which treats an i32 global's value as an int32 everywhere downstream.
+/// \p val must already have the JS TYPE its declared Wasm type requires -- a
+/// Number for i32/f32/f64, and for a funcref `null` or an Exported Function.
+/// This function NARROWS, it does not validate. The refusal belongs to the
+/// caller's own dispatch on getValType(): the two setters raise a TypeError
+/// there, the Global constructor coerces or raises, and wasmMakeGlobal
+/// raises. What catches a caller that skipped it is the assert in each
+/// numeric arm, which fires in a Debug build on a non-Number. The funcref
+/// brand check stays with the caller because it ALLOCATES, and this function
+/// is documented not to; the arm asserts only the shape it can check for
+/// free.
 ///
-/// Must not be called on an i64 global, whose slot holds a BigInt, nor on a
-/// reference-typed one, whose slot holds the reference. Those rows of the
-/// value_ table have their own writers; this one owns the numeric rows.
-/// Defined in HermesBuiltin.cpp, which unlike WebAssembly.cpp is compiled
-/// whether or not HERMES_ENABLE_WASM is set -- the wasm* builtins that call
-/// it are.
+/// Must not be called on an I64 global: its slot holds a BigInt wrapped to 64
+/// bits, and materializing one allocates. JSWebAssemblyGlobal::setI64Value is
+/// that row's writer, and is a static taking a handle for exactly that reason.
 ///
 /// Takes a Runtime & because the slot is a GCHermesValue and its store goes
-/// through the write barrier. It still does not allocate, so \p glob may be a
-/// raw pointer.
+/// through the write barrier. It does not allocate, so \p glob may be a raw
+/// pointer and \p val may be an unrooted HermesValue.
 class JSWebAssemblyGlobal;
-void setWasmGlobalNumber(
+void setWasmGlobalValue(
     Runtime &runtime,
     JSWebAssemblyGlobal *glob,
-    double val);
+    HermesValue val);
 #endif
 
 } // namespace vm

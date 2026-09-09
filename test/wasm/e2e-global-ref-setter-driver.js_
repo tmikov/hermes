@@ -1,0 +1,224 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-global-ref-setter.wat.
+//
+// The public `.value` setter's per-type dispatch. Two things are asserted
+// about every accepted write: that the value arrives IDENTICAL, with ===
+// rather than a stringification, and that it arrives where a value was not
+// already sitting -- a setter that stored nothing would otherwise pass.
+//
+// Only the anyfunc rows refuse anything. An externref admits every JS value
+// there is, `null` and `undefined` included, so a case here that refused one
+// would be asserting a bug.
+
+var args = hermescli.getScriptArgs();
+var mod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[0]));
+
+function attempt(f) {
+  try {
+    return String(f());
+  } catch (e) {
+    return e.name + ': ' + e.message;
+  }
+}
+
+// The import's link-time value is an object: wasmLinkGlobal still reports its
+// two failures as `null` and `undefined`, so a snapshot Global holding either
+// does not link yet.
+var linkValue = {tag: 'link'};
+var hostRef =
+    new WebAssembly.Global({value: 'externref', mutable: true}, linkValue);
+var ex = new WebAssembly.Instance(mod, {e: {ref: hostRef}}).exports;
+var h = ex.h;
+print('fixture: ' + typeof h + ' ' + h(41));
+
+// ===========================================================================
+// A SNAPSHOT global: the setter stores into the object's own slot.
+// ===========================================================================
+
+// --- externref: whatever it is given, as it stands ---
+// It starts holding 0, so each write below has to change something.
+var gExt = new WebAssembly.Global({value: 'externref', mutable: true}, 0);
+var obj = {tag: 'obj'};
+gExt.value = obj;
+print('externref an object: ' + (gExt.value === obj));
+// `null` and `undefined` are ordinary externref values, not absent ones: each
+// must replace what the previous line stored.
+gExt.value = null;
+print('externref null: ' + (gExt.value === null));
+gExt.value = undefined;
+print('externref undefined: ' + (gExt.value === undefined));
+// A Number stays the Number it is: there is no declared numeric type to
+// narrow it to.
+gExt.value = 3.7;
+print('externref a number: ' + gExt.value);
+// And ToNumber never runs on this path: an object with a valueOf is STORED,
+// not called. A setter that coerced would leave 99 here.
+var coercible = {valueOf: function () { return 99; }};
+gExt.value = coercible;
+print('externref never coerces: ' + (gExt.value === coercible));
+
+// --- anyfunc: null or an Exported Function, nothing else ---
+var gFn = new WebAssembly.Global({value: 'anyfunc', mutable: true}, null);
+gFn.value = h;
+print('anyfunc an export: ' + (gFn.value === h));
+// A plain JS function is a host reference, not a funcref. `undefined` is an
+// ordinary value that fails the check, unlike an omitted constructor
+// argument, which is DefaultValue(funcref) and is null.
+print('anyfunc a plain function: ' + attempt(function () {
+  gFn.value = function () {};
+  return 'wrote';
+}));
+print('anyfunc undefined: ' + attempt(function () {
+  gFn.value = undefined;
+  return 'wrote';
+}));
+print('anyfunc a number: ' + attempt(function () {
+  gFn.value = 5;
+  return 'wrote';
+}));
+// Validation runs before the store, so none of the three reached the slot.
+print('anyfunc intact after the refusals: ' + (gFn.value === h));
+gFn.value = null;
+print('anyfunc null: ' + (gFn.value === null));
+
+// --- i64: a BigInt, wrapped to 64 bits ---
+var g64 = new WebAssembly.Global({value: 'i64', mutable: true}, 0n);
+g64.value = 2n ** 100n + 5n;
+print('i64 wraps to 64 bits: ' + g64.value);
+g64.value = -1n;
+print('i64 negative: ' + g64.value);
+print('i64 from a Number: ' + attempt(function () {
+  g64.value = 5;
+  return 'wrote';
+}));
+print('i64 intact after the refusal: ' + g64.value);
+
+// --- i32/f32/f64: this setter COERCES where the internal one refuses ---
+var g32 = new WebAssembly.Global({value: 'i32', mutable: true}, 0);
+g32.value = '3.7';
+print('i32 from a string: ' + g32.value);
+// ToNumber runs user JS, which allocates and can move the heap; the valueOf
+// below allocates deliberately, so a destination held raw across it would be
+// stale by the time the store happened.
+g32.value = {valueOf: function () {
+  var pad = [];
+  for (var i = 0; i < 200; i++) {
+    pad.push({i: i});
+  }
+  return 300.9;
+}};
+print('i32 from a valueOf that allocates: ' + g32.value);
+var gF32 = new WebAssembly.Global({value: 'f32', mutable: true}, 0);
+gF32.value = 1.1;
+print('f32 narrows: ' + gF32.value);
+
+// --- valueOf() delegates to the getter, reference types included ---
+print('valueOf on an externref global: ' +
+      (new WebAssembly.Global({value: 'externref'}, obj).valueOf() === obj));
+print('valueOf on an anyfunc global: ' +
+      (new WebAssembly.Global({value: 'anyfunc'}, h).valueOf() === h));
+
+// ===========================================================================
+// A LIVE global: the setter runs the module's own closure over a frame slot.
+// ===========================================================================
+
+// Each write is checked through the module's get_* function, which reads the
+// frame slot, as well as through the Global. A closure that stored somewhere
+// the module cannot see would satisfy the second reading alone.
+var liveObj = {tag: 'live'};
+ex.g_ext.value = liveObj;
+print('live externref: ' + (ex.get_ext() === liveObj) + ' ' +
+      (ex.g_ext.value === liveObj));
+ex.g_fn.value = h;
+print('live anyfunc: ' + (ex.get_fn() === h) + ' ' + (ex.g_fn.value === h));
+// The brand check runs BEFORE the closure is invoked, so a refused write
+// cannot have reached the frame slot: get_fn still returns the export.
+print('live anyfunc refuses a plain function: ' + attempt(function () {
+  ex.g_fn.value = function () {};
+  return 'wrote';
+}));
+print('live anyfunc intact: ' + (ex.get_fn() === h));
+ex.g_i64.value = 2n ** 100n + 5n;
+print('live i64: ' + ex.get_i64());
+ex.g_i32.value = '3.7';
+print('live i32: ' + ex.get_i32());
+ex.g_f32.value = 1.1;
+print('live f32: ' + ex.get_f32());
+
+// ===========================================================================
+// The identity round trip, JS to Wasm.
+// ===========================================================================
+
+// The host writes an object through `.value`; the module reads the same
+// shared global with global.get and hands it back. A coerced or copied value
+// fails this, and nothing else asserts it in this direction.
+var carried = {tag: 'carried'};
+hostRef.value = carried;
+print('JS write, Wasm read, same object: ' + (ex.get_imp() === carried));
+
+// ===========================================================================
+// The safepoints, with allocation in between.
+// ===========================================================================
+
+var N = 40;
+// isWasmExportedFunction allocates, so every write in this loop is a
+// safepoint, and the loop allocates between them.
+var funcGlobals = [];
+for (var i = 0; i < N; i++) {
+  var gf = new WebAssembly.Global({value: 'anyfunc', mutable: true}, null);
+  gf.value = h;
+  funcGlobals.push(gf);
+  var junk = {i: i, a: [i, i + 1, i + 2]};
+}
+var ok = true;
+for (var i = 0; i < N; i++) {
+  if (funcGlobals[i].value !== h) {
+    ok = false;
+    print('funcref mismatch at ' + i);
+    break;
+  }
+}
+print('funcref writes intact across collections: ' + ok);
+
+// An externref value is a GC pointer in the value slot, written here rather
+// than at construction.
+var written = [];
+var extGlobals = [];
+for (var i = 0; i < N; i++) {
+  var ge = new WebAssembly.Global({value: 'externref', mutable: true}, 0);
+  var o = {n: i, pad: [i, i]};
+  ge.value = o;
+  written.push(o);
+  extGlobals.push(ge);
+}
+ok = true;
+for (var i = 0; i < N; i++) {
+  var v = extGlobals[i].value;
+  if (v !== written[i] || v.n !== i) {
+    ok = false;
+    print('externref mismatch at ' + i + ': ' + JSON.stringify(v));
+    break;
+  }
+}
+print('externref writes traced across collections: ' + ok);
+
+// The live path, where the closure call is the safepoint and the value has to
+// survive it in both directions.
+ok = true;
+for (var i = 0; i < N; i++) {
+  var o = {n: i, pad: [i, i]};
+  ex.g_ext.value = o;
+  var junk = {i: i, a: [i, i]};
+  if (ex.get_ext() !== o || ex.g_ext.value !== o) {
+    ok = false;
+    print('live externref mismatch at ' + i);
+    break;
+  }
+}
+print('live externref writes survive collection: ' + ok);

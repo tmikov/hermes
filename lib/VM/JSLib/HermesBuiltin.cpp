@@ -1380,10 +1380,10 @@ static bool readWasmFuncInfo(
 // resolves to the single wasmDisabled body instead (see the note above it).
 // What IS independent of the flag is Builtins.def NUMBERING, which is a
 // different claim: the ids exist in both configurations, the bodies do not.
-void setWasmGlobalNumber(
+void setWasmGlobalValue(
     Runtime &runtime,
     JSWebAssemblyGlobal *glob,
-    double val) {
+    HermesValue val) {
   // Every enumerator is spelled out and there is NO `default:`, on purpose.
   // ValType is documented as an ABI, so a further type is a plausible future
   // addition; under a `default:` it would fall through to an unconverted
@@ -1397,8 +1397,9 @@ void setWasmGlobalNumber(
   // HERMES_ENABLE_WERROR=OFF -- it is an ERROR only under -Werror and a
   // warning otherwise. It is also NOT the whole of the automatic signal:
   // this is not the only `switch` over ValType in the tree -- wasmMakeGlobal
-  // validates a snapshot's value with one -- but wasmMakeGlobal also bounds
-  // its type code with an ordering comparison, which no warning can flag.
+  // validates a snapshot's value with one, and so does each of the two
+  // setters -- but wasmMakeGlobal also bounds its type code with an ordering
+  // comparison, which no warning can flag.
   switch (glob->getValType()) {
     case JSWebAssemblyGlobal::ValType::I32:
       // truncateToInt32 is ES ToInt32, which is how ToWebAssemblyValue's i32
@@ -1406,34 +1407,42 @@ void setWasmGlobalNumber(
       // static_cast<int32_t>(static_cast<int64_t>(val)), which agrees with it
       // for every |val| < 2^63 and is undefined behaviour above that -- NaN
       // and Infinity included.
-      val = static_cast<double>(truncateToInt32(val));
-      break;
+      assert(val.isNumber() && "an i32 global's slot holds a Number");
+      glob->setNumberValue(
+          runtime, static_cast<double>(truncateToInt32(val.getNumber())));
+      return;
     case JSWebAssemblyGlobal::ValType::F32:
-      val = static_cast<double>(static_cast<float>(val));
-      break;
+      assert(val.isNumber() && "an f32 global's slot holds a Number");
+      glob->setNumberValue(
+          runtime, static_cast<double>(static_cast<float>(val.getNumber())));
+      return;
     case JSWebAssemblyGlobal::ValType::F64:
       // The double as it stands.
-      break;
+      assert(val.isNumber() && "an f64 global's slot holds a Number");
+      glob->setNumberValue(runtime, val.getNumber());
+      return;
     case JSWebAssemblyGlobal::ValType::I64:
-      // Precondition violation: an i64 global's slot holds a BigInt, because
-      // a double cannot represent every i64 exactly. Leave the slot alone
-      // rather than replacing the BigInt with a lossy Number and breaking
-      // the invariant every reader of value_ depends on.
-      assert(false && "an i64 global's slot holds a BigInt, not a Number");
+      // Precondition violation: an i64 global's slot holds a BigInt wrapped to
+      // 64 bits, and building one allocates, which this function is
+      // documented not to do. JSWebAssemblyGlobal::setI64Value is that row's
+      // writer. Leave the slot alone rather than storing an unwrapped BigInt.
+      assert(false && "an i64 global's slot is written by setI64Value");
       return;
     case JSWebAssemblyGlobal::ValType::ExternRef:
     case JSWebAssemblyGlobal::ValType::FuncRef:
-      // Precondition violation for the same reason: a reference global's slot
-      // holds the reference itself and is written by the reference paths, not
-      // by the numeric funnel. Reference-typed Globals DO exist now -- both
-      // the JS constructor and wasmMakeGlobal build them -- so what keeps
-      // this unreached is that each of them dispatches on valType_ and stores
-      // the reference with setValue, and that both setters refuse a
-      // reference-typed global before reaching this funnel.
-      assert(false && "a reference global's slot holds a reference");
+      // A reference is its own canonical form: there is nothing to narrow and
+      // nothing to build, so the value is stored as it stands. What makes it
+      // legal is the caller's dispatch, not anything checkable here -- an
+      // externref admits every JS value, and a funcref's `null or an Exported
+      // Function` rule needs a brand check that allocates. The assertion below
+      // is therefore the weaker shape-only one that costs nothing.
+      assert(
+          (glob->getValType() != JSWebAssemblyGlobal::ValType::FuncRef ||
+           val.isNull() || val.isObject()) &&
+          "a funcref global's slot holds null or an Exported Function");
+      glob->setValue(runtime, val);
       return;
   }
-  glob->setNumberValue(runtime, val);
 }
 
 /// The brand check on its own, for callers that need to REFUSE a value rather
@@ -2592,7 +2601,6 @@ CallResult<HermesValue> wasmMakeGlobal(void *, Runtime &runtime) {
   // when ValType grows again; the range check above cannot, being an ordering
   // comparison.
   int64_t initI64 = 0;
-  double initValue = 0.0;
   if (!live) {
     switch (valType) {
       case JSWebAssemblyGlobal::ValType::I32:
@@ -2601,7 +2609,6 @@ CallResult<HermesValue> wasmMakeGlobal(void *, Runtime &runtime) {
         if (LLVM_UNLIKELY(!args.getArg(2).isNumber()))
           return runtime.raiseTypeError(
               "wasmMakeGlobal: a numeric global requires a Number value");
-        initValue = args.getArg(2).getNumber();
         break;
       case JSWebAssemblyGlobal::ValType::I64:
         // An i64 snapshot's value is a BigInt, matching
@@ -2640,8 +2647,8 @@ CallResult<HermesValue> wasmMakeGlobal(void *, Runtime &runtime) {
 
   Handle<JSObject> globalPrototype{runtime.wasmGlobalPrototype};
   lv.glob = JSWebAssemblyGlobal::create(runtime, globalPrototype);
-  // The type must be set before any store: setWasmGlobalNumber coerces to it
-  // and setI64Value asserts on it.
+  // The type must be set before any store: setWasmGlobalValue dispatches on
+  // it and setI64Value asserts on it.
   lv.glob->setValType(valType);
   lv.glob->setMutable(isMutable);
   if (live) {
@@ -2655,16 +2662,12 @@ CallResult<HermesValue> wasmMakeGlobal(void *, Runtime &runtime) {
             JSWebAssemblyGlobal::setI64Value(lv.glob, runtime, initI64) ==
             ExecutionStatus::EXCEPTION))
       return ExecutionStatus::EXCEPTION;
-  } else if (
-      valType == JSWebAssemblyGlobal::ValType::ExternRef ||
-      valType == JSWebAssemblyGlobal::ValType::FuncRef) {
-    // The reference itself is the canonical slot content, so it is stored as
-    // it stands. The value is re-read from the argument register rather than
-    // carried across create() in a local, so the allocation cannot have
-    // staled it; setValue writes the barrier and allocates nothing.
-    lv.glob->setValue(runtime, args.getArg(2));
   } else {
-    setWasmGlobalNumber(runtime, lv.glob.get(), initValue);
+    // The value is re-read from the argument register rather than carried
+    // across create() in a local, so the allocation cannot have staled it;
+    // the funnel allocates nothing, and it is what narrows a numeric value
+    // to the declared type and stores a reference as it stands.
+    setWasmGlobalValue(runtime, lv.glob.get(), args.getArg(2));
   }
   return lv.glob.getHermesValue();
 }
@@ -2777,105 +2780,100 @@ CallResult<HermesValue> wasmGlobalSet(void *, Runtime &runtime) {
         "Wasm global.set: the imported global is immutable");
 
   // A live global's storage is another module's frame slot; the closure
-  // writes it. The type checks below are unchanged and still run first.
+  // writes it. The validation below runs first either way, so no closure is
+  // invoked with a value the declared type does not admit.
   //
-  // The raw Callable* is consumed immediately and only a BOOL survives.
-  // Unlike the public setter this builtin never calls toNumber_RJS -- it
-  // type-checks its argument directly. What allocates below is each
-  // executeCall1 on the live path, the i64 snapshot store, which materializes
-  // a BigInt, and every raiseTypeError -- and only the first two have to be
-  // survived, since a raise is returned from immediately. lv.arg carries the
-  // value across the calls and lv.glob the destination across the store.
-  // Anything added here that allocates -- a reference-typed brand check, say
-  // -- must be rooted across the same way.
+  // The funcref brand check, the live path's executeCall1 and the i64
+  // snapshot store each allocate. (So does raiseTypeError, but its result is
+  // returned from immediately, so nothing has to survive it.) The raw
+  // Callable* below is therefore consumed into lv.fn at once and only a BOOL
+  // survives it, lv.arg carries the value across all three, and lv.glob
+  // carries the destination -- which is why the raw `glob` above is not read
+  // past this point.
+  //
+  // Unlike the public setter this builtin never calls toNumber_RJS: it
+  // type-checks its argument and refuses, rather than coercing.
   struct : public Locals {
     PinnedValue<Callable> fn;
     PinnedValue<> arg;
     PinnedValue<JSWebAssemblyGlobal> glob;
   } lv;
   LocalsRAII lraii(runtime, &lv);
+  lv.glob = glob;
+  lv.arg = args.getArg(1);
   bool hasSetter = false;
   if (Callable *setterFn = glob->getSetter(runtime)) {
     lv.fn = setterFn;
     hasSetter = true;
   }
 
-  HermesValue val = args.getArg(1);
-  // INTERIM, and deliberately fail-closed. THIS REFUSES A LEGAL OPERATION:
-  // `global.set` on an imported mutable externref global is valid Wasm, and
-  // it throws here for now. That is a gap, not a rule, which is why the
-  // message says the write is not implemented rather than not allowed.
-  //
-  // It is here because the alternative is worse. A JS caller can now build a
-  // mutable reference-typed WebAssembly.Global and a module can import it --
-  // one .wat and one line of JS reach this function with one -- and a Number
-  // would otherwise pass the check below and reach setWasmGlobalNumber, whose
-  // reference arms assert: a Debug abort, and a silent no-op in a release
-  // build.
-  //
-  // The per-type dispatch this becomes (externref stored as it stands,
-  // funcref validated as null or an Exported Function, both before any
-  // closure invocation) is the internal setter's own task in the
-  // reference-types plan. Deleting this block is that task's, and
-  // e2e-global-ref-construct.wat pins the behaviour so the deletion is a
-  // visible change rather than a silent one.
-  if (LLVM_UNLIKELY(
-          glob->getValType() == JSWebAssemblyGlobal::ValType::ExternRef ||
-          glob->getValType() == JSWebAssemblyGlobal::ValType::FuncRef))
-    return runtime.raiseTypeError(
-        "Wasm global.set: writing a reference-typed global is not "
-        "implemented yet");
-  if (glob->getValType() == JSWebAssemblyGlobal::ValType::I64) {
-    if (LLVM_UNLIKELY(!val.isBigInt()))
-      return runtime.raiseTypeError(
-          "Wasm global.set: an i64 global requires a BigInt value");
-    if (hasSetter) {
-      lv.arg = val;
-      auto res = Callable::executeCall1(
-          lv.fn,
-          runtime,
-          Runtime::getUndefinedValue(),
-          lv.arg.getHermesValue());
-      if (LLVM_UNLIKELY(res == ExecutionStatus::EXCEPTION))
-        return ExecutionStatus::EXCEPTION;
-      return HermesValue::encodeUndefinedValue();
-    }
-    // The store allocates the BigInt, so the destination is pinned and the
-    // digit is read out of `val` first: neither `glob` nor `val` survives the
-    // safepoint, lv.glob does.
+  // Validate against the declared type BEFORE anything is stored or any
+  // closure runs. No `default:`, so -Wswitch names this site if ValType
+  // grows.
+  switch (lv.glob->getValType()) {
+    case JSWebAssemblyGlobal::ValType::I32:
+    case JSWebAssemblyGlobal::ValType::F32:
+    case JSWebAssemblyGlobal::ValType::F64:
+      if (LLVM_UNLIKELY(!lv.arg->isNumber()))
+        return runtime.raiseTypeError(
+            "Wasm global.set: a numeric global requires a Number value");
+      break;
+    case JSWebAssemblyGlobal::ValType::I64:
+      if (LLVM_UNLIKELY(!lv.arg->isBigInt()))
+        return runtime.raiseTypeError(
+            "Wasm global.set: an i64 global requires a BigInt value");
+      break;
+    case JSWebAssemblyGlobal::ValType::ExternRef:
+      // Any JS value is a valid externref, `null` and `undefined` included,
+      // so there is nothing to check and a check here would be a bug.
+      break;
+    case JSWebAssemblyGlobal::ValType::FuncRef:
+      // null, or an Exported Function. A plain JS function is a host
+      // reference rather than a funcref, and is refused.
+      //
+      // isWasmExportedFunction ALLOCATES: it reaches
+      // HiddenClass::findPropertyNoMap, which initializes a missing property
+      // map, and it roots its own arguments rather than this frame's. Both
+      // things this function still needs -- the value and the destination --
+      // are PinnedValues by now, and lv.fn was taken before the call.
+      if (LLVM_UNLIKELY(
+              !lv.arg->isNull() && !isWasmExportedFunction(runtime, lv.arg)))
+        return runtime.raiseTypeError(
+            "Wasm global.set: a funcref global requires null or a "
+            "WebAssembly exported function");
+      break;
+  }
+
+  if (hasSetter) {
+    // The closure narrows a Number to the declared Wasm type and splits a
+    // BigInt into the lo/hi pair the compiler represents i64 with; a
+    // reference it stores as it stands. Doing any of that here would put the
+    // compiler's storage layout in the runtime.
+    auto res = Callable::executeCall1(
+        lv.fn, runtime, Runtime::getUndefinedValue(), lv.arg.getHermesValue());
+    if (LLVM_UNLIKELY(res == ExecutionStatus::EXCEPTION))
+      return ExecutionStatus::EXCEPTION;
+    return HermesValue::encodeUndefinedValue();
+  }
+
+  if (lv.glob->getValType() == JSWebAssemblyGlobal::ValType::I64) {
+    // The store allocates the BigInt, so the digit is read out first and the
+    // destination goes in through the pinned handle.
     int64_t digit =
-        static_cast<int64_t>(val.getBigInt()->truncateToSingleDigit());
-    lv.glob.castAndSetHermesValue<JSWebAssemblyGlobal>(args.getArg(0));
+        static_cast<int64_t>(lv.arg->getBigInt()->truncateToSingleDigit());
     if (LLVM_UNLIKELY(
             JSWebAssemblyGlobal::setI64Value(lv.glob, runtime, digit) ==
             ExecutionStatus::EXCEPTION))
       return ExecutionStatus::EXCEPTION;
     return HermesValue::encodeUndefinedValue();
   }
-  if (LLVM_UNLIKELY(!val.isNumber()))
-    return runtime.raiseTypeError(
-        "Wasm global.set: a numeric global requires a Number value");
-  if (hasSetter) {
-    lv.arg = val;
-    auto res = Callable::executeCall1(
-        lv.fn,
-        runtime,
-        Runtime::getUndefinedValue(),
-        lv.arg.getHermesValue());
-    if (LLVM_UNLIKELY(res == ExecutionStatus::EXCEPTION))
-      return ExecutionStatus::EXCEPTION;
-    return HermesValue::encodeUndefinedValue();
-  }
-  // setWasmGlobalNumber, not setValue: every write to an i32, f32 or f64
-  // global's slot goes through it and is narrowed there, so an i32 global's
-  // slot is int32-valued and an f32 global's float-valued whichever writer
-  // wrote it. (A reference-typed global's slot is written with setValue
-  // instead, which narrows nothing because there is nothing to narrow; the
-  // branch above refuses to reach here with one.) The values generated code
-  // pushes here are already in that form, so this cannot be observed to do
-  // anything -- it makes the invariant a property of the setter rather than
-  // of the whole compiler, and keeps the writers from drifting apart.
-  setWasmGlobalNumber(runtime, glob, val.getNumber());
+  // The funnel, not setValue directly: it is where an i32 global's slot is
+  // made int32-valued and an f32 global's float-valued, so those two rows of
+  // the value_ table stay true of this writer as of the others. The values
+  // generated code pushes here are already narrowed, so on this path the
+  // narrowing cannot be observed to do anything; it keeps the writers from
+  // drifting apart rather than fixing up a value.
+  setWasmGlobalValue(runtime, lv.glob.get(), lv.arg.getHermesValue());
   return HermesValue::encodeUndefinedValue();
 }
 

@@ -7920,8 +7920,8 @@ void WasmIRGen::onGlobalGet(uint32_t globalIndex) {
     } else {
       // This coercion IS A NO-OP on this path and is kept deliberately.
       // Read that as a statement about scope, not about trust: the value now
-      // comes out of value_ through wasmGlobalGet, and setWasmGlobalNumber is
-      // the only NUMERIC writer of that slot, so it is already an
+      // comes out of value_ through wasmGlobalGet, and every numeric write to
+      // that slot is narrowed by setWasmGlobalValue, so it is already an
       // int32-valued double for an i32 global and float-representable for an
       // f32 one --
       // and wasmLinkGlobal refused the import unless the Global's type

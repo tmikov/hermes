@@ -34,10 +34,10 @@
 ;; without HERMESVM_SANITIZE_HANDLES the flag is ignored and this is an
 ;; ordinary behavioural test.
 ;;
-;; One case pins INTERIM behaviour: writing an exported mutable reference
-;; global through `.value` is refused, because writing a reference-typed
-;; global is not implemented yet. That case is to be rewritten when the setter
-;; task lands, not routed around.
+;; The write direction through `.value` is here too, now that the public
+;; setter handles reference types: the module's own global.get must see a
+;; host write, which is what tells a live export from a snapshot in the write
+;; direction as `set_mut` does in the read direction.
 
 ;; REQUIRES: wasm
 ;; RUN: %wat2wasm %s -o %t.wasm && %hermesc --wasm -emit-binary -out %t.hbc %t.wasm && %hermes -Xhermes-internal-test-methods -Xenable-untrusted-bytecode-from-js -gc-sanitize-handles=1 %S/e2e-global-ref-export-driver.js_ -- %t.hbc | %FileCheck --match-full-lines %s
@@ -53,12 +53,18 @@
     (i32.add (local.get 0) (i32.const 1)))
 
   ;; Writes the mutable global from inside the module. A module-defined
-  ;; global.set stores straight into the frame slot, so this is the one write
-  ;; direction that works while writing a reference-typed global through
-  ;; either setter is refused -- and it is what tells a LIVE export from a
-  ;; snapshot of the same initial value.
+  ;; global.set stores straight into the frame slot, bypassing both JS
+  ;; setters, and it is what tells a LIVE export from a snapshot of the same
+  ;; initial value.
   (func (export "set_mut") (param externref)
     (global.set $g_mut (local.get 0)))
+
+  ;; Reads that same frame slot. A host write through `.value` goes through
+  ;; this module's setter closure, so this is where it has to show up: reading
+  ;; the Global back instead would pass even if the closure stored nowhere the
+  ;; module can see.
+  (func (export "get_mut") (result externref)
+    (global.get $g_mut))
 
   ;; Escapable but NOT exported under any name: the only way script reaches
   ;; this function is through the funcref global below.
@@ -92,6 +98,7 @@
 ;; CHECK-NEXT: g_nullfunc is null: true
 ;; CHECK-NEXT: g_mut === hostValue: true
 ;; CHECK-NEXT: a retained live Global sees a later global.set: true
-;; CHECK-NEXT: g_mut write: TypeError: WebAssembly.Global.prototype.value: writing a reference-typed global is not implemented yet
-;; CHECK-NEXT: g_mut unchanged by the refused write: true
+;; CHECK-NEXT: g_mut write reaches the module: true
+;; CHECK-NEXT: g_mut write reaches a retained Global: true
+;; CHECK-NEXT: g_mut holds undefined: true true
 ;; CHECK-NEXT: g_func write: TypeError: WebAssembly.Global.prototype.value: cannot set an immutable global

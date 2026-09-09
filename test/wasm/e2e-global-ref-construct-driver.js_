@@ -106,12 +106,9 @@ print('externref stores every JS value as it stands: ' + storedAsIs);
 // not of Global: this constructor takes mutability from the descriptor, and
 // getting that wrong is the trap this change is warned about.
 //
-// A reference snapshot's mutability is observable through WHICH refusal its
-// setter reports: an immutable global is refused for being immutable, before
-// the INTERIM reference refusal is reached. A global built mutable but
-// recorded immutable reports the first message where it should report the
-// second. The numeric snapshot below adds the round trip a reference one
-// cannot do until the setter task lands.
+// A reference snapshot's mutability is observable as a round trip through
+// `.value`: a global built mutable but recorded immutable refuses the write
+// below for being immutable instead of storing it.
 var refVal = {tag: 'stored'};
 var gmExt = new WebAssembly.Global({value: 'externref', mutable: true}, refVal);
 var gmFn = new WebAssembly.Global({value: 'anyfunc', mutable: true}, null);
@@ -123,14 +120,22 @@ print('immutable externref write: ' + attempt(function () {
   giExt.value = null;
   return 'wrote';
 }));
-// INTERIM: these two refusals are deleted by the setter task, which stores
-// the value instead. Rewrite them then; do not route around them.
-print('mutable externref write: ' + attempt(function () {
-  gmExt.value = null;
-  return 'wrote';
-}));
-print('mutable anyfunc write: ' + attempt(function () {
-  gmFn.value = null;
+// The write direction. Identity against a value the slot did NOT already
+// hold: gmExt starts out holding refVal, so a setter that stored nothing
+// would leave refVal there and read false here. Nothing is coerced -- an
+// object assigned to an externref global used to become NaN.
+var rewritten = {tag: 'rewritten'};
+gmExt.value = rewritten;
+print('mutable externref write: ' + (gmExt.value === rewritten));
+// `null` is an ordinary externref value and must replace the object above.
+// Compared with ===, not stringified: the string "null" passes String(x).
+gmExt.value = null;
+print('mutable externref write null: ' + (gmExt.value === null));
+// An 'anyfunc' global admits null or an Exported Function and nothing else,
+// with the setter's message rather than the constructor's. The Exported
+// Function half needs the module and is below.
+print('mutable anyfunc write a plain function: ' + attempt(function () {
+  gmFn.value = function () {};
   return 'wrote';
 }));
 
@@ -204,6 +209,14 @@ for (var i = 0; i < N; i++) {
 }
 print('funcref constructions intact: ' + ok);
 
+// The funcref setter's positive half, which needs a real Exported Function.
+// gmFn holds null to begin with, so the write is what makes it hold `add`,
+// and the write back to null is what makes it stop.
+gmFn.value = add;
+print('anyfunc write an export: ' + (gmFn.value === add));
+gmFn.value = null;
+print('anyfunc write back to null: ' + (gmFn.value === null));
+
 // --- The numeric global exports, through the compiler ---
 // wasmMakeGlobal now selects its mode on isMutable: g_const takes the
 // snapshot arm, g_mut the live one. A live global is a two-way view, so the
@@ -220,20 +233,29 @@ print('g_mut after a host write: ' + ex.g_mut.value + ' / ' + ex.get_mut());
 // The READ direction works today: global.get on the import hands back the
 // host's own value, unchanged and identical.
 print('global.get sees the host value: ' + (ex.get_ref() === hostValue));
-// INTERIM, and the same refusal as above from the other setter: this is the
-// route by which generated code reaches an imported reference-typed global,
-// and it is one .wat plus one line of JS. Deleted by the setter task.
-//
-// A NUMBER is written as well as an object, and it is the case that matters:
-// without the refusal an object is caught by the internal setter's
-// "requires a Number value" check further down, while a Number passes it and
-// reaches setWasmGlobalNumber, whose reference arms assert.
-print('put_ref an object: ' + attempt(function () {
-  ex.put_ref({});
-  return 'wrote';
-}));
-print('put_ref a number: ' + attempt(function () {
-  ex.put_ref(5);
-  return 'wrote';
-}));
-print('the host value is untouched: ' + (ex.get_ref() === hostValue));
+// The write direction through generated code. hostRef is a JS-built SNAPSHOT
+// Global, so global.set reaches the internal setter's own storage path rather
+// than a live setter closure. Each write is checked on both sides -- the
+// module's global.get and the host's `.value` -- because they are the same
+// storage, and a setter writing only one of them would be caught.
+var putObj = {tag: 'put'};
+ex.put_ref(putObj);
+print('put_ref an object: ' + (ex.get_ref() === putObj) + ' ' +
+      (hostRef.value === putObj));
+// A NUMBER is the case that matters: an object was caught by the internal
+// setter's "requires a Number value" check, while a Number passed it and
+// reached the numeric funnel, whose reference arms assert. It is an ordinary
+// externref value and is stored as a Number, not narrowed and not refused.
+ex.put_ref(5);
+print('put_ref a number: ' + (ex.get_ref() === 5) + ' ' +
+      (hostRef.value === 5));
+// `undefined` likewise, and it must REPLACE the 5 rather than be skipped.
+ex.put_ref(undefined);
+print('put_ref undefined: ' + (ex.get_ref() === undefined));
+
+// The identity round trip in the other direction: the host writes an object
+// through `.value` and the module's own global.get hands back that same
+// object. A coerced or copied value fails this.
+var jsWritten = {tag: 'js'};
+hostRef.value = jsWritten;
+print('.value write is seen by global.get: ' + (ex.get_ref() === jsWritten));

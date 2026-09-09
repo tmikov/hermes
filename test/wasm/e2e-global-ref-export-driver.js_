@@ -76,21 +76,29 @@ print('g_mut === hostValue: ' + (ex.g_mut.value === hostValue));
 // reading it twice with an unchanged value in between.
 //
 // The write goes through the module's own global.set, which stores into the
-// frame slot; writing a reference-typed global through either setter is
-// refused for now, and that refusal is the next case.
+// frame slot directly, reaching neither JS setter.
 var retained = ex.g_mut;
 var written = {tag: 'written'};
 ex.set_mut(written);
 print('a retained live Global sees a later global.set: ' +
       (retained.value === written));
 
-// INTERIM: deleted by the setter task, which stores the value instead.
-print('g_mut write: ' + attempt(function () {
-  ex.g_mut.value = null;
-  return 'wrote';
-}));
-print('g_mut unchanged by the refused write: ' +
-      (ex.g_mut.value === written));
+// The other write direction: a host write through `.value` runs the module's
+// setter closure, so it must land in the same frame slot get_mut reads. The
+// object is a fresh one, so a setter that stored nothing would leave get_mut
+// returning `written` and this would read false.
+var hostWritten = {tag: 'host-written'};
+ex.g_mut.value = hostWritten;
+print('g_mut write reaches the module: ' + (ex.get_mut() === hostWritten));
+print('g_mut write reaches a retained Global: ' +
+      (retained.value === hostWritten));
+
+// `undefined` is an ordinary externref value, not an absent one: it has to
+// REPLACE the object above rather than be skipped. Asserted on both sides so
+// that a setter which stored it only in the Global would still be caught.
+ex.g_mut.value = undefined;
+print('g_mut holds undefined: ' + (ex.get_mut() === undefined) + ' ' +
+      (retained.value === undefined));
 
 // An immutable one is refused for being immutable, before that.
 print('g_func write: ' + attempt(function () {

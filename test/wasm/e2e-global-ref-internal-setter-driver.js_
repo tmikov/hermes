@@ -1,0 +1,117 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-global-ref-internal-setter.wat.
+//
+// The wasmGlobalSet builtin, reached by the consumer module writing globals it
+// imported as mutable. Its contract is strict validation, not coercion: a
+// funcref global takes null or an Exported Function and refuses everything
+// else, while an externref global takes any JS value at all -- a case here
+// that refused one would be asserting a bug.
+
+var args = hermescli.getScriptArgs();
+function load(i) {
+  return WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[i]));
+}
+
+function attempt(f) {
+  try {
+    return String(f());
+  } catch (e) {
+    return e.name + ': ' + e.message;
+  }
+}
+
+var provider = new WebAssembly.Instance(load(0)).exports;
+var h = provider.h;
+print('fixture: ' + typeof h + ' ' + h(41));
+
+// The provider's slots start out null, so every assertion below is about a
+// value that arrived rather than one that was already there.
+print('before instantiation: ' + (provider.get_ext() === null) + ' ' +
+      (provider.get_fn() === null));
+
+var seedObj = {tag: 'seed'};
+var seed = new WebAssembly.Global({value: 'externref'}, seedObj);
+// A snapshot destination for the same builtin: its storage is its own slot,
+// not a closure. It holds an Exported Function at link time because
+// wasmLinkGlobal still spells its two failures `null` and `undefined`.
+var jsFn = new WebAssembly.Global({value: 'anyfunc', mutable: true}, h);
+
+var consumer = new WebAssembly.Instance(load(1), {
+  e: {ext: provider.g_ext, fn: provider.g_fn, jsfn: jsFn, seed: seed},
+}).exports;
+
+// The consumer's start function ran during instantiation and wrote the seed
+// through wasmGlobalSet.
+print('the start function wrote during instantiation: ' +
+      (provider.get_ext() === seedObj));
+
+// --- externref: every JS value, stored as it stands ---
+var obj = {tag: 'obj'};
+consumer.put_ext(obj);
+print('put_ext an object: ' + (provider.get_ext() === obj) + ' ' +
+      (provider.g_ext.value === obj));
+// A Number is an ordinary externref value: not narrowed, not refused. It used
+// to pass the builtin's Number-only check and reach the numeric funnel, whose
+// reference arms assert.
+consumer.put_ext(7);
+print('put_ext a number: ' + (provider.get_ext() === 7));
+consumer.put_ext(null);
+print('put_ext null: ' + (provider.get_ext() === null));
+consumer.put_ext(undefined);
+print('put_ext undefined: ' + (provider.get_ext() === undefined));
+
+// --- funcref, live destination: null or an Exported Function ---
+consumer.put_fn(h);
+print('put_fn an export: ' + (provider.get_fn() === h) + ' ' +
+      (provider.g_fn.value === h));
+print('put_fn a plain function: ' + attempt(function () {
+  consumer.put_fn(function () {});
+  return 'wrote';
+}));
+print('put_fn a number: ' + attempt(function () {
+  consumer.put_fn(5);
+  return 'wrote';
+}));
+print('put_fn undefined: ' + attempt(function () {
+  consumer.put_fn(undefined);
+  return 'wrote';
+}));
+// Validation happens before the setter closure is invoked, so none of the
+// three reached the provider's frame slot.
+print('put_fn intact after the refusals: ' + (provider.get_fn() === h));
+consumer.put_fn(null);
+print('put_fn null: ' + (provider.get_fn() === null));
+
+// --- funcref, snapshot destination: the builtin's other arm ---
+// jsFn holds h at link time, so each write below has to change the slot.
+consumer.put_jsfn(null);
+print('put_jsfn null: ' + (jsFn.value === null));
+consumer.put_jsfn(h);
+print('put_jsfn an export: ' + (jsFn.value === h));
+print('put_jsfn a plain function: ' + attempt(function () {
+  consumer.put_jsfn(function () {});
+  return 'wrote';
+}));
+print('put_jsfn intact after the refusal: ' + (jsFn.value === h));
+
+// --- The brand check is a safepoint, and so is the setter closure ---
+var N = 40;
+var ok = true;
+for (var i = 0; i < N; i++) {
+  var o = {n: i, pad: [i, i]};
+  consumer.put_ext(o);
+  consumer.put_fn(h);
+  var junk = {i: i, a: [i, i + 1, i + 2]};
+  if (provider.get_ext() !== o || provider.get_fn() !== h) {
+    ok = false;
+    print('mismatch at ' + i);
+    break;
+  }
+}
+print('writes survive collection: ' + ok);
