@@ -458,6 +458,237 @@ TEST_F(WasmBuiltinTest, WasmMakeGlobalModeAndSnapshotValidation) {
   }
 }
 
+/// wasmGlobalSet called directly: strict validation, and the ORDER it happens
+/// in.
+///
+/// This builtin refuses where the public `.value` setter coerces, and its
+/// numeric refusal is reachable from ordinary compiled Wasm rather than only
+/// from handcrafted bytecode. The chain, in WasmIRGen.cpp: a module's return
+/// buffer is built by calling globalThis.Float64Array, which script can
+/// replace; an f32/f64 result is read out of it with an ordinary property
+/// load and pushed with NO coercion; and a following global.set on an
+/// imported mutable global pops that value and hands it straight to this
+/// builtin. A replacement whose elements read back as strings is therefore
+/// enough to deliver a non-Number here.
+///
+/// Each refusal below is checked for leaving the destination unchanged, and
+/// the ones aimed at a live global are checked for not having run the setter
+/// CLOSURE. That second check is what a .wat test cannot make: a compiled
+/// module's setter closure is generated code, so nothing on the JS side can
+/// count its invocations. "Validation before any closure invocation" is the
+/// property that keeps a refused write out of the module's frame slot, and a
+/// call count is direct evidence of it where an unchanged slot is only
+/// consistent with it.
+///
+/// The funcref cases are here as well as in
+/// e2e-global-ref-internal-setter.wat for a different reason: the .wat cases
+/// reach this builtin only because export-wrapper parameter conversion does
+/// not exist yet. When it does, those arguments are intercepted at the
+/// `(param funcref)` boundary and the .wat checks change meaning. These do
+/// not depend on that.
+TEST_F(WasmBuiltinTest, WasmGlobalSetValidatesBeforeStoringOrCalling) {
+  GCScope scope{runtime, "WasmGlobalSetValidatesBeforeStoringOrCalling"};
+
+  Callable *setRaw = runtime.getBuiltinCallable(
+      hermes::BuiltinMethod::HermesBuiltin_wasmGlobalSet);
+  ASSERT_NE(nullptr, setRaw);
+  auto globalSet = runtime.makeHandle(setRaw);
+
+  Callable *makeRaw = runtime.getBuiltinCallable(
+      hermes::BuiltinMethod::HermesBuiltin_wasmMakeGlobal);
+  ASSERT_NE(nullptr, makeRaw);
+  auto make = runtime.makeHandle(makeRaw);
+
+  constexpr double kF64 = 3, kExternRef = 4, kFuncRef = 5;
+
+  auto realExport = makeRealExport(runtime);
+  auto jsClosure = makeJSClosure(runtime);
+
+  // A live global's storage, with a setter that COUNTS its invocations. Both
+  // things the assertions below need -- what was stored and how many times
+  // the closure ran -- are read back out of this object.
+  evalExpr(runtime, R"JS(
+    var __st = {slot: 0, calls: 0};
+    var __get = function () { return __st.slot; };
+    var __set = function (v) { __st.calls++; __st.slot = v; };
+    0;
+  )JS");
+  auto getter = evalExpr(runtime, "__get");
+  auto setter = evalExpr(runtime, "__set");
+
+  auto reset = [&]() { evalExpr(runtime, "__st.slot = 0; __st.calls = 0; 0"); };
+  auto calls = [&]() {
+    return evalExpr(runtime, "__st.calls").getHermesValue().getNumber();
+  };
+  auto slot = [&]() { return evalExpr(runtime, "__st.slot").getHermesValue(); };
+
+  /// A LIVE global of type \p code, whose closures are the counting pair
+  /// above. wasmMakeGlobal reads its mode from isMutable, so `true` is what
+  /// makes arguments 2 and 3 the getter and the setter.
+  auto makeLive = [&](double code) -> Handle<JSWebAssemblyGlobal> {
+    auto res = Callable::executeCall4(
+        make,
+        runtime,
+        Runtime::getUndefinedValue(),
+        HermesValue::encodeTrustedNumberValue(code),
+        HermesValue::encodeBoolValue(true),
+        getter.getHermesValue(),
+        setter.getHermesValue());
+    EXPECT_EQ(ExecutionStatus::RETURNED, res.getStatus());
+    if (res == ExecutionStatus::EXCEPTION) {
+      runtime.clearThrownValue();
+      return Runtime::makeNullHandle<JSWebAssemblyGlobal>();
+    }
+    return runtime.makeHandle(
+        vmcast<JSWebAssemblyGlobal>(res->getHermesValue()));
+  };
+
+  /// A SNAPSHOT global, built through the public constructor because
+  /// wasmMakeGlobal refuses a mutable snapshot -- one of its writes would go
+  /// nowhere -- while the constructor takes mutability from the descriptor.
+  auto makeSnapshot = [&](const char *js) -> Handle<JSWebAssemblyGlobal> {
+    return runtime.makeHandle(
+        vmcast<JSWebAssemblyGlobal>(evalExpr(runtime, js).getHermesValue()));
+  };
+
+  /// Call the builtin. \return true if it REFUSED the write.
+  auto callSet = [&](Handle<JSWebAssemblyGlobal> glob, HermesValue v) -> bool {
+    auto res = Callable::executeCall2(
+        globalSet,
+        runtime,
+        Runtime::getUndefinedValue(),
+        glob.getHermesValue(),
+        v);
+    if (res == ExecutionStatus::EXCEPTION) {
+      runtime.clearThrownValue();
+      return true;
+    }
+    return false;
+  };
+
+  auto str37 = evalExpr(runtime, "'3.7'");
+
+  // THE REFUSAL A REPLACED Float64Array DELIVERS, against a live global.
+  {
+    auto g = makeLive(kF64);
+    ASSERT_TRUE(*g);
+    reset();
+    EXPECT_TRUE(callSet(g, str37.getHermesValue()))
+        << "a string must not satisfy an f64 global";
+    EXPECT_EQ(0.0, calls()) << "a refusal must not reach the setter closure";
+    EXPECT_EQ(0.0, slot().getNumber()) << "and must not store";
+
+    // The accepted write DOES run it, so the zero above is a property of the
+    // refusal rather than of a closure that never works.
+    EXPECT_FALSE(callSet(g, HermesValue::encodeTrustedNumberValue(1.5)));
+    EXPECT_EQ(1.0, calls());
+    EXPECT_EQ(1.5, slot().getNumber());
+  }
+
+  // The same refusal with a SNAPSHOT destination, where the storage funnel
+  // rather than a closure would have done the store.
+  {
+    auto g = makeSnapshot(
+        "new WebAssembly.Global({value: 'f64', mutable: true}, 1.5)");
+    EXPECT_TRUE(callSet(g, str37.getHermesValue()));
+    EXPECT_EQ(1.5, g->getValue().getNumber());
+  }
+
+  // i64 takes a BigInt and refuses a Number, and the stored BigInt is wrapped
+  // to 64 bits. Compared in JS with ===, so the Number 5 does not pass for
+  // 5n.
+  {
+    auto g = makeSnapshot(
+        "new WebAssembly.Global({value: 'i64', mutable: true}, 7n)");
+    EXPECT_TRUE(callSet(g, HermesValue::encodeTrustedNumberValue(5)));
+    auto isSeven = evalExpr(runtime, "(function (v) { return v === 7n; })");
+    auto kept = Callable::executeCall1(
+        Handle<Callable>::vmcast(isSeven),
+        runtime,
+        Runtime::getUndefinedValue(),
+        g->getValue());
+    ASSERT_EQ(ExecutionStatus::RETURNED, kept.getStatus());
+    EXPECT_TRUE(kept->get().getBool()) << "a refused write must not store";
+
+    auto big = evalExpr(runtime, "2n ** 100n + 5n");
+    EXPECT_FALSE(callSet(g, big.getHermesValue()));
+    auto isFive = evalExpr(runtime, "(function (v) { return v === 5n; })");
+    auto wrapped = Callable::executeCall1(
+        Handle<Callable>::vmcast(isFive),
+        runtime,
+        Runtime::getUndefinedValue(),
+        g->getValue());
+    ASSERT_EQ(ExecutionStatus::RETURNED, wrapped.getStatus());
+    EXPECT_TRUE(wrapped->get().getBool()) << "2n**100n + 5n wraps to 5n";
+  }
+
+  // funcref: null or an Exported Function, validated before the closure runs.
+  {
+    auto g = makeLive(kFuncRef);
+    ASSERT_TRUE(*g);
+    reset();
+    EXPECT_TRUE(callSet(g, jsClosure.getHermesValue()))
+        << "a plain JS closure is a host reference, not a funcref";
+    EXPECT_TRUE(callSet(g, HermesValue::encodeUndefinedValue()));
+    EXPECT_TRUE(callSet(g, HermesValue::encodeTrustedNumberValue(5)));
+    EXPECT_TRUE(callSet(g, str37.getHermesValue()));
+    EXPECT_EQ(0.0, calls()) << "no refusal may reach the setter closure";
+
+    EXPECT_FALSE(callSet(g, realExport.getHermesValue()));
+    EXPECT_EQ(1.0, calls());
+    EXPECT_EQ(realExport->getRaw(), slot().getRaw());
+    EXPECT_FALSE(callSet(g, HermesValue::encodeNullValue()));
+    EXPECT_EQ(2.0, calls());
+    EXPECT_TRUE(slot().isNull());
+  }
+
+  // The same rules with a snapshot destination, which is the funnel's arm.
+  {
+    auto g = makeSnapshot(
+        "new WebAssembly.Global({value: 'anyfunc', mutable: true}, null)");
+    EXPECT_TRUE(callSet(g, jsClosure.getHermesValue()));
+    EXPECT_TRUE(g->getValue().isNull()) << "a refused write must not store";
+    EXPECT_FALSE(callSet(g, realExport.getHermesValue()));
+    EXPECT_EQ(realExport->getRaw(), g->getValue().getRaw());
+  }
+
+  // An externref admits any JS value, so none of these may be refused, and
+  // nothing is coerced: the string arrives as the string it is.
+  {
+    auto g = makeLive(kExternRef);
+    ASSERT_TRUE(*g);
+    reset();
+    EXPECT_FALSE(callSet(g, HermesValue::encodeUndefinedValue()));
+    EXPECT_FALSE(callSet(g, HermesValue::encodeNullValue()));
+    EXPECT_FALSE(callSet(g, HermesValue::encodeTrustedNumberValue(7)));
+    EXPECT_FALSE(callSet(g, jsClosure.getHermesValue()));
+    EXPECT_FALSE(callSet(g, str37.getHermesValue()));
+    EXPECT_EQ(5.0, calls());
+    EXPECT_EQ(str37->getRaw(), slot().getRaw());
+  }
+
+  // The entry guards, which are this builtin's own and not the compiler's: a
+  // PRIVATE_BUILTIN is reachable from any bytecode emitting a CallBuiltin
+  // with its index.
+  {
+    auto imm = makeSnapshot("new WebAssembly.Global({value: 'i32'}, 1)");
+    EXPECT_TRUE(callSet(imm, HermesValue::encodeTrustedNumberValue(2)))
+        << "an immutable global must be refused";
+    EXPECT_EQ(1.0, imm->getValue().getNumber());
+
+    auto res = Callable::executeCall2(
+        globalSet,
+        runtime,
+        Runtime::getUndefinedValue(),
+        jsClosure.getHermesValue(),
+        HermesValue::encodeTrustedNumberValue(2));
+    EXPECT_EQ(ExecutionStatus::EXCEPTION, res.getStatus())
+        << "an object that is not a WebAssembly.Global must be refused";
+    if (res == ExecutionStatus::EXCEPTION)
+      runtime.clearThrownValue();
+  }
+}
+
 } // namespace
 
 #endif // HERMES_ENABLE_WASM

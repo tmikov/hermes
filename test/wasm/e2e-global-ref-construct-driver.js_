@@ -252,6 +252,17 @@ print('put_ref a number: ' + (ex.get_ref() === 5) + ' ' +
 // `undefined` likewise, and it must REPLACE the 5 rather than be skipped.
 ex.put_ref(undefined);
 print('put_ref undefined: ' + (ex.get_ref() === undefined));
+// hostRef is a snapshot, so this is the internal setter's storage arm, and
+// the count is the assertion: an implementation that ran ToNumber and then
+// stored the original reference anyway would pass an identity check alone.
+var coerceCalls = 0;
+var probe = {
+  valueOf: function () { coerceCalls++; return 99; },
+  toString: function () { coerceCalls++; return 'probe'; },
+};
+ex.put_ref(probe);
+print('put_ref never coerces: ' + (ex.get_ref() === probe) + ' ' +
+      (hostRef.value === probe) + ' ' + (coerceCalls === 0));
 
 // The identity round trip in the other direction: the host writes an object
 // through `.value` and the module's own global.get hands back that same

@@ -25,7 +25,7 @@
 ;; instantiation and the seed object after, which is what makes that
 ;; assertion mean something.
 ;;
-;; The consumer's fourth import is a JS-built mutable anyfunc Global, whose
+;; The consumer's `jsfn` import is a JS-built mutable anyfunc Global, whose
 ;; storage is its own slot rather than a closure: that is the snapshot arm of
 ;; the same builtin, where the value goes through the storage funnel.
 ;;
@@ -54,13 +54,14 @@
 
 ;; The expected output. It lives here rather than in the driver because
 ;; FileCheck reads this file.
-;; CHECK: fixture: function 42
+;; CHECK: fixture: function true
 ;; CHECK-NEXT: before instantiation: true true
 ;; CHECK-NEXT: the start function wrote during instantiation: true
 ;; CHECK-NEXT: put_ext an object: true true
 ;; CHECK-NEXT: put_ext a number: true
 ;; CHECK-NEXT: put_ext null: true
 ;; CHECK-NEXT: put_ext undefined: true
+;; CHECK-NEXT: put_ext never coerces: true true true
 ;; CHECK-NEXT: put_fn an export: true true
 ;; CHECK-NEXT: put_fn a plain function: TypeError: Wasm global.set: a funcref global requires null or a WebAssembly exported function
 ;; CHECK-NEXT: put_fn a number: TypeError: Wasm global.set: a funcref global requires null or a WebAssembly exported function

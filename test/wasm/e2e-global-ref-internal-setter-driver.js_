@@ -28,7 +28,7 @@ function attempt(f) {
 
 var provider = new WebAssembly.Instance(load(0)).exports;
 var h = provider.h;
-print('fixture: ' + typeof h + ' ' + h(41));
+print('fixture: ' + typeof h + ' ' + (h(41) === 42));
 
 // The provider's slots start out null, so every assertion below is about a
 // value that arrived rather than one that was already there.
@@ -65,6 +65,17 @@ consumer.put_ext(null);
 print('put_ext null: ' + (provider.get_ext() === null));
 consumer.put_ext(undefined);
 print('put_ext undefined: ' + (provider.get_ext() === undefined));
+// This builtin must not coerce either, and the count is what says so: an
+// identity check alone would pass an implementation that called ToNumber and
+// then stored the original reference anyway.
+var coerceCalls = 0;
+var probe = {
+  valueOf: function () { coerceCalls++; return 99; },
+  toString: function () { coerceCalls++; return 'probe'; },
+};
+consumer.put_ext(probe);
+print('put_ext never coerces: ' + (provider.get_ext() === probe) + ' ' +
+      (provider.g_ext.value === probe) + ' ' + (coerceCalls === 0));
 
 // --- funcref, live destination: null or an Exported Function ---
 consumer.put_fn(h);

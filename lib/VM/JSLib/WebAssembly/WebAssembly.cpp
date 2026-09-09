@@ -2488,14 +2488,13 @@ wasmGlobalValueSetter(void *context, Runtime &runtime) {
         "WebAssembly.Global.prototype.value: cannot set an immutable global");
   }
 
-  // Nothing raw is carried past this point: lv.glob is the destination,
-  // lv.newVal the value, and lv.fn the live setter closure, taken here
-  // because the raw Callable* would not survive what follows. Four things
-  // below allocate -- toNumber_RJS on the numeric arm, isWasmExportedFunction
-  // on the funcref arm, the executeCall1 on the live path, and the i64 store
-  // -- and of the routes through this function only an externref written into
-  // a SNAPSHOT global reaches none of them. A live externref write still runs
-  // the closure.
+  // toNumber_RJS on the numeric arm, isWasmExportedFunction on the funcref
+  // arm, the live path's executeCall1 and the i64 snapshot store each
+  // allocate. (So does raiseTypeError, but its result is returned from
+  // immediately, so nothing has to survive it.) Nothing raw is carried past
+  // this point as a result: lv.glob is the destination, lv.newVal the value,
+  // and lv.fn the live setter closure, taken here because the raw Callable*
+  // would not survive what follows.
   struct : public Locals {
     PinnedValue<> newVal;
     PinnedValue<Callable> fn;

@@ -471,12 +471,14 @@ property of what the import points at, not of the import-wiring code itself.
   that accessor; `e2e-imported-mutable-global.wat` is where the sharing itself
   is pinned.
 
-  Every numeric writer of `value_` — the `Global` constructor, the `value`
-  setter, `wasmMakeGlobal` and the `wasmGlobalSet` builtin — goes through one
-  function, `setWasmGlobalValue`, so an `i32` global's field is int32-valued
-  and an `f32` global's float-valued whichever wrote it. (An `i64` global's
-  field is a `BigInt`, written by `setI64Value` because it allocates.) Generated code and
-  `wasmLinkGlobal` both hand that field straight to code that assumes as much.
+  The `Global` constructor, the `value` setter, `wasmMakeGlobal` and the
+  `wasmGlobalSet` builtin all store through one function,
+  `setWasmGlobalValue`, which narrows to the declared type, so an `i32`
+  global's field is int32-valued and an `f32` global's float-valued
+  whichever of them wrote it. (An `i64` global's field is a `BigInt`,
+  written by `setI64Value` because it allocates.) Generated code and
+  `wasmLinkGlobal` both hand that field straight to code that assumes as
+  much.
 
   At global-initialization time the resolved value is
   coerced to the declared type (`ToInt32` for `i32`, `fround` for `f32`,

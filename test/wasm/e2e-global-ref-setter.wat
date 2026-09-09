@@ -5,10 +5,17 @@
 
 ;; WebAssembly.Global.prototype.value, the SETTER, across every declared type.
 ;;
-;; The setter used to be "an i64 global requires a BigInt; everything else goes
-;; through toNumber_RJS", so assigning an object to an externref global stored
-;; NaN. It now dispatches on the declared type before any coercion, and this
-;; file is the table: an externref takes any JS value as it stands, an anyfunc
+;; The setter was written as "an i64 global requires a BigInt; everything else
+;; goes through toNumber_RJS", so an object assigned to an externref global
+;; would have become NaN. That state was never reachable: reference-typed
+;; globals could not be constructed until Task 3, and Task 3 added an interim
+;; refusal so that this setter raised "not implemented yet" rather than
+;; coercing. The dispatch below is what replaced the refusal, and the NaN is
+;; what it would have done without it -- which is why the object case is first
+;; and compares identity.
+;;
+;; The setter now dispatches on the declared type before any coercion, and
+;; this file is the table: an externref takes any JS value as it stands, an anyfunc
 ;; takes null or an Exported Function, an i64 takes a BigInt wrapped to 64
 ;; bits, and a numeric global still COERCES with ToNumber -- which is what
 ;; separates this setter from the internal one, whose test refuses the same
@@ -30,10 +37,11 @@
 ;; failures `null` and `undefined`; that collision is the link path's own gap
 ;; and not this file's subject.
 ;;
-;; It runs with -gc-sanitize-handles=1 because three things in the setter are
-;; safepoints: ToNumber, which runs user JS; the funcref brand check, which
-;; allocates in HiddenClass::findPropertyNoMap; and the live setter closure,
-;; which runs generated code. The loops at the end allocate between writes so
+;; It runs with -gc-sanitize-handles=1 because the setter allocates in
+;; several places this file reaches: ToNumber, which runs user JS; the funcref
+;; brand check, which allocates in HiddenClass::findPropertyNoMap; the live
+;; setter closure, which runs generated code; and the i64 store, which
+;; materializes the BigInt. The loops at the end allocate between writes so
 ;; that a destination held raw across any of them would be a use-after-free
 ;; rather than a value that happened to survive. In a build without
 ;; HERMESVM_SANITIZE_HANDLES the flag is ignored and this is an ordinary
@@ -70,34 +78,35 @@
 
 ;; The expected output. It lives here rather than in the driver because
 ;; FileCheck reads this file.
-;; CHECK: fixture: function 42
+;; CHECK: fixture: function true
 ;; CHECK-NEXT: externref an object: true
 ;; CHECK-NEXT: externref null: true
 ;; CHECK-NEXT: externref undefined: true
-;; CHECK-NEXT: externref a number: 3.7
-;; CHECK-NEXT: externref never coerces: true
+;; CHECK-NEXT: externref a number: true number
+;; CHECK-NEXT: externref never coerces: true true
 ;; CHECK-NEXT: anyfunc an export: true
 ;; CHECK-NEXT: anyfunc a plain function: TypeError: WebAssembly.Global.prototype.value: an 'anyfunc' global requires null or a WebAssembly exported function
 ;; CHECK-NEXT: anyfunc undefined: TypeError: WebAssembly.Global.prototype.value: an 'anyfunc' global requires null or a WebAssembly exported function
 ;; CHECK-NEXT: anyfunc a number: TypeError: WebAssembly.Global.prototype.value: an 'anyfunc' global requires null or a WebAssembly exported function
 ;; CHECK-NEXT: anyfunc intact after the refusals: true
 ;; CHECK-NEXT: anyfunc null: true
-;; CHECK-NEXT: i64 wraps to 64 bits: 5
-;; CHECK-NEXT: i64 negative: -1
+;; CHECK-NEXT: i64 wraps to 64 bits: true bigint
+;; CHECK-NEXT: i64 negative: true
 ;; CHECK-NEXT: i64 from a Number: TypeError: WebAssembly.Global.prototype.value: an i64 global requires a BigInt value
-;; CHECK-NEXT: i64 intact after the refusal: -1
-;; CHECK-NEXT: i32 from a string: 3
-;; CHECK-NEXT: i32 from a valueOf that allocates: 300
-;; CHECK-NEXT: f32 narrows: 1.100000023841858
+;; CHECK-NEXT: i64 intact after the refusal: true
+;; CHECK-NEXT: i32 from a string: true number
+;; CHECK-NEXT: i32 from a valueOf that allocates: true
+;; CHECK-NEXT: f32 narrows: true true
 ;; CHECK-NEXT: valueOf on an externref global: true
 ;; CHECK-NEXT: valueOf on an anyfunc global: true
 ;; CHECK-NEXT: live externref: true true
 ;; CHECK-NEXT: live anyfunc: true true
 ;; CHECK-NEXT: live anyfunc refuses a plain function: TypeError: WebAssembly.Global.prototype.value: an 'anyfunc' global requires null or a WebAssembly exported function
 ;; CHECK-NEXT: live anyfunc intact: true
-;; CHECK-NEXT: live i64: 5
-;; CHECK-NEXT: live i32: 3
-;; CHECK-NEXT: live f32: 1.100000023841858
+;; CHECK-NEXT: live i64: true true
+;; CHECK-NEXT: live i32: true true
+;; CHECK-NEXT: live f32: true true
+;; CHECK-NEXT: live externref never coerces: true true true
 ;; CHECK-NEXT: JS write, Wasm read, same object: true
 ;; CHECK-NEXT: funcref writes intact across collections: true
 ;; CHECK-NEXT: externref writes traced across collections: true

@@ -468,9 +468,29 @@ defect (a) restated.
 - **Link path**, both shapes, plus a raw plain function refused for a funcref
   import — the case needing the new predicate builtin.
 - **The sentinel collision.** Import a global whose value **is** `null`, and
-  another whose value is `undefined`. These must be **immutable snapshot**
-  Globals: a mutable import discards the link result's value and keeps the
-  object, so a mutable case passes without exercising the collision.
+  another whose value is `undefined`. **Both mutabilities must be covered,
+  not just immutable snapshots.** (Corrected in Task 4 against the code: an
+  earlier revision said these had to be immutable snapshot Globals because "a
+  mutable import discards the link result's value and keeps the object, so a
+  mutable case passes without exercising the collision". That is backwards.
+  `wasmLinkGlobal` returns `getValue()` for any non-LIVE global, and
+  `WasmIRGen.cpp` compares the result against both sentinels *before* it
+  decides to keep the object for a mutable import, so a mutable snapshot
+  Global holding either sentinel **link-errors** rather than passing.
+  Measured on `a5a44f9db`, all four combinations:
+
+  | Global | value | outcome |
+  |---|---|---|
+  | immutable snapshot | `null` | LinkError "must be a Number to satisfy an externref global import" |
+  | immutable snapshot | `undefined` | LinkError "does not match the declared immutable externref global import" |
+  | mutable snapshot | `null` | LinkError "must be a WebAssembly.Global to satisfy a mutable global import" |
+  | mutable snapshot | `undefined` | LinkError "does not match the declared mutable externref global import" |
+
+  The branch that refuses is chosen by the VALUE, not by the mutability:
+  `null` fails the "is it a Global at all" test, `undefined` the type-match
+  test. A **live** Global is unaffected either way, because `wasmLinkGlobal`
+  returns the object itself for one. So the link-path work must fix both
+  sentinels for both mutabilities, and its tests must cover all four rows.)
 - **`ref.is_null`** on null and non-null references of both types, replacing
   `ref-is-null-unsupported.wat`.
 - **Element expressions**: a segment mixing `ref.func`, `ref.null` and

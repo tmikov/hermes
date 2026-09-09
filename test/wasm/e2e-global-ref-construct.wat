@@ -96,4 +96,5 @@
 ;; CHECK-NEXT: put_ref an object: true true
 ;; CHECK-NEXT: put_ref a number: true true
 ;; CHECK-NEXT: put_ref undefined: true
+;; CHECK-NEXT: put_ref never coerces: true true true
 ;; CHECK-NEXT: .value write is seen by global.get: true

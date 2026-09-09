@@ -35,7 +35,7 @@ var hostRef =
     new WebAssembly.Global({value: 'externref', mutable: true}, linkValue);
 var ex = new WebAssembly.Instance(mod, {e: {ref: hostRef}}).exports;
 var h = ex.h;
-print('fixture: ' + typeof h + ' ' + h(41));
+print('fixture: ' + typeof h + ' ' + (h(41) === 42));
 
 // ===========================================================================
 // A SNAPSHOT global: the setter stores into the object's own slot.
@@ -54,14 +54,29 @@ print('externref null: ' + (gExt.value === null));
 gExt.value = undefined;
 print('externref undefined: ' + (gExt.value === undefined));
 // A Number stays the Number it is: there is no declared numeric type to
-// narrow it to.
+// narrow it to. Compared with ===, and its typeof printed, because string
+// concatenation erases the difference between 3.7 and the string "3.7".
 gExt.value = 3.7;
-print('externref a number: ' + gExt.value);
-// And ToNumber never runs on this path: an object with a valueOf is STORED,
-// not called. A setter that coerced would leave 99 here.
-var coercible = {valueOf: function () { return 99; }};
-gExt.value = coercible;
-print('externref never coerces: ' + (gExt.value === coercible));
+print('externref a number: ' + (gExt.value === 3.7) + ' ' +
+      typeof gExt.value);
+
+// And ToNumber must not RUN on this path, which is a stronger claim than the
+// value coming back unchanged: an implementation that called ToNumber and
+// then threw the result away, storing the original reference, would satisfy
+// an identity check. The probe counts every coercion hook, so the assertion
+// is that the count is zero.
+var coerceCalls = 0;
+function makeProbe(tag) {
+  return {
+    tag: tag,
+    valueOf: function () { coerceCalls++; return 99; },
+    toString: function () { coerceCalls++; return 'probe'; },
+  };
+}
+var probe = makeProbe('snapshot');
+gExt.value = probe;
+print('externref never coerces: ' + (gExt.value === probe) + ' ' +
+      (coerceCalls === 0));
 
 // --- anyfunc: null or an Exported Function, nothing else ---
 var gFn = new WebAssembly.Global({value: 'anyfunc', mutable: true}, null);
@@ -88,21 +103,25 @@ gFn.value = null;
 print('anyfunc null: ' + (gFn.value === null));
 
 // --- i64: a BigInt, wrapped to 64 bits ---
+// Compared against BigInt literals with ===, not printed: `'' + g64.value`
+// reads the same for 5n, the Number 5 and the string "5", so a stringified
+// expectation would accept a slot that stopped holding a BigInt at all.
 var g64 = new WebAssembly.Global({value: 'i64', mutable: true}, 0n);
 g64.value = 2n ** 100n + 5n;
-print('i64 wraps to 64 bits: ' + g64.value);
+print('i64 wraps to 64 bits: ' + (g64.value === 5n) + ' ' +
+      typeof g64.value);
 g64.value = -1n;
-print('i64 negative: ' + g64.value);
+print('i64 negative: ' + (g64.value === -1n));
 print('i64 from a Number: ' + attempt(function () {
   g64.value = 5;
   return 'wrote';
 }));
-print('i64 intact after the refusal: ' + g64.value);
+print('i64 intact after the refusal: ' + (g64.value === -1n));
 
 // --- i32/f32/f64: this setter COERCES where the internal one refuses ---
 var g32 = new WebAssembly.Global({value: 'i32', mutable: true}, 0);
 g32.value = '3.7';
-print('i32 from a string: ' + g32.value);
+print('i32 from a string: ' + (g32.value === 3) + ' ' + typeof g32.value);
 // ToNumber runs user JS, which allocates and can move the heap; the valueOf
 // below allocates deliberately, so a destination held raw across it would be
 // stale by the time the store happened.
@@ -113,10 +132,13 @@ g32.value = {valueOf: function () {
   }
   return 300.9;
 }};
-print('i32 from a valueOf that allocates: ' + g32.value);
+print('i32 from a valueOf that allocates: ' + (g32.value === 300));
+// The second half is what makes this about narrowing rather than about
+// storing: an f32 global must NOT hold the double 1.1.
 var gF32 = new WebAssembly.Global({value: 'f32', mutable: true}, 0);
 gF32.value = 1.1;
-print('f32 narrows: ' + gF32.value);
+print('f32 narrows: ' + (gF32.value === 1.100000023841858) + ' ' +
+      (gF32.value !== 1.1));
 
 // --- valueOf() delegates to the getter, reference types included ---
 print('valueOf on an externref global: ' +
@@ -144,12 +166,22 @@ print('live anyfunc refuses a plain function: ' + attempt(function () {
   return 'wrote';
 }));
 print('live anyfunc intact: ' + (ex.get_fn() === h));
+// Each live value is asserted through BOTH the module's frame slot and the
+// Global, and against a typed literal.
 ex.g_i64.value = 2n ** 100n + 5n;
-print('live i64: ' + ex.get_i64());
+print('live i64: ' + (ex.get_i64() === 5n) + ' ' + (ex.g_i64.value === 5n));
 ex.g_i32.value = '3.7';
-print('live i32: ' + ex.get_i32());
+print('live i32: ' + (ex.get_i32() === 3) + ' ' + (ex.g_i32.value === 3));
 ex.g_f32.value = 1.1;
-print('live f32: ' + ex.get_f32());
+print('live f32: ' + (ex.get_f32() === 1.100000023841858) + ' ' +
+      (ex.g_f32.value === 1.100000023841858));
+
+// The live setter must not coerce either, and the count is what says so.
+var liveProbe = makeProbe('live');
+coerceCalls = 0;
+ex.g_ext.value = liveProbe;
+print('live externref never coerces: ' + (ex.get_ext() === liveProbe) + ' ' +
+      (ex.g_ext.value === liveProbe) + ' ' + (coerceCalls === 0));
 
 // ===========================================================================
 // The identity round trip, JS to Wasm.

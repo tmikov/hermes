@@ -159,11 +159,15 @@ class JSWebAssemblyGlobal final : public JSObject {
       const GCCell *cell,
       Metadata::Builder &mb);
 
-  /// The storage funnel, which dispatches on valType_ and is the reason the
-  /// two stores below are private rather than public: with them reachable
-  /// only from here and from setI64Value, "value_ is canonical for valType_"
-  /// is enforced by the compiler instead of by everyone remembering. Adding a
-  /// writer elsewhere is a build error, not a silently broken invariant.
+  /// The storage funnel, and the reason the two stores below are private.
+  /// What access control buys is narrow and worth stating exactly: code
+  /// OUTSIDE this class cannot write value_ except through this function, so
+  /// a new writer added elsewhere is a build error. It does not make the slot
+  /// canonical -- the funnel's arms narrow, but its funcref assertion admits
+  /// any object, setValType can change the type out from under a stored
+  /// value, and a member added to this class keeps private access, as
+  /// setI64Value does. Canonicality is still the callers' dispatch; this only
+  /// keeps the set of callers small enough to read.
   friend void setWasmGlobalValue(
       Runtime &runtime,
       JSWebAssemblyGlobal *glob,
@@ -202,7 +206,10 @@ class JSWebAssemblyGlobal final : public JSObject {
   /// snapshot readers do no per-type dispatch. Two functions write this field
   /// -- setWasmGlobalValue, which narrows the first three rows and stores the
   /// last two as they stand, and setI64Value, which builds the fourth's
-  /// BigInt -- and the private setters above are what keep it to those two.
+  /// BigInt. The private setters above keep any writer OUTSIDE this class to
+  /// the first of those; a member of this class could still add a third, and
+  /// the table itself is kept true by what each caller validates before it
+  /// stores.
   ///
   /// This replaced a `double value_` plus an `int64_t i64Value_`. It is a
   /// GCHermesValue -- a full 64-bit HermesValue in every heap mode, unlike
