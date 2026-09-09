@@ -760,13 +760,15 @@ wabt::Result BinaryReaderHermesIRGen::OnRefIsNullExpr() {
 }
 
 wabt::Result BinaryReaderHermesIRGen::OnRefFuncExpr(wabt::Index funcIndex) {
-  // In a function body, ref.func is handled by a later step.
-  if (inFunctionBody_ && irgen_) {
-    irgen_->warnUnsupported("ref.func", 0, 1);
+  // In a function body, ref.func pushes the function's canonical Exported
+  // Function. It used to go through warnUnsupported(), which pushed
+  // `undefined`; a following global.set then stored that in a funcref global,
+  // from where a live getter handed it back to script.
+  if (inFunctionBody_) {
+    if (irgen_)
+      irgen_->onRefFunc(funcIndex);
     return wabt::Result::Ok;
   }
-  if (inFunctionBody_)
-    return wabt::Result::Ok;
 
   switch (initExprContext_) {
     case InitExprContext::Global: {

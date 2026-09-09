@@ -1,0 +1,78 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+// JS driver for e2e-ref-func-body.wat. Read that file's header for what this
+// is proving.
+
+var args = hermescli.getScriptArgs();
+var mod = WebAssembly.Module.fromHermesBytecode(hermescli.loadFile(args[0]));
+var E = new WebAssembly.Instance(mod, {}).exports;
+
+print('instantiated: ' + (typeof E.target === 'function'));
+
+// The global's initial value. Printed rather than assumed: if it already held
+// the wrapper, every identity check below would pass without ref.func having
+// done anything.
+print('g starts null: ' + (E.g.value === null));
+
+// Taken BEFORE the write, so a snapshot-style export would keep returning
+// null at the "retained" line further down.
+var retained = E.g;
+
+E.stash_target();
+
+// The assertion. Only the module's one canonical Exported Function for
+// $target is `===` E.target: the internal closure is a different object, and
+// so is anything else that merely calls through to the same code.
+print('after stash_target, g.value === target: ' + (E.g.value === E.target));
+
+// And it behaves like the wrapper, not like the raw closure: an i32 parameter
+// arrives coerced. 42 -> 43.
+print('and it is not the internal closure: ' + E.g.value(42));
+
+// The same slot, read from inside the module and returned as a funcref.
+print('get_g() === target: ' + (E.get_g() === E.target));
+
+print('a retained live Global saw the global.set: ' +
+      (retained.value === E.target));
+
+E.clear();
+print('after clear, g.value is null: ' + (E.g.value === null));
+
+// The table slot funnel takes an Exported Function and derives the closure
+// and the interned type id from it. A body that pushed the internal closure
+// would not get past this.
+E.put_in_table(0);
+print('table.set of ref.func, read back: ' + (E.tbl.get(0) === E.target));
+
+// $hidden is exported nowhere; this route is the only way script sees it, so
+// there is no canonical object to compare against and `typeof` plus a call is
+// what can be asked.
+E.stash_hidden();
+var h = E.g.value;
+print('hidden is a function, not target: ' + typeof h + ' ' + (h !== E.target));
+print('hidden calls: ' + h());
+
+// A ref.func value is not null. Printed with its typeof so that a string "0"
+// -- which concatenation would render identically -- is not accepted.
+var inz = E.is_null_of_ref_func();
+print('ref.is_null of a ref.func: ' + inz + ' ' + typeof inz);
+
+// Table.prototype.set is the brand check the lines above lean on. Without
+// this, "read back === target" could be satisfied by a table that accepted
+// and returned anything.
+var oracle = new WebAssembly.Table({element: 'anyfunc', initial: 1});
+var refused;
+try {
+  oracle.set(0, function () {});
+  refused = 'accepted it';
+} catch (e) {
+  refused = e.name;
+}
+print('Table.prototype.set refuses a plain JS function: ' + refused);
+
+print('done');

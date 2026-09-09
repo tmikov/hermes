@@ -29,9 +29,14 @@
   (type $ret_f (func (result funcref)))
   (type $ret_e (func (result externref)))
 
-  ;; The non-null funcref has to come from somewhere, and function-body
-  ;; ref.func is not implemented yet. An imported funcref global fed with the
-  ;; module's own Exported Function is the route that exists today.
+  ;; The non-null funcref has to come from somewhere. An imported funcref
+  ;; global, fed with the module's own Exported Function, is the route this
+  ;; file uses. Function-body `ref.func` would be another one now that it is
+  ;; implemented, but it is not added here: it pushes a value the frame
+  ;; variable types `any`, so it lands on none of the five annotation sites
+  ;; this file is about, and inserting a function would renumber every
+  ;; wasm_func_N pin below. `ref.is_null` of a `ref.func` is covered in
+  ;; e2e-ref-func-body.wat instead.
   (import "e" "fnull" (global $fnull funcref))
   (import "e" "ffn" (global $ffn funcref))
   (import "e" "enull" (global $enull externref))

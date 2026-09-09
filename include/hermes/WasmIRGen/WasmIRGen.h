@@ -471,6 +471,16 @@ class WasmIRGen {
   /// as nullable; test/wasm/ref-is-null.wat goes red if that changes.
   void onRefIsNull();
 
+  /// ref.func: push the canonical Exported Function of \p funcIndex -- the
+  /// wrapper, not the internal closure, because this value can reach script
+  /// through a funcref global, a table slot or a funcref result. The wrapper
+  /// exists because Wasm validation only lets a function body name a function
+  /// index that also occurs outside function bodies, and
+  /// computeEscapableFuncs() covers those occurrences; see the comment there.
+  /// If it is absent anyway, this records an error message and
+  /// finalizeModule() refuses the module.
+  void onRefFunc(uint32_t funcIndex);
+
   // --- Unsupported opcode handling (D.13) ---
 
   /// Emit a warning for an unsupported opcode. Pops \p numInputs values

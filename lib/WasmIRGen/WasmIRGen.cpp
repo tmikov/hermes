@@ -403,9 +403,9 @@ void WasmIRGen::buildCanonicalTypeMap() {
 }
 
 void WasmIRGen::computeEscapableFuncs() {
-  // Which function indices a funcref VALUE can name. In the supported feature
-  // set a funcref is introduced in exactly two places, both of which name the
-  // function by index in moduleInfo_:
+  // Which function indices a funcref VALUE can name, over and above the
+  // exported and imported ones createFunctions() adds. The two loops below
+  // collect the module-level constructs that produce one:
   //
   //   1. Element segments -- the function goes into a table, from where
   //      table.get, WebAssembly.Table.prototype.get, table.copy, table.init
@@ -413,21 +413,42 @@ void WasmIRGen::computeEscapableFuncs() {
   //      already-listed functions, so they add no indices).
   //   2. A ref.func global initializer.
   //
-  // ref.func inside a function body is unsupported (it warns and pushes a
-  // placeholder), so there is no dynamic way to materialize a funcref for an
-  // arbitrary function.
-  //
   // What this set is FOR is exportedFuncVars_: an index in it gets a canonical
   // Exported Function even if it is neither exported nor imported, because
-  // that wrapper is the object every one of those funcref values carries. If
-  // a new way to introduce a funcref lands -- ref.func in code, call_ref --
-  // it must be added here, or the index will have no wrapper and there will
-  // be nothing to hand out but the internal closure. The safe fallback is to
-  // put every function in the set.
+  // that wrapper is the object those funcref values carry.
   //
-  // It no longer affects parameter typing: the J4 interim typed float params
-  // of these functions `:any` and coerced them at entry, and that is gone now
-  // that no route yields the closure (see createFunctions()).
+  // A ref.func in a FUNCTION BODY adds no index here, and that is a claim
+  // about Wasm validation rather than about this module's shape. The operand
+  // of ref.func must be in the module's `refs` set -- the function indices
+  // that occur outside function bodies -- so wabt refuses `ref.func $f` in a
+  // body unless $f also appears in an element segment, in a ref.func global
+  // initializer, or in an export. The first two are the loops below; exports
+  // are added by createFunctions(). compileWasmModule() runs
+  // validateWasmBinary() (which is wabt::ValidateModule) before it builds any
+  // IR, so a module that breaks the rule is refused before reaching here.
+  // compile-invalid-ref-func-undeclared.wat is that rejection, run against a
+  // binary built with wat2wasm --no-check.
+  //
+  // That reasoning is why this does not take the safe fallback of putting
+  // every function in the set. createExportedFunctions() builds an export
+  // wrapper -- an IR function, a closure and a wasmSetFuncInfo call -- for
+  // each non-null slot of exportedFuncVars_, so the fallback would charge
+  // that to every function of every module compiled. It would also leave the
+  // loops below unfalsifiable: an index missing from the set could no longer
+  // be observed. Where the reasoning does not hold, onRefFunc() refuses the
+  // module instead of emitting a funcref with no wrapper.
+  //
+  // e2e-no-closure-escape.wat enumerates the routes by which a function value
+  // reaches script and requires a wrapper on each; route 22 is a body
+  // ref.func.
+  //
+  // If a new way to introduce a funcref lands -- call_ref, say -- check
+  // whether validation ties it to `refs` the way ref.func is tied; if it does
+  // not, its indices belong here.
+  //
+  // This set no longer affects parameter typing: the J4 interim typed float
+  // params of these functions `:any` and coerced them at entry, and that is
+  // gone now that no route yields the closure (see createFunctions()).
   //
   // A funcref global is exportable, and the loop below over ref.func
   // initializers is what makes that work. An exported one is wrapped by the
@@ -724,6 +745,8 @@ void WasmIRGen::createFunctions() {
   // through an import (whose wrapper wraps the trampoline, so a JS function
   // placed in a table is reached the same way as a native one), or through
   // escapableFuncs_ -- element segments and ref.func global initializers.
+  // A ref.func in a function body reaches script too, and is covered by these
+  // three without a fourth term; computeEscapableFuncs() says why.
   llvh::DenseSet<uint32_t> wrapped = escapableFuncs_;
   for (uint32_t i = 0; i < moduleInfo_.importedFunctionCount(); ++i)
     wrapped.insert(i);
@@ -765,7 +788,8 @@ void WasmIRGen::createFunctions() {
         /* hidden */ true);
 
     // And, where the function can reach script at all, a variable for its
-    // single canonical Exported Function (filled in by finalizeModule).
+    // single canonical Exported Function (stored by createExportedFunctions(),
+    // called below).
     if (wrapped.count(i)) {
       exportedFuncVars_[i] = builder_.createVariable(
           topLevelVS_,
@@ -1809,6 +1833,12 @@ bool WasmIRGen::validateExportIndices() {
 }
 
 bool WasmIRGen::finalizeModule() {
+  // onRefFunc() can refuse the module from inside a function body; it records
+  // why in errorMsg_ and translation carries on. Report that here, before
+  // anything else is emitted.
+  if (LLVM_UNLIKELY(!errorMsg_.empty()))
+    return false;
+
   auto *tlScope = tlScope_;
   bool hasMemory = moduleInfo_.totalMemoryCount() > 0;
 
@@ -7694,6 +7724,33 @@ void WasmIRGen::onRefIsNull() {
       ref, builder_.getLiteralNull(), ValueKind::BinaryStrictlyEqualInstKind);
   // Wasm wants an i32; AsInt32Inst turns the boolean into 1 or 0.
   push(builder_.createAsInt32Inst(isNull));
+}
+
+void WasmIRGen::onRefFunc(uint32_t funcIndex) {
+  if (unreachable_)
+    return;
+
+  if (LLVM_UNLIKELY(
+          funcIndex >= exportedFuncVars_.size() ||
+          !exportedFuncVars_[funcIndex])) {
+    // computeEscapableFuncs() explains why a validated module does not get
+    // here. Refusing beats the alternatives: the internal closure has an
+    // internal calling convention and script can reach this value, and a null
+    // is a legal funcref, so it would be stored without complaint.
+    errorMsg_ = ("ref.func names function index " + llvh::Twine(funcIndex) +
+                 ", which has no canonical exported function")
+                    .str();
+    // The value stack has to stay the right height for the rest of the body,
+    // which is still translated before finalizeModule() reads errorMsg_.
+    push(builder_.getLiteralNull());
+    return;
+  }
+
+  // The wrapper, not closureVars_[funcIndex]: the Exported Function is what a
+  // funcref value is on the JS side of the boundary. Route 22 of
+  // e2e-no-closure-escape.wat is this one, and it goes red for the closure.
+  push(builder_.createLoadFrameInst(
+      parentScopeInst_, exportedFuncVars_[funcIndex]));
 }
 
 void WasmIRGen::onElemDrop(uint32_t segmentIndex) {

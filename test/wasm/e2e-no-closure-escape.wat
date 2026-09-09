@@ -21,10 +21,11 @@
 ;; This test enumerates EVERY route by which a function value can reach script
 ;; and asserts that each one yields a wrapper. It is the gate on the
 ;; `:number` parameter annotation: that annotation is honest exactly as long
-;; as every line below says `wrapper`. If a new route is added -- ref.func in
-;; a function body, call_ref, a funcref global export, anything that puts a
-;; value on the JS side of the boundary -- it belongs here, and it must be
-;; added BEFORE the feature lands, not after.
+;; as every line below says `wrapper`. If a new route is added -- call_ref,
+;; anything that puts a value on the JS side of the boundary -- it belongs
+;; here, and it must be added BEFORE the feature lands, not after. `ref.func`
+;; in a function body was on that list until it was implemented; it is now
+;; route 22.
 ;;
 ;; The oracle is WebAssembly.Table.prototype.set, which accepts null or a
 ;; genuine Exported Function and nothing else. Its brand is an internal
@@ -115,7 +116,13 @@
     (table.grow 0 (table.get 0 (local.get 0)) (local.get 1)))
 
   (func (export "size") (result i32)
-    (table.size 0)))
+    (table.size 0))
+
+  ;; ref.func in a FUNCTION BODY, returned straight out as a funcref result.
+  ;; It used to warn and push `undefined`. $addf32 is legal to name here
+  ;; because the element segments above declare it.
+  (func (export "refFunc") (result funcref)
+    (ref.func $addf32)))
 
 ;; The oracle can say no. Without this line every `wrapper` below could be a
 ;; Table.prototype.set that accepts anything.
@@ -149,6 +156,7 @@
 ;; CHECK-NEXT: 19 cross-module: importer of the table, wasm table.get: wrapper same=true
 ;; CHECK-NEXT: 20 cross-module: importer's own Table.prototype.get: wrapper same=true
 ;; CHECK-NEXT: 21 funcref global export, .value: wrapper same=true
+;; CHECK-NEXT: 22 ref.func in a function body: wrapper same=true
 
 ;; Nothing about the linking ABI is a property any more, so there is no array
 ;; of closures to read even if one existed.
@@ -161,9 +169,10 @@
 
 ;; The J4 crash repro, run against the value each route hands out. A wrapper
 ;; coerces, so a non-number becomes NaN by ordinary JS rules; the raw closure
-;; would read the argument's bits. Every route is re-tested here rather than
-;; only the first: "it is a wrapper" and "it behaves like one" are different
-;; claims, and the second is the one J4 is about.
+;; would read the argument's bits. Values from routes across the enumeration
+;; are re-tested here rather than only the first: "it is a wrapper" and "it
+;; behaves like one" are different claims, and the second is the one J4 is
+;; about.
 ;; CHECK-NEXT: === J4 repro: a float parameter given a non-number ===
 ;; CHECK-NEXT: addf64 via exports("x", "y"): NaN
 ;; CHECK-NEXT: addf64 via tbl.get("x", "y"): NaN
@@ -173,6 +182,7 @@
 ;; CHECK-NEXT: addf32 via exception payload({}, 1): NaN
 ;; CHECK-NEXT: addf32 via import argument({}, 1): NaN
 ;; CHECK-NEXT: addf32 via cross-module get({}, 1): NaN
+;; CHECK-NEXT: addf32 via body ref.func({}, 1): NaN
 
 ;; The same values still compute correctly when given numbers, so the lines
 ;; above are not NaN because everything is broken.

@@ -10,9 +10,10 @@
 ;;
 ;; $ext and $fn come from the provider and are live; $jsfn is a JS-built
 ;; snapshot Global, so the same builtin takes its other arm for it. $seed is
-;; immutable and exists only to give the start function a value to write --
-;; ref.func in a function body is not implemented yet, and ref.null and
-;; global.get are the constant expressions left.
+;; immutable and exists only to give the start function a value to write: the
+;; value has to be an externref, which ref.func cannot produce, and a start
+;; function takes no parameters, so a global.get of an import is what is
+;; left.
 
 (module
   (import "e" "ext" (global $ext (mut externref)))

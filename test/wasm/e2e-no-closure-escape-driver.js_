@@ -151,6 +151,10 @@ report('20 cross-module: importer\'s own Table.prototype.get',
 // wasmMakeGlobal builtin, whose funcref arm refuses a value that is not null
 // or an Exported Function, so this route yields a wrapper or nothing.
 report('21 funcref global export, .value', E.gfx.value, REF32);
+// ref.func in a function body, straight out as a funcref result. The
+// placeholder this used to push was `undefined`, which brand() reports as
+// "not a function".
+report('22 ref.func in a function body', E.refFunc(), REF32);
 
 // ---------------------------------------------------------------------------
 // The publications are gone, so there is no array of closures to read.
@@ -182,6 +186,7 @@ print('addf32 via global.get({}, 1): ' + E.fromGlobal()({}, 1));
 print('addf32 via exception payload({}, 1): ' + payload({}, 1));
 print('addf32 via import argument({}, 1): ' + handedToJs[0]({}, 1));
 print('addf32 via cross-module get({}, 1): ' + consumer.exports.getAt(1)({}, 1));
+print('addf32 via body ref.func({}, 1): ' + E.refFunc()({}, 1));
 
 print('=== and the same values still work ===');
 print('addf64 via exports(2.5, 4): ' + REF64(2.5, 4));
