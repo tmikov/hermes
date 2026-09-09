@@ -282,13 +282,16 @@ raiseLinkError(Runtime &runtime, const char *msg) {
 /// Look up globalThis.Promise.resolve and call it with \p value.
 /// Returns the resolved Promise object.
 ///
-/// \p value arrives as a raw HermesValue and every caller passes something
-/// that carries a GC pointer -- a Module, an Instance, the {module, instance}
-/// result object, or a thrown error. It is pinned FIRST, before either lookup
-/// below: `globalThis.Promise` and `Promise.resolve` are both replaceable, so
-/// each getNamed_RJS allocates and can run a user getter, and the value used
-/// to be handed to executeCall1 still holding whatever address it had two
-/// safepoints earlier.
+/// \p value arrives as a raw HermesValue and can carry a GC pointer: every
+/// caller today passes an object -- a Module, an Instance, or the
+/// {module, instance} result -- but the parameter is untyped, so it is pinned
+/// unconditionally rather than on a property of the current callers.
+/// (Pinning a primitive is harmless.)
+///
+/// It is pinned FIRST, before either lookup below: `globalThis.Promise` and
+/// `Promise.resolve` are both replaceable, so each getNamed_RJS allocates and
+/// can run a user getter, and the value used to be handed to executeCall1
+/// still holding whatever address it had two safepoints earlier.
 static CallResult<HermesValue>
 callPromiseResolve(Runtime &runtime, HermesValue value) {
   struct : public Locals {
@@ -349,8 +352,14 @@ callPromiseResolve(Runtime &runtime, HermesValue value) {
 /// Same rooting obligation as callPromiseResolve, and more pressing: every
 /// caller reaches here by taking the thrown value out of the runtime and
 /// calling clearThrownValue(), so the exception root is already gone and this
-/// raw parameter is the ONLY thing referring to the error object across the
-/// two replaceable-property lookups below. Pin it first.
+/// raw parameter may be the only thing referring to the error object across
+/// the two replaceable-property lookups below. Script may happen to be
+/// retaining the same object elsewhere, but nothing here may assume it is.
+///
+/// A thrown value can also be a primitive -- `throw 1` is legal, and this
+/// helper is reachable with whatever a user import threw -- in which case
+/// there is nothing to root. Pinning it anyway is harmless and keeps the rule
+/// unconditional. Pin it first.
 static CallResult<HermesValue>
 callPromiseReject(Runtime &runtime, HermesValue error) {
   struct : public Locals {
@@ -1182,6 +1191,32 @@ wasmModuleExports(void *context, Runtime &runtime) {
   }
   lv.arr = std::move(*arrRes);
 
+  // `exp` below is a REFERENCE into moduleData->exportDescs, and it is held
+  // across putNamed_RJS, which walks the prototype chain and can run a user
+  // setter on Object.prototype. That is safe here, but only because THREE
+  // conditions all hold. Any one of them going away makes this a
+  // use-after-free:
+  //
+  //  1. STABLE ALLOCATION. WasmModuleData is reached through
+  //     JSWebAssemblyModule::getModuleData(), which returns the pointee of a
+  //     std::unique_ptr member. The struct is separately allocated, so moving
+  //     the Module cell does not move it. Inlining WasmModuleData into the
+  //     cell would break exactly this and turn both this function and
+  //     wasmModuleImports into use-after-frees. That is not hypothetical:
+  //     JSWebAssemblyTag::parameters_ IS stored inline, and holding a
+  //     reference to it across a safepoint was a real defect, fixed by
+  //     copying the vector out in wasmExceptionConstructor.
+  //  2. ROOTED OWNER. The owning Module stays live in native argument zero,
+  //     which Runtime::markRoots scans with the rest of the register stack.
+  //     Without this the storage would be stable but freed.
+  //  3. NO DESCRIPTOR MUTATION. No callback can replace this module's data or
+  //     resize these vectors: setModuleData is called only on a freshly
+  //     created Module before it is handed to script, and the descriptors are
+  //     populated by extractDescriptorsFromModuleInfo into a local
+  //     unique_ptr, before any Module exists. Without this the storage would
+  //     be stable and live but reallocated out from under the reference.
+  //
+  // unique_ptr alone establishes only the first.
   GCScopeMarkerRAII marker{runtime};
   for (uint32_t i = 0, e = moduleData->exportDescs.size(); i < e; ++i) {
     marker.flush();
@@ -1262,6 +1297,22 @@ wasmModuleImports(void *context, Runtime &runtime) {
   }
   lv.arr = std::move(*arrRes);
 
+  // `imp` is a REFERENCE into moduleData->importDescs held across
+  // putNamed_RJS, which can run a user setter -- the same shape as
+  // wasmModuleExports above, safe on the same three conditions, and unsafe
+  // the moment any of them stops holding:
+  //
+  //  1. STABLE ALLOCATION. WasmModuleData is a std::unique_ptr pointee, so it
+  //     does not move when the Module cell moves. Inlining it into the cell
+  //     would break this and make both functions use-after-frees -- the
+  //     mistake JSWebAssemblyTag::parameters_ made, fixed by copying in
+  //     wasmExceptionConstructor.
+  //  2. ROOTED OWNER. The Module is live in native argument zero, which
+  //     Runtime::markRoots scans; otherwise the storage would be stable but
+  //     freed.
+  //  3. NO DESCRIPTOR MUTATION. setModuleData runs only during construction
+  //     and descriptor population precedes publication, so no callback can
+  //     swap the data or resize the vector under the reference.
   GCScopeMarkerRAII marker{runtime};
   for (uint32_t i = 0, e = moduleData->importDescs.size(); i < e; ++i) {
     marker.flush();
