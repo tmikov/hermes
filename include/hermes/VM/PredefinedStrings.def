@@ -479,7 +479,7 @@ STR(checkedTypeCast, "checkedTypeCast")
 STR(setFunctionName, "setFunctionName")
 STR(fastArrayPop, "fastArrayPop")
 STR(fastArraySlice, "fastArraySlice")
-// The 71 wasm builtin names. These are PRIVATE_BUILTINs: not properties of
+// The 73 wasm builtin names. These are PRIVATE_BUILTINs: not properties of
 // any object, never looked up by name, and unreachable without Wasm, where
 // every one of their ids resolves to a single shared body instead. So with
 // Wasm off they need no predefined string at all.
@@ -556,6 +556,7 @@ STR(wasmMakeGlobal, "wasmMakeGlobal")
 STR(wasmBigIntToI64, "wasmBigIntToI64")
 STR(wasmI64ToBigInt, "wasmI64ToBigInt")
 STR(wasmLinkError, "wasmLinkError")
+STR(wasmIsExportedFunction, "wasmIsExportedFunction")
 #endif // HERMES_ENABLE_WASM
 STR(__wasmTag, "__wasmTag")
 STR(__wasmPayload, "__wasmPayload")

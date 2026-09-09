@@ -58,7 +58,7 @@
 #define PRIVATE_BUILTIN(name)
 #endif
 /// A private builtin that exists only to serve Wasm. It is spelled differently
-/// only so a consumer can treat the 71 of them as a group; by default it IS a
+/// only so a consumer can treat the 73 of them as a group; by default it IS a
 /// PRIVATE_BUILTIN, and the ids it produces are identical either way, so this
 /// spelling does not touch the bytecode ABI.
 #ifndef WASM_BUILTIN
@@ -390,6 +390,18 @@ WASM_BUILTIN(wasmSetFuncInfo)
 // immutable global and is what this builtin requires.
 // valTypeCode is a JSWebAssemblyGlobal::ValType.
 WASM_BUILTIN(wasmMakeGlobal)
+// wasmIsExportedFunction(value) -> boolean: is `value` a WebAssembly
+// Exported Function? This is the brand wasmSetFuncInfo stamps, asked as a
+// question rather than stamped.
+// It exists because generated IR has no way to ask. isWasmExportedFunction
+// is a C++ helper, reachable from the JS API and from other builtins but not
+// from compiled code; the funcref paths that need the answer -- a funcref raw
+// import, a funcref reference value -- are emitted IR; and wasmSetFuncInfo
+// only WRITES the brand. The implementation delegates to the C++ helper, so
+// the two notions of the brand cannot drift apart.
+// Answers rather than throws for every argument: anything that is not a
+// branded object, including a missing argument, is simply false.
+WASM_BUILTIN(wasmIsExportedFunction)
 
 JS_BUILTIN(spawnAsync)
 MARK_FIRST_JS_BUILTIN(spawnAsync)

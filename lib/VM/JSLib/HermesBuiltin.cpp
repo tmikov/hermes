@@ -245,12 +245,12 @@ CallResult<HermesValue> hermesBuiltinThrowReferenceError(
 ///
 /// Builtins.def numbering is deliberately independent of HERMES_ENABLE_WASM,
 /// so every wasm builtin id must still resolve to something (see the note
-/// above wasmLinkErrorProto). It need not resolve to 71 DIFFERENT somethings:
+/// above wasmLinkErrorProto). It need not resolve to 73 DIFFERENT somethings:
 /// the ids are distinct, the behaviour is not. So the whole block of wasm
 /// implementations below is compiled out and every id points here instead.
 ///
 /// Which builtin was called arrives as the context pointer, so one format
-/// string serves all of them; 71 distinct messages would put a good part of
+/// string serves all of them; 73 distinct messages would put a good part of
 /// the saving straight back into .rodata.
 ///
 /// Nothing can reach here. Without Wasm there is no WebAssembly object to call
@@ -1441,6 +1441,35 @@ bool isWasmExportedFunction(Runtime &runtime, Handle<> value) {
   } lv;
   LocalsRAII lraii(runtime, &lv);
   return readWasmFuncInfo(runtime, value, lv.closure, lv.typeId);
+}
+
+/// wasmIsExportedFunction(value) -> a boolean.
+///
+/// The brand check above, asked from generated IR. The funcref paths the Wasm
+/// code generator emits -- a funcref raw import, a funcref reference value --
+/// have to refuse anything that is not `null` or an Exported Function, and IR
+/// cannot call a C++ helper. Delegating to isWasmExportedFunction rather than
+/// re-deriving the brand is the whole point of the builtin: two independent
+/// definitions of "is an Exported Function" are two things that can drift
+/// apart, and the JS API and the compiler would then disagree about which
+/// values a funcref admits.
+///
+/// This ALLOCATES: isWasmExportedFunction reaches
+/// HiddenClass::findPropertyNoMap, which initializes a missing property map,
+/// and it roots its own locals but not its caller's. Nothing of this
+/// builtin's survives the call -- the argument is read through a Handle into
+/// the native argument registers, which the GC scans and updates in place,
+/// and no raw pointer is derived from it before or after.
+///
+/// A PRIVATE_BUILTIN is reachable from ANY bytecode emitting a CallBuiltin
+/// with its index, so this must have an answer for every argument rather than
+/// a precondition. It does: a predicate refuses nothing, and anything that is
+/// not a branded object -- a primitive, a plain function, a missing argument,
+/// which reads as undefined -- is simply false.
+CallResult<HermesValue> wasmIsExportedFunction(void *, Runtime &runtime) {
+  NativeArgs args = runtime.getCurrentFrame().getNativeArgs();
+  return HermesValue::encodeBoolValue(
+      isWasmExportedFunction(runtime, args.getArgHandle(0)));
 }
 
 /// Store one element of one table array, and REPORT A REFUSED WRITE.
@@ -4110,19 +4139,30 @@ void createHermesBuiltins(Runtime &runtime) {
       B::HermesBuiltin_wasmSetFuncInfo, P::wasmSetFuncInfo, wasmSetFuncInfo, 3);
   defineInternMethod(
       B::HermesBuiltin_wasmMakeGlobal, P::wasmMakeGlobal, wasmMakeGlobal, 4);
+  defineInternMethod(
+      B::HermesBuiltin_wasmIsExportedFunction,
+      P::wasmIsExportedFunction,
+      wasmIsExportedFunction,
+      1);
 #else
   // Without Wasm the bodies above are not compiled and the names are not even
   // predefined strings, but Builtins.def numbering stays independent of
   // HERMES_ENABLE_WASM -- builtin ids are encoded as CallBuiltin operands in
   // bytecode -- so every wasm id must still resolve to something.
   //
-  // It need not resolve to 71 different somethings, and none of them needs a
+  // It need not resolve to 73 different somethings, and none of them needs a
   // name: these are private builtins, so they are not properties of any object
   // and nothing looks them up by name (assertBuiltinsUnmodified walks only the
   // public builtins). The ids are the last contiguous run of private builtins,
   // so one loop over that range registers them all against the shared body.
+  //
+  // The endpoint is the LAST wasm builtin in Builtins.def, so appending one
+  // there means moving it here as well: a builtin outside this range is never
+  // registered, its id resolves to nothing, and a Wasm-off build then fails
+  // the "native builtin not initialized" assertion at startup -- after
+  // compiling and linking cleanly.
   for (unsigned i = B::HermesBuiltin_wasmTrap;
-       i <= B::HermesBuiltin_wasmMakeGlobal;
+       i <= B::HermesBuiltin_wasmIsExportedFunction;
        ++i) {
     defineInternMethod(
         static_cast<B::Enum>(i), P::emptyString, wasmDisabled, 0);

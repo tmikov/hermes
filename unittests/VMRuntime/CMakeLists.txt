@@ -76,6 +76,12 @@ set(RTSources
   FinalizationRegistryTest.cpp
   )
 
+# Wasm builtins only exist when Wasm is compiled in; the file's contents are
+# also guarded, so this only keeps it out of the build entirely.
+if(HERMES_ENABLE_WASM)
+  list(APPEND RTSources WasmBuiltinTest.cpp)
+endif()
+
 add_hermes_unittest(HermesVMRuntimeTests
   ${RTSources}
   LINK_LIBS hermesvm_a
