@@ -2551,8 +2551,9 @@ CallResult<HermesValue> wasmMakeGlobal(void *, Runtime &runtime) {
   // ref.func global's snapshot VALUE is an Exported Function -- callable --
   // so the old test read it as a getter closure and then refused it, because
   // a live global must be mutable. An immutable externref global holding a
-  // function was misread the same way. Neither is expressible without this
-  // change, whatever the type code is widened to.
+  // function was misread the same way. Both cases are asserted by the gtest
+  // WasmMakeGlobalModeAndSnapshotValidation, which goes red if the mode goes
+  // back to being read off argument 2.
   //
   //   isMutable  -- argument 2 is the getter closure, argument 3 the setter.
   //   !isMutable -- argument 2 is the value; argument 3 is unused.
@@ -2565,7 +2566,8 @@ CallResult<HermesValue> wasmMakeGlobal(void *, Runtime &runtime) {
   //
   // The CONVERSE is not imposed on Global objects in general: the public
   // constructor builds a snapshot and takes its mutability from the
-  // descriptor, so mutable snapshots exist and must keep working. "A
+  // descriptor, so mutable snapshots exist and must keep working --
+  // e2e-global-ref-construct.wat goes red if one stops being mutable. "A
   // snapshot is always immutable" is a property of THIS builtin's callers,
   // which is where it is enforced.
   //
@@ -2692,11 +2694,10 @@ CallResult<HermesValue> wasmMakeGlobal(void *, Runtime &runtime) {
 /// side rather than the compiler side. A PRIVATE_BUILTIN is reachable from
 /// ANY bytecode that emits a CallBuiltin with this index: `builtins_[]` is
 /// indexed straight from the operand and nothing types the arguments. That
-/// channel is not hypothetical: every test in test/wasm that loads a module
-/// from precompiled bytecode passes -Xenable-untrusted-bytecode-from-js, and
-/// bytecode reaching this builtin that way is bytecode this VM did not
-/// produce in this run. So this is the entry guard, and an unchecked vmcast
-/// here would be a Debug-only assert and a wild pointer in a release build.
+/// channel is not hypothetical: -Xenable-untrusted-bytecode-from-js admits
+/// bytecode this VM did not produce in this run, and tests in test/wasm use
+/// it. So this is the entry guard, and an unchecked vmcast here would be a
+/// Debug-only assert and a wild pointer in a release build.
 ///
 /// On the compiler side it is unreachable: the object comes from a hidden
 /// frame Variable written only in the accept block of the global import path,
@@ -2715,8 +2716,8 @@ CallResult<HermesValue> wasmGlobalGet(void *, Runtime &runtime) {
   // body is a frame load plus, for i64, the BigInt assembly. wasmGlobalSet
   // does the same thing in the other direction, through the live setter
   // closure, and the rooting obligation below is the same one. The closure is
-  // normally
-  // compiler-generated, but that is not something this builtin can enforce:
+  // normally compiler-generated, but that is not something this builtin can
+  // enforce:
   // wasmMakeGlobal type-checks its arguments but cannot verify a Callable's
   // origin, and a PRIVATE_BUILTIN is reachable from arbitrary bytecode, so a
   // caller can install an arbitrary JS closure here. Safety does not rest on
@@ -2892,9 +2893,9 @@ CallResult<HermesValue> wasmGlobalSet(void *, Runtime &runtime) {
 /// what they are. A PRIVATE_BUILTIN is reachable from ANY bytecode that emits
 /// a CallBuiltin with its index: `builtins_[]` is indexed straight from the
 /// operand and nothing types the arguments. That is the same VM-side entry
-/// channel Task 5b's Minor 2 established for wasmGlobalGet/Set, and every test
-/// in test/wasm uses it, via -Xenable-untrusted-bytecode-from-js. Under that
-/// doctrine an `dyn_vmcast<JSObject>` on arg 0 alone would let a caller stamp
+/// channel Task 5b's Minor 2 established for wasmGlobalGet/Set, reachable in
+/// tests through -Xenable-untrusted-bytecode-from-js. Under that doctrine an
+/// `dyn_vmcast<JSObject>` on arg 0 alone would let a caller stamp
 /// the brand onto an arbitrary object with an arbitrary "closure", and the
 /// brand is what readWasmFuncInfo trusts to hand a value to call_indirect.
 ///

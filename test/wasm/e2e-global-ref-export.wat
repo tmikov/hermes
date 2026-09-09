@@ -6,22 +6,26 @@
 ;; Reference-typed global EXPORTS: the direction the JS-API constructor tests
 ;; do not cover, and the one a module produces on its own.
 ;;
-;; Every global a module exports is wrapped by the wasmMakeGlobal builtin,
+;; The globals this module exports are wrapped by the wasmMakeGlobal builtin,
 ;; which bounded its type code with `rawCode > ValType::F64` -- an ordering
-;; comparison, so no -Wswitch could name it. Both reference codes were above
-;; the bound, and instantiating any module exporting an externref or funcref
-;; global threw "wasmMakeGlobal: unknown value type". The bound is now the
-;; highest enumerator, and an immutable funcref export additionally needs the
-;; builtin to read its mode from isMutable: such a global's snapshot VALUE is
-;; an Exported Function, and while the mode was "is argument 2 callable" it
-;; was read as a live global's getter closure and refused.
+;; comparison, so no -Wswitch could name it. Both reference codes are above
+;; that bound, and instantiating this module threw "wasmMakeGlobal: unknown
+;; value type". The bound is now the highest enumerator. An immutable funcref
+;; export also needs the builtin to read its mode from isMutable: such a
+;; global's snapshot VALUE is an Exported Function, and while the mode was
+;; "is argument 2 callable" it was read as a live global's getter closure and
+;; refused.
 ;;
 ;; The identity assertion is the load-bearing one. g_func must be the module's
 ;; OWN exported function -- the canonical wrapper, the same object `h` names --
-;; because a stand-in that merely looked callable would satisfy every other
-;; assertion here. g_hidden covers the other half: a funcref global naming a
-;; function that is not exported still gets a wrapper, so the assertion is
-;; about wrappers rather than about export tables.
+;; because a stand-in that merely looked callable would satisfy the other
+;; assertions here.
+;;
+;; g_hidden names a function this module does not export, so its wrapper can
+;; come from nowhere but computeEscapableFuncs' loop over ref.func global
+;; initializers: delete that loop and `g_hidden is a function` goes red. Keep
+;; this module free of an `(elem declare ...)` segment, which would put the
+;; index in the set by another route and mask exactly that.
 ;;
 ;; It runs with -gc-sanitize-handles=1 because wasmMakeGlobal's funcref arm
 ;; brand-checks its value with isWasmExportedFunction, which ALLOCATES --
@@ -61,8 +65,6 @@
   ;; Mutable, so this one is exported LIVE: it holds no value of its own and
   ;; reads the module's frame slot through a closure.
   (global (export "g_mut") (mut externref) (global.get $imp))
-
-  (elem declare func $h $hidden)
 )
 
 ;; The expected output. It lives here rather than in the driver because

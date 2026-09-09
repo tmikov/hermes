@@ -313,15 +313,11 @@ TEST_F(WasmBuiltinSanitizeTest, WasmIsExportedFunctionMovesTheHeap) {
 /// refused, because a live global must be mutable. The mode is now
 /// isMutable, and argument 2 means the value or the getter accordingly.
 ///
-/// A compiled module DOES reach the reference arms -- an exported
-/// `(global funcref (ref.func $f))` is wrapped by this builtin, and
-/// e2e-global-ref-export.wat covers that end to end. What it cannot reach is
-/// the refusals and the argument shapes a compiler never emits: a funcref
-/// snapshot of an unbranded closure, a mutable global missing a setter, a
-/// type code out of range. A PRIVATE_BUILTIN is reachable from any bytecode
-/// emitting a CallBuiltin with its index, so those are answers this builtin
-/// owes rather than cases the compiler rules out, and calling it directly is
-/// the only way to ask for them.
+/// This test calls the builtin directly, with the argument shapes below. A
+/// PRIVATE_BUILTIN is reachable from any bytecode emitting a CallBuiltin with
+/// its index, so each of them is an answer the builtin owes rather than a
+/// hypothetical. What a compiled module produces is covered separately, by
+/// e2e-global-ref-export.wat.
 TEST_F(WasmBuiltinTest, WasmMakeGlobalModeAndSnapshotValidation) {
   GCScope scope{runtime, "WasmMakeGlobalModeAndSnapshotValidation"};
 

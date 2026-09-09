@@ -18,7 +18,8 @@ var args = hermescli.getScriptArgs();
 // internal property written only by the wasmSetFuncInfo builtin; script can
 // neither name it nor write it, so a plain function, a copy, a Proxy and a
 // forged object all fail. That makes this the strongest question script can
-// ask about a function value, and it is the question this file asks 20 times.
+// ask about a function value, and it is the question this file asks of every
+// route below.
 //
 // It is deliberately NOT a name check or a property check: the wrapper's name
 // and its __wasm_type__ string are both ordinary and both forgeable, so a test
@@ -39,7 +40,7 @@ function brand(v) {
 // `same` is identity against the ONE canonical Exported Function of that
 // function index. brand() says the value is a wrapper; this says it is the
 // same wrapper every other route yields, which is what makes the enumeration
-// exhaustive rather than 20 unrelated facts.
+// one claim rather than a list of unrelated facts.
 function report(label, v, ref) {
   var s = brand(v);
   if (ref !== undefined)
@@ -146,11 +147,9 @@ report('19 cross-module: importer of the table, wasm table.get',
        consumer.exports.getAt(1), REF32);
 report('20 cross-module: importer\'s own Table.prototype.get',
        consumer.exports.tbl.get(1), REF32);
-// The newest route: a funcref global EXPORT. Every exported global is wrapped
-// by the wasmMakeGlobal builtin, which refuses a funcref value that is not
-// null or an Exported Function -- so this route yields a wrapper by
-// construction, and it is enumerated here because this file is where a route
-// that hands script a function value has to be enumerated.
+// A funcref global EXPORT. The exported global above is wrapped by the
+// wasmMakeGlobal builtin, whose funcref arm refuses a value that is not null
+// or an Exported Function, so this route yields a wrapper or nothing.
 report('21 funcref global export, .value', E.gfx.value, REF32);
 
 // ---------------------------------------------------------------------------
